@@ -28,9 +28,13 @@ This document describes the device model supported by `cloud-hypervisor`.
 ### Serial port
 
 Simple emulation of a serial port by reading and writing to specific port I/O
-addresses. Used as the default console for Linux when booting with the option
-`console=ttyS0`, the serial port can be very useful to gather early logs from
-the operating system booted inside the VM.
+addresses. The serial port can be very useful to gather early logs from the
+operating system booted inside the VM.
+
+For x86_64, The default serial port is from an emulated 16550A device. It can
+be used as the default console for Linux when booting with the option
+`console=ttyS0`. For AArch64, the default serial port is from an emulated
+PL011 UART device. The related command line for AArch64 is `console=ttyAMA0`.
 
 This device is always built-in, and it is disabled by default. It can be
 enabled with the `--serial` option, as long as its parameter is not `off`.
@@ -43,6 +47,10 @@ emulation of this legacy device makes the platform usable.
 This device is built-in by default, but it can be compiled out with Rust
 features. When compiled in, it is always enabled, and cannot be disabled
 from the command line.
+
+For AArch64 machines, an ARM PrimeCell Real Time Clock(PL031) is implemented.
+This device is built-in by default for the AArch64 platform, and it is always
+enabled, and cannot be disabled from the command line.
 
 ### I/O APIC
 
@@ -64,6 +72,11 @@ This device is always built-in, but it is disabled by default. Because ACPI is
 enabled by default, the handling of reboot/shutdown goes through the dedicated
 ACPI device. In case ACPI is disabled, this device is enabled to bring to the
 VM some reboot/shutdown support.
+
+### ARM PrimeCell General Purpose Input/Output (PL061)
+
+Simplified ARM PrimeCell GPIO (PL061) implementation. Only supports key 3 to
+trigger a graceful shutdown of the AArch64 guest.
 
 ### ACPI device
 
@@ -100,9 +113,8 @@ selecting `--serial tty --console off` from the command line.
 ### virtio-iommu
 
 As we want to improve our nested guests support, we added support for exposing
-a [paravirtualized IOMMU](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/master/docs/iommu.md)
-device through virtio. This allows for a safer nested virtio and directly
-assigned devices support.
+a [paravirtualized IOMMU](iommu.md) device through virtio. This allows for a
+safer nested virtio and directly assigned devices support.
 
 This device is always built-in, and it is enabled based on the presence of the
 parameter `iommu=on` in any of the virtio or VFIO devices. If at least one of
@@ -171,8 +183,8 @@ This device is always built-in, and it is enabled when `vhost_user=true` and
 shared file system, allowing for an efficient and reliable way of sharing
 a filesystem between the host and the cloud-hypervisor guest.
 
-See our [filesystem sharing](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/master/docs/fs.md)
-documentation for more details on how to use virtio-fs with cloud-hypervisor.
+See our [filesystem sharing](fs.md) documentation for more details on how to
+use virtio-fs with cloud-hypervisor.
 
 This device is always built-in, and it is enabled based on the presence of the
 flag `--fs`.
@@ -193,9 +205,8 @@ VFIO (Virtual Function I/O) is a kernel framework that exposes direct device
 access to userspace. `cloud-hypervisor` uses VFIO to directly assign host
 physical devices into its guest.
 
-See our [VFIO documentation](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/master/docs/vfio.md)
-for more details on how to directly assign host devices to `cloud-hypervisor`
-guests.
+See our [VFIO documentation](vfio.md) for more details on how to directly
+assign host devices to `cloud-hypervisor` guests.
 
 Because VFIO implies `vfio-pci` in the `cloud-hypervisor` context, the VFIO
 support is built-in when the `pci` feature is selected. And because the `pci`

@@ -14,6 +14,7 @@ extern crate libc;
 #[macro_use]
 extern crate log;
 extern crate net_gen;
+extern crate rate_limiter;
 extern crate serde;
 extern crate virtio_bindings;
 extern crate vm_memory;

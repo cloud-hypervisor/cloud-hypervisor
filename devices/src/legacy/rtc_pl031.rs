@@ -8,6 +8,7 @@
 //! This is achieved by generating an interrupt signal after counting for a programmed number of cycles of
 //! a real-time clock input.
 //!
+use crate::{read_le_u32, write_le_u32};
 use std::fmt;
 use std::sync::{Arc, Barrier};
 use std::time::Instant;
@@ -37,52 +38,6 @@ const AMBA_ID_LOW: u64 = 0xFE0;
 const AMBA_ID_HIGH: u64 = 0x1000;
 /// Constant to convert seconds to nanoseconds.
 pub const NANOS_PER_SECOND: u64 = 1_000_000_000;
-
-#[allow(unused_macros)]
-macro_rules! generate_read_fn {
-    ($fn_name: ident, $data_type: ty, $byte_type: ty, $type_size: expr, $endian_type: ident) => {
-        #[allow(dead_code)]
-        pub fn $fn_name(input: &[$byte_type]) -> $data_type {
-            assert!($type_size == std::mem::size_of::<$data_type>());
-            let mut array = [0u8; $type_size];
-            for (byte, read) in array.iter_mut().zip(input.iter().cloned()) {
-                *byte = read as u8;
-            }
-            <$data_type>::$endian_type(array)
-        }
-    };
-}
-
-#[allow(unused_macros)]
-macro_rules! generate_write_fn {
-    ($fn_name: ident, $data_type: ty, $byte_type: ty, $endian_type: ident) => {
-        #[allow(dead_code)]
-        pub fn $fn_name(buf: &mut [$byte_type], n: $data_type) {
-            for (byte, read) in buf
-                .iter_mut()
-                .zip(<$data_type>::$endian_type(n).iter().cloned())
-            {
-                *byte = read as $byte_type;
-            }
-        }
-    };
-}
-
-generate_read_fn!(read_le_u16, u16, u8, 2, from_le_bytes);
-generate_read_fn!(read_le_u32, u32, u8, 4, from_le_bytes);
-generate_read_fn!(read_le_u64, u64, u8, 8, from_le_bytes);
-generate_read_fn!(read_le_i32, i32, i8, 4, from_le_bytes);
-
-generate_read_fn!(read_be_u16, u16, u8, 2, from_be_bytes);
-generate_read_fn!(read_be_u32, u32, u8, 4, from_be_bytes);
-
-generate_write_fn!(write_le_u16, u16, u8, to_le_bytes);
-generate_write_fn!(write_le_u32, u32, u8, to_le_bytes);
-generate_write_fn!(write_le_u64, u64, u8, to_le_bytes);
-generate_write_fn!(write_le_i32, i32, i8, to_le_bytes);
-
-generate_write_fn!(write_be_u16, u16, u8, to_be_bytes);
-generate_write_fn!(write_be_u32, u32, u8, to_be_bytes);
 
 #[derive(Debug)]
 pub enum Error {
@@ -115,9 +70,9 @@ pub enum ClockType {
     ThreadCpu,
 }
 
-impl Into<libc::clockid_t> for ClockType {
-    fn into(self) -> libc::clockid_t {
-        match self {
+impl From<ClockType> for libc::clockid_t {
+    fn from(ct: ClockType) -> libc::clockid_t {
+        match ct {
             ClockType::Monotonic => libc::CLOCK_MONOTONIC,
             ClockType::Real => libc::CLOCK_REALTIME,
             ClockType::ProcessCpu => libc::CLOCK_PROCESS_CPUTIME_ID,
@@ -260,7 +215,7 @@ pub fn seconds_to_nanoseconds(value: i64) -> Option<i64> {
 }
 
 /// A RTC device following the PL031 specification..
-pub struct RTC {
+pub struct Rtc {
     previous_now: Instant,
     tick_offset: i64,
     // This is used for implementing the RTC alarm. However, in Firecracker we do not need it.
@@ -272,10 +227,10 @@ pub struct RTC {
     interrupt: Arc<Box<dyn InterruptSourceGroup>>,
 }
 
-impl RTC {
+impl Rtc {
     /// Constructs an AMBA PL031 RTC device.
-    pub fn new(interrupt: Arc<Box<dyn InterruptSourceGroup>>) -> RTC {
-        RTC {
+    pub fn new(interrupt: Arc<Box<dyn InterruptSourceGroup>>) -> Self {
+        Self {
             // This is used only for duration measuring purposes.
             previous_now: Instant::now(),
             tick_offset: get_time(ClockType::Real) as i64,
@@ -334,7 +289,7 @@ impl RTC {
     }
 }
 
-impl BusDevice for RTC {
+impl BusDevice for Rtc {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
         let v;
         let mut read_ok = true;
@@ -373,7 +328,7 @@ impl BusDevice for RTC {
 
     fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         if data.len() <= 4 {
-            let v = read_le_u32(&data[..]);
+            let v = read_le_u32(&data);
             if let Err(e) = self.handle_write(offset, v) {
                 warn!("Failed to write to RTC PL031 device: {}", e);
             }
@@ -392,6 +347,10 @@ impl BusDevice for RTC {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        read_be_u16, read_be_u32, read_le_i32, read_le_u16, read_le_u32, read_le_u64, write_be_u16,
+        write_be_u32, write_le_i32, write_le_u16, write_le_u32, write_le_u64,
+    };
     use std::sync::Arc;
     use vm_device::interrupt::{InterruptIndex, InterruptSourceConfig};
     use vmm_sys_util::eventfd::EventFd;
@@ -491,7 +450,7 @@ mod tests {
     fn test_rtc_read_write_and_event() {
         let intr_evt = EventFd::new(libc::EFD_NONBLOCK).unwrap();
 
-        let mut rtc = RTC::new(Arc::new(Box::new(TestInterrupt::new(
+        let mut rtc = Rtc::new(Arc::new(Box::new(TestInterrupt::new(
             intr_evt.try_clone().unwrap(),
         ))));
         let mut data = [0; 4];
@@ -500,7 +459,7 @@ mod tests {
         write_le_u32(&mut data, 123);
         rtc.write(LEGACY_RTC_MAPPED_IO_START, RTCMR, &mut data);
         rtc.read(LEGACY_RTC_MAPPED_IO_START, RTCMR, &mut data);
-        let v = read_le_u32(&data[..]);
+        let v = read_le_u32(&data);
         assert_eq!(v, 123);
 
         // Read and write to the LR register.
@@ -512,7 +471,7 @@ mod tests {
         assert!(rtc.previous_now > previous_now_before);
 
         rtc.read(LEGACY_RTC_MAPPED_IO_START, RTCLR, &mut data);
-        let v_read = read_le_u32(&data[..]);
+        let v_read = read_le_u32(&data);
         assert_eq!((v / NANOS_PER_SECOND) as u32, v_read);
 
         // Read and write to IMSC register.
@@ -523,14 +482,14 @@ mod tests {
         // The interrupt line should be on.
         assert!(rtc.interrupt.notifier(0).unwrap().read().unwrap() == 1);
         rtc.read(LEGACY_RTC_MAPPED_IO_START, RTCIMSC, &mut data);
-        let v = read_le_u32(&data[..]);
+        let v = read_le_u32(&data);
         assert_eq!(non_zero & 1, v);
 
         // Now test with 0.
         write_le_u32(&mut data, 0);
         rtc.write(LEGACY_RTC_MAPPED_IO_START, RTCIMSC, &mut data);
         rtc.read(LEGACY_RTC_MAPPED_IO_START, RTCIMSC, &mut data);
-        let v = read_le_u32(&data[..]);
+        let v = read_le_u32(&data);
         assert_eq!(0, v);
 
         // Read and write to the ICR register.
@@ -538,10 +497,10 @@ mod tests {
         rtc.write(LEGACY_RTC_MAPPED_IO_START, RTCICR, &mut data);
         // The interrupt line should be on.
         assert!(rtc.interrupt.notifier(0).unwrap().read().unwrap() > 1);
-        let v_before = read_le_u32(&data[..]);
+        let v_before = read_le_u32(&data);
 
         rtc.read(LEGACY_RTC_MAPPED_IO_START, RTCICR, &mut data);
-        let v = read_le_u32(&data[..]);
+        let v = read_le_u32(&data);
         // ICR is a  write only register. Data received should stay equal to data sent.
         assert_eq!(v, v_before);
 
@@ -549,7 +508,7 @@ mod tests {
         write_le_u32(&mut data, 0);
         rtc.write(LEGACY_RTC_MAPPED_IO_START, RTCCR, &mut data);
         rtc.read(LEGACY_RTC_MAPPED_IO_START, RTCCR, &mut data);
-        let v = read_le_u32(&data[..]);
+        let v = read_le_u32(&data);
         assert_eq!(v, 1);
 
         // Attempts to write beyond the writable space. Using here the space used to read

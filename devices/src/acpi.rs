@@ -62,20 +62,20 @@ impl BusDevice for AcpiShutdownDevice {
 }
 
 /// A device for handling ACPI GED event generation
-pub struct AcpiGEDDevice {
+pub struct AcpiGedDevice {
     interrupt: Arc<Box<dyn InterruptSourceGroup>>,
     notification_type: AcpiNotificationFlags,
     ged_irq: u32,
     address: GuestAddress,
 }
 
-impl AcpiGEDDevice {
+impl AcpiGedDevice {
     pub fn new(
         interrupt: Arc<Box<dyn InterruptSourceGroup>>,
         ged_irq: u32,
         address: GuestAddress,
-    ) -> AcpiGEDDevice {
-        AcpiGEDDevice {
+    ) -> AcpiGedDevice {
+        AcpiGedDevice {
             interrupt,
             notification_type: AcpiNotificationFlags::NO_DEVICES_CHANGED,
             ged_irq,
@@ -97,7 +97,7 @@ impl AcpiGEDDevice {
 }
 
 // I/O port reports what type of notification was made
-impl BusDevice for AcpiGEDDevice {
+impl BusDevice for AcpiGedDevice {
     // Spec has all fields as zero
     fn read(&mut self, _base: u64, _offset: u64, data: &mut [u8]) {
         data[0] = self.notification_type.bits();
@@ -106,7 +106,7 @@ impl BusDevice for AcpiGEDDevice {
 }
 
 #[cfg(feature = "acpi")]
-impl Aml for AcpiGEDDevice {
+impl Aml for AcpiGedDevice {
     fn to_aml_bytes(&self) -> Vec<u8> {
         aml::Device::new(
             "_SB_.GED_".into(),
@@ -172,11 +172,11 @@ impl Aml for AcpiGEDDevice {
     }
 }
 
-pub struct AcpiPMTimerDevice {
+pub struct AcpiPmTimerDevice {
     start: Instant,
 }
 
-impl AcpiPMTimerDevice {
+impl AcpiPmTimerDevice {
     pub fn new() -> Self {
         Self {
             start: Instant::now(),
@@ -184,13 +184,13 @@ impl AcpiPMTimerDevice {
     }
 }
 
-impl Default for AcpiPMTimerDevice {
+impl Default for AcpiPmTimerDevice {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl BusDevice for AcpiPMTimerDevice {
+impl BusDevice for AcpiPmTimerDevice {
     fn read(&mut self, _base: u64, _offset: u64, data: &mut [u8]) {
         let now = Instant::now();
         let since = now.duration_since(self.start);

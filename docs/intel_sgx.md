@@ -19,7 +19,7 @@ following [instructions](https://github.com/intel/linux-sgx).
 
 ## Cloud-Hypervisor support
 
-Assuming the host exposes `/dev/sgx_virt_epc`, we can pass SGX enclaves through
+Assuming the host exposes `/dev/sgx_vepc`, we can pass SGX enclaves through
 the guest.
 
 In order to use SGX enclaves within a Cloud-Hypervisor VM, we must define one
@@ -32,7 +32,7 @@ memory, the second one being 32MiB with no pre-allocated memory.
     --cpus boot=1 \
     --memory size=1G \
     --disk path=focal-server-cloudimg-amd64.raw \
-    --kernel bzImage \
+    --kernel vmlinux \
     --cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw" \
     --sgx-epc size=64M,prefault=on size=32M,prefault=off
 ```
@@ -43,7 +43,7 @@ have been correctly created under `/dev/sgx`:
 
 ```bash
 ls /dev/sgx*
-/dev/sgx_enclave  /dev/sgx_provision  /dev/sgx_virt_epc
+/dev/sgx_enclave  /dev/sgx_provision  /dev/sgx_vepc
 ```
 
 From this point, it is possible to run any SGX application from the guest, as
@@ -51,5 +51,5 @@ it will access `/dev/sgx_enclave` device to create dedicated SGX enclaves.
 
 Note: There is only one contiguous SGX EPC region, which contains all SGX EPC
 sections. This region is exposed through ACPI and marked as reserved through
-the e820 table. It is treated yet as another device, which means it should
+the e820 table. It is treated as yet another device, which means it should
 appear at the end of the guest address space.

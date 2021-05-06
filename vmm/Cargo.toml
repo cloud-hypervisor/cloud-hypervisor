@@ -12,6 +12,7 @@ fwdebug = ["devices/fwdebug"]
 kvm = ["hypervisor/kvm"]
 mshv = ["hypervisor/mshv"]
 io_uring = ["virtio-devices/io_uring"]
+tdx = ["arch/tdx", "hypervisor/tdx"]
 
 [dependencies]
 acpi_tables = { path = "../acpi_tables", optional = true }
@@ -26,21 +27,20 @@ epoll = ">=4.0.1"
 event_monitor = { path = "../event_monitor" }
 hypervisor = { path = "../hypervisor" }
 lazy_static = "1.4.0"
-libc = "0.2.86"
+libc = "0.2.94"
 linux-loader = { version = "0.3.0", features = ["elf", "bzimage", "pe"] }
 log = "0.4.14"
-micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "master" }
+micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "main" }
 net_util = { path = "../net_util" }
 option_parser = { path = "../option_parser" }
 pci = { path = "../pci" }
 qcow = { path = "../qcow" }
-seccomp = { git = "https://github.com/firecracker-microvm/firecracker", tag = "v0.22.0" }
+seccomp = { git = "https://github.com/firecracker-microvm/firecracker", tag = "v0.24.2" }
 serde = {version = ">=1.0.27", features = ["rc"] }
 serde_derive = ">=1.0.27"
 serde_json = ">=1.0.9"
-signal-hook = "0.3.6"
+signal-hook = "0.3.8"
 thiserror = "1.0"
-url = "2.2.1"
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio-ioctls", branch = "master" }
 virtio-devices = { path = "../virtio-devices" }
 vm-allocator = { path = "../vm-allocator" }

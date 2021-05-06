@@ -26,6 +26,7 @@ extern crate virtio_bindings;
 extern crate vm_device;
 extern crate vm_memory;
 
+use std::convert::TryInto;
 use std::io;
 
 #[macro_use]
@@ -73,8 +74,6 @@ const VIRTIO_F_VERSION_1: u32 = 32;
 const VIRTIO_F_IOMMU_PLATFORM: u32 = 33;
 const VIRTIO_F_IN_ORDER: u32 = 35;
 
-const VIRTIO_MSI_NO_VECTOR: u16 = 0xffff;
-
 #[derive(Debug)]
 pub enum ActivateError {
     EpollCtl(std::io::Error),
@@ -85,16 +84,18 @@ pub enum ActivateError {
     CloneKillEventFd,
     /// Failed to create Vhost-user interrupt eventfd
     VhostIrqCreate,
-    /// Failed to setup vhost-user daemon.
-    VhostUserSetup(vhost_user::Error),
-    /// Failed to setup vhost-user daemon.
+    /// Failed to setup vhost-user-fs daemon.
+    VhostUserFsSetup(vhost_user::Error),
+    /// Failed to setup vhost-user-net daemon.
     VhostUserNetSetup(vhost_user::Error),
-    /// Failed to setup vhost-user daemon.
+    /// Failed to setup vhost-user-blk daemon.
     VhostUserBlkSetup(vhost_user::Error),
     /// Failed to reset vhost-user daemon.
     VhostUserReset(vhost_user::Error),
     /// Cannot create seccomp filter
     CreateSeccompFilter(seccomp::SeccompError),
+    /// Cannot create rate limiter
+    CreateRateLimiter(std::io::Error),
 }
 
 pub type ActivateResult = std::result::Result<(), ActivateError>;
@@ -119,12 +120,44 @@ pub enum Error {
     EpollWait(io::Error),
     FailedSignalingDriver(io::Error),
     VhostUserUpdateMemory(vhost_user::Error),
+    VhostUserAddMemoryRegion(vhost_user::Error),
     EventfdError(io::Error),
     SetShmRegionsNotSupported,
     EpollHander(String),
     NoMemoryConfigured,
     NetQueuePair(::net_util::NetQueuePairError),
     ApplySeccompFilter(seccomp::Error),
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
+pub struct TokenBucketConfig {
+    pub size: u64,
+    pub one_time_burst: Option<u64>,
+    pub refill_time: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RateLimiterConfig {
+    pub bandwidth: Option<TokenBucketConfig>,
+    pub ops: Option<TokenBucketConfig>,
+}
+
+impl TryInto<rate_limiter::RateLimiter> for RateLimiterConfig {
+    type Error = io::Error;
+
+    fn try_into(self) -> std::result::Result<rate_limiter::RateLimiter, Self::Error> {
+        let bw = self.bandwidth.unwrap_or_default();
+        let ops = self.ops.unwrap_or_default();
+        rate_limiter::RateLimiter::new(
+            bw.size,
+            bw.one_time_burst.unwrap_or(0),
+            bw.refill_time,
+            ops.size,
+            ops.one_time_burst.unwrap_or(0),
+            ops.refill_time,
+        )
+    }
 }
 
 /// Convert an absolute address into an address space (GuestMemory)

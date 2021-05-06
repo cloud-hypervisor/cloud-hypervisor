@@ -9,10 +9,14 @@
 mod cmos;
 #[cfg(feature = "fwdebug")]
 mod fwdebug;
+#[cfg(target_arch = "aarch64")]
+mod gpio_pl061;
 mod i8042;
 #[cfg(target_arch = "aarch64")]
 mod rtc_pl031;
 mod serial;
+#[cfg(target_arch = "aarch64")]
+mod uart_pl011;
 
 #[cfg(feature = "cmos")]
 pub use self::cmos::Cmos;
@@ -22,4 +26,10 @@ pub use self::i8042::I8042Device;
 pub use self::serial::Serial;
 
 #[cfg(target_arch = "aarch64")]
-pub use self::rtc_pl031::RTC;
+pub use self::gpio_pl061::Error as GpioDeviceError;
+#[cfg(target_arch = "aarch64")]
+pub use self::gpio_pl061::Gpio;
+#[cfg(target_arch = "aarch64")]
+pub use self::rtc_pl031::Rtc;
+#[cfg(target_arch = "aarch64")]
+pub use self::uart_pl011::Pl011;

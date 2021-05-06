@@ -23,10 +23,7 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::time::Instant;
 use vm_memory::{Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
-use vm_migration::{
-    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
-    Transportable,
-};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: u16 = 8;
@@ -189,7 +186,7 @@ impl Watchdog {
         let timer = unsafe { File::from_raw_fd(timer_fd) };
         Ok(Watchdog {
             common: VirtioCommon {
-                device_type: VirtioDeviceType::TYPE_WATCHDOG as u32,
+                device_type: VirtioDeviceType::Watchdog as u32,
                 queue_sizes: QUEUE_SIZES.to_vec(),
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 avail_features,
@@ -395,38 +392,12 @@ impl Snapshottable for Watchdog {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        let snapshot =
-            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
-
-        let mut watchdog_snapshot = Snapshot::new(self.id.as_str());
-        watchdog_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", self.id),
-            snapshot,
-        });
-
-        Ok(watchdog_snapshot)
+        Snapshot::new_from_state(&self.id, &self.state())
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        if let Some(watchdog_section) = snapshot.snapshot_data.get(&format!("{}-section", self.id))
-        {
-            let watchdog_state = match serde_json::from_slice(&watchdog_section.snapshot) {
-                Ok(state) => state,
-                Err(error) => {
-                    return Err(MigratableError::Restore(anyhow!(
-                        "Could not deserialize watchdog {}",
-                        error
-                    )))
-                }
-            };
-
-            self.set_state(&watchdog_state);
-            return Ok(());
-        }
-
-        Err(MigratableError::Restore(anyhow!(
-            "Could not find watchdog snapshot section"
-        )))
+        self.set_state(&snapshot.to_state(&self.id)?);
+        Ok(())
     }
 }
 

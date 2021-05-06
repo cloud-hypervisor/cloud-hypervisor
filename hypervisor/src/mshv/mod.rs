@@ -5,17 +5,16 @@
 
 use crate::arch::emulator::{PlatformEmulator, PlatformError};
 
-use thiserror::Error;
-
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::emulator::{Emulator, EmulatorCpuState};
 use crate::cpu;
 use crate::cpu::Vcpu;
 use crate::hypervisor;
+use crate::vec_with_array_field;
 use crate::vm::{self, VmmOps};
 pub use mshv_bindings::*;
 pub use mshv_ioctls::IoEventAddress;
-use mshv_ioctls::{set_registers_64, InterruptRequest, Mshv, NoDatamatch, VcpuFd, VmFd};
+use mshv_ioctls::{set_registers_64, Mshv, NoDatamatch, VcpuFd, VmFd};
 use serde_derive::{Deserialize, Serialize};
 use std::sync::Arc;
 use vm::DataMatch;
@@ -29,7 +28,6 @@ pub use x86_64::VcpuMshvState as CpuState;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::*;
 
-use std::collections::HashMap;
 use std::os::unix::io::AsRawFd;
 use std::sync::RwLock;
 
@@ -101,12 +99,9 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         }
         let vm_fd = Arc::new(fd);
 
-        let gsi_routes = Arc::new(RwLock::new(HashMap::new()));
-
         Ok(Arc::new(MshvVm {
             fd: vm_fd,
             msrs,
-            gsi_routes,
             hv_state: hv_state_init(),
             vmmops: None,
         }))
@@ -135,7 +130,6 @@ pub struct MshvVcpu {
     vp_index: u8,
     cpuid: CpuId,
     msrs: MsrEntries,
-    gsi_routes: Arc<RwLock<HashMap<u32, MshvIrqRoutingEntry>>>,
     hv_state: Arc<RwLock<HvState>>, // Mshv State
     vmmops: Option<Arc<Box<dyn vm::VmmOps>>>,
 }
@@ -528,6 +522,18 @@ impl cpu::Vcpu for MshvVcpu {
             xsave,
         })
     }
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Translate guest virtual address to guest physical address
+    ///
+    fn translate_gva(&self, gva: u64, flags: u64) -> cpu::Result<(u64, hv_translate_gva_result)> {
+        let r = self
+            .fd
+            .translate_gva(gva, flags)
+            .map_err(|e| cpu::HypervisorCpuError::TranslateVirtualAddress(e.into()))?;
+
+        Ok(r)
+    }
 }
 
 struct MshvEmulatorContext<'a> {
@@ -537,14 +543,25 @@ struct MshvEmulatorContext<'a> {
 
 impl<'a> MshvEmulatorContext<'a> {
     // Do the actual gva -> gpa translation
+    #[allow(non_upper_case_globals)]
     fn translate(&self, gva: u64) -> Result<u64, PlatformError> {
         if self.map.0 == gva {
             return Ok(self.map.1);
         }
 
-        // TODO Check if we could fallback to e.g. an hypercall for doing
-        // the translation for us.
-        todo!()
+        // TODO: More fine-grained control for the flags
+        let flags = HV_TRANSLATE_GVA_VALIDATE_READ | HV_TRANSLATE_GVA_VALIDATE_WRITE;
+
+        let r = self
+            .vcpu
+            .translate_gva(gva, flags.into())
+            .map_err(|e| PlatformError::TranslateVirtualAddress(anyhow!(e)))?;
+
+        let result_code = unsafe { r.1.__bindgen_anon_1.result_code };
+        match result_code {
+            hv_translate_gva_result_code_HvTranslateGvaSuccess => Ok(r.0),
+            _ => Err(PlatformError::TranslateVirtualAddress(anyhow!(result_code))),
+        }
     }
 }
 
@@ -650,8 +667,6 @@ impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
 pub struct MshvVm {
     fd: Arc<VmFd>,
     msrs: MsrEntries,
-    // GSI routing information
-    gsi_routes: Arc<RwLock<HashMap<u32, MshvIrqRoutingEntry>>>,
     // Hypervisor State
     hv_state: Arc<RwLock<HvState>>,
     vmmops: Option<Arc<Box<dyn vm::VmmOps>>>,
@@ -692,19 +707,9 @@ impl vm::Vm for MshvVm {
     fn register_irqfd(&self, fd: &EventFd, gsi: u32) -> vm::Result<()> {
         debug!("register_irqfd fd {} gsi {}", fd.as_raw_fd(), gsi);
 
-        let gsi_routes = self.gsi_routes.read().unwrap();
-
-        if let Some(e) = gsi_routes.get(&gsi) {
-            let msi = e
-                .get_msi_routing()
-                .map_err(|e| vm::HypervisorVmError::RegisterIrqFd(e.into()))?;
-            let request = msi.to_interrupt_request();
-            self.fd
-                .register_irqfd(&fd, gsi, &request)
-                .map_err(|e| vm::HypervisorVmError::RegisterIrqFd(e.into()))?;
-        } else {
-            error!("No routing info found for GSI {}", gsi)
-        }
+        self.fd
+            .register_irqfd(&fd, gsi)
+            .map_err(|e| vm::HypervisorVmError::RegisterIrqFd(e.into()))?;
 
         Ok(())
     }
@@ -737,7 +742,6 @@ impl vm::Vm for MshvVm {
             vp_index: id,
             cpuid: CpuId::new(1).unwrap(),
             msrs: self.msrs.clone(),
-            gsi_routes: self.gsi_routes.clone(),
             hv_state: self.hv_state.clone(),
             vmmops,
         };
@@ -821,17 +825,20 @@ impl vm::Vm for MshvVm {
         )))
     }
 
-    fn set_gsi_routing(&self, irq_routing: &[IrqRoutingEntry]) -> vm::Result<()> {
-        let mut routes = self.gsi_routes.write().unwrap();
+    fn set_gsi_routing(&self, entries: &[IrqRoutingEntry]) -> vm::Result<()> {
+        let mut msi_routing =
+            vec_with_array_field::<mshv_msi_routing, mshv_msi_routing_entry>(entries.len());
+        msi_routing[0].nr = entries.len() as u32;
 
-        routes.drain();
-
-        for r in irq_routing {
-            debug!("gsi routing {:x?}", r);
-            routes.insert(r.gsi, *r);
+        unsafe {
+            let entries_slice: &mut [mshv_msi_routing_entry] =
+                msi_routing[0].entries.as_mut_slice(entries.len());
+            entries_slice.copy_from_slice(&entries);
         }
 
-        Ok(())
+        self.fd
+            .set_msi_routing(&msi_routing[0])
+            .map_err(|e| vm::HypervisorVmError::SetGsiRouting(e.into()))
     }
     ///
     /// Get the Vm state. Return VM specific data
@@ -857,104 +864,6 @@ impl vm::Vm for MshvVm {
 }
 pub use hv_cpuid_entry as CpuIdEntry;
 
-#[derive(Copy, Clone, Debug)]
-pub struct MshvIrqRoutingMsi {
-    pub address_lo: u32,
-    pub address_hi: u32,
-    pub data: u32,
-}
-
-#[derive(Copy, Clone, Debug)]
-pub enum MshvIrqRouting {
-    Msi(MshvIrqRoutingMsi),
-}
-
-#[derive(Error, Debug)]
-pub enum MshvIrqRoutingEntryError {
-    #[error("Invalid MSI address: {0}")]
-    InvalidMsiAddress(#[source] anyhow::Error),
-}
-
-#[derive(Copy, Clone, Debug)]
-pub struct MshvIrqRoutingEntry {
-    pub gsi: u32,
-    pub route: MshvIrqRouting,
-}
-pub type IrqRoutingEntry = MshvIrqRoutingEntry;
-
-impl MshvIrqRoutingEntry {
-    fn get_msi_routing(&self) -> Result<MshvIrqRoutingMsi, MshvIrqRoutingEntryError> {
-        let MshvIrqRouting::Msi(msi) = self.route;
-        if msi.address_hi != 0 {
-            return Err(MshvIrqRoutingEntryError::InvalidMsiAddress(anyhow!(
-                "MSI high address part is not zero"
-            )));
-        }
-        Ok(msi)
-    }
-}
-
-impl MshvIrqRoutingMsi {
-    ///
-    /// See Intel SDM vol3 10.11.1
-    /// We assume APIC ID and Hyper-V Vcpu ID are the same value
-    ///
-
-    fn get_destination(&self) -> u64 {
-        ((self.address_lo >> 12) & 0xff).into()
-    }
-
-    fn get_destination_mode(&self) -> bool {
-        if (self.address_lo >> 2) & 0x1 == 0x1 {
-            return true;
-        }
-        false
-    }
-
-    fn get_vector(&self) -> u8 {
-        (self.data & 0xff) as u8
-    }
-
-    ///
-    ///  True means level triggered
-    ///
-    fn get_trigger_mode(&self) -> bool {
-        if (self.data >> 15) & 0x1 == 0x1 {
-            return true;
-        }
-        false
-    }
-
-    fn get_delivery_mode(&self) -> u8 {
-        ((self.data & 0x700) >> 8) as u8
-    }
-
-    ///
-    ///  Translate from architectural defined delivery mode to Hyper-V type
-    /// See Intel SDM vol3 10.11.2
-    ///
-    fn get_interrupt_type(&self) -> Option<hv_interrupt_type> {
-        match self.get_delivery_mode() {
-            0 => Some(hv_interrupt_type_HV_X64_INTERRUPT_TYPE_FIXED),
-            1 => Some(hv_interrupt_type_HV_X64_INTERRUPT_TYPE_LOWESTPRIORITY),
-            2 => Some(hv_interrupt_type_HV_X64_INTERRUPT_TYPE_SMI),
-            4 => Some(hv_interrupt_type_HV_X64_INTERRUPT_TYPE_NMI),
-            5 => Some(hv_interrupt_type_HV_X64_INTERRUPT_TYPE_INIT),
-            7 => Some(hv_interrupt_type_HV_X64_INTERRUPT_TYPE_EXTINT),
-            _ => None,
-        }
-    }
-
-    pub fn to_interrupt_request(&self) -> InterruptRequest {
-        InterruptRequest {
-            interrupt_type: self.get_interrupt_type().unwrap(),
-            apic_id: self.get_destination(),
-            vector: self.get_vector() as u32,
-            level_triggered: self.get_trigger_mode(),
-            logical_destination_mode: self.get_destination_mode(),
-            long_mode: false,
-        }
-    }
-}
+pub type IrqRoutingEntry = mshv_msi_routing_entry;
 
 pub const CPUID_FLAG_VALID_INDEX: u32 = 0;

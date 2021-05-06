@@ -184,6 +184,14 @@ Set-Service -Name sshd -StartupType ‘Automatic’
 
 This allows for SSH login from a remote machine, for example through the `administrator` user: `ssh administrator@192.168.249.2`. For a more detailed OpenSSH guide, please follow the MSDN article from the [links](#links) section.
 
+## Hotplug capability
+
+CPU hotplug is supported. The VM operating system needs to support hotplug and be appropriately licensed. SKU limitations like constraints on the number of cores are to be taken into consideration. Note, that Windows doesn't support CPU hot-remove. When `ch-remote` is invoked to reduce the number of CPUs, the result will be visible after the OS reboot within the same hypervisor instance.
+
+RAM hotplug is supported. Note, that while the `pnpmem.sys` driver in use supports RAM hot-remove, the RAM being unplugged has to be not in use and have no reserved pages. In most cases it means, hot-remove won't work. Same as with the CPU hot-remove, when `ch-remote` is invoked to reduce the RAM size, the result will be visible after the OS reboot.
+
+Network device hotplug and hot-remove are supported.
+
 ## Debugging
 
 The Windows guest debugging process relies heavily on QEMU and [socat](http://www.dest-unreach.org/socat/). The procedure requires two Windows VMs:

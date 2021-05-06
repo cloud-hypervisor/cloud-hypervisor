@@ -17,7 +17,6 @@ extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 extern crate serde_json;
-extern crate url;
 extern crate vmm_sys_util;
 #[cfg(test)]
 #[macro_use]
@@ -43,6 +42,7 @@ use std::io::{Read, Write};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::UnixListener;
 use std::os::unix::net::UnixStream;
+use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};
 use std::{result, thread};
@@ -140,6 +140,14 @@ pub enum Error {
     /// Error activating virtio devices
     #[error("Error activating virtio devices: {0:?}")]
     ActivateVirtioDevices(VmError),
+
+    /// Error creating API server
+    #[error("Error creating API server {0:?}")]
+    CreateApiServer(micro_http::ServerError),
+
+    /// Error binding API server socket
+    #[error("Error creation API server's socket {0:?}")]
+    CreateApiServerSocket(#[source] io::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -243,9 +251,11 @@ impl Serialize for PciDeviceInfo {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn start_vmm_thread(
     vmm_version: String,
-    http_path: &str,
+    http_path: &Option<String>,
+    http_fd: Option<RawFd>,
     api_event: EventFd,
     api_sender: Sender<ApiRequest>,
     api_receiver: Receiver<ApiRequest>,
@@ -277,8 +287,11 @@ pub fn start_vmm_thread(
         .map_err(Error::VmmThreadSpawn)?;
 
     // The VMM thread is started, we can start serving HTTP requests
-    api::start_http_thread(http_path, http_api_event, api_sender, seccomp_action)?;
-
+    if let Some(http_path) = http_path {
+        api::start_http_path_thread(http_path, http_api_event, api_sender, seccomp_action)?;
+    } else if let Some(http_fd) = http_fd {
+        api::start_http_fd_thread(http_fd, http_api_event, api_sender, seccomp_action)?;
+    }
     Ok(thread)
 }
 
@@ -359,15 +372,17 @@ impl Vmm {
                     &self.seccomp_action,
                     self.hypervisor.clone(),
                     activate_evt,
+                    None,
+                    None,
                 )?;
-                if let Some(ref serial_pty) = vm.serial_pty() {
+                if let Some(serial_pty) = vm.serial_pty() {
                     self.epoll
-                        .add_event(serial_pty, EpollDispatch::Pty)
+                        .add_event(&serial_pty.main, EpollDispatch::Pty)
                         .map_err(VmError::EventfdError)?;
                 };
-                if let Some(ref console_pty) = vm.console_pty() {
+                if let Some(console_pty) = vm.console_pty() {
                     self.epoll
-                        .add_event(console_pty, EpollDispatch::Pty)
+                        .add_event(&console_pty.main, EpollDispatch::Pty)
                         .map_err(VmError::EventfdError)?;
                 };
                 self.vm = Some(vm);
@@ -477,6 +492,8 @@ impl Vmm {
         // First we stop the current VM and create a new one.
         if let Some(ref mut vm) = self.vm {
             let config = vm.get_config();
+            let serial_pty = vm.serial_pty();
+            let console_pty = vm.console_pty();
             self.vm_shutdown()?;
 
             let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
@@ -499,6 +516,8 @@ impl Vmm {
                 &self.seccomp_action,
                 self.hypervisor.clone(),
                 activate_evt,
+                serial_pty,
+                console_pty,
             )?);
         }
 
@@ -805,6 +824,14 @@ impl Vmm {
         Ok(())
     }
 
+    fn socket_url_to_path(url: &str) -> result::Result<PathBuf, MigratableError> {
+        url.strip_prefix("unix:")
+            .ok_or_else(|| {
+                MigratableError::MigrateSend(anyhow!("Could not extract path from URL: {}", url))
+            })
+            .map(|s| s.into())
+    }
+
     fn vm_receive_migration(
         &mut self,
         receive_data_migration: VmReceiveMigrationData,
@@ -814,34 +841,16 @@ impl Vmm {
             receive_data_migration.receiver_url
         );
 
-        let url = url::Url::parse(&receive_data_migration.receiver_url)
-            .map_err(|e| MigratableError::MigrateReceive(anyhow!("Error parsing URL: {}", e)))?;
-
-        let mut socket = match url.scheme() {
-            "unix" => {
-                let path = url.to_file_path().map_err(|_| {
-                    MigratableError::MigrateReceive(anyhow!("Error extracting path from URL"))
-                })?;
-                let listener = UnixListener::bind(&path).map_err(|e| {
-                    MigratableError::MigrateReceive(anyhow!("Error binding to UNIX socket: {}", e))
-                })?;
-                let (socket, _addr) = listener.accept().map_err(|e| {
-                    MigratableError::MigrateReceive(anyhow!(
-                        "Error accepting on UNIX socket: {}",
-                        e
-                    ))
-                })?;
-                std::fs::remove_file(&path).map_err(|e| {
-                    MigratableError::MigrateReceive(anyhow!("Error unlinking UNIX socket: {}", e))
-                })?;
-                socket
-            }
-            _ => {
-                return Err(MigratableError::MigrateReceive(anyhow!(
-                    "Unsupported URL scheme"
-                )))
-            }
-        };
+        let path = Self::socket_url_to_path(&receive_data_migration.receiver_url)?;
+        let listener = UnixListener::bind(&path).map_err(|e| {
+            MigratableError::MigrateReceive(anyhow!("Error binding to UNIX socket: {}", e))
+        })?;
+        let (mut socket, _addr) = listener.accept().map_err(|e| {
+            MigratableError::MigrateReceive(anyhow!("Error accepting on UNIX socket: {}", e))
+        })?;
+        std::fs::remove_file(&path).map_err(|e| {
+            MigratableError::MigrateReceive(anyhow!("Error unlinking UNIX socket: {}", e))
+        })?;
 
         let mut started = false;
         let mut vm: Option<Vm> = None;
@@ -962,21 +971,10 @@ impl Vmm {
             send_data_migration.destination_url
         );
         if let Some(ref mut vm) = self.vm {
-            let url = url::Url::parse(&send_data_migration.destination_url)
-                .map_err(|e| MigratableError::MigrateSend(anyhow!("Error parsing URL: {}", e)))?;
-            let mut socket = match url.scheme() {
-                "unix" => UnixStream::connect(url.to_file_path().map_err(|_| {
-                    MigratableError::MigrateSend(anyhow!("Error extracting path from URL"))
-                })?)
-                .map_err(|e| {
-                    MigratableError::MigrateSend(anyhow!("Error connecting to UNIX socket: {}", e))
-                })?,
-                _ => {
-                    return Err(MigratableError::MigrateReceive(anyhow!(
-                        "Unsupported URL scheme"
-                    )))
-                }
-            };
+            let path = Self::socket_url_to_path(&send_data_migration.destination_url)?;
+            let mut socket = UnixStream::connect(&path).map_err(|e| {
+                MigratableError::MigrateSend(anyhow!("Error connecting to UNIX socket: {}", e))
+            })?;
 
             // Start the migration
             Request::start().write_to(&mut socket)?;

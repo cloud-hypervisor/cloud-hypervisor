@@ -6,6 +6,7 @@ extern crate hypervisor;
 #[cfg(target_arch = "x86_64")]
 use crate::config::SgxEpcConfig;
 use crate::config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
+use crate::migration::url_to_path;
 use crate::MEMORY_MANAGER_SNAPSHOT_ID;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml};
@@ -27,7 +28,6 @@ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
 use std::result;
 use std::sync::{Arc, Barrier, Mutex};
-use url::Url;
 #[cfg(target_arch = "x86_64")]
 use vm_allocator::GsiApic;
 use vm_allocator::SystemAllocator;
@@ -137,6 +137,7 @@ pub struct MemoryManager {
     user_provided_zones: bool,
     snapshot_memory_regions: Vec<MemoryRegion>,
     memory_zones: MemoryZones,
+    log_dirty: bool, // Enable dirty logging for created RAM regions
 
     // Keep track of calls to create_userspace_mapping() for guest RAM.
     // This is useful for getting the dirty pages as we need to know the
@@ -171,7 +172,7 @@ pub enum Error {
     NoSlotAvailable,
 
     /// Not enough space in the hotplug RAM region
-    InsufficientHotplugRAM,
+    InsufficientHotplugRam,
 
     /// The requested hotplug memory addition is not a valid size
     InvalidSize,
@@ -266,7 +267,7 @@ pub enum Error {
     SnapshotCopy(GuestMemoryError),
 
     /// Failed to allocate MMIO address
-    AllocateMMIOAddress,
+    AllocateMmioAddress,
 }
 
 const ENABLE_FLAG: usize = 0;
@@ -487,7 +488,7 @@ impl MemoryManager {
                 self.guest_memory
                     .memory()
                     .read_exact_from(
-                        region.start_addr,
+                        GuestAddress(region.start_addr),
                         &mut memory_region_file,
                         region.size as usize,
                     )
@@ -503,6 +504,7 @@ impl MemoryManager {
         config: &MemoryConfig,
         prefault: bool,
         phys_bits: u8,
+        #[cfg(feature = "tdx")] tdx_enabled: bool,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         let user_provided_zones = config.size == 0;
         let mut allow_mem_hotplug: bool = false;
@@ -739,7 +741,12 @@ impl MemoryManager {
             .lock()
             .unwrap()
             .allocate_mmio_addresses(None, MEMORY_MANAGER_ACPI_SIZE as u64, None)
-            .ok_or(Error::AllocateMMIOAddress)?;
+            .ok_or(Error::AllocateMmioAddress)?;
+
+        #[cfg(not(feature = "tdx"))]
+        let log_dirty = true;
+        #[cfg(feature = "tdx")]
+        let log_dirty = !tdx_enabled; // Cannot log dirty pages on a TD
 
         let memory_manager = Arc::new(Mutex::new(MemoryManager {
             boot_guest_memory,
@@ -768,6 +775,7 @@ impl MemoryManager {
             guest_ram_mappings: Vec::new(),
             #[cfg(feature = "acpi")]
             acpi_address,
+            log_dirty,
         }));
 
         guest_memory.memory().with_regions(|_, region| {
@@ -778,7 +786,7 @@ impl MemoryManager {
                 region.as_ptr() as u64,
                 config.mergeable,
                 false,
-                true,
+                log_dirty,
             )?;
             mm.guest_ram_mappings.push(GuestRamMapping {
                 gpa: region.start_addr().raw_value(),
@@ -797,7 +805,7 @@ impl MemoryManager {
                 region.as_ptr() as u64,
                 config.mergeable,
                 false,
-                true,
+                log_dirty,
             )?;
 
             mm.guest_ram_mappings.push(GuestRamMapping {
@@ -833,54 +841,42 @@ impl MemoryManager {
         prefault: bool,
         phys_bits: u8,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
-        let mm = MemoryManager::new(vm, config, prefault, phys_bits)?;
+        let mm = MemoryManager::new(
+            vm,
+            config,
+            prefault,
+            phys_bits,
+            #[cfg(feature = "tdx")]
+            false,
+        )?;
 
         if let Some(source_url) = source_url {
-            let url = Url::parse(source_url).unwrap();
-            /* url must be valid dir which is verified in recv_vm_snapshot() */
-            let vm_snapshot_path = url.to_file_path().unwrap();
+            let vm_snapshot_path = url_to_path(source_url).map_err(Error::Restore)?;
 
-            if let Some(mem_section) = snapshot
-                .snapshot_data
-                .get(&format!("{}-section", MEMORY_MANAGER_SNAPSHOT_ID))
-            {
-                let mem_snapshot: MemoryManagerSnapshotData =
-                    match serde_json::from_slice(&mem_section.snapshot) {
-                        Ok(snapshot) => snapshot,
-                        Err(error) => {
-                            return Err(Error::Restore(MigratableError::Restore(anyhow!(
-                                "Could not deserialize MemoryManager {}",
-                                error
-                            ))))
-                        }
-                    };
+            let mem_snapshot: MemoryManagerSnapshotData = snapshot
+                .to_state(MEMORY_MANAGER_SNAPSHOT_ID)
+                .map_err(Error::Restore)?;
 
-                // Here we turn the content file name into a content file path as
-                // this will be needed to copy the content of the saved memory
-                // region into the newly created memory region.
-                // We simply ignore the content files that are None, as they
-                // represent regions that have been directly saved by the user, with
-                // no need for saving into a dedicated external file. For these
-                // files, the VmConfig already contains the information on where to
-                // find them.
-                let mut saved_regions = mem_snapshot.memory_regions;
-                for region in saved_regions.iter_mut() {
-                    if let Some(content) = &mut region.content {
-                        let mut memory_region_path = vm_snapshot_path.clone();
-                        memory_region_path.push(content.clone());
-                        *content = memory_region_path;
-                    }
+            // Here we turn the content file name into a content file path as
+            // this will be needed to copy the content of the saved memory
+            // region into the newly created memory region.
+            // We simply ignore the content files that are None, as they
+            // represent regions that have been directly saved by the user, with
+            // no need for saving into a dedicated external file. For these
+            // files, the VmConfig already contains the information on where to
+            // find them.
+            let mut saved_regions = mem_snapshot.memory_regions;
+            for region in saved_regions.iter_mut() {
+                if let Some(content) = &mut region.content {
+                    let mut memory_region_path = vm_snapshot_path.clone();
+                    memory_region_path.push(content.clone());
+                    *content = memory_region_path.to_str().unwrap().to_owned();
                 }
-
-                mm.lock().unwrap().fill_saved_regions(saved_regions)?;
-
-                Ok(mm)
-            } else {
-                Err(Error::Restore(MigratableError::Restore(anyhow!(
-                    "Could not find {}-section from snapshot",
-                    MEMORY_MANAGER_SNAPSHOT_ID
-                ))))
             }
+
+            mm.lock().unwrap().fill_saved_regions(saved_regions)?;
+
+            Ok(mm)
         } else {
             Ok(mm)
         }
@@ -1118,7 +1114,7 @@ impl MemoryManager {
             region.as_ptr() as u64,
             self.mergeable,
             false,
-            true,
+            self.log_dirty,
         )?;
         self.guest_ram_mappings.push(GuestRamMapping {
             gpa: region.start_addr().raw_value(),
@@ -1147,10 +1143,16 @@ impl MemoryManager {
         let start_addr = MemoryManager::start_addr(self.guest_memory.memory().last_addr(), true)?;
 
         if start_addr.checked_add(size.try_into().unwrap()).unwrap() > self.start_of_device_area() {
-            return Err(Error::InsufficientHotplugRAM);
+            return Err(Error::InsufficientHotplugRam);
         }
 
         let region = self.add_ram_region(start_addr, size)?;
+
+        // Add region to the list of regions associated with the default
+        // memory zone.
+        if let Some(memory_zone) = self.memory_zones.get_mut(DEFAULT_MEMORY_ZONE) {
+            memory_zone.regions.push(Arc::clone(&region));
+        }
 
         // Tell the allocator
         self.allocator
@@ -1406,7 +1408,7 @@ impl MemoryManager {
             let file = OpenOptions::new()
                 .read(true)
                 .write(true)
-                .open("/dev/sgx_virt_epc")
+                .open("/dev/sgx_vepc")
                 .map_err(Error::SgxVirtEpcOpen)?;
 
             let prot = PROT_READ | PROT_WRITE;
@@ -1417,7 +1419,7 @@ impl MemoryManager {
 
             // We can't use the vm-memory crate to perform the memory mapping
             // here as it would try to ensure the size of the backing file is
-            // matching the size of the expected mapping. The /dev/sgx_virt_epc
+            // matching the size of the expected mapping. The /dev/sgx_vepc
             // device does not work that way, it provides a file descriptor
             // which is not matching the mapping size, as it's a just a way to
             // let KVM know that an EPC section is being created for the guest.
@@ -1474,25 +1476,13 @@ impl MemoryManager {
         &self.memory_zones
     }
 
-    // Generate a table for the pages that are dirty. The algorithm is currently
-    // very simple. If any page in a "block" of 64 pages is dirty then that whole
-    // "block" is added to the table. These "blocks" are also collapsed together if
-    // they are contiguous:
-    //
-    // For every block of 64 pages we check to see if there are any dirty pages in it
-    // if there are we increase the size of the current range if there is one, otherwise
-    // create a new range. If there are no dirty pages in the current "block" the range is
-    // closed if there is one and added to the table. After iterating through the dirty
-    // page bitmaps an open range will be closed and added to the table.
-    //
-    // This algorithm is very simple and could be refined to count the number of pages
-    // in the block and instead create smaller ranges covering those pages.
+    // Generate a table for the pages that are dirty. The dirty pages are collapsed
+    // together in the table if they are contiguous.
     pub fn dirty_memory_range_table(
         &self,
     ) -> std::result::Result<MemoryRangeTable, MigratableError> {
         let page_size = 4096; // TODO: Does this need to vary?
         let mut table = MemoryRangeTable::default();
-        let mut total_pages = 0;
         for r in &self.guest_ram_mappings {
             let dirty_bitmap = self.vm.get_dirty_log(r.slot, r.size).map_err(|e| {
                 MigratableError::MigrateSend(anyhow!("Error getting VM dirty log {}", e))
@@ -1500,18 +1490,21 @@ impl MemoryManager {
 
             let mut entry: Option<MemoryRange> = None;
             for (i, block) in dirty_bitmap.iter().enumerate() {
-                if *block > 0 {
-                    if let Some(entry) = &mut entry {
-                        entry.length += 64 * page_size;
-                    } else {
-                        entry = Some(MemoryRange {
-                            gpa: r.gpa + (64 * i as u64 * page_size),
-                            length: 64 * page_size,
-                        });
+                for j in 0..64 {
+                    let is_page_dirty = ((block >> j) & 1u64) != 0u64;
+                    let page_offset = ((i * 64) + j) as u64 * page_size;
+                    if is_page_dirty {
+                        if let Some(entry) = &mut entry {
+                            entry.length += page_size;
+                        } else {
+                            entry = Some(MemoryRange {
+                                gpa: r.gpa + page_offset,
+                                length: page_size,
+                            });
+                        }
+                    } else if let Some(entry) = entry.take() {
+                        table.push(entry);
                     }
-                    total_pages += block.count_ones() as u64;
-                } else if let Some(entry) = entry.take() {
-                    table.push(entry);
                 }
             }
             if let Some(entry) = entry.take() {
@@ -1522,18 +1515,9 @@ impl MemoryManager {
                 info!("Dirty Memory Range Table is empty");
             } else {
                 info!("Dirty Memory Range Table:");
-                let mut total_size = 0;
                 for range in table.regions() {
                     info!("GPA: {:x} size: {} (KiB)", range.gpa, range.length / 1024);
-                    total_size += range.length;
                 }
-                info!(
-                    "Total pages: {} ({} KiB). Total size: {} KiB. Efficiency: {}%",
-                    total_pages,
-                    total_pages * page_size / 1024,
-                    total_size / 1024,
-                    (total_pages * page_size * 100) / total_size
-                );
             }
         }
         Ok(table)
@@ -1580,7 +1564,7 @@ impl Aml for MemorySlot {
         aml::Device::new(
             format!("M{:03}", self.slot_id).as_str().into(),
             vec![
-                &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0C80")),
+                &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0C80")),
                 &aml::Name::new("_UID".into(), &self.slot_id),
                 /*
                 _STA return value:
@@ -1791,9 +1775,17 @@ impl Aml for MemoryMethods {
                         &aml::Path::new("MINH"),
                         &aml::Path::new("LENH"),
                     ),
+                    &aml::If::new(
+                        &aml::LessThan::new(&aml::Path::new("MAXL"), &aml::Path::new("MINL")),
+                        vec![&aml::Add::new(
+                            &aml::Path::new("MAXH"),
+                            &aml::ONE,
+                            &aml::Path::new("MAXH"),
+                        )],
+                    ),
                     &aml::Subtract::new(
-                        &aml::Path::new("MAXH"),
-                        &aml::Path::new("MAXH"),
+                        &aml::Path::new("MAXL"),
+                        &aml::Path::new("MAXL"),
                         &aml::ONE,
                     ),
                     // Release lock
@@ -1817,7 +1809,7 @@ impl Aml for MemoryManager {
             &aml::Device::new(
                 "_SB_.MHPC".into(),
                 vec![
-                    &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0A06")),
+                    &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0A06")),
                     &aml::Name::new("_UID".into(), &"Memory Hotplug Controller"),
                     // Mutex to protect concurrent access as we write to choose slot and then read back status
                     &aml::Mutex::new("MLCK".into(), 0),
@@ -1900,7 +1892,7 @@ impl Aml for MemoryManager {
                     &aml::Device::new(
                         "_SB_.EPC_".into(),
                         vec![
-                            &aml::Name::new("_HID".into(), &aml::EISAName::new("INT0E0C")),
+                            &aml::Name::new("_HID".into(), &aml::EisaName::new("INT0E0C")),
                             // QWORD describing the EPC region start and size
                             &aml::Name::new(
                                 "_CRS".into(),
@@ -1936,10 +1928,9 @@ pub struct GuestAddressDef(pub u64);
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct MemoryRegion {
-    content: Option<PathBuf>,
-    #[serde(with = "GuestAddressDef")]
-    start_addr: GuestAddress,
-    size: GuestUsize,
+    content: Option<String>,
+    start_addr: u64,
+    size: u64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1982,8 +1973,8 @@ impl Snapshottable for MemoryManager {
             }
 
             memory_regions.push(MemoryRegion {
-                content,
-                start_addr: region.start_addr(),
+                content: content.map(|p| p.to_str().unwrap().to_owned()),
+                start_addr: region.start_addr().0,
                 size: region.len(),
             });
 
@@ -2000,14 +1991,10 @@ impl Snapshottable for MemoryManager {
         // memory region content for the regions requiring it.
         self.snapshot_memory_regions = memory_regions.clone();
 
-        let snapshot_data_section =
-            serde_json::to_vec(&MemoryManagerSnapshotData { memory_regions })
-                .map_err(|e| MigratableError::Snapshot(e.into()))?;
-
-        memory_manager_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", MEMORY_MANAGER_SNAPSHOT_ID),
-            snapshot: snapshot_data_section,
-        });
+        memory_manager_snapshot.add_data_section(SnapshotDataSection::new_from_state(
+            MEMORY_MANAGER_SNAPSHOT_ID,
+            &MemoryManagerSnapshotData { memory_regions },
+        )?);
 
         let mut memory_snapshot = self.snapshot.lock().unwrap();
         *memory_snapshot = Some(guest_memory);
@@ -2022,59 +2009,30 @@ impl Transportable for MemoryManager {
         _snapshot: &Snapshot,
         destination_url: &str,
     ) -> result::Result<(), MigratableError> {
-        let url = Url::parse(destination_url).map_err(|e| {
-            MigratableError::MigrateSend(anyhow!("Could not parse destination URL: {}", e))
-        })?;
+        let vm_memory_snapshot_path = url_to_path(destination_url)?;
 
-        match url.scheme() {
-            "file" => {
-                let vm_memory_snapshot_path = url
-                    .to_file_path()
-                    .map_err(|_| {
-                        MigratableError::MigrateSend(anyhow!(
-                            "Could not convert file URL to a file path: {}",
-                            destination_url
-                        ))
-                    })
-                    .and_then(|path| {
-                        if !path.is_dir() {
-                            return Err(MigratableError::MigrateSend(anyhow!(
-                                "Destination is not a directory"
-                            )));
-                        }
-                        Ok(path)
-                    })?;
+        if let Some(guest_memory) = &*self.snapshot.lock().unwrap() {
+            for region in self.snapshot_memory_regions.iter() {
+                if let Some(content) = &region.content {
+                    let mut memory_region_path = vm_memory_snapshot_path.clone();
+                    memory_region_path.push(content);
 
-                if let Some(guest_memory) = &*self.snapshot.lock().unwrap() {
-                    for region in self.snapshot_memory_regions.iter() {
-                        if let Some(content) = &region.content {
-                            let mut memory_region_path = vm_memory_snapshot_path.clone();
-                            memory_region_path.push(content);
+                    // Create the snapshot file for the region
+                    let mut memory_region_file = OpenOptions::new()
+                        .read(true)
+                        .write(true)
+                        .create_new(true)
+                        .open(memory_region_path)
+                        .map_err(|e| MigratableError::MigrateSend(e.into()))?;
 
-                            // Create the snapshot file for the region
-                            let mut memory_region_file = OpenOptions::new()
-                                .read(true)
-                                .write(true)
-                                .create_new(true)
-                                .open(memory_region_path)
-                                .map_err(|e| MigratableError::MigrateSend(e.into()))?;
-
-                            guest_memory
-                                .write_all_to(
-                                    region.start_addr,
-                                    &mut memory_region_file,
-                                    region.size as usize,
-                                )
-                                .map_err(|e| MigratableError::MigrateSend(e.into()))?;
-                        }
-                    }
+                    guest_memory
+                        .write_all_to(
+                            GuestAddress(region.start_addr),
+                            &mut memory_region_file,
+                            region.size as usize,
+                        )
+                        .map_err(|e| MigratableError::MigrateSend(e.into()))?;
                 }
-            }
-            _ => {
-                return Err(MigratableError::MigrateSend(anyhow!(
-                    "Unsupported VM transport URL scheme: {}",
-                    url.scheme()
-                )))
             }
         }
         Ok(())

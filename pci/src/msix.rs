@@ -6,7 +6,7 @@
 extern crate byteorder;
 extern crate vm_memory;
 
-use crate::{PciCapability, PciCapabilityID};
+use crate::{PciCapability, PciCapabilityId};
 use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
 use std::io;
@@ -16,7 +16,7 @@ use vm_device::interrupt::{
     InterruptIndex, InterruptSourceConfig, InterruptSourceGroup, MsiIrqSourceConfig,
 };
 use vm_memory::ByteValued;
-use vm_migration::{MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable};
+use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable};
 
 const MAX_MSIX_VECTORS_PER_DEVICE: u16 = 2048;
 const MSIX_TABLE_ENTRIES_MODULO: u64 = 16;
@@ -432,41 +432,18 @@ impl Snapshottable for MsixConfig {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        let snapshot =
-            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
-
-        let mut msix_snapshot = Snapshot::new(self.id().as_str());
-        msix_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", self.id()),
-            snapshot,
-        });
-
-        Ok(msix_snapshot)
+        Snapshot::new_from_state(&self.id(), &self.state())
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        if let Some(msix_section) = snapshot
-            .snapshot_data
-            .get(&format!("{}-section", self.id()))
-        {
-            let msix_state = match serde_json::from_slice(&msix_section.snapshot) {
-                Ok(state) => state,
-                Err(error) => {
-                    return Err(MigratableError::Restore(anyhow!(
-                        "Could not deserialize MSI-X {}",
-                        error
-                    )))
-                }
-            };
-
-            return self.set_state(&msix_state).map_err(|e| {
-                MigratableError::Restore(anyhow!("Could not restore MSI-X state {:?}", e))
-            });
-        }
-
-        Err(MigratableError::Restore(anyhow!(
-            "Could not find MSI-X snapshot section"
-        )))
+        self.set_state(&snapshot.to_state(&self.id())?)
+            .map_err(|e| {
+                MigratableError::Restore(anyhow!(
+                    "Could not restore state for {}: {:?}",
+                    self.id(),
+                    e
+                ))
+            })
     }
 }
 
@@ -498,8 +475,8 @@ impl PciCapability for MsixCap {
         self.as_slice()
     }
 
-    fn id(&self) -> PciCapabilityID {
-        PciCapabilityID::MSIX
+    fn id(&self) -> PciCapabilityId {
+        PciCapabilityId::MsiX
     }
 }
 

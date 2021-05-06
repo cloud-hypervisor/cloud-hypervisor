@@ -136,6 +136,39 @@ pipeline{
 						}
 					}
 				}
+				stage ('Worker build VFIO') {
+					agent { node { label 'bionic-vfio' } }
+					when { branch 'master' }
+					stages {
+						stage ('Checkout') {
+							steps {
+								checkout scm
+							}
+						}
+						stage ('Run VFIO integration tests') {
+							options {
+								timeout(time: 1, unit: 'HOURS')
+							}
+							steps {
+								sh "scripts/dev_cli.sh tests --integration-vfio"
+							}
+						}
+						stage ('Run VFIO integration tests for musl') {
+							options {
+								timeout(time: 1, unit: 'HOURS')
+							}
+							steps {
+								sh "scripts/dev_cli.sh tests --integration-vfio --libc musl"
+							}
+						}
+					}
+					post {
+						always {
+							sh "sudo chown -R jenkins.jenkins ${WORKSPACE}"
+							deleteDir()
+						}
+					}
+				}
 				stage ('Worker build - Windows guest') {
 					agent { node { label 'groovy-win' } }
 					stages {

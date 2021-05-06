@@ -11,7 +11,9 @@ use std::sync::Arc;
 use std::vec::Vec;
 use vhost::vhost_user::{Master, VhostUserMaster};
 use vhost::{VhostBackend, VhostUserMemoryRegionInfo, VringConfigData};
-use vm_memory::{Address, Error as MmapError, GuestMemory, GuestMemoryMmap, GuestMemoryRegion};
+use vm_memory::{
+    Address, Error as MmapError, GuestMemory, GuestMemoryMmap, GuestMemoryRegion, GuestRegionMmap,
+};
 use vmm_sys_util::eventfd::EventFd;
 
 #[derive(Debug, Clone)]
@@ -47,6 +49,24 @@ pub fn update_mem_table(vu: &mut Master, mem: &GuestMemoryMmap) -> Result<()> {
         .map_err(Error::VhostUserSetMemTable)?;
 
     Ok(())
+}
+
+pub fn add_memory_region(vu: &mut Master, region: &Arc<GuestRegionMmap>) -> Result<()> {
+    let (mmap_handle, mmap_offset) = match region.file_offset() {
+        Some(file_offset) => (file_offset.file().as_raw_fd(), file_offset.start()),
+        None => return Err(Error::MissingRegionFd),
+    };
+
+    let region = VhostUserMemoryRegionInfo {
+        guest_phys_addr: region.start_addr().raw_value(),
+        memory_size: region.len() as u64,
+        userspace_addr: region.as_ptr() as u64,
+        mmap_offset,
+        mmap_handle,
+    };
+
+    vu.add_mem_region(&region)
+        .map_err(Error::VhostUserAddMemReg)
 }
 
 pub fn setup_vhost_user_vring(
@@ -135,10 +155,6 @@ pub fn reset_vhost_user(vu: &mut Master, num_queues: usize) -> Result<()> {
         // Disable the vrings.
         vu.set_vring_enable(queue_index, false)
             .map_err(Error::VhostUserSetVringEnable)?;
-
-        // Stop the vrings.
-        vu.get_vring_base(queue_index)
-            .map_err(Error::VhostUserSetFeatures)?;
     }
 
     // Reset the owner.

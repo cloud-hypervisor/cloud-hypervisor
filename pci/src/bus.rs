@@ -122,7 +122,7 @@ impl PciBus {
     ) -> Result<()> {
         for (address, size, type_) in bars {
             match type_ {
-                PciBarRegionType::IORegion => {
+                PciBarRegionType::IoRegion => {
                     #[cfg(target_arch = "x86_64")]
                     io_bus
                         .insert(dev.clone(), address.raw_value(), size)

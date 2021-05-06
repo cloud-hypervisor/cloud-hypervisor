@@ -328,7 +328,7 @@ impl Balloon {
 
         Ok(Balloon {
             common: VirtioCommon {
-                device_type: VirtioDeviceType::TYPE_BALLOON as u32,
+                device_type: VirtioDeviceType::Balloon as u32,
                 avail_features,
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 queue_sizes: QUEUE_SIZES.to_vec(),

@@ -12,6 +12,7 @@ use crate::VirtioInterrupt;
 use block_util::VirtioBlockConfig;
 use seccomp::{SeccompAction, SeccompFilter};
 use std::mem;
+use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::{Arc, Barrier};
@@ -24,7 +25,9 @@ use vhost::vhost_user::{Master, VhostUserMaster, VhostUserMasterReqHandler};
 use vhost::VhostBackend;
 use virtio_bindings::bindings::virtio_blk::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
-use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
+use vm_memory::{
+    ByteValued, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap, GuestRegionMmap,
+};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -37,6 +40,8 @@ pub struct Blk {
     vhost_user_blk: Master,
     config: VirtioBlockConfig,
     seccomp_action: SeccompAction,
+    guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
+    acked_protocol_features: u64,
 }
 
 impl Blk {
@@ -79,17 +84,21 @@ impl Blk {
 
         // Identify if protocol features are supported by the slave.
         let mut acked_features = 0;
+        let mut acked_protocol_features = 0;
         if avail_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
             acked_features |= VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
 
             let mut protocol_features = vhost_user_blk
                 .get_protocol_features()
                 .map_err(Error::VhostUserGetProtocolFeatures)?;
-            protocol_features |= VhostUserProtocolFeatures::MQ;
-            protocol_features &= !VhostUserProtocolFeatures::INFLIGHT_SHMFD;
+            protocol_features &= VhostUserProtocolFeatures::CONFIG
+                | VhostUserProtocolFeatures::MQ
+                | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS;
             vhost_user_blk
                 .set_protocol_features(protocol_features)
                 .map_err(Error::VhostUserSetProtocolFeatures)?;
+
+            acked_protocol_features = protocol_features.bits();
         }
         // Get the max queues number from backend, and the queue number set
         // should be less than this max queue number.
@@ -130,7 +139,7 @@ impl Blk {
 
         Ok(Blk {
             common: VirtioCommon {
-                device_type: VirtioDeviceType::TYPE_BLOCK as u32,
+                device_type: VirtioDeviceType::Block as u32,
                 queue_sizes: vec![vu_cfg.queue_size; vu_cfg.num_queues],
                 avail_features,
                 acked_features,
@@ -142,6 +151,8 @@ impl Blk {
             vhost_user_blk,
             config,
             seccomp_action,
+            guest_memory: None,
+            acked_protocol_features,
         })
     }
 }
@@ -206,6 +217,8 @@ impl VirtioDevice for Blk {
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
 
+        self.guest_memory = Some(mem.clone());
+
         let mut vu_interrupt_list = setup_vhost_user(
             &mut self.vhost_user_blk,
             &mem.memory(),
@@ -218,8 +231,7 @@ impl VirtioDevice for Blk {
 
         let mut epoll_threads = Vec::new();
         for i in 0..vu_interrupt_list.len() {
-            let mut interrupt_list_sub: Vec<(Option<EventFd>, Queue)> = Vec::with_capacity(1);
-            interrupt_list_sub.push(vu_interrupt_list.remove(0));
+            let interrupt_list_sub = vec![vu_interrupt_list.remove(0)];
 
             let kill_evt = self
                 .common
@@ -302,8 +314,20 @@ impl VirtioDevice for Blk {
         let _ = unsafe { libc::close(self.vhost_user_blk.as_raw_fd()) };
     }
 
-    fn update_memory(&mut self, mem: &GuestMemoryMmap) -> std::result::Result<(), crate::Error> {
-        update_mem_table(&mut self.vhost_user_blk, mem).map_err(crate::Error::VhostUserUpdateMemory)
+    fn add_memory_region(
+        &mut self,
+        region: &Arc<GuestRegionMmap>,
+    ) -> std::result::Result<(), crate::Error> {
+        if self.acked_protocol_features & VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS.bits() != 0
+        {
+            add_memory_region(&mut self.vhost_user_blk, region)
+                .map_err(crate::Error::VhostUserAddMemoryRegion)
+        } else if let Some(guest_memory) = &self.guest_memory {
+            update_mem_table(&mut self.vhost_user_blk, guest_memory.memory().deref())
+                .map_err(crate::Error::VhostUserUpdateMemory)
+        } else {
+            Ok(())
+        }
     }
 }
 

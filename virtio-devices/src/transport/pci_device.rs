@@ -16,13 +16,13 @@ use crate::transport::VirtioTransport;
 use crate::{
     ActivateResult, Queue, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
     DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED, DEVICE_FEATURES_OK,
-    DEVICE_INIT, VIRTIO_MSI_NO_VECTOR,
+    DEVICE_INIT,
 };
 use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
 use pci::{
     BarReprogrammingParams, MsixCap, MsixConfig, PciBarConfiguration, PciBarRegionType,
-    PciCapability, PciCapabilityID, PciClassCode, PciConfiguration, PciDevice, PciDeviceError,
+    PciCapability, PciCapabilityId, PciClassCode, PciConfiguration, PciDevice, PciDeviceError,
     PciHeaderType, PciMassStorageSubclass, PciNetworkControllerSubclass, PciSubclass,
 };
 use std::any::Any;
@@ -41,11 +41,8 @@ use vm_memory::{
     Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
     GuestUsize, Le32,
 };
-use vm_migration::{
-    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
-    Transportable,
-};
-use vm_virtio::{queue, VirtioIommuRemapping};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
+use vm_virtio::{queue, VirtioIommuRemapping, VIRTIO_MSI_NO_VECTOR};
 use vmm_sys_util::{errno::Result, eventfd::EventFd};
 
 #[derive(Debug)]
@@ -89,8 +86,8 @@ impl PciCapability for VirtioPciCap {
         self.as_slice()
     }
 
-    fn id(&self) -> PciCapabilityID {
-        PciCapabilityID::VendorSpecific
+    fn id(&self) -> PciCapabilityId {
+        PciCapabilityId::VendorSpecific
     }
 }
 
@@ -125,8 +122,8 @@ impl PciCapability for VirtioPciNotifyCap {
         self.as_slice()
     }
 
-    fn id(&self) -> PciCapabilityID {
-        PciCapabilityID::VendorSpecific
+    fn id(&self) -> PciCapabilityId {
+        PciCapabilityId::VendorSpecific
     }
 }
 
@@ -170,8 +167,8 @@ impl PciCapability for VirtioPciCap64 {
         self.as_slice()
     }
 
-    fn id(&self) -> PciCapabilityID {
-        PciCapabilityID::VendorSpecific
+    fn id(&self) -> PciCapabilityId {
+        PciCapabilityId::VendorSpecific
     }
 }
 
@@ -208,8 +205,8 @@ impl PciCapability for VirtioPciCfgCap {
         self.as_slice()
     }
 
-    fn id(&self) -> PciCapabilityID {
-        PciCapabilityID::VendorSpecific
+    fn id(&self) -> PciCapabilityId {
+        PciCapabilityId::VendorSpecific
     }
 }
 
@@ -384,11 +381,11 @@ impl VirtioPciDevice {
         // to firmware without requiring excessive identity mapping.
         let mut use_64bit_bar = true;
         let (class, subclass) = match VirtioDeviceType::from(locked_device.device_type()) {
-            VirtioDeviceType::TYPE_NET => (
+            VirtioDeviceType::Net => (
                 PciClassCode::NetworkController,
                 &PciNetworkControllerSubclass::EthernetController as &dyn PciSubclass,
             ),
-            VirtioDeviceType::TYPE_BLOCK => {
+            VirtioDeviceType::Block => {
                 use_64bit_bar = false;
                 (
                     PciClassCode::MassStorage,
@@ -423,7 +420,7 @@ impl VirtioPciDevice {
                 device_feature_select: 0,
                 driver_feature_select: 0,
                 queue_select: 0,
-                msix_config: Arc::new(AtomicU16::new(0)),
+                msix_config: Arc::new(AtomicU16::new(VIRTIO_MSI_NO_VECTOR)),
             },
             msix_config,
             msix_num,
@@ -631,7 +628,7 @@ impl VirtioPciDevice {
 
         if offset < std::mem::size_of::<VirtioPciCap>() {
             let (_, right) = cap_slice.split_at_mut(offset);
-            right[..data_len].copy_from_slice(&data[..]);
+            right[..data_len].copy_from_slice(&data);
             None
         } else {
             // Safe since we know self.cap_pci_cfg_info.cap.cap.offset is 32bits long.
@@ -835,14 +832,22 @@ impl PciDevice for VirtioPciDevice {
         let (virtio_pci_bar_addr, region_type) = if self.use_64bit_bar {
             let region_type = PciBarRegionType::Memory64BitRegion;
             let addr = allocator
-                .allocate_mmio_addresses(self.settings_bar_addr, CAPABILITY_BAR_SIZE, None)
+                .allocate_mmio_addresses(
+                    self.settings_bar_addr,
+                    CAPABILITY_BAR_SIZE,
+                    Some(CAPABILITY_BAR_SIZE),
+                )
                 .ok_or(PciDeviceError::IoAllocationFailed(CAPABILITY_BAR_SIZE))?;
             ranges.push((addr, CAPABILITY_BAR_SIZE, region_type));
             (addr, region_type)
         } else {
             let region_type = PciBarRegionType::Memory32BitRegion;
             let addr = allocator
-                .allocate_mmio_hole_addresses(self.settings_bar_addr, CAPABILITY_BAR_SIZE, None)
+                .allocate_mmio_hole_addresses(
+                    self.settings_bar_addr,
+                    CAPABILITY_BAR_SIZE,
+                    Some(CAPABILITY_BAR_SIZE),
+                )
                 .ok_or(PciDeviceError::IoAllocationFailed(CAPABILITY_BAR_SIZE))?;
             ranges.push((addr, CAPABILITY_BAR_SIZE, region_type));
             (addr, region_type)
@@ -1078,14 +1083,7 @@ impl Snapshottable for VirtioPciDevice {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        let snapshot =
-            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
-
-        let mut virtio_pci_dev_snapshot = Snapshot::new(self.id.as_str());
-        virtio_pci_dev_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", self.id),
-            snapshot,
-        });
+        let mut virtio_pci_dev_snapshot = Snapshot::new_from_state(&self.id, &self.state())?;
 
         // Snapshot PciConfiguration
         virtio_pci_dev_snapshot.add_snapshot(self.configuration.snapshot()?);
@@ -1127,24 +1125,14 @@ impl Snapshottable for VirtioPciDevice {
                 self.configuration.restore(*pci_config_snapshot.clone())?;
             }
 
-            let virtio_pci_dev_state =
-                match serde_json::from_slice(&virtio_pci_dev_section.snapshot) {
-                    Ok(state) => state,
-                    Err(error) => {
-                        return Err(MigratableError::Restore(anyhow!(
-                            "Could not deserialize VIRTIO_PCI_DEVICE {}",
-                            error
-                        )))
-                    }
-                };
-
             // First restore the status of the virtqueues.
-            self.set_state(&virtio_pci_dev_state).map_err(|e| {
-                MigratableError::Restore(anyhow!(
-                    "Could not restore VIRTIO_PCI_DEVICE state {:?}",
-                    e
-                ))
-            })?;
+            self.set_state(&virtio_pci_dev_section.to_state()?)
+                .map_err(|e| {
+                    MigratableError::Restore(anyhow!(
+                        "Could not restore VIRTIO_PCI_DEVICE state {:?}",
+                        e
+                    ))
+                })?;
 
             // Then we can activate the device, as we know at this point that
             // the virtqueues are in the right state and the device is ready

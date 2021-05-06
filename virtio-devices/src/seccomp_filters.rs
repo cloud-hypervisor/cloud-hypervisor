@@ -55,6 +55,27 @@ const SYS_IO_URING_ENTER: i64 = 426;
 // See include/uapi/asm-generic/ioctls.h in the kernel code.
 const FIONBIO: u64 = 0x5421;
 
+// See include/uapi/linux/vfio.h in the kernel code.
+const VFIO_IOMMU_MAP_DMA: u64 = 0x3b71;
+const VFIO_IOMMU_UNMAP_DMA: u64 = 0x3b72;
+
+// See include/uapi/linux/if_tun.h in the kernel code.
+const TUNSETOFFLOAD: u64 = 0x4004_54d0;
+
+fn create_virtio_iommu_ioctl_seccomp_rule() -> Vec<SeccompRule> {
+    or![
+        and![Cond::new(1, ArgLen::DWORD, Eq, VFIO_IOMMU_MAP_DMA).unwrap()],
+        and![Cond::new(1, ArgLen::DWORD, Eq, VFIO_IOMMU_UNMAP_DMA).unwrap()],
+    ]
+}
+
+fn create_virtio_mem_ioctl_seccomp_rule() -> Vec<SeccompRule> {
+    or![
+        and![Cond::new(1, ArgLen::DWORD, Eq, VFIO_IOMMU_MAP_DMA).unwrap()],
+        and![Cond::new(1, ArgLen::DWORD, Eq, VFIO_IOMMU_UNMAP_DMA).unwrap()],
+    ]
+}
+
 fn virtio_balloon_thread_rules() -> Vec<SyscallRuleSet> {
     vec![
         allow_syscall(libc::SYS_brk),
@@ -114,6 +135,7 @@ fn virtio_block_thread_rules() -> Vec<SyscallRuleSet> {
         allow_syscall(libc::SYS_sched_getaffinity),
         allow_syscall(libc::SYS_set_robust_list),
         allow_syscall(libc::SYS_sigaltstack),
+        allow_syscall(libc::SYS_timerfd_settime),
         allow_syscall(libc::SYS_write),
     ]
 }
@@ -156,6 +178,7 @@ fn virtio_iommu_thread_rules() -> Vec<SyscallRuleSet> {
         allow_syscall(libc::SYS_epoll_wait),
         allow_syscall(libc::SYS_exit),
         allow_syscall(libc::SYS_futex),
+        allow_syscall_if(libc::SYS_ioctl, create_virtio_iommu_ioctl_seccomp_rule()),
         allow_syscall(libc::SYS_madvise),
         allow_syscall(libc::SYS_mmap),
         allow_syscall(libc::SYS_mprotect),
@@ -179,6 +202,7 @@ fn virtio_mem_thread_rules() -> Vec<SyscallRuleSet> {
         allow_syscall(libc::SYS_exit),
         allow_syscall(libc::SYS_fallocate),
         allow_syscall(libc::SYS_futex),
+        allow_syscall_if(libc::SYS_ioctl, create_virtio_mem_ioctl_seccomp_rule()),
         allow_syscall(libc::SYS_madvise),
         allow_syscall(libc::SYS_munmap),
         allow_syscall(libc::SYS_read),
@@ -207,13 +231,18 @@ fn virtio_net_thread_rules() -> Vec<SyscallRuleSet> {
         allow_syscall(libc::SYS_readv),
         allow_syscall(libc::SYS_rt_sigprocmask),
         allow_syscall(libc::SYS_sigaltstack),
+        allow_syscall(libc::SYS_timerfd_settime),
         allow_syscall(libc::SYS_write),
         allow_syscall(libc::SYS_writev),
     ]
 }
 
-fn virtio_net_ctl_thread_rules() -> Vec<SyscallRuleSet> {
-    vec![
+fn create_virtio_net_ctl_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
+    Ok(or![and![Cond::new(1, ArgLen::DWORD, Eq, TUNSETOFFLOAD)?],])
+}
+
+fn virtio_net_ctl_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
+    Ok(vec![
         allow_syscall(libc::SYS_brk),
         allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_dup),
@@ -224,13 +253,14 @@ fn virtio_net_ctl_thread_rules() -> Vec<SyscallRuleSet> {
         allow_syscall(libc::SYS_epoll_wait),
         allow_syscall(libc::SYS_exit),
         allow_syscall(libc::SYS_futex),
+        allow_syscall_if(libc::SYS_ioctl, create_virtio_net_ctl_ioctl_seccomp_rule()?),
         allow_syscall(libc::SYS_madvise),
         allow_syscall(libc::SYS_munmap),
         allow_syscall(libc::SYS_read),
         allow_syscall(libc::SYS_rt_sigprocmask),
         allow_syscall(libc::SYS_sigaltstack),
         allow_syscall(libc::SYS_write),
-    ]
+    ])
 }
 
 fn virtio_pmem_thread_rules() -> Vec<SyscallRuleSet> {
@@ -341,9 +371,7 @@ fn virtio_vhost_net_thread_rules() -> Vec<SyscallRuleSet> {
         allow_syscall(libc::SYS_write),
         allow_syscall(libc::SYS_sigaltstack),
         allow_syscall(libc::SYS_munmap),
-        #[cfg(target_arch = "aarch64")]
         allow_syscall(libc::SYS_madvise),
-        #[cfg(target_arch = "aarch64")]
         allow_syscall(libc::SYS_exit),
     ]
 }
@@ -358,16 +386,13 @@ fn virtio_vhost_net_ctl_thread_rules() -> Vec<SyscallRuleSet> {
         allow_syscall(libc::SYS_epoll_pwait),
         #[cfg(target_arch = "x86_64")]
         allow_syscall(libc::SYS_epoll_wait),
-        allow_syscall(libc::SYS_futex),
-        allow_syscall(libc::SYS_read),
-        #[cfg(target_arch = "aarch64")]
-        allow_syscall(libc::SYS_sigaltstack),
-        #[cfg(target_arch = "aarch64")]
-        allow_syscall(libc::SYS_munmap),
-        #[cfg(target_arch = "aarch64")]
-        allow_syscall(libc::SYS_madvise),
-        #[cfg(target_arch = "aarch64")]
         allow_syscall(libc::SYS_exit),
+        allow_syscall(libc::SYS_futex),
+        allow_syscall(libc::SYS_munmap),
+        allow_syscall(libc::SYS_madvise),
+        allow_syscall(libc::SYS_read),
+        allow_syscall(libc::SYS_sigaltstack),
+        allow_syscall(libc::SYS_write),
     ]
 }
 
@@ -434,7 +459,7 @@ fn get_seccomp_filter_trap(thread_type: Thread) -> Result<SeccompFilter, Error> 
         Thread::VirtioIommu => virtio_iommu_thread_rules(),
         Thread::VirtioMem => virtio_mem_thread_rules(),
         Thread::VirtioNet => virtio_net_thread_rules(),
-        Thread::VirtioNetCtl => virtio_net_ctl_thread_rules(),
+        Thread::VirtioNetCtl => virtio_net_ctl_thread_rules()?,
         Thread::VirtioPmem => virtio_pmem_thread_rules(),
         Thread::VirtioRng => virtio_rng_thread_rules(),
         Thread::VirtioVhostBlk => virtio_vhost_blk_thread_rules(),
@@ -456,7 +481,7 @@ fn get_seccomp_filter_log(thread_type: Thread) -> Result<SeccompFilter, Error> {
         Thread::VirtioIommu => virtio_iommu_thread_rules(),
         Thread::VirtioMem => virtio_mem_thread_rules(),
         Thread::VirtioNet => virtio_net_thread_rules(),
-        Thread::VirtioNetCtl => virtio_net_ctl_thread_rules(),
+        Thread::VirtioNetCtl => virtio_net_ctl_thread_rules()?,
         Thread::VirtioPmem => virtio_pmem_thread_rules(),
         Thread::VirtioRng => virtio_rng_thread_rules(),
         Thread::VirtioVhostBlk => virtio_vhost_blk_thread_rules(),
@@ -467,10 +492,7 @@ fn get_seccomp_filter_log(thread_type: Thread) -> Result<SeccompFilter, Error> {
         Thread::VirtioWatchdog => virtio_watchdog_thread_rules(),
     };
 
-    Ok(SeccompFilter::new(
-        rules.into_iter().collect(),
-        SeccompAction::Log,
-    )?)
+    SeccompFilter::new(rules.into_iter().collect(), SeccompAction::Log)
 }
 
 /// Generate a BPF program based on the seccomp_action value

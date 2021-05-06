@@ -20,15 +20,8 @@ use vm_device::interrupt::{
 };
 use vm_device::BusDevice;
 use vm_memory::GuestAddress;
-use vm_migration::{
-    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
-    Transportable,
-};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
-
-#[derive(Serialize, Deserialize)]
-#[serde(remote = "GuestAddress")]
-pub struct GuestAddressDef(pub u64);
 
 type Result<T> = result::Result<T, Error>;
 
@@ -113,9 +106,9 @@ enum TriggerMode {
 enum DeliveryMode {
     Fixed = 0b000,
     Lowest = 0b001,
-    SMI = 0b010,        // System management interrupt
+    Smi = 0b010,        // System management interrupt
     RemoteRead = 0b011, // This is no longer supported by intel.
-    NMI = 0b100,        // Non maskable interrupt
+    Nmi = 0b100,        // Non maskable interrupt
     Init = 0b101,
     Startup = 0b110,
     External = 0b111,
@@ -146,8 +139,7 @@ pub struct IoapicState {
     reg_sel: u32,
     reg_entries: [RedirectionTableEntry; NUM_IOAPIC_PINS],
     used_entries: [bool; NUM_IOAPIC_PINS],
-    #[serde(with = "GuestAddressDef")]
-    apic_address: GuestAddress,
+    apic_address: u64,
 }
 
 impl BusDevice for Ioapic {
@@ -284,7 +276,7 @@ impl Ioapic {
             reg_sel: self.reg_sel,
             reg_entries: self.reg_entries,
             used_entries: self.used_entries,
-            apic_address: self.apic_address,
+            apic_address: self.apic_address.0,
         }
     }
 
@@ -293,7 +285,7 @@ impl Ioapic {
         self.reg_sel = state.reg_sel;
         self.reg_entries = state.reg_entries;
         self.used_entries = state.used_entries;
-        self.apic_address = state.apic_address;
+        self.apic_address = GuestAddress(state.apic_address);
         for (irq, entry) in self.used_entries.iter().enumerate() {
             if *entry {
                 self.update_entry(irq)?;
@@ -333,9 +325,9 @@ impl Ioapic {
         match delivery_mode {
             x if (x == DeliveryMode::Fixed as u8)
                 || (x == DeliveryMode::Lowest as u8)
-                || (x == DeliveryMode::SMI as u8)
+                || (x == DeliveryMode::Smi as u8)
                 || (x == DeliveryMode::RemoteRead as u8)
-                || (x == DeliveryMode::NMI as u8)
+                || (x == DeliveryMode::Nmi as u8)
                 || (x == DeliveryMode::Init as u8)
                 || (x == DeliveryMode::Startup as u8)
                 || (x == DeliveryMode::External as u8) => {}
@@ -418,38 +410,13 @@ impl Snapshottable for Ioapic {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        let snapshot =
-            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
-
-        let mut ioapic_snapshot = Snapshot::new(self.id.as_str());
-        ioapic_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", self.id),
-            snapshot,
-        });
-
-        Ok(ioapic_snapshot)
+        Snapshot::new_from_state(&self.id, &self.state())
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        if let Some(ioapic_section) = snapshot.snapshot_data.get(&format!("{}-section", self.id)) {
-            let ioapic_state = match serde_json::from_slice(&ioapic_section.snapshot) {
-                Ok(state) => state,
-                Err(error) => {
-                    return Err(MigratableError::Restore(anyhow!(
-                        "Could not deserialize IOAPIC {}",
-                        error
-                    )))
-                }
-            };
-
-            return self.set_state(&ioapic_state).map_err(|e| {
-                MigratableError::Restore(anyhow!("Could not restore IOAPIC state {:?}", e))
-            });
-        }
-
-        Err(MigratableError::Restore(anyhow!(
-            "Could not find IOAPIC snapshot section"
-        )))
+        self.set_state(&snapshot.to_state(&self.id)?).map_err(|e| {
+            MigratableError::Restore(anyhow!("Could not restore state for {}: {:?}", self.id, e))
+        })
     }
 }
 

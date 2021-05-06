@@ -12,7 +12,7 @@ This virtual device relies on the _vhost-user_ protocol, which assumes the backe
 
 _Build virtiofsd_
 ```bash
-git clone --depth 1 "https://github.com/sboeuf/qemu.git" -b "virtio-fs" $VIRTIOFSD_DIR
+git clone --depth 1 "https://gitlab.com/virtio-fs/qemu.git" -b "qemu5.0-virtiofs-dax" $VIRTIOFSD_DIR
 cd $VIRTIOFSD_DIR
 ./configure --prefix=$PWD --target-list=x86_64-softmmu
 make virtiofsd -j `nproc`
@@ -35,45 +35,42 @@ The `cache=none` option should be the default when using `virtiofsd` with the __
 
 The `cache=always` option will allow for the guest page cache to be used, which will increase the memory footprint of the guest. This option should be used only for specific use cases where a single VM is going to be running on a host.
 
-### The kernel
+### Kernel support
 
-In order to leverage __virtio-fs__ support from within the guest, and because the code has not been merged in upstream Linux kernel yet, it is required to build a custom kernel embedding the patches.
-
-The following branch `virtio-fs-virtio-iommu` on the repository https://github.com/cloud-hypervisor/linux.git includes all the needed patches to support __virtio-fs__.
-
-Make sure to build a kernel out of this branch that can be then used to boot the VM.
+Modern Linux kernels starting (at least v5.10) have support for virtio-fs. Use
+of older kernels, with additional patches, are not supported.
 
 ## How to share directories with cloud-hypervisor
 
 ### Start the VM
 Once the daemon is running, the option `--fs` from __cloud-hypervisor__ needs to be used.
 
-Direct kernel boot option is preferred since we need to provide the custom kernel including the __virtio-fs__ patches. We could boot from `hypervisor-fw` if we had previously edited the image to replace the kernel binary.
+Direct kernel boot is the preferred option, but we can boot from an EFI cloud image if it contains a recent enough kernel.
 
-Because _vhost-user_ expects a dedicated process (__virtiofsd__ in this case) to be able to access the guest RAM to communicate through the _virtqueues_ with the driver running in the guest, `--memory` option needs to be slightly modified. It needs to specify a backing file for the memory so that an external process can access it.
+Because _vhost-user_ expects a dedicated process (__virtiofsd__ in this case) to be able to access the guest RAM to communicate through the _virtqueues_ with the driver running in the guest, `--memory` option needs to be slightly modified. It must specify `shared=on` to share the memory pages so that an external process can access them.
 
-Assuming you have `focal-server-cloudimg-amd64.raw` and `custom-vmlinux.bin` on your system, here is the __cloud-hypervisor__ command you need to run:
+Assuming you have `focal-server-cloudimg-amd64.raw` and `vmlinux` on your system, here is the __cloud-hypervisor__ command you need to run:
 ```bash
 ./cloud-hypervisor \
-    --cpus 4 \
-    --memory "size=512M,shared=on" \
+    --cpus boot=1 \
+    --memory size=1G,shared=on \
     --disk path=focal-server-cloudimg-amd64.raw \
-    --kernel custom-vmlinux.bin \
-    --cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw" \
+    --kernel vmlinux \
+    --cmdline "console=hvc0 root=/dev/vda1 rw" \
     --fs tag=myfs,socket=/tmp/virtiofs,num_queues=1,queue_size=512
 ```
 
 By default, DAX is enabled with a cache window of 8GiB. You can specify a custom size (let's say 4GiB for this example) for the cache by explicitly setting DAX and the cache size:
 
 ```bash
---fs tag=virtiofs,socket=/tmp/virtiofs,num_queues=1,queue_size=512,dax=on,cache_size=4G
+--fs tag=myfs,socket=/tmp/virtiofs,num_queues=1,queue_size=512,dax=on,cache_size=4G
 
 ```
 
 In case you don't want to use a shared window of cache to pass the shared files content, this means you will have to explicitly disable DAX with `dax=off`. Note that in this case, the `cache_size` parameter will be ignored.
 
 ```bash
---fs tag=virtiofs,socket=/tmp/virtiofs,num_queues=1,queue_size=512,dax=off
+--fs tag=myfs,socket=/tmp/virtiofs,num_queues=1,queue_size=512,dax=off
 
 ```
 

@@ -1,7 +1,9 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::vu_common_ctrl::{reset_vhost_user, setup_vhost_user, update_mem_table};
+use super::vu_common_ctrl::{
+    add_memory_region, reset_vhost_user, setup_vhost_user, update_mem_table,
+};
 use super::{Error, Result};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::vhost_user::handler::{VhostUserEpollConfig, VhostUserEpollHandler};
@@ -12,6 +14,7 @@ use crate::{
 use libc::{self, c_void, off64_t, pread64, pwrite64};
 use seccomp::{SeccompAction, SeccompFilter};
 use std::io;
+use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
 use std::sync::{Arc, Barrier};
@@ -26,7 +29,7 @@ use vhost::vhost_user::{
 use vhost::VhostBackend;
 use vm_memory::{
     Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
-    GuestMemoryMmap, MmapRegion,
+    GuestMemoryMmap, GuestRegionMmap, MmapRegion,
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
@@ -274,6 +277,8 @@ pub struct Fs {
     cache: Option<(VirtioSharedMemoryList, MmapRegion)>,
     slave_req_support: bool,
     seccomp_action: SeccompAction,
+    guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
+    acked_protocol_features: u64,
 }
 
 impl Fs {
@@ -315,6 +320,7 @@ impl Fs {
 
         // Identify if protocol features are supported by the slave.
         let mut acked_features = 0;
+        let mut acked_protocol_features = 0;
         if avail_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
             acked_features |= VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
 
@@ -322,19 +328,22 @@ impl Fs {
                 .get_protocol_features()
                 .map_err(Error::VhostUserGetProtocolFeatures)?;
 
+            let mut supported_protocol_features = VhostUserProtocolFeatures::MQ
+                | VhostUserProtocolFeatures::REPLY_ACK
+                | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS;
+
             if cache.is_some() {
-                protocol_features &= VhostUserProtocolFeatures::MQ
-                    | VhostUserProtocolFeatures::REPLY_ACK
-                    | VhostUserProtocolFeatures::SLAVE_REQ
-                    | VhostUserProtocolFeatures::SLAVE_SEND_FD;
-            } else {
-                protocol_features &=
-                    VhostUserProtocolFeatures::MQ | VhostUserProtocolFeatures::REPLY_ACK;
+                supported_protocol_features |=
+                    VhostUserProtocolFeatures::SLAVE_REQ | VhostUserProtocolFeatures::SLAVE_SEND_FD
             }
+
+            protocol_features &= supported_protocol_features;
 
             master
                 .set_protocol_features(protocol_features)
                 .map_err(Error::VhostUserSetProtocolFeatures)?;
+
+            acked_protocol_features = protocol_features.bits();
 
             slave_req_support = true;
         }
@@ -347,7 +356,7 @@ impl Fs {
 
         Ok(Fs {
             common: VirtioCommon {
-                device_type: VirtioDeviceType::TYPE_FS as u32,
+                device_type: VirtioDeviceType::Fs as u32,
                 avail_features,
                 acked_features,
                 queue_sizes: vec![queue_size; num_queues],
@@ -361,6 +370,8 @@ impl Fs {
             cache,
             slave_req_support,
             seccomp_action,
+            guest_memory: None,
+            acked_protocol_features,
         })
     }
 }
@@ -404,6 +415,8 @@ impl VirtioDevice for Fs {
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
 
+        self.guest_memory = Some(mem.clone());
+
         let kill_evt = self
             .common
             .kill_evt
@@ -433,7 +446,7 @@ impl VirtioDevice for Fs {
             &interrupt_cb,
             self.common.acked_features,
         )
-        .map_err(ActivateError::VhostUserSetup)?;
+        .map_err(ActivateError::VhostUserFsSetup)?;
 
         // Initialize slave communication.
         let slave_req_handler = if self.slave_req_support {
@@ -447,13 +460,13 @@ impl VirtioDevice for Fs {
 
                 let mut req_handler =
                     MasterReqHandler::new(vu_master_req_handler).map_err(|e| {
-                        ActivateError::VhostUserSetup(Error::MasterReqHandlerCreation(e))
+                        ActivateError::VhostUserFsSetup(Error::MasterReqHandlerCreation(e))
                     })?;
                 req_handler.set_reply_ack_flag(true);
                 self.vu
                     .set_slave_request_fd(req_handler.get_tx_raw_fd())
                     .map_err(|e| {
-                        ActivateError::VhostUserSetup(Error::VhostUserSetSlaveRequestFd(e))
+                        ActivateError::VhostUserFsSetup(Error::VhostUserSetSlaveRequestFd(e))
                     })?;
                 Some(req_handler)
             } else {
@@ -525,11 +538,7 @@ impl VirtioDevice for Fs {
     }
 
     fn get_shm_regions(&self) -> Option<VirtioSharedMemoryList> {
-        if let Some(cache) = self.cache.as_ref() {
-            Some(cache.0.clone())
-        } else {
-            None
-        }
+        self.cache.as_ref().map(|cache| cache.0.clone())
     }
 
     fn set_shm_regions(
@@ -544,8 +553,19 @@ impl VirtioDevice for Fs {
         }
     }
 
-    fn update_memory(&mut self, mem: &GuestMemoryMmap) -> std::result::Result<(), crate::Error> {
-        update_mem_table(&mut self.vu, mem).map_err(crate::Error::VhostUserUpdateMemory)
+    fn add_memory_region(
+        &mut self,
+        region: &Arc<GuestRegionMmap>,
+    ) -> std::result::Result<(), crate::Error> {
+        if self.acked_protocol_features & VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS.bits() != 0
+        {
+            add_memory_region(&mut self.vu, region).map_err(crate::Error::VhostUserAddMemoryRegion)
+        } else if let Some(guest_memory) = &self.guest_memory {
+            update_mem_table(&mut self.vu, guest_memory.memory().deref())
+                .map_err(crate::Error::VhostUserUpdateMemory)
+        } else {
+            Ok(())
+        }
     }
 
     fn userspace_mappings(&self) -> Vec<UserspaceMapping> {

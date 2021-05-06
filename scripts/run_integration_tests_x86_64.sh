@@ -43,7 +43,7 @@ if [ ! -f "$BIONIC_OS_RAW_IMAGE" ]; then
 fi
 
 
-FOCAL_OS_IMAGE_NAME="focal-server-cloudimg-amd64-custom-20210106-1.qcow2"
+FOCAL_OS_IMAGE_NAME="focal-server-cloudimg-amd64-custom-20210407-0.qcow2"
 FOCAL_OS_IMAGE_URL="https://cloudhypervisorstorage.blob.core.windows.net/images/$FOCAL_OS_IMAGE_NAME"
 FOCAL_OS_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_IMAGE_NAME"
 if [ ! -f "$FOCAL_OS_IMAGE" ]; then
@@ -52,7 +52,7 @@ if [ ! -f "$FOCAL_OS_IMAGE" ]; then
     popd
 fi
 
-FOCAL_OS_RAW_IMAGE_NAME="focal-server-cloudimg-amd64-custom-20210106-1.raw"
+FOCAL_OS_RAW_IMAGE_NAME="focal-server-cloudimg-amd64-custom-20210407-0.raw"
 FOCAL_OS_RAW_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_NAME"
 if [ ! -f "$FOCAL_OS_RAW_IMAGE" ]; then
     pushd $WORKLOADS_DIR
@@ -96,33 +96,21 @@ popd
 
 # Build custom kernel based on virtio-pmem and virtio-fs upstream patches
 VMLINUX_IMAGE="$WORKLOADS_DIR/vmlinux"
-VMLINUX_PVH_IMAGE="$WORKLOADS_DIR/vmlinux.pvh"
-BZIMAGE_IMAGE="$WORKLOADS_DIR/bzImage"
 
 LINUX_CUSTOM_DIR="$WORKLOADS_DIR/linux-custom"
 
-if [ ! -f "$VMLINUX_IMAGE" ] || [ ! -f "$VMLINUX_PVH_IMAGE" ]; then
+if [ ! -f "$VMLINUX_IMAGE" ]; then
     SRCDIR=$PWD
     pushd $WORKLOADS_DIR
-    time git clone --depth 1 "https://github.com/cloud-hypervisor/linux.git" -b "ch-5.10.6" $LINUX_CUSTOM_DIR
+    time git clone --depth 1 "https://github.com/cloud-hypervisor/linux.git" -b "ch-5.12" $LINUX_CUSTOM_DIR
     cp $SRCDIR/resources/linux-config-x86_64 $LINUX_CUSTOM_DIR/.config
     popd
 fi
 
 if [ ! -f "$VMLINUX_IMAGE" ]; then
     pushd $LINUX_CUSTOM_DIR
-    scripts/config --disable "CONFIG_PVH"
     time make bzImage -j `nproc`
     cp vmlinux $VMLINUX_IMAGE || exit 1
-    cp arch/x86/boot/bzImage $BZIMAGE_IMAGE || exit 1
-    popd
-fi
-
-if [ ! -f "$VMLINUX_PVH_IMAGE" ]; then
-    pushd $LINUX_CUSTOM_DIR
-    scripts/config --enable "CONFIG_PVH"
-    time make bzImage -j `nproc`
-    cp vmlinux $VMLINUX_PVH_IMAGE || exit 1
     popd
 fi
 
@@ -130,19 +118,6 @@ if [ -d "$LINUX_CUSTOM_DIR" ]; then
     rm -rf $LINUX_CUSTOM_DIR
 fi
 
-VIRTIOFSD="$WORKLOADS_DIR/virtiofsd"
-QEMU_DIR="qemu_build"
-if [ ! -f "$VIRTIOFSD" ]; then
-    pushd $WORKLOADS_DIR
-    git clone --depth 1 "https://gitlab.com/virtio-fs/qemu.git" -b "qemu5.0-virtiofs-dax" $QEMU_DIR
-    pushd $QEMU_DIR
-    time ./configure --prefix=$PWD --target-list=x86_64-softmmu
-    time make virtiofsd -j `nproc`
-    cp virtiofsd $VIRTIOFSD || exit 1
-    popd
-    rm -rf $QEMU_DIR
-    popd
-fi
 
 VIRTIOFSD_RS="$WORKLOADS_DIR/virtiofsd-rs"
 VIRTIOFSD_RS_DIR="virtiofsd_rs_build"

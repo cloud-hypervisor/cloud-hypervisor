@@ -111,6 +111,7 @@ const KVM_GET_REGS: u64 = 0x8090_ae81;
 const KVM_GET_SUPPORTED_CPUID: u64 = 0xc008_ae05;
 const KVM_CREATE_DEVICE: u64 = 0xc00c_aee0;
 const KVM_GET_REG_LIST: u64 = 0xc008_aeb0;
+const KVM_MEMORY_ENCRYPT_OP: u64 = 0xc008_aeba;
 
 // The definition of libc::SYS_ftruncate on AArch64 is different from that on x86_64.
 #[cfg(target_arch = "aarch64")]
@@ -141,6 +142,7 @@ fn create_vmm_ioctl_seccomp_rule_common() -> Result<Vec<SeccompRule>, Error> {
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_IOEVENTFD)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_IRQFD)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_RUN)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_MEMORY_ENCRYPT_OP)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_DEVICE_ATTR,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_GSI_ROUTING)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_MP_STATE)?],
@@ -342,6 +344,7 @@ fn vmm_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_mremap),
         allow_syscall(libc::SYS_munmap),
         allow_syscall(libc::SYS_nanosleep),
+        allow_syscall(libc::SYS_newfstatat),
         #[cfg(target_arch = "x86_64")]
         allow_syscall(libc::SYS_open),
         allow_syscall(libc::SYS_openat),
@@ -416,6 +419,7 @@ fn vcpu_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
     Ok(vec![
         allow_syscall(libc::SYS_brk),
         allow_syscall(libc::SYS_clock_gettime),
+        allow_syscall(libc::SYS_clock_nanosleep),
         allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_dup),
         allow_syscall(libc::SYS_exit),
@@ -429,6 +433,7 @@ fn vcpu_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_mprotect),
         allow_syscall(libc::SYS_munmap),
         allow_syscall(libc::SYS_nanosleep),
+        allow_syscall(libc::SYS_newfstatat),
         #[cfg(target_arch = "x86_64")]
         allow_syscall(libc::SYS_open),
         allow_syscall(libc::SYS_openat),
@@ -456,7 +461,6 @@ fn vcpu_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
 fn api_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
     Ok(vec![
         allow_syscall(libc::SYS_accept4),
-        allow_syscall(libc::SYS_bind),
         allow_syscall(libc::SYS_brk),
         allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_dup),
@@ -469,13 +473,11 @@ fn api_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_futex),
         allow_syscall(libc::SYS_getrandom),
         allow_syscall_if(libc::SYS_ioctl, create_api_ioctl_seccomp_rule()?),
-        allow_syscall(libc::SYS_listen),
         allow_syscall(libc::SYS_madvise),
         allow_syscall(libc::SYS_mprotect),
         allow_syscall(libc::SYS_munmap),
         allow_syscall(libc::SYS_recvfrom),
         allow_syscall(libc::SYS_sigaltstack),
-        allow_syscall(libc::SYS_socket),
         allow_syscall(libc::SYS_write),
     ])
 }
@@ -488,10 +490,7 @@ fn get_seccomp_filter_trap(thread_type: Thread) -> Result<SeccompFilter, Error> 
         Thread::Vmm => vmm_thread_rules()?,
     };
 
-    Ok(SeccompFilter::new(
-        rules.into_iter().collect(),
-        SeccompAction::Trap,
-    )?)
+    SeccompFilter::new(rules.into_iter().collect(), SeccompAction::Trap)
 }
 
 fn get_seccomp_filter_log(thread_type: Thread) -> Result<SeccompFilter, Error> {
@@ -502,10 +501,7 @@ fn get_seccomp_filter_log(thread_type: Thread) -> Result<SeccompFilter, Error> {
         Thread::Vmm => vmm_thread_rules()?,
     };
 
-    Ok(SeccompFilter::new(
-        rules.into_iter().collect(),
-        SeccompAction::Log,
-    )?)
+    SeccompFilter::new(rules.into_iter().collect(), SeccompAction::Log)
 }
 
 /// Generate a BPF program based on the seccomp_action value

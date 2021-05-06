@@ -15,6 +15,8 @@ use std::path::PathBuf;
 use std::result;
 use std::str::FromStr;
 
+use virtio_devices::{RateLimiterConfig, TokenBucketConfig};
+
 pub const DEFAULT_VCPUS: u8 = 1;
 pub const DEFAULT_MEMORY_MB: u64 = 512;
 pub const DEFAULT_RNG_SOURCE: &str = "/dev/urandom";
@@ -53,7 +55,7 @@ pub enum Error {
     /// Error parsing network options
     ParseNetwork(OptionParserError),
     /// Error parsing RNG options
-    ParseRNG(OptionParserError),
+    ParseRng(OptionParserError),
     /// Error parsing balloon options
     ParseBalloon(OptionParserError),
     /// Error parsing filesystem parameters
@@ -79,6 +81,12 @@ pub enum Error {
     ParseNuma(OptionParserError),
     /// Failed to validate configuration
     Validation(ValidationError),
+    #[cfg(feature = "tdx")]
+    /// Failed to parse TDX config
+    ParseTdx(OptionParserError),
+    #[cfg(feature = "tdx")]
+    // No TDX firmware
+    FirmwarePathMissing,
 }
 
 #[derive(Debug)]
@@ -109,10 +117,17 @@ pub enum ValidationError {
     VnetQueueLowerThan2,
     /// The input queue number for virtio_net must match the number of input fds
     VnetQueueFdMismatch,
+    /// Using reserved fd
+    VnetReservedFd,
     // Hugepages not turned on
     HugePageSizeWithoutHugePages,
     // Huge page size is not power of 2
     InvalidHugePageSize(u64),
+    // CPU Hotplug not permitted with TDX
+    #[cfg(feature = "tdx")]
+    TdxNoCpuHotplug,
+    // Insuffient vCPUs for queues
+    TooManyQueues,
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -142,11 +157,19 @@ impl fmt::Display for ValidationError {
                 f,
                 "Number of queues to virtio_net does not match the number of input FDs"
             ),
+            VnetReservedFd => write!(f, "Reserved fd number (<= 2)"),
             HugePageSizeWithoutHugePages => {
                 write!(f, "Huge page size specified but huge pages not enabled")
             }
             InvalidHugePageSize(s) => {
                 write!(f, "Huge page size is not power of 2: {}", s)
+            }
+            #[cfg(feature = "tdx")]
+            TdxNoCpuHotplug => {
+                write!(f, "CPU hotplug not possible with TDX")
+            }
+            TooManyQueues => {
+                write!(f, "Number of vCPUs is insufficient for number of queues")
             }
         }
     }
@@ -180,7 +203,7 @@ impl fmt::Display for Error {
             ParseMemoryZoneIdMissing => write!(f, "Error parsing --memory-zone: id missing"),
             ParseNetwork(o) => write!(f, "Error parsing --net: {}", o),
             ParseDisk(o) => write!(f, "Error parsing --disk: {}", o),
-            ParseRNG(o) => write!(f, "Error parsing --rng: {}", o),
+            ParseRng(o) => write!(f, "Error parsing --rng: {}", o),
             ParseBalloon(o) => write!(f, "Error parsing --balloon: {}", o),
             ParseRestore(o) => write!(f, "Error parsing --restore: {}", o),
             #[cfg(target_arch = "x86_64")]
@@ -190,6 +213,10 @@ impl fmt::Display for Error {
                 write!(f, "Error parsing --restore: source_url missing")
             }
             Validation(v) => write!(f, "Error validating configuration: {}", v),
+            #[cfg(feature = "tdx")]
+            ParseTdx(o) => write!(f, "Error parsing --tdx: {}", o),
+            #[cfg(feature = "tdx")]
+            FirmwarePathMissing => write!(f, "TDX firmware missing"),
         }
     }
 }
@@ -217,6 +244,8 @@ pub struct VmParams<'a> {
     pub sgx_epc: Option<Vec<&'a str>>,
     pub numa: Option<Vec<&'a str>>,
     pub watchdog: bool,
+    #[cfg(feature = "tdx")]
+    pub tdx: Option<&'a str>,
 }
 
 impl<'a> VmParams<'a> {
@@ -244,7 +273,8 @@ impl<'a> VmParams<'a> {
         let sgx_epc: Option<Vec<&str>> = args.values_of("sgx-epc").map(|x| x.collect());
         let numa: Option<Vec<&str>> = args.values_of("numa").map(|x| x.collect());
         let watchdog = args.is_present("watchdog");
-
+        #[cfg(feature = "tdx")]
+        let tdx = args.value_of("tdx");
         VmParams {
             cpus,
             memory,
@@ -266,6 +296,8 @@ impl<'a> VmParams<'a> {
             sgx_epc,
             numa,
             watchdog,
+            #[cfg(feature = "tdx")]
+            tdx,
         }
     }
 }
@@ -655,6 +687,8 @@ pub struct DiskConfig {
     #[serde(default = "default_diskconfig_poll_queue")]
     pub poll_queue: bool,
     #[serde(default)]
+    pub rate_limiter_config: Option<RateLimiterConfig>,
+    #[serde(default)]
     pub id: Option<String>,
     // For testing use only. Not exposed in API.
     #[serde(default)]
@@ -687,6 +721,7 @@ impl Default for DiskConfig {
             poll_queue: default_diskconfig_poll_queue(),
             id: None,
             disable_io_uring: false,
+            rate_limiter_config: None,
         }
     }
 }
@@ -695,8 +730,10 @@ impl DiskConfig {
     pub const SYNTAX: &'static str = "Disk parameters \
          \"path=<disk_image_path>,readonly=on|off,direct=on|off,iommu=on|off,\
          num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,\
-         vhost_user=on|off,socket=<vhost_user_socket_path>,\
-         poll_queue=on|off,id=<device_id>\"";
+         vhost_user=on|off,socket=<vhost_user_socket_path>,poll_queue=on|off,\
+         bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,\
+         ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,\
+         id=<device_id>\"";
 
     pub fn parse(disk: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -710,6 +747,12 @@ impl DiskConfig {
             .add("vhost_user")
             .add("socket")
             .add("poll_queue")
+            .add("bw_size")
+            .add("bw_one_time_burst")
+            .add("bw_refill_time")
+            .add("ops_size")
+            .add("ops_one_time_burst")
+            .add("ops_refill_time")
             .add("id")
             .add("_disable_io_uring");
         parser.parse(disk).map_err(Error::ParseDisk)?;
@@ -755,6 +798,56 @@ impl DiskConfig {
             .map_err(Error::ParseDisk)?
             .unwrap_or(Toggle(false))
             .0;
+        let bw_size = parser
+            .convert("bw_size")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_default();
+        let bw_one_time_burst = parser
+            .convert("bw_one_time_burst")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_default();
+        let bw_refill_time = parser
+            .convert("bw_refill_time")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_default();
+        let ops_size = parser
+            .convert("ops_size")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_default();
+        let ops_one_time_burst = parser
+            .convert("ops_one_time_burst")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_default();
+        let ops_refill_time = parser
+            .convert("ops_refill_time")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_default();
+        let bw_tb_config = if bw_size != 0 && bw_refill_time != 0 {
+            Some(TokenBucketConfig {
+                size: bw_size,
+                one_time_burst: Some(bw_one_time_burst),
+                refill_time: bw_refill_time,
+            })
+        } else {
+            None
+        };
+        let ops_tb_config = if ops_size != 0 && ops_refill_time != 0 {
+            Some(TokenBucketConfig {
+                size: ops_size,
+                one_time_burst: Some(ops_one_time_burst),
+                refill_time: ops_refill_time,
+            })
+        } else {
+            None
+        };
+        let rate_limiter_config = if bw_tb_config.is_some() || ops_tb_config.is_some() {
+            Some(RateLimiterConfig {
+                bandwidth: bw_tb_config,
+                ops: ops_tb_config,
+            })
+        } else {
+            None
+        };
 
         if parser.is_set("poll_queue") && !vhost_user {
             warn!("poll_queue parameter currently only has effect when used vhost_user=true");
@@ -767,12 +860,50 @@ impl DiskConfig {
             iommu,
             num_queues,
             queue_size,
-            vhost_socket,
             vhost_user,
+            vhost_socket,
             poll_queue,
+            rate_limiter_config,
             id,
             disable_io_uring,
         })
+    }
+
+    pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        if self.num_queues > vm_config.cpus.boot_vcpus as usize {
+            return Err(ValidationError::TooManyQueues);
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub enum VhostMode {
+    Client,
+    Server,
+}
+
+impl Default for VhostMode {
+    fn default() -> Self {
+        VhostMode::Client
+    }
+}
+
+#[derive(Debug)]
+pub enum ParseVhostModeError {
+    InvalidValue(String),
+}
+
+impl FromStr for VhostMode {
+    type Err = ParseVhostModeError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "client" => Ok(VhostMode::Client),
+            "server" => Ok(VhostMode::Server),
+            _ => Err(ParseVhostModeError::InvalidValue(s.to_owned())),
+        }
     }
 }
 
@@ -798,9 +929,13 @@ pub struct NetConfig {
     pub vhost_user: bool,
     pub vhost_socket: Option<String>,
     #[serde(default)]
+    pub vhost_mode: VhostMode,
+    #[serde(default)]
     pub id: Option<String>,
     #[serde(default)]
     pub fds: Option<Vec<i32>>,
+    #[serde(default)]
+    pub rate_limiter_config: Option<RateLimiterConfig>,
 }
 
 fn default_netconfig_tap() -> Option<String> {
@@ -840,8 +975,10 @@ impl Default for NetConfig {
             queue_size: default_netconfig_queue_size(),
             vhost_user: false,
             vhost_socket: None,
+            vhost_mode: VhostMode::Client,
             id: None,
             fds: None,
+            rate_limiter_config: None,
         }
     }
 }
@@ -849,8 +986,10 @@ impl Default for NetConfig {
 impl NetConfig {
     pub const SYNTAX: &'static str = "Network parameters \
     \"tap=<if_name>,ip=<ip_addr>,mask=<net_mask>,mac=<mac_addr>,fd=<fd1:fd2...>,iommu=on|off,\
-    num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,\
-    vhost_user=<vhost_user_enable>,socket=<vhost_user_socket_path>,id=<device_id>\"";
+    num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,id=<device_id>,\
+    vhost_user=<vhost_user_enable>,socket=<vhost_user_socket_path>,vhost_mode=client|server,\
+    bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,\
+    ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>\"";
 
     pub fn parse(net: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -866,8 +1005,15 @@ impl NetConfig {
             .add("num_queues")
             .add("vhost_user")
             .add("socket")
+            .add("vhost_mode")
             .add("id")
-            .add("fd");
+            .add("fd")
+            .add("bw_size")
+            .add("bw_one_time_burst")
+            .add("bw_refill_time")
+            .add("ops_size")
+            .add("ops_one_time_burst")
+            .add("ops_refill_time");
         parser.parse(net).map_err(Error::ParseNetwork)?;
 
         let tap = parser.get("tap");
@@ -903,11 +1049,66 @@ impl NetConfig {
             .unwrap_or(Toggle(false))
             .0;
         let vhost_socket = parser.get("socket");
+        let vhost_mode = parser
+            .convert("vhost_mode")
+            .map_err(Error::ParseNetwork)?
+            .unwrap_or_default();
         let id = parser.get("id");
         let fds = parser
             .convert::<IntegerList>("fd")
             .map_err(Error::ParseNetwork)?
             .map(|v| v.0.iter().map(|e| *e as i32).collect());
+
+        let bw_size = parser
+            .convert("bw_size")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_default();
+        let bw_one_time_burst = parser
+            .convert("bw_one_time_burst")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_default();
+        let bw_refill_time = parser
+            .convert("bw_refill_time")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_default();
+        let ops_size = parser
+            .convert("ops_size")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_default();
+        let ops_one_time_burst = parser
+            .convert("ops_one_time_burst")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_default();
+        let ops_refill_time = parser
+            .convert("ops_refill_time")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_default();
+        let bw_tb_config = if bw_size != 0 && bw_refill_time != 0 {
+            Some(TokenBucketConfig {
+                size: bw_size,
+                one_time_burst: Some(bw_one_time_burst),
+                refill_time: bw_refill_time,
+            })
+        } else {
+            None
+        };
+        let ops_tb_config = if ops_size != 0 && ops_refill_time != 0 {
+            Some(TokenBucketConfig {
+                size: ops_size,
+                one_time_burst: Some(ops_one_time_burst),
+                refill_time: ops_refill_time,
+            })
+        } else {
+            None
+        };
+        let rate_limiter_config = if bw_tb_config.is_some() || ops_tb_config.is_some() {
+            Some(RateLimiterConfig {
+                bandwidth: bw_tb_config,
+                ops: ops_tb_config,
+            })
+        } else {
+            None
+        };
 
         let config = NetConfig {
             tap,
@@ -920,19 +1121,33 @@ impl NetConfig {
             queue_size,
             vhost_user,
             vhost_socket,
+            vhost_mode,
             id,
             fds,
+            rate_limiter_config,
         };
-        config.validate().map_err(Error::Validation)?;
         Ok(config)
     }
-    pub fn validate(&self) -> ValidationResult<()> {
+
+    pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
         if self.num_queues < 2 {
             return Err(ValidationError::VnetQueueLowerThan2);
         }
 
         if self.fds.is_some() && self.fds.as_ref().unwrap().len() * 2 != self.num_queues {
             return Err(ValidationError::VnetQueueFdMismatch);
+        }
+
+        if let Some(fds) = self.fds.as_ref() {
+            for fd in fds {
+                if *fd <= 2 {
+                    return Err(ValidationError::VnetReservedFd);
+                }
+            }
+        }
+
+        if (self.num_queues / 2) > vm_config.cpus.boot_vcpus as usize {
+            return Err(ValidationError::TooManyQueues);
         }
 
         Ok(())
@@ -950,7 +1165,7 @@ impl RngConfig {
     pub fn parse(rng: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser.add("src").add("iommu");
-        parser.parse(rng).map_err(Error::ParseRNG)?;
+        parser.parse(rng).map_err(Error::ParseRng)?;
 
         let src = PathBuf::from(
             parser
@@ -959,7 +1174,7 @@ impl RngConfig {
         );
         let iommu = parser
             .convert::<Toggle>("iommu")
-            .map_err(Error::ParseRNG)?
+            .map_err(Error::ParseRng)?
             .unwrap_or(Toggle(false))
             .0;
 
@@ -1103,6 +1318,14 @@ impl FsConfig {
             id,
         })
     }
+
+    pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        if self.num_queues > vm_config.cpus.boot_vcpus as usize {
+            return Err(ValidationError::TooManyQueues);
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
@@ -1233,7 +1456,7 @@ impl ConsoleConfig {
             .unwrap_or(Toggle(false))
             .0;
 
-        Ok(Self { mode, file, iommu })
+        Ok(Self { file, mode, iommu })
     }
 
     pub fn default_serial() -> Self {
@@ -1323,6 +1546,26 @@ impl VsockConfig {
             iommu,
             id,
         })
+    }
+}
+
+#[cfg(feature = "tdx")]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
+pub struct TdxConfig {
+    pub firmware: PathBuf,
+}
+
+#[cfg(feature = "tdx")]
+impl TdxConfig {
+    pub fn parse(tdx: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        parser.add("firmware");
+        parser.parse(tdx).map_err(Error::ParseTdx)?;
+        let firmware = parser
+            .get("firmware")
+            .map(PathBuf::from)
+            .ok_or(Error::FirmwarePathMissing)?;
+        Ok(TdxConfig { firmware })
     }
 }
 
@@ -1490,11 +1733,25 @@ pub struct VmConfig {
     pub numa: Option<Vec<NumaConfig>>,
     #[serde(default)]
     pub watchdog: bool,
+    #[cfg(feature = "tdx")]
+    pub tdx: Option<TdxConfig>,
 }
 
 impl VmConfig {
     pub fn validate(&self) -> ValidationResult<()> {
+        #[cfg(not(feature = "tdx"))]
         self.kernel.as_ref().ok_or(ValidationError::KernelMissing)?;
+
+        #[cfg(feature = "tdx")]
+        {
+            let tdx_enabled = self.tdx.is_some();
+            if !tdx_enabled && self.kernel.is_none() {
+                return Err(ValidationError::KernelMissing);
+            }
+            if tdx_enabled && (self.cpus.max_vcpus != self.cpus.boot_vcpus) {
+                return Err(ValidationError::TdxNoCpuHotplug);
+            }
+        }
 
         if self.console.mode == ConsoleOutputMode::Tty && self.serial.mode == ConsoleOutputMode::Tty
         {
@@ -1524,6 +1781,7 @@ impl VmConfig {
                 if disk.vhost_user && disk.vhost_socket.is_none() {
                     return Err(ValidationError::VhostUserMissingSocket);
                 }
+                disk.validate(self)?;
             }
         }
 
@@ -1532,12 +1790,16 @@ impl VmConfig {
                 if net.vhost_user && !self.memory.shared {
                     return Err(ValidationError::VhostUserRequiresSharedMemory);
                 }
+                net.validate(self)?;
             }
         }
 
         if let Some(fses) = &self.fs {
             if !fses.is_empty() && !self.memory.shared {
                 return Err(ValidationError::VhostUserRequiresSharedMemory);
+            }
+            for fs in fses {
+                fs.validate(self)?;
             }
         }
 
@@ -1695,6 +1957,9 @@ impl VmConfig {
             });
         }
 
+        #[cfg(feature = "tdx")]
+        let tdx = vm_params.tdx.map(TdxConfig::parse).transpose()?;
+
         let config = VmConfig {
             cpus: CpusConfig::parse(vm_params.cpus)?,
             memory: MemoryConfig::parse(vm_params.memory, vm_params.memory_zones)?,
@@ -1716,6 +1981,8 @@ impl VmConfig {
             sgx_epc,
             numa,
             watchdog: vm_params.watchdog,
+            #[cfg(feature = "tdx")]
+            tdx,
         };
         config.validate().map_err(Error::Validation)?;
         Ok(config)
@@ -2322,6 +2589,8 @@ mod tests {
             sgx_epc: None,
             numa: None,
             watchdog: false,
+            #[cfg(feature = "tdx")]
+            tdx: None,
         };
 
         assert!(valid_config.validate().is_ok());
@@ -2403,6 +2672,13 @@ mod tests {
         }]);
         still_valid_config.memory.shared = true;
         assert!(still_valid_config.validate().is_ok());
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.net = Some(vec![NetConfig {
+            fds: Some(vec![0]),
+            ..Default::default()
+        }]);
+        assert!(invalid_config.validate().is_err());
 
         let mut invalid_config = valid_config.clone();
         invalid_config.fs = Some(vec![FsConfig {

@@ -54,6 +54,7 @@ $ lspci -n -s 01:00.0
 01:00.0 ff00: 10ec:525a (rev 01)
 
 $ echo 10ec 525a > /sys/bus/pci/drivers/vfio-pci/new_id
+$ echo 0000:01:00.0 > /sys/bus/pci/drivers/vfio-pci/bind
 ```
 
 Now the device is managed by the VFIO framework.

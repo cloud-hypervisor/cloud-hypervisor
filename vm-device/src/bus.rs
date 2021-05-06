@@ -24,8 +24,6 @@ pub trait BusDevice: Send {
     fn write(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         None
     }
-    /// Triggers the `irq_mask` interrupt on this device
-    fn interrupt(&self, irq_mask: u32) {}
 }
 
 #[derive(Debug)]

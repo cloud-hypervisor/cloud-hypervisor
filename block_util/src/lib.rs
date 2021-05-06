@@ -24,7 +24,6 @@ pub mod vhd;
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, DiskFileError, DiskFileResult};
 #[cfg(feature = "io_uring")]
 use io_uring::{opcode, IoUring, Probe};
-use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::cmp;
 use std::convert::TryInto;
 use std::fs::File;
@@ -32,7 +31,7 @@ use std::io::{self, IoSlice, IoSliceMut, Read, Seek, SeekFrom, Write};
 use std::os::linux::fs::MetadataExt;
 #[cfg(feature = "io_uring")]
 use std::os::unix::io::AsRawFd;
-use std::path::PathBuf;
+use std::path::Path;
 use std::result;
 use std::sync::{Arc, Mutex};
 use virtio_bindings::bindings::virtio_blk::*;
@@ -65,7 +64,7 @@ pub enum Error {
     TooManyDescriptors,
 }
 
-fn build_device_id(disk_path: &PathBuf) -> result::Result<String, Error> {
+fn build_device_id(disk_path: &Path) -> result::Result<String, Error> {
     let blk_metadata = match disk_path.metadata() {
         Err(_) => return Err(Error::GetFileMetadata),
         Ok(m) => m,
@@ -80,7 +79,7 @@ fn build_device_id(disk_path: &PathBuf) -> result::Result<String, Error> {
     Ok(device_id)
 }
 
-pub fn build_disk_image_id(disk_path: &PathBuf) -> Vec<u8> {
+pub fn build_disk_image_id(disk_path: &Path) -> Vec<u8> {
     let mut default_disk_image_id = vec![0; VIRTIO_BLK_ID_BYTES as usize];
     match build_device_id(disk_path) {
         Err(_) => {
@@ -135,7 +134,7 @@ pub enum RequestType {
     In,
     Out,
     Flush,
-    GetDeviceID,
+    GetDeviceId,
     Unsupported(u32),
 }
 
@@ -148,7 +147,7 @@ pub fn request_type(
         VIRTIO_BLK_T_IN => Ok(RequestType::In),
         VIRTIO_BLK_T_OUT => Ok(RequestType::Out),
         VIRTIO_BLK_T_FLUSH => Ok(RequestType::Flush),
-        VIRTIO_BLK_T_GET_ID => Ok(RequestType::GetDeviceID),
+        VIRTIO_BLK_T_GET_ID => Ok(RequestType::GetDeviceId),
         t => Ok(RequestType::Unsupported(t)),
     }
 }
@@ -163,6 +162,7 @@ fn sector(mem: &GuestMemoryMmap, desc_addr: GuestAddress) -> result::Result<u64,
     mem.read_obj(addr).map_err(Error::GuestMemory)
 }
 
+#[derive(Debug)]
 pub struct Request {
     pub request_type: RequestType,
     pub sector: u64,
@@ -192,12 +192,17 @@ impl Request {
         let status_desc;
         let mut desc = avail_desc
             .next_descriptor()
-            .ok_or(Error::DescriptorChainTooShort)?;
+            .ok_or(Error::DescriptorChainTooShort)
+            .map_err(|e| {
+                error!("Only head descriptor present: request = {:?}", req);
+                e
+            })?;
 
         if !desc.has_next() {
             status_desc = desc;
             // Only flush requests are allowed to skip the data descriptor.
             if req.request_type != RequestType::Flush {
+                error!("Need a data descriptor: request = {:?}", req);
                 return Err(Error::DescriptorChainTooShort);
             }
         } else {
@@ -208,13 +213,17 @@ impl Request {
                 if !desc.is_write_only() && req.request_type == RequestType::In {
                     return Err(Error::UnexpectedReadOnlyDescriptor);
                 }
-                if !desc.is_write_only() && req.request_type == RequestType::GetDeviceID {
+                if !desc.is_write_only() && req.request_type == RequestType::GetDeviceId {
                     return Err(Error::UnexpectedReadOnlyDescriptor);
                 }
                 req.data_descriptors.push((desc.addr, desc.len));
                 desc = desc
                     .next_descriptor()
-                    .ok_or(Error::DescriptorChainTooShort)?;
+                    .ok_or(Error::DescriptorChainTooShort)
+                    .map_err(|e| {
+                        error!("DescriptorChain corrupted: request = {:?}", req);
+                        e
+                    })?;
             }
             status_desc = desc;
         }
@@ -270,7 +279,7 @@ impl Request {
                     }
                 }
                 RequestType::Flush => disk.flush().map_err(ExecuteError::Flush)?,
-                RequestType::GetDeviceID => {
+                RequestType::GetDeviceId => {
                     if (*data_len as usize) < disk_id.len() {
                         return Err(ExecuteError::BadRequest(Error::InvalidOffset));
                     }
@@ -336,7 +345,7 @@ impl Request {
                     .fsync(Some(user_data))
                     .map_err(ExecuteError::AsyncFlush)?;
             }
-            RequestType::GetDeviceID => {
+            RequestType::GetDeviceId => {
                 let (data_addr, data_len) = if self.data_descriptors.len() == 1 {
                     (self.data_descriptors[0].0, self.data_descriptors[0].1)
                 } else {
@@ -360,7 +369,7 @@ impl Request {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, Deserialize)]
+#[derive(Copy, Clone, Debug, Default, Deserialize, Serialize)]
 #[repr(C, packed)]
 pub struct VirtioBlockConfig {
     pub capacity: u64,
@@ -383,95 +392,15 @@ pub struct VirtioBlockConfig {
     pub write_zeroes_may_unmap: u8,
     pub unused1: [u8; 3],
 }
-
-// We must explicitly implement Serialize since the structure is packed and
-// it's unsafe to borrow from a packed structure. And by default, if we derive
-// Serialize from serde, it will borrow the values from the structure.
-// That's why this implementation copies each field separately before it
-// serializes the entire structure field by field.
-impl Serialize for VirtioBlockConfig {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let capacity = self.capacity;
-        let size_max = self.size_max;
-        let seg_max = self.seg_max;
-        let geometry = self.geometry;
-        let blk_size = self.blk_size;
-        let physical_block_exp = self.physical_block_exp;
-        let alignment_offset = self.alignment_offset;
-        let min_io_size = self.min_io_size;
-        let opt_io_size = self.opt_io_size;
-        let writeback = self.writeback;
-        let unused = self.unused;
-        let num_queues = self.num_queues;
-        let max_discard_sectors = self.max_discard_sectors;
-        let max_discard_seg = self.max_discard_seg;
-        let discard_sector_alignment = self.discard_sector_alignment;
-        let max_write_zeroes_sectors = self.max_write_zeroes_sectors;
-        let max_write_zeroes_seg = self.max_write_zeroes_seg;
-        let write_zeroes_may_unmap = self.write_zeroes_may_unmap;
-        let unused1 = self.unused1;
-
-        let mut virtio_block_config = serializer.serialize_struct("VirtioBlockConfig", 60)?;
-        virtio_block_config.serialize_field("capacity", &capacity)?;
-        virtio_block_config.serialize_field("size_max", &size_max)?;
-        virtio_block_config.serialize_field("seg_max", &seg_max)?;
-        virtio_block_config.serialize_field("geometry", &geometry)?;
-        virtio_block_config.serialize_field("blk_size", &blk_size)?;
-        virtio_block_config.serialize_field("physical_block_exp", &physical_block_exp)?;
-        virtio_block_config.serialize_field("alignment_offset", &alignment_offset)?;
-        virtio_block_config.serialize_field("min_io_size", &min_io_size)?;
-        virtio_block_config.serialize_field("opt_io_size", &opt_io_size)?;
-        virtio_block_config.serialize_field("writeback", &writeback)?;
-        virtio_block_config.serialize_field("unused", &unused)?;
-        virtio_block_config.serialize_field("num_queues", &num_queues)?;
-        virtio_block_config.serialize_field("max_discard_sectors", &max_discard_sectors)?;
-        virtio_block_config.serialize_field("max_discard_seg", &max_discard_seg)?;
-        virtio_block_config
-            .serialize_field("discard_sector_alignment", &discard_sector_alignment)?;
-        virtio_block_config
-            .serialize_field("max_write_zeroes_sectors", &max_write_zeroes_sectors)?;
-        virtio_block_config.serialize_field("max_write_zeroes_seg", &max_write_zeroes_seg)?;
-        virtio_block_config.serialize_field("write_zeroes_may_unmap", &write_zeroes_may_unmap)?;
-        virtio_block_config.serialize_field("unused1", &unused1)?;
-        virtio_block_config.end()
-    }
-}
-
 unsafe impl ByteValued for VirtioBlockConfig {}
 
-#[derive(Copy, Clone, Debug, Default, Deserialize)]
+#[derive(Copy, Clone, Debug, Default, Serialize, Deserialize)]
 #[repr(C, packed)]
 pub struct VirtioBlockGeometry {
     pub cylinders: u16,
     pub heads: u8,
     pub sectors: u8,
 }
-
-// We must explicitly implement Serialize since the structure is packed and
-// it's unsafe to borrow from a packed structure. And by default, if we derive
-// Serialize from serde, it will borrow the values from the structure.
-// That's why this implementation copies each field separately before it
-// serializes the entire structure field by field.
-impl Serialize for VirtioBlockGeometry {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let cylinders = self.cylinders;
-        let heads = self.heads;
-        let sectors = self.sectors;
-
-        let mut virtio_block_geometry = serializer.serialize_struct("VirtioBlockGeometry", 4)?;
-        virtio_block_geometry.serialize_field("cylinders", &cylinders)?;
-        virtio_block_geometry.serialize_field("heads", &heads)?;
-        virtio_block_geometry.serialize_field("sectors", &sectors)?;
-        virtio_block_geometry.end()
-    }
-}
-
 unsafe impl ByteValued for VirtioBlockGeometry {}
 
 /// Check if io_uring for block device can be used on the current system, as

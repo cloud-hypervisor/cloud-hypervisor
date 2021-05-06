@@ -16,7 +16,7 @@ use std::sync::{
     Arc, Barrier,
 };
 use std::thread;
-use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryMmap, GuestUsize};
+use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryMmap, GuestRegionMmap, GuestUsize};
 use vm_migration::{MigratableError, Pausable};
 use vm_virtio::VirtioDeviceType;
 use vmm_sys_util::eventfd::EventFd;
@@ -139,7 +139,10 @@ pub trait VirtioDevice: Send {
     /// after a shutdown() can lead to unpredictable results.
     fn shutdown(&mut self) {}
 
-    fn update_memory(&mut self, _mem: &GuestMemoryMmap) -> std::result::Result<(), Error> {
+    fn add_memory_region(
+        &mut self,
+        _region: &Arc<GuestRegionMmap>,
+    ) -> std::result::Result<(), Error> {
         Ok(())
     }
 

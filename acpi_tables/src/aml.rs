@@ -95,8 +95,7 @@ pub type Byte = u8;
 
 impl Aml for Byte {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(0x0a); /* BytePrefix */
+        let mut bytes = vec![0x0a]; /* BytePrefix */
         bytes.push(*self);
         bytes
     }
@@ -106,8 +105,7 @@ pub type Word = u16;
 
 impl Aml for Word {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(0x0bu8); /* WordPrefix */
+        let mut bytes = vec![0x0bu8]; /* WordPrefix */
         bytes.append(&mut self.to_le_bytes().to_vec());
         bytes
     }
@@ -117,8 +115,7 @@ pub type DWord = u32;
 
 impl Aml for DWord {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(0x0c); /* DWordPrefix */
+        let mut bytes = vec![0x0c]; /* DWordPrefix */
         bytes.append(&mut self.to_le_bytes().to_vec());
         bytes
     }
@@ -128,8 +125,7 @@ pub type QWord = u64;
 
 impl Aml for QWord {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(0x0e); /* QWordPrefix */
+        let mut bytes = vec![0x0e]; /* QWordPrefix */
         bytes.append(&mut self.to_le_bytes().to_vec());
         bytes
     }
@@ -147,8 +143,7 @@ impl Aml for Name {
 
 impl Name {
     pub fn new(path: Path, inner: &dyn Aml) -> Self {
-        let mut bytes = Vec::new();
-        bytes.push(0x08); /* NameOp */
+        let mut bytes = vec![0x08]; /* NameOp */
         bytes.append(&mut path.to_aml_bytes());
         bytes.append(&mut inner.to_aml_bytes());
         Name { bytes }
@@ -161,8 +156,7 @@ pub struct Package<'a> {
 
 impl<'a> Aml for Package<'a> {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(self.children.len() as u8);
+        let mut bytes = vec![self.children.len() as u8];
         for child in &self.children {
             bytes.append(&mut child.to_aml_bytes());
         }
@@ -239,11 +233,11 @@ fn create_pkg_length(data: &[u8], include_self: bool) -> Vec<u8> {
     result
 }
 
-pub struct EISAName {
+pub struct EisaName {
     value: DWord,
 }
 
-impl EISAName {
+impl EisaName {
     pub fn new(name: &str) -> Self {
         assert_eq!(name.len(), 7);
 
@@ -258,11 +252,11 @@ impl EISAName {
             | name.chars().nth(6).unwrap().to_digit(16).unwrap())
         .swap_bytes();
 
-        EISAName { value }
+        EisaName { value }
     }
 }
 
-impl Aml for EISAName {
+impl Aml for EisaName {
     fn to_aml_bytes(&self) -> Vec<u8> {
         self.value.to_aml_bytes()
     }
@@ -289,8 +283,7 @@ impl Aml for Usize {
 }
 
 fn create_aml_string(v: &str) -> Vec<u8> {
-    let mut data = Vec::new();
-    data.push(0x0D); /* String Op */
+    let mut data = vec![0x0D]; /* String Op */
     data.extend_from_slice(v.as_bytes());
     data.push(0x0); /* NullChar */
     data
@@ -374,9 +367,7 @@ impl Memory32Fixed {
 
 impl Aml for Memory32Fixed {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-
-        bytes.push(0x86); /* Memory32Fixed */
+        let mut bytes = vec![0x86]; /* Memory32Fixed */
         bytes.append(&mut 9u16.to_le_bytes().to_vec());
 
         // 9 bytes of payload
@@ -390,7 +381,7 @@ impl Aml for Memory32Fixed {
 #[derive(Copy, Clone)]
 enum AddressSpaceType {
     Memory,
-    IO,
+    Io,
     BusNumber,
 }
 
@@ -421,7 +412,7 @@ impl<T> AddressSpace<T> {
 
     pub fn new_io(min: T, max: T) -> Self {
         AddressSpace {
-            r#type: AddressSpaceType::IO,
+            r#type: AddressSpaceType::Io,
             min,
             max,
             type_flags: 3, /* EntireRange */
@@ -510,16 +501,16 @@ impl Aml for AddressSpace<u64> {
     }
 }
 
-pub struct IO {
+pub struct Io {
     min: u16,
     max: u16,
     alignment: u8,
     length: u8,
 }
 
-impl IO {
+impl Io {
     pub fn new(min: u16, max: u16, alignment: u8, length: u8) -> Self {
-        IO {
+        Io {
             min,
             max,
             alignment,
@@ -528,11 +519,10 @@ impl IO {
     }
 }
 
-impl Aml for IO {
+impl Aml for Io {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
+        let mut bytes = vec![0x47]; /* Io Port Descriptor */
 
-        bytes.push(0x47); /* IO Port Descriptor */
         bytes.push(1); /* IODecode16 */
         bytes.append(&mut self.min.to_le_bytes().to_vec());
         bytes.append(&mut self.max.to_le_bytes().to_vec());
@@ -571,9 +561,7 @@ impl Interrupt {
 
 impl Aml for Interrupt {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-
-        bytes.push(0x89); /* Extended IRQ Descriptor */
+        let mut bytes = vec![0x89]; /* Extended IRQ Descriptor */
         bytes.append(&mut 6u16.to_le_bytes().to_vec());
         let flags = (self.shared as u8) << 3
             | (self.active_low as u8) << 2
@@ -699,8 +687,7 @@ impl<'a> Return<'a> {
 
 impl<'a> Aml for Return<'a> {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(0xa4); /* ReturnOp */
+        let mut bytes = vec![0xa4]; /* ReturnOp */
         bytes.append(&mut self.value.to_aml_bytes());
         bytes
     }
@@ -745,9 +732,9 @@ impl Field {
     ) -> Self {
         Field {
             path,
+            fields,
             access_type,
             update_rule,
-            fields,
         }
     }
 }
@@ -788,14 +775,14 @@ impl Aml for Field {
 #[derive(Clone, Copy)]
 pub enum OpRegionSpace {
     SystemMemory,
-    SystemIO,
-    PCIConfig,
+    SystemIo,
+    PConfig,
     EmbeddedControl,
-    SMBus,
-    SystemCMOS,
+    Smbus,
+    SystemCmos,
     PciBarTarget,
-    IPMI,
-    GeneralPurposeIO,
+    Ipmi,
+    GeneralPurposeIo,
     GenericSerialBus,
 }
 
@@ -864,8 +851,8 @@ impl<'a> Aml for If<'a> {
 }
 
 pub struct Equal<'a> {
-    right: &'a dyn Aml,
     left: &'a dyn Aml,
+    right: &'a dyn Aml,
 }
 
 impl<'a> Equal<'a> {
@@ -876,8 +863,7 @@ impl<'a> Equal<'a> {
 
 impl<'a> Aml for Equal<'a> {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(0x93); /* LEqualOp */
+        let mut bytes = vec![0x93]; /* LEqualOp */
         bytes.extend_from_slice(&self.left.to_aml_bytes());
         bytes.extend_from_slice(&self.right.to_aml_bytes());
         bytes
@@ -885,8 +871,8 @@ impl<'a> Aml for Equal<'a> {
 }
 
 pub struct LessThan<'a> {
-    right: &'a dyn Aml,
     left: &'a dyn Aml,
+    right: &'a dyn Aml,
 }
 
 impl<'a> LessThan<'a> {
@@ -897,8 +883,7 @@ impl<'a> LessThan<'a> {
 
 impl<'a> Aml for LessThan<'a> {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(0x95); /* LLessOp */
+        let mut bytes = vec![0x95]; /* LLessOp */
         bytes.extend_from_slice(&self.left.to_aml_bytes());
         bytes.extend_from_slice(&self.right.to_aml_bytes());
         bytes
@@ -940,8 +925,7 @@ impl<'a> Store<'a> {
 
 impl<'a> Aml for Store<'a> {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(0x70); /* StoreOp */
+        let mut bytes = vec![0x70]; /* StoreOp */
         bytes.extend_from_slice(&self.value.to_aml_bytes());
         bytes.extend_from_slice(&self.name.to_aml_bytes());
         bytes
@@ -961,8 +945,7 @@ impl Mutex {
 
 impl Aml for Mutex {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(0x5b); /* ExtOpPrefix */
+        let mut bytes = vec![0x5b]; /* ExtOpPrefix */
         bytes.push(0x01); /* MutexOp */
         bytes.extend_from_slice(&self.path.to_aml_bytes());
         bytes.push(self.sync_level);
@@ -983,8 +966,7 @@ impl Acquire {
 
 impl Aml for Acquire {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(0x5b); /* ExtOpPrefix */
+        let mut bytes = vec![0x5b]; /* ExtOpPrefix */
         bytes.push(0x23); /* AcquireOp */
         bytes.extend_from_slice(&self.mutex.to_aml_bytes());
         bytes.extend_from_slice(&self.timeout.to_le_bytes());
@@ -1004,8 +986,7 @@ impl Release {
 
 impl Aml for Release {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(0x5b); /* ExtOpPrefix */
+        let mut bytes = vec![0x5b]; /* ExtOpPrefix */
         bytes.push(0x27); /* ReleaseOp */
         bytes.extend_from_slice(&self.mutex.to_aml_bytes());
         bytes
@@ -1025,8 +1006,7 @@ impl<'a> Notify<'a> {
 
 impl<'a> Aml for Notify<'a> {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(0x86); /* NotifyOp */
+        let mut bytes = vec![0x86]; /* NotifyOp */
         bytes.extend_from_slice(&self.object.to_aml_bytes());
         bytes.extend_from_slice(&self.value.to_aml_bytes());
         bytes
@@ -1076,14 +1056,13 @@ macro_rules! binary_op {
 
         impl<'a> $name<'a> {
             pub fn new(target: &'a dyn Aml, a: &'a dyn Aml, b: &'a dyn Aml) -> Self {
-                $name { target, a, b }
+                $name { a, b, target }
             }
         }
 
         impl<'a> Aml for $name<'a> {
             fn to_aml_bytes(&self) -> Vec<u8> {
-                let mut bytes = Vec::new();
-                bytes.push($opcode); /* Op for the binary operator */
+                let mut bytes = vec![$opcode]; /* Op for the binary operator */
                 bytes.extend_from_slice(&self.a.to_aml_bytes());
                 bytes.extend_from_slice(&self.b.to_aml_bytes());
                 bytes.extend_from_slice(&self.target.to_aml_bytes());
@@ -1180,8 +1159,7 @@ impl<'a, T> CreateField<'a, T> {
 
 impl<'a> Aml for CreateField<'a, u64> {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(0x8f); /* CreateQWordFieldOp */
+        let mut bytes = vec![0x8f]; /* CreateQWordFieldOp */
         bytes.extend_from_slice(&self.buffer.to_aml_bytes());
         bytes.extend_from_slice(&self.offset.to_aml_bytes());
         bytes.extend_from_slice(&self.field.to_aml_bytes());
@@ -1191,8 +1169,7 @@ impl<'a> Aml for CreateField<'a, u64> {
 
 impl<'a> Aml for CreateField<'a, u32> {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(0x8a); /* CreateDWordFieldOp */
+        let mut bytes = vec![0x8a]; /* CreateDWordFieldOp */
         bytes.extend_from_slice(&self.buffer.to_aml_bytes());
         bytes.extend_from_slice(&self.offset.to_aml_bytes());
         bytes.extend_from_slice(&self.field.to_aml_bytes());
@@ -1235,12 +1212,12 @@ mod tests {
             Device::new(
                 "_SB_.COM1".into(),
                 vec![
-                    &Name::new("_HID".into(), &EISAName::new("PNP0501")),
+                    &Name::new("_HID".into(), &EisaName::new("PNP0501")),
                     &Name::new(
                         "_CRS".into(),
                         &ResourceTemplate::new(vec![
                             &Interrupt::new(true, true, false, false, 4),
-                            &IO::new(0x3f8, 0x3f8, 0, 0x8)
+                            &Io::new(0x3f8, 0x3f8, 0, 0x8)
                         ])
                     )
                 ]
@@ -1476,7 +1453,7 @@ mod tests {
                 "_CRS".into(),
                 &ResourceTemplate::new(vec![
                     &Interrupt::new(true, true, false, false, 4),
-                    &IO::new(0x3f8, 0x3f8, 0, 0x8)
+                    &Io::new(0x3f8, 0x3f8, 0, 0x8)
                 ])
             )
             .to_aml_bytes(),
@@ -1519,7 +1496,7 @@ mod tests {
     #[test]
     fn test_eisa_name() {
         assert_eq!(
-            Name::new("_HID".into(), &EISAName::new("PNP0501")).to_aml_bytes(),
+            Name::new("_HID".into(), &EisaName::new("PNP0501")).to_aml_bytes(),
             [0x08, 0x5F, 0x48, 0x49, 0x44, 0x0C, 0x41, 0xD0, 0x05, 0x01],
         )
     }
@@ -1665,14 +1642,14 @@ mod tests {
     #[test]
     fn test_op_region() {
         /*
-            OperationRegion (PRST, SystemIO, 0x0CD8, 0x0C)
+            OperationRegion (PRST, SystemIo, 0x0CD8, 0x0C)
         */
         let op_region_data = [
             0x5Bu8, 0x80, 0x50, 0x52, 0x53, 0x54, 0x01, 0x0B, 0xD8, 0x0C, 0x0A, 0x0C,
         ];
 
         assert_eq!(
-            OpRegion::new("PRST".into(), OpRegionSpace::SystemIO, 0xcd8, 0xc).to_aml_bytes(),
+            OpRegion::new("PRST".into(), OpRegionSpace::SystemIo, 0xcd8, 0xc).to_aml_bytes(),
             &op_region_data[..]
         );
     }
@@ -1766,7 +1743,7 @@ mod tests {
             Device::new(
                 "_SB_.MHPC".into(),
                 vec![
-                    &Name::new("_HID".into(), &EISAName::new("PNP0A06")),
+                    &Name::new("_HID".into(), &EisaName::new("PNP0A06")),
                     &mutex,
                     &Method::new(
                         "TEST".into(),
@@ -1807,7 +1784,7 @@ mod tests {
             Device::new(
                 "_SB_.MHPC".into(),
                 vec![
-                    &Name::new("_HID".into(), &EISAName::new("PNP0A06")),
+                    &Name::new("_HID".into(), &EisaName::new("PNP0A06")),
                     &Method::new(
                         "TEST".into(),
                         0,
@@ -1848,7 +1825,7 @@ mod tests {
             Device::new(
                 "_SB_.MHPC".into(),
                 vec![
-                    &Name::new("_HID".into(), &EISAName::new("PNP0A06")),
+                    &Name::new("_HID".into(), &EisaName::new("PNP0A06")),
                     &Method::new(
                         "TEST".into(),
                         0,

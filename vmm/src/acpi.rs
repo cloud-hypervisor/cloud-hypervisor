@@ -8,7 +8,7 @@ use crate::memory_manager::MemoryManager;
 use crate::vm::NumaNodes;
 #[cfg(target_arch = "x86_64")]
 use acpi_tables::sdt::GenericAddress;
-use acpi_tables::{aml::Aml, rsdp::RSDP, sdt::SDT};
+use acpi_tables::{aml::Aml, rsdp::Rsdp, sdt::Sdt};
 
 use bitflags::bitflags;
 use std::sync::{Arc, Mutex};
@@ -17,7 +17,7 @@ use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemoryMmap, Guest
 
 #[repr(packed)]
 #[derive(Default)]
-struct PCIRangeEntry {
+struct PciRangeEntry {
     pub base_address: u64,
     pub segment: u16,
     pub start: u8,
@@ -94,9 +94,9 @@ pub fn create_dsdt_table(
     device_manager: &Arc<Mutex<DeviceManager>>,
     cpu_manager: &Arc<Mutex<CpuManager>>,
     memory_manager: &Arc<Mutex<MemoryManager>>,
-) -> SDT {
+) -> Sdt {
     // DSDT
-    let mut dsdt = SDT::new(*b"DSDT", 36, 6, *b"CLOUDH", *b"CHDSDT  ", 1);
+    let mut dsdt = Sdt::new(*b"DSDT", 36, 6, *b"CLOUDH", *b"CHDSDT  ", 1);
 
     dsdt.append_slice(device_manager.lock().unwrap().to_aml_bytes().as_slice());
     dsdt.append_slice(cpu_manager.lock().unwrap().to_aml_bytes().as_slice());
@@ -126,14 +126,14 @@ pub fn create_acpi_tables(
 
     // DSDT
     let dsdt = create_dsdt_table(device_manager, cpu_manager, memory_manager);
-    let dsdt_offset = rsdp_offset.checked_add(RSDP::len() as u64).unwrap();
+    let dsdt_offset = rsdp_offset.checked_add(Rsdp::len() as u64).unwrap();
     guest_mem
         .write_slice(dsdt.as_slice(), dsdt_offset)
         .expect("Error writing DSDT table");
 
     // FACP aka FADT
     // Revision 6 of the ACPI FADT table is 276 bytes long
-    let mut facp = SDT::new(*b"FACP", 276, 6, *b"CLOUDH", *b"CHFACP  ", 1);
+    let mut facp = Sdt::new(*b"FACP", 276, 6, *b"CLOUDH", *b"CHFACP  ", 1);
 
     // PM_TMR_BLK I/O port
     #[cfg(target_arch = "x86_64")]
@@ -182,13 +182,13 @@ pub fn create_acpi_tables(
     tables.push(madt_offset.0);
 
     // MCFG
-    let mut mcfg = SDT::new(*b"MCFG", 36, 1, *b"CLOUDH", *b"CHMCFG  ", 1);
+    let mut mcfg = Sdt::new(*b"MCFG", 36, 1, *b"CLOUDH", *b"CHMCFG  ", 1);
 
     // MCFG reserved 8 bytes
     mcfg.append(0u64);
 
     // 32-bit PCI enhanced configuration mechanism
-    mcfg.append(PCIRangeEntry {
+    mcfg.append(PciRangeEntry {
         base_address: arch::layout::PCI_MMCONFIG_START.0,
         segment: 0,
         start: 0,
@@ -208,7 +208,7 @@ pub fn create_acpi_tables(
         (mcfg.len(), mcfg_offset)
     } else {
         // SRAT
-        let mut srat = SDT::new(*b"SRAT", 36, 3, *b"CLOUDH", *b"CHSRAT  ", 1);
+        let mut srat = Sdt::new(*b"SRAT", 36, 3, *b"CLOUDH", *b"CHSRAT  ", 1);
         // SRAT reserved 12 bytes
         srat.append_slice(&[0u8; 12]);
 
@@ -262,7 +262,7 @@ pub fn create_acpi_tables(
         tables.push(srat_offset.0);
 
         // SLIT
-        let mut slit = SDT::new(*b"SLIT", 36, 1, *b"CLOUDH", *b"CHSLIT  ", 1);
+        let mut slit = Sdt::new(*b"SLIT", 36, 1, *b"CLOUDH", *b"CHSLIT  ", 1);
         // Number of System Localities on 8 bytes.
         slit.append(numa_nodes.len() as u64);
 
@@ -292,7 +292,7 @@ pub fn create_acpi_tables(
     };
 
     // XSDT
-    let mut xsdt = SDT::new(*b"XSDT", 36, 1, *b"CLOUDH", *b"CHXSDT  ", 1);
+    let mut xsdt = Sdt::new(*b"XSDT", 36, 1, *b"CLOUDH", *b"CHXSDT  ", 1);
     for table in tables {
         xsdt.append(table);
     }
@@ -304,7 +304,7 @@ pub fn create_acpi_tables(
         .expect("Error writing XSDT table");
 
     // RSDP
-    let rsdp = RSDP::new(*b"CLOUDH", xsdt_offset.0);
+    let rsdp = Rsdp::new(*b"CLOUDH", xsdt_offset.0);
     guest_mem
         .write_slice(rsdp.as_slice(), rsdp_offset)
         .expect("Error writing RSDP");

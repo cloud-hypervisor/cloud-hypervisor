@@ -21,7 +21,7 @@ use std::process;
 enum Error {
     Connect(std::io::Error),
     ApiClient(ApiClientError),
-    InvalidCPUCount(std::num::ParseIntError),
+    InvalidCpuCount(std::num::ParseIntError),
     InvalidMemorySize(ByteSizedParseError),
     InvalidBalloonSize(ByteSizedParseError),
     AddDeviceConfig(vmm::config::Error),
@@ -39,7 +39,7 @@ impl fmt::Display for Error {
         match self {
             ApiClient(e) => e.fmt(f),
             Connect(e) => write!(f, "Error opening HTTP socket: {}", e),
-            InvalidCPUCount(e) => write!(f, "Error parsing CPU count: {}", e),
+            InvalidCpuCount(e) => write!(f, "Error parsing CPU count: {}", e),
             InvalidMemorySize(e) => write!(f, "Error parsing memory size: {:?}", e),
             InvalidBalloonSize(e) => write!(f, "Error parsing balloon size: {:?}", e),
             AddDeviceConfig(e) => write!(f, "Error parsing device syntax: {}", e),
@@ -60,7 +60,7 @@ fn resize_api_command(
     balloon: Option<&str>,
 ) -> Result<(), Error> {
     let desired_vcpus: Option<u8> = if let Some(cpus) = cpus {
-        Some(cpus.parse().map_err(Error::InvalidCPUCount)?)
+        Some(cpus.parse().map_err(Error::InvalidCpuCount)?)
     } else {
         None
     };

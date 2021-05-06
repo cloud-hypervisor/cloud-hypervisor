@@ -24,6 +24,7 @@ use crate::{VirtioInterrupt, VirtioInterruptType};
 use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
 use seccomp::{SeccompAction, SeccompFilter};
+use std::collections::BTreeMap;
 use std::io;
 use std::mem::size_of;
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -32,6 +33,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
+use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
     GuestMemoryError, GuestMemoryMmap, GuestMemoryRegion, GuestRegionMmap,
@@ -124,6 +126,12 @@ pub enum Error {
     ValidateError(anyhow::Error),
     // Failed discarding memory range
     DiscardMemoryRange(std::io::Error),
+    // Failed DMA mapping.
+    DmaMap(std::io::Error),
+    // Failed DMA unmapping.
+    DmaUnmap(std::io::Error),
+    // Invalid DMA mapping handler
+    InvalidDmaMappingHandler,
 }
 
 #[repr(C)]
@@ -401,12 +409,16 @@ impl BlocksState {
             *state = plug;
         }
     }
+
+    fn inner(&self) -> &Vec<bool> {
+        &self.0
+    }
 }
 
 struct MemEpollHandler {
     host_addr: u64,
     host_fd: Option<RawFd>,
-    blocks_state: BlocksState,
+    blocks_state: Arc<Mutex<BlocksState>>,
     config: Arc<Mutex<VirtioMemConfig>>,
     resize: ResizeSender,
     queue: Queue,
@@ -416,6 +428,7 @@ struct MemEpollHandler {
     kill_evt: EventFd,
     pause_evt: EventFd,
     hugepages: bool,
+    dma_mapping_handlers: Arc<Mutex<BTreeMap<u32, Arc<dyn ExternalDmaMapping>>>>,
 }
 
 impl MemEpollHandler {
@@ -473,6 +486,8 @@ impl MemEpollHandler {
         let first_block_index = (offset / config.block_size) as usize;
         if !self
             .blocks_state
+            .lock()
+            .unwrap()
             .is_range_state(first_block_index, nb_blocks, !plug)
         {
             return VIRTIO_MEM_RESP_ERROR;
@@ -486,11 +501,40 @@ impl MemEpollHandler {
         }
 
         self.blocks_state
+            .lock()
+            .unwrap()
             .set_range(first_block_index, nb_blocks, plug);
 
         if plug {
+            let handlers = self.dma_mapping_handlers.lock().unwrap();
+            let mut gpa = addr;
+            for _ in 0..nb_blocks {
+                for (_, handler) in handlers.iter() {
+                    if let Err(e) = handler.map(gpa, gpa, config.block_size) {
+                        error!(
+                            "failed DMA mapping addr 0x{:x} size 0x{:x}: {}",
+                            gpa, config.block_size, e
+                        );
+                        return VIRTIO_MEM_RESP_ERROR;
+                    }
+                }
+
+                gpa += config.block_size;
+            }
+
             config.plugged_size += size;
         } else {
+            let handlers = self.dma_mapping_handlers.lock().unwrap();
+            for (_, handler) in handlers.iter() {
+                if let Err(e) = handler.unmap(addr, size) {
+                    error!(
+                        "failed DMA unmapping addr 0x{:x} size 0x{:x}: {}",
+                        addr, size, e
+                    );
+                    return VIRTIO_MEM_RESP_ERROR;
+                }
+            }
+
             config.plugged_size -= size;
         }
 
@@ -504,8 +548,30 @@ impl MemEpollHandler {
             return VIRTIO_MEM_RESP_ERROR;
         }
 
-        self.blocks_state
-            .set_range(0, (config.region_size / config.block_size) as u16, false);
+        // Remaining plugged blocks are unmapped.
+        if config.plugged_size > 0 {
+            let handlers = self.dma_mapping_handlers.lock().unwrap();
+            for (idx, plugged) in self.blocks_state.lock().unwrap().inner().iter().enumerate() {
+                if *plugged {
+                    let gpa = config.addr + (idx as u64 * config.block_size);
+                    for (_, handler) in handlers.iter() {
+                        if let Err(e) = handler.unmap(gpa, config.block_size) {
+                            error!(
+                                "failed DMA unmapping addr 0x{:x} size 0x{:x}: {}",
+                                gpa, config.block_size, e
+                            );
+                            return VIRTIO_MEM_RESP_ERROR;
+                        }
+                    }
+                }
+            }
+        }
+
+        self.blocks_state.lock().unwrap().set_range(
+            0,
+            (config.region_size / config.block_size) as u16,
+            false,
+        );
 
         config.plugged_size = 0;
 
@@ -524,19 +590,23 @@ impl MemEpollHandler {
 
         let offset = addr - config.addr;
         let first_block_index = (offset / config.block_size) as usize;
-        let resp_state = if self
-            .blocks_state
-            .is_range_state(first_block_index, nb_blocks, true)
-        {
-            VIRTIO_MEM_STATE_PLUGGED
-        } else if self
-            .blocks_state
-            .is_range_state(first_block_index, nb_blocks, false)
-        {
-            VIRTIO_MEM_STATE_UNPLUGGED
-        } else {
-            VIRTIO_MEM_STATE_MIXED
-        };
+        let resp_state =
+            if self
+                .blocks_state
+                .lock()
+                .unwrap()
+                .is_range_state(first_block_index, nb_blocks, true)
+            {
+                VIRTIO_MEM_STATE_PLUGGED
+            } else if self.blocks_state.lock().unwrap().is_range_state(
+                first_block_index,
+                nb_blocks,
+                false,
+            ) {
+                VIRTIO_MEM_STATE_UNPLUGGED
+            } else {
+                VIRTIO_MEM_STATE_MIXED
+            };
 
         (resp_type, resp_state)
     }
@@ -675,6 +745,8 @@ pub struct Mem {
     config: Arc<Mutex<VirtioMemConfig>>,
     seccomp_action: SeccompAction,
     hugepages: bool,
+    dma_mapping_handlers: Arc<Mutex<BTreeMap<u32, Arc<dyn ExternalDmaMapping>>>>,
+    blocks_state: Arc<Mutex<BlocksState>>,
 }
 
 impl Mem {
@@ -744,7 +816,7 @@ impl Mem {
 
         Ok(Mem {
             common: VirtioCommon {
-                device_type: VirtioDeviceType::TYPE_MEM as u32,
+                device_type: VirtioDeviceType::Mem as u32,
                 avail_features,
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 queue_sizes: QUEUE_SIZES.to_vec(),
@@ -758,7 +830,63 @@ impl Mem {
             config: Arc::new(Mutex::new(config)),
             seccomp_action,
             hugepages,
+            dma_mapping_handlers: Arc::new(Mutex::new(BTreeMap::new())),
+            blocks_state: Arc::new(Mutex::new(BlocksState(vec![
+                false;
+                (config.region_size / config.block_size)
+                    as usize
+            ]))),
         })
+    }
+
+    pub fn add_dma_mapping_handler(
+        &mut self,
+        device_id: u32,
+        handler: Arc<dyn ExternalDmaMapping>,
+    ) -> result::Result<(), Error> {
+        let config = self.config.lock().unwrap();
+
+        if config.plugged_size > 0 {
+            for (idx, plugged) in self.blocks_state.lock().unwrap().inner().iter().enumerate() {
+                if *plugged {
+                    let gpa = config.addr + (idx as u64 * config.block_size);
+                    handler
+                        .map(gpa, gpa, config.block_size)
+                        .map_err(Error::DmaMap)?;
+                }
+            }
+        }
+
+        self.dma_mapping_handlers
+            .lock()
+            .unwrap()
+            .insert(device_id, handler);
+
+        Ok(())
+    }
+
+    pub fn remove_dma_mapping_handler(&mut self, device_id: u32) -> result::Result<(), Error> {
+        let handler = self
+            .dma_mapping_handlers
+            .lock()
+            .unwrap()
+            .remove(&device_id)
+            .ok_or(Error::InvalidDmaMappingHandler)?;
+
+        let config = self.config.lock().unwrap();
+
+        if config.plugged_size > 0 {
+            for (idx, plugged) in self.blocks_state.lock().unwrap().inner().iter().enumerate() {
+                if *plugged {
+                    let gpa = config.addr + (idx as u64 * config.block_size);
+                    handler
+                        .unmap(gpa, config.block_size)
+                        .map_err(Error::DmaUnmap)?;
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -825,10 +953,7 @@ impl VirtioDevice for Mem {
         let mut handler = MemEpollHandler {
             host_addr: self.host_addr,
             host_fd: self.host_fd,
-            blocks_state: BlocksState(vec![
-                false;
-                (config.region_size / config.block_size) as usize
-            ]),
+            blocks_state: Arc::clone(&self.blocks_state),
             config: self.config.clone(),
             resize: self.resize.clone(),
             queue: queues.remove(0),
@@ -838,6 +963,7 @@ impl VirtioDevice for Mem {
             kill_evt,
             pause_evt,
             hugepages: self.hugepages,
+            dma_mapping_handlers: Arc::clone(&self.dma_mapping_handlers),
         };
 
         handler

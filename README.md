@@ -26,7 +26,8 @@
 
 # 1. What is Cloud Hypervisor?
 
-Cloud Hypervisor is an open source Virtual Machine Monitor (VMM) that runs on top of [KVM](https://www.kernel.org/doc/Documentation/virtual/kvm/api.txt).
+Cloud Hypervisor is an open source Virtual Machine Monitor (VMM) that runs on top of [KVM](https://www.kernel.org/doc/Documentation/virtual/kvm/api.txt) and the MSHV hypervisors .
+
 The project focuses on exclusively running modern, cloud workloads, on top of a limited set of hardware architectures and platforms.
 Cloud workloads refers to those that are usually run by customers inside a cloud provider. For our purposes this means modern operating systems with most I/O handled by paravirtualised devices (i.e. virtio), no requirement for legacy devices, and 64-bit CPUs.
 
@@ -36,7 +37,7 @@ Cloud Hypervisor is implemented in [Rust](https://www.rust-lang.org/) and is bas
 
 ### High Level
 
-- KVM based
+- Runs on KVM or MSHV
 - Minimal emulation
 - Low latency
 - Low memory footprint
@@ -53,7 +54,7 @@ Cloud Hypervisor supports the `x86-64` and `AArch64` architectures. There are so
 
 ### Guest OS
 
-Cloud Hypervisor supports `64-bit Linux` with support for _modern_ 64-bit Windows guests currently under development.
+Cloud Hypervisor supports `64-bit Linux` and Windows 10/Windows Server 2019.
 
 # 2. Getting Started
 
@@ -148,7 +149,7 @@ We need to get the latest `rust-hypervisor-firmware` release and also a working 
 $ pushd $CLOUDH
 $ wget https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img
 $ qemu-img convert -p -f qcow2 -O raw focal-server-cloudimg-amd64.img focal-server-cloudimg-amd64.raw
-$ wget https://github.com/cloud-hypervisor/rust-hypervisor-firmware/releases/download/0.2.8/hypervisor-fw
+$ wget https://github.com/cloud-hypervisor/rust-hypervisor-firmware/releases/download/0.3.1/hypervisor-fw
 $ popd
 ```
 
@@ -171,7 +172,7 @@ Multiple arguments can be given to the `--disk` parameter.
 
 #### Building your kernel
 
-Cloud Hypervisor also supports direct kernel boot into a `vmlinux` ELF kernel or `bzImage`. In order to support virtio-fs and virtio-iommu we have our own development branch. You are of course able to use your own kernel but these instructions will continue with the version that we develop and test against.
+Cloud Hypervisor also supports direct kernel boot into a `vmlinux` ELF kernel. In order to support virtio-iommu we have our own development branch. You are of course able to use your own kernel but these instructions will continue with the version that we develop and test against.
 
 To build the kernel:
 
@@ -179,7 +180,7 @@ To build the kernel:
 
 # Clone the Cloud Hypervisor Linux branch
 $ pushd $CLOUDH
-$ git clone --depth 1 https://github.com/cloud-hypervisor/linux.git -b virtio-fs-virtio-iommu-virtio-mem-5.6-rc4 linux-cloud-hypervisor
+$ git clone --depth 1 https://github.com/cloud-hypervisor/linux.git -b ch-5.12 linux-cloud-hypervisor
 $ pushd linux-cloud-hypervisor
 
 # Use the cloud-hypervisor kernel config to build your kernel
@@ -241,23 +242,40 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 
 # 3. Status
 
-Cloud Hypervisor is under active development. No API or feature stability is guaranteed.
+Cloud Hypervisor is under active development. The following stability guarantees are currently made:
 
-As of 2020-07-02, the following cloud images are supported:
+* The API (including command line options) will not be removed or changed in a
+  breaking way without a minimum of 2 releases notice. Where possible warnings
+  will be given about the use of deprecated functionality and the deprecations
+  will be documented in the release notes.
+* Point releases will be made between individual releases where there are
+  substantial bug fixes or security issues that need to be fixed.
+
+Currently the following items are **not** guaranteed across updates:
+
+* Snapshot/restore is not supported across different versions
+* Live migration is not supported across different versions
+* The following features are considered experimental and may change
+  substantially between releases: TDX, SGX.
+
+
+As of 2021-04-29, the following cloud images are supported:
 
 - [Ubuntu Bionic](https://cloud-images.ubuntu.com/bionic/current/) (cloudimg)
 - [Ubuntu Focal](https://cloud-images.ubuntu.com/focal/current/) (cloudimg)
+- [Ubuntu Groovy](https://cloud-images.ubuntu.com/groovy/current/) (cloudimg)
+- [Ubuntu Hirsute](https://cloud-images.ubuntu.com/hirsute/current/) (cloudimg)
 
 Direct kernel boot to userspace should work with a rootfs from most distributions.
 
 ## Hot Plug
 
-Cloud Hypervisor supports hotplug of CPUs, passthrough devices (VFIO), `virtio-{net,block,pmem,fs,vsock}` and memory resizing. This [document](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/master/docs/hotplug.md) details how to add devices to
+Cloud Hypervisor supports hotplug of CPUs, passthrough devices (VFIO), `virtio-{net,block,pmem,fs,vsock}` and memory resizing. This [document](docs/hotplug.md) details how to add devices to
 a running VM.
 
 ## Device Model
 
-Details of the device model can be found in this [documentation](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/master/docs/device_model.md).
+Details of the device model can be found in this [documentation](docs/device_model.md).
 
 ## TODO
 
@@ -317,3 +335,7 @@ etc, are all equal and welcome means of contribution. See the [CONTRIBUTING](CON
 
 Get an [invite to our Slack channel](https://join.slack.com/t/cloud-hypervisor/shared_invite/enQtNjY3MTE3MDkwNDQ4LWQ1MTA1ZDVmODkwMWQ1MTRhYzk4ZGNlN2UwNTI3ZmFlODU0OTcwOWZjMTkwZDExYWE3YjFmNzgzY2FmNDAyMjI)
 and [join us on Slack](https://cloud-hypervisor.slack.com/).
+
+## Security issues
+
+Please use the GitHub security advisories feature for reporting issues: https://github.com/cloud-hypervisor/cloud-hypervisor/security/advisories/new

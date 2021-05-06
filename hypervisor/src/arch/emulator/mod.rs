@@ -47,8 +47,8 @@ pub enum PlatformError {
     #[error("Set CPU state failure: {0}")]
     SetCpuStateFailure(#[source] anyhow::Error),
 
-    #[error("Unmapped virtual address: {0}")]
-    UnmappedGVA(#[source] anyhow::Error),
+    #[error("Translate virtual address: {0}")]
+    TranslateVirtualAddress(#[source] anyhow::Error),
 
     #[error("Unsupported CPU Mode: {0}")]
     UnsupportedCpuMode(#[source] anyhow::Error),

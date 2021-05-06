@@ -4,6 +4,7 @@
 //
 
 use devices::interrupt_controller::InterruptController;
+use hypervisor::IrqRoutingEntry;
 use std::collections::HashMap;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -83,33 +84,41 @@ impl InterruptRoute {
     }
 }
 
-pub struct RoutingEntry<E> {
-    route: E,
+pub struct RoutingEntry<IrqRoutingEntry> {
+    route: IrqRoutingEntry,
     masked: bool,
 }
 
-pub struct MsiInterruptGroup<E> {
+pub struct MsiInterruptGroup<IrqRoutingEntry> {
     vm: Arc<dyn hypervisor::Vm>,
-    gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<E>>>>,
+    gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<IrqRoutingEntry>>>>,
     irq_routes: HashMap<InterruptIndex, InterruptRoute>,
 }
 
-pub trait MsiInterruptGroupOps<E> {
-    fn set_gsi_routes(&self, routes: &HashMap<u32, RoutingEntry<E>>) -> Result<()>;
+impl MsiInterruptGroup<IrqRoutingEntry> {
+    fn set_gsi_routes(&self, routes: &HashMap<u32, RoutingEntry<IrqRoutingEntry>>) -> Result<()> {
+        let mut entry_vec: Vec<IrqRoutingEntry> = Vec::new();
+        for (_, entry) in routes.iter() {
+            if entry.masked {
+                continue;
+            }
+
+            entry_vec.push(entry.route);
+        }
+
+        self.vm.set_gsi_routing(&entry_vec).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("Failed setting GSI routing: {}", e),
+            )
+        })
+    }
 }
 
-pub trait RoutingEntryExt {
-    fn make_entry(
-        vm: &Arc<dyn hypervisor::Vm>,
-        gsi: u32,
-        config: &InterruptSourceConfig,
-    ) -> Result<Box<Self>>;
-}
-
-impl<E> MsiInterruptGroup<E> {
+impl MsiInterruptGroup<IrqRoutingEntry> {
     fn new(
         vm: Arc<dyn hypervisor::Vm>,
-        gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<E>>>>,
+        gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<IrqRoutingEntry>>>>,
         irq_routes: HashMap<InterruptIndex, InterruptRoute>,
     ) -> Self {
         MsiInterruptGroup {
@@ -120,12 +129,7 @@ impl<E> MsiInterruptGroup<E> {
     }
 }
 
-impl<E> InterruptSourceGroup for MsiInterruptGroup<E>
-where
-    E: Send + Sync,
-    RoutingEntry<E>: RoutingEntryExt,
-    MsiInterruptGroup<E>: MsiInterruptGroupOps<E>,
-{
+impl InterruptSourceGroup for MsiInterruptGroup<IrqRoutingEntry> {
     fn enable(&self) -> Result<()> {
         for (_, route) in self.irq_routes.iter() {
             route.enable(&self.vm)?;
@@ -256,10 +260,10 @@ pub struct LegacyUserspaceInterruptManager {
     ioapic: Arc<Mutex<dyn InterruptController>>,
 }
 
-pub struct MsiInterruptManager<E> {
+pub struct MsiInterruptManager<IrqRoutingEntry> {
     allocator: Arc<Mutex<SystemAllocator>>,
     vm: Arc<dyn hypervisor::Vm>,
-    gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<E>>>>,
+    gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<IrqRoutingEntry>>>>,
 }
 
 impl LegacyUserspaceInterruptManager {
@@ -268,7 +272,7 @@ impl LegacyUserspaceInterruptManager {
     }
 }
 
-impl<E> MsiInterruptManager<E> {
+impl MsiInterruptManager<IrqRoutingEntry> {
     pub fn new(allocator: Arc<Mutex<SystemAllocator>>, vm: Arc<dyn hypervisor::Vm>) -> Self {
         // Create a shared list of GSI that can be shared through all PCI
         // devices. This way, we can maintain the full list of used GSI,
@@ -302,12 +306,7 @@ impl InterruptManager for LegacyUserspaceInterruptManager {
     }
 }
 
-impl<E> InterruptManager for MsiInterruptManager<E>
-where
-    E: Send + Sync + 'static,
-    RoutingEntry<E>: RoutingEntryExt,
-    MsiInterruptGroup<E>: MsiInterruptGroupOps<E>,
-{
+impl InterruptManager for MsiInterruptManager<IrqRoutingEntry> {
     type GroupConfig = MsiIrqGroupConfig;
 
     fn create_group(
@@ -337,14 +336,13 @@ where
 pub mod kvm {
     use super::*;
     use hypervisor::kvm::KVM_MSI_VALID_DEVID;
-    use hypervisor::kvm::{kvm_irq_routing_entry, KVM_IRQ_ROUTING_MSI};
+    use hypervisor::kvm::{kvm_irq_routing_entry, KVM_IRQ_ROUTING_IRQCHIP, KVM_IRQ_ROUTING_MSI};
 
-    type KvmMsiInterruptGroup = MsiInterruptGroup<kvm_irq_routing_entry>;
     type KvmRoutingEntry = RoutingEntry<kvm_irq_routing_entry>;
     pub type KvmMsiInterruptManager = MsiInterruptManager<kvm_irq_routing_entry>;
 
-    impl RoutingEntryExt for KvmRoutingEntry {
-        fn make_entry(
+    impl KvmRoutingEntry {
+        pub fn make_entry(
             vm: &Arc<dyn hypervisor::Vm>,
             gsi: u32,
             config: &InterruptSourceConfig,
@@ -371,35 +369,26 @@ pub mod kvm {
                 };
 
                 return Ok(Box::new(kvm_entry));
+            } else if let InterruptSourceConfig::LegacyIrq(cfg) = &config {
+                let mut kvm_route = kvm_irq_routing_entry {
+                    gsi,
+                    type_: KVM_IRQ_ROUTING_IRQCHIP,
+                    ..Default::default()
+                };
+                kvm_route.u.irqchip.irqchip = cfg.irqchip;
+                kvm_route.u.irqchip.pin = cfg.pin;
+                let kvm_entry = KvmRoutingEntry {
+                    route: kvm_route,
+                    masked: false,
+                };
+
+                return Ok(Box::new(kvm_entry));
             }
 
             Err(io::Error::new(
                 io::ErrorKind::Other,
                 "Interrupt config type not supported",
             ))
-        }
-    }
-
-    impl MsiInterruptGroupOps<kvm_irq_routing_entry> for KvmMsiInterruptGroup {
-        fn set_gsi_routes(
-            &self,
-            routes: &HashMap<u32, RoutingEntry<kvm_irq_routing_entry>>,
-        ) -> Result<()> {
-            let mut entry_vec: Vec<kvm_irq_routing_entry> = Vec::new();
-            for (_, entry) in routes.iter() {
-                if entry.masked {
-                    continue;
-                }
-
-                entry_vec.push(entry.route);
-            }
-
-            self.vm.set_gsi_routing(&entry_vec).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("Failed setting GSI routing: {}", e),
-                )
-            })
         }
     }
 }
@@ -409,24 +398,21 @@ pub mod mshv {
     use super::*;
     use hypervisor::mshv::*;
 
-    type MshvMsiInterruptGroup = MsiInterruptGroup<MshvIrqRoutingEntry>;
-    type MshvRoutingEntry = RoutingEntry<MshvIrqRoutingEntry>;
-    pub type MshvMsiInterruptManager = MsiInterruptManager<MshvIrqRoutingEntry>;
+    type MshvRoutingEntry = RoutingEntry<mshv_msi_routing_entry>;
+    pub type MshvMsiInterruptManager = MsiInterruptManager<mshv_msi_routing_entry>;
 
-    impl RoutingEntryExt for MshvRoutingEntry {
-        fn make_entry(
+    impl MshvRoutingEntry {
+        pub fn make_entry(
             _vm: &Arc<dyn hypervisor::Vm>,
             gsi: u32,
             config: &InterruptSourceConfig,
         ) -> Result<Box<Self>> {
             if let InterruptSourceConfig::MsiIrq(cfg) = &config {
-                let route = MshvIrqRoutingEntry {
+                let route = mshv_msi_routing_entry {
                     gsi,
-                    route: MshvIrqRouting::Msi(MshvIrqRoutingMsi {
-                        address_lo: cfg.low_addr,
-                        address_hi: cfg.high_addr,
-                        data: cfg.data,
-                    }),
+                    address_lo: cfg.low_addr,
+                    address_hi: cfg.high_addr,
+                    data: cfg.data,
                 };
                 let entry = MshvRoutingEntry {
                     route,
@@ -440,29 +426,6 @@ pub mod mshv {
                 io::ErrorKind::Other,
                 "Interrupt config type not supported",
             ))
-        }
-    }
-
-    impl MsiInterruptGroupOps<MshvIrqRoutingEntry> for MshvMsiInterruptGroup {
-        fn set_gsi_routes(
-            &self,
-            routes: &HashMap<u32, RoutingEntry<MshvIrqRoutingEntry>>,
-        ) -> Result<()> {
-            let mut entry_vec: Vec<MshvIrqRoutingEntry> = Vec::new();
-            for (_, entry) in routes.iter() {
-                if entry.masked {
-                    continue;
-                }
-
-                entry_vec.push(entry.route);
-            }
-
-            self.vm.set_gsi_routing(&entry_vec).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("Failed setting GSI routing: {}", e),
-                )
-            })
         }
     }
 }
@@ -493,7 +456,7 @@ mod tests {
         let res = get_dist_regs(gic.device());
         assert!(res.is_ok());
         let state = res.unwrap();
-        assert_eq!(state.len(), 244);
+        assert_eq!(state.len(), 649);
 
         let res = set_dist_regs(gic.device(), &state);
         assert!(res.is_ok());

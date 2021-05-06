@@ -7,12 +7,11 @@ extern crate vm_allocator;
 
 use crate::{
     msi_num_enabled_vectors, BarReprogrammingParams, MsiConfig, MsixCap, MsixConfig,
-    PciBarConfiguration, PciBarRegionType, PciCapabilityID, PciClassCode, PciConfiguration,
+    PciBarConfiguration, PciBarRegionType, PciCapabilityId, PciClassCode, PciConfiguration,
     PciDevice, PciDeviceError, PciHeaderType, PciSubclass, MSIX_TABLE_ENTRY_SIZE,
 };
 use byteorder::{ByteOrder, LittleEndian};
 use std::any::Any;
-use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::ptr::null_mut;
 use std::sync::{Arc, Barrier};
@@ -24,15 +23,14 @@ use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
 };
 use vm_device::BusDevice;
-use vm_memory::{
-    Address, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
-    GuestMemoryRegion, GuestRegionMmap, GuestUsize,
-};
+use vm_memory::{Address, GuestAddress, GuestUsize};
 use vmm_sys_util::eventfd::EventFd;
 
 #[derive(Debug)]
 pub enum VfioPciError {
     AllocateGsi,
+    DmaMap(VfioError),
+    DmaUnmap(VfioError),
     EnableIntx(VfioError),
     EnableMsi(VfioError),
     EnableMsix(VfioError),
@@ -45,7 +43,6 @@ pub enum VfioPciError {
     MsixNotConfigured,
     NewVfioPciDevice,
     SetGsiRouting(hypervisor::HypervisorVmError),
-    UpdateMemory(VfioError),
 }
 pub type Result<T> = std::result::Result<T, VfioPciError>;
 
@@ -53,6 +50,8 @@ impl fmt::Display for VfioPciError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             VfioPciError::AllocateGsi => write!(f, "failed to allocate GSI"),
+            VfioPciError::DmaMap(e) => write!(f, "failed to DMA map: {}", e),
+            VfioPciError::DmaUnmap(e) => write!(f, "failed to DMA unmap: {}", e),
             VfioPciError::EnableIntx(e) => write!(f, "failed to enable INTx: {}", e),
             VfioPciError::EnableMsi(e) => write!(f, "failed to enable MSI: {}", e),
             VfioPciError::EnableMsix(e) => write!(f, "failed to enable MSI-X: {}", e),
@@ -69,7 +68,6 @@ impl fmt::Display for VfioPciError {
             VfioPciError::MsixNotConfigured => write!(f, "MSI-X interrupt not yet configured"),
             VfioPciError::NewVfioPciDevice => write!(f, "failed to create VFIO PCI device"),
             VfioPciError::SetGsiRouting(e) => write!(f, "failed to set GSI routes: {}", e),
-            VfioPciError::UpdateMemory(e) => write!(f, "failed to update memory: {}", e),
         }
     }
 }
@@ -186,13 +184,13 @@ impl Interrupt {
         None
     }
 
-    fn accessed(&self, offset: u64) -> Option<(PciCapabilityID, u64)> {
+    fn accessed(&self, offset: u64) -> Option<(PciCapabilityId, u64)> {
         if let Some(msi) = &self.msi {
             if offset >= u64::from(msi.cap_offset)
                 && offset < u64::from(msi.cap_offset) + msi.cfg.size()
             {
                 return Some((
-                    PciCapabilityID::MessageSignalledInterrupts,
+                    PciCapabilityId::MessageSignalledInterrupts,
                     u64::from(msi.cap_offset),
                 ));
             }
@@ -200,7 +198,7 @@ impl Interrupt {
 
         if let Some(msix) = &self.msix {
             if offset == u64::from(msix.cap_offset) {
-                return Some((PciCapabilityID::MSIX, u64::from(msix.cap_offset)));
+                return Some((PciCapabilityId::MsiX, u64::from(msix.cap_offset)));
             }
         }
 
@@ -303,7 +301,6 @@ pub struct VfioPciDevice {
     configuration: PciConfiguration,
     mmio_regions: Vec<MmioRegion>,
     interrupt: Interrupt,
-    mem: GuestMemoryAtomic<GuestMemoryMmap>,
     iommu_attached: bool,
 }
 
@@ -315,7 +312,6 @@ impl VfioPciDevice {
         container: Arc<VfioContainer>,
         msi_interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         legacy_interrupt_group: Option<Arc<Box<dyn InterruptSourceGroup>>>,
-        mem: GuestMemoryAtomic<GuestMemoryMmap>,
         iommu_attached: bool,
     ) -> Result<Self> {
         let device = Arc::new(device);
@@ -348,7 +344,6 @@ impl VfioPciDevice {
                 msi: None,
                 msix: None,
             },
-            mem,
             iommu_attached,
         };
 
@@ -357,6 +352,10 @@ impl VfioPciDevice {
         vfio_pci_device.initialize_legacy_interrupt(legacy_interrupt_group)?;
 
         Ok(vfio_pci_device)
+    }
+
+    pub fn iommu_attached(&self) -> bool {
+        self.iommu_attached
     }
 
     fn enable_intx(&mut self) -> Result<()> {
@@ -427,7 +426,7 @@ impl VfioPciDevice {
 
             self.device
                 .enable_msix(irq_fds.iter().collect())
-                .map_err(VfioPciError::EnableMsi)?;
+                .map_err(VfioPciError::EnableMsix)?;
         }
 
         Ok(())
@@ -541,8 +540,8 @@ impl VfioPciDevice {
                 .vfio_pci_configuration
                 .read_config_byte(cap_next.into());
 
-            match PciCapabilityID::from(cap_id) {
-                PciCapabilityID::MessageSignalledInterrupts => {
+            match PciCapabilityId::from(cap_id) {
+                PciCapabilityId::MessageSignalledInterrupts => {
                     if let Some(irq_info) = self.device.get_irq_info(VFIO_PCI_MSI_IRQ_INDEX) {
                         if irq_info.count > 0 {
                             // Parse capability only if the VFIO device
@@ -551,7 +550,7 @@ impl VfioPciDevice {
                         }
                     }
                 }
-                PciCapabilityID::MSIX => {
+                PciCapabilityId::MsiX => {
                     if let Some(irq_info) = self.device.get_irq_info(VFIO_PCI_MSIX_IRQ_INDEX) {
                         if irq_info.count > 0 {
                             // Parse capability only if the VFIO device
@@ -728,15 +727,21 @@ impl VfioPciDevice {
         }
     }
 
-    pub fn update_memory(&self, new_region: &Arc<GuestRegionMmap>) -> Result<()> {
+    pub fn dma_map(&self, iova: u64, size: u64, user_addr: u64) -> Result<()> {
         if !self.iommu_attached {
             self.container
-                .vfio_dma_map(
-                    new_region.start_addr().raw_value(),
-                    new_region.len() as u64,
-                    new_region.as_ptr() as u64,
-                )
-                .map_err(VfioPciError::UpdateMemory)?;
+                .vfio_dma_map(iova, size, user_addr)
+                .map_err(VfioPciError::DmaMap)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn dma_unmap(&self, iova: u64, size: u64) -> Result<()> {
+        if !self.iommu_attached {
+            self.container
+                .vfio_dma_unmap(iova, size)
+                .map_err(VfioPciError::DmaUnmap)?;
         }
 
         Ok(())
@@ -765,15 +770,6 @@ impl Drop for VfioPciDevice {
 
         if self.interrupt.intx_in_use() {
             self.disable_intx();
-        }
-
-        if !self.iommu_attached
-            && self
-                .container
-                .vfio_unmap_guest_memory(self.mem.memory().deref())
-                .is_err()
-        {
-            error!("failed to remove all guest memory regions from iommu table");
         }
     }
 }
@@ -871,7 +867,7 @@ impl PciDevice for VfioPciDevice {
                 #[cfg(target_arch = "x86_64")]
                 {
                     // IO BAR
-                    region_type = PciBarRegionType::IORegion;
+                    region_type = PciBarRegionType::IoRegion;
 
                     // Clear first bit.
                     lsb_size &= 0xffff_fffc;
@@ -914,26 +910,14 @@ impl PciDevice for VfioPciDevice {
                 let first_bit = region_size.trailing_zeros();
                 region_size = 2u64.pow(first_bit);
 
-                // We need to allocate a guest MMIO address range for that BAR.
-                // In case the BAR is mappable directly, this means it might be
-                // set as user memory region, which expects to deal with 4K
-                // pages. Therefore, the alignment has to be set accordingly.
-                let bar_alignment = if (bar_id == VFIO_PCI_ROM_REGION_INDEX)
-                    || (self.device.get_region_flags(bar_id) & VFIO_REGION_INFO_FLAG_MMAP != 0)
-                {
-                    // 4K alignment
-                    0x1000
-                } else {
-                    // Default 16 bytes alignment
-                    0x10
-                };
+                // BAR allocation needs to be naturally aligned
                 if is_64bit_bar {
                     bar_addr = allocator
-                        .allocate_mmio_addresses(None, region_size, Some(bar_alignment))
+                        .allocate_mmio_addresses(None, region_size, Some(region_size))
                         .ok_or(PciDeviceError::IoAllocationFailed(region_size))?;
                 } else {
                     bar_addr = allocator
-                        .allocate_mmio_hole_addresses(None, region_size, Some(bar_alignment))
+                        .allocate_mmio_hole_addresses(None, region_size, Some(region_size))
                         .ok_or(PciDeviceError::IoAllocationFailed(region_size))?;
                 }
             }
@@ -978,15 +962,6 @@ impl PciDevice for VfioPciDevice {
             }
         }
 
-        if !self.iommu_attached
-            && self
-                .container
-                .vfio_map_guest_memory(self.mem.memory().deref())
-                .is_err()
-        {
-            error!("failed to add all guest memory regions into iommu table");
-        }
-
         Ok(ranges)
     }
 
@@ -996,7 +971,7 @@ impl PciDevice for VfioPciDevice {
     ) -> std::result::Result<(), PciDeviceError> {
         for region in self.mmio_regions.iter() {
             match region.type_ {
-                PciBarRegionType::IORegion => {
+                PciBarRegionType::IoRegion => {
                     #[cfg(target_arch = "x86_64")]
                     allocator.free_io_addresses(region.start, region.length);
                     #[cfg(target_arch = "aarch64")]
@@ -1042,12 +1017,12 @@ impl PciDevice for VfioPciDevice {
         if let Some((cap_id, cap_base)) = self.interrupt.accessed(reg) {
             let cap_offset: u64 = reg - cap_base + offset;
             match cap_id {
-                PciCapabilityID::MessageSignalledInterrupts => {
+                PciCapabilityId::MessageSignalledInterrupts => {
                     if let Err(e) = self.update_msi_capabilities(cap_offset, data) {
                         error!("Could not update MSI capabilities: {}", e);
                     }
                 }
-                PciCapabilityID::MSIX => {
+                PciCapabilityId::MsiX => {
                     if let Err(e) = self.update_msix_capabilities(cap_offset, data) {
                         error!("Could not update MSI-X capabilities: {}", e);
                     }

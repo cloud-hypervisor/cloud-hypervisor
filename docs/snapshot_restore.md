@@ -20,7 +20,7 @@ First thing, we must run a Cloud-Hypervisor VM:
     --api-socket /tmp/cloud-hypervisor.sock \
     --cpus boot=4 \
     --memory size=4G \
-    --kernel bzImage \
+    --kernel vmlinux \
     --cmdline "root=/dev/vda1 console=hvc0 rw" \
     --disk path=focal-server-cloudimg-amd64.raw
 ```

@@ -16,6 +16,7 @@ use log::*;
 use net_util::{
     open_tap, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TxVirtio,
 };
+use option_parser::Toggle;
 use option_parser::{OptionParser, OptionParserError};
 use std::fmt;
 use std::io::{self};
@@ -75,7 +76,7 @@ pub enum Error {
 }
 
 pub const SYNTAX: &str = "vhost-user-net backend parameters \
-\"ip=<ip_addr>,mask=<net_mask>,socket=<socket_path>,\
+\"ip=<ip_addr>,mask=<net_mask>,socket=<socket_path>,client=on|off,\
 num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,tap=<if_name>\"";
 
 impl fmt::Display for Error {
@@ -94,7 +95,6 @@ impl std::convert::From<Error> for std::io::Error {
 
 struct VhostUserNetThread {
     net: NetQueuePair,
-    vring_worker: Option<Arc<VringWorker>>,
     kill_evt: EventFd,
 }
 
@@ -102,7 +102,6 @@ impl VhostUserNetThread {
     /// Create a new virtio network device with the given TAP interface.
     fn new(tap: Tap) -> Result<Self> {
         Ok(VhostUserNetThread {
-            vring_worker: None,
             kill_evt: EventFd::new(EFD_NONBLOCK).map_err(Error::CreateKillEventFd)?,
             net: NetQueuePair {
                 mem: None,
@@ -113,13 +112,15 @@ impl VhostUserNetThread {
                 epoll_fd: None,
                 counters: NetCounters::default(),
                 tap_event_id: 2,
+                rx_desc_avail: false,
+                rx_rate_limiter: None,
+                tx_rate_limiter: None,
             },
         })
     }
 
     pub fn set_vring_worker(&mut self, vring_worker: Option<Arc<VringWorker>>) {
         self.net.epoll_fd = Some(vring_worker.as_ref().unwrap().as_raw_fd());
-        self.vring_worker = vring_worker;
     }
 }
 
@@ -176,19 +177,15 @@ impl VhostUserBackend for VhostUserNetBackend {
     }
 
     fn features(&self) -> u64 {
-        1 << VIRTIO_NET_F_GUEST_CSUM
-            | 1 << VIRTIO_NET_F_CSUM
-            | 1 << VIRTIO_NET_F_GUEST_TSO4
-            | 1 << VIRTIO_NET_F_GUEST_UFO
-            | 1 << VIRTIO_NET_F_HOST_TSO4
-            | 1 << VIRTIO_NET_F_HOST_UFO
-            | 1 << VIRTIO_F_VERSION_1
+        1 << VIRTIO_F_VERSION_1
             | 1 << VIRTIO_RING_F_EVENT_IDX
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
     }
 
     fn protocol_features(&self) -> VhostUserProtocolFeatures {
-        VhostUserProtocolFeatures::MQ | VhostUserProtocolFeatures::REPLY_ACK
+        VhostUserProtocolFeatures::MQ
+            | VhostUserProtocolFeatures::REPLY_ACK
+            | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
     }
 
     fn set_event_idx(&mut self, _enabled: bool) {}
@@ -282,6 +279,7 @@ pub struct VhostUserNetBackendConfig {
     pub num_queues: usize,
     pub queue_size: u16,
     pub tap: Option<String>,
+    pub client: bool,
 }
 
 impl VhostUserNetBackendConfig {
@@ -295,7 +293,8 @@ impl VhostUserNetBackendConfig {
             .add("mask")
             .add("queue_size")
             .add("num_queues")
-            .add("socket");
+            .add("socket")
+            .add("client");
 
         parser.parse(backend).map_err(Error::FailedConfigParse)?;
 
@@ -321,6 +320,11 @@ impl VhostUserNetBackendConfig {
             .map_err(Error::FailedConfigParse)?
             .unwrap_or(2);
         let socket = parser.get("socket").ok_or(Error::SocketParameterMissing)?;
+        let client = parser
+            .convert::<Toggle>("client")
+            .map_err(Error::FailedConfigParse)?
+            .unwrap_or(Toggle(false))
+            .0;
 
         Ok(VhostUserNetBackendConfig {
             ip,
@@ -330,6 +334,7 @@ impl VhostUserNetBackendConfig {
             num_queues,
             queue_size,
             tap,
+            client,
         })
     }
 }
@@ -343,11 +348,7 @@ pub fn start_net_backend(backend_command: &str) {
         }
     };
 
-    let tap = if let Some(tap) = backend_config.tap.as_ref() {
-        Some(tap.as_str())
-    } else {
-        None
-    };
+    let tap = backend_config.tap.as_deref();
 
     let net_backend = Arc::new(RwLock::new(
         VhostUserNetBackend::new(
@@ -360,8 +361,6 @@ pub fn start_net_backend(backend_command: &str) {
         )
         .unwrap(),
     ));
-
-    let listener = Listener::new(&backend_config.socket, true).unwrap();
 
     let mut net_daemon =
         VhostUserDaemon::new("vhost-user-net-backend".to_string(), net_backend.clone()).unwrap();
@@ -380,7 +379,11 @@ pub fn start_net_backend(backend_command: &str) {
             .set_vring_worker(Some(vring_workers.remove(0)));
     }
 
-    if let Err(e) = net_daemon.start(listener) {
+    if let Err(e) = if backend_config.client {
+        net_daemon.start_client(&backend_config.socket)
+    } else {
+        net_daemon.start_server(Listener::new(&backend_config.socket, true).unwrap())
+    } {
         error!(
             "failed to start daemon for vhost-user-net with error: {:?}",
             e

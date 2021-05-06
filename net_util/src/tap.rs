@@ -190,11 +190,8 @@ impl Tap {
             return Err(Error::ConfigureTap(IoError::last_os_error()));
         }
 
-        let tap = Tap { if_name, tap_file };
-        let offload_flags =
-            net_gen::TUN_F_CSUM | net_gen::TUN_F_UFO | net_gen::TUN_F_TSO4 | net_gen::TUN_F_TSO6;
+        let tap = Tap { tap_file, if_name };
         let vnet_hdr_size = vnet_hdr_len() as i32;
-        tap.set_offload(offload_flags)?;
         tap.set_vnet_hdr_size(vnet_hdr_size)?;
 
         Ok(tap)

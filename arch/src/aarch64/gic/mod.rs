@@ -18,7 +18,7 @@ use std::sync::Arc;
 #[derive(Debug)]
 pub enum Error {
     /// Error while calling KVM ioctl for setting up the global interrupt controller.
-    CreateGIC(hypervisor::HypervisorVmError),
+    CreateGic(hypervisor::HypervisorVmError),
     /// Error while setting device attributes for the GIC.
     SetDeviceAttribute(hypervisor::HypervisorDeviceError),
     /// Error while getting device attributes for the GIC.
@@ -26,7 +26,7 @@ pub enum Error {
 }
 type Result<T> = result::Result<T, Error>;
 
-pub trait GICDevice: Send {
+pub trait GicDevice: Send {
     /// Returns the hypervisor agnostic Device of the GIC device
     fn device(&self) -> &Arc<dyn hypervisor::Device>;
 
@@ -65,16 +65,16 @@ pub trait GICDevice: Send {
 }
 
 pub mod kvm {
-    use super::GICDevice;
+    use super::GicDevice;
     use super::Result;
-    use crate::aarch64::gic::gicv3_its::kvm::KvmGICv3ITS;
+    use crate::aarch64::gic::gicv3_its::kvm::KvmGicV3Its;
     use crate::layout;
     use hypervisor::kvm::kvm_bindings;
     use std::boxed::Box;
     use std::sync::Arc;
 
     /// Trait for GIC devices.
-    pub trait KvmGICDevice: Send + Sync + GICDevice {
+    pub trait KvmGicDevice: Send + Sync + GicDevice {
         /// Returns the GIC version of the device
         fn version() -> u32;
 
@@ -82,12 +82,12 @@ pub mod kvm {
         fn create_device(
             device: Arc<dyn hypervisor::Device>,
             vcpu_count: u64,
-        ) -> Box<dyn GICDevice>;
+        ) -> Box<dyn GicDevice>;
 
         /// Setup the device-specific attributes
         fn init_device_attributes(
             vm: &Arc<dyn hypervisor::Vm>,
-            gic_device: &dyn GICDevice,
+            gic_device: &dyn GicDevice,
         ) -> Result<()>;
 
         /// Initialize a GIC device
@@ -99,7 +99,7 @@ pub mod kvm {
             };
 
             vm.create_device(&mut gic_device)
-                .map_err(super::Error::CreateGIC)
+                .map_err(super::Error::CreateGic)
         }
 
         /// Set a GIC device attribute
@@ -111,10 +111,10 @@ pub mod kvm {
             flags: u32,
         ) -> Result<()> {
             let attr = kvm_bindings::kvm_device_attr {
+                flags,
                 group,
                 attr,
                 addr,
-                flags,
             };
             device
                 .set_device_attr(&attr)
@@ -132,10 +132,10 @@ pub mod kvm {
             flags: u32,
         ) -> Result<()> {
             let mut attr = kvm_bindings::kvm_device_attr {
+                flags,
                 group,
                 attr,
                 addr,
-                flags,
             };
             device
                 .get_device_attr(&mut attr)
@@ -145,7 +145,7 @@ pub mod kvm {
         }
 
         /// Finalize the setup of a GIC device
-        fn finalize_device(gic_device: &dyn GICDevice) -> Result<()> {
+        fn finalize_device(gic_device: &dyn GicDevice) -> Result<()> {
             /* We need to tell the kernel how many irqs to support with this vgic.
              * See the `layout` module for details.
              */
@@ -175,7 +175,7 @@ pub mod kvm {
 
         /// Method to initialize the GIC device
         #[allow(clippy::new_ret_no_self)]
-        fn new(vm: &Arc<dyn hypervisor::Vm>, vcpu_count: u64) -> Result<Box<dyn GICDevice>> {
+        fn new(vm: &Arc<dyn hypervisor::Vm>, vcpu_count: u64) -> Result<Box<dyn GicDevice>> {
             let vgic_fd = Self::init_device(vm)?;
 
             let device = Self::create_device(vgic_fd, vcpu_count);
@@ -190,9 +190,9 @@ pub mod kvm {
 
     /// Create a GICv3-ITS device.
     ///
-    pub fn create_gic(vm: &Arc<dyn hypervisor::Vm>, vcpu_count: u64) -> Result<Box<dyn GICDevice>> {
+    pub fn create_gic(vm: &Arc<dyn hypervisor::Vm>, vcpu_count: u64) -> Result<Box<dyn GicDevice>> {
         debug!("creating a GICv3-ITS");
-        KvmGICv3ITS::new(vm, vcpu_count)
+        KvmGicV3Its::new(vm, vcpu_count)
     }
 
     /// Function that saves RDIST pending tables into guest RAM.

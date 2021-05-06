@@ -10,7 +10,6 @@ use super::{
 };
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{VirtioInterrupt, VirtioInterruptType};
-use anyhow::anyhow;
 use seccomp::{SeccompAction, SeccompFilter};
 use std::fs::File;
 use std::io;
@@ -20,10 +19,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};
 use std::thread;
 use vm_memory::{Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
-use vm_migration::{
-    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
-    Transportable,
-};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: u16 = 256;
@@ -154,7 +150,7 @@ impl Rng {
 
         Ok(Rng {
             common: VirtioCommon {
-                device_type: VirtioDeviceType::TYPE_RNG as u32,
+                device_type: VirtioDeviceType::Rng as u32,
                 queue_sizes: QUEUE_SIZES.to_vec(),
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 avail_features,
@@ -303,37 +299,12 @@ impl Snapshottable for Rng {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        let snapshot =
-            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
-
-        let mut rng_snapshot = Snapshot::new(self.id.as_str());
-        rng_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", self.id),
-            snapshot,
-        });
-
-        Ok(rng_snapshot)
+        Snapshot::new_from_state(&self.id, &self.state())
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        if let Some(rng_section) = snapshot.snapshot_data.get(&format!("{}-section", self.id)) {
-            let rng_state = match serde_json::from_slice(&rng_section.snapshot) {
-                Ok(state) => state,
-                Err(error) => {
-                    return Err(MigratableError::Restore(anyhow!(
-                        "Could not deserialize RNG {}",
-                        error
-                    )))
-                }
-            };
-
-            self.set_state(&rng_state);
-            return Ok(());
-        }
-
-        Err(MigratableError::Restore(anyhow!(
-            "Could not find RNG snapshot section"
-        )))
+        self.set_state(&snapshot.to_state(&self.id)?);
+        Ok(())
     }
 }
 

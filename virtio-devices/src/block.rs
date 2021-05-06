@@ -11,17 +11,17 @@
 use super::Error as DeviceError;
 use super::{
     ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
-    VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
+    RateLimiterConfig, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType,
+    EPOLL_HELPER_EVENT_LAST,
 };
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::VirtioInterrupt;
-use anyhow::anyhow;
 use block_util::{
     async_io::AsyncIo, async_io::AsyncIoError, async_io::DiskFile, build_disk_image_id, Request,
     RequestType, VirtioBlockConfig,
 };
+use rate_limiter::{RateLimiter, TokenType};
 use seccomp::{SeccompAction, SeccompFilter};
-use std::collections::HashMap;
 use std::io;
 use std::num::Wrapping;
 use std::os::unix::io::AsRawFd;
@@ -30,15 +30,10 @@ use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;
+use std::{collections::HashMap, convert::TryInto};
 use virtio_bindings::bindings::virtio_blk::*;
-use vm_memory::{
-    ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryError,
-    GuestMemoryMmap,
-};
-use vm_migration::{
-    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
-    Transportable,
-};
+use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 const SECTOR_SHIFT: u8 = 9;
@@ -48,27 +43,11 @@ pub const SECTOR_SIZE: u64 = 0x01 << SECTOR_SHIFT;
 const QUEUE_AVAIL_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 // New completed tasks are pending on the completion ring.
 const COMPLETION_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
+// New 'wake up' event from the rate limiter
+const RATE_LIMITER_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
 
 #[derive(Debug)]
 pub enum Error {
-    /// Guest gave us bad memory addresses.
-    GuestMemory(GuestMemoryError),
-    /// Guest gave us offsets that would have overflowed a usize.
-    CheckedOffset(GuestAddress, usize),
-    /// Guest gave us a write only descriptor that protocol says to read from.
-    UnexpectedWriteOnlyDescriptor,
-    /// Guest gave us a read only descriptor that protocol says to write to.
-    UnexpectedReadOnlyDescriptor,
-    /// Guest gave us too few descriptors in a descriptor chain.
-    DescriptorChainTooShort,
-    /// Guest gave us a descriptor that was too short to use.
-    DescriptorLengthTooSmall,
-    /// Getting a block's metadata fails for any reason.
-    GetFileMetadata,
-    /// The requested operation would cause a seek beyond disk end.
-    InvalidOffset,
-    /// Unsupported operation on the disk.
-    Unsupported(u32),
     /// Failed to parse the request.
     RequestParsing(block_util::Error),
     /// Failed to execute the request.
@@ -104,6 +83,7 @@ struct BlockEpollHandler {
     counters: BlockCounters,
     queue_evt: EventFd,
     request_list: HashMap<u16, Request>,
+    rate_limiter: Option<RateLimiter>,
 }
 
 impl BlockEpollHandler {
@@ -116,6 +96,38 @@ impl BlockEpollHandler {
 
         for avail_desc in queue.iter(&mem) {
             let mut request = Request::parse(&avail_desc, &mem).map_err(Error::RequestParsing)?;
+
+            if let Some(rate_limiter) = &mut self.rate_limiter {
+                // If limiter.consume() fails it means there is no more TokenType::Ops
+                // budget and rate limiting is in effect.
+                if !rate_limiter.consume(1, TokenType::Ops) {
+                    // Stop processing the queue and return this descriptor chain to the
+                    // avail ring, for later processing.
+                    queue.go_to_previous_position();
+                    break;
+                }
+                // Exercise the rate limiter only if this request is of data transfer type.
+                if request.request_type == RequestType::In
+                    || request.request_type == RequestType::Out
+                {
+                    let mut bytes = Wrapping(0);
+                    for (_, data_len) in &request.data_descriptors {
+                        bytes += Wrapping(*data_len as u64);
+                    }
+
+                    // If limiter.consume() fails it means there is no more TokenType::Bytes
+                    // budget and rate limiting is in effect.
+                    if !rate_limiter.consume(bytes.0, TokenType::Bytes) {
+                        // Revert the OPS consume().
+                        rate_limiter.manual_replenish(1, TokenType::Ops);
+                        // Stop processing the queue and return this descriptor chain to the
+                        // avail ring, for later processing.
+                        queue.go_to_previous_position();
+                        break;
+                    }
+                };
+            }
+
             request.set_writeback(self.writeback.load(Ordering::Acquire));
 
             if request
@@ -242,6 +254,9 @@ impl BlockEpollHandler {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.queue_evt.as_raw_fd(), QUEUE_AVAIL_EVENT)?;
         helper.add_event(self.disk_image.notifier().as_raw_fd(), COMPLETION_EVENT)?;
+        if let Some(rate_limiter) = &self.rate_limiter {
+            helper.add_event(rate_limiter.as_raw_fd(), RATE_LIMITER_EVENT)?;
+        }
         helper.run(paused, paused_sync, self)?;
 
         Ok(())
@@ -258,18 +273,24 @@ impl EpollHelperHandler for BlockEpollHandler {
                     return true;
                 }
 
-                match self.process_queue_submit() {
-                    Ok(needs_notification) => {
-                        if needs_notification {
-                            if let Err(e) = self.signal_used_queue() {
-                                error!("Failed to signal used queue: {:?}", e);
-                                return true;
+                let rate_limit_reached =
+                    self.rate_limiter.as_ref().map_or(false, |r| r.is_blocked());
+
+                // Process the queue only when the rate limit is not reached
+                if !rate_limit_reached {
+                    match self.process_queue_submit() {
+                        Ok(needs_notification) => {
+                            if needs_notification {
+                                if let Err(e) = self.signal_used_queue() {
+                                    error!("Failed to signal used queue: {:?}", e);
+                                    return true;
+                                }
                             }
                         }
-                    }
-                    Err(e) => {
-                        error!("Failed to process queue (submit): {:?}", e);
-                        return true;
+                        Err(e) => {
+                            error!("Failed to process queue (submit): {:?}", e);
+                            return true;
+                        }
                     }
                 }
             }
@@ -294,6 +315,31 @@ impl EpollHelperHandler for BlockEpollHandler {
                     }
                 }
             }
+            RATE_LIMITER_EVENT => {
+                if let Some(rate_limiter) = &mut self.rate_limiter {
+                    // Upon rate limiter event, call the rate limiter handler
+                    // and restart processing the queue.
+                    if rate_limiter.event_handler().is_ok() {
+                        match self.process_queue_submit() {
+                            Ok(needs_notification) => {
+                                if needs_notification {
+                                    if let Err(e) = self.signal_used_queue() {
+                                        error!("Failed to signal used queue: {:?}", e);
+                                        return true;
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                error!("Failed to process queue (submit): {:?}", e);
+                                return true;
+                            }
+                        }
+                    }
+                } else {
+                    error!("Unexpected 'RATE_LIMITER_EVENT' when rate_limiter is not enabled.");
+                    return true;
+                }
+            }
             _ => {
                 error!("Unexpected event: {}", ev_type);
                 return true;
@@ -314,11 +360,12 @@ pub struct Block {
     writeback: Arc<AtomicBool>,
     counters: BlockCounters,
     seccomp_action: SeccompAction,
+    rate_limiter_config: Option<RateLimiterConfig>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct BlockState {
-    pub disk_path: PathBuf,
+    pub disk_path: String,
     pub disk_nsectors: u64,
     pub avail_features: u64,
     pub acked_features: u64,
@@ -337,6 +384,7 @@ impl Block {
         num_queues: usize,
         queue_size: u16,
         seccomp_action: SeccompAction,
+        rate_limiter_config: Option<RateLimiterConfig>,
     ) -> io::Result<Self> {
         let disk_size = disk_image.size().map_err(|e| {
             io::Error::new(
@@ -378,7 +426,7 @@ impl Block {
 
         Ok(Block {
             common: VirtioCommon {
-                device_type: VirtioDeviceType::TYPE_BLOCK as u32,
+                device_type: VirtioDeviceType::Block as u32,
                 avail_features,
                 paused_sync: Some(Arc::new(Barrier::new(num_queues + 1))),
                 queue_sizes: vec![queue_size; num_queues],
@@ -393,12 +441,13 @@ impl Block {
             writeback: Arc::new(AtomicBool::new(true)),
             counters: BlockCounters::default(),
             seccomp_action,
+            rate_limiter_config,
         })
     }
 
     fn state(&self) -> BlockState {
         BlockState {
-            disk_path: self.disk_path.clone(),
+            disk_path: self.disk_path.to_str().unwrap().to_owned(),
             disk_nsectors: self.disk_nsectors,
             avail_features: self.common.avail_features,
             acked_features: self.common.acked_features,
@@ -407,7 +456,7 @@ impl Block {
     }
 
     fn set_state(&mut self, state: &BlockState) {
-        self.disk_path = state.disk_path.clone();
+        self.disk_path = state.disk_path.clone().into();
         self.disk_nsectors = state.disk_nsectors;
         self.common.avail_features = state.avail_features;
         self.common.acked_features = state.acked_features;
@@ -521,6 +570,12 @@ impl VirtioDevice for Block {
                     ActivateError::BadActivate
                 })?;
 
+            let rate_limiter: Option<RateLimiter> = self
+                .rate_limiter_config
+                .map(RateLimiterConfig::try_into)
+                .transpose()
+                .map_err(ActivateError::CreateRateLimiter)?;
+
             let mut handler = BlockEpollHandler {
                 queue,
                 mem: mem.clone(),
@@ -540,6 +595,7 @@ impl VirtioDevice for Block {
                 counters: self.counters.clone(),
                 queue_evt,
                 request_list: HashMap::with_capacity(queue_size.into()),
+                rate_limiter,
             };
 
             let paused = self.common.paused.clone();
@@ -618,37 +674,12 @@ impl Snapshottable for Block {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        let snapshot =
-            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
-
-        let mut block_snapshot = Snapshot::new(self.id.as_str());
-        block_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", self.id),
-            snapshot,
-        });
-
-        Ok(block_snapshot)
+        Snapshot::new_from_state(&self.id(), &self.state())
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        if let Some(block_section) = snapshot.snapshot_data.get(&format!("{}-section", self.id)) {
-            let block_state = match serde_json::from_slice(&block_section.snapshot) {
-                Ok(state) => state,
-                Err(error) => {
-                    return Err(MigratableError::Restore(anyhow!(
-                        "Could not deserialize BLOCK {}",
-                        error
-                    )))
-                }
-            };
-
-            self.set_state(&block_state);
-            return Ok(());
-        }
-
-        Err(MigratableError::Restore(anyhow!(
-            "Could not find BLOCK snapshot section"
-        )))
+        self.set_state(&snapshot.to_state(&self.id)?);
+        Ok(())
     }
 }
 impl Transportable for Block {}

@@ -17,6 +17,7 @@ extern crate event_monitor;
 use clap::{App, Arg, ArgGroup, ArgMatches};
 use libc::EFD_NONBLOCK;
 use log::LevelFilter;
+use option_parser::OptionParser;
 use seccomp::SeccompAction;
 use signal_hook::{
     consts::SIGSYS,
@@ -24,7 +25,7 @@ use signal_hook::{
 };
 use std::env;
 use std::fs::File;
-use std::os::unix::io::FromRawFd;
+use std::os::unix::io::{FromRawFd, RawFd};
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -35,7 +36,7 @@ use vmm_sys_util::eventfd::EventFd;
 #[derive(Error, Debug)]
 enum Error {
     #[error("Failed to create API EventFd: {0}")]
-    CreateAPIEventFd(#[source] std::io::Error),
+    CreateApiEventFd(#[source] std::io::Error),
     #[cfg_attr(
         feature = "kvm",
         error("Failed to open hypervisor interface (is /dev/kvm available?): {0}")
@@ -46,7 +47,7 @@ enum Error {
     )]
     CreateHypervisor(#[source] hypervisor::HypervisorError),
     #[error("Failed to start the VMM thread: {0}")]
-    StartVMMThread(#[source] vmm::Error),
+    StartVmmThread(#[source] vmm::Error),
     #[error("Error parsing config: {0}")]
     ParsingConfig(vmm::config::Error),
     #[error("Error creating VM: {0:?}")]
@@ -61,6 +62,18 @@ enum Error {
     ThreadJoin(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
     #[error("VMM thread exited with error: {0}")]
     VmmThread(#[source] vmm::Error),
+    #[error("Error parsing --api-socket: {0}")]
+    ParsingApiSocket(std::num::ParseIntError),
+    #[error("Error parsing --event-monitor: {0}")]
+    ParsingEventMonitor(option_parser::OptionParserError),
+    #[error("Error parsing --event-monitor: path or fd required")]
+    BareEventMonitor,
+    #[error("Error doing event monitor I/O: {0}")]
+    EventMonitorIo(std::io::Error),
+    #[error("Error creating log file: {0}")]
+    LogFileCreation(std::io::Error),
+    #[error("Error setting up logger: {0}")]
+    LoggerSetup(log::SetLoggerError),
 }
 
 struct Logger {
@@ -120,7 +133,6 @@ fn create_app<'a, 'b>(
     default_vcpus: &'a str,
     default_memory: &'a str,
     default_rng: &'a str,
-    api_server_path: &'a str,
 ) -> App<'a, 'b> {
     #[cfg(target_arch = "x86_64")]
     let mut app: App;
@@ -182,7 +194,7 @@ fn create_app<'a, 'b>(
                 .long("kernel")
                 .help(
                     "Path to loaded kernel. This may be a kernel or firmware that supports a PVH \
-                entry point, a vmlinux ELF file or a Linux bzImage or achitecture equivalent",
+                entry point (e.g. vmlinux) or architecture equivalent",
                 )
                 .takes_value(true)
                 .group("vm-config"),
@@ -314,16 +326,15 @@ fn create_app<'a, 'b>(
         .arg(
             Arg::with_name("api-socket")
                 .long("api-socket")
-                .help("HTTP API socket path (UNIX domain socket).")
+                .help("HTTP API socket (UNIX domain socket): path=</path/to/a/file> or fd=<fd>.")
                 .takes_value(true)
                 .min_values(1)
-                .default_value(&api_server_path)
                 .group("vmm-config"),
         )
         .arg(
-            Arg::with_name("monitor-fd")
-                .long("monitor-fd")
-                .help("File descriptor to report events on")
+            Arg::with_name("event-monitor")
+                .long("event-monitor")
+                .help("File to report events on: path=</path/to/a/file> or fd=<fd>")
                 .takes_value(true)
                 .min_values(1)
                 .group("vmm-config"),
@@ -356,12 +367,93 @@ fn create_app<'a, 'b>(
         );
     }
 
+    #[cfg(feature = "tdx")]
+    {
+        app = app.arg(
+            Arg::with_name("tdx")
+                .long("tdx")
+                .help("TDX Support: firmware=<tdvf path>")
+                .takes_value(true)
+                .group("vm-config"),
+        );
+    }
+
     app
 }
 
-fn start_vmm(cmd_arguments: ArgMatches, api_socket_path: &str) -> Result<(), Error> {
+fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
+    let log_level = match cmd_arguments.occurrences_of("v") {
+        0 => LevelFilter::Warn,
+        1 => LevelFilter::Info,
+        2 => LevelFilter::Debug,
+        _ => LevelFilter::Trace,
+    };
+
+    let log_file: Box<dyn std::io::Write + Send> = if let Some(file) =
+        cmd_arguments.value_of("log-file")
+    {
+        Box::new(std::fs::File::create(std::path::Path::new(file)).map_err(Error::LogFileCreation)?)
+    } else {
+        Box::new(std::io::stderr())
+    };
+
+    log::set_boxed_logger(Box::new(Logger {
+        output: Mutex::new(log_file),
+        start: std::time::Instant::now(),
+    }))
+    .map(|()| log::set_max_level(log_level))
+    .map_err(Error::LoggerSetup)?;
+
+    let (api_socket_path, api_socket_fd) =
+        if let Some(socket_config) = cmd_arguments.value_of("api-socket") {
+            let mut parser = OptionParser::new();
+            parser.add("path").add("fd");
+            parser.parse(socket_config).unwrap_or_default();
+
+            if let Some(fd) = parser.get("fd") {
+                (
+                    None,
+                    Some(fd.parse::<RawFd>().map_err(Error::ParsingApiSocket)?),
+                )
+            } else if let Some(path) = parser.get("path") {
+                (Some(path), None)
+            } else {
+                (
+                    cmd_arguments.value_of("api-socket").map(|s| s.to_string()),
+                    None,
+                )
+            }
+        } else {
+            (None, None)
+        };
+
+    if let Some(monitor_config) = cmd_arguments.value_of("event-monitor") {
+        let mut parser = OptionParser::new();
+        parser.add("path").add("fd");
+        parser
+            .parse(monitor_config)
+            .map_err(Error::ParsingEventMonitor)?;
+
+        let file = if parser.is_set("fd") {
+            let fd = parser
+                .convert("fd")
+                .map_err(Error::ParsingEventMonitor)?
+                .unwrap();
+            unsafe { File::from_raw_fd(fd) }
+        } else if parser.is_set("path") {
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(parser.get("path").unwrap())
+                .map_err(Error::EventMonitorIo)?
+        } else {
+            return Err(Error::BareEventMonitor);
+        };
+        event_monitor::set_monitor(file).map_err(Error::EventMonitorIo)?;
+    }
+
     let (api_request_sender, api_request_receiver) = channel();
-    let api_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateAPIEventFd)?;
+    let api_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateApiEventFd)?;
 
     let http_sender = api_request_sender.clone();
     let seccomp_action = if let Some(seccomp_value) = cmd_arguments.value_of("seccomp") {
@@ -407,32 +499,21 @@ fn start_vmm(cmd_arguments: ArgMatches, api_socket_path: &str) -> Result<(), Err
     let hypervisor = hypervisor::new().map_err(Error::CreateHypervisor)?;
     let vmm_thread = vmm::start_vmm_thread(
         env!("CARGO_PKG_VERSION").to_string(),
-        api_socket_path,
+        &api_socket_path,
+        api_socket_fd,
         api_evt.try_clone().unwrap(),
         http_sender,
         api_request_receiver,
         &seccomp_action,
         hypervisor,
     )
-    .map_err(Error::StartVMMThread)?;
+    .map_err(Error::StartVmmThread)?;
 
     // Can't test for "vm-config" group as some have default values. The kernel
     // is the only required option for booting the VM.
-    if cmd_arguments.is_present("kernel") {
+    if cmd_arguments.is_present("kernel") || cmd_arguments.is_present("tdx") {
         let vm_params = config::VmParams::from_arg_matches(&cmd_arguments);
         let vm_config = config::VmConfig::parse(vm_params).map_err(Error::ParsingConfig)?;
-
-        println!(
-            "Cloud Hypervisor Guest\n\tAPI server: {}\n\tvCPUs: {}\n\tMemory: {} MB\n\tKernel: \
-             {:?}\n\tInitramfs: {:?}\n\tKernel cmdline: {}\n\tDisk(s): {:?}",
-            api_socket_path,
-            vm_config.cpus.boot_vcpus,
-            vm_config.memory.size >> 20,
-            vm_config.kernel,
-            vm_config.initramfs,
-            vm_config.cmdline.args.as_str(),
-            vm_config.disks,
-        );
 
         // Create and boot the VM based off the VM config we just built.
         let sender = api_request_sender.clone();
@@ -455,81 +536,29 @@ fn start_vmm(cmd_arguments: ArgMatches, api_socket_path: &str) -> Result<(), Err
     vmm_thread
         .join()
         .map_err(Error::ThreadJoin)?
-        .map_err(Error::VmmThread)
+        .map_err(Error::VmmThread)?;
+
+    Ok(api_socket_path)
 }
 
 fn main() {
     // Ensure all created files (.e.g sockets) are only accessible by this user
     let _ = unsafe { libc::umask(0o077) };
 
-    let pid = unsafe { libc::getpid() };
-    let uid = unsafe { libc::getuid() };
-
-    let mut api_server_path = format! {"/run/user/{}/cloud-hypervisor.{}", uid, pid};
-    if uid == 0 {
-        // If we're running as root, we try to get the real user ID if we've been sudo'ed
-        // or else create our socket directly under /run.
-        let key = "SUDO_UID";
-        match env::var(key) {
-            Ok(sudo_uid) => {
-                api_server_path = format! {"/run/user/{}/cloud-hypervisor.{}", sudo_uid, pid}
-            }
-            Err(_) => api_server_path = format! {"/run/cloud-hypervisor.{}", pid},
-        }
-    }
-
     let (default_vcpus, default_memory, default_rng) = prepare_default_values();
-
-    let cmd_arguments = create_app(
-        &default_vcpus,
-        &default_memory,
-        &default_rng,
-        &api_server_path,
-    )
-    .get_matches();
-
-    let log_level = match cmd_arguments.occurrences_of("v") {
-        0 => LevelFilter::Warn,
-        1 => LevelFilter::Info,
-        2 => LevelFilter::Debug,
-        _ => LevelFilter::Trace,
+    let cmd_arguments = create_app(&default_vcpus, &default_memory, &default_rng).get_matches();
+    let exit_code = match start_vmm(cmd_arguments) {
+        Ok(path) => {
+            path.map(|s| std::fs::remove_file(s).ok());
+            0
+        }
+        Err(e) => {
+            eprintln!("{}", e);
+            1
+        }
     };
 
-    let log_file: Box<dyn std::io::Write + Send> =
-        if let Some(file) = cmd_arguments.value_of("log-file") {
-            Box::new(
-                std::fs::File::create(std::path::Path::new(file)).expect("Error creating log file"),
-            )
-        } else {
-            Box::new(std::io::stderr())
-        };
-
-    log::set_boxed_logger(Box::new(Logger {
-        output: Mutex::new(log_file),
-        start: std::time::Instant::now(),
-    }))
-    .map(|()| log::set_max_level(log_level))
-    .expect("Expected to be able to setup logger");
-
-    let api_socket_path = cmd_arguments
-        .value_of("api-socket")
-        .expect("Missing argument: api-socket")
-        .to_string();
-
-    if let Some(fd) = cmd_arguments
-        .value_of("monitor-fd")
-        .map(|s| s.parse::<i32>().expect("Expect integral file descriptor"))
-    {
-        let file = unsafe { File::from_raw_fd(fd) };
-        event_monitor::set_monitor(file).expect("Expected setting monitor to succeed");
-    }
-
-    if let Err(e) = start_vmm(cmd_arguments, &api_socket_path) {
-        eprintln!("{}", e);
-        std::fs::remove_file(api_socket_path).ok();
-        std::process::exit(1);
-    }
-    std::fs::remove_file(api_socket_path).ok();
+    std::process::exit(exit_code);
 }
 
 #[cfg(test)]
@@ -548,15 +577,8 @@ mod unit_tests {
 
     fn get_vm_config_from_vec(args: &[&str]) -> VmConfig {
         let (default_vcpus, default_memory, default_rng) = prepare_default_values();
-        let api_server_path = "";
-
-        let cmd_arguments = create_app(
-            &default_vcpus,
-            &default_memory,
-            &default_rng,
-            &api_server_path,
-        )
-        .get_matches_from(args);
+        let cmd_arguments =
+            create_app(&default_vcpus, &default_memory, &default_rng).get_matches_from(args);
 
         let vm_params = VmParams::from_arg_matches(&cmd_arguments);
 
@@ -646,6 +668,8 @@ mod unit_tests {
                 sgx_epc: None,
                 numa: None,
                 watchdog: false,
+                #[cfg(feature = "tdx")]
+                tdx: None,
             };
 
             aver_eq!(tb, expected_vm_config, result_vm_config);
@@ -960,11 +984,13 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
+                    "--cpus", "boot=2",
                     "--net",
                     "mac=12:34:56:78:90:ab,host_mac=34:56:78:90:ab:cd,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=4",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
+                    "cpus": {"boot_vcpus": 2, "max_vcpus": 2},
                     "net": [
                         {"mac": "12:34:56:78:90:ab", "host_mac": "34:56:78:90:ab:cd", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 4}
                     ]
@@ -974,11 +1000,13 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
+                    "--cpus", "boot=2",
                     "--net",
                     "mac=12:34:56:78:90:ab,host_mac=34:56:78:90:ab:cd,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=4,queue_size=128",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
+                    "cpus": {"boot_vcpus": 2, "max_vcpus": 2},
                     "net": [
                         {"mac": "12:34:56:78:90:ab", "host_mac": "34:56:78:90:ab:cd", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 4, "queue_size": 128}
                     ]
@@ -1139,13 +1167,14 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
-                    "--memory", "shared=true",
+                    "--memory", "shared=true", "--cpus", "boot=4",
                     "--fs",
                     "tag=virtiofs1,socket=/path/to/sock1,num_queues=4",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
+                    "cpus": {"boot_vcpus": 4, "max_vcpus": 4},
                     "fs": [
                         {"tag": "virtiofs1", "socket": "/path/to/sock1", "num_queues": 4}
                     ]
@@ -1155,13 +1184,14 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
-                    "--memory", "shared=true",
+                    "--memory", "shared=true", "--cpus", "boot=4",
                     "--fs",
                     "tag=virtiofs1,socket=/path/to/sock1,num_queues=4,queue_size=128"
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
+                    "cpus": {"boot_vcpus": 4, "max_vcpus": 4},
                     "fs": [
                         {"tag": "virtiofs1", "socket": "/path/to/sock1", "num_queues": 4, "queue_size": 128}
                     ]
@@ -1171,13 +1201,14 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
-                    "--memory", "shared=true",
+                    "--memory", "shared=true", "--cpus", "boot=4",
                     "--fs",
                     "tag=virtiofs1,socket=/path/to/sock1,num_queues=4,queue_size=128,dax=on"
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
+                    "cpus": {"boot_vcpus": 4, "max_vcpus": 4},
                     "fs": [
                         {"tag": "virtiofs1", "socket": "/path/to/sock1", "num_queues": 4, "queue_size": 128}
                     ]
@@ -1187,13 +1218,14 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
-                    "--memory", "shared=true",
+                    "--memory", "shared=true", "--cpus", "boot=4",
                     "--fs",
                     "tag=virtiofs1,socket=/path/to/sock1,num_queues=4,queue_size=128,dax=on"
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
+                    "cpus": {"boot_vcpus": 4, "max_vcpus": 4},
                     "fs": [
                         {"tag": "virtiofs1", "socket": "/path/to/sock1", "num_queues": 4, "queue_size": 128, "dax": true}
                     ]
@@ -1203,13 +1235,14 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
-                    "--memory", "shared=true",
+                    "--memory", "shared=true", "--cpus", "boot=4",
                     "--fs",
                     "tag=virtiofs1,socket=/path/to/sock1,num_queues=4,queue_size=128"
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
+                    "cpus": {"boot_vcpus": 4, "max_vcpus": 4},
                     "fs": [
                         {"tag": "virtiofs1", "socket": "/path/to/sock1", "num_queues": 4, "queue_size": 128, "dax": true}
                     ]
@@ -1219,13 +1252,14 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
-                    "--memory", "shared=true",
+                    "--memory", "shared=true", "--cpus", "boot=4",
                     "--fs",
                     "tag=virtiofs1,socket=/path/to/sock1,num_queues=4,queue_size=128,cache_size=8589934592"
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
+                    "cpus": {"boot_vcpus": 4, "max_vcpus": 4},
                     "fs": [
                         {"tag": "virtiofs1", "socket": "/path/to/sock1", "num_queues": 4, "queue_size": 128}
                     ]
@@ -1235,13 +1269,14 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
-                    "--memory", "shared=true",
+                    "--memory", "shared=true", "--cpus", "boot=4",
                     "--fs",
                     "tag=virtiofs1,socket=/path/to/sock1,num_queues=4,queue_size=128"
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
+                    "cpus": {"boot_vcpus": 4, "max_vcpus": 4},
                     "fs": [
                         {"tag": "virtiofs1", "socket": "/path/to/sock1", "num_queues": 4, "queue_size": 128, "cache_size": 8589934592}
                     ]
@@ -1251,13 +1286,14 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
-                    "--memory", "shared=true",
+                    "--memory", "shared=true","--cpus", "boot=4",
                     "--fs",
                     "tag=virtiofs1,socket=/path/to/sock1,num_queues=4,queue_size=128,cache_size=4294967296"
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
+                    "cpus": {"boot_vcpus": 4, "max_vcpus": 4},
                     "fs": [
                         {"tag": "virtiofs1", "socket": "/path/to/sock1", "num_queues": 4, "queue_size": 128, "cache_size": 4294967296}
                     ]
@@ -1267,13 +1303,14 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
-                    "--memory", "shared=true",
+                    "--memory", "shared=true","--cpus", "boot=4",
                     "--fs",
                     "tag=virtiofs1,socket=/path/to/sock1,num_queues=4,queue_size=128,cache_size=4294967296"
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
+                    "cpus": {"boot_vcpus": 4, "max_vcpus": 4},
                     "fs": [
                         {"tag": "virtiofs1", "socket": "/path/to/sock1", "num_queues": 4, "queue_size": 128}
                     ]

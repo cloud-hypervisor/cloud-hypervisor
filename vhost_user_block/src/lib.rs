@@ -308,6 +308,8 @@ impl VhostUserBackend for VhostUserBlkBackend {
 
     fn protocol_features(&self) -> VhostUserProtocolFeatures {
         VhostUserProtocolFeatures::CONFIG
+            | VhostUserProtocolFeatures::MQ
+            | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
     }
 
     fn set_event_idx(&mut self, enabled: bool) {
@@ -391,7 +393,7 @@ impl VhostUserBackend for VhostUserBlkBackend {
             return Err(io::Error::from_raw_os_error(libc::EINVAL));
         }
         let (_, right) = config_slice.split_at_mut(offset as usize);
-        right.copy_from_slice(&data[..]);
+        right.copy_from_slice(&data);
         self.update_writeback();
         Ok(())
     }
@@ -467,10 +469,10 @@ impl VhostUserBlkBackendConfig {
             path,
             socket,
             num_queues,
+            queue_size,
             readonly,
             direct,
             poll_queue,
-            queue_size,
         })
     }
 }
@@ -505,7 +507,7 @@ pub fn start_block_backend(backend_command: &str) {
 
     debug!("blk_daemon is created!\n");
 
-    if let Err(e) = blk_daemon.start(listener) {
+    if let Err(e) = blk_daemon.start_server(listener) {
         error!(
             "Failed to start daemon for vhost-user-block with error: {:?}\n",
             e

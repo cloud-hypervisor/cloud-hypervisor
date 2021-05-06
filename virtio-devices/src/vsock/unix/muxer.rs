@@ -474,7 +474,7 @@ impl VsockMuxer {
         }
 
         let mut word_iter = std::str::from_utf8(&buf[..blen])
-            .map_err(Error::ConvertFromUTF8)?
+            .map_err(Error::ConvertFromUtf8)?
             .split_whitespace();
 
         word_iter

@@ -4,11 +4,10 @@
 
 use crate::device::BarReprogrammingParams;
 use crate::{MsixConfig, PciInterruptPin};
-use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
 use std::fmt::{self, Display};
 use std::sync::{Arc, Mutex};
-use vm_migration::{MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable};
+use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable};
 
 // The number of 32bit registers in the config space, 4096 bytes.
 const NUM_CONFIGURATION_REGISTERS: usize = 1024;
@@ -100,7 +99,7 @@ pub enum PciBridgeSubclass {
     PcmciaBridge = 0x05,
     NuBusBridge = 0x06,
     CardBusBridge = 0x07,
-    RACEwayBridge = 0x08,
+    RacEwayBridge = 0x08,
     PciToPciSemiTransparentBridge = 0x09,
     InfiniBrandToPciHostBridge = 0x0a,
     OtherBridgeDevice = 0x80,
@@ -117,9 +116,9 @@ impl PciSubclass for PciBridgeSubclass {
 #[derive(Copy, Clone)]
 pub enum PciSerialBusSubClass {
     Firewire = 0x00,
-    ACCESSbus = 0x01,
-    SSA = 0x02,
-    USB = 0x03,
+    Accessbus = 0x01,
+    Ssa = 0x02,
+    Usb = 0x03,
 }
 
 impl PciSubclass for PciSerialBusSubClass {
@@ -132,15 +131,15 @@ impl PciSubclass for PciSerialBusSubClass {
 #[allow(dead_code)]
 #[derive(Copy, Clone)]
 pub enum PciMassStorageSubclass {
-    SCSIStorage = 0x00,
-    IDEInterface = 0x01,
+    ScsiStorage = 0x00,
+    IdeInterface = 0x01,
     FloppyController = 0x02,
-    IPIController = 0x03,
-    RAIDController = 0x04,
-    ATAController = 0x05,
-    SATAController = 0x06,
-    SerialSCSIController = 0x07,
-    NVMController = 0x08,
+    IpiController = 0x03,
+    RaidController = 0x04,
+    AtaController = 0x05,
+    SataController = 0x06,
+    SerialScsiController = 0x07,
+    NvmController = 0x08,
     MassStorage = 0x80,
 }
 
@@ -156,11 +155,11 @@ impl PciSubclass for PciMassStorageSubclass {
 pub enum PciNetworkControllerSubclass {
     EthernetController = 0x00,
     TokenRingController = 0x01,
-    FDDIController = 0x02,
-    ATMController = 0x03,
-    ISDNController = 0x04,
+    FddiController = 0x02,
+    AtmController = 0x03,
+    IsdnController = 0x04,
     WorldFipController = 0x05,
-    PICMGController = 0x06,
+    PicmgController = 0x06,
     InfinibandController = 0x07,
     FabricController = 0x08,
     NetworkController = 0x80,
@@ -186,55 +185,55 @@ pub trait PciProgrammingInterface {
 #[allow(dead_code)]
 #[allow(non_camel_case_types)]
 #[repr(C)]
-pub enum PciCapabilityID {
-    ListID = 0,
+pub enum PciCapabilityId {
+    ListId = 0,
     PowerManagement = 0x01,
     AcceleratedGraphicsPort = 0x02,
     VitalProductData = 0x03,
     SlotIdentification = 0x04,
     MessageSignalledInterrupts = 0x05,
-    CompactPCIHotSwap = 0x06,
-    PCIX = 0x07,
+    CompactPciHotSwap = 0x06,
+    PciX = 0x07,
     HyperTransport = 0x08,
     VendorSpecific = 0x09,
     Debugport = 0x0A,
-    CompactPCICentralResourceControl = 0x0B,
-    PCIStandardHotPlugController = 0x0C,
-    BridgeSubsystemVendorDeviceID = 0x0D,
-    AGPTargetPCIPCIbridge = 0x0E,
+    CompactPciCentralResourceControl = 0x0B,
+    PciStandardHotPlugController = 0x0C,
+    BridgeSubsystemVendorDeviceId = 0x0D,
+    AgpTargetPciPcibridge = 0x0E,
     SecureDevice = 0x0F,
-    PCIExpress = 0x10,
-    MSIX = 0x11,
-    SATADataIndexConf = 0x12,
-    PCIAdvancedFeatures = 0x13,
-    PCIEnhancedAllocation = 0x14,
+    PciExpress = 0x10,
+    MsiX = 0x11,
+    SataDataIndexConf = 0x12,
+    PciAdvancedFeatures = 0x13,
+    PciEnhancedAllocation = 0x14,
 }
 
-impl From<u8> for PciCapabilityID {
+impl From<u8> for PciCapabilityId {
     fn from(c: u8) -> Self {
         match c {
-            0 => PciCapabilityID::ListID,
-            0x01 => PciCapabilityID::PowerManagement,
-            0x02 => PciCapabilityID::AcceleratedGraphicsPort,
-            0x03 => PciCapabilityID::VitalProductData,
-            0x04 => PciCapabilityID::SlotIdentification,
-            0x05 => PciCapabilityID::MessageSignalledInterrupts,
-            0x06 => PciCapabilityID::CompactPCIHotSwap,
-            0x07 => PciCapabilityID::PCIX,
-            0x08 => PciCapabilityID::HyperTransport,
-            0x09 => PciCapabilityID::VendorSpecific,
-            0x0A => PciCapabilityID::Debugport,
-            0x0B => PciCapabilityID::CompactPCICentralResourceControl,
-            0x0C => PciCapabilityID::PCIStandardHotPlugController,
-            0x0D => PciCapabilityID::BridgeSubsystemVendorDeviceID,
-            0x0E => PciCapabilityID::AGPTargetPCIPCIbridge,
-            0x0F => PciCapabilityID::SecureDevice,
-            0x10 => PciCapabilityID::PCIExpress,
-            0x11 => PciCapabilityID::MSIX,
-            0x12 => PciCapabilityID::SATADataIndexConf,
-            0x13 => PciCapabilityID::PCIAdvancedFeatures,
-            0x14 => PciCapabilityID::PCIEnhancedAllocation,
-            _ => PciCapabilityID::ListID,
+            0 => PciCapabilityId::ListId,
+            0x01 => PciCapabilityId::PowerManagement,
+            0x02 => PciCapabilityId::AcceleratedGraphicsPort,
+            0x03 => PciCapabilityId::VitalProductData,
+            0x04 => PciCapabilityId::SlotIdentification,
+            0x05 => PciCapabilityId::MessageSignalledInterrupts,
+            0x06 => PciCapabilityId::CompactPciHotSwap,
+            0x07 => PciCapabilityId::PciX,
+            0x08 => PciCapabilityId::HyperTransport,
+            0x09 => PciCapabilityId::VendorSpecific,
+            0x0A => PciCapabilityId::Debugport,
+            0x0B => PciCapabilityId::CompactPciCentralResourceControl,
+            0x0C => PciCapabilityId::PciStandardHotPlugController,
+            0x0D => PciCapabilityId::BridgeSubsystemVendorDeviceId,
+            0x0E => PciCapabilityId::AgpTargetPciPcibridge,
+            0x0F => PciCapabilityId::SecureDevice,
+            0x10 => PciCapabilityId::PciExpress,
+            0x11 => PciCapabilityId::MsiX,
+            0x12 => PciCapabilityId::SataDataIndexConf,
+            0x13 => PciCapabilityId::PciAdvancedFeatures,
+            0x14 => PciCapabilityId::PciEnhancedAllocation,
+            _ => PciCapabilityId::ListId,
         }
     }
 }
@@ -242,7 +241,7 @@ impl From<u8> for PciCapabilityID {
 /// A PCI capability list. Devices can optionally specify capabilities in their configuration space.
 pub trait PciCapability {
     fn bytes(&self) -> &[u8];
-    fn id(&self) -> PciCapabilityID;
+    fn id(&self) -> PciCapabilityId;
 }
 
 fn encode_32_bits_bar_size(bar_size: u32) -> Option<u32> {
@@ -317,7 +316,7 @@ pub struct PciConfiguration {
 #[derive(Copy, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PciBarRegionType {
     Memory32BitRegion = 0,
-    IORegion = 0x01,
+    IoRegion = 0x01,
     Memory64BitRegion = 0x04,
 }
 
@@ -572,7 +571,7 @@ impl PciConfiguration {
             .checked_add(config.size - 1)
             .ok_or(Error::BarAddressInvalid(config.addr, config.size))?;
         match config.region_type {
-            PciBarRegionType::Memory32BitRegion | PciBarRegionType::IORegion => {
+            PciBarRegionType::Memory32BitRegion | PciBarRegionType::IoRegion => {
                 if end_addr > u64::from(u32::max_value()) {
                     return Err(Error::BarAddressInvalid(config.addr, config.size));
                 }
@@ -614,7 +613,7 @@ impl PciConfiguration {
                 BAR_MEM_ADDR_MASK,
                 config.prefetchable as u32 | config.region_type as u32,
             ),
-            PciBarRegionType::IORegion => (BAR_IO_ADDR_MASK, config.region_type as u32),
+            PciBarRegionType::IoRegion => (BAR_IO_ADDR_MASK, config.region_type as u32),
         };
 
         self.registers[bar_idx] = ((config.addr as u32) & mask) | lower_bits;
@@ -711,7 +710,7 @@ impl PciConfiguration {
         }
         self.last_capability = Some((cap_offset, total_len));
 
-        if cap_data.id() == PciCapabilityID::MSIX {
+        if cap_data.id() == PciCapabilityId::MsiX {
             self.msix_cap_reg_idx = Some(cap_offset / 4);
         }
 
@@ -769,85 +768,77 @@ impl PciConfiguration {
 
         let mask = self.writable_bits[reg_idx];
         if (BAR0_REG..BAR0_REG + NUM_BAR_REGS).contains(&reg_idx) {
+            // Ignore the case where the BAR size is being asked for.
+            if value == 0xffff_ffff {
+                return None;
+            }
+
             let bar_idx = reg_idx - 4;
-            if (value & mask) != (self.bars[bar_idx].addr & mask) {
-                // Handle special case where the address being written is
-                // different from the address initially provided. This is a
-                // BAR reprogramming case which needs to be properly caught.
-                if let Some(bar_type) = self.bars[bar_idx].r#type {
-                    match bar_type {
-                        PciBarRegionType::Memory64BitRegion => {}
-                        _ => {
-                            // Ignore the case where the BAR size is being
-                            // asked for.
-                            if value == 0xffff_ffff {
-                                return None;
-                            }
-
-                            debug!(
-                                "DETECT BAR REPROG: current 0x{:x}, new 0x{:x}",
-                                self.registers[reg_idx], value
-                            );
-                            let old_base = u64::from(self.bars[bar_idx].addr & mask);
-                            let new_base = u64::from(value & mask);
-                            let len = u64::from(
-                                decode_32_bits_bar_size(self.bars[bar_idx].size)
-                                    .ok_or(Error::Decode32BarSize)
-                                    .unwrap(),
-                            );
-                            let region_type = bar_type;
-
-                            self.bars[bar_idx].addr = value;
-
-                            return Some(BarReprogrammingParams {
-                                old_base,
-                                new_base,
-                                len,
-                                region_type,
-                            });
-                        }
-                    }
-                } else if (reg_idx > BAR0_REG)
-                    && (self.registers[reg_idx - 1] & self.writable_bits[reg_idx - 1])
-                        != (self.bars[bar_idx - 1].addr & self.writable_bits[reg_idx - 1])
-                {
-                    // Ignore the case where the BAR size is being asked for.
-                    // Because we are in the 64bits case here, we have to check
-                    // if the lower 32bits of the current BAR have already been
-                    // asked for the BAR size too.
-                    if value == 0xffff_ffff
-                        && self.registers[reg_idx - 1] & self.writable_bits[reg_idx - 1]
-                            == self.bars[bar_idx - 1].size & self.writable_bits[reg_idx - 1]
-                    {
-                        return None;
-                    }
-
-                    debug!(
-                        "DETECT BAR REPROG: current 0x{:x}, new 0x{:x}",
-                        self.registers[reg_idx], value
-                    );
-                    let old_base = u64::from(self.bars[bar_idx].addr & mask) << 32
-                        | u64::from(self.bars[bar_idx - 1].addr & self.writable_bits[reg_idx - 1]);
-                    let new_base = u64::from(value & mask) << 32
-                        | u64::from(self.registers[reg_idx - 1] & self.writable_bits[reg_idx - 1]);
-                    let len = decode_64_bits_bar_size(
-                        self.bars[bar_idx].size,
-                        self.bars[bar_idx - 1].size,
-                    )
-                    .ok_or(Error::Decode64BarSize)
-                    .unwrap();
-                    let region_type = PciBarRegionType::Memory64BitRegion;
-
-                    self.bars[bar_idx].addr = value;
-                    self.bars[bar_idx - 1].addr = self.registers[reg_idx - 1];
-
-                    return Some(BarReprogrammingParams {
-                        old_base,
-                        new_base,
-                        len,
-                        region_type,
-                    });
+            // Handle special case where the address being written is
+            // different from the address initially provided. This is a
+            // BAR reprogramming case which needs to be properly caught.
+            if let Some(bar_type) = self.bars[bar_idx].r#type {
+                // In case of 64 bits memory BAR, we don't do anything until
+                // the upper BAR is modified, otherwise we would be moving the
+                // BAR to a wrong location in memory.
+                if bar_type == PciBarRegionType::Memory64BitRegion {
+                    return None;
                 }
+
+                // Ignore the case where the value is unchanged.
+                if (value & mask) == (self.bars[bar_idx].addr & mask) {
+                    return None;
+                }
+
+                debug!(
+                    "DETECT BAR REPROG: current 0x{:x}, new 0x{:x}",
+                    self.registers[reg_idx], value
+                );
+                let old_base = u64::from(self.bars[bar_idx].addr & mask);
+                let new_base = u64::from(value & mask);
+                let len = u64::from(
+                    decode_32_bits_bar_size(self.bars[bar_idx].size)
+                        .ok_or(Error::Decode32BarSize)
+                        .unwrap(),
+                );
+                let region_type = bar_type;
+
+                self.bars[bar_idx].addr = value;
+
+                return Some(BarReprogrammingParams {
+                    old_base,
+                    new_base,
+                    len,
+                    region_type,
+                });
+            } else if (reg_idx > BAR0_REG)
+                && ((self.registers[reg_idx - 1] & self.writable_bits[reg_idx - 1])
+                    != (self.bars[bar_idx - 1].addr & self.writable_bits[reg_idx - 1])
+                    || (value & mask) != (self.bars[bar_idx].addr & mask))
+            {
+                debug!(
+                    "DETECT BAR REPROG: current 0x{:x}, new 0x{:x}",
+                    self.registers[reg_idx], value
+                );
+                let old_base = u64::from(self.bars[bar_idx].addr & mask) << 32
+                    | u64::from(self.bars[bar_idx - 1].addr & self.writable_bits[reg_idx - 1]);
+                let new_base = u64::from(value & mask) << 32
+                    | u64::from(self.registers[reg_idx - 1] & self.writable_bits[reg_idx - 1]);
+                let len =
+                    decode_64_bits_bar_size(self.bars[bar_idx].size, self.bars[bar_idx - 1].size)
+                        .ok_or(Error::Decode64BarSize)
+                        .unwrap();
+                let region_type = PciBarRegionType::Memory64BitRegion;
+
+                self.bars[bar_idx].addr = value;
+                self.bars[bar_idx - 1].addr = self.registers[reg_idx - 1];
+
+                return Some(BarReprogrammingParams {
+                    old_base,
+                    new_base,
+                    len,
+                    region_type,
+                });
             }
         } else if reg_idx == ROM_BAR_REG && (value & mask) != (self.rom_bar_addr & mask) {
             // Ignore the case where the BAR size is being asked for.
@@ -890,43 +881,12 @@ impl Snapshottable for PciConfiguration {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        let snapshot =
-            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
-
-        let mut config_snapshot = Snapshot::new(self.id().as_str());
-        config_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", self.id()),
-            snapshot,
-        });
-
-        Ok(config_snapshot)
+        Snapshot::new_from_state(&self.id(), &self.state())
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        if let Some(config_section) = snapshot
-            .snapshot_data
-            .get(&format!("{}-section", self.id()))
-        {
-            let config_state = match serde_json::from_slice(&config_section.snapshot) {
-                Ok(state) => state,
-                Err(error) => {
-                    return Err(MigratableError::Restore(anyhow!(
-                        "Could not deserialize {}: {}",
-                        self.id(),
-                        error
-                    )))
-                }
-            };
-
-            self.set_state(&config_state);
-
-            return Ok(());
-        }
-
-        Err(MigratableError::Restore(anyhow!(
-            "Could not find {} snapshot section",
-            self.id()
-        )))
+        self.set_state(&snapshot.to_state(&self.id())?);
+        Ok(())
     }
 }
 
@@ -1005,8 +965,8 @@ mod tests {
             self.as_slice()
         }
 
-        fn id(&self) -> PciCapabilityID {
-            PciCapabilityID::VendorSpecific
+        fn id(&self) -> PciCapabilityId {
+            PciCapabilityId::VendorSpecific
         }
     }
 
@@ -1056,11 +1016,11 @@ mod tests {
     }
 
     #[derive(Copy, Clone)]
-    enum TestPI {
+    enum TestPi {
         Test = 0x5a,
     }
 
-    impl PciProgrammingInterface for TestPI {
+    impl PciProgrammingInterface for TestPi {
         fn get_register_value(&self) -> u8 {
             *self as u8
         }
@@ -1074,7 +1034,7 @@ mod tests {
             0x1,
             PciClassCode::MultimediaController,
             &PciMultimediaSubclass::AudioController,
-            Some(&TestPI::Test),
+            Some(&TestPi::Test),
             PciHeaderType::Device,
             0xABCD,
             0x2468,

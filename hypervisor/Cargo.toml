@@ -8,15 +8,16 @@ license = "Apache-2.0 OR BSD-3-Clause"
 [features]
 kvm = ["kvm-ioctls", "kvm-bindings"]
 mshv = ["mshv-ioctls", "mshv-bindings"]
+tdx = []
 
 [dependencies]
 anyhow = "1.0"
 epoll = ">=4.0.1"
 thiserror = "1.0"
-libc = "0.2.86"
+libc = "0.2.94"
 log = "0.4.14"
-kvm-ioctls = {  version = "0.7.0", optional = true }
-kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch-v0.3.0", features = ["with-serde", "fam-wrappers"], optional  = true }
+kvm-ioctls = {  version = "0.8.0", optional = true }
+kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch-v0.4.0", features = ["with-serde", "fam-wrappers"], optional  = true }
 mshv-bindings = {git = "https://github.com/cloud-hypervisor/mshv", branch = "master", features = ["with-serde", "fam-wrappers"], optional  = true }
 mshv-ioctls = { git = "https://github.com/cloud-hypervisor/mshv", branch = "master", optional  = true}
 serde = {version = ">=1.0.27", features = ["rc"] }
@@ -26,7 +27,7 @@ vm-memory = { version = "0.5.0", features = ["backend-mmap", "backend-atomic"] }
 vmm-sys-util = { version = ">=0.5.0", features = ["with-serde"] }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies.iced-x86]
-version = "1.10"
+version = "1.11"
 default-features = false
 features = ["std", "decoder", "op_code_info", "instr_info", "fast_fmt"]
 

@@ -10,7 +10,6 @@ use super::{
 };
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{DmaRemapping, VirtioInterrupt, VirtioInterruptType};
-use anyhow::anyhow;
 use seccomp::{SeccompAction, SeccompFilter};
 use std::collections::BTreeMap;
 use std::fmt::{self, Display};
@@ -27,10 +26,7 @@ use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
     GuestMemoryError, GuestMemoryMmap,
 };
-use vm_migration::{
-    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
-    Transportable,
-};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 /// Queues sizes
@@ -748,8 +744,8 @@ pub struct Iommu {
 struct IommuState {
     avail_features: u64,
     acked_features: u64,
-    endpoints: BTreeMap<u32, u32>,
-    mappings: BTreeMap<u32, BTreeMap<u64, Mapping>>,
+    endpoints: Vec<(u32, u32)>,
+    mappings: Vec<(u32, Vec<(u64, Mapping)>)>,
 }
 
 impl Iommu {
@@ -769,7 +765,7 @@ impl Iommu {
             Iommu {
                 id,
                 common: VirtioCommon {
-                    device_type: VirtioDeviceType::TYPE_IOMMU as u32,
+                    device_type: VirtioDeviceType::Iommu as u32,
                     queue_sizes: QUEUE_SIZES.to_vec(),
                     avail_features: 1u64 << VIRTIO_F_VERSION_1
                         | 1u64 << VIRTIO_IOMMU_F_MAP_UNMAP
@@ -791,16 +787,36 @@ impl Iommu {
         IommuState {
             avail_features: self.common.avail_features,
             acked_features: self.common.acked_features,
-            endpoints: self.mapping.endpoints.read().unwrap().clone(),
-            mappings: self.mapping.mappings.read().unwrap().clone(),
+            endpoints: self
+                .mapping
+                .endpoints
+                .read()
+                .unwrap()
+                .clone()
+                .into_iter()
+                .collect(),
+            mappings: self
+                .mapping
+                .mappings
+                .read()
+                .unwrap()
+                .clone()
+                .into_iter()
+                .map(|(k, v)| (k, v.into_iter().collect()))
+                .collect(),
         }
     }
 
     fn set_state(&mut self, state: &IommuState) {
         self.common.avail_features = state.avail_features;
         self.common.acked_features = state.acked_features;
-        *(self.mapping.endpoints.write().unwrap()) = state.endpoints.clone();
-        *(self.mapping.mappings.write().unwrap()) = state.mappings.clone();
+        *(self.mapping.endpoints.write().unwrap()) = state.endpoints.clone().into_iter().collect();
+        *(self.mapping.mappings.write().unwrap()) = state
+            .mappings
+            .clone()
+            .into_iter()
+            .map(|(k, v)| (k, v.into_iter().collect()))
+            .collect();
     }
 
     // This function lets the caller specify a list of devices attached to the
@@ -975,37 +991,12 @@ impl Snapshottable for Iommu {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        let snapshot =
-            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
-
-        let mut iommu_snapshot = Snapshot::new(self.id.as_str());
-        iommu_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", self.id),
-            snapshot,
-        });
-
-        Ok(iommu_snapshot)
+        Snapshot::new_from_state(&self.id, &self.state())
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        if let Some(iommu_section) = snapshot.snapshot_data.get(&format!("{}-section", self.id)) {
-            let iommu_state = match serde_json::from_slice(&iommu_section.snapshot) {
-                Ok(state) => state,
-                Err(error) => {
-                    return Err(MigratableError::Restore(anyhow!(
-                        "Could not deserialize IOMMU {}",
-                        error
-                    )))
-                }
-            };
-
-            self.set_state(&iommu_state);
-            return Ok(());
-        }
-
-        Err(MigratableError::Restore(anyhow!(
-            "Could not find IOMMU snapshot section"
-        )))
+        self.set_state(&snapshot.to_state(&self.id)?);
+        Ok(())
     }
 }
 impl Transportable for Iommu {}
