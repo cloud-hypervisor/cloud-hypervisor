@@ -170,7 +170,7 @@ pipeline{
 					}
 				}
 				stage ('Worker build - Windows guest') {
-					agent { node { label 'groovy-win' } }
+					agent { node { label 'groovy' } }
 					stages {
 						stage ('Checkout') {
 							steps {

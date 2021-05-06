@@ -5260,7 +5260,7 @@ mod tests {
                 return ssh_command_ip_with_auth(
                 "powershell -Command \"(Get-CimInstance win32_computersystem).NumberOfLogicalProcessors\"",
                 &self.auth,
-                "192.168.249.2",
+                &self.guest.network.guest_ip,
                 DEFAULT_SSH_RETRIES,
                 DEFAULT_SSH_TIMEOUT,
             )
@@ -5274,7 +5274,7 @@ mod tests {
                 return ssh_command_ip_with_auth(
                 "powershell -Command \"(Get-CimInstance win32_computersystem).TotalPhysicalMemory\"",
                 &self.auth,
-                "192.168.249.2",
+                &self.guest.network.guest_ip,
                 DEFAULT_SSH_RETRIES,
                 DEFAULT_SSH_TIMEOUT,
             )
@@ -5288,7 +5288,7 @@ mod tests {
                 return ssh_command_ip_with_auth(
                 "powershell -Command \"netsh int ipv4 show interfaces | Select-String ethernet | Measure-Object -Line | Format-Table -HideTableHeaders\"",
                 &self.auth,
-                "192.168.249.2",
+                &self.guest.network.guest_ip,
                 DEFAULT_SSH_RETRIES,
                 DEFAULT_SSH_TIMEOUT,
             )
@@ -5302,7 +5302,7 @@ mod tests {
                 ssh_command_ip_with_auth(
                     "shutdown /r /t 0",
                     &self.auth,
-                    "192.168.249.2",
+                    &self.guest.network.guest_ip,
                     DEFAULT_SSH_RETRIES,
                     DEFAULT_SSH_TIMEOUT,
                 )
@@ -5313,11 +5313,35 @@ mod tests {
                 ssh_command_ip_with_auth(
                     "shutdown /s",
                     &self.auth,
-                    "192.168.249.2",
+                    &self.guest.network.guest_ip,
                     DEFAULT_SSH_RETRIES,
                     DEFAULT_SSH_TIMEOUT,
                 )
                 .unwrap();
+            }
+
+            fn run_dnsmasq(&self) -> std::process::Child {
+                let listen_address = format!("--listen-address={}", self.guest.network.host_ip);
+                let dhcp_host = format!(
+                    "--dhcp-host={},{}",
+                    self.guest.network.guest_mac, self.guest.network.guest_ip
+                );
+                let dhcp_range = format!(
+                    "--dhcp-range=eth,{},{}",
+                    self.guest.network.guest_ip, self.guest.network.guest_ip
+                );
+
+                Command::new("dnsmasq")
+                    .arg("--no-daemon")
+                    .arg("--log-queries")
+                    .arg(listen_address.as_str())
+                    .arg("--except-interface=lo")
+                    .arg("--bind-interfaces")
+                    .arg("--conf-file=/dev/null")
+                    .arg(dhcp_host.as_str())
+                    .arg(dhcp_range.as_str())
+                    .spawn()
+                    .unwrap()
             }
         }
 
@@ -5362,10 +5386,10 @@ mod tests {
                 .args(&["--cpus", "boot=2,kvm_hyperv=on"])
                 .args(&["--memory", "size=4G"])
                 .args(&["--kernel", ovmf_path.to_str().unwrap()])
-                .default_disks()
                 .args(&["--serial", "tty"])
                 .args(&["--console", "off"])
-                .args(&["--net", "tap="])
+                .default_disks()
+                .default_net()
                 .capture_output()
                 .spawn()
                 .unwrap();
@@ -5378,6 +5402,12 @@ mod tests {
             assert!(pipesize >= PIPE_SIZE && pipesize1 >= PIPE_SIZE);
 
             thread::sleep(std::time::Duration::new(60, 0));
+
+            let mut child_dnsmasq = windows_guest.run_dnsmasq();
+            // Give some time for the guest to reach dnsmasq and get
+            // assigned the right IP address.
+            thread::sleep(std::time::Duration::new(30, 0));
+
             let r = std::panic::catch_unwind(|| {
                 windows_guest.shutdown();
             });
@@ -5385,6 +5415,8 @@ mod tests {
             let _ = child.wait_timeout(std::time::Duration::from_secs(60));
             let _ = child.kill();
             let output = child.wait_with_output().unwrap();
+
+            let _ = child_dnsmasq.kill();
 
             handle_child_output(r, &output);
         }
@@ -5411,10 +5443,10 @@ mod tests {
                 .args(&["--cpus", "boot=2,kvm_hyperv=on"])
                 .args(&["--memory", "size=4G"])
                 .args(&["--kernel", ovmf_path.to_str().unwrap()])
-                .default_disks()
                 .args(&["--serial", "tty"])
                 .args(&["--console", "off"])
-                .args(&["--net", "tap="])
+                .default_disks()
+                .default_net()
                 .capture_output()
                 .spawn()
                 .unwrap();
@@ -5428,6 +5460,11 @@ mod tests {
 
             // Wait to make sure Windows boots up
             thread::sleep(std::time::Duration::new(60, 0));
+
+            let mut child_dnsmasq = windows_guest.run_dnsmasq();
+            // Give some time for the guest to reach dnsmasq and get
+            // assigned the right IP address.
+            thread::sleep(std::time::Duration::new(30, 0));
 
             let snapshot_dir = temp_snapshot_dir_path(&tmp_dir);
 
@@ -5472,6 +5509,8 @@ mod tests {
             let _ = child.kill();
             let output = child.wait_with_output().unwrap();
 
+            let _ = child_dnsmasq.kill();
+
             handle_child_output(r, &output);
         }
 
@@ -5497,16 +5536,21 @@ mod tests {
                 .args(&["--cpus", "boot=2,max=8,kvm_hyperv=on"])
                 .args(&["--memory", "size=4G"])
                 .args(&["--kernel", ovmf_path.to_str().unwrap()])
-                .default_disks()
                 .args(&["--serial", "tty"])
                 .args(&["--console", "off"])
-                .args(&["--net", "tap="])
+                .default_disks()
+                .default_net()
                 .capture_output()
                 .spawn()
                 .unwrap();
 
             // Wait to make sure Windows boots up
             thread::sleep(std::time::Duration::new(60, 0));
+
+            let mut child_dnsmasq = windows_guest.run_dnsmasq();
+            // Give some time for the guest to reach dnsmasq and get
+            // assigned the right IP address.
+            thread::sleep(std::time::Duration::new(30, 0));
 
             let r = std::panic::catch_unwind(|| {
                 let vcpu_num = 2;
@@ -5546,6 +5590,8 @@ mod tests {
             let _ = child.kill();
             let output = child.wait_with_output().unwrap();
 
+            let _ = child_dnsmasq.kill();
+
             handle_child_output(r, &output);
         }
 
@@ -5571,16 +5617,21 @@ mod tests {
                 .args(&["--cpus", "boot=2,kvm_hyperv=on"])
                 .args(&["--memory", "size=2G,hotplug_size=5G"])
                 .args(&["--kernel", ovmf_path.to_str().unwrap()])
-                .default_disks()
                 .args(&["--serial", "tty"])
                 .args(&["--console", "off"])
-                .args(&["--net", "tap="])
+                .default_disks()
+                .default_net()
                 .capture_output()
                 .spawn()
                 .unwrap();
 
             // Wait to make sure Windows boots up
             thread::sleep(std::time::Duration::new(60, 0));
+
+            let mut child_dnsmasq = windows_guest.run_dnsmasq();
+            // Give some time for the guest to reach dnsmasq and get
+            // assigned the right IP address.
+            thread::sleep(std::time::Duration::new(30, 0));
 
             let r = std::panic::catch_unwind(|| {
                 let ram_size = 2 * 1024 * 1024 * 1024;
@@ -5620,6 +5671,8 @@ mod tests {
             let _ = child.kill();
             let output = child.wait_with_output().unwrap();
 
+            let _ = child_dnsmasq.kill();
+
             handle_child_output(r, &output);
         }
 
@@ -5645,16 +5698,21 @@ mod tests {
                 .args(&["--cpus", "boot=2,kvm_hyperv=on"])
                 .args(&["--memory", "size=2G,hotplug_size=5G"])
                 .args(&["--kernel", ovmf_path.to_str().unwrap()])
-                .default_disks()
                 .args(&["--serial", "tty"])
                 .args(&["--console", "off"])
-                .args(&["--net", "tap="])
+                .default_disks()
+                .default_net()
                 .capture_output()
                 .spawn()
                 .unwrap();
 
             // Wait to make sure Windows boots up
             thread::sleep(std::time::Duration::new(60, 0));
+
+            let mut child_dnsmasq = windows_guest.run_dnsmasq();
+            // Give some time for the guest to reach dnsmasq and get
+            // assigned the right IP address.
+            thread::sleep(std::time::Duration::new(30, 0));
 
             let r = std::panic::catch_unwind(|| {
                 // Initially present network device
@@ -5691,6 +5749,8 @@ mod tests {
             let _ = child.wait_timeout(std::time::Duration::from_secs(60));
             let _ = child.kill();
             let output = child.wait_with_output().unwrap();
+
+            let _ = child_dnsmasq.kill();
 
             handle_child_output(r, &output);
         }
