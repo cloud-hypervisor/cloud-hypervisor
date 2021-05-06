@@ -18,7 +18,6 @@ use super::{
     EpollHelperHandler, Queue, VirtioCommon, VirtioDevice, VirtioDeviceType,
     EPOLL_HELPER_EVENT_LAST, VIRTIO_F_VERSION_1,
 };
-
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{VirtioInterrupt, VirtioInterruptType};
 use anyhow::anyhow;

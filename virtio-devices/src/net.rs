@@ -30,9 +30,12 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 use std::vec::Vec;
 use std::{collections::HashMap, convert::TryInto};
+use versionize::{VersionMap, Versionize, VersionizeResult};
+use versionize_derive::Versionize;
 use virtio_bindings::bindings::virtio_net::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
+use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -293,13 +296,15 @@ pub struct Net {
     rate_limiter_config: Option<RateLimiterConfig>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Versionize)]
 pub struct NetState {
     pub avail_features: u64,
     pub acked_features: u64,
     pub config: VirtioNetConfig,
     pub queue_size: Vec<u16>,
 }
+
+impl VersionMapped for NetState {}
 
 impl Net {
     /// Create a new virtio network device with the given TAP interface.
@@ -698,11 +703,11 @@ impl Snapshottable for Net {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        Snapshot::new_from_state(&self.id, &self.state())
+        Snapshot::new_from_versioned_state(&self.id, &self.state())
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.set_state(&snapshot.to_state(&self.id)?);
+        self.set_state(&snapshot.to_versioned_state(&self.id)?);
         Ok(())
     }
 }
