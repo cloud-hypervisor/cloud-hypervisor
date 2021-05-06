@@ -5373,14 +5373,9 @@ mod tests {
         fn test_windows_guest() {
             let windows_guest = WindowsGuest::new();
 
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
-
-            let mut ovmf_path = workload_path.clone();
+            let mut ovmf_path = dirs::home_dir().unwrap();
+            ovmf_path.push("workloads");
             ovmf_path.push(OVMF_NAME);
-
-            let mut osdisk_path = workload_path;
-            osdisk_path.push(WINDOWS_IMAGE_NAME.to_string());
 
             let mut child = GuestCommand::new(windows_guest.guest())
                 .args(&["--cpus", "boot=2,kvm_hyperv=on"])
@@ -5427,16 +5422,11 @@ mod tests {
         fn test_windows_guest_snapshot_restore() {
             let windows_guest = WindowsGuest::new();
 
-            let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
-
-            let mut ovmf_path = workload_path.clone();
+            let mut ovmf_path = dirs::home_dir().unwrap();
+            ovmf_path.push("workloads");
             ovmf_path.push(OVMF_NAME);
 
-            let mut osdisk_path = workload_path;
-            osdisk_path.push(WINDOWS_IMAGE_NAME.to_string());
-
+            let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
             let api_socket = temp_api_path(&tmp_dir);
 
             let mut child = GuestCommand::new(windows_guest.guest())
@@ -5521,16 +5511,11 @@ mod tests {
         fn test_windows_guest_cpu_hotplug() {
             let windows_guest = WindowsGuest::new();
 
-            let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
-
-            let mut ovmf_path = workload_path.clone();
+            let mut ovmf_path = dirs::home_dir().unwrap();
+            ovmf_path.push("workloads");
             ovmf_path.push(OVMF_NAME);
 
-            let mut osdisk_path = workload_path;
-            osdisk_path.push(WINDOWS_IMAGE_NAME.to_string());
-
+            let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
             let api_socket = temp_api_path(&tmp_dir);
 
             let mut child = GuestCommand::new(windows_guest.guest())
@@ -5603,16 +5588,11 @@ mod tests {
         fn test_windows_guest_ram_hotplug() {
             let windows_guest = WindowsGuest::new();
 
-            let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
-
-            let mut ovmf_path = workload_path.clone();
+            let mut ovmf_path = dirs::home_dir().unwrap();
+            ovmf_path.push("workloads");
             ovmf_path.push(OVMF_NAME);
 
-            let mut osdisk_path = workload_path;
-            osdisk_path.push(WINDOWS_IMAGE_NAME.to_string());
-
+            let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
             let api_socket = temp_api_path(&tmp_dir);
 
             let mut child = GuestCommand::new(windows_guest.guest())
@@ -5685,16 +5665,11 @@ mod tests {
         fn test_windows_guest_netdev_hotplug() {
             let windows_guest = WindowsGuest::new();
 
-            let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
-
-            let mut ovmf_path = workload_path.clone();
+            let mut ovmf_path = dirs::home_dir().unwrap();
+            ovmf_path.push("workloads");
             ovmf_path.push(OVMF_NAME);
 
-            let mut osdisk_path = workload_path;
-            osdisk_path.push(WINDOWS_IMAGE_NAME.to_string());
-
+            let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
             let api_socket = temp_api_path(&tmp_dir);
 
             let mut child = GuestCommand::new(windows_guest.guest())
