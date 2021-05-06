@@ -5417,6 +5417,7 @@ mod tests {
             let output = child.wait_with_output().unwrap();
 
             let _ = child_dnsmasq.kill();
+            let _ = child_dnsmasq.wait();
 
             handle_child_output(r, &output);
         }
@@ -5510,6 +5511,7 @@ mod tests {
             let output = child.wait_with_output().unwrap();
 
             let _ = child_dnsmasq.kill();
+            let _ = child_dnsmasq.wait();
 
             handle_child_output(r, &output);
         }
@@ -5591,6 +5593,7 @@ mod tests {
             let output = child.wait_with_output().unwrap();
 
             let _ = child_dnsmasq.kill();
+            let _ = child_dnsmasq.wait();
 
             handle_child_output(r, &output);
         }
@@ -5672,6 +5675,7 @@ mod tests {
             let output = child.wait_with_output().unwrap();
 
             let _ = child_dnsmasq.kill();
+            let _ = child_dnsmasq.wait();
 
             handle_child_output(r, &output);
         }
@@ -5751,6 +5755,7 @@ mod tests {
             let output = child.wait_with_output().unwrap();
 
             let _ = child_dnsmasq.kill();
+            let _ = child_dnsmasq.wait();
 
             handle_child_output(r, &output);
         }
