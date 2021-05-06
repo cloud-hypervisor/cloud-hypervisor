@@ -32,19 +32,17 @@ pub use {kvm_ioctls::Cap, kvm_ioctls::Kvm};
 
 // This macro gets the offset of a structure (i.e `str`) member (i.e `field`) without having
 // an instance of that structure.
-// It uses a null pointer to retrieve the offset to the field.
-// Inspired by C solution: `#define offsetof(str, f) ((size_t)(&((str *)0)->f))`.
-// Doing `offset__of!(user_pt_regs, pstate)` in our rust code will trigger the following:
-// unsafe { &(*(0 as *const user_pt_regs)).pstate as *const _ as usize }
-// The dereference expression produces an lvalue, but that lvalue is not actually read from,
-// we're just doing pointer math on it, so in theory, it should safe.
 #[macro_export]
 macro_rules! offset__of {
-    ($str:ty, $field:ident) => {
-        unsafe { &(*std::ptr::null::<$str>()).$field as *const _ as usize }
-    };
-}
+    ($str:ty, $($field:ident)+) => ({
+        let tmp: std::mem::MaybeUninit<$str> = std::mem::MaybeUninit::uninit();
+        let tmp = unsafe { tmp.assume_init() };
+        let base = &tmp as *const _ as usize;
+        let member =  &tmp.$($field)* as *const _ as usize;
 
+        member - base
+    });
+}
 // Get the ID of a core register
 #[macro_export]
 macro_rules! arm64_core_reg_id {
