@@ -9,6 +9,7 @@
 use std::sync::Arc;
 pub mod interrupts;
 pub mod layout;
+mod mpspec;
 mod mptable;
 pub mod regs;
 use crate::InitramfsConfig;
