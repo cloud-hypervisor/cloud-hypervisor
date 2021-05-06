@@ -5309,6 +5309,28 @@ mod tests {
             n
         }
 
+        fn reboot_windows(auth: &PasswordAuth) {
+            ssh_command_ip_with_auth(
+                "shutdown /r /t 0",
+                &auth,
+                "192.168.249.2",
+                DEFAULT_SSH_RETRIES,
+                DEFAULT_SSH_TIMEOUT,
+            )
+            .unwrap();
+        }
+
+        fn shutdown_windows(auth: &PasswordAuth) {
+            ssh_command_ip_with_auth(
+                "shutdown /s",
+                &auth,
+                "192.168.249.2",
+                DEFAULT_SSH_RETRIES,
+                DEFAULT_SSH_TIMEOUT,
+            )
+            .unwrap();
+        }
+
         #[test]
         fn test_windows_guest() {
             let windows = WindowsDiskConfig::new(WINDOWS_IMAGE_NAME.to_string());
@@ -5345,14 +5367,7 @@ mod tests {
             thread::sleep(std::time::Duration::new(60, 0));
             let auth = windows_auth();
             let r = std::panic::catch_unwind(|| {
-                ssh_command_ip_with_auth(
-                    "shutdown /s",
-                    &auth,
-                    "192.168.249.2",
-                    DEFAULT_SSH_RETRIES,
-                    DEFAULT_SSH_TIMEOUT,
-                )
-                .unwrap();
+                shutdown_windows(&auth);
             });
 
             let _ = child.wait_timeout(std::time::Duration::from_secs(60));
@@ -5440,15 +5455,7 @@ mod tests {
                 assert!(remote_command(&api_socket, "resume", None));
 
                 let auth = windows_auth();
-
-                ssh_command_ip_with_auth(
-                    "shutdown /s",
-                    &auth,
-                    "192.168.249.2",
-                    DEFAULT_SSH_RETRIES,
-                    DEFAULT_SSH_TIMEOUT,
-                )
-                .unwrap();
+                shutdown_windows(&auth);
             });
 
             let _ = child.wait_timeout(std::time::Duration::from_secs(60));
@@ -5517,14 +5524,7 @@ mod tests {
                 // Wait to make sure CPUs are removed
                 thread::sleep(std::time::Duration::new(10, 0));
                 // Reboot to let Windows catch up
-                ssh_command_ip_with_auth(
-                    "shutdown /r /t 0",
-                    &auth,
-                    "192.168.249.2",
-                    DEFAULT_SSH_RETRIES,
-                    DEFAULT_SSH_TIMEOUT,
-                )
-                .unwrap();
+                reboot_windows(&auth);
                 // Wait to make sure Windows completely rebooted
                 thread::sleep(std::time::Duration::new(60, 0));
                 // Check the guest sees the correct number
@@ -5532,14 +5532,7 @@ mod tests {
                 // Check the CH process has the correct number of vcpu threads
                 assert_eq!(get_vcpu_threads_count(child.id()), vcpu_num);
 
-                ssh_command_ip_with_auth(
-                    "shutdown /s",
-                    &auth,
-                    "192.168.249.2",
-                    DEFAULT_SSH_RETRIES,
-                    DEFAULT_SSH_TIMEOUT,
-                )
-                .unwrap();
+                shutdown_windows(&auth);
             });
 
             let _ = child.wait_timeout(std::time::Duration::from_secs(60));
@@ -5610,27 +5603,13 @@ mod tests {
                 // Wait to make sure RAM has been added
                 thread::sleep(std::time::Duration::new(10, 0));
                 // Reboot to let Windows catch up
-                ssh_command_ip_with_auth(
-                    "shutdown /r /t 0",
-                    &auth,
-                    "192.168.249.2",
-                    DEFAULT_SSH_RETRIES,
-                    DEFAULT_SSH_TIMEOUT,
-                )
-                .unwrap();
+                reboot_windows(&auth);
                 // Wait to make sure guest completely rebooted
                 thread::sleep(std::time::Duration::new(60, 0));
                 // Check the guest sees the correct number
                 assert_eq!(get_ram_size_windows(&auth), ram_size - reserved_ram_size);
 
-                ssh_command_ip_with_auth(
-                    "shutdown /s",
-                    &auth,
-                    "192.168.249.2",
-                    DEFAULT_SSH_RETRIES,
-                    DEFAULT_SSH_TIMEOUT,
-                )
-                .unwrap();
+                shutdown_windows(&auth);
             });
 
             let _ = child.wait_timeout(std::time::Duration::from_secs(60));
@@ -5714,14 +5693,7 @@ mod tests {
                     netdev_num
                 );
 
-                ssh_command_ip_with_auth(
-                    "shutdown /s",
-                    &auth,
-                    "192.168.249.2",
-                    DEFAULT_SSH_RETRIES,
-                    DEFAULT_SSH_TIMEOUT,
-                )
-                .unwrap();
+                shutdown_windows(&auth);
             });
 
             let _ = child.wait_timeout(std::time::Duration::from_secs(60));
