@@ -24,10 +24,13 @@ use std::result;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};
 use std::thread;
+use versionize::{VersionMap, Versionize, VersionizeResult};
+use versionize_derive::Versionize;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
     GuestMemoryError, GuestMemoryMmap, MmapRegion,
 };
+use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -41,7 +44,7 @@ const VIRTIO_PMEM_RESP_TYPE_EIO: u32 = 1;
 // New descriptors are pending on the virtio queue.
 const QUEUE_AVAIL_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 
-#[derive(Copy, Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Default, Serialize, Deserialize, Versionize)]
 #[repr(C)]
 struct VirtioPmemConfig {
     start: u64,
@@ -266,12 +269,14 @@ pub struct Pmem {
     _region: MmapRegion,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Versionize)]
 pub struct PmemState {
     avail_features: u64,
     acked_features: u64,
     config: VirtioPmemConfig,
 }
+
+impl VersionMapped for PmemState {}
 
 impl Pmem {
     pub fn new(
@@ -457,11 +462,11 @@ impl Snapshottable for Pmem {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        Snapshot::new_from_state(&self.id, &self.state())
+        Snapshot::new_from_versioned_state(&self.id, &self.state())
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.set_state(&snapshot.to_state(&self.id)?);
+        self.set_state(&snapshot.to_versioned_state(&self.id)?);
         Ok(())
     }
 }

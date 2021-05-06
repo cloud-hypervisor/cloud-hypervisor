@@ -17,6 +17,8 @@ serde = ">=1.0.27"
 serde_derive = ">=1.0.27"
 serde_json = ">=1.0.9"
 thiserror = "1.0"
+versionize = "0.1.6"
+versionize_derive = "0.1.4"
 virtio-bindings = { version = "0.1", features = ["virtio-v5_0_0"]}
 vm-memory = { version = "0.5.0", features = ["backend-mmap", "backend-atomic"] }
 vm-virtio = { path = "../vm-virtio" }

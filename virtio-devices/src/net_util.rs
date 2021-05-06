@@ -9,6 +9,8 @@ use std::os::raw::c_uint;
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};
+use versionize::{VersionMap, Versionize, VersionizeResult};
+use versionize_derive::Versionize;
 use virtio_bindings::bindings::virtio_net::*;
 use vm_memory::{
     ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryError, GuestMemoryMmap,
@@ -23,7 +25,7 @@ const QUEUE_SIZE: usize = 256;
 const CTRL_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 
 #[repr(C, packed)]
-#[derive(Copy, Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Copy, Clone, Debug, Default, Deserialize, Serialize, Versionize)]
 pub struct VirtioNetConfig {
     pub mac: [u8; 6],
     pub status: u16,

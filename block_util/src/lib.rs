@@ -34,6 +34,8 @@ use std::os::unix::io::AsRawFd;
 use std::path::Path;
 use std::result;
 use std::sync::{Arc, Mutex};
+use versionize::{VersionMap, Versionize, VersionizeResult};
+use versionize_derive::Versionize;
 use virtio_bindings::bindings::virtio_blk::*;
 use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryMmap};
 use vm_virtio::DescriptorChain;
@@ -369,7 +371,7 @@ impl Request {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Copy, Clone, Debug, Default, Deserialize, Serialize, Versionize)]
 #[repr(C, packed)]
 pub struct VirtioBlockConfig {
     pub capacity: u64,
@@ -394,7 +396,7 @@ pub struct VirtioBlockConfig {
 }
 unsafe impl ByteValued for VirtioBlockConfig {}
 
-#[derive(Copy, Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Default, Serialize, Deserialize, Versionize)]
 #[repr(C, packed)]
 pub struct VirtioBlockGeometry {
     pub cylinders: u16,

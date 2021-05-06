@@ -18,7 +18,10 @@ use std::result;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};
 use std::thread;
+use versionize::{VersionMap, Versionize, VersionizeResult};
+use versionize_derive::Versionize;
 use vm_memory::{Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
+use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -127,11 +130,13 @@ pub struct Rng {
     seccomp_action: SeccompAction,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Versionize)]
 pub struct RngState {
     pub avail_features: u64,
     pub acked_features: u64,
 }
+
+impl VersionMapped for RngState {}
 
 impl Rng {
     /// Create a new virtio rng device that gets random data from /dev/urandom.
@@ -299,11 +304,11 @@ impl Snapshottable for Rng {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        Snapshot::new_from_state(&self.id, &self.state())
+        Snapshot::new_from_versioned_state(&self.id, &self.state())
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.set_state(&snapshot.to_state(&self.id)?);
+        self.set_state(&snapshot.to_versioned_state(&self.id)?);
         Ok(())
     }
 }

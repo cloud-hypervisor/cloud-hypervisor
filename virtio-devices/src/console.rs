@@ -21,7 +21,10 @@ use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
+use versionize::{VersionMap, Versionize, VersionizeResult};
+use versionize_derive::Versionize;
 use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
+use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -40,7 +43,7 @@ const CONFIG_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 4;
 //Console size feature bit
 const VIRTIO_CONSOLE_F_SIZE: u64 = 0;
 
-#[derive(Copy, Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Copy, Clone, Debug, Default, Deserialize, Serialize, Versionize)]
 #[repr(C, packed)]
 pub struct VirtioConsoleConfig {
     cols: u16,
@@ -277,13 +280,15 @@ pub struct Console {
     seccomp_action: SeccompAction,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Versionize)]
 pub struct ConsoleState {
     avail_features: u64,
     acked_features: u64,
     config: VirtioConsoleConfig,
     in_buffer: Vec<u8>,
 }
+
+impl VersionMapped for ConsoleState {}
 
 impl Console {
     /// Create a new virtio console device that gets random data from /dev/urandom.
@@ -483,11 +488,11 @@ impl Snapshottable for Console {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        Snapshot::new_from_state(&self.id, &self.state())
+        Snapshot::new_from_versioned_state(&self.id, &self.state())
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.set_state(&snapshot.to_state(&self.id)?);
+        self.set_state(&snapshot.to_versioned_state(&self.id)?);
         Ok(())
     }
 }
