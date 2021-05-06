@@ -5418,6 +5418,73 @@ mod tests {
         }
 
         #[test]
+        fn test_windows_guest_multiple_queues() {
+            let windows_guest = WindowsGuest::new();
+
+            let mut ovmf_path = dirs::home_dir().unwrap();
+            ovmf_path.push("workloads");
+            ovmf_path.push(OVMF_NAME);
+
+            let mut child = GuestCommand::new(windows_guest.guest())
+                .args(&["--cpus", "boot=4,kvm_hyperv=on"])
+                .args(&["--memory", "size=4G"])
+                .args(&["--kernel", ovmf_path.to_str().unwrap()])
+                .args(&["--serial", "tty"])
+                .args(&["--console", "off"])
+                .args(&[
+                    "--disk",
+                    format!(
+                        "path={},num_queues=4",
+                        windows_guest
+                            .guest()
+                            .disk_config
+                            .disk(DiskType::OperatingSystem)
+                            .unwrap()
+                    )
+                    .as_str(),
+                ])
+                .args(&[
+                    "--net",
+                    format!(
+                        "tap=,mac={},ip={},mask=255.255.255.0,num_queues=8",
+                        windows_guest.guest().network.guest_mac,
+                        windows_guest.guest().network.host_ip
+                    )
+                    .as_str(),
+                ])
+                .capture_output()
+                .spawn()
+                .unwrap();
+
+            let fd = child.stdout.as_ref().unwrap().as_raw_fd();
+            let pipesize = unsafe { libc::fcntl(fd, libc::F_SETPIPE_SZ, PIPE_SIZE) };
+            let fd = child.stderr.as_ref().unwrap().as_raw_fd();
+            let pipesize1 = unsafe { libc::fcntl(fd, libc::F_SETPIPE_SZ, PIPE_SIZE) };
+
+            assert!(pipesize >= PIPE_SIZE && pipesize1 >= PIPE_SIZE);
+
+            thread::sleep(std::time::Duration::new(60, 0));
+
+            let mut child_dnsmasq = windows_guest.run_dnsmasq();
+            // Give some time for the guest to reach dnsmasq and get
+            // assigned the right IP address.
+            thread::sleep(std::time::Duration::new(30, 0));
+
+            let r = std::panic::catch_unwind(|| {
+                windows_guest.shutdown();
+            });
+
+            let _ = child.wait_timeout(std::time::Duration::from_secs(60));
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+
+            let _ = child_dnsmasq.kill();
+            let _ = child_dnsmasq.wait();
+
+            handle_child_output(r, &output);
+        }
+
+        #[test]
         #[cfg(not(feature = "mshv"))]
         fn test_windows_guest_snapshot_restore() {
             let windows_guest = WindowsGuest::new();
