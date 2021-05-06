@@ -5256,7 +5256,7 @@ mod tests {
                 &self.guest
             }
 
-            fn get_cpu_count_windows(&self) -> u8 {
+            fn cpu_count(&self) -> u8 {
                 return ssh_command_ip_with_auth(
                 "powershell -Command \"(Get-CimInstance win32_computersystem).NumberOfLogicalProcessors\"",
                 &self.auth,
@@ -5270,7 +5270,7 @@ mod tests {
             .unwrap_or(0);
             }
 
-            fn get_ram_size_windows(&self) -> usize {
+            fn ram_size(&self) -> usize {
                 return ssh_command_ip_with_auth(
                 "powershell -Command \"(Get-CimInstance win32_computersystem).TotalPhysicalMemory\"",
                 &self.auth,
@@ -5284,7 +5284,7 @@ mod tests {
             .unwrap_or(0);
             }
 
-            fn get_netdev_count_windows(&self) -> u8 {
+            fn netdev_count(&self) -> u8 {
                 return ssh_command_ip_with_auth(
                 "powershell -Command \"netsh int ipv4 show interfaces | Select-String ethernet | Measure-Object -Line | Format-Table -HideTableHeaders\"",
                 &self.auth,
@@ -5298,7 +5298,7 @@ mod tests {
             .unwrap_or(0);
             }
 
-            fn reboot_windows(&self) {
+            fn reboot(&self) {
                 ssh_command_ip_with_auth(
                     "shutdown /r /t 0",
                     &self.auth,
@@ -5309,7 +5309,7 @@ mod tests {
                 .unwrap();
             }
 
-            fn shutdown_windows(&self) {
+            fn shutdown(&self) {
                 ssh_command_ip_with_auth(
                     "shutdown /s",
                     &self.auth,
@@ -5321,7 +5321,7 @@ mod tests {
             }
         }
 
-        fn get_vcpu_threads_count(pid: u32) -> u8 {
+        fn vcpu_threads_count(pid: u32) -> u8 {
             // ps -T -p 12345 | grep vcpu | wc -l
             let out = Command::new("ps")
                 .args(&["-T", "-p", format!("{}", pid).as_str()])
@@ -5331,7 +5331,7 @@ mod tests {
             return String::from_utf8_lossy(&out).matches("vcpu").count() as u8;
         }
 
-        fn get_netdev_ctrl_threads_count_windows(pid: u32) -> u8 {
+        fn netdev_ctrl_threads_count(pid: u32) -> u8 {
             // ps -T -p 12345 | grep "_net[0-9]*_ctrl" | wc -l
             let out = Command::new("ps")
                 .args(&["-T", "-p", format!("{}", pid).as_str()])
@@ -5379,7 +5379,7 @@ mod tests {
 
             thread::sleep(std::time::Duration::new(60, 0));
             let r = std::panic::catch_unwind(|| {
-                windows_guest.shutdown_windows();
+                windows_guest.shutdown();
             });
 
             let _ = child.wait_timeout(std::time::Duration::from_secs(60));
@@ -5465,7 +5465,7 @@ mod tests {
                 // Resume the VM
                 assert!(remote_command(&api_socket, "resume", None));
 
-                windows_guest.shutdown_windows();
+                windows_guest.shutdown();
             });
 
             let _ = child.wait_timeout(std::time::Duration::from_secs(60));
@@ -5511,9 +5511,9 @@ mod tests {
             let r = std::panic::catch_unwind(|| {
                 let vcpu_num = 2;
                 // Check the initial number of CPUs the guest sees
-                assert_eq!(windows_guest.get_cpu_count_windows(), vcpu_num);
+                assert_eq!(windows_guest.cpu_count(), vcpu_num);
                 // Check the initial number of vcpu threads in the CH process
-                assert_eq!(get_vcpu_threads_count(child.id()), vcpu_num);
+                assert_eq!(vcpu_threads_count(child.id()), vcpu_num);
 
                 let vcpu_num = 6;
                 // Hotplug some CPUs
@@ -5521,9 +5521,9 @@ mod tests {
                 // Wait to make sure CPUs are added
                 thread::sleep(std::time::Duration::new(10, 0));
                 // Check the guest sees the correct number
-                assert_eq!(windows_guest.get_cpu_count_windows(), vcpu_num);
+                assert_eq!(windows_guest.cpu_count(), vcpu_num);
                 // Check the CH process has the correct number of vcpu threads
-                assert_eq!(get_vcpu_threads_count(child.id()), vcpu_num);
+                assert_eq!(vcpu_threads_count(child.id()), vcpu_num);
 
                 let vcpu_num = 4;
                 // Remove some CPUs. Note that Windows doesn't support hot-remove.
@@ -5531,15 +5531,15 @@ mod tests {
                 // Wait to make sure CPUs are removed
                 thread::sleep(std::time::Duration::new(10, 0));
                 // Reboot to let Windows catch up
-                windows_guest.reboot_windows();
+                windows_guest.reboot();
                 // Wait to make sure Windows completely rebooted
                 thread::sleep(std::time::Duration::new(60, 0));
                 // Check the guest sees the correct number
-                assert_eq!(windows_guest.get_cpu_count_windows(), vcpu_num);
+                assert_eq!(windows_guest.cpu_count(), vcpu_num);
                 // Check the CH process has the correct number of vcpu threads
-                assert_eq!(get_vcpu_threads_count(child.id()), vcpu_num);
+                assert_eq!(vcpu_threads_count(child.id()), vcpu_num);
 
-                windows_guest.shutdown_windows();
+                windows_guest.shutdown();
             });
 
             let _ = child.wait_timeout(std::time::Duration::from_secs(60));
@@ -5585,7 +5585,7 @@ mod tests {
             let r = std::panic::catch_unwind(|| {
                 let ram_size = 2 * 1024 * 1024 * 1024;
                 // Check the initial number of RAM the guest sees
-                let current_ram_size = windows_guest.get_ram_size_windows();
+                let current_ram_size = windows_guest.ram_size();
                 // This size seems to be reserved by the system and thus the
                 // reported amount differs by this constant value.
                 let reserved_ram_size = ram_size - current_ram_size;
@@ -5599,10 +5599,7 @@ mod tests {
                 // Wait to make sure RAM has been added
                 thread::sleep(std::time::Duration::new(10, 0));
                 // Check the guest sees the correct number
-                assert_eq!(
-                    windows_guest.get_ram_size_windows(),
-                    ram_size - reserved_ram_size
-                );
+                assert_eq!(windows_guest.ram_size(), ram_size - reserved_ram_size);
 
                 let ram_size = 3 * 1024 * 1024 * 1024;
                 // Unplug some RAM. Note that hot-remove most likely won't work.
@@ -5610,16 +5607,13 @@ mod tests {
                 // Wait to make sure RAM has been added
                 thread::sleep(std::time::Duration::new(10, 0));
                 // Reboot to let Windows catch up
-                windows_guest.reboot_windows();
+                windows_guest.reboot();
                 // Wait to make sure guest completely rebooted
                 thread::sleep(std::time::Duration::new(60, 0));
                 // Check the guest sees the correct number
-                assert_eq!(
-                    windows_guest.get_ram_size_windows(),
-                    ram_size - reserved_ram_size
-                );
+                assert_eq!(windows_guest.ram_size(), ram_size - reserved_ram_size);
 
-                windows_guest.shutdown_windows();
+                windows_guest.shutdown();
             });
 
             let _ = child.wait_timeout(std::time::Duration::from_secs(60));
@@ -5665,11 +5659,8 @@ mod tests {
             let r = std::panic::catch_unwind(|| {
                 // Initially present network device
                 let netdev_num = 1;
-                assert_eq!(windows_guest.get_netdev_count_windows(), netdev_num);
-                assert_eq!(
-                    get_netdev_ctrl_threads_count_windows(child.id()),
-                    netdev_num
-                );
+                assert_eq!(windows_guest.netdev_count(), netdev_num);
+                assert_eq!(netdev_ctrl_threads_count(child.id()), netdev_num);
 
                 // Hotplug network device
                 let (cmd_success, cmd_output) = remote_command_w_output(
@@ -5682,11 +5673,8 @@ mod tests {
                 thread::sleep(std::time::Duration::new(5, 0));
                 // Verify the device  is on the system
                 let netdev_num = 2;
-                assert_eq!(windows_guest.get_netdev_count_windows(), netdev_num);
-                assert_eq!(
-                    get_netdev_ctrl_threads_count_windows(child.id()),
-                    netdev_num
-                );
+                assert_eq!(windows_guest.netdev_count(), netdev_num);
+                assert_eq!(netdev_ctrl_threads_count(child.id()), netdev_num);
 
                 // Remove network device
                 let cmd_success = remote_command(&api_socket, "remove-device", Some("_net2"));
@@ -5694,13 +5682,10 @@ mod tests {
                 thread::sleep(std::time::Duration::new(5, 0));
                 // Verify the device has been removed
                 let netdev_num = 1;
-                assert_eq!(windows_guest.get_netdev_count_windows(), netdev_num);
-                assert_eq!(
-                    get_netdev_ctrl_threads_count_windows(child.id()),
-                    netdev_num
-                );
+                assert_eq!(windows_guest.netdev_count(), netdev_num);
+                assert_eq!(netdev_ctrl_threads_count(child.id()), netdev_num);
 
-                windows_guest.shutdown_windows();
+                windows_guest.shutdown();
             });
 
             let _ = child.wait_timeout(std::time::Duration::from_secs(60));
