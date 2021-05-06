@@ -11,7 +11,6 @@ tdx = []
 [dependencies]
 acpi_tables = { path = "../acpi_tables", optional = true }
 anyhow = "1.0"
-arch_gen = { path = "../arch_gen" }
 byteorder = "1.4.3"
 hypervisor = { path = "../hypervisor" }
 libc = "0.2.94"

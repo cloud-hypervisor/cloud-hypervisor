@@ -5,15 +5,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
+use crate::x86_64::mpspec;
+use layout::{APIC_START, HIGH_RAM_START, IOAPIC_START};
+use libc::c_char;
 use std::io;
 use std::mem;
 use std::result;
 use std::slice;
-
-use libc::c_char;
-
-use arch_gen::x86::mpspec;
-use layout::{APIC_START, HIGH_RAM_START, IOAPIC_START};
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryMmap,
 };
@@ -222,7 +220,7 @@ pub fn setup_mptable(offset: GuestAddress, mem: &GuestMemoryMmap, num_cpus: u8) 
         let size = mem::size_of::<MpcIntsrcWrapper>();
         let mut mpc_intsrc = MpcIntsrcWrapper(mpspec::mpc_intsrc::default());
         mpc_intsrc.0.type_ = mpspec::MP_INTSRC as u8;
-        mpc_intsrc.0.irqtype = mpspec::mp_irq_source_types_mp_INT as u8;
+        mpc_intsrc.0.irqtype = mpspec::MP_IRQ_SOURCE_TYPES_MP_INT as u8;
         mpc_intsrc.0.irqflag = mpspec::MP_IRQDIR_DEFAULT as u16;
         mpc_intsrc.0.srcbus = 0;
         mpc_intsrc.0.srcbusirq = i;
@@ -237,7 +235,7 @@ pub fn setup_mptable(offset: GuestAddress, mem: &GuestMemoryMmap, num_cpus: u8) 
         let size = mem::size_of::<MpcLintsrcWrapper>();
         let mut mpc_lintsrc = MpcLintsrcWrapper(mpspec::mpc_lintsrc::default());
         mpc_lintsrc.0.type_ = mpspec::MP_LINTSRC as u8;
-        mpc_lintsrc.0.irqtype = mpspec::mp_irq_source_types_mp_ExtINT as u8;
+        mpc_lintsrc.0.irqtype = mpspec::MP_IRQ_SOURCE_TYPES_MP_EXT_INT as u8;
         mpc_lintsrc.0.irqflag = mpspec::MP_IRQDIR_DEFAULT as u16;
         mpc_lintsrc.0.srcbusid = 0;
         mpc_lintsrc.0.srcbusirq = 0;
@@ -252,7 +250,7 @@ pub fn setup_mptable(offset: GuestAddress, mem: &GuestMemoryMmap, num_cpus: u8) 
         let size = mem::size_of::<MpcLintsrcWrapper>();
         let mut mpc_lintsrc = MpcLintsrcWrapper(mpspec::mpc_lintsrc::default());
         mpc_lintsrc.0.type_ = mpspec::MP_LINTSRC as u8;
-        mpc_lintsrc.0.irqtype = mpspec::mp_irq_source_types_mp_NMI as u8;
+        mpc_lintsrc.0.irqtype = mpspec::MP_IRQ_SOURCE_TYPES_MP_NMI as u8;
         mpc_lintsrc.0.irqflag = mpspec::MP_IRQDIR_DEFAULT as u16;
         mpc_lintsrc.0.srcbusid = 0;
         mpc_lintsrc.0.srcbusirq = 0;

@@ -16,7 +16,6 @@ extern crate libc;
 extern crate log;
 #[cfg(feature = "acpi")]
 extern crate acpi_tables;
-extern crate arch_gen;
 extern crate linux_loader;
 extern crate serde;
 extern crate vm_memory;
