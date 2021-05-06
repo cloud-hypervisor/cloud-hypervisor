@@ -22,7 +22,9 @@ mod tests {
     use std::fs;
     use std::io;
     use std::io::BufRead;
-    use std::io::{Read, Write};
+    use std::io::Read;
+    #[cfg(target_arch = "x86_64")]
+    use std::io::Write;
     use std::os::unix::io::AsRawFd;
     use std::path::PathBuf;
     use std::process::{Child, Command, Stdio};
@@ -2434,44 +2436,41 @@ mod tests {
             let bionic = UbuntuDiskConfig::new(BIONIC_IMAGE_NAME.to_string());
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
 
-            vec![
-                &mut bionic as &mut dyn DiskConfig,
-                &mut focal as &mut dyn DiskConfig,
-            ]
-            .iter_mut()
-            .for_each(|disk_config| {
-                let guest = Guest::new(*disk_config);
+            vec![Box::new(bionic), Box::new(focal)]
+                .drain(..)
+                .for_each(|disk_config| {
+                    let guest = Guest::new(disk_config);
 
-                let mut workload_path = dirs::home_dir().unwrap();
-                workload_path.push("workloads");
+                    let mut workload_path = dirs::home_dir().unwrap();
+                    workload_path.push("workloads");
 
-                let kernel_path = direct_kernel_boot_path();
+                    let kernel_path = direct_kernel_boot_path();
 
-                let mut child = GuestCommand::new(&guest)
-                    .args(&["--cpus", "boot=1"])
-                    .args(&["--memory", "size=512M"])
-                    .args(&["--kernel", kernel_path.to_str().unwrap()])
-                    .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-                    .default_disks()
-                    .default_net()
-                    .args(&["--seccomp", "false"])
-                    .capture_output()
-                    .spawn()
-                    .unwrap();
+                    let mut child = GuestCommand::new(&guest)
+                        .args(&["--cpus", "boot=1"])
+                        .args(&["--memory", "size=512M"])
+                        .args(&["--kernel", kernel_path.to_str().unwrap()])
+                        .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+                        .default_disks()
+                        .default_net()
+                        .args(&["--seccomp", "false"])
+                        .capture_output()
+                        .spawn()
+                        .unwrap();
 
-                let r = std::panic::catch_unwind(|| {
-                    guest.wait_vm_boot(Some(120)).unwrap();
+                    let r = std::panic::catch_unwind(|| {
+                        guest.wait_vm_boot(Some(120)).unwrap();
 
-                    assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
-                    assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
-                    assert!(guest.get_entropy().unwrap_or_default() >= 900);
+                        assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
+                        assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+                        assert!(guest.get_entropy().unwrap_or_default() >= 900);
+                    });
+
+                    let _ = child.kill();
+                    let output = child.wait_with_output().unwrap();
+
+                    handle_child_output(r, &output);
                 });
-
-                let _ = child.kill();
-                let output = child.wait_with_output().unwrap();
-
-                handle_child_output(r, &output);
-            });
         }
 
         fn _test_virtio_block(image_name: &str, disable_io_uring: bool) {
@@ -5236,17 +5235,31 @@ mod tests {
     mod windows {
         use crate::tests::*;
 
-        fn windows_auth() -> PasswordAuth {
-            PasswordAuth {
-                username: String::from("administrator"),
-                password: String::from("Admin123"),
-            }
+        struct WindowsGuest {
+            guest: Guest,
+            auth: PasswordAuth,
         }
 
-        fn get_cpu_count_windows(auth: &PasswordAuth) -> u8 {
-            return ssh_command_ip_with_auth(
+        impl WindowsGuest {
+            fn new() -> Self {
+                let disk = WindowsDiskConfig::new(WINDOWS_IMAGE_NAME.to_string());
+                let guest = Guest::new(Box::new(disk));
+                let auth = PasswordAuth {
+                    username: String::from("administrator"),
+                    password: String::from("Admin123"),
+                };
+
+                WindowsGuest { guest, auth }
+            }
+
+            fn guest(&self) -> &Guest {
+                &self.guest
+            }
+
+            fn get_cpu_count_windows(&self) -> u8 {
+                return ssh_command_ip_with_auth(
                 "powershell -Command \"(Get-CimInstance win32_computersystem).NumberOfLogicalProcessors\"",
-                &auth,
+                &self.auth,
                 "192.168.249.2",
                 DEFAULT_SSH_RETRIES,
                 DEFAULT_SSH_TIMEOUT,
@@ -5255,12 +5268,12 @@ mod tests {
             .trim()
             .parse::<u8>()
             .unwrap_or(0);
-        }
+            }
 
-        fn get_ram_size_windows(auth: &PasswordAuth) -> usize {
-            return ssh_command_ip_with_auth(
+            fn get_ram_size_windows(&self) -> usize {
+                return ssh_command_ip_with_auth(
                 "powershell -Command \"(Get-CimInstance win32_computersystem).TotalPhysicalMemory\"",
-                &auth,
+                &self.auth,
                 "192.168.249.2",
                 DEFAULT_SSH_RETRIES,
                 DEFAULT_SSH_TIMEOUT,
@@ -5269,6 +5282,43 @@ mod tests {
             .trim()
             .parse::<usize>()
             .unwrap_or(0);
+            }
+
+            fn get_netdev_count_windows(&self) -> u8 {
+                return ssh_command_ip_with_auth(
+                "powershell -Command \"netsh int ipv4 show interfaces | Select-String ethernet | Measure-Object -Line | Format-Table -HideTableHeaders\"",
+                &self.auth,
+                "192.168.249.2",
+                DEFAULT_SSH_RETRIES,
+                DEFAULT_SSH_TIMEOUT,
+            )
+            .unwrap()
+            .trim()
+            .parse::<u8>()
+            .unwrap_or(0);
+            }
+
+            fn reboot_windows(&self) {
+                ssh_command_ip_with_auth(
+                    "shutdown /r /t 0",
+                    &self.auth,
+                    "192.168.249.2",
+                    DEFAULT_SSH_RETRIES,
+                    DEFAULT_SSH_TIMEOUT,
+                )
+                .unwrap();
+            }
+
+            fn shutdown_windows(&self) {
+                ssh_command_ip_with_auth(
+                    "shutdown /s",
+                    &self.auth,
+                    "192.168.249.2",
+                    DEFAULT_SSH_RETRIES,
+                    DEFAULT_SSH_TIMEOUT,
+                )
+                .unwrap();
+            }
         }
 
         fn get_vcpu_threads_count(pid: u32) -> u8 {
@@ -5279,20 +5329,6 @@ mod tests {
                 .expect("ps command failed")
                 .stdout;
             return String::from_utf8_lossy(&out).matches("vcpu").count() as u8;
-        }
-
-        fn get_netdev_count_windows(auth: &PasswordAuth) -> u8 {
-            return ssh_command_ip_with_auth(
-                "powershell -Command \"netsh int ipv4 show interfaces | Select-String ethernet | Measure-Object -Line | Format-Table -HideTableHeaders\"",
-                &auth,
-                "192.168.249.2",
-                DEFAULT_SSH_RETRIES,
-                DEFAULT_SSH_TIMEOUT,
-            )
-            .unwrap()
-            .trim()
-            .parse::<u8>()
-            .unwrap_or(0);
         }
 
         fn get_netdev_ctrl_threads_count_windows(pid: u32) -> u8 {
@@ -5309,32 +5345,9 @@ mod tests {
             n
         }
 
-        fn reboot_windows(auth: &PasswordAuth) {
-            ssh_command_ip_with_auth(
-                "shutdown /r /t 0",
-                &auth,
-                "192.168.249.2",
-                DEFAULT_SSH_RETRIES,
-                DEFAULT_SSH_TIMEOUT,
-            )
-            .unwrap();
-        }
-
-        fn shutdown_windows(auth: &PasswordAuth) {
-            ssh_command_ip_with_auth(
-                "shutdown /s",
-                &auth,
-                "192.168.249.2",
-                DEFAULT_SSH_RETRIES,
-                DEFAULT_SSH_TIMEOUT,
-            )
-            .unwrap();
-        }
-
         #[test]
         fn test_windows_guest() {
-            let windows = WindowsDiskConfig::new(WINDOWS_IMAGE_NAME.to_string());
-            let guest = Guest::new(Box::new(windows));
+            let windows_guest = WindowsGuest::new();
 
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
@@ -5345,7 +5358,7 @@ mod tests {
             let mut osdisk_path = workload_path;
             osdisk_path.push(WINDOWS_IMAGE_NAME.to_string());
 
-            let mut child = GuestCommand::new(&guest)
+            let mut child = GuestCommand::new(windows_guest.guest())
                 .args(&["--cpus", "boot=2,kvm_hyperv=on"])
                 .args(&["--memory", "size=4G"])
                 .args(&["--kernel", ovmf_path.to_str().unwrap()])
@@ -5365,9 +5378,8 @@ mod tests {
             assert!(pipesize >= PIPE_SIZE && pipesize1 >= PIPE_SIZE);
 
             thread::sleep(std::time::Duration::new(60, 0));
-            let auth = windows_auth();
             let r = std::panic::catch_unwind(|| {
-                shutdown_windows(&auth);
+                windows_guest.shutdown_windows();
             });
 
             let _ = child.wait_timeout(std::time::Duration::from_secs(60));
@@ -5380,8 +5392,7 @@ mod tests {
         #[test]
         #[cfg(not(feature = "mshv"))]
         fn test_windows_guest_snapshot_restore() {
-            let windows = WindowsDiskConfig::new(WINDOWS_IMAGE_NAME.to_string());
-            let guest = Guest::new(Box::new(windows));
+            let windows_guest = WindowsGuest::new();
 
             let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
             let mut workload_path = dirs::home_dir().unwrap();
@@ -5395,7 +5406,7 @@ mod tests {
 
             let api_socket = temp_api_path(&tmp_dir);
 
-            let mut child = GuestCommand::new(&guest)
+            let mut child = GuestCommand::new(windows_guest.guest())
                 .args(&["--api-socket", &api_socket])
                 .args(&["--cpus", "boot=2,kvm_hyperv=on"])
                 .args(&["--memory", "size=4G"])
@@ -5437,7 +5448,7 @@ mod tests {
             child.wait().unwrap();
 
             // Restore the VM from the snapshot
-            let mut child = GuestCommand::new(&guest)
+            let mut child = GuestCommand::new(windows_guest.guest())
                 .args(&["--api-socket", &api_socket])
                 .args(&[
                     "--restore",
@@ -5454,8 +5465,7 @@ mod tests {
                 // Resume the VM
                 assert!(remote_command(&api_socket, "resume", None));
 
-                let auth = windows_auth();
-                shutdown_windows(&auth);
+                windows_guest.shutdown_windows();
             });
 
             let _ = child.wait_timeout(std::time::Duration::from_secs(60));
@@ -5468,8 +5478,7 @@ mod tests {
         #[test]
         #[cfg(not(feature = "mshv"))]
         fn test_windows_guest_cpu_hotplug() {
-            let windows = WindowsDiskConfig::new(WINDOWS_IMAGE_NAME.to_string());
-            let guest = Guest::new(Box::new(windows));
+            let windows_guest = WindowsGuest::new();
 
             let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
             let mut workload_path = dirs::home_dir().unwrap();
@@ -5483,7 +5492,7 @@ mod tests {
 
             let api_socket = temp_api_path(&tmp_dir);
 
-            let mut child = GuestCommand::new(&guest)
+            let mut child = GuestCommand::new(windows_guest.guest())
                 .args(&["--api-socket", &api_socket])
                 .args(&["--cpus", "boot=2,max=8,kvm_hyperv=on"])
                 .args(&["--memory", "size=4G"])
@@ -5500,11 +5509,9 @@ mod tests {
             thread::sleep(std::time::Duration::new(60, 0));
 
             let r = std::panic::catch_unwind(|| {
-                let auth = windows_auth();
-
                 let vcpu_num = 2;
                 // Check the initial number of CPUs the guest sees
-                assert_eq!(get_cpu_count_windows(&auth), vcpu_num);
+                assert_eq!(windows_guest.get_cpu_count_windows(), vcpu_num);
                 // Check the initial number of vcpu threads in the CH process
                 assert_eq!(get_vcpu_threads_count(child.id()), vcpu_num);
 
@@ -5514,7 +5521,7 @@ mod tests {
                 // Wait to make sure CPUs are added
                 thread::sleep(std::time::Duration::new(10, 0));
                 // Check the guest sees the correct number
-                assert_eq!(get_cpu_count_windows(&auth), vcpu_num);
+                assert_eq!(windows_guest.get_cpu_count_windows(), vcpu_num);
                 // Check the CH process has the correct number of vcpu threads
                 assert_eq!(get_vcpu_threads_count(child.id()), vcpu_num);
 
@@ -5524,15 +5531,15 @@ mod tests {
                 // Wait to make sure CPUs are removed
                 thread::sleep(std::time::Duration::new(10, 0));
                 // Reboot to let Windows catch up
-                reboot_windows(&auth);
+                windows_guest.reboot_windows();
                 // Wait to make sure Windows completely rebooted
                 thread::sleep(std::time::Duration::new(60, 0));
                 // Check the guest sees the correct number
-                assert_eq!(get_cpu_count_windows(&auth), vcpu_num);
+                assert_eq!(windows_guest.get_cpu_count_windows(), vcpu_num);
                 // Check the CH process has the correct number of vcpu threads
                 assert_eq!(get_vcpu_threads_count(child.id()), vcpu_num);
 
-                shutdown_windows(&auth);
+                windows_guest.shutdown_windows();
             });
 
             let _ = child.wait_timeout(std::time::Duration::from_secs(60));
@@ -5545,8 +5552,7 @@ mod tests {
         #[test]
         #[cfg(not(feature = "mshv"))]
         fn test_windows_guest_ram_hotplug() {
-            let windows = WindowsDiskConfig::new(WINDOWS_IMAGE_NAME.to_string());
-            let guest = Guest::new(Box::new(windows));
+            let windows_guest = WindowsGuest::new();
 
             let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
             let mut workload_path = dirs::home_dir().unwrap();
@@ -5560,7 +5566,7 @@ mod tests {
 
             let api_socket = temp_api_path(&tmp_dir);
 
-            let mut child = GuestCommand::new(&guest)
+            let mut child = GuestCommand::new(windows_guest.guest())
                 .args(&["--api-socket", &api_socket])
                 .args(&["--cpus", "boot=2,kvm_hyperv=on"])
                 .args(&["--memory", "size=2G,hotplug_size=5G"])
@@ -5577,11 +5583,9 @@ mod tests {
             thread::sleep(std::time::Duration::new(60, 0));
 
             let r = std::panic::catch_unwind(|| {
-                let auth = windows_auth();
-
                 let ram_size = 2 * 1024 * 1024 * 1024;
                 // Check the initial number of RAM the guest sees
-                let current_ram_size = get_ram_size_windows(&auth);
+                let current_ram_size = windows_guest.get_ram_size_windows();
                 // This size seems to be reserved by the system and thus the
                 // reported amount differs by this constant value.
                 let reserved_ram_size = ram_size - current_ram_size;
@@ -5595,7 +5599,10 @@ mod tests {
                 // Wait to make sure RAM has been added
                 thread::sleep(std::time::Duration::new(10, 0));
                 // Check the guest sees the correct number
-                assert_eq!(get_ram_size_windows(&auth), ram_size - reserved_ram_size);
+                assert_eq!(
+                    windows_guest.get_ram_size_windows(),
+                    ram_size - reserved_ram_size
+                );
 
                 let ram_size = 3 * 1024 * 1024 * 1024;
                 // Unplug some RAM. Note that hot-remove most likely won't work.
@@ -5603,13 +5610,16 @@ mod tests {
                 // Wait to make sure RAM has been added
                 thread::sleep(std::time::Duration::new(10, 0));
                 // Reboot to let Windows catch up
-                reboot_windows(&auth);
+                windows_guest.reboot_windows();
                 // Wait to make sure guest completely rebooted
                 thread::sleep(std::time::Duration::new(60, 0));
                 // Check the guest sees the correct number
-                assert_eq!(get_ram_size_windows(&auth), ram_size - reserved_ram_size);
+                assert_eq!(
+                    windows_guest.get_ram_size_windows(),
+                    ram_size - reserved_ram_size
+                );
 
-                shutdown_windows(&auth);
+                windows_guest.shutdown_windows();
             });
 
             let _ = child.wait_timeout(std::time::Duration::from_secs(60));
@@ -5622,8 +5632,7 @@ mod tests {
         #[test]
         #[cfg(not(feature = "mshv"))]
         fn test_windows_guest_netdev_hotplug() {
-            let windows = WindowsDiskConfig::new(WINDOWS_IMAGE_NAME.to_string());
-            let guest = Guest::new(Box::new(windows));
+            let windows_guest = WindowsGuest::new();
 
             let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
             let mut workload_path = dirs::home_dir().unwrap();
@@ -5637,7 +5646,7 @@ mod tests {
 
             let api_socket = temp_api_path(&tmp_dir);
 
-            let mut child = GuestCommand::new(&guest)
+            let mut child = GuestCommand::new(windows_guest.guest())
                 .args(&["--api-socket", &api_socket])
                 .args(&["--cpus", "boot=2,kvm_hyperv=on"])
                 .args(&["--memory", "size=2G,hotplug_size=5G"])
@@ -5654,11 +5663,9 @@ mod tests {
             thread::sleep(std::time::Duration::new(60, 0));
 
             let r = std::panic::catch_unwind(|| {
-                let auth = windows_auth();
-
                 // Initially present network device
                 let netdev_num = 1;
-                assert_eq!(get_netdev_count_windows(&auth), netdev_num);
+                assert_eq!(windows_guest.get_netdev_count_windows(), netdev_num);
                 assert_eq!(
                     get_netdev_ctrl_threads_count_windows(child.id()),
                     netdev_num
@@ -5668,14 +5675,14 @@ mod tests {
                 let (cmd_success, cmd_output) = remote_command_w_output(
                     &api_socket,
                     "add-net",
-                    Some(guest.default_net_string().as_str()),
+                    Some(windows_guest.guest().default_net_string().as_str()),
                 );
                 assert!(cmd_success);
                 assert!(String::from_utf8_lossy(&cmd_output).contains("\"id\":\"_net2\""));
                 thread::sleep(std::time::Duration::new(5, 0));
                 // Verify the device  is on the system
                 let netdev_num = 2;
-                assert_eq!(get_netdev_count_windows(&auth), netdev_num);
+                assert_eq!(windows_guest.get_netdev_count_windows(), netdev_num);
                 assert_eq!(
                     get_netdev_ctrl_threads_count_windows(child.id()),
                     netdev_num
@@ -5687,13 +5694,13 @@ mod tests {
                 thread::sleep(std::time::Duration::new(5, 0));
                 // Verify the device has been removed
                 let netdev_num = 1;
-                assert_eq!(get_netdev_count_windows(&auth), netdev_num);
+                assert_eq!(windows_guest.get_netdev_count_windows(), netdev_num);
                 assert_eq!(
                     get_netdev_ctrl_threads_count_windows(child.id()),
                     netdev_num
                 );
 
-                shutdown_windows(&auth);
+                windows_guest.shutdown_windows();
             });
 
             let _ = child.wait_timeout(std::time::Duration::from_secs(60));
