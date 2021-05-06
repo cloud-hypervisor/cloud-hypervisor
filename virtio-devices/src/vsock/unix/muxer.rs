@@ -594,7 +594,7 @@ impl VsockMuxer {
             )
             .unwrap_or_else(|err| {
                 warn!(
-                    "vosck muxer: error removing epoll listener for fd {:?}: {:?}",
+                    "vsock muxer: error removing epoll listener for fd {:?}: {:?}",
                     fd, err
                 );
             });

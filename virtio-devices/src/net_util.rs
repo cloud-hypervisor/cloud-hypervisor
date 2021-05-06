@@ -82,7 +82,7 @@ pub enum Error {
     InvalidQueuePairsNum,
     /// No memory passed in.
     NoMemory,
-    /// No ueue pairs number.
+    /// No queue pairs number.
     NoQueuePairsNum,
 }
 
