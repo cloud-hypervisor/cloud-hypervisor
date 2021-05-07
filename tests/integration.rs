@@ -5951,7 +5951,7 @@ mod tests {
                 // Add RAM to the VM
                 let desired_ram = 6 << 30;
                 resize_command(&api_socket, None, Some(desired_ram), None);
-                thread::sleep(std::time::Duration::new(10, 0));
+                thread::sleep(std::time::Duration::new(30, 0));
                 assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
 
                 // Check the VFIO device works when RAM is increased to 6GiB
