@@ -105,7 +105,10 @@ pipeline{
 				}
 				stage ('Worker build SGX') {
 					agent { node { label 'bionic-sgx' } }
-					when { branch 'master' }
+					when {
+						beforeAgent true
+						branch 'master'
+					}
 					stages {
 						stage ('Checkout') {
 							steps {
@@ -138,7 +141,10 @@ pipeline{
 				}
 				stage ('Worker build VFIO') {
 					agent { node { label 'bionic-vfio' } }
-					when { branch 'master' }
+					when {
+						beforeAgent true
+						branch 'master'
+					}
 					stages {
 						stage ('Checkout') {
 							steps {
