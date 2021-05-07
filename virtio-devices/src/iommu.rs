@@ -436,9 +436,7 @@ impl Request {
 
                 // Add new domain with no mapping if the entry didn't exist yet
                 let mut mappings = mapping.mappings.write().unwrap();
-                if !mappings.contains_key(&domain) {
-                    mappings.insert(domain, BTreeMap::new());
-                }
+                mappings.entry(domain).or_insert_with(BTreeMap::new);
 
                 0
             }
