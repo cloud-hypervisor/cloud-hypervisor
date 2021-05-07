@@ -52,7 +52,6 @@ pub struct Net {
 
 impl Net {
     /// Create a new vhost-user-net device
-    /// Create a new vhost-user-net device
     pub fn new(
         id: String,
         mac_addr: MacAddr,

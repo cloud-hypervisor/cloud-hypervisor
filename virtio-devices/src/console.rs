@@ -70,7 +70,7 @@ impl ConsoleEpollHandler {
     /*
      * Each port of virtio console device has one receive
      * queue. One or more empty buffers are placed by the
-     * dirver in the receive queue for incoming data. Here,
+     * driver in the receive queue for incoming data. Here,
      * we place the input data to these empty buffers.
      */
     fn process_input_queue(&mut self) -> bool {
