@@ -261,7 +261,7 @@ impl VirtioCommon {
 
         if queues.len() < self.min_queues.into() {
             error!(
-                "Number of enabled queues lower tham min: {} vs {}",
+                "Number of enabled queues lower than min: {} vs {}",
                 queues.len(),
                 self.min_queues
             );

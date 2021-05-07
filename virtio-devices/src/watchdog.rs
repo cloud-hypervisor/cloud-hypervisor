@@ -213,7 +213,7 @@ impl Watchdog {
         self.common.avail_features = state.avail_features;
         self.common.acked_features = state.acked_features;
         // When restoring enable the watchdog if it was previously enabled. We reset the timer
-        // to ensure that we don't unnecesarily reboot due to the offline time.
+        // to ensure that we don't unnecessarily reboot due to the offline time.
         if state.enabled {
             self.last_ping_time.lock().unwrap().replace(Instant::now());
         }

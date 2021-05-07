@@ -54,7 +54,7 @@
 // 3. Flow control
 //    Before sending a data packet (VSOCK_OP_RW), the sender must make sure that the receiver
 //    has enough free buffer space to store that data. If this condition is not respected, the
-//    receiving peer's behaviour is undefined. In this implementation, we forcefully terminate
+//    receiving peer's behavior is undefined. In this implementation, we forcefully terminate
 //    the connection by sending back a VSOCK_OP_RST packet.
 //    Note: all buffer space information is computed and stored on a per-connection basis.
 //    Peers keep each other informed about the free buffer space they have by filling in two
@@ -197,7 +197,7 @@ where
             }
 
             // Oh wait, before we start bringing in the big data, can our peer handle receiving so
-            // much bytey goodness?
+            // much bytes goodness?
             if self.need_credit_update_from_peer() {
                 self.last_fwd_cnt_to_peer = self.fwd_cnt;
                 pkt.set_op(uapi::VSOCK_OP_CREDIT_REQUEST);
