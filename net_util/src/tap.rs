@@ -121,13 +121,12 @@ impl Tap {
         let mut ifreq: net_gen::ifreq = Default::default();
         unsafe {
             let ifrn_name = ifreq.ifr_ifrn.ifrn_name.as_mut();
-            let ifru_flags = ifreq.ifr_ifru.ifru_flags.as_mut();
             let name_slice = &mut ifrn_name[..terminated_if_name.len()];
             name_slice.copy_from_slice(terminated_if_name.as_slice());
-            *ifru_flags =
+            ifreq.ifr_ifru.ifru_flags =
                 (net_gen::IFF_TAP | net_gen::IFF_NO_PI | net_gen::IFF_VNET_HDR) as c_short;
             if num_queue_pairs > 1 {
-                *ifru_flags |= net_gen::IFF_MULTI_QUEUE as c_short;
+                ifreq.ifr_ifru.ifru_flags |= net_gen::IFF_MULTI_QUEUE as c_short;
             }
         }
 
@@ -138,8 +137,7 @@ impl Tap {
             return Err(Error::ConfigureTap(IoError::last_os_error()));
         }
 
-        let if_name_temp = unsafe { *ifreq.ifr_ifrn.ifrn_name.as_ref() };
-        let mut if_name = if_name_temp.to_vec();
+        let mut if_name = unsafe { ifreq.ifr_ifrn.ifrn_name }.to_vec();
         if_name.truncate(terminated_if_name.len() - 1);
         // Safe since only the name is accessed, and it's cloned out.
         Ok(Tap {
@@ -173,16 +171,16 @@ impl Tap {
         if ret < 0 {
             return Err(Error::IoctlError(IoError::last_os_error()));
         }
-        let if_name = unsafe { *ifreq.ifr_ifrn.ifrn_name.as_ref() }.to_vec();
+        // We only access one field of the ifru union, hence this is safe.
+        let if_name = unsafe { ifreq.ifr_ifrn.ifrn_name }.to_vec();
 
         // Try and update flags. Depending on how the tap was created (macvtap
         // or via open_named()) this might return -EEXIST so we just ignore that.
         unsafe {
-            let ifru_flags = ifreq.ifr_ifru.ifru_flags.as_mut();
-            *ifru_flags =
+            ifreq.ifr_ifru.ifru_flags =
                 (net_gen::IFF_TAP | net_gen::IFF_NO_PI | net_gen::IFF_VNET_HDR) as c_short;
             if num_queue_pairs > 1 {
-                *ifru_flags |= net_gen::IFF_MULTI_QUEUE as c_short;
+                ifreq.ifr_ifru.ifru_flags |= net_gen::IFF_MULTI_QUEUE as c_short;
             }
         }
         let ret = unsafe { ioctl_with_mut_ref(&tap_file, net_gen::TUNSETIFF(), &mut ifreq) };
@@ -204,11 +202,7 @@ impl Tap {
 
         let mut ifreq = self.get_ifreq();
 
-        // We only access one field of the ifru union, hence this is safe.
-        unsafe {
-            let ifru_addr = ifreq.ifr_ifru.ifru_addr.as_mut();
-            *ifru_addr = addr;
-        }
+        ifreq.ifr_ifru.ifru_addr = addr;
 
         // ioctl is safe. Called with a valid sock fd, and we check the return.
         #[allow(clippy::cast_lossless)]
@@ -245,9 +239,9 @@ impl Tap {
         }
         // We only access one field of the ifru union, hence this is safe.
         unsafe {
-            let ifru_hwaddr = ifreq.ifr_ifru.ifru_hwaddr.as_mut();
+            let ifru_hwaddr = &mut ifreq.ifr_ifru.ifru_hwaddr;
             for (i, v) in addr.get_bytes().iter().enumerate() {
-                ifru_hwaddr.sa_data[i] = *v as c_char;
+                ifru_hwaddr.sa_data[i] = *v as c_uchar;
             }
         }
 
@@ -278,11 +272,8 @@ impl Tap {
 
         // We only access one field of the ifru union, hence this is safe.
         let addr = unsafe {
-            let ifru_hwaddr = ifreq.ifr_ifru.ifru_hwaddr.as_ref();
-            MacAddr::from_bytes(
-                &*(&ifru_hwaddr.sa_data[0..MAC_ADDR_LEN] as *const _ as *const [u8]),
-            )
-            .map_err(Error::MacParsing)?
+            MacAddr::from_bytes(&ifreq.ifr_ifru.ifru_hwaddr.sa_data[0..MAC_ADDR_LEN])
+                .map_err(Error::MacParsing)?
         };
         Ok(addr)
     }
@@ -294,11 +285,7 @@ impl Tap {
 
         let mut ifreq = self.get_ifreq();
 
-        // We only access one field of the ifru union, hence this is safe.
-        unsafe {
-            let ifru_addr = ifreq.ifr_ifru.ifru_addr.as_mut();
-            *ifru_addr = addr;
-        }
+        ifreq.ifr_ifru.ifru_addr = addr;
 
         // ioctl is safe. Called with a valid sock fd, and we check the return.
         #[allow(clippy::cast_lossless)]
@@ -338,7 +325,7 @@ impl Tap {
         }
 
         // If TAP device is already up don't try and enable it
-        let ifru_flags = unsafe { ifreq.ifr_ifru.ifru_flags.as_ref() };
+        let ifru_flags = unsafe { ifreq.ifr_ifru.ifru_flags };
         if ifru_flags
             & (net_gen::net_device_flags_IFF_UP | net_gen::net_device_flags_IFF_RUNNING) as i16
             == (net_gen::net_device_flags_IFF_UP | net_gen::net_device_flags_IFF_RUNNING) as i16
@@ -346,13 +333,8 @@ impl Tap {
             return Ok(());
         }
 
-        // We only access one field of the ifru union, hence this is safe.
-        unsafe {
-            let ifru_flags = ifreq.ifr_ifru.ifru_flags.as_mut();
-
-            *ifru_flags =
-                (net_gen::net_device_flags_IFF_UP | net_gen::net_device_flags_IFF_RUNNING) as i16;
-        }
+        ifreq.ifr_ifru.ifru_flags =
+            (net_gen::net_device_flags_IFF_UP | net_gen::net_device_flags_IFF_RUNNING) as i16;
 
         // ioctl is safe. Called with a valid sock fd, and we check the return.
         #[allow(clippy::cast_lossless)]
@@ -629,18 +611,6 @@ mod tests {
         let tap = Tap::new(1).unwrap();
         let ret = tap.enable();
         assert!(ret.is_ok());
-    }
-
-    #[test]
-    fn test_tap_get_ifreq() {
-        let _tap_ip_guard = TAP_IP_LOCK.lock().unwrap();
-
-        let tap = Tap::new(1).unwrap();
-        let ret = tap.get_ifreq();
-        assert_eq!(
-            "__BindgenUnionField",
-            format!("{:?}", ret.ifr_ifrn.ifrn_name)
-        );
     }
 
     #[test]
