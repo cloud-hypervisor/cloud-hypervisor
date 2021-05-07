@@ -18,6 +18,8 @@ extern crate log;
 extern crate acpi_tables;
 extern crate linux_loader;
 extern crate serde;
+#[cfg(target_arch = "aarch64")]
+extern crate vm_fdt;
 extern crate vm_memory;
 extern crate vm_migration;
 #[cfg(target_arch = "aarch64")]

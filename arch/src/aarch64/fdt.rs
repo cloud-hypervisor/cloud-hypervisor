@@ -6,12 +6,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
-use libc::{c_char, c_int, c_void};
 use std::collections::HashMap;
-use std::ffi::{CStr, CString, NulError};
+use std::ffi::CStr;
 use std::fmt::Debug;
-use std::ptr::null;
-use std::{io, result};
+use std::result;
 
 use super::super::DeviceType;
 use super::super::InitramfsConfig;
@@ -21,7 +19,7 @@ use super::layout::{
     FDT_MAX_SIZE, MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START, PCI_MMCONFIG_SIZE,
     PCI_MMCONFIG_START,
 };
-use crate::aarch64::fdt::Error::CstringFdtTransform;
+use vm_fdt::{FdtWriter, FdtWriterResult};
 use vm_memory::{Address, Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryMmap};
 
 // This is a value for uniquely identifying the FDT node declaring the interrupt controller.
@@ -51,22 +49,6 @@ const IRQ_TYPE_LEVEL_HI: u32 = 4;
 // System Power Down
 const KEY_POWER: u32 = 116;
 
-// This links to libfdt which handles the creation of the binary blob
-// flattened device tree (fdt) that is passed to the kernel and indicates
-// the hardware configuration of the machine.
-#[link(name = "fdt")]
-extern "C" {
-    fn fdt_create(buf: *mut c_void, bufsize: c_int) -> c_int;
-    fn fdt_finish_reservemap(fdt: *mut c_void) -> c_int;
-    fn fdt_begin_node(fdt: *mut c_void, name: *const c_char) -> c_int;
-    fn fdt_property(fdt: *mut c_void, name: *const c_char, val: *const c_void, len: c_int)
-        -> c_int;
-    fn fdt_end_node(fdt: *mut c_void) -> c_int;
-    fn fdt_open_into(fdt: *const c_void, buf: *mut c_void, bufsize: c_int) -> c_int;
-    fn fdt_finish(fdt: *const c_void) -> c_int;
-    fn fdt_pack(fdt: *mut c_void) -> c_int;
-}
-
 /// Trait for devices to be added to the Flattened Device Tree.
 pub trait DeviceInfoForFdt {
     /// Returns the address where this device will be loaded.
@@ -80,16 +62,6 @@ pub trait DeviceInfoForFdt {
 /// Errors thrown while configuring the Flattened Device Tree for aarch64.
 #[derive(Debug)]
 pub enum Error {
-    /// Failed to append node to the FDT.
-    AppendFdtNode(io::Error),
-    /// Failed to append a property to the FDT.
-    AppendFdtProperty(io::Error),
-    /// Syscall for creating FDT failed.
-    CreateFdt(io::Error),
-    /// Failed to obtain a C style string.
-    CstringFdtTransform(NulError),
-    /// Failure in calling syscall for terminating this FDT.
-    FinishFdtReserveMap(io::Error),
     /// Failure in writing FDT in memory.
     WriteFdtToMemory(GuestMemoryError),
 }
@@ -104,29 +76,27 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     gic_device: &dyn GicDevice,
     initrd: &Option<InitramfsConfig>,
     pci_space_address: &(u64, u64),
-) -> Result<Vec<u8>> {
+) -> FdtWriterResult<Vec<u8>> {
     // Allocate stuff necessary for the holding the blob.
-    let mut fdt = vec![0; FDT_MAX_SIZE];
-
-    allocate_fdt(&mut fdt)?;
+    let mut fdt = FdtWriter::new(&[]);
 
     // For an explanation why these nodes were introduced in the blob take a look at
     // https://github.com/torvalds/linux/blob/master/Documentation/devicetree/booting-without-of.txt#L845
     // Look for "Required nodes and properties".
 
     // Header or the root node as per above mentioned documentation.
-    append_begin_node(&mut fdt, "")?;
-    append_property_string(&mut fdt, "compatible", "linux,dummy-virt")?;
+    let root_node = fdt.begin_node("")?;
+    fdt.property_string("compatible", "linux,dummy-virt")?;
     // For info on #address-cells and size-cells read "Note about cells and address representation"
     // from the above mentioned txt file.
-    append_property_u32(&mut fdt, "#address-cells", ADDRESS_CELLS)?;
-    append_property_u32(&mut fdt, "#size-cells", SIZE_CELLS)?;
+    fdt.property_u32("#address-cells", ADDRESS_CELLS)?;
+    fdt.property_u32("#size-cells", SIZE_CELLS)?;
     // This is not mandatory but we use it to point the root node to the node
     // containing description of the interrupt controller for this VM.
-    append_property_u32(&mut fdt, "interrupt-parent", GIC_PHANDLE)?;
+    fdt.property_u32("interrupt-parent", GIC_PHANDLE)?;
     create_cpu_nodes(&mut fdt, &vcpu_mpidr)?;
     create_memory_node(&mut fdt, guest_mem)?;
-    create_chosen_node(&mut fdt, cmdline, initrd)?;
+    create_chosen_node(&mut fdt, cmdline.to_str().unwrap(), initrd)?;
     create_gic_node(&mut fdt, gic_device)?;
     create_timer_node(&mut fdt)?;
     create_clock_node(&mut fdt)?;
@@ -135,307 +105,136 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     create_pci_nodes(&mut fdt, pci_space_address.0, pci_space_address.1)?;
 
     // End Header node.
-    append_end_node(&mut fdt)?;
+    fdt.end_node(root_node)?;
 
-    // Allocate another buffer so we can format and then write fdt to guest.
-    let mut fdt_final = vec![0; FDT_MAX_SIZE];
-    finish_fdt(&mut fdt, &mut fdt_final)?;
+    let fdt_final = fdt.finish(FDT_MAX_SIZE)?;
 
+    Ok(fdt_final)
+}
+
+pub fn write_fdt_to_memory(fdt_final: Vec<u8>, guest_mem: &GuestMemoryMmap) -> Result<()> {
     // Write FDT to memory.
     let fdt_address = GuestAddress(get_fdt_addr(&guest_mem));
     guest_mem
         .write_slice(fdt_final.as_slice(), fdt_address)
         .map_err(Error::WriteFdtToMemory)?;
-    Ok(fdt_final)
-}
-
-// Following are auxiliary functions for allocating and finishing the FDT.
-fn allocate_fdt(fdt: &mut Vec<u8>) -> Result<()> {
-    // Safe since we allocated this array with FDT_MAX_SIZE.
-    let mut fdt_ret = unsafe { fdt_create(fdt.as_mut_ptr() as *mut c_void, FDT_MAX_SIZE as c_int) };
-
-    if fdt_ret != 0 {
-        return Err(Error::CreateFdt(io::Error::last_os_error()));
-    }
-
-    // The flattened device trees created with fdt_create() contains a list of
-    // reserved memory areas. We need to call `fdt_finish_reservemap` so as to make sure that there is a
-    // terminator in the reservemap list and whatever happened to be at the
-    // start of the FDT data section would end up being interpreted as
-    // reservemap entries.
-    // Safe since we previously allocated this array.
-    fdt_ret = unsafe { fdt_finish_reservemap(fdt.as_mut_ptr() as *mut c_void) };
-    if fdt_ret != 0 {
-        return Err(Error::FinishFdtReserveMap(io::Error::last_os_error()));
-    }
     Ok(())
-}
-
-fn finish_fdt(from_fdt: &mut Vec<u8>, to_fdt: &mut Vec<u8>) -> Result<()> {
-    // Safe since we allocated `fdt_final` and previously passed in its size.
-    let mut fdt_ret = unsafe { fdt_finish(from_fdt.as_mut_ptr() as *mut c_void) };
-    if fdt_ret != 0 {
-        return Err(Error::FinishFdtReserveMap(io::Error::last_os_error()));
-    }
-
-    // Safe because we allocated both arrays with the correct size.
-    fdt_ret = unsafe {
-        fdt_open_into(
-            from_fdt.as_mut_ptr() as *mut c_void,
-            to_fdt.as_mut_ptr() as *mut c_void,
-            FDT_MAX_SIZE as i32,
-        )
-    };
-    if fdt_ret != 0 {
-        return Err(Error::FinishFdtReserveMap(io::Error::last_os_error()));
-    }
-
-    // Safe since we allocated `to_fdt`.
-    fdt_ret = unsafe { fdt_pack(to_fdt.as_mut_ptr() as *mut c_void) };
-    if fdt_ret != 0 {
-        return Err(Error::FinishFdtReserveMap(io::Error::last_os_error()));
-    }
-    Ok(())
-}
-
-// Following are auxiliary functions for appending nodes to FDT.
-fn append_begin_node(fdt: &mut Vec<u8>, name: &str) -> Result<()> {
-    let cstr_name = CString::new(name).map_err(CstringFdtTransform)?;
-
-    // Safe because we allocated fdt and converted name to a CString
-    let fdt_ret = unsafe { fdt_begin_node(fdt.as_mut_ptr() as *mut c_void, cstr_name.as_ptr()) };
-    if fdt_ret != 0 {
-        return Err(Error::AppendFdtNode(io::Error::last_os_error()));
-    }
-    Ok(())
-}
-
-fn append_end_node(fdt: &mut Vec<u8>) -> Result<()> {
-    // Safe because we allocated fdt.
-    let fdt_ret = unsafe { fdt_end_node(fdt.as_mut_ptr() as *mut c_void) };
-    if fdt_ret != 0 {
-        return Err(Error::AppendFdtNode(io::Error::last_os_error()));
-    }
-    Ok(())
-}
-
-// Following are auxiliary functions for appending property nodes to the nodes of the FDT.
-fn append_property_u32(fdt: &mut Vec<u8>, name: &str, val: u32) -> Result<()> {
-    append_property(fdt, name, &to_be32(val))
-}
-
-fn append_property_u64(fdt: &mut Vec<u8>, name: &str, val: u64) -> Result<()> {
-    append_property(fdt, name, &to_be64(val))
-}
-
-fn append_property_string(fdt: &mut Vec<u8>, name: &str, value: &str) -> Result<()> {
-    let cstr_value = CString::new(value).map_err(CstringFdtTransform)?;
-    append_property_cstring(fdt, name, &cstr_value)
-}
-
-fn append_property_cstring(fdt: &mut Vec<u8>, name: &str, cstr_value: &CStr) -> Result<()> {
-    let value_bytes = cstr_value.to_bytes_with_nul();
-    let cstr_name = CString::new(name).map_err(CstringFdtTransform)?;
-    // Safe because we allocated fdt, converted name and value to CStrings
-    let fdt_ret = unsafe {
-        fdt_property(
-            fdt.as_mut_ptr() as *mut c_void,
-            cstr_name.as_ptr(),
-            value_bytes.as_ptr() as *mut c_void,
-            value_bytes.len() as i32,
-        )
-    };
-    if fdt_ret != 0 {
-        return Err(Error::AppendFdtProperty(io::Error::last_os_error()));
-    }
-    Ok(())
-}
-
-fn append_property_null(fdt: &mut Vec<u8>, name: &str) -> Result<()> {
-    let cstr_name = CString::new(name).map_err(CstringFdtTransform)?;
-
-    // Safe because we allocated fdt, converted name to a CString
-    let fdt_ret = unsafe {
-        fdt_property(
-            fdt.as_mut_ptr() as *mut c_void,
-            cstr_name.as_ptr(),
-            null(),
-            0,
-        )
-    };
-    if fdt_ret != 0 {
-        return Err(Error::AppendFdtProperty(io::Error::last_os_error()));
-    }
-    Ok(())
-}
-
-fn append_property(fdt: &mut Vec<u8>, name: &str, val: &[u8]) -> Result<()> {
-    let cstr_name = CString::new(name).map_err(CstringFdtTransform)?;
-    let val_ptr = val.as_ptr() as *const c_void;
-
-    // Safe because we allocated fdt and converted name to a CString
-    let fdt_ret = unsafe {
-        fdt_property(
-            fdt.as_mut_ptr() as *mut c_void,
-            cstr_name.as_ptr(),
-            val_ptr,
-            val.len() as i32,
-        )
-    };
-    if fdt_ret != 0 {
-        return Err(Error::AppendFdtProperty(io::Error::last_os_error()));
-    }
-    Ok(())
-}
-
-// Auxiliary functions for writing u32/u64 numbers in big endian order.
-fn to_be32(input: u32) -> [u8; 4] {
-    u32::to_be_bytes(input)
-}
-
-fn to_be64(input: u64) -> [u8; 8] {
-    u64::to_be_bytes(input)
-}
-
-// Helper functions for generating a properly formatted byte vector using 32-bit/64-bit cells.
-fn generate_prop32(cells: &[u32]) -> Vec<u8> {
-    let mut ret: Vec<u8> = Vec::new();
-    for &e in cells {
-        ret.extend(to_be32(e).iter());
-    }
-    ret
-}
-
-fn generate_prop64(cells: &[u64]) -> Vec<u8> {
-    let mut ret: Vec<u8> = Vec::new();
-    for &e in cells {
-        ret.extend(to_be64(e).iter());
-    }
-    ret
 }
 
 // Following are the auxiliary function for creating the different nodes that we append to our FDT.
-fn create_cpu_nodes(fdt: &mut Vec<u8>, vcpu_mpidr: &[u64]) -> Result<()> {
+fn create_cpu_nodes(fdt: &mut FdtWriter, vcpu_mpidr: &[u64]) -> FdtWriterResult<()> {
     // See https://github.com/torvalds/linux/blob/master/Documentation/devicetree/bindings/arm/cpus.yaml.
-    append_begin_node(fdt, "cpus")?;
-    // As per documentation, on ARM v8 64-bit systems value should be set to 2.
-    append_property_u32(fdt, "#address-cells", 0x02)?;
-    append_property_u32(fdt, "#size-cells", 0x0)?;
+    let cpus_node = fdt.begin_node("cpus")?;
+    fdt.property_u32("#address-cells", 0x1)?;
+    fdt.property_u32("#size-cells", 0x0)?;
     let num_cpus = vcpu_mpidr.len();
 
-    for (cpu_index, mpidr) in vcpu_mpidr.iter().enumerate().take(num_cpus) {
-        let cpu_name = format!("cpu@{:x}", cpu_index);
-        append_begin_node(fdt, &cpu_name)?;
-        append_property_string(fdt, "device_type", "cpu")?;
-        append_property_string(fdt, "compatible", "arm,arm-v8")?;
+    for cpu_id in 0..num_cpus {
+        let cpu_name = format!("cpu@{:x}", cpu_id);
+        let cpu_node = fdt.begin_node(&cpu_name)?;
+        fdt.property_string("device_type", "cpu")?;
+        fdt.property_string("compatible", "arm,arm-v8")?;
         if num_cpus > 1 {
             // This is required on armv8 64-bit. See aforementioned documentation.
-            append_property_string(fdt, "enable-method", "psci")?;
+            fdt.property_string("enable-method", "psci")?;
         }
-        // Set the field to first 24 bits of the MPIDR - Multiprocessor Affinity Register.
-        // See http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.ddi0488c/BABHBJCI.html.
-        append_property_u64(fdt, "reg", mpidr & 0x7FFFFF)?;
-        append_end_node(fdt)?;
+        fdt.property_u32("reg", cpu_id as u32)?;
+        fdt.end_node(cpu_node)?;
     }
-    append_end_node(fdt)?;
+    fdt.end_node(cpus_node)?;
     Ok(())
 }
 
-fn create_memory_node(fdt: &mut Vec<u8>, guest_mem: &GuestMemoryMmap) -> Result<()> {
+fn create_memory_node(fdt: &mut FdtWriter, guest_mem: &GuestMemoryMmap) -> FdtWriterResult<()> {
     let mem_size = guest_mem.last_addr().raw_value() - super::layout::RAM_64BIT_START + 1;
     // See https://github.com/torvalds/linux/blob/master/Documentation/devicetree/booting-without-of.txt#L960
     // for an explanation of this.
-    let mem_reg_prop = generate_prop64(&[super::layout::RAM_64BIT_START as u64, mem_size as u64]);
+    let mem_reg_prop = [super::layout::RAM_64BIT_START as u64, mem_size as u64];
 
-    append_begin_node(fdt, "memory")?;
-    append_property_string(fdt, "device_type", "memory")?;
-    append_property(fdt, "reg", &mem_reg_prop)?;
-    append_end_node(fdt)?;
+    let memory_node = fdt.begin_node("memory")?;
+    fdt.property_string("device_type", "memory")?;
+    fdt.property_array_u64("reg", &mem_reg_prop)?;
+    fdt.end_node(memory_node)?;
+
     Ok(())
 }
 
 fn create_chosen_node(
-    fdt: &mut Vec<u8>,
-    cmdline: &CStr,
+    fdt: &mut FdtWriter,
+    cmdline: &str,
     initrd: &Option<InitramfsConfig>,
-) -> Result<()> {
-    append_begin_node(fdt, "chosen")?;
-    append_property_cstring(fdt, "bootargs", cmdline)?;
+) -> FdtWriterResult<()> {
+    let chosen_node = fdt.begin_node("chosen")?;
+    fdt.property_string("bootargs", cmdline)?;
 
     if let Some(initrd_config) = initrd {
-        append_property_u64(
-            fdt,
-            "linux,initrd-start",
-            initrd_config.address.raw_value() as u64,
-        )?;
-        append_property_u64(
-            fdt,
-            "linux,initrd-end",
-            initrd_config.address.raw_value() + initrd_config.size as u64,
-        )?;
+        let initrd_start = initrd_config.address.raw_value() as u64;
+        let initrd_end = initrd_config.address.raw_value() + initrd_config.size as u64;
+        fdt.property_u64("linux,initrd-start", initrd_start)?;
+        fdt.property_u64("linux,initrd-end", initrd_end)?;
     }
 
-    append_end_node(fdt)?;
+    fdt.end_node(chosen_node)?;
 
     Ok(())
 }
 
-fn create_gic_node(fdt: &mut Vec<u8>, gic_device: &dyn GicDevice) -> Result<()> {
-    let gic_reg_prop = generate_prop64(gic_device.device_properties());
+fn create_gic_node(fdt: &mut FdtWriter, gic_device: &dyn GicDevice) -> FdtWriterResult<()> {
+    let gic_reg_prop = gic_device.device_properties();
 
-    append_begin_node(fdt, "intc")?;
-    append_property_string(fdt, "compatible", gic_device.fdt_compatibility())?;
-    append_property_null(fdt, "interrupt-controller")?;
+    let intc_node = fdt.begin_node("intc")?;
+
+    fdt.property_string("compatible", gic_device.fdt_compatibility())?;
+    fdt.property_null("interrupt-controller")?;
     // "interrupt-cells" field specifies the number of cells needed to encode an
     // interrupt source. The type shall be a <u32> and the value shall be 3 if no PPI affinity description
     // is required.
-    append_property_u32(fdt, "#interrupt-cells", 3)?;
-    append_property(fdt, "reg", &gic_reg_prop)?;
-    append_property_u32(fdt, "phandle", GIC_PHANDLE)?;
-    append_property_u32(fdt, "#address-cells", 2)?;
-    append_property_u32(fdt, "#size-cells", 2)?;
-    append_property_null(fdt, "ranges")?;
-    let gic_intr = [
+    fdt.property_u32("#interrupt-cells", 3)?;
+    fdt.property_array_u64("reg", &gic_reg_prop)?;
+    fdt.property_u32("phandle", GIC_PHANDLE)?;
+    fdt.property_u32("#address-cells", 2)?;
+    fdt.property_u32("#size-cells", 2)?;
+    fdt.property_null("ranges")?;
+
+    let gic_intr_prop = [
         GIC_FDT_IRQ_TYPE_PPI,
         gic_device.fdt_maint_irq(),
         IRQ_TYPE_LEVEL_HI,
     ];
-    let gic_intr_prop = generate_prop32(&gic_intr);
-
-    append_property(fdt, "interrupts", &gic_intr_prop)?;
+    fdt.property_array_u32("interrupts", &gic_intr_prop)?;
 
     if gic_device.msi_compatible() {
-        append_begin_node(fdt, "msic")?;
-        append_property_string(fdt, "compatible", gic_device.msi_compatibility())?;
-        append_property_null(fdt, "msi-controller")?;
-        append_property_u32(fdt, "phandle", MSI_PHANDLE)?;
-        let msi_reg_prop = generate_prop64(gic_device.msi_properties());
-        append_property(fdt, "reg", &msi_reg_prop)?;
-        append_end_node(fdt)?;
+        let msic_node = fdt.begin_node("msic")?;
+        fdt.property_string("compatible", gic_device.msi_compatibility())?;
+        fdt.property_null("msi-controller")?;
+        fdt.property_u32("phandle", MSI_PHANDLE)?;
+        let msi_reg_prop = gic_device.msi_properties();
+        fdt.property_array_u64("reg", &msi_reg_prop)?;
+        fdt.end_node(msic_node)?;
     }
 
-    append_end_node(fdt)?;
+    fdt.end_node(intc_node)?;
 
     Ok(())
 }
 
-fn create_clock_node(fdt: &mut Vec<u8>) -> Result<()> {
+fn create_clock_node(fdt: &mut FdtWriter) -> FdtWriterResult<()> {
     // The Advanced Peripheral Bus (APB) is part of the Advanced Microcontroller Bus Architecture
     // (AMBA) protocol family. It defines a low-cost interface that is optimized for minimal power
     // consumption and reduced interface complexity.
     // PCLK is the clock source and this node defines exactly the clock for the APB.
-    append_begin_node(fdt, "apb-pclk")?;
-    append_property_string(fdt, "compatible", "fixed-clock")?;
-    append_property_u32(fdt, "#clock-cells", 0x0)?;
-    append_property_u32(fdt, "clock-frequency", 24000000)?;
-    append_property_string(fdt, "clock-output-names", "clk24mhz")?;
-    append_property_u32(fdt, "phandle", CLOCK_PHANDLE)?;
-    append_end_node(fdt)?;
+    let clock_node = fdt.begin_node("apb-pclk")?;
+    fdt.property_string("compatible", "fixed-clock")?;
+    fdt.property_u32("#clock-cells", 0x0)?;
+    fdt.property_u32("clock-frequency", 24000000)?;
+    fdt.property_string("clock-output-names", "clk24mhz")?;
+    fdt.property_u32("phandle", CLOCK_PHANDLE)?;
+    fdt.end_node(clock_node)?;
 
     Ok(())
 }
 
-fn create_timer_node(fdt: &mut Vec<u8>) -> Result<()> {
+fn create_timer_node(fdt: &mut FdtWriter) -> FdtWriterResult<()> {
     // See
     // https://github.com/torvalds/linux/blob/master/Documentation/devicetree/bindings/interrupt-controller/arch_timer.txt
     // These are fixed interrupt numbers for the timer device.
@@ -448,123 +247,124 @@ fn create_timer_node(fdt: &mut Vec<u8>) -> Result<()> {
         timer_reg_cells.push(irq);
         timer_reg_cells.push(IRQ_TYPE_LEVEL_HI);
     }
-    let timer_reg_prop = generate_prop32(timer_reg_cells.as_slice());
 
-    append_begin_node(fdt, "timer")?;
-    append_property_string(fdt, "compatible", compatible)?;
-    append_property_null(fdt, "always-on")?;
-    append_property(fdt, "interrupts", &timer_reg_prop)?;
-    append_end_node(fdt)?;
+    let timer_node = fdt.begin_node("timer")?;
+    fdt.property_string("compatible", compatible)?;
+    fdt.property_null("always-on")?;
+    fdt.property_array_u32("interrupts", &timer_reg_cells)?;
+    fdt.end_node(timer_node)?;
 
     Ok(())
 }
 
-fn create_psci_node(fdt: &mut Vec<u8>) -> Result<()> {
+fn create_psci_node(fdt: &mut FdtWriter) -> FdtWriterResult<()> {
     let compatible = "arm,psci-0.2";
-    append_begin_node(fdt, "psci")?;
-    append_property_string(fdt, "compatible", compatible)?;
+    let psci_node = fdt.begin_node("psci")?;
+    fdt.property_string("compatible", compatible)?;
     // Two methods available: hvc and smc.
     // As per documentation, PSCI calls between a guest and hypervisor may use the HVC conduit instead of SMC.
     // So, since we are using kvm, we need to use hvc.
-    append_property_string(fdt, "method", "hvc")?;
-    append_end_node(fdt)?;
+    fdt.property_string("method", "hvc")?;
+    fdt.end_node(psci_node)?;
 
     Ok(())
 }
 
 fn create_virtio_node<T: DeviceInfoForFdt + Clone + Debug>(
-    fdt: &mut Vec<u8>,
+    fdt: &mut FdtWriter,
     dev_info: &T,
-) -> Result<()> {
-    let device_reg_prop = generate_prop64(&[dev_info.addr(), dev_info.length()]);
-    let irq = generate_prop32(&[GIC_FDT_IRQ_TYPE_SPI, dev_info.irq(), IRQ_TYPE_EDGE_RISING]);
+) -> FdtWriterResult<()> {
+    let device_reg_prop = [dev_info.addr(), dev_info.length()];
+    let irq = [GIC_FDT_IRQ_TYPE_SPI, dev_info.irq(), IRQ_TYPE_EDGE_RISING];
 
-    append_begin_node(fdt, &format!("virtio_mmio@{:x}", dev_info.addr()))?;
-    append_property_string(fdt, "compatible", "virtio,mmio")?;
-    append_property(fdt, "reg", &device_reg_prop)?;
-    append_property(fdt, "interrupts", &irq)?;
-    append_property_u32(fdt, "interrupt-parent", GIC_PHANDLE)?;
-    append_end_node(fdt)?;
+    let virtio_node = fdt.begin_node(&format!("virtio_mmio@{:x}", dev_info.addr()))?;
+    fdt.property_string("compatible", "virtio,mmio")?;
+    fdt.property_array_u64("reg", &device_reg_prop)?;
+    fdt.property_array_u32("interrupts", &irq)?;
+    fdt.property_u32("interrupt-parent", GIC_PHANDLE)?;
+    fdt.end_node(virtio_node)?;
 
     Ok(())
 }
 
 fn create_serial_node<T: DeviceInfoForFdt + Clone + Debug>(
-    fdt: &mut Vec<u8>,
+    fdt: &mut FdtWriter,
     dev_info: &T,
-) -> Result<()> {
+) -> FdtWriterResult<()> {
     let compatible = b"arm,pl011\0arm,primecell\0";
-    let serial_reg_prop = generate_prop64(&[dev_info.addr(), dev_info.length()]);
-    let irq = generate_prop32(&[GIC_FDT_IRQ_TYPE_SPI, dev_info.irq(), IRQ_TYPE_EDGE_RISING]);
+    let serial_reg_prop = [dev_info.addr(), dev_info.length()];
+    let irq = [GIC_FDT_IRQ_TYPE_SPI, dev_info.irq(), IRQ_TYPE_EDGE_RISING];
 
-    append_begin_node(fdt, &format!("pl011@{:x}", dev_info.addr()))?;
-    append_property(fdt, "compatible", compatible)?;
-    append_property(fdt, "reg", &serial_reg_prop)?;
-    append_property_u32(fdt, "clocks", CLOCK_PHANDLE)?;
-    append_property_string(fdt, "clock-names", "apb_pclk")?;
-    append_property(fdt, "interrupts", &irq)?;
-    append_end_node(fdt)?;
+    let serial_node = fdt.begin_node(&format!("pl011@{:x}", dev_info.addr()))?;
+    fdt.property("compatible", compatible)?;
+    fdt.property_array_u64("reg", &serial_reg_prop)?;
+    fdt.property_u32("clocks", CLOCK_PHANDLE)?;
+    fdt.property_string("clock-names", "apb_pclk")?;
+    fdt.property_array_u32("interrupts", &irq)?;
+    fdt.end_node(serial_node)?;
 
     Ok(())
 }
 
 fn create_rtc_node<T: DeviceInfoForFdt + Clone + Debug>(
-    fdt: &mut Vec<u8>,
+    fdt: &mut FdtWriter,
     dev_info: &T,
-) -> Result<()> {
+) -> FdtWriterResult<()> {
     let compatible = b"arm,pl031\0arm,primecell\0";
-    let rtc_reg_prop = generate_prop64(&[dev_info.addr(), dev_info.length()]);
-    let irq = generate_prop32(&[GIC_FDT_IRQ_TYPE_SPI, dev_info.irq(), IRQ_TYPE_LEVEL_HI]);
-    append_begin_node(fdt, &format!("rtc@{:x}", dev_info.addr()))?;
-    append_property(fdt, "compatible", compatible)?;
-    append_property(fdt, "reg", &rtc_reg_prop)?;
-    append_property(fdt, "interrupts", &irq)?;
-    append_property_u32(fdt, "clocks", CLOCK_PHANDLE)?;
-    append_property_string(fdt, "clock-names", "apb_pclk")?;
-    append_end_node(fdt)?;
+    let rtc_reg_prop = [dev_info.addr(), dev_info.length()];
+    let irq = [GIC_FDT_IRQ_TYPE_SPI, dev_info.irq(), IRQ_TYPE_LEVEL_HI];
+
+    let rtc_node = fdt.begin_node(&format!("rtc@{:x}", dev_info.addr()))?;
+    fdt.property("compatible", compatible)?;
+    fdt.property_array_u64("reg", &rtc_reg_prop)?;
+    fdt.property_array_u32("interrupts", &irq)?;
+    fdt.property_u32("clocks", CLOCK_PHANDLE)?;
+    fdt.property_string("clock-names", "apb_pclk")?;
+    fdt.end_node(rtc_node)?;
 
     Ok(())
 }
 
 fn create_gpio_node<T: DeviceInfoForFdt + Clone + Debug>(
-    fdt: &mut Vec<u8>,
+    fdt: &mut FdtWriter,
     dev_info: &T,
-) -> Result<()> {
+) -> FdtWriterResult<()> {
     // PL061 GPIO controller node
     let compatible = b"arm,pl061\0arm,primecell\0";
-    let gpio_reg_prop = generate_prop64(&[dev_info.addr(), dev_info.length()]);
-    let irq = generate_prop32(&[GIC_FDT_IRQ_TYPE_SPI, dev_info.irq(), IRQ_TYPE_EDGE_RISING]);
-    append_begin_node(fdt, &format!("pl061@{:x}", dev_info.addr()))?;
-    append_property(fdt, "compatible", compatible)?;
-    append_property(fdt, "reg", &gpio_reg_prop)?;
-    append_property(fdt, "interrupts", &irq)?;
-    append_property_null(fdt, "gpio-controller")?;
-    append_property_u32(fdt, "#gpio-cells", 2)?;
-    append_property_u32(fdt, "clocks", CLOCK_PHANDLE)?;
-    append_property_string(fdt, "clock-names", "apb_pclk")?;
-    append_property_u32(fdt, "phandle", GPIO_PHANDLE)?;
-    append_end_node(fdt)?;
+    let gpio_reg_prop = [dev_info.addr(), dev_info.length()];
+    let irq = [GIC_FDT_IRQ_TYPE_SPI, dev_info.irq(), IRQ_TYPE_EDGE_RISING];
+
+    let gpio_node = fdt.begin_node(&format!("pl061@{:x}", dev_info.addr()))?;
+    fdt.property("compatible", compatible)?;
+    fdt.property_array_u64("reg", &gpio_reg_prop)?;
+    fdt.property_array_u32("interrupts", &irq)?;
+    fdt.property_null("gpio-controller")?;
+    fdt.property_u32("#gpio-cells", 2)?;
+    fdt.property_u32("clocks", CLOCK_PHANDLE)?;
+    fdt.property_string("clock-names", "apb_pclk")?;
+    fdt.property_u32("phandle", GPIO_PHANDLE)?;
+    fdt.end_node(gpio_node)?;
 
     // gpio-keys node
-    append_begin_node(fdt, "/gpio-keys")?;
-    append_property_string(fdt, "compatible", "gpio-keys")?;
-    append_property_u32(fdt, "#size-cells", 0)?;
-    append_property_u32(fdt, "#address-cells", 1)?;
-    append_begin_node(fdt, "/gpio-keys/poweroff")?;
-    append_property_string(fdt, "label", "GPIO Key Poweroff")?;
-    append_property_u32(fdt, "linux,code", KEY_POWER)?;
-    let gpios = generate_prop32(&[GPIO_PHANDLE, 3, 0]);
-    append_property(fdt, "gpios", &gpios)?;
-    append_end_node(fdt)?;
-    append_end_node(fdt)?;
+    let gpio_keys_node = fdt.begin_node("gpio-keys")?;
+    fdt.property_string("compatible", "gpio-keys")?;
+    fdt.property_u32("#size-cells", 0)?;
+    fdt.property_u32("#address-cells", 1)?;
+    let gpio_keys_poweroff_node = fdt.begin_node("button@1")?;
+    fdt.property_string("label", "GPIO Key Poweroff")?;
+    fdt.property_u32("linux,code", KEY_POWER)?;
+    let gpios = [GPIO_PHANDLE, 3, 0];
+    fdt.property_array_u32("gpios", &gpios)?;
+    fdt.end_node(gpio_keys_poweroff_node)?;
+    fdt.end_node(gpio_keys_node)?;
 
     Ok(())
 }
 
 fn create_devices_node<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHasher>(
-    fdt: &mut Vec<u8>,
+    fdt: &mut FdtWriter,
     dev_info: &HashMap<(DeviceType, String), T, S>,
-) -> Result<()> {
+) -> FdtWriterResult<()> {
     // Create one temp Vec to store all virtio devices
     let mut ordered_virtio_device: Vec<&T> = Vec::new();
 
@@ -592,11 +392,15 @@ fn create_devices_node<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Buil
     Ok(())
 }
 
-fn create_pci_nodes(fdt: &mut Vec<u8>, pci_device_base: u64, pci_device_size: u64) -> Result<()> {
+fn create_pci_nodes(
+    fdt: &mut FdtWriter,
+    pci_device_base: u64,
+    pci_device_size: u64,
+) -> FdtWriterResult<()> {
     // Add node for PCIe controller.
     // See Documentation/devicetree/bindings/pci/host-generic-pci.txt in the kernel
     // and https://elinux.org/Device_Tree_Usage.
-    let ranges = generate_prop32(&[
+    let ranges = [
         // mmio addresses
         0x2000000,                                // (ss = 10: 32-bit memory space)
         (MEM_32BIT_DEVICES_START.0 >> 32) as u32, // PCI address
@@ -613,24 +417,24 @@ fn create_pci_nodes(fdt: &mut Vec<u8>, pci_device_base: u64, pci_device_size: u6
         pci_device_base as u32,
         (pci_device_size >> 32) as u32, // size
         pci_device_size as u32,
-    ]);
-    let bus_range = generate_prop32(&[0, 0]); // Only bus 0
-    let reg = generate_prop64(&[PCI_MMCONFIG_START.0, PCI_MMCONFIG_SIZE]);
+    ];
+    let bus_range = [0, 0]; // Only bus 0
+    let reg = [PCI_MMCONFIG_START.0, PCI_MMCONFIG_SIZE];
 
-    append_begin_node(fdt, "pci")?;
-    append_property_string(fdt, "compatible", "pci-host-ecam-generic")?;
-    append_property_string(fdt, "device_type", "pci")?;
-    append_property(fdt, "ranges", &ranges)?;
-    append_property(fdt, "bus-range", &bus_range)?;
-    append_property_u32(fdt, "#address-cells", 3)?;
-    append_property_u32(fdt, "#size-cells", 2)?;
-    append_property(fdt, "reg", &reg)?;
-    append_property_u32(fdt, "#interrupt-cells", 1)?;
-    append_property_null(fdt, "interrupt-map")?;
-    append_property_null(fdt, "interrupt-map-mask")?;
-    append_property_null(fdt, "dma-coherent")?;
-    append_property_u32(fdt, "msi-parent", MSI_PHANDLE)?;
-    append_end_node(fdt)?;
+    let pci_node = fdt.begin_node("pci")?;
+    fdt.property_string("compatible", "pci-host-ecam-generic")?;
+    fdt.property_string("device_type", "pci")?;
+    fdt.property_array_u32("ranges", &ranges)?;
+    fdt.property_array_u32("bus-range", &bus_range)?;
+    fdt.property_u32("#address-cells", 3)?;
+    fdt.property_u32("#size-cells", 2)?;
+    fdt.property_array_u64("reg", &reg)?;
+    fdt.property_u32("#interrupt-cells", 1)?;
+    fdt.property_null("interrupt-map")?;
+    fdt.property_null("interrupt-map-mask")?;
+    fdt.property_null("dma-coherent")?;
+    fdt.property_u32("msi-parent", MSI_PHANDLE)?;
+    fdt.end_node(pci_node)?;
 
     Ok(())
 }
