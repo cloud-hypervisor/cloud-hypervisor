@@ -1410,12 +1410,10 @@ mod tests {
             );
             assert_eq!(guest.ssh_command(&mount_cmd).unwrap().trim(), "ok");
 
-            assert_eq!(
-                guest
-                    .valid_virtio_fs_cache_size(dax, cache_size)
-                    .unwrap_or_default(),
-                true
-            );
+            assert!(guest
+                .valid_virtio_fs_cache_size(dax, cache_size)
+                .unwrap_or_default());
+
             // Check file1 exists and its content is "foo"
             assert_eq!(
                 guest.ssh_command("cat mount_dir/file1").unwrap().trim(),
@@ -3145,7 +3143,7 @@ mod tests {
 
             let r = std::panic::catch_unwind(|| {
                 // Check that the cloud-hypervisor binary actually terminated
-                assert_eq!(output.status.success(), true);
+                assert!(output.status.success());
 
                 // Do this check after shutdown of the VM as an easy way to ensure
                 // all writes are flushed to disk
@@ -3238,7 +3236,7 @@ mod tests {
 
             let r = std::panic::catch_unwind(|| {
                 // Check that the cloud-hypervisor binary actually terminated
-                assert_eq!(output.status.success(), true);
+                assert!(output.status.success())
             });
             handle_child_output(r, &output);
         }
@@ -3323,7 +3321,7 @@ mod tests {
 
             let r = std::panic::catch_unwind(|| {
                 // Check that the cloud-hypervisor binary actually terminated
-                assert_eq!(output.status.success(), true);
+                assert!(output.status.success());
 
                 // Do this check after shutdown of the VM as an easy way to ensure
                 // all writes are flushed to disk
@@ -3660,7 +3658,7 @@ mod tests {
 
                     let r = std::panic::catch_unwind(|| {
                         // Check that the cloud-hypervisor binary actually terminated
-                        assert_eq!(output.status.success(), true);
+                        assert!(output.status.success());
                     });
 
                     handle_child_output(r, &output);
