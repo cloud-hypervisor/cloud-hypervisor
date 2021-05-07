@@ -505,8 +505,8 @@ impl MemEpollHandler {
             .unwrap()
             .set_range(first_block_index, nb_blocks, plug);
 
+        let handlers = self.dma_mapping_handlers.lock().unwrap();
         if plug {
-            let handlers = self.dma_mapping_handlers.lock().unwrap();
             let mut gpa = addr;
             for _ in 0..nb_blocks {
                 for (_, handler) in handlers.iter() {
@@ -524,7 +524,6 @@ impl MemEpollHandler {
 
             config.plugged_size += size;
         } else {
-            let handlers = self.dma_mapping_handlers.lock().unwrap();
             for (_, handler) in handlers.iter() {
                 if let Err(e) = handler.unmap(addr, size) {
                     error!(
