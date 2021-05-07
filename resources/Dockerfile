@@ -37,7 +37,6 @@ RUN apt-get update \
 	socat \
 	dosfstools \
 	cpio \
-	libfdt-dev \
 	python3-setuptools \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
@@ -56,14 +55,7 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
         && apt-get -yq upgrade \
         && DEBIAN_FRONTEND=noninteractive apt-get install -yq libcap2-bin \
         && apt-get clean \
-        && rm -rf /var/lib/apt/lists/* \
-        # Build and install the musl-gcc version of libfdt. This is to ensure
-        # the cloud-hypervisor binary can be built and linked using musl toolchain.
-        && git clone https://github.com/dgibson/dtc.git && cd dtc \
-        && sed -i 's/$(LIBFDT_archive) $(LIBFDT_lib)/$(LIBFDT_archive)/g' Makefile \
-        && export CC=musl-gcc && make libfdt \
-        && cp libfdt/libfdt.a /usr/lib/aarch64-linux-musl \
-        && rm -rf /dtc;	fi
+        && rm -rf /var/lib/apt/lists/*;	fi
 
 # Fix the libssl-dev install
 RUN export ARCH="$(uname -m)" \
