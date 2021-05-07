@@ -78,11 +78,12 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
             }
 
             let addr = self.mmap_cache_addr + offset;
+            let flags = fs.flags[i];
             let ret = unsafe {
                 libc::mmap(
                     addr as *mut libc::c_void,
                     len as usize,
-                    fs.flags[i].bits() as i32,
+                    flags.bits() as i32,
                     libc::MAP_SHARED | libc::MAP_FIXED,
                     fd,
                     fs.fd_offset[i] as libc::off_t,
