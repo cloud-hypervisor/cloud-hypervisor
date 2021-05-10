@@ -71,6 +71,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "thiserror",
+ "vm-fdt",
  "vm-memory",
  "vm-migration",
 ]
@@ -1153,7 +1154,7 @@ dependencies = [
 [[package]]
 name = "vhost"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vhost?branch=master#c4cd1d375e386069d0b781174de9f62ef41812e2"
+source = "git+https://github.com/rust-vmm/vhost?branch=master#cc4da710ac68ca8ffe68cddcd80d562699445522"
 dependencies = [
  "bitflags 1.2.1",
  "libc",
@@ -1268,6 +1269,11 @@ dependencies = [
  "vm-memory",
  "vmm-sys-util",
 ]
+
+[[package]]
+name = "vm-fdt"
+version = "0.1.0"
+source = "git+https://github.com/rust-vmm/vm-fdt?branch=master#8d81555c14fb72d3c13730122130adfaba2cb434"
 
 [[package]]
 name = "vm-memory"
