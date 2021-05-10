@@ -126,6 +126,9 @@ pub enum ValidationError {
     // CPU Hotplug not permitted with TDX
     #[cfg(feature = "tdx")]
     TdxNoCpuHotplug,
+    // Specifying kernel not permitted with TDX
+    #[cfg(feature = "tdx")]
+    TdxKernelSpecified,
     // Insuffient vCPUs for queues
     TooManyQueues,
 }
@@ -167,6 +170,10 @@ impl fmt::Display for ValidationError {
             #[cfg(feature = "tdx")]
             TdxNoCpuHotplug => {
                 write!(f, "CPU hotplug not possible with TDX")
+            }
+            #[cfg(feature = "tdx")]
+            TdxKernelSpecified => {
+                write!(f, "Direct kernel boot not possible with TDX")
             }
             TooManyQueues => {
                 write!(f, "Number of vCPUs is insufficient for number of queues")
@@ -1750,6 +1757,9 @@ impl VmConfig {
             }
             if tdx_enabled && (self.cpus.max_vcpus != self.cpus.boot_vcpus) {
                 return Err(ValidationError::TdxNoCpuHotplug);
+            }
+            if tdx_enabled && self.kernel.is_some() {
+                return Err(ValidationError::TdxKernelSpecified);
             }
         }
 
