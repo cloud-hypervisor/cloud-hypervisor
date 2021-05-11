@@ -8,25 +8,11 @@
 //! Supported platforms: x86_64, aarch64.
 #![allow(clippy::transmute_ptr_to_ptr, clippy::redundant_static_lifetimes)]
 
-extern crate anyhow;
-extern crate byteorder;
-extern crate hypervisor;
-extern crate libc;
 #[macro_use]
 extern crate log;
-#[cfg(feature = "acpi")]
-extern crate acpi_tables;
-extern crate linux_loader;
-extern crate serde;
-#[cfg(target_arch = "aarch64")]
-extern crate vm_fdt;
-extern crate vm_memory;
-extern crate vm_migration;
 #[cfg(target_arch = "aarch64")]
 #[macro_use]
 extern crate serde_derive;
-extern crate serde_json;
-extern crate thiserror;
 
 use std::fmt;
 use std::result;

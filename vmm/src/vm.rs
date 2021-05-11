@@ -11,17 +11,6 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-extern crate arch;
-extern crate devices;
-extern crate epoll;
-extern crate hypervisor;
-extern crate libc;
-extern crate linux_loader;
-extern crate net_util;
-extern crate signal_hook;
-extern crate vm_allocator;
-extern crate vm_memory;
-
 #[cfg(feature = "acpi")]
 use crate::config::NumaConfig;
 use crate::config::{

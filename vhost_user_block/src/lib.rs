@@ -8,11 +8,6 @@
 //
 // SPDX-License-Identifier: (Apache-2.0 AND BSD-3-Clause)
 
-extern crate block_util;
-extern crate log;
-extern crate vhost;
-extern crate vhost_user_backend;
-
 use block_util::{build_disk_image_id, Request, VirtioBlockConfig};
 use libc::EFD_NONBLOCK;
 use log::*;

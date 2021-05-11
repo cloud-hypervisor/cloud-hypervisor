@@ -6,20 +6,11 @@
 // found in the LICENSE-BSD-3-Clause file.
 
 //! Emulates virtual and hardware devices.
-extern crate anyhow;
+
 #[macro_use]
 extern crate bitflags;
-extern crate byteorder;
-extern crate epoll;
-extern crate libc;
 #[macro_use]
 extern crate log;
-#[cfg(feature = "acpi")]
-extern crate acpi_tables;
-extern crate vm_device;
-extern crate vm_memory;
-extern crate vm_migration;
-extern crate vmm_sys_util;
 
 #[cfg(feature = "acpi")]
 pub mod acpi;

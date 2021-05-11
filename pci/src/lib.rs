@@ -5,12 +5,8 @@
 //! Implements pci devices and busses.
 #[macro_use]
 extern crate log;
-extern crate hypervisor;
-extern crate serde;
 #[macro_use]
 extern crate serde_derive;
-extern crate serde_json;
-extern crate vm_memory;
 
 mod bus;
 mod configuration;

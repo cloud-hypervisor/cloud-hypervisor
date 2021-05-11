@@ -5,9 +5,6 @@
 
 #[macro_use(crate_authors)]
 extern crate clap;
-extern crate api_client;
-extern crate serde_json;
-extern crate vmm;
 
 use api_client::simple_api_command;
 use api_client::Error as ApiClientError;

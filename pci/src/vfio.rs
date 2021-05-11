@@ -3,8 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
 //
 
-extern crate vm_allocator;
-
 use crate::{
     msi_num_enabled_vectors, BarReprogrammingParams, MsiConfig, MsixCap, MsixConfig,
     PciBarConfiguration, PciBarRegionType, PciCapabilityId, PciClassCode, PciConfiguration,

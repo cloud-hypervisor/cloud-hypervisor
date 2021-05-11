@@ -23,10 +23,6 @@ extern crate anyhow;
 #[cfg(target_arch = "x86_64")]
 #[macro_use]
 extern crate log;
-extern crate serde;
-extern crate serde_derive;
-extern crate serde_json;
-extern crate thiserror;
 
 /// Architecture specific definitions
 #[macro_use]

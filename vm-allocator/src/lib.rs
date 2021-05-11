@@ -10,9 +10,6 @@
 
 //! Manages system resources that can be allocated to VMs and their devices.
 
-extern crate libc;
-extern crate vm_memory;
-
 mod address;
 mod gsi;
 mod system;

@@ -3,14 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-extern crate anyhow;
-extern crate signal_hook;
-extern crate vmm;
-extern crate vmm_sys_util;
-
 #[macro_use(crate_authors)]
 extern crate clap;
-
 #[macro_use]
 extern crate event_monitor;
 
