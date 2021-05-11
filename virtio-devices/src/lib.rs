@@ -10,21 +10,12 @@
 
 //! Implements virtio devices, queues, and transport mechanisms.
 
-extern crate arc_swap;
-extern crate epoll;
 #[macro_use]
 extern crate event_monitor;
 #[macro_use]
 extern crate log;
-extern crate pci;
-extern crate serde;
 #[macro_use]
 extern crate serde_derive;
-extern crate serde_json;
-extern crate vhost;
-extern crate virtio_bindings;
-extern crate vm_device;
-extern crate vm_memory;
 
 use std::convert::TryInto;
 use std::io;

@@ -8,7 +8,6 @@
 
 #[macro_use(crate_version, crate_authors)]
 extern crate clap;
-extern crate vhost_user_net;
 
 use clap::{App, Arg};
 use vhost_user_net::start_net_backend;

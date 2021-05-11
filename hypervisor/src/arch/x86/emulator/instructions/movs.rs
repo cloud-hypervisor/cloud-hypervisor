@@ -10,8 +10,6 @@
 // MOVS - Move Data from String to String
 //
 
-extern crate iced_x86;
-
 use crate::arch::emulator::{EmulationError, PlatformEmulator};
 use crate::arch::x86::emulator::instructions::*;
 use crate::arch::x86::regs::DF;

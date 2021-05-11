@@ -162,8 +162,6 @@ pub fn configure_segments_and_sregs(
 
 #[cfg(test)]
 mod tests {
-    extern crate vm_memory;
-
     use super::*;
     use vm_memory::{GuestAddress, GuestMemoryMmap};
 

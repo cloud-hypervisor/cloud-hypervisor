@@ -4,8 +4,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-extern crate thiserror;
-
 use core::fmt::Debug;
 use std::fmt::{self, Display};
 use thiserror::Error;

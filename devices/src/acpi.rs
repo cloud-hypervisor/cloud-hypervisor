@@ -52,7 +52,6 @@ impl BusDevice for AcpiShutdownDevice {
         const SLEEP_VALUE_BIT: u8 = 2;
         if data[0] == (S5_SLEEP_VALUE << SLEEP_VALUE_BIT) | (1 << SLEEP_STATUS_EN_BIT) {
             debug!("ACPI Shutdown signalled");
-            extern crate bitflags;
             if let Err(e) = self.exit_evt.write(1) {
                 error!("Error triggering ACPI shutdown event: {}", e);
             }

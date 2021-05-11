@@ -152,8 +152,6 @@ impl FromStr for MacAddr {
 
 #[cfg(test)]
 mod tests {
-    extern crate serde_json;
-
     use super::*;
 
     #[test]

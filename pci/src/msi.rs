@@ -3,9 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
 //
 
-extern crate byteorder;
-extern crate vm_memory;
-
 use byteorder::{ByteOrder, LittleEndian};
 use std::sync::Arc;
 use vm_device::interrupt::{

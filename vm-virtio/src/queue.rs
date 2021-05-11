@@ -966,8 +966,6 @@ pub mod testing {
 
 #[cfg(test)]
 pub mod tests {
-    extern crate vm_memory;
-
     use super::testing::*;
     pub use super::*;
     use vm_memory::{GuestAddress, GuestMemoryMmap};

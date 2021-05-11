@@ -4,8 +4,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-extern crate iced_x86;
-
 use crate::arch::emulator::{EmulationError, EmulationResult, PlatformEmulator, PlatformError};
 use crate::arch::x86::emulator::instructions::*;
 use crate::arch::x86::regs::*;
@@ -639,8 +637,6 @@ impl<'a, T: CpuStateManager> Emulator<'a, T> {
 #[cfg(test)]
 mod mock_vmm {
     #![allow(unused_mut)]
-
-    extern crate env_logger;
 
     use super::*;
     use crate::arch::emulator::{EmulationError, PlatformEmulator};

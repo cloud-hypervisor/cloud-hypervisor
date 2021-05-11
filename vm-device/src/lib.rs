@@ -5,7 +5,6 @@
 
 #[macro_use]
 extern crate serde_derive;
-extern crate vm_memory;
 
 mod bus;
 pub mod dma_mapping;

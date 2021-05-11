@@ -1,12 +1,6 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-extern crate epoll;
-extern crate net_util;
-extern crate vhost;
-extern crate virtio_bindings;
-extern crate vm_memory;
-
 use std::io;
 use vhost::Error as VhostError;
 use vm_memory::Error as MmapError;

@@ -6,11 +6,6 @@
 //
 // SPDX-License-Identifier: (Apache-2.0 AND BSD-3-Clause)
 
-extern crate log;
-extern crate net_util;
-extern crate vhost;
-extern crate vhost_user_backend;
-
 use libc::{self, EFD_NONBLOCK};
 use log::*;
 use net_util::{

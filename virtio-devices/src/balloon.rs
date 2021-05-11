@@ -17,7 +17,6 @@ use super::{
     VirtioCommon, VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_VERSION_1,
 };
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
-use crate::vm_memory::GuestMemory;
 use crate::{VirtioInterrupt, VirtioInterruptType};
 use libc::EFD_NONBLOCK;
 use seccomp::{SeccompAction, SeccompFilter};
@@ -29,6 +28,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
+use vm_memory::GuestMemory;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
     GuestMemoryError, GuestMemoryMmap,
