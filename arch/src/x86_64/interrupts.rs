@@ -12,12 +12,6 @@ use std::mem;
 use std::result;
 use std::sync::Arc;
 
-#[derive(Debug)]
-pub enum Error {
-    GetLapic(anyhow::Error),
-    SetLapic(anyhow::Error),
-}
-
 pub type Result<T> = result::Result<T, hypervisor::HypervisorCpuError>;
 
 // Defines poached from apicdef.h kernel header.

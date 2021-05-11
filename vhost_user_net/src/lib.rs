@@ -26,31 +26,20 @@ use std::process;
 use std::sync::{Arc, Mutex, RwLock};
 use std::vec::Vec;
 use vhost::vhost_user::message::*;
-use vhost::vhost_user::{Error as VhostUserError, Listener};
+use vhost::vhost_user::Listener;
 use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring, VringWorker};
 use virtio_bindings::bindings::virtio_net::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
 
-pub type VhostUserResult<T> = std::result::Result<T, VhostUserError>;
 pub type Result<T> = std::result::Result<T, Error>;
-pub type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
+type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
 
 #[derive(Debug)]
 pub enum Error {
-    /// Failed to activate device.
-    BadActivate,
     /// Failed to create kill eventfd
     CreateKillEventFd(io::Error),
-    /// Failed to add event.
-    EpollCtl(io::Error),
-    /// Fail to wait event.
-    EpollWait(io::Error),
-    /// Failed to create EventFd.
-    EpollCreateFd,
-    /// Failed to read Tap.
-    FailedReadTap,
     /// Failed to parse configuration string
     FailedConfigParse(OptionParserError),
     /// Failed to signal used queue.
@@ -59,12 +48,6 @@ pub enum Error {
     HandleEventNotEpollIn,
     /// Failed to handle unknown event.
     HandleEventUnknownEvent,
-    /// Invalid vring address.
-    InvalidVringAddr,
-    /// No vring call fd to notify.
-    NoVringCallFdNotify,
-    /// No memory configured.
-    NoMemoryConfigured,
     /// Open tap device failed.
     OpenTap(OpenTapError),
     /// No socket provided

@@ -80,13 +80,6 @@ pub enum Error {
     /// Cannot patch the CPU ID
     PatchCpuId(anyhow::Error),
 
-    /// The call to KVM_SET_CPUID2 failed.
-    SetSupportedCpusFailed(anyhow::Error),
-
-    #[cfg(target_arch = "x86_64")]
-    /// Cannot set the local interruption due to bad configuration.
-    LocalIntConfiguration(anyhow::Error),
-
     /// Error configuring VCPU
     VcpuConfiguration(arch::Error),
 
@@ -106,63 +99,6 @@ pub enum Error {
 
     /// Asking for more vCPUs that we can have
     DesiredVCpuCountExceedsMax,
-
-    /// Failed to get KVM vcpu lapic.
-    VcpuGetLapic(anyhow::Error),
-
-    /// Failed to set KVM vcpu lapic.
-    VcpuSetLapic(anyhow::Error),
-
-    /// Failed to get KVM vcpu MP state.
-    VcpuGetMpState(anyhow::Error),
-
-    /// Failed to set KVM vcpu MP state.
-    VcpuSetMpState(anyhow::Error),
-
-    /// Failed to get KVM vcpu msrs.
-    VcpuGetMsrs(anyhow::Error),
-
-    /// Failed to set KVM vcpu msrs.
-    VcpuSetMsrs(anyhow::Error),
-
-    /// Failed to get KVM vcpu regs.
-    VcpuGetRegs(anyhow::Error),
-
-    /// Failed to set KVM vcpu regs.
-    VcpuSetRegs(anyhow::Error),
-
-    /// Failed to get KVM vcpu sregs.
-    VcpuGetSregs(anyhow::Error),
-
-    /// Failed to set KVM vcpu sregs.
-    VcpuSetSregs(anyhow::Error),
-
-    /// Failed to get KVM vcpu events.
-    VcpuGetVcpuEvents(anyhow::Error),
-
-    /// Failed to set KVM vcpu events.
-    VcpuSetVcpuEvents(anyhow::Error),
-
-    /// Failed to get KVM vcpu FPU.
-    VcpuGetFpu(anyhow::Error),
-
-    /// Failed to set KVM vcpu FPU.
-    VcpuSetFpu(anyhow::Error),
-
-    /// Failed to get KVM vcpu XSAVE.
-    VcpuGetXsave(anyhow::Error),
-
-    /// Failed to set KVM vcpu XSAVE.
-    VcpuSetXsave(anyhow::Error),
-
-    /// Failed to get KVM vcpu XCRS.
-    VcpuGetXcrs(anyhow::Error),
-
-    /// Failed to set KVM vcpu XCRS.
-    VcpuSetXcrs(anyhow::Error),
-
-    /// Error resuming vCPU on shutdown
-    ResumeOnShutdown(MigratableError),
 
     /// Cannot create seccomp filter
     CreateSeccompFilter(seccomp::SeccompError),

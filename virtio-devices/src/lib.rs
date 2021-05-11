@@ -104,27 +104,11 @@ pub type DeviceEventT = u16;
 
 #[derive(Debug)]
 pub enum Error {
-    FailedReadingQueue {
-        event_type: &'static str,
-        underlying: io::Error,
-    },
     FailedSignalingUsedQueue(io::Error),
-    PayloadExpected,
-    UnknownEvent {
-        device: &'static str,
-        event: DeviceEventT,
-    },
     IoError(io::Error),
-    EpollCreateFd(io::Error),
-    EpollCtl(io::Error),
-    EpollWait(io::Error),
-    FailedSignalingDriver(io::Error),
     VhostUserUpdateMemory(vhost_user::Error),
     VhostUserAddMemoryRegion(vhost_user::Error),
-    EventfdError(io::Error),
     SetShmRegionsNotSupported,
-    EpollHander(String),
-    NoMemoryConfigured,
     NetQueuePair(::net_util::NetQueuePairError),
     ApplySeccompFilter(seccomp::Error),
 }

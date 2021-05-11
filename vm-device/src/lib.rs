@@ -7,18 +7,11 @@
 extern crate serde_derive;
 extern crate vm_memory;
 
-use std::io;
-
 mod bus;
 pub mod dma_mapping;
 pub mod interrupt;
 
 pub use self::bus::{Bus, BusDevice, Error as BusError};
-
-#[derive(Debug)]
-pub enum Error {
-    IoError(io::Error),
-}
 
 /// Type of Message Signalled Interrupt
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
