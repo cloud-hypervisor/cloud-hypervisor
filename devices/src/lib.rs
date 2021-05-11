@@ -16,14 +16,10 @@ extern crate libc;
 extern crate log;
 #[cfg(feature = "acpi")]
 extern crate acpi_tables;
-extern crate serde;
 extern crate vm_device;
 extern crate vm_memory;
 extern crate vm_migration;
 extern crate vmm_sys_util;
-#[macro_use]
-extern crate serde_derive;
-extern crate serde_json;
 
 #[cfg(feature = "acpi")]
 pub mod acpi;
