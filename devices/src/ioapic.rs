@@ -14,13 +14,17 @@ use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
 use std::result;
 use std::sync::{Arc, Barrier};
+use versionize::{VersionMap, Versionize, VersionizeResult};
+use versionize_derive::Versionize;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceConfig, InterruptSourceGroup,
     MsiIrqGroupConfig, MsiIrqSourceConfig,
 };
 use vm_device::BusDevice;
 use vm_memory::GuestAddress;
-use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
+use vm_migration::{
+    Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
+};
 use vmm_sys_util::eventfd::EventFd;
 
 type Result<T> = result::Result<T, Error>;
@@ -133,7 +137,7 @@ pub struct Ioapic {
     interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Versionize)]
 pub struct IoapicState {
     id_reg: u32,
     reg_sel: u32,
@@ -141,6 +145,7 @@ pub struct IoapicState {
     used_entries: [bool; NUM_IOAPIC_PINS],
     apic_address: u64,
 }
+impl VersionMapped for IoapicState {}
 
 impl BusDevice for Ioapic {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
@@ -410,13 +415,18 @@ impl Snapshottable for Ioapic {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        Snapshot::new_from_state(&self.id, &self.state())
+        Snapshot::new_from_versioned_state(&self.id, &self.state())
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.set_state(&snapshot.to_state(&self.id)?).map_err(|e| {
-            MigratableError::Restore(anyhow!("Could not restore state for {}: {:?}", self.id, e))
-        })
+        self.set_state(&snapshot.to_versioned_state(&self.id)?)
+            .map_err(|e| {
+                MigratableError::Restore(anyhow!(
+                    "Could not restore state for {}: {:?}",
+                    self.id,
+                    e
+                ))
+            })
     }
 }
 
