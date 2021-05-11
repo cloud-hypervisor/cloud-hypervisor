@@ -130,7 +130,7 @@ pub struct Rng {
     seccomp_action: SeccompAction,
 }
 
-#[derive(Serialize, Deserialize, Versionize)]
+#[derive(Versionize)]
 pub struct RngState {
     pub avail_features: u64,
     pub acked_features: u64,

@@ -25,7 +25,7 @@ const QUEUE_SIZE: usize = 256;
 const CTRL_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 
 #[repr(C, packed)]
-#[derive(Copy, Clone, Debug, Default, Deserialize, Serialize, Versionize)]
+#[derive(Copy, Clone, Debug, Default, Versionize)]
 pub struct VirtioNetConfig {
     pub mac: [u8; 6],
     pub status: u16,

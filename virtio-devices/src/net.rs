@@ -296,7 +296,7 @@ pub struct Net {
     rate_limiter_config: Option<RateLimiterConfig>,
 }
 
-#[derive(Serialize, Deserialize, Versionize)]
+#[derive(Versionize)]
 pub struct NetState {
     pub avail_features: u64,
     pub acked_features: u64,
