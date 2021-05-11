@@ -113,10 +113,6 @@ pub enum Error {
     #[error("Error rebooting VM: {0:?}")]
     VmReboot(VmError),
 
-    /// Cannot shut a VM down
-    #[error("Error shutting down VM: {0:?}")]
-    VmShutdown(VmError),
-
     /// Cannot create VMM thread
     #[error("Error spawning VMM thread {0:?}")]
     VmmThreadSpawn(#[source] io::Error),
@@ -124,10 +120,6 @@ pub enum Error {
     /// Cannot shut the VMM down
     #[error("Error shutting down VMM: {0:?}")]
     VmmShutdown(VmError),
-
-    // Error following "exe" link
-    #[error("Error following \"exe\" link: {0}")]
-    ExePathReadLink(#[source] io::Error),
 
     /// Cannot create seccomp filter
     #[error("Error creating seccomp filter: {0}")]

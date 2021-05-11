@@ -27,8 +27,6 @@ pub enum Error {
     TapSetMac(TapError),
     /// Getting MAC address failed
     TapGetMac(TapError),
-    /// Setting tap interface offload flags failed.
-    TapSetOffload(TapError),
     /// Setting vnet header size failed.
     TapSetVnetHdrSize(TapError),
     /// Enabling tap interface failed.

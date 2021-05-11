@@ -122,9 +122,6 @@ unsafe impl ByteValued for BootParamsWrapper {}
 
 #[derive(Debug)]
 pub enum Error {
-    /// Invalid e820 setup params.
-    E820Configuration,
-
     /// Error writing MP table to memory.
     MpTableSetup(mptable::Error),
 

@@ -162,9 +162,6 @@ pub enum Error {
     /// Failed to allocate a memory range.
     MemoryRangeAllocation,
 
-    /// Failed to create map region
-    MmapRegion(),
-
     /// Error from region creation
     GuestMemoryRegion(MmapRegionError),
 
@@ -194,10 +191,6 @@ pub enum Error {
 
     /// Cannot create the system allocator
     CreateSystemAllocator,
-
-    /// The number of external backing files doesn't match the number of
-    /// memory regions.
-    InvalidAmountExternalBackingFiles,
 
     /// Invalid SGX EPC section size
     #[cfg(target_arch = "x86_64")]

@@ -132,14 +132,8 @@ pub enum Error {
     /// Cannot setup terminal in canonical mode.
     SetTerminalCanon(vmm_sys_util::errno::Error),
 
-    /// Failed parsing network parameters
-    ParseNetworkParameters,
-
     /// Memory is overflow
     MemOverflow,
-
-    /// Failed to allocate the IOAPIC memory range.
-    IoapicRangeAllocation,
 
     /// Cannot spawn a signal handler thread
     SignalHandlerSpawn(io::Error),
@@ -186,9 +180,6 @@ pub enum Error {
     /// Memory manager error
     MemoryManager(MemoryManagerError),
 
-    /// No PCI support
-    NoPciSupport,
-
     /// Eventfd write error
     EventfdError(std::io::Error),
 
@@ -224,9 +215,6 @@ pub enum Error {
 
     /// Failed resizing a memory zone.
     ResizeZone,
-
-    /// Failed setting the VmmOps interface.
-    SetVmmOpsInterface(hypervisor::HypervisorVmError),
 
     /// Cannot activate virtio devices
     ActivateVirtioDevices(device_manager::DeviceManagerError),
