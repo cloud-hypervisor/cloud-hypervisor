@@ -6,8 +6,7 @@
 // found in the THIRD-PARTY file.
 
 use super::{create_sockaddr, create_socket, vnet_hdr_len, Error as NetUtilError, MacAddr};
-use mac::MAC_ADDR_LEN;
-use net_gen;
+use crate::mac::MAC_ADDR_LEN;
 use std::fs::File;
 use std::io::{Error as IoError, Read, Result as IoResult, Write};
 use std::net;

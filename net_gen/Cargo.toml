@@ -2,6 +2,7 @@
 name = "net_gen"
 version = "0.1.0"
 authors = ["The Chromium OS Authors"]
+edition = "2018"
 
 [dependencies]
 vmm-sys-util = ">=0.3.1"
