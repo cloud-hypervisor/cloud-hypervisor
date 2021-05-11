@@ -6,13 +6,12 @@
 // Portions Copyright 2017 The Chromium OS Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
-use std::sync::Arc;
-use std::{mem, result};
-
+use crate::layout::{BOOT_GDT_START, BOOT_IDT_START, PVH_INFO_START};
 use hypervisor::arch::x86::gdt::{gdt_entry, segment_from_gdt};
 use hypervisor::arch::x86::regs::*;
 use hypervisor::x86_64::{FpuState, SpecialRegisters, StandardRegisters};
-use layout::{BOOT_GDT_START, BOOT_IDT_START, PVH_INFO_START};
+use std::sync::Arc;
+use std::{mem, result};
 use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError, GuestMemoryMmap};
 
 #[derive(Debug)]

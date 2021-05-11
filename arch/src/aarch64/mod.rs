@@ -14,7 +14,7 @@ pub mod regs;
 pub use self::fdt::DeviceInfoForFdt;
 use crate::DeviceType;
 use crate::RegionType;
-use aarch64::gic::GicDevice;
+use gic::GicDevice;
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::fmt::Debug;
