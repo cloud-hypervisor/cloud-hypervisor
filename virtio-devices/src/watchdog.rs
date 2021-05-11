@@ -167,7 +167,7 @@ pub struct Watchdog {
     timer: File,
 }
 
-#[derive(Serialize, Deserialize, Versionize)]
+#[derive(Versionize)]
 pub struct WatchdogState {
     pub avail_features: u64,
     pub acked_features: u64,

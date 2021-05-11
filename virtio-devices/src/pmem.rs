@@ -44,7 +44,7 @@ const VIRTIO_PMEM_RESP_TYPE_EIO: u32 = 1;
 // New descriptors are pending on the virtio queue.
 const QUEUE_AVAIL_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 
-#[derive(Copy, Clone, Debug, Default, Serialize, Deserialize, Versionize)]
+#[derive(Copy, Clone, Debug, Default, Versionize)]
 #[repr(C)]
 struct VirtioPmemConfig {
     start: u64,
@@ -269,7 +269,7 @@ pub struct Pmem {
     _region: MmapRegion,
 }
 
-#[derive(Serialize, Deserialize, Versionize)]
+#[derive(Versionize)]
 pub struct PmemState {
     avail_features: u64,
     acked_features: u64,

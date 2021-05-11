@@ -693,7 +693,7 @@ impl EpollHelperHandler for IommuEpollHandler {
     }
 }
 
-#[derive(Clone, Copy, Serialize, Deserialize, Versionize)]
+#[derive(Clone, Copy, Versionize)]
 struct Mapping {
     gpa: u64,
     size: u64,
@@ -741,7 +741,7 @@ pub struct Iommu {
     seccomp_action: SeccompAction,
 }
 
-#[derive(Serialize, Deserialize, Versionize)]
+#[derive(Versionize)]
 struct IommuState {
     avail_features: u64,
     acked_features: u64,

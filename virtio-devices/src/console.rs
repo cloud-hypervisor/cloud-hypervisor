@@ -43,7 +43,7 @@ const CONFIG_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 4;
 //Console size feature bit
 const VIRTIO_CONSOLE_F_SIZE: u64 = 0;
 
-#[derive(Copy, Clone, Debug, Default, Deserialize, Serialize, Versionize)]
+#[derive(Copy, Clone, Debug, Default, Versionize)]
 #[repr(C, packed)]
 pub struct VirtioConsoleConfig {
     cols: u16,
@@ -280,7 +280,7 @@ pub struct Console {
     seccomp_action: SeccompAction,
 }
 
-#[derive(Serialize, Deserialize, Versionize)]
+#[derive(Versionize)]
 pub struct ConsoleState {
     avail_features: u64,
     acked_features: u64,

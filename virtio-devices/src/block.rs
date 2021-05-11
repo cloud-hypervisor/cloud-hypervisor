@@ -366,7 +366,7 @@ pub struct Block {
     rate_limiter_config: Option<RateLimiterConfig>,
 }
 
-#[derive(Serialize, Deserialize, Versionize)]
+#[derive(Versionize)]
 pub struct BlockState {
     pub disk_path: String,
     pub disk_nsectors: u64,
