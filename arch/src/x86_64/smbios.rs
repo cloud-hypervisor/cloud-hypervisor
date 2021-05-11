@@ -6,7 +6,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use layout::SMBIOS_START;
+use crate::layout::SMBIOS_START;
 use std::fmt::{self, Display};
 use std::mem;
 use std::result;

@@ -5,8 +5,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
+use crate::layout::{APIC_START, HIGH_RAM_START, IOAPIC_START};
 use crate::x86_64::mpspec;
-use layout::{APIC_START, HIGH_RAM_START, IOAPIC_START};
 use libc::c_char;
 use std::io;
 use std::mem;
@@ -285,7 +285,7 @@ pub fn setup_mptable(offset: GuestAddress, mem: &GuestMemoryMmap, num_cpus: u8) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use layout::MPTABLE_START;
+    use crate::layout::MPTABLE_START;
     use vm_memory::{GuestAddress, GuestUsize};
 
     fn table_entry_size(type_: u8) -> usize {
