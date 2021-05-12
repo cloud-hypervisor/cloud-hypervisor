@@ -90,5 +90,7 @@ pub enum Error {
     InvalidFeatures,
     /// Missing file descriptor for the region.
     MissingRegionFd,
+    /// Missing IrqFd
+    MissingIrqFd,
 }
 type Result<T> = std::result::Result<T, Error>;

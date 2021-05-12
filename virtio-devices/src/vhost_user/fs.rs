@@ -439,7 +439,7 @@ impl VirtioDevice for Fs {
                 ActivateError::BadActivate
             })?;
 
-        let vu_call_evt_queue_list = setup_vhost_user(
+        setup_vhost_user(
             &mut self.vu,
             &mem.memory(),
             queues,
@@ -478,8 +478,6 @@ impl VirtioDevice for Fs {
         };
 
         let mut handler = VhostUserEpollHandler::new(VhostUserEpollConfig {
-            vu_interrupt_list: vu_call_evt_queue_list,
-            interrupt_cb,
             kill_evt,
             pause_evt,
             slave_req_handler,

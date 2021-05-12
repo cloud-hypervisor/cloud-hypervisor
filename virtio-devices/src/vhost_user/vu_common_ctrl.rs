@@ -4,7 +4,6 @@
 use super::super::{Descriptor, Queue};
 use super::{Error, Result};
 use crate::{get_host_address_range, VirtioInterrupt, VirtioInterruptType};
-use libc::EFD_NONBLOCK;
 use std::convert::TryInto;
 use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
@@ -75,11 +74,9 @@ pub fn setup_vhost_user_vring(
     queues: Vec<Queue>,
     queue_evts: Vec<EventFd>,
     virtio_interrupt: &Arc<dyn VirtioInterrupt>,
-) -> Result<Vec<(Option<EventFd>, Queue)>> {
+) -> Result<()> {
     // Let's first provide the memory table to the backend.
     update_mem_table(vu, mem)?;
-
-    let mut vu_interrupt_list = Vec::new();
 
     for (queue_index, queue) in queues.into_iter().enumerate() {
         let actual_size: usize = queue.actual_size().try_into().unwrap();
@@ -117,12 +114,8 @@ pub fn setup_vhost_user_vring(
         {
             vu.set_vring_call(queue_index, &eventfd)
                 .map_err(Error::VhostUserSetVringCall)?;
-            vu_interrupt_list.push((None, queue));
         } else {
-            let eventfd = EventFd::new(EFD_NONBLOCK).map_err(Error::VhostIrqCreate)?;
-            vu.set_vring_call(queue_index, &eventfd)
-                .map_err(Error::VhostUserSetVringCall)?;
-            vu_interrupt_list.push((Some(eventfd), queue));
+            return Err(Error::MissingIrqFd);
         }
 
         vu.set_vring_kick(queue_index, &queue_evts[queue_index])
@@ -132,7 +125,7 @@ pub fn setup_vhost_user_vring(
             .map_err(Error::VhostUserSetVringEnable)?;
     }
 
-    Ok(vu_interrupt_list)
+    Ok(())
 }
 
 pub fn setup_vhost_user(
@@ -142,7 +135,7 @@ pub fn setup_vhost_user(
     queue_evts: Vec<EventFd>,
     virtio_interrupt: &Arc<dyn VirtioInterrupt>,
     acked_features: u64,
-) -> Result<Vec<(Option<EventFd>, Queue)>> {
+) -> Result<()> {
     // Set features based on the acked features from the guest driver.
     vu.set_features(acked_features)
         .map_err(Error::VhostUserSetFeatures)?;
