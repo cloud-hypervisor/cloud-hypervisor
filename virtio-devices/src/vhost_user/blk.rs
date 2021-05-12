@@ -4,19 +4,16 @@
 use super::super::{
     ActivateError, ActivateResult, Queue, VirtioCommon, VirtioDevice, VirtioDeviceType,
 };
-use super::handler::*;
 use super::vu_common_ctrl::*;
 use super::{Error, Result};
-use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::VirtioInterrupt;
 use block_util::VirtioBlockConfig;
-use seccomp::{SeccompAction, SeccompFilter};
+use seccomp::SeccompAction;
 use std::mem;
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::{Arc, Barrier};
-use std::thread;
 use std::vec::Vec;
 use vhost::vhost_user::message::VhostUserConfigFlags;
 use vhost::vhost_user::message::VHOST_USER_CONFIG_OFFSET;
@@ -39,7 +36,7 @@ pub struct Blk {
     id: String,
     vhost_user_blk: Master,
     config: VirtioBlockConfig,
-    seccomp_action: SeccompAction,
+    _seccomp_action: SeccompAction,
     guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     acked_protocol_features: u64,
 }
@@ -150,7 +147,7 @@ impl Blk {
             id,
             vhost_user_blk,
             config,
-            seccomp_action,
+            _seccomp_action: seccomp_action,
             guest_memory: None,
             acked_protocol_features,
         })
@@ -219,7 +216,7 @@ impl VirtioDevice for Blk {
 
         self.guest_memory = Some(mem.clone());
 
-        let mut vu_interrupt_list = setup_vhost_user(
+        setup_vhost_user(
             &mut self.vhost_user_blk,
             &mem.memory(),
             queues,
@@ -229,62 +226,6 @@ impl VirtioDevice for Blk {
         )
         .map_err(ActivateError::VhostUserBlkSetup)?;
 
-        let mut epoll_threads = Vec::new();
-        for i in 0..vu_interrupt_list.len() {
-            let interrupt_list_sub = vec![vu_interrupt_list.remove(0)];
-
-            let kill_evt = self
-                .common
-                .kill_evt
-                .as_ref()
-                .unwrap()
-                .try_clone()
-                .map_err(|e| {
-                    error!("failed to clone kill_evt eventfd: {}", e);
-                    ActivateError::BadActivate
-                })?;
-            let pause_evt = self
-                .common
-                .pause_evt
-                .as_ref()
-                .unwrap()
-                .try_clone()
-                .map_err(|e| {
-                    error!("failed to clone pause_evt eventfd: {}", e);
-                    ActivateError::BadActivate
-                })?;
-
-            let mut handler = VhostUserEpollHandler::<SlaveReqHandler>::new(VhostUserEpollConfig {
-                interrupt_cb: interrupt_cb.clone(),
-                kill_evt,
-                pause_evt,
-                vu_interrupt_list: interrupt_list_sub,
-                slave_req_handler: None,
-            });
-
-            let paused = self.common.paused.clone();
-            let paused_sync = self.common.paused_sync.clone();
-            let virtio_vhost_blk_seccomp_filter =
-                get_seccomp_filter(&self.seccomp_action, Thread::VirtioVhostBlk)
-                    .map_err(ActivateError::CreateSeccompFilter)?;
-            thread::Builder::new()
-                .name(format!("{}_q{}", self.id.clone(), i))
-                .spawn(move || {
-                    if let Err(e) = SeccompFilter::apply(virtio_vhost_blk_seccomp_filter) {
-                        error!("Error applying seccomp filter: {:?}", e);
-                    } else if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
-                        error!("Error running worker: {:?}", e);
-                    }
-                })
-                .map(|thread| epoll_threads.push(thread))
-                .map_err(|e| {
-                    error!("failed to clone virtio epoll thread: {}", e);
-                    ActivateError::BadActivate
-                })?;
-        }
-        self.common.epoll_threads = Some(epoll_threads);
-
-        event!("virtio-device", "activated", "id", &self.id);
         Ok(())
     }
 

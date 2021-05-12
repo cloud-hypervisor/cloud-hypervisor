@@ -7,7 +7,6 @@ use super::super::net_util::{
 use super::super::{
     ActivateError, ActivateResult, Queue, VirtioCommon, VirtioDevice, VirtioDeviceType,
 };
-use super::handler::*;
 use super::vu_common_ctrl::*;
 use super::{Error, Result};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
@@ -291,7 +290,7 @@ impl VirtioDevice for Net {
                 })?;
         }
 
-        let mut vu_interrupt_list = setup_vhost_user(
+        setup_vhost_user(
             &mut self.vhost_user_net,
             &mem.memory(),
             queues,
@@ -300,62 +299,6 @@ impl VirtioDevice for Net {
             self.common.acked_features & self.backend_features,
         )
         .map_err(ActivateError::VhostUserNetSetup)?;
-
-        let mut epoll_threads = Vec::new();
-        for i in 0..vu_interrupt_list.len() / 2 {
-            let interrupt_list_sub = vec![vu_interrupt_list.remove(0), vu_interrupt_list.remove(0)];
-
-            let kill_evt = self
-                .common
-                .kill_evt
-                .as_ref()
-                .unwrap()
-                .try_clone()
-                .map_err(|e| {
-                    error!("failed to clone kill_evt eventfd: {}", e);
-                    ActivateError::BadActivate
-                })?;
-            let pause_evt = self
-                .common
-                .pause_evt
-                .as_ref()
-                .unwrap()
-                .try_clone()
-                .map_err(|e| {
-                    error!("failed to clone pause_evt eventfd: {}", e);
-                    ActivateError::BadActivate
-                })?;
-
-            let mut handler = VhostUserEpollHandler::<SlaveReqHandler>::new(VhostUserEpollConfig {
-                interrupt_cb: interrupt_cb.clone(),
-                kill_evt,
-                pause_evt,
-                vu_interrupt_list: interrupt_list_sub,
-                slave_req_handler: None,
-            });
-
-            let paused = self.common.paused.clone();
-            let paused_sync = self.common.paused_sync.clone();
-            let virtio_vhost_net_seccomp_filter =
-                get_seccomp_filter(&self.seccomp_action, Thread::VirtioVhostNet)
-                    .map_err(ActivateError::CreateSeccompFilter)?;
-            thread::Builder::new()
-                .name(format!("{}_qp{}", self.id.clone(), i))
-                .spawn(move || {
-                    if let Err(e) = SeccompFilter::apply(virtio_vhost_net_seccomp_filter) {
-                        error!("Error applying seccomp filter: {:?}", e);
-                    } else if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
-                        error!("Error running worker: {:?}", e);
-                    }
-                })
-                .map(|thread| epoll_threads.push(thread))
-                .map_err(|e| {
-                    error!("failed to clone queue EventFd: {}", e);
-                    ActivateError::BadActivate
-                })?;
-        }
-
-        self.common.epoll_threads = Some(epoll_threads);
 
         Ok(())
     }
