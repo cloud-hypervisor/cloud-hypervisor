@@ -11,19 +11,19 @@ cargo-fuzz = true
 [dependencies]
 block_util = { path = "../block_util" }
 libc = "0.2.94"
-libfuzzer-sys = "0.4"
+libfuzzer-sys = "0.4.0"
 qcow = { path = "../qcow" }
-seccomp = { git = "https://github.com/firecracker-microvm/firecracker", tag = "v0.24.2" }
+seccomp = { git = "https://github.com/firecracker-microvm/firecracker", tag = "v0.24.3" }
 virtio-devices = { path = "../virtio-devices" }
 vmm-sys-util = "0.8.0"
 vm-virtio = { path = "../vm-virtio" }
 vm-memory = "0.5.0"
 
-[patch.crates-io]
-kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch-v0.4.0", features = ["with-serde", "fam-wrappers"] }
-
 [dependencies.cloud-hypervisor]
 path = ".."
+
+[patch.crates-io]
+kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch-v0.4.0", features = ["with-serde", "fam-wrappers"] }
 
 # Prevent this from interfering with workspaces
 [workspace]
