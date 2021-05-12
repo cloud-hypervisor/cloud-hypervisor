@@ -13,7 +13,7 @@ block_util = { path = "../block_util" }
 libc = "0.2.94"
 libfuzzer-sys = "0.4"
 qcow = { path = "../qcow" }
-seccomp = { git = "https://github.com/firecracker-microvm/firecracker", tag = "v0.24.2" }
+seccomp = { git = "https://github.com/firecracker-microvm/firecracker", tag = "v0.24.3" }
 virtio-devices = { path = "../virtio-devices" }
 vmm-sys-util = "0.8.0"
 vm-virtio = { path = "../vm-virtio" }
