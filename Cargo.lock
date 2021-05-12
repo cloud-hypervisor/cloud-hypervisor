@@ -1184,7 +1184,7 @@ dependencies = [
 [[package]]
 name = "vfio-ioctls"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vfio-ioctls?branch=master#ed8d2534576371000361e615eeb91b4266c55713"
+source = "git+https://github.com/rust-vmm/vfio-ioctls?branch=master#5cb8550556620546e74b9fe6d1174e0d1fc83888"
 dependencies = [
  "byteorder",
  "kvm-bindings",
@@ -1198,7 +1198,7 @@ dependencies = [
 [[package]]
 name = "vhost"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vhost?branch=master#cc4da710ac68ca8ffe68cddcd80d562699445522"
+source = "git+https://github.com/rust-vmm/vhost?branch=master#e5b930b73a47cbdd79858e2e68bcb57123d1c1f3"
 dependencies = [
  "bitflags 1.2.1",
  "libc",
@@ -1319,7 +1319,7 @@ dependencies = [
 [[package]]
 name = "vm-fdt"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vm-fdt?branch=master#8d81555c14fb72d3c13730122130adfaba2cb434"
+source = "git+https://github.com/rust-vmm/vm-fdt?branch=master#13ab882e2f8387753064351c69fbe35c422b448b"
 
 [[package]]
 name = "vm-memory"
