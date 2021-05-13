@@ -192,6 +192,8 @@ RAM hotplug is supported. Note, that while the `pnpmem.sys` driver in use suppor
 
 Network device hotplug and hot-remove are supported.
 
+Disk hotplug and hot-remove are supported. After the device has been hotplugged, it will need to be onlined from within the guest. Among other tools, powershell applets `Get-Disk` and `Set-Disk` can be used for the disk configuration and activation.
+
 ## Debugging
 
 The Windows guest debugging process relies heavily on QEMU and [socat](http://www.dest-unreach.org/socat/). The procedure requires two Windows VMs:

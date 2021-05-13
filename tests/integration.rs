@@ -5351,6 +5351,20 @@ mod tests {
             .unwrap_or(0);
             }
 
+            fn disk_count(&self) -> u8 {
+                return ssh_command_ip_with_auth(
+                "powershell -Command \"Get-Disk | Measure-Object -Line | Format-Table -HideTableHeaders\"",
+                &self.auth,
+                &self.guest.network.guest_ip,
+                DEFAULT_SSH_RETRIES,
+                DEFAULT_SSH_TIMEOUT,
+            )
+            .unwrap()
+            .trim()
+            .parse::<u8>()
+            .unwrap_or(0);
+            }
+
             fn reboot(&self) {
                 ssh_command_ip_with_auth(
                     "shutdown /r /t 0",
@@ -5396,6 +5410,141 @@ mod tests {
                     .spawn()
                     .unwrap()
             }
+
+            // XXX Follow up test involving multiple disks will require:
+            // - Make image size variable
+            // - Make image filename random
+            // - Cleanup image file after test
+            // - NTFS should be added for use along with FAT for better coverage, needs mkfs.ntfs in the container.
+            fn disk_new(&self) -> String {
+                let img = PathBuf::from(
+                    String::from_utf8_lossy(b"/tmp/test-fat-hotplug-0.raw").to_string(),
+                );
+                let _ = fs::remove_file(&img);
+
+                // Create an image file
+                let out = Command::new("qemu-img")
+                    .args(&["create", "-f", "raw", &img.to_str().unwrap(), "100m"])
+                    .output()
+                    .expect("qemu-img command failed")
+                    .stdout;
+                println!("{:?}", out);
+
+                // Associate image to a loop device
+                let out = Command::new("losetup")
+                    .args(&["--show", "-f", &img.to_str().unwrap()])
+                    .output()
+                    .expect("failed to create loop device")
+                    .stdout;
+                let _tmp = String::from_utf8_lossy(&out);
+                let loop_dev = _tmp.trim();
+                println!("{:?}", out);
+
+                // Create a partition table
+                // echo 'type=7' | sudo sfdisk "${LOOP}"
+                let mut child = Command::new("sfdisk")
+                    .args(&[loop_dev])
+                    .stdin(Stdio::piped())
+                    .spawn()
+                    .unwrap();
+                let stdin = child.stdin.as_mut().expect("failed to open stdin");
+                let _ = stdin
+                    .write_all("type=7".as_bytes())
+                    .expect("failed to write stdin");
+                let out = child.wait_with_output().expect("sfdisk failed").stdout;
+                println!("{:?}", out);
+
+                // Disengage the loop device
+                let out = Command::new("losetup")
+                    .args(&["-d", &loop_dev])
+                    .output()
+                    .expect("loop device not found")
+                    .stdout;
+                println!("{:?}", out);
+
+                // Re-associate loop device pointing to the partition only
+                let out = Command::new("losetup")
+                    .args(&[
+                        "--show",
+                        "--offset",
+                        (512 * 2048).to_string().as_str(),
+                        "-f",
+                        &img.to_str().unwrap(),
+                    ])
+                    .output()
+                    .expect("failed to create loop device")
+                    .stdout;
+                let _tmp = String::from_utf8_lossy(&out);
+                let loop_dev = _tmp.trim();
+                println!("{:?}", out);
+
+                // Create msdos filesystem.
+                // XXX mkfs.ntfs is missing in the docker image and should be added
+                // For mkfs.ntfs also add -f.
+                let out = Command::new("mkfs.msdos")
+                    .args(&[&loop_dev])
+                    .output()
+                    .expect("mkfs.msdos failed")
+                    .stdout;
+                println!("{:?}", out);
+
+                // Disengage the loop device
+                let out = Command::new("losetup")
+                    .args(&["-d", &loop_dev])
+                    .output()
+                    .expect("loop device not found")
+                    .stdout;
+                println!("{:?}", out);
+
+                img.to_str().unwrap().to_string()
+            }
+
+            fn disks_set_rw(&self) {
+                ssh_command_ip_with_auth(
+                    "powershell -Command \"Get-Disk | Where-Object IsOffline -eq $True | Set-Disk -IsReadOnly $False\"",
+                    &self.auth,
+                    &self.guest.network.guest_ip,
+                    DEFAULT_SSH_RETRIES,
+                    DEFAULT_SSH_TIMEOUT,
+                )
+                .unwrap();
+            }
+
+            fn disks_online(&self) {
+                ssh_command_ip_with_auth(
+                    "powershell -Command \"Get-Disk | Where-Object IsOffline -eq $True | Set-Disk -IsOffline $False\"",
+                    &self.auth,
+                    &self.guest.network.guest_ip,
+                    DEFAULT_SSH_RETRIES,
+                    DEFAULT_SSH_TIMEOUT,
+                )
+                .unwrap();
+            }
+
+            fn disk_file_put(&self, fname: &str, data: &str) {
+                ssh_command_ip_with_auth(
+                    &format!(
+                        "powershell -Command \"'{}' | Set-Content -Path {}\"",
+                        data, fname
+                    ),
+                    &self.auth,
+                    &self.guest.network.guest_ip,
+                    DEFAULT_SSH_RETRIES,
+                    DEFAULT_SSH_TIMEOUT,
+                )
+                .unwrap();
+            }
+
+            fn disk_file_read(&self, fname: &str) -> String {
+                ssh_command_ip_with_auth(
+                    &format!("powershell -Command \"Get-Content -Path {}\"", fname),
+                    &self.auth,
+                    &self.guest.network.guest_ip,
+                    DEFAULT_SSH_RETRIES,
+                    DEFAULT_SSH_TIMEOUT,
+                )
+                .unwrap()
+            }
         }
 
         fn vcpu_threads_count(pid: u32) -> u8 {
@@ -5419,6 +5568,20 @@ mod tests {
             String::from_utf8_lossy(&out)
                 .split_whitespace()
                 .for_each(|s| n += (s.starts_with("_net") && s.ends_with("_ctrl")) as u8); // _net1_ctrl
+            n
+        }
+
+        fn disk_ctrl_threads_count(pid: u32) -> u8 {
+            // ps -T -p 15782  | grep "_disk[0-9]*_q0" | wc -l
+            let out = Command::new("ps")
+                .args(&["-T", "-p", format!("{}", pid).as_str()])
+                .output()
+                .expect("ps command failed")
+                .stdout;
+            let mut n = 0;
+            String::from_utf8_lossy(&out)
+                .split_whitespace()
+                .for_each(|s| n += (s.starts_with("_disk") && s.ends_with("_q0")) as u8); // _disk0_q0, don't care about multiple queues as they're related to the same hdd
             n
         }
 
@@ -5795,7 +5958,7 @@ mod tests {
             let mut child = GuestCommand::new(windows_guest.guest())
                 .args(&["--api-socket", &api_socket])
                 .args(&["--cpus", "boot=2,kvm_hyperv=on"])
-                .args(&["--memory", "size=2G,hotplug_size=5G"])
+                .args(&["--memory", "size=4G"])
                 .args(&["--kernel", ovmf_path.to_str().unwrap()])
                 .args(&["--serial", "tty"])
                 .args(&["--console", "off"])
@@ -5841,6 +6004,103 @@ mod tests {
                 let netdev_num = 1;
                 assert_eq!(windows_guest.netdev_count(), netdev_num);
                 assert_eq!(netdev_ctrl_threads_count(child.id()), netdev_num);
+
+                windows_guest.shutdown();
+            });
+
+            let _ = child.wait_timeout(std::time::Duration::from_secs(60));
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+
+            let _ = child_dnsmasq.kill();
+            let _ = child_dnsmasq.wait();
+
+            handle_child_output(r, &output);
+        }
+
+        #[test]
+        #[cfg(not(feature = "mshv"))]
+        fn test_windows_guest_disk_hotplug() {
+            let windows_guest = WindowsGuest::new();
+
+            let mut ovmf_path = dirs::home_dir().unwrap();
+            ovmf_path.push("workloads");
+            ovmf_path.push(OVMF_NAME);
+
+            let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
+            let api_socket = temp_api_path(&tmp_dir);
+
+            let mut child = GuestCommand::new(windows_guest.guest())
+                .args(&["--api-socket", &api_socket])
+                .args(&["--cpus", "boot=2,kvm_hyperv=on"])
+                .args(&["--memory", "size=4G"])
+                .args(&["--kernel", ovmf_path.to_str().unwrap()])
+                .args(&["--serial", "tty"])
+                .args(&["--console", "off"])
+                .default_disks()
+                .default_net()
+                .capture_output()
+                .spawn()
+                .unwrap();
+
+            // Wait to make sure Windows boots up
+            thread::sleep(std::time::Duration::new(60, 0));
+
+            let mut child_dnsmasq = windows_guest.run_dnsmasq();
+            // Give some time for the guest to reach dnsmasq and get
+            // assigned the right IP address.
+            thread::sleep(std::time::Duration::new(30, 0));
+
+            let disk = windows_guest.disk_new();
+
+            let r = std::panic::catch_unwind(|| {
+                // Initially present disk device
+                let disk_num = 1;
+                assert_eq!(windows_guest.disk_count(), disk_num);
+                assert_eq!(disk_ctrl_threads_count(child.id()), disk_num);
+
+                // Hotplug disk device
+                let (cmd_success, cmd_output) = remote_command_w_output(
+                    &api_socket,
+                    "add-disk",
+                    Some(format!("path={},readonly=off", disk).as_str()),
+                );
+                assert!(cmd_success);
+                assert!(String::from_utf8_lossy(&cmd_output).contains("\"id\":\"_disk2\""));
+                thread::sleep(std::time::Duration::new(5, 0));
+                // Online disk device
+                windows_guest.disks_set_rw();
+                windows_guest.disks_online();
+                // Verify the device is on the system
+                let disk_num = 2;
+                assert_eq!(windows_guest.disk_count(), disk_num);
+                assert_eq!(disk_ctrl_threads_count(child.id()), disk_num);
+
+                let data = "hello";
+                let fname = "d:\\world";
+                windows_guest.disk_file_put(fname, data);
+
+                // Unmount disk device
+                let cmd_success = remote_command(&api_socket, "remove-device", Some("_disk2"));
+                assert!(cmd_success);
+                thread::sleep(std::time::Duration::new(5, 0));
+                // Verify the device has been removed
+                let disk_num = 1;
+                assert_eq!(windows_guest.disk_count(), disk_num);
+                assert_eq!(disk_ctrl_threads_count(child.id()), disk_num);
+
+                // Remount and check the file exists with the expected contents
+                let (cmd_success, _cmd_output) = remote_command_w_output(
+                    &api_socket,
+                    "add-disk",
+                    Some(format!("path={},readonly=off", disk).as_str()),
+                );
+                assert!(cmd_success);
+                thread::sleep(std::time::Duration::new(5, 0));
+                let out = windows_guest.disk_file_read(fname);
+                assert_eq!(data, out.trim());
+
+                // Intentionally no unmount, it'll happen at shutdown.
 
                 windows_guest.shutdown();
             });
