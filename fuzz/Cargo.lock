@@ -195,9 +195,8 @@ dependencies = [
  "epoll",
  "libc",
  "log",
- "serde",
- "serde_derive",
- "serde_json",
+ "versionize",
+ "versionize_derive",
  "vm-device",
  "vm-memory",
  "vm-migration",
@@ -467,9 +466,9 @@ checksum = "558dc50e1a5a5fa7112ca2ce4effcb321b0300c0d4ccf0776a9f60cd89031171"
 
 [[package]]
 name = "serde_derive"
-version = "1.0.125"
+version = "1.0.126"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b093b7a2bb58203b5da3056c05b4ec1fed827dcfdb37347a8841695263b3d06d"
+checksum = "963a7dbc9895aeac7ac90e74f34a5d5261828f79df35cbed41e10189d3804d43"
 dependencies = [
  "proc-macro2",
  "quote",
