@@ -30,6 +30,8 @@ use crate::{
 };
 use anyhow::anyhow;
 use arch::get_host_cpu_phys_bits;
+#[cfg(feature = "tdx")]
+use arch::x86_64::tdx::TdvfSection;
 use arch::EntryPoint;
 use devices::AcpiNotificationFlags;
 use hypervisor::vm::{HypervisorVmError, VmmOps};
@@ -1508,7 +1510,19 @@ impl Vm {
     }
 
     #[cfg(feature = "tdx")]
-    fn init_tdx_memory(&mut self) -> Result<Option<u64>> {
+    fn extract_tdvf_sections(&mut self) -> Result<Vec<TdvfSection>> {
+        use arch::x86_64::tdx::*;
+        // The TDVF file contains a table of section as well as code
+        let mut firmware_file =
+            File::open(&self.config.lock().unwrap().tdx.as_ref().unwrap().firmware)
+                .map_err(Error::LoadTdvf)?;
+
+        // For all the sections allocate some RAM backing them
+        parse_tdvf_sections(&mut firmware_file).map_err(Error::ParseTdvf)
+    }
+
+    #[cfg(feature = "tdx")]
+    fn populate_tdx_sections(&mut self, sections: &[TdvfSection]) -> Result<Option<u64>> {
         use arch::x86_64::tdx::*;
         // Get the memory end *before* we start adding TDVF ram regions
         let mem_end = {
@@ -1516,15 +1530,7 @@ impl Vm {
             let mem = guest_memory.memory();
             mem.last_addr()
         };
-
-        // The TDVF file contains a table of section as well as code
-        let mut firmware_file =
-            File::open(&self.config.lock().unwrap().tdx.as_ref().unwrap().firmware)
-                .map_err(Error::LoadTdvf)?;
-
-        // For all the sections allocate some RAM backing them
-        let sections = parse_tdvf_sections(&mut firmware_file).map_err(Error::ParseTdvf)?;
-        for section in &sections {
+        for section in sections {
             info!("Allocating TDVF Section: {:?}", section);
             self.memory_manager
                 .lock()
@@ -1533,12 +1539,17 @@ impl Vm {
                 .map_err(Error::AllocatingTdvfMemory)?;
         }
 
+        // The TDVF file contains a table of section as well as code
+        let mut firmware_file =
+            File::open(&self.config.lock().unwrap().tdx.as_ref().unwrap().firmware)
+                .map_err(Error::LoadTdvf)?;
+
         // The guest memory at this point now has all the required regions so it
         // is safe to copy from the TDVF file into it.
         let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
         let mem = guest_memory.memory();
         let mut hob_offset = None;
-        for section in &sections {
+        for section in sections {
             info!("Populating TDVF Section: {:?}", section);
             match section.r#type {
                 TdvfSectionType::Bfv | TdvfSectionType::Cfv => {
@@ -1611,7 +1622,15 @@ impl Vm {
 
         hob.finish(&mem).map_err(Error::PopulateHob)?;
 
-        for section in &sections {
+        Ok(hob_offset)
+    }
+
+    #[cfg(feature = "tdx")]
+    fn init_tdx_memory(&mut self, sections: &[TdvfSection]) -> Result<()> {
+        let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
+        let mem = guest_memory.memory();
+
+        for section in sections {
             self.vm
                 .tdx_init_memory_region(
                     mem.get_host_address(GuestAddress(section.address)).unwrap() as u64,
@@ -1622,8 +1641,7 @@ impl Vm {
                 )
                 .map_err(Error::InitializeTdxMemoryRegion)?;
         }
-
-        Ok(hob_offset)
+        Ok(())
     }
 
     pub fn boot(&mut self) -> Result<()> {
@@ -1657,10 +1675,13 @@ impl Vm {
             .create_boot_vcpus(entry_point)
             .map_err(Error::CpuManager)?;
 
+        #[cfg(feature = "tdx")]
+        let sections = self.extract_tdvf_sections()?;
+
         // Configuring the TDX regions requires that the vCPUs are created
         #[cfg(feature = "tdx")]
         let hob_address = if self.config.lock().unwrap().tdx.is_some() {
-            self.init_tdx_memory()?
+            self.populate_tdx_sections(&sections)?
         } else {
             None
         };
@@ -1677,6 +1698,7 @@ impl Vm {
                 .unwrap()
                 .initialize_tdx(hob_address)
                 .map_err(Error::CpuManager)?;
+            self.init_tdx_memory(&sections)?;
             // With TDX memory and CPU state configured TDX setup is complete
             self.vm.tdx_finalize().map_err(Error::FinalizeTdx)?;
         }
