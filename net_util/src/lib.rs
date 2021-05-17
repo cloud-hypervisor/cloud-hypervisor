@@ -13,6 +13,7 @@ extern crate lazy_static;
 #[macro_use]
 extern crate log;
 
+mod ctrl_queue;
 mod mac;
 mod open_tap;
 mod queue_pair;
@@ -22,6 +23,7 @@ use std::io::Error as IoError;
 use std::os::unix::io::{FromRawFd, RawFd};
 use std::{io, mem, net};
 
+pub use ctrl_queue::{CtrlQueue, Error as CtrlQueueError};
 pub use mac::{MacAddr, MAC_ADDR_LEN};
 pub use open_tap::{open_tap, Error as OpenTapError};
 pub use queue_pair::{NetCounters, NetQueuePair, NetQueuePairError, RxVirtio, TxVirtio};
