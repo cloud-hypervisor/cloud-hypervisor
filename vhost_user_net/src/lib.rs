@@ -8,6 +8,7 @@
 
 use libc::{self, EFD_NONBLOCK};
 use log::*;
+use net_util::CtrlQueue;
 use net_util::{
     open_tap, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TxVirtio,
 };
@@ -25,7 +26,7 @@ use vhost::vhost_user::Listener;
 use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring, VringWorker};
 use virtio_bindings::bindings::virtio_net::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
-use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
+use vm_memory::{GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -51,6 +52,8 @@ pub enum Error {
     NetQueuePair(net_util::NetQueuePairError),
     /// Failed registering the TAP listener
     RegisterTapListener(io::Error),
+    /// Failed processing control queue
+    ProcessCtrlQueue(net_util::CtrlQueueError),
 }
 
 pub const SYNTAX: &str = "vhost-user-net backend parameters \
@@ -97,13 +100,32 @@ impl VhostUserNetThread {
         })
     }
 
-    pub fn set_vring_worker(&mut self, vring_worker: Option<Arc<VringWorker>>) {
+    fn set_vring_worker(&mut self, vring_worker: Option<Arc<VringWorker>>) {
         self.net.epoll_fd = Some(vring_worker.as_ref().unwrap().as_raw_fd());
+    }
+}
+
+struct VhostUserNetCtrlThread {
+    ctrl: CtrlQueue,
+    kill_evt: EventFd,
+    id: usize,
+    mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
+}
+
+impl VhostUserNetCtrlThread {
+    fn new(taps: Vec<Tap>, id: usize) -> Result<Self> {
+        Ok(VhostUserNetCtrlThread {
+            ctrl: CtrlQueue::new(taps),
+            kill_evt: EventFd::new(EFD_NONBLOCK).map_err(Error::CreateKillEventFd)?,
+            id,
+            mem: None,
+        })
     }
 }
 
 pub struct VhostUserNetBackend {
     threads: Vec<Mutex<VhostUserNetThread>>,
+    ctrl_thread: Mutex<VhostUserNetCtrlThread>,
     num_queues: usize,
     queue_size: u16,
     queues_per_thread: Vec<u64>,
@@ -114,11 +136,11 @@ impl VhostUserNetBackend {
         ip_addr: Ipv4Addr,
         host_mac: MacAddr,
         netmask: Ipv4Addr,
-        num_queues: usize,
+        mut num_queues: usize,
         queue_size: u16,
         ifname: Option<&str>,
     ) -> Result<Self> {
-        let mut taps = open_tap(
+        let taps = open_tap(
             ifname,
             Some(ip_addr),
             Some(netmask),
@@ -130,62 +152,34 @@ impl VhostUserNetBackend {
 
         let mut queues_per_thread = Vec::new();
         let mut threads = Vec::new();
-        for (i, tap) in taps.drain(..).enumerate() {
+        for (i, tap) in taps.clone().drain(..).enumerate() {
             let thread = Mutex::new(VhostUserNetThread::new(tap)?);
             threads.push(thread);
             queues_per_thread.push(0b11 << (i * 2));
         }
 
+        // Create a dedicated thread for the control queue.
+        let ctrl_thread = Mutex::new(VhostUserNetCtrlThread::new(taps.clone(), taps.len())?);
+        queues_per_thread.push(1 << num_queues);
+
+        // Increase num_queues by 1 because of the control queue.
+        num_queues += 1;
+
         Ok(VhostUserNetBackend {
             threads,
+            ctrl_thread,
             num_queues,
             queue_size,
             queues_per_thread,
         })
     }
-}
 
-impl VhostUserBackend for VhostUserNetBackend {
-    fn num_queues(&self) -> usize {
-        self.num_queues
-    }
-
-    fn max_queue_size(&self) -> usize {
-        self.queue_size as usize
-    }
-
-    fn features(&self) -> u64 {
-        1 << VIRTIO_F_VERSION_1
-            | 1 << VIRTIO_RING_F_EVENT_IDX
-            | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
-    }
-
-    fn protocol_features(&self) -> VhostUserProtocolFeatures {
-        VhostUserProtocolFeatures::MQ
-            | VhostUserProtocolFeatures::REPLY_ACK
-            | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
-    }
-
-    fn set_event_idx(&mut self, _enabled: bool) {}
-
-    fn update_memory(&mut self, mem: GuestMemoryMmap) -> VhostUserBackendResult<()> {
-        for thread in self.threads.iter() {
-            thread.lock().unwrap().net.mem = Some(GuestMemoryAtomic::new(mem.clone()));
-        }
-        Ok(())
-    }
-
-    fn handle_event(
+    fn handle_queue(
         &self,
         device_event: u16,
-        evset: epoll::Events,
         vrings: &[Arc<RwLock<Vring>>],
         thread_id: usize,
     ) -> VhostUserBackendResult<bool> {
-        if evset != epoll::Events::EPOLLIN {
-            return Err(Error::HandleEventNotEpollIn.into());
-        }
-
         let mut thread = self.threads[thread_id].lock().unwrap();
         match device_event {
             0 => {
@@ -230,18 +224,116 @@ impl VhostUserBackend for VhostUserNetBackend {
         Ok(false)
     }
 
+    fn handle_ctrl_queue(
+        &self,
+        device_event: u16,
+        vrings: &[Arc<RwLock<Vring>>],
+    ) -> VhostUserBackendResult<bool> {
+        let mut thread = self.ctrl_thread.lock().unwrap();
+
+        let mem = thread.mem.as_ref().unwrap().memory();
+
+        match device_event {
+            0 => {
+                let mut vring = vrings[0].write().unwrap();
+                if thread
+                    .ctrl
+                    .process(&mem, &mut vring.mut_queue())
+                    .map_err(Error::ProcessCtrlQueue)?
+                {
+                    vring
+                        .signal_used_queue()
+                        .map_err(Error::FailedSignalingUsedQueue)?;
+                }
+            }
+            _ => return Err(Error::HandleEventUnknownEvent.into()),
+        }
+
+        Ok(false)
+    }
+}
+
+impl VhostUserBackend for VhostUserNetBackend {
+    fn num_queues(&self) -> usize {
+        self.num_queues
+    }
+
+    fn max_queue_size(&self) -> usize {
+        self.queue_size as usize
+    }
+
+    fn features(&self) -> u64 {
+        1 << VIRTIO_F_VERSION_1
+            | 1 << VIRTIO_RING_F_EVENT_IDX
+            | 1 << VIRTIO_NET_F_CTRL_VQ
+            | 1 << VIRTIO_NET_F_MQ
+            | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
+    }
+
+    fn protocol_features(&self) -> VhostUserProtocolFeatures {
+        VhostUserProtocolFeatures::MQ
+            | VhostUserProtocolFeatures::REPLY_ACK
+            | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
+    }
+
+    fn set_event_idx(&mut self, _enabled: bool) {}
+
+    fn update_memory(&mut self, mem: GuestMemoryMmap) -> VhostUserBackendResult<()> {
+        for thread in self.threads.iter() {
+            thread.lock().unwrap().net.mem = Some(GuestMemoryAtomic::new(mem.clone()));
+        }
+        self.ctrl_thread.lock().unwrap().mem = Some(GuestMemoryAtomic::new(mem));
+
+        Ok(())
+    }
+
+    fn handle_event(
+        &self,
+        device_event: u16,
+        evset: epoll::Events,
+        vrings: &[Arc<RwLock<Vring>>],
+        thread_id: usize,
+    ) -> VhostUserBackendResult<bool> {
+        if evset != epoll::Events::EPOLLIN {
+            return Err(Error::HandleEventNotEpollIn.into());
+        }
+
+        if thread_id == self.ctrl_thread.lock().unwrap().id {
+            self.handle_ctrl_queue(device_event, vrings)
+        } else {
+            self.handle_queue(device_event, vrings, thread_id)
+        }
+    }
+
     fn exit_event(&self, thread_index: usize) -> Option<(EventFd, Option<u16>)> {
-        // The exit event is placed after the queues and the tap event, which
-        // is event index 3.
-        Some((
-            self.threads[thread_index]
-                .lock()
-                .unwrap()
-                .kill_evt
-                .try_clone()
-                .unwrap(),
-            Some(3),
-        ))
+        let (exit_event_fd, exit_event_index) =
+            if thread_index == self.ctrl_thread.lock().unwrap().id {
+                // The exit event is placed after the control queue event, which is
+                // event index 1.
+                (
+                    self.ctrl_thread
+                        .lock()
+                        .unwrap()
+                        .kill_evt
+                        .try_clone()
+                        .unwrap(),
+                    1,
+                )
+            } else {
+                // The exit event is placed after the queues and the tap event, which
+                // is event index 3.
+                (
+                    self.threads[thread_index]
+                        .lock()
+                        .unwrap()
+                        .kill_evt
+                        .try_clone()
+                        .unwrap(),
+                    3,
+                )
+            };
+
+        Some((exit_event_fd, Some(exit_event_index)))
     }
 
     fn queues_per_thread(&self) -> Vec<u64> {
@@ -345,7 +437,7 @@ pub fn start_net_backend(backend_command: &str) {
 
     let mut vring_workers = net_daemon.get_vring_workers();
 
-    if vring_workers.len() != net_backend.read().unwrap().threads.len() {
+    if vring_workers.len() != (net_backend.read().unwrap().threads.len() + 1) {
         error!("Number of vring workers must be identical to the number of backend threads");
         process::exit(1);
     }
@@ -378,4 +470,15 @@ pub fn start_net_backend(backend_command: &str) {
             error!("Error shutting down worker thread: {:?}", e)
         }
     }
+    if let Err(e) = net_backend
+        .read()
+        .unwrap()
+        .ctrl_thread
+        .lock()
+        .unwrap()
+        .kill_evt
+        .write(1)
+    {
+        error!("Error shutting down control thread: {:?}", e);
+    };
 }
