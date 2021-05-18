@@ -21,10 +21,7 @@ pub enum Thread {
     VirtioNetCtl,
     VirtioPmem,
     VirtioRng,
-    VirtioVhostBlk,
     VirtioVhostFs,
-    VirtioVhostNet,
-    VirtioVhostNetCtl,
     VirtioVsock,
     VirtioWatchdog,
 }
@@ -311,27 +308,6 @@ fn virtio_rng_thread_rules() -> Vec<SyscallRuleSet> {
     ]
 }
 
-fn virtio_vhost_blk_thread_rules() -> Vec<SyscallRuleSet> {
-    vec![
-        allow_syscall(libc::SYS_brk),
-        allow_syscall(libc::SYS_close),
-        allow_syscall(libc::SYS_dup),
-        allow_syscall(libc::SYS_epoll_create1),
-        allow_syscall(libc::SYS_epoll_ctl),
-        allow_syscall(libc::SYS_epoll_pwait),
-        #[cfg(target_arch = "x86_64")]
-        allow_syscall(libc::SYS_epoll_wait),
-        allow_syscall(libc::SYS_exit),
-        allow_syscall(libc::SYS_futex),
-        allow_syscall(libc::SYS_madvise),
-        allow_syscall(libc::SYS_munmap),
-        allow_syscall(libc::SYS_read),
-        allow_syscall(libc::SYS_rt_sigprocmask),
-        allow_syscall(libc::SYS_sigaltstack),
-        allow_syscall(libc::SYS_write),
-    ]
-}
-
 fn virtio_vhost_fs_thread_rules() -> Vec<SyscallRuleSet> {
     vec![
         allow_syscall(libc::SYS_brk),
@@ -351,46 +327,6 @@ fn virtio_vhost_fs_thread_rules() -> Vec<SyscallRuleSet> {
         allow_syscall(libc::SYS_recvmsg),
         allow_syscall(libc::SYS_rt_sigprocmask),
         allow_syscall(libc::SYS_sendmsg),
-        allow_syscall(libc::SYS_sigaltstack),
-        allow_syscall(libc::SYS_write),
-    ]
-}
-
-fn virtio_vhost_net_thread_rules() -> Vec<SyscallRuleSet> {
-    vec![
-        allow_syscall(libc::SYS_brk),
-        allow_syscall(libc::SYS_close),
-        allow_syscall(libc::SYS_dup),
-        allow_syscall(libc::SYS_epoll_create1),
-        allow_syscall(libc::SYS_epoll_ctl),
-        allow_syscall(libc::SYS_epoll_pwait),
-        #[cfg(target_arch = "x86_64")]
-        allow_syscall(libc::SYS_epoll_wait),
-        allow_syscall(libc::SYS_futex),
-        allow_syscall(libc::SYS_read),
-        allow_syscall(libc::SYS_write),
-        allow_syscall(libc::SYS_sigaltstack),
-        allow_syscall(libc::SYS_munmap),
-        allow_syscall(libc::SYS_madvise),
-        allow_syscall(libc::SYS_exit),
-    ]
-}
-
-fn virtio_vhost_net_ctl_thread_rules() -> Vec<SyscallRuleSet> {
-    vec![
-        allow_syscall(libc::SYS_brk),
-        allow_syscall(libc::SYS_close),
-        allow_syscall(libc::SYS_dup),
-        allow_syscall(libc::SYS_epoll_create1),
-        allow_syscall(libc::SYS_epoll_ctl),
-        allow_syscall(libc::SYS_epoll_pwait),
-        #[cfg(target_arch = "x86_64")]
-        allow_syscall(libc::SYS_epoll_wait),
-        allow_syscall(libc::SYS_exit),
-        allow_syscall(libc::SYS_futex),
-        allow_syscall(libc::SYS_munmap),
-        allow_syscall(libc::SYS_madvise),
-        allow_syscall(libc::SYS_read),
         allow_syscall(libc::SYS_sigaltstack),
         allow_syscall(libc::SYS_write),
     ]
@@ -462,10 +398,7 @@ fn get_seccomp_filter_trap(thread_type: Thread) -> Result<SeccompFilter, Error> 
         Thread::VirtioNetCtl => virtio_net_ctl_thread_rules()?,
         Thread::VirtioPmem => virtio_pmem_thread_rules(),
         Thread::VirtioRng => virtio_rng_thread_rules(),
-        Thread::VirtioVhostBlk => virtio_vhost_blk_thread_rules(),
         Thread::VirtioVhostFs => virtio_vhost_fs_thread_rules(),
-        Thread::VirtioVhostNet => virtio_vhost_net_thread_rules(),
-        Thread::VirtioVhostNetCtl => virtio_vhost_net_ctl_thread_rules(),
         Thread::VirtioVsock => virtio_vsock_thread_rules(),
         Thread::VirtioWatchdog => virtio_watchdog_thread_rules(),
     };
@@ -484,10 +417,7 @@ fn get_seccomp_filter_log(thread_type: Thread) -> Result<SeccompFilter, Error> {
         Thread::VirtioNetCtl => virtio_net_ctl_thread_rules()?,
         Thread::VirtioPmem => virtio_pmem_thread_rules(),
         Thread::VirtioRng => virtio_rng_thread_rules(),
-        Thread::VirtioVhostBlk => virtio_vhost_blk_thread_rules(),
         Thread::VirtioVhostFs => virtio_vhost_fs_thread_rules(),
-        Thread::VirtioVhostNet => virtio_vhost_net_thread_rules(),
-        Thread::VirtioVhostNetCtl => virtio_vhost_net_ctl_thread_rules(),
         Thread::VirtioVsock => virtio_vsock_thread_rules(),
         Thread::VirtioWatchdog => virtio_watchdog_thread_rules(),
     };
