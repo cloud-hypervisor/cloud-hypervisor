@@ -205,7 +205,7 @@ $ popd
 #### Booting the guest VM
 
 Now we can directly boot into our custom kernel and make it use the Ubuntu root partition.
-If we want to have 4 vCPUs and 512 MBytes of memory:
+If we want to have 4 vCPUs and 1024 MBytes of memory:
 
 ```shell
 $ pushd $CLOUDH

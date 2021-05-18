@@ -277,7 +277,7 @@ impl<'a> DescriptorChain<'a> {
     /// If the driver designated this as a write only descriptor.
     ///
     /// If this is false, this descriptor is read only.
-    /// Write only means the the emulated device can write and the driver can read.
+    /// Write only means that the emulated device can write and the driver can read.
     pub fn is_write_only(&self) -> bool {
         self.flags & VIRTQ_DESC_F_WRITE != 0
     }
@@ -1003,7 +1003,7 @@ pub mod tests {
             // the first desc has a normal len now, and the next_descriptor flag is set
             vq.dtable[0].len.set(0x1000);
             vq.dtable[0].flags.set(VIRTQ_DESC_F_NEXT);
-            //..but the the index of the next descriptor is too large
+            //..but the index of the next descriptor is too large
             vq.dtable[0].next.set(16);
 
             assert!(DescriptorChain::checked_new(m, vq.start(), 16, 0, None).is_none());
