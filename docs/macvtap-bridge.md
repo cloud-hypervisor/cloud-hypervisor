@@ -1,6 +1,6 @@
 # Using MACVTAP to Bridge onto Host Network
 
-Cloud Hypervisor supports using a MACVTAP device which is derived from a MACVLAN. Full details of configuring MACVLAN or MACVTAP is out of scope of this document. However the example below indicates how to bridge the guest directly onto the the network the host is on. Due to the lack of hairpin mode it not usually possible to reach the guest directly from the host.
+Cloud Hypervisor supports using a MACVTAP device which is derived from a MACVLAN. Full details of configuring MACVLAN or MACVTAP is out of scope of this document. However the example below indicates how to bridge the guest directly onto the network the host is on. Due to the lack of hairpin mode it not usually possible to reach the guest directly from the host.
 
 ```bash
 # The MAC address must be attached to the macvtap and be used inside the guest

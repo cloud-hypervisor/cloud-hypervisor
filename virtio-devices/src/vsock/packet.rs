@@ -469,7 +469,7 @@ mod tests {
             expect_asm_error!(tx, test_ctx, handler_ctx, VsockError::UnreadableDescriptor);
         }
 
-        // Test case: the buffer descriptor cannot fit all the data advertised by the the
+        // Test case: the buffer descriptor cannot fit all the data advertised by the
         // packet header `len` field.
         {
             create_context!(test_ctx, handler_ctx);

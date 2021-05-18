@@ -11,7 +11,7 @@ by the VFIO kernel drivers. However, by default, a host device will be bound to
 its native driver, which is not the VFIO one.
 
 As a consequence, a device must be unbound from its native driver before passing
-it to `cloud-hypervisor` for assigning it to a guess.
+it to `cloud-hypervisor` for assigning it to a guest.
 
 ### Example
 

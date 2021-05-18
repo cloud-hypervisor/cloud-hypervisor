@@ -340,7 +340,7 @@ impl Vmm {
     }
 
     fn vm_boot(&mut self) -> result::Result<(), VmError> {
-        // Create a new VM is we don't have one yet.
+        // Create a new VM if we don't have one yet.
         if self.vm.is_none() {
             let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
             let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;

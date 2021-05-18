@@ -1,6 +1,6 @@
 # Profiling
 
-`perf` can be used to profile the `cloud-hypervisor` binary but it is necessary to make some modifications to the the build in order to produce a binary that gives useful results.
+`perf` can be used to profile the `cloud-hypervisor` binary but it is necessary to make some modifications to the build in order to produce a binary that gives useful results.
 
 ## Building a suitable binary
 

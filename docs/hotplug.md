@@ -31,7 +31,7 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 $ popd
 ```
 
-Notice the addition of `--api-socket=/tmp/ch-socket` and a `max` parameter on `--cpus boot=4.max=8`.
+Notice the addition of `--api-socket=/tmp/ch-socket` and a `max` parameter on `--cpus boot=4,max=8`.
 
 To ask the VMM to add additional vCPUs then use the resize API:
 
