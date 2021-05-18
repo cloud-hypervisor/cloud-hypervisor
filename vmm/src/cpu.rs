@@ -221,7 +221,7 @@ impl Vcpu {
             self.mpidr = arch::configure_vcpu(&self.vcpu, self.id, kernel_entry_point, vm_memory)
                 .map_err(Error::VcpuConfiguration)?;
         }
-
+        info!("Configuring vCPU: cpu_id = {}", self.id);
         #[cfg(target_arch = "x86_64")]
         arch::configure_vcpu(
             &self.vcpu,

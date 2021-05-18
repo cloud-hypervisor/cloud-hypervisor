@@ -849,6 +849,7 @@ impl Vm {
             .read_from(address, &mut initramfs, size)
             .map_err(|_| Error::InitramfsLoad)?;
 
+        info!("Initramfs loaded: address = 0x{:x}", address.0);
         Ok(arch::InitramfsConfig { address, size })
     }
 
@@ -889,6 +890,7 @@ impl Vm {
 
     #[cfg(target_arch = "x86_64")]
     fn load_kernel(&mut self) -> Result<EntryPoint> {
+        info!("Loading kernel");
         let cmdline_cstring = self.get_cmdline()?;
         let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
         let mem = guest_memory.memory();
@@ -912,13 +914,10 @@ impl Vm {
         )
         .map_err(Error::LoadCmdLine)?;
 
-        if let PvhEntryPresent(pvh_entry_addr) = entry_addr.pvh_boot_cap {
+        if let PvhEntryPresent(entry_addr) = entry_addr.pvh_boot_cap {
             // Use the PVH kernel entry point to boot the guest
-            let entry_point_addr: GuestAddress;
-            entry_point_addr = pvh_entry_addr;
-            Ok(EntryPoint {
-                entry_addr: entry_point_addr,
-            })
+            info!("Kernel loaded: entry_addr = 0x{:x}", entry_addr.0);
+            Ok(EntryPoint { entry_addr })
         } else {
             Err(Error::KernelMissingPvhHeader)
         }
@@ -926,6 +925,7 @@ impl Vm {
 
     #[cfg(target_arch = "x86_64")]
     fn configure_system(&mut self) -> Result<()> {
+        info!("Configuring system");
         let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
 
         let initramfs_config = match self.initramfs {
@@ -947,6 +947,10 @@ impl Vm {
                 &self.memory_manager,
                 &self.numa_nodes,
             ));
+            info!(
+                "Created ACPI tables: rsdp_addr = 0x{:x}",
+                rsdp_addr.unwrap().0
+            );
         }
 
         let sgx_epc_region = self
@@ -1645,6 +1649,7 @@ impl Vm {
     }
 
     pub fn boot(&mut self) -> Result<()> {
+        info!("Booting VM");
         event!("vm", "booting");
         let current_state = self.get_state()?;
         if current_state == VmState::Paused {
