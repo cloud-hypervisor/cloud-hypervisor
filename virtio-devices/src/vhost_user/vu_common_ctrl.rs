@@ -68,7 +68,7 @@ pub fn add_memory_region(vu: &mut Master, region: &Arc<GuestRegionMmap>) -> Resu
         .map_err(Error::VhostUserAddMemReg)
 }
 
-pub fn setup_vhost_user_vring(
+pub fn setup_vhost_user(
     vu: &mut Master,
     mem: &GuestMemoryMmap,
     queues: Vec<Queue>,
@@ -114,8 +114,6 @@ pub fn setup_vhost_user_vring(
         {
             vu.set_vring_call(queue_index, &eventfd)
                 .map_err(Error::VhostUserSetVringCall)?;
-        } else {
-            return Err(Error::MissingIrqFd);
         }
 
         vu.set_vring_kick(queue_index, &queue_evts[queue_index])
@@ -126,21 +124,6 @@ pub fn setup_vhost_user_vring(
     }
 
     Ok(())
-}
-
-pub fn setup_vhost_user(
-    vu: &mut Master,
-    mem: &GuestMemoryMmap,
-    queues: Vec<Queue>,
-    queue_evts: Vec<EventFd>,
-    virtio_interrupt: &Arc<dyn VirtioInterrupt>,
-    acked_features: u64,
-) -> Result<()> {
-    // Set features based on the acked features from the guest driver.
-    vu.set_features(acked_features)
-        .map_err(Error::VhostUserSetFeatures)?;
-
-    setup_vhost_user_vring(vu, mem, queues, queue_evts, virtio_interrupt)
 }
 
 pub fn reset_vhost_user(vu: &mut Master, num_queues: usize) -> Result<()> {

@@ -223,7 +223,6 @@ impl VirtioDevice for Net {
             queues,
             queue_evts,
             &interrupt_cb,
-            self.common.acked_features,
         )
         .map_err(ActivateError::VhostUserNetSetup)?;
 
