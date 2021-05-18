@@ -42,9 +42,20 @@ strip target/$BUILD_TARGET/release/cloud-hypervisor
 
 export RUST_BACKTRACE=1
 
-# Only run with 1 thread to avoid tests interfering with one another because
-# Windows has a static IP configured
-time cargo test $features_test "tests::windows::$test_filter"
+CARGO_ARGS=
+# On a desktop class CPU invoking all the available tests at once is likely
+# to cause cryptic false positives due to the resource limits. Reduce the
+# load automatically to 1/3 of the processor capacity to retain balance between
+# resources exhaustion and speed.
+if [ -z "${CI}" -a -z "${JENKINS_HOME}" ]; then
+	THREADS_TO_USE=1
+	NPROC=$(nproc)
+	if [ "${NPROC}" -gt "2" ]; then
+		THREADS_TO_USE=$(echo "${NPROC}/3" | bc)
+	fi
+	CARGO_ARGS="-- --test-threads=${THREADS_TO_USE}"
+fi
+time cargo test $features_test "tests::windows::$test_filter" ${CARGO_ARGS}
 RES=$?
 
 dmsetup remove_all -f
