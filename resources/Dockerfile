@@ -38,6 +38,7 @@ RUN apt-get update \
 	dosfstools \
 	cpio \
 	python3-setuptools \
+	ntfs-3g \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
