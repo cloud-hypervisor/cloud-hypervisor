@@ -163,37 +163,37 @@ pub struct VmmPingResponse {
     pub version: String,
 }
 
-#[derive(Clone, Deserialize, Serialize, Default)]
+#[derive(Clone, Deserialize, Serialize, Default, Debug)]
 pub struct VmResizeData {
     pub desired_vcpus: Option<u8>,
     pub desired_ram: Option<u64>,
     pub desired_balloon: Option<u64>,
 }
 
-#[derive(Clone, Deserialize, Serialize, Default)]
+#[derive(Clone, Deserialize, Serialize, Default, Debug)]
 pub struct VmResizeZoneData {
     pub id: String,
     pub desired_ram: u64,
 }
 
-#[derive(Clone, Deserialize, Serialize, Default)]
+#[derive(Clone, Deserialize, Serialize, Default, Debug)]
 pub struct VmRemoveDeviceData {
     pub id: String,
 }
 
-#[derive(Clone, Deserialize, Serialize, Default)]
+#[derive(Clone, Deserialize, Serialize, Default, Debug)]
 pub struct VmSnapshotConfig {
     /// The snapshot destination URL
     pub destination_url: String,
 }
 
-#[derive(Clone, Deserialize, Serialize, Default)]
+#[derive(Clone, Deserialize, Serialize, Default, Debug)]
 pub struct VmReceiveMigrationData {
     /// URL for the reception of migration state
     pub receiver_url: String,
 }
 
-#[derive(Clone, Deserialize, Serialize, Default)]
+#[derive(Clone, Deserialize, Serialize, Default, Debug)]
 pub struct VmSendMigrationData {
     /// URL to migrate the VM to
     pub destination_url: String,
@@ -217,6 +217,7 @@ pub enum ApiResponsePayload {
 pub type ApiResponse = std::result::Result<ApiResponsePayload, ApiError>;
 
 #[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
 pub enum ApiRequest {
     /// Create the virtual machine. This request payload is a VM configuration
     /// (VmConfig).

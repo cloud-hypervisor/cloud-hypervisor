@@ -1878,6 +1878,8 @@ impl DeviceManager {
             id
         };
 
+        info!("Creating virtio-block device: {:?}", disk_cfg);
+
         if disk_cfg.vhost_user {
             let socket = disk_cfg.vhost_socket.as_ref().unwrap().clone();
             let vu_cfg = VhostUserConfig {
@@ -1928,7 +1930,6 @@ impl DeviceManager {
                         .clone(),
                 )
                 .map_err(DeviceManagerError::Disk)?;
-
             let image_type =
                 detect_image_type(&mut file).map_err(DeviceManagerError::DetectImageType)?;
 
@@ -2028,6 +2029,7 @@ impl DeviceManager {
             net_cfg.id = Some(id.clone());
             id
         };
+        info!("Creating virtio-net device: {:?}", net_cfg);
 
         if net_cfg.vhost_user {
             let socket = net_cfg.vhost_socket.as_ref().unwrap().clone();
@@ -2158,6 +2160,7 @@ impl DeviceManager {
         // Add virtio-rng if required
         let rng_config = self.config.lock().unwrap().rng.clone();
         if let Some(rng_path) = rng_config.src.to_str() {
+            info!("Creating virtio-rng device: {:?}", rng_config);
             let id = String::from(RNG_DEVICE_NAME);
 
             let virtio_rng_device = Arc::new(Mutex::new(
@@ -2198,6 +2201,8 @@ impl DeviceManager {
             fs_cfg.id = Some(id.clone());
             id
         };
+
+        info!("Creating virtio-fs device: {:?}", fs_cfg);
 
         let mut node = device_node!(id);
 
@@ -2356,6 +2361,8 @@ impl DeviceManager {
             pmem_cfg.id = Some(id.clone());
             id
         };
+
+        info!("Creating virtio-pmem device: {:?}", pmem_cfg);
 
         let mut node = device_node!(id);
 
@@ -2543,6 +2550,8 @@ impl DeviceManager {
             id
         };
 
+        info!("Creating virtio-vsock device: {:?}", vsock_cfg);
+
         let socket_path = vsock_cfg
             .socket
             .to_str()
@@ -2602,7 +2611,7 @@ impl DeviceManager {
         for (_memory_zone_id, memory_zone) in mm.memory_zones().iter() {
             if let Some(virtio_mem_zone) = memory_zone.virtio_mem_zone() {
                 let id = self.next_device_name(MEM_DEVICE_NAME_PREFIX)?;
-
+                info!("Creating virtio-mem device: id = {}", id);
                 #[cfg(not(feature = "acpi"))]
                 let node_id: Option<u16> = None;
                 #[cfg(feature = "acpi")]
@@ -2653,6 +2662,7 @@ impl DeviceManager {
 
         if let Some(balloon_config) = &self.config.lock().unwrap().balloon {
             let id = String::from(BALLOON_DEVICE_NAME);
+            info!("Creating virtio-balloon device: id = {}", id);
 
             let virtio_balloon_device = Arc::new(Mutex::new(
                 virtio_devices::Balloon::new(
@@ -2690,6 +2700,7 @@ impl DeviceManager {
         }
 
         let id = String::from(WATCHDOG_DEVICE_NAME);
+        info!("Creating virtio-watchdog device: id = {}", id);
 
         let virtio_watchdog_device = Arc::new(Mutex::new(
             virtio_devices::Watchdog::new(

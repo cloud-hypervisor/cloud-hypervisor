@@ -1090,6 +1090,7 @@ impl Vmm {
                 if let Some(dispatch_type) = self.epoll.dispatch_table[dispatch_idx] {
                     match dispatch_type {
                         EpollDispatch::Exit => {
+                            info!("VM exit event");
                             // Consume the event.
                             self.exit_evt.read().map_err(Error::EventFdRead)?;
                             self.vmm_shutdown().map_err(Error::VmmShutdown)?;
@@ -1097,6 +1098,7 @@ impl Vmm {
                             break 'outer;
                         }
                         EpollDispatch::Reset => {
+                            info!("VM reset event");
                             // Consume the event.
                             self.reset_evt.read().map_err(Error::EventFdRead)?;
                             self.vm_reboot().map_err(Error::VmReboot)?;
@@ -1129,6 +1131,7 @@ impl Vmm {
                             // Read from the API receiver channel
                             let api_request = api_receiver.recv().map_err(Error::ApiRequestRecv)?;
 
+                            info!("API request event: {:?}", api_request);
                             match api_request {
                                 ApiRequest::VmCreate(config, sender) => {
                                     // We only store the passed VM config.
