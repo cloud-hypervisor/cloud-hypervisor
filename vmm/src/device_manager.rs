@@ -2043,13 +2043,8 @@ impl DeviceManager {
                 VhostMode::Server => true,
             };
             let vhost_user_net_device = Arc::new(Mutex::new(
-                match virtio_devices::vhost_user::Net::new(
-                    id.clone(),
-                    net_cfg.mac,
-                    vu_cfg,
-                    self.seccomp_action.clone(),
-                    server,
-                ) {
+                match virtio_devices::vhost_user::Net::new(id.clone(), net_cfg.mac, vu_cfg, server)
+                {
                     Ok(vun_device) => vun_device,
                     Err(e) => {
                         return Err(DeviceManagerError::CreateVhostUserNet(e));

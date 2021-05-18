@@ -1,24 +1,19 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::super::net_util::{
-    build_net_config_space, NetCtrl, NetCtrlEpollHandler, VirtioNetConfig,
-};
+use super::super::net_util::{build_net_config_space, VirtioNetConfig};
 use super::super::{
     ActivateError, ActivateResult, Queue, VirtioCommon, VirtioDevice, VirtioDeviceType,
 };
 use super::vu_common_ctrl::*;
 use super::{Error, Result};
-use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::VirtioInterrupt;
 use net_util::MacAddr;
-use seccomp::{SeccompAction, SeccompFilter};
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixListener;
 use std::result;
 use std::sync::{Arc, Barrier};
-use std::thread;
 use std::vec::Vec;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost::vhost_user::{Master, VhostUserMaster, VhostUserMasterReqHandler};
@@ -40,10 +35,7 @@ pub struct Net {
     common: VirtioCommon,
     id: String,
     vhost_user_net: Master,
-    backend_features: u64,
     config: VirtioNetConfig,
-    ctrl_queue_epoll_thread: Option<thread::JoinHandle<()>>,
-    seccomp_action: SeccompAction,
     guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     acked_protocol_features: u64,
     socket_path: Option<String>,
@@ -55,24 +47,11 @@ impl Net {
         id: String,
         mac_addr: MacAddr,
         vu_cfg: VhostUserConfig,
-        seccomp_action: SeccompAction,
         server: bool,
     ) -> Result<Net> {
         let mut socket_path: Option<String> = None;
 
-        let mut vhost_user_net = if server {
-            info!("Binding vhost-user-net listener...");
-            let listener = UnixListener::bind(&vu_cfg.socket).map_err(Error::BindSocket)?;
-            info!("Waiting for incoming vhost-user-net connection...");
-            let (stream, _) = listener.accept().map_err(Error::AcceptConnection)?;
-
-            socket_path = Some(vu_cfg.socket.clone());
-
-            Master::from_stream(stream, vu_cfg.num_queues as u64)
-        } else {
-            Master::connect(&vu_cfg.socket, vu_cfg.num_queues as u64)
-                .map_err(Error::VhostUserCreateMaster)?
-        };
+        let mut num_queues = vu_cfg.num_queues;
 
         // Filling device and vring features VMM supports.
         let mut avail_features = 1 << virtio_net::VIRTIO_NET_F_GUEST_CSUM
@@ -86,10 +65,31 @@ impl Net {
             | 1 << virtio_net::VIRTIO_NET_F_HOST_ECN
             | 1 << virtio_net::VIRTIO_NET_F_HOST_UFO
             | 1 << virtio_net::VIRTIO_NET_F_MRG_RXBUF
+            | 1 << virtio_net::VIRTIO_NET_F_CTRL_VQ
             | 1 << virtio_net::VIRTIO_F_NOTIFY_ON_EMPTY
             | 1 << virtio_net::VIRTIO_F_VERSION_1
             | 1 << virtio_ring::VIRTIO_RING_F_EVENT_IDX
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
+
+        let mut config = VirtioNetConfig::default();
+        build_net_config_space(&mut config, mac_addr, num_queues, &mut avail_features);
+
+        // Adding one potential queue for the control queue.
+        num_queues += 1;
+
+        let mut vhost_user_net = if server {
+            info!("Binding vhost-user-net listener...");
+            let listener = UnixListener::bind(&vu_cfg.socket).map_err(Error::BindSocket)?;
+            info!("Waiting for incoming vhost-user-net connection...");
+            let (stream, _) = listener.accept().map_err(Error::AcceptConnection)?;
+
+            socket_path = Some(vu_cfg.socket.clone());
+
+            Master::from_stream(stream, num_queues as u64)
+        } else {
+            Master::connect(&vu_cfg.socket, num_queues as u64)
+                .map_err(Error::VhostUserCreateMaster)?
+        };
 
         vhost_user_net
             .set_owner()
@@ -100,63 +100,56 @@ impl Net {
         let backend_features = vhost_user_net
             .get_features()
             .map_err(Error::VhostUserGetFeatures)?;
-        avail_features &= backend_features;
+        let acked_features = avail_features & backend_features;
         // Set features back is required by the vhost crate mechanism, since the
         // later vhost call will check if features is filled in master before execution.
         vhost_user_net
-            .set_features(avail_features)
+            .set_features(acked_features)
             .map_err(Error::VhostUserSetFeatures)?;
 
-        let mut protocol_features;
-        let mut acked_features = 0;
-        if avail_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
-            acked_features |= VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
-            protocol_features = vhost_user_net
-                .get_protocol_features()
-                .map_err(Error::VhostUserGetProtocolFeatures)?;
-        } else {
-            return Err(Error::VhostUserProtocolNotSupport);
-        }
-
-        protocol_features &=
-            VhostUserProtocolFeatures::MQ | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS;
+        let avail_protocol_features = VhostUserProtocolFeatures::MQ
+            | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
+            | VhostUserProtocolFeatures::REPLY_ACK;
+        let backend_protocol_features =
+            if acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
+                vhost_user_net
+                    .get_protocol_features()
+                    .map_err(Error::VhostUserGetProtocolFeatures)?
+            } else {
+                return Err(Error::VhostUserProtocolNotSupport);
+            };
+        let acked_protocol_features = avail_protocol_features & backend_protocol_features;
 
         vhost_user_net
-            .set_protocol_features(protocol_features)
+            .set_protocol_features(acked_protocol_features)
             .map_err(Error::VhostUserSetProtocolFeatures)?;
 
-        let acked_protocol_features = protocol_features.bits();
+        // If the control queue feature has not been negotiated, let's decrease
+        // the number of queues.
+        if acked_features & (1 << virtio_net::VIRTIO_NET_F_CTRL_VQ) == 0 {
+            num_queues -= 1;
+        }
 
-        let max_queue_number =
-            if protocol_features.bits() & VhostUserProtocolFeatures::MQ.bits() != 0 {
-                match vhost_user_net.get_queue_num() {
-                    Ok(qn) => qn,
-                    Err(_) => DEFAULT_QUEUE_NUMBER as u64,
-                }
+        let backend_num_queues =
+            if acked_protocol_features.bits() & VhostUserProtocolFeatures::MQ.bits() != 0 {
+                vhost_user_net
+                    .get_queue_num()
+                    .map_err(Error::VhostUserGetQueueMaxNum)? as usize
+            } else if backend_features & (1 << virtio_net::VIRTIO_NET_F_CTRL_VQ) != 0 {
+                DEFAULT_QUEUE_NUMBER + 1
             } else {
-                DEFAULT_QUEUE_NUMBER as u64
+                DEFAULT_QUEUE_NUMBER
             };
 
-        if vu_cfg.num_queues > max_queue_number as usize {
-            error!("vhost-user-net has queue number: {} larger than the max queue number: {} backend allowed\n",
-                vu_cfg.num_queues, max_queue_number);
+        if num_queues > backend_num_queues {
+            error!("vhost-user-net requested too many queues ({}) since the backend only supports {}\n",
+                num_queues, backend_num_queues);
             return Err(Error::BadQueueNum);
         }
 
-        avail_features |= 1 << virtio_net::VIRTIO_NET_F_CTRL_VQ;
-        let queue_num = vu_cfg.num_queues + 1;
-
-        let mut config = VirtioNetConfig::default();
-        build_net_config_space(
-            &mut config,
-            mac_addr,
-            vu_cfg.num_queues,
-            &mut avail_features,
-        );
-
         // Send set_vring_base here, since it could tell backends, like OVS + DPDK,
         // how many virt queues to be handled, which backend required to know at early stage.
-        for i in 0..vu_cfg.num_queues {
+        for i in 0..num_queues {
             vhost_user_net
                 .set_vring_base(i, 0)
                 .map_err(Error::VhostUserSetVringBase)?;
@@ -166,20 +159,17 @@ impl Net {
             id,
             common: VirtioCommon {
                 device_type: VirtioDeviceType::Net as u32,
-                queue_sizes: vec![vu_cfg.queue_size; queue_num],
+                queue_sizes: vec![vu_cfg.queue_size; num_queues],
                 avail_features,
                 acked_features,
-                paused_sync: Some(Arc::new(Barrier::new((vu_cfg.num_queues / 2) + 1))),
-                min_queues: 2,
+                paused_sync: Some(Arc::new(Barrier::new(1))),
+                min_queues: DEFAULT_QUEUE_NUMBER as u16,
                 ..Default::default()
             },
             vhost_user_net,
-            backend_features,
             config,
-            ctrl_queue_epoll_thread: None,
-            seccomp_action,
             guest_memory: None,
-            acked_protocol_features,
+            acked_protocol_features: acked_protocol_features.bits(),
             socket_path,
         })
     }
@@ -220,75 +210,12 @@ impl VirtioDevice for Net {
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        mut queues: Vec<Queue>,
-        mut queue_evts: Vec<EventFd>,
+        queues: Vec<Queue>,
+        queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
 
         self.guest_memory = Some(mem.clone());
-
-        let queue_num = self.common.queue_evts.as_ref().unwrap().len();
-
-        if self
-            .common
-            .feature_acked(virtio_net::VIRTIO_NET_F_CTRL_VQ.into())
-            && queue_num % 2 != 0
-        {
-            let cvq_queue = queues.remove(queue_num - 1);
-            let cvq_queue_evt = queue_evts.remove(queue_num - 1);
-
-            let kill_evt = self
-                .common
-                .kill_evt
-                .as_ref()
-                .unwrap()
-                .try_clone()
-                .map_err(|e| {
-                    error!("failed to clone kill_evt eventfd: {}", e);
-                    ActivateError::BadActivate
-                })?;
-            let pause_evt = self
-                .common
-                .pause_evt
-                .as_ref()
-                .unwrap()
-                .try_clone()
-                .map_err(|e| {
-                    error!("failed to clone pause_evt eventfd: {}", e);
-                    ActivateError::BadActivate
-                })?;
-
-            let mut ctrl_handler = NetCtrlEpollHandler {
-                mem: mem.clone(),
-                kill_evt,
-                pause_evt,
-                ctrl_q: NetCtrl::new(cvq_queue, cvq_queue_evt, None),
-            };
-
-            let paused = self.common.paused.clone();
-            // Let's update the barrier as we need 1 for each RX/TX pair +
-            // 1 for the control queue + 1 for the main thread signalling
-            // the pause.
-            self.common.paused_sync = Some(Arc::new(Barrier::new((queue_num / 2) + 2)));
-            let paused_sync = self.common.paused_sync.clone();
-            let virtio_vhost_net_ctl_seccomp_filter =
-                get_seccomp_filter(&self.seccomp_action, Thread::VirtioVhostNetCtl)
-                    .map_err(ActivateError::CreateSeccompFilter)?;
-            thread::Builder::new()
-                .name(format!("{}_ctrl", self.id))
-                .spawn(move || {
-                    if let Err(e) = SeccompFilter::apply(virtio_vhost_net_ctl_seccomp_filter) {
-                        error!("Error applying seccomp filter: {:?}", e);
-                    } else if let Err(e) = ctrl_handler.run_ctrl(paused, paused_sync.unwrap()) {
-                        error!("Error running worker: {:?}", e);
-                    }
-                })
-                .map(|thread| self.ctrl_queue_epoll_thread = Some(thread))
-                .map_err(|e| {
-                    error!("failed to clone queue EventFd: {}", e);
-                    ActivateError::BadActivate
-                })?;
-        }
 
         setup_vhost_user(
             &mut self.vhost_user_net,
@@ -296,7 +223,7 @@ impl VirtioDevice for Net {
             queues,
             queue_evts,
             &interrupt_cb,
-            self.common.acked_features & self.backend_features,
+            self.common.acked_features,
         )
         .map_err(ActivateError::VhostUserNetSetup)?;
 
@@ -357,12 +284,7 @@ impl Pausable for Net {
     }
 
     fn resume(&mut self) -> result::Result<(), MigratableError> {
-        self.common.resume()?;
-
-        if let Some(ctrl_queue_epoll_thread) = &self.ctrl_queue_epoll_thread {
-            ctrl_queue_epoll_thread.thread().unpark();
-        }
-        Ok(())
+        self.common.resume()
     }
 }
 
