@@ -473,7 +473,7 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     fn set_xsave(&self, xsave: &Xsave) -> cpu::Result<()> {
         self.fd
-            .set_xsave(*xsave)
+            .set_xsave(xsave)
             .map_err(|e| cpu::HypervisorCpuError::SetXsaveState(e.into()))
     }
     ///
