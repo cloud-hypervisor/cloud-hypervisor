@@ -1502,7 +1502,7 @@ mod tests {
     fn test_setlint() {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().expect("new VM fd creation failed");
-        assert!(hv.check_capability(hypervisor::kvm::Cap::Irqchip));
+        assert!(hv.check_required_extensions().is_ok());
         // Calling get_lapic will fail if there is no irqchip before hand.
         assert!(vm.create_irq_chip().is_ok());
         let vcpu = vm.create_vcpu(0, None).unwrap();

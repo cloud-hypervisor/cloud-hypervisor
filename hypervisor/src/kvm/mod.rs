@@ -565,33 +565,6 @@ impl hypervisor::Hypervisor for KvmHypervisor {
         Ok(())
     }
 
-    ///
-    ///  Returns the size of the memory mapping required to use the vcpu's `kvm_run` structure.
-    ///
-    fn get_vcpu_mmap_size(&self) -> hypervisor::Result<usize> {
-        self.kvm
-            .get_vcpu_mmap_size()
-            .map_err(|e| hypervisor::HypervisorError::GetVcpuMmap(e.into()))
-    }
-    ///
-    /// Gets the recommended maximum number of VCPUs per VM.
-    ///
-    fn get_max_vcpus(&self) -> hypervisor::Result<usize> {
-        Ok(self.kvm.get_max_vcpus())
-    }
-    ///
-    /// Gets the recommended number of VCPUs per VM.
-    ///
-    fn get_nr_vcpus(&self) -> hypervisor::Result<usize> {
-        Ok(self.kvm.get_nr_vcpus())
-    }
-    #[cfg(target_arch = "x86_64")]
-    ///
-    /// Checks if a particular `Cap` is available.
-    ///
-    fn check_capability(&self, c: Cap) -> bool {
-        self.kvm.check_extension(c)
-    }
     #[cfg(target_arch = "x86_64")]
     ///
     /// X86 specific call to get the system supported CPUID values.

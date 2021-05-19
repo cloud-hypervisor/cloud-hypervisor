@@ -12,8 +12,6 @@ use crate::vm::Vm;
 use crate::x86_64::CpuId;
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::MsrList;
-#[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-use kvm_ioctls::Cap;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -41,16 +39,6 @@ pub enum HypervisorError {
     ///
     #[error("Failed to get API Version: {0}")]
     GetApiVersion(#[source] anyhow::Error),
-    ///
-    /// Vcpu mmap error
-    ///
-    #[error("Failed to get Vcpu Mmap: {0}")]
-    GetVcpuMmap(#[source] anyhow::Error),
-    ///
-    /// Max Vcpu error
-    ///
-    #[error("Failed to get number of max vcpus: {0}")]
-    GetMaxVcpu(#[source] anyhow::Error),
     ///
     /// CpuId error
     ///
@@ -90,26 +78,6 @@ pub trait Hypervisor: Send + Sync {
     /// Return a hypervisor-agnostic Vm trait object
     ///
     fn create_vm_with_type(&self, vm_type: u64) -> Result<Arc<dyn Vm>>;
-    #[cfg(feature = "kvm")]
-    ///
-    /// Returns the size of the memory mapping required to use the vcpu's structures
-    ///
-    fn get_vcpu_mmap_size(&self) -> Result<usize>;
-    #[cfg(feature = "kvm")]
-    ///
-    /// Gets the recommended maximum number of VCPUs per VM.
-    ///
-    fn get_max_vcpus(&self) -> Result<usize>;
-    #[cfg(feature = "kvm")]
-    ///
-    /// Gets the recommended number of VCPUs per VM.
-    ///
-    fn get_nr_vcpus(&self) -> Result<usize>;
-    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-    ///
-    /// Checks if a particular `Cap` is available.
-    ///
-    fn check_capability(&self, c: Cap) -> bool;
     #[cfg(target_arch = "x86_64")]
     ///
     /// Get the supported CpuID
