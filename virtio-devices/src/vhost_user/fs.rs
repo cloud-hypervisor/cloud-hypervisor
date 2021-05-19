@@ -27,6 +27,9 @@ use vhost::vhost_user::{
     HandlerResult, Master, MasterReqHandler, VhostUserMaster, VhostUserMasterReqHandler,
 };
 use vhost::VhostBackend;
+use virtio_bindings::bindings::virtio_ring::{
+    VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC,
+};
 use vm_memory::{
     Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
     GuestMemoryMmap, GuestRegionMmap, MmapRegion,
@@ -35,6 +38,7 @@ use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transpo
 use vmm_sys_util::eventfd::EventFd;
 
 const NUM_QUEUE_OFFSET: usize = 1;
+const DEFAULT_QUEUE_NUMBER: usize = 2;
 
 struct SlaveReqHandler {
     cache_offset: GuestAddress,
@@ -299,53 +303,78 @@ impl Fs {
         let num_queues = NUM_QUEUE_OFFSET + req_num_queues;
 
         // Connect to the vhost-user socket.
-        let mut master =
+        let mut vhost_user_fs =
             Master::connect(path, num_queues as u64).map_err(Error::VhostUserCreateMaster)?;
 
         // Filling device and vring features VMM supports.
-        let mut avail_features =
-            1 << VIRTIO_F_VERSION_1 | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
+        let avail_features = 1 << VIRTIO_F_VERSION_1
+            | 1 << VIRTIO_RING_F_EVENT_IDX
+            | 1 << VIRTIO_RING_F_INDIRECT_DESC
+            | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
 
         // Set vhost-user owner.
-        master.set_owner().map_err(Error::VhostUserSetOwner)?;
+        vhost_user_fs
+            .set_owner()
+            .map_err(Error::VhostUserSetOwner)?;
 
         // Get features from backend, do negotiation to get a feature collection which
         // both VMM and backend support.
-        let backend_features = master.get_features().map_err(Error::VhostUserGetFeatures)?;
-        avail_features &= backend_features;
+        let backend_features = vhost_user_fs
+            .get_features()
+            .map_err(Error::VhostUserGetFeatures)?;
+        let acked_features = avail_features & backend_features;
         // Set features back is required by the vhost crate mechanism, since the
         // later vhost call will check if features is filled in master before execution.
-        master
-            .set_features(avail_features)
+        vhost_user_fs
+            .set_features(acked_features)
             .map_err(Error::VhostUserSetFeatures)?;
 
-        // Identify if protocol features are supported by the slave.
-        let mut acked_features = 0;
-        let mut acked_protocol_features = 0;
-        if avail_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
-            acked_features |= VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
+        let mut avail_protocol_features = VhostUserProtocolFeatures::MQ
+            | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
+            | VhostUserProtocolFeatures::REPLY_ACK;
+        let slave_protocol_features =
+            VhostUserProtocolFeatures::SLAVE_REQ | VhostUserProtocolFeatures::SLAVE_SEND_FD;
+        if cache.is_some() {
+            avail_protocol_features |= slave_protocol_features;
+        }
 
-            let mut protocol_features = master
-                .get_protocol_features()
-                .map_err(Error::VhostUserGetProtocolFeatures)?;
+        let acked_protocol_features =
+            if acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
+                let backend_protocol_features = vhost_user_fs
+                    .get_protocol_features()
+                    .map_err(Error::VhostUserGetProtocolFeatures)?;
 
-            let mut supported_protocol_features = VhostUserProtocolFeatures::MQ
-                | VhostUserProtocolFeatures::REPLY_ACK
-                | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS;
+                let acked_protocol_features = avail_protocol_features & backend_protocol_features;
 
-            if cache.is_some() {
-                supported_protocol_features |=
-                    VhostUserProtocolFeatures::SLAVE_REQ | VhostUserProtocolFeatures::SLAVE_SEND_FD
-            }
+                vhost_user_fs
+                    .set_protocol_features(acked_protocol_features)
+                    .map_err(Error::VhostUserSetProtocolFeatures)?;
 
-            protocol_features &= supported_protocol_features;
+                acked_protocol_features.bits()
+            } else {
+                0
+            };
 
-            master
-                .set_protocol_features(protocol_features)
-                .map_err(Error::VhostUserSetProtocolFeatures)?;
+        let backend_num_queues =
+            if acked_protocol_features & VhostUserProtocolFeatures::MQ.bits() != 0 {
+                vhost_user_fs
+                    .get_queue_num()
+                    .map_err(Error::VhostUserGetQueueMaxNum)? as usize
+            } else {
+                DEFAULT_QUEUE_NUMBER
+            };
 
-            acked_protocol_features = protocol_features.bits();
+        if num_queues > backend_num_queues {
+            error!(
+                "vhost-user-fs requested too many queues ({}) since the backend only supports {}\n",
+                num_queues, backend_num_queues
+            );
+            return Err(Error::BadQueueNum);
+        }
 
+        if acked_protocol_features & slave_protocol_features.bits()
+            == slave_protocol_features.bits()
+        {
             slave_req_support = true;
         }
 
@@ -358,15 +387,15 @@ impl Fs {
         Ok(Fs {
             common: VirtioCommon {
                 device_type: VirtioDeviceType::Fs as u32,
-                avail_features,
-                acked_features,
+                avail_features: acked_features,
+                acked_features: 0,
                 queue_sizes: vec![queue_size; num_queues],
                 paused_sync: Some(Arc::new(Barrier::new(2))),
-                min_queues: NUM_QUEUE_OFFSET as u16,
+                min_queues: DEFAULT_QUEUE_NUMBER as u16,
                 ..Default::default()
             },
             id,
-            vu: master,
+            vu: vhost_user_fs,
             config,
             cache,
             slave_req_support,
