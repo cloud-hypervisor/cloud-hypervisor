@@ -83,11 +83,12 @@ pub trait Hypervisor: Send + Sync {
     /// Get the supported CpuID
     ///
     fn get_cpuid(&self) -> Result<CpuId>;
-    #[cfg(not(feature = "mshv"))]
     ///
     /// Check particular extensions if any
     ///
-    fn check_required_extensions(&self) -> Result<()>;
+    fn check_required_extensions(&self) -> Result<()> {
+        Ok(())
+    }
     #[cfg(target_arch = "x86_64")]
     ///
     /// Retrieve the list of MSRs supported by the hypervisor.

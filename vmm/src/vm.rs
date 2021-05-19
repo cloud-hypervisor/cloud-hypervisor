@@ -674,7 +674,7 @@ impl Vm {
     ) -> Result<Self> {
         #[cfg(feature = "tdx")]
         let tdx_enabled = config.lock().unwrap().tdx.is_some();
-        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+        #[cfg(target_arch = "x86_64")]
         hypervisor.check_required_extensions().unwrap();
         #[cfg(feature = "tdx")]
         let vm = hypervisor
@@ -746,7 +746,7 @@ impl Vm {
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         activate_evt: EventFd,
     ) -> Result<Self> {
-        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+        #[cfg(target_arch = "x86_64")]
         hypervisor.check_required_extensions().unwrap();
         let vm = hypervisor.create_vm().unwrap();
         #[cfg(target_arch = "x86_64")]
@@ -799,7 +799,7 @@ impl Vm {
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         activate_evt: EventFd,
     ) -> Result<Self> {
-        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+        #[cfg(target_arch = "x86_64")]
         hypervisor.check_required_extensions().unwrap();
         let vm = hypervisor.create_vm().unwrap();
         #[cfg(target_arch = "x86_64")]
