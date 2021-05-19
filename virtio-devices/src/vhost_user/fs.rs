@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::vu_common_ctrl::{
-    add_memory_region, reset_vhost_user, setup_vhost_user, update_mem_table,
+    add_memory_region, negotiate_features_vhost_user, reset_vhost_user, setup_vhost_user,
+    update_mem_table,
 };
 use super::{Error, Result};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
@@ -26,7 +27,6 @@ use vhost::vhost_user::message::{
 use vhost::vhost_user::{
     HandlerResult, Master, MasterReqHandler, VhostUserMaster, VhostUserMasterReqHandler,
 };
-use vhost::VhostBackend;
 use virtio_bindings::bindings::virtio_ring::{
     VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC,
 };
@@ -312,23 +312,6 @@ impl Fs {
             | 1 << VIRTIO_RING_F_INDIRECT_DESC
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
 
-        // Set vhost-user owner.
-        vhost_user_fs
-            .set_owner()
-            .map_err(Error::VhostUserSetOwner)?;
-
-        // Get features from backend, do negotiation to get a feature collection which
-        // both VMM and backend support.
-        let backend_features = vhost_user_fs
-            .get_features()
-            .map_err(Error::VhostUserGetFeatures)?;
-        let acked_features = avail_features & backend_features;
-        // Set features back is required by the vhost crate mechanism, since the
-        // later vhost call will check if features is filled in master before execution.
-        vhost_user_fs
-            .set_features(acked_features)
-            .map_err(Error::VhostUserSetFeatures)?;
-
         let mut avail_protocol_features = VhostUserProtocolFeatures::MQ
             | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
             | VhostUserProtocolFeatures::REPLY_ACK;
@@ -338,22 +321,11 @@ impl Fs {
             avail_protocol_features |= slave_protocol_features;
         }
 
-        let acked_protocol_features =
-            if acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
-                let backend_protocol_features = vhost_user_fs
-                    .get_protocol_features()
-                    .map_err(Error::VhostUserGetProtocolFeatures)?;
-
-                let acked_protocol_features = avail_protocol_features & backend_protocol_features;
-
-                vhost_user_fs
-                    .set_protocol_features(acked_protocol_features)
-                    .map_err(Error::VhostUserSetProtocolFeatures)?;
-
-                acked_protocol_features.bits()
-            } else {
-                0
-            };
+        let (acked_features, acked_protocol_features) = negotiate_features_vhost_user(
+            &mut vhost_user_fs,
+            avail_features,
+            avail_protocol_features,
+        )?;
 
         let backend_num_queues =
             if acked_protocol_features & VhostUserProtocolFeatures::MQ.bits() != 0 {

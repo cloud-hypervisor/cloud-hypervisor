@@ -91,41 +91,15 @@ impl Net {
                 .map_err(Error::VhostUserCreateMaster)?
         };
 
-        vhost_user_net
-            .set_owner()
-            .map_err(Error::VhostUserSetOwner)?;
-
-        // Get features from backend, do negotiation to get a feature collection which
-        // both VMM and backend support.
-        let backend_features = vhost_user_net
-            .get_features()
-            .map_err(Error::VhostUserGetFeatures)?;
-        let acked_features = avail_features & backend_features;
-        // Set features back is required by the vhost crate mechanism, since the
-        // later vhost call will check if features is filled in master before execution.
-        vhost_user_net
-            .set_features(acked_features)
-            .map_err(Error::VhostUserSetFeatures)?;
-
         let avail_protocol_features = VhostUserProtocolFeatures::MQ
             | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
             | VhostUserProtocolFeatures::REPLY_ACK;
-        let acked_protocol_features =
-            if acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
-                let backend_protocol_features = vhost_user_net
-                    .get_protocol_features()
-                    .map_err(Error::VhostUserGetProtocolFeatures)?;
 
-                let acked_protocol_features = avail_protocol_features & backend_protocol_features;
-
-                vhost_user_net
-                    .set_protocol_features(acked_protocol_features)
-                    .map_err(Error::VhostUserSetProtocolFeatures)?;
-
-                acked_protocol_features.bits()
-            } else {
-                0
-            };
+        let (acked_features, acked_protocol_features) = negotiate_features_vhost_user(
+            &mut vhost_user_net,
+            avail_features,
+            avail_protocol_features,
+        )?;
 
         // If the control queue feature has not been negotiated, let's decrease
         // the number of queues.
@@ -138,7 +112,7 @@ impl Net {
                 vhost_user_net
                     .get_queue_num()
                     .map_err(Error::VhostUserGetQueueMaxNum)? as usize
-            } else if backend_features & (1 << virtio_net::VIRTIO_NET_F_CTRL_VQ) != 0 {
+            } else if acked_features & (1 << virtio_net::VIRTIO_NET_F_CTRL_VQ) != 0 {
                 DEFAULT_QUEUE_NUMBER + 1
             } else {
                 DEFAULT_QUEUE_NUMBER
