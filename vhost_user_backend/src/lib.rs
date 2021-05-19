@@ -295,15 +295,15 @@ impl<S: VhostUserBackend> VringEpollHandler<S> {
 
         let num_queues = self.vrings.len();
         if (device_event as usize) < num_queues {
+            // If the vring is not enabled, it should not be processed.
+            // But let's not read it (hence lose it) in case it is later enabled.
+            if !self.vrings[device_event as usize].read().unwrap().enabled {
+                return Ok(false);
+            }
+
             if let Some(kick) = &self.vrings[device_event as usize].read().unwrap().kick {
                 kick.read()
                     .map_err(VringEpollHandlerError::HandleEventReadKick)?;
-            }
-
-            // If the vring is not enabled, it should not be processed.
-            // The event is only read to be discarded.
-            if !self.vrings[device_event as usize].read().unwrap().enabled {
-                return Ok(false);
             }
         }
 
