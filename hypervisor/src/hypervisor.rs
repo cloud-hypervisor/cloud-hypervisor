@@ -54,6 +54,11 @@ pub enum HypervisorError {
     ///
     #[error("Incompatible API version")]
     IncompatibleApiVersion,
+    ///
+    /// Checking extensions failed
+    ///
+    #[error("Checking extensions:{0}")]
+    CheckExtensions(#[source] anyhow::Error),
 }
 
 ///

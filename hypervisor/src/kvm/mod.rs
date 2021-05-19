@@ -70,9 +70,9 @@ pub use kvm_ioctls;
 pub use kvm_ioctls::{Cap, Kvm};
 #[cfg(target_arch = "aarch64")]
 use std::mem;
+use thiserror::Error;
 #[cfg(feature = "tdx")]
 use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_expr, ioctl_ioc_nr, ioctl_iowr_nr};
-
 ///
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
 ///
@@ -465,8 +465,9 @@ pub struct KvmHypervisor {
     kvm: Kvm,
 }
 /// Enum for KVM related error
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum KvmError {
+    #[error("Capability missing: {0:?}")]
     CapabilityMissing(Cap),
 }
 pub type KvmResult<T> = result::Result<T, KvmError>;
@@ -561,8 +562,8 @@ impl hypervisor::Hypervisor for KvmHypervisor {
     }
 
     fn check_required_extensions(&self) -> hypervisor::Result<()> {
-        check_required_kvm_extensions(&self.kvm).expect("Missing KVM capabilities");
-        Ok(())
+        check_required_kvm_extensions(&self.kvm)
+            .map_err(|e| hypervisor::HypervisorError::CheckExtensions(e.into()))
     }
 
     #[cfg(target_arch = "x86_64")]
