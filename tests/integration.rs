@@ -5309,82 +5309,51 @@ mod tests {
                 &self.guest
             }
 
+            fn ssh_cmd(&self, cmd: &str) -> String {
+                ssh_command_ip_with_auth(
+                    cmd,
+                    &self.auth,
+                    &self.guest.network.guest_ip,
+                    DEFAULT_SSH_RETRIES,
+                    DEFAULT_SSH_TIMEOUT,
+                )
+                .unwrap()
+            }
+
             fn cpu_count(&self) -> u8 {
-                return ssh_command_ip_with_auth(
-                "powershell -Command \"(Get-CimInstance win32_computersystem).NumberOfLogicalProcessors\"",
-                &self.auth,
-                &self.guest.network.guest_ip,
-                DEFAULT_SSH_RETRIES,
-                DEFAULT_SSH_TIMEOUT,
-            )
-            .unwrap()
-            .trim()
-            .parse::<u8>()
-            .unwrap_or(0);
+                self.ssh_cmd("powershell -Command \"(Get-CimInstance win32_computersystem).NumberOfLogicalProcessors\"")
+                .trim()
+                .parse::<u8>()
+                .unwrap_or(0)
             }
 
             fn ram_size(&self) -> usize {
-                return ssh_command_ip_with_auth(
-                "powershell -Command \"(Get-CimInstance win32_computersystem).TotalPhysicalMemory\"",
-                &self.auth,
-                &self.guest.network.guest_ip,
-                DEFAULT_SSH_RETRIES,
-                DEFAULT_SSH_TIMEOUT,
-            )
-            .unwrap()
-            .trim()
-            .parse::<usize>()
-            .unwrap_or(0);
+                self.ssh_cmd("powershell -Command \"(Get-CimInstance win32_computersystem).TotalPhysicalMemory\"")
+                .trim()
+                .parse::<usize>()
+                .unwrap_or(0)
             }
 
             fn netdev_count(&self) -> u8 {
-                return ssh_command_ip_with_auth(
-                "powershell -Command \"netsh int ipv4 show interfaces | Select-String ethernet | Measure-Object -Line | Format-Table -HideTableHeaders\"",
-                &self.auth,
-                &self.guest.network.guest_ip,
-                DEFAULT_SSH_RETRIES,
-                DEFAULT_SSH_TIMEOUT,
-            )
-            .unwrap()
-            .trim()
-            .parse::<u8>()
-            .unwrap_or(0);
+                self.ssh_cmd("powershell -Command \"netsh int ipv4 show interfaces | Select-String ethernet | Measure-Object -Line | Format-Table -HideTableHeaders\"")
+                .trim()
+                .parse::<u8>()
+                .unwrap_or(0)
             }
 
             fn disk_count(&self) -> u8 {
-                return ssh_command_ip_with_auth(
-                "powershell -Command \"Get-Disk | Measure-Object -Line | Format-Table -HideTableHeaders\"",
-                &self.auth,
-                &self.guest.network.guest_ip,
-                DEFAULT_SSH_RETRIES,
-                DEFAULT_SSH_TIMEOUT,
-            )
-            .unwrap()
-            .trim()
-            .parse::<u8>()
-            .unwrap_or(0);
+                self.ssh_cmd("powershell -Command \"Get-Disk | Measure-Object -Line | Format-Table -HideTableHeaders\"")
+                .trim()
+                .parse::<u8>()
+                .unwrap_or(0)
             }
 
             fn reboot(&self) {
-                ssh_command_ip_with_auth(
-                    "shutdown /r /t 0",
-                    &self.auth,
-                    &self.guest.network.guest_ip,
-                    DEFAULT_SSH_RETRIES,
-                    DEFAULT_SSH_TIMEOUT,
-                )
-                .unwrap();
+                let _ = self.ssh_cmd("shutdown /r /t 0");
             }
 
             fn shutdown(&self) {
-                ssh_command_ip_with_auth(
-                    "shutdown /s",
-                    &self.auth,
-                    &self.guest.network.guest_ip,
-                    DEFAULT_SSH_RETRIES,
-                    DEFAULT_SSH_TIMEOUT,
-                )
-                .unwrap();
+                let _ = self.ssh_cmd("shutdown /s /t 0");
             }
 
             fn run_dnsmasq(&self) -> std::process::Child {
@@ -5500,50 +5469,25 @@ mod tests {
             }
 
             fn disks_set_rw(&self) {
-                ssh_command_ip_with_auth(
-                    "powershell -Command \"Get-Disk | Where-Object IsOffline -eq $True | Set-Disk -IsReadOnly $False\"",
-                    &self.auth,
-                    &self.guest.network.guest_ip,
-                    DEFAULT_SSH_RETRIES,
-                    DEFAULT_SSH_TIMEOUT,
-                )
-                .unwrap();
+                let _ = self.ssh_cmd("powershell -Command \"Get-Disk | Where-Object IsOffline -eq $True | Set-Disk -IsReadOnly $False\"");
             }
 
             fn disks_online(&self) {
-                ssh_command_ip_with_auth(
-                    "powershell -Command \"Get-Disk | Where-Object IsOffline -eq $True | Set-Disk -IsOffline $False\"",
-                    &self.auth,
-                    &self.guest.network.guest_ip,
-                    DEFAULT_SSH_RETRIES,
-                    DEFAULT_SSH_TIMEOUT,
-                )
-                .unwrap();
+                let _ = self.ssh_cmd("powershell -Command \"Get-Disk | Where-Object IsOffline -eq $True | Set-Disk -IsOffline $False\"");
             }
 
             fn disk_file_put(&self, fname: &str, data: &str) {
-                ssh_command_ip_with_auth(
-                    &format!(
-                        "powershell -Command \"'{}' | Set-Content -Path {}\"",
-                        data, fname
-                    ),
-                    &self.auth,
-                    &self.guest.network.guest_ip,
-                    DEFAULT_SSH_RETRIES,
-                    DEFAULT_SSH_TIMEOUT,
-                )
-                .unwrap();
+                let _ = self.ssh_cmd(&format!(
+                    "powershell -Command \"'{}' | Set-Content -Path {}\"",
+                    data, fname
+                ));
             }
 
             fn disk_file_read(&self, fname: &str) -> String {
-                ssh_command_ip_with_auth(
-                    &format!("powershell -Command \"Get-Content -Path {}\"", fname),
-                    &self.auth,
-                    &self.guest.network.guest_ip,
-                    DEFAULT_SSH_RETRIES,
-                    DEFAULT_SSH_TIMEOUT,
-                )
-                .unwrap()
+                self.ssh_cmd(&format!(
+                    "powershell -Command \"Get-Content -Path {}\"",
+                    fname
+                ))
             }
         }
 
