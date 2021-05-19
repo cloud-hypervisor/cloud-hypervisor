@@ -8,7 +8,6 @@ use super::vu_common_ctrl::*;
 use super::{Error, Result};
 use crate::VirtioInterrupt;
 use block_util::VirtioBlockConfig;
-use seccomp::SeccompAction;
 use std::mem;
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
@@ -28,6 +27,8 @@ use vm_memory::{
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
+const DEFAULT_QUEUE_NUMBER: usize = 1;
+
 struct SlaveReqHandler {}
 impl VhostUserMasterReqHandler for SlaveReqHandler {}
 
@@ -36,16 +37,14 @@ pub struct Blk {
     id: String,
     vhost_user_blk: Master,
     config: VirtioBlockConfig,
-    _seccomp_action: SeccompAction,
     guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     acked_protocol_features: u64,
 }
 
 impl Blk {
     /// Create a new vhost-user-blk device
-    pub fn new(id: String, vu_cfg: VhostUserConfig, seccomp_action: SeccompAction) -> Result<Blk> {
-        let mut vhost_user_blk = Master::connect(&vu_cfg.socket, vu_cfg.num_queues as u64)
-            .map_err(Error::VhostUserCreateMaster)?;
+    pub fn new(id: String, vu_cfg: VhostUserConfig) -> Result<Blk> {
+        let num_queues = vu_cfg.num_queues;
 
         // Filling device and vring features VMM supports.
         let mut avail_features = 1 << VIRTIO_BLK_F_SEG_MAX
@@ -58,9 +57,12 @@ impl Blk {
             | 1 << VIRTIO_F_VERSION_1
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
 
-        if vu_cfg.num_queues > 1 {
+        if num_queues > 1 {
             avail_features |= 1 << VIRTIO_BLK_F_MQ;
         }
+
+        let mut vhost_user_blk = Master::connect(&vu_cfg.socket, num_queues as u64)
+            .map_err(Error::VhostUserCreateMaster)?;
 
         // Set vhost-user owner.
         vhost_user_blk
@@ -72,42 +74,49 @@ impl Blk {
         let backend_features = vhost_user_blk
             .get_features()
             .map_err(Error::VhostUserGetFeatures)?;
-        avail_features &= backend_features;
+        let acked_features = avail_features & backend_features;
         // Set features back is required by the vhost crate mechanism, since the
         // later vhost call will check if features is filled in master before execution.
         vhost_user_blk
-            .set_features(avail_features)
+            .set_features(acked_features)
             .map_err(Error::VhostUserSetFeatures)?;
 
-        // Identify if protocol features are supported by the slave.
-        let mut acked_features = 0;
-        let mut acked_protocol_features = 0;
-        if avail_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
-            acked_features |= VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
+        let avail_protocol_features = VhostUserProtocolFeatures::CONFIG
+            | VhostUserProtocolFeatures::MQ
+            | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
+            | VhostUserProtocolFeatures::REPLY_ACK;
+        let acked_protocol_features =
+            if acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
+                let backend_protocol_features = vhost_user_blk
+                    .get_protocol_features()
+                    .map_err(Error::VhostUserGetProtocolFeatures)?;
 
-            let mut protocol_features = vhost_user_blk
-                .get_protocol_features()
-                .map_err(Error::VhostUserGetProtocolFeatures)?;
-            protocol_features &= VhostUserProtocolFeatures::CONFIG
-                | VhostUserProtocolFeatures::MQ
-                | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS;
-            vhost_user_blk
-                .set_protocol_features(protocol_features)
-                .map_err(Error::VhostUserSetProtocolFeatures)?;
+                let acked_protocol_features = avail_protocol_features & backend_protocol_features;
 
-            acked_protocol_features = protocol_features.bits();
-        }
-        // Get the max queues number from backend, and the queue number set
-        // should be less than this max queue number.
-        let max_queues_num = vhost_user_blk
-            .get_queue_num()
-            .map_err(Error::VhostUserGetQueueMaxNum)?;
+                vhost_user_blk
+                    .set_protocol_features(acked_protocol_features)
+                    .map_err(Error::VhostUserSetProtocolFeatures)?;
 
-        if vu_cfg.num_queues > max_queues_num as usize {
-            error!("vhost-user-blk has queue number: {} larger than the max queue number: {} backend allowed\n",
-                vu_cfg.num_queues, max_queues_num);
+                acked_protocol_features.bits()
+            } else {
+                0
+            };
+
+        let backend_num_queues =
+            if acked_protocol_features & VhostUserProtocolFeatures::MQ.bits() != 0 {
+                vhost_user_blk
+                    .get_queue_num()
+                    .map_err(Error::VhostUserGetQueueMaxNum)? as usize
+            } else {
+                DEFAULT_QUEUE_NUMBER
+            };
+
+        if num_queues > backend_num_queues {
+            error!("vhost-user-blk requested too many queues ({}) since the backend only supports {}\n",
+                num_queues, backend_num_queues);
             return Err(Error::BadQueueNum);
         }
+
         let config_len = mem::size_of::<VirtioBlockConfig>();
         let config_space: Vec<u8> = vec![0u8; config_len as usize];
         let (_, config_space) = vhost_user_blk
@@ -117,18 +126,17 @@ impl Blk {
                 VhostUserConfigFlags::WRITABLE,
                 config_space.as_slice(),
             )
-            .unwrap();
+            .map_err(Error::VhostUserGetConfig)?;
         let mut config = VirtioBlockConfig::default();
         if let Some(backend_config) = VirtioBlockConfig::from_slice(config_space.as_slice()) {
             config = *backend_config;
-            // Only set num_queues value(u16).
-            config.num_queues = vu_cfg.num_queues as u16;
+            config.num_queues = num_queues as u16;
         }
 
         // Send set_vring_base here, since it could tell backends, like SPDK,
         // how many virt queues to be handled, which backend required to know
         // at early stage.
-        for i in 0..vu_cfg.num_queues {
+        for i in 0..num_queues {
             vhost_user_blk
                 .set_vring_base(i, 0)
                 .map_err(Error::VhostUserSetVringBase)?;
@@ -137,17 +145,16 @@ impl Blk {
         Ok(Blk {
             common: VirtioCommon {
                 device_type: VirtioDeviceType::Block as u32,
-                queue_sizes: vec![vu_cfg.queue_size; vu_cfg.num_queues],
-                avail_features,
-                acked_features,
-                paused_sync: Some(Arc::new(Barrier::new(vu_cfg.num_queues + 1))),
-                min_queues: 1,
+                queue_sizes: vec![vu_cfg.queue_size; num_queues],
+                avail_features: acked_features,
+                acked_features: 0,
+                paused_sync: Some(Arc::new(Barrier::new(1))),
+                min_queues: DEFAULT_QUEUE_NUMBER as u16,
                 ..Default::default()
             },
             id,
             vhost_user_blk,
             config,
-            _seccomp_action: seccomp_action,
             guest_memory: None,
             acked_protocol_features,
         })
@@ -200,9 +207,13 @@ impl VirtioDevice for Blk {
         }
 
         self.config.writeback = data[0];
-        self.vhost_user_blk
+        if let Err(e) = self
+            .vhost_user_blk
             .set_config(offset as u32, VhostUserConfigFlags::WRITABLE, data)
-            .expect("Failed to set config");
+            .map_err(Error::VhostUserSetConfig)
+        {
+            error!("Failed setting vhost-user-blk configuration: {:?}", e);
+        }
     }
 
     fn activate(

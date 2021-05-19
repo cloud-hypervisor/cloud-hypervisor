@@ -84,6 +84,10 @@ pub enum Error {
     VhostUserSetSlaveRequestFd(vhost::Error),
     /// Add memory region failed.
     VhostUserAddMemReg(VhostError),
+    /// Failed getting the configuration.
+    VhostUserGetConfig(VhostError),
+    /// Failed setting the configuration.
+    VhostUserSetConfig(VhostError),
     /// Invalid used address.
     UsedAddress,
     /// Invalid features provided from vhost-user backend
