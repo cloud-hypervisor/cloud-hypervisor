@@ -8,6 +8,7 @@ use std::convert::TryInto;
 use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
 use std::vec::Vec;
+use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost::vhost_user::{Master, VhostUserMaster};
 use vhost::{VhostBackend, VhostUserMemoryRegionInfo, VringConfigData};
 use vm_memory::{
@@ -66,6 +67,42 @@ pub fn add_memory_region(vu: &mut Master, region: &Arc<GuestRegionMmap>) -> Resu
 
     vu.add_mem_region(&region)
         .map_err(Error::VhostUserAddMemReg)
+}
+
+pub fn negotiate_features_vhost_user(
+    vu: &mut Master,
+    avail_features: u64,
+    avail_protocol_features: VhostUserProtocolFeatures,
+) -> Result<(u64, u64)> {
+    // Set vhost-user owner.
+    vu.set_owner().map_err(Error::VhostUserSetOwner)?;
+
+    // Get features from backend, do negotiation to get a feature collection which
+    // both VMM and backend support.
+    let backend_features = vu.get_features().map_err(Error::VhostUserGetFeatures)?;
+    let acked_features = avail_features & backend_features;
+    // Set features back is required by the vhost crate mechanism, since the
+    // later vhost call will check if features is filled in master before execution.
+    vu.set_features(acked_features)
+        .map_err(Error::VhostUserSetFeatures)?;
+
+    let acked_protocol_features =
+        if acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
+            let backend_protocol_features = vu
+                .get_protocol_features()
+                .map_err(Error::VhostUserGetProtocolFeatures)?;
+
+            let acked_protocol_features = avail_protocol_features & backend_protocol_features;
+
+            vu.set_protocol_features(acked_protocol_features)
+                .map_err(Error::VhostUserSetProtocolFeatures)?;
+
+            acked_protocol_features.bits()
+        } else {
+            0
+        };
+
+    Ok((acked_features, acked_protocol_features))
 }
 
 pub fn setup_vhost_user(

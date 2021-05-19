@@ -46,6 +46,9 @@ impl Blk {
     pub fn new(id: String, vu_cfg: VhostUserConfig) -> Result<Blk> {
         let num_queues = vu_cfg.num_queues;
 
+        let mut vhost_user_blk = Master::connect(&vu_cfg.socket, num_queues as u64)
+            .map_err(Error::VhostUserCreateMaster)?;
+
         // Filling device and vring features VMM supports.
         let mut avail_features = 1 << VIRTIO_BLK_F_SEG_MAX
             | 1 << VIRTIO_BLK_F_RO
@@ -61,46 +64,16 @@ impl Blk {
             avail_features |= 1 << VIRTIO_BLK_F_MQ;
         }
 
-        let mut vhost_user_blk = Master::connect(&vu_cfg.socket, num_queues as u64)
-            .map_err(Error::VhostUserCreateMaster)?;
-
-        // Set vhost-user owner.
-        vhost_user_blk
-            .set_owner()
-            .map_err(Error::VhostUserSetOwner)?;
-
-        // Get features from backend, do negotiation to get a feature collection which
-        // both VMM and backend support.
-        let backend_features = vhost_user_blk
-            .get_features()
-            .map_err(Error::VhostUserGetFeatures)?;
-        let acked_features = avail_features & backend_features;
-        // Set features back is required by the vhost crate mechanism, since the
-        // later vhost call will check if features is filled in master before execution.
-        vhost_user_blk
-            .set_features(acked_features)
-            .map_err(Error::VhostUserSetFeatures)?;
-
         let avail_protocol_features = VhostUserProtocolFeatures::CONFIG
             | VhostUserProtocolFeatures::MQ
             | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
             | VhostUserProtocolFeatures::REPLY_ACK;
-        let acked_protocol_features =
-            if acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
-                let backend_protocol_features = vhost_user_blk
-                    .get_protocol_features()
-                    .map_err(Error::VhostUserGetProtocolFeatures)?;
 
-                let acked_protocol_features = avail_protocol_features & backend_protocol_features;
-
-                vhost_user_blk
-                    .set_protocol_features(acked_protocol_features)
-                    .map_err(Error::VhostUserSetProtocolFeatures)?;
-
-                acked_protocol_features.bits()
-            } else {
-                0
-            };
+        let (acked_features, acked_protocol_features) = negotiate_features_vhost_user(
+            &mut vhost_user_blk,
+            avail_features,
+            avail_protocol_features,
+        )?;
 
         let backend_num_queues =
             if acked_protocol_features & VhostUserProtocolFeatures::MQ.bits() != 0 {
