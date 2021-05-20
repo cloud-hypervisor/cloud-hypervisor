@@ -74,7 +74,11 @@ pub fn setup_vhost_user(
     queues: Vec<Queue>,
     queue_evts: Vec<EventFd>,
     virtio_interrupt: &Arc<dyn VirtioInterrupt>,
+    acked_features: u64,
 ) -> Result<()> {
+    vu.set_features(acked_features)
+        .map_err(Error::VhostUserSetFeatures)?;
+
     // Let's first provide the memory table to the backend.
     update_mem_table(vu, mem)?;
 

@@ -474,6 +474,8 @@ impl VirtioDevice for Fs {
             queues,
             queue_evts,
             &interrupt_cb,
+            self.common.acked_features
+                | (self.common.avail_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()),
         )
         .map_err(ActivateError::VhostUserFsSetup)?;
 
