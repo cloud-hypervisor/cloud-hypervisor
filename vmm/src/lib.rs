@@ -776,6 +776,10 @@ impl Vmm {
             MigratableError::MigrateReceive(anyhow!("Error deserialising snapshot: {}", e))
         })?;
 
+        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+        vm.load_clock_from_snapshot(&snapshot)
+            .map_err(|e| MigratableError::MigrateReceive(anyhow!("Error resume clock: {:?}", e)))?;
+
         // Create VM
         vm.restore(snapshot).map_err(|e| {
             Response::error().write_to(socket).ok();

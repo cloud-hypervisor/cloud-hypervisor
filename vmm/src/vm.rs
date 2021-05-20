@@ -1833,6 +1833,17 @@ impl Vm {
             .map(|state| *state)
     }
 
+    /// Load saved clock from snapshot
+    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+    pub fn load_clock_from_snapshot(
+        &mut self,
+        snapshot: &Snapshot,
+    ) -> Result<Option<hypervisor::ClockData>> {
+        let vm_snapshot = get_vm_snapshot(snapshot).map_err(Error::Restore)?;
+        self.saved_clock = vm_snapshot.clock;
+        Ok(self.saved_clock)
+    }
+
     #[cfg(target_arch = "aarch64")]
     /// Add the vGIC section to the VM snapshot.
     fn add_vgic_snapshot_section(
