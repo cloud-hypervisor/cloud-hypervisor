@@ -498,7 +498,9 @@ impl Vm {
         reset_evt: EventFd,
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
-        #[cfg(feature = "kvm")] _saved_clock: Option<hypervisor::ClockData>,
+        #[cfg(all(feature = "kvm", target_arch = "x86_64"))] _saved_clock: Option<
+            hypervisor::ClockData,
+        >,
         activate_evt: EventFd,
     ) -> Result<Self> {
         config
@@ -718,7 +720,7 @@ impl Vm {
             reset_evt,
             seccomp_action,
             hypervisor,
-            #[cfg(feature = "kvm")]
+            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             None,
             activate_evt,
         )?;
@@ -783,8 +785,8 @@ impl Vm {
             reset_evt,
             seccomp_action,
             hypervisor,
-            #[cfg(feature = "kvm")]
-            None,
+            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+            vm_snapshot.clock,
             activate_evt,
         )
     }
@@ -821,7 +823,7 @@ impl Vm {
             reset_evt,
             seccomp_action,
             hypervisor,
-            #[cfg(feature = "kvm")]
+            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             None,
             activate_evt,
         )
