@@ -5,7 +5,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
-use super::net_util::{NetCtrl, NetCtrlEpollHandler};
+use super::net_util::NetCtrlEpollHandler;
 use super::Error as DeviceError;
 use super::{
     ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
@@ -14,6 +14,7 @@ use super::{
 };
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::VirtioInterrupt;
+use net_util::CtrlQueue;
 use net_util::{
     build_net_config_space, build_net_config_space_with_mq, open_tap,
     virtio_features_to_tap_offload, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio,
@@ -516,7 +517,9 @@ impl VirtioDevice for Net {
                 mem: mem.clone(),
                 kill_evt,
                 pause_evt,
-                ctrl_q: NetCtrl::new(cvq_queue, cvq_queue_evt, Some(self.taps.clone())),
+                ctrl_q: CtrlQueue::new(self.taps.clone()),
+                queue: cvq_queue,
+                queue_evt: cvq_queue_evt,
             };
 
             let paused = self.common.paused.clone();
