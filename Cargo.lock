@@ -1293,6 +1293,8 @@ dependencies = [
  "serde_json",
  "signal-hook",
  "thiserror",
+ "versionize",
+ "versionize_derive",
  "vfio-ioctls",
  "virtio-devices",
  "vm-allocator",
