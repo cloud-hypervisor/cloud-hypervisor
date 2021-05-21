@@ -5,7 +5,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
-use super::net_util::NetCtrlEpollHandler;
 use super::Error as DeviceError;
 use super::{
     ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
@@ -39,6 +38,59 @@ use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
+/// Control queue
+// Event available on the control queue.
+const CTRL_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
+
+pub struct NetCtrlEpollHandler {
+    pub mem: GuestMemoryAtomic<GuestMemoryMmap>,
+    pub kill_evt: EventFd,
+    pub pause_evt: EventFd,
+    pub ctrl_q: CtrlQueue,
+    pub queue_evt: EventFd,
+    pub queue: Queue,
+}
+
+impl NetCtrlEpollHandler {
+    pub fn run_ctrl(
+        &mut self,
+        paused: Arc<AtomicBool>,
+        paused_sync: Arc<Barrier>,
+    ) -> std::result::Result<(), EpollHelperError> {
+        let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
+        helper.add_event(self.queue_evt.as_raw_fd(), CTRL_QUEUE_EVENT)?;
+        helper.run(paused, paused_sync, self)?;
+
+        Ok(())
+    }
+}
+
+impl EpollHelperHandler for NetCtrlEpollHandler {
+    fn handle_event(&mut self, _helper: &mut EpollHelper, event: &epoll::Event) -> bool {
+        let ev_type = event.data as u16;
+        match ev_type {
+            CTRL_QUEUE_EVENT => {
+                let mem = self.mem.memory();
+                if let Err(e) = self.queue_evt.read() {
+                    error!("failed to get ctl queue event: {:?}", e);
+                    return true;
+                }
+                if let Err(e) = self.ctrl_q.process(&mem, &mut self.queue) {
+                    error!("failed to process ctrl queue: {:?}", e);
+                    return true;
+                }
+            }
+            _ => {
+                error!("Unknown event for virtio-net");
+                return true;
+            }
+        }
+
+        false
+    }
+}
+
+/// Rx/Tx queue pair
 // The guest has made a buffer available to receive a frame into.
 pub const RX_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 // The transmit queue has a frame that is ready to send from the guest.
