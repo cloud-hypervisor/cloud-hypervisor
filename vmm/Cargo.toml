@@ -41,6 +41,8 @@ serde_derive = ">=1.0.27"
 serde_json = ">=1.0.9"
 signal-hook = "0.3.8"
 thiserror = "1.0"
+versionize = "0.1.6"
+versionize_derive = "0.1.4"
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio-ioctls", branch = "master" }
 virtio-devices = { path = "../virtio-devices" }
 vm-allocator = { path = "../vm-allocator" }

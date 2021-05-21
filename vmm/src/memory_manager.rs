@@ -27,6 +27,8 @@ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
 use std::result;
 use std::sync::{Arc, Barrier, Mutex};
+use versionize::{VersionMap, Versionize, VersionizeResult};
+use versionize_derive::Versionize;
 #[cfg(target_arch = "x86_64")]
 use vm_allocator::GsiApic;
 use vm_allocator::SystemAllocator;
@@ -40,7 +42,7 @@ use vm_memory::{
 use vm_migration::{
     protocol::{MemoryRange, MemoryRangeTable},
     Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
-    Transportable,
+    Transportable, VersionMapped,
 };
 
 #[cfg(feature = "acpi")]
@@ -846,7 +848,7 @@ impl MemoryManager {
             let vm_snapshot_path = url_to_path(source_url).map_err(Error::Restore)?;
 
             let mem_snapshot: MemoryManagerSnapshotData = snapshot
-                .to_state(MEMORY_MANAGER_SNAPSHOT_ID)
+                .to_versioned_state(MEMORY_MANAGER_SNAPSHOT_ID)
                 .map_err(Error::Restore)?;
 
             // Here we turn the content file name into a content file path as
@@ -1914,21 +1916,19 @@ impl Aml for MemoryManager {
 
 impl Pausable for MemoryManager {}
 
-#[derive(Serialize, Deserialize)]
-#[serde(remote = "GuestAddress")]
-pub struct GuestAddressDef(pub u64);
-
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Versionize)]
 pub struct MemoryRegion {
     content: Option<String>,
     start_addr: u64,
     size: u64,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Versionize)]
 pub struct MemoryManagerSnapshotData {
     memory_regions: Vec<MemoryRegion>,
 }
+
+impl VersionMapped for MemoryManagerSnapshotData {}
 
 impl Snapshottable for MemoryManager {
     fn id(&self) -> String {
@@ -1983,7 +1983,7 @@ impl Snapshottable for MemoryManager {
         // memory region content for the regions requiring it.
         self.snapshot_memory_regions = memory_regions.clone();
 
-        memory_manager_snapshot.add_data_section(SnapshotDataSection::new_from_state(
+        memory_manager_snapshot.add_data_section(SnapshotDataSection::new_from_versioned_state(
             MEMORY_MANAGER_SNAPSHOT_ID,
             &MemoryManagerSnapshotData { memory_regions },
         )?);
