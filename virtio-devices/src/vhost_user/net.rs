@@ -1,14 +1,13 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::super::net_util::{build_net_config_space, VirtioNetConfig};
 use super::super::{
     ActivateError, ActivateResult, Queue, VirtioCommon, VirtioDevice, VirtioDeviceType,
 };
 use super::vu_common_ctrl::*;
 use super::{Error, Result};
 use crate::VirtioInterrupt;
-use net_util::MacAddr;
+use net_util::{build_net_config_space, MacAddr, VirtioNetConfig};
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixListener;

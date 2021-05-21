@@ -3,15 +3,16 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use super::{EpollHelper, EpollHelperError, EpollHelperHandler, Queue, EPOLL_HELPER_EVENT_LAST};
-use net_util::MacAddr;
+use net_util::virtio_features_to_tap_offload;
 use net_util::Tap;
-use std::os::raw::c_uint;
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};
-use versionize::{VersionMap, Versionize, VersionizeResult};
-use versionize_derive::Versionize;
-use virtio_bindings::bindings::virtio_net::*;
+use virtio_bindings::bindings::virtio_net::{
+    VIRTIO_NET_CTRL_GUEST_OFFLOADS, VIRTIO_NET_CTRL_GUEST_OFFLOADS_SET, VIRTIO_NET_CTRL_MQ,
+    VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX, VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN,
+    VIRTIO_NET_CTRL_MQ_VQ_PAIRS_SET, VIRTIO_NET_ERR, VIRTIO_NET_OK,
+};
 use vm_memory::{
     ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryError, GuestMemoryMmap,
 };
@@ -23,20 +24,6 @@ const QUEUE_SIZE: usize = 256;
 
 // Event available on the control queue.
 const CTRL_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
-
-#[repr(C, packed)]
-#[derive(Copy, Clone, Debug, Default, Versionize)]
-pub struct VirtioNetConfig {
-    pub mac: [u8; 6],
-    pub status: u16,
-    pub max_virtqueue_pairs: u16,
-    pub mtu: u16,
-    pub speed: u32,
-    pub duplex: u8,
-}
-
-// Safe because it only has data and has no implicit padding.
-unsafe impl ByteValued for VirtioNetConfig {}
 
 #[derive(Debug)]
 pub enum Error {
@@ -194,51 +181,4 @@ impl EpollHelperHandler for NetCtrlEpollHandler {
 
         false
     }
-}
-
-pub fn build_net_config_space(
-    mut config: &mut VirtioNetConfig,
-    mac: MacAddr,
-    num_queues: usize,
-    mut avail_features: &mut u64,
-) {
-    config.mac.copy_from_slice(mac.get_bytes());
-    *avail_features |= 1 << VIRTIO_NET_F_MAC;
-
-    build_net_config_space_with_mq(&mut config, num_queues, &mut avail_features);
-}
-
-pub fn build_net_config_space_with_mq(
-    config: &mut VirtioNetConfig,
-    num_queues: usize,
-    avail_features: &mut u64,
-) {
-    let num_queue_pairs = (num_queues / 2) as u16;
-    if (num_queue_pairs >= VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN as u16)
-        && (num_queue_pairs <= VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX as u16)
-    {
-        config.max_virtqueue_pairs = num_queue_pairs;
-        *avail_features |= 1 << VIRTIO_NET_F_MQ;
-    }
-}
-
-pub fn virtio_features_to_tap_offload(features: u64) -> c_uint {
-    let mut tap_offloads: c_uint = 0;
-    if features & (1 << VIRTIO_NET_F_GUEST_CSUM) != 0 {
-        tap_offloads |= net_gen::TUN_F_CSUM;
-    }
-    if features & (1 << VIRTIO_NET_F_GUEST_TSO4) != 0 {
-        tap_offloads |= net_gen::TUN_F_TSO4;
-    }
-    if features & (1 << VIRTIO_NET_F_GUEST_TSO6) != 0 {
-        tap_offloads |= net_gen::TUN_F_TSO6;
-    }
-    if features & (1 << VIRTIO_NET_F_GUEST_ECN) != 0 {
-        tap_offloads |= net_gen::TUN_F_TSO_ECN;
-    }
-    if features & (1 << VIRTIO_NET_F_GUEST_UFO) != 0 {
-        tap_offloads |= net_gen::TUN_F_UFO;
-    }
-
-    tap_offloads
 }

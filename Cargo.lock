@@ -580,6 +580,8 @@ dependencies = [
  "rate_limiter",
  "serde",
  "serde_json",
+ "versionize",
+ "versionize_derive",
  "virtio-bindings",
  "vm-memory",
  "vm-virtio",

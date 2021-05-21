@@ -5,10 +5,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
-use super::net_util::{
-    build_net_config_space, build_net_config_space_with_mq, virtio_features_to_tap_offload,
-    NetCtrl, NetCtrlEpollHandler, VirtioNetConfig,
-};
+use super::net_util::{NetCtrl, NetCtrlEpollHandler};
 use super::Error as DeviceError;
 use super::{
     ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
@@ -18,7 +15,9 @@ use super::{
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::VirtioInterrupt;
 use net_util::{
-    open_tap, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TapError, TxVirtio,
+    build_net_config_space, build_net_config_space_with_mq, open_tap,
+    virtio_features_to_tap_offload, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio,
+    Tap, TapError, TxVirtio, VirtioNetConfig,
 };
 use seccomp::{SeccompAction, SeccompFilter};
 use std::net::Ipv4Addr;
