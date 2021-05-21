@@ -20,8 +20,17 @@ mod queue_pair;
 mod tap;
 
 use std::io::Error as IoError;
+use std::os::raw::c_uint;
 use std::os::unix::io::{FromRawFd, RawFd};
 use std::{io, mem, net};
+use versionize::{VersionMap, Versionize, VersionizeResult};
+use versionize_derive::Versionize;
+use virtio_bindings::bindings::virtio_net::{
+    virtio_net_hdr_v1, VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX, VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN,
+    VIRTIO_NET_F_GUEST_CSUM, VIRTIO_NET_F_GUEST_ECN, VIRTIO_NET_F_GUEST_TSO4,
+    VIRTIO_NET_F_GUEST_TSO6, VIRTIO_NET_F_GUEST_UFO, VIRTIO_NET_F_MAC, VIRTIO_NET_F_MQ,
+};
+use vm_memory::ByteValued;
 
 pub use ctrl_queue::{CtrlQueue, Error as CtrlQueueError};
 pub use mac::{MacAddr, MAC_ADDR_LEN};
@@ -36,6 +45,20 @@ pub enum Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+#[repr(C, packed)]
+#[derive(Copy, Clone, Debug, Default, Versionize)]
+pub struct VirtioNetConfig {
+    pub mac: [u8; 6],
+    pub status: u16,
+    pub max_virtqueue_pairs: u16,
+    pub mtu: u16,
+    pub speed: u32,
+    pub duplex: u8,
+}
+
+// Safe because it only has data and has no implicit padding.
+unsafe impl ByteValued for VirtioNetConfig {}
 
 /// Create a sockaddr_in from an IPv4 address, and expose it as
 /// an opaque sockaddr suitable for usage by socket ioctls.
@@ -64,7 +87,6 @@ fn create_socket() -> Result<net::UdpSocket> {
 }
 
 fn vnet_hdr_len() -> usize {
-    use virtio_bindings::bindings::virtio_net::virtio_net_hdr_v1;
     std::mem::size_of::<virtio_net_hdr_v1>()
 }
 
@@ -94,6 +116,53 @@ pub fn unregister_listener(
         fd,
         epoll::Event::new(ev_type, data),
     )
+}
+
+pub fn build_net_config_space(
+    mut config: &mut VirtioNetConfig,
+    mac: MacAddr,
+    num_queues: usize,
+    mut avail_features: &mut u64,
+) {
+    config.mac.copy_from_slice(mac.get_bytes());
+    *avail_features |= 1 << VIRTIO_NET_F_MAC;
+
+    build_net_config_space_with_mq(&mut config, num_queues, &mut avail_features);
+}
+
+pub fn build_net_config_space_with_mq(
+    config: &mut VirtioNetConfig,
+    num_queues: usize,
+    avail_features: &mut u64,
+) {
+    let num_queue_pairs = (num_queues / 2) as u16;
+    if (num_queue_pairs >= VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN as u16)
+        && (num_queue_pairs <= VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX as u16)
+    {
+        config.max_virtqueue_pairs = num_queue_pairs;
+        *avail_features |= 1 << VIRTIO_NET_F_MQ;
+    }
+}
+
+pub fn virtio_features_to_tap_offload(features: u64) -> c_uint {
+    let mut tap_offloads: c_uint = 0;
+    if features & (1 << VIRTIO_NET_F_GUEST_CSUM) != 0 {
+        tap_offloads |= net_gen::TUN_F_CSUM;
+    }
+    if features & (1 << VIRTIO_NET_F_GUEST_TSO4) != 0 {
+        tap_offloads |= net_gen::TUN_F_TSO4;
+    }
+    if features & (1 << VIRTIO_NET_F_GUEST_TSO6) != 0 {
+        tap_offloads |= net_gen::TUN_F_TSO6;
+    }
+    if features & (1 << VIRTIO_NET_F_GUEST_ECN) != 0 {
+        tap_offloads |= net_gen::TUN_F_TSO_ECN;
+    }
+    if features & (1 << VIRTIO_NET_F_GUEST_UFO) != 0 {
+        tap_offloads |= net_gen::TUN_F_UFO;
+    }
+
+    tap_offloads
 }
 
 #[cfg(test)]
