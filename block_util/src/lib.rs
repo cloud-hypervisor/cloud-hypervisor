@@ -10,8 +10,6 @@
 
 #[macro_use]
 extern crate log;
-#[macro_use]
-extern crate serde_derive;
 
 pub mod async_io;
 pub mod fixed_vhd_async;
@@ -371,7 +369,7 @@ impl Request {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, Deserialize, Serialize, Versionize)]
+#[derive(Copy, Clone, Debug, Default, Versionize)]
 #[repr(C, packed)]
 pub struct VirtioBlockConfig {
     pub capacity: u64,
@@ -396,7 +394,7 @@ pub struct VirtioBlockConfig {
 }
 unsafe impl ByteValued for VirtioBlockConfig {}
 
-#[derive(Copy, Clone, Debug, Default, Serialize, Deserialize, Versionize)]
+#[derive(Copy, Clone, Debug, Default, Versionize)]
 #[repr(C, packed)]
 pub struct VirtioBlockGeometry {
     pub cylinders: u16,
