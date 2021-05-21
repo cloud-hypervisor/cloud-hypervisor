@@ -241,6 +241,7 @@ version = "0.1.0"
 dependencies = [
  "acpi_tables",
  "anyhow",
+ "arch",
  "bitflags",
  "byteorder",
  "epoll",
