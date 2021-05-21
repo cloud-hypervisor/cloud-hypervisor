@@ -81,10 +81,6 @@ pub fn negotiate_features_vhost_user(
     // both VMM and backend support.
     let backend_features = vu.get_features().map_err(Error::VhostUserGetFeatures)?;
     let acked_features = avail_features & backend_features;
-    // Set features back is required by the vhost crate mechanism, since the
-    // later vhost call will check if features is filled in master before execution.
-    vu.set_features(acked_features)
-        .map_err(Error::VhostUserSetFeatures)?;
 
     let acked_protocol_features =
         if acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
