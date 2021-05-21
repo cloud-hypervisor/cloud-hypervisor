@@ -4,8 +4,11 @@
 use super::super::{
     ActivateError, ActivateResult, Queue, VirtioCommon, VirtioDevice, VirtioDeviceType,
 };
-use super::vu_common_ctrl::*;
-use super::{Error, Result};
+use super::vu_common_ctrl::{
+    add_memory_region, negotiate_features_vhost_user, reset_vhost_user, setup_vhost_user,
+    update_mem_table, VhostUserConfig,
+};
+use super::{Error, Result, DEFAULT_VIRTIO_FEATURES};
 use crate::VirtioInterrupt;
 use block_util::VirtioBlockConfig;
 use std::mem;
@@ -19,8 +22,11 @@ use vhost::vhost_user::message::VHOST_USER_CONFIG_OFFSET;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost::vhost_user::{Master, VhostUserMaster, VhostUserMasterReqHandler};
 use vhost::VhostBackend;
-use virtio_bindings::bindings::virtio_blk::*;
-use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
+use virtio_bindings::bindings::virtio_blk::{
+    VIRTIO_BLK_F_BLK_SIZE, VIRTIO_BLK_F_CONFIG_WCE, VIRTIO_BLK_F_DISCARD, VIRTIO_BLK_F_FLUSH,
+    VIRTIO_BLK_F_GEOMETRY, VIRTIO_BLK_F_MQ, VIRTIO_BLK_F_RO, VIRTIO_BLK_F_SEG_MAX,
+    VIRTIO_BLK_F_SIZE_MAX, VIRTIO_BLK_F_TOPOLOGY, VIRTIO_BLK_F_WRITE_ZEROES,
+};
 use vm_memory::{
     ByteValued, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap, GuestRegionMmap,
 };
@@ -50,15 +56,17 @@ impl Blk {
             .map_err(Error::VhostUserCreateMaster)?;
 
         // Filling device and vring features VMM supports.
-        let mut avail_features = 1 << VIRTIO_BLK_F_SEG_MAX
+        let mut avail_features = 1 << VIRTIO_BLK_F_SIZE_MAX
+            | 1 << VIRTIO_BLK_F_SEG_MAX
+            | 1 << VIRTIO_BLK_F_GEOMETRY
             | 1 << VIRTIO_BLK_F_RO
             | 1 << VIRTIO_BLK_F_BLK_SIZE
             | 1 << VIRTIO_BLK_F_FLUSH
             | 1 << VIRTIO_BLK_F_TOPOLOGY
-            | 1 << VIRTIO_RING_F_EVENT_IDX
             | 1 << VIRTIO_BLK_F_CONFIG_WCE
-            | 1 << VIRTIO_F_VERSION_1
-            | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
+            | 1 << VIRTIO_BLK_F_DISCARD
+            | 1 << VIRTIO_BLK_F_WRITE_ZEROES
+            | DEFAULT_VIRTIO_FEATURES;
 
         if num_queues > 1 {
             avail_features |= 1 << VIRTIO_BLK_F_MQ;

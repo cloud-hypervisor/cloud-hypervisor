@@ -5,7 +5,7 @@ use super::super::{
     ActivateError, ActivateResult, Queue, VirtioCommon, VirtioDevice, VirtioDeviceType,
 };
 use super::vu_common_ctrl::*;
-use super::{Error, Result};
+use super::{Error, Result, DEFAULT_VIRTIO_FEATURES};
 use crate::VirtioInterrupt;
 use net_util::{build_net_config_space, MacAddr, VirtioNetConfig};
 use std::ops::Deref;
@@ -17,8 +17,12 @@ use std::vec::Vec;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost::vhost_user::{Master, VhostUserMaster, VhostUserMasterReqHandler};
 use vhost::VhostBackend;
-use virtio_bindings::bindings::virtio_net;
-use virtio_bindings::bindings::virtio_ring;
+use virtio_bindings::bindings::virtio_net::{
+    VIRTIO_NET_F_CSUM, VIRTIO_NET_F_CTRL_VQ, VIRTIO_NET_F_GUEST_CSUM, VIRTIO_NET_F_GUEST_ECN,
+    VIRTIO_NET_F_GUEST_TSO4, VIRTIO_NET_F_GUEST_TSO6, VIRTIO_NET_F_GUEST_UFO,
+    VIRTIO_NET_F_HOST_ECN, VIRTIO_NET_F_HOST_TSO4, VIRTIO_NET_F_HOST_TSO6, VIRTIO_NET_F_HOST_UFO,
+    VIRTIO_NET_F_MRG_RXBUF,
+};
 use vm_memory::{
     ByteValued, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap, GuestRegionMmap,
 };
@@ -53,22 +57,19 @@ impl Net {
         let mut num_queues = vu_cfg.num_queues;
 
         // Filling device and vring features VMM supports.
-        let mut avail_features = 1 << virtio_net::VIRTIO_NET_F_GUEST_CSUM
-            | 1 << virtio_net::VIRTIO_NET_F_CSUM
-            | 1 << virtio_net::VIRTIO_NET_F_GUEST_TSO4
-            | 1 << virtio_net::VIRTIO_NET_F_GUEST_TSO6
-            | 1 << virtio_net::VIRTIO_NET_F_GUEST_ECN
-            | 1 << virtio_net::VIRTIO_NET_F_GUEST_UFO
-            | 1 << virtio_net::VIRTIO_NET_F_HOST_TSO4
-            | 1 << virtio_net::VIRTIO_NET_F_HOST_TSO6
-            | 1 << virtio_net::VIRTIO_NET_F_HOST_ECN
-            | 1 << virtio_net::VIRTIO_NET_F_HOST_UFO
-            | 1 << virtio_net::VIRTIO_NET_F_MRG_RXBUF
-            | 1 << virtio_net::VIRTIO_NET_F_CTRL_VQ
-            | 1 << virtio_net::VIRTIO_F_NOTIFY_ON_EMPTY
-            | 1 << virtio_net::VIRTIO_F_VERSION_1
-            | 1 << virtio_ring::VIRTIO_RING_F_EVENT_IDX
-            | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
+        let mut avail_features = 1 << VIRTIO_NET_F_CSUM
+            | 1 << VIRTIO_NET_F_GUEST_CSUM
+            | 1 << VIRTIO_NET_F_GUEST_TSO4
+            | 1 << VIRTIO_NET_F_GUEST_TSO6
+            | 1 << VIRTIO_NET_F_GUEST_ECN
+            | 1 << VIRTIO_NET_F_GUEST_UFO
+            | 1 << VIRTIO_NET_F_HOST_TSO4
+            | 1 << VIRTIO_NET_F_HOST_TSO6
+            | 1 << VIRTIO_NET_F_HOST_ECN
+            | 1 << VIRTIO_NET_F_HOST_UFO
+            | 1 << VIRTIO_NET_F_MRG_RXBUF
+            | 1 << VIRTIO_NET_F_CTRL_VQ
+            | DEFAULT_VIRTIO_FEATURES;
 
         let mut config = VirtioNetConfig::default();
         build_net_config_space(&mut config, mac_addr, num_queues, &mut avail_features);
@@ -102,7 +103,7 @@ impl Net {
 
         // If the control queue feature has not been negotiated, let's decrease
         // the number of queues.
-        if acked_features & (1 << virtio_net::VIRTIO_NET_F_CTRL_VQ) == 0 {
+        if acked_features & (1 << VIRTIO_NET_F_CTRL_VQ) == 0 {
             num_queues -= 1;
         }
 
@@ -111,7 +112,7 @@ impl Net {
                 vhost_user_net
                     .get_queue_num()
                     .map_err(Error::VhostUserGetQueueMaxNum)? as usize
-            } else if acked_features & (1 << virtio_net::VIRTIO_NET_F_CTRL_VQ) != 0 {
+            } else if acked_features & (1 << VIRTIO_NET_F_CTRL_VQ) != 0 {
                 DEFAULT_QUEUE_NUMBER + 1
             } else {
                 DEFAULT_QUEUE_NUMBER

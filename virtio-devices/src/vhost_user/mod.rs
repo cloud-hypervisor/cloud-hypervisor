@@ -1,7 +1,12 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::{
+    VIRTIO_F_IN_ORDER, VIRTIO_F_NOTIFICATION_DATA, VIRTIO_F_ORDER_PLATFORM,
+    VIRTIO_F_RING_EVENT_IDX, VIRTIO_F_RING_INDIRECT_DESC, VIRTIO_F_RING_PACKED, VIRTIO_F_VERSION_1,
+};
 use std::io;
+use vhost::vhost_user::message::VhostUserVirtioFeatures;
 use vhost::Error as VhostError;
 use vm_memory::Error as MmapError;
 
@@ -98,3 +103,12 @@ pub enum Error {
     MissingIrqFd,
 }
 type Result<T> = std::result::Result<T, Error>;
+
+pub const DEFAULT_VIRTIO_FEATURES: u64 = 1 << VIRTIO_F_RING_INDIRECT_DESC
+    | 1 << VIRTIO_F_RING_EVENT_IDX
+    | 1 << VIRTIO_F_VERSION_1
+    | 1 << VIRTIO_F_RING_PACKED
+    | 1 << VIRTIO_F_IN_ORDER
+    | 1 << VIRTIO_F_ORDER_PLATFORM
+    | 1 << VIRTIO_F_NOTIFICATION_DATA
+    | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();

@@ -5,12 +5,12 @@ use super::vu_common_ctrl::{
     add_memory_region, negotiate_features_vhost_user, reset_vhost_user, setup_vhost_user,
     update_mem_table,
 };
-use super::{Error, Result};
+use super::{Error, Result, DEFAULT_VIRTIO_FEATURES};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::vhost_user::handler::{VhostUserEpollConfig, VhostUserEpollHandler};
 use crate::{
     ActivateError, ActivateResult, Queue, UserspaceMapping, VirtioCommon, VirtioDevice,
-    VirtioDeviceType, VirtioInterrupt, VirtioSharedMemoryList, VIRTIO_F_VERSION_1,
+    VirtioDeviceType, VirtioInterrupt, VirtioSharedMemoryList,
 };
 use libc::{self, c_void, off64_t, pread64, pwrite64};
 use seccomp::{SeccompAction, SeccompFilter};
@@ -26,9 +26,6 @@ use vhost::vhost_user::message::{
 };
 use vhost::vhost_user::{
     HandlerResult, Master, MasterReqHandler, VhostUserMaster, VhostUserMasterReqHandler,
-};
-use virtio_bindings::bindings::virtio_ring::{
-    VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC,
 };
 use vm_memory::{
     Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
@@ -307,10 +304,7 @@ impl Fs {
             Master::connect(path, num_queues as u64).map_err(Error::VhostUserCreateMaster)?;
 
         // Filling device and vring features VMM supports.
-        let avail_features = 1 << VIRTIO_F_VERSION_1
-            | 1 << VIRTIO_RING_F_EVENT_IDX
-            | 1 << VIRTIO_RING_F_INDIRECT_DESC
-            | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
+        let avail_features = DEFAULT_VIRTIO_FEATURES;
 
         let mut avail_protocol_features = VhostUserProtocolFeatures::MQ
             | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
