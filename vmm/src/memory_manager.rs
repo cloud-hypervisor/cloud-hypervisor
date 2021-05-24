@@ -773,7 +773,7 @@ impl MemoryManager {
             log_dirty,
         }));
 
-        guest_memory.memory().with_regions(|_, region| {
+        for region in guest_memory.memory().iter() {
             let mut mm = memory_manager.lock().unwrap();
             let slot = mm.create_userspace_mapping(
                 region.start_addr().raw_value(),
@@ -788,9 +788,7 @@ impl MemoryManager {
                 size: region.len(),
                 slot,
             });
-
-            Ok(())
-        })?;
+        }
 
         for region in virtio_mem_regions.drain(..) {
             let mut mm = memory_manager.lock().unwrap();
@@ -1942,7 +1940,7 @@ impl Snapshottable for MemoryManager {
 
         let mut memory_regions: Vec<MemoryRegion> = Vec::new();
 
-        guest_memory.with_regions_mut(|index, region| {
+        for (index, region) in guest_memory.iter().enumerate() {
             if region.len() == 0 {
                 return Err(MigratableError::Snapshot(anyhow!("Zero length region")));
             }
@@ -1970,9 +1968,7 @@ impl Snapshottable for MemoryManager {
                 start_addr: region.start_addr().0,
                 size: region.len(),
             });
-
-            Ok(())
-        })?;
+        }
 
         // Store locally this list of regions as it will be used through the
         // Transportable::send() implementation. The point is to avoid the

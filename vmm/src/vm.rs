@@ -2019,13 +2019,12 @@ impl Vm {
         let mut table = MemoryRangeTable::default();
         let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
 
-        guest_memory.memory().with_regions_mut(|_, region| {
+        for region in guest_memory.memory().iter() {
             table.push(MemoryRange {
                 gpa: region.start_addr().raw_value(),
                 length: region.len() as u64,
             });
-            Ok(())
-        })?;
+        }
 
         Ok(table)
     }
@@ -2520,7 +2519,7 @@ pub fn test_vm() {
     let hv = hypervisor::new().unwrap();
     let vm = hv.create_vm().expect("new VM creation failed");
 
-    mem.with_regions(|index, region| {
+    for (index, region) in mem.iter().enumerate() {
         let mem_region = vm.make_user_memory_region(
             index as u32,
             region.start_addr().raw_value(),
@@ -2531,8 +2530,8 @@ pub fn test_vm() {
         );
 
         vm.set_user_memory_region(mem_region)
-    })
-    .expect("Cannot configure guest memory");
+            .expect("Cannot configure guest memory");
+    }
     mem.write_slice(&code, load_addr)
         .expect("Writing code to memory failed");
 
