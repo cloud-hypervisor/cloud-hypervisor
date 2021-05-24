@@ -27,10 +27,10 @@ pub struct VhostUserConfig {
 
 pub fn update_mem_table(vu: &mut Master, mem: &GuestMemoryMmap) -> Result<()> {
     let mut regions: Vec<VhostUserMemoryRegionInfo> = Vec::new();
-    mem.with_regions_mut(|_, region| {
+    for region in mem.iter() {
         let (mmap_handle, mmap_offset) = match region.file_offset() {
             Some(_file_offset) => (_file_offset.file().as_raw_fd(), _file_offset.start()),
-            None => return Err(MmapError::NoMemoryRegion),
+            None => return Err(Error::VhostUserMemoryRegion(MmapError::NoMemoryRegion)),
         };
 
         let vhost_user_net_reg = VhostUserMemoryRegionInfo {
@@ -42,10 +42,7 @@ pub fn update_mem_table(vu: &mut Master, mem: &GuestMemoryMmap) -> Result<()> {
         };
 
         regions.push(vhost_user_net_reg);
-
-        Ok(())
-    })
-    .map_err(Error::VhostUserMemoryRegion)?;
+    }
 
     vu.set_mem_table(regions.as_slice())
         .map_err(Error::VhostUserSetMemTable)?;
