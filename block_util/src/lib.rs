@@ -36,7 +36,8 @@ use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_bindings::bindings::virtio_blk::*;
 use vm_memory::{
-    bitmap::AtomicBitmap, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError,
+    bitmap::AtomicBitmap, bitmap::Bitmap, ByteValued, Bytes, GuestAddress, GuestMemory,
+    GuestMemoryError,
 };
 use vm_virtio::DescriptorChain;
 use vmm_sys_util::eventfd::EventFd;
@@ -335,6 +336,12 @@ impl Request {
         // Queue operations expected to be submitted.
         match request_type {
             RequestType::In => {
+                for (data_addr, data_len) in &self.data_descriptors {
+                    mem.get_slice(*data_addr, *data_len as usize)
+                        .map_err(ExecuteError::GetHostAddress)?
+                        .bitmap()
+                        .mark_dirty(0, *data_len as usize);
+                }
                 disk_image
                     .read_vectored(offset, iovecs, user_data)
                     .map_err(ExecuteError::AsyncRead)?;
