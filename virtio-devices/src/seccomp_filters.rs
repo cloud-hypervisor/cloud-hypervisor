@@ -22,6 +22,7 @@ pub enum Thread {
     VirtioPmem,
     VirtioRng,
     VirtioVhostFs,
+    VirtioVhostNetCtl,
     VirtioVsock,
     VirtioWatchdog,
 }
@@ -332,6 +333,26 @@ fn virtio_vhost_fs_thread_rules() -> Vec<SyscallRuleSet> {
     ]
 }
 
+fn virtio_vhost_net_ctl_thread_rules() -> Vec<SyscallRuleSet> {
+    vec![
+        allow_syscall(libc::SYS_brk),
+        allow_syscall(libc::SYS_close),
+        allow_syscall(libc::SYS_dup),
+        allow_syscall(libc::SYS_epoll_create1),
+        allow_syscall(libc::SYS_epoll_ctl),
+        allow_syscall(libc::SYS_epoll_pwait),
+        #[cfg(target_arch = "x86_64")]
+        allow_syscall(libc::SYS_epoll_wait),
+        allow_syscall(libc::SYS_exit),
+        allow_syscall(libc::SYS_futex),
+        allow_syscall(libc::SYS_munmap),
+        allow_syscall(libc::SYS_madvise),
+        allow_syscall(libc::SYS_read),
+        allow_syscall(libc::SYS_sigaltstack),
+        allow_syscall(libc::SYS_write),
+    ]
+}
+
 fn create_vsock_ioctl_seccomp_rule() -> Vec<SeccompRule> {
     or![and![Cond::new(1, ArgLen::DWORD, Eq, FIONBIO,).unwrap()],]
 }
@@ -399,6 +420,7 @@ fn get_seccomp_filter_trap(thread_type: Thread) -> Result<SeccompFilter, Error> 
         Thread::VirtioPmem => virtio_pmem_thread_rules(),
         Thread::VirtioRng => virtio_rng_thread_rules(),
         Thread::VirtioVhostFs => virtio_vhost_fs_thread_rules(),
+        Thread::VirtioVhostNetCtl => virtio_vhost_net_ctl_thread_rules(),
         Thread::VirtioVsock => virtio_vsock_thread_rules(),
         Thread::VirtioWatchdog => virtio_watchdog_thread_rules(),
     };
@@ -418,6 +440,7 @@ fn get_seccomp_filter_log(thread_type: Thread) -> Result<SeccompFilter, Error> {
         Thread::VirtioPmem => virtio_pmem_thread_rules(),
         Thread::VirtioRng => virtio_rng_thread_rules(),
         Thread::VirtioVhostFs => virtio_vhost_fs_thread_rules(),
+        Thread::VirtioVhostNetCtl => virtio_vhost_net_ctl_thread_rules(),
         Thread::VirtioVsock => virtio_vsock_thread_rules(),
         Thread::VirtioWatchdog => virtio_watchdog_thread_rules(),
     };

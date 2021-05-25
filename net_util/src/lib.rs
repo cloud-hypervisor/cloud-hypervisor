@@ -122,12 +122,12 @@ pub fn build_net_config_space(
     mut config: &mut VirtioNetConfig,
     mac: MacAddr,
     num_queues: usize,
-    mut avail_features: &mut u64,
+    avail_features: &mut u64,
 ) {
     config.mac.copy_from_slice(mac.get_bytes());
     *avail_features |= 1 << VIRTIO_NET_F_MAC;
 
-    build_net_config_space_with_mq(&mut config, num_queues, &mut avail_features);
+    build_net_config_space_with_mq(&mut config, num_queues, avail_features);
 }
 
 pub fn build_net_config_space_with_mq(
