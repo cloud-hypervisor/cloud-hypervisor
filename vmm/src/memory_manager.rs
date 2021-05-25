@@ -1477,9 +1477,29 @@ impl MemoryManager {
         let page_size = 4096; // TODO: Does this need to vary?
         let mut table = MemoryRangeTable::default();
         for r in &self.guest_ram_mappings {
-            let dirty_bitmap = self.vm.get_dirty_log(r.slot, r.size).map_err(|e| {
+            let vm_dirty_bitmap = self.vm.get_dirty_log(r.slot, r.size).map_err(|e| {
                 MigratableError::MigrateSend(anyhow!("Error getting VM dirty log {}", e))
             })?;
+            let vmm_dirty_bitmap = match self.guest_memory.memory().find_region(GuestAddress(r.gpa))
+            {
+                Some(region) => {
+                    assert!(region.start_addr().raw_value() == r.gpa);
+                    assert!(region.len() == r.size);
+                    region.bitmap().get_and_reset()
+                }
+                None => {
+                    return Err(MigratableError::MigrateSend(anyhow!(
+                        "Error finding 'guest memory region' with address {:x}",
+                        r.gpa
+                    )))
+                }
+            };
+
+            let dirty_bitmap: Vec<u64> = vm_dirty_bitmap
+                .iter()
+                .zip(vmm_dirty_bitmap.iter())
+                .map(|(x, y)| x | y)
+                .collect();
 
             let mut entry: Option<MemoryRange> = None;
             for (i, block) in dirty_bitmap.iter().enumerate() {
@@ -1525,6 +1545,11 @@ impl MemoryManager {
                 MigratableError::MigrateSend(anyhow!("Error getting VM dirty log {}", e))
             })?;
         }
+
+        for r in self.guest_memory.memory().iter() {
+            r.bitmap().reset();
+        }
+
         Ok(())
     }
 }
