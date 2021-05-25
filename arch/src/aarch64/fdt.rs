@@ -412,7 +412,23 @@ fn create_pci_nodes(
     // Add node for PCIe controller.
     // See Documentation/devicetree/bindings/pci/host-generic-pci.txt in the kernel
     // and https://elinux.org/Device_Tree_Usage.
-    let pci_device_base = pci_device_base + PCI_HIGH_BASE;
+
+    // EDK2 requires the PCIe high space above 4G address.
+    // The actual space in CLH follows the RAM. If the RAM space is small, the PCIe high space
+    // could fall bellow 4G.
+    // Here we put it above 512G in FDT to workaround the EDK2 check.
+    // But the address written in ACPI is not impacted.
+    let pci_device_base_64bit: u64 = if cfg!(feature = "acpi") {
+        pci_device_base + PCI_HIGH_BASE
+    } else {
+        pci_device_base
+    };
+    let pci_device_size_64bit: u64 = if cfg!(feature = "acpi") {
+        pci_device_size - PCI_HIGH_BASE
+    } else {
+        pci_device_size
+    };
+
     let ranges = [
         // io addresses
         0x1000000,
@@ -431,13 +447,13 @@ fn create_pci_nodes(
         (MEM_32BIT_DEVICES_SIZE >> 32) as u32, // size
         MEM_32BIT_DEVICES_SIZE as u32,
         // device addresses
-        0x3000000,                      // (ss = 11: 64-bit memory space)
-        (pci_device_base >> 32) as u32, // PCI address
-        pci_device_base as u32,
-        (pci_device_base >> 32) as u32, // CPU address
-        pci_device_base as u32,
-        (pci_device_size >> 32) as u32, // size
-        pci_device_size as u32,
+        0x3000000,                            // (ss = 11: 64-bit memory space)
+        (pci_device_base_64bit >> 32) as u32, // PCI address
+        pci_device_base_64bit as u32,
+        (pci_device_base_64bit >> 32) as u32, // CPU address
+        pci_device_base_64bit as u32,
+        (pci_device_size_64bit >> 32) as u32, // size
+        pci_device_size_64bit as u32,
     ];
     let bus_range = [0, 0]; // Only bus 0
     let reg = [PCI_MMCONFIG_START.0, PCI_MMCONFIG_SIZE];
