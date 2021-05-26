@@ -6,4 +6,4 @@ edition = "2018"
 
 [dependencies]
 vm-memory = "0.5.0"
-
+hex = "0.4.3"

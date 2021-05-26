@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+extern crate hex;
 use std::marker::PhantomData;
 
 pub trait Aml {
@@ -259,6 +260,38 @@ impl EisaName {
 impl Aml for EisaName {
     fn to_aml_bytes(&self) -> Vec<u8> {
         self.value.to_aml_bytes()
+    }
+}
+
+// UUID (Universally Unique IDentifiers)
+pub struct Uuid {
+    pub data: Vec<u8>,
+}
+
+// Converts an ASCII UUID or GUID string to an encoded 128-bit Buffer object.
+// The UUID string is in the format of aabbccdd-eeff-gghh-iijj-kkllmmnnoopp,
+// where aa – pp are one byte hexadecimal numbers, made up of hexadecimal digits.
+impl Uuid {
+    pub fn new(str: String) -> Self {
+        let mut str = str;
+        let str = &mut str;
+
+        // remove '-' in the string
+        let index = vec![8, 12, 16, 20];
+        for i in index {
+            str.remove(i);
+        }
+
+        let ori = hex::decode(str).unwrap();
+        let mut ret: Vec<u8> = Vec::new();
+
+        // The result sequence of UUID, refer to ACPI specification version 6.3, Table 19-438
+        let index = vec![3, 2, 1, 0, 5, 4, 7, 6, 8, 9, 10, 11, 12, 13, 14, 15];
+        for i in index {
+            ret.push(ori[i]);
+        }
+
+        Uuid { data: ret }
     }
 }
 
@@ -1959,6 +1992,17 @@ mod tests {
                 ]
             )
             .to_aml_bytes(),
+            &data[..]
+        );
+    }
+
+    #[test]
+    fn test_uuid() {
+        let data = [
+            120, 86, 52, 18, 52, 18, 120, 86, 18, 52, 18, 52, 86, 120, 18, 52,
+        ];
+        assert_eq!(
+            Uuid::new("12345678-1234-5678-1234-123456781234".to_string()).data,
             &data[..]
         );
     }

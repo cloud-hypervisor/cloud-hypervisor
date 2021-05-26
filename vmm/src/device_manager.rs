@@ -3727,6 +3727,48 @@ impl Aml for DeviceManager {
         pci_dsdt_inner_data.push(&uid);
         let supp = aml::Name::new("SUPP".into(), &aml::ZERO);
         pci_dsdt_inner_data.push(&supp);
+
+        // _DSM (Device Specific Method), the following is the implementation in ASL.
+        /*
+        Method (_DSM, 4, NotSerialized)  // _DSM: Device-Specific Method
+        {
+              If ((Arg0 == ToUUID ("e5c937d0-3553-4d7a-9117-ea4d19c3434d") /* Device Labeling Interface */))
+              {
+                  If ((Arg2 == Zero))
+                  {
+                      Return (Buffer (One)
+                      {
+                           0x21                                             // !
+                      })
+                  }
+                  If ((Arg2 == 0x05))
+                  {
+                      Return (Zero)
+                  }
+              }
+
+              Return (Buffer (One)
+              {
+                   0x00                                             // .
+              })
+        }
+        */
+        let uuid = aml::Uuid::new("E5C937D0-3553-4D7A-9117-EA4D19C3434D".to_string());
+        let uuid = aml::Buffer::new(uuid.data);
+        let buf1 = aml::Buffer::new(vec![0x21]);
+        let buf2 = aml::Buffer::new(vec![0]);
+        let dsm_eq11 = aml::Equal::new(&aml::Arg(2), &aml::ZERO);
+        let dsm_eq1 = aml::Equal::new(&aml::Arg(0), &uuid);
+        let dsm_rt11 = aml::Return::new(&buf1);
+        let dsm_if11 = aml::If::new(&dsm_eq11, vec![&dsm_rt11]);
+        let dsm_rt12 = aml::Return::new(&aml::ZERO);
+        let dsm_eq12 = aml::Equal::new(&aml::Arg(2), &0x05u8);
+        let dsm_if12 = aml::If::new(&dsm_eq12, vec![&dsm_rt12]);
+        let dsm_if1 = aml::If::new(&dsm_eq1, vec![&dsm_if11, &dsm_if12]);
+        let dsm_rt2 = aml::Return::new(&buf2);
+        let dsm = aml::Method::new("_DSM".into(), 4, false, vec![&dsm_if1, &dsm_rt2]);
+        pci_dsdt_inner_data.push(&dsm);
+
         let crs = aml::Name::new(
             "_CRS".into(),
             &aml::ResourceTemplate::new(vec![
