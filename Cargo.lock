@@ -70,8 +70,6 @@ dependencies = [
  "linux-loader",
  "log",
  "serde",
- "serde_derive",
- "serde_json",
  "thiserror",
  "versionize",
  "versionize_derive",
