@@ -9,11 +9,13 @@ use byteorder::{ByteOrder, LittleEndian};
 use std::io;
 use std::result;
 use std::sync::Arc;
+use versionize::{VersionMap, Versionize, VersionizeResult};
+use versionize_derive::Versionize;
 use vm_device::interrupt::{
     InterruptIndex, InterruptSourceConfig, InterruptSourceGroup, MsiIrqSourceConfig,
 };
 use vm_memory::ByteValued;
-use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable};
+use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, VersionMapped};
 
 const MAX_MSIX_VECTORS_PER_DEVICE: u16 = 2048;
 const MSIX_TABLE_ENTRIES_MODULO: u64 = 16;
@@ -33,7 +35,7 @@ enum Error {
     UpdateInterruptRoute(io::Error),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Versionize)]
 pub struct MsixTableEntry {
     pub msg_addr_lo: u32,
     pub msg_addr_hi: u32,
@@ -58,13 +60,15 @@ impl Default for MsixTableEntry {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Versionize)]
 struct MsixConfigState {
     table_entries: Vec<MsixTableEntry>,
     pba_entries: Vec<u64>,
     masked: bool,
     enabled: bool,
 }
+
+impl VersionMapped for MsixConfigState {}
 
 pub struct MsixConfig {
     pub table_entries: Vec<MsixTableEntry>,
@@ -429,11 +433,11 @@ impl Snapshottable for MsixConfig {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        Snapshot::new_from_state(&self.id(), &self.state())
+        Snapshot::new_from_versioned_state(&self.id(), &self.state())
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.set_state(&snapshot.to_state(&self.id())?)
+        self.set_state(&snapshot.to_versioned_state(&self.id())?)
             .map_err(|e| {
                 MigratableError::Restore(anyhow!(
                     "Could not restore state for {}: {:?}",
