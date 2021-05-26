@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies]
 epoll = ">=4.0.1"
-libc = "0.2.94"
+libc = "0.2.95"
 log = "0.4.14"
 net_gen = { path = "../net_gen" }
 rate_limiter = { path = "../rate_limiter" }
