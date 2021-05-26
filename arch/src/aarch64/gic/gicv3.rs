@@ -14,8 +14,11 @@ pub mod kvm {
     use std::convert::TryInto;
     use std::sync::Arc;
     use std::{boxed::Box, result};
+    use versionize::{VersionMap, Versionize, VersionizeResult};
+    use versionize_derive::Versionize;
     use vm_migration::{
         Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable,
+        VersionMapped,
     };
 
     /// Errors thrown while saving/restoring the GICv3.
@@ -57,7 +60,7 @@ pub mod kvm {
         vcpu_count: u64,
     }
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, Versionize)]
     pub struct Gicv3State {
         dist: Vec<u32>,
         rdist: Vec<u32>,
@@ -65,6 +68,8 @@ pub mod kvm {
         // special register that enables interrupts and affinity routing
         gicd_ctlr: u32,
     }
+
+    impl VersionMapped for Gicv3State {}
 
     impl KvmGicV3 {
         // Unfortunately bindgen omits defines that are based on other defines.
@@ -229,12 +234,12 @@ pub mod kvm {
 
         fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
             let gicr_typers = self.gicr_typers.clone();
-            Snapshot::new_from_state(&self.id(), &self.state(&gicr_typers).unwrap())
+            Snapshot::new_from_versioned_state(&self.id(), &self.state(&gicr_typers).unwrap())
         }
 
         fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
             let gicr_typers = self.gicr_typers.clone();
-            self.set_state(&gicr_typers, &snapshot.to_state(&self.id())?)
+            self.set_state(&gicr_typers, &snapshot.to_versioned_state(&self.id())?)
                 .map_err(|e| {
                     MigratableError::Restore(anyhow!("Could not restore GICv3 state {:?}", e))
                 })
