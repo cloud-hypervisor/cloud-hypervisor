@@ -3736,23 +3736,17 @@ impl Aml for DeviceManager {
               {
                   If ((Arg2 == Zero))
                   {
-                      Return (Buffer (One)
-                      {
-                           0x21                                             // !
-                      })
+                      Return (Buffer (One) { 0x21 })
                   }
                   If ((Arg2 == 0x05))
                   {
                       Return (Zero)
                   }
               }
-
-              Return (Buffer (One)
-              {
-                   0x00                                             // .
-              })
+              Return (Buffer (One) { 0x00 })
         }
-        */
+         */
+        /*
         let uuid = aml::Uuid::new("E5C937D0-3553-4D7A-9117-EA4D19C3434D".to_string());
         let uuid = aml::Buffer::new(uuid.data);
         let buf1 = aml::Buffer::new(vec![0x21]);
@@ -3767,6 +3761,33 @@ impl Aml for DeviceManager {
         let dsm_if1 = aml::If::new(&dsm_eq1, vec![&dsm_if11, &dsm_if12]);
         let dsm_rt2 = aml::Return::new(&buf2);
         let dsm = aml::Method::new("_DSM".into(), 4, false, vec![&dsm_if1, &dsm_rt2]);
+         */
+        #[cfg(target_arch = "aarch64")]
+        let dsm = aml::Method::new(
+            "_DSM".into(),
+            4,
+            false,
+            vec![
+                &aml::If::new(
+                    &aml::Equal::new(
+                        &aml::Arg(0),
+                        &aml::Uuid::new("E5C937D0-3553-4D7A-9117-EA4D19C3434D".to_string()),
+                    ),
+                    vec![
+                        &aml::If::new(
+                            &aml::Equal::new(&aml::Arg(2), &aml::ZERO),
+                            vec![&aml::Return::new(&aml::Buffer::new(vec![0x21]))],
+                        ),
+                        &aml::If::new(
+                            &aml::Equal::new(&aml::Arg(2), &0x05u8),
+                            vec![&aml::Return::new(&aml::ZERO)],
+                        ),
+                    ],
+                ),
+                &aml::Return::new(&aml::Buffer::new(vec![0])),
+            ],
+        );
+        #[cfg(target_arch = "aarch64")]
         pci_dsdt_inner_data.push(&dsm);
 
         let crs = aml::Name::new(
