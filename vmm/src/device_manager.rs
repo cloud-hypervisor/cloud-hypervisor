@@ -77,6 +77,8 @@ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
 use std::result;
 use std::sync::{Arc, Barrier, Mutex};
+#[cfg(feature = "acpi")]
+use uuid::Uuid;
 #[cfg(feature = "kvm")]
 use vfio_ioctls::{VfioContainer, VfioDevice};
 use virtio_devices::transport::VirtioPciDevice;
@@ -3594,6 +3596,71 @@ impl Aml for PciDevSlotMethods {
 }
 
 #[cfg(feature = "acpi")]
+struct PciDsmMethod {}
+
+#[cfg(feature = "acpi")]
+impl Aml for PciDsmMethod {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        // Refer to ACPI spec v6.3 Ch 9.1.1 and PCI Firmware spec v3.3 Ch 4.6.1
+        // _DSM (Device Specific Method), the following is the implementation in ASL.
+        /*
+        Method (_DSM, 4, NotSerialized)  // _DSM: Device-Specific Method
+        {
+              If ((Arg0 == ToUUID ("e5c937d0-3553-4d7a-9117-ea4d19c3434d") /* Device Labeling Interface */))
+              {
+                  If ((Arg2 == Zero))
+                  {
+                      Return (Buffer (One) { 0x21 })
+                  }
+                  If ((Arg2 == 0x05))
+                  {
+                      Return (Zero)
+                  }
+              }
+
+              Return (Buffer (One) { 0x00 })
+        }
+         */
+        /*
+         * As per ACPI v6.3 Ch 19.6.142, the UUID is required to be in mixed endian:
+         * Among the fields of a UUID:
+         *   {d1 (8 digits)} - {d2 (4 digits)} - {d3 (4 digits)} - {d4 (16 digits)}
+         * d1 ~ d3 need to be little endian, d4 be big endian.
+         * See https://en.wikipedia.org/wiki/Universally_unique_identifier#Encoding .
+         */
+        let uuid = Uuid::parse_str("E5C937D0-3553-4D7A-9117-EA4D19C3434D").unwrap();
+        let (uuid_d1, uuid_d2, uuid_d3, uuid_d4) = uuid.as_fields();
+        let mut uuid_buf = vec![];
+        uuid_buf.extend(&uuid_d1.to_le_bytes());
+        uuid_buf.extend(&uuid_d2.to_le_bytes());
+        uuid_buf.extend(&uuid_d3.to_le_bytes());
+        uuid_buf.extend(uuid_d4);
+        aml::Method::new(
+            "_DSM".into(),
+            4,
+            false,
+            vec![
+                &aml::If::new(
+                    &aml::Equal::new(&aml::Arg(0), &aml::Buffer::new(uuid_buf)),
+                    vec![
+                        &aml::If::new(
+                            &aml::Equal::new(&aml::Arg(2), &aml::ZERO),
+                            vec![&aml::Return::new(&aml::Buffer::new(vec![0x21]))],
+                        ),
+                        &aml::If::new(
+                            &aml::Equal::new(&aml::Arg(2), &0x05u8),
+                            vec![&aml::Return::new(&aml::ZERO)],
+                        ),
+                    ],
+                ),
+                &aml::Return::new(&aml::Buffer::new(vec![0])),
+            ],
+        )
+        .to_aml_bytes()
+    }
+}
+
+#[cfg(feature = "acpi")]
 impl Aml for DeviceManager {
     fn to_aml_bytes(&self) -> Vec<u8> {
         #[cfg(target_arch = "aarch64")]
@@ -3671,6 +3738,10 @@ impl Aml for DeviceManager {
         pci_dsdt_inner_data.push(&uid);
         let supp = aml::Name::new("SUPP".into(), &aml::ZERO);
         pci_dsdt_inner_data.push(&supp);
+
+        let pci_dsm = PciDsmMethod {};
+        pci_dsdt_inner_data.push(&pci_dsm);
+
         let crs = aml::Name::new(
             "_CRS".into(),
             &aml::ResourceTemplate::new(vec![
