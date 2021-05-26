@@ -378,6 +378,8 @@ pub fn create_acpi_tables(
     guest_mem
         .write_slice(dsdt.as_slice(), dsdt_offset)
         .expect("Error writing DSDT table");
+    #[cfg(target_arch = "aarch64")]
+    tables.push(dsdt_offset.0);
 
     // FACP aka FADT
     let facp = create_facp_table(dsdt_offset);
