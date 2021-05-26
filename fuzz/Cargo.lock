@@ -150,7 +150,7 @@ dependencies = [
  "libc",
  "log",
  "option_parser",
- "seccomp",
+ "seccomp 0.1.0 (git+https://github.com/firecracker-microvm/firecracker?tag=v0.24.3)",
  "serde_json",
  "signal-hook",
  "thiserror",
@@ -168,7 +168,7 @@ dependencies = [
  "libc",
  "libfuzzer-sys",
  "qcow",
- "seccomp",
+ "seccomp 0.1.0 (git+https://github.com/firecracker-microvm/firecracker?tag=v0.24.4)",
  "virtio-devices",
  "vm-memory",
  "vm-virtio",
@@ -459,6 +459,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "seccomp"
+version = "0.1.0"
+source = "git+https://github.com/firecracker-microvm/firecracker?tag=v0.24.4#8f44986a0e956a77f2b2324c12f73bec16130c82"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "serde"
 version = "1.0.126"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -670,7 +678,7 @@ dependencies = [
  "net_util",
  "pci",
  "rate_limiter",
- "seccomp",
+ "seccomp 0.1.0 (git+https://github.com/firecracker-microvm/firecracker?tag=v0.24.3)",
  "serde",
  "serde_derive",
  "serde_json",
@@ -775,7 +783,7 @@ dependencies = [
  "option_parser",
  "pci",
  "qcow",
- "seccomp",
+ "seccomp 0.1.0 (git+https://github.com/firecracker-microvm/firecracker?tag=v0.24.3)",
  "serde",
  "serde_derive",
  "serde_json",
