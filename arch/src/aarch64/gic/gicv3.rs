@@ -60,7 +60,7 @@ pub mod kvm {
         vcpu_count: u64,
     }
 
-    #[derive(Serialize, Deserialize, Versionize)]
+    #[derive(Versionize)]
     pub struct Gicv3State {
         dist: Vec<u32>,
         rdist: Vec<u32>,

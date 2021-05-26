@@ -10,9 +10,6 @@
 
 #[macro_use]
 extern crate log;
-#[cfg(target_arch = "aarch64")]
-#[macro_use]
-extern crate serde_derive;
 
 use std::fmt;
 use std::result;
