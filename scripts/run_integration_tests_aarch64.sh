@@ -227,6 +227,13 @@ sudo bash -c "echo 1000000 > /sys/kernel/mm/ksm/pages_to_scan"
 sudo bash -c "echo 10 > /sys/kernel/mm/ksm/sleep_millisecs"
 sudo bash -c "echo 1 > /sys/kernel/mm/ksm/run"
 
+# Setup ovs-dpdk
+echo 2048 | sudo tee /proc/sys/vm/nr_hugepages
+service openvswitch-switch start
+ovs-vsctl init
+ovs-vsctl set Open_vSwitch . other_config:dpdk-init=true
+service openvswitch-switch restart
+
 time cargo test $features_test_fdt "tests::parallel::$test_filter"
 RES=$?
 echo "Integration test on FDT finished with result $RES."

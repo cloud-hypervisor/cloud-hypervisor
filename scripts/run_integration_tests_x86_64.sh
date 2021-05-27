@@ -198,9 +198,15 @@ sudo bash -c "echo 1000000 > /sys/kernel/mm/ksm/pages_to_scan"
 sudo bash -c "echo 10 > /sys/kernel/mm/ksm/sleep_millisecs"
 sudo bash -c "echo 1 > /sys/kernel/mm/ksm/run"
 
-# test_vfio relies on hugepages
-echo 4096 | sudo tee /proc/sys/vm/nr_hugepages
+# Both test_vfio and ovs-dpdk rely on hugepages
+echo 6144 | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
+
+# Setup ovs-dpdk
+service openvswitch-switch start
+ovs-vsctl init
+ovs-vsctl set Open_vSwitch . other_config:dpdk-init=true
+service openvswitch-switch restart
 
 export RUST_BACKTRACE=1
 time cargo test $features_test "tests::parallel::$test_filter"
