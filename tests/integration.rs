@@ -5255,6 +5255,129 @@ mod tests {
 
             handle_child_output(r, &output);
         }
+
+        #[test]
+        fn test_ovs_dpdk() {
+            // Create OVS-DPDK bridge and ports
+            std::process::Command::new("bash")
+                .args(&[
+                    "-c",
+                    "ovs-vsctl add-br ovsbr0 -- set bridge ovsbr0 datapath_type=netdev",
+                ])
+                .status()
+                .expect("Expected 'ovs-vsctl add-br ovsbr0 -- set bridge ovsbr0 datapath_type=netdev' to work");
+            std::process::Command::new("bash")
+                .args(&[
+                    "-c",
+                    "ovs-vsctl add-port ovsbr0 vhost-user1 -- set Interface vhost-user1 type=dpdkvhostuser",
+                ])
+                .status()
+                .expect("Expected 'ovs-vsctl add-port ovsbr0 vhost-user1 -- set Interface vhost-user1 type=dpdkvhostuser' to work");
+            std::process::Command::new("bash")
+                .args(&[
+                    "-c",
+                    "ovs-vsctl add-port ovsbr0 vhost-user2 -- set Interface vhost-user2 type=dpdkvhostuser",
+                ])
+                .status()
+                .expect("Expected 'ovs-vsctl add-port ovsbr0 vhost-user2 -- set Interface vhost-user2 type=dpdkvhostuser' to work");
+            std::process::Command::new("bash")
+                .args(&["-c", "ip link set up dev ovsbr0"])
+                .status()
+                .expect("Expected 'ip link set up dev ovsbr0' to work");
+            std::process::Command::new("bash")
+                .args(&["-c", "service openvswitch-switch restart"])
+                .status()
+                .expect("Expected 'service openvswitch-switch restart' to work");
+
+            let focal1 = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest1 = Guest::new(Box::new(focal1));
+            let mut child1 = GuestCommand::new(&guest1)
+                .args(&["--cpus", "boot=2"])
+                .args(&["--memory", "size=1G,shared=on"])
+                .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+                .default_disks()
+                .args(&["--net", guest1.default_net_string().as_str(), "vhost_user=true,socket=/var/run/openvswitch/vhost-user1,num_queues=2,queue_size=256,vhost_mode=client"])
+                .capture_output()
+                .spawn()
+                .unwrap();
+
+            #[cfg(target_arch = "x86_64")]
+            let guest_net_iface = "ens5";
+            #[cfg(target_arch = "aarch64")]
+            let guest_net_iface = "enp0s5";
+
+            let r = std::panic::catch_unwind(|| {
+                guest1.wait_vm_boot(None).unwrap();
+
+                assert!(guest1
+                    .ssh_command_ok(&format!(
+                        "sudo ip addr add 172.100.0.1/24 dev {}",
+                        guest_net_iface
+                    ))
+                    .unwrap());
+                assert!(guest1
+                    .ssh_command_ok(&format!("sudo ip link set up dev {}", guest_net_iface))
+                    .unwrap());
+
+                let guest_ip = guest1.network.guest_ip.clone();
+                thread::spawn(move || {
+                    ssh_command_ip(
+                        "iperf3 -s -p 4444",
+                        &guest_ip,
+                        DEFAULT_SSH_RETRIES,
+                        DEFAULT_SSH_TIMEOUT,
+                    )
+                    .unwrap();
+                });
+            });
+            if r.is_err() {
+                let _ = child1.kill();
+                let output = child1.wait_with_output().unwrap();
+                handle_child_output(r, &output);
+                panic!("Test should already be failed/panicked"); // To explicitly mark this block never return
+            }
+
+            let focal2 = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest2 = Guest::new(Box::new(focal2));
+            let mut child2 = GuestCommand::new(&guest2)
+                .args(&["--cpus", "boot=2"])
+                .args(&["--memory", "size=1G,shared=on"])
+                .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+                .default_disks()
+                .args(&["--net", guest2.default_net_string().as_str(), "vhost_user=true,socket=/var/run/openvswitch/vhost-user2,num_queues=2,queue_size=256,vhost_mode=client"])
+                .capture_output()
+                .spawn()
+                .unwrap();
+
+            let r = std::panic::catch_unwind(|| {
+                guest2.wait_vm_boot(None).unwrap();
+
+                assert!(guest2
+                    .ssh_command_ok(&format!(
+                        "sudo ip addr add 172.100.0.2/24 dev {}",
+                        guest_net_iface
+                    ))
+                    .unwrap());
+                assert!(guest2
+                    .ssh_command_ok(&format!("sudo ip link set up dev {}", guest_net_iface))
+                    .unwrap());
+
+                // Check the connection works properly between the two VMs
+                assert!(guest2
+                    .ssh_command_ok("iperf3 -c 172.100.0.1 -t 10 -p 4444")
+                    .unwrap());
+            });
+
+            let _ = child1.kill();
+            let _ = child2.kill();
+
+            let output = child1.wait_with_output().unwrap();
+            child2.wait().unwrap();
+
+            handle_child_output(r, &output);
+        }
     }
 
     mod sequential {
