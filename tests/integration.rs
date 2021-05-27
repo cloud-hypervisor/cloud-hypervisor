@@ -355,7 +355,7 @@ mod tests {
 
             let mut fw_path = workload_path;
             #[cfg(target_arch = "aarch64")]
-            fw_path.push("Image");
+            fw_path.push("CLOUDHV_EFI.fd");
             #[cfg(target_arch = "x86_64")]
             fw_path.push("hypervisor-fw");
             let fw_path = String::from(fw_path.to_str().unwrap());
@@ -2036,6 +2036,41 @@ mod tests {
 
                     handle_child_output(r, &output);
                 });
+        }
+
+        #[test]
+        #[cfg(all(target_arch = "aarch64", feature = "acpi"))]
+        fn test_edk2_acpi_launch() {
+            let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+
+            vec![Box::new(focal)].drain(..).for_each(|disk_config| {
+                let guest = Guest::new(disk_config);
+
+                let mut child = GuestCommand::new(&guest)
+                    .args(&["--cpus", "boot=1"])
+                    .args(&["--memory", "size=512M"])
+                    .args(&["--kernel", guest.fw_path.as_str()])
+                    .default_disks()
+                    .default_net()
+                    .args(&["--serial", "tty", "--console", "off"])
+                    .capture_output()
+                    .spawn()
+                    .unwrap();
+
+                let r = std::panic::catch_unwind(|| {
+                    guest.wait_vm_boot(Some(120)).unwrap();
+
+                    assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
+                    assert!(guest.get_total_memory().unwrap_or_default() > 400_000);
+                    assert!(guest.get_entropy().unwrap_or_default() >= 900);
+                    assert_eq!(guest.get_pci_bridge_class().unwrap_or_default(), "0x060000");
+                });
+
+                let _ = child.kill();
+                let output = child.wait_with_output().unwrap();
+
+                handle_child_output(r, &output);
+            });
         }
 
         #[test]

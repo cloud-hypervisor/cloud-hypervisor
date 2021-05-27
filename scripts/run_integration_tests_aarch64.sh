@@ -301,6 +301,17 @@ echo "Integration test on FDT finished with result $RES."
 if [ $RES -eq 0 ]; then
     # Test with EDK2 + ACPI
     cargo build --all --release $features_build_acpi --target $BUILD_TARGET
+    strip target/$BUILD_TARGET/release/cloud-hypervisor
+    strip target/$BUILD_TARGET/release/vhost_user_net
+    strip target/$BUILD_TARGET/release/ch-remote
+
+    # Enable KSM with some reasonable parameters so that it won't take too long
+    # for the memory to be merged between two processes.
+    sudo bash -c "echo 1000000 > /sys/kernel/mm/ksm/pages_to_scan"
+    sudo bash -c "echo 10 > /sys/kernel/mm/ksm/sleep_millisecs"
+    sudo bash -c "echo 1 > /sys/kernel/mm/ksm/run"
+
+    time cargo test $features_test_acpi "tests::parallel::test_edk2_acpi_launch"
     RES=$?
     echo "Integration test on UEFI & ACPI finished with result $RES."
 fi
