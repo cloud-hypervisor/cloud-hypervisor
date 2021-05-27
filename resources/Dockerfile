@@ -1,7 +1,7 @@
 FROM ubuntu:20.04 as dev
 
 ARG TARGETARCH
-ARG RUST_TOOLCHAIN="1.51.0"
+ARG RUST_TOOLCHAIN="1.52.1"
 ARG CLH_SRC_DIR="/cloud-hypervisor"
 ARG CLH_BUILD_DIR="$CLH_SRC_DIR/build"
 ARG CARGO_REGISTRY_DIR="$CLH_BUILD_DIR/cargo_registry"
@@ -39,8 +39,11 @@ RUN apt-get update \
 	cpio \
 	python3-setuptools \
 	ntfs-3g \
+	openvswitch-switch-dpdk \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+RUN update-alternatives --set ovs-vswitchd /usr/lib/openvswitch-switch-dpdk/ovs-vswitchd-dpdk
 
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
 	apt-get update \
