@@ -52,9 +52,9 @@ dependencies = [
  "linux-loader",
  "log",
  "serde",
- "serde_derive",
- "serde_json",
  "thiserror",
+ "versionize",
+ "versionize_derive",
  "vm-fdt",
  "vm-memory",
  "vm-migration",
@@ -150,7 +150,7 @@ dependencies = [
  "libc",
  "log",
  "option_parser",
- "seccomp 0.1.0 (git+https://github.com/firecracker-microvm/firecracker?tag=v0.24.3)",
+ "seccomp",
  "serde_json",
  "signal-hook",
  "thiserror",
@@ -168,7 +168,7 @@ dependencies = [
  "libc",
  "libfuzzer-sys",
  "qcow",
- "seccomp 0.1.0 (git+https://github.com/firecracker-microvm/firecracker?tag=v0.24.4)",
+ "seccomp",
  "virtio-devices",
  "vm-memory",
  "vm-virtio",
@@ -310,12 +310,13 @@ checksum = "789da6d93f1b866ffe175afc5322a4d76c038605a1c3319bb57b06967ca98a36"
 
 [[package]]
 name = "libfuzzer-sys"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a9dc6556604b8ad76486563d5a47fad989b643932fa006e76e23d948bef0f5b"
+checksum = "36a9a84a6e8b55dfefb04235e55edb2b9a2a18488fcae777a6bdaa6f06f1deb3"
 dependencies = [
  "arbitrary",
  "cc",
+ "once_cell",
 ]
 
 [[package]]
@@ -371,6 +372,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "once_cell"
+version = "1.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af8b08b04175473088b46763e51ee54da5f9a164bc162f615b91bc179dbf15a3"
+
+[[package]]
 name = "option_parser"
 version = "0.1.0"
 
@@ -383,9 +390,8 @@ dependencies = [
  "hypervisor",
  "libc",
  "log",
- "serde",
- "serde_derive",
- "serde_json",
+ "versionize",
+ "versionize_derive",
  "vfio-bindings",
  "vfio-ioctls",
  "vm-allocator",
@@ -449,14 +455,6 @@ name = "ryu"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71d301d4193d031abdd79ff7e3dd721168a9572ef3fe51a1517aba235bd8f86e"
-
-[[package]]
-name = "seccomp"
-version = "0.1.0"
-source = "git+https://github.com/firecracker-microvm/firecracker?tag=v0.24.3#9f447fe65c1c549ef7b0abe863428fa33ffe5f79"
-dependencies = [
- "libc",
-]
 
 [[package]]
 name = "seccomp"
@@ -678,7 +676,7 @@ dependencies = [
  "net_util",
  "pci",
  "rate_limiter",
- "seccomp 0.1.0 (git+https://github.com/firecracker-microvm/firecracker?tag=v0.24.3)",
+ "seccomp",
  "serde",
  "serde_derive",
  "serde_json",
@@ -783,7 +781,7 @@ dependencies = [
  "option_parser",
  "pci",
  "qcow",
- "seccomp 0.1.0 (git+https://github.com/firecracker-microvm/firecracker?tag=v0.24.3)",
+ "seccomp",
  "serde",
  "serde_derive",
  "serde_json",
