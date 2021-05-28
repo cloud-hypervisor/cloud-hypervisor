@@ -16,7 +16,7 @@ use super::super::InitramfsConfig;
 use super::get_fdt_addr;
 use super::gic::GicDevice;
 use super::layout::{
-    FDT_MAX_SIZE, IRQ_BASE, MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START, PCI_MMCONFIG_SIZE,
+    IRQ_BASE, MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START, PCI_MMCONFIG_SIZE,
     PCI_MMCONFIG_START,
 };
 use vm_fdt::{FdtWriter, FdtWriterResult};
@@ -107,7 +107,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     // End Header node.
     fdt.end_node(root_node)?;
 
-    let fdt_final = fdt.finish(FDT_MAX_SIZE)?;
+    let fdt_final = fdt.finish()?;
 
     Ok(fdt_final)
 }
