@@ -404,6 +404,13 @@ mod tests {
             )
         }
 
+        fn ssh_command_ok(&self, command: &str) -> Result<bool, SshCommandError> {
+            Ok(self
+                .ssh_command(&format!("{} && echo ok", command))?
+                .trim()
+                .ends_with("ok"))
+        }
+
         fn ssh_command(&self, command: &str) -> Result<String, SshCommandError> {
             ssh_command_ip(
                 command,
@@ -524,10 +531,10 @@ mod tests {
         fn check_numa_node_cpus(&self, node_id: usize, cpus: Vec<usize>) -> Result<bool, Error> {
             for cpu in cpus.iter() {
                 let cmd = format!(
-                    "[ -d \"/sys/devices/system/node/node{}/cpu{}\" ]  && echo ok",
+                    "[ -d \"/sys/devices/system/node/node{}/cpu{}\" ]",
                     node_id, cpu
                 );
-                if self.ssh_command(cmd.as_str())?.trim() != "ok" {
+                if !self.ssh_command_ok(cmd.as_str())? {
                     return Ok(false);
                 }
             }
@@ -549,34 +556,22 @@ mod tests {
         }
 
         fn check_sgx_support(&self) -> Result<bool, Error> {
-            if self
-                .ssh_command(
-                    "cpuid -l 0x7 -s 0 | tr -s [:space:] | grep -q 'SGX: \
-                    Software Guard Extensions supported = true' && echo ok",
-                )?
-                .trim()
-                != "ok"
-            {
+            if !self.ssh_command_ok(
+                "cpuid -l 0x7 -s 0 | tr -s [:space:] | grep -q 'SGX: \
+                    Software Guard Extensions supported = true'",
+            )? {
                 return Ok(false);
             }
-            if self
-                .ssh_command(
-                    "cpuid -l 0x7 -s 0 | tr -s [:space:] | grep -q 'SGX_LC: \
-                    SGX launch config supported = true' && echo ok",
-                )?
-                .trim()
-                != "ok"
-            {
+            if !self.ssh_command_ok(
+                "cpuid -l 0x7 -s 0 | tr -s [:space:] | grep -q 'SGX_LC: \
+                    SGX launch config supported = true'",
+            )? {
                 return Ok(false);
             }
-            if self
-                .ssh_command(
-                    "cpuid -l 0x12 -s 0 | tr -s [:space:] | grep -q 'SGX1 \
-                    supported = true' && echo ok",
-                )?
-                .trim()
-                != "ok"
-            {
+            if !self.ssh_command_ok(
+                "cpuid -l 0x12 -s 0 | tr -s [:space:] | grep -q 'SGX1 \
+                    supported = true'",
+            )? {
                 return Ok(false);
             }
 
@@ -724,12 +719,7 @@ mod tests {
             assert!(device_query_result.contains("Result = PASS"));
 
             // Run NVIDIA DCGM Diagnostics to validate the device is functional
-            assert_eq!(
-                self.ssh_command("sudo nv-hostengine && echo ok")
-                    .unwrap()
-                    .trim(),
-                "ok"
-            );
+            assert!(self.ssh_command_ok("sudo nv-hostengine").unwrap());
 
             assert!(self
                 .ssh_command("sudo dcgmi discovery -l")
@@ -1404,11 +1394,10 @@ mod tests {
             // Mount shared directory through virtio_fs filesystem
             let mount_cmd = format!(
                 "mkdir -p mount_dir && \
-                 sudo mount -t virtiofs {} myfs mount_dir/ && \
-                 echo ok",
+                 sudo mount -t virtiofs {} myfs mount_dir/",
                 dax_mount_param
             );
-            assert_eq!(guest.ssh_command(&mount_cmd).unwrap().trim(), "ok");
+            assert!(guest.ssh_command_ok(&mount_cmd).unwrap());
 
             assert!(guest
                 .valid_virtio_fs_cache_size(dax, cache_size)
@@ -1452,13 +1441,7 @@ mod tests {
 
             if hotplug {
                 // Remove from VM
-                assert_eq!(
-                    guest
-                        .ssh_command("sudo umount mount_dir && echo ok")
-                        .unwrap()
-                        .trim(),
-                    "ok"
-                );
+                assert!(guest.ssh_command_ok("sudo umount mount_dir").unwrap());
                 assert!(remote_command(&api_socket, "remove-device", Some("myfs0")));
             }
         });
@@ -1488,11 +1471,10 @@ mod tests {
                 // Mount shared directory through virtio_fs filesystem
                 let mount_cmd = format!(
                     "mkdir -p mount_dir && \
-                     sudo mount -t virtiofs {} myfs mount_dir/ && \
-                     echo ok",
+                     sudo mount -t virtiofs {} myfs mount_dir/",
                     dax_mount_param
                 );
-                assert_eq!(guest.ssh_command(&mount_cmd).unwrap().trim(), "ok");
+                assert!(guest.ssh_command_ok(&mount_cmd).unwrap());
                 // Check file1 exists and its content is "foo"
                 assert_eq!(
                     guest.ssh_command("cat mount_dir/file1").unwrap().trim(),
