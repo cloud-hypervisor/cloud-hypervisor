@@ -131,30 +131,21 @@ pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, Region
 }
 
 /// Configures the system and should be called once per vm before starting vcpu threads.
-///
-/// # Arguments
-///
-/// * `guest_mem` - The memory to be used by the guest.
-/// * `num_cpus` - Number of virtual CPUs the guest will have.
-#[allow(clippy::too_many_arguments)]
 pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHasher>(
-    vm: &Arc<dyn hypervisor::Vm>,
     guest_mem: &GuestMemoryMmap,
     cmdline_cstring: &CStr,
-    vcpu_count: u64,
     vcpu_mpidr: Vec<u64>,
     device_info: &HashMap<(DeviceType, String), T, S>,
     initrd: &Option<super::InitramfsConfig>,
     pci_space_address: &(u64, u64),
-) -> super::Result<Box<dyn GicDevice>> {
-    let gic_device = gic::kvm::create_gic(vm, vcpu_count).map_err(Error::SetupGic)?;
-
+    gic_device: &dyn GicDevice,
+) -> super::Result<()> {
     let fdt_final = fdt::create_fdt(
         guest_mem,
         cmdline_cstring,
         vcpu_mpidr,
         device_info,
-        &*gic_device,
+        gic_device,
         initrd,
         pci_space_address,
     )
@@ -162,7 +153,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Bui
 
     fdt::write_fdt_to_memory(fdt_final, guest_mem).map_err(Error::WriteFdtToMemory)?;
 
-    Ok(gic_device)
+    Ok(())
 }
 
 /// Returns the memory address where the initramfs could be loaded.
