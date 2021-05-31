@@ -1021,17 +1021,22 @@ impl Vm {
             );
         }
 
-        // Call `configure_system` and pass the GIC devices out, so that
-        // we can register the GIC device to the device manager.
-        let gic_device = arch::configure_system(
+        let gic_device = create_gic(
             &self.memory_manager.lock().as_ref().unwrap().vm,
+            self.cpu_manager.lock().unwrap().boot_vcpus() as u64,
+        )
+        .map_err(|e| {
+            Error::ConfigureSystem(arch::Error::AArch64Setup(arch::aarch64::Error::SetupGic(e)))
+        })?;
+
+        arch::configure_system(
             &mem,
             &cmdline_cstring,
-            self.cpu_manager.lock().unwrap().boot_vcpus() as u64,
             vcpu_mpidrs,
             device_info,
             &initramfs_config,
             &pci_space,
+            &*gic_device,
         )
         .map_err(Error::ConfigureSystem)?;
 
