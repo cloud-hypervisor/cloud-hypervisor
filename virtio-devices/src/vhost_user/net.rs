@@ -6,8 +6,8 @@ use super::super::{
     VirtioCommon, VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST,
 };
 use super::vu_common_ctrl::{
-    add_memory_region, negotiate_features_vhost_user, reinitialize_vhost_user, reset_vhost_user,
-    setup_vhost_user, update_mem_table, VhostUserConfig,
+    add_memory_region, connect_vhost_user, negotiate_features_vhost_user, reinitialize_vhost_user,
+    reset_vhost_user, setup_vhost_user, update_mem_table, VhostUserConfig,
 };
 use super::{Error, Result};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
@@ -16,7 +16,6 @@ use net_util::{build_net_config_space, CtrlQueue, MacAddr, VirtioNetConfig};
 use seccomp::{SeccompAction, SeccompFilter};
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
-use std::os::unix::net::UnixListener;
 use std::result;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
@@ -135,25 +134,18 @@ impl ReconnectEpollHandler {
             epoll::Events::EPOLLHUP,
         )?;
 
-        let num_queues = self.queues.len() as u64;
-
-        let mut vhost_user_net = if self.server {
-            std::fs::remove_file(&self.socket_path).map_err(EpollHelperError::IoError)?;
-            info!("Binding vhost-user-net listener...");
-            let listener =
-                UnixListener::bind(&self.socket_path).map_err(EpollHelperError::IoError)?;
-            info!("Waiting for incoming vhost-user-net connection...");
-            let (stream, _) = listener.accept().map_err(EpollHelperError::IoError)?;
-
-            Master::from_stream(stream, num_queues)
-        } else {
-            Master::connect(&self.socket_path, num_queues).map_err(|e| {
-                EpollHelperError::IoError(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("failed connecting vhost-user backend{:?}", e),
-                ))
-            })?
-        };
+        let mut vhost_user_net = connect_vhost_user(
+            self.server,
+            &self.socket_path,
+            self.queues.len() as u64,
+            true,
+        )
+        .map_err(|e| {
+            EpollHelperError::IoError(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("failed connecting vhost-user backend{:?}", e),
+            ))
+        })?;
 
         // Initialize the backend
         reinitialize_vhost_user(
@@ -254,17 +246,8 @@ impl Net {
         let mut config = VirtioNetConfig::default();
         build_net_config_space(&mut config, mac_addr, num_queues, &mut avail_features);
 
-        let mut vhost_user_net = if server {
-            info!("Binding vhost-user-net listener...");
-            let listener = UnixListener::bind(&vu_cfg.socket).map_err(Error::BindSocket)?;
-            info!("Waiting for incoming vhost-user-net connection...");
-            let (stream, _) = listener.accept().map_err(Error::AcceptConnection)?;
-
-            Master::from_stream(stream, num_queues as u64)
-        } else {
-            Master::connect(&vu_cfg.socket, num_queues as u64)
-                .map_err(Error::VhostUserCreateMaster)?
-        };
+        let mut vhost_user_net =
+            connect_vhost_user(server, &vu_cfg.socket, num_queues as u64, false)?;
 
         let avail_protocol_features = VhostUserProtocolFeatures::MQ
             | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
