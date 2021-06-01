@@ -1,17 +1,17 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::super::{
-    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
-    VirtioCommon, VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST,
-};
-use super::vu_common_ctrl::{
-    add_memory_region, connect_vhost_user, negotiate_features_vhost_user, reinitialize_vhost_user,
-    reset_vhost_user, setup_vhost_user, update_mem_table, VhostUserConfig,
-};
-use super::{Error, Result};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
-use crate::{VirtioInterrupt, VIRTIO_F_RING_EVENT_IDX, VIRTIO_F_VERSION_1};
+use crate::vhost_user::vu_common_ctrl::{
+    add_memory_region, connect_vhost_user, negotiate_features_vhost_user, reset_vhost_user,
+    setup_vhost_user, update_mem_table, VhostUserConfig,
+};
+use crate::vhost_user::{Error, ReconnectEpollHandler, Result};
+use crate::{
+    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
+    VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterrupt, EPOLL_HELPER_EVENT_LAST,
+    VIRTIO_F_RING_EVENT_IDX, VIRTIO_F_VERSION_1,
+};
 use net_util::{build_net_config_space, CtrlQueue, MacAddr, VirtioNetConfig};
 use seccomp::{SeccompAction, SeccompFilter};
 use std::ops::Deref;
@@ -84,115 +84,6 @@ impl EpollHelperHandler for NetCtrlEpollHandler {
             }
             _ => {
                 error!("Unknown event for virtio-net");
-                return true;
-            }
-        }
-
-        false
-    }
-}
-
-/// Reconnection thread
-// Event meaning the connection was closed.
-const HUP_CONNECTION_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
-
-pub struct ReconnectEpollHandler {
-    pub vu: Arc<Mutex<Master>>,
-    pub mem: GuestMemoryAtomic<GuestMemoryMmap>,
-    pub kill_evt: EventFd,
-    pub pause_evt: EventFd,
-    pub queues: Vec<Queue>,
-    pub queue_evts: Vec<EventFd>,
-    pub virtio_interrupt: Arc<dyn VirtioInterrupt>,
-    pub acked_features: u64,
-    pub acked_protocol_features: u64,
-    pub socket_path: String,
-    pub server: bool,
-}
-
-impl ReconnectEpollHandler {
-    pub fn run(
-        &mut self,
-        paused: Arc<AtomicBool>,
-        paused_sync: Arc<Barrier>,
-    ) -> std::result::Result<(), EpollHelperError> {
-        let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
-        helper.add_event_custom(
-            self.vu.lock().unwrap().as_raw_fd(),
-            HUP_CONNECTION_EVENT,
-            epoll::Events::EPOLLHUP,
-        )?;
-        helper.run(paused, paused_sync, self)?;
-
-        Ok(())
-    }
-
-    fn reconnect(&mut self, helper: &mut EpollHelper) -> std::result::Result<(), EpollHelperError> {
-        helper.del_event_custom(
-            self.vu.lock().unwrap().as_raw_fd(),
-            HUP_CONNECTION_EVENT,
-            epoll::Events::EPOLLHUP,
-        )?;
-
-        let mut vhost_user_net = connect_vhost_user(
-            self.server,
-            &self.socket_path,
-            self.queues.len() as u64,
-            true,
-        )
-        .map_err(|e| {
-            EpollHelperError::IoError(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("failed connecting vhost-user backend{:?}", e),
-            ))
-        })?;
-
-        // Initialize the backend
-        reinitialize_vhost_user(
-            &mut vhost_user_net,
-            self.mem.memory().deref(),
-            self.queues.clone(),
-            self.queue_evts
-                .iter()
-                .map(|q| q.try_clone().unwrap())
-                .collect(),
-            &self.virtio_interrupt,
-            self.acked_features,
-            self.acked_protocol_features,
-        )
-        .map_err(|e| {
-            EpollHelperError::IoError(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("failed reconnecting vhost-user backend{:?}", e),
-            ))
-        })?;
-
-        helper.add_event_custom(
-            vhost_user_net.as_raw_fd(),
-            HUP_CONNECTION_EVENT,
-            epoll::Events::EPOLLHUP,
-        )?;
-
-        // Update vhost-user reference
-        let mut vu = self.vu.lock().unwrap();
-        *vu = vhost_user_net;
-
-        Ok(())
-    }
-}
-
-impl EpollHelperHandler for ReconnectEpollHandler {
-    fn handle_event(&mut self, helper: &mut EpollHelper, event: &epoll::Event) -> bool {
-        let ev_type = event.data as u16;
-        match ev_type {
-            HUP_CONNECTION_EVENT => {
-                if let Err(e) = self.reconnect(helper) {
-                    error!("failed to reconnect vhost-user-net backend: {:?}", e);
-                    return true;
-                }
-            }
-            _ => {
-                error!("Unknown event for vhost-user-net reconnection thread");
                 return true;
             }
         }
