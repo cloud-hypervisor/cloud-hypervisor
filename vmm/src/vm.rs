@@ -1044,7 +1044,11 @@ impl Vm {
         self.device_manager
             .lock()
             .unwrap()
-            .set_gic_device_entity(Arc::new(Mutex::new(gic_device)));
+            .get_interrupt_controller()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .set_gic_device(Arc::new(Mutex::new(gic_device)));
 
         self.device_manager
             .lock()
@@ -1865,7 +1869,11 @@ impl Vm {
             self.device_manager
                 .lock()
                 .unwrap()
-                .get_gic_device_entity()
+                .get_interrupt_controller()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .get_gic_device()
                 .unwrap()
                 .lock()
                 .unwrap()
@@ -1898,7 +1906,11 @@ impl Vm {
         self.device_manager
             .lock()
             .unwrap()
-            .set_gic_device_entity(Arc::new(Mutex::new(gic_device)));
+            .get_interrupt_controller()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .set_gic_device(Arc::new(Mutex::new(gic_device)));
 
         // Here we prepare the GICR_TYPER registers from the restored vCPU states.
         self.device_manager
@@ -1911,7 +1923,11 @@ impl Vm {
             self.device_manager
                 .lock()
                 .unwrap()
-                .get_gic_device_entity()
+                .get_interrupt_controller()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .get_gic_device()
                 .unwrap()
                 .lock()
                 .unwrap()
