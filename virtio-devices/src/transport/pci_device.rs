@@ -27,6 +27,8 @@ use std::num::Wrapping;
 use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
+use versionize::{VersionMap, Versionize, VersionizeResult};
+use versionize_derive::Versionize;
 use vm_allocator::SystemAllocator;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
@@ -36,7 +38,9 @@ use vm_memory::{
     Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
     GuestUsize, Le32,
 };
-use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
+use vm_migration::{
+    Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
+};
 use vm_virtio::{queue, VirtioIommuRemapping, VIRTIO_MSI_NO_VECTOR};
 use vmm_sys_util::{errno::Result, eventfd::EventFd};
 
@@ -260,7 +264,7 @@ const NOTIFY_OFF_MULTIPLIER: u32 = 4; // A dword per notification address.
 const VIRTIO_PCI_VENDOR_ID: u16 = 0x1af4;
 const VIRTIO_PCI_DEVICE_ID_BASE: u16 = 0x1040; // Add to device type to get device ID.
 
-#[derive(Serialize, Deserialize)]
+#[derive(Versionize)]
 struct QueueState {
     max_size: u16,
     size: u16,
@@ -271,12 +275,14 @@ struct QueueState {
     used_ring: u64,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Versionize)]
 struct VirtioPciDeviceState {
     device_activated: bool,
     queues: Vec<QueueState>,
     interrupt_status: usize,
 }
+
+impl VersionMapped for VirtioPciDeviceState {}
 
 pub struct VirtioPciDevice {
     id: String,
@@ -1101,7 +1107,8 @@ impl Snapshottable for VirtioPciDevice {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        let mut virtio_pci_dev_snapshot = Snapshot::new_from_state(&self.id, &self.state())?;
+        let mut virtio_pci_dev_snapshot =
+            Snapshot::new_from_versioned_state(&self.id, &self.state())?;
 
         // Snapshot PciConfiguration
         virtio_pci_dev_snapshot.add_snapshot(self.configuration.snapshot()?);
@@ -1144,7 +1151,7 @@ impl Snapshottable for VirtioPciDevice {
             }
 
             // First restore the status of the virtqueues.
-            self.set_state(&virtio_pci_dev_section.to_state()?)
+            self.set_state(&virtio_pci_dev_section.to_versioned_state()?)
                 .map_err(|e| {
                     MigratableError::Restore(anyhow!(
                         "Could not restore VIRTIO_PCI_DEVICE state {:?}",
