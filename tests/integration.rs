@@ -5257,6 +5257,7 @@ mod tests {
         }
 
         #[test]
+        #[ignore]
         fn test_ovs_dpdk() {
             // Create OVS-DPDK bridge and ports
             std::process::Command::new("bash")
