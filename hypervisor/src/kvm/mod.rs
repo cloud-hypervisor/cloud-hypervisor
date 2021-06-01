@@ -373,7 +373,7 @@ impl vm::Vm for KvmVm {
         let data = TdxInitVm {
             max_vcpus,
             reserved: 0,
-            attributes: 0,
+            attributes: 1, // TDX1_TD_ATTRIBUTE_DEBUG,
             cpuid: cpuid.as_fam_struct_ptr() as u64,
         };
 
