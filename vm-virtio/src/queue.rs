@@ -384,11 +384,7 @@ impl<'a, 'b> Iterator for AvailIter<'a, 'b> {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(remote = "GuestAddress")]
-struct GuestAddressDef(pub u64);
-
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone)]
 /// A virtio queue's parameters.
 pub struct Queue {
     /// The maximal size in elements offered by the device
@@ -403,22 +399,18 @@ pub struct Queue {
     /// Interrupt vector index of the queue
     pub vector: u16,
 
-    #[serde(with = "GuestAddressDef")]
     /// Guest physical address of the descriptor table
     pub desc_table: GuestAddress,
 
-    #[serde(with = "GuestAddressDef")]
     /// Guest physical address of the available ring
     pub avail_ring: GuestAddress,
 
-    #[serde(with = "GuestAddressDef")]
     /// Guest physical address of the used ring
     pub used_ring: GuestAddress,
 
     pub next_avail: Wrapping<u16>,
     pub next_used: Wrapping<u16>,
 
-    #[serde(skip)]
     pub iommu_mapping_cb: Option<Arc<VirtioIommuRemapping>>,
 
     /// VIRTIO_F_RING_EVENT_IDX negotiated

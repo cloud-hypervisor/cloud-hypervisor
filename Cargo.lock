@@ -1255,9 +1255,6 @@ name = "vm-virtio"
 version = "0.1.0"
 dependencies = [
  "log",
- "serde",
- "serde_derive",
- "serde_json",
  "virtio-bindings",
  "vm-memory",
 ]

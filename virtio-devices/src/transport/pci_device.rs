@@ -261,9 +261,20 @@ const VIRTIO_PCI_VENDOR_ID: u16 = 0x1af4;
 const VIRTIO_PCI_DEVICE_ID_BASE: u16 = 0x1040; // Add to device type to get device ID.
 
 #[derive(Serialize, Deserialize)]
+struct QueueState {
+    max_size: u16,
+    size: u16,
+    ready: bool,
+    vector: u16,
+    desc_table: u64,
+    avail_ring: u64,
+    used_ring: u64,
+}
+
+#[derive(Serialize, Deserialize)]
 struct VirtioPciDeviceState {
     device_activated: bool,
-    queues: Vec<Queue>,
+    queues: Vec<QueueState>,
     interrupt_status: usize,
 }
 
@@ -451,7 +462,19 @@ impl VirtioPciDevice {
         VirtioPciDeviceState {
             device_activated: self.device_activated.load(Ordering::Acquire),
             interrupt_status: self.interrupt_status.load(Ordering::Acquire),
-            queues: self.queues.clone(),
+            queues: self
+                .queues
+                .iter()
+                .map(|q| QueueState {
+                    max_size: q.max_size,
+                    size: q.size,
+                    ready: q.ready,
+                    vector: q.vector,
+                    desc_table: q.desc_table.0,
+                    avail_ring: q.avail_ring.0,
+                    used_ring: q.used_ring.0,
+                })
+                .collect(),
         }
     }
 
@@ -469,9 +492,9 @@ impl VirtioPciDevice {
                 queue.size = state.queues[i].size;
                 queue.ready = state.queues[i].ready;
                 queue.vector = state.queues[i].vector;
-                queue.desc_table = state.queues[i].desc_table;
-                queue.avail_ring = state.queues[i].avail_ring;
-                queue.used_ring = state.queues[i].used_ring;
+                queue.desc_table = GuestAddress(state.queues[i].desc_table);
+                queue.avail_ring = GuestAddress(state.queues[i].avail_ring);
+                queue.used_ring = GuestAddress(state.queues[i].used_ring);
                 queue.next_avail = Wrapping(
                     queue
                         .used_index_from_memory(&mem)
