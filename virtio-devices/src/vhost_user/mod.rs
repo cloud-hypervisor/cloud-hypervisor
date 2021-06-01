@@ -2,13 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    VIRTIO_F_IN_ORDER, VIRTIO_F_NOTIFICATION_DATA, VIRTIO_F_ORDER_PLATFORM,
-    VIRTIO_F_RING_EVENT_IDX, VIRTIO_F_RING_INDIRECT_DESC, VIRTIO_F_RING_PACKED, VIRTIO_F_VERSION_1,
+    EpollHelper, EpollHelperError, EpollHelperHandler, Queue, VirtioInterrupt,
+    EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IN_ORDER, VIRTIO_F_NOTIFICATION_DATA,
+    VIRTIO_F_ORDER_PLATFORM, VIRTIO_F_RING_EVENT_IDX, VIRTIO_F_RING_INDIRECT_DESC,
+    VIRTIO_F_RING_PACKED, VIRTIO_F_VERSION_1,
 };
 use std::io;
+use std::ops::Deref;
+use std::os::unix::io::AsRawFd;
+use std::sync::{atomic::AtomicBool, Arc, Barrier, Mutex};
 use vhost::vhost_user::message::VhostUserVirtioFeatures;
+use vhost::vhost_user::Master;
 use vhost::Error as VhostError;
-use vm_memory::Error as MmapError;
+use vm_memory::{Error as MmapError, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
+use vmm_sys_util::eventfd::EventFd;
+use vu_common_ctrl::{connect_vhost_user, reinitialize_vhost_user};
 
 pub mod blk;
 pub mod fs;
@@ -114,3 +122,110 @@ pub const DEFAULT_VIRTIO_FEATURES: u64 = 1 << VIRTIO_F_RING_INDIRECT_DESC
     | 1 << VIRTIO_F_ORDER_PLATFORM
     | 1 << VIRTIO_F_NOTIFICATION_DATA
     | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
+
+const HUP_CONNECTION_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
+
+pub struct ReconnectEpollHandler {
+    pub vu: Arc<Mutex<Master>>,
+    pub mem: GuestMemoryAtomic<GuestMemoryMmap>,
+    pub kill_evt: EventFd,
+    pub pause_evt: EventFd,
+    pub queues: Vec<Queue>,
+    pub queue_evts: Vec<EventFd>,
+    pub virtio_interrupt: Arc<dyn VirtioInterrupt>,
+    pub acked_features: u64,
+    pub acked_protocol_features: u64,
+    pub socket_path: String,
+    pub server: bool,
+}
+
+impl ReconnectEpollHandler {
+    pub fn run(
+        &mut self,
+        paused: Arc<AtomicBool>,
+        paused_sync: Arc<Barrier>,
+    ) -> std::result::Result<(), EpollHelperError> {
+        let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
+        helper.add_event_custom(
+            self.vu.lock().unwrap().as_raw_fd(),
+            HUP_CONNECTION_EVENT,
+            epoll::Events::EPOLLHUP,
+        )?;
+        helper.run(paused, paused_sync, self)?;
+
+        Ok(())
+    }
+
+    fn reconnect(&mut self, helper: &mut EpollHelper) -> std::result::Result<(), EpollHelperError> {
+        helper.del_event_custom(
+            self.vu.lock().unwrap().as_raw_fd(),
+            HUP_CONNECTION_EVENT,
+            epoll::Events::EPOLLHUP,
+        )?;
+
+        let mut vhost_user = connect_vhost_user(
+            self.server,
+            &self.socket_path,
+            self.queues.len() as u64,
+            true,
+        )
+        .map_err(|e| {
+            EpollHelperError::IoError(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("failed connecting vhost-user backend{:?}", e),
+            ))
+        })?;
+
+        // Initialize the backend
+        reinitialize_vhost_user(
+            &mut vhost_user,
+            self.mem.memory().deref(),
+            self.queues.clone(),
+            self.queue_evts
+                .iter()
+                .map(|q| q.try_clone().unwrap())
+                .collect(),
+            &self.virtio_interrupt,
+            self.acked_features,
+            self.acked_protocol_features,
+        )
+        .map_err(|e| {
+            EpollHelperError::IoError(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("failed reconnecting vhost-user backend{:?}", e),
+            ))
+        })?;
+
+        helper.add_event_custom(
+            vhost_user.as_raw_fd(),
+            HUP_CONNECTION_EVENT,
+            epoll::Events::EPOLLHUP,
+        )?;
+
+        // Update vhost-user reference
+        let mut vu = self.vu.lock().unwrap();
+        *vu = vhost_user;
+
+        Ok(())
+    }
+}
+
+impl EpollHelperHandler for ReconnectEpollHandler {
+    fn handle_event(&mut self, helper: &mut EpollHelper, event: &epoll::Event) -> bool {
+        let ev_type = event.data as u16;
+        match ev_type {
+            HUP_CONNECTION_EVENT => {
+                if let Err(e) = self.reconnect(helper) {
+                    error!("failed to reconnect vhost-user backend: {:?}", e);
+                    return true;
+                }
+            }
+            _ => {
+                error!("Unknown event for vhost-user reconnection thread");
+                return true;
+            }
+        }
+
+        false
+    }
+}
