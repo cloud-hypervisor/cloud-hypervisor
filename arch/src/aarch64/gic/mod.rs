@@ -10,6 +10,7 @@ pub mod redist_regs;
 pub use self::dist_regs::{get_dist_regs, read_ctlr, set_dist_regs, write_ctlr};
 pub use self::icc_regs::{get_icc_regs, set_icc_regs};
 pub use self::redist_regs::{get_redist_regs, set_redist_regs};
+use hypervisor::CpuState;
 use std::any::Any;
 use std::result;
 use std::sync::Arc;
@@ -58,7 +59,7 @@ pub trait GicDevice: Send {
     }
 
     /// Get the values of GICR_TYPER for each vCPU.
-    fn set_gicr_typers(&mut self, gicr_typers: Vec<u64>);
+    fn set_gicr_typers(&mut self, vcpu_states: &[CpuState]);
 
     /// Downcast the trait object to its concrete type.
     fn as_any_concrete_mut(&mut self) -> &mut dyn Any;

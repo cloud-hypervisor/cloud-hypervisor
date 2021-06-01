@@ -1860,12 +1860,7 @@ impl Vm {
         vm_snapshot: &mut Snapshot,
     ) -> std::result::Result<(), MigratableError> {
         let saved_vcpu_states = self.cpu_manager.lock().unwrap().get_saved_states();
-        self.device_manager
-            .lock()
-            .unwrap()
-            .construct_gicr_typers(&saved_vcpu_states);
-
-        vm_snapshot.add_snapshot(
+        let gic_device = Arc::clone(
             self.device_manager
                 .lock()
                 .unwrap()
@@ -1874,7 +1869,16 @@ impl Vm {
                 .lock()
                 .unwrap()
                 .get_gic_device()
-                .unwrap()
+                .unwrap(),
+        );
+
+        gic_device
+            .lock()
+            .unwrap()
+            .set_gicr_typers(&saved_vcpu_states);
+
+        vm_snapshot.add_snapshot(
+            gic_device
                 .lock()
                 .unwrap()
                 .as_any_concrete_mut()
@@ -1899,9 +1903,13 @@ impl Vm {
         // Creating a GIC device here, as the GIC will not be created when
         // restoring the device manager. Note that currently only the bare GICv3
         // without ITS is supported.
-        let gic_device = create_gic(&self.vm, vcpu_numbers.try_into().unwrap())
+        let mut gic_device = create_gic(&self.vm, vcpu_numbers.try_into().unwrap())
             .map_err(|e| MigratableError::Restore(anyhow!("Could not create GIC: {:#?}", e)))?;
 
+        // Here we prepare the GICR_TYPER registers from the restored vCPU states.
+        gic_device.set_gicr_typers(&saved_vcpu_states);
+
+        let gic_device = Arc::new(Mutex::new(gic_device));
         // Update the GIC entity in device manager
         self.device_manager
             .lock()
@@ -1910,25 +1918,11 @@ impl Vm {
             .unwrap()
             .lock()
             .unwrap()
-            .set_gic_device(Arc::new(Mutex::new(gic_device)));
-
-        // Here we prepare the GICR_TYPER registers from the restored vCPU states.
-        self.device_manager
-            .lock()
-            .unwrap()
-            .construct_gicr_typers(&saved_vcpu_states);
+            .set_gic_device(Arc::clone(&gic_device));
 
         // Restore GIC states.
         if let Some(gic_v3_snapshot) = vm_snapshot.snapshots.get(GIC_V3_SNAPSHOT_ID) {
-            self.device_manager
-                .lock()
-                .unwrap()
-                .get_interrupt_controller()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .get_gic_device()
-                .unwrap()
+            gic_device
                 .lock()
                 .unwrap()
                 .as_any_concrete_mut()

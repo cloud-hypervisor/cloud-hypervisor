@@ -5,11 +5,14 @@ pub mod kvm {
     use crate::aarch64::gic::dist_regs::{get_dist_regs, read_ctlr, set_dist_regs, write_ctlr};
     use crate::aarch64::gic::icc_regs::{get_icc_regs, set_icc_regs};
     use crate::aarch64::gic::kvm::{save_pending_tables, KvmGicDevice};
-    use crate::aarch64::gic::redist_regs::{get_redist_regs, set_redist_regs};
+    use crate::aarch64::gic::redist_regs::{
+        construct_gicr_typers, get_redist_regs, set_redist_regs,
+    };
     use crate::aarch64::gic::GicDevice;
     use crate::layout;
     use anyhow::anyhow;
     use hypervisor::kvm::kvm_bindings;
+    use hypervisor::CpuState;
     use std::any::Any;
     use std::convert::TryInto;
     use std::sync::Arc;
@@ -165,7 +168,8 @@ pub mod kvm {
             self.vcpu_count
         }
 
-        fn set_gicr_typers(&mut self, gicr_typers: Vec<u64>) {
+        fn set_gicr_typers(&mut self, vcpu_states: &[CpuState]) {
+            let gicr_typers = construct_gicr_typers(vcpu_states);
             self.gicr_typers = gicr_typers;
         }
 
