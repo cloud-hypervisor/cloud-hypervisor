@@ -24,6 +24,7 @@ pub struct EpollHelper {
 pub enum EpollHelperError {
     CreateFd(std::io::Error),
     Ctl(std::io::Error),
+    IoError(std::io::Error),
     Wait(std::io::Error),
 }
 
@@ -57,11 +58,35 @@ impl EpollHelper {
     }
 
     pub fn add_event(&mut self, fd: RawFd, id: u16) -> std::result::Result<(), EpollHelperError> {
+        self.add_event_custom(fd, id, epoll::Events::EPOLLIN)
+    }
+
+    pub fn add_event_custom(
+        &mut self,
+        fd: RawFd,
+        id: u16,
+        evts: epoll::Events,
+    ) -> std::result::Result<(), EpollHelperError> {
         epoll::ctl(
             self.epoll_file.as_raw_fd(),
             epoll::ControlOptions::EPOLL_CTL_ADD,
             fd,
-            epoll::Event::new(epoll::Events::EPOLLIN, id.into()),
+            epoll::Event::new(evts, id.into()),
+        )
+        .map_err(EpollHelperError::Ctl)
+    }
+
+    pub fn del_event_custom(
+        &mut self,
+        fd: RawFd,
+        id: u16,
+        evts: epoll::Events,
+    ) -> std::result::Result<(), EpollHelperError> {
+        epoll::ctl(
+            self.epoll_file.as_raw_fd(),
+            epoll::ControlOptions::EPOLL_CTL_DEL,
+            fd,
+            epoll::Event::new(evts, id.into()),
         )
         .map_err(EpollHelperError::Ctl)
     }
