@@ -10,10 +10,12 @@ use crate::{Queue, VirtioDevice};
 use byteorder::{ByteOrder, LittleEndian};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
+use versionize::{VersionMap, Versionize, VersionizeResult};
+use versionize_derive::Versionize;
 use vm_memory::GuestAddress;
-use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable};
+use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, VersionMapped};
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Versionize)]
 pub struct VirtioPciCommonConfigState {
     pub driver_status: u8,
     pub config_generation: u8,
@@ -22,6 +24,8 @@ pub struct VirtioPciCommonConfigState {
     pub queue_select: u16,
     pub msix_config: u16,
 }
+
+impl VersionMapped for VirtioPciCommonConfigState {}
 
 /// Contains the data for reading and writing the common configuration structure of a virtio PCI
 /// device.
@@ -289,11 +293,11 @@ impl Snapshottable for VirtioPciCommonConfig {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        Snapshot::new_from_state(&self.id(), &self.state())
+        Snapshot::new_from_versioned_state(&self.id(), &self.state())
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.set_state(&snapshot.to_state(&self.id())?);
+        self.set_state(&snapshot.to_versioned_state(&self.id())?);
         Ok(())
     }
 }
