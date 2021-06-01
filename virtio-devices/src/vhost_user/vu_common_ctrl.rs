@@ -6,6 +6,7 @@ use super::{Error, Result};
 use crate::{get_host_address_range, VirtioInterrupt, VirtioInterruptType};
 use std::convert::TryInto;
 use std::os::unix::io::AsRawFd;
+use std::os::unix::net::UnixListener;
 use std::sync::Arc;
 use std::vec::Vec;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
@@ -203,4 +204,26 @@ pub fn reinitialize_vhost_user(
         virtio_interrupt,
         acked_features,
     )
+}
+
+pub fn connect_vhost_user(
+    server: bool,
+    socket_path: &str,
+    num_queues: u64,
+    unlink_socket: bool,
+) -> Result<Master> {
+    Ok(if server {
+        if unlink_socket {
+            std::fs::remove_file(socket_path).map_err(Error::RemoveSocketPath)?;
+        }
+
+        info!("Binding vhost-user listener...");
+        let listener = UnixListener::bind(socket_path).map_err(Error::BindSocket)?;
+        info!("Waiting for incoming vhost-user connection...");
+        let (stream, _) = listener.accept().map_err(Error::AcceptConnection)?;
+
+        Master::from_stream(stream, num_queues)
+    } else {
+        Master::connect(socket_path, num_queues).map_err(Error::VhostUserConnect)?
+    })
 }

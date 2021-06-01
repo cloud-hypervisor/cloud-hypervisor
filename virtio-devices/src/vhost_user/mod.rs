@@ -41,6 +41,8 @@ pub enum Error {
     FailedSignalingUsedQueue(io::Error),
     /// Failed to read vhost eventfd.
     MemoryRegions(MmapError),
+    /// Failed removing socket path
+    RemoveSocketPath(io::Error),
     /// Failed to create master.
     VhostUserCreateMaster(VhostError),
     /// Failed to open vhost device.
