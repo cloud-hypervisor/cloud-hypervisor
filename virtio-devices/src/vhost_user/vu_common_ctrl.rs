@@ -173,3 +173,34 @@ pub fn reset_vhost_user(vu: &mut Master, num_queues: usize) -> Result<()> {
     // Reset the owner.
     vu.reset_owner().map_err(Error::VhostUserResetOwner)
 }
+
+pub fn reinitialize_vhost_user(
+    vu: &mut Master,
+    mem: &GuestMemoryMmap,
+    queues: Vec<Queue>,
+    queue_evts: Vec<EventFd>,
+    virtio_interrupt: &Arc<dyn VirtioInterrupt>,
+    acked_features: u64,
+    acked_protocol_features: u64,
+) -> Result<()> {
+    vu.set_owner().map_err(Error::VhostUserSetOwner)?;
+    vu.get_features().map_err(Error::VhostUserGetFeatures)?;
+
+    if acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
+        if let Some(acked_protocol_features) =
+            VhostUserProtocolFeatures::from_bits(acked_protocol_features)
+        {
+            vu.set_protocol_features(acked_protocol_features)
+                .map_err(Error::VhostUserSetProtocolFeatures)?;
+        }
+    }
+
+    setup_vhost_user(
+        vu,
+        mem,
+        queues,
+        queue_evts,
+        virtio_interrupt,
+        acked_features,
+    )
+}
