@@ -4,8 +4,9 @@
 
 use super::interrupt_controller::{Error, InterruptController};
 extern crate arch;
+use arch::aarch64::gic::GicDevice;
 use std::result;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceConfig, InterruptSourceGroup,
     LegacyIrqSourceConfig, MsiIrqGroupConfig,
@@ -26,6 +27,7 @@ pub const IRQ_LEGACY_COUNT: usize = 32;
 //   2. Move this file and ioapic.rs to arch/, as they are architecture specific.
 pub struct Gic {
     interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>,
+    gic_device: Option<Arc<Mutex<Box<dyn GicDevice>>>>,
 }
 
 impl Gic {
@@ -42,7 +44,16 @@ impl Gic {
 
         Ok(Gic {
             interrupt_source_group,
+            gic_device: None,
         })
+    }
+
+    pub fn set_gic_device(&mut self, gic_device: Arc<Mutex<Box<dyn GicDevice>>>) {
+        self.gic_device = Some(gic_device);
+    }
+
+    pub fn get_gic_device(&self) -> Option<&Arc<Mutex<Box<dyn GicDevice>>>> {
+        self.gic_device.as_ref()
     }
 }
 

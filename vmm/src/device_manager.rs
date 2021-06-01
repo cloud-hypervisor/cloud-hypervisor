@@ -1262,6 +1262,11 @@ impl DeviceManager {
     }
 
     #[cfg(target_arch = "aarch64")]
+    pub fn get_interrupt_controller(&mut self) -> Option<&Arc<Mutex<gic::Gic>>> {
+        self.interrupt_controller.as_ref()
+    }
+
+    #[cfg(target_arch = "aarch64")]
     pub fn set_gic_device_entity(&mut self, device_entity: Arc<Mutex<Box<dyn GicDevice>>>) {
         self.gic_device_entity = Some(device_entity);
     }
