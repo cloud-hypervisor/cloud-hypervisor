@@ -62,6 +62,16 @@ const MTRR_EDX_BIT: u8 = 12; // Hypervisor ecx bit.
 // KVM feature bits
 #[cfg(target_arch = "x86_64")]
 const KVM_FEATURE_ASYNC_PF_INT_BIT: u8 = 14;
+#[cfg(feature = "tdx")]
+const KVM_FEATURE_CLOCKSOURCE_BIT: u8 = 0;
+#[cfg(feature = "tdx")]
+const KVM_FEATURE_CLOCKSOURCE2_BIT: u8 = 3;
+#[cfg(feature = "tdx")]
+const KVM_FEATURE_CLOCKSOURCE_STABLE_BIT: u8 = 24;
+#[cfg(feature = "tdx")]
+const KVM_FEATURE_ASYNC_PF_BIT: u8 = 4;
+#[cfg(feature = "tdx")]
+const KVM_FEATURE_ASYNC_PF_VMEXIT_BIT: u8 = 10;
 
 #[cfg(feature = "acpi")]
 pub const CPU_MANAGER_ACPI_SIZE: usize = 0xc;
@@ -533,6 +543,7 @@ impl CpuManager {
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         seccomp_action: SeccompAction,
         vmmops: Arc<Box<dyn VmmOps>>,
+        #[cfg(feature = "tdx")] tdx_enabled: bool,
     ) -> Result<Arc<Mutex<CpuManager>>> {
         let guest_memory = memory_manager.lock().unwrap().guest_memory();
         let mut vcpu_states = Vec::with_capacity(usize::from(config.max_vcpus));
@@ -554,6 +565,8 @@ impl CpuManager {
                 sgx_epc_sections,
                 phys_bits,
                 config.kvm_hyperv,
+                #[cfg(feature = "tdx")]
+                tdx_enabled,
             )?
         };
 
@@ -605,6 +618,7 @@ impl CpuManager {
         sgx_epc_sections: Option<Vec<SgxEpcSection>>,
         phys_bits: u8,
         kvm_hyperv: bool,
+        #[cfg(feature = "tdx")] tdx_enabled: bool,
     ) -> Result<CpuId> {
         let cpuid_patches = vec![
             // Patch tsc deadline timer bit
@@ -674,6 +688,16 @@ impl CpuManager {
                 // TODO: Re-enable KVM_FEATURE_ASYNC_PF_INT (#2277)
                 0x4000_0001 => {
                     entry.eax &= !(1 << KVM_FEATURE_ASYNC_PF_INT_BIT);
+
+                    // These features are not supported by TDX
+                    #[cfg(feature = "tdx")]
+                    if tdx_enabled {
+                        entry.eax &= !(1 << KVM_FEATURE_CLOCKSOURCE_BIT
+                            | 1 << KVM_FEATURE_CLOCKSOURCE2_BIT
+                            | 1 << KVM_FEATURE_CLOCKSOURCE_STABLE_BIT
+                            | 1 << KVM_FEATURE_ASYNC_PF_BIT
+                            | 1 << KVM_FEATURE_ASYNC_PF_VMEXIT_BIT)
+                    }
                 }
                 _ => {}
             }

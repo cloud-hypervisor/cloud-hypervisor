@@ -558,6 +558,8 @@ impl Vm {
             hypervisor,
             seccomp_action.clone(),
             vm_ops,
+            #[cfg(feature = "tdx")]
+            config.lock().unwrap().tdx.is_some(),
         )
         .map_err(Error::CpuManager)?;
 
