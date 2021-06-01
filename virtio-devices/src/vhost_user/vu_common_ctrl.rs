@@ -8,6 +8,8 @@ use std::convert::TryInto;
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixListener;
 use std::sync::Arc;
+use std::thread::sleep;
+use std::time::{Duration, Instant};
 use std::vec::Vec;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost::vhost_user::{Master, VhostUserMaster};
@@ -212,7 +214,7 @@ pub fn connect_vhost_user(
     num_queues: u64,
     unlink_socket: bool,
 ) -> Result<Master> {
-    Ok(if server {
+    if server {
         if unlink_socket {
             std::fs::remove_file(socket_path).map_err(Error::RemoveSocketPath)?;
         }
@@ -222,8 +224,27 @@ pub fn connect_vhost_user(
         info!("Waiting for incoming vhost-user connection...");
         let (stream, _) = listener.accept().map_err(Error::AcceptConnection)?;
 
-        Master::from_stream(stream, num_queues)
+        Ok(Master::from_stream(stream, num_queues))
     } else {
-        Master::connect(socket_path, num_queues).map_err(Error::VhostUserConnect)?
-    })
+        let now = Instant::now();
+
+        // Retry connecting for a full minute
+        let err = loop {
+            let err = match Master::connect(socket_path, num_queues) {
+                Ok(m) => return Ok(m),
+                Err(e) => e,
+            };
+            sleep(Duration::from_millis(100));
+
+            if now.elapsed().as_secs() < 60 {
+                break err;
+            }
+        };
+
+        error!(
+            "Failed connecting the backend after trying for 1 minute: {:?}",
+            err
+        );
+        Err(Error::VhostUserConnect)
+    }
 }
