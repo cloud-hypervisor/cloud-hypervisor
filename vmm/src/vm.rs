@@ -75,6 +75,8 @@ use vmm_sys_util::terminal::Terminal;
 use arch::aarch64::gic::gicv3::kvm::{KvmGicV3, GIC_V3_SNAPSHOT_ID};
 #[cfg(target_arch = "aarch64")]
 use arch::aarch64::gic::kvm::create_gic;
+#[cfg(target_arch = "aarch64")]
+use devices::interrupt_controller::{self, InterruptController};
 
 /// Errors associated with VM management
 #[derive(Debug)]
@@ -104,7 +106,8 @@ pub enum Error {
     ConfigureSystem(arch::Error),
 
     /// Cannot enable interrupt controller
-    EnableInterruptController(device_manager::DeviceManagerError),
+    #[cfg(target_arch = "aarch64")]
+    EnableInterruptController(interrupt_controller::Error),
 
     PoisonedState,
 
@@ -1050,10 +1053,15 @@ impl Vm {
             .unwrap()
             .set_gic_device(Arc::new(Mutex::new(gic_device)));
 
+        // Activate gic device
         self.device_manager
             .lock()
             .unwrap()
-            .enable_interrupt_controller()
+            .get_interrupt_controller()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .enable()
             .map_err(Error::EnableInterruptController)?;
 
         Ok(())
@@ -1933,10 +1941,15 @@ impl Vm {
             return Err(MigratableError::Restore(anyhow!("Missing GICv3 snapshot")));
         }
 
+        // Activate gic device
         self.device_manager
             .lock()
             .unwrap()
-            .enable_interrupt_controller()
+            .get_interrupt_controller()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .enable()
             .map_err(|e| {
                 MigratableError::Restore(anyhow!(
                     "Could not enable interrupt controller routing: {:#?}",

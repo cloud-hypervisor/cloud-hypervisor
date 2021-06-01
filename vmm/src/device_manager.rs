@@ -1257,14 +1257,6 @@ impl DeviceManager {
         self.interrupt_controller.as_ref()
     }
 
-    #[cfg(target_arch = "aarch64")]
-    pub fn enable_interrupt_controller(&self) -> DeviceManagerResult<()> {
-        if let Some(interrupt_controller) = &self.interrupt_controller {
-            interrupt_controller.lock().unwrap().enable().unwrap();
-        }
-        Ok(())
-    }
-
     #[cfg(target_arch = "x86_64")]
     fn add_interrupt_controller(
         &mut self,
