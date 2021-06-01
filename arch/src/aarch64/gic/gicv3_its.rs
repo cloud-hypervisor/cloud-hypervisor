@@ -10,6 +10,7 @@ pub mod kvm {
     use crate::aarch64::gic::kvm::KvmGicDevice;
     use crate::aarch64::gic::{Error, GicDevice};
     use hypervisor::kvm::kvm_bindings;
+    use hypervisor::CpuState;
 
     pub struct KvmGicV3Its {
         /// The hypervisor agnostic device
@@ -70,7 +71,7 @@ pub mod kvm {
             self.vcpu_count
         }
 
-        fn set_gicr_typers(&mut self, _gicr_typers: Vec<u64>) {}
+        fn set_gicr_typers(&mut self, _vcpu_states: &[CpuState]) {}
 
         fn as_any_concrete_mut(&mut self) -> &mut dyn Any {
             self

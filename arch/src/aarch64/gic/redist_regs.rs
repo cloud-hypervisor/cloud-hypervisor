@@ -3,6 +3,7 @@
 
 use super::{Error, Result};
 use hypervisor::kvm::kvm_bindings::{kvm_device_attr, KVM_DEV_ARM_VGIC_GRP_REDIST_REGS};
+use hypervisor::CpuState;
 use std::sync::Arc;
 
 // Relevant redistributor registers that we want to save/restore.
@@ -176,4 +177,35 @@ pub fn set_redist_regs(
         &mut idx,
         true,
     )
+}
+
+pub fn construct_gicr_typers(vcpu_states: &[CpuState]) -> Vec<u64> {
+    /* Pre-construct the GICR_TYPER:
+     * For our implementation:
+     *  Top 32 bits are the affinity value of the associated CPU
+     *  CommonLPIAff == 01 (redistributors with same Aff3 share LPI table)
+     *  Processor_Number == CPU index starting from 0
+     *  DPGS == 0 (GICR_CTLR.DPG* not supported)
+     *  Last == 1 if this is the last redistributor in a series of
+     *            contiguous redistributor pages
+     *  DirectLPI == 0 (direct injection of LPIs not supported)
+     *  VLPIS == 0 (virtual LPIs not supported)
+     *  PLPIS == 0 (physical LPIs not supported)
+     */
+    let mut gicr_typers: Vec<u64> = Vec::new();
+    for (index, state) in vcpu_states.iter().enumerate() {
+        let last = {
+            if index == vcpu_states.len() - 1 {
+                1
+            } else {
+                0
+            }
+        };
+        //calculate affinity
+        let mut cpu_affid = state.mpidr & 1095233437695;
+        cpu_affid = ((cpu_affid & 0xFF00000000) >> 8) | (cpu_affid & 0xFFFFFF);
+        gicr_typers.push((cpu_affid << 32) | (1 << 24) | (index as u64) << 8 | (last << 4));
+    }
+
+    gicr_typers
 }

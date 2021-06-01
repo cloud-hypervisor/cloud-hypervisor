@@ -29,8 +29,6 @@ use crate::{device_node, DEVICE_MANAGER_SNAPSHOT_ID};
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml};
 use anyhow::anyhow;
-#[cfg(target_arch = "aarch64")]
-use arch::aarch64::gic::GicDevice;
 #[cfg(feature = "acpi")]
 use arch::layout;
 #[cfg(target_arch = "x86_64")]
@@ -55,8 +53,6 @@ use devices::{
 };
 #[cfg(feature = "kvm")]
 use hypervisor::kvm_ioctls::*;
-#[cfg(target_arch = "aarch64")]
-use hypervisor::CpuState;
 #[cfg(feature = "mshv")]
 use hypervisor::IoEventAddress;
 use libc::{
@@ -828,9 +824,6 @@ pub struct DeviceManager {
     #[cfg(target_arch = "aarch64")]
     interrupt_controller: Option<Arc<Mutex<gic::Gic>>>,
 
-    #[cfg(target_arch = "aarch64")]
-    gic_device_entity: Option<Arc<Mutex<Box<dyn GicDevice>>>>,
-
     // Things to be added to the commandline (i.e. for virtio-mmio)
     cmdline_additions: Vec<String>,
 
@@ -966,8 +959,6 @@ impl DeviceManager {
             address_manager: Arc::clone(&address_manager),
             console: Arc::new(Console::default()),
             interrupt_controller: None,
-            #[cfg(target_arch = "aarch64")]
-            gic_device_entity: None,
             cmdline_additions: Vec::new(),
             #[cfg(feature = "acpi")]
             ged_notification_device: None,
@@ -1264,51 +1255,6 @@ impl DeviceManager {
     #[cfg(target_arch = "aarch64")]
     pub fn get_interrupt_controller(&mut self) -> Option<&Arc<Mutex<gic::Gic>>> {
         self.interrupt_controller.as_ref()
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    pub fn set_gic_device_entity(&mut self, device_entity: Arc<Mutex<Box<dyn GicDevice>>>) {
-        self.gic_device_entity = Some(device_entity);
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    pub fn get_gic_device_entity(&self) -> Option<&Arc<Mutex<Box<dyn GicDevice>>>> {
-        self.gic_device_entity.as_ref()
-    }
-    #[cfg(target_arch = "aarch64")]
-    pub fn construct_gicr_typers(&self, vcpu_states: &[CpuState]) {
-        /* Pre-construct the GICR_TYPER:
-         * For our implementation:
-         *  Top 32 bits are the affinity value of the associated CPU
-         *  CommonLPIAff == 01 (redistributors with same Aff3 share LPI table)
-         *  Processor_Number == CPU index starting from 0
-         *  DPGS == 0 (GICR_CTLR.DPG* not supported)
-         *  Last == 1 if this is the last redistributor in a series of
-         *            contiguous redistributor pages
-         *  DirectLPI == 0 (direct injection of LPIs not supported)
-         *  VLPIS == 0 (virtual LPIs not supported)
-         *  PLPIS == 0 (physical LPIs not supported)
-         */
-        let mut gicr_typers: Vec<u64> = Vec::new();
-        for (index, state) in vcpu_states.iter().enumerate() {
-            let last = {
-                if index == vcpu_states.len() - 1 {
-                    1
-                } else {
-                    0
-                }
-            };
-            //calculate affinity
-            let mut cpu_affid = state.mpidr & 1095233437695;
-            cpu_affid = ((cpu_affid & 0xFF00000000) >> 8) | (cpu_affid & 0xFFFFFF);
-            gicr_typers.push((cpu_affid << 32) | (1 << 24) | (index as u64) << 8 | (last << 4));
-        }
-
-        self.get_gic_device_entity()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .set_gicr_typers(gicr_typers)
     }
 
     #[cfg(target_arch = "aarch64")]
