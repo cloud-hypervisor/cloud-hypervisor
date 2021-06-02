@@ -236,7 +236,7 @@ pub fn connect_vhost_user(
             };
             sleep(Duration::from_millis(100));
 
-            if now.elapsed().as_secs() < 60 {
+            if now.elapsed().as_secs() >= 60 {
                 break err;
             }
         };
