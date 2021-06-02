@@ -503,6 +503,8 @@ pub enum SshCommandError {
     Authentication(ssh2::Error),
     ChannelSession(ssh2::Error),
     Command(ssh2::Error),
+    ExitStatus(ssh2::Error),
+    NonZeroExitStatus(i32),
 }
 
 pub fn ssh_command_ip_with_auth(
@@ -537,7 +539,14 @@ pub fn ssh_command_ip_with_auth(
             let _ = channel.read_to_string(&mut s);
             let _ = channel.close();
             let _ = channel.wait_close();
-            Ok(())
+
+            let status = channel.exit_status().map_err(SshCommandError::ExitStatus)?;
+
+            if status != 0 {
+                Err(SshCommandError::NonZeroExitStatus(status))
+            } else {
+                Ok(())
+            }
         })() {
             Ok(_) => break,
             Err(e) => {
