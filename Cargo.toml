@@ -24,7 +24,7 @@ log = { version = "0.4.14", features = ["std"] }
 option_parser = { path = "option_parser" }
 seccomp = { git = "https://github.com/firecracker-microvm/firecracker", tag = "v0.24.4" }
 serde_json = "1.0.64"
-signal-hook = "0.3.8"
+signal-hook = "0.3.9"
 thiserror = "1.0.25"
 vmm = { path = "vmm" }
 vmm-sys-util = "0.8.0"
