@@ -723,8 +723,7 @@ source = "git+https://github.com/rust-vmm/vm-fdt?branch=master#13ab882e2f8387753
 [[package]]
 name = "vm-memory"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "625f401b1b8b3ac3d43f53903cd138cfe840bd985f8581e553027b31d2bb8ae8"
+source = "git+https://github.com/rust-vmm/vm-memory?rev=5bd7138758183a73ac0da27ce40c004d95f1a7e9#5bd7138758183a73ac0da27ce40c004d95f1a7e9"
 dependencies = [
  "arc-swap",
  "libc",
