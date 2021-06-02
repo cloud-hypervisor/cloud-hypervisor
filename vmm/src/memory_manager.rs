@@ -7,6 +7,7 @@ use crate::config::SgxEpcConfig;
 use crate::config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
 use crate::migration::url_to_path;
 use crate::MEMORY_MANAGER_SNAPSHOT_ID;
+use crate::{GuestMemoryMmap, GuestRegionMmap};
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml};
 use anyhow::anyhow;
@@ -36,8 +37,8 @@ use vm_device::BusDevice;
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
     mmap::MmapRegionError, Address, Bytes, Error as MmapError, GuestAddress, GuestAddressSpace,
-    GuestMemory, GuestMemoryAtomic, GuestMemoryError, GuestMemoryLoadGuard, GuestMemoryMmap,
-    GuestMemoryRegion, GuestRegionMmap, GuestUsize, MmapRegion,
+    GuestMemory, GuestMemoryAtomic, GuestMemoryError, GuestMemoryLoadGuard, GuestMemoryRegion,
+    GuestUsize, MmapRegion,
 };
 use vm_migration::{
     protocol::{MemoryRange, MemoryRangeTable},

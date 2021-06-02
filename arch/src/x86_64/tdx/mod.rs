@@ -1,10 +1,11 @@
 // Copyright © 2021 Intel Corporation
 //
 // SPDX-License-Identifier: Apache-2.0
+use crate::GuestMemoryMmap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use thiserror::Error;
-use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemoryError, GuestMemoryMmap};
+use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemoryError};
 
 #[derive(Error, Debug)]
 pub enum TdvfError {

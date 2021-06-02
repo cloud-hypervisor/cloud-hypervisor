@@ -40,6 +40,7 @@ use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};
 use std::{result, thread};
 use thiserror::Error;
+use vm_memory::bitmap::AtomicBitmap;
 use vm_migration::protocol::*;
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
@@ -57,6 +58,9 @@ pub mod vm;
 
 #[cfg(feature = "acpi")]
 mod acpi;
+
+type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
+type GuestRegionMmap = vm_memory::GuestRegionMmap<AtomicBitmap>;
 
 /// Errors associated with VMM management
 #[derive(Debug, Error)]

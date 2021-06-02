@@ -16,13 +16,15 @@ use std::num::Wrapping;
 use std::sync::atomic::{fence, Ordering};
 use std::sync::Arc;
 use vm_memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryMmap,
+    bitmap::AtomicBitmap, Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError,
     GuestUsize,
 };
 
 pub const VIRTQ_DESC_F_NEXT: u16 = 0x1;
 pub const VIRTQ_DESC_F_WRITE: u16 = 0x2;
 pub const VIRTQ_DESC_F_INDIRECT: u16 = 0x4;
+
+type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
 #[derive(Debug)]
 pub enum Error {
@@ -717,7 +719,9 @@ pub mod testing {
     use std::marker::PhantomData;
     use std::mem;
     use vm_memory::Bytes;
-    use vm_memory::{Address, GuestAddress, GuestMemoryMmap, GuestUsize};
+    use vm_memory::{bitmap::AtomicBitmap, Address, GuestAddress, GuestUsize};
+
+    type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
     // Represents a location in GuestMemoryMmap which holds a given type.
     pub struct SomeplaceInMemory<'a, T> {
@@ -960,7 +964,9 @@ pub mod testing {
 pub mod tests {
     use super::testing::*;
     pub use super::*;
-    use vm_memory::{GuestAddress, GuestMemoryMmap};
+    use vm_memory::{bitmap::AtomicBitmap, GuestAddress};
+
+    type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
     #[test]
     fn test_checked_new_descriptor_chain() {

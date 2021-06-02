@@ -49,8 +49,12 @@ pub use self::pmem::*;
 pub use self::rng::*;
 pub use self::vsock::*;
 pub use self::watchdog::*;
-use vm_memory::{GuestAddress, GuestMemory};
+use vm_memory::{bitmap::AtomicBitmap, GuestAddress, GuestMemory};
 use vm_virtio::{queue::*, VirtioDeviceType};
+
+type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
+type GuestRegionMmap = vm_memory::GuestRegionMmap<AtomicBitmap>;
+type MmapRegion = vm_memory::MmapRegion<AtomicBitmap>;
 
 const DEVICE_INIT: u32 = 0x00;
 const DEVICE_ACKNOWLEDGE: u32 = 0x01;

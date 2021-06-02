@@ -13,6 +13,7 @@ use super::{
     EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
+use crate::{GuestMemoryMmap, MmapRegion};
 use crate::{VirtioInterrupt, VirtioInterruptType};
 use seccomp::{SeccompAction, SeccompFilter};
 use std::fmt::{self, Display};
@@ -28,7 +29,7 @@ use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
-    GuestMemoryError, GuestMemoryMmap, MmapRegion,
+    GuestMemoryError,
 };
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};

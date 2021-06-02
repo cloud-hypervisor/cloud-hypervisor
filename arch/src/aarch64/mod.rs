@@ -13,6 +13,7 @@ pub mod regs;
 
 pub use self::fdt::DeviceInfoForFdt;
 use crate::DeviceType;
+use crate::GuestMemoryMmap;
 use crate::RegionType;
 use gic::GicDevice;
 use std::collections::HashMap;
@@ -20,8 +21,7 @@ use std::ffi::CStr;
 use std::fmt::Debug;
 use std::sync::Arc;
 use vm_memory::{
-    Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic, GuestMemoryMmap,
-    GuestUsize,
+    Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic, GuestUsize,
 };
 
 /// Errors thrown while configuring aarch64 system.

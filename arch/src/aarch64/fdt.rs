@@ -12,6 +12,7 @@ use std::fmt::Debug;
 use std::result;
 
 use super::super::DeviceType;
+use super::super::GuestMemoryMmap;
 use super::super::InitramfsConfig;
 use super::get_fdt_addr;
 use super::gic::GicDevice;
@@ -20,7 +21,7 @@ use super::layout::{
     PCI_MMCONFIG_START,
 };
 use vm_fdt::{FdtWriter, FdtWriterResult};
-use vm_memory::{Address, Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryMmap};
+use vm_memory::{Address, Bytes, GuestAddress, GuestMemory, GuestMemoryError};
 
 // This is a value for uniquely identifying the FDT node declaring the interrupt controller.
 const GIC_PHANDLE: u32 = 1;

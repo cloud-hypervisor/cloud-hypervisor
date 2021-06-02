@@ -27,9 +27,12 @@ use vhost::vhost_user::{
 };
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use vm_memory::guest_memory::FileOffset;
-use vm_memory::{GuestAddress, GuestMemoryMmap, GuestRegionMmap, MmapRegion};
+use vm_memory::{bitmap::AtomicBitmap, GuestAddress, MmapRegion};
 use vm_virtio::Queue;
 use vmm_sys_util::eventfd::EventFd;
+
+pub type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
+pub type GuestRegionMmap = vm_memory::GuestRegionMmap<AtomicBitmap>;
 
 const MAX_MEM_SLOTS: u64 = 32;
 

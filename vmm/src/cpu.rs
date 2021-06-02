@@ -19,6 +19,7 @@ use crate::memory_manager::MemoryManager;
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 #[cfg(target_arch = "x86_64")]
 use crate::vm::physical_bits;
+use crate::GuestMemoryMmap;
 use crate::CPU_MANAGER_SNAPSHOT_ID;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml, sdt::Sdt};
@@ -43,7 +44,7 @@ use std::{cmp, io, result, thread};
 use vm_device::BusDevice;
 #[cfg(feature = "acpi")]
 use vm_memory::GuestAddress;
-use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
+use vm_memory::GuestMemoryAtomic;
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
     Transportable,
@@ -1775,6 +1776,7 @@ mod tests {
 #[cfg(target_arch = "aarch64")]
 #[cfg(test)]
 mod tests {
+    use crate::GuestMemoryMmap;
     use arch::aarch64::layout;
     use arch::aarch64::regs::*;
     use hypervisor::kvm::aarch64::{is_system_register, MPIDR_EL1};
@@ -1784,7 +1786,7 @@ mod tests {
     };
     use hypervisor::{arm64_core_reg_id, offset__of};
     use std::mem;
-    use vm_memory::{GuestAddress, GuestMemoryMmap};
+    use vm_memory::GuestAddress;
 
     #[test]
     fn test_setup_regs() {

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    EpollHelper, EpollHelperError, EpollHelperHandler, Queue, VirtioInterrupt,
+    EpollHelper, EpollHelperError, EpollHelperHandler, GuestMemoryMmap, Queue, VirtioInterrupt,
     EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IN_ORDER, VIRTIO_F_NOTIFICATION_DATA,
     VIRTIO_F_ORDER_PLATFORM, VIRTIO_F_RING_EVENT_IDX, VIRTIO_F_RING_INDIRECT_DESC,
     VIRTIO_F_RING_PACKED, VIRTIO_F_VERSION_1,
@@ -14,7 +14,7 @@ use std::sync::{atomic::AtomicBool, Arc, Barrier, Mutex};
 use vhost::vhost_user::message::VhostUserVirtioFeatures;
 use vhost::vhost_user::Master;
 use vhost::Error as VhostError;
-use vm_memory::{Error as MmapError, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
+use vm_memory::{Error as MmapError, GuestAddressSpace, GuestMemoryAtomic};
 use vmm_sys_util::eventfd::EventFd;
 use vu_common_ctrl::{connect_vhost_user, reinitialize_vhost_user};
 

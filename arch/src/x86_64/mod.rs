@@ -12,6 +12,7 @@ pub mod layout;
 mod mpspec;
 mod mptable;
 pub mod regs;
+use crate::GuestMemoryMmap;
 use crate::InitramfsConfig;
 use crate::RegionType;
 use hypervisor::{CpuId, CpuIdEntry, CPUID_FLAG_VALID_INDEX};
@@ -22,7 +23,7 @@ use linux_loader::loader::elf::start_info::{
 use std::mem;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
-    GuestMemoryMmap, GuestMemoryRegion, GuestUsize,
+    GuestMemoryRegion, GuestUsize,
 };
 mod smbios;
 use std::arch::x86_64;

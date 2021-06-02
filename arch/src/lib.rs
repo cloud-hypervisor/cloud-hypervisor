@@ -14,6 +14,8 @@ extern crate log;
 use std::fmt;
 use std::result;
 
+type GuestMemoryMmap = vm_memory::GuestMemoryMmap<vm_memory::bitmap::AtomicBitmap>;
+
 /// Type for returning error code.
 #[derive(Debug)]
 pub enum Error {
