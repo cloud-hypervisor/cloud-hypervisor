@@ -4,6 +4,7 @@
 use super::super::{Descriptor, Queue};
 use super::{Error, Result};
 use crate::{get_host_address_range, VirtioInterrupt, VirtioInterruptType};
+use crate::{GuestMemoryMmap, GuestRegionMmap};
 use std::convert::TryInto;
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixListener;
@@ -14,9 +15,7 @@ use std::vec::Vec;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost::vhost_user::{Master, VhostUserMaster};
 use vhost::{VhostBackend, VhostUserMemoryRegionInfo, VringConfigData};
-use vm_memory::{
-    Address, Error as MmapError, GuestMemory, GuestMemoryMmap, GuestMemoryRegion, GuestRegionMmap,
-};
+use vm_memory::{Address, Error as MmapError, GuestMemory, GuestMemoryRegion};
 use vmm_sys_util::eventfd::EventFd;
 
 #[derive(Debug, Clone)]

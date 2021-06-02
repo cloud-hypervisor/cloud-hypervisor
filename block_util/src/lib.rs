@@ -35,9 +35,13 @@ use std::sync::{Arc, Mutex};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_bindings::bindings::virtio_blk::*;
-use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryMmap};
+use vm_memory::{
+    bitmap::AtomicBitmap, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError,
+};
 use vm_virtio::DescriptorChain;
 use vmm_sys_util::eventfd::EventFd;
+
+type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
 const SECTOR_SHIFT: u8 = 9;
 pub const SECTOR_SIZE: u64 = 0x01 << SECTOR_SHIFT;

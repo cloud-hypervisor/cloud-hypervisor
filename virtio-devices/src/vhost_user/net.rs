@@ -12,6 +12,7 @@ use crate::{
     VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterrupt, EPOLL_HELPER_EVENT_LAST,
     VIRTIO_F_RING_EVENT_IDX, VIRTIO_F_VERSION_1,
 };
+use crate::{GuestMemoryMmap, GuestRegionMmap};
 use net_util::{build_net_config_space, CtrlQueue, MacAddr, VirtioNetConfig};
 use seccomp::{SeccompAction, SeccompFilter};
 use std::ops::Deref;
@@ -29,9 +30,7 @@ use virtio_bindings::bindings::virtio_net::{
     VIRTIO_NET_F_HOST_ECN, VIRTIO_NET_F_HOST_TSO4, VIRTIO_NET_F_HOST_TSO6, VIRTIO_NET_F_HOST_UFO,
     VIRTIO_NET_F_MAC, VIRTIO_NET_F_MRG_RXBUF,
 };
-use vm_memory::{
-    ByteValued, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap, GuestRegionMmap,
-};
+use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 

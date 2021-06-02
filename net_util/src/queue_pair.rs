@@ -3,13 +3,14 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use super::{unregister_listener, vnet_hdr_len, Tap};
+use crate::GuestMemoryMmap;
 use rate_limiter::{RateLimiter, TokenType};
 use std::io;
 use std::num::Wrapping;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use vm_memory::{Bytes, GuestAddressSpace, GuestMemory, GuestMemoryAtomic, GuestMemoryMmap};
+use vm_memory::{Bytes, GuestAddressSpace, GuestMemory, GuestMemoryAtomic};
 use vm_virtio::Queue;
 
 #[derive(Clone)]

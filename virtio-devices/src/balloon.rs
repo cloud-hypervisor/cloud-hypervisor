@@ -17,6 +17,7 @@ use super::{
     VirtioCommon, VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_VERSION_1,
 };
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
+use crate::GuestMemoryMmap;
 use crate::{VirtioInterrupt, VirtioInterruptType};
 use libc::EFD_NONBLOCK;
 use seccomp::{SeccompAction, SeccompFilter};
@@ -31,7 +32,7 @@ use std::thread;
 use vm_memory::GuestMemory;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
-    GuestMemoryError, GuestMemoryMmap,
+    GuestMemoryError,
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;

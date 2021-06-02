@@ -25,6 +25,7 @@ use crate::device_tree::DeviceTree;
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 use crate::migration::{get_vm_snapshot, url_to_path, VM_SNAPSHOT_FILE};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
+use crate::{GuestMemoryMmap, GuestRegionMmap};
 use crate::{
     PciDeviceInfo, CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_SNAPSHOT_ID,
 };
@@ -61,7 +62,7 @@ use std::{result, str, thread};
 use vm_device::Bus;
 use vm_memory::{
     Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
-    GuestMemoryMmap, GuestMemoryRegion, GuestRegionMmap,
+    GuestMemoryRegion,
 };
 use vm_migration::{
     protocol::{MemoryRange, MemoryRangeTable},
@@ -2435,11 +2436,12 @@ mod tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{GuestMemoryMmap, GuestRegionMmap};
     use arch::aarch64::fdt::create_fdt;
     use arch::aarch64::gic::kvm::create_gic;
     use arch::aarch64::{layout, DeviceInfoForFdt};
     use arch::{DeviceType, MmioDeviceInfo};
-    use vm_memory::{GuestAddress, GuestMemoryMmap};
+    use vm_memory::GuestAddress;
 
     const LEN: u64 = 4096;
 

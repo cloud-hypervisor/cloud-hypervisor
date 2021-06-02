@@ -9,6 +9,7 @@ use super::{
     EPOLL_HELPER_EVENT_LAST, VIRTIO_F_VERSION_1,
 };
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
+use crate::GuestMemoryMmap;
 use crate::{DmaRemapping, VirtioInterrupt, VirtioInterruptType};
 use seccomp::{SeccompAction, SeccompFilter};
 use std::collections::BTreeMap;
@@ -26,7 +27,7 @@ use versionize_derive::Versionize;
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
-    GuestMemoryError, GuestMemoryMmap,
+    GuestMemoryError,
 };
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};

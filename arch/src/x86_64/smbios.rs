@@ -7,12 +7,13 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use crate::layout::SMBIOS_START;
+use crate::GuestMemoryMmap;
 use std::fmt::{self, Display};
 use std::mem;
 use std::result;
 use std::slice;
 use vm_memory::ByteValued;
-use vm_memory::{Address, Bytes, GuestAddress, GuestMemoryMmap};
+use vm_memory::{Address, Bytes, GuestAddress};
 
 #[allow(unused_variables)]
 #[derive(Debug)]

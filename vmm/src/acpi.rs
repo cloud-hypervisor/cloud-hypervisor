@@ -6,6 +6,7 @@ use crate::cpu::CpuManager;
 use crate::device_manager::DeviceManager;
 use crate::memory_manager::MemoryManager;
 use crate::vm::NumaNodes;
+use crate::{GuestMemoryMmap, GuestRegionMmap};
 use acpi_tables::sdt::GenericAddress;
 use acpi_tables::{aml::Aml, rsdp::Rsdp, sdt::Sdt};
 #[cfg(target_arch = "aarch64")]
@@ -15,8 +16,7 @@ use arch::DeviceType;
 
 use bitflags::bitflags;
 use std::sync::{Arc, Mutex};
-use vm_memory::GuestRegionMmap;
-use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemoryMmap, GuestMemoryRegion};
+use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemoryRegion};
 
 /* Values for Type in APIC sub-headers */
 #[cfg(target_arch = "x86_64")]

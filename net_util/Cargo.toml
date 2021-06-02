@@ -14,7 +14,7 @@ serde = "1.0.126"
 versionize = "0.1.6"
 versionize_derive = "0.1.4"
 virtio-bindings = "0.1.0"
-vm-memory = { version = "0.5.0", features = ["backend-mmap", "backend-atomic"] }
+vm-memory = { version = "0.5.0", features = ["backend-mmap", "backend-atomic", "backend-bitmap"] }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = ">=0.3.1"
 

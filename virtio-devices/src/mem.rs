@@ -19,6 +19,7 @@ use super::{
     EPOLL_HELPER_EVENT_LAST, VIRTIO_F_VERSION_1,
 };
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
+use crate::{GuestMemoryMmap, GuestRegionMmap};
 use crate::{VirtioInterrupt, VirtioInterruptType};
 use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
@@ -35,7 +36,7 @@ use std::thread;
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
-    GuestMemoryError, GuestMemoryMmap, GuestMemoryRegion, GuestRegionMmap,
+    GuestMemoryError, GuestMemoryRegion,
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;

@@ -12,6 +12,7 @@ use crate::{
     ActivateError, ActivateResult, Queue, UserspaceMapping, VirtioCommon, VirtioDevice,
     VirtioDeviceType, VirtioInterrupt, VirtioSharedMemoryList,
 };
+use crate::{GuestMemoryMmap, GuestRegionMmap, MmapRegion};
 use libc::{self, c_void, off64_t, pread64, pwrite64};
 use seccomp::{SeccompAction, SeccompFilter};
 use std::io;
@@ -29,7 +30,6 @@ use vhost::vhost_user::{
 };
 use vm_memory::{
     Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
-    GuestMemoryMmap, GuestRegionMmap, MmapRegion,
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;

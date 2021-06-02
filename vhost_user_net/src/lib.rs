@@ -22,10 +22,10 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::vec::Vec;
 use vhost::vhost_user::message::*;
 use vhost::vhost_user::Listener;
-use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring, VringWorker};
+use vhost_user_backend::{GuestMemoryMmap, VhostUserBackend, VhostUserDaemon, Vring, VringWorker};
 use virtio_bindings::bindings::virtio_net::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
-use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
+use vm_memory::GuestMemoryAtomic;
 use vmm_sys_util::eventfd::EventFd;
 
 pub type Result<T> = std::result::Result<T, Error>;

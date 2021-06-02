@@ -6,13 +6,13 @@
 // found in the THIRD-PARTY file.
 
 use super::get_fdt_addr;
+use crate::GuestMemoryMmap;
 use hypervisor::kvm::kvm_bindings::{
     kvm_regs, user_pt_regs, KVM_REG_ARM64, KVM_REG_ARM_CORE, KVM_REG_SIZE_U64,
 };
 use hypervisor::{arm64_core_reg_id, offset__of};
 use std::sync::Arc;
 use std::{mem, result};
-use vm_memory::GuestMemoryMmap;
 
 /// Errors thrown while setting aarch64 registers.
 #[derive(Debug)]

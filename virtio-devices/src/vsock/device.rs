@@ -30,6 +30,7 @@
 use super::{VsockBackend, VsockPacket};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::Error as DeviceError;
+use crate::GuestMemoryMmap;
 use crate::VirtioInterrupt;
 use crate::{
     ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
@@ -47,7 +48,7 @@ use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use vm_memory::{GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
+use vm_memory::{GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
 };

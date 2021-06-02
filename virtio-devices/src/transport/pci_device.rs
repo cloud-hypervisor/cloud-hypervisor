@@ -8,6 +8,7 @@
 
 use super::VirtioPciCommonConfig;
 use crate::transport::VirtioTransport;
+use crate::GuestMemoryMmap;
 use crate::{
     ActivateResult, Queue, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
     DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED, DEVICE_FEATURES_OK,
@@ -35,8 +36,7 @@ use vm_device::interrupt::{
 };
 use vm_device::BusDevice;
 use vm_memory::{
-    Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
-    GuestUsize, Le32,
+    Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestUsize, Le32,
 };
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,

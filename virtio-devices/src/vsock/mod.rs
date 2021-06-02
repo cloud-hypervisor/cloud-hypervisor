@@ -163,11 +163,12 @@ mod tests {
     use crate::device::{VirtioInterrupt, VirtioInterruptType};
     use crate::epoll_helper::EpollHelperHandler;
     use crate::EpollHelper;
+    use crate::GuestMemoryMmap;
     use libc::EFD_NONBLOCK;
     use std::os::unix::io::AsRawFd;
     use std::path::PathBuf;
     use std::sync::{Arc, RwLock};
-    use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
+    use vm_memory::{GuestAddress, GuestMemoryAtomic};
     use vm_virtio::queue::testing::VirtQueue as GuestQ;
     use vm_virtio::queue::Queue;
     use vm_virtio::queue::{VIRTQ_DESC_F_NEXT, VIRTQ_DESC_F_WRITE};

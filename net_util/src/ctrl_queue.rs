@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+use crate::GuestMemoryMmap;
 use crate::Tap;
 use libc::c_uint;
 use virtio_bindings::bindings::virtio_net::{
@@ -11,7 +12,7 @@ use virtio_bindings::bindings::virtio_net::{
     VIRTIO_NET_F_GUEST_ECN, VIRTIO_NET_F_GUEST_TSO4, VIRTIO_NET_F_GUEST_TSO6,
     VIRTIO_NET_F_GUEST_UFO, VIRTIO_NET_OK,
 };
-use vm_memory::{ByteValued, Bytes, GuestMemoryError, GuestMemoryMmap};
+use vm_memory::{ByteValued, Bytes, GuestMemoryError};
 use vm_virtio::Queue;
 
 #[derive(Debug)]

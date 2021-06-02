@@ -24,6 +24,7 @@ use crate::memory_manager::MEMORY_MANAGER_ACPI_SIZE;
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 #[cfg(feature = "acpi")]
 use crate::vm::NumaNodes;
+use crate::GuestRegionMmap;
 use crate::PciDeviceInfo;
 use crate::{device_node, DEVICE_MANAGER_SNAPSHOT_ID};
 #[cfg(feature = "acpi")]
@@ -93,7 +94,7 @@ use vm_device::{Bus, BusDevice, Resource};
 use vm_memory::guest_memory::FileOffset;
 #[cfg(feature = "kvm")]
 use vm_memory::GuestMemoryRegion;
-use vm_memory::{Address, GuestAddress, GuestRegionMmap, GuestUsize, MmapRegion};
+use vm_memory::{Address, GuestAddress, GuestUsize, MmapRegion};
 #[cfg(feature = "cmos")]
 use vm_memory::{GuestAddressSpace, GuestMemory};
 use vm_migration::{

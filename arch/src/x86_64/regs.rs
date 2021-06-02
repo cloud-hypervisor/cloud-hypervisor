@@ -7,12 +7,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 use crate::layout::{BOOT_GDT_START, BOOT_IDT_START, PVH_INFO_START};
+use crate::GuestMemoryMmap;
 use hypervisor::arch::x86::gdt::{gdt_entry, segment_from_gdt};
 use hypervisor::arch::x86::regs::*;
 use hypervisor::x86_64::{FpuState, SpecialRegisters, StandardRegisters};
 use std::sync::Arc;
 use std::{mem, result};
-use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError, GuestMemoryMmap};
+use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError};
 
 #[derive(Debug)]
 pub enum Error {
@@ -163,7 +164,8 @@ pub fn configure_segments_and_sregs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vm_memory::{GuestAddress, GuestMemoryMmap};
+    use crate::GuestMemoryMmap;
+    use vm_memory::GuestAddress;
 
     fn create_guest_mem() -> GuestMemoryMmap {
         GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap()

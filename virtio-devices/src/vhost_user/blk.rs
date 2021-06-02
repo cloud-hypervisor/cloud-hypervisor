@@ -10,6 +10,7 @@ use super::vu_common_ctrl::{
 };
 use super::{Error, Result, DEFAULT_VIRTIO_FEATURES};
 use crate::VirtioInterrupt;
+use crate::{GuestMemoryMmap, GuestRegionMmap};
 use block_util::VirtioBlockConfig;
 use std::mem;
 use std::ops::Deref;
@@ -27,9 +28,7 @@ use virtio_bindings::bindings::virtio_blk::{
     VIRTIO_BLK_F_GEOMETRY, VIRTIO_BLK_F_MQ, VIRTIO_BLK_F_RO, VIRTIO_BLK_F_SEG_MAX,
     VIRTIO_BLK_F_SIZE_MAX, VIRTIO_BLK_F_TOPOLOGY, VIRTIO_BLK_F_WRITE_ZEROES,
 };
-use vm_memory::{
-    ByteValued, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap, GuestRegionMmap,
-};
+use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 

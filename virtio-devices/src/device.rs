@@ -7,6 +7,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use crate::{ActivateError, ActivateResult, Error, Queue};
+use crate::{GuestMemoryMmap, GuestRegionMmap};
 use libc::EFD_NONBLOCK;
 use std::collections::HashMap;
 use std::io::Write;
@@ -16,7 +17,7 @@ use std::sync::{
     Arc, Barrier,
 };
 use std::thread;
-use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryMmap, GuestRegionMmap, GuestUsize};
+use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestUsize};
 use vm_migration::{MigratableError, Pausable};
 use vm_virtio::VirtioDeviceType;
 use vmm_sys_util::eventfd::EventFd;
