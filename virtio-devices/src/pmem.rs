@@ -370,26 +370,7 @@ impl VirtioDevice for Pmem {
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
-        let kill_evt = self
-            .common
-            .kill_evt
-            .as_ref()
-            .unwrap()
-            .try_clone()
-            .map_err(|e| {
-                error!("failed to clone kill_evt eventfd: {}", e);
-                ActivateError::BadActivate
-            })?;
-        let pause_evt = self
-            .common
-            .pause_evt
-            .as_ref()
-            .unwrap()
-            .try_clone()
-            .map_err(|e| {
-                error!("failed to clone pause_evt eventfd: {}", e);
-                ActivateError::BadActivate
-            })?;
+        let (kill_evt, pause_evt) = self.common.dup_eventfds();
         if let Some(disk) = self.disk.as_ref() {
             let disk = disk.try_clone().map_err(|e| {
                 error!("failed cloning pmem disk: {}", e);

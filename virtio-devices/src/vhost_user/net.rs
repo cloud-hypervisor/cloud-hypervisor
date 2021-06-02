@@ -246,26 +246,7 @@ impl VirtioDevice for Net {
             let cvq_queue = queues.remove(num_queues - 1);
             let cvq_queue_evt = queue_evts.remove(num_queues - 1);
 
-            let kill_evt = self
-                .common
-                .kill_evt
-                .as_ref()
-                .unwrap()
-                .try_clone()
-                .map_err(|e| {
-                    error!("failed to clone kill_evt eventfd: {}", e);
-                    ActivateError::BadActivate
-                })?;
-            let pause_evt = self
-                .common
-                .pause_evt
-                .as_ref()
-                .unwrap()
-                .try_clone()
-                .map_err(|e| {
-                    error!("failed to clone pause_evt eventfd: {}", e);
-                    ActivateError::BadActivate
-                })?;
+            let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
             let mut ctrl_handler = NetCtrlEpollHandler {
                 mem: mem.clone(),
@@ -322,26 +303,7 @@ impl VirtioDevice for Net {
 
         // Run a dedicated thread for handling potential reconnections with
         // the backend.
-        let kill_evt = self
-            .common
-            .kill_evt
-            .as_ref()
-            .unwrap()
-            .try_clone()
-            .map_err(|e| {
-                error!("failed to clone kill_evt eventfd: {}", e);
-                ActivateError::BadActivate
-            })?;
-        let pause_evt = self
-            .common
-            .pause_evt
-            .as_ref()
-            .unwrap()
-            .try_clone()
-            .map_err(|e| {
-                error!("failed to clone pause_evt eventfd: {}", e);
-                ActivateError::BadActivate
-            })?;
+        let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
         let mut reconnect_handler = ReconnectEpollHandler {
             vu: self.vhost_user_net.clone(),
