@@ -410,29 +410,8 @@ impl VirtioDevice for Fs {
         queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
-
+        let (kill_evt, pause_evt) = self.common.dup_eventfds();
         self.guest_memory = Some(mem.clone());
-
-        let kill_evt = self
-            .common
-            .kill_evt
-            .as_ref()
-            .unwrap()
-            .try_clone()
-            .map_err(|e| {
-                error!("failed to clone kill_evt eventfd: {}", e);
-                ActivateError::BadActivate
-            })?;
-        let pause_evt = self
-            .common
-            .pause_evt
-            .as_ref()
-            .unwrap()
-            .try_clone()
-            .map_err(|e| {
-                error!("failed to clone pause_evt eventfd: {}", e);
-                ActivateError::BadActivate
-            })?;
 
         setup_vhost_user(
             &mut self.vu,

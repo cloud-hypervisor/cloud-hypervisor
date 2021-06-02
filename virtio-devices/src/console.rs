@@ -402,26 +402,7 @@ impl VirtioDevice for Console {
             }
         }
 
-        let kill_evt = self
-            .common
-            .kill_evt
-            .as_ref()
-            .unwrap()
-            .try_clone()
-            .map_err(|e| {
-                error!("failed to clone kill_evt eventfd: {}", e);
-                ActivateError::BadActivate
-            })?;
-        let pause_evt = self
-            .common
-            .pause_evt
-            .as_ref()
-            .unwrap()
-            .try_clone()
-            .map_err(|e| {
-                error!("failed to clone pause_evt eventfd: {}", e);
-                ActivateError::BadActivate
-            })?;
+        let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
         let mut handler = ConsoleEpollHandler {
             queues,

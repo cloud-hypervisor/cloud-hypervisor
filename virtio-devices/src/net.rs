@@ -544,27 +544,7 @@ impl VirtioDevice for Net {
             let cvq_queue = queues.remove(queue_num - 1);
             let cvq_queue_evt = queue_evts.remove(queue_num - 1);
 
-            let kill_evt = self
-                .common
-                .kill_evt
-                .as_ref()
-                .unwrap()
-                .try_clone()
-                .map_err(|e| {
-                    error!("failed to clone kill_evt eventfd: {}", e);
-                    ActivateError::BadActivate
-                })?;
-            let pause_evt = self
-                .common
-                .pause_evt
-                .as_ref()
-                .unwrap()
-                .try_clone()
-                .map_err(|e| {
-                    error!("failed to clone pause_evt eventfd: {}", e);
-                    ActivateError::BadActivate
-                })?;
-
+            let (kill_evt, pause_evt) = self.common.dup_eventfds();
             let mut ctrl_handler = NetCtrlEpollHandler {
                 mem: mem.clone(),
                 kill_evt,
@@ -616,26 +596,7 @@ impl VirtioDevice for Net {
 
             let queue_evt_pair = vec![queue_evts.remove(0), queue_evts.remove(0)];
 
-            let kill_evt = self
-                .common
-                .kill_evt
-                .as_ref()
-                .unwrap()
-                .try_clone()
-                .map_err(|e| {
-                    error!("failed to clone kill_evt eventfd: {}", e);
-                    ActivateError::BadActivate
-                })?;
-            let pause_evt = self
-                .common
-                .pause_evt
-                .as_ref()
-                .unwrap()
-                .try_clone()
-                .map_err(|e| {
-                    error!("failed to clone pause_evt eventfd: {}", e);
-                    ActivateError::BadActivate
-                })?;
+            let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
             let rx_rate_limiter: Option<rate_limiter::RateLimiter> = self
                 .rate_limiter_config

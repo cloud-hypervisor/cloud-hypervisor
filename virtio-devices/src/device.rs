@@ -319,6 +319,13 @@ impl VirtioCommon {
         // Return the interrupt
         Some(self.interrupt_cb.take().unwrap())
     }
+
+    pub fn dup_eventfds(&self) -> (EventFd, EventFd) {
+        (
+            self.kill_evt.as_ref().unwrap().try_clone().unwrap(),
+            self.pause_evt.as_ref().unwrap().try_clone().unwrap(),
+        )
+    }
 }
 
 impl Pausable for VirtioCommon {

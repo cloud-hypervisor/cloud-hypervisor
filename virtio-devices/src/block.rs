@@ -554,26 +554,7 @@ impl VirtioDevice for Block {
             let queue_evt = queue_evts.remove(0);
             let queue = queues.remove(0);
             let queue_size = queue.size;
-            let kill_evt = self
-                .common
-                .kill_evt
-                .as_ref()
-                .unwrap()
-                .try_clone()
-                .map_err(|e| {
-                    error!("failed to clone kill_evt eventfd: {}", e);
-                    ActivateError::BadActivate
-                })?;
-            let pause_evt = self
-                .common
-                .pause_evt
-                .as_ref()
-                .unwrap()
-                .try_clone()
-                .map_err(|e| {
-                    error!("failed to clone pause_evt eventfd: {}", e);
-                    ActivateError::BadActivate
-                })?;
+            let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
             let rate_limiter: Option<RateLimiter> = self
                 .rate_limiter_config
