@@ -5316,6 +5316,39 @@ mod tests {
 
                 // Check the connection works properly between the two VMs
                 assert!(guest2.ssh_command_ok("nc -vz 172.100.0.1 12345").unwrap());
+
+                // Remove one of the two ports from the OVS bridge
+                std::process::Command::new("bash")
+                    .args(&["-c", "ovs-vsctl del-port vhost-user1"])
+                    .status()
+                    .expect("Expected 'ovs-vsctl del-port vhost-user1' to work");
+
+                // Spawn a new netcat listener in the first VM
+                let guest_ip = guest1.network.guest_ip.clone();
+                thread::spawn(move || {
+                    ssh_command_ip(
+                        "nc -l 12345",
+                        &guest_ip,
+                        DEFAULT_SSH_RETRIES,
+                        DEFAULT_SSH_TIMEOUT,
+                    )
+                    .unwrap();
+                });
+
+                // Check the connection fails this time
+                assert!(guest2.ssh_command("nc -vz 172.100.0.1 12345").is_err());
+
+                // Add the OVS port back
+                std::process::Command::new("bash")
+                .args(&[
+                    "-c",
+                    "ovs-vsctl add-port ovsbr0 vhost-user1 -- set Interface vhost-user1 type=dpdkvhostuserclient options:vhost-server-path=/tmp/dpdkvhostclient1",
+                ])
+                .status()
+                .expect("Expected 'ovs-vsctl add-port ovsbr0 vhost-user1 -- set Interface vhost-user1 type=dpdkvhostuserclient options:vhost-server-path=/tmp/dpdkvhostclient1' to work");
+
+                // And finally check the connection is functional again
+                assert!(guest2.ssh_command_ok("nc -vz 172.100.0.1 12345").unwrap());
             });
 
             let _ = child1.kill();
