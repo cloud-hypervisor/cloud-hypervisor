@@ -5272,7 +5272,7 @@ mod tests {
                 let guest_ip = guest1.network.guest_ip.clone();
                 thread::spawn(move || {
                     ssh_command_ip(
-                        "iperf3 -s -p 4444",
+                        "nc -l 12345",
                         &guest_ip,
                         DEFAULT_SSH_RETRIES,
                         DEFAULT_SSH_TIMEOUT,
@@ -5315,9 +5315,7 @@ mod tests {
                     .unwrap());
 
                 // Check the connection works properly between the two VMs
-                assert!(guest2
-                    .ssh_command_ok("iperf3 -c 172.100.0.1 -t 10 -p 4444")
-                    .unwrap());
+                assert!(guest2.ssh_command_ok("nc -vz 172.100.0.1 12345").unwrap());
             });
 
             let _ = child1.kill();
