@@ -5217,17 +5217,17 @@ mod tests {
             std::process::Command::new("bash")
                 .args(&[
                     "-c",
-                    "ovs-vsctl add-port ovsbr0 vhost-user1 -- set Interface vhost-user1 type=dpdkvhostuser",
+                    "ovs-vsctl add-port ovsbr0 vhost-user1 -- set Interface vhost-user1 type=dpdkvhostuserclient options:vhost-server-path=/tmp/dpdkvhostclient1",
                 ])
                 .status()
-                .expect("Expected 'ovs-vsctl add-port ovsbr0 vhost-user1 -- set Interface vhost-user1 type=dpdkvhostuser' to work");
+                .expect("Expected 'ovs-vsctl add-port ovsbr0 vhost-user1 -- set Interface vhost-user1 type=dpdkvhostuserclient options:vhost-server-path=/tmp/dpdkvhostclient1' to work");
             std::process::Command::new("bash")
                 .args(&[
                     "-c",
-                    "ovs-vsctl add-port ovsbr0 vhost-user2 -- set Interface vhost-user2 type=dpdkvhostuser",
+                    "ovs-vsctl add-port ovsbr0 vhost-user2 -- set Interface vhost-user2 type=dpdkvhostuserclient options:vhost-server-path=/tmp/dpdkvhostclient2",
                 ])
                 .status()
-                .expect("Expected 'ovs-vsctl add-port ovsbr0 vhost-user2 -- set Interface vhost-user2 type=dpdkvhostuser' to work");
+                .expect("Expected 'ovs-vsctl add-port ovsbr0 vhost-user2 -- set Interface vhost-user2 type=dpdkvhostuserclient options:vhost-server-path=/tmp/dpdkvhostclient2' to work");
             std::process::Command::new("bash")
                 .args(&["-c", "ip link set up dev ovsbr0"])
                 .status()
@@ -5246,7 +5246,7 @@ mod tests {
                 .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
                 .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
-                .args(&["--net", guest1.default_net_string().as_str(), "vhost_user=true,socket=/var/run/openvswitch/vhost-user1,num_queues=2,queue_size=256,vhost_mode=client"])
+                .args(&["--net", guest1.default_net_string().as_str(), "vhost_user=true,socket=/tmp/dpdkvhostclient1,num_queues=2,queue_size=256,vhost_mode=server"])
                 .capture_output()
                 .spawn()
                 .unwrap();
@@ -5296,7 +5296,7 @@ mod tests {
                 .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
                 .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
-                .args(&["--net", guest2.default_net_string().as_str(), "vhost_user=true,socket=/var/run/openvswitch/vhost-user2,num_queues=2,queue_size=256,vhost_mode=client"])
+                .args(&["--net", guest2.default_net_string().as_str(), "vhost_user=true,socket=/tmp/dpdkvhostclient2,num_queues=2,queue_size=256,vhost_mode=server"])
                 .capture_output()
                 .spawn()
                 .unwrap();
