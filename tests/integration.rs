@@ -80,9 +80,9 @@ mod tests {
         "root=/dev/vda1 console=hvc0 rw systemd.journald.forward_to_console=1";
 
     #[cfg(target_arch = "x86_64")]
-    const GREP_SERIAL_IRQ_CMD: &str = "cat /proc/interrupts | grep 'IO-APIC' | grep -c 'ttyS0'";
+    const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'IO-APIC.*ttyS0' /proc/interrupts || true";
     #[cfg(target_arch = "aarch64")]
-    const GREP_SERIAL_IRQ_CMD: &str = "cat /proc/interrupts | grep 'GICv3' | grep -c 'uart-pl011'";
+    const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'GICv3.*uart-pl011' /proc/interrupts || true";
 
     const PIPE_SIZE: i32 = 32 << 20;
 
@@ -609,7 +609,7 @@ mod tests {
         ) -> Result<bool, Error> {
             // SHM region is called different things depending on kernel
             let shm_region = self
-                .ssh_command("sudo grep 'virtio[0-9]\\|virtio-pci-shm' /proc/iomem")?
+                .ssh_command("sudo grep 'virtio[0-9]\\|virtio-pci-shm' /proc/iomem || true")?
                 .trim()
                 .to_string();
 
@@ -1381,10 +1381,10 @@ mod tests {
                 "foo"
             );
             // Check file2 does not exist
-            assert_ne!(
-                guest.ssh_command("ls mount_dir/file2").unwrap().trim(),
-                "mount_dir/file2"
-            );
+            guest
+                .ssh_command("[ ! -f 'mount_dir/file2' ] || true")
+                .unwrap();
+
             // Check file3 exists and its content is "bar"
             assert_eq!(
                 guest.ssh_command("cat mount_dir/file3").unwrap().trim(),
@@ -1536,7 +1536,10 @@ mod tests {
             guest.reboot_linux(0, None);
             assert_eq!(guest.ssh_command("sudo mount /dev/pmem0 /mnt").unwrap(), "");
             assert_eq!(
-                guest.ssh_command("sudo cat /mnt/test").unwrap().trim(),
+                guest
+                    .ssh_command("sudo cat /mnt/test || true")
+                    .unwrap()
+                    .trim(),
                 if discard_writes { "" } else { "test123" }
             );
         });
@@ -2677,7 +2680,7 @@ mod tests {
 
                 assert_eq!(
                     guest
-                        .ssh_command("cat /proc/interrupts | grep 'IO-APIC' | grep -c 'timer'")
+                        .ssh_command("grep -c IO-APIC.*timer /proc/interrupts || true")
                         .unwrap()
                         .trim()
                         .parse::<u32>()
@@ -2686,7 +2689,7 @@ mod tests {
                 );
                 assert_eq!(
                     guest
-                        .ssh_command("cat /proc/interrupts | grep 'IO-APIC' | grep -c 'cascade'")
+                        .ssh_command("grep -c IO-APIC.*cascade /proc/interrupts || true")
                         .unwrap()
                         .trim()
                         .parse::<u32>()
@@ -4286,7 +4289,7 @@ mod tests {
                 // Check /dev/vdc is not there
                 assert_eq!(
                     guest
-                        .ssh_command("lsblk | grep vdc | grep -c 16M")
+                        .ssh_command("lsblk | grep -c vdc.*16M || true")
                         .unwrap()
                         .trim()
                         .parse::<u32>()
@@ -4330,7 +4333,7 @@ mod tests {
                 // And check /dev/vdc is not there
                 assert_eq!(
                     guest
-                        .ssh_command("lsblk | grep vdc | grep -c 16M")
+                        .ssh_command("lsblk | grep -c vdc.*16M || true")
                         .unwrap()
                         .trim()
                         .parse::<u32>()
@@ -4386,7 +4389,7 @@ mod tests {
                 // Check device has gone away
                 assert_eq!(
                     guest
-                        .ssh_command("lsblk | grep vdc | grep -c 16M")
+                        .ssh_command("lsblk | grep -c vdc.*16M || true")
                         .unwrap()
                         .trim()
                         .parse::<u32>()
@@ -4399,7 +4402,7 @@ mod tests {
                 // Check device still absent
                 assert_eq!(
                     guest
-                        .ssh_command("lsblk | grep vdc | grep -c 16M")
+                        .ssh_command("lsblk | grep -c vdc.*16M || true")
                         .unwrap()
                         .trim()
                         .parse::<u32>()
@@ -4445,7 +4448,7 @@ mod tests {
                 // Check /dev/pmem0 is not there
                 assert_eq!(
                     guest
-                        .ssh_command("lsblk | grep -c pmem0")
+                        .ssh_command("lsblk | grep -c pmem0 || true")
                         .unwrap()
                         .trim()
                         .parse::<u32>()
@@ -4498,7 +4501,7 @@ mod tests {
                 // Check device has gone away
                 assert_eq!(
                     guest
-                        .ssh_command("lsblk | grep pmem0 | grep -c 128M")
+                        .ssh_command("lsblk | grep -c pmem0.*128M || true")
                         .unwrap()
                         .trim()
                         .parse::<u32>()
@@ -4511,7 +4514,7 @@ mod tests {
                 // Check still absent after reboot
                 assert_eq!(
                     guest
-                        .ssh_command("lsblk | grep pmem0 | grep -c 128M")
+                        .ssh_command("lsblk | grep -c pmem0.*128M || true")
                         .unwrap()
                         .trim()
                         .parse::<u32>()
@@ -4741,7 +4744,7 @@ mod tests {
                     .is_ok());
                 // Check if the rng device is readable
                 assert!(guest
-                    .ssh_command("head -c 1000 /dev/hwrng > /dev/null")
+                    .ssh_command("sudo head -c 1000 /dev/hwrng > /dev/null")
                     .is_ok());
                 // Check vsock
                 guest.check_vsock(socket.as_str());
@@ -4826,7 +4829,7 @@ mod tests {
                     .ssh_command("sudo dd if=/dev/vdb of=/dev/null bs=1M iflag=direct count=8")
                     .is_ok());
                 assert!(guest
-                    .ssh_command("head -c 1000 /dev/hwrng > /dev/null")
+                    .ssh_command("sudo head -c 1000 /dev/hwrng > /dev/null")
                     .is_ok());
                 guest.check_vsock(socket.as_str());
                 assert!(guest.ssh_command(&console_cmd).is_ok());
