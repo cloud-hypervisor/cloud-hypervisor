@@ -15,6 +15,7 @@ use vhost::vhost_user::message::VhostUserVirtioFeatures;
 use vhost::vhost_user::Master;
 use vhost::Error as VhostError;
 use vm_memory::{Error as MmapError, GuestAddressSpace, GuestMemoryAtomic};
+use vm_virtio::Error as VirtioError;
 use vmm_sys_util::eventfd::EventFd;
 use vu_common_ctrl::{connect_vhost_user, reinitialize_vhost_user};
 
@@ -111,6 +112,8 @@ pub enum Error {
     MissingRegionFd,
     /// Missing IrqFd
     MissingIrqFd,
+    /// Failed getting the available index.
+    GetAvailableIndex(VirtioError),
 }
 type Result<T> = std::result::Result<T, Error>;
 
