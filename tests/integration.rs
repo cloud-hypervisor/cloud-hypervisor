@@ -4321,7 +4321,7 @@ mod tests {
                 );
                 // And check the block device can be read.
                 assert!(guest
-                    .ssh_command("dd if=/dev/vdc of=/dev/null bs=1M iflag=direct count=16")
+                    .ssh_command("sudo dd if=/dev/vdc of=/dev/null bs=1M iflag=direct count=16")
                     .is_ok());
 
                 // Let's remove it the extra disk.
@@ -4362,7 +4362,7 @@ mod tests {
                 );
                 // And check the block device can be read.
                 assert!(guest
-                    .ssh_command("dd if=/dev/vdc of=/dev/null bs=1M iflag=direct count=16")
+                    .ssh_command("sudo dd if=/dev/vdc of=/dev/null bs=1M iflag=direct count=16")
                     .is_ok());
 
                 // Reboot the VM.
@@ -4734,10 +4734,10 @@ mod tests {
                 assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
                 // Check block devices are readable
                 assert!(guest
-                    .ssh_command("dd if=/dev/vda of=/dev/null bs=1M iflag=direct count=1024")
+                    .ssh_command("sudo dd if=/dev/vda of=/dev/null bs=1M iflag=direct count=1024")
                     .is_ok());
                 assert!(guest
-                    .ssh_command("dd if=/dev/vdb of=/dev/null bs=1M iflag=direct count=8")
+                    .ssh_command("sudo dd if=/dev/vdb of=/dev/null bs=1M iflag=direct count=8")
                     .is_ok());
                 // Check if the rng device is readable
                 assert!(guest
@@ -4820,10 +4820,10 @@ mod tests {
                 assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
                 assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
                 assert!(guest
-                    .ssh_command("dd if=/dev/vda of=/dev/null bs=1M iflag=direct count=1024")
+                    .ssh_command("sudo dd if=/dev/vda of=/dev/null bs=1M iflag=direct count=1024")
                     .is_ok());
                 assert!(guest
-                    .ssh_command("dd if=/dev/vdb of=/dev/null bs=1M iflag=direct count=8")
+                    .ssh_command("sudo dd if=/dev/vdb of=/dev/null bs=1M iflag=direct count=8")
                     .is_ok());
                 assert!(guest
                     .ssh_command("head -c 1000 /dev/hwrng > /dev/null")
