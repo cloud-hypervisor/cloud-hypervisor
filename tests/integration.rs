@@ -5205,7 +5205,6 @@ mod tests {
         }
 
         #[test]
-        #[ignore]
         fn test_ovs_dpdk() {
             // Create OVS-DPDK bridge and ports
             std::process::Command::new("bash")
@@ -5242,7 +5241,8 @@ mod tests {
             let guest1 = Guest::new(Box::new(focal1));
             let mut child1 = GuestCommand::new(&guest1)
                 .args(&["--cpus", "boot=2"])
-                .args(&["--memory", "size=1G,shared=on"])
+                .args(&["--memory", "size=0,shared=on"])
+                .args(&["--memory-zone", "id=mem0,size=1G,shared=on,host_numa_node=0"])
                 .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
                 .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
@@ -5291,7 +5291,8 @@ mod tests {
             let guest2 = Guest::new(Box::new(focal2));
             let mut child2 = GuestCommand::new(&guest2)
                 .args(&["--cpus", "boot=2"])
-                .args(&["--memory", "size=1G,shared=on"])
+                .args(&["--memory", "size=0,shared=on"])
+                .args(&["--memory-zone", "id=mem0,size=1G,shared=on,host_numa_node=0"])
                 .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
                 .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
