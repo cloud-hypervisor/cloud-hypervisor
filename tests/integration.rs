@@ -376,13 +376,6 @@ mod tests {
             )
         }
 
-        fn ssh_command_ok(&self, command: &str) -> Result<bool, SshCommandError> {
-            Ok(self
-                .ssh_command(&format!("{} && echo ok", command))?
-                .trim()
-                .ends_with("ok"))
-        }
-
         fn ssh_command(&self, command: &str) -> Result<String, SshCommandError> {
             ssh_command_ip(
                 command,
@@ -500,18 +493,16 @@ mod tests {
                 .map_err(Error::WaitForBoot)
         }
 
-        fn check_numa_node_cpus(&self, node_id: usize, cpus: Vec<usize>) -> Result<bool, Error> {
+        fn check_numa_node_cpus(&self, node_id: usize, cpus: Vec<usize>) -> Result<(), Error> {
             for cpu in cpus.iter() {
                 let cmd = format!(
                     "[ -d \"/sys/devices/system/node/node{}/cpu{}\" ]",
                     node_id, cpu
                 );
-                if !self.ssh_command_ok(cmd.as_str())? {
-                    return Ok(false);
-                }
+                self.ssh_command(cmd.as_str())?;
             }
 
-            Ok(true)
+            Ok(())
         }
 
         fn check_numa_node_distances(
@@ -527,27 +518,21 @@ mod tests {
             }
         }
 
-        fn check_sgx_support(&self) -> Result<bool, Error> {
-            if !self.ssh_command_ok(
+        fn check_sgx_support(&self) -> Result<(), Error> {
+            self.ssh_command(
                 "cpuid -l 0x7 -s 0 | tr -s [:space:] | grep -q 'SGX: \
                     Software Guard Extensions supported = true'",
-            )? {
-                return Ok(false);
-            }
-            if !self.ssh_command_ok(
+            )?;
+            self.ssh_command(
                 "cpuid -l 0x7 -s 0 | tr -s [:space:] | grep -q 'SGX_LC: \
                     SGX launch config supported = true'",
-            )? {
-                return Ok(false);
-            }
-            if !self.ssh_command_ok(
+            )?;
+            self.ssh_command(
                 "cpuid -l 0x12 -s 0 | tr -s [:space:] | grep -q 'SGX1 \
                     supported = true'",
-            )? {
-                return Ok(false);
-            }
+            )?;
 
-            Ok(true)
+            Ok(())
         }
 
         fn get_entropy(&self) -> Result<u32, Error> {
@@ -691,7 +676,7 @@ mod tests {
             assert!(device_query_result.contains("Result = PASS"));
 
             // Run NVIDIA DCGM Diagnostics to validate the device is functional
-            assert!(self.ssh_command_ok("sudo nv-hostengine").unwrap());
+            self.ssh_command("sudo nv-hostengine").unwrap();
 
             assert!(self
                 .ssh_command("sudo dcgmi discovery -l")
@@ -1369,7 +1354,7 @@ mod tests {
                  sudo mount -t virtiofs {} myfs mount_dir/",
                 dax_mount_param
             );
-            assert!(guest.ssh_command_ok(&mount_cmd).unwrap());
+            guest.ssh_command(&mount_cmd).unwrap();
 
             assert!(guest
                 .valid_virtio_fs_cache_size(dax, cache_size)
@@ -1413,7 +1398,7 @@ mod tests {
 
             if hotplug {
                 // Remove from VM
-                assert!(guest.ssh_command_ok("sudo umount mount_dir").unwrap());
+                guest.ssh_command("sudo umount mount_dir").unwrap();
                 assert!(remote_command(&api_socket, "remove-device", Some("myfs0")));
             }
         });
@@ -1446,7 +1431,7 @@ mod tests {
                      sudo mount -t virtiofs {} myfs mount_dir/",
                     dax_mount_param
                 );
-                assert!(guest.ssh_command_ok(&mount_cmd).unwrap());
+                guest.ssh_command(&mount_cmd).unwrap();
                 // Check file1 exists and its content is "foo"
                 assert_eq!(
                     guest.ssh_command("cat mount_dir/file1").unwrap().trim(),
@@ -2298,9 +2283,9 @@ mod tests {
                 assert!(guest.get_numa_node_memory(2).unwrap_or_default() > 2_880_000);
 
                 // Check each NUMA node has been assigned the right CPUs set.
-                assert!(guest.check_numa_node_cpus(0, vec![0, 1, 2]).unwrap());
-                assert!(guest.check_numa_node_cpus(1, vec![3, 4]).unwrap());
-                assert!(guest.check_numa_node_cpus(2, vec![5]).unwrap());
+                guest.check_numa_node_cpus(0, vec![0, 1, 2]).unwrap();
+                guest.check_numa_node_cpus(1, vec![3, 4]).unwrap();
+                guest.check_numa_node_cpus(2, vec![5]).unwrap();
 
                 // Check each NUMA node has been assigned the right distances.
                 assert!(guest.check_numa_node_distances(0, "10 15 20").unwrap());
@@ -4323,9 +4308,9 @@ mod tests {
                     1
                 );
                 // And check the block device can be read.
-                assert!(guest
+                guest
                     .ssh_command("sudo dd if=/dev/vdc of=/dev/null bs=1M iflag=direct count=16")
-                    .is_ok());
+                    .unwrap();
 
                 // Let's remove it the extra disk.
                 assert!(remote_command(&api_socket, "remove-device", Some("test0")));
@@ -4364,9 +4349,9 @@ mod tests {
                     1
                 );
                 // And check the block device can be read.
-                assert!(guest
+                guest
                     .ssh_command("sudo dd if=/dev/vdc of=/dev/null bs=1M iflag=direct count=16")
-                    .is_ok());
+                    .unwrap();
 
                 // Reboot the VM.
                 guest.reboot_linux(0, None);
@@ -4736,21 +4721,21 @@ mod tests {
                 // Check the guest RAM
                 assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
                 // Check block devices are readable
-                assert!(guest
+                guest
                     .ssh_command("sudo dd if=/dev/vda of=/dev/null bs=1M iflag=direct count=1024")
-                    .is_ok());
-                assert!(guest
+                    .unwrap();
+                guest
                     .ssh_command("sudo dd if=/dev/vdb of=/dev/null bs=1M iflag=direct count=8")
-                    .is_ok());
+                    .unwrap();
                 // Check if the rng device is readable
-                assert!(guest
+                guest
                     .ssh_command("sudo head -c 1000 /dev/hwrng > /dev/null")
-                    .is_ok());
+                    .unwrap();
                 // Check vsock
                 guest.check_vsock(socket.as_str());
                 // Check if the console is usable
 
-                assert!(guest.ssh_command(&console_cmd).is_ok());
+                guest.ssh_command(&console_cmd).unwrap();
 
                 // We check that removing and adding back the virtio-net device
                 // does not break the snapshot/restore support for virtio-pci.
@@ -4822,17 +4807,17 @@ mod tests {
                 // Perform same checks to validate VM has been properly restored
                 assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
                 assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
-                assert!(guest
+                guest
                     .ssh_command("sudo dd if=/dev/vda of=/dev/null bs=1M iflag=direct count=1024")
-                    .is_ok());
-                assert!(guest
+                    .unwrap();
+                guest
                     .ssh_command("sudo dd if=/dev/vdb of=/dev/null bs=1M iflag=direct count=8")
-                    .is_ok());
-                assert!(guest
+                    .unwrap();
+                guest
                     .ssh_command("sudo head -c 1000 /dev/hwrng > /dev/null")
-                    .is_ok());
+                    .unwrap();
                 guest.check_vsock(socket.as_str());
-                assert!(guest.ssh_command(&console_cmd).is_ok());
+                guest.ssh_command(&console_cmd).unwrap();
                 // Shutdown the target VM and check console output
             });
             let _ = child.kill();
@@ -4868,9 +4853,9 @@ mod tests {
                 guest.wait_vm_boot(None).unwrap();
 
                 let orig_counters = get_counters(&api_socket);
-                assert!(guest
+                guest
                     .ssh_command("dd if=/dev/zero of=test count=8 bs=1M")
-                    .is_ok());
+                    .unwrap();
 
                 let new_counters = get_counters(&api_socket);
 
@@ -5259,15 +5244,15 @@ mod tests {
             let r = std::panic::catch_unwind(|| {
                 guest1.wait_vm_boot(None).unwrap();
 
-                assert!(guest1
-                    .ssh_command_ok(&format!(
+                guest1
+                    .ssh_command(&format!(
                         "sudo ip addr add 172.100.0.1/24 dev {}",
                         guest_net_iface
                     ))
-                    .unwrap());
-                assert!(guest1
-                    .ssh_command_ok(&format!("sudo ip link set up dev {}", guest_net_iface))
-                    .unwrap());
+                    .unwrap();
+                guest1
+                    .ssh_command(&format!("sudo ip link set up dev {}", guest_net_iface))
+                    .unwrap();
 
                 let guest_ip = guest1.network.guest_ip.clone();
                 thread::spawn(move || {
@@ -5304,18 +5289,18 @@ mod tests {
             let r = std::panic::catch_unwind(|| {
                 guest2.wait_vm_boot(None).unwrap();
 
-                assert!(guest2
-                    .ssh_command_ok(&format!(
+                guest2
+                    .ssh_command(&format!(
                         "sudo ip addr add 172.100.0.2/24 dev {}",
                         guest_net_iface
                     ))
-                    .unwrap());
-                assert!(guest2
-                    .ssh_command_ok(&format!("sudo ip link set up dev {}", guest_net_iface))
-                    .unwrap());
+                    .unwrap();
+                guest2
+                    .ssh_command(&format!("sudo ip link set up dev {}", guest_net_iface))
+                    .unwrap();
 
                 // Check the connection works properly between the two VMs
-                assert!(guest2.ssh_command_ok("nc -vz 172.100.0.1 12345").unwrap());
+                guest2.ssh_command("nc -vz 172.100.0.1 12345").unwrap();
 
                 // Remove one of the two ports from the OVS bridge
                 std::process::Command::new("bash")
@@ -5348,7 +5333,7 @@ mod tests {
                 .expect("Expected 'ovs-vsctl add-port ovsbr0 vhost-user1 -- set Interface vhost-user1 type=dpdkvhostuserclient options:vhost-server-path=/tmp/dpdkvhostclient1' to work");
 
                 // And finally check the connection is functional again
-                assert!(guest2.ssh_command_ok("nc -vz 172.100.0.1 12345").unwrap());
+                guest2.ssh_command("nc -vz 172.100.0.1 12345").unwrap();
             });
 
             let _ = child1.kill();
@@ -6176,7 +6161,7 @@ mod tests {
                 guest.wait_vm_boot(None).unwrap();
 
                 // Check if SGX is correctly detected in the guest.
-                assert!(guest.check_sgx_support().unwrap());
+                guest.check_sgx_support().unwrap();
 
                 // Validate the SGX EPC section is 64MiB.
                 assert_eq!(
