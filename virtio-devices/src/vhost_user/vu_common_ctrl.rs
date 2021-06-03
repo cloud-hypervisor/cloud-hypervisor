@@ -143,8 +143,13 @@ pub fn setup_vhost_user(
 
         vu.set_vring_addr(queue_index, &config_data)
             .map_err(Error::VhostUserSetVringAddr)?;
-        vu.set_vring_base(queue_index, 0u16)
-            .map_err(Error::VhostUserSetVringBase)?;
+        vu.set_vring_base(
+            queue_index,
+            queue
+                .avail_index_from_memory(mem)
+                .map_err(Error::GetAvailableIndex)?,
+        )
+        .map_err(Error::VhostUserSetVringBase)?;
 
         if let Some(eventfd) = virtio_interrupt.notifier(&VirtioInterruptType::Queue, Some(&queue))
         {
