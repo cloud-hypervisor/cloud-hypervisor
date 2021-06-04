@@ -280,6 +280,14 @@ fn create_app<'a, 'b>(
                 .group("vm-config"),
         )
         .arg(
+            Arg::with_name("user-device")
+                .long("user-device")
+                .help(config::UserDeviceConfig::SYNTAX)
+                .takes_value(true)
+                .min_values(1)
+                .group("vm-config"),
+        )
+        .arg(
             Arg::with_name("vsock")
                 .long("vsock")
                 .help(config::VsockConfig::SYNTAX)
@@ -656,6 +664,7 @@ mod unit_tests {
                     iommu: false,
                 },
                 devices: None,
+                user_devices: None,
                 vsock: None,
                 iommu: false,
                 #[cfg(target_arch = "x86_64")]
