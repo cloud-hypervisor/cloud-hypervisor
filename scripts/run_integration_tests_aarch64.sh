@@ -128,6 +128,20 @@ update_workloads() {
     cp $SRCDIR/resources/linux-config-aarch64 $LINUX_CUSTOM_DIR/.config
     build_custom_linux_kernel
 
+    VIRTIOFSD="$WORKLOADS_DIR/virtiofsd"
+    QEMU_DIR="qemu_build"
+
+    if [ ! -f "$VIRTIOFSD" ]; then
+        pushd $WORKLOADS_DIR
+        git clone --depth 1 "https://gitlab.com/virtio-fs/qemu.git" -b "qemu5.0-virtiofs-dax" $QEMU_DIR
+        pushd $QEMU_DIR
+        time ./configure --prefix=$PWD --target-list=aarch64-softmmu
+        time make virtiofsd -j `nproc`
+        cp virtiofsd $VIRTIOFSD || exit 1
+        popd
+        rm -rf $QEMU_DIR
+        popd
+    fi
 
     VIRTIOFSD_RS="$WORKLOADS_DIR/virtiofsd-rs"
     VIRTIOFSD_RS_DIR="virtiofsd_rs_build"
