@@ -964,20 +964,14 @@ mod tests {
             guest.wait_vm_boot(None).unwrap();
 
             if let Some(tap_name) = tap {
-                let tap_count = std::process::Command::new("bash")
-                    .arg("-c")
-                    .arg(format!("ip link | grep -c {}", tap_name))
-                    .output()
-                    .expect("Expected checking of tap count to succeed");
+                let tap_count =
+                    exec_host_command_output(&format!("ip link | grep -c {}", tap_name));
                 assert_eq!(String::from_utf8_lossy(&tap_count.stdout).trim(), "1");
             }
 
             if let Some(host_mac) = tap {
-                let mac_count = std::process::Command::new("bash")
-                    .arg("-c")
-                    .arg(format!("ip link | grep -c {}", host_mac))
-                    .output()
-                    .expect("Expected checking of host mac to succeed");
+                let mac_count =
+                    exec_host_command_output(&format!("ip link | grep -c {}", host_mac));
                 assert_eq!(String::from_utf8_lossy(&mac_count.stdout).trim(), "1");
             }
 
@@ -2740,11 +2734,7 @@ mod tests {
             let r = std::panic::catch_unwind(|| {
                 guest.wait_vm_boot(None).unwrap();
 
-                let tap_count = std::process::Command::new("bash")
-                    .arg("-c")
-                    .arg("ip link | grep -c mytap1")
-                    .output()
-                    .expect("Expected checking of tap count to succeed");
+                let tap_count = exec_host_command_output("ip link | grep -c mytap1");
                 assert_eq!(String::from_utf8_lossy(&tap_count.stdout).trim(), "1");
 
                 // 3 network interfaces + default localhost ==> 4 interfaces
