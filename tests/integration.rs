@@ -643,10 +643,11 @@ mod tests {
             thread::sleep(std::time::Duration::new(10, 0));
 
             // Write something to vsock from the host
-            exec_host_command_status(&format!(
+            assert!(exec_host_command_status(&format!(
                 "echo -e \"CONNECT 16\\nHelloWorld!\" | socat - UNIX-CONNECT:{}",
                 socket
-            ));
+            ))
+            .success());
 
             // Wait for the thread to terminate.
             listen_socat.join().unwrap();
@@ -1821,34 +1822,34 @@ mod tests {
     // We reserve a different IP class for it: 172.18.0.0/24.
     fn setup_vfio_network_interfaces() {
         // 'vfio-br0'
-        exec_host_command_status("sudo ip link add name vfio-br0 type bridge");
-        exec_host_command_status("sudo ip link set vfio-br0 up");
-        exec_host_command_status("sudo ip addr add 172.18.0.1/24 dev vfio-br0");
+        assert!(exec_host_command_status("sudo ip link add name vfio-br0 type bridge").success());
+        assert!(exec_host_command_status("sudo ip link set vfio-br0 up").success());
+        assert!(exec_host_command_status("sudo ip addr add 172.18.0.1/24 dev vfio-br0").success());
         // 'vfio-tap0'
-        exec_host_command_status("sudo ip tuntap add vfio-tap0 mode tap");
-        exec_host_command_status("sudo ip link set vfio-tap0 master vfio-br0");
-        exec_host_command_status("sudo ip link set vfio-tap0 up");
+        assert!(exec_host_command_status("sudo ip tuntap add vfio-tap0 mode tap").success());
+        assert!(exec_host_command_status("sudo ip link set vfio-tap0 master vfio-br0").success());
+        assert!(exec_host_command_status("sudo ip link set vfio-tap0 up").success());
         // 'vfio-tap1'
-        exec_host_command_status("sudo ip tuntap add vfio-tap1 mode tap");
-        exec_host_command_status("sudo ip link set vfio-tap1 master vfio-br0");
-        exec_host_command_status("sudo ip link set vfio-tap1 up");
+        assert!(exec_host_command_status("sudo ip tuntap add vfio-tap1 mode tap").success());
+        assert!(exec_host_command_status("sudo ip link set vfio-tap1 master vfio-br0").success());
+        assert!(exec_host_command_status("sudo ip link set vfio-tap1 up").success());
         // 'vfio-tap2'
-        exec_host_command_status("sudo ip tuntap add vfio-tap2 mode tap");
-        exec_host_command_status("sudo ip link set vfio-tap2 master vfio-br0");
-        exec_host_command_status("sudo ip link set vfio-tap2 up");
+        assert!(exec_host_command_status("sudo ip tuntap add vfio-tap2 mode tap").success());
+        assert!(exec_host_command_status("sudo ip link set vfio-tap2 master vfio-br0").success());
+        assert!(exec_host_command_status("sudo ip link set vfio-tap2 up").success());
         // 'vfio-tap3'
-        exec_host_command_status("sudo ip tuntap add vfio-tap3 mode tap");
-        exec_host_command_status("sudo ip link set vfio-tap3 master vfio-br0");
-        exec_host_command_status("sudo ip link set vfio-tap3 up");
+        assert!(exec_host_command_status("sudo ip tuntap add vfio-tap3 mode tap").success());
+        assert!(exec_host_command_status("sudo ip link set vfio-tap3 master vfio-br0").success());
+        assert!(exec_host_command_status("sudo ip link set vfio-tap3 up").success());
     }
 
     // Tear VFIO test network down
     fn cleanup_vfio_network_interfaces() {
-        exec_host_command_status("sudo ip link del vfio-br0");
-        exec_host_command_status("sudo ip link del vfio-tap0");
-        exec_host_command_status("sudo ip link del vfio-tap1");
-        exec_host_command_status("sudo ip link del vfio-tap2");
-        exec_host_command_status("sudo ip link del vfio-tap3");
+        assert!(exec_host_command_status("sudo ip link del vfio-br0").success());
+        assert!(exec_host_command_status("sudo ip link del vfio-tap0").success());
+        assert!(exec_host_command_status("sudo ip link del vfio-tap1").success());
+        assert!(exec_host_command_status("sudo ip link del vfio-tap2").success());
+        assert!(exec_host_command_status("sudo ip link del vfio-tap3").success());
     }
 
     mod parallel {
@@ -5105,13 +5106,14 @@ mod tests {
         #[test]
         fn test_ovs_dpdk() {
             // Create OVS-DPDK bridge and ports
-            exec_host_command_status(
+            assert!(exec_host_command_status(
                 "ovs-vsctl add-br ovsbr0 -- set bridge ovsbr0 datapath_type=netdev",
-            );
-            exec_host_command_status("ovs-vsctl add-port ovsbr0 vhost-user1 -- set Interface vhost-user1 type=dpdkvhostuserclient options:vhost-server-path=/tmp/dpdkvhostclient1");
-            exec_host_command_status("ovs-vsctl add-port ovsbr0 vhost-user2 -- set Interface vhost-user2 type=dpdkvhostuserclient options:vhost-server-path=/tmp/dpdkvhostclient2");
-            exec_host_command_status("ip link set up dev ovsbr0");
-            exec_host_command_status("service openvswitch-switch restart");
+            )
+            .success());
+            assert!(exec_host_command_status("ovs-vsctl add-port ovsbr0 vhost-user1 -- set Interface vhost-user1 type=dpdkvhostuserclient options:vhost-server-path=/tmp/dpdkvhostclient1").success());
+            assert!(exec_host_command_status("ovs-vsctl add-port ovsbr0 vhost-user2 -- set Interface vhost-user2 type=dpdkvhostuserclient options:vhost-server-path=/tmp/dpdkvhostclient2").success());
+            assert!(exec_host_command_status("ip link set up dev ovsbr0").success());
+            assert!(exec_host_command_status("service openvswitch-switch restart").success());
 
             let focal1 = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest1 = Guest::new(Box::new(focal1));
@@ -5194,7 +5196,7 @@ mod tests {
                 guest2.ssh_command("nc -vz 172.100.0.1 12345").unwrap();
 
                 // Remove one of the two ports from the OVS bridge
-                exec_host_command_status("ovs-vsctl del-port vhost-user1");
+                assert!(exec_host_command_status("ovs-vsctl del-port vhost-user1").success());
 
                 // Spawn a new netcat listener in the first VM
                 let guest_ip = guest1.network.guest_ip.clone();
@@ -5212,7 +5214,7 @@ mod tests {
                 assert!(guest2.ssh_command("nc -vz 172.100.0.1 12345").is_err());
 
                 // Add the OVS port back
-                exec_host_command_status("ovs-vsctl add-port ovsbr0 vhost-user1 -- set Interface vhost-user1 type=dpdkvhostuserclient options:vhost-server-path=/tmp/dpdkvhostclient1");
+                assert!(exec_host_command_status("ovs-vsctl add-port ovsbr0 vhost-user1 -- set Interface vhost-user1 type=dpdkvhostuserclient options:vhost-server-path=/tmp/dpdkvhostclient1").success());
 
                 // And finally check the connection is functional again
                 guest2.ssh_command("nc -vz 172.100.0.1 12345").unwrap();
