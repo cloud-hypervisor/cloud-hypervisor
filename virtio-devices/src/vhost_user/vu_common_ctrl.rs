@@ -14,7 +14,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 use std::vec::Vec;
 use vhost::vhost_user::message::{
-    VhostUserInflight, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
+    VhostUserHeaderFlag, VhostUserInflight, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
 };
 use vhost::vhost_user::{Master, MasterReqHandler, VhostUserMaster, VhostUserMasterReqHandler};
 use vhost::{VhostBackend, VhostUserMemoryRegionInfo, VringConfigData};
@@ -95,12 +95,18 @@ pub fn negotiate_features_vhost_user(
             vu.set_protocol_features(acked_protocol_features)
                 .map_err(Error::VhostUserSetProtocolFeatures)?;
 
-            acked_protocol_features.bits()
+            acked_protocol_features
         } else {
-            0
+            VhostUserProtocolFeatures::empty()
         };
 
-    Ok((acked_features, acked_protocol_features))
+    if avail_protocol_features.contains(VhostUserProtocolFeatures::REPLY_ACK)
+        && acked_protocol_features.contains(VhostUserProtocolFeatures::REPLY_ACK)
+    {
+        vu.set_hdr_flags(VhostUserHeaderFlag::NEED_REPLY);
+    }
+
+    Ok((acked_features, acked_protocol_features.bits()))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -230,6 +236,10 @@ pub fn reinitialize_vhost_user<S: VhostUserMasterReqHandler>(
         {
             vu.set_protocol_features(acked_protocol_features)
                 .map_err(Error::VhostUserSetProtocolFeatures)?;
+
+            if acked_protocol_features.contains(VhostUserProtocolFeatures::REPLY_ACK) {
+                vu.set_hdr_flags(VhostUserHeaderFlag::NEED_REPLY);
+            }
         }
     }
 
