@@ -11,7 +11,7 @@ use std::net::TcpListener;
 use std::net::TcpStream;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
-use std::process::ExitStatus;
+use std::process::{ExitStatus, Output};
 use std::str::FromStr;
 use std::thread;
 use vmm_sys_util::tempdir::TempDir;
@@ -595,5 +595,12 @@ pub fn exec_host_command_status(command: &str) -> ExitStatus {
     std::process::Command::new("bash")
         .args(&["-c", command])
         .status()
+        .expect(&format!("Expected '{}' to run", command))
+}
+
+pub fn exec_host_command_output(command: &str) -> Output {
+    std::process::Command::new("bash")
+        .args(&["-c", command])
+        .output()
         .expect(&format!("Expected '{}' to run", command))
 }
