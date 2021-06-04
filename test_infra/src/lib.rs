@@ -11,6 +11,7 @@ use std::net::TcpListener;
 use std::net::TcpStream;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
+use std::process::ExitStatus;
 use std::str::FromStr;
 use std::thread;
 use vmm_sys_util::tempdir::TempDir;
@@ -588,4 +589,11 @@ pub fn ssh_command_ip(
         retries,
         timeout,
     )
+}
+
+pub fn exec_host_command_status(command: &str) -> ExitStatus {
+    std::process::Command::new("bash")
+        .args(&["-c", command])
+        .status()
+        .expect(&format!("Expected '{}' to run", command))
 }
