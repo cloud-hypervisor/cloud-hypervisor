@@ -2277,6 +2277,17 @@ impl Snapshottable for Vm {
         #[cfg(target_arch = "aarch64")]
         self.restore_vgic_and_enable_interrupt(&snapshot)?;
 
+        if let Some(device_manager_snapshot) = snapshot.snapshots.get(DEVICE_MANAGER_SNAPSHOT_ID) {
+            self.device_manager
+                .lock()
+                .unwrap()
+                .restore_devices(*device_manager_snapshot.clone())?;
+        } else {
+            return Err(MigratableError::Restore(anyhow!(
+                "Missing device manager snapshot"
+            )));
+        }
+
         // Now we can start all vCPUs from here.
         self.cpu_manager
             .lock()
