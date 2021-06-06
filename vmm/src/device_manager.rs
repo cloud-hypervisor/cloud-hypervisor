@@ -3465,6 +3465,39 @@ impl DeviceManager {
         self.device_tree.clone()
     }
 
+    pub fn restore_devices(
+        &mut self,
+        snapshot: Snapshot,
+    ) -> std::result::Result<(), MigratableError> {
+        // Finally, restore all devices associated with the DeviceManager.
+        // It's important to restore devices in the right order, that's why
+        // the device tree is the right way to ensure we restore a child before
+        // its parent node.
+        for node in self
+            .device_tree
+            .lock()
+            .unwrap()
+            .breadth_first_traversal()
+            .rev()
+        {
+            // Restore the node
+            if let Some(migratable) = &node.migratable {
+                debug!("Restoring {} from DeviceManager", node.id);
+                if let Some(snapshot) = snapshot.snapshots.get(&node.id) {
+                    migratable.lock().unwrap().pause()?;
+                    migratable.lock().unwrap().restore(*snapshot.clone())?;
+                } else {
+                    return Err(MigratableError::Restore(anyhow!(
+                        "Missing device {}",
+                        node.id
+                    )));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     #[cfg(feature = "acpi")]
     #[cfg(target_arch = "x86_64")]
     pub fn notify_power_button(&self) -> DeviceManagerResult<()> {
@@ -3969,32 +4002,6 @@ impl Snapshottable for DeviceManager {
         // to create the devices based on the configuration.
         self.create_devices(None, None)
             .map_err(|e| MigratableError::Restore(anyhow!("Could not create devices {:?}", e)))?;
-
-        // Finally, restore all devices associated with the DeviceManager.
-        // It's important to restore devices in the right order, that's why
-        // the device tree is the right way to ensure we restore a child before
-        // its parent node.
-        for node in self
-            .device_tree
-            .lock()
-            .unwrap()
-            .breadth_first_traversal()
-            .rev()
-        {
-            // Restore the node
-            if let Some(migratable) = &node.migratable {
-                debug!("Restoring {} from DeviceManager", node.id);
-                if let Some(snapshot) = snapshot.snapshots.get(&node.id) {
-                    migratable.lock().unwrap().pause()?;
-                    migratable.lock().unwrap().restore(*snapshot.clone())?;
-                } else {
-                    return Err(MigratableError::Restore(anyhow!(
-                        "Missing device {}",
-                        node.id
-                    )));
-                }
-            }
-        }
 
         Ok(())
     }
