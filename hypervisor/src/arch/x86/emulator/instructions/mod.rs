@@ -12,6 +12,7 @@ use iced_x86::*;
 pub mod cmp;
 pub mod mov;
 pub mod movs;
+pub mod or;
 
 fn get_op<T: CpuStateManager>(
     insn: &Instruction,
