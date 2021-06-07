@@ -714,7 +714,7 @@ mod mock_vmm {
                 "Memory read {} bytes from [{:#x} -> {:#x}]",
                 data.len(),
                 gva,
-                gva
+                gva + data.len() as u64 - 1
             );
             data.copy_from_slice(&self.memory[gva as usize..gva as usize + data.len()]);
             Ok(())
@@ -725,7 +725,7 @@ mod mock_vmm {
                 "Memory write {} bytes at [{:#x} -> {:#x}]",
                 data.len(),
                 gva,
-                gva
+                gva + data.len() as u64 - 1
             );
             self.memory[gva as usize..gva as usize + data.len()].copy_from_slice(data);
 
