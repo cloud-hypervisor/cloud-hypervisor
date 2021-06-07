@@ -4679,7 +4679,6 @@ mod tests {
         // through each ssh command. There's no need to perform a dedicated test to
         // verify the migration went well for virtio-net.
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_snapshot_restore() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
@@ -4750,22 +4749,26 @@ mod tests {
 
                 guest.ssh_command(&console_cmd).unwrap();
 
-                // We check that removing and adding back the virtio-net device
+                // x86_64: We check that removing and adding back the virtio-net device
                 // does not break the snapshot/restore support for virtio-pci.
                 // This is an important thing to test as the hotplug will
                 // trigger a PCI BAR reprogramming, which is a good way of
                 // checking if the stored resources are correctly restored.
                 // Unplug the virtio-net device
-                assert!(remote_command(&api_socket, "remove-device", Some(net_id),));
-                thread::sleep(std::time::Duration::new(10, 0));
+                // AArch64: Device hotplug is currently not supported, skipping here.
+                #[cfg(target_arch = "x86_64")]
+                {
+                    assert!(remote_command(&api_socket, "remove-device", Some(net_id),));
+                    thread::sleep(std::time::Duration::new(10, 0));
 
-                // Plug the virtio-net device again
-                assert!(remote_command(
-                    &api_socket,
-                    "add-net",
-                    Some(net_params.as_str()),
-                ));
-                thread::sleep(std::time::Duration::new(10, 0));
+                    // Plug the virtio-net device again
+                    assert!(remote_command(
+                        &api_socket,
+                        "add-net",
+                        Some(net_params.as_str()),
+                    ));
+                    thread::sleep(std::time::Duration::new(10, 0));
+                }
 
                 // Pause the VM
                 assert!(remote_command(&api_socket, "pause", None));
