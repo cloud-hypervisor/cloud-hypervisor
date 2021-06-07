@@ -7,17 +7,19 @@ use crate::{
     VIRTIO_F_ORDER_PLATFORM, VIRTIO_F_RING_EVENT_IDX, VIRTIO_F_RING_INDIRECT_DESC,
     VIRTIO_F_RING_PACKED, VIRTIO_F_VERSION_1,
 };
+use seccomp::SeccompAction;
 use std::io;
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::sync::{atomic::AtomicBool, Arc, Barrier, Mutex};
+use std::thread;
 use vhost::vhost_user::message::VhostUserVirtioFeatures;
 use vhost::vhost_user::Master;
 use vhost::Error as VhostError;
 use vm_memory::{Error as MmapError, GuestAddressSpace, GuestMemoryAtomic};
 use vm_virtio::Error as VirtioError;
 use vmm_sys_util::eventfd::EventFd;
-use vu_common_ctrl::{connect_vhost_user, reinitialize_vhost_user};
+use vu_common_ctrl::{connect_vhost_user, reinitialize_vhost_user, setup_slave_channel};
 
 pub mod blk;
 pub mod fs;
@@ -140,6 +142,13 @@ pub struct ReconnectEpollHandler {
     pub acked_protocol_features: u64,
     pub socket_path: String,
     pub server: bool,
+    pub paused: Option<Arc<AtomicBool>>,
+    pub paused_sync: Option<Arc<Barrier>>,
+    pub slave_req_handler: Option<Arc<SlaveReqHandler>>,
+    pub seccomp_action: Option<SeccompAction>,
+    pub slave_thread: Arc<Mutex<Option<thread::JoinHandle<()>>>>,
+    pub id: String,
+    pub disconnect_evt: Option<EventFd>,
 }
 
 impl ReconnectEpollHandler {
@@ -159,12 +168,29 @@ impl ReconnectEpollHandler {
         Ok(())
     }
 
+    fn dup_eventfds(&self) -> (EventFd, EventFd) {
+        (
+            self.kill_evt.try_clone().unwrap(),
+            self.pause_evt.try_clone().unwrap(),
+        )
+    }
+
     fn reconnect(&mut self, helper: &mut EpollHelper) -> std::result::Result<(), EpollHelperError> {
         helper.del_event_custom(
             self.vu.lock().unwrap().as_raw_fd(),
             HUP_CONNECTION_EVENT,
             epoll::Events::EPOLLHUP,
         )?;
+
+        // Tell the slave thread to exit
+        if let Some(disconnect_evt) = self.disconnect_evt.as_ref() {
+            disconnect_evt.write(1).map_err(|e| {
+                EpollHelperError::IoError(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("failed to write disconnection eventfd{:?}", e),
+                ))
+            })?;
+        }
 
         let mut vhost_user = connect_vhost_user(
             self.server,
@@ -198,6 +224,33 @@ impl ReconnectEpollHandler {
                 format!("failed reconnecting vhost-user backend{:?}", e),
             ))
         })?;
+
+        if let Some(handler) = self.slave_req_handler.as_ref() {
+            if let Some(disconnect_evt) = self.disconnect_evt.as_ref() {
+                let paused = self.paused.as_ref().unwrap().clone();
+                let paused_sync = self.paused_sync.clone();
+                let (kill_evt, pause_evt) = self.dup_eventfds();
+                self.slave_thread = Arc::new(Mutex::new(None));
+                setup_slave_channel(
+                    &mut vhost_user,
+                    handler.clone(),
+                    kill_evt,
+                    pause_evt,
+                    paused,
+                    paused_sync,
+                    &mut self.slave_thread.lock().unwrap(),
+                    self.id.clone(),
+                    self.seccomp_action.as_ref().unwrap(),
+                    disconnect_evt.try_clone().unwrap(),
+                )
+                .map_err(|e| {
+                    EpollHelperError::IoError(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("failed create vhost-user slave channel{:?}", e),
+                    ))
+                })?;
+            }
+        }
 
         helper.add_event_custom(
             vhost_user.as_raw_fd(),

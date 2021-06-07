@@ -10,7 +10,7 @@
 use super::super::{EpollHelper, EpollHelperError, EpollHelperHandler, EPOLL_HELPER_EVENT_LAST};
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, Mutex};
 use vhost::vhost_user::{MasterReqHandler, VhostUserMasterReqHandler};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -24,12 +24,14 @@ use vmm_sys_util::eventfd::EventFd;
 pub struct VhostUserEpollConfig<S: VhostUserMasterReqHandler> {
     pub kill_evt: EventFd,
     pub pause_evt: EventFd,
-    pub slave_req_handler: Option<MasterReqHandler<S>>,
+    pub slave_req_handler: Option<Arc<Mutex<MasterReqHandler<S>>>>,
+    pub disconnect_evt: EventFd,
 }
 
 pub struct VhostUserEpollHandler<S: VhostUserMasterReqHandler> {
     vu_epoll_cfg: VhostUserEpollConfig<S>,
     slave_evt_idx: u16,
+    disconnect_evt_idx: u16,
 }
 
 impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
@@ -44,6 +46,7 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
         VhostUserEpollHandler {
             vu_epoll_cfg,
             slave_evt_idx: EPOLL_HELPER_EVENT_LAST + 1,
+            disconnect_evt_idx: EPOLL_HELPER_EVENT_LAST + 2,
         }
     }
 
@@ -56,7 +59,14 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
             EpollHelper::new(&self.vu_epoll_cfg.kill_evt, &self.vu_epoll_cfg.pause_evt)?;
 
         if let Some(self_req_handler) = &self.vu_epoll_cfg.slave_req_handler {
-            helper.add_event(self_req_handler.as_raw_fd(), self.slave_evt_idx)?;
+            helper.add_event(
+                self_req_handler.lock().unwrap().as_raw_fd(),
+                self.slave_evt_idx,
+            )?;
+            helper.add_event(
+                self.vu_epoll_cfg.disconnect_evt.as_raw_fd(),
+                self.disconnect_evt_idx,
+            )?;
         }
 
         helper.run(paused, paused_sync, self)?;
@@ -71,11 +81,18 @@ impl<S: VhostUserMasterReqHandler> EpollHelperHandler for VhostUserEpollHandler<
         match ev_type {
             x if x == self.slave_evt_idx => {
                 if let Some(slave_req_handler) = self.vu_epoll_cfg.slave_req_handler.as_mut() {
-                    if let Err(e) = slave_req_handler.handle_request() {
+                    if let Err(e) = slave_req_handler.lock().unwrap().handle_request() {
                         error!("Failed to handle vhost-user request: {:?}", e);
                         return true;
                     }
                 }
+            }
+            x if x == self.disconnect_evt_idx => {
+                info!("Vhost-user socket disconnected, exiting the slave thread...");
+
+                // Drain the disconnect_evt event before exiting
+                let _ = self.vu_epoll_cfg.disconnect_evt.read();
+                return true;
             }
             _ => {
                 error!("Unknown event for vhost-user");

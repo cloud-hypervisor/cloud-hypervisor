@@ -3,11 +3,9 @@
 
 use super::vu_common_ctrl::{
     add_memory_region, connect_vhost_user, negotiate_features_vhost_user, reset_vhost_user,
-    setup_vhost_user, update_mem_table,
+    setup_slave_channel, setup_vhost_user, update_mem_table,
 };
 use super::{Error, Result, DEFAULT_VIRTIO_FEATURES};
-use crate::seccomp_filters::{get_seccomp_filter, Thread};
-use crate::vhost_user::handler::{VhostUserEpollConfig, VhostUserEpollHandler};
 use crate::vhost_user::ReconnectEpollHandler;
 use crate::{
     ActivateError, ActivateResult, Queue, UserspaceMapping, VirtioCommon, VirtioDevice,
@@ -15,7 +13,7 @@ use crate::{
 };
 use crate::{GuestMemoryMmap, GuestRegionMmap, MmapRegion};
 use libc::{self, c_void, off64_t, pread64, pwrite64};
-use seccomp::{SeccompAction, SeccompFilter};
+use seccomp::SeccompAction;
 use std::io;
 use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -26,9 +24,7 @@ use vhost::vhost_user::message::{
     VhostUserFSSlaveMsg, VhostUserFSSlaveMsgFlags, VhostUserProtocolFeatures,
     VhostUserVirtioFeatures, VHOST_USER_FS_SLAVE_ENTRIES,
 };
-use vhost::vhost_user::{
-    HandlerResult, Master, MasterReqHandler, VhostUserMaster, VhostUserMasterReqHandler,
-};
+use vhost::vhost_user::{HandlerResult, Master, VhostUserMaster, VhostUserMasterReqHandler};
 use vm_memory::{
     Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
 };
@@ -38,7 +34,7 @@ use vmm_sys_util::eventfd::EventFd;
 const NUM_QUEUE_OFFSET: usize = 1;
 const DEFAULT_QUEUE_NUMBER: usize = 2;
 
-struct SlaveReqHandler {
+pub struct SlaveReqHandler {
     cache_offset: GuestAddress,
     cache_size: u64,
     mmap_cache_addr: u64,
@@ -283,6 +279,7 @@ pub struct Fs {
     guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     acked_protocol_features: u64,
     socket_path: String,
+    slave_thread: Arc<Mutex<Option<thread::JoinHandle<()>>>>,
     reconnect_epoll_thread: Option<thread::JoinHandle<()>>,
 }
 
@@ -358,7 +355,7 @@ impl Fs {
                 avail_features: acked_features,
                 acked_features: 0,
                 queue_sizes: vec![queue_size; num_queues],
-                paused_sync: Some(Arc::new(Barrier::new(3))),
+                paused_sync: Some(Arc::new(Barrier::new(2))),
                 min_queues: DEFAULT_QUEUE_NUMBER as u16,
                 ..Default::default()
             },
@@ -371,6 +368,7 @@ impl Fs {
             guest_memory: None,
             acked_protocol_features,
             socket_path: path.to_string(),
+            slave_thread: Arc::new(Mutex::new(None)),
             reconnect_epoll_thread: None,
         })
     }
@@ -414,7 +412,6 @@ impl VirtioDevice for Fs {
         queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
-        let (kill_evt, pause_evt) = self.common.dup_eventfds();
         self.guest_memory = Some(mem.clone());
 
         // The backend acknowledged features must contain the protocol feature
@@ -434,66 +431,53 @@ impl VirtioDevice for Fs {
         .map_err(ActivateError::VhostUserFsSetup)?;
 
         // Initialize slave communication.
-        let slave_req_handler = if self.slave_req_support {
+        let mut slave_req_handler: Option<Arc<SlaveReqHandler>> = None;
+        if self.slave_req_support {
             if let Some(cache) = self.cache.as_ref() {
-                let vu_master_req_handler = Arc::new(SlaveReqHandler {
+                slave_req_handler = Some(Arc::new(SlaveReqHandler {
                     cache_offset: cache.0.addr,
                     cache_size: cache.0.len,
                     mmap_cache_addr: cache.0.host_addr,
                     mem: mem.clone(),
-                });
-
-                let mut req_handler =
-                    MasterReqHandler::new(vu_master_req_handler).map_err(|e| {
-                        ActivateError::VhostUserFsSetup(Error::MasterReqHandlerCreation(e))
-                    })?;
-                req_handler.set_reply_ack_flag(true);
-                self.vu
-                    .lock()
-                    .unwrap()
-                    .set_slave_request_fd(req_handler.get_tx_raw_fd())
-                    .map_err(|e| {
-                        ActivateError::VhostUserFsSetup(Error::VhostUserSetSlaveRequestFd(e))
-                    })?;
-                Some(req_handler)
-            } else {
-                None
+                }));
             }
-        } else {
-            None
-        };
+        }
+        let disconnect_evt = EventFd::new(libc::EFD_NONBLOCK).map_err(|e| {
+            error!("failed creating pause disconnection EventFd: {}", e);
+            ActivateError::BadActivate
+        })?;
 
-        let mut handler = VhostUserEpollHandler::new(VhostUserEpollConfig {
-            kill_evt,
-            pause_evt,
-            slave_req_handler,
-        });
+        // We only need to start the slave thread when slave_req_support is true.
+        if let Some(handler) = slave_req_handler.as_ref() {
+            let paused = self.common.paused.clone();
 
-        let paused = self.common.paused.clone();
-        let paused_sync = self.common.paused_sync.clone();
-        let mut epoll_threads = Vec::new();
-        let virtio_vhost_fs_seccomp_filter =
-            get_seccomp_filter(&self.seccomp_action, Thread::VirtioVhostFs)
-                .map_err(ActivateError::CreateSeccompFilter)?;
-        thread::Builder::new()
-            .name(self.id.clone())
-            .spawn(move || {
-                if let Err(e) = SeccompFilter::apply(virtio_vhost_fs_seccomp_filter) {
-                    error!("Error applying seccomp filter: {:?}", e);
-                } else if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
-                    error!("Error running worker: {:?}", e);
-                }
-            })
-            .map(|thread| epoll_threads.push(thread))
-            .map_err(|e| {
-                error!("failed to clone queue EventFd: {}", e);
-                ActivateError::BadActivate
-            })?;
+            // Let's update the barrier to 3, as except 1 for the reconnect
+            // thread and 1 for the main thread to signal the pause, now we
+            // need another 1 for the slave channel handler thread.
+            self.common.paused_sync = Some(Arc::new(Barrier::new(3)));
+            let paused_sync = self.common.paused_sync.clone();
 
-        self.common.epoll_threads = Some(epoll_threads);
+            let (kill_evt, pause_evt) = self.common.dup_eventfds();
+            self.slave_thread = Arc::new(Mutex::new(None));
+
+            setup_slave_channel(
+                &mut self.vu.lock().unwrap(),
+                handler.clone(),
+                kill_evt,
+                pause_evt,
+                paused,
+                paused_sync,
+                &mut self.slave_thread.lock().unwrap(),
+                self.id.clone(),
+                &self.seccomp_action,
+                disconnect_evt.try_clone().unwrap(),
+            )?;
+        }
 
         // Run a dedicated thread for handling potential reconnections with
         // the backend.
+        let paused = self.common.paused.clone();
+        let paused_sync = self.common.paused_sync.clone();
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
         let mut reconnect_handler = ReconnectEpollHandler {
             vu: self.vu.clone(),
@@ -507,6 +491,13 @@ impl VirtioDevice for Fs {
             acked_protocol_features: self.acked_protocol_features,
             socket_path: self.socket_path.clone(),
             server: false,
+            paused: Some(paused),
+            paused_sync,
+            slave_req_handler,
+            seccomp_action: Some(self.seccomp_action.clone()),
+            slave_thread: self.slave_thread.clone(),
+            id: self.id.clone(),
+            disconnect_evt: Some(disconnect_evt),
         };
 
         let paused = self.common.paused.clone();
@@ -615,6 +606,9 @@ impl Pausable for Fs {
 
         if let Some(reconnect_epoll_thread) = &self.reconnect_epoll_thread {
             reconnect_epoll_thread.thread().unpark();
+        }
+        if let Some(slave_thread) = self.slave_thread.lock().unwrap().as_ref() {
+            slave_thread.thread().unpark();
         }
         Ok(())
     }

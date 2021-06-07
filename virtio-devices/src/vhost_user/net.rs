@@ -316,6 +316,13 @@ impl VirtioDevice for Net {
             acked_protocol_features: self.acked_protocol_features,
             socket_path: self.socket_path.clone(),
             server: self.server,
+            paused: None,
+            paused_sync: None,
+            slave_req_handler: None,
+            seccomp_action: None,
+            slave_thread: Arc::new(Mutex::new(None)),
+            id: self.id.clone(),
+            disconnect_evt: None,
         };
 
         let paused = self.common.paused.clone();

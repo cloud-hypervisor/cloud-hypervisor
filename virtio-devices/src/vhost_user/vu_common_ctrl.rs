@@ -2,18 +2,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::super::{Descriptor, Queue};
+use super::fs::SlaveReqHandler;
 use super::{Error, Result};
+use crate::seccomp_filters::{get_seccomp_filter, Thread};
+use crate::vhost_user::handler::{VhostUserEpollConfig, VhostUserEpollHandler};
 use crate::{get_host_address_range, VirtioInterrupt, VirtioInterruptType};
-use crate::{GuestMemoryMmap, GuestRegionMmap};
+use crate::{ActivateError, ActivateResult, GuestMemoryMmap, GuestRegionMmap};
+use seccomp::{SeccompAction, SeccompFilter};
 use std::convert::TryInto;
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixListener;
-use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Barrier, Mutex};
+use std::thread;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 use std::vec::Vec;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
-use vhost::vhost_user::{Master, VhostUserMaster};
+use vhost::vhost_user::{Master, MasterReqHandler, VhostUserMaster};
 use vhost::{VhostBackend, VhostUserMemoryRegionInfo, VringConfigData};
 use vm_memory::{Address, Error as MmapError, GuestMemory, GuestMemoryRegion};
 use vmm_sys_util::eventfd::EventFd;
@@ -167,6 +173,53 @@ pub fn setup_vhost_user(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn setup_slave_channel(
+    vu: &mut Master,
+    handler: Arc<SlaveReqHandler>,
+    kill_evt: EventFd,
+    pause_evt: EventFd,
+    paused: Arc<AtomicBool>,
+    paused_sync: Option<Arc<Barrier>>,
+    slave_thread: &mut Option<thread::JoinHandle<()>>,
+    id: String,
+    seccomp_action: &SeccompAction,
+    disconnect_evt: EventFd,
+) -> ActivateResult {
+    let mut req_handler = MasterReqHandler::new(handler)
+        .map_err(|e| ActivateError::VhostUserFsSetup(Error::MasterReqHandlerCreation(e)))?;
+    req_handler.set_reply_ack_flag(true);
+    vu.set_slave_request_fd(req_handler.get_tx_raw_fd())
+        .map_err(|e| ActivateError::VhostUserFsSetup(Error::VhostUserSetSlaveRequestFd(e)))?;
+    let slave_req_handler_backend = Arc::new(Mutex::new(req_handler));
+
+    let mut epoll_handler = VhostUserEpollHandler::new(VhostUserEpollConfig {
+        kill_evt,
+        pause_evt,
+        slave_req_handler: Some(slave_req_handler_backend),
+        disconnect_evt,
+    });
+
+    let virtio_vhost_fs_seccomp_filter = get_seccomp_filter(seccomp_action, Thread::VirtioVhostFs)
+        .map_err(ActivateError::CreateSeccompFilter)?;
+    thread::Builder::new()
+        .name(id)
+        .spawn(move || {
+            if let Err(e) = SeccompFilter::apply(virtio_vhost_fs_seccomp_filter) {
+                error!("Error applying seccomp filter: {:?}", e);
+            } else if let Err(e) = epoll_handler.run(paused, paused_sync.unwrap()) {
+                error!("Error running worker: {:?}", e);
+            }
+        })
+        .map(|thread| *slave_thread = Some(thread))
+        .map_err(|e| {
+            error!("failed to clone queue EventFd: {}", e);
+            ActivateError::BadActivate
+        })?;
+
+    Ok(())
+}
+
 pub fn reset_vhost_user(vu: &mut Master, num_queues: usize) -> Result<()> {
     for queue_index in 0..num_queues {
         // Disable the vrings.
@@ -206,7 +259,9 @@ pub fn reinitialize_vhost_user(
         queue_evts,
         virtio_interrupt,
         acked_features,
-    )
+    )?;
+
+    Ok(())
 }
 
 pub fn connect_vhost_user(
