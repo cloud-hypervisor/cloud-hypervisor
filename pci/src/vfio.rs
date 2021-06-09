@@ -222,6 +222,8 @@ pub struct MmioRegion {
 pub enum VfioError {
     #[error("Kernel VFIO error: {0}")]
     KernelVfio(#[source] vfio_ioctls::VfioError),
+    #[error("VFIO user error: {0}")]
+    VfioUser(#[source] vfio_user::Error),
 }
 
 pub(crate) trait Vfio {
