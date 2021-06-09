@@ -12,7 +12,7 @@ use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::sync::{atomic::AtomicBool, Arc, Barrier, Mutex};
 use vhost::vhost_user::message::VhostUserVirtioFeatures;
-use vhost::vhost_user::Master;
+use vhost::vhost_user::{Master, MasterReqHandler, VhostUserMasterReqHandler};
 use vhost::Error as VhostError;
 use vm_memory::{Error as MmapError, GuestAddressSpace, GuestMemoryAtomic};
 use vm_virtio::Error as VirtioError;
@@ -21,7 +21,6 @@ use vu_common_ctrl::{connect_vhost_user, reinitialize_vhost_user};
 
 pub mod blk;
 pub mod fs;
-mod handler;
 pub mod net;
 pub mod vu_common_ctrl;
 
@@ -127,8 +126,9 @@ pub const DEFAULT_VIRTIO_FEATURES: u64 = 1 << VIRTIO_F_RING_INDIRECT_DESC
     | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
 
 const HUP_CONNECTION_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
+const SLAVE_REQ_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
 
-pub struct ReconnectEpollHandler {
+pub struct VhostUserEpollHandler<S: VhostUserMasterReqHandler> {
     pub vu: Arc<Mutex<Master>>,
     pub mem: GuestMemoryAtomic<GuestMemoryMmap>,
     pub kill_evt: EventFd,
@@ -140,9 +140,10 @@ pub struct ReconnectEpollHandler {
     pub acked_protocol_features: u64,
     pub socket_path: String,
     pub server: bool,
+    pub slave_req_handler: Option<MasterReqHandler<S>>,
 }
 
-impl ReconnectEpollHandler {
+impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
     pub fn run(
         &mut self,
         paused: Arc<AtomicBool>,
@@ -154,6 +155,11 @@ impl ReconnectEpollHandler {
             HUP_CONNECTION_EVENT,
             epoll::Events::EPOLLHUP,
         )?;
+
+        if let Some(slave_req_handler) = &self.slave_req_handler {
+            helper.add_event(slave_req_handler.as_raw_fd(), SLAVE_REQ_EVENT)?;
+        }
+
         helper.run(paused, paused_sync, self)?;
 
         Ok(())
@@ -213,7 +219,7 @@ impl ReconnectEpollHandler {
     }
 }
 
-impl EpollHelperHandler for ReconnectEpollHandler {
+impl<S: VhostUserMasterReqHandler> EpollHelperHandler for VhostUserEpollHandler<S> {
     fn handle_event(&mut self, helper: &mut EpollHelper, event: &epoll::Event) -> bool {
         let ev_type = event.data as u16;
         match ev_type {
@@ -221,6 +227,14 @@ impl EpollHelperHandler for ReconnectEpollHandler {
                 if let Err(e) = self.reconnect(helper) {
                     error!("failed to reconnect vhost-user backend: {:?}", e);
                     return true;
+                }
+            }
+            SLAVE_REQ_EVENT => {
+                if let Some(slave_req_handler) = self.slave_req_handler.as_mut() {
+                    if let Err(e) = slave_req_handler.handle_request() {
+                        error!("Failed to handle request from vhost-user backend: {:?}", e);
+                        return true;
+                    }
                 }
             }
             _ => {

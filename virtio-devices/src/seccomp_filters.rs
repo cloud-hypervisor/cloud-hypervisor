@@ -313,6 +313,7 @@ fn virtio_vhost_fs_thread_rules() -> Vec<SyscallRuleSet> {
     vec![
         allow_syscall(libc::SYS_brk),
         allow_syscall(libc::SYS_close),
+        allow_syscall(libc::SYS_connect),
         allow_syscall(libc::SYS_dup),
         allow_syscall(libc::SYS_epoll_create1),
         allow_syscall(libc::SYS_epoll_ctl),
@@ -324,11 +325,14 @@ fn virtio_vhost_fs_thread_rules() -> Vec<SyscallRuleSet> {
         allow_syscall(libc::SYS_madvise),
         allow_syscall(libc::SYS_mmap),
         allow_syscall(libc::SYS_munmap),
+        allow_syscall(libc::SYS_nanosleep),
         allow_syscall(libc::SYS_read),
         allow_syscall(libc::SYS_recvmsg),
         allow_syscall(libc::SYS_rt_sigprocmask),
         allow_syscall(libc::SYS_sendmsg),
+        allow_syscall(libc::SYS_sendto),
         allow_syscall(libc::SYS_sigaltstack),
+        allow_syscall(libc::SYS_socket),
         allow_syscall(libc::SYS_write),
     ]
 }

@@ -9,7 +9,7 @@ use super::vu_common_ctrl::{
     setup_vhost_user, update_mem_table, VhostUserConfig,
 };
 use super::{Error, Result, DEFAULT_VIRTIO_FEATURES};
-use crate::vhost_user::ReconnectEpollHandler;
+use crate::vhost_user::VhostUserEpollHandler;
 use crate::VirtioInterrupt;
 use crate::{GuestMemoryMmap, GuestRegionMmap};
 use block_util::VirtioBlockConfig;
@@ -235,7 +235,7 @@ impl VirtioDevice for Blk {
         // the backend.
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
-        let mut reconnect_handler = ReconnectEpollHandler {
+        let mut reconnect_handler: VhostUserEpollHandler<SlaveReqHandler> = VhostUserEpollHandler {
             vu: self.vhost_user_blk.clone(),
             mem,
             kill_evt,
@@ -247,13 +247,14 @@ impl VirtioDevice for Blk {
             acked_protocol_features: self.acked_protocol_features,
             socket_path: self.socket_path.clone(),
             server: false,
+            slave_req_handler: None,
         };
 
         let paused = self.common.paused.clone();
         let paused_sync = self.common.paused_sync.clone();
 
         thread::Builder::new()
-            .name(format!("{}_reconnect", self.id))
+            .name(self.id.to_string())
             .spawn(move || {
                 if let Err(e) = reconnect_handler.run(paused, paused_sync.unwrap()) {
                     error!("Error running reconnection worker: {:?}", e);

@@ -7,8 +7,7 @@ use super::vu_common_ctrl::{
 };
 use super::{Error, Result, DEFAULT_VIRTIO_FEATURES};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
-use crate::vhost_user::handler::{VhostUserEpollConfig, VhostUserEpollHandler};
-use crate::vhost_user::ReconnectEpollHandler;
+use crate::vhost_user::VhostUserEpollHandler;
 use crate::{
     ActivateError, ActivateResult, Queue, UserspaceMapping, VirtioCommon, VirtioDevice,
     VirtioDeviceType, VirtioInterrupt, VirtioSharedMemoryList,
@@ -358,7 +357,7 @@ impl Fs {
                 avail_features: acked_features,
                 acked_features: 0,
                 queue_sizes: vec![queue_size; num_queues],
-                paused_sync: Some(Arc::new(Barrier::new(3))),
+                paused_sync: Some(Arc::new(Barrier::new(2))),
                 min_queues: DEFAULT_QUEUE_NUMBER as u16,
                 ..Default::default()
             },
@@ -414,7 +413,6 @@ impl VirtioDevice for Fs {
         queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
-        let (kill_evt, pause_evt) = self.common.dup_eventfds();
         self.guest_memory = Some(mem.clone());
 
         // The backend acknowledged features must contain the protocol feature
@@ -463,39 +461,10 @@ impl VirtioDevice for Fs {
             None
         };
 
-        let mut handler = VhostUserEpollHandler::new(VhostUserEpollConfig {
-            kill_evt,
-            pause_evt,
-            slave_req_handler,
-        });
-
-        let paused = self.common.paused.clone();
-        let paused_sync = self.common.paused_sync.clone();
-        let mut epoll_threads = Vec::new();
-        let virtio_vhost_fs_seccomp_filter =
-            get_seccomp_filter(&self.seccomp_action, Thread::VirtioVhostFs)
-                .map_err(ActivateError::CreateSeccompFilter)?;
-        thread::Builder::new()
-            .name(self.id.clone())
-            .spawn(move || {
-                if let Err(e) = SeccompFilter::apply(virtio_vhost_fs_seccomp_filter) {
-                    error!("Error applying seccomp filter: {:?}", e);
-                } else if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
-                    error!("Error running worker: {:?}", e);
-                }
-            })
-            .map(|thread| epoll_threads.push(thread))
-            .map_err(|e| {
-                error!("failed to clone queue EventFd: {}", e);
-                ActivateError::BadActivate
-            })?;
-
-        self.common.epoll_threads = Some(epoll_threads);
-
         // Run a dedicated thread for handling potential reconnections with
-        // the backend.
+        // the backend as well as requests initiated by the backend.
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
-        let mut reconnect_handler = ReconnectEpollHandler {
+        let mut reconnect_handler: VhostUserEpollHandler<SlaveReqHandler> = VhostUserEpollHandler {
             vu: self.vu.clone(),
             mem,
             kill_evt,
@@ -507,15 +476,22 @@ impl VirtioDevice for Fs {
             acked_protocol_features: self.acked_protocol_features,
             socket_path: self.socket_path.clone(),
             server: false,
+            slave_req_handler,
         };
 
         let paused = self.common.paused.clone();
         let paused_sync = self.common.paused_sync.clone();
 
+        let virtio_vhost_fs_seccomp_filter =
+            get_seccomp_filter(&self.seccomp_action, Thread::VirtioVhostFs)
+                .map_err(ActivateError::CreateSeccompFilter)?;
+
         thread::Builder::new()
-            .name(format!("{}_reconnect", self.id))
+            .name(self.id.to_string())
             .spawn(move || {
-                if let Err(e) = reconnect_handler.run(paused, paused_sync.unwrap()) {
+                if let Err(e) = SeccompFilter::apply(virtio_vhost_fs_seccomp_filter) {
+                    error!("Error applying seccomp filter: {:?}", e);
+                } else if let Err(e) = reconnect_handler.run(paused, paused_sync.unwrap()) {
                     error!("Error running reconnection worker: {:?}", e);
                 }
             })
