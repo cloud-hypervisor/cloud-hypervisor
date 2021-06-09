@@ -10,7 +10,7 @@ cargo-fuzz = true
 
 [dependencies]
 block_util = { path = "../block_util" }
-libc = "0.2.95"
+libc = "0.2.96"
 libfuzzer-sys = "0.4.2"
 qcow = { path = "../qcow" }
 seccomp = { git = "https://github.com/firecracker-microvm/firecracker", tag = "v0.24.4" }
