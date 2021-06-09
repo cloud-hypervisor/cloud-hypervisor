@@ -19,6 +19,7 @@ use crate::GuestMemoryMmap;
 use crate::RegionType;
 use gic::GicDevice;
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::ffi::CStr;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -195,22 +196,17 @@ fn get_fdt_addr() -> u64 {
 }
 
 pub fn get_host_cpu_phys_bits() -> u8 {
-    // The value returned here is used to determine the physical address space size
-    // for a VM (IPA size).
-    // In recent kernel versions, the maximum IPA size supported by the host can be
-    // known by querying cap KVM_CAP_ARM_VM_IPA_SIZE. And the IPA size for a
-    // guest can be configured smaller.
-    // But in Cloud-Hypervisor we simply use the maximum value for the VM.
-    // Reference https://lwn.net/Articles/766767/.
-    //
-    // The correct way to query KVM_CAP_ARM_VM_IPA_SIZE is via rust-vmm/kvm-ioctls,
-    // which wraps all IOCTL's and provides easy interface to user hypervisors.
-    // For now the cap hasn't been supported. A separate patch will be submitted to
-    // rust-vmm to add it.
-    // So a hardcoded value is used here as a temporary solution.
-    // It will be replace once rust-vmm/kvm-ioctls is ready.
-    //
-    40
+    // A dummy hypervisor created only for querying the host IPA size and will
+    // be freed after the query.
+    let hv = hypervisor::new().unwrap();
+    let host_cpu_phys_bits = hv.get_host_ipa_limit().try_into().unwrap();
+    if host_cpu_phys_bits == 0 {
+        // Host kernel does not support `get_host_ipa_limit`,
+        // we return the default value 40 here.
+        40
+    } else {
+        host_cpu_phys_bits
+    }
 }
 
 #[cfg(test)]
