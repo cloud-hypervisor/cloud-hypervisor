@@ -13,7 +13,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 use std::vec::Vec;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
-use vhost::vhost_user::{Master, VhostUserMaster};
+use vhost::vhost_user::{Master, MasterReqHandler, VhostUserMaster, VhostUserMasterReqHandler};
 use vhost::{VhostBackend, VhostUserMemoryRegionInfo, VringConfigData};
 use vm_memory::{Address, Error as MmapError, GuestMemory, GuestMemoryRegion};
 use vmm_sys_util::eventfd::EventFd;
@@ -100,13 +100,14 @@ pub fn negotiate_features_vhost_user(
     Ok((acked_features, acked_protocol_features))
 }
 
-pub fn setup_vhost_user(
+pub fn setup_vhost_user<S: VhostUserMasterReqHandler>(
     vu: &mut Master,
     mem: &GuestMemoryMmap,
     queues: Vec<Queue>,
     queue_evts: Vec<EventFd>,
     virtio_interrupt: &Arc<dyn VirtioInterrupt>,
     acked_features: u64,
+    slave_req_handler: &Option<MasterReqHandler<S>>,
 ) -> Result<()> {
     vu.set_features(acked_features)
         .map_err(Error::VhostUserSetFeatures)?;
@@ -164,7 +165,12 @@ pub fn setup_vhost_user(
             .map_err(Error::VhostUserSetVringEnable)?;
     }
 
-    Ok(())
+    if let Some(slave_req_handler) = slave_req_handler {
+        vu.set_slave_request_fd(slave_req_handler.get_tx_raw_fd())
+            .map_err(Error::VhostUserSetSlaveRequestFd)
+    } else {
+        Ok(())
+    }
 }
 
 pub fn reset_vhost_user(vu: &mut Master, num_queues: usize) -> Result<()> {
@@ -178,7 +184,8 @@ pub fn reset_vhost_user(vu: &mut Master, num_queues: usize) -> Result<()> {
     vu.reset_owner().map_err(Error::VhostUserResetOwner)
 }
 
-pub fn reinitialize_vhost_user(
+#[allow(clippy::too_many_arguments)]
+pub fn reinitialize_vhost_user<S: VhostUserMasterReqHandler>(
     vu: &mut Master,
     mem: &GuestMemoryMmap,
     queues: Vec<Queue>,
@@ -186,6 +193,7 @@ pub fn reinitialize_vhost_user(
     virtio_interrupt: &Arc<dyn VirtioInterrupt>,
     acked_features: u64,
     acked_protocol_features: u64,
+    slave_req_handler: &Option<MasterReqHandler<S>>,
 ) -> Result<()> {
     vu.set_owner().map_err(Error::VhostUserSetOwner)?;
     vu.get_features().map_err(Error::VhostUserGetFeatures)?;
@@ -206,6 +214,7 @@ pub fn reinitialize_vhost_user(
         queue_evts,
         virtio_interrupt,
         acked_features,
+        slave_req_handler,
     )
 }
 

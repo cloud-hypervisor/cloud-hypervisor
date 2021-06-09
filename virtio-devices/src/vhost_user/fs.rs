@@ -415,22 +415,6 @@ impl VirtioDevice for Fs {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
         self.guest_memory = Some(mem.clone());
 
-        // The backend acknowledged features must contain the protocol feature
-        // bit in case it was initially set but lost through the features
-        // negotiation with the guest.
-        let backend_acked_features = self.common.acked_features
-            | (self.common.avail_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits());
-
-        setup_vhost_user(
-            &mut self.vu.lock().unwrap(),
-            &mem.memory(),
-            queues.clone(),
-            queue_evts.iter().map(|q| q.try_clone().unwrap()).collect(),
-            &interrupt_cb,
-            backend_acked_features,
-        )
-        .map_err(ActivateError::VhostUserFsSetup)?;
-
         // Initialize slave communication.
         let slave_req_handler = if self.slave_req_support {
             if let Some(cache) = self.cache.as_ref() {
@@ -446,13 +430,6 @@ impl VirtioDevice for Fs {
                         ActivateError::VhostUserFsSetup(Error::MasterReqHandlerCreation(e))
                     })?;
                 req_handler.set_reply_ack_flag(true);
-                self.vu
-                    .lock()
-                    .unwrap()
-                    .set_slave_request_fd(req_handler.get_tx_raw_fd())
-                    .map_err(|e| {
-                        ActivateError::VhostUserFsSetup(Error::VhostUserSetSlaveRequestFd(e))
-                    })?;
                 Some(req_handler)
             } else {
                 None
@@ -460,6 +437,23 @@ impl VirtioDevice for Fs {
         } else {
             None
         };
+
+        // The backend acknowledged features must contain the protocol feature
+        // bit in case it was initially set but lost through the features
+        // negotiation with the guest.
+        let backend_acked_features = self.common.acked_features
+            | (self.common.avail_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits());
+
+        setup_vhost_user(
+            &mut self.vu.lock().unwrap(),
+            &mem.memory(),
+            queues.clone(),
+            queue_evts.iter().map(|q| q.try_clone().unwrap()).collect(),
+            &interrupt_cb,
+            backend_acked_features,
+            &slave_req_handler,
+        )
+        .map_err(ActivateError::VhostUserFsSetup)?;
 
         // Run a dedicated thread for handling potential reconnections with
         // the backend as well as requests initiated by the backend.
