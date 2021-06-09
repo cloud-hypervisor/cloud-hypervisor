@@ -6,7 +6,7 @@ use crate::vhost_user::vu_common_ctrl::{
     add_memory_region, connect_vhost_user, negotiate_features_vhost_user, reset_vhost_user,
     setup_vhost_user, update_mem_table, VhostUserConfig,
 };
-use crate::vhost_user::{Error, ReconnectEpollHandler, Result};
+use crate::vhost_user::{Error, Result, VhostUserEpollHandler};
 use crate::{
     ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
     VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterrupt, EPOLL_HELPER_EVENT_LAST,
@@ -304,7 +304,7 @@ impl VirtioDevice for Net {
         // the backend.
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
-        let mut reconnect_handler = ReconnectEpollHandler {
+        let mut reconnect_handler: VhostUserEpollHandler<SlaveReqHandler> = VhostUserEpollHandler {
             vu: self.vhost_user_net.clone(),
             mem,
             kill_evt,
@@ -316,13 +316,14 @@ impl VirtioDevice for Net {
             acked_protocol_features: self.acked_protocol_features,
             socket_path: self.socket_path.clone(),
             server: self.server,
+            slave_req_handler: None,
         };
 
         let paused = self.common.paused.clone();
         let paused_sync = self.common.paused_sync.clone();
 
         thread::Builder::new()
-            .name(format!("{}_reconnect", self.id))
+            .name(self.id.to_string())
             .spawn(move || {
                 if let Err(e) = reconnect_handler.run(paused, paused_sync.unwrap()) {
                     error!("Error running reconnection worker: {:?}", e);
