@@ -27,7 +27,7 @@ epoll = ">=4.0.1"
 event_monitor = { path = "../event_monitor" }
 hypervisor = { path = "../hypervisor" }
 lazy_static = "1.4.0"
-libc = "0.2.95"
+libc = "0.2.96"
 linux-loader = { version = "0.3.0", features = ["elf", "bzimage", "pe"] }
 log = "0.4.14"
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "main" }
