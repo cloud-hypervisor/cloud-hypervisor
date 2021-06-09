@@ -661,6 +661,7 @@ dependencies = [
  "versionize_derive",
  "vfio-bindings",
  "vfio-ioctls",
+ "vfio_user",
  "vm-allocator",
  "vm-device",
  "vm-memory 0.6.0",
