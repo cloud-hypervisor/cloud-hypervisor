@@ -100,4 +100,9 @@ pub trait Hypervisor: Send + Sync {
     /// Retrieve the list of MSRs supported by the hypervisor.
     ///
     fn get_msr_list(&self) -> Result<MsrList>;
+    #[cfg(target_arch = "aarch64")]
+    ///
+    /// Retrieve AArch64 host maximum IPA size supported by KVM.
+    ///
+    fn get_host_ipa_limit(&self) -> i32;
 }

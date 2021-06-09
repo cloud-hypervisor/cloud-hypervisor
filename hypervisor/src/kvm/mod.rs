@@ -584,6 +584,13 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             .get_msr_index_list()
             .map_err(|e| hypervisor::HypervisorError::GetMsrList(e.into()))
     }
+    #[cfg(target_arch = "aarch64")]
+    ///
+    /// Retrieve AArch64 host maximum IPA size supported by KVM.
+    ///
+    fn get_host_ipa_limit(&self) -> i32 {
+        self.kvm.get_host_ipa_limit()
+    }
 }
 /// Vcpu struct for KVM
 pub struct KvmVcpu {
