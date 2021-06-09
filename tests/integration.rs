@@ -2329,8 +2329,7 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
-        fn test_vmlinux_boot() {
+        fn test_direct_kernel_boot() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
             let mut workload_path = dirs::home_dir().unwrap();
@@ -2356,9 +2355,14 @@ mod tests {
                 assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
                 assert!(guest.get_entropy().unwrap_or_default() >= 900);
 
+                let grep_cmd = if cfg!(target_arch = "x86_64") {
+                    "grep -c PCI-MSI /proc/interrupts"
+                } else {
+                    "grep -c ITS-MSI /proc/interrupts"
+                };
                 assert_eq!(
                     guest
-                        .ssh_command("grep -c PCI-MSI /proc/interrupts")
+                        .ssh_command(grep_cmd)
                         .unwrap()
                         .trim()
                         .parse::<u32>()
@@ -2371,49 +2375,6 @@ mod tests {
             let output = child.wait_with_output().unwrap();
 
             handle_child_output(r, &output);
-        }
-
-        #[test]
-        #[cfg(target_arch = "aarch64")]
-        fn test_aarch64_pe_boot() {
-            let bionic = UbuntuDiskConfig::new(BIONIC_IMAGE_NAME.to_string());
-            let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-
-            vec![Box::new(bionic), Box::new(focal)]
-                .drain(..)
-                .for_each(|disk_config| {
-                    let guest = Guest::new(disk_config);
-
-                    let mut workload_path = dirs::home_dir().unwrap();
-                    workload_path.push("workloads");
-
-                    let kernel_path = direct_kernel_boot_path();
-
-                    let mut child = GuestCommand::new(&guest)
-                        .args(&["--cpus", "boot=1"])
-                        .args(&["--memory", "size=512M"])
-                        .args(&["--kernel", kernel_path.to_str().unwrap()])
-                        .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-                        .default_disks()
-                        .default_net()
-                        .args(&["--seccomp", "false"])
-                        .capture_output()
-                        .spawn()
-                        .unwrap();
-
-                    let r = std::panic::catch_unwind(|| {
-                        guest.wait_vm_boot(Some(120)).unwrap();
-
-                        assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
-                        assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
-                        assert!(guest.get_entropy().unwrap_or_default() >= 900);
-                    });
-
-                    let _ = child.kill();
-                    let output = child.wait_with_output().unwrap();
-
-                    handle_child_output(r, &output);
-                });
         }
 
         fn _test_virtio_block(image_name: &str, disable_io_uring: bool) {
