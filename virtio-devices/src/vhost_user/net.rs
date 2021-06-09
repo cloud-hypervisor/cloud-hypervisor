@@ -23,7 +23,7 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::vec::Vec;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
-use vhost::vhost_user::{Master, VhostUserMaster, VhostUserMasterReqHandler};
+use vhost::vhost_user::{Master, MasterReqHandler, VhostUserMaster, VhostUserMasterReqHandler};
 use virtio_bindings::bindings::virtio_net::{
     VIRTIO_NET_F_CSUM, VIRTIO_NET_F_CTRL_VQ, VIRTIO_NET_F_GUEST_CSUM, VIRTIO_NET_F_GUEST_ECN,
     VIRTIO_NET_F_GUEST_TSO4, VIRTIO_NET_F_GUEST_TSO6, VIRTIO_NET_F_GUEST_UFO,
@@ -283,6 +283,8 @@ impl VirtioDevice for Net {
                 })?;
         }
 
+        let slave_req_handler: Option<MasterReqHandler<SlaveReqHandler>> = None;
+
         // The backend acknowledged features must contain the protocol feature
         // bit in case it was initially set but lost through the features
         // negotiation with the guest. Additionally, it must not contain
@@ -297,6 +299,7 @@ impl VirtioDevice for Net {
             queue_evts.iter().map(|q| q.try_clone().unwrap()).collect(),
             &interrupt_cb,
             backend_acked_features,
+            &slave_req_handler,
         )
         .map_err(ActivateError::VhostUserNetSetup)?;
 

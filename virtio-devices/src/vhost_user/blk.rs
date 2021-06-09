@@ -23,7 +23,7 @@ use std::vec::Vec;
 use vhost::vhost_user::message::VhostUserConfigFlags;
 use vhost::vhost_user::message::VHOST_USER_CONFIG_OFFSET;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
-use vhost::vhost_user::{Master, VhostUserMaster, VhostUserMasterReqHandler};
+use vhost::vhost_user::{Master, MasterReqHandler, VhostUserMaster, VhostUserMasterReqHandler};
 use vhost::VhostBackend;
 use virtio_bindings::bindings::virtio_blk::{
     VIRTIO_BLK_F_BLK_SIZE, VIRTIO_BLK_F_CONFIG_WCE, VIRTIO_BLK_F_DISCARD, VIRTIO_BLK_F_FLUSH,
@@ -215,6 +215,8 @@ impl VirtioDevice for Blk {
 
         self.guest_memory = Some(mem.clone());
 
+        let slave_req_handler: Option<MasterReqHandler<SlaveReqHandler>> = None;
+
         // The backend acknowledged features must contain the protocol feature
         // bit in case it was initially set but lost through the features
         // negotiation with the guest.
@@ -228,6 +230,7 @@ impl VirtioDevice for Blk {
             queue_evts.iter().map(|q| q.try_clone().unwrap()).collect(),
             &interrupt_cb,
             backend_acked_features,
+            &slave_req_handler,
         )
         .map_err(ActivateError::VhostUserBlkSetup)?;
 

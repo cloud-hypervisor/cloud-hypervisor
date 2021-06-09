@@ -197,6 +197,7 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
             &self.virtio_interrupt,
             self.acked_features,
             self.acked_protocol_features,
+            &self.slave_req_handler,
         )
         .map_err(|e| {
             EpollHelperError::IoError(std::io::Error::new(
