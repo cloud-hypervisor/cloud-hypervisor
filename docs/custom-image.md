@@ -78,7 +78,7 @@ Ubuntu distributions.
 
 ```bash
 apt update
-apt install fio iperf iperf3 socat
+apt install fio iperf iperf3 socat stress
 ```
 
 ### Remove counterproductive packages
