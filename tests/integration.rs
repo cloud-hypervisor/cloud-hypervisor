@@ -3494,8 +3494,7 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
-        fn test_vmlinux_boot_noacpi() {
+        fn test_direct_kernel_boot_noacpi() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
             let mut workload_path = dirs::home_dir().unwrap();
