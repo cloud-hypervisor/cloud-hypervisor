@@ -23,7 +23,6 @@ mod tests {
     use std::io;
     use std::io::BufRead;
     use std::io::Read;
-    #[cfg(target_arch = "x86_64")]
     use std::io::Write;
     use std::os::unix::io::AsRawFd;
     use std::path::PathBuf;
@@ -3031,12 +3030,16 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_pty_interaction() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
             let api_socket = temp_api_path(&guest.tmp_dir);
-            let cmdline = DIRECT_KERNEL_BOOT_CMDLINE.to_owned() + " console=ttyS0";
+            let serial_option = if cfg!(target_arch = "x86_64") {
+                " console=ttyS0"
+            } else {
+                " console=ttyAMA0"
+            };
+            let cmdline = DIRECT_KERNEL_BOOT_CMDLINE.to_owned() + serial_option;
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
