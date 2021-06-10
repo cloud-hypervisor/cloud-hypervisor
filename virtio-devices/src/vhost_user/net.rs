@@ -300,6 +300,7 @@ impl VirtioDevice for Net {
             &interrupt_cb,
             backend_acked_features,
             &slave_req_handler,
+            None,
         )
         .map_err(ActivateError::VhostUserNetSetup)?;
 
@@ -320,6 +321,7 @@ impl VirtioDevice for Net {
             socket_path: self.socket_path.clone(),
             server: self.server,
             slave_req_handler: None,
+            inflight: None,
         };
 
         let paused = self.common.paused.clone();

@@ -231,6 +231,7 @@ impl VirtioDevice for Blk {
             &interrupt_cb,
             backend_acked_features,
             &slave_req_handler,
+            None,
         )
         .map_err(ActivateError::VhostUserBlkSetup)?;
 
@@ -251,6 +252,7 @@ impl VirtioDevice for Blk {
             socket_path: self.socket_path.clone(),
             server: false,
             slave_req_handler: None,
+            inflight: None,
         };
 
         let paused = self.common.paused.clone();

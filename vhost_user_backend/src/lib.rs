@@ -959,6 +959,24 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandlerMut for VhostUserHandler<S> {
 
         Ok(())
     }
+
+    fn get_inflight_fd(
+        &mut self,
+        _: &vhost::vhost_user::message::VhostUserInflight,
+    ) -> std::result::Result<
+        (vhost::vhost_user::message::VhostUserInflight, i32),
+        vhost::vhost_user::Error,
+    > {
+        std::unimplemented!()
+    }
+
+    fn set_inflight_fd(
+        &mut self,
+        _: &vhost::vhost_user::message::VhostUserInflight,
+        _: std::fs::File,
+    ) -> std::result::Result<(), vhost::vhost_user::Error> {
+        std::unimplemented!()
+    }
 }
 
 impl<S: VhostUserBackend> Drop for VhostUserHandler<S> {
