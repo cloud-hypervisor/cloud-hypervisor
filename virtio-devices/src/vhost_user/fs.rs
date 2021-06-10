@@ -452,6 +452,7 @@ impl VirtioDevice for Fs {
             &interrupt_cb,
             backend_acked_features,
             &slave_req_handler,
+            None,
         )
         .map_err(ActivateError::VhostUserFsSetup)?;
 
@@ -471,6 +472,7 @@ impl VirtioDevice for Fs {
             socket_path: self.socket_path.clone(),
             server: false,
             slave_req_handler,
+            inflight: None,
         };
 
         let paused = self.common.paused.clone();

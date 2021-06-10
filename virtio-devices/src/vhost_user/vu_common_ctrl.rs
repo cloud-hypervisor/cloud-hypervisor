@@ -3,6 +3,7 @@
 
 use super::super::{Descriptor, Queue};
 use super::{Error, Result};
+use crate::vhost_user::Inflight;
 use crate::{get_host_address_range, VirtioInterrupt, VirtioInterruptType};
 use crate::{GuestMemoryMmap, GuestRegionMmap};
 use std::convert::TryInto;
@@ -12,7 +13,9 @@ use std::sync::Arc;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 use std::vec::Vec;
-use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
+use vhost::vhost_user::message::{
+    VhostUserInflight, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
+};
 use vhost::vhost_user::{Master, MasterReqHandler, VhostUserMaster, VhostUserMasterReqHandler};
 use vhost::{VhostBackend, VhostUserMemoryRegionInfo, VringConfigData};
 use vm_memory::{Address, Error as MmapError, GuestMemory, GuestMemoryRegion};
@@ -100,6 +103,7 @@ pub fn negotiate_features_vhost_user(
     Ok((acked_features, acked_protocol_features))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn setup_vhost_user<S: VhostUserMasterReqHandler>(
     vu: &mut Master,
     mem: &GuestMemoryMmap,
@@ -108,12 +112,33 @@ pub fn setup_vhost_user<S: VhostUserMasterReqHandler>(
     virtio_interrupt: &Arc<dyn VirtioInterrupt>,
     acked_features: u64,
     slave_req_handler: &Option<MasterReqHandler<S>>,
+    inflight: Option<&mut Inflight>,
 ) -> Result<()> {
     vu.set_features(acked_features)
         .map_err(Error::VhostUserSetFeatures)?;
 
     // Let's first provide the memory table to the backend.
     update_mem_table(vu, mem)?;
+
+    // Setup for inflight I/O tracking shared memory.
+    if let Some(inflight) = inflight {
+        if inflight.fd.is_none() {
+            let inflight_req_info = VhostUserInflight {
+                mmap_size: 0,
+                mmap_offset: 0,
+                num_queues: queues.len() as u16,
+                queue_size: queues[0].actual_size(),
+            };
+            let (info, fd) = vu
+                .get_inflight_fd(&inflight_req_info)
+                .map_err(Error::VhostUserGetInflight)?;
+            inflight.info = info;
+            inflight.fd = Some(fd);
+        }
+        // Unwrapping the inflight fd is safe here since we know it can't be None.
+        vu.set_inflight_fd(&inflight.info, inflight.fd.as_ref().unwrap().as_raw_fd())
+            .map_err(Error::VhostUserSetInflight)?;
+    }
 
     for (queue_index, queue) in queues.into_iter().enumerate() {
         let actual_size: usize = queue.actual_size().try_into().unwrap();
@@ -194,6 +219,7 @@ pub fn reinitialize_vhost_user<S: VhostUserMasterReqHandler>(
     acked_features: u64,
     acked_protocol_features: u64,
     slave_req_handler: &Option<MasterReqHandler<S>>,
+    inflight: Option<&mut Inflight>,
 ) -> Result<()> {
     vu.set_owner().map_err(Error::VhostUserSetOwner)?;
     vu.get_features().map_err(Error::VhostUserGetFeatures)?;
@@ -215,6 +241,7 @@ pub fn reinitialize_vhost_user<S: VhostUserMasterReqHandler>(
         virtio_interrupt,
         acked_features,
         slave_req_handler,
+        inflight,
     )
 }
 

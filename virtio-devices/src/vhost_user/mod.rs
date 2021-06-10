@@ -11,7 +11,7 @@ use std::io;
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::sync::{atomic::AtomicBool, Arc, Barrier, Mutex};
-use vhost::vhost_user::message::VhostUserVirtioFeatures;
+use vhost::vhost_user::message::{VhostUserInflight, VhostUserVirtioFeatures};
 use vhost::vhost_user::{Master, MasterReqHandler, VhostUserMasterReqHandler};
 use vhost::Error as VhostError;
 use vm_memory::{Error as MmapError, GuestAddressSpace, GuestMemoryAtomic};
@@ -103,6 +103,10 @@ pub enum Error {
     VhostUserGetConfig(VhostError),
     /// Failed setting the configuration.
     VhostUserSetConfig(VhostError),
+    /// Failed getting inflight shm log.
+    VhostUserGetInflight(VhostError),
+    /// Failed setting inflight shm log.
+    VhostUserSetInflight(VhostError),
     /// Invalid used address.
     UsedAddress,
     /// Invalid features provided from vhost-user backend
@@ -128,6 +132,12 @@ pub const DEFAULT_VIRTIO_FEATURES: u64 = 1 << VIRTIO_F_RING_INDIRECT_DESC
 const HUP_CONNECTION_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 const SLAVE_REQ_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
 
+#[derive(Default)]
+pub struct Inflight {
+    pub info: VhostUserInflight,
+    pub fd: Option<std::fs::File>,
+}
+
 pub struct VhostUserEpollHandler<S: VhostUserMasterReqHandler> {
     pub vu: Arc<Mutex<Master>>,
     pub mem: GuestMemoryAtomic<GuestMemoryMmap>,
@@ -141,6 +151,7 @@ pub struct VhostUserEpollHandler<S: VhostUserMasterReqHandler> {
     pub socket_path: String,
     pub server: bool,
     pub slave_req_handler: Option<MasterReqHandler<S>>,
+    pub inflight: Option<Inflight>,
 }
 
 impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
@@ -198,6 +209,7 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
             self.acked_features,
             self.acked_protocol_features,
             &self.slave_req_handler,
+            self.inflight.as_mut(),
         )
         .map_err(|e| {
             EpollHelperError::IoError(std::io::Error::new(
