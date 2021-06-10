@@ -359,6 +359,8 @@ fn vmm_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_readv),
         #[cfg(target_arch = "x86_64")]
         allow_syscall(libc::SYS_readlink),
+        #[cfg(target_arch = "aarch64")]
+        allow_syscall(libc::SYS_readlinkat),
         allow_syscall(libc::SYS_recvfrom),
         allow_syscall(libc::SYS_recvmsg),
         allow_syscall(libc::SYS_restart_syscall),
