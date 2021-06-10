@@ -3601,7 +3601,6 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         // Start cloud-hypervisor with no VM parameters, only the API server running.
         // From the API: Create a VM, boot it and check that it looks as expected.
         // Then we pause the VM, check that it's no longer available.
