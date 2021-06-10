@@ -5373,7 +5373,7 @@ mod tests {
                     .arg("--log-queries")
                     .arg(listen_address.as_str())
                     .arg("--except-interface=lo")
-                    .arg("--bind-interfaces")
+                    .arg("--bind-dynamic") // Allow listening to host_ip while the interface is not ready yet.
                     .arg("--conf-file=/dev/null")
                     .arg(dhcp_host.as_str())
                     .arg(dhcp_range.as_str())
@@ -5490,6 +5490,39 @@ mod tests {
                     fname
                 ))
             }
+
+            fn wait_for_boot(&self) -> bool {
+                let cmd = "dir /b c:\\ | find \"Windows\"";
+                let tmo_max = 180;
+                // The timeout increase by n*1+n*2+n*3+..., therefore the initial
+                // interval must be small.
+                let tmo_int = 2;
+                let out = ssh_command_ip_with_auth(
+                    cmd,
+                    &self.auth,
+                    &self.guest.network.guest_ip,
+                    {
+                        let mut ret = 1;
+                        let mut tmo_acc = 0;
+                        loop {
+                            tmo_acc += tmo_int * ret;
+                            if tmo_acc >= tmo_max {
+                                break;
+                            }
+                            ret += 1;
+                        }
+                        ret
+                    },
+                    tmo_int,
+                )
+                .unwrap();
+
+                if "Windows" == out.trim() {
+                    return true;
+                }
+
+                false
+            }
         }
 
         fn vcpu_threads_count(pid: u32) -> u8 {
@@ -5557,14 +5590,12 @@ mod tests {
 
             assert!(pipesize >= PIPE_SIZE && pipesize1 >= PIPE_SIZE);
 
-            thread::sleep(std::time::Duration::new(60, 0));
-
             let mut child_dnsmasq = windows_guest.run_dnsmasq();
-            // Give some time for the guest to reach dnsmasq and get
-            // assigned the right IP address.
-            thread::sleep(std::time::Duration::new(30, 0));
 
             let r = std::panic::catch_unwind(|| {
+                // Wait to make sure Windows boots up
+                assert!(windows_guest.wait_for_boot());
+
                 windows_guest.shutdown();
             });
 
@@ -5624,14 +5655,12 @@ mod tests {
 
             assert!(pipesize >= PIPE_SIZE && pipesize1 >= PIPE_SIZE);
 
-            thread::sleep(std::time::Duration::new(60, 0));
-
             let mut child_dnsmasq = windows_guest.run_dnsmasq();
-            // Give some time for the guest to reach dnsmasq and get
-            // assigned the right IP address.
-            thread::sleep(std::time::Duration::new(30, 0));
 
             let r = std::panic::catch_unwind(|| {
+                // Wait to make sure Windows boots up
+                assert!(windows_guest.wait_for_boot());
+
                 windows_guest.shutdown();
             });
 
@@ -5677,13 +5706,10 @@ mod tests {
 
             assert!(pipesize >= PIPE_SIZE && pipesize1 >= PIPE_SIZE);
 
-            // Wait to make sure Windows boots up
-            thread::sleep(std::time::Duration::new(60, 0));
-
             let mut child_dnsmasq = windows_guest.run_dnsmasq();
-            // Give some time for the guest to reach dnsmasq and get
-            // assigned the right IP address.
-            thread::sleep(std::time::Duration::new(30, 0));
+
+            // Wait to make sure Windows boots up
+            assert!(windows_guest.wait_for_boot());
 
             let snapshot_dir = temp_snapshot_dir_path(&tmp_dir);
 
@@ -5759,15 +5785,12 @@ mod tests {
                 .spawn()
                 .unwrap();
 
-            // Wait to make sure Windows boots up
-            thread::sleep(std::time::Duration::new(60, 0));
-
             let mut child_dnsmasq = windows_guest.run_dnsmasq();
-            // Give some time for the guest to reach dnsmasq and get
-            // assigned the right IP address.
-            thread::sleep(std::time::Duration::new(30, 0));
 
             let r = std::panic::catch_unwind(|| {
+                // Wait to make sure Windows boots up
+                assert!(windows_guest.wait_for_boot());
+
                 let vcpu_num = 2;
                 // Check the initial number of CPUs the guest sees
                 assert_eq!(windows_guest.cpu_count(), vcpu_num);
@@ -5836,15 +5859,12 @@ mod tests {
                 .spawn()
                 .unwrap();
 
-            // Wait to make sure Windows boots up
-            thread::sleep(std::time::Duration::new(60, 0));
-
             let mut child_dnsmasq = windows_guest.run_dnsmasq();
-            // Give some time for the guest to reach dnsmasq and get
-            // assigned the right IP address.
-            thread::sleep(std::time::Duration::new(30, 0));
 
             let r = std::panic::catch_unwind(|| {
+                // Wait to make sure Windows boots up
+                assert!(windows_guest.wait_for_boot());
+
                 let ram_size = 2 * 1024 * 1024 * 1024;
                 // Check the initial number of RAM the guest sees
                 let current_ram_size = windows_guest.ram_size();
@@ -5913,15 +5933,12 @@ mod tests {
                 .spawn()
                 .unwrap();
 
-            // Wait to make sure Windows boots up
-            thread::sleep(std::time::Duration::new(60, 0));
-
             let mut child_dnsmasq = windows_guest.run_dnsmasq();
-            // Give some time for the guest to reach dnsmasq and get
-            // assigned the right IP address.
-            thread::sleep(std::time::Duration::new(30, 0));
 
             let r = std::panic::catch_unwind(|| {
+                // Wait to make sure Windows boots up
+                assert!(windows_guest.wait_for_boot());
+
                 // Initially present network device
                 let netdev_num = 1;
                 assert_eq!(windows_guest.netdev_count(), netdev_num);
@@ -5988,17 +6005,14 @@ mod tests {
                 .spawn()
                 .unwrap();
 
-            // Wait to make sure Windows boots up
-            thread::sleep(std::time::Duration::new(60, 0));
-
             let mut child_dnsmasq = windows_guest.run_dnsmasq();
-            // Give some time for the guest to reach dnsmasq and get
-            // assigned the right IP address.
-            thread::sleep(std::time::Duration::new(30, 0));
 
             let disk = windows_guest.disk_new();
 
             let r = std::panic::catch_unwind(|| {
+                // Wait to make sure Windows boots up
+                assert!(windows_guest.wait_for_boot());
+
                 // Initially present disk device
                 let disk_num = 1;
                 assert_eq!(windows_guest.disk_count(), disk_num);
