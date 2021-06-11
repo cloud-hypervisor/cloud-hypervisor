@@ -9,7 +9,7 @@ use super::vu_common_ctrl::{
     setup_vhost_user, update_mem_table, VhostUserConfig,
 };
 use super::{Error, Result, DEFAULT_VIRTIO_FEATURES};
-use crate::vhost_user::VhostUserEpollHandler;
+use crate::vhost_user::{Inflight, VhostUserEpollHandler};
 use crate::VirtioInterrupt;
 use crate::{GuestMemoryMmap, GuestRegionMmap};
 use block_util::VirtioBlockConfig;
@@ -78,7 +78,8 @@ impl Blk {
         let avail_protocol_features = VhostUserProtocolFeatures::CONFIG
             | VhostUserProtocolFeatures::MQ
             | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
-            | VhostUserProtocolFeatures::REPLY_ACK;
+            | VhostUserProtocolFeatures::REPLY_ACK
+            | VhostUserProtocolFeatures::INFLIGHT_SHMFD;
 
         let (acked_features, acked_protocol_features) = negotiate_features_vhost_user(
             &mut vhost_user_blk,
@@ -223,6 +224,14 @@ impl VirtioDevice for Blk {
         let backend_acked_features = self.common.acked_features
             | (self.common.avail_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits());
 
+        let mut inflight: Option<Inflight> =
+            if self.acked_protocol_features & VhostUserProtocolFeatures::INFLIGHT_SHMFD.bits() != 0
+            {
+                Some(Inflight::default())
+            } else {
+                None
+            };
+
         setup_vhost_user(
             &mut self.vhost_user_blk.lock().unwrap(),
             &mem.memory(),
@@ -231,7 +240,7 @@ impl VirtioDevice for Blk {
             &interrupt_cb,
             backend_acked_features,
             &slave_req_handler,
-            None,
+            inflight.as_mut(),
         )
         .map_err(ActivateError::VhostUserBlkSetup)?;
 
@@ -252,7 +261,7 @@ impl VirtioDevice for Blk {
             socket_path: self.socket_path.clone(),
             server: false,
             slave_req_handler: None,
-            inflight: None,
+            inflight,
         };
 
         let paused = self.common.paused.clone();
