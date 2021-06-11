@@ -7,7 +7,7 @@ use super::vu_common_ctrl::{
 };
 use super::{Error, Result, DEFAULT_VIRTIO_FEATURES};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
-use crate::vhost_user::VhostUserEpollHandler;
+use crate::vhost_user::{Inflight, VhostUserEpollHandler};
 use crate::{
     ActivateError, ActivateResult, Queue, UserspaceMapping, VirtioCommon, VirtioDevice,
     VirtioDeviceType, VirtioInterrupt, VirtioSharedMemoryList,
@@ -309,7 +309,8 @@ impl Fs {
 
         let mut avail_protocol_features = VhostUserProtocolFeatures::MQ
             | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
-            | VhostUserProtocolFeatures::REPLY_ACK;
+            | VhostUserProtocolFeatures::REPLY_ACK
+            | VhostUserProtocolFeatures::INFLIGHT_SHMFD;
         let slave_protocol_features =
             VhostUserProtocolFeatures::SLAVE_REQ | VhostUserProtocolFeatures::SLAVE_SEND_FD;
         if cache.is_some() {
@@ -444,6 +445,14 @@ impl VirtioDevice for Fs {
         let backend_acked_features = self.common.acked_features
             | (self.common.avail_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits());
 
+        let mut inflight: Option<Inflight> =
+            if self.acked_protocol_features & VhostUserProtocolFeatures::INFLIGHT_SHMFD.bits() != 0
+            {
+                Some(Inflight::default())
+            } else {
+                None
+            };
+
         setup_vhost_user(
             &mut self.vu.lock().unwrap(),
             &mem.memory(),
@@ -452,7 +461,7 @@ impl VirtioDevice for Fs {
             &interrupt_cb,
             backend_acked_features,
             &slave_req_handler,
-            None,
+            inflight.as_mut(),
         )
         .map_err(ActivateError::VhostUserFsSetup)?;
 
@@ -472,7 +481,7 @@ impl VirtioDevice for Fs {
             socket_path: self.socket_path.clone(),
             server: false,
             slave_req_handler,
-            inflight: None,
+            inflight,
         };
 
         let paused = self.common.paused.clone();
