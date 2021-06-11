@@ -6,7 +6,7 @@ use crate::vhost_user::vu_common_ctrl::{
     add_memory_region, connect_vhost_user, negotiate_features_vhost_user, reset_vhost_user,
     setup_vhost_user, update_mem_table, VhostUserConfig,
 };
-use crate::vhost_user::{Error, Result, VhostUserEpollHandler};
+use crate::vhost_user::{Error, Inflight, Result, VhostUserEpollHandler};
 use crate::{
     ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
     VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterrupt, EPOLL_HELPER_EVENT_LAST,
@@ -141,7 +141,8 @@ impl Net {
 
         let avail_protocol_features = VhostUserProtocolFeatures::MQ
             | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
-            | VhostUserProtocolFeatures::REPLY_ACK;
+            | VhostUserProtocolFeatures::REPLY_ACK
+            | VhostUserProtocolFeatures::INFLIGHT_SHMFD;
 
         let (mut acked_features, acked_protocol_features) = negotiate_features_vhost_user(
             &mut vhost_user_net,
@@ -292,6 +293,14 @@ impl VirtioDevice for Net {
         let backend_acked_features = self.common.acked_features & !(1 << VIRTIO_NET_F_MAC)
             | (self.common.avail_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits());
 
+        let mut inflight: Option<Inflight> =
+            if self.acked_protocol_features & VhostUserProtocolFeatures::INFLIGHT_SHMFD.bits() != 0
+            {
+                Some(Inflight::default())
+            } else {
+                None
+            };
+
         setup_vhost_user(
             &mut self.vhost_user_net.lock().unwrap(),
             &mem.memory(),
@@ -300,7 +309,7 @@ impl VirtioDevice for Net {
             &interrupt_cb,
             backend_acked_features,
             &slave_req_handler,
-            None,
+            inflight.as_mut(),
         )
         .map_err(ActivateError::VhostUserNetSetup)?;
 
@@ -321,7 +330,7 @@ impl VirtioDevice for Net {
             socket_path: self.socket_path.clone(),
             server: self.server,
             slave_req_handler: None,
-            inflight: None,
+            inflight,
         };
 
         let paused = self.common.paused.clone();
