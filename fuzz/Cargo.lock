@@ -20,9 +20,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.40"
+version = "1.0.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28b2cd92db5cbd74e8e5028f7e27dd7aa3090e89e4f2a197cc7c8dfb69c7063b"
+checksum = "15af2628f6890fe2609a3b91bef4c83450512802e59489f9c1cb1fa5df064a61"
 
 [[package]]
 name = "api_client"
@@ -139,7 +139,7 @@ dependencies = [
 
 [[package]]
 name = "cloud-hypervisor"
-version = "15.0.0"
+version = "16.0.0"
 dependencies = [
  "anyhow",
  "api_client",
@@ -251,9 +251,9 @@ dependencies = [
 
 [[package]]
 name = "iced-x86"
-version = "1.11.3"
+version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d907dfc273d9ed0da940e8145ceb77759056a1fb2110b44b83d1b203cddb906"
+checksum = "1ec039d142a47291ec551db1f67f689b599cc4b6d2b8cd6f430062ba46b2eb12"
 dependencies = [
  "lazy_static",
  "static_assertions",
