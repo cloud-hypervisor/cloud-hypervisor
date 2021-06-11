@@ -317,7 +317,7 @@ pub struct PciConfiguration {
 }
 
 /// See pci_regs.h in kernel
-#[derive(Copy, Clone, PartialEq, Versionize)]
+#[derive(Copy, Clone, PartialEq, Versionize, Debug)]
 pub enum PciBarRegionType {
     Memory32BitRegion = 0,
     IoRegion = 0x01,
