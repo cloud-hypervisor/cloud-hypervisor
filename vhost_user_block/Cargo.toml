@@ -8,7 +8,7 @@ edition = "2018"
 block_util = { path = "../block_util" }
 clap = { version = "2.33.3", features=["wrap_help"] }
 epoll = ">=4.0.1"
-libc = "0.2.96"
+libc = "0.2.97"
 log = "0.4.14"
 option_parser = { path = "../option_parser" }
 qcow = { path = "../qcow" }

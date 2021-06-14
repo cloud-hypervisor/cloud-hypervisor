@@ -9,7 +9,7 @@ default = []
 
 [dependencies]
 epoll = ">=4.0.1"
-libc = "0.2.96"
+libc = "0.2.97"
 log = "0.4.14"
 virtio-bindings = "0.1.0"
 vm-memory = { version = "0.5.0", features = ["backend-bitmap"] }
