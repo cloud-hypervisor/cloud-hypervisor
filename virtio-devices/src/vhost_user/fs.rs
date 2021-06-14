@@ -282,7 +282,7 @@ pub struct Fs {
     guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     acked_protocol_features: u64,
     socket_path: String,
-    reconnect_epoll_thread: Option<thread::JoinHandle<()>>,
+    epoll_thread: Option<thread::JoinHandle<()>>,
 }
 
 impl Fs {
@@ -371,7 +371,7 @@ impl Fs {
             guest_memory: None,
             acked_protocol_features,
             socket_path: path.to_string(),
-            reconnect_epoll_thread: None,
+            epoll_thread: None,
         })
     }
 }
@@ -468,7 +468,7 @@ impl VirtioDevice for Fs {
         // Run a dedicated thread for handling potential reconnections with
         // the backend as well as requests initiated by the backend.
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
-        let mut reconnect_handler: VhostUserEpollHandler<SlaveReqHandler> = VhostUserEpollHandler {
+        let mut handler: VhostUserEpollHandler<SlaveReqHandler> = VhostUserEpollHandler {
             vu: self.vu.clone(),
             mem,
             kill_evt,
@@ -496,11 +496,11 @@ impl VirtioDevice for Fs {
             .spawn(move || {
                 if let Err(e) = SeccompFilter::apply(virtio_vhost_fs_seccomp_filter) {
                     error!("Error applying seccomp filter: {:?}", e);
-                } else if let Err(e) = reconnect_handler.run(paused, paused_sync.unwrap()) {
-                    error!("Error running reconnection worker: {:?}", e);
+                } else if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
+                    error!("Error running vhost-user-fs worker: {:?}", e);
                 }
             })
-            .map(|thread| self.reconnect_epoll_thread = Some(thread))
+            .map(|thread| self.epoll_thread = Some(thread))
             .map_err(|e| {
                 error!("failed to clone queue EventFd: {}", e);
                 ActivateError::BadActivate
@@ -594,8 +594,8 @@ impl Pausable for Fs {
     fn resume(&mut self) -> result::Result<(), MigratableError> {
         self.common.resume()?;
 
-        if let Some(reconnect_epoll_thread) = &self.reconnect_epoll_thread {
-            reconnect_epoll_thread.thread().unpark();
+        if let Some(epoll_thread) = &self.epoll_thread {
+            epoll_thread.thread().unpark();
         }
         Ok(())
     }

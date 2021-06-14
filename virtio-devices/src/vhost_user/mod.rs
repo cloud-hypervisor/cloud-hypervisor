@@ -251,7 +251,7 @@ impl<S: VhostUserMasterReqHandler> EpollHelperHandler for VhostUserEpollHandler<
                 }
             }
             _ => {
-                error!("Unknown event for vhost-user reconnection thread");
+                error!("Unknown event for vhost-user thread");
                 return true;
             }
         }
