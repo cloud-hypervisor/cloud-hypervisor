@@ -11,7 +11,7 @@ arch = { path = "../arch" }
 bitflags = ">=1.2.1"
 byteorder = "1.4.3"
 epoll = ">=4.0.1"
-libc = "0.2.96"
+libc = "0.2.97"
 log = "0.4.14"
 versionize = "0.1.6"
 versionize_derive = "0.1.4"
