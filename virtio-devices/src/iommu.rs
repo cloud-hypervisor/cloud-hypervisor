@@ -62,7 +62,7 @@ const MSI_IOVA_END: u64 = 0xfeef_ffff;
 #[allow(unused)]
 const VIRTIO_IOMMU_F_INPUT_RANGE: u32 = 0;
 #[allow(unused)]
-const VIRTIO_IOMMU_F_DOMAIN_BITS: u32 = 1;
+const VIRTIO_IOMMU_F_DOMAIN_RANGE: u32 = 1;
 #[allow(unused)]
 const VIRTIO_IOMMU_F_MAP_UNMAP: u32 = 2;
 #[allow(unused)]
@@ -71,7 +71,7 @@ const VIRTIO_IOMMU_F_PROBE: u32 = 4;
 #[allow(unused)]
 const VIRTIO_IOMMU_F_MMIO: u32 = 5;
 #[allow(unused)]
-const VIRTIO_IOMMU_F_TOPOLOGY: u32 = 6;
+const VIRTIO_IOMMU_F_BYPASS_CONFIG: u32 = 6;
 
 // Support 2MiB and 4KiB page sizes.
 const VIRTIO_IOMMU_PAGE_SIZE_MASK: u64 = (2 << 20) | (4 << 10);
@@ -96,56 +96,16 @@ unsafe impl ByteValued for VirtioIommuRange64 {}
 
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
-struct VirtioIommuTopoConfig {
-    num_items: u16,
-    offset: u16,
-}
-
-unsafe impl ByteValued for VirtioIommuTopoConfig {}
-
-#[derive(Copy, Clone, Debug, Default)]
-#[repr(packed)]
 struct VirtioIommuConfig {
     page_size_mask: u64,
     input_range: VirtioIommuRange64,
     domain_range: VirtioIommuRange32,
     probe_size: u32,
-    topo_config: VirtioIommuTopoConfig,
+    bypass: u8,
+    reserved: [u8; 7],
 }
 
 unsafe impl ByteValued for VirtioIommuConfig {}
-
-#[allow(unused)]
-const VIRTIO_IOMMU_TOPO_PCI_RANGE: u8 = 1;
-#[allow(unused)]
-const VIRTIO_IOMMU_TOPO_MMIO: u8 = 2;
-
-#[derive(Copy, Clone, Debug, Default)]
-#[repr(packed)]
-struct VirtioIommuTopoPciRange {
-    type_: u8,
-    reserved: u8,
-    length: u16,
-    endpoint_start: u32,
-    segment_start: u16,
-    segment_end: u16,
-    bdf_start: u16,
-    bdf_end: u16,
-}
-
-unsafe impl ByteValued for VirtioIommuTopoPciRange {}
-
-#[derive(Copy, Clone, Debug, Default)]
-#[repr(packed)]
-struct VirtioIommuTopoMmio {
-    type_: u8,
-    reserved: u8,
-    length: u16,
-    endpoint: u32,
-    address: u64,
-}
-
-unsafe impl ByteValued for VirtioIommuTopoMmio {}
 
 /// Virtio IOMMU request type
 const VIRTIO_IOMMU_T_ATTACH: u8 = 1;
@@ -179,6 +139,8 @@ const VIRTIO_IOMMU_S_RANGE: u8 = 5;
 const VIRTIO_IOMMU_S_NOENT: u8 = 6;
 #[allow(unused)]
 const VIRTIO_IOMMU_S_FAULT: u8 = 7;
+#[allow(unused)]
+const VIRTIO_IOMMU_S_NOMEM: u8 = 8;
 
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
@@ -217,9 +179,10 @@ const VIRTIO_IOMMU_MAP_F_READ: u32 = 1;
 #[allow(unused)]
 const VIRTIO_IOMMU_MAP_F_WRITE: u32 = 1 << 1;
 #[allow(unused)]
-const VIRTIO_IOMMU_MAP_F_EXEC: u32 = 1 << 2;
+const VIRTIO_IOMMU_MAP_F_MMIO: u32 = 1 << 2;
 #[allow(unused)]
-const VIRTIO_IOMMU_MAP_F_MMIO: u32 = 1 << 3;
+const VIRTIO_IOMMU_MAP_F_MASK: u32 =
+    VIRTIO_IOMMU_MAP_F_READ | VIRTIO_IOMMU_MAP_F_WRITE | VIRTIO_IOMMU_MAP_F_MMIO;
 
 /// MAP request
 #[derive(Copy, Clone, Debug, Default)]
@@ -248,10 +211,10 @@ unsafe impl ByteValued for VirtioIommuReqUnmap {}
 
 /// Virtio IOMMU request PROBE types
 #[allow(unused)]
-const VIRTIO_IOMMU_PROBE_T_MASK: u16 = 0xfff;
-#[allow(unused)]
 const VIRTIO_IOMMU_PROBE_T_NONE: u16 = 0;
 const VIRTIO_IOMMU_PROBE_T_RESV_MEM: u16 = 1;
+#[allow(unused)]
+const VIRTIO_IOMMU_PROBE_T_MASK: u16 = 0xfff;
 
 /// PROBE request
 #[derive(Copy, Clone, Debug, Default)]
@@ -315,7 +278,7 @@ struct VirtioIommuFault {
     reserved: [u8; 3],
     flags: u32,
     endpoint: u32,
-    reserved1: u32,
+    reserved2: [u8; 4],
     address: u64,
 }
 
@@ -736,7 +699,6 @@ pub struct Iommu {
     common: VirtioCommon,
     id: String,
     config: VirtioIommuConfig,
-    config_topo_pci_ranges: Vec<VirtioIommuTopoPciRange>,
     mapping: Arc<IommuMapping>,
     ext_mapping: BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
     seccomp_action: SeccompAction,
@@ -778,7 +740,6 @@ impl Iommu {
                     ..Default::default()
                 },
                 config,
-                config_topo_pci_ranges: Vec::new(),
                 mapping: mapping.clone(),
                 ext_mapping: BTreeMap::new(),
                 seccomp_action,
@@ -823,46 +784,6 @@ impl Iommu {
             .collect();
     }
 
-    // This function lets the caller specify a list of devices attached to the
-    // virtual IOMMU. This list is translated into a virtio-iommu configuration
-    // topology, so that it can be understood by the guest driver.
-    //
-    // The topology is overridden everytime this function is being invoked.
-    //
-    // This function is dedicated to PCI, which means it will exclusively
-    // create VIRTIO_IOMMU_TOPO_PCI_RANGE entries.
-    pub fn attach_pci_devices(&mut self, segment: u16, device_ids: Vec<u32>) {
-        if device_ids.is_empty() {
-            warn!("No device to attach to virtual IOMMU");
-            return;
-        }
-
-        // If there is at least one device attached to the virtual IOMMU, we
-        // need the topology feature to be enabled.
-        self.common.avail_features |= 1u64 << VIRTIO_IOMMU_F_TOPOLOGY;
-
-        // Update the topology.
-        let mut topo_pci_ranges = Vec::new();
-        for device_id in device_ids.iter() {
-            let dev_id = *device_id;
-            topo_pci_ranges.push(VirtioIommuTopoPciRange {
-                type_: VIRTIO_IOMMU_TOPO_PCI_RANGE,
-                length: size_of::<VirtioIommuTopoPciRange>() as u16,
-                endpoint_start: dev_id,
-                segment_start: segment,
-                segment_end: segment,
-                bdf_start: dev_id as u16,
-                bdf_end: dev_id as u16,
-                ..Default::default()
-            });
-        }
-        self.config_topo_pci_ranges = topo_pci_ranges;
-
-        // Update the configuration to include the topology.
-        self.config.topo_config.num_items = self.config_topo_pci_ranges.len() as u16;
-        self.config.topo_config.offset = size_of::<VirtioIommuConfig>() as u16;
-    }
-
     pub fn add_external_mapping(&mut self, device_id: u32, mapping: Arc<dyn ExternalDmaMapping>) {
         self.ext_mapping.insert(device_id, mapping);
     }
@@ -895,13 +816,7 @@ impl VirtioDevice for Iommu {
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
-        let mut config: Vec<u8> = Vec::new();
-        config.extend_from_slice(self.config.as_slice());
-        for config_topo_pci_range in self.config_topo_pci_ranges.iter() {
-            config.extend_from_slice(config_topo_pci_range.as_slice());
-        }
-
-        self.read_config_from_slice(config.as_slice(), offset, data);
+        self.read_config_from_slice(self.config.as_slice(), offset, data);
     }
 
     fn activate(
