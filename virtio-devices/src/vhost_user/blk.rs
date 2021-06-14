@@ -47,7 +47,7 @@ pub struct Blk {
     guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     acked_protocol_features: u64,
     socket_path: String,
-    reconnect_epoll_thread: Option<thread::JoinHandle<()>>,
+    epoll_thread: Option<thread::JoinHandle<()>>,
 }
 
 impl Blk {
@@ -143,7 +143,7 @@ impl Blk {
             guest_memory: None,
             acked_protocol_features,
             socket_path: vu_cfg.socket,
-            reconnect_epoll_thread: None,
+            epoll_thread: None,
         })
     }
 }
@@ -248,7 +248,7 @@ impl VirtioDevice for Blk {
         // the backend.
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
-        let mut reconnect_handler: VhostUserEpollHandler<SlaveReqHandler> = VhostUserEpollHandler {
+        let mut handler: VhostUserEpollHandler<SlaveReqHandler> = VhostUserEpollHandler {
             vu: self.vhost_user_blk.clone(),
             mem,
             kill_evt,
@@ -270,11 +270,11 @@ impl VirtioDevice for Blk {
         thread::Builder::new()
             .name(self.id.to_string())
             .spawn(move || {
-                if let Err(e) = reconnect_handler.run(paused, paused_sync.unwrap()) {
-                    error!("Error running reconnection worker: {:?}", e);
+                if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
+                    error!("Error running vhost-user-blk worker: {:?}", e);
                 }
             })
-            .map(|thread| self.reconnect_epoll_thread = Some(thread))
+            .map(|thread| self.epoll_thread = Some(thread))
             .map_err(|e| {
                 error!("failed to clone queue EventFd: {}", e);
                 ActivateError::BadActivate
@@ -340,8 +340,8 @@ impl Pausable for Blk {
     fn resume(&mut self) -> result::Result<(), MigratableError> {
         self.common.resume()?;
 
-        if let Some(reconnect_epoll_thread) = &self.reconnect_epoll_thread {
-            reconnect_epoll_thread.thread().unpark();
+        if let Some(epoll_thread) = &self.epoll_thread {
+            epoll_thread.thread().unpark();
         }
         Ok(())
     }

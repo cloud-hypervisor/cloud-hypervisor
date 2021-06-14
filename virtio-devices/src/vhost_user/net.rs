@@ -101,7 +101,7 @@ pub struct Net {
     socket_path: String,
     server: bool,
     ctrl_queue_epoll_thread: Option<thread::JoinHandle<()>>,
-    reconnect_epoll_thread: Option<thread::JoinHandle<()>>,
+    epoll_thread: Option<thread::JoinHandle<()>>,
     seccomp_action: SeccompAction,
 }
 
@@ -193,7 +193,7 @@ impl Net {
             socket_path: vu_cfg.socket,
             server,
             ctrl_queue_epoll_thread: None,
-            reconnect_epoll_thread: None,
+            epoll_thread: None,
             seccomp_action,
         })
     }
@@ -258,9 +258,9 @@ impl VirtioDevice for Net {
             };
 
             let paused = self.common.paused.clone();
-            // Let's update the barrier as we need 1 for the control queue + 1
-            // for the reconnect thread + 1 for the main thread signalling the
-            // pause.
+            // Let's update the barrier as we need 1 for the control queue
+            // thread + 1 for the common vhost-user thread + 1 for the main
+            // thread signalling the pause.
             self.common.paused_sync = Some(Arc::new(Barrier::new(3)));
             let paused_sync = self.common.paused_sync.clone();
 
@@ -317,7 +317,7 @@ impl VirtioDevice for Net {
         // the backend.
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
-        let mut reconnect_handler: VhostUserEpollHandler<SlaveReqHandler> = VhostUserEpollHandler {
+        let mut handler: VhostUserEpollHandler<SlaveReqHandler> = VhostUserEpollHandler {
             vu: self.vhost_user_net.clone(),
             mem,
             kill_evt,
@@ -339,11 +339,11 @@ impl VirtioDevice for Net {
         thread::Builder::new()
             .name(self.id.to_string())
             .spawn(move || {
-                if let Err(e) = reconnect_handler.run(paused, paused_sync.unwrap()) {
-                    error!("Error running reconnection worker: {:?}", e);
+                if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
+                    error!("Error running vhost-user-net worker: {:?}", e);
                 }
             })
-            .map(|thread| self.reconnect_epoll_thread = Some(thread))
+            .map(|thread| self.epoll_thread = Some(thread))
             .map_err(|e| {
                 error!("failed to clone queue EventFd: {}", e);
                 ActivateError::BadActivate
@@ -418,8 +418,8 @@ impl Pausable for Net {
             ctrl_queue_epoll_thread.thread().unpark();
         }
 
-        if let Some(reconnect_epoll_thread) = &self.reconnect_epoll_thread {
-            reconnect_epoll_thread.thread().unpark();
+        if let Some(epoll_thread) = &self.epoll_thread {
+            epoll_thread.thread().unpark();
         }
 
         Ok(())
