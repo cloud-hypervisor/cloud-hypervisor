@@ -869,6 +869,12 @@ pub struct DeviceManager {
     // Paravirtualized IOMMU
     iommu_device: Option<Arc<Mutex<virtio_devices::Iommu>>>,
 
+    // PCI information about devices attached to the paravirtualized IOMMU
+    // It contains the virtual IOMMU PCI BDF along with the list of PCI BDF
+    // representing the devices attached to the virtual IOMMU. This is useful
+    // information for filling the ACPI VIOT table.
+    iommu_attached_devices: Option<(u32, Vec<u32>)>,
+
     // Bitmap of PCI devices to hotplug.
     pci_devices_up: u32,
 
@@ -975,6 +981,7 @@ impl DeviceManager {
             legacy_interrupt_manager: None,
             passthrough_device: None,
             iommu_device: None,
+            iommu_attached_devices: None,
             pci_devices_up: 0,
             pci_devices_down: 0,
             pci_irq_slots: [0; 32],
@@ -1196,15 +1203,8 @@ impl DeviceManager {
         iommu_attached_devices.append(&mut vfio_iommu_device_ids);
 
         if let Some(iommu_device) = iommu_device {
-            iommu_device
-                .lock()
-                .unwrap()
-                .attach_pci_devices(0, iommu_attached_devices);
-
-            // Because we determined the virtio-iommu b/d/f, we have to
-            // add the device to the PCI topology now. Otherwise, the
-            // b/d/f won't match the virtio-iommu device as expected.
-            self.add_virtio_pci_device(iommu_device, &mut pci_bus, &None, iommu_id)?;
+            let dev_id = self.add_virtio_pci_device(iommu_device, &mut pci_bus, &None, iommu_id)?;
+            self.iommu_attached_devices = Some((dev_id, iommu_attached_devices));
         }
 
         let pci_bus = Arc::new(Mutex::new(pci_bus));
@@ -3485,6 +3485,10 @@ impl DeviceManager {
             .unwrap()
             .trigger_key(3)
             .map_err(DeviceManagerError::AArch64PowerButtonNotification)
+    }
+
+    pub fn iommu_attached_devices(&self) -> &Option<(u32, Vec<u32>)> {
+        &self.iommu_attached_devices
     }
 }
 

@@ -109,6 +109,32 @@ impl MemoryAffinity {
     }
 }
 
+#[repr(packed)]
+#[derive(Default)]
+struct ViotVirtioPciNode {
+    pub type_: u8,
+    _reserved: u8,
+    pub length: u16,
+    pub pci_segment: u16,
+    pub pci_bdf_number: u16,
+    _reserved2: [u8; 8],
+}
+
+#[repr(packed)]
+#[derive(Default)]
+struct ViotPciRangeNode {
+    pub type_: u8,
+    _reserved: u8,
+    pub length: u16,
+    pub endpoint_start: u32,
+    pub pci_segment_start: u16,
+    pub pci_segment_end: u16,
+    pub pci_bdf_start: u16,
+    pub pci_bdf_end: u16,
+    pub output_node: u16,
+    _reserved2: [u8; 6],
+}
+
 pub fn create_dsdt_table(
     device_manager: &Arc<Mutex<DeviceManager>>,
     cpu_manager: &Arc<Mutex<CpuManager>>,
@@ -360,6 +386,42 @@ fn create_iort_table() -> Sdt {
     iort
 }
 
+fn create_viot_table(iommu_bdf: u32, devices_bdf: &[u32]) -> Sdt {
+    // VIOT
+    let mut viot = Sdt::new(*b"VIOT", 36, 0, *b"CLOUDH", *b"CHVIOT  ", 0);
+    // Node count
+    viot.append((devices_bdf.len() + 1) as u16);
+    // Node offset
+    viot.append(48u16);
+    // VIOT reserved 8 bytes
+    viot.append_slice(&[0u8; 8]);
+
+    // Virtio-iommu based on virtio-pci node
+    viot.append(ViotVirtioPciNode {
+        type_: 3,
+        length: 16,
+        pci_segment: 0,
+        pci_bdf_number: iommu_bdf as u16,
+        ..Default::default()
+    });
+
+    for device_bdf in devices_bdf {
+        viot.append(ViotPciRangeNode {
+            type_: 1,
+            length: 24,
+            endpoint_start: *device_bdf,
+            pci_segment_start: 0,
+            pci_segment_end: 0,
+            pci_bdf_start: *device_bdf as u16,
+            pci_bdf_end: *device_bdf as u16,
+            output_node: 48,
+            ..Default::default()
+        });
+    }
+
+    viot
+}
+
 pub fn create_acpi_tables(
     guest_mem: &GuestMemoryMmap,
     device_manager: &Arc<Mutex<DeviceManager>>,
@@ -487,6 +549,20 @@ pub fn create_acpi_tables(
         tables.push(iort_offset.0);
         prev_tbl_len = iort.len() as u64;
         prev_tbl_off = iort_offset;
+    }
+
+    // VIOT
+    if let Some((iommu_bdf, devices_bdf)) = device_manager.lock().unwrap().iommu_attached_devices()
+    {
+        let viot = create_viot_table(*iommu_bdf, devices_bdf);
+
+        let viot_offset = prev_tbl_off.checked_add(prev_tbl_len).unwrap();
+        guest_mem
+            .write_slice(viot.as_slice(), viot_offset)
+            .expect("Error writing VIOT table");
+        tables.push(viot_offset.0);
+        prev_tbl_len = viot.len() as u64;
+        prev_tbl_off = viot_offset;
     }
 
     // XSDT
