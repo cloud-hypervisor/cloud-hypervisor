@@ -925,9 +925,6 @@ mod tests {
         let guest = Guest::new(Box::new(focal));
         let api_socket = temp_api_path(&guest.tmp_dir);
 
-        let mut workload_path = dirs::home_dir().unwrap();
-        workload_path.push("workloads");
-
         let kernel_path = direct_kernel_boot_path();
 
         let host_mac = if generate_host_mac {
@@ -1082,9 +1079,6 @@ mod tests {
         let guest = Guest::new(Box::new(focal));
         let api_socket = temp_api_path(&guest.tmp_dir);
 
-        let mut workload_path = dirs::home_dir().unwrap();
-        workload_path.push("workloads");
-
         let kernel_path = direct_kernel_boot_path();
 
         let (blk_params, daemon_child) = {
@@ -1230,9 +1224,6 @@ mod tests {
     ) {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
-
-        let mut workload_path = dirs::home_dir().unwrap();
-        workload_path.push("workloads");
 
         let kernel_path = direct_kernel_boot_path();
 
@@ -1477,9 +1468,6 @@ mod tests {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
 
-        let mut workload_path = dirs::home_dir().unwrap();
-        workload_path.push("workloads");
-
         let kernel_path = direct_kernel_boot_path();
 
         let pmem_temp_file = TempFile::new().unwrap();
@@ -1557,9 +1545,6 @@ mod tests {
     fn _test_virtio_vsock(hotplug: bool) {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
-
-        let mut workload_path = dirs::home_dir().unwrap();
-        workload_path.push("workloads");
 
         let kernel_path = direct_kernel_boot_path();
 
@@ -2147,9 +2132,6 @@ mod tests {
             let guest = Guest::new(Box::new(focal));
             let api_socket = temp_api_path(&guest.tmp_dir);
 
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
-
             let kernel_path = direct_kernel_boot_path();
 
             let mut child = GuestCommand::new(&guest)
@@ -2217,9 +2199,6 @@ mod tests {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
             let api_socket = temp_api_path(&guest.tmp_dir);
-
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
 
             let kernel_path = direct_kernel_boot_path();
 
@@ -2331,8 +2310,6 @@ mod tests {
         fn test_direct_kernel_boot() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
 
             let kernel_path = direct_kernel_boot_path();
 
@@ -2701,8 +2678,6 @@ mod tests {
         fn test_boot_from_virtio_pmem() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
 
             let kernel_path = direct_kernel_boot_path();
 
@@ -2758,9 +2733,6 @@ mod tests {
         fn test_multiple_network_interfaces() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
-
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
 
             let kernel_path = direct_kernel_boot_path();
 
@@ -2898,9 +2870,6 @@ mod tests {
         fn test_serial_tty() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
-
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
 
             let kernel_path = direct_kernel_boot_path();
 
@@ -3117,9 +3086,6 @@ mod tests {
         fn test_virtio_console() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
-
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
 
             let kernel_path = direct_kernel_boot_path();
 
@@ -3456,8 +3422,6 @@ mod tests {
         fn test_direct_kernel_boot_noacpi() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
 
             let kernel_path = direct_kernel_boot_path();
 
@@ -3552,8 +3516,6 @@ mod tests {
         fn test_api_create_boot() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
 
             let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -3603,8 +3565,6 @@ mod tests {
         fn test_api_pause_resume() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
 
             let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -3685,8 +3645,6 @@ mod tests {
         fn test_virtio_iommu() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
 
             let kernel_path = direct_kernel_boot_path();
 
@@ -3862,8 +3820,6 @@ mod tests {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
             let api_socket = temp_api_path(&guest.tmp_dir);
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
 
             let kernel_path = direct_kernel_boot_path();
 
@@ -3946,8 +3902,6 @@ mod tests {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
             let api_socket = temp_api_path(&guest.tmp_dir);
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
 
             let kernel_path = direct_kernel_boot_path();
 
@@ -4029,8 +3983,6 @@ mod tests {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
             let api_socket = temp_api_path(&guest.tmp_dir);
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
 
             let kernel_path = direct_kernel_boot_path();
 
@@ -4105,8 +4057,6 @@ mod tests {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
             let api_socket = temp_api_path(&guest.tmp_dir);
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
 
             let kernel_path = direct_kernel_boot_path();
 
@@ -4160,8 +4110,6 @@ mod tests {
         fn test_memory_overhead() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
 
             let kernel_path = direct_kernel_boot_path();
 
@@ -4202,9 +4150,6 @@ mod tests {
         fn test_disk_hotplug() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
-
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
 
             let kernel_path = direct_kernel_boot_path();
 
@@ -4362,9 +4307,6 @@ mod tests {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
 
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
-
             let kernel_path = direct_kernel_boot_path();
 
             let api_socket = temp_api_path(&guest.tmp_dir);
@@ -4473,9 +4415,6 @@ mod tests {
         fn test_net_hotplug() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
-
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
 
             let kernel_path = direct_kernel_boot_path();
 
@@ -4621,9 +4560,6 @@ mod tests {
         fn test_snapshot_restore() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
-
             let kernel_path = direct_kernel_boot_path();
 
             let api_socket = temp_api_path(&guest.tmp_dir);
