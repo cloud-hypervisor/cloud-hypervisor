@@ -130,7 +130,7 @@ fn create_cpu_nodes(fdt: &mut FdtWriter, vcpu_mpidr: &[u64]) -> FdtWriterResult<
     fdt.property_u32("#size-cells", 0x0)?;
     let num_cpus = vcpu_mpidr.len();
 
-    for cpu_id in 0..num_cpus {
+    for (cpu_id, mpidr) in vcpu_mpidr.iter().enumerate().take(num_cpus) {
         let cpu_name = format!("cpu@{:x}", cpu_id);
         let cpu_node = fdt.begin_node(&cpu_name)?;
         fdt.property_string("device_type", "cpu")?;
@@ -139,7 +139,9 @@ fn create_cpu_nodes(fdt: &mut FdtWriter, vcpu_mpidr: &[u64]) -> FdtWriterResult<
             // This is required on armv8 64-bit. See aforementioned documentation.
             fdt.property_string("enable-method", "psci")?;
         }
-        fdt.property_u32("reg", cpu_id as u32)?;
+        // Set the field to first 24 bits of the MPIDR - Multiprocessor Affinity Register.
+        // See http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.ddi0488c/BABHBJCI.html.
+        fdt.property_u32("reg", (mpidr & 0x7FFFFF) as u32)?;
         fdt.end_node(cpu_node)?;
     }
     fdt.end_node(cpus_node)?;
