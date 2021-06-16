@@ -18,6 +18,7 @@ use crate::DeviceType;
 use crate::GuestMemoryMmap;
 use crate::RegionType;
 use gic::GicDevice;
+use log::{log_enabled, Level};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::ffi::CStr;
@@ -153,6 +154,10 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Bui
         pci_space_address,
     )
     .map_err(|_| Error::SetupFdt)?;
+
+    if log_enabled!(Level::Debug) {
+        fdt::print_fdt(&fdt_final);
+    }
 
     fdt::write_fdt_to_memory(fdt_final, guest_mem).map_err(Error::WriteFdtToMemory)?;
 

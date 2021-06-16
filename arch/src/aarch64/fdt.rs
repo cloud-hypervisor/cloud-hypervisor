@@ -6,10 +6,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
+use byteorder::{BigEndian, ByteOrder};
+use std::cmp;
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::fmt::Debug;
 use std::result;
+use std::str;
 
 use super::super::DeviceType;
 use super::super::GuestMemoryMmap;
@@ -477,4 +480,84 @@ fn create_pci_nodes(
     fdt.end_node(pci_node)?;
 
     Ok(())
+}
+
+// Parse the DTB binary and print for debugging
+pub fn print_fdt(dtb: &[u8]) {
+    match fdt_parser::Fdt::new(dtb) {
+        Ok(fdt) => {
+            if let Some(root) = fdt.find_node("/") {
+                debug!("Printing the FDT:");
+                print_node(root, 0);
+            } else {
+                debug!("Failed to find root node in FDT for debugging.");
+            }
+        }
+        Err(_) => debug!("Failed to parse FDT for debugging."),
+    }
+}
+
+fn print_node(node: fdt_parser::node::FdtNode<'_, '_>, n_spaces: usize) {
+    debug!("{:indent$}{}/", "", node.name, indent = n_spaces);
+    for property in node.properties() {
+        let name = property.name;
+
+        // If the property is 'compatible', its value requires special handling.
+        // The u8 array could contain multiple null-terminated strings.
+        // We copy the original array and simply replace all 'null' characters with spaces.
+        let value = if name == "compatible" {
+            let mut compatible = vec![0u8; 256];
+            let handled_value = property
+                .value
+                .iter()
+                .map(|&c| if c == 0 { b' ' } else { c })
+                .collect::<Vec<_>>();
+            let len = cmp::min(255, handled_value.len());
+            compatible[..len].copy_from_slice(&handled_value[..len]);
+            compatible[..(len + 1)].to_vec()
+        } else {
+            property.value.to_vec()
+        };
+        let value = &value;
+
+        // Now the value can be either:
+        //   - A null-terminated C string, or
+        //   - Binary data
+        // We follow a very simple logic to present the value:
+        //   - At first, try to convert it to CStr and print,
+        //   - If failed, print it as u32 array.
+        let value_result = match CStr::from_bytes_with_nul(value) {
+            Ok(value_cstr) => match value_cstr.to_str() {
+                Ok(value_str) => Some(value_str),
+                Err(_e) => None,
+            },
+            Err(_e) => None,
+        };
+
+        if let Some(value_str) = value_result {
+            debug!(
+                "{:indent$}{} : {:#?}",
+                "",
+                name,
+                value_str,
+                indent = (n_spaces + 2)
+            );
+        } else {
+            let mut array = Vec::with_capacity(256);
+            array.resize(value.len() / 4, 0u32);
+            BigEndian::read_u32_into(value, &mut array);
+            debug!(
+                "{:indent$}{} : {:X?}",
+                "",
+                name,
+                array,
+                indent = (n_spaces + 2)
+            );
+        };
+    }
+
+    // Print children nodes if there is any
+    for child in node.children() {
+        print_node(child, n_spaces + 2);
+    }
 }
