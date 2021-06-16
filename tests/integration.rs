@@ -2077,6 +2077,17 @@ mod tests {
             guest.wait_vm_boot(None).unwrap();
 
             let r = std::panic::catch_unwind(|| {
+                assert_eq!(guest.get_cpu_count().unwrap_or_default(), 48);
+                assert_eq!(
+                    guest
+                        .ssh_command(
+                            "lscpu | grep \"On-line\" | cut -f 2 -d \":\" | sed \"s# *##\""
+                        )
+                        .unwrap()
+                        .trim(),
+                    "0-47"
+                );
+
                 assert!(guest.get_total_memory().unwrap_or_default() > 5_000_000);
             });
 
