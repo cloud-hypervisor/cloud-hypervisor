@@ -79,7 +79,7 @@ update_workloads() {
     cp scripts/sha1sums-aarch64 $WORKLOADS_DIR
 
     BIONIC_OS_IMAGE_DOWNLOAD_NAME="bionic-server-cloudimg-arm64.img"
-    BIONIC_OS_IMAGE_DOWNLOAD_URL="https://cloudhypervisorstorage.blob.core.windows.net/images/$BIONIC_OS_IMAGE_DOWNLOAD_NAME"
+    BIONIC_OS_IMAGE_DOWNLOAD_URL="https://cloud-hypervisor.azureedge.net/$BIONIC_OS_IMAGE_DOWNLOAD_NAME"
     BIONIC_OS_DOWNLOAD_IMAGE="$WORKLOADS_DIR/$BIONIC_OS_IMAGE_DOWNLOAD_NAME"
     if [ ! -f "$BIONIC_OS_DOWNLOAD_IMAGE" ]; then
         pushd $WORKLOADS_DIR
@@ -106,7 +106,7 @@ update_workloads() {
     fi
 
     FOCAL_OS_RAW_IMAGE_NAME="focal-server-cloudimg-arm64-custom.raw"
-    FOCAL_OS_RAW_IMAGE_DOWNLOAD_URL="https://cloudhypervisorstorage.blob.core.windows.net/images/$FOCAL_OS_RAW_IMAGE_NAME"
+    FOCAL_OS_RAW_IMAGE_DOWNLOAD_URL="https://cloud-hypervisor.azureedge.net/$FOCAL_OS_RAW_IMAGE_NAME"
     FOCAL_OS_RAW_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_NAME"
     if [ ! -f "$FOCAL_OS_RAW_IMAGE" ]; then
         pushd $WORKLOADS_DIR
@@ -117,7 +117,7 @@ update_workloads() {
     # Convert the raw image to qcow2 image to remove compressed blocks from the disk. Therefore letting the
     # qcow2 format image can be directly used in the integration test.
     FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME="focal-server-cloudimg-arm64-custom.qcow2"
-    FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_DOWNLOAD_URL="https://cloudhypervisorstorage.blob.core.windows.net/images/$FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME"
+    FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_DOWNLOAD_URL="https://cloud-hypervisor.azureedge.net/$FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME"
     FOCAL_OS_QCOW2_UNCOMPRESSED_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME"
     if [ ! -f "$FOCAL_OS_QCOW2_UNCOMPRESSED_IMAGE" ]; then
         pushd $WORKLOADS_DIR
