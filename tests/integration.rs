@@ -5313,9 +5313,22 @@ mod tests {
     mod windows {
         use crate::tests::*;
 
+        lazy_static! {
+            static ref NEXT_DISK_ID: Mutex<u8> = Mutex::new(1);
+        }
+
         struct WindowsGuest {
             guest: Guest,
             auth: PasswordAuth,
+        }
+
+        trait FsType {
+            const FS_FAT: u8;
+            const FS_NTFS: u8;
+        }
+        impl FsType for WindowsGuest {
+            const FS_FAT: u8 = 0;
+            const FS_NTFS: u8 = 1;
         }
 
         impl WindowsGuest {
@@ -5405,20 +5418,24 @@ mod tests {
                     .unwrap()
             }
 
-            // XXX Follow up test involving multiple disks will require:
-            // - Make image size variable
-            // - Make image filename random
-            // - Cleanup image file after test
-            // - NTFS should be added for use along with FAT for better coverage, needs mkfs.ntfs in the container.
-            fn disk_new(&self) -> String {
-                let img = PathBuf::from(
-                    String::from_utf8_lossy(b"/tmp/test-fat-hotplug-0.raw").to_string(),
-                );
+            // TODO Cleanup image file explicitly after test, if there's some space issues.
+            fn disk_new(&self, fs: u8, sz: usize) -> String {
+                let mut guard = NEXT_DISK_ID.lock().unwrap();
+                let id = *guard;
+                *guard = id + 1;
+
+                let img = PathBuf::from(format!("/tmp/test-hotplug-{}.raw", id));
                 let _ = fs::remove_file(&img);
 
                 // Create an image file
                 let out = Command::new("qemu-img")
-                    .args(&["create", "-f", "raw", &img.to_str().unwrap(), "100m"])
+                    .args(&[
+                        "create",
+                        "-f",
+                        "raw",
+                        &img.to_str().unwrap(),
+                        format!("{}m", sz).as_str(),
+                    ])
                     .output()
                     .expect("qemu-img command failed")
                     .stdout;
@@ -5472,13 +5489,16 @@ mod tests {
                 let loop_dev = _tmp.trim();
                 println!("{:?}", out);
 
-                // Create msdos filesystem.
-                // XXX mkfs.ntfs is missing in the docker image and should be added
-                // For mkfs.ntfs also add -f.
-                let out = Command::new("mkfs.msdos")
+                // Create filesystem.
+                let fs_cmd = match fs {
+                    WindowsGuest::FS_FAT => "mkfs.msdos",
+                    WindowsGuest::FS_NTFS => "mkfs.ntfs",
+                    _ => panic!("Unknown filesystem type '{}'", fs),
+                };
+                let out = Command::new(fs_cmd)
                     .args(&[&loop_dev])
                     .output()
-                    .expect("mkfs.msdos failed")
+                    .unwrap_or_else(|_| panic!("{} failed", fs_cmd))
                     .stdout;
                 println!("{:?}", out);
 
@@ -5486,7 +5506,7 @@ mod tests {
                 let out = Command::new("losetup")
                     .args(&["-d", &loop_dev])
                     .output()
-                    .expect("loop device not found")
+                    .unwrap_or_else(|_| panic!("loop device '{}' not found", loop_dev))
                     .stdout;
                 println!("{:?}", out);
 
@@ -6031,7 +6051,7 @@ mod tests {
 
             let mut child_dnsmasq = windows_guest.run_dnsmasq();
 
-            let disk = windows_guest.disk_new();
+            let disk = windows_guest.disk_new(WindowsGuest::FS_FAT, 100);
 
             let r = std::panic::catch_unwind(|| {
                 // Wait to make sure Windows boots up
@@ -6082,6 +6102,135 @@ mod tests {
                 thread::sleep(std::time::Duration::new(5, 0));
                 let out = windows_guest.disk_file_read(fname);
                 assert_eq!(data, out.trim());
+
+                // Intentionally no unmount, it'll happen at shutdown.
+
+                windows_guest.shutdown();
+            });
+
+            let _ = child.wait_timeout(std::time::Duration::from_secs(60));
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+
+            let _ = child_dnsmasq.kill();
+            let _ = child_dnsmasq.wait();
+
+            handle_child_output(r, &output);
+        }
+
+        #[test]
+        #[cfg(not(feature = "mshv"))]
+        fn test_windows_guest_disk_hotplug_multi() {
+            let windows_guest = WindowsGuest::new();
+
+            let mut ovmf_path = dirs::home_dir().unwrap();
+            ovmf_path.push("workloads");
+            ovmf_path.push(OVMF_NAME);
+
+            let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
+            let api_socket = temp_api_path(&tmp_dir);
+
+            let mut child = GuestCommand::new(windows_guest.guest())
+                .args(&["--api-socket", &api_socket])
+                .args(&["--cpus", "boot=2,kvm_hyperv=on"])
+                .args(&["--memory", "size=2G"])
+                .args(&["--kernel", ovmf_path.to_str().unwrap()])
+                .args(&["--serial", "tty"])
+                .args(&["--console", "off"])
+                .default_disks()
+                .default_net()
+                .capture_output()
+                .spawn()
+                .unwrap();
+
+            let mut child_dnsmasq = windows_guest.run_dnsmasq();
+
+            // Predefined data to used at various test stages
+            let disk_test_data: [[String; 4]; 2] = [
+                [
+                    "_disk2".to_string(),
+                    windows_guest.disk_new(WindowsGuest::FS_FAT, 123),
+                    "d:\\world".to_string(),
+                    "hello".to_string(),
+                ],
+                [
+                    "_disk3".to_string(),
+                    windows_guest.disk_new(WindowsGuest::FS_NTFS, 333),
+                    "e:\\hello".to_string(),
+                    "world".to_string(),
+                ],
+            ];
+
+            let r = std::panic::catch_unwind(|| {
+                // Wait to make sure Windows boots up
+                assert!(windows_guest.wait_for_boot());
+
+                // Initially present disk device
+                let disk_num = 1;
+                assert_eq!(windows_guest.disk_count(), disk_num);
+                assert_eq!(disk_ctrl_threads_count(child.id()), disk_num);
+
+                for it in &disk_test_data {
+                    let disk_id = it[0].as_str();
+                    let disk = it[1].as_str();
+                    // Hotplug disk device
+                    let (cmd_success, cmd_output) = remote_command_w_output(
+                        &api_socket,
+                        "add-disk",
+                        Some(format!("path={},readonly=off", disk).as_str()),
+                    );
+                    assert!(cmd_success);
+                    assert!(String::from_utf8_lossy(&cmd_output)
+                        .contains(format!("\"id\":\"{}\"", disk_id).as_str()));
+                    thread::sleep(std::time::Duration::new(5, 0));
+                    // Online disk devices
+                    windows_guest.disks_set_rw();
+                    windows_guest.disks_online();
+                }
+                // Verify the devices are on the system
+                let disk_num = (disk_test_data.len() + 1) as u8;
+                assert_eq!(windows_guest.disk_count(), disk_num);
+                assert_eq!(disk_ctrl_threads_count(child.id()), disk_num);
+
+                // Put test data
+                for it in &disk_test_data {
+                    let fname = it[2].as_str();
+                    let data = it[3].as_str();
+                    windows_guest.disk_file_put(fname, data);
+                }
+
+                // Unmount disk devices
+                for it in &disk_test_data {
+                    let disk_id = it[0].as_str();
+                    let cmd_success = remote_command(&api_socket, "remove-device", Some(disk_id));
+                    assert!(cmd_success);
+                    thread::sleep(std::time::Duration::new(5, 0));
+                }
+
+                // Verify the devices have been removed
+                let disk_num = 1;
+                assert_eq!(windows_guest.disk_count(), disk_num);
+                assert_eq!(disk_ctrl_threads_count(child.id()), disk_num);
+
+                // Remount
+                for it in &disk_test_data {
+                    let disk = it[1].as_str();
+                    let (cmd_success, _cmd_output) = remote_command_w_output(
+                        &api_socket,
+                        "add-disk",
+                        Some(format!("path={},readonly=off", disk).as_str()),
+                    );
+                    assert!(cmd_success);
+                    thread::sleep(std::time::Duration::new(5, 0));
+                }
+
+                // Check the files exists with the expected contents
+                for it in &disk_test_data {
+                    let fname = it[2].as_str();
+                    let data = it[3].as_str();
+                    let out = windows_guest.disk_file_read(fname);
+                    assert_eq!(data, out.trim());
+                }
 
                 // Intentionally no unmount, it'll happen at shutdown.
 
