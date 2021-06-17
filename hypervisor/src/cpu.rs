@@ -21,6 +21,8 @@ use crate::x86_64::{
 use crate::CpuState;
 #[cfg(feature = "kvm")]
 use crate::MpState;
+#[cfg(all(feature = "mshv", target_arch = "x86_64"))]
+use crate::SuspendRegisters;
 #[cfg(target_arch = "x86_64")]
 use crate::Xsave;
 #[cfg(feature = "mshv")]
@@ -41,6 +43,11 @@ pub enum HypervisorCpuError {
     ///
     #[error("Failed to get standard registers: {0}")]
     GetStandardRegs(#[source] anyhow::Error),
+    ///
+    /// Getting suspend registers error
+    ///
+    #[error("Failed to get suspend registers: {0}")]
+    GetSuspendRegs(#[source] anyhow::Error),
     ///
     /// Setting special register error
     ///
@@ -421,4 +428,9 @@ pub trait Vcpu: Send + Sync {
     ///
     #[cfg(feature = "tdx")]
     fn tdx_init(&self, hob_address: u64) -> Result<()>;
+    #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
+    ///
+    /// Return suspend registers(explicit and intercept suspend registers)
+    ///
+    fn get_suspend_regs(&self) -> Result<SuspendRegisters>;
 }

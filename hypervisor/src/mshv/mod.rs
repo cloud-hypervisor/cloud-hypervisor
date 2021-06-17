@@ -534,6 +534,15 @@ impl cpu::Vcpu for MshvVcpu {
 
         Ok(r)
     }
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// X86 specific call that returns the vcpu's current "suspend registers".
+    ///
+    fn get_suspend_regs(&self) -> cpu::Result<SuspendRegisters> {
+        self.fd
+            .get_suspend_regs()
+            .map_err(|e| cpu::HypervisorCpuError::GetSuspendRegs(e.into()))
+    }
 }
 
 struct MshvEmulatorContext<'a> {
