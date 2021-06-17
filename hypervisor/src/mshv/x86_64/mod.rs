@@ -19,8 +19,8 @@ pub use {
     mshv_bindings::FloatingPointUnit as FpuState, mshv_bindings::LapicState,
     mshv_bindings::MsrList, mshv_bindings::Msrs as MsrEntries, mshv_bindings::Msrs,
     mshv_bindings::SegmentRegister, mshv_bindings::SpecialRegisters,
-    mshv_bindings::StandardRegisters, mshv_bindings::VcpuEvents, mshv_bindings::XSave as Xsave,
-    mshv_bindings::Xcrs as ExtendedControlRegisters,
+    mshv_bindings::StandardRegisters, mshv_bindings::SuspendRegisters, mshv_bindings::VcpuEvents,
+    mshv_bindings::XSave as Xsave, mshv_bindings::Xcrs as ExtendedControlRegisters,
 };
 
 #[derive(Clone, Serialize, Deserialize)]
