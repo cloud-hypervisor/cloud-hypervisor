@@ -1614,14 +1614,6 @@ impl Aml for MemorySlot {
                         vec![&self.slot_id],
                     ))],
                 ),
-                // We don't expose any NUMA characteristics so all memory is in the same "proximity domain"
-                &aml::Method::new(
-                    "_PXM".into(),
-                    0,
-                    false,
-                    // We aren't NUMA so associate all RAM into the same proximity region (zero)
-                    vec![&aml::Return::new(&0u32)],
-                ),
             ],
         )
         .to_aml_bytes()
