@@ -569,6 +569,8 @@ impl Vm {
             vm_ops,
             #[cfg(feature = "tdx")]
             tdx_enabled,
+            #[cfg(feature = "acpi")]
+            &numa_nodes,
         )
         .map_err(Error::CpuManager)?;
 

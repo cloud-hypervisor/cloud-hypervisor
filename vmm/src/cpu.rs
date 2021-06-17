@@ -19,6 +19,8 @@ use crate::memory_manager::MemoryManager;
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 #[cfg(target_arch = "x86_64")]
 use crate::vm::physical_bits;
+#[cfg(feature = "acpi")]
+use crate::vm::NumaNodes;
 use crate::GuestMemoryMmap;
 use crate::CPU_MANAGER_SNAPSHOT_ID;
 #[cfg(feature = "acpi")]
@@ -37,6 +39,8 @@ use hypervisor::{vm::VmmOps, CpuState, HypervisorCpuError, VmExit};
 use hypervisor::{CpuId, CpuIdEntry};
 use libc::{c_void, siginfo_t};
 use seccomp::{SeccompAction, SeccompFilter};
+#[cfg(feature = "acpi")]
+use std::collections::BTreeMap;
 use std::os::unix::thread::JoinHandleExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
@@ -407,6 +411,8 @@ pub struct CpuManager {
     #[cfg(feature = "acpi")]
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     acpi_address: GuestAddress,
+    #[cfg(feature = "acpi")]
+    proximity_domain_per_cpu: BTreeMap<u8, u32>,
 }
 
 const CPU_ENABLE_FLAG: usize = 0;
@@ -545,6 +551,7 @@ impl CpuManager {
         seccomp_action: SeccompAction,
         vmmops: Arc<Box<dyn VmmOps>>,
         #[cfg(feature = "tdx")] tdx_enabled: bool,
+        #[cfg(feature = "acpi")] numa_nodes: &NumaNodes,
     ) -> Result<Arc<Mutex<CpuManager>>> {
         let guest_memory = memory_manager.lock().unwrap().guest_memory();
         let mut vcpu_states = Vec::with_capacity(usize::from(config.max_vcpus));
@@ -579,6 +586,20 @@ impl CpuManager {
             .unwrap()
             .allocate_mmio_addresses(None, CPU_MANAGER_ACPI_SIZE as u64, None)
             .ok_or(Error::AllocateMmmioAddress)?;
+
+        #[cfg(feature = "acpi")]
+        let proximity_domain_per_cpu: BTreeMap<u8, u32> = {
+            let mut cpu_list = Vec::new();
+            for (proximity_domain, numa_node) in numa_nodes.iter() {
+                for cpu in numa_node.cpus().iter() {
+                    cpu_list.push((*cpu, *proximity_domain))
+                }
+            }
+            cpu_list
+        }
+        .into_iter()
+        .collect();
+
         let cpu_manager = Arc::new(Mutex::new(CpuManager {
             config: config.clone(),
             interrupt_controller: device_manager.interrupt_controller().clone(),
@@ -597,6 +618,8 @@ impl CpuManager {
             vmmops,
             #[cfg(feature = "acpi")]
             acpi_address,
+            #[cfg(feature = "acpi")]
+            proximity_domain_per_cpu,
         }));
 
         #[cfg(feature = "acpi")]
@@ -1284,6 +1307,7 @@ impl CpuManager {
 #[cfg(feature = "acpi")]
 struct Cpu {
     cpu_id: u8,
+    proximity_domain: u32,
 }
 
 #[cfg(all(target_arch = "x86_64", feature = "acpi"))]
@@ -1340,6 +1364,12 @@ impl Aml for Cpu {
                         "CSTA".into(),
                         vec![&self.cpu_id],
                     ))],
+                ),
+                &aml::Method::new(
+                    "_PXM".into(),
+                    0,
+                    false,
+                    vec![&aml::Return::new(&self.proximity_domain)],
                 ),
                 // The Linux kernel expects every CPU device to have a _MAT entry
                 // containing the LAPIC for this processor with the enabled bit set
@@ -1573,7 +1603,11 @@ impl Aml for CpuManager {
 
         let mut cpu_devices = Vec::new();
         for cpu_id in 0..self.config.max_vcpus {
-            let cpu_device = Cpu { cpu_id };
+            let proximity_domain = *self.proximity_domain_per_cpu.get(&cpu_id).unwrap_or(&0);
+            let cpu_device = Cpu {
+                cpu_id,
+                proximity_domain,
+            };
 
             cpu_devices.push(cpu_device);
         }
