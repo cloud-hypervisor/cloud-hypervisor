@@ -451,3 +451,10 @@ _Example_
 --numa guest_numa_id=0,memory_zones=mem0:mem2
 --numa guest_numa_id=1,memory_zones=mem1
 ```
+
+### PCI bus
+
+Cloud Hypervisor supports only one PCI bus, which is why it has been tied to
+the NUMA node 0 by default. It is the user responsibility to organize the NUMA
+nodes correctly so that vCPUs and guest RAM which should be located on the same
+NUMA node as the PCI bus end up on the NUMA node 0.

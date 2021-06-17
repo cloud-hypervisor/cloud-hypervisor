@@ -3744,6 +3744,14 @@ impl Aml for DeviceManager {
         let supp = aml::Name::new("SUPP".into(), &aml::ZERO);
         pci_dsdt_inner_data.push(&supp);
 
+        // Since Cloud Hypervisor supports only one PCI bus, it can be tied
+        // to the NUMA node 0. It's up to the user to organize the NUMA nodes
+        // so that the PCI bus relates to the expected vCPUs and guest RAM.
+        let proximity_domain = 0u32;
+        let pxm_return = aml::Return::new(&proximity_domain);
+        let pxm = aml::Method::new("_PXM".into(), 0, false, vec![&pxm_return]);
+        pci_dsdt_inner_data.push(&pxm);
+
         let pci_dsm = PciDsmMethod {};
         pci_dsdt_inner_data.push(&pci_dsm);
 
