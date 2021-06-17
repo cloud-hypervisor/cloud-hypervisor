@@ -2230,7 +2230,7 @@ mod tests {
             let kernel_path = direct_kernel_boot_path();
 
             let mut child = GuestCommand::new(&guest)
-                .args(&["--cpus", "boot=6"])
+                .args(&["--cpus", "boot=6,max=12"])
                 .args(&["--memory", "size=0,hotplug_method=virtio-mem"])
                 .args(&[
                     "--memory-zone",
@@ -2240,9 +2240,9 @@ mod tests {
                 ])
                 .args(&[
                     "--numa",
-                    "guest_numa_id=0,cpus=0-2,distances=1@15:2@20,memory_zones=mem0",
-                    "guest_numa_id=1,cpus=3-4,distances=0@20:2@25,memory_zones=mem1",
-                    "guest_numa_id=2,cpus=5,distances=0@25:1@30,memory_zones=mem2",
+                    "guest_numa_id=0,cpus=0-2:9,distances=1@15:2@20,memory_zones=mem0",
+                    "guest_numa_id=1,cpus=3-4:6-8,distances=0@20:2@25,memory_zones=mem1",
+                    "guest_numa_id=2,cpus=5:10-11,distances=0@25:1@30,memory_zones=mem2",
                 ])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
@@ -2285,6 +2285,13 @@ mod tests {
                 resize_zone_command(&api_socket, "mem2", "4G");
                 thread::sleep(std::time::Duration::new(5, 0));
                 assert!(guest.get_numa_node_memory(2).unwrap_or_default() > 3_840_000);
+
+                // Resize to the maximum amount of CPUs and check each NUMA
+                // node has been assigned the right CPUs set.
+                resize_command(&api_socket, Some(12), None, None);
+                guest.check_numa_node_cpus(0, vec![0, 1, 2, 9]).unwrap();
+                guest.check_numa_node_cpus(1, vec![3, 4, 6, 7, 8]).unwrap();
+                guest.check_numa_node_cpus(2, vec![5, 10, 11]).unwrap();
             });
 
             let _ = child.kill();
