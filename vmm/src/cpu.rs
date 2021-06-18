@@ -77,6 +77,8 @@ const KVM_FEATURE_CLOCKSOURCE_STABLE_BIT: u8 = 24;
 const KVM_FEATURE_ASYNC_PF_BIT: u8 = 4;
 #[cfg(feature = "tdx")]
 const KVM_FEATURE_ASYNC_PF_VMEXIT_BIT: u8 = 10;
+#[cfg(feature = "tdx")]
+const KVM_FEATURE_STEAL_TIME_BIT: u8 = 5;
 
 #[cfg(feature = "acpi")]
 pub const CPU_MANAGER_ACPI_SIZE: usize = 0xc;
@@ -720,7 +722,8 @@ impl CpuManager {
                             | 1 << KVM_FEATURE_CLOCKSOURCE2_BIT
                             | 1 << KVM_FEATURE_CLOCKSOURCE_STABLE_BIT
                             | 1 << KVM_FEATURE_ASYNC_PF_BIT
-                            | 1 << KVM_FEATURE_ASYNC_PF_VMEXIT_BIT)
+                            | 1 << KVM_FEATURE_ASYNC_PF_VMEXIT_BIT
+                            | 1 << KVM_FEATURE_STEAL_TIME_BIT)
                     }
                 }
                 _ => {}
