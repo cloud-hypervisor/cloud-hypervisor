@@ -24,7 +24,7 @@ pipeline{
 		stage ('Build') {
             		parallel {
 				stage ('Worker build') {
-					agent { node { label 'groovy' } }
+					agent { node { label 'hirsute' } }
 					stages {
 						stage ('Checkout') {
 							steps {
@@ -83,7 +83,7 @@ pipeline{
 					}
 				}
 				stage ('Worker build (musl)') {
-					agent { node { label 'groovy' } }
+					agent { node { label 'hirsute' } }
 					stages {
 						stage ('Checkout') {
 							steps {
@@ -179,7 +179,7 @@ pipeline{
 					}
 				}
 				stage ('Worker build - Windows guest') {
-					agent { node { label 'groovy' } }
+					agent { node { label 'hirsute' } }
 					stages {
 						stage ('Checkout') {
 							steps {
