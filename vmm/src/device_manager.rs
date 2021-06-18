@@ -2997,7 +2997,7 @@ impl DeviceManager {
                             std::io::ErrorKind::Other,
                             format!(
                                 "failed to translate addr 0x{:x} for device 00:{:02x}.0 {}",
-                                addr, pci_device_bdf, e
+                                addr, pci_device_bdf >> 3, e
                             ),
                         )
                     })
