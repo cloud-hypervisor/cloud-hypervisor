@@ -42,3 +42,6 @@ jobs:
         
       - name: Release Build (default features)
         run: cargo build --all --release --target=${{ matrix.target }}
+
+      - name: Check build did not modify any files
+        run: test -z "$(git status --porcelain)"
