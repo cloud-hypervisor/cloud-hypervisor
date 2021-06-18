@@ -56,3 +56,6 @@ jobs:
 
       - name: Clippy (integration tests)
         run: cargo clippy --all --all-targets --tests --features "integration_tests" -- -D warnings
+
+      - name: Check build did not modify any files
+        run: test -z "$(git status --porcelain)"
