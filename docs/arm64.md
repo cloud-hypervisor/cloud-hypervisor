@@ -1,58 +1,126 @@
-# How to build and run Cloud-hypervisor on AArch64
+# How to build and test Cloud Hypervisor on AArch64
 
-Cloud-hypervisor is partially enabled on AArch64 architecture.
-Although all features are not ready yet, you can begin to test Cloud-hypervisor on a AArch64 host by following this guide.
+This document introduces how to build and test Cloud Hypervisor on AArch64 servers. Currently Cloud Hypervisor cannot be tested on Raspberry PI. Because on AArch64, Cloud Hypervisor requires GICv3-ITS device for PCIe MSI interrupt handling. But GICv3-ITS has not been equipped on any Raspberry PI product so far.
+
+Now Cloud Hypervisor supports 2 ways of booting on AArch64: UEFI booting and direct-kernel booting. The document covers both of the ways.
+
+All the steps are based on Ubuntu. We use the Ubuntu cloud image for guest VM disk.
+
+## Getting started
+
+We create a folder to build and run Cloud Hypervisor at `$HOME/cloud-hypervisor`
+
+```shell
+$ export CLOUDH=$HOME/cloud-hypervisor
+$ mkdir $CLOUDH
+```
 
 ## Prerequisites
 
-On AArch64 machines, Cloud-hypervisor depends on an external library `libfdt-dev` for generating Flattened Device Tree (FDT).
+You need to install some prerequisite packages to build and test Cloud Hypervisor.
 
-The long-term plan is to replace `libfdt-dev` with some pure-Rust component to get rid of such dependency.
-
-```bash
-sudo apt-get update
-sudo apt-get install libfdt-dev
-```
-
-## Build
-
-Using PCI devices requires GICv3-ITS for MSI messaging. GICv3-ITS is very common in modern servers.
+### Tools
 
 ```bash
-cargo build --no-default-features --features kvm
+# Install rust tool chain
+$ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+# Install the tools used for building guest kernel, EDK2 and converting guest disk
+$ sudo apt-get update
+$ sudo apt-get install git build-essential m4 bison flex uuid-dev qemu-utils
 ```
 
-## Image
+### Disk image
 
-Download kernel binary and rootfs image from AWS.
+Download the Ubuntu cloud image and convert the image type.
 
 ```bash
-wget https://s3.amazonaws.com/spec.ccfc.min/img/aarch64/ubuntu_with_ssh/fsfiles/xenial.rootfs.ext4 -O rootfs.ext4
-wget https://s3.amazonaws.com/spec.ccfc.min/img/aarch64/ubuntu_with_ssh/kernel/vmlinux.bin -O kernel.bin
+$ pushd $CLOUDH
+$ wget https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-arm64.img
+$ qemu-img convert -p -f qcow2 -O raw focal-server-cloudimg-arm64.img focal-server-cloudimg-arm64.raw
+$ popd
 ```
 
-## Containerized build
+## UEFI booting
 
-If you want to build and test Cloud Hypervisor without having to install all the required dependencies, you can also turn to the development script: dev_cli.sh.
+This part introduces how to build EDK2 firmware and boot Cloud Hypervisor with it.
 
-To build the development container:
+### Building Cloud Hypervisor
 
 ```bash
-./scripts/dev_cli.sh build-container
+$ pushd $CLOUDH
+$ git clone https://github.com/cloud-hypervisor/cloud-hypervisor.git
+$ cd cloud-hypervisor
+$ cargo build --no-default-features --features kvm,acpi
+$ popd
 ```
 
-To build Cloud-hypervisor in the container:
+### Building EDK2
 
 ```bash
-./scripts/dev_cli.sh build
+$ pushd $CLOUDH
+
+# Clone source code repos
+$ git clone --depth 1 https://github.com/cloud-hypervisor/edk2.git -b ch-aarch64
+$ cd edk2
+$ git submodule update --init
+$ cd ..
+$ git clone --depth 1 https://github.com/tianocore/edk2-platforms.git -b master
+$ git clone --depth 1 https://github.com/acpica/acpica.git -b master
+
+# Build tools
+$ export PACKAGES_PATH="$PWD/edk2:$PWD/edk2-platforms"
+$ export IASL_PREFIX="$PWD/acpica/generate/unix/bin/"
+$ make -C acpica
+$ cd edk2/
+$ . edksetup.sh
+$ cd ..
+$ make -C edk2/BaseTools
+
+# Build EDK2
+$ build -a AARCH64 -t GCC5 -p ArmVirtPkg/ArmVirtCloudHv.dsc -b RELEASE
+
+$ popd
 ```
 
-## Run
+If the build goes well, the EDK2 binary is available at `edk2/Build/ArmVirtCloudHv-AARCH64/RELEASE_GCC5/FV/CLOUDHV_EFI.fd`.
 
-Assuming you have built Cloud-hypervisor with the development container, a VM can be started with command:
+### Booting the guest VM
 
 ```bash
-sudo build/cargo_target/aarch64-unknown-linux-gnu/debug/cloud-hypervisor --kernel kernel.bin --disk path=rootfs.ext4 --cmdline "keep_bootcon console=hvc0 reboot=k panic=1 root=/dev/vda rw" --cpus boot=4 --memory size=512M --serial file=serial.log --log-file log.log -vvv
+$ pushd $CLOUDH
+$ sudo RUST_BACKTRACE=1 $CLOUDH/cloud-hypervisor/target/debug/cloud-hypervisor --api-socket /tmp/cloud-hypervisor.sock --kernel $CLOUDH/edk2/edk2/Build/ArmVirtCloudHv-AARCH64/RELEASE_GCC5/FV/CLOUDHV_EFI.fd --disk path=$CLOUDH/focal-server-cloudimg-arm64.raw --cpus boot=4 --memory size=4096M --serial tty --console off --log-file log.log -vvv --net tap=,mac=12:34:56:78:90:01,ip=192.168.1.1,mask=255.255.255.0
+$ popd
 ```
 
-If the build was done out of the container, replace the binary path with `target/debug/cloud-hypervisor`.
+## Direct-kernel booting
+
+Alternativelly, you can build your own kernel for guest VM. This way, UEFI is not involved and ACPI cannot be enabled.
+
+### Building Cloud Hypervisor
+
+```bash
+$ pushd $CLOUDH
+$ git clone https://github.com/cloud-hypervisor/cloud-hypervisor.git
+$ cd cloud-hypervisor
+$ cargo build --no-default-features --features kvm
+$ popd
+```
+
+### Building kernel
+
+```bash
+$ pushd $CLOUDH
+$ git clone --depth 1 "https://github.com/cloud-hypervisor/linux.git" -b ch-5.12
+$ cd linux
+$ cp $CLOUDH/cloud-hypervisor/resources/linux-config-aarch64 .config
+$ make -j `nproc`
+$ popd
+```
+
+### Booting the guest VM
+
+```bash
+$ pushd $CLOUDH
+$ sudo $CLOUDH/cloud-hypervisor/target/debug/cloud-hypervisor --api-socket /tmp/cloud-hypervisor.sock --kernel $CLOUDH/linux/arch/arm64/boot/Image --disk path=focal-server-cloudimg-arm64.raw --cmdline "keep_bootcon console=ttyAMA0 reboot=k panic=1 root=/dev/vda1 rw" --cpus boot=4 --memory size=4096M --serial tty --console off --log-file log.log -vvv --net "tap=,mac=,ip=,mask="
+$ popd
+```
