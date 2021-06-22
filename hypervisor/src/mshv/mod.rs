@@ -559,7 +559,7 @@ impl<'a> MshvEmulatorContext<'a> {
 
         let result_code = unsafe { r.1.__bindgen_anon_1.result_code };
         match result_code {
-            hv_translate_gva_result_code_HvTranslateGvaSuccess => Ok(r.0),
+            hv_translate_gva_result_code_HV_TRANSLATE_GVA_SUCCESS => Ok(r.0),
             _ => Err(PlatformError::TranslateVirtualAddress(anyhow!(result_code))),
         }
     }
