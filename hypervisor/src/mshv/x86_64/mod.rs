@@ -8,7 +8,7 @@
 //
 //
 
-use crate::arch::x86::{msr_index, SegmentRegisterOps};
+use crate::arch::x86::{msr_index, SegmentRegisterOps, MTRR_ENABLE, MTRR_MEM_TYPE_WB};
 use serde_derive::{Deserialize, Serialize};
 ///
 /// Export generically-named wrappers of mshv_bindings for Unix-based platforms
@@ -118,6 +118,7 @@ pub fn boot_msr_entries() -> MsrEntries {
         msr!(msr_index::MSR_KERNEL_GS_BASE),
         msr!(msr_index::MSR_SYSCALL_MASK),
         msr!(msr_index::MSR_IA32_TSC),
+        msr_data!(msr_index::MSR_MTRRdefType, MTRR_ENABLE | MTRR_MEM_TYPE_WB),
     ])
     .unwrap()
 }
