@@ -3779,6 +3779,10 @@ impl Aml for DeviceManager {
                     start_of_device_area,
                     end_of_device_area,
                 ),
+                #[cfg(target_arch = "x86_64")]
+                &aml::AddressSpace::new_io(0u16, 0x0cf7u16),
+                #[cfg(target_arch = "x86_64")]
+                &aml::AddressSpace::new_io(0x0d00u16, 0xffffu16),
             ]),
         );
         pci_dsdt_inner_data.push(&crs);
