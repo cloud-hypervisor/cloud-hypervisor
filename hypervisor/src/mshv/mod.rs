@@ -393,22 +393,22 @@ impl cpu::Vcpu for MshvVcpu {
                 }
                 hv_message_type_HVMSG_X64_CPUID_INTERCEPT => {
                     let info = x.to_cpuid_info().unwrap();
-                    debug!("cpuid eax: {:x}", info.rax);
+                    debug!("cpuid eax: {:x}", { info.rax });
                     Ok(cpu::VmExit::Ignore)
                 }
                 hv_message_type_HVMSG_X64_MSR_INTERCEPT => {
                     let info = x.to_msr_info().unwrap();
                     if info.header.intercept_access_type == 0 {
-                        debug!("msr read: {:x}", info.msr_number);
+                        debug!("msr read: {:x}", { info.msr_number });
                     } else {
-                        debug!("msr write: {:x}", info.msr_number);
+                        debug!("msr write: {:x}", { info.msr_number });
                     }
                     Ok(cpu::VmExit::Ignore)
                 }
                 hv_message_type_HVMSG_X64_EXCEPTION_INTERCEPT => {
                     //TODO: Handler for VMCALL here.
                     let info = x.to_exception_info().unwrap();
-                    debug!("Exception Info {:?}", info.exception_vector);
+                    debug!("Exception Info {:?}", { info.exception_vector });
                     Ok(cpu::VmExit::Ignore)
                 }
                 exit => Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
