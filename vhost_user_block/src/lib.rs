@@ -154,7 +154,7 @@ impl VhostUserBlkThread {
             if self.event_idx {
                 let queue = vring.mut_queue();
                 if let Some(used_idx) = queue.add_used(mem, head.index, len) {
-                    if queue.needs_notification(&mem, Wrapping(used_idx)) {
+                    if queue.needs_notification(mem, Wrapping(used_idx)) {
                         debug!("signalling queue");
                         vring.signal_used_queue().unwrap();
                     } else {
@@ -391,7 +391,7 @@ impl VhostUserBackend for VhostUserBlkBackend {
             return Err(io::Error::from_raw_os_error(libc::EINVAL));
         }
         let (_, right) = config_slice.split_at_mut(offset as usize);
-        right.copy_from_slice(&data);
+        right.copy_from_slice(data);
         self.update_writeback();
         Ok(())
     }

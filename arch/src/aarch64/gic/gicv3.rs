@@ -107,19 +107,19 @@ pub mod kvm {
         /// Save the state of GIC.
         fn state(&self, gicr_typers: &[u64]) -> Result<Gicv3State> {
             // Flush redistributors pending tables to guest RAM.
-            save_pending_tables(&self.device()).map_err(Error::SavePendingTables)?;
+            save_pending_tables(self.device()).map_err(Error::SavePendingTables)?;
 
             let gicd_ctlr =
-                read_ctlr(&self.device()).map_err(Error::SaveDistributorCtrlRegisters)?;
+                read_ctlr(self.device()).map_err(Error::SaveDistributorCtrlRegisters)?;
 
             let dist_state =
-                get_dist_regs(&self.device()).map_err(Error::SaveDistributorRegisters)?;
+                get_dist_regs(self.device()).map_err(Error::SaveDistributorRegisters)?;
 
-            let rdist_state = get_redist_regs(&self.device(), &gicr_typers)
+            let rdist_state = get_redist_regs(self.device(), gicr_typers)
                 .map_err(Error::SaveRedistributorRegisters)?;
 
             let icc_state =
-                get_icc_regs(&self.device(), &gicr_typers).map_err(Error::SaveIccRegisters)?;
+                get_icc_regs(self.device(), gicr_typers).map_err(Error::SaveIccRegisters)?;
 
             Ok(Gicv3State {
                 dist: dist_state,
@@ -131,16 +131,16 @@ pub mod kvm {
 
         /// Restore the state of GIC.
         fn set_state(&mut self, gicr_typers: &[u64], state: &Gicv3State) -> Result<()> {
-            write_ctlr(&self.device(), state.gicd_ctlr)
+            write_ctlr(self.device(), state.gicd_ctlr)
                 .map_err(Error::RestoreDistributorCtrlRegisters)?;
 
-            set_dist_regs(&self.device(), &state.dist)
+            set_dist_regs(self.device(), &state.dist)
                 .map_err(Error::RestoreDistributorRegisters)?;
 
-            set_redist_regs(&self.device(), gicr_typers, &state.rdist)
+            set_redist_regs(self.device(), gicr_typers, &state.rdist)
                 .map_err(Error::RestoreRedistributorRegisters)?;
 
-            set_icc_regs(&self.device(), &gicr_typers, &state.icc)
+            set_icc_regs(self.device(), gicr_typers, &state.icc)
                 .map_err(Error::RestoreIccRegisters)?;
 
             Ok(())

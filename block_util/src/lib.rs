@@ -187,8 +187,8 @@ impl Request {
         }
 
         let mut req = Request {
-            request_type: request_type(&mem, avail_desc.addr)?,
-            sector: sector(&mem, avail_desc.addr)?,
+            request_type: request_type(mem, avail_desc.addr)?,
+            sector: sector(mem, avail_desc.addr)?,
             data_descriptors: Vec::new(),
             status_addr: GuestAddress(0),
             writeback: true,
@@ -288,7 +288,7 @@ impl Request {
                     if (*data_len as usize) < disk_id.len() {
                         return Err(ExecuteError::BadRequest(Error::InvalidOffset));
                     }
-                    mem.write_slice(&disk_id.as_slice(), *data_addr)
+                    mem.write_slice(disk_id.as_slice(), *data_addr)
                         .map_err(ExecuteError::Write)?;
                 }
                 RequestType::Unsupported(t) => return Err(ExecuteError::Unsupported(t)),

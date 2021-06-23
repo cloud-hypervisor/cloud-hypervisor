@@ -171,7 +171,7 @@ impl RefCount {
         if self.ref_table.dirty() {
             raw_file.write_pointer_table(
                 self.refcount_table_offset,
-                &self.ref_table.get_values(),
+                self.ref_table.get_values(),
                 0,
             )?;
             self.ref_table.mark_clean();
@@ -210,7 +210,7 @@ impl RefCount {
 
     /// Returns the refcount table for this file. This is only useful for debugging.
     pub fn ref_table(&self) -> &[u64] {
-        &self.ref_table.get_values()
+        self.ref_table.get_values()
     }
 
     /// Returns the refcounts stored in the given block.

@@ -175,7 +175,7 @@ mod tests {
         let mut disk_file: File = TempFile::new().unwrap().into_file();
         disk_file.set_len(0x1000_0200).unwrap();
         disk_file.seek(SeekFrom::Start(0x1000_0000)).unwrap();
-        disk_file.write_all(&footer).unwrap();
+        disk_file.write_all(footer).unwrap();
 
         testfn(disk_file); // File closed when the function exits.
     }

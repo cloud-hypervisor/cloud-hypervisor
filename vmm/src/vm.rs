@@ -1186,7 +1186,7 @@ impl Vm {
                 self.device_manager
                     .lock()
                     .unwrap()
-                    .update_memory(&new_region)
+                    .update_memory(new_region)
                     .map_err(Error::DeviceManager)?;
 
                 match memory_config.hotplug_method {
@@ -2580,7 +2580,7 @@ pub fn test_vm() {
                 println!(
                     "IO out -- addr: {:#x} data [{:?}]",
                     addr,
-                    str::from_utf8(&data).unwrap()
+                    str::from_utf8(data).unwrap()
                 );
             }
             VmExit::Reset => {

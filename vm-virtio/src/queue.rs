@@ -697,7 +697,7 @@ impl Queue {
         let mut notify = true;
 
         if let Some(old_idx) = self.signalled_used {
-            if let Some(used_event) = self.get_used_event(&mem) {
+            if let Some(used_event) = self.get_used_event(mem) {
                 debug!(
                     "used_event = {:?} used_idx = {:?} old_idx = {:?}",
                     used_event, used_idx, old_idx

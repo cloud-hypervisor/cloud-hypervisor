@@ -234,7 +234,7 @@ impl VsockChannel for VsockMuxer {
             // connection requests.
             if pkt.op() == uapi::VSOCK_OP_REQUEST {
                 // Oh, this is a connection request!
-                self.handle_peer_request_pkt(&pkt);
+                self.handle_peer_request_pkt(pkt);
             } else {
                 // Send back an RST, to let the drive know we weren't expecting this packet.
                 self.enq_rst(pkt.dst_port(), pkt.src_port());

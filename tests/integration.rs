@@ -1765,7 +1765,7 @@ mod tests {
 
     fn get_counters(api_socket: &str) -> Counters {
         // Get counters
-        let (cmd_success, cmd_output) = remote_command_w_output(&api_socket, "counters", None);
+        let (cmd_success, cmd_output) = remote_command_w_output(api_socket, "counters", None);
         assert!(cmd_success);
 
         let counters: HashMap<&str, HashMap<&str, u64>> =
@@ -1813,7 +1813,7 @@ mod tests {
     }
 
     fn get_pty_path(api_socket: &str, pty_type: &str) -> PathBuf {
-        let (cmd_success, cmd_output) = remote_command_w_output(&api_socket, "info", None);
+        let (cmd_success, cmd_output) = remote_command_w_output(api_socket, "info", None);
         assert!(cmd_success);
         let info: serde_json::Value = serde_json::from_slice(&cmd_output).unwrap_or_default();
         assert_eq!("Pty", info["config"][pty_type]["mode"]);
@@ -1859,7 +1859,7 @@ mod tests {
     }
 
     fn balloon_size(api_socket: &str) -> u64 {
-        let (cmd_success, cmd_output) = remote_command_w_output(&api_socket, "info", None);
+        let (cmd_success, cmd_output) = remote_command_w_output(api_socket, "info", None);
         assert!(cmd_success);
 
         let info: serde_json::Value = serde_json::from_slice(&cmd_output).unwrap_or_default();
@@ -5433,7 +5433,7 @@ mod tests {
                         "create",
                         "-f",
                         "raw",
-                        &img.to_str().unwrap(),
+                        img.to_str().unwrap(),
                         format!("{}m", sz).as_str(),
                     ])
                     .output()
@@ -5443,7 +5443,7 @@ mod tests {
 
                 // Associate image to a loop device
                 let out = Command::new("losetup")
-                    .args(&["--show", "-f", &img.to_str().unwrap()])
+                    .args(&["--show", "-f", img.to_str().unwrap()])
                     .output()
                     .expect("failed to create loop device")
                     .stdout;
@@ -5467,7 +5467,7 @@ mod tests {
 
                 // Disengage the loop device
                 let out = Command::new("losetup")
-                    .args(&["-d", &loop_dev])
+                    .args(&["-d", loop_dev])
                     .output()
                     .expect("loop device not found")
                     .stdout;
@@ -5480,7 +5480,7 @@ mod tests {
                         "--offset",
                         (512 * 2048).to_string().as_str(),
                         "-f",
-                        &img.to_str().unwrap(),
+                        img.to_str().unwrap(),
                     ])
                     .output()
                     .expect("failed to create loop device")
@@ -5504,7 +5504,7 @@ mod tests {
 
                 // Disengage the loop device
                 let out = Command::new("losetup")
-                    .args(&["-d", &loop_dev])
+                    .args(&["-d", loop_dev])
                     .output()
                     .unwrap_or_else(|_| panic!("loop device '{}' not found", loop_dev))
                     .stdout;

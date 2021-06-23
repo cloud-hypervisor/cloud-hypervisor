@@ -47,7 +47,7 @@ impl CtrlQueue {
 
     pub fn process(&mut self, mem: &GuestMemoryMmap, queue: &mut Queue) -> Result<bool> {
         let mut used_desc_heads = Vec::new();
-        for avail_desc in queue.iter(&mem) {
+        for avail_desc in queue.iter(mem) {
             let ctrl_hdr: ControlHeader =
                 mem.read_obj(avail_desc.addr).map_err(Error::GuestMemory)?;
             let data_desc = avail_desc
@@ -111,8 +111,8 @@ impl CtrlQueue {
         }
 
         for (desc_index, len) in used_desc_heads.iter() {
-            queue.add_used(&mem, *desc_index, *len);
-            queue.update_avail_event(&mem);
+            queue.add_used(mem, *desc_index, *len);
+            queue.update_avail_event(mem);
         }
 
         Ok(!used_desc_heads.is_empty())

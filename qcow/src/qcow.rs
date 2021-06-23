@@ -576,7 +576,7 @@ impl QcowFile {
 
     /// Returns the L1 lookup table for this file. This is only useful for debugging.
     pub fn l1_table(&self) -> &[u64] {
-        &self.l1_table.get_values()
+        self.l1_table.get_values()
     }
 
     /// Returns an L2_table of cluster addresses, only used for debugging.
@@ -613,7 +613,7 @@ impl QcowFile {
 
     /// Returns the refcount table for this file. This is only useful for debugging.
     pub fn ref_table(&self) -> &[u64] {
-        &self.refcounts.ref_table()
+        self.refcounts.ref_table()
     }
 
     /// Returns the `index`th refcount block from the file.
@@ -831,7 +831,7 @@ impl QcowFile {
 
             // Rewrite the top-level refcount table.
             raw_file
-                .write_pointer_table(header.refcount_table_offset, &ref_table, 0)
+                .write_pointer_table(header.refcount_table_offset, ref_table, 0)
                 .map_err(Error::WritingHeader)?;
 
             // Rewrite the header again, now with lazy refcounts disabled.
@@ -1379,7 +1379,7 @@ impl QcowFile {
         let mut sync_required = if self.l1_table.dirty() {
             self.raw_file.write_pointer_table(
                 self.header.l1_table_offset,
-                &self.l1_table.get_values(),
+                self.l1_table.get_values(),
                 0,
             )?;
             self.l1_table.mark_clean();
@@ -1783,7 +1783,7 @@ mod tests {
         F: FnMut(RawFile),
     {
         let mut disk_file: RawFile = RawFile::new(TempFile::new().unwrap().into_file(), false);
-        disk_file.write_all(&header).unwrap();
+        disk_file.write_all(header).unwrap();
         disk_file.set_len(0x1_0000_0000).unwrap();
         disk_file.seek(SeekFrom::Start(0)).unwrap();
 

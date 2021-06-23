@@ -678,7 +678,7 @@ mod mock_vmm {
             };
 
             if let Some(mem) = memory {
-                vmm.write_memory(mem.0, &mem.1).unwrap();
+                vmm.write_memory(mem.0, mem.1).unwrap();
             }
 
             vmm
@@ -693,7 +693,7 @@ mod mock_vmm {
             let ip = self.cpu_state(cpu_id).unwrap().ip();
             let mut emulator = Emulator::new(self);
 
-            let new_state = emulator.emulate_insn_stream(cpu_id, &insn, num_insn)?;
+            let new_state = emulator.emulate_insn_stream(cpu_id, insn, num_insn)?;
             if num_insn.is_none() {
                 assert_eq!(ip + insn.len() as u64, new_state.ip());
             }

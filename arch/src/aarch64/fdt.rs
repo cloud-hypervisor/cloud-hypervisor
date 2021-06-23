@@ -196,7 +196,7 @@ fn create_gic_node(fdt: &mut FdtWriter, gic_device: &dyn GicDevice) -> FdtWriter
     // interrupt source. The type shall be a <u32> and the value shall be 3 if no PPI affinity description
     // is required.
     fdt.property_u32("#interrupt-cells", 3)?;
-    fdt.property_array_u64("reg", &gic_reg_prop)?;
+    fdt.property_array_u64("reg", gic_reg_prop)?;
     fdt.property_u32("phandle", GIC_PHANDLE)?;
     fdt.property_u32("#address-cells", 2)?;
     fdt.property_u32("#size-cells", 2)?;
@@ -215,7 +215,7 @@ fn create_gic_node(fdt: &mut FdtWriter, gic_device: &dyn GicDevice) -> FdtWriter
         fdt.property_null("msi-controller")?;
         fdt.property_u32("phandle", MSI_PHANDLE)?;
         let msi_reg_prop = gic_device.msi_properties();
-        fdt.property_array_u64("reg", &msi_reg_prop)?;
+        fdt.property_array_u64("reg", msi_reg_prop)?;
         fdt.end_node(msic_node)?;
     }
 

@@ -142,14 +142,14 @@ pub fn get_redist_regs(gic: &Arc<dyn hypervisor::Device>, gicr_typer: &[u64]) ->
     let mut idx: usize = 0;
     access_redists_aux(
         gic,
-        &gicr_typer,
+        gicr_typer,
         &mut state,
         VGIC_RDIST_REGS,
         &mut idx,
         false,
     )?;
 
-    access_redists_aux(gic, &gicr_typer, &mut state, VGIC_SGI_REGS, &mut idx, false)?;
+    access_redists_aux(gic, gicr_typer, &mut state, VGIC_SGI_REGS, &mut idx, false)?;
     Ok(state)
 }
 

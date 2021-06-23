@@ -302,7 +302,7 @@ impl Fs {
         let num_queues = NUM_QUEUE_OFFSET + req_num_queues;
 
         // Connect to the vhost-user socket.
-        let mut vhost_user_fs = connect_vhost_user(false, &path, num_queues as u64, false)?;
+        let mut vhost_user_fs = connect_vhost_user(false, path, num_queues as u64, false)?;
 
         // Filling device and vring features VMM supports.
         let avail_features = DEFAULT_VIRTIO_FEATURES;

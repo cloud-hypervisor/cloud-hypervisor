@@ -3159,7 +3159,7 @@ impl DeviceManager {
         device_cfg: &mut DeviceConfig,
     ) -> DeviceManagerResult<PciDeviceInfo> {
         let pci = if let Some(pci_bus) = &self.pci_bus {
-            Arc::clone(&pci_bus)
+            Arc::clone(pci_bus)
         } else {
             return Err(DeviceManagerError::NoPciBus);
         };
@@ -3235,7 +3235,7 @@ impl DeviceManager {
     pub fn eject_device(&mut self, device_id: u8) -> DeviceManagerResult<()> {
         // Retrieve the PCI bus.
         let pci = if let Some(pci_bus) = &self.pci_bus {
-            Arc::clone(&pci_bus)
+            Arc::clone(pci_bus)
         } else {
             return Err(DeviceManagerError::NoPciBus);
         };
@@ -3382,7 +3382,7 @@ impl DeviceManager {
         }
 
         let pci = if let Some(pci_bus) = &self.pci_bus {
-            Arc::clone(&pci_bus)
+            Arc::clone(pci_bus)
         } else {
             return Err(DeviceManagerError::NoPciBus);
         };
@@ -4049,7 +4049,7 @@ impl BusDevice for DeviceManager {
             B0EJ_FIELD_OFFSET => {
                 assert!(data.len() == B0EJ_FIELD_SIZE);
                 let mut data_array: [u8; 4] = [0, 0, 0, 0];
-                data_array.copy_from_slice(&data);
+                data_array.copy_from_slice(data);
                 let device_bitmap = u32::from_le_bytes(data_array);
 
                 for device_id in 0..32 {
