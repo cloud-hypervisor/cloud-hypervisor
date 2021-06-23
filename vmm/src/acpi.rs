@@ -34,6 +34,7 @@ pub const ACPI_APIC_GENERIC_REDISTRIBUTOR: u8 = 14;
 #[cfg(target_arch = "aarch64")]
 pub const ACPI_APIC_GENERIC_TRANSLATOR: u8 = 15;
 
+#[allow(dead_code)]
 #[repr(packed)]
 #[derive(Default)]
 struct PciRangeEntry {
@@ -44,6 +45,7 @@ struct PciRangeEntry {
     _reserved: u32,
 }
 
+#[allow(dead_code)]
 #[repr(packed)]
 #[derive(Default)]
 struct MemoryAffinity {
@@ -60,6 +62,7 @@ struct MemoryAffinity {
     _reserved3: u64,
 }
 
+#[allow(dead_code)]
 #[repr(packed)]
 #[derive(Default)]
 struct ProcessorLocalX2ApicAffinity {
@@ -109,6 +112,7 @@ impl MemoryAffinity {
     }
 }
 
+#[allow(dead_code)]
 #[repr(packed)]
 #[derive(Default)]
 struct ViotVirtioPciNode {
@@ -120,6 +124,7 @@ struct ViotVirtioPciNode {
     _reserved2: [u8; 8],
 }
 
+#[allow(dead_code)]
 #[repr(packed)]
 #[derive(Default)]
 struct ViotPciRangeNode {
