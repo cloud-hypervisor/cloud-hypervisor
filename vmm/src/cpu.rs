@@ -150,6 +150,7 @@ pub enum Error {
 pub type Result<T> = result::Result<T, Error>;
 
 #[cfg(all(target_arch = "x86_64", feature = "acpi"))]
+#[allow(dead_code)]
 #[repr(packed)]
 struct LocalApic {
     pub r#type: u8,
@@ -159,6 +160,7 @@ struct LocalApic {
     pub flags: u32,
 }
 
+#[allow(dead_code)]
 #[repr(packed)]
 #[derive(Default)]
 struct Ioapic {
@@ -227,6 +229,7 @@ struct GicIts {
     pub reserved1: u32,
 }
 
+#[allow(dead_code)]
 #[repr(packed)]
 #[derive(Default)]
 struct InterruptSourceOverride {
