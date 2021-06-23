@@ -235,7 +235,7 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     fn set_xcrs(&self, xcrs: &ExtendedControlRegisters) -> cpu::Result<()> {
         self.fd
-            .set_xcrs(&xcrs)
+            .set_xcrs(xcrs)
             .map_err(|e| cpu::HypervisorCpuError::SetXcsr(e.into()))
     }
     #[cfg(target_arch = "x86_64")]
@@ -708,7 +708,7 @@ impl vm::Vm for MshvVm {
         debug!("register_irqfd fd {} gsi {}", fd.as_raw_fd(), gsi);
 
         self.fd
-            .register_irqfd(&fd, gsi)
+            .register_irqfd(fd, gsi)
             .map_err(|e| vm::HypervisorVmError::RegisterIrqFd(e.into()))?;
 
         Ok(())
@@ -720,7 +720,7 @@ impl vm::Vm for MshvVm {
         debug!("unregister_irqfd fd {} gsi {}", fd.as_raw_fd(), gsi);
 
         self.fd
-            .unregister_irqfd(&fd, gsi)
+            .unregister_irqfd(fd, gsi)
             .map_err(|e| vm::HypervisorVmError::UnregisterIrqFd(e.into()))?;
 
         Ok(())
@@ -833,7 +833,7 @@ impl vm::Vm for MshvVm {
         unsafe {
             let entries_slice: &mut [mshv_msi_routing_entry] =
                 msi_routing[0].entries.as_mut_slice(entries.len());
-            entries_slice.copy_from_slice(&entries);
+            entries_slice.copy_from_slice(entries);
         }
 
         self.fd

@@ -75,7 +75,7 @@ impl Sdt {
     }
 
     pub fn as_slice(&self) -> &[u8] {
-        &self.data.as_slice()
+        self.data.as_slice()
     }
 
     pub fn append<T>(&mut self, value: T) {

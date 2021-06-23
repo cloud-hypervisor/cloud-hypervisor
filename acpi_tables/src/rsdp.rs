@@ -36,7 +36,7 @@ impl Rsdp {
         };
 
         rsdp.checksum = super::generate_checksum(&rsdp.as_slice()[0..19]);
-        rsdp.extended_checksum = super::generate_checksum(&rsdp.as_slice());
+        rsdp.extended_checksum = super::generate_checksum(rsdp.as_slice());
         rsdp
     }
 

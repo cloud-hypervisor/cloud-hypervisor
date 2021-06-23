@@ -40,7 +40,7 @@ impl TxVirtio {
         queue: &mut Queue,
         rate_limiter: &mut Option<RateLimiter>,
     ) -> Result<(), NetQueuePairError> {
-        while let Some(avail_desc) = queue.iter(&mem).next() {
+        while let Some(avail_desc) = queue.iter(mem).next() {
             let head_index = avail_desc.index;
             let mut next_desc = Some(avail_desc);
 
@@ -108,8 +108,8 @@ impl TxVirtio {
                 self.counter_frames += Wrapping(1);
             }
 
-            queue.add_used(&mem, head_index, 0);
-            queue.update_avail_event(&mem);
+            queue.add_used(mem, head_index, 0);
+            queue.update_avail_event(mem);
         }
 
         Ok(())
@@ -146,7 +146,7 @@ impl RxVirtio {
         let mut exhausted_descs = true;
         let mut rate_limit_reached = false;
 
-        while let Some(avail_desc) = queue.iter(&mem).next() {
+        while let Some(avail_desc) = queue.iter(mem).next() {
             if rate_limit_reached {
                 exhausted_descs = false;
                 queue.go_to_previous_position();
@@ -208,8 +208,8 @@ impl RxVirtio {
                 0
             };
 
-            queue.add_used(&mem, head_index, len);
-            queue.update_avail_event(&mem);
+            queue.add_used(mem, head_index, len);
+            queue.update_avail_event(mem);
 
             // For the sake of simplicity (keeping the handling of RX_QUEUE_EVENT and
             // RX_TAP_EVENT totally asynchronous), we always let the 'last' descriptor

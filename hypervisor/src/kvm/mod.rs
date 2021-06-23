@@ -226,7 +226,7 @@ impl vm::Vm for KvmVm {
         unsafe {
             let entries_slice: &mut [kvm_irq_routing_entry] =
                 irq_routing[0].entries.as_mut_slice(entries.len());
-            entries_slice.copy_from_slice(&entries);
+            entries_slice.copy_from_slice(entries);
         }
 
         self.fd
@@ -801,7 +801,7 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     fn set_xcrs(&self, xcrs: &ExtendedControlRegisters) -> cpu::Result<()> {
         self.fd
-            .set_xcrs(&xcrs)
+            .set_xcrs(xcrs)
             .map_err(|e| cpu::HypervisorCpuError::SetXcsr(e.into()))
     }
     ///

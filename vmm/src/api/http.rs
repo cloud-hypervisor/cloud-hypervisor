@@ -241,7 +241,7 @@ fn handle_http_request(
     let path = request.uri().get_abs_path().to_string();
     let mut response = match HTTP_ROUTES.routes.get(&path) {
         Some(route) => match api_notifier.try_clone() {
-            Ok(notifier) => route.handle_request(&request, notifier, api_sender.clone()),
+            Ok(notifier) => route.handle_request(request, notifier, api_sender.clone()),
             Err(_) => error_response(
                 HttpError::InternalServerError,
                 StatusCode::InternalServerError,

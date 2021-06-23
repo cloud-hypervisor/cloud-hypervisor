@@ -652,7 +652,7 @@ impl VirtioPciDevice {
 
         if offset < std::mem::size_of::<VirtioPciCap>() {
             let (_, right) = cap_slice.split_at_mut(offset);
-            right[..data_len].copy_from_slice(&data);
+            right[..data_len].copy_from_slice(data);
             None
         } else {
             // Safe since we know self.cap_pci_cfg_info.cap.cap.offset is 32bits long.

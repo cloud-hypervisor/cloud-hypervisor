@@ -341,7 +341,7 @@ impl BusDevice for Pl011 {
 
     fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         if data.len() <= 4 {
-            let v = read_le_u32(&data);
+            let v = read_le_u32(data);
             if let Err(e) = self.handle_write(offset, v) {
                 warn!("Failed to write to PL011 device: {}", e);
             }

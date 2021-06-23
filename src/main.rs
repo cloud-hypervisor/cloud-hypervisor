@@ -150,7 +150,7 @@ fn create_app<'a, 'b>(
                     topology=<threads_per_core>:<cores_per_die>:<dies_per_package>:<packages>,\
                     kvm_hyperv=on|off,max_phys_bits=<maximum_number_of_physical_bits>",
                 )
-                .default_value(&default_vcpus)
+                .default_value(default_vcpus)
                 .group("vm-config"),
         )
         .arg(
@@ -164,7 +164,7 @@ fn create_app<'a, 'b>(
                      hotplug_size=<hotpluggable_memory_size>,\
                      hotplugged_size=<hotplugged_memory_size>\"",
                 )
-                .default_value(&default_memory)
+                .default_value(default_memory)
                 .group("vm-config"),
         )
         .arg(
@@ -229,7 +229,7 @@ fn create_app<'a, 'b>(
                 .help(
                     "Random number generator parameters \"src=<entropy_source_path>,iommu=on|off\"",
                 )
-                .default_value(&default_rng)
+                .default_value(default_rng)
                 .group("vm-config"),
         )
         .arg(

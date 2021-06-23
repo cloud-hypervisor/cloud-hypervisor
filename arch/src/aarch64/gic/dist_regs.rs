@@ -152,7 +152,7 @@ pub fn set_dist_regs(gic: &Arc<dyn hypervisor::Device>, state: &[u32]) -> Result
 
     for dreg in VGIC_DIST_REGS {
         let mut base = dreg.base + REG_SIZE as u32 * dreg.bpi as u32;
-        let end = compute_reg_len(gic, &dreg, base)?;
+        let end = compute_reg_len(gic, dreg, base)?;
 
         while base < end {
             let val = state[idx];
@@ -169,7 +169,7 @@ pub fn get_dist_regs(gic: &Arc<dyn hypervisor::Device>) -> Result<Vec<u32>> {
 
     for dreg in VGIC_DIST_REGS {
         let mut base = dreg.base + REG_SIZE as u32 * dreg.bpi as u32;
-        let end = compute_reg_len(gic, &dreg, base)?;
+        let end = compute_reg_len(gic, dreg, base)?;
 
         while base < end {
             let val: u32 = 0;
