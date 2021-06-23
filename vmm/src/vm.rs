@@ -624,8 +624,6 @@ impl Vm {
         let mut numa_nodes = BTreeMap::new();
 
         if let Some(configs) = &configs {
-            let node_id_list: Vec<u32> = configs.iter().map(|cfg| cfg.guest_numa_id).collect();
-
             for config in configs.iter() {
                 if numa_nodes.contains_key(&config.guest_numa_id) {
                     error!("Can't define twice the same NUMA node");
@@ -658,7 +656,7 @@ impl Vm {
                         let dest = distance.destination;
                         let dist = distance.distance;
 
-                        if !node_id_list.contains(&dest) {
+                        if !configs.iter().any(|cfg| cfg.guest_numa_id == dest) {
                             error!("Unknown destination NUMA node {}", dest);
                             return Err(Error::InvalidNumaConfig);
                         }
