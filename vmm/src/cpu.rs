@@ -1837,11 +1837,10 @@ mod tests {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0, None).unwrap();
-        let mut regions = Vec::new();
-        regions.push((
+        let regions = vec![(
             GuestAddress(layout::RAM_64BIT_START),
             (layout::FDT_MAX_SIZE + 0x1000) as usize,
-        ));
+        )];
         let mem = GuestMemoryMmap::from_ranges(&regions).expect("Cannot initialize memory");
 
         let res = setup_regs(&vcpu, 0, 0x0, &mem);
@@ -1896,7 +1895,7 @@ mod tests {
             "Failed to get core register: Exec format error (os error 8)"
         );
 
-        let res = vcpu.set_core_registers(&mut state);
+        let res = vcpu.set_core_registers(&state);
         assert!(res.is_err());
         assert_eq!(
             format!("{}", res.unwrap_err()),
@@ -1936,7 +1935,7 @@ mod tests {
             id: MPIDR_EL1,
             addr: 0x00,
         });
-        let res = vcpu.set_system_registers(&mut state);
+        let res = vcpu.set_system_registers(&state);
         assert!(res.is_err());
         assert_eq!(
             format!("{}", res.unwrap_err()),

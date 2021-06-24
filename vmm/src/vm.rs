@@ -2458,10 +2458,10 @@ mod tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{GuestMemoryMmap, GuestRegionMmap};
+    use crate::GuestMemoryMmap;
     use arch::aarch64::fdt::create_fdt;
     use arch::aarch64::gic::kvm::create_gic;
-    use arch::aarch64::{layout, DeviceInfoForFdt};
+    use arch::aarch64::layout;
     use arch::{DeviceType, MmioDeviceInfo};
     use vm_memory::GuestAddress;
 
@@ -2469,11 +2469,10 @@ mod tests {
 
     #[test]
     fn test_create_fdt_with_devices() {
-        let mut regions = Vec::new();
-        regions.push((
+        let regions = vec![(
             GuestAddress(layout::RAM_64BIT_START),
             (layout::FDT_MAX_SIZE + 0x1000) as usize,
-        ));
+        )];
         let mem = GuestMemoryMmap::from_ranges(&regions).expect("Cannot initialize memory");
 
         let dev_info: HashMap<(DeviceType, std::string::String), MmioDeviceInfo> = [
@@ -2486,15 +2485,12 @@ mod tests {
             ),
             (
                 (DeviceType::Virtio(1), "virtio".to_string()),
-                MmioDeviceInfo {
-                    addr: 0x00 + LEN,
-                    irq: 34,
-                },
+                MmioDeviceInfo { addr: LEN, irq: 34 },
             ),
             (
                 (DeviceType::Rtc, "rtc".to_string()),
                 MmioDeviceInfo {
-                    addr: 0x00 + 2 * LEN,
+                    addr: 2 * LEN,
                     irq: 35,
                 },
             ),

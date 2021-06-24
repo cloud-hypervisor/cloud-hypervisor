@@ -469,8 +469,7 @@ mod tests {
         let _ = vm.create_vcpu(0, None).unwrap();
         let gic = create_gic(&vm, 1).expect("Cannot create gic");
 
-        let mut gicr_typer = Vec::new();
-        gicr_typer.push(123);
+        let gicr_typer = vec![123];
         let res = get_redist_regs(gic.device(), &gicr_typer);
         assert!(res.is_ok());
         let state = res.unwrap();
@@ -487,8 +486,7 @@ mod tests {
         let _ = vm.create_vcpu(0, None).unwrap();
         let gic = create_gic(&vm, 1).expect("Cannot create gic");
 
-        let mut gicr_typer = Vec::new();
-        gicr_typer.push(123);
+        let gicr_typer = vec![123];
         let res = get_icc_regs(gic.device(), &gicr_typer);
         assert!(res.is_ok());
         let state = res.unwrap();
