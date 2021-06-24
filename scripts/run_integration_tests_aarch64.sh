@@ -253,10 +253,8 @@ if [[ "$hypervisor" = "mshv" ]]; then
     exit 1
 fi
 
-features_build_fdt="--no-default-features --features $hypervisor"
-features_build_acpi="--no-default-features --features $hypervisor,acpi"
-features_test_fdt="--no-default-features --features integration_tests,$hypervisor"
-features_test_acpi="--no-default-features --features integration_tests,$hypervisor,acpi"
+features_build=""
+features_test="--features integration_tests"
 
 # lock the workloads folder to avoid parallel updating by different containers
 (
@@ -283,7 +281,7 @@ fi
 export RUST_BACKTRACE=1
 
 # Test without ACPI
-cargo build --all --release $features_build_fdt --target $BUILD_TARGET
+cargo build --all --release $features_build --target $BUILD_TARGET
 strip target/$BUILD_TARGET/release/cloud-hypervisor
 strip target/$BUILD_TARGET/release/vhost_user_net
 strip target/$BUILD_TARGET/release/ch-remote
@@ -301,20 +299,7 @@ ovs-vsctl init
 ovs-vsctl set Open_vSwitch . other_config:dpdk-init=true
 service openvswitch-switch restart
 
-time cargo test $features_test_fdt "tests::parallel::$test_filter"
+time cargo test $features_test "tests::parallel::$test_filter"
 RES=$?
-echo "Integration test on FDT finished with result $RES."
-
-if [ $RES -eq 0 ]; then
-    # Test with EDK2 + ACPI
-    cargo build --all --release $features_build_acpi --target $BUILD_TARGET
-    strip target/$BUILD_TARGET/release/cloud-hypervisor
-    strip target/$BUILD_TARGET/release/vhost_user_net
-    strip target/$BUILD_TARGET/release/ch-remote
-
-    time cargo test $features_test_acpi "tests::parallel::test_edk2_acpi_launch"
-    RES=$?
-    echo "Integration test on UEFI & ACPI finished with result $RES."
-fi
 
 exit $RES

@@ -1039,7 +1039,7 @@ mod tests {
             );
 
             // ACPI feature is needed.
-            #[cfg(feature = "acpi")]
+            #[cfg(all(target_arch = "x86_64", feature = "acpi"))]
             {
                 guest.enable_memory_hotplug();
 
@@ -1179,7 +1179,7 @@ mod tests {
             );
 
             // ACPI feature is needed.
-            #[cfg(feature = "acpi")]
+            #[cfg(all(target_arch = "x86_64", feature = "acpi"))]
             {
                 guest.enable_memory_hotplug();
 
@@ -1383,7 +1383,7 @@ mod tests {
             );
 
             // ACPI feature is needed.
-            #[cfg(feature = "acpi")]
+            #[cfg(all(target_arch = "x86_64", feature = "acpi"))]
             {
                 guest.enable_memory_hotplug();
 
@@ -4165,6 +4165,12 @@ mod tests {
             thread::sleep(std::time::Duration::new(20, 0));
 
             let r = std::panic::catch_unwind(|| {
+                // On AArch64 when acpi is enabled, there is a 4 MiB gap between the RAM
+                // that the VMM gives and the guest can see.
+                // This is a temporary solution, will be fixed in future.
+                #[cfg(all(target_arch = "aarch64", feature = "acpi"))]
+                let guest_memory_size_kb = guest_memory_size_kb - 4 * 1024;
+
                 let overhead = get_vmm_overhead(child.id(), guest_memory_size_kb);
                 eprintln!(
                     "Guest memory overhead: {} vs {}",
