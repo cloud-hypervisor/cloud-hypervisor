@@ -73,9 +73,6 @@ pub enum ApiError {
     /// The VM info is not available.
     VmInfo(VmError),
 
-    /// The VM config is missing.
-    VmMissingConfig,
-
     /// The VM could not be paused.
     VmPause(VmError),
 
