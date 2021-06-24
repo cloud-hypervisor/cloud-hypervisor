@@ -197,7 +197,7 @@ pub fn setup_vhost_user<S: VhostUserMasterReqHandler>(
     }
 
     if let Some(slave_req_handler) = slave_req_handler {
-        vu.set_slave_request_fd(slave_req_handler.get_tx_raw_fd())
+        vu.set_slave_request_fd(&slave_req_handler.get_tx_raw_fd())
             .map_err(Error::VhostUserSetSlaveRequestFd)
     } else {
         Ok(())
