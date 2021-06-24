@@ -6252,6 +6252,63 @@ mod tests {
 
             handle_child_output(r, &output);
         }
+
+        #[test]
+        #[cfg(not(feature = "mshv"))]
+        fn test_windows_guest_netdev_multi() {
+            let windows_guest = WindowsGuest::new();
+
+            let mut ovmf_path = dirs::home_dir().unwrap();
+            ovmf_path.push("workloads");
+            ovmf_path.push(OVMF_NAME);
+
+            let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
+            let api_socket = temp_api_path(&tmp_dir);
+
+            let mut child = GuestCommand::new(windows_guest.guest())
+                .args(&["--api-socket", &api_socket])
+                .args(&["--cpus", "boot=2,kvm_hyperv=on"])
+                .args(&["--memory", "size=4G"])
+                .args(&["--kernel", ovmf_path.to_str().unwrap()])
+                .args(&["--serial", "tty"])
+                .args(&["--console", "off"])
+                .default_disks()
+                // The multi net dev config is borrowed from test_multiple_network_interfaces
+                .args(&[
+                    "--net",
+                    windows_guest.guest().default_net_string().as_str(),
+                    "tap=,mac=8a:6b:6f:5a:de:ac,ip=192.168.3.1,mask=255.255.255.0",
+                    "tap=mytap42,mac=fe:1f:9e:e1:60:f2,ip=192.168.4.1,mask=255.255.255.0",
+                ])
+                .capture_output()
+                .spawn()
+                .unwrap();
+
+            let mut child_dnsmasq = windows_guest.run_dnsmasq();
+
+            let r = std::panic::catch_unwind(|| {
+                // Wait to make sure Windows boots up
+                assert!(windows_guest.wait_for_boot());
+
+                let netdev_num = 3;
+                assert_eq!(windows_guest.netdev_count(), netdev_num);
+                assert_eq!(netdev_ctrl_threads_count(child.id()), netdev_num);
+
+                let tap_count = exec_host_command_output("ip link | grep -c mytap42");
+                assert_eq!(String::from_utf8_lossy(&tap_count.stdout).trim(), "1");
+
+                windows_guest.shutdown();
+            });
+
+            let _ = child.wait_timeout(std::time::Duration::from_secs(60));
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+
+            let _ = child_dnsmasq.kill();
+            let _ = child_dnsmasq.wait();
+
+            handle_child_output(r, &output);
+        }
     }
 
     #[cfg(target_arch = "x86_64")]
