@@ -17,7 +17,7 @@ use libc::{self, c_void, off64_t, pread64, pwrite64};
 use seccomp::{SeccompAction, SeccompFilter};
 use std::io;
 use std::ops::Deref;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
@@ -62,7 +62,7 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
         Ok(0)
     }
 
-    fn fs_slave_map(&self, fs: &VhostUserFSSlaveMsg, fd: RawFd) -> HandlerResult<u64> {
+    fn fs_slave_map(&self, fs: &VhostUserFSSlaveMsg, fd: &dyn AsRawFd) -> HandlerResult<u64> {
         debug!("fs_slave_map");
 
         for i in 0..VHOST_USER_FS_SLAVE_ENTRIES {
@@ -86,7 +86,7 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
                     len as usize,
                     flags.bits() as i32,
                     libc::MAP_SHARED | libc::MAP_FIXED,
-                    fd,
+                    fd.as_raw_fd(),
                     fs.fd_offset[i] as libc::off_t,
                 )
             };
@@ -94,7 +94,7 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
                 return Err(io::Error::last_os_error());
             }
 
-            let ret = unsafe { libc::close(fd) };
+            let ret = unsafe { libc::close(fd.as_raw_fd()) };
             if ret == -1 {
                 return Err(io::Error::last_os_error());
             }
@@ -171,7 +171,7 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
         Ok(0)
     }
 
-    fn fs_slave_io(&self, fs: &VhostUserFSSlaveMsg, fd: RawFd) -> HandlerResult<u64> {
+    fn fs_slave_io(&self, fs: &VhostUserFSSlaveMsg, fd: &dyn AsRawFd) -> HandlerResult<u64> {
         debug!("fs_slave_io");
 
         let mut done: u64 = 0;
@@ -218,10 +218,24 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
                     == VhostUserFSSlaveMsgFlags::MAP_W
                 {
                     debug!("write: foffset={}, len={}", foffset, len);
-                    unsafe { pwrite64(fd, ptr as *const c_void, len as usize, foffset as off64_t) }
+                    unsafe {
+                        pwrite64(
+                            fd.as_raw_fd(),
+                            ptr as *const c_void,
+                            len as usize,
+                            foffset as off64_t,
+                        )
+                    }
                 } else {
                     debug!("read: foffset={}, len={}", foffset, len);
-                    unsafe { pread64(fd, ptr as *mut c_void, len as usize, foffset as off64_t) }
+                    unsafe {
+                        pread64(
+                            fd.as_raw_fd(),
+                            ptr as *mut c_void,
+                            len as usize,
+                            foffset as off64_t,
+                        )
+                    }
                 };
 
                 if ret < 0 {
@@ -242,7 +256,7 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
             }
         }
 
-        let ret = unsafe { libc::close(fd) };
+        let ret = unsafe { libc::close(fd.as_raw_fd()) };
         if ret == -1 {
             return Err(io::Error::last_os_error());
         }
