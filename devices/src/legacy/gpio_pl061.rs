@@ -383,7 +383,7 @@ mod tests {
         // Read and write to the GPIODIR register.
         // Set pin 0 output pin.
         write_le_u32(&mut data, 1);
-        gpio.write(LEGACY_GPIO_MAPPED_IO_START, GPIODIR, &mut data);
+        gpio.write(LEGACY_GPIO_MAPPED_IO_START, GPIODIR, &data);
         gpio.read(LEGACY_GPIO_MAPPED_IO_START, GPIODIR, &mut data);
         let v = read_le_u32(&data);
         assert_eq!(v, 1);
@@ -391,8 +391,8 @@ mod tests {
         // Read and write to the GPIODATA register.
         write_le_u32(&mut data, 1);
         // Set pin 0 high.
-        let offset = 0x00000004 as u64;
-        gpio.write(LEGACY_GPIO_MAPPED_IO_START, offset, &mut data);
+        let offset = 0x00000004_u64;
+        gpio.write(LEGACY_GPIO_MAPPED_IO_START, offset, &data);
         gpio.read(LEGACY_GPIO_MAPPED_IO_START, offset, &mut data);
         let v = read_le_u32(&data);
         assert_eq!(v, 1);
@@ -400,7 +400,7 @@ mod tests {
         // Read and write to the GPIOIS register.
         // Configure pin 0 detecting level interrupt.
         write_le_u32(&mut data, 1);
-        gpio.write(LEGACY_GPIO_MAPPED_IO_START, GPIOIS, &mut data);
+        gpio.write(LEGACY_GPIO_MAPPED_IO_START, GPIOIS, &data);
         gpio.read(LEGACY_GPIO_MAPPED_IO_START, GPIOIS, &mut data);
         let v = read_le_u32(&data);
         assert_eq!(v, 1);
@@ -408,7 +408,7 @@ mod tests {
         // Read and write to the GPIOIBE register.
         // Configure pin 1 detecting both falling and rising edges.
         write_le_u32(&mut data, 2);
-        gpio.write(LEGACY_GPIO_MAPPED_IO_START, GPIOIBE, &mut data);
+        gpio.write(LEGACY_GPIO_MAPPED_IO_START, GPIOIBE, &data);
         gpio.read(LEGACY_GPIO_MAPPED_IO_START, GPIOIBE, &mut data);
         let v = read_le_u32(&data);
         assert_eq!(v, 2);
@@ -416,7 +416,7 @@ mod tests {
         // Read and write to the GPIOIEV register.
         // Configure pin 2 detecting both falling and rising edges.
         write_le_u32(&mut data, 4);
-        gpio.write(LEGACY_GPIO_MAPPED_IO_START, GPIOIEV, &mut data);
+        gpio.write(LEGACY_GPIO_MAPPED_IO_START, GPIOIEV, &data);
         gpio.read(LEGACY_GPIO_MAPPED_IO_START, GPIOIEV, &mut data);
         let v = read_le_u32(&data);
         assert_eq!(v, 4);
@@ -425,12 +425,12 @@ mod tests {
         // Configure pin 0...2 capable of triggering their individual interrupts
         // and then the combined GPIOINTR line.
         write_le_u32(&mut data, 7);
-        gpio.write(LEGACY_GPIO_MAPPED_IO_START, GPIOIE, &mut data);
+        gpio.write(LEGACY_GPIO_MAPPED_IO_START, GPIOIE, &data);
         gpio.read(LEGACY_GPIO_MAPPED_IO_START, GPIOIE, &mut data);
         let v = read_le_u32(&data);
         assert_eq!(v, 7);
 
-        let mask = 0x00000002 as u32;
+        let mask = 0x00000002_u32;
         // emulate an rising pulse in pin 1.
         gpio.data |= !(gpio.data & mask) & mask;
         gpio.pl061_internal_update();
@@ -443,14 +443,14 @@ mod tests {
         // Read and Write to the GPIOIC register.
         // clear interrupt in pin 1.
         write_le_u32(&mut data, 2);
-        gpio.write(LEGACY_GPIO_MAPPED_IO_START, GPIOIC, &mut data);
+        gpio.write(LEGACY_GPIO_MAPPED_IO_START, GPIOIC, &data);
         gpio.read(LEGACY_GPIO_MAPPED_IO_START, GPIOIC, &mut data);
         let v = read_le_u32(&data);
         assert_eq!(v, 2);
 
         // Attempts to write beyond the writable space.
         write_le_u32(&mut data, 0);
-        gpio.write(LEGACY_GPIO_MAPPED_IO_START, GPIO_ID_LOW, &mut data);
+        gpio.write(LEGACY_GPIO_MAPPED_IO_START, GPIO_ID_LOW, &data);
 
         let mut data = [0; 4];
         gpio.read(LEGACY_GPIO_MAPPED_IO_START, GPIO_ID_LOW, &mut data);
