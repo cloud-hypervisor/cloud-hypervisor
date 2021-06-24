@@ -355,6 +355,11 @@ impl Vmm {
     }
 
     fn vm_boot(&mut self) -> result::Result<(), VmError> {
+        // If we don't have a config, we can not boot a VM.
+        if self.vm_config.is_none() {
+            return Err(VmError::VmMissingConfig);
+        };
+
         // Create a new VM if we don't have one yet.
         if self.vm.is_none() {
             let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
@@ -1169,14 +1174,6 @@ impl Vmm {
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
                                 ApiRequest::VmBoot(sender) => {
-                                    // If we don't have a config, we can not boot a VM.
-                                    if self.vm_config.is_none() {
-                                        sender
-                                            .send(Err(ApiError::VmMissingConfig))
-                                            .map_err(Error::ApiResponseSend)?;
-                                        continue;
-                                    }
-
                                     let response = self
                                         .vm_boot()
                                         .map_err(ApiError::VmBoot)

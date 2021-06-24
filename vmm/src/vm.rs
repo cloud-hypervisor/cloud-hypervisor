@@ -142,6 +142,9 @@ pub enum Error {
     /// Failed to join on vCPU threads
     ThreadCleanup(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
 
+    /// VM config is missing.
+    VmMissingConfig,
+
     /// VM is not created
     VmNotCreated,
 
