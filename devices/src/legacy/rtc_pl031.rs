@@ -457,7 +457,7 @@ mod tests {
 
         // Read and write to the MR register.
         write_le_u32(&mut data, 123);
-        rtc.write(LEGACY_RTC_MAPPED_IO_START, RTCMR, &mut data);
+        rtc.write(LEGACY_RTC_MAPPED_IO_START, RTCMR, &data);
         rtc.read(LEGACY_RTC_MAPPED_IO_START, RTCMR, &mut data);
         let v = read_le_u32(&data);
         assert_eq!(v, 123);
@@ -466,7 +466,7 @@ mod tests {
         let v = get_time(ClockType::Real);
         write_le_u32(&mut data, (v / NANOS_PER_SECOND) as u32);
         let previous_now_before = rtc.previous_now;
-        rtc.write(LEGACY_RTC_MAPPED_IO_START, RTCLR, &mut data);
+        rtc.write(LEGACY_RTC_MAPPED_IO_START, RTCLR, &data);
 
         assert!(rtc.previous_now > previous_now_before);
 
@@ -478,7 +478,7 @@ mod tests {
         // Test with non zero value.
         let non_zero = 1;
         write_le_u32(&mut data, non_zero);
-        rtc.write(LEGACY_RTC_MAPPED_IO_START, RTCIMSC, &mut data);
+        rtc.write(LEGACY_RTC_MAPPED_IO_START, RTCIMSC, &data);
         // The interrupt line should be on.
         assert!(rtc.interrupt.notifier(0).unwrap().read().unwrap() == 1);
         rtc.read(LEGACY_RTC_MAPPED_IO_START, RTCIMSC, &mut data);
@@ -487,14 +487,14 @@ mod tests {
 
         // Now test with 0.
         write_le_u32(&mut data, 0);
-        rtc.write(LEGACY_RTC_MAPPED_IO_START, RTCIMSC, &mut data);
+        rtc.write(LEGACY_RTC_MAPPED_IO_START, RTCIMSC, &data);
         rtc.read(LEGACY_RTC_MAPPED_IO_START, RTCIMSC, &mut data);
         let v = read_le_u32(&data);
         assert_eq!(0, v);
 
         // Read and write to the ICR register.
         write_le_u32(&mut data, 1);
-        rtc.write(LEGACY_RTC_MAPPED_IO_START, RTCICR, &mut data);
+        rtc.write(LEGACY_RTC_MAPPED_IO_START, RTCICR, &data);
         // The interrupt line should be on.
         assert!(rtc.interrupt.notifier(0).unwrap().read().unwrap() > 1);
         let v_before = read_le_u32(&data);
@@ -506,7 +506,7 @@ mod tests {
 
         // Attempts to turn off the RTC should not go through.
         write_le_u32(&mut data, 0);
-        rtc.write(LEGACY_RTC_MAPPED_IO_START, RTCCR, &mut data);
+        rtc.write(LEGACY_RTC_MAPPED_IO_START, RTCCR, &data);
         rtc.read(LEGACY_RTC_MAPPED_IO_START, RTCCR, &mut data);
         let v = read_le_u32(&data);
         assert_eq!(v, 1);
@@ -514,7 +514,7 @@ mod tests {
         // Attempts to write beyond the writable space. Using here the space used to read
         // the CID and PID from.
         write_le_u32(&mut data, 0);
-        rtc.write(LEGACY_RTC_MAPPED_IO_START, AMBA_ID_LOW, &mut data);
+        rtc.write(LEGACY_RTC_MAPPED_IO_START, AMBA_ID_LOW, &data);
         // However, reading from the AMBA_ID_LOW should succeed upon read.
 
         let mut data = [0; 4];
