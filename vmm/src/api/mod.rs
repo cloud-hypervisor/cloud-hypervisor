@@ -64,9 +64,6 @@ pub enum ApiError {
     /// The VM could not boot.
     VmBoot(VmError),
 
-    /// The VM is already created.
-    VmAlreadyCreated,
-
     /// The VM could not be created.
     VmCreate(VmError),
 

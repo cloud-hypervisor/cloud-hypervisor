@@ -343,6 +343,17 @@ impl Vmm {
         })
     }
 
+    fn vm_create(&mut self, config: Arc<Mutex<VmConfig>>) -> result::Result<(), VmError> {
+        // We only store the passed VM config.
+        // The VM will be created when being asked to boot it.
+        if self.vm_config.is_none() {
+            self.vm_config = Some(config);
+            Ok(())
+        } else {
+            Err(VmError::VmAlreadyCreated)
+        }
+    }
+
     fn vm_boot(&mut self) -> result::Result<(), VmError> {
         // Create a new VM if we don't have one yet.
         if self.vm.is_none() {
@@ -1142,14 +1153,10 @@ impl Vmm {
                             info!("API request event: {:?}", api_request);
                             match api_request {
                                 ApiRequest::VmCreate(config, sender) => {
-                                    // We only store the passed VM config.
-                                    // The VM will be created when being asked to boot it.
-                                    let response = if self.vm_config.is_none() {
-                                        self.vm_config = Some(config);
-                                        Ok(ApiResponsePayload::Empty)
-                                    } else {
-                                        Err(ApiError::VmAlreadyCreated)
-                                    };
+                                    let response = self
+                                        .vm_create(config)
+                                        .map_err(ApiError::VmCreate)
+                                        .map(|_| ApiResponsePayload::Empty);
 
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
