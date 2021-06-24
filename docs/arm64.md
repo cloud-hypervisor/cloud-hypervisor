@@ -29,6 +29,16 @@ $ sudo apt-get update
 $ sudo apt-get install git build-essential m4 bison flex uuid-dev qemu-utils
 ```
 
+### Building Cloud Hypervisor
+
+```bash
+$ pushd $CLOUDH
+$ git clone https://github.com/cloud-hypervisor/cloud-hypervisor.git
+$ cd cloud-hypervisor
+$ cargo build
+$ popd
+```
+
 ### Disk image
 
 Download the Ubuntu cloud image and convert the image type.
@@ -43,16 +53,6 @@ $ popd
 ## UEFI booting
 
 This part introduces how to build EDK2 firmware and boot Cloud Hypervisor with it.
-
-### Building Cloud Hypervisor
-
-```bash
-$ pushd $CLOUDH
-$ git clone https://github.com/cloud-hypervisor/cloud-hypervisor.git
-$ cd cloud-hypervisor
-$ cargo build --no-default-features --features kvm,acpi
-$ popd
-```
 
 ### Building EDK2
 
@@ -95,16 +95,6 @@ $ popd
 ## Direct-kernel booting
 
 Alternativelly, you can build your own kernel for guest VM. This way, UEFI is not involved and ACPI cannot be enabled.
-
-### Building Cloud Hypervisor
-
-```bash
-$ pushd $CLOUDH
-$ git clone https://github.com/cloud-hypervisor/cloud-hypervisor.git
-$ cd cloud-hypervisor
-$ cargo build --no-default-features --features kvm
-$ popd
-```
 
 ### Building kernel
 
