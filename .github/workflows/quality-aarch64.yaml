@@ -37,25 +37,25 @@ jobs:
         with:
           use-cross: true
           command: clippy
-          args: --target=${{ matrix.target }} --no-default-features --features "kvm" -- -D warnings
+          args: --target=${{ matrix.target }} --all --no-default-features --features "kvm" -- -D warnings
 
       - name: Clippy (kvm,acpi)
         uses: actions-rs/cargo@v1
         with:
           use-cross: true
           command: clippy
-          args: --target=${{ matrix.target }} --no-default-features --features "kvm,acpi" -- -D warnings
+          args: --target=${{ matrix.target }} --all --no-default-features --features "kvm,acpi" -- -D warnings
 
       - name: Clippy (all features,kvm)
         uses: actions-rs/cargo@v1
         with:
           use-cross: true
           command: clippy
-          args: --target=${{ matrix.target }} --no-default-features --features "common,kvm" -- -D warnings
+          args: --target=${{ matrix.target }} --all --no-default-features --features "common,kvm" -- -D warnings
 
       - name: Clippy (default)
         uses: actions-rs/cargo@v1
         with:
           use-cross: true
           command: clippy
-          args: --target=${{ matrix.target }} -- -D warnings
+          args: --target=${{ matrix.target }} --all -- -D warnings
