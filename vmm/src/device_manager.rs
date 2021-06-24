@@ -97,7 +97,7 @@ use vm_memory::guest_memory::FileOffset;
 #[cfg(feature = "kvm")]
 use vm_memory::GuestMemoryRegion;
 use vm_memory::{Address, GuestAddress, GuestUsize, MmapRegion};
-#[cfg(feature = "cmos")]
+#[cfg(all(target_arch = "x86_64", feature = "cmos"))]
 use vm_memory::{GuestAddressSpace, GuestMemory};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,

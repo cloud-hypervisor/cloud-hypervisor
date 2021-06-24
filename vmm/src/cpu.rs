@@ -173,6 +173,7 @@ struct Ioapic {
 }
 
 #[cfg(all(target_arch = "aarch64", feature = "acpi"))]
+#[allow(dead_code)]
 #[repr(packed)]
 struct GicC {
     pub r#type: u8,
@@ -196,6 +197,7 @@ struct GicC {
 }
 
 #[cfg(all(target_arch = "aarch64", feature = "acpi"))]
+#[allow(dead_code)]
 #[repr(packed)]
 struct GicD {
     pub r#type: u8,
@@ -209,6 +211,7 @@ struct GicD {
 }
 
 #[cfg(all(target_arch = "aarch64", feature = "acpi"))]
+#[allow(dead_code)]
 #[repr(packed)]
 struct GicR {
     pub r#type: u8,
@@ -219,6 +222,7 @@ struct GicR {
 }
 
 #[cfg(all(target_arch = "aarch64", feature = "acpi"))]
+#[allow(dead_code)]
 #[repr(packed)]
 struct GicIts {
     pub r#type: u8,
