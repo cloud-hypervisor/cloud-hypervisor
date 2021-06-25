@@ -76,6 +76,18 @@ struct ProcessorLocalX2ApicAffinity {
     _reserved2: u32,
 }
 
+#[allow(dead_code)]
+#[repr(packed)]
+#[derive(Default)]
+struct ProcessorGiccAffinity {
+    pub type_: u8,
+    pub length: u8,
+    pub proximity_domain: u32,
+    pub acpi_processor_uid: u32,
+    pub flags: u32,
+    pub clock_domain: u32,
+}
+
 bitflags! {
     pub struct MemAffinityFlags: u32 {
         const NOFLAGS = 0;
@@ -250,6 +262,7 @@ fn create_srat_table(numa_nodes: &NumaNodes) -> Sdt {
             // - Reserved bits 1-31
             let flags = 1;
 
+            #[cfg(target_arch = "x86_64")]
             srat.append(ProcessorLocalX2ApicAffinity {
                 type_: 2,
                 length: 24,
@@ -258,6 +271,15 @@ fn create_srat_table(numa_nodes: &NumaNodes) -> Sdt {
                 flags,
                 clock_domain: 0,
                 ..Default::default()
+            });
+            #[cfg(target_arch = "aarch64")]
+            srat.append(ProcessorGiccAffinity {
+                type_: 3,
+                length: 18,
+                proximity_domain,
+                acpi_processor_uid: x2apic_id,
+                flags,
+                clock_domain: 0,
             });
         }
     }
