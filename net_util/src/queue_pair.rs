@@ -98,6 +98,7 @@ impl TxVirtio {
                     /* EAGAIN */
                     if e.kind() == std::io::ErrorKind::WouldBlock {
                         warn!("net: tx: (recoverable) failed writing to tap: {}", e);
+                        queue.go_to_previous_position();
                         break;
                     }
                     error!("net: tx: failed writing to tap: {}", e);
