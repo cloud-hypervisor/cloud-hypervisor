@@ -595,12 +595,12 @@ pub fn exec_host_command_status(command: &str) -> ExitStatus {
     std::process::Command::new("bash")
         .args(&["-c", command])
         .status()
-        .expect(&format!("Expected '{}' to run", command))
+        .unwrap_or_else(|_| panic!("Expected '{}' to run", command))
 }
 
 pub fn exec_host_command_output(command: &str) -> Output {
     std::process::Command::new("bash")
         .args(&["-c", command])
         .output()
-        .expect(&format!("Expected '{}' to run", command))
+        .unwrap_or_else(|_| panic!("Expected '{}' to run", command))
 }
