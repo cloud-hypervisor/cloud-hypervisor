@@ -3213,6 +3213,13 @@ mod tests {
                 let mut f = std::fs::File::open(console_path).unwrap();
                 let mut buf = String::new();
                 f.read_to_string(&mut buf).unwrap();
+
+                if !buf.contains("cloud login:") {
+                    eprintln!(
+                        "\n\n==== Console file output ====\n\n{}\n\n==== End console file output ====",
+                        buf
+                    );
+                }
                 assert!(buf.contains("cloud login:"));
             });
 
