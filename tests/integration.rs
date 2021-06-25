@@ -218,6 +218,16 @@ mod tests {
         kernel_path
     }
 
+    #[cfg(target_arch = "aarch64")]
+    fn edk2_path() -> PathBuf {
+        let mut workload_path = dirs::home_dir().unwrap();
+        workload_path.push("workloads");
+        let mut edk2_path = workload_path;
+        edk2_path.push("CLOUDHV_EFI.fd");
+
+        edk2_path
+    }
+
     fn prepare_vhost_user_net_daemon(
         tmp_dir: &TempDir,
         ip: &str,
@@ -1920,10 +1930,6 @@ mod tests {
         #[cfg(all(target_arch = "aarch64", feature = "acpi"))]
         fn test_edk2_acpi_launch() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
-            let mut edk2_path = workload_path;
-            edk2_path.push("CLOUDHV_EFI.fd");
 
             vec![Box::new(focal)].drain(..).for_each(|disk_config| {
                 let guest = Guest::new(disk_config);
@@ -1931,7 +1937,7 @@ mod tests {
                 let mut child = GuestCommand::new(&guest)
                     .args(&["--cpus", "boot=1"])
                     .args(&["--memory", "size=512M"])
-                    .args(&["--kernel", edk2_path.to_str().unwrap()])
+                    .args(&["--kernel", edk2_path().to_str().unwrap()])
                     .default_disks()
                     .default_net()
                     .args(&["--serial", "tty", "--console", "off"])
@@ -2221,13 +2227,16 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(feature = "acpi")]
         fn test_guest_numa_nodes() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
             let api_socket = temp_api_path(&guest.tmp_dir);
 
+            #[cfg(target_arch = "x86_64")]
             let kernel_path = direct_kernel_boot_path();
+            #[cfg(target_arch = "aarch64")]
+            let kernel_path = edk2_path();
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=6,max=12"])
@@ -2272,26 +2281,31 @@ mod tests {
                 assert!(guest.check_numa_node_distances(1, "20 10 25").unwrap());
                 assert!(guest.check_numa_node_distances(2, "25 30 10").unwrap());
 
-                guest.enable_memory_hotplug();
+                // AArch64 currently does not support hotplug, and therefore we only
+                // test hotplug-related function on x86_64 here.
+                #[cfg(target_arch = "x86_64")]
+                {
+                    guest.enable_memory_hotplug();
 
-                // Resize every memory zone and check each associated NUMA node
-                // has been assigned the right amount of memory.
-                resize_zone_command(&api_socket, "mem0", "4G");
-                thread::sleep(std::time::Duration::new(5, 0));
-                assert!(guest.get_numa_node_memory(0).unwrap_or_default() > 3_840_000);
-                resize_zone_command(&api_socket, "mem1", "4G");
-                thread::sleep(std::time::Duration::new(5, 0));
-                assert!(guest.get_numa_node_memory(1).unwrap_or_default() > 3_840_000);
-                resize_zone_command(&api_socket, "mem2", "4G");
-                thread::sleep(std::time::Duration::new(5, 0));
-                assert!(guest.get_numa_node_memory(2).unwrap_or_default() > 3_840_000);
+                    // Resize every memory zone and check each associated NUMA node
+                    // has been assigned the right amount of memory.
+                    resize_zone_command(&api_socket, "mem0", "4G");
+                    thread::sleep(std::time::Duration::new(5, 0));
+                    assert!(guest.get_numa_node_memory(0).unwrap_or_default() > 3_840_000);
+                    resize_zone_command(&api_socket, "mem1", "4G");
+                    thread::sleep(std::time::Duration::new(5, 0));
+                    assert!(guest.get_numa_node_memory(1).unwrap_or_default() > 3_840_000);
+                    resize_zone_command(&api_socket, "mem2", "4G");
+                    thread::sleep(std::time::Duration::new(5, 0));
+                    assert!(guest.get_numa_node_memory(2).unwrap_or_default() > 3_840_000);
 
-                // Resize to the maximum amount of CPUs and check each NUMA
-                // node has been assigned the right CPUs set.
-                resize_command(&api_socket, Some(12), None, None);
-                guest.check_numa_node_cpus(0, vec![0, 1, 2, 9]).unwrap();
-                guest.check_numa_node_cpus(1, vec![3, 4, 6, 7, 8]).unwrap();
-                guest.check_numa_node_cpus(2, vec![5, 10, 11]).unwrap();
+                    // Resize to the maximum amount of CPUs and check each NUMA
+                    // node has been assigned the right CPUs set.
+                    resize_command(&api_socket, Some(12), None, None);
+                    guest.check_numa_node_cpus(0, vec![0, 1, 2, 9]).unwrap();
+                    guest.check_numa_node_cpus(1, vec![3, 4, 6, 7, 8]).unwrap();
+                    guest.check_numa_node_cpus(2, vec![5, 10, 11]).unwrap();
+                }
             });
 
             let _ = child.kill();
