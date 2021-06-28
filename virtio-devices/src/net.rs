@@ -98,10 +98,12 @@ pub const RX_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 pub const TX_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
 // A frame is available for reading from the tap device to receive in the guest.
 pub const RX_TAP_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
+// The TAP can be written to. Used after an EAGAIN error to retry TX.
+pub const TX_TAP_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 4;
 // New 'wake up' event from the rx rate limiter
-pub const RX_RATE_LIMITER_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 4;
+pub const RX_RATE_LIMITER_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 5;
 // New 'wake up' event from the tx rate limiter
-pub const TX_RATE_LIMITER_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 5;
+pub const TX_RATE_LIMITER_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 6;
 
 #[derive(Debug)]
 pub enum Error {
@@ -186,11 +188,6 @@ impl NetEpollHandler {
     }
 
     fn handle_tx_event(&mut self) -> result::Result<(), DeviceError> {
-        let queue_evt = &self.queue_evt_pair[1];
-        if let Err(e) = queue_evt.read() {
-            error!("Failed to get tx queue event: {:?}", e);
-        }
-
         let rate_limit_reached = self
             .net
             .tx_rate_limiter
@@ -266,9 +263,19 @@ impl EpollHelperHandler for NetEpollHandler {
                 }
             }
             TX_QUEUE_EVENT => {
+                let queue_evt = &self.queue_evt_pair[1];
+                if let Err(e) = queue_evt.read() {
+                    error!("Failed to get tx queue event: {:?}", e);
+                }
                 self.driver_awake = true;
                 if let Err(e) = self.handle_tx_event() {
                     error!("Error processing TX queue: {:?}", e);
+                    return true;
+                }
+            }
+            TX_TAP_EVENT => {
+                if let Err(e) = self.handle_tx_event() {
+                    error!("Error processing TX queue (TAP event): {:?}", e);
                     return true;
                 }
             }
@@ -621,13 +628,16 @@ impl VirtioDevice for Net {
             let mut handler = NetEpollHandler {
                 net: NetQueuePair {
                     mem: Some(mem.clone()),
+                    tap_for_write_epoll: tap.clone(),
                     tap,
                     rx,
                     tx,
                     epoll_fd: None,
                     rx_tap_listening,
+                    tx_tap_listening: false,
                     counters: self.counters.clone(),
                     tap_rx_event_id: RX_TAP_EVENT,
+                    tap_tx_event_id: TX_TAP_EVENT,
                     rx_desc_avail: false,
                     rx_rate_limiter,
                     tx_rate_limiter,

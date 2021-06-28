@@ -83,13 +83,16 @@ impl VhostUserNetThread {
             kill_evt: EventFd::new(EFD_NONBLOCK).map_err(Error::CreateKillEventFd)?,
             net: NetQueuePair {
                 mem: None,
+                tap_for_write_epoll: tap.clone(),
                 tap,
                 rx: RxVirtio::new(),
                 tx: TxVirtio::new(),
                 rx_tap_listening: false,
+                tx_tap_listening: false,
                 epoll_fd: None,
                 counters: NetCounters::default(),
                 tap_rx_event_id: 2,
+                tap_tx_event_id: 3,
                 rx_desc_avail: false,
                 rx_rate_limiter: None,
                 tx_rate_limiter: None,
@@ -193,14 +196,10 @@ impl VhostUserBackend for VhostUserNetBackend {
     fn handle_event(
         &self,
         device_event: u16,
-        evset: epoll::Events,
+        _evset: epoll::Events,
         vrings: &[Arc<RwLock<Vring>>],
         thread_id: usize,
     ) -> VhostUserBackendResult<bool> {
-        if evset != epoll::Events::EPOLLIN {
-            return Err(Error::HandleEventNotEpollIn.into());
-        }
-
         let mut thread = self.threads[thread_id].lock().unwrap();
         match device_event {
             0 => {
@@ -215,7 +214,7 @@ impl VhostUserBackend for VhostUserNetBackend {
                     thread.net.rx_tap_listening = true;
                 }
             }
-            1 => {
+            1 | 3 => {
                 let mut vring = vrings[1].write().unwrap();
                 if thread
                     .net
