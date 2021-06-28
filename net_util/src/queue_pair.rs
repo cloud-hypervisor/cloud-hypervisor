@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use super::{unregister_listener, vnet_hdr_len, Tap};
+use super::{register_listener, unregister_listener, vnet_hdr_len, Tap};
 use crate::GuestMemoryMmap;
 use rate_limiter::{RateLimiter, TokenType};
 use std::io;
@@ -39,7 +39,8 @@ impl TxVirtio {
         tap: &mut Tap,
         queue: &mut Queue,
         rate_limiter: &mut Option<RateLimiter>,
-    ) -> Result<(), NetQueuePairError> {
+    ) -> Result<bool, NetQueuePairError> {
+        let mut retry_write = false;
         while let Some(avail_desc) = queue.iter(mem).next() {
             let head_index = avail_desc.index;
             let mut next_desc = Some(avail_desc);
@@ -93,11 +94,12 @@ impl TxVirtio {
                 };
                 if result < 0 {
                     let e = std::io::Error::last_os_error();
-                    queue.go_to_previous_position();
 
                     /* EAGAIN */
                     if e.kind() == std::io::ErrorKind::WouldBlock {
                         warn!("net: tx: (recoverable) failed writing to tap: {}", e);
+                        queue.go_to_previous_position();
+                        retry_write = true;
                         break;
                     }
                     error!("net: tx: failed writing to tap: {}", e);
@@ -112,7 +114,7 @@ impl TxVirtio {
             queue.update_avail_event(mem);
         }
 
-        Ok(())
+        Ok(retry_write)
     }
 }
 
@@ -252,12 +254,19 @@ pub enum NetQueuePairError {
 pub struct NetQueuePair {
     pub mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     pub tap: Tap,
+    // With epoll each FD must be unique. So in order to filter the
+    // events we need to get a second FD responding to the original
+    // device so that we can send EPOLLOUT and EPOLLIN to separate
+    // events.
+    pub tap_for_write_epoll: Tap,
     pub rx: RxVirtio,
     pub tx: TxVirtio,
     pub epoll_fd: Option<RawFd>,
     pub rx_tap_listening: bool,
+    pub tx_tap_listening: bool,
     pub counters: NetCounters,
     pub tap_rx_event_id: u16,
+    pub tap_tx_event_id: u16,
     pub rx_desc_avail: bool,
     pub rx_rate_limiter: Option<RateLimiter>,
     pub tx_rate_limiter: Option<RateLimiter>,
@@ -271,8 +280,35 @@ impl NetQueuePair {
             .ok_or(NetQueuePairError::NoMemoryConfigured)
             .map(|m| m.memory())?;
 
-        self.tx
-            .process_desc_chain(&mem, &mut self.tap, &mut queue, &mut self.tx_rate_limiter)?;
+        let tx_tap_retry = self.tx.process_desc_chain(
+            &mem,
+            &mut self.tap,
+            &mut queue,
+            &mut self.tx_rate_limiter,
+        )?;
+
+        // We got told to try again when writing to the tap. Wait for the TAP to be writable
+        if tx_tap_retry && !self.tx_tap_listening {
+            register_listener(
+                self.epoll_fd.unwrap(),
+                self.tap_for_write_epoll.as_raw_fd(),
+                epoll::Events::EPOLLOUT,
+                u64::from(self.tap_tx_event_id),
+            )
+            .map_err(NetQueuePairError::RegisterListener)?;
+            self.tx_tap_listening = true;
+            info!("Writing to TAP returned EAGAIN. Listening for TAP to become writable.");
+        } else if !tx_tap_retry && self.tx_tap_listening {
+            unregister_listener(
+                self.epoll_fd.unwrap(),
+                self.tap_for_write_epoll.as_raw_fd(),
+                epoll::Events::EPOLLOUT,
+                u64::from(self.tap_tx_event_id),
+            )
+            .map_err(NetQueuePairError::UnregisterListener)?;
+            self.tx_tap_listening = false;
+            info!("Writing to TAP succeeded. No longer listening for TAP to become writable.");
+        }
 
         self.counters
             .tx_bytes
