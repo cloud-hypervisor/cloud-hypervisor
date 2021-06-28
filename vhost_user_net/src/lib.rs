@@ -89,7 +89,7 @@ impl VhostUserNetThread {
                 rx_tap_listening: false,
                 epoll_fd: None,
                 counters: NetCounters::default(),
-                tap_event_id: 2,
+                tap_rx_event_id: 2,
                 rx_desc_avail: false,
                 rx_rate_limiter: None,
                 tx_rate_limiter: None,
@@ -209,7 +209,7 @@ impl VhostUserBackend for VhostUserNetBackend {
                         thread.net.epoll_fd.unwrap(),
                         thread.net.tap.as_raw_fd(),
                         epoll::Events::EPOLLIN,
-                        u64::from(thread.net.tap_event_id),
+                        u64::from(thread.net.tap_rx_event_id),
                     )
                     .map_err(Error::RegisterTapListener)?;
                     thread.net.rx_tap_listening = true;

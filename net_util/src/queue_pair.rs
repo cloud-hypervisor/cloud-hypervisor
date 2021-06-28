@@ -257,7 +257,7 @@ pub struct NetQueuePair {
     pub epoll_fd: Option<RawFd>,
     pub rx_tap_listening: bool,
     pub counters: NetCounters,
-    pub tap_event_id: u16,
+    pub tap_rx_event_id: u16,
     pub rx_desc_avail: bool,
     pub rx_rate_limiter: Option<RateLimiter>,
     pub tx_rate_limiter: Option<RateLimiter>,
@@ -312,7 +312,7 @@ impl NetQueuePair {
                 self.epoll_fd.unwrap(),
                 self.tap.as_raw_fd(),
                 epoll::Events::EPOLLIN,
-                u64::from(self.tap_event_id),
+                u64::from(self.tap_rx_event_id),
             )
             .map_err(NetQueuePairError::UnregisterListener)?;
             self.rx_tap_listening = false;

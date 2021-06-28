@@ -161,7 +161,7 @@ impl NetEpollHandler {
                 self.net.epoll_fd.unwrap(),
                 self.net.tap.as_raw_fd(),
                 epoll::Events::EPOLLIN,
-                u64::from(self.net.tap_event_id),
+                u64::from(self.net.tap_rx_event_id),
             )
             .map_err(DeviceError::IoError)?;
             self.net.rx_tap_listening = true;
@@ -289,7 +289,7 @@ impl EpollHelperHandler for NetEpollHandler {
                                     self.net.epoll_fd.unwrap(),
                                     self.net.tap.as_raw_fd(),
                                     epoll::Events::EPOLLIN,
-                                    u64::from(self.net.tap_event_id),
+                                    u64::from(self.net.tap_rx_event_id),
                                 ) {
                                     error!("Error register_listener with `RX_RATE_LIMITER_EVENT`: {:?}", e);
                                     return true;
@@ -627,7 +627,7 @@ impl VirtioDevice for Net {
                     epoll_fd: None,
                     rx_tap_listening,
                     counters: self.counters.clone(),
-                    tap_event_id: RX_TAP_EVENT,
+                    tap_rx_event_id: RX_TAP_EVENT,
                     rx_desc_avail: false,
                     rx_rate_limiter,
                     tx_rate_limiter,
