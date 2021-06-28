@@ -85,6 +85,8 @@ mod tests {
 
     const PIPE_SIZE: i32 = 32 << 20;
 
+    const CONSOLE_TEST_STRING: &str = "Started OpenBSD Secure Shell server";
+
     fn clh_command(cmd: &str) -> String {
         env::var("BUILD_TARGET").map_or(
             format!("target/x86_64-unknown-linux-gnu/release/{}", cmd),
@@ -2908,7 +2910,7 @@ mod tests {
             handle_child_output(r, &output);
 
             let r = std::panic::catch_unwind(|| {
-                assert!(!String::from_utf8_lossy(&output.stdout).contains("cloud login:"));
+                assert!(!String::from_utf8_lossy(&output.stdout).contains(CONSOLE_TEST_STRING));
             });
 
             handle_child_output(r, &output);
@@ -2967,7 +2969,7 @@ mod tests {
             handle_child_output(r, &output);
 
             let r = std::panic::catch_unwind(|| {
-                assert!(String::from_utf8_lossy(&output.stdout).contains("cloud login:"));
+                assert!(String::from_utf8_lossy(&output.stdout).contains(CONSOLE_TEST_STRING));
             });
 
             handle_child_output(r, &output);
@@ -3035,7 +3037,7 @@ mod tests {
                 let mut f = std::fs::File::open(serial_path).unwrap();
                 let mut buf = String::new();
                 f.read_to_string(&mut buf).unwrap();
-                assert!(buf.contains("cloud login:"));
+                assert!(buf.contains(CONSOLE_TEST_STRING));
             });
 
             handle_child_output(r, &output);
@@ -3214,13 +3216,13 @@ mod tests {
                 let mut buf = String::new();
                 f.read_to_string(&mut buf).unwrap();
 
-                if !buf.contains("cloud login:") {
+                if !buf.contains(CONSOLE_TEST_STRING) {
                     eprintln!(
                         "\n\n==== Console file output ====\n\n{}\n\n==== End console file output ====",
                         buf
                     );
                 }
-                assert!(buf.contains("cloud login:"));
+                assert!(buf.contains(CONSOLE_TEST_STRING));
             });
 
             handle_child_output(r, &output);
