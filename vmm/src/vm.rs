@@ -1579,7 +1579,13 @@ impl Vm {
             let mem = guest_memory.memory();
             mem.last_addr()
         };
+
         for section in sections {
+            // TempMem section is inside the RAM range so no allocation needed
+            if matches!(section.r#type, TdvfSectionType::TempMem) && section.address < mem_end.0 {
+                continue;
+            }
+
             info!("Allocating TDVF Section: {:?}", section);
             self.memory_manager
                 .lock()
