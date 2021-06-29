@@ -92,12 +92,12 @@ impl TxVirtio {
                         iovecs.len() as libc::c_int,
                     )
                 };
+
                 if result < 0 {
                     let e = std::io::Error::last_os_error();
 
                     /* EAGAIN */
                     if e.kind() == std::io::ErrorKind::WouldBlock {
-                        warn!("net: tx: (recoverable) failed writing to tap: {}", e);
                         queue.go_to_previous_position();
                         retry_write = true;
                         break;
