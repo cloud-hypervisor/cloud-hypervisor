@@ -14,6 +14,60 @@ pub mod kvm {
     use hypervisor::kvm::kvm_bindings;
     use hypervisor::CpuState;
 
+    /// Access an ITS device attribute.
+    ///
+    /// This is a helper function to get/set the ITS device attribute depending
+    /// the bool parameter `set` provided.
+    pub fn gicv3_its_attr_access(
+        its_device: &Arc<dyn hypervisor::Device>,
+        group: u32,
+        attr: u32,
+        val: &u64,
+        set: bool,
+    ) -> crate::aarch64::gic::Result<()> {
+        let mut gicv3_its_attr = kvm_bindings::kvm_device_attr {
+            group,
+            attr: attr as u64,
+            addr: val as *const u64 as u64,
+            flags: 0,
+        };
+        if set {
+            its_device
+                .set_device_attr(&gicv3_its_attr)
+                .map_err(crate::aarch64::gic::Error::SetDeviceAttribute)?;
+        } else {
+            its_device
+                .get_device_attr(&mut gicv3_its_attr)
+                .map_err(crate::aarch64::gic::Error::GetDeviceAttribute)?;
+        }
+        Ok(())
+    }
+
+    /// Function that saves/restores ITS tables into guest RAM.
+    ///
+    /// The tables get flushed to guest RAM whenever the VM gets stopped.
+    pub fn gicv3_its_tables_access(
+        its_device: &Arc<dyn hypervisor::Device>,
+        save: bool,
+    ) -> crate::aarch64::gic::Result<()> {
+        let attr: u64;
+        if save {
+            attr = u64::from(kvm_bindings::KVM_DEV_ARM_ITS_SAVE_TABLES);
+        } else {
+            attr = u64::from(kvm_bindings::KVM_DEV_ARM_ITS_RESTORE_TABLES);
+        }
+
+        let init_gic_attr = kvm_bindings::kvm_device_attr {
+            group: kvm_bindings::KVM_DEV_ARM_VGIC_GRP_CTRL,
+            attr,
+            addr: 0,
+            flags: 0,
+        };
+        its_device
+            .set_device_attr(&init_gic_attr)
+            .map_err(crate::aarch64::gic::Error::SetDeviceAttribute)
+    }
+
     pub struct KvmGicV3Its {
         /// The hypervisor agnostic device for the GicV3
         device: Arc<dyn hypervisor::Device>,
