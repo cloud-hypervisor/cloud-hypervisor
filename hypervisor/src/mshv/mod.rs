@@ -14,7 +14,7 @@ use crate::vec_with_array_field;
 use crate::vm::{self, VmmOps};
 pub use mshv_bindings::*;
 pub use mshv_ioctls::IoEventAddress;
-use mshv_ioctls::{set_registers_64, Mshv, NoDatamatch, VcpuFd, VmFd};
+use mshv_ioctls::{set_registers_64, DeviceFd, Mshv, NoDatamatch, VcpuFd, VmFd};
 use serde_derive::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -31,10 +31,20 @@ pub use x86_64::*;
 
 #[cfg(target_arch = "x86_64")]
 use std::fs::File;
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, RawFd};
 
 const DIRTY_BITMAP_CLEAR_DIRTY: u64 = 0x4;
 const DIRTY_BITMAP_SET_DIRTY: u64 = 0x8;
+
+///
+/// Export generically-named wrappers of mshv-bindings for Unix-based platforms
+///
+pub use {
+    mshv_bindings::mshv_create_device as CreateDevice,
+    mshv_bindings::mshv_device_attr as DeviceAttr,
+    mshv_bindings::mshv_msi_routing_entry as IrqRoutingEntry,
+};
+
 pub const PAGE_SHIFT: usize = 12;
 
 #[derive(Debug, Default, Copy, Clone, Serialize, Deserialize)]
@@ -555,6 +565,36 @@ impl cpu::Vcpu for MshvVcpu {
     }
 }
 
+/// Device struct for MSHV
+pub struct MshvDevice {
+    fd: DeviceFd,
+}
+
+impl device::Device for MshvDevice {
+    ///
+    /// Set device attribute
+    ///
+    fn set_device_attr(&self, attr: &DeviceAttr) -> device::Result<()> {
+        self.fd
+            .set_device_attr(attr)
+            .map_err(|e| device::HypervisorDeviceError::SetDeviceAttribute(e.into()))
+    }
+    ///
+    /// Get device attribute
+    ///
+    fn get_device_attr(&self, attr: &mut DeviceAttr) -> device::Result<()> {
+        self.fd
+            .get_device_attr(attr)
+            .map_err(|e| device::HypervisorDeviceError::GetDeviceAttribute(e.into()))
+    }
+}
+
+impl AsRawFd for MshvDevice {
+    fn as_raw_fd(&self) -> RawFd {
+        self.fd.as_raw_fd()
+    }
+}
+
 struct MshvEmulatorContext<'a> {
     vcpu: &'a MshvVcpu,
     map: (u64, u64), // Initial GVA to GPA mapping provided by the hypervisor
@@ -868,10 +908,28 @@ impl vm::Vm for MshvVm {
         }
     }
 
+    ///
+    /// Creates an in-kernel device.
+    ///
+    /// See the documentation for `MSHV_CREATE_DEVICE`.
+    fn create_device(&self, device: &mut CreateDevice) -> vm::Result<Arc<dyn device::Device>> {
+        let fd = self
+            .fd
+            .create_device(device)
+            .map_err(|e| vm::HypervisorVmError::CreateDevice(e.into()))?;
+        let device = MshvDevice { fd };
+        Ok(Arc::new(device))
+    }
+
     fn create_passthrough_device(&self) -> vm::Result<Arc<dyn device::Device>> {
-        Err(vm::HypervisorVmError::CreatePassthroughDevice(anyhow!(
-            "No passthrough support"
-        )))
+        let mut vfio_dev = mshv_create_device {
+            type_: mshv_device_type_MSHV_DEV_TYPE_VFIO,
+            fd: 0,
+            flags: 0,
+        };
+
+        self.create_device(&mut vfio_dev)
+            .map_err(|e| vm::HypervisorVmError::CreatePassthroughDevice(e.into()))
     }
 
     fn set_gsi_routing(&self, entries: &[IrqRoutingEntry]) -> vm::Result<()> {
@@ -942,7 +1000,5 @@ impl vm::Vm for MshvVm {
     }
 }
 pub use hv_cpuid_entry as CpuIdEntry;
-
-pub type IrqRoutingEntry = mshv_msi_routing_entry;
 
 pub const CPUID_FLAG_VALID_INDEX: u32 = 0;
