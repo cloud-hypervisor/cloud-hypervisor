@@ -61,8 +61,6 @@ impl fmt::Display for VcpuMshvState {
     }
 }
 
-pub struct CreateDevice {}
-pub struct DeviceAttr {}
 pub struct IrqRouting {}
 pub enum VcpuExit {}
 pub struct MpState {}

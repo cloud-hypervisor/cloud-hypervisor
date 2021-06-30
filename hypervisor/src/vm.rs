@@ -16,7 +16,6 @@ use crate::device::Device;
 use crate::x86_64::CpuId;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use crate::ClockData;
-#[cfg(feature = "kvm")]
 use crate::CreateDevice;
 #[cfg(feature = "mshv")]
 use crate::HvState as VmState;
@@ -254,7 +253,6 @@ pub trait Vm: Send + Sync {
     fn create_user_memory_region(&self, user_memory_region: MemoryRegion) -> Result<()>;
     /// Removes a guest physical memory slot.
     fn remove_user_memory_region(&self, user_memory_region: MemoryRegion) -> Result<()>;
-    #[cfg(feature = "kvm")]
     /// Creates an emulated device in the kernel.
     fn create_device(&self, device: &mut CreateDevice) -> Result<Arc<dyn Device>>;
     /// Returns the preferred CPU target type which can be emulated by KVM on underlying host.
