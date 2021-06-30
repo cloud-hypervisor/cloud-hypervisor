@@ -57,13 +57,13 @@ use devices::{
 };
 #[cfg(feature = "kvm")]
 use hypervisor::kvm_ioctls::*;
+use hypervisor::DeviceFd;
 #[cfg(feature = "mshv")]
 use hypervisor::IoEventAddress;
 use libc::{
     isatty, tcgetattr, tcsetattr, termios, ECHO, ICANON, ISIG, MAP_NORESERVE, MAP_PRIVATE,
     MAP_SHARED, O_TMPFILE, PROT_READ, PROT_WRITE, TCSANOW, TIOCGWINSZ,
 };
-#[cfg(feature = "kvm")]
 use pci::VfioPciDevice;
 use pci::{
     DeviceRelocation, PciBarRegionType, PciBus, PciConfigIo, PciConfigMmio, PciDevice, PciRoot,
@@ -83,7 +83,6 @@ use std::result;
 use std::sync::{Arc, Barrier, Mutex};
 #[cfg(feature = "acpi")]
 use uuid::Uuid;
-#[cfg(feature = "kvm")]
 use vfio_ioctls::{VfioContainer, VfioDevice};
 use virtio_devices::transport::VirtioPciDevice;
 use virtio_devices::transport::VirtioTransport;
@@ -91,14 +90,12 @@ use virtio_devices::vhost_user::VhostUserConfig;
 use virtio_devices::{DmaRemapping, Endpoint, IommuMapping};
 use virtio_devices::{VirtioSharedMemory, VirtioSharedMemoryList};
 use vm_allocator::SystemAllocator;
-#[cfg(feature = "kvm")]
 use vm_device::dma_mapping::vfio::VfioDmaMapping;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, LegacyIrqGroupConfig, MsiIrqGroupConfig,
 };
 use vm_device::{Bus, BusDevice, Resource};
 use vm_memory::guest_memory::FileOffset;
-#[cfg(feature = "kvm")]
 use vm_memory::GuestMemoryRegion;
 use vm_memory::{Address, GuestAddress, GuestUsize, MmapRegion};
 #[cfg(all(target_arch = "x86_64", feature = "cmos"))]
@@ -113,7 +110,6 @@ use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "aarch64")]
 const MMIO_LEN: u64 = 0x1000;
 
-#[cfg(feature = "kvm")]
 const VFIO_DEVICE_NAME_PREFIX: &str = "_vfio";
 
 const VFIO_USER_DEVICE_NAME_PREFIX: &str = "_vfio_user";
@@ -804,7 +800,6 @@ impl PtyPair {
 
 #[derive(Clone)]
 pub enum PciDeviceHandle {
-    #[cfg(feature = "kvm")]
     Vfio(Arc<Mutex<VfioPciDevice>>),
     Virtio(Arc<Mutex<VirtioPciDevice>>),
     VfioUser(Arc<Mutex<VfioUserPciDevice>>),
@@ -2730,7 +2725,6 @@ impl DeviceManager {
         Err(DeviceManagerError::NoAvailableDeviceName)
     }
 
-    #[cfg_attr(not(feature = "kvm"), allow(unused_variables))]
     fn add_passthrough_device(
         &mut self,
         pci: &mut PciBus,
@@ -2747,14 +2741,9 @@ impl DeviceManager {
             );
         }
 
-        #[cfg(feature = "kvm")]
-        return self.add_vfio_device(pci, device_cfg);
-
-        #[cfg(not(feature = "kvm"))]
-        Err(DeviceManagerError::NoDevicePassthroughSupport)
+        self.add_vfio_device(pci, device_cfg)
     }
 
-    #[cfg(feature = "kvm")]
     fn add_vfio_device(
         &mut self,
         pci: &mut PciBus,
@@ -2792,9 +2781,8 @@ impl DeviceManager {
         let dup_device_fd = unsafe { libc::dup(passthrough_device.as_raw_fd()) };
 
         // SAFETY the raw fd conversion here is safe because:
-        //   1. This function is only called on KVM, see the feature guard above.
-        //   2. When running on KVM, passthrough_device wraps around DeviceFd.
-        //   3. The conversion here extracts the raw fd and then turns the raw fd into a DeviceFd
+        //   1. When running on KVM or MSHV, passthrough_device wraps around DeviceFd.
+        //   2. The conversion here extracts the raw fd and then turns the raw fd into a DeviceFd
         //      of the same (correct) type.
         let vfio_container = Arc::new(
             VfioContainer::new(Arc::new(unsafe { DeviceFd::from_raw_fd(dup_device_fd) }))
@@ -3432,7 +3420,6 @@ impl DeviceManager {
             .pci_device_handle
             .ok_or(DeviceManagerError::MissingPciDevice)?;
         let (pci_device, bus_device, virtio_device) = match pci_device_handle {
-            #[cfg(feature = "kvm")]
             PciDeviceHandle::Vfio(vfio_pci_device) => {
                 {
                     // Unregister DMA mapping in IOMMU.
