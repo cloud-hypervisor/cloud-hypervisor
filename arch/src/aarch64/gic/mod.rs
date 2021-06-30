@@ -1,3 +1,4 @@
+// Copyright 2021 Arm Limited (or its affiliates). All rights reserved.
 // Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
