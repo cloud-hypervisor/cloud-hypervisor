@@ -1,5 +1,7 @@
-// Copyright 2020 ARM Limited
+// Copyright 2021 Arm Limited (or its affiliates). All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
+//
+// This file implements the GicV3 device with ITS (Virtual Interrupt Translation Service).
 
 pub mod kvm {
     use std::any::Any;
@@ -13,8 +15,11 @@ pub mod kvm {
     use hypervisor::CpuState;
 
     pub struct KvmGicV3Its {
-        /// The hypervisor agnostic device
+        /// The hypervisor agnostic device for the GicV3
         device: Arc<dyn hypervisor::Device>,
+
+        /// The hypervisor agnostic device for the Its device
+        its_device: Option<Arc<dyn hypervisor::Device>>,
 
         /// GIC device properties, to be used for setting up the fdt entry
         gic_properties: [u64; 4],
@@ -41,6 +46,10 @@ pub mod kvm {
     impl GicDevice for KvmGicV3Its {
         fn device(&self) -> &Arc<dyn hypervisor::Device> {
             &self.device
+        }
+
+        fn its_device(&self) -> Option<&Arc<dyn hypervisor::Device>> {
+            self.its_device.as_ref()
         }
 
         fn fdt_compatibility(&self) -> &str {
@@ -71,6 +80,10 @@ pub mod kvm {
             self.vcpu_count
         }
 
+        fn set_its_device(&mut self, its_device: Option<Arc<dyn hypervisor::Device>>) {
+            self.its_device = its_device;
+        }
+
         fn set_gicr_typers(&mut self, _vcpu_states: &[CpuState]) {}
 
         fn as_any_concrete_mut(&mut self) -> &mut dyn Any {
@@ -89,6 +102,7 @@ pub mod kvm {
         ) -> Box<dyn GicDevice> {
             Box::new(KvmGicV3Its {
                 device,
+                its_device: None,
                 gic_properties: [
                     KvmGicV3::get_dist_addr(),
                     KvmGicV3::get_dist_size(),
@@ -105,7 +119,7 @@ pub mod kvm {
 
         fn init_device_attributes(
             vm: &Arc<dyn hypervisor::Vm>,
-            gic_device: &dyn GicDevice,
+            gic_device: &mut dyn GicDevice,
         ) -> Result<()> {
             KvmGicV3::init_device_attributes(vm, gic_device)?;
 
@@ -134,6 +148,8 @@ pub mod kvm {
                 0,
                 0,
             )?;
+
+            gic_device.set_its_device(Some(its_fd));
 
             Ok(())
         }

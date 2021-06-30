@@ -1,5 +1,8 @@
+// Copyright 2021 Arm Limited (or its affiliates). All rights reserved.
 // Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
+//
+// This file implements the GicV3 device.
 
 pub mod kvm {
     use crate::aarch64::gic::dist_regs::{get_dist_regs, read_ctlr, set_dist_regs, write_ctlr};
@@ -50,7 +53,7 @@ pub mod kvm {
     type Result<T> = result::Result<T, Error>;
 
     pub struct KvmGicV3 {
-        /// The hypervisor agnostic device
+        /// The hypervisor agnostic device for the GicV3
         device: Arc<dyn hypervisor::Device>,
 
         /// Vector holding values of GICR_TYPER for each vCPU
@@ -168,6 +171,8 @@ pub mod kvm {
             self.vcpu_count
         }
 
+        fn set_its_device(&mut self, _its_device: Option<Arc<dyn hypervisor::Device>>) {}
+
         fn set_gicr_typers(&mut self, vcpu_states: &[CpuState]) {
             let gicr_typers = construct_gicr_typers(vcpu_states);
             self.gicr_typers = gicr_typers;
@@ -202,7 +207,7 @@ pub mod kvm {
 
         fn init_device_attributes(
             _vm: &Arc<dyn hypervisor::Vm>,
-            gic_device: &dyn GicDevice,
+            gic_device: &mut dyn GicDevice,
         ) -> crate::aarch64::gic::Result<()> {
             /* Setting up the distributor attribute.
              We are placing the GIC below 1GB so we need to substract the size of the distributor.
