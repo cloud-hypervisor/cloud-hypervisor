@@ -14,7 +14,7 @@ use crate::vec_with_array_field;
 use crate::vm::{self, VmmOps};
 pub use mshv_bindings::*;
 pub use mshv_ioctls::IoEventAddress;
-use mshv_ioctls::{set_registers_64, DeviceFd, Mshv, NoDatamatch, VcpuFd, VmFd};
+use mshv_ioctls::{set_registers_64, Mshv, NoDatamatch, VcpuFd, VmFd};
 use serde_derive::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -42,7 +42,7 @@ const DIRTY_BITMAP_SET_DIRTY: u64 = 0x8;
 pub use {
     mshv_bindings::mshv_create_device as CreateDevice,
     mshv_bindings::mshv_device_attr as DeviceAttr,
-    mshv_bindings::mshv_msi_routing_entry as IrqRoutingEntry,
+    mshv_bindings::mshv_msi_routing_entry as IrqRoutingEntry, mshv_ioctls::DeviceFd,
 };
 
 pub const PAGE_SHIFT: usize = 12;
