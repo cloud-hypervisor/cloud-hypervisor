@@ -31,6 +31,11 @@ pub trait GicDevice: Send {
     /// Returns the hypervisor agnostic Device of the GIC device
     fn device(&self) -> &Arc<dyn hypervisor::Device>;
 
+    /// Returns the hypervisor agnostic Device of the ITS device
+    fn its_device(&self) -> Option<&Arc<dyn hypervisor::Device>> {
+        None
+    }
+
     /// Returns the fdt compatibility property of the device
     fn fdt_compatibility(&self) -> &str;
 
@@ -57,6 +62,8 @@ pub trait GicDevice: Send {
     fn msi_properties(&self) -> &[u64] {
         &[]
     }
+
+    fn set_its_device(&mut self, its_device: Option<Arc<dyn hypervisor::Device>>);
 
     /// Get the values of GICR_TYPER for each vCPU.
     fn set_gicr_typers(&mut self, vcpu_states: &[CpuState]);
@@ -88,7 +95,7 @@ pub mod kvm {
         /// Setup the device-specific attributes
         fn init_device_attributes(
             vm: &Arc<dyn hypervisor::Vm>,
-            gic_device: &dyn GicDevice,
+            gic_device: &mut dyn GicDevice,
         ) -> Result<()>;
 
         /// Initialize a GIC device
@@ -179,9 +186,9 @@ pub mod kvm {
         fn new(vm: &Arc<dyn hypervisor::Vm>, vcpu_count: u64) -> Result<Box<dyn GicDevice>> {
             let vgic_fd = Self::init_device(vm)?;
 
-            let device = Self::create_device(vgic_fd, vcpu_count);
+            let mut device = Self::create_device(vgic_fd, vcpu_count);
 
-            Self::init_device_attributes(vm, &*device)?;
+            Self::init_device_attributes(vm, &mut *device)?;
 
             Self::finalize_device(&*device)?;
 
