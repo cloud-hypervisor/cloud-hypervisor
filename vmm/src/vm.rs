@@ -75,7 +75,7 @@ use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::terminal::Terminal;
 
 #[cfg(target_arch = "aarch64")]
-use arch::aarch64::gic::gicv3::kvm::{KvmGicV3, GIC_V3_SNAPSHOT_ID};
+use arch::aarch64::gic::gicv3_its::kvm::{KvmGicV3Its, GIC_V3_ITS_SNAPSHOT_ID};
 #[cfg(target_arch = "aarch64")]
 use arch::aarch64::gic::kvm::create_gic;
 #[cfg(target_arch = "aarch64")]
@@ -1919,7 +1919,7 @@ impl Vm {
                 .lock()
                 .unwrap()
                 .as_any_concrete_mut()
-                .downcast_mut::<KvmGicV3>()
+                .downcast_mut::<KvmGicV3Its>()
                 .unwrap()
                 .snapshot()?,
         );
@@ -1958,16 +1958,18 @@ impl Vm {
             .set_gic_device(Arc::clone(&gic_device));
 
         // Restore GIC states.
-        if let Some(gic_v3_snapshot) = vm_snapshot.snapshots.get(GIC_V3_SNAPSHOT_ID) {
+        if let Some(gicv3_its_snapshot) = vm_snapshot.snapshots.get(GIC_V3_ITS_SNAPSHOT_ID) {
             gic_device
                 .lock()
                 .unwrap()
                 .as_any_concrete_mut()
-                .downcast_mut::<KvmGicV3>()
+                .downcast_mut::<KvmGicV3Its>()
                 .unwrap()
-                .restore(*gic_v3_snapshot.clone())?;
+                .restore(*gicv3_its_snapshot.clone())?;
         } else {
-            return Err(MigratableError::Restore(anyhow!("Missing GICv3 snapshot")));
+            return Err(MigratableError::Restore(anyhow!(
+                "Missing GicV3Its snapshot"
+            )));
         }
 
         // Activate gic device
