@@ -11,8 +11,7 @@ use crate::transport::VirtioTransport;
 use crate::GuestMemoryMmap;
 use crate::{
     ActivateResult, Queue, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
-    DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED, DEVICE_FEATURES_OK,
-    DEVICE_INIT,
+    DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FEATURES_OK, DEVICE_INIT,
 };
 use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
@@ -528,7 +527,6 @@ impl VirtioPciDevice {
         let ready_bits =
             (DEVICE_ACKNOWLEDGE | DEVICE_DRIVER | DEVICE_DRIVER_OK | DEVICE_FEATURES_OK) as u8;
         self.common_config.driver_status == ready_bits
-            && self.common_config.driver_status & DEVICE_FAILED as u8 == 0
     }
 
     /// Determines if the driver has requested the device (re)init / reset itself
