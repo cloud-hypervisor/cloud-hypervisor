@@ -125,6 +125,45 @@ pub const SYS_FTRUNCATE: libc::c_long = 46;
 #[cfg(target_arch = "x86_64")]
 pub const SYS_FTRUNCATE: libc::c_long = 77;
 
+// MSHV IOCTL code. This is unstable until the kernel code has been declared stable.
+#[cfg(feature = "mshv")]
+mod mshv {
+    pub const MSHV_GET_API_VERSION: u64 = 0xb800;
+    pub const MSHV_CREATE_VM: u64 = 0x4028_b801;
+    pub const MSHV_MAP_GUEST_MEMORY: u64 = 0x4020_b802;
+    pub const MSHV_UNMAP_GUEST_MEMORY: u64 = 0x4020_b803;
+    pub const MSHV_CREATE_VP: u64 = 0x4004_b804;
+    pub const MSHV_IRQFD: u64 = 0x4010_b80e;
+    pub const MSHV_IOEVENTFD: u64 = 0x4020_b80f;
+    pub const MSHV_SET_MSI_ROUTING: u64 = 0x4008_b811;
+    pub const MSHV_GET_VP_REGISTERS: u64 = 0xc010_b805;
+    pub const MSHV_SET_VP_REGISTERS: u64 = 0x4010_b806;
+    pub const MSHV_RUN_VP: u64 = 0x8100_b807;
+    pub const MSHV_GET_VP_STATE: u64 = 0xc028_b80a;
+    pub const MSHV_SET_VP_STATE: u64 = 0xc028_b80b;
+}
+#[cfg(feature = "mshv")]
+use mshv::*;
+
+#[cfg(feature = "mshv")]
+fn create_vmm_ioctl_seccomp_rule_common_mshv() -> Result<Vec<SeccompRule>, Error> {
+    Ok(or![
+        and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_GET_API_VERSION,)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_CREATE_VM)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_MAP_GUEST_MEMORY)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_UNMAP_GUEST_MEMORY)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_CREATE_VP)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_IRQFD)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_IOEVENTFD)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_SET_MSI_ROUTING)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_GET_VP_REGISTERS)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_SET_VP_REGISTERS)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_RUN_VP)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_GET_VP_STATE)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_SET_VP_STATE)?],
+    ])
+}
+
 #[cfg(feature = "kvm")]
 fn create_vmm_ioctl_seccomp_rule_common_kvm() -> Result<Vec<SeccompRule>, Error> {
     Ok(or![
@@ -160,7 +199,12 @@ fn create_vmm_ioctl_seccomp_rule_common_kvm() -> Result<Vec<SeccompRule>, Error>
 
 fn create_vmm_ioctl_seccomp_rule_hypervisor() -> Result<Vec<SeccompRule>, Error> {
     #[cfg(feature = "kvm")]
-    create_vmm_ioctl_seccomp_rule_common_kvm()
+    let rules = create_vmm_ioctl_seccomp_rule_common_kvm();
+
+    #[cfg(feature = "mshv")]
+    let rules = create_vmm_ioctl_seccomp_rule_common_mshv();
+
+    rules
 }
 
 fn create_vmm_ioctl_seccomp_rule_common() -> Result<Vec<SeccompRule>, Error> {
@@ -278,9 +322,19 @@ fn create_vmm_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, Error> {
     Ok(arch_rules)
 }
 
+#[cfg(all(target_arch = "x86_64", feature = "mshv"))]
+fn create_vmm_ioctl_seccomp_rule_mshv() -> Result<Vec<SeccompRule>, Error> {
+    create_vmm_ioctl_seccomp_rule_common()
+}
+
 fn create_vmm_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
     #[cfg(feature = "kvm")]
-    create_vmm_ioctl_seccomp_rule_kvm()
+    let rules = create_vmm_ioctl_seccomp_rule_kvm();
+
+    #[cfg(feature = "mshv")]
+    let rules = create_vmm_ioctl_seccomp_rule_mshv();
+
+    rules
 }
 
 fn create_api_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
@@ -443,9 +497,26 @@ fn create_vcpu_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, Error> {
     ])
 }
 
+#[cfg(feature = "mshv")]
+fn create_vcpu_ioctl_seccomp_rule_mshv() -> Result<Vec<SeccompRule>, Error> {
+    Ok(or![
+        and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_SET_MSI_ROUTING)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_IOEVENTFD)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_IRQFD)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_RUN_VP)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_GET_VP_REGISTERS)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_SET_VP_REGISTERS)?],
+    ])
+}
+
 fn create_vcpu_ioctl_seccomp_rule_hypervisor() -> Result<Vec<SeccompRule>, Error> {
     #[cfg(feature = "kvm")]
-    create_vcpu_ioctl_seccomp_rule_kvm()
+    let rules = create_vcpu_ioctl_seccomp_rule_kvm();
+
+    #[cfg(feature = "mshv")]
+    let rules = create_vcpu_ioctl_seccomp_rule_mshv();
+
+    rules
 }
 
 fn create_vcpu_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
