@@ -85,33 +85,39 @@ const VFIO_IOMMU_UNMAP_DMA: u64 = 0x3b72;
 const VFIO_DEVICE_IOEVENTFD: u64 = 0x3b74;
 
 // See include/uapi/linux/kvm.h in the kernel code.
-const KVM_GET_API_VERSION: u64 = 0xae00;
-const KVM_CREATE_VM: u64 = 0xae01;
-const KVM_CHECK_EXTENSION: u64 = 0xae03;
-const KVM_GET_VCPU_MMAP_SIZE: u64 = 0xae04;
-const KVM_CREATE_VCPU: u64 = 0xae41;
-const KVM_CREATE_IRQCHIP: u64 = 0xae60;
-const KVM_RUN: u64 = 0xae80;
-const KVM_SET_MP_STATE: u64 = 0x4004_ae99;
-const KVM_SET_GSI_ROUTING: u64 = 0x4008_ae6a;
-const KVM_SET_DEVICE_ATTR: u64 = 0x4018_aee1;
-const KVM_SET_ONE_REG: u64 = 0x4010_aeac;
-const KVM_SET_USER_MEMORY_REGION: u64 = 0x4020_ae46;
-const KVM_IRQFD: u64 = 0x4020_ae76;
-const KVM_IOEVENTFD: u64 = 0x4040_ae79;
-const KVM_SET_VCPU_EVENTS: u64 = 0x4040_aea0;
-const KVM_ENABLE_CAP: u64 = 0x4068_aea3;
-const KVM_SET_REGS: u64 = 0x4090_ae82;
-const KVM_GET_MP_STATE: u64 = 0x8004_ae98;
-const KVM_GET_DEVICE_ATTR: u64 = 0x4018_aee2;
-const KVM_GET_DIRTY_LOG: u64 = 0x4010_ae42;
-const KVM_GET_VCPU_EVENTS: u64 = 0x8040_ae9f;
-const KVM_GET_ONE_REG: u64 = 0x4010_aeab;
-const KVM_GET_REGS: u64 = 0x8090_ae81;
-const KVM_GET_SUPPORTED_CPUID: u64 = 0xc008_ae05;
-const KVM_CREATE_DEVICE: u64 = 0xc00c_aee0;
-const KVM_GET_REG_LIST: u64 = 0xc008_aeb0;
-const KVM_MEMORY_ENCRYPT_OP: u64 = 0xc008_aeba;
+#[cfg(feature = "kvm")]
+mod kvm {
+    pub const KVM_GET_API_VERSION: u64 = 0xae00;
+    pub const KVM_CREATE_VM: u64 = 0xae01;
+    pub const KVM_CHECK_EXTENSION: u64 = 0xae03;
+    pub const KVM_GET_VCPU_MMAP_SIZE: u64 = 0xae04;
+    pub const KVM_CREATE_VCPU: u64 = 0xae41;
+    pub const KVM_CREATE_IRQCHIP: u64 = 0xae60;
+    pub const KVM_RUN: u64 = 0xae80;
+    pub const KVM_SET_MP_STATE: u64 = 0x4004_ae99;
+    pub const KVM_SET_GSI_ROUTING: u64 = 0x4008_ae6a;
+    pub const KVM_SET_DEVICE_ATTR: u64 = 0x4018_aee1;
+    pub const KVM_SET_ONE_REG: u64 = 0x4010_aeac;
+    pub const KVM_SET_USER_MEMORY_REGION: u64 = 0x4020_ae46;
+    pub const KVM_IRQFD: u64 = 0x4020_ae76;
+    pub const KVM_IOEVENTFD: u64 = 0x4040_ae79;
+    pub const KVM_SET_VCPU_EVENTS: u64 = 0x4040_aea0;
+    pub const KVM_ENABLE_CAP: u64 = 0x4068_aea3;
+    pub const KVM_SET_REGS: u64 = 0x4090_ae82;
+    pub const KVM_GET_MP_STATE: u64 = 0x8004_ae98;
+    pub const KVM_GET_DEVICE_ATTR: u64 = 0x4018_aee2;
+    pub const KVM_GET_DIRTY_LOG: u64 = 0x4010_ae42;
+    pub const KVM_GET_VCPU_EVENTS: u64 = 0x8040_ae9f;
+    pub const KVM_GET_ONE_REG: u64 = 0x4010_aeab;
+    pub const KVM_GET_REGS: u64 = 0x8090_ae81;
+    pub const KVM_GET_SUPPORTED_CPUID: u64 = 0xc008_ae05;
+    pub const KVM_CREATE_DEVICE: u64 = 0xc00c_aee0;
+    pub const KVM_GET_REG_LIST: u64 = 0xc008_aeb0;
+    pub const KVM_MEMORY_ENCRYPT_OP: u64 = 0xc008_aeba;
+}
+
+#[cfg(feature = "kvm")]
+use kvm::*;
 
 // The definition of libc::SYS_ftruncate on AArch64 is different from that on x86_64.
 #[cfg(target_arch = "aarch64")]
@@ -119,10 +125,9 @@ pub const SYS_FTRUNCATE: libc::c_long = 46;
 #[cfg(target_arch = "x86_64")]
 pub const SYS_FTRUNCATE: libc::c_long = 77;
 
-fn create_vmm_ioctl_seccomp_rule_common() -> Result<Vec<SeccompRule>, Error> {
+#[cfg(feature = "kvm")]
+fn create_vmm_ioctl_seccomp_rule_common_kvm() -> Result<Vec<SeccompRule>, Error> {
     Ok(or![
-        and![Cond::new(1, ArgLen::DWORD, Eq, FIOCLEX)?],
-        and![Cond::new(1, ArgLen::DWORD, Eq, FIONBIO)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_CHECK_EXTENSION,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_CREATE_DEVICE,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_CREATE_IRQCHIP,)?],
@@ -150,6 +155,18 @@ fn create_vmm_ioctl_seccomp_rule_common() -> Result<Vec<SeccompRule>, Error> {
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_REGS)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_USER_MEMORY_REGION,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_VCPU_EVENTS,)?],
+    ])
+}
+
+fn create_vmm_ioctl_seccomp_rule_hypervisor() -> Result<Vec<SeccompRule>, Error> {
+    #[cfg(feature = "kvm")]
+    create_vmm_ioctl_seccomp_rule_common_kvm()
+}
+
+fn create_vmm_ioctl_seccomp_rule_common() -> Result<Vec<SeccompRule>, Error> {
+    let mut common_rules = or![
+        and![Cond::new(1, ArgLen::DWORD, Eq, FIOCLEX)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, FIONBIO)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, SIOCGIFFLAGS)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, SIOCGIFHWADDR)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, SIOCSIFADDR)?],
@@ -186,11 +203,17 @@ fn create_vmm_ioctl_seccomp_rule_common() -> Result<Vec<SeccompRule>, Error> {
         and![Cond::new(1, ArgLen::DWORD, Eq, VFIO_IOMMU_MAP_DMA)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, VFIO_IOMMU_UNMAP_DMA)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, VFIO_DEVICE_IOEVENTFD)?],
-    ])
+    ];
+
+    let hypervisor_rules = create_vmm_ioctl_seccomp_rule_hypervisor()?;
+
+    common_rules.extend(hypervisor_rules);
+
+    Ok(common_rules)
 }
 
-#[cfg(target_arch = "x86_64")]
-fn create_vmm_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
+#[cfg(all(target_arch = "x86_64", feature = "kvm"))]
+fn create_vmm_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, Error> {
     const KVM_CREATE_PIT2: u64 = 0x4040_ae77;
     const KVM_GET_CLOCK: u64 = 0x8030_ae7c;
     const KVM_GET_CPUID2: u64 = 0xc008_ae91;
@@ -240,8 +263,8 @@ fn create_vmm_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
     Ok(arch_rules)
 }
 
-#[cfg(target_arch = "aarch64")]
-fn create_vmm_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
+#[cfg(all(target_arch = "aarch64", feature = "kvm"))]
+fn create_vmm_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, Error> {
     const KVM_ARM_PREFERRED_TARGET: u64 = 0x8020_aeaf;
     const KVM_ARM_VCPU_INIT: u64 = 0x4020_aeae;
 
@@ -253,6 +276,11 @@ fn create_vmm_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
     arch_rules.extend(common_rules);
 
     Ok(arch_rules)
+}
+
+fn create_vmm_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
+    #[cfg(feature = "kvm")]
+    create_vmm_ioctl_seccomp_rule_kvm()
 }
 
 fn create_api_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
@@ -402,7 +430,8 @@ fn vmm_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
     ])
 }
 
-fn create_vcpu_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
+#[cfg(feature = "kvm")]
+fn create_vcpu_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, Error> {
     Ok(or![
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_CHECK_EXTENSION,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_IOEVENTFD)?],
@@ -411,10 +440,26 @@ fn create_vcpu_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_GSI_ROUTING,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_USER_MEMORY_REGION,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_RUN,)?],
+    ])
+}
+
+fn create_vcpu_ioctl_seccomp_rule_hypervisor() -> Result<Vec<SeccompRule>, Error> {
+    #[cfg(feature = "kvm")]
+    create_vcpu_ioctl_seccomp_rule_kvm()
+}
+
+fn create_vcpu_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
+    let mut rules = or![
         and![Cond::new(1, ArgLen::DWORD, Eq, VFIO_DEVICE_SET_IRQS)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, VFIO_GROUP_UNSET_CONTAINER)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, VFIO_IOMMU_UNMAP_DMA)?],
-    ])
+    ];
+
+    let hypervisor_rules = create_vcpu_ioctl_seccomp_rule_hypervisor()?;
+
+    rules.extend(hypervisor_rules);
+
+    Ok(rules)
 }
 
 fn vcpu_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
