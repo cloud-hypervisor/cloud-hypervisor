@@ -234,7 +234,7 @@ impl vm::Vm for KvmVm {
             .map_err(|e| vm::HypervisorVmError::SetGsiRouting(e.into()))
     }
     ///
-    /// Creates a memory region structure that can be used with set_user_memory_region
+    /// Creates a memory region structure that can be used with {create/remove}_user_memory_region
     ///
     fn make_user_memory_region(
         &self,
@@ -259,14 +259,29 @@ impl vm::Vm for KvmVm {
         }
     }
     ///
-    /// Creates/modifies a guest physical memory slot.
+    /// Creates a guest physical memory region.
     ///
-    fn set_user_memory_region(&self, user_memory_region: MemoryRegion) -> vm::Result<()> {
+    fn create_user_memory_region(&self, user_memory_region: MemoryRegion) -> vm::Result<()> {
         // Safe because guest regions are guaranteed not to overlap.
         unsafe {
             self.fd
                 .set_user_memory_region(user_memory_region)
-                .map_err(|e| vm::HypervisorVmError::SetUserMemory(e.into()))
+                .map_err(|e| vm::HypervisorVmError::CreateUserMemory(e.into()))
+        }
+    }
+    ///
+    /// Removes a guest physical memory region.
+    ///
+    fn remove_user_memory_region(&self, user_memory_region: MemoryRegion) -> vm::Result<()> {
+        let mut region = user_memory_region;
+
+        // Setting the size to 0 means "remove"
+        region.memory_size = 0;
+        // Safe because guest regions are guaranteed not to overlap.
+        unsafe {
+            self.fd
+                .set_user_memory_region(region)
+                .map_err(|e| vm::HypervisorVmError::RemoveUserMemory(e.into()))
         }
     }
     ///

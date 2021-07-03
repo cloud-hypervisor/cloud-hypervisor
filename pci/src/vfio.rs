@@ -679,7 +679,7 @@ impl VfioPciDevice {
                     false,
                 );
 
-                vm.set_user_memory_region(mem_region)
+                vm.create_user_memory_region(mem_region)
                     .map_err(|e| VfioPciError::MapRegionGuest(e.into()))?;
 
                 // Update the region with memory mapped info.
@@ -703,13 +703,13 @@ impl VfioPciDevice {
                 let r = self.vm.make_user_memory_region(
                     mem_slot,
                     region.start.raw_value() + mmap_offset,
-                    0,
+                    mmap_size as u64,
                     host_addr as u64,
                     false,
                     false,
                 );
 
-                if let Err(e) = self.vm.set_user_memory_region(r) {
+                if let Err(e) = self.vm.remove_user_memory_region(r) {
                     error!("Could not remove the userspace memory region: {}", e);
                 }
 
@@ -1137,14 +1137,14 @@ impl PciDevice for VfioPciDevice {
                         let old_mem_region = self.vm.make_user_memory_region(
                             mem_slot,
                             old_base + mmap_offset,
-                            0,
+                            mmap_size as u64,
                             host_addr as u64,
                             false,
                             false,
                         );
 
                         self.vm
-                            .set_user_memory_region(old_mem_region)
+                            .remove_user_memory_region(old_mem_region)
                             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
                         // Insert new region
@@ -1158,7 +1158,7 @@ impl PciDevice for VfioPciDevice {
                         );
 
                         self.vm
-                            .set_user_memory_region(new_mem_region)
+                            .create_user_memory_region(new_mem_region)
                             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
                     }
                 }

@@ -727,20 +727,19 @@ impl DeviceRelocation for AddressManager {
                 let mut virtio_dev = virtio_dev.lock().unwrap();
                 if let Some(mut shm_regions) = virtio_dev.get_shm_regions() {
                     if shm_regions.addr.raw_value() == old_base {
-                        // Remove old region from KVM by passing a size of 0.
                         let mem_region = self.vm.make_user_memory_region(
                             shm_regions.mem_slot,
                             old_base,
-                            0,
+                            shm_regions.len,
                             shm_regions.host_addr,
                             false,
                             false,
                         );
 
-                        self.vm.set_user_memory_region(mem_region).map_err(|e| {
+                        self.vm.remove_user_memory_region(mem_region).map_err(|e| {
                             io::Error::new(
                                 io::ErrorKind::Other,
-                                format!("failed to set user memory region: {:?}", e),
+                                format!("failed to remove user memory region: {:?}", e),
                             )
                         })?;
 
@@ -754,10 +753,10 @@ impl DeviceRelocation for AddressManager {
                             false,
                         );
 
-                        self.vm.set_user_memory_region(mem_region).map_err(|e| {
+                        self.vm.create_user_memory_region(mem_region).map_err(|e| {
                             io::Error::new(
                                 io::ErrorKind::Other,
-                                format!("failed to set user memory regions: {:?}", e),
+                                format!("failed to create user memory regions: {:?}", e),
                             )
                         })?;
 
