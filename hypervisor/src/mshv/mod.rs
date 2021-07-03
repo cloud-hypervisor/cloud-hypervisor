@@ -798,11 +798,19 @@ impl vm::Vm for MshvVm {
             .map_err(|e| vm::HypervisorVmError::UnregisterIoEvent(e.into()))
     }
 
-    /// Creates/modifies a guest physical memory slot.
-    fn set_user_memory_region(&self, user_memory_region: MemoryRegion) -> vm::Result<()> {
+    /// Creates a guest physical memory region.
+    fn create_user_memory_region(&self, user_memory_region: MemoryRegion) -> vm::Result<()> {
         self.fd
             .map_user_memory(user_memory_region)
-            .map_err(|e| vm::HypervisorVmError::SetUserMemory(e.into()))?;
+            .map_err(|e| vm::HypervisorVmError::CreateUserMemory(e.into()))?;
+        Ok(())
+    }
+
+    /// Removes a guest physical memory region.
+    fn remove_user_memory_region(&self, user_memory_region: MemoryRegion) -> vm::Result<()> {
+        self.fd
+            .unmap_user_memory(user_memory_region)
+            .map_err(|e| vm::HypervisorVmError::RemoveUserMemory(e.into()))?;
         Ok(())
     }
 

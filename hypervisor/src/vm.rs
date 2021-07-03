@@ -92,10 +92,15 @@ pub enum HypervisorVmError {
     #[error("Failed to set GSI routing: {0}")]
     SetGsiRouting(#[source] anyhow::Error),
     ///
-    /// Set user memory error
+    /// Create user memory error
     ///
-    #[error("Failed to set user memory: {0}")]
-    SetUserMemory(#[source] anyhow::Error),
+    #[error("Failed to create user memory: {0}")]
+    CreateUserMemory(#[source] anyhow::Error),
+    ///
+    /// Remove user memory region error
+    ///
+    #[error("Failed to remove user memory: {0}")]
+    RemoveUserMemory(#[source] anyhow::Error),
     ///
     /// Create device error
     ///
@@ -218,7 +223,7 @@ pub trait Vm: Send + Sync {
     fn unregister_ioevent(&self, fd: &EventFd, addr: &IoEventAddress) -> Result<()>;
     /// Sets the GSI routing table entries, overwriting any previously set
     fn set_gsi_routing(&self, entries: &[IrqRoutingEntry]) -> Result<()>;
-    /// Creates a memory region structure that can be used with set_user_memory_region
+    /// Creates a memory region structure that can be used with {create/remove}_user_memory_region
     fn make_user_memory_region(
         &self,
         slot: u32,
@@ -228,8 +233,10 @@ pub trait Vm: Send + Sync {
         readonly: bool,
         log_dirty_pages: bool,
     ) -> MemoryRegion;
-    /// Creates/modifies a guest physical memory slot.
-    fn set_user_memory_region(&self, user_memory_region: MemoryRegion) -> Result<()>;
+    /// Creates a guest physical memory slot.
+    fn create_user_memory_region(&self, user_memory_region: MemoryRegion) -> Result<()>;
+    /// Removes a guest physical memory slot.
+    fn remove_user_memory_region(&self, user_memory_region: MemoryRegion) -> Result<()>;
     #[cfg(feature = "kvm")]
     /// Creates an emulated device in the kernel.
     fn create_device(&self, device: &mut CreateDevice) -> Result<Arc<dyn Device>>;

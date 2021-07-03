@@ -176,8 +176,11 @@ pub enum Error {
     /// The requested hotplug memory addition is not a valid size
     InvalidSize,
 
-    /// Failed to set the user memory region.
-    SetUserMemoryRegion(hypervisor::HypervisorVmError),
+    /// Failed to create the user memory region.
+    CreateUserMemoryRegion(hypervisor::HypervisorVmError),
+
+    /// Failed to remove the user memory region.
+    RemoveUserMemoryRegion(hypervisor::HypervisorVmError),
 
     /// Failed to EventFd.
     EventFdFail(io::Error),
@@ -1212,8 +1215,8 @@ impl MemoryManager {
         );
 
         self.vm
-            .set_user_memory_region(mem_region)
-            .map_err(Error::SetUserMemoryRegion)?;
+            .create_user_memory_region(mem_region)
+            .map_err(Error::CreateUserMemoryRegion)?;
 
         // Mark the pages as mergeable if explicitly asked for.
         if mergeable {
@@ -1259,15 +1262,15 @@ impl MemoryManager {
         let mem_region = self.vm.make_user_memory_region(
             slot,
             guest_phys_addr,
-            0, /* memory_size -- using 0 removes this slot */
+            memory_size,
             userspace_addr,
             false, /* readonly -- don't care */
             false, /* log dirty */
         );
 
         self.vm
-            .set_user_memory_region(mem_region)
-            .map_err(Error::SetUserMemoryRegion)?;
+            .remove_user_memory_region(mem_region)
+            .map_err(Error::RemoveUserMemoryRegion)?;
 
         // Mark the pages as unmergeable if there were previously marked as
         // mergeable.

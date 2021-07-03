@@ -2551,7 +2551,7 @@ pub fn test_vm() {
             false,
         );
 
-        vm.set_user_memory_region(mem_region)
+        vm.create_user_memory_region(mem_region)
             .expect("Cannot configure guest memory");
     }
     mem.write_slice(&code, load_addr)
