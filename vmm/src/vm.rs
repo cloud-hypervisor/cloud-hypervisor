@@ -1574,13 +1574,23 @@ impl Vm {
     fn populate_tdx_sections(&mut self, sections: &[TdvfSection]) -> Result<Option<u64>> {
         use arch::x86_64::tdx::*;
         // Get the memory end *before* we start adding TDVF ram regions
-        let mem_end = {
-            let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
-            let mem = guest_memory.memory();
-            mem.last_addr()
-        };
+        let boot_guest_memory = self
+            .memory_manager
+            .lock()
+            .as_ref()
+            .unwrap()
+            .boot_guest_memory();
         for section in sections {
-            info!("Allocating TDVF Section: {:?}", section);
+            // No need to allocate if the section falls within guest RAM ranges
+            if boot_guest_memory.address_in_range(GuestAddress(section.address)) {
+                info!(
+                    "Not allocating TDVF Section: {:x?} since it is already part of guest RAM",
+                    section
+                );
+                continue;
+            }
+
+            info!("Allocating TDVF Section: {:x?}", section);
             self.memory_manager
                 .lock()
                 .unwrap()
@@ -1599,7 +1609,7 @@ impl Vm {
         let mem = guest_memory.memory();
         let mut hob_offset = None;
         for section in sections {
-            info!("Populating TDVF Section: {:?}", section);
+            info!("Populating TDVF Section: {:x?}", section);
             match section.r#type {
                 TdvfSectionType::Bfv | TdvfSectionType::Cfv => {
                     info!("Copying section to guest memory");
@@ -1623,22 +1633,47 @@ impl Vm {
         // Generate HOB
         let mut hob = TdHob::start(hob_offset.unwrap());
 
-        // RAM regions (all below 3GiB case)
-        if mem_end < arch::layout::MEM_32BIT_RESERVED_START {
-            hob.add_memory_resource(&mem, 0, mem_end.0 + 1, true)
-                .map_err(Error::PopulateHob)?;
-        } else {
-            // Otherwise split into two
-            hob.add_memory_resource(&mem, 0, arch::layout::MEM_32BIT_RESERVED_START.0, true)
-                .map_err(Error::PopulateHob)?;
-            if mem_end > arch::layout::RAM_64BIT_START {
-                hob.add_memory_resource(
-                    &mem,
-                    arch::layout::RAM_64BIT_START.raw_value(),
-                    mem_end.unchecked_offset_from(arch::layout::RAM_64BIT_START) + 1,
-                    true,
-                )
-                .map_err(Error::PopulateHob)?;
+        let mut sorted_sections = sections.to_vec();
+        sorted_sections.retain(|section| {
+            !matches!(section.r#type, TdvfSectionType::Bfv | TdvfSectionType::Cfv)
+        });
+        sorted_sections.sort_by_key(|section| section.address);
+        sorted_sections.reverse();
+        let mut current_section = sorted_sections.pop();
+
+        // RAM regions interleaved with TDVF sections
+        let mut next_start_addr = 0;
+        for region in boot_guest_memory.iter() {
+            let region_start = region.start_addr().0;
+            let region_end = region.last_addr().0;
+            if region_start > next_start_addr {
+                next_start_addr = region_start;
+            }
+
+            loop {
+                let (start, size, ram) = if let Some(section) = &current_section {
+                    if section.address <= next_start_addr {
+                        (section.address, section.size, false)
+                    } else {
+                        let last_addr = std::cmp::min(section.address - 1, region_end);
+                        (next_start_addr, last_addr - next_start_addr + 1, true)
+                    }
+                } else {
+                    (next_start_addr, region_end - next_start_addr + 1, true)
+                };
+
+                hob.add_memory_resource(&mem, start, size, ram)
+                    .map_err(Error::PopulateHob)?;
+
+                if !ram {
+                    current_section = sorted_sections.pop();
+                }
+
+                next_start_addr = start + size;
+
+                if next_start_addr > region_end {
+                    break;
+                }
             }
         }
 
