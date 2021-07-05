@@ -144,10 +144,6 @@ pipeline{
 				}
 				stage ('Worker build VFIO') {
 					agent { node { label 'bionic-vfio' } }
-					when {
-						beforeAgent true
-						branch 'master'
-					}
 					stages {
 						stage ('Checkout') {
 							steps {
