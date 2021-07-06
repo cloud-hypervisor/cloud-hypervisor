@@ -494,6 +494,65 @@ impl VfioCommon {
         }
         Ok(())
     }
+
+    fn parse_msix_capabilities(
+        &mut self,
+        cap: u8,
+        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+        vfio_pci_config: &dyn VfioPciConfig,
+    ) {
+        let msg_ctl = vfio_pci_config.read_config_word((cap + 2).into());
+
+        let table = vfio_pci_config.read_config_dword((cap + 4).into());
+
+        let pba = vfio_pci_config.read_config_dword((cap + 8).into());
+
+        let msix_cap = MsixCap {
+            msg_ctl,
+            table,
+            pba,
+        };
+
+        let interrupt_source_group = interrupt_manager
+            .create_group(MsiIrqGroupConfig {
+                base: 0,
+                count: msix_cap.table_size() as InterruptIndex,
+            })
+            .unwrap();
+
+        let msix_config = MsixConfig::new(msix_cap.table_size(), interrupt_source_group.clone(), 0);
+
+        self.interrupt.msix = Some(VfioMsix {
+            bar: msix_config,
+            cap: msix_cap,
+            cap_offset: cap.into(),
+            interrupt_source_group,
+        });
+    }
+
+    fn parse_msi_capabilities(
+        &mut self,
+        cap: u8,
+        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+        vfio_pci_config: &dyn VfioPciConfig,
+    ) {
+        let msg_ctl = vfio_pci_config.read_config_word((cap + 2).into());
+
+        let interrupt_source_group = interrupt_manager
+            .create_group(MsiIrqGroupConfig {
+                base: 0,
+                count: msi_num_enabled_vectors(msg_ctl) as InterruptIndex,
+            })
+            .unwrap();
+
+        let msi_config = MsiConfig::new(msg_ctl, interrupt_source_group.clone());
+
+        self.interrupt.msi = Some(VfioMsi {
+            cfg: msi_config,
+            cap_offset: cap.into(),
+            interrupt_source_group,
+        });
+    }
 }
 
 /// VfioPciDevice represents a VFIO PCI device.
@@ -671,71 +730,6 @@ impl VfioPciDevice {
         Ok(())
     }
 
-    fn parse_msix_capabilities(
-        &mut self,
-        cap: u8,
-        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
-    ) {
-        let msg_ctl = self
-            .vfio_pci_configuration
-            .read_config_word((cap + 2).into());
-
-        let table = self
-            .vfio_pci_configuration
-            .read_config_dword((cap + 4).into());
-
-        let pba = self
-            .vfio_pci_configuration
-            .read_config_dword((cap + 8).into());
-
-        let msix_cap = MsixCap {
-            msg_ctl,
-            table,
-            pba,
-        };
-
-        let interrupt_source_group = interrupt_manager
-            .create_group(MsiIrqGroupConfig {
-                base: 0,
-                count: msix_cap.table_size() as InterruptIndex,
-            })
-            .unwrap();
-
-        let msix_config = MsixConfig::new(msix_cap.table_size(), interrupt_source_group.clone(), 0);
-
-        self.common.interrupt.msix = Some(VfioMsix {
-            bar: msix_config,
-            cap: msix_cap,
-            cap_offset: cap.into(),
-            interrupt_source_group,
-        });
-    }
-
-    fn parse_msi_capabilities(
-        &mut self,
-        cap: u8,
-        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
-    ) {
-        let msg_ctl = self
-            .vfio_pci_configuration
-            .read_config_word((cap + 2).into());
-
-        let interrupt_source_group = interrupt_manager
-            .create_group(MsiIrqGroupConfig {
-                base: 0,
-                count: msi_num_enabled_vectors(msg_ctl) as InterruptIndex,
-            })
-            .unwrap();
-
-        let msi_config = MsiConfig::new(msg_ctl, interrupt_source_group.clone());
-
-        self.common.interrupt.msi = Some(VfioMsi {
-            cfg: msi_config,
-            cap_offset: cap.into(),
-            interrupt_source_group,
-        });
-    }
-
     fn parse_capabilities(
         &mut self,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
@@ -755,7 +749,11 @@ impl VfioPciDevice {
                         if irq_info.count > 0 {
                             // Parse capability only if the VFIO device
                             // supports MSI.
-                            self.parse_msi_capabilities(cap_next, interrupt_manager);
+                            self.common.parse_msi_capabilities(
+                                cap_next,
+                                interrupt_manager,
+                                &self.vfio_pci_configuration,
+                            );
                         }
                     }
                 }
@@ -764,7 +762,11 @@ impl VfioPciDevice {
                         if irq_info.count > 0 {
                             // Parse capability only if the VFIO device
                             // supports MSI-X.
-                            self.parse_msix_capabilities(cap_next, interrupt_manager);
+                            self.common.parse_msix_capabilities(
+                                cap_next,
+                                interrupt_manager,
+                                &self.vfio_pci_configuration,
+                            );
                         }
                     }
                 }
