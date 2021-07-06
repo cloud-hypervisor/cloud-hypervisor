@@ -82,7 +82,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     pci_space_address: &(u64, u64),
 ) -> FdtWriterResult<Vec<u8>> {
     // Allocate stuff necessary for the holding the blob.
-    let mut fdt = FdtWriter::new(&[]).unwrap();
+    let mut fdt = FdtWriter::new().unwrap();
 
     // For an explanation why these nodes were introduced in the blob take a look at
     // https://github.com/torvalds/linux/blob/master/Documentation/devicetree/booting-without-of.txt#L845
