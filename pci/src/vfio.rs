@@ -306,6 +306,196 @@ struct VfioCommon {
     interrupt: Interrupt,
 }
 
+impl VfioCommon {
+    fn allocate_bars(
+        &mut self,
+        allocator: &mut SystemAllocator,
+        vfio_pci_config: &dyn VfioPciConfig,
+    ) -> std::result::Result<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>, PciDeviceError>
+    {
+        let mut ranges = Vec::new();
+        let mut bar_id = VFIO_PCI_BAR0_REGION_INDEX as u32;
+
+        // Going through all regular regions to compute the BAR size.
+        // We're not saving the BAR address to restore it, because we
+        // are going to allocate a guest address for each BAR and write
+        // that new address back.
+        while bar_id < VFIO_PCI_CONFIG_REGION_INDEX {
+            let region_size: u64;
+            let bar_addr: GuestAddress;
+
+            let bar_offset = if bar_id == VFIO_PCI_ROM_REGION_INDEX {
+                (PCI_ROM_EXP_BAR_INDEX * 4) as u32
+            } else {
+                PCI_CONFIG_BAR_OFFSET + bar_id * 4
+            };
+
+            // First read flags
+            let flags = vfio_pci_config.read_config_dword(bar_offset);
+
+            // Is this an IO BAR?
+            let io_bar = if bar_id != VFIO_PCI_ROM_REGION_INDEX {
+                matches!(flags & PCI_CONFIG_IO_BAR, PCI_CONFIG_IO_BAR)
+            } else {
+                false
+            };
+
+            // Is this a 64-bit BAR?
+            let is_64bit_bar = if bar_id != VFIO_PCI_ROM_REGION_INDEX {
+                matches!(
+                    flags & PCI_CONFIG_MEMORY_BAR_64BIT,
+                    PCI_CONFIG_MEMORY_BAR_64BIT
+                )
+            } else {
+                false
+            };
+
+            // By default, the region type is 32 bits memory BAR.
+            let mut region_type = PciBarRegionType::Memory32BitRegion;
+
+            // To get size write all 1s
+            vfio_pci_config.write_config_dword(bar_offset, 0xffff_ffff);
+
+            // And read back BAR value. The device will write zeros for bits it doesn't care about
+            let mut lower = vfio_pci_config.read_config_dword(bar_offset);
+
+            if io_bar {
+                #[cfg(target_arch = "x86_64")]
+                {
+                    // IO BAR
+                    region_type = PciBarRegionType::IoRegion;
+
+                    // Mask flag bits (lowest 2 for I/O bars)
+                    lower &= !0b11;
+
+                    // BAR is not enabled
+                    if lower == 0 {
+                        bar_id += 1;
+                        continue;
+                    }
+
+                    // Invert bits and add 1 to calculate size
+                    region_size = (!lower + 1) as u64;
+
+                    // The address needs to be 4 bytes aligned.
+                    bar_addr = allocator
+                        .allocate_io_addresses(None, region_size, Some(0x4))
+                        .ok_or(PciDeviceError::IoAllocationFailed(region_size))?;
+                }
+                #[cfg(target_arch = "aarch64")]
+                unimplemented!()
+            } else if is_64bit_bar {
+                // 64 bits Memory BAR
+                region_type = PciBarRegionType::Memory64BitRegion;
+
+                // Query size of upper BAR of 64-bit BAR
+                let upper_offset: u32 = PCI_CONFIG_BAR_OFFSET + (bar_id + 1) * 4;
+                vfio_pci_config.write_config_dword(upper_offset, 0xffff_ffff);
+                let upper = vfio_pci_config.read_config_dword(upper_offset);
+
+                let mut combined_size = u64::from(upper) << 32 | u64::from(lower);
+
+                // Mask out flag bits (lowest 4 for memory bars)
+                combined_size &= !0b1111;
+
+                // BAR is not enabled
+                if combined_size == 0 {
+                    bar_id += 1;
+                    continue;
+                }
+
+                // Invert and add 1 to to find size
+                region_size = (!combined_size + 1) as u64;
+
+                // BAR allocation must be naturally aligned
+                bar_addr = allocator
+                    .allocate_mmio_addresses(None, region_size, Some(region_size))
+                    .ok_or(PciDeviceError::IoAllocationFailed(region_size))?;
+            } else {
+                // Mask out flag bits (lowest 4 for memory bars)
+                lower &= !0b1111;
+
+                if lower == 0 {
+                    bar_id += 1;
+                    continue;
+                }
+
+                // Invert and add 1 to to find size
+                region_size = (!lower + 1) as u64;
+
+                // BAR allocation must be naturally aligned
+                bar_addr = allocator
+                    .allocate_mmio_hole_addresses(None, region_size, Some(region_size))
+                    .ok_or(PciDeviceError::IoAllocationFailed(region_size))?;
+            }
+
+            let reg_idx = if bar_id == VFIO_PCI_ROM_REGION_INDEX {
+                PCI_ROM_EXP_BAR_INDEX
+            } else {
+                bar_id as usize
+            };
+
+            // We can now build our BAR configuration block.
+            let config = PciBarConfiguration::default()
+                .set_register_index(reg_idx)
+                .set_address(bar_addr.raw_value())
+                .set_size(region_size)
+                .set_region_type(region_type);
+
+            if bar_id == VFIO_PCI_ROM_REGION_INDEX {
+                self.configuration
+                    .add_pci_rom_bar(&config, flags & 0x1)
+                    .map_err(|e| PciDeviceError::IoRegistrationFailed(bar_addr.raw_value(), e))?;
+            } else {
+                self.configuration
+                    .add_pci_bar(&config)
+                    .map_err(|e| PciDeviceError::IoRegistrationFailed(bar_addr.raw_value(), e))?;
+            }
+
+            ranges.push((bar_addr, region_size, region_type));
+            self.mmio_regions.push(MmioRegion {
+                start: bar_addr,
+                length: region_size,
+                type_: region_type,
+                index: bar_id as u32,
+                mem_slot: None,
+                host_addr: None,
+                mmap_size: None,
+            });
+
+            bar_id += 1;
+            if is_64bit_bar {
+                bar_id += 1;
+            }
+        }
+
+        Ok(ranges)
+    }
+
+    fn free_bars(
+        &mut self,
+        allocator: &mut SystemAllocator,
+    ) -> std::result::Result<(), PciDeviceError> {
+        for region in self.mmio_regions.iter() {
+            match region.type_ {
+                PciBarRegionType::IoRegion => {
+                    #[cfg(target_arch = "x86_64")]
+                    allocator.free_io_addresses(region.start, region.length);
+                    #[cfg(target_arch = "aarch64")]
+                    error!("I/O region is not supported");
+                }
+                PciBarRegionType::Memory32BitRegion => {
+                    allocator.free_mmio_hole_addresses(region.start, region.length);
+                }
+                PciBarRegionType::Memory64BitRegion => {
+                    allocator.free_mmio_addresses(region.start, region.length);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 /// VfioPciDevice represents a VFIO PCI device.
 /// This structure implements the BusDevice and PciDevice traits.
 ///
@@ -828,190 +1018,15 @@ impl PciDevice for VfioPciDevice {
         allocator: &mut SystemAllocator,
     ) -> std::result::Result<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>, PciDeviceError>
     {
-        let mut ranges = Vec::new();
-        let mut bar_id = VFIO_PCI_BAR0_REGION_INDEX as u32;
-
-        // Going through all regular regions to compute the BAR size.
-        // We're not saving the BAR address to restore it, because we
-        // are going to allocate a guest address for each BAR and write
-        // that new address back.
-        while bar_id < VFIO_PCI_CONFIG_REGION_INDEX {
-            let region_size: u64;
-            let bar_addr: GuestAddress;
-
-            let bar_offset = if bar_id == VFIO_PCI_ROM_REGION_INDEX {
-                (PCI_ROM_EXP_BAR_INDEX * 4) as u32
-            } else {
-                PCI_CONFIG_BAR_OFFSET + bar_id * 4
-            };
-
-            // First read flags
-            let flags = self.vfio_pci_configuration.read_config_dword(bar_offset);
-
-            // Is this an IO BAR?
-            let io_bar = if bar_id != VFIO_PCI_ROM_REGION_INDEX {
-                matches!(flags & PCI_CONFIG_IO_BAR, PCI_CONFIG_IO_BAR)
-            } else {
-                false
-            };
-
-            // Is this a 64-bit BAR?
-            let is_64bit_bar = if bar_id != VFIO_PCI_ROM_REGION_INDEX {
-                matches!(
-                    flags & PCI_CONFIG_MEMORY_BAR_64BIT,
-                    PCI_CONFIG_MEMORY_BAR_64BIT
-                )
-            } else {
-                false
-            };
-
-            // By default, the region type is 32 bits memory BAR.
-            let mut region_type = PciBarRegionType::Memory32BitRegion;
-
-            // To get size write all 1s
-            self.vfio_pci_configuration
-                .write_config_dword(bar_offset, 0xffff_ffff);
-
-            // And read back BAR value. The device will write zeros for bits it doesn't care about
-            let mut lower = self.vfio_pci_configuration.read_config_dword(bar_offset);
-
-            if io_bar {
-                #[cfg(target_arch = "x86_64")]
-                {
-                    // IO BAR
-                    region_type = PciBarRegionType::IoRegion;
-
-                    // Mask flag bits (lowest 2 for I/O bars)
-                    lower &= !0b11;
-
-                    // BAR is not enabled
-                    if lower == 0 {
-                        bar_id += 1;
-                        continue;
-                    }
-
-                    // Invert bits and add 1 to calculate size
-                    region_size = (!lower + 1) as u64;
-
-                    // The address needs to be 4 bytes aligned.
-                    bar_addr = allocator
-                        .allocate_io_addresses(None, region_size, Some(0x4))
-                        .ok_or(PciDeviceError::IoAllocationFailed(region_size))?;
-                }
-                #[cfg(target_arch = "aarch64")]
-                unimplemented!()
-            } else if is_64bit_bar {
-                // 64 bits Memory BAR
-                region_type = PciBarRegionType::Memory64BitRegion;
-
-                // Query size of upper BAR of 64-bit BAR
-                let upper_offset: u32 = PCI_CONFIG_BAR_OFFSET + (bar_id + 1) * 4;
-                self.vfio_pci_configuration
-                    .write_config_dword(upper_offset, 0xffff_ffff);
-                let upper = self.vfio_pci_configuration.read_config_dword(upper_offset);
-
-                let mut combined_size = u64::from(upper) << 32 | u64::from(lower);
-
-                // Mask out flag bits (lowest 4 for memory bars)
-                combined_size &= !0b1111;
-
-                // BAR is not enabled
-                if combined_size == 0 {
-                    bar_id += 1;
-                    continue;
-                }
-
-                // Invert and add 1 to to find size
-                region_size = (!combined_size + 1) as u64;
-
-                // BAR allocation must be naturally aligned
-                bar_addr = allocator
-                    .allocate_mmio_addresses(None, region_size, Some(region_size))
-                    .ok_or(PciDeviceError::IoAllocationFailed(region_size))?;
-            } else {
-                // Mask out flag bits (lowest 4 for memory bars)
-                lower &= !0b1111;
-
-                if lower == 0 {
-                    bar_id += 1;
-                    continue;
-                }
-
-                // Invert and add 1 to to find size
-                region_size = (!lower + 1) as u64;
-
-                // BAR allocation must be naturally aligned
-                bar_addr = allocator
-                    .allocate_mmio_hole_addresses(None, region_size, Some(region_size))
-                    .ok_or(PciDeviceError::IoAllocationFailed(region_size))?;
-            }
-
-            let reg_idx = if bar_id == VFIO_PCI_ROM_REGION_INDEX {
-                PCI_ROM_EXP_BAR_INDEX
-            } else {
-                bar_id as usize
-            };
-
-            // We can now build our BAR configuration block.
-            let config = PciBarConfiguration::default()
-                .set_register_index(reg_idx)
-                .set_address(bar_addr.raw_value())
-                .set_size(region_size)
-                .set_region_type(region_type);
-
-            if bar_id == VFIO_PCI_ROM_REGION_INDEX {
-                self.common
-                    .configuration
-                    .add_pci_rom_bar(&config, flags & 0x1)
-                    .map_err(|e| PciDeviceError::IoRegistrationFailed(bar_addr.raw_value(), e))?;
-            } else {
-                self.common
-                    .configuration
-                    .add_pci_bar(&config)
-                    .map_err(|e| PciDeviceError::IoRegistrationFailed(bar_addr.raw_value(), e))?;
-            }
-
-            ranges.push((bar_addr, region_size, region_type));
-            self.common.mmio_regions.push(MmioRegion {
-                start: bar_addr,
-                length: region_size,
-                type_: region_type,
-                index: bar_id as u32,
-                mem_slot: None,
-                host_addr: None,
-                mmap_size: None,
-            });
-
-            bar_id += 1;
-            if is_64bit_bar {
-                bar_id += 1;
-            }
-        }
-
-        Ok(ranges)
+        self.common
+            .allocate_bars(allocator, &self.vfio_pci_configuration)
     }
 
     fn free_bars(
         &mut self,
         allocator: &mut SystemAllocator,
     ) -> std::result::Result<(), PciDeviceError> {
-        for region in self.common.mmio_regions.iter() {
-            match region.type_ {
-                PciBarRegionType::IoRegion => {
-                    #[cfg(target_arch = "x86_64")]
-                    allocator.free_io_addresses(region.start, region.length);
-                    #[cfg(target_arch = "aarch64")]
-                    error!("I/O region is not supported");
-                }
-                PciBarRegionType::Memory32BitRegion => {
-                    allocator.free_mmio_hole_addresses(region.start, region.length);
-                }
-                PciBarRegionType::Memory64BitRegion => {
-                    allocator.free_mmio_addresses(region.start, region.length);
-                }
-            }
-        }
-        Ok(())
+        self.common.free_bars(allocator)
     }
 
     fn write_config_register(
