@@ -269,11 +269,19 @@ pub(crate) trait Vfio {
         self.write_config(offset, &data)
     }
 
-    fn read_config(&self, _offset: u32, _data: &mut [u8]) {
+    fn read_config(&self, offset: u32, data: &mut [u8]) {
+        self.region_read(VFIO_PCI_CONFIG_REGION_INDEX, offset.into(), data.as_mut());
+    }
+
+    fn write_config(&self, offset: u32, data: &[u8]) {
+        self.region_write(VFIO_PCI_CONFIG_REGION_INDEX, offset.into(), data)
+    }
+
+    fn region_read(&self, _index: u32, _offset: u64, _data: &mut [u8]) {
         unimplemented!()
     }
 
-    fn write_config(&self, _offset: u32, _data: &[u8]) {
+    fn region_write(&self, _index: u32, _offset: u64, _data: &[u8]) {
         unimplemented!()
     }
 }
@@ -289,14 +297,12 @@ impl VfioDeviceWrapper {
 }
 
 impl Vfio for VfioDeviceWrapper {
-    fn read_config(&self, offset: u32, data: &mut [u8]) {
-        self.device
-            .region_read(VFIO_PCI_CONFIG_REGION_INDEX, data.as_mut(), offset.into());
+    fn region_read(&self, index: u32, offset: u64, data: &mut [u8]) {
+        self.device.region_read(index, data, offset)
     }
 
-    fn write_config(&self, offset: u32, data: &[u8]) {
-        self.device
-            .region_write(VFIO_PCI_CONFIG_REGION_INDEX, &data, offset.into())
+    fn region_write(&self, index: u32, offset: u64, data: &[u8]) {
+        self.device.region_write(index, data, offset)
     }
 }
 
