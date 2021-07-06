@@ -246,19 +246,34 @@ pub struct MmioRegion {
 }
 
 trait VfioPciConfig {
-    fn read_config_byte(&self, _offset: u32) -> u8 {
+    fn read_config_byte(&self, offset: u32) -> u8 {
+        let mut data: [u8; 1] = [0];
+        self.read_config(offset, &mut data);
+        data[0]
+    }
+
+    fn read_config_word(&self, offset: u32) -> u16 {
+        let mut data: [u8; 2] = [0, 0];
+        self.read_config(offset, &mut data);
+        u16::from_le_bytes(data)
+    }
+
+    fn read_config_dword(&self, offset: u32) -> u32 {
+        let mut data: [u8; 4] = [0, 0, 0, 0];
+        self.read_config(offset, &mut data);
+        u32::from_le_bytes(data)
+    }
+
+    fn write_config_dword(&self, offset: u32, buf: u32) {
+        let data: [u8; 4] = buf.to_le_bytes();
+        self.write_config(offset, &data)
+    }
+
+    fn read_config(&self, _offset: u32, _data: &mut [u8]) {
         unimplemented!()
     }
 
-    fn read_config_word(&self, _offset: u32) -> u16 {
-        unimplemented!()
-    }
-
-    fn read_config_dword(&self, _offset: u32) -> u32 {
-        unimplemented!()
-    }
-
-    fn write_config_dword(&self, _buf: u32, _offset: u32) {
+    fn write_config(&self, _offset: u32, _data: &[u8]) {
         unimplemented!()
     }
 }
@@ -274,32 +289,12 @@ impl VfioPciDeviceConfig {
 }
 
 impl VfioPciConfig for VfioPciDeviceConfig {
-    fn read_config_byte(&self, offset: u32) -> u8 {
-        let mut data: [u8; 1] = [0];
+    fn read_config(&self, offset: u32, data: &mut [u8]) {
         self.device
             .region_read(VFIO_PCI_CONFIG_REGION_INDEX, data.as_mut(), offset.into());
-
-        data[0]
     }
 
-    fn read_config_word(&self, offset: u32) -> u16 {
-        let mut data: [u8; 2] = [0, 0];
-        self.device
-            .region_read(VFIO_PCI_CONFIG_REGION_INDEX, data.as_mut(), offset.into());
-
-        u16::from_le_bytes(data)
-    }
-
-    fn read_config_dword(&self, offset: u32) -> u32 {
-        let mut data: [u8; 4] = [0, 0, 0, 0];
-        self.device
-            .region_read(VFIO_PCI_CONFIG_REGION_INDEX, data.as_mut(), offset.into());
-
-        u32::from_le_bytes(data)
-    }
-
-    fn write_config_dword(&self, buf: u32, offset: u32) {
-        let data: [u8; 4] = buf.to_le_bytes();
+    fn write_config(&self, offset: u32, data: &[u8]) {
         self.device
             .region_write(VFIO_PCI_CONFIG_REGION_INDEX, &data, offset.into())
     }
@@ -869,7 +864,7 @@ impl PciDevice for VfioPciDevice {
 
             // To get size write all 1s
             self.vfio_pci_configuration
-                .write_config_dword(0xffff_ffff, bar_offset);
+                .write_config_dword(bar_offset, 0xffff_ffff);
 
             // And read back BAR value. The device will write zeros for bits it doesn't care about
             let mut lower = self.vfio_pci_configuration.read_config_dword(bar_offset);
@@ -906,7 +901,7 @@ impl PciDevice for VfioPciDevice {
                 // Query size of upper BAR of 64-bit BAR
                 let upper_offset: u32 = PCI_CONFIG_BAR_OFFSET + (bar_id + 1) * 4;
                 self.vfio_pci_configuration
-                    .write_config_dword(0xffff_ffff, upper_offset);
+                    .write_config_dword(upper_offset, 0xffff_ffff);
                 let upper = self.vfio_pci_configuration.read_config_dword(upper_offset);
 
                 let mut combined_size = u64::from(upper) << 32 | u64::from(lower);
@@ -1062,8 +1057,8 @@ impl PciDevice for VfioPciDevice {
         // enabling this bit, we first need to enable the MSI interrupts with
         // VFIO through VFIO_DEVICE_SET_IRQS ioctl, and only after we can write
         // to the device region to update the MSI Enable bit.
-        self.device
-            .region_write(VFIO_PCI_CONFIG_REGION_INDEX, data, reg + offset);
+        self.vfio_pci_configuration
+            .write_config((reg + offset) as u32, data);
 
         None
     }
