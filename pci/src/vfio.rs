@@ -245,15 +245,35 @@ pub struct MmioRegion {
     mmap_size: Option<usize>,
 }
 
-struct VfioPciConfig {
+trait VfioPciConfig {
+    fn read_config_byte(&self, _offset: u32) -> u8 {
+        unimplemented!()
+    }
+
+    fn read_config_word(&self, _offset: u32) -> u16 {
+        unimplemented!()
+    }
+
+    fn read_config_dword(&self, _offset: u32) -> u32 {
+        unimplemented!()
+    }
+
+    fn write_config_dword(&self, _buf: u32, _offset: u32) {
+        unimplemented!()
+    }
+}
+
+struct VfioPciDeviceConfig {
     device: Arc<VfioDevice>,
 }
 
-impl VfioPciConfig {
+impl VfioPciDeviceConfig {
     fn new(device: Arc<VfioDevice>) -> Self {
-        VfioPciConfig { device }
+        Self { device }
     }
+}
 
+impl VfioPciConfig for VfioPciDeviceConfig {
     fn read_config_byte(&self, offset: u32) -> u8 {
         let mut data: [u8; 1] = [0];
         self.device
@@ -295,7 +315,7 @@ pub struct VfioPciDevice {
     vm: Arc<dyn hypervisor::Vm>,
     device: Arc<VfioDevice>,
     container: Arc<VfioContainer>,
-    vfio_pci_configuration: VfioPciConfig,
+    vfio_pci_configuration: VfioPciDeviceConfig,
     configuration: PciConfiguration,
     mmio_regions: Vec<MmioRegion>,
     interrupt: Interrupt,
@@ -328,7 +348,7 @@ impl VfioPciDevice {
             None,
         );
 
-        let vfio_pci_configuration = VfioPciConfig::new(Arc::clone(&device));
+        let vfio_pci_configuration = VfioPciDeviceConfig::new(Arc::clone(&device));
 
         let mut vfio_pci_device = VfioPciDevice {
             vm: vm.clone(),
