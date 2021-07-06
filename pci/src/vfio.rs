@@ -88,13 +88,13 @@ enum InterruptUpdateAction {
     DisableMsix,
 }
 
-struct VfioIntx {
+pub(crate) struct VfioIntx {
     interrupt_source_group: Arc<dyn InterruptSourceGroup>,
     enabled: bool,
 }
 
-struct VfioMsi {
-    cfg: MsiConfig,
+pub(crate) struct VfioMsi {
+    pub(crate) cfg: MsiConfig,
     cap_offset: u32,
     interrupt_source_group: Arc<dyn InterruptSourceGroup>,
 }
@@ -119,8 +119,8 @@ impl VfioMsi {
     }
 }
 
-struct VfioMsix {
-    bar: MsixConfig,
+pub(crate) struct VfioMsix {
+    pub(crate) bar: MsixConfig,
     cap: MsixCap,
     cap_offset: u32,
     interrupt_source_group: Arc<dyn InterruptSourceGroup>,
@@ -157,10 +157,10 @@ impl VfioMsix {
     }
 }
 
-struct Interrupt {
-    intx: Option<VfioIntx>,
-    msi: Option<VfioMsi>,
-    msix: Option<VfioMsix>,
+pub(crate) struct Interrupt {
+    pub(crate) intx: Option<VfioIntx>,
+    pub(crate) msi: Option<VfioMsi>,
+    pub(crate) msix: Option<VfioMsix>,
 }
 
 impl Interrupt {
@@ -225,7 +225,7 @@ impl Interrupt {
         }
     }
 
-    fn intx_in_use(&self) -> bool {
+    pub(crate) fn intx_in_use(&self) -> bool {
         if let Some(intx) = &self.intx {
             return intx.enabled;
         }
@@ -238,14 +238,14 @@ impl Interrupt {
 pub struct MmioRegion {
     pub start: GuestAddress,
     pub length: GuestUsize,
-    type_: PciBarRegionType,
-    index: u32,
-    mem_slot: Option<u32>,
-    host_addr: Option<u64>,
-    mmap_size: Option<usize>,
+    pub(crate) type_: PciBarRegionType,
+    pub(crate) index: u32,
+    pub(crate) mem_slot: Option<u32>,
+    pub(crate) host_addr: Option<u64>,
+    pub(crate) mmap_size: Option<usize>,
 }
 
-trait VfioPciConfig {
+pub(crate) trait VfioPciConfig {
     fn read_config_byte(&self, offset: u32) -> u8 {
         let mut data: [u8; 1] = [0];
         self.read_config(offset, &mut data);
@@ -300,14 +300,14 @@ impl VfioPciConfig for VfioPciDeviceConfig {
     }
 }
 
-struct VfioCommon {
-    configuration: PciConfiguration,
-    mmio_regions: Vec<MmioRegion>,
-    interrupt: Interrupt,
+pub(crate) struct VfioCommon {
+    pub(crate) configuration: PciConfiguration,
+    pub(crate) mmio_regions: Vec<MmioRegion>,
+    pub(crate) interrupt: Interrupt,
 }
 
 impl VfioCommon {
-    fn allocate_bars(
+    pub(crate) fn allocate_bars(
         &mut self,
         allocator: &mut SystemAllocator,
         vfio_pci_config: &dyn VfioPciConfig,
@@ -472,7 +472,7 @@ impl VfioCommon {
         Ok(ranges)
     }
 
-    fn free_bars(
+    pub(crate) fn free_bars(
         &mut self,
         allocator: &mut SystemAllocator,
     ) -> std::result::Result<(), PciDeviceError> {
@@ -495,7 +495,7 @@ impl VfioCommon {
         Ok(())
     }
 
-    fn parse_msix_capabilities(
+    pub(crate) fn parse_msix_capabilities(
         &mut self,
         cap: u8,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
@@ -530,7 +530,7 @@ impl VfioCommon {
         });
     }
 
-    fn parse_msi_capabilities(
+    pub(crate) fn parse_msi_capabilities(
         &mut self,
         cap: u8,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
