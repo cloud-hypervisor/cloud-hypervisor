@@ -245,7 +245,7 @@ pub struct MmioRegion {
     pub(crate) mmap_size: Option<usize>,
 }
 
-pub(crate) trait VfioPciConfig {
+pub(crate) trait Vfio {
     fn read_config_byte(&self, offset: u32) -> u8 {
         let mut data: [u8; 1] = [0];
         self.read_config(offset, &mut data);
@@ -278,17 +278,17 @@ pub(crate) trait VfioPciConfig {
     }
 }
 
-struct VfioPciDeviceConfig {
+struct VfioDeviceWrapper {
     device: Arc<VfioDevice>,
 }
 
-impl VfioPciDeviceConfig {
+impl VfioDeviceWrapper {
     fn new(device: Arc<VfioDevice>) -> Self {
         Self { device }
     }
 }
 
-impl VfioPciConfig for VfioPciDeviceConfig {
+impl Vfio for VfioDeviceWrapper {
     fn read_config(&self, offset: u32, data: &mut [u8]) {
         self.device
             .region_read(VFIO_PCI_CONFIG_REGION_INDEX, data.as_mut(), offset.into());
@@ -310,7 +310,7 @@ impl VfioCommon {
     pub(crate) fn allocate_bars(
         &mut self,
         allocator: &mut SystemAllocator,
-        vfio_pci_config: &dyn VfioPciConfig,
+        vfio_wrapper: &dyn Vfio,
     ) -> std::result::Result<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>, PciDeviceError>
     {
         let mut ranges = Vec::new();
@@ -331,7 +331,7 @@ impl VfioCommon {
             };
 
             // First read flags
-            let flags = vfio_pci_config.read_config_dword(bar_offset);
+            let flags = vfio_wrapper.read_config_dword(bar_offset);
 
             // Is this an IO BAR?
             let io_bar = if bar_id != VFIO_PCI_ROM_REGION_INDEX {
@@ -354,10 +354,10 @@ impl VfioCommon {
             let mut region_type = PciBarRegionType::Memory32BitRegion;
 
             // To get size write all 1s
-            vfio_pci_config.write_config_dword(bar_offset, 0xffff_ffff);
+            vfio_wrapper.write_config_dword(bar_offset, 0xffff_ffff);
 
             // And read back BAR value. The device will write zeros for bits it doesn't care about
-            let mut lower = vfio_pci_config.read_config_dword(bar_offset);
+            let mut lower = vfio_wrapper.read_config_dword(bar_offset);
 
             if io_bar {
                 #[cfg(target_arch = "x86_64")]
@@ -390,8 +390,8 @@ impl VfioCommon {
 
                 // Query size of upper BAR of 64-bit BAR
                 let upper_offset: u32 = PCI_CONFIG_BAR_OFFSET + (bar_id + 1) * 4;
-                vfio_pci_config.write_config_dword(upper_offset, 0xffff_ffff);
-                let upper = vfio_pci_config.read_config_dword(upper_offset);
+                vfio_wrapper.write_config_dword(upper_offset, 0xffff_ffff);
+                let upper = vfio_wrapper.read_config_dword(upper_offset);
 
                 let mut combined_size = u64::from(upper) << 32 | u64::from(lower);
 
@@ -499,13 +499,13 @@ impl VfioCommon {
         &mut self,
         cap: u8,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
-        vfio_pci_config: &dyn VfioPciConfig,
+        vfio_wrapper: &dyn Vfio,
     ) {
-        let msg_ctl = vfio_pci_config.read_config_word((cap + 2).into());
+        let msg_ctl = vfio_wrapper.read_config_word((cap + 2).into());
 
-        let table = vfio_pci_config.read_config_dword((cap + 4).into());
+        let table = vfio_wrapper.read_config_dword((cap + 4).into());
 
-        let pba = vfio_pci_config.read_config_dword((cap + 8).into());
+        let pba = vfio_wrapper.read_config_dword((cap + 8).into());
 
         let msix_cap = MsixCap {
             msg_ctl,
@@ -534,9 +534,9 @@ impl VfioCommon {
         &mut self,
         cap: u8,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
-        vfio_pci_config: &dyn VfioPciConfig,
+        vfio_wrapper: &dyn Vfio,
     ) {
-        let msg_ctl = vfio_pci_config.read_config_word((cap + 2).into());
+        let msg_ctl = vfio_wrapper.read_config_word((cap + 2).into());
 
         let interrupt_source_group = interrupt_manager
             .create_group(MsiIrqGroupConfig {
@@ -565,7 +565,7 @@ pub struct VfioPciDevice {
     vm: Arc<dyn hypervisor::Vm>,
     device: Arc<VfioDevice>,
     container: Arc<VfioContainer>,
-    vfio_pci_configuration: VfioPciDeviceConfig,
+    vfio_wrapper: VfioDeviceWrapper,
     common: VfioCommon,
     iommu_attached: bool,
 }
@@ -596,13 +596,13 @@ impl VfioPciDevice {
             None,
         );
 
-        let vfio_pci_configuration = VfioPciDeviceConfig::new(Arc::clone(&device));
+        let vfio_wrapper = VfioDeviceWrapper::new(Arc::clone(&device));
 
         let mut vfio_pci_device = VfioPciDevice {
             vm: vm.clone(),
             device,
             container,
-            vfio_pci_configuration,
+            vfio_wrapper,
             common: VfioCommon {
                 mmio_regions: Vec::new(),
                 configuration,
@@ -735,13 +735,11 @@ impl VfioPciDevice {
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
     ) {
         let mut cap_next = self
-            .vfio_pci_configuration
+            .vfio_wrapper
             .read_config_byte(PCI_CONFIG_CAPABILITY_OFFSET);
 
         while cap_next != 0 {
-            let cap_id = self
-                .vfio_pci_configuration
-                .read_config_byte(cap_next.into());
+            let cap_id = self.vfio_wrapper.read_config_byte(cap_next.into());
 
             match PciCapabilityId::from(cap_id) {
                 PciCapabilityId::MessageSignalledInterrupts => {
@@ -752,7 +750,7 @@ impl VfioPciDevice {
                             self.common.parse_msi_capabilities(
                                 cap_next,
                                 interrupt_manager,
-                                &self.vfio_pci_configuration,
+                                &self.vfio_wrapper,
                             );
                         }
                     }
@@ -765,7 +763,7 @@ impl VfioPciDevice {
                             self.common.parse_msix_capabilities(
                                 cap_next,
                                 interrupt_manager,
-                                &self.vfio_pci_configuration,
+                                &self.vfio_wrapper,
                             );
                         }
                     }
@@ -773,9 +771,7 @@ impl VfioPciDevice {
                 _ => {}
             };
 
-            cap_next = self
-                .vfio_pci_configuration
-                .read_config_byte((cap_next + 1).into());
+            cap_next = self.vfio_wrapper.read_config_byte((cap_next + 1).into());
         }
     }
 
@@ -1020,8 +1016,7 @@ impl PciDevice for VfioPciDevice {
         allocator: &mut SystemAllocator,
     ) -> std::result::Result<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>, PciDeviceError>
     {
-        self.common
-            .allocate_bars(allocator, &self.vfio_pci_configuration)
+        self.common.allocate_bars(allocator, &self.vfio_wrapper)
     }
 
     fn free_bars(
@@ -1083,8 +1078,7 @@ impl PciDevice for VfioPciDevice {
         // enabling this bit, we first need to enable the MSI interrupts with
         // VFIO through VFIO_DEVICE_SET_IRQS ioctl, and only after we can write
         // to the device region to update the MSI Enable bit.
-        self.vfio_pci_configuration
-            .write_config((reg + offset) as u32, data);
+        self.vfio_wrapper.write_config((reg + offset) as u32, data);
 
         None
     }
@@ -1110,9 +1104,7 @@ impl PciDevice for VfioPciDevice {
         };
 
         // The config register read comes from the VFIO device itself.
-        self.vfio_pci_configuration
-            .read_config_dword((reg_idx * 4) as u32)
-            & mask
+        self.vfio_wrapper.read_config_dword((reg_idx * 4) as u32) & mask
     }
 
     fn detect_bar_reprogramming(
