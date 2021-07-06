@@ -300,6 +300,12 @@ impl VfioPciConfig for VfioPciDeviceConfig {
     }
 }
 
+struct VfioCommon {
+    configuration: PciConfiguration,
+    mmio_regions: Vec<MmioRegion>,
+    interrupt: Interrupt,
+}
+
 /// VfioPciDevice represents a VFIO PCI device.
 /// This structure implements the BusDevice and PciDevice traits.
 ///
@@ -311,9 +317,7 @@ pub struct VfioPciDevice {
     device: Arc<VfioDevice>,
     container: Arc<VfioContainer>,
     vfio_pci_configuration: VfioPciDeviceConfig,
-    configuration: PciConfiguration,
-    mmio_regions: Vec<MmioRegion>,
-    interrupt: Interrupt,
+    common: VfioCommon,
     iommu_attached: bool,
 }
 
@@ -349,13 +353,15 @@ impl VfioPciDevice {
             vm: vm.clone(),
             device,
             container,
-            configuration,
             vfio_pci_configuration,
-            mmio_regions: Vec::new(),
-            interrupt: Interrupt {
-                intx: None,
-                msi: None,
-                msix: None,
+            common: VfioCommon {
+                mmio_regions: Vec::new(),
+                configuration,
+                interrupt: Interrupt {
+                    intx: None,
+                    msi: None,
+                    msix: None,
+                },
             },
             iommu_attached,
         };
@@ -372,7 +378,7 @@ impl VfioPciDevice {
     }
 
     fn enable_intx(&mut self) -> Result<()> {
-        if let Some(intx) = &mut self.interrupt.intx {
+        if let Some(intx) = &mut self.common.interrupt.intx {
             if !intx.enabled {
                 if let Some(eventfd) = intx.interrupt_source_group.notifier(0) {
                     self.device
@@ -390,7 +396,7 @@ impl VfioPciDevice {
     }
 
     fn disable_intx(&mut self) {
-        if let Some(intx) = &mut self.interrupt.intx {
+        if let Some(intx) = &mut self.common.interrupt.intx {
             if intx.enabled {
                 if let Err(e) = self.device.disable_irq(VFIO_PCI_INTX_IRQ_INDEX) {
                     error!("Could not disable INTx: {}", e);
@@ -402,7 +408,7 @@ impl VfioPciDevice {
     }
 
     fn enable_msi(&self) -> Result<()> {
-        if let Some(msi) = &self.interrupt.msi {
+        if let Some(msi) = &self.common.interrupt.msi {
             let mut irq_fds: Vec<EventFd> = Vec::new();
             for i in 0..msi.cfg.num_enabled_vectors() {
                 if let Some(eventfd) = msi.interrupt_source_group.notifier(i as InterruptIndex) {
@@ -427,7 +433,7 @@ impl VfioPciDevice {
     }
 
     fn enable_msix(&self) -> Result<()> {
-        if let Some(msix) = &self.interrupt.msix {
+        if let Some(msix) = &self.common.interrupt.msix {
             let mut irq_fds: Vec<EventFd> = Vec::new();
             for i in 0..msix.bar.table_entries.len() {
                 if let Some(eventfd) = msix.interrupt_source_group.notifier(i as InterruptIndex) {
@@ -464,7 +470,7 @@ impl VfioPciDevice {
         }
 
         if let Some(interrupt_source_group) = legacy_interrupt_group {
-            self.interrupt.intx = Some(VfioIntx {
+            self.common.interrupt.intx = Some(VfioIntx {
                 interrupt_source_group,
                 enabled: false,
             });
@@ -507,7 +513,7 @@ impl VfioPciDevice {
 
         let msix_config = MsixConfig::new(msix_cap.table_size(), interrupt_source_group.clone(), 0);
 
-        self.interrupt.msix = Some(VfioMsix {
+        self.common.interrupt.msix = Some(VfioMsix {
             bar: msix_config,
             cap: msix_cap,
             cap_offset: cap.into(),
@@ -533,7 +539,7 @@ impl VfioPciDevice {
 
         let msi_config = MsiConfig::new(msg_ctl, interrupt_source_group.clone());
 
-        self.interrupt.msi = Some(VfioMsi {
+        self.common.interrupt.msi = Some(VfioMsi {
             cfg: msi_config,
             cap_offset: cap.into(),
             interrupt_source_group,
@@ -582,7 +588,7 @@ impl VfioPciDevice {
     }
 
     fn update_msi_capabilities(&mut self, offset: u64, data: &[u8]) -> Result<()> {
-        match self.interrupt.update_msi(offset, data) {
+        match self.common.interrupt.update_msi(offset, data) {
             Some(InterruptUpdateAction::EnableMsi) => {
                 // Disable INTx before we can enable MSI
                 self.disable_intx();
@@ -600,7 +606,7 @@ impl VfioPciDevice {
     }
 
     fn update_msix_capabilities(&mut self, offset: u64, data: &[u8]) -> Result<()> {
-        match self.interrupt.update_msix(offset, data) {
+        match self.common.interrupt.update_msix(offset, data) {
             Some(InterruptUpdateAction::EnableMsix) => {
                 // Disable INTx before we can enable MSI-X
                 self.disable_intx();
@@ -618,7 +624,7 @@ impl VfioPciDevice {
     }
 
     fn find_region(&self, addr: u64) -> Option<MmioRegion> {
-        for region in self.mmio_regions.iter() {
+        for region in self.common.mmio_regions.iter() {
             if addr >= region.start.raw_value()
                 && addr < region.start.unchecked_add(region.length).raw_value()
             {
@@ -642,12 +648,12 @@ impl VfioPciDevice {
     {
         let fd = self.device.as_raw_fd();
 
-        for region in self.mmio_regions.iter_mut() {
+        for region in self.common.mmio_regions.iter_mut() {
             // We want to skip the mapping of the BAR containing the MSI-X
             // table even if it is mappable. The reason is we need to trap
             // any access to the MSI-X table and update the GSI routing
             // accordingly.
-            if let Some(msix) = &self.interrupt.msix {
+            if let Some(msix) = &self.common.interrupt.msix {
                 if region.index == msix.cap.table_bir() || region.index == msix.cap.pba_bir() {
                     continue;
                 }
@@ -708,7 +714,7 @@ impl VfioPciDevice {
     }
 
     pub fn unmap_mmio_regions(&mut self) {
-        for region in self.mmio_regions.iter() {
+        for region in self.common.mmio_regions.iter() {
             if let (Some(host_addr), Some(mmap_size), Some(mem_slot)) =
                 (region.host_addr, region.mmap_size, region.mem_slot)
             {
@@ -761,7 +767,7 @@ impl VfioPciDevice {
     }
 
     pub fn mmio_regions(&self) -> Vec<MmioRegion> {
-        self.mmio_regions.clone()
+        self.common.mmio_regions.clone()
     }
 }
 
@@ -769,19 +775,19 @@ impl Drop for VfioPciDevice {
     fn drop(&mut self) {
         self.unmap_mmio_regions();
 
-        if let Some(msix) = &self.interrupt.msix {
+        if let Some(msix) = &self.common.interrupt.msix {
             if msix.bar.enabled() {
                 self.disable_msix();
             }
         }
 
-        if let Some(msi) = &self.interrupt.msi {
+        if let Some(msi) = &self.common.interrupt.msi {
             if msi.cfg.enabled() {
                 self.disable_msi();
             }
         }
 
-        if self.interrupt.intx_in_use() {
+        if self.common.interrupt.intx_in_use() {
             self.disable_intx();
         }
     }
@@ -954,17 +960,19 @@ impl PciDevice for VfioPciDevice {
                 .set_region_type(region_type);
 
             if bar_id == VFIO_PCI_ROM_REGION_INDEX {
-                self.configuration
+                self.common
+                    .configuration
                     .add_pci_rom_bar(&config, flags & 0x1)
                     .map_err(|e| PciDeviceError::IoRegistrationFailed(bar_addr.raw_value(), e))?;
             } else {
-                self.configuration
+                self.common
+                    .configuration
                     .add_pci_bar(&config)
                     .map_err(|e| PciDeviceError::IoRegistrationFailed(bar_addr.raw_value(), e))?;
             }
 
             ranges.push((bar_addr, region_size, region_type));
-            self.mmio_regions.push(MmioRegion {
+            self.common.mmio_regions.push(MmioRegion {
                 start: bar_addr,
                 length: region_size,
                 type_: region_type,
@@ -987,7 +995,7 @@ impl PciDevice for VfioPciDevice {
         &mut self,
         allocator: &mut SystemAllocator,
     ) -> std::result::Result<(), PciDeviceError> {
-        for region in self.mmio_regions.iter() {
+        for region in self.common.mmio_regions.iter() {
             match region.type_ {
                 PciBarRegionType::IoRegion => {
                     #[cfg(target_arch = "x86_64")]
@@ -1021,7 +1029,8 @@ impl PciDevice for VfioPciDevice {
             // We keep our local cache updated with the BARs.
             // We'll read it back from there when the guest is asking
             // for BARs (see read_config_register()).
-            self.configuration
+            self.common
+                .configuration
                 .write_config_register(reg_idx, offset, data);
             return None;
         }
@@ -1032,7 +1041,7 @@ impl PciDevice for VfioPciDevice {
         // update our local cache accordingly.
         // Depending on how the capabilities are modified, this could
         // trigger a VFIO MSI or MSI-X toggle.
-        if let Some((cap_id, cap_base)) = self.interrupt.accessed(reg) {
+        if let Some((cap_id, cap_base)) = self.common.interrupt.accessed(reg) {
             let cap_offset: u64 = reg - cap_base + offset;
             match cap_id {
                 PciCapabilityId::MessageSignalledInterrupts => {
@@ -1071,7 +1080,7 @@ impl PciDevice for VfioPciDevice {
         if (PCI_CONFIG_BAR0_INDEX..PCI_CONFIG_BAR0_INDEX + BAR_NUMS).contains(&reg_idx)
             || reg_idx == PCI_ROM_EXP_BAR_INDEX
         {
-            return self.configuration.read_reg(reg_idx);
+            return self.common.configuration.read_reg(reg_idx);
         }
 
         // Since we don't support passing multi-functions devices, we should
@@ -1094,7 +1103,9 @@ impl PciDevice for VfioPciDevice {
         reg_idx: usize,
         data: &[u8],
     ) -> Option<BarReprogrammingParams> {
-        self.configuration.detect_bar_reprogramming(reg_idx, data)
+        self.common
+            .configuration
+            .detect_bar_reprogramming(reg_idx, data)
     }
 
     fn read_bar(&mut self, base: u64, offset: u64, data: &mut [u8]) {
@@ -1102,8 +1113,12 @@ impl PciDevice for VfioPciDevice {
         if let Some(region) = self.find_region(addr) {
             let offset = addr - region.start.raw_value();
 
-            if self.interrupt.msix_table_accessed(region.index, offset) {
-                self.interrupt.msix_read_table(offset, data);
+            if self
+                .common
+                .interrupt
+                .msix_table_accessed(region.index, offset)
+            {
+                self.common.interrupt.msix_read_table(offset, data);
             } else {
                 self.device.region_read(region.index, data, offset);
             }
@@ -1112,7 +1127,7 @@ impl PciDevice for VfioPciDevice {
         // INTx EOI
         // The guest reading from the BAR potentially means the interrupt has
         // been received and can be acknowledged.
-        if self.interrupt.intx_in_use() {
+        if self.common.interrupt.intx_in_use() {
             if let Err(e) = self.device.unmask_irq(VFIO_PCI_INTX_IRQ_INDEX) {
                 error!("Failed unmasking INTx IRQ: {}", e);
             }
@@ -1125,8 +1140,12 @@ impl PciDevice for VfioPciDevice {
             let offset = addr - region.start.raw_value();
 
             // If the MSI-X table is written to, we need to update our cache.
-            if self.interrupt.msix_table_accessed(region.index, offset) {
-                self.interrupt.msix_write_table(offset, data);
+            if self
+                .common
+                .interrupt
+                .msix_table_accessed(region.index, offset)
+            {
+                self.common.interrupt.msix_write_table(offset, data);
             } else {
                 self.device.region_write(region.index, data, offset);
             }
@@ -1135,7 +1154,7 @@ impl PciDevice for VfioPciDevice {
         // INTx EOI
         // The guest writing to the BAR potentially means the interrupt has
         // been received and can be acknowledged.
-        if self.interrupt.intx_in_use() {
+        if self.common.interrupt.intx_in_use() {
             if let Err(e) = self.device.unmask_irq(VFIO_PCI_INTX_IRQ_INDEX) {
                 error!("Failed unmasking INTx IRQ: {}", e);
             }
@@ -1145,7 +1164,7 @@ impl PciDevice for VfioPciDevice {
     }
 
     fn move_bar(&mut self, old_base: u64, new_base: u64) -> result::Result<(), io::Error> {
-        for region in self.mmio_regions.iter_mut() {
+        for region in self.common.mmio_regions.iter_mut() {
             if region.start.raw_value() == old_base {
                 region.start = GuestAddress(new_base);
 
