@@ -28,6 +28,8 @@ pub use x86_64::VcpuMshvState as CpuState;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::*;
 
+#[cfg(target_arch = "x86_64")]
+use std::fs::File;
 use std::os::unix::io::AsRawFd;
 use std::sync::RwLock;
 
@@ -758,6 +760,10 @@ impl vm::Vm for MshvVm {
     }
     #[cfg(target_arch = "x86_64")]
     fn enable_split_irq(&self) -> vm::Result<()> {
+        Ok(())
+    }
+    #[cfg(target_arch = "x86_64")]
+    fn enable_sgx_attribute(&self, _file: File) -> vm::Result<()> {
         Ok(())
     }
     fn register_ioevent(
