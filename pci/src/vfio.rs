@@ -15,7 +15,7 @@ use std::ptr::null_mut;
 use std::sync::{Arc, Barrier};
 use std::{fmt, io, result};
 use vfio_bindings::bindings::vfio::*;
-use vfio_ioctls::{VfioContainer, VfioDevice, VfioError};
+use vfio_ioctls::{VfioContainer, VfioDevice, VfioError, VfioIrq};
 use vm_allocator::SystemAllocator;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
@@ -284,6 +284,10 @@ pub(crate) trait Vfio {
     fn region_write(&self, _index: u32, _offset: u64, _data: &[u8]) {
         unimplemented!()
     }
+
+    fn get_irq_info(&self, _irq_index: u32) -> Option<&VfioIrq> {
+        unimplemented!()
+    }
 }
 
 struct VfioDeviceWrapper {
@@ -303,6 +307,10 @@ impl Vfio for VfioDeviceWrapper {
 
     fn region_write(&self, index: u32, offset: u64, data: &[u8]) {
         self.device.region_write(index, data, offset)
+    }
+
+    fn get_irq_info(&self, irq_index: u32) -> Option<&VfioIrq> {
+        self.device.get_irq_info(irq_index)
     }
 }
 
@@ -559,6 +567,42 @@ impl VfioCommon {
             interrupt_source_group,
         });
     }
+
+    pub(crate) fn parse_capabilities(
+        &mut self,
+        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+        vfio_wrapper: &dyn Vfio,
+    ) {
+        let mut cap_next = vfio_wrapper.read_config_byte(PCI_CONFIG_CAPABILITY_OFFSET);
+
+        while cap_next != 0 {
+            let cap_id = vfio_wrapper.read_config_byte(cap_next.into());
+
+            match PciCapabilityId::from(cap_id) {
+                PciCapabilityId::MessageSignalledInterrupts => {
+                    if let Some(irq_info) = vfio_wrapper.get_irq_info(VFIO_PCI_MSI_IRQ_INDEX) {
+                        if irq_info.count > 0 {
+                            // Parse capability only if the VFIO device
+                            // supports MSI.
+                            self.parse_msi_capabilities(cap_next, interrupt_manager, vfio_wrapper);
+                        }
+                    }
+                }
+                PciCapabilityId::MsiX => {
+                    if let Some(irq_info) = vfio_wrapper.get_irq_info(VFIO_PCI_MSIX_IRQ_INDEX) {
+                        if irq_info.count > 0 {
+                            // Parse capability only if the VFIO device
+                            // supports MSI-X.
+                            self.parse_msix_capabilities(cap_next, interrupt_manager, vfio_wrapper);
+                        }
+                    }
+                }
+                _ => {}
+            };
+
+            cap_next = vfio_wrapper.read_config_byte((cap_next + 1).into());
+        }
+    }
 }
 
 /// VfioPciDevice represents a VFIO PCI device.
@@ -604,24 +648,26 @@ impl VfioPciDevice {
 
         let vfio_wrapper = VfioDeviceWrapper::new(Arc::clone(&device));
 
+        let mut common = VfioCommon {
+            mmio_regions: Vec::new(),
+            configuration,
+            interrupt: Interrupt {
+                intx: None,
+                msi: None,
+                msix: None,
+            },
+        };
+
+        common.parse_capabilities(msi_interrupt_manager, &vfio_wrapper);
+
         let mut vfio_pci_device = VfioPciDevice {
             vm: vm.clone(),
             device,
             container,
             vfio_wrapper,
-            common: VfioCommon {
-                mmio_regions: Vec::new(),
-                configuration,
-                interrupt: Interrupt {
-                    intx: None,
-                    msi: None,
-                    msix: None,
-                },
-            },
+            common,
             iommu_attached,
         };
-
-        vfio_pci_device.parse_capabilities(msi_interrupt_manager);
 
         vfio_pci_device.initialize_legacy_interrupt(legacy_interrupt_group)?;
 
@@ -734,51 +780,6 @@ impl VfioPciDevice {
         }
 
         Ok(())
-    }
-
-    fn parse_capabilities(
-        &mut self,
-        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
-    ) {
-        let mut cap_next = self
-            .vfio_wrapper
-            .read_config_byte(PCI_CONFIG_CAPABILITY_OFFSET);
-
-        while cap_next != 0 {
-            let cap_id = self.vfio_wrapper.read_config_byte(cap_next.into());
-
-            match PciCapabilityId::from(cap_id) {
-                PciCapabilityId::MessageSignalledInterrupts => {
-                    if let Some(irq_info) = self.device.get_irq_info(VFIO_PCI_MSI_IRQ_INDEX) {
-                        if irq_info.count > 0 {
-                            // Parse capability only if the VFIO device
-                            // supports MSI.
-                            self.common.parse_msi_capabilities(
-                                cap_next,
-                                interrupt_manager,
-                                &self.vfio_wrapper,
-                            );
-                        }
-                    }
-                }
-                PciCapabilityId::MsiX => {
-                    if let Some(irq_info) = self.device.get_irq_info(VFIO_PCI_MSIX_IRQ_INDEX) {
-                        if irq_info.count > 0 {
-                            // Parse capability only if the VFIO device
-                            // supports MSI-X.
-                            self.common.parse_msix_capabilities(
-                                cap_next,
-                                interrupt_manager,
-                                &self.vfio_wrapper,
-                            );
-                        }
-                    }
-                }
-                _ => {}
-            };
-
-            cap_next = self.vfio_wrapper.read_config_byte((cap_next + 1).into());
-        }
     }
 
     fn update_msi_capabilities(&mut self, offset: u64, data: &[u8]) -> Result<()> {
