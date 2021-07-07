@@ -724,7 +724,7 @@ impl Vm {
                 memory_manager
                     .lock()
                     .unwrap()
-                    .setup_sgx(sgx_epc_config)
+                    .setup_sgx(sgx_epc_config, &vm)
                     .map_err(Error::MemoryManager)?;
             }
         }

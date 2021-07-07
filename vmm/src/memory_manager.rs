@@ -213,6 +213,14 @@ pub enum Error {
     #[cfg(target_arch = "x86_64")]
     SgxVirtEpcFileSetLen(io::Error),
 
+    /// Failed opening SGX provisioning device
+    #[cfg(target_arch = "x86_64")]
+    SgxProvisionOpen(io::Error),
+
+    /// Failed enabling SGX provisioning
+    #[cfg(target_arch = "x86_64")]
+    SgxEnableProvisioning(hypervisor::HypervisorVmError),
+
     /// Failed creating a new MmapRegion instance.
     #[cfg(target_arch = "x86_64")]
     NewMmapRegion(vm_memory::mmap::MmapRegionError),
@@ -1370,7 +1378,18 @@ impl MemoryManager {
     }
 
     #[cfg(target_arch = "x86_64")]
-    pub fn setup_sgx(&mut self, sgx_epc_config: Vec<SgxEpcConfig>) -> Result<(), Error> {
+    pub fn setup_sgx(
+        &mut self,
+        sgx_epc_config: Vec<SgxEpcConfig>,
+        vm: &Arc<dyn hypervisor::Vm>,
+    ) -> Result<(), Error> {
+        let file = OpenOptions::new()
+            .read(true)
+            .open("/dev/sgx_provision")
+            .map_err(Error::SgxProvisionOpen)?;
+        vm.enable_sgx_attribute(file)
+            .map_err(Error::SgxEnableProvisioning)?;
+
         // Go over each EPC section and verify its size is a 4k multiple. At
         // the same time, calculate the total size needed for the contiguous
         // EPC region.
