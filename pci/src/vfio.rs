@@ -277,6 +277,22 @@ pub(crate) trait Vfio {
         self.region_write(VFIO_PCI_CONFIG_REGION_INDEX, offset.into(), data)
     }
 
+    fn enable_msi(&self, fds: Vec<&EventFd>) -> std::result::Result<(), VfioError> {
+        self.enable_irq(VFIO_PCI_MSI_IRQ_INDEX, fds)
+    }
+
+    fn disable_msi(&self) -> std::result::Result<(), VfioError> {
+        self.disable_irq(VFIO_PCI_MSI_IRQ_INDEX)
+    }
+
+    fn enable_msix(&self, fds: Vec<&EventFd>) -> std::result::Result<(), VfioError> {
+        self.enable_irq(VFIO_PCI_MSIX_IRQ_INDEX, fds)
+    }
+
+    fn disable_msix(&self) -> std::result::Result<(), VfioError> {
+        self.disable_irq(VFIO_PCI_MSIX_IRQ_INDEX)
+    }
+
     fn region_read(&self, _index: u32, _offset: u64, _data: &mut [u8]) {
         unimplemented!()
     }
@@ -286,6 +302,18 @@ pub(crate) trait Vfio {
     }
 
     fn get_irq_info(&self, _irq_index: u32) -> Option<&VfioIrq> {
+        unimplemented!()
+    }
+
+    fn enable_irq(
+        &self,
+        _irq_index: u32,
+        _event_fds: Vec<&EventFd>,
+    ) -> std::result::Result<(), VfioError> {
+        unimplemented!()
+    }
+
+    fn disable_irq(&self, _irq_index: u32) -> std::result::Result<(), VfioError> {
         unimplemented!()
     }
 }
@@ -311,6 +339,18 @@ impl Vfio for VfioDeviceWrapper {
 
     fn get_irq_info(&self, irq_index: u32) -> Option<&VfioIrq> {
         self.device.get_irq_info(irq_index)
+    }
+
+    fn enable_irq(
+        &self,
+        irq_index: u32,
+        event_fds: Vec<&EventFd>,
+    ) -> std::result::Result<(), VfioError> {
+        self.device.enable_irq(irq_index, event_fds)
+    }
+
+    fn disable_irq(&self, irq_index: u32) -> std::result::Result<(), VfioError> {
+        self.device.disable_irq(irq_index)
     }
 }
 
@@ -603,6 +643,157 @@ impl VfioCommon {
             cap_next = vfio_wrapper.read_config_byte((cap_next + 1).into());
         }
     }
+
+    pub(crate) fn enable_intx(&mut self, wrapper: &dyn Vfio) -> Result<()> {
+        if let Some(intx) = &mut self.interrupt.intx {
+            if !intx.enabled {
+                if let Some(eventfd) = intx.interrupt_source_group.notifier(0) {
+                    wrapper
+                        .enable_irq(VFIO_PCI_INTX_IRQ_INDEX, vec![&eventfd])
+                        .map_err(VfioPciError::EnableIntx)?;
+
+                    intx.enabled = true;
+                } else {
+                    return Err(VfioPciError::MissingNotifier);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn disable_intx(&mut self, wrapper: &dyn Vfio) {
+        if let Some(intx) = &mut self.interrupt.intx {
+            if intx.enabled {
+                if let Err(e) = wrapper.disable_irq(VFIO_PCI_INTX_IRQ_INDEX) {
+                    error!("Could not disable INTx: {}", e);
+                } else {
+                    intx.enabled = false;
+                }
+            }
+        }
+    }
+
+    pub(crate) fn enable_msi(&self, wrapper: &dyn Vfio) -> Result<()> {
+        if let Some(msi) = &self.interrupt.msi {
+            let mut irq_fds: Vec<EventFd> = Vec::new();
+            for i in 0..msi.cfg.num_enabled_vectors() {
+                if let Some(eventfd) = msi.interrupt_source_group.notifier(i as InterruptIndex) {
+                    irq_fds.push(eventfd);
+                } else {
+                    return Err(VfioPciError::MissingNotifier);
+                }
+            }
+
+            wrapper
+                .enable_msi(irq_fds.iter().collect())
+                .map_err(VfioPciError::EnableMsi)?;
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn disable_msi(&self, wrapper: &dyn Vfio) {
+        if let Err(e) = wrapper.disable_msi() {
+            error!("Could not disable MSI: {}", e);
+        }
+    }
+
+    pub(crate) fn enable_msix(&self, wrapper: &dyn Vfio) -> Result<()> {
+        if let Some(msix) = &self.interrupt.msix {
+            let mut irq_fds: Vec<EventFd> = Vec::new();
+            for i in 0..msix.bar.table_entries.len() {
+                if let Some(eventfd) = msix.interrupt_source_group.notifier(i as InterruptIndex) {
+                    irq_fds.push(eventfd);
+                } else {
+                    return Err(VfioPciError::MissingNotifier);
+                }
+            }
+
+            wrapper
+                .enable_msix(irq_fds.iter().collect())
+                .map_err(VfioPciError::EnableMsix)?;
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn disable_msix(&self, wrapper: &dyn Vfio) {
+        if let Err(e) = wrapper.disable_msix() {
+            error!("Could not disable MSI-X: {}", e);
+        }
+    }
+
+    pub(crate) fn initialize_legacy_interrupt(
+        &mut self,
+        legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
+        wrapper: &dyn Vfio,
+    ) -> Result<()> {
+        if let Some(irq_info) = wrapper.get_irq_info(VFIO_PCI_INTX_IRQ_INDEX) {
+            if irq_info.count == 0 {
+                // A count of 0 means the INTx IRQ is not supported, therefore
+                // it shouldn't be initialized.
+                return Ok(());
+            }
+        }
+
+        if let Some(interrupt_source_group) = legacy_interrupt_group {
+            self.interrupt.intx = Some(VfioIntx {
+                interrupt_source_group,
+                enabled: false,
+            });
+
+            self.enable_intx(wrapper)?;
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn update_msi_capabilities(
+        &mut self,
+        offset: u64,
+        data: &[u8],
+        wrapper: &dyn Vfio,
+    ) -> Result<()> {
+        match self.interrupt.update_msi(offset, data) {
+            Some(InterruptUpdateAction::EnableMsi) => {
+                // Disable INTx before we can enable MSI
+                self.disable_intx(wrapper);
+                self.enable_msi(wrapper)?;
+            }
+            Some(InterruptUpdateAction::DisableMsi) => {
+                // Fallback onto INTx when disabling MSI
+                self.disable_msi(wrapper);
+                self.enable_intx(wrapper)?;
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn update_msix_capabilities(
+        &mut self,
+        offset: u64,
+        data: &[u8],
+        wrapper: &dyn Vfio,
+    ) -> Result<()> {
+        match self.interrupt.update_msix(offset, data) {
+            Some(InterruptUpdateAction::EnableMsix) => {
+                // Disable INTx before we can enable MSI-X
+                self.disable_intx(wrapper);
+                self.enable_msix(wrapper)?;
+            }
+            Some(InterruptUpdateAction::DisableMsix) => {
+                // Fallback onto INTx when disabling MSI-X
+                self.disable_msix(wrapper);
+                self.enable_intx(wrapper)?;
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
 }
 
 /// VfioPciDevice represents a VFIO PCI device.
@@ -659,8 +850,9 @@ impl VfioPciDevice {
         };
 
         common.parse_capabilities(msi_interrupt_manager, &vfio_wrapper);
+        common.initialize_legacy_interrupt(legacy_interrupt_group, &vfio_wrapper)?;
 
-        let mut vfio_pci_device = VfioPciDevice {
+        let vfio_pci_device = VfioPciDevice {
             vm: vm.clone(),
             device,
             container,
@@ -669,153 +861,11 @@ impl VfioPciDevice {
             iommu_attached,
         };
 
-        vfio_pci_device.initialize_legacy_interrupt(legacy_interrupt_group)?;
-
         Ok(vfio_pci_device)
     }
 
     pub fn iommu_attached(&self) -> bool {
         self.iommu_attached
-    }
-
-    fn enable_intx(&mut self) -> Result<()> {
-        if let Some(intx) = &mut self.common.interrupt.intx {
-            if !intx.enabled {
-                if let Some(eventfd) = intx.interrupt_source_group.notifier(0) {
-                    self.device
-                        .enable_irq(VFIO_PCI_INTX_IRQ_INDEX, vec![&eventfd])
-                        .map_err(VfioPciError::EnableIntx)?;
-
-                    intx.enabled = true;
-                } else {
-                    return Err(VfioPciError::MissingNotifier);
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    fn disable_intx(&mut self) {
-        if let Some(intx) = &mut self.common.interrupt.intx {
-            if intx.enabled {
-                if let Err(e) = self.device.disable_irq(VFIO_PCI_INTX_IRQ_INDEX) {
-                    error!("Could not disable INTx: {}", e);
-                } else {
-                    intx.enabled = false;
-                }
-            }
-        }
-    }
-
-    fn enable_msi(&self) -> Result<()> {
-        if let Some(msi) = &self.common.interrupt.msi {
-            let mut irq_fds: Vec<EventFd> = Vec::new();
-            for i in 0..msi.cfg.num_enabled_vectors() {
-                if let Some(eventfd) = msi.interrupt_source_group.notifier(i as InterruptIndex) {
-                    irq_fds.push(eventfd);
-                } else {
-                    return Err(VfioPciError::MissingNotifier);
-                }
-            }
-
-            self.device
-                .enable_msi(irq_fds.iter().collect())
-                .map_err(VfioPciError::EnableMsi)?;
-        }
-
-        Ok(())
-    }
-
-    fn disable_msi(&self) {
-        if let Err(e) = self.device.disable_msi() {
-            error!("Could not disable MSI: {}", e);
-        }
-    }
-
-    fn enable_msix(&self) -> Result<()> {
-        if let Some(msix) = &self.common.interrupt.msix {
-            let mut irq_fds: Vec<EventFd> = Vec::new();
-            for i in 0..msix.bar.table_entries.len() {
-                if let Some(eventfd) = msix.interrupt_source_group.notifier(i as InterruptIndex) {
-                    irq_fds.push(eventfd);
-                } else {
-                    return Err(VfioPciError::MissingNotifier);
-                }
-            }
-
-            self.device
-                .enable_msix(irq_fds.iter().collect())
-                .map_err(VfioPciError::EnableMsix)?;
-        }
-
-        Ok(())
-    }
-
-    fn disable_msix(&self) {
-        if let Err(e) = self.device.disable_msix() {
-            error!("Could not disable MSI-X: {}", e);
-        }
-    }
-
-    fn initialize_legacy_interrupt(
-        &mut self,
-        legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
-    ) -> Result<()> {
-        if let Some(irq_info) = self.device.get_irq_info(VFIO_PCI_INTX_IRQ_INDEX) {
-            if irq_info.count == 0 {
-                // A count of 0 means the INTx IRQ is not supported, therefore
-                // it shouldn't be initialized.
-                return Ok(());
-            }
-        }
-
-        if let Some(interrupt_source_group) = legacy_interrupt_group {
-            self.common.interrupt.intx = Some(VfioIntx {
-                interrupt_source_group,
-                enabled: false,
-            });
-
-            self.enable_intx()?;
-        }
-
-        Ok(())
-    }
-
-    fn update_msi_capabilities(&mut self, offset: u64, data: &[u8]) -> Result<()> {
-        match self.common.interrupt.update_msi(offset, data) {
-            Some(InterruptUpdateAction::EnableMsi) => {
-                // Disable INTx before we can enable MSI
-                self.disable_intx();
-                self.enable_msi()?;
-            }
-            Some(InterruptUpdateAction::DisableMsi) => {
-                // Fallback onto INTx when disabling MSI
-                self.disable_msi();
-                self.enable_intx()?;
-            }
-            _ => {}
-        }
-
-        Ok(())
-    }
-
-    fn update_msix_capabilities(&mut self, offset: u64, data: &[u8]) -> Result<()> {
-        match self.common.interrupt.update_msix(offset, data) {
-            Some(InterruptUpdateAction::EnableMsix) => {
-                // Disable INTx before we can enable MSI-X
-                self.disable_intx();
-                self.enable_msix()?;
-            }
-            Some(InterruptUpdateAction::DisableMsix) => {
-                // Fallback onto INTx when disabling MSI-X
-                self.disable_msix();
-                self.enable_intx()?;
-            }
-            _ => {}
-        }
-
-        Ok(())
     }
 
     fn find_region(&self, addr: u64) -> Option<MmioRegion> {
@@ -972,18 +1022,18 @@ impl Drop for VfioPciDevice {
 
         if let Some(msix) = &self.common.interrupt.msix {
             if msix.bar.enabled() {
-                self.disable_msix();
+                self.common.disable_msix(&self.vfio_wrapper);
             }
         }
 
         if let Some(msi) = &self.common.interrupt.msi {
             if msi.cfg.enabled() {
-                self.disable_msi();
+                self.common.disable_msi(&self.vfio_wrapper)
             }
         }
 
         if self.common.interrupt.intx_in_use() {
-            self.disable_intx();
+            self.common.disable_intx(&self.vfio_wrapper);
         }
     }
 }
@@ -1064,12 +1114,18 @@ impl PciDevice for VfioPciDevice {
             let cap_offset: u64 = reg - cap_base + offset;
             match cap_id {
                 PciCapabilityId::MessageSignalledInterrupts => {
-                    if let Err(e) = self.update_msi_capabilities(cap_offset, data) {
+                    if let Err(e) =
+                        self.common
+                            .update_msi_capabilities(cap_offset, data, &self.vfio_wrapper)
+                    {
                         error!("Could not update MSI capabilities: {}", e);
                     }
                 }
                 PciCapabilityId::MsiX => {
-                    if let Err(e) = self.update_msix_capabilities(cap_offset, data) {
+                    if let Err(e) =
+                        self.common
+                            .update_msix_capabilities(cap_offset, data, &self.vfio_wrapper)
+                    {
                         error!("Could not update MSI-X capabilities: {}", e);
                     }
                 }
