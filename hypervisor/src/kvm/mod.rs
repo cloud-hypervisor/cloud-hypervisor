@@ -24,6 +24,8 @@ use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
 use serde_derive::{Deserialize, Serialize};
 #[cfg(target_arch = "aarch64")]
 use std::convert::TryInto;
+#[cfg(target_arch = "x86_64")]
+use std::fs::File;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
 #[cfg(target_arch = "x86_64")]
@@ -86,6 +88,9 @@ pub use {
     kvm_bindings::kvm_vcpu_events as VcpuEvents, kvm_ioctls::DeviceFd, kvm_ioctls::IoEventAddress,
     kvm_ioctls::VcpuExit,
 };
+
+#[cfg(target_arch = "x86_64")]
+const KVM_CAP_SGX_ATTRIBUTE: u32 = 196;
 
 #[cfg(feature = "tdx")]
 ioctl_iowr_nr!(KVM_MEMORY_ENCRYPT_OP, KVMIO, 0xba, std::os::raw::c_ulong);
@@ -322,6 +327,18 @@ impl vm::Vm for KvmVm {
         self.fd
             .enable_cap(&cap)
             .map_err(|e| vm::HypervisorVmError::EnableSplitIrq(e.into()))?;
+        Ok(())
+    }
+    #[cfg(target_arch = "x86_64")]
+    fn enable_sgx_attribute(&self, file: File) -> vm::Result<()> {
+        let mut cap = kvm_enable_cap {
+            cap: KVM_CAP_SGX_ATTRIBUTE,
+            ..Default::default()
+        };
+        cap.args[0] = file.as_raw_fd() as u64;
+        self.fd
+            .enable_cap(&cap)
+            .map_err(|e| vm::HypervisorVmError::EnableSgxAttribute(e.into()))?;
         Ok(())
     }
     /// Retrieve guest clock.

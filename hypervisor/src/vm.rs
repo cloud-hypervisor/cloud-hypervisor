@@ -25,6 +25,8 @@ use crate::KvmVmState as VmState;
 use crate::{IoEventAddress, IrqRoutingEntry, MemoryRegion};
 #[cfg(feature = "kvm")]
 use kvm_ioctls::Cap;
+#[cfg(target_arch = "x86_64")]
+use std::fs::File;
 use std::sync::Arc;
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
@@ -116,6 +118,11 @@ pub enum HypervisorVmError {
     ///
     #[error("Failed to enable split Irq: {0}")]
     EnableSplitIrq(#[source] anyhow::Error),
+    ///
+    /// Enable SGX attribute error
+    ///
+    #[error("Failed to enable SGX attribute: {0}")]
+    EnableSgxAttribute(#[source] anyhow::Error),
     ///
     /// Get clock error
     ///
@@ -246,6 +253,8 @@ pub trait Vm: Send + Sync {
     /// Enable split Irq capability
     #[cfg(target_arch = "x86_64")]
     fn enable_split_irq(&self) -> Result<()>;
+    #[cfg(target_arch = "x86_64")]
+    fn enable_sgx_attribute(&self, file: File) -> Result<()>;
     /// Retrieve guest clock.
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     fn get_clock(&self) -> Result<ClockData>;
