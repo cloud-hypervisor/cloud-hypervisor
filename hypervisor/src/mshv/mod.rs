@@ -33,6 +33,7 @@ use std::fs::File;
 use std::os::unix::io::AsRawFd;
 use std::sync::RwLock;
 
+const DIRTY_BITMAP_CLEAR_DIRTY: u64 = 0x4;
 pub const PAGE_SHIFT: usize = 12;
 
 #[derive(Debug, Default, Copy, Clone, Serialize, Deserialize)]
@@ -895,10 +896,14 @@ impl vm::Vm for MshvVm {
     ///
     /// Get dirty pages bitmap (one bit per page)
     ///
-    fn get_dirty_log(&self, _slot: u32, _memory_size: u64) -> vm::Result<Vec<u64>> {
-        Err(vm::HypervisorVmError::GetDirtyLog(anyhow!(
-            "get_dirty_log not implemented"
-        )))
+    fn get_dirty_log(&self, _slot: u32, base_gpa: u64, memory_size: u64) -> vm::Result<Vec<u64>> {
+        self.fd
+            .get_dirty_log(
+                base_gpa >> PAGE_SHIFT,
+                memory_size as usize,
+                DIRTY_BITMAP_CLEAR_DIRTY,
+            )
+            .map_err(|e| vm::HypervisorVmError::GetDirtyLog(e.into()))
     }
 }
 pub use hv_cpuid_entry as CpuIdEntry;
