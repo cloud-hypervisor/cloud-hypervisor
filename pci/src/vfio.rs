@@ -794,6 +794,17 @@ impl VfioCommon {
 
         Ok(())
     }
+
+    pub(crate) fn find_region(&self, addr: u64) -> Option<MmioRegion> {
+        for region in self.mmio_regions.iter() {
+            if addr >= region.start.raw_value()
+                && addr < region.start.unchecked_add(region.length).raw_value()
+            {
+                return Some(*region);
+            }
+        }
+        None
+    }
 }
 
 /// VfioPciDevice represents a VFIO PCI device.
@@ -866,17 +877,6 @@ impl VfioPciDevice {
 
     pub fn iommu_attached(&self) -> bool {
         self.iommu_attached
-    }
-
-    fn find_region(&self, addr: u64) -> Option<MmioRegion> {
-        for region in self.common.mmio_regions.iter() {
-            if addr >= region.start.raw_value()
-                && addr < region.start.unchecked_add(region.length).raw_value()
-            {
-                return Some(*region);
-            }
-        }
-        None
     }
 
     /// Map MMIO regions into the guest, and avoid VM exits when the guest tries
@@ -1182,7 +1182,7 @@ impl PciDevice for VfioPciDevice {
 
     fn read_bar(&mut self, base: u64, offset: u64, data: &mut [u8]) {
         let addr = base + offset;
-        if let Some(region) = self.find_region(addr) {
+        if let Some(region) = self.common.find_region(addr) {
             let offset = addr - region.start.raw_value();
 
             if self
@@ -1208,7 +1208,7 @@ impl PciDevice for VfioPciDevice {
 
     fn write_bar(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         let addr = base + offset;
-        if let Some(region) = self.find_region(addr) {
+        if let Some(region) = self.common.find_region(addr) {
             let offset = addr - region.start.raw_value();
 
             // If the MSI-X table is written to, we need to update our cache.
