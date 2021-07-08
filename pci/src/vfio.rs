@@ -866,6 +866,87 @@ impl VfioCommon {
 
         None
     }
+
+    pub(crate) fn write_config_register(
+        &mut self,
+        reg_idx: usize,
+        offset: u64,
+        data: &[u8],
+        wrapper: &dyn Vfio,
+    ) -> Option<Arc<Barrier>> {
+        // When the guest wants to write to a BAR, we trap it into
+        // our local configuration space. We're not reprogramming
+        // VFIO device.
+        if (PCI_CONFIG_BAR0_INDEX..PCI_CONFIG_BAR0_INDEX + BAR_NUMS).contains(&reg_idx)
+            || reg_idx == PCI_ROM_EXP_BAR_INDEX
+        {
+            // We keep our local cache updated with the BARs.
+            // We'll read it back from there when the guest is asking
+            // for BARs (see read_config_register()).
+            self.configuration
+                .write_config_register(reg_idx, offset, data);
+            return None;
+        }
+
+        let reg = (reg_idx * PCI_CONFIG_REGISTER_SIZE) as u64;
+
+        // If the MSI or MSI-X capabilities are accessed, we need to
+        // update our local cache accordingly.
+        // Depending on how the capabilities are modified, this could
+        // trigger a VFIO MSI or MSI-X toggle.
+        if let Some((cap_id, cap_base)) = self.interrupt.accessed(reg) {
+            let cap_offset: u64 = reg - cap_base + offset;
+            match cap_id {
+                PciCapabilityId::MessageSignalledInterrupts => {
+                    if let Err(e) = self.update_msi_capabilities(cap_offset, data, wrapper) {
+                        error!("Could not update MSI capabilities: {}", e);
+                    }
+                }
+                PciCapabilityId::MsiX => {
+                    if let Err(e) = self.update_msix_capabilities(cap_offset, data, wrapper) {
+                        error!("Could not update MSI-X capabilities: {}", e);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Make sure to write to the device's PCI config space after MSI/MSI-X
+        // interrupts have been enabled/disabled. In case of MSI, when the
+        // interrupts are enabled through VFIO (using VFIO_DEVICE_SET_IRQS),
+        // the MSI Enable bit in the MSI capability structure found in the PCI
+        // config space is disabled by default. That's why when the guest is
+        // enabling this bit, we first need to enable the MSI interrupts with
+        // VFIO through VFIO_DEVICE_SET_IRQS ioctl, and only after we can write
+        // to the device region to update the MSI Enable bit.
+        wrapper.write_config((reg + offset) as u32, data);
+
+        None
+    }
+
+    pub(crate) fn read_config_register(&mut self, reg_idx: usize, wrapper: &dyn Vfio) -> u32 {
+        // When reading the BARs, we trap it and return what comes
+        // from our local configuration space. We want the guest to
+        // use that and not the VFIO device BARs as it does not map
+        // with the guest address space.
+        if (PCI_CONFIG_BAR0_INDEX..PCI_CONFIG_BAR0_INDEX + BAR_NUMS).contains(&reg_idx)
+            || reg_idx == PCI_ROM_EXP_BAR_INDEX
+        {
+            return self.configuration.read_reg(reg_idx);
+        }
+
+        // Since we don't support passing multi-functions devices, we should
+        // mask the multi-function bit, bit 7 of the Header Type byte on the
+        // register 3.
+        let mask = if reg_idx == PCI_HEADER_TYPE_REG_INDEX {
+            0xff7f_ffff
+        } else {
+            0xffff_ffff
+        };
+
+        // The config register read comes from the VFIO device itself.
+        wrapper.read_config_dword((reg_idx * 4) as u32) & mask
+    }
 }
 
 /// VfioPciDevice represents a VFIO PCI device.
@@ -1150,85 +1231,13 @@ impl PciDevice for VfioPciDevice {
         offset: u64,
         data: &[u8],
     ) -> Option<Arc<Barrier>> {
-        // When the guest wants to write to a BAR, we trap it into
-        // our local configuration space. We're not reprogramming
-        // VFIO device.
-        if (PCI_CONFIG_BAR0_INDEX..PCI_CONFIG_BAR0_INDEX + BAR_NUMS).contains(&reg_idx)
-            || reg_idx == PCI_ROM_EXP_BAR_INDEX
-        {
-            // We keep our local cache updated with the BARs.
-            // We'll read it back from there when the guest is asking
-            // for BARs (see read_config_register()).
-            self.common
-                .configuration
-                .write_config_register(reg_idx, offset, data);
-            return None;
-        }
-
-        let reg = (reg_idx * PCI_CONFIG_REGISTER_SIZE) as u64;
-
-        // If the MSI or MSI-X capabilities are accessed, we need to
-        // update our local cache accordingly.
-        // Depending on how the capabilities are modified, this could
-        // trigger a VFIO MSI or MSI-X toggle.
-        if let Some((cap_id, cap_base)) = self.common.interrupt.accessed(reg) {
-            let cap_offset: u64 = reg - cap_base + offset;
-            match cap_id {
-                PciCapabilityId::MessageSignalledInterrupts => {
-                    if let Err(e) =
-                        self.common
-                            .update_msi_capabilities(cap_offset, data, &self.vfio_wrapper)
-                    {
-                        error!("Could not update MSI capabilities: {}", e);
-                    }
-                }
-                PciCapabilityId::MsiX => {
-                    if let Err(e) =
-                        self.common
-                            .update_msix_capabilities(cap_offset, data, &self.vfio_wrapper)
-                    {
-                        error!("Could not update MSI-X capabilities: {}", e);
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        // Make sure to write to the device's PCI config space after MSI/MSI-X
-        // interrupts have been enabled/disabled. In case of MSI, when the
-        // interrupts are enabled through VFIO (using VFIO_DEVICE_SET_IRQS),
-        // the MSI Enable bit in the MSI capability structure found in the PCI
-        // config space is disabled by default. That's why when the guest is
-        // enabling this bit, we first need to enable the MSI interrupts with
-        // VFIO through VFIO_DEVICE_SET_IRQS ioctl, and only after we can write
-        // to the device region to update the MSI Enable bit.
-        self.vfio_wrapper.write_config((reg + offset) as u32, data);
-
-        None
+        self.common
+            .write_config_register(reg_idx, offset, data, &self.vfio_wrapper)
     }
 
     fn read_config_register(&mut self, reg_idx: usize) -> u32 {
-        // When reading the BARs, we trap it and return what comes
-        // from our local configuration space. We want the guest to
-        // use that and not the VFIO device BARs as it does not map
-        // with the guest address space.
-        if (PCI_CONFIG_BAR0_INDEX..PCI_CONFIG_BAR0_INDEX + BAR_NUMS).contains(&reg_idx)
-            || reg_idx == PCI_ROM_EXP_BAR_INDEX
-        {
-            return self.common.configuration.read_reg(reg_idx);
-        }
-
-        // Since we don't support passing multi-functions devices, we should
-        // mask the multi-function bit, bit 7 of the Header Type byte on the
-        // register 3.
-        let mask = if reg_idx == PCI_HEADER_TYPE_REG_INDEX {
-            0xff7f_ffff
-        } else {
-            0xffff_ffff
-        };
-
-        // The config register read comes from the VFIO device itself.
-        self.vfio_wrapper.read_config_dword((reg_idx * 4) as u32) & mask
+        self.common
+            .read_config_register(reg_idx, &self.vfio_wrapper)
     }
 
     fn detect_bar_reprogramming(
