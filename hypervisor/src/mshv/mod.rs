@@ -34,6 +34,7 @@ use std::fs::File;
 use std::os::unix::io::AsRawFd;
 
 const DIRTY_BITMAP_CLEAR_DIRTY: u64 = 0x4;
+const DIRTY_BITMAP_SET_DIRTY: u64 = 0x8;
 pub const PAGE_SHIFT: usize = 12;
 
 #[derive(Debug, Default, Copy, Clone, Serialize, Deserialize)]
@@ -905,17 +906,27 @@ impl vm::Vm for MshvVm {
     /// Start logging dirty pages
     ///
     fn start_dirty_log(&self) -> vm::Result<()> {
-        Err(vm::HypervisorVmError::StartDirtyLog(anyhow!(
-            "functionality not implemented"
-        )))
+        self.fd
+            .enable_dirty_page_tracking()
+            .map_err(|e| vm::HypervisorVmError::StartDirtyLog(e.into()))
     }
     ///
     /// Stop logging dirty pages
     ///
     fn stop_dirty_log(&self) -> vm::Result<()> {
-        Err(vm::HypervisorVmError::StopDirtyLog(anyhow!(
-            "functionality not implemented"
-        )))
+        let dirty_log_slots = self.dirty_log_slots.read().unwrap();
+        // Before disabling the dirty page tracking we need
+        // to set the dirty bits in the Hypervisor
+        // This is a requirement from Microsoft Hypervisor
+        for (_, s) in dirty_log_slots.iter() {
+            self.fd
+                .get_dirty_log(s.guest_pfn, s.memory_size as usize, DIRTY_BITMAP_SET_DIRTY)
+                .map_err(|e| vm::HypervisorVmError::StartDirtyLog(e.into()))?;
+        }
+        self.fd
+            .disable_dirty_page_tracking()
+            .map_err(|e| vm::HypervisorVmError::StartDirtyLog(e.into()))?;
+        Ok(())
     }
     ///
     /// Get dirty pages bitmap (one bit per page)

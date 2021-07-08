@@ -141,6 +141,8 @@ mod mshv {
     pub const MSHV_RUN_VP: u64 = 0x8100_b807;
     pub const MSHV_GET_VP_STATE: u64 = 0xc028_b80a;
     pub const MSHV_SET_VP_STATE: u64 = 0xc028_b80b;
+    pub const MSHV_SET_PARTITION_PROPERTY: u64 = 0x4010_b80c;
+    pub const MSHV_GET_GPA_ACCESS_STATES: u64 = 0xc01c_b812;
 }
 #[cfg(feature = "mshv")]
 use mshv::*;
@@ -161,6 +163,13 @@ fn create_vmm_ioctl_seccomp_rule_common_mshv() -> Result<Vec<SeccompRule>, Error
         and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_RUN_VP)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_GET_VP_STATE)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_SET_VP_STATE)?],
+        and![Cond::new(
+            1,
+            ArgLen::DWORD,
+            Eq,
+            MSHV_SET_PARTITION_PROPERTY
+        )?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_GET_GPA_ACCESS_STATES)?],
     ])
 }
 
