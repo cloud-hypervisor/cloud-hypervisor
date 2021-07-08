@@ -1009,6 +1009,7 @@ CONFIG_VSOCKETS_DIAG=y
 # CONFIG_VSOCKETS_LOOPBACK is not set
 CONFIG_VIRTIO_VSOCKETS=y
 CONFIG_VIRTIO_VSOCKETS_COMMON=y
+# CONFIG_HYPERV_VSOCKETS is not set
 # CONFIG_NETLINK_DIAG is not set
 # CONFIG_MPLS is not set
 # CONFIG_NET_NSH is not set
@@ -1088,6 +1089,7 @@ CONFIG_PCI_LOCKLESS_CONFIG=y
 # CONFIG_PCI_PASID is not set
 # CONFIG_PCI_P2PDMA is not set
 CONFIG_PCI_LABEL=y
+# CONFIG_PCI_HYPERV is not set
 # CONFIG_PCIE_BUS_TUNE_OFF is not set
 CONFIG_PCIE_BUS_DEFAULT=y
 # CONFIG_PCIE_BUS_SAFE is not set
@@ -1103,6 +1105,7 @@ CONFIG_HOTPLUG_PCI_ACPI=y
 # PCI controller drivers
 #
 # CONFIG_VMD is not set
+# CONFIG_PCI_HYPERV_INTERFACE is not set
 
 #
 # DesignWare PCI Core Support
@@ -1334,6 +1337,7 @@ CONFIG_VIRTIO_NET=y
 # CONFIG_WWAN is not set
 # CONFIG_VMXNET3 is not set
 # CONFIG_FUJITSU_ES is not set
+# CONFIG_HYPERV_NET is not set
 # CONFIG_NETDEVSIM is not set
 CONFIG_NET_FAILOVER=y
 # CONFIG_ISDN is not set
@@ -1721,6 +1725,7 @@ CONFIG_FB=y
 # CONFIG_FB_VIRTUAL is not set
 # CONFIG_FB_METRONOME is not set
 # CONFIG_FB_MB862XX is not set
+# CONFIG_FB_HYPERV is not set
 # CONFIG_FB_SIMPLE is not set
 # CONFIG_FB_SM712 is not set
 # end of Frame buffer Devices
@@ -1821,6 +1826,7 @@ CONFIG_HID_REDRAGON=y
 # CONFIG_HID_SUNPLUS is not set
 # CONFIG_HID_RMI is not set
 # CONFIG_HID_GREENASIA is not set
+# CONFIG_HID_HYPERV_MOUSE is not set
 # CONFIG_HID_SMARTJOYPLUS is not set
 # CONFIG_HID_TIVO is not set
 # CONFIG_HID_TOPSEED is not set
@@ -1910,6 +1916,7 @@ CONFIG_UIO_DMEM_GENIRQ=y
 # CONFIG_UIO_NETX is not set
 # CONFIG_UIO_PRUSS is not set
 # CONFIG_UIO_MF624 is not set
+# CONFIG_UIO_HV_GENERIC is not set
 CONFIG_VFIO_IOMMU_TYPE1=y
 CONFIG_VFIO_VIRQFD=y
 CONFIG_VFIO=y
@@ -1940,7 +1947,10 @@ CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES=y
 #
 # Microsoft Hyper-V guest support
 #
-# CONFIG_HYPERV is not set
+CONFIG_HYPERV=y
+CONFIG_HYPERV_TIMER=y
+# CONFIG_HYPERV_UTILS is not set
+# CONFIG_HYPERV_BALLOON is not set
 # end of Microsoft Hyper-V guest support
 
 # CONFIG_GREYBUS is not set
@@ -1984,6 +1994,7 @@ CONFIG_IOMMU_DMA=y
 # CONFIG_AMD_IOMMU is not set
 # CONFIG_INTEL_IOMMU is not set
 # CONFIG_IRQ_REMAP is not set
+CONFIG_HYPERV_IOMMU=y
 CONFIG_VIRTIO_IOMMU=y
 
 #
@@ -2875,5 +2886,6 @@ CONFIG_RUNTIME_TESTING_MENU=y
 # CONFIG_TEST_FPU is not set
 CONFIG_ARCH_USE_MEMTEST=y
 # CONFIG_MEMTEST is not set
+# CONFIG_HYPERV_TESTING is not set
 # end of Kernel Testing and Coverage
 # end of Kernel hacking
