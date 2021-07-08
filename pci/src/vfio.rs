@@ -316,6 +316,10 @@ pub(crate) trait Vfio {
     fn disable_irq(&self, _irq_index: u32) -> std::result::Result<(), VfioError> {
         unimplemented!()
     }
+
+    fn unmask_irq(&self, _irq_index: u32) -> std::result::Result<(), VfioError> {
+        unimplemented!()
+    }
 }
 
 struct VfioDeviceWrapper {
@@ -351,6 +355,10 @@ impl Vfio for VfioDeviceWrapper {
 
     fn disable_irq(&self, irq_index: u32) -> std::result::Result<(), VfioError> {
         self.device.disable_irq(irq_index)
+    }
+
+    fn unmask_irq(&self, irq_index: u32) -> std::result::Result<(), VfioError> {
+        self.device.unmask_irq(irq_index)
     }
 }
 
@@ -805,6 +813,59 @@ impl VfioCommon {
         }
         None
     }
+
+    pub(crate) fn read_bar(&mut self, base: u64, offset: u64, data: &mut [u8], wrapper: &dyn Vfio) {
+        let addr = base + offset;
+        if let Some(region) = self.find_region(addr) {
+            let offset = addr - region.start.raw_value();
+
+            if self.interrupt.msix_table_accessed(region.index, offset) {
+                self.interrupt.msix_read_table(offset, data);
+            } else {
+                wrapper.region_read(region.index, offset, data);
+            }
+        }
+
+        // INTx EOI
+        // The guest reading from the BAR potentially means the interrupt has
+        // been received and can be acknowledged.
+        if self.interrupt.intx_in_use() {
+            if let Err(e) = wrapper.unmask_irq(VFIO_PCI_INTX_IRQ_INDEX) {
+                error!("Failed unmasking INTx IRQ: {}", e);
+            }
+        }
+    }
+
+    pub(crate) fn write_bar(
+        &mut self,
+        base: u64,
+        offset: u64,
+        data: &[u8],
+        wrapper: &dyn Vfio,
+    ) -> Option<Arc<Barrier>> {
+        let addr = base + offset;
+        if let Some(region) = self.find_region(addr) {
+            let offset = addr - region.start.raw_value();
+
+            // If the MSI-X table is written to, we need to update our cache.
+            if self.interrupt.msix_table_accessed(region.index, offset) {
+                self.interrupt.msix_write_table(offset, data);
+            } else {
+                wrapper.region_write(region.index, offset, data);
+            }
+        }
+
+        // INTx EOI
+        // The guest writing to the BAR potentially means the interrupt has
+        // been received and can be acknowledged.
+        if self.interrupt.intx_in_use() {
+            if let Err(e) = wrapper.unmask_irq(VFIO_PCI_INTX_IRQ_INDEX) {
+                error!("Failed unmasking INTx IRQ: {}", e);
+            }
+        }
+
+        None
+    }
 }
 
 /// VfioPciDevice represents a VFIO PCI device.
@@ -1181,58 +1242,12 @@ impl PciDevice for VfioPciDevice {
     }
 
     fn read_bar(&mut self, base: u64, offset: u64, data: &mut [u8]) {
-        let addr = base + offset;
-        if let Some(region) = self.common.find_region(addr) {
-            let offset = addr - region.start.raw_value();
-
-            if self
-                .common
-                .interrupt
-                .msix_table_accessed(region.index, offset)
-            {
-                self.common.interrupt.msix_read_table(offset, data);
-            } else {
-                self.device.region_read(region.index, data, offset);
-            }
-        }
-
-        // INTx EOI
-        // The guest reading from the BAR potentially means the interrupt has
-        // been received and can be acknowledged.
-        if self.common.interrupt.intx_in_use() {
-            if let Err(e) = self.device.unmask_irq(VFIO_PCI_INTX_IRQ_INDEX) {
-                error!("Failed unmasking INTx IRQ: {}", e);
-            }
-        }
+        self.common.read_bar(base, offset, data, &self.vfio_wrapper)
     }
 
     fn write_bar(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
-        let addr = base + offset;
-        if let Some(region) = self.common.find_region(addr) {
-            let offset = addr - region.start.raw_value();
-
-            // If the MSI-X table is written to, we need to update our cache.
-            if self
-                .common
-                .interrupt
-                .msix_table_accessed(region.index, offset)
-            {
-                self.common.interrupt.msix_write_table(offset, data);
-            } else {
-                self.device.region_write(region.index, data, offset);
-            }
-        }
-
-        // INTx EOI
-        // The guest writing to the BAR potentially means the interrupt has
-        // been received and can be acknowledged.
-        if self.common.interrupt.intx_in_use() {
-            if let Err(e) = self.device.unmask_irq(VFIO_PCI_INTX_IRQ_INDEX) {
-                error!("Failed unmasking INTx IRQ: {}", e);
-            }
-        }
-
-        None
+        self.common
+            .write_bar(base, offset, data, &self.vfio_wrapper)
     }
 
     fn move_bar(&mut self, old_base: u64, new_base: u64) -> result::Result<(), io::Error> {
