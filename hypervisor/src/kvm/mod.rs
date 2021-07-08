@@ -1057,10 +1057,11 @@ impl cpu::Vcpu for KvmVcpu {
         // https://elixir.free-electrons.com/linux/v4.9.62/source/arch/arm64/include/uapi/asm/kvm.h#L53
         let mut off = offset__of!(kvm_regs, fp_regs) + offset__of!(user_fpsimd_state, vregs);
         for i in 0..32 {
-            state.fp_regs.vregs[i][0] = self
+            state.fp_regs.vregs[i] = self
                 .fd
                 .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U128, off))
-                .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?;
+                .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?
+                .into();
             off += mem::size_of::<u128>();
         }
 
@@ -1137,7 +1138,7 @@ impl cpu::Vcpu for KvmVcpu {
             self.fd
                 .set_one_reg(
                     arm64_core_reg_id!(KVM_REG_SIZE_U128, off),
-                    state.fp_regs.vregs[i][0],
+                    state.fp_regs.vregs[i] as u64,
                 )
                 .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
             off += mem::size_of::<u128>();

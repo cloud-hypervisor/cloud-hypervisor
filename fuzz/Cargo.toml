@@ -23,7 +23,8 @@ vm-memory = "0.5.0"
 path = ".."
 
 [patch.crates-io]
-kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch-v0.4.0", features = ["with-serde", "fam-wrappers"] }
+#kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch-v0.4.0", features = ["with-serde", "fam-wrappers"] }
+kvm-bindings = { git = "https://github.com/sboeuf/kvm-bindings", branch = "update_ch_bindings", features = ["with-serde", "fam-wrappers"], optional = true }
 vm-memory = { git = "https://github.com/rust-vmm/vm-memory", rev = "5bd7138758183a73ac0da27ce40c004d95f1a7e9"}
 
 # Prevent this from interfering with workspaces
