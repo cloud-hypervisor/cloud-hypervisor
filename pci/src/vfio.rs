@@ -301,7 +301,7 @@ pub(crate) trait Vfio {
         unimplemented!()
     }
 
-    fn get_irq_info(&self, _irq_index: u32) -> Option<&VfioIrq> {
+    fn get_irq_info(&self, _irq_index: u32) -> Option<VfioIrq> {
         unimplemented!()
     }
 
@@ -341,8 +341,8 @@ impl Vfio for VfioDeviceWrapper {
         self.device.region_write(index, data, offset)
     }
 
-    fn get_irq_info(&self, irq_index: u32) -> Option<&VfioIrq> {
-        self.device.get_irq_info(irq_index)
+    fn get_irq_info(&self, irq_index: u32) -> Option<VfioIrq> {
+        self.device.get_irq_info(irq_index).copied()
     }
 
     fn enable_irq(
