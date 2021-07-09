@@ -572,7 +572,7 @@ impl CpuManager {
             .unwrap()
             .sgx_epc_region()
             .as_ref()
-            .map(|sgx_epc_region| sgx_epc_region.epc_sections().clone());
+            .map(|sgx_epc_region| sgx_epc_region.epc_sections().values().cloned().collect());
         #[cfg(target_arch = "x86_64")]
         let cpuid = {
             let phys_bits = physical_bits(config.max_phys_bits);

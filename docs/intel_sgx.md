@@ -34,7 +34,7 @@ memory, the second one being 32MiB with no pre-allocated memory.
     --disk path=focal-server-cloudimg-amd64.raw \
     --kernel vmlinux \
     --cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw" \
-    --sgx-epc size=64M,prefault=on size=32M,prefault=off
+    --sgx-epc id=epc0,size=64M,prefault=on id=epc1,size=32M,prefault=off
 ```
 
 Once booted, and assuming your guest kernel contains the patches from the

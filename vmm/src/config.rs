@@ -77,6 +77,9 @@ pub enum Error {
     /// Failed to parse SGX EPC parameters
     #[cfg(target_arch = "x86_64")]
     ParseSgxEpc(OptionParserError),
+    /// Missing 'id' from SGX EPC section
+    #[cfg(target_arch = "x86_64")]
+    ParseSgxEpcIdMissing,
     /// Failed to parse NUMA parameters
     ParseNuma(OptionParserError),
     /// Failed to validate configuration
@@ -215,6 +218,7 @@ impl fmt::Display for Error {
             ParseRestore(o) => write!(f, "Error parsing --restore: {}", o),
             #[cfg(target_arch = "x86_64")]
             ParseSgxEpc(o) => write!(f, "Error parsing --sgx-epc: {}", o),
+            ParseSgxEpcIdMissing => write!(f, "Error parsing --sgx-epc: id missing"),
             ParseNuma(o) => write!(f, "Error parsing --numa: {}", o),
             ParseRestoreSourceUrlMissing => {
                 write!(f, "Error parsing --restore: source_url missing")
@@ -1593,6 +1597,7 @@ impl TdxConfig {
 #[cfg(target_arch = "x86_64")]
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
 pub struct SgxEpcConfig {
+    pub id: String,
     #[serde(default)]
     pub size: u64,
     #[serde(default)]
@@ -1602,12 +1607,13 @@ pub struct SgxEpcConfig {
 #[cfg(target_arch = "x86_64")]
 impl SgxEpcConfig {
     pub const SYNTAX: &'static str = "SGX EPC parameters \
-        \"size=<epc_section_size>,prefault=on|off\"";
+        \"id=<epc_section_identifier>,size=<epc_section_size>,prefault=on|off\"";
     pub fn parse(sgx_epc: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
-        parser.add("size").add("prefault");
+        parser.add("id").add("size").add("prefault");
         parser.parse(sgx_epc).map_err(Error::ParseSgxEpc)?;
 
+        let id = parser.get("id").ok_or(Error::ParseSgxEpcIdMissing)?;
         let size = parser
             .convert::<ByteSized>("size")
             .map_err(Error::ParseSgxEpc)?
@@ -1619,7 +1625,7 @@ impl SgxEpcConfig {
             .unwrap_or(Toggle(false))
             .0;
 
-        Ok(SgxEpcConfig { size, prefault })
+        Ok(SgxEpcConfig { id, size, prefault })
     }
 }
 
