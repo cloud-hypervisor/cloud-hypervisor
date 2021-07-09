@@ -1458,10 +1458,13 @@ impl MemoryManager {
                 false,
             )?;
 
-            sgx_epc_region.push(SgxEpcSection::new(
-                GuestAddress(epc_section_start),
-                epc_section.size as GuestUsize,
-            ));
+            sgx_epc_region.insert(
+                epc_section.id.clone(),
+                SgxEpcSection::new(
+                    GuestAddress(epc_section_start),
+                    epc_section.size as GuestUsize,
+                ),
+            );
 
             epc_section_start += epc_section.size;
         }

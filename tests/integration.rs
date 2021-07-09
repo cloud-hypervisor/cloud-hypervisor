@@ -6358,7 +6358,7 @@ mod tests {
                 .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .default_net()
-                .args(&["--sgx-epc", "size=64M"])
+                .args(&["--sgx-epc", "id=epc0,size=64M"])
                 .capture_output()
                 .spawn()
                 .unwrap();

@@ -20,6 +20,7 @@ use linux_loader::loader::bootparam::boot_params;
 use linux_loader::loader::elf::start_info::{
     hvm_memmap_table_entry, hvm_modlist_entry, hvm_start_info,
 };
+use std::collections::BTreeMap;
 use std::mem;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
@@ -64,7 +65,7 @@ impl SgxEpcSection {
 pub struct SgxEpcRegion {
     start: GuestAddress,
     size: GuestUsize,
-    epc_sections: Vec<SgxEpcSection>,
+    epc_sections: BTreeMap<String, SgxEpcSection>,
 }
 
 impl SgxEpcRegion {
@@ -72,7 +73,7 @@ impl SgxEpcRegion {
         SgxEpcRegion {
             start,
             size,
-            epc_sections: Vec::new(),
+            epc_sections: BTreeMap::new(),
         }
     }
     pub fn start(&self) -> GuestAddress {
@@ -81,11 +82,11 @@ impl SgxEpcRegion {
     pub fn size(&self) -> GuestUsize {
         self.size
     }
-    pub fn epc_sections(&self) -> &Vec<SgxEpcSection> {
+    pub fn epc_sections(&self) -> &BTreeMap<String, SgxEpcSection> {
         &self.epc_sections
     }
-    pub fn push(&mut self, epc_section: SgxEpcSection) {
-        self.epc_sections.push(epc_section);
+    pub fn insert(&mut self, id: String, epc_section: SgxEpcSection) {
+        self.epc_sections.insert(id, epc_section);
     }
 }
 
