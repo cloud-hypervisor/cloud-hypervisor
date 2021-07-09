@@ -103,12 +103,24 @@ impl MemoryAffinity {
         proximity_domain: u32,
         flags: MemAffinityFlags,
     ) -> Self {
-        let base_addr = region.start_addr().raw_value();
+        Self::from_range(
+            region.start_addr().raw_value(),
+            region.len(),
+            proximity_domain,
+            flags,
+        )
+    }
+
+    fn from_range(
+        base_addr: u64,
+        size: u64,
+        proximity_domain: u32,
+        flags: MemAffinityFlags,
+    ) -> Self {
         let base_addr_lo = (base_addr & 0xffff_ffff) as u32;
         let base_addr_hi = (base_addr >> 32) as u32;
-        let length = region.len() as u64;
-        let length_lo = (length & 0xffff_ffff) as u32;
-        let length_hi = (length >> 32) as u32;
+        let length_lo = (size & 0xffff_ffff) as u32;
+        let length_hi = (size >> 32) as u32;
 
         MemoryAffinity {
             type_: 1,
@@ -251,6 +263,16 @@ fn create_srat_table(numa_nodes: &NumaNodes) -> Sdt {
                 region,
                 proximity_domain,
                 MemAffinityFlags::ENABLE | MemAffinityFlags::HOTPLUGGABLE,
+            ))
+        }
+
+        #[cfg(target_arch = "x86_64")]
+        for section in node.sgx_epc_sections() {
+            srat.append(MemoryAffinity::from_range(
+                section.start().raw_value(),
+                section.size(),
+                proximity_domain,
+                MemAffinityFlags::ENABLE,
             ))
         }
 
