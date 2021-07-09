@@ -898,6 +898,10 @@ components:
           type: array
           items:
             type: string
+        sgx_epc_sections:
+          type: array
+          items:
+            type: string
 
     VmResize:
       type: object

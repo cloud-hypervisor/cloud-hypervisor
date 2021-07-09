@@ -33,6 +33,8 @@ use anyhow::anyhow;
 use arch::get_host_cpu_phys_bits;
 #[cfg(feature = "tdx")]
 use arch::x86_64::tdx::TdvfSection;
+#[cfg(target_arch = "x86_64")]
+use arch::x86_64::SgxEpcSection;
 use arch::EntryPoint;
 use devices::AcpiNotificationFlags;
 use hypervisor::vm::{HypervisorVmError, VmmOps};
@@ -269,6 +271,8 @@ pub struct NumaNode {
     cpus: Vec<u8>,
     distances: BTreeMap<u32, u8>,
     memory_zones: Vec<String>,
+    #[cfg(target_arch = "x86_64")]
+    sgx_epc_sections: Vec<SgxEpcSection>,
 }
 
 impl NumaNode {
@@ -290,6 +294,11 @@ impl NumaNode {
 
     pub fn memory_zones(&self) -> &Vec<String> {
         &self.memory_zones
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    pub fn sgx_epc_sections(&self) -> &Vec<SgxEpcSection> {
+        &self.sgx_epc_sections
     }
 }
 
@@ -670,6 +679,24 @@ impl Vm {
                         }
 
                         node.distances.insert(dest, dist);
+                    }
+                }
+
+                #[cfg(target_arch = "x86_64")]
+                if let Some(sgx_epc_sections) = &config.sgx_epc_sections {
+                    if let Some(sgx_epc_region) = mm.sgx_epc_region() {
+                        let mm_sections = sgx_epc_region.epc_sections();
+                        for sgx_epc_section in sgx_epc_sections.iter() {
+                            if let Some(mm_section) = mm_sections.get(sgx_epc_section) {
+                                node.sgx_epc_sections.push(mm_section.clone());
+                            } else {
+                                error!("Unknown SGX EPC section '{}'", sgx_epc_section);
+                                return Err(Error::InvalidNumaConfig);
+                            }
+                        }
+                    } else {
+                        error!("Missing SGX EPC region");
+                        return Err(Error::InvalidNumaConfig);
                     }
                 }
 
