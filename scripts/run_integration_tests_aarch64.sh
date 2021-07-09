@@ -13,9 +13,9 @@ EDK2_BUILD_DIR="$WORKLOADS_DIR/edk2_build"
 mkdir -p "$WORKLOADS_DIR"
 
 build_edk2() {
-    EDK2_REPO="https://github.com/cloud-hypervisor/edk2.git"
+    EDK2_REPO="https://github.com/tianocore/edk2.git"
     EDK2_DIR="edk2"
-    EDK2_BRANCH="ch-aarch64"
+    EDK2_BRANCH="master"
     EDK2_PLAT_REPO="https://github.com/tianocore/edk2-platforms.git"
     EDK2_PLAT_DIR="edk2-platforms"
     ACPICA_REPO="https://github.com/acpica/acpica.git"
