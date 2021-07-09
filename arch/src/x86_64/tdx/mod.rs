@@ -144,6 +144,7 @@ unsafe impl ByteValued for HobHeader {}
 struct HobHandoffInfoTable {
     header: HobHeader,
     version: u32,
+    boot_mode: u32,
     efi_memory_top: u64,
     efi_memory_bottom: u64,
     efi_free_memory_top: u64,
@@ -218,6 +219,7 @@ impl TdHob {
                 reserved: 0,
             },
             version: 0x9,
+            boot_mode: 0,
             efi_memory_top: 0,
             efi_memory_bottom: 0,
             efi_free_memory_top: 0,
