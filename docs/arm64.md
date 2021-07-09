@@ -60,7 +60,7 @@ This part introduces how to build EDK2 firmware and boot Cloud Hypervisor with i
 $ pushd $CLOUDH
 
 # Clone source code repos
-$ git clone --depth 1 https://github.com/cloud-hypervisor/edk2.git -b ch-aarch64
+$ git clone --depth 1 https://github.com/tianocore/edk2.git -b master
 $ cd edk2
 $ git submodule update --init
 $ cd ..
