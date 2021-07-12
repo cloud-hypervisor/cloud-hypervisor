@@ -159,7 +159,7 @@ fn create_app<'a, 'b>(
                 .help(
                     "Memory parameters \
                      \"size=<guest_memory_size>,mergeable=on|off,shared=on|off,\
-                     hugepages=on|off,hugepage_size=<hugepage_size>\
+                     hugepages=on|off,hugepage_size=<hugepage_size>,\
                      hotplug_method=acpi|virtio-mem,\
                      hotplug_size=<hotpluggable_memory_size>,\
                      hotplugged_size=<hotplugged_memory_size>\"",
@@ -174,7 +174,7 @@ fn create_app<'a, 'b>(
                     "User defined memory zone parameters \
                      \"size=<guest_memory_region_size>,file=<backing_file>,\
                      shared=on|off,\
-                     hugepages=on|off,hugepage_size=<hugepage_size>\
+                     hugepages=on|off,hugepage_size=<hugepage_size>,\
                      host_numa_node=<node_id>,\
                      id=<zone_identifier>,hotplug_size=<hotpluggable_memory_size>,\
                      hotplugged_size=<hotplugged_memory_size>\"",
