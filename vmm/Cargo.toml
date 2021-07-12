@@ -10,7 +10,7 @@ acpi = ["acpi_tables","devices/acpi", "arch/acpi"]
 cmos = ["devices/cmos"]
 fwdebug = ["devices/fwdebug"]
 kvm = ["hypervisor/kvm", "vfio-ioctls/kvm", "vm-device/kvm"]
-mshv = ["hypervisor/mshv"]
+mshv = ["hypervisor/mshv", "virtio-devices/mshv"]
 io_uring = ["virtio-devices/io_uring"]
 tdx = ["arch/tdx", "hypervisor/tdx"]
 
