@@ -7,6 +7,7 @@ edition = "2018"
 [features]
 default = []
 io_uring = ["block_util/io_uring"]
+mshv = []
 
 [dependencies]
 anyhow = "1.0"
