@@ -3238,6 +3238,8 @@ mod tests {
         // line (We tag the command line from cloud-hypervisor for that purpose).
         // The third device is added to validate that hotplug works correctly since
         // it is being added to the L2 VM through hotplugging mechanism.
+        // Also, we pass-through a vitio-blk device to the L2 VM to test the 32-bit
+        // vfio device support
         fn test_vfio() {
             setup_vfio_network_interfaces();
 
@@ -3263,7 +3265,7 @@ mod tests {
             )
             .expect("copying of cloud-init disk failed");
 
-            let mut vfio_disk_path = workload_path;
+            let mut vfio_disk_path = workload_path.clone();
             vfio_disk_path.push("vfio.img");
 
             // Create the vfio disk image
@@ -3278,6 +3280,9 @@ mod tests {
                 eprintln!("{}", String::from_utf8_lossy(&output.stderr));
                 panic!("mkfs.ext4 command generated an error");
             }
+
+            let mut blk_file_path = workload_path;
+            blk_file_path.push("blk.img");
 
             let vfio_tap0 = "vfio-tap0";
             let vfio_tap1 = "vfio-tap1";
@@ -3301,6 +3306,7 @@ mod tests {
                     )
                     .as_str(),
                     format!("path={}", vfio_disk_path.to_str().unwrap()).as_str(),
+                    format!("path={},iommu=on", blk_file_path.to_str().unwrap()).as_str(),
                 ])
                 .args(&[
                     "--cmdline",
@@ -3374,27 +3380,38 @@ mod tests {
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
-                    7,
+                    8,
+                );
+
+                // Check both if /dev/vdc exists and if the block size is 16M in L2 VM
+                assert_eq!(
+                    guest
+                        .ssh_command_l2_1("lsblk | grep vdc | grep -c 16M")
+                        .unwrap()
+                        .trim()
+                        .parse::<u32>()
+                        .unwrap_or_default(),
+                    1
                 );
 
                 // Hotplug an extra virtio-net device through L2 VM.
                 guest.ssh_command_l1(
-                    "echo 0000:00:08.0 | sudo tee /sys/bus/pci/devices/0000:00:08.0/driver/unbind",
+                    "echo 0000:00:09.0 | sudo tee /sys/bus/pci/devices/0000:00:09.0/driver/unbind",
                 ).unwrap();
                 guest
                     .ssh_command_l1(
-                        "echo 0000:00:08.0 | sudo tee /sys/bus/pci/drivers/vfio-pci/bind",
+                        "echo 0000:00:09.0 | sudo tee /sys/bus/pci/drivers/vfio-pci/bind",
                     )
                     .unwrap();
                 let vfio_hotplug_output = guest
                     .ssh_command_l1(
                         "sudo /mnt/ch-remote \
                  --api-socket=/tmp/ch_api.sock \
-                 add-device path=/sys/bus/pci/devices/0000:00:08.0,id=vfio123",
+                 add-device path=/sys/bus/pci/devices/0000:00:09.0,id=vfio123",
                     )
                     .unwrap();
                 assert!(
-                    vfio_hotplug_output.contains("{\"id\":\"vfio123\",\"bdf\":\"0000:00:07.0\"}")
+                    vfio_hotplug_output.contains("{\"id\":\"vfio123\",\"bdf\":\"0000:00:08.0\"}")
                 );
 
                 thread::sleep(std::time::Duration::new(10, 0));
@@ -3414,7 +3431,7 @@ mod tests {
 
                 // Check the amount of PCI devices appearing in L2 VM.
                 // There should be one more device than before, raising the count
-                // up to 8 PCI devices.
+                // up to 9 PCI devices.
                 assert_eq!(
                     guest
                         .ssh_command_l2_1("ls /sys/bus/pci/devices | wc -l")
@@ -3422,7 +3439,7 @@ mod tests {
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
-                    8,
+                    9,
                 );
 
                 // Let's now verify that we can correctly remove the virtio-net
@@ -3438,7 +3455,7 @@ mod tests {
                 thread::sleep(std::time::Duration::new(10, 0));
 
                 // Check the amount of PCI devices appearing in L2 VM is back down
-                // to 7 devices.
+                // to 8 devices.
                 assert_eq!(
                     guest
                         .ssh_command_l2_1("ls /sys/bus/pci/devices | wc -l")
@@ -3446,7 +3463,7 @@ mod tests {
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
-                    7,
+                    8,
                 );
 
                 // Perform memory hotplug in L2 and validate the memory is showing
