@@ -9,7 +9,7 @@ default = []
 acpi = ["acpi_tables","devices/acpi", "arch/acpi"]
 cmos = ["devices/cmos"]
 fwdebug = ["devices/fwdebug"]
-kvm = ["hypervisor/kvm"]
+kvm = ["hypervisor/kvm", "vfio-ioctls/kvm", "vm-device/kvm"]
 mshv = ["hypervisor/mshv"]
 io_uring = ["virtio-devices/io_uring"]
 tdx = ["arch/tdx", "hypervisor/tdx"]
@@ -44,7 +44,7 @@ thiserror = "1.0"
 uuid = "0.8"
 versionize = "0.1.6"
 versionize_derive = "0.1.4"
-vfio-ioctls = { git = "https://github.com/rust-vmm/vfio-ioctls", branch = "master" }
+vfio-ioctls = { git = "https://github.com/rust-vmm/vfio-ioctls", branch = "master", default-features = false }
 virtio-devices = { path = "../virtio-devices" }
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
