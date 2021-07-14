@@ -11,8 +11,6 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-#[cfg(target_arch = "x86_64")]
-use crate::config::CpuTopology;
 use crate::config::CpusConfig;
 use crate::device_manager::DeviceManager;
 use crate::memory_manager::MemoryManager;
@@ -26,17 +24,13 @@ use crate::CPU_MANAGER_SNAPSHOT_ID;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml, sdt::Sdt};
 use anyhow::anyhow;
-#[cfg(target_arch = "x86_64")]
-use arch::x86_64::SgxEpcSection;
-#[cfg(target_arch = "x86_64")]
-use arch::CpuidPatch;
 use arch::EntryPoint;
 use devices::interrupt_controller::InterruptController;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::kvm::kvm_bindings;
-use hypervisor::{vm::VmmOps, CpuState, HypervisorCpuError, VmExit};
 #[cfg(target_arch = "x86_64")]
-use hypervisor::{CpuId, CpuIdEntry};
+use hypervisor::CpuId;
+use hypervisor::{vm::VmmOps, CpuState, HypervisorCpuError, VmExit};
 use libc::{c_void, siginfo_t};
 use seccomp::{SeccompAction, SeccompFilter};
 #[cfg(feature = "acpi")]
@@ -56,30 +50,6 @@ use vm_migration::{
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::{register_signal_handler, SIGRTMIN};
 
-// CPUID feature bits
-#[cfg(target_arch = "x86_64")]
-const TSC_DEADLINE_TIMER_ECX_BIT: u8 = 24; // tsc deadline timer ecx bit.
-#[cfg(target_arch = "x86_64")]
-const HYPERVISOR_ECX_BIT: u8 = 31; // Hypervisor ecx bit.
-#[cfg(target_arch = "x86_64")]
-const MTRR_EDX_BIT: u8 = 12; // Hypervisor ecx bit.
-
-// KVM feature bits
-#[cfg(target_arch = "x86_64")]
-const KVM_FEATURE_ASYNC_PF_INT_BIT: u8 = 14;
-#[cfg(feature = "tdx")]
-const KVM_FEATURE_CLOCKSOURCE_BIT: u8 = 0;
-#[cfg(feature = "tdx")]
-const KVM_FEATURE_CLOCKSOURCE2_BIT: u8 = 3;
-#[cfg(feature = "tdx")]
-const KVM_FEATURE_CLOCKSOURCE_STABLE_BIT: u8 = 24;
-#[cfg(feature = "tdx")]
-const KVM_FEATURE_ASYNC_PF_BIT: u8 = 4;
-#[cfg(feature = "tdx")]
-const KVM_FEATURE_ASYNC_PF_VMEXIT_BIT: u8 = 10;
-#[cfg(feature = "tdx")]
-const KVM_FEATURE_STEAL_TIME_BIT: u8 = 5;
-
 #[cfg(feature = "acpi")]
 pub const CPU_MANAGER_ACPI_SIZE: usize = 0xc;
 
@@ -94,8 +64,8 @@ pub enum Error {
     /// Cannot spawn a new vCPU thread.
     VcpuSpawn(io::Error),
 
-    /// Cannot patch the CPU ID
-    PatchCpuId(anyhow::Error),
+    /// Cannot generate common CPUID
+    CommonCpuId(arch::Error),
 
     /// Error configuring VCPU
     VcpuConfiguration(arch::Error),
@@ -131,18 +101,6 @@ pub enum Error {
 
     /// Failed to allocate MMIO address
     AllocateMmmioAddress,
-
-    /// Error populating CPUID with KVM HyperV emulation details
-    #[cfg(target_arch = "x86_64")]
-    CpuidKvmHyperV(vmm_sys_util::fam::Error),
-
-    /// Error populating CPUID with KVM HyperV emulation details
-    #[cfg(target_arch = "x86_64")]
-    CpuidSgx(arch::x86_64::Error),
-
-    /// Error populating CPUID with CPU identification
-    #[cfg(target_arch = "x86_64")]
-    CpuidIdentification(vmm_sys_util::fam::Error),
 
     #[cfg(feature = "tdx")]
     InitializeTdx(hypervisor::HypervisorCpuError),
@@ -576,15 +534,19 @@ impl CpuManager {
         #[cfg(target_arch = "x86_64")]
         let cpuid = {
             let phys_bits = physical_bits(config.max_phys_bits);
-            CpuManager::generate_common_cpuid(
+            arch::generate_common_cpuid(
                 hypervisor,
-                &config.topology,
+                config
+                    .topology
+                    .clone()
+                    .map(|t| (t.threads_per_core, t.cores_per_die, t.dies_per_package)),
                 sgx_epc_sections,
                 phys_bits,
                 config.kvm_hyperv,
                 #[cfg(feature = "tdx")]
                 tdx_enabled,
-            )?
+            )
+            .map_err(Error::CommonCpuId)?
         };
 
         let device_manager = device_manager.lock().unwrap();
@@ -642,177 +604,6 @@ impl CpuManager {
             .map_err(Error::BusError)?;
 
         Ok(cpu_manager)
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    fn generate_common_cpuid(
-        hypervisor: Arc<dyn hypervisor::Hypervisor>,
-        topology: &Option<CpuTopology>,
-        sgx_epc_sections: Option<Vec<SgxEpcSection>>,
-        phys_bits: u8,
-        kvm_hyperv: bool,
-        #[cfg(feature = "tdx")] tdx_enabled: bool,
-    ) -> Result<CpuId> {
-        let cpuid_patches = vec![
-            // Patch tsc deadline timer bit
-            CpuidPatch {
-                function: 1,
-                index: 0,
-                flags_bit: None,
-                eax_bit: None,
-                ebx_bit: None,
-                ecx_bit: Some(TSC_DEADLINE_TIMER_ECX_BIT),
-                edx_bit: None,
-            },
-            // Patch hypervisor bit
-            CpuidPatch {
-                function: 1,
-                index: 0,
-                flags_bit: None,
-                eax_bit: None,
-                ebx_bit: None,
-                ecx_bit: Some(HYPERVISOR_ECX_BIT),
-                edx_bit: None,
-            },
-            // Enable MTRR feature
-            CpuidPatch {
-                function: 1,
-                index: 0,
-                flags_bit: None,
-                eax_bit: None,
-                ebx_bit: None,
-                ecx_bit: None,
-                edx_bit: Some(MTRR_EDX_BIT),
-            },
-        ];
-
-        // Supported CPUID
-        let mut cpuid = hypervisor
-            .get_cpuid()
-            .map_err(|e| Error::PatchCpuId(e.into()))?;
-
-        CpuidPatch::patch_cpuid(&mut cpuid, cpuid_patches);
-
-        if let Some(t) = topology {
-            arch::x86_64::update_cpuid_topology(
-                &mut cpuid,
-                t.threads_per_core,
-                t.cores_per_die,
-                t.dies_per_package,
-            );
-        }
-
-        if let Some(sgx_epc_sections) = sgx_epc_sections {
-            arch::x86_64::update_cpuid_sgx(&mut cpuid, sgx_epc_sections)
-                .map_err(Error::CpuidSgx)?;
-        }
-
-        // Update some existing CPUID
-        for entry in cpuid.as_mut_slice().iter_mut() {
-            match entry.function {
-                // Set CPU physical bits
-                0x8000_0008 => {
-                    entry.eax = (entry.eax & 0xffff_ff00) | (phys_bits as u32 & 0xff);
-                }
-                // Disable KVM_FEATURE_ASYNC_PF_INT
-                // This is required until we find out why the asynchronous page
-                // fault is generating unexpected behavior when using interrupt
-                // mechanism.
-                // TODO: Re-enable KVM_FEATURE_ASYNC_PF_INT (#2277)
-                0x4000_0001 => {
-                    entry.eax &= !(1 << KVM_FEATURE_ASYNC_PF_INT_BIT);
-
-                    // These features are not supported by TDX
-                    #[cfg(feature = "tdx")]
-                    if tdx_enabled {
-                        entry.eax &= !(1 << KVM_FEATURE_CLOCKSOURCE_BIT
-                            | 1 << KVM_FEATURE_CLOCKSOURCE2_BIT
-                            | 1 << KVM_FEATURE_CLOCKSOURCE_STABLE_BIT
-                            | 1 << KVM_FEATURE_ASYNC_PF_BIT
-                            | 1 << KVM_FEATURE_ASYNC_PF_VMEXIT_BIT
-                            | 1 << KVM_FEATURE_STEAL_TIME_BIT)
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        // Copy CPU identification string
-        for i in 0x8000_0002..=0x8000_0004 {
-            cpuid.retain(|c| c.function != i);
-            let leaf = unsafe { std::arch::x86_64::__cpuid(i) };
-            cpuid
-                .push(CpuIdEntry {
-                    function: i,
-                    eax: leaf.eax,
-                    ebx: leaf.ebx,
-                    ecx: leaf.ecx,
-                    edx: leaf.edx,
-                    ..Default::default()
-                })
-                .map_err(Error::CpuidIdentification)?;
-        }
-
-        if kvm_hyperv {
-            // Remove conflicting entries
-            cpuid.retain(|c| c.function != 0x4000_0000);
-            cpuid.retain(|c| c.function != 0x4000_0001);
-            // See "Hypervisor Top Level Functional Specification" for details
-            // Compliance with "Hv#1" requires leaves up to 0x4000_000a
-            cpuid
-                .push(CpuIdEntry {
-                    function: 0x40000000,
-                    eax: 0x4000000a, // Maximum cpuid leaf
-                    ebx: 0x756e694c, // "Linu"
-                    ecx: 0x564b2078, // "x KV"
-                    edx: 0x7648204d, // "M Hv"
-                    ..Default::default()
-                })
-                .map_err(Error::CpuidKvmHyperV)?;
-            cpuid
-                .push(CpuIdEntry {
-                    function: 0x40000001,
-                    eax: 0x31237648, // "Hv#1"
-                    ..Default::default()
-                })
-                .map_err(Error::CpuidKvmHyperV)?;
-            cpuid
-                .push(CpuIdEntry {
-                    function: 0x40000002,
-                    eax: 0x3839,  // "Build number"
-                    ebx: 0xa0000, // "Version"
-                    ..Default::default()
-                })
-                .map_err(Error::CpuidKvmHyperV)?;
-            cpuid
-                .push(CpuIdEntry {
-                    function: 0x4000_0003,
-                    eax: 1 << 1 // AccessPartitionReferenceCounter
-                       | 1 << 2 // AccessSynicRegs
-                       | 1 << 3 // AccessSyntheticTimerRegs
-                       | 1 << 9, // AccessPartitionReferenceTsc
-                    edx: 1 << 3, // CPU dynamic partitioning
-                    ..Default::default()
-                })
-                .map_err(Error::CpuidKvmHyperV)?;
-            cpuid
-                .push(CpuIdEntry {
-                    function: 0x4000_0004,
-                    eax: 1 << 5, // Recommend relaxed timing
-                    ..Default::default()
-                })
-                .map_err(Error::CpuidKvmHyperV)?;
-            for i in 0x4000_0005..=0x4000_000a {
-                cpuid
-                    .push(CpuIdEntry {
-                        function: i,
-                        ..Default::default()
-                    })
-                    .map_err(Error::CpuidKvmHyperV)?;
-            }
-        }
-
-        Ok(cpuid)
     }
 
     fn create_vcpu(
