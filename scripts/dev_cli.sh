@@ -198,6 +198,7 @@ cmd_help() {
     echo ""
     echo "    shell"
     echo "        Run the development container into an interactive, privileged BASH shell."
+    echo "        --volumes             Hash separated volumes to be exported. Example --volumes /mnt:/mnt#/myvol:/myvol"
     echo ""
     echo "    help"
     echo "        Display this help message."
@@ -499,10 +500,24 @@ cmd_build-container() {
 }
 
 cmd_shell() {
+    while [ $# -gt 0 ]; do
+	case "$1" in
+            "-h"|"--help")  { cmd_help; exit 1; } ;;
+            "--volumes")
+                shift
+                arg_vols="$1"
+                ;;
+            "--")           { shift; break; } ;;
+            *)
+		;;
+	esac
+	shift
+    done
     ensure_build_dir
     if [ $(uname -m) = "x86_64" ]; then
 	ensure_latest_ctr
     fi
+    process_volumes_args
     say_warn "Starting a privileged shell prompt as root ..."
     say_warn "WARNING: Your $CLH_ROOT_DIR folder will be bind-mounted in the container under $CTR_CLH_ROOT_DIR"
     $DOCKER_RUNTIME run \
