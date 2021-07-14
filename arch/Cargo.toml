@@ -23,6 +23,7 @@ versionize = "0.1.6"
 versionize_derive = "0.1.4"
 vm-memory = { version = "0.5.0", features = ["backend-mmap", "backend-bitmap"] }
 vm-migration = { path = "../vm-migration" }
+vmm-sys-util = { version = ">=0.5.0", features = ["with-serde"] }
 
 [target.'cfg(target_arch = "aarch64")'.dependencies]
 fdt_parser = { version = "0.1.3", package = 'fdt'}
