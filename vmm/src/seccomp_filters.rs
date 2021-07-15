@@ -595,6 +595,7 @@ fn api_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_mprotect),
         allow_syscall(libc::SYS_munmap),
         allow_syscall(libc::SYS_recvfrom),
+        allow_syscall(libc::SYS_recvmsg),
         allow_syscall(libc::SYS_sigaltstack),
         allow_syscall(libc::SYS_write),
     ])
