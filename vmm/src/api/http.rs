@@ -11,6 +11,7 @@ use micro_http::{Body, HttpServer, MediaType, Method, Request, Response, StatusC
 use seccomp::{SeccompAction, SeccompFilter};
 use serde_json::Error as SerdeError;
 use std::collections::HashMap;
+use std::fs::File;
 use std::os::unix::io::{IntoRawFd, RawFd};
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
@@ -141,8 +142,9 @@ pub trait EndpointHandler: Sync + Send {
         api_notifier: EventFd,
         api_sender: Sender<ApiRequest>,
     ) -> Response {
+        let file = req.file.as_ref().map(|f| f.try_clone().unwrap());
         let res = match req.method() {
-            Method::Put => self.put_handler(api_notifier, api_sender, &req.body),
+            Method::Put => self.put_handler(api_notifier, api_sender, &req.body, file),
             Method::Get => self.get_handler(api_notifier, api_sender, &req.body),
             _ => return Response::new(Version::Http11, StatusCode::BadRequest),
         };
@@ -170,6 +172,7 @@ pub trait EndpointHandler: Sync + Send {
         _api_notifier: EventFd,
         _api_sender: Sender<ApiRequest>,
         _body: &Option<Body>,
+        _file: Option<File>,
     ) -> std::result::Result<Option<Body>, HttpError> {
         Err(HttpError::BadRequest)
     }

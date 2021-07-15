@@ -11,7 +11,10 @@ use crate::api::{
     vm_send_migration, vm_shutdown, vm_snapshot, vmm_ping, vmm_shutdown, ApiRequest, VmAction,
     VmConfig,
 };
+use crate::config::NetConfig;
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
+use std::fs::File;
+use std::os::unix::io::IntoRawFd;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use vmm_sys_util::eventfd::EventFd;
@@ -73,6 +76,7 @@ impl EndpointHandler for VmActionHandler {
         api_notifier: EventFd,
         api_sender: Sender<ApiRequest>,
         body: &Option<Body>,
+        file: Option<File>,
     ) -> std::result::Result<Option<Body>, HttpError> {
         use VmAction::*;
         if let Some(body) = body {
@@ -105,12 +109,16 @@ impl EndpointHandler for VmActionHandler {
                 )
                 .map_err(HttpError::VmAddPmem),
 
-                AddNet(_) => vm_add_net(
-                    api_notifier,
-                    api_sender,
-                    Arc::new(serde_json::from_slice(body.raw())?),
-                )
-                .map_err(HttpError::VmAddNet),
+                AddNet(_) => {
+                    let mut net_cfg: NetConfig = serde_json::from_slice(body.raw())?;
+                    // Update network config with optional file that might have
+                    // been sent through control message.
+                    if let Some(file) = file {
+                        net_cfg.fds = Some(vec![file.into_raw_fd()]);
+                    }
+                    vm_add_net(api_notifier, api_sender, Arc::new(net_cfg))
+                        .map_err(HttpError::VmAddNet)
+                }
 
                 AddVsock(_) => vm_add_vsock(
                     api_notifier,
