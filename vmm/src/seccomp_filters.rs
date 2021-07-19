@@ -143,6 +143,7 @@ mod mshv {
     pub const MSHV_SET_VP_STATE: u64 = 0xc028_b80b;
     pub const MSHV_SET_PARTITION_PROPERTY: u64 = 0x4010_b80c;
     pub const MSHV_GET_GPA_ACCESS_STATES: u64 = 0xc01c_b812;
+    pub const MSHV_VP_TRANSLATE_GVA: u64 = 0xc020_b80e;
 }
 #[cfg(feature = "mshv")]
 use mshv::*;
@@ -170,6 +171,7 @@ fn create_vmm_ioctl_seccomp_rule_common_mshv() -> Result<Vec<SeccompRule>, Error
             MSHV_SET_PARTITION_PROPERTY
         )?],
         and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_GET_GPA_ACCESS_STATES)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_VP_TRANSLATE_GVA)?],
     ])
 }
 
