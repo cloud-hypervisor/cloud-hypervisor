@@ -547,7 +547,7 @@ dependencies = [
 [[package]]
 name = "mshv-bindings"
 version = "0.1.0"
-source = "git+https://github.com/cloud-hypervisor/mshv?branch=master#3bdb6cae41c0951990c8e074a8999245271806d1"
+source = "git+https://github.com/cloud-hypervisor/mshv?branch=master#9481c711c329e1e004eb13dc3f1df946316afda0"
 dependencies = [
  "libc",
  "serde",
@@ -559,7 +559,7 @@ dependencies = [
 [[package]]
 name = "mshv-ioctls"
 version = "0.1.0"
-source = "git+https://github.com/cloud-hypervisor/mshv?branch=master#3bdb6cae41c0951990c8e074a8999245271806d1"
+source = "git+https://github.com/cloud-hypervisor/mshv?branch=master#9481c711c329e1e004eb13dc3f1df946316afda0"
 dependencies = [
  "libc",
  "mshv-bindings",
