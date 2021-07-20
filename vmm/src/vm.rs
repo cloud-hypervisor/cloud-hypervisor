@@ -523,6 +523,8 @@ pub struct Vm {
     numa_nodes: NumaNodes,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
+    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+    hypervisor: Arc<dyn hypervisor::Hypervisor>,
 }
 
 impl Vm {
@@ -597,7 +599,7 @@ impl Vm {
             vm.clone(),
             exit_evt_clone,
             reset_evt,
-            hypervisor,
+            hypervisor.clone(),
             seccomp_action.clone(),
             vm_ops,
             #[cfg(feature = "tdx")]
@@ -644,6 +646,8 @@ impl Vm {
             numa_nodes,
             seccomp_action: seccomp_action.clone(),
             exit_evt,
+            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+            hypervisor,
         })
     }
 
@@ -2268,6 +2272,8 @@ pub struct VmSnapshot {
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     pub clock: Option<hypervisor::ClockData>,
     pub state: Option<hypervisor::VmState>,
+    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+    pub common_cpuid: hypervisor::CpuId,
 }
 
 pub const VM_SNAPSHOT_ID: &str = "vm";
@@ -2295,6 +2301,29 @@ impl Snapshottable for Vm {
             )));
         }
 
+        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+        let common_cpuid = {
+            #[cfg(feature = "tdx")]
+            let tdx_enabled = self.config.lock().unwrap().tdx.is_some();
+            let phys_bits = physical_bits(
+                self.config.lock().unwrap().cpus.max_phys_bits,
+                #[cfg(feature = "tdx")]
+                tdx_enabled,
+            );
+            arch::generate_common_cpuid(
+                self.hypervisor.clone(),
+                None,
+                None,
+                phys_bits,
+                self.config.lock().unwrap().cpus.kvm_hyperv,
+                #[cfg(feature = "tdx")]
+                tdx_enabled,
+            )
+            .map_err(|e| {
+                MigratableError::MigrateReceive(anyhow!("Error generating common cpuid: {:?}", e))
+            })?
+        };
+
         let mut vm_snapshot = Snapshot::new(VM_SNAPSHOT_ID);
         let vm_state = self
             .vm
@@ -2305,6 +2334,8 @@ impl Snapshottable for Vm {
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             clock: self.saved_clock,
             state: Some(vm_state),
+            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+            common_cpuid,
         })
         .map_err(|e| MigratableError::Snapshot(e.into()))?;
 

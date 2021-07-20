@@ -453,6 +453,10 @@ impl Vmm {
         let snapshot = recv_vm_snapshot(source_url).map_err(VmError::Restore)?;
         let vm_snapshot = get_vm_snapshot(&snapshot).map_err(VmError::Restore)?;
 
+        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+        self.vm_check_cpuid_compatibility(&vm_snapshot.config, &vm_snapshot.common_cpuid)
+            .map_err(VmError::Restore)?;
+
         self.vm_config = Some(Arc::clone(&vm_snapshot.config));
 
         let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
