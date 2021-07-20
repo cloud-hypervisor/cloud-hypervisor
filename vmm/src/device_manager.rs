@@ -919,6 +919,9 @@ pub struct DeviceManager {
     #[cfg(target_arch = "aarch64")]
     // GPIO device for AArch64
     gpio_device: Option<Arc<Mutex<devices::legacy::Gpio>>>,
+
+    // Flag to force setting the iommu on virtio devices
+    force_iommu: bool,
 }
 
 impl DeviceManager {
@@ -932,6 +935,7 @@ impl DeviceManager {
         seccomp_action: SeccompAction,
         #[cfg(feature = "acpi")] numa_nodes: NumaNodes,
         activate_evt: &EventFd,
+        force_iommu: bool,
     ) -> DeviceManagerResult<Arc<Mutex<Self>>> {
         let device_tree = Arc::new(Mutex::new(DeviceTree::new()));
 
@@ -1004,6 +1008,7 @@ impl DeviceManager {
             virtio_mem_devices: Vec::new(),
             #[cfg(target_arch = "aarch64")]
             gpio_device: None,
+            force_iommu,
         };
 
         let device_manager = Arc::new(Mutex::new(device_manager));
@@ -1744,7 +1749,7 @@ impl DeviceManager {
                 writer,
                 col,
                 row,
-                console_config.iommu,
+                self.force_iommu | console_config.iommu,
                 self.seccomp_action.clone(),
             )
             .map_err(DeviceManagerError::CreateVirtioConsole)?;
@@ -1919,7 +1924,7 @@ impl DeviceManager {
                         .ok_or(DeviceManagerError::NoDiskPath)?
                         .clone(),
                     disk_cfg.readonly,
-                    disk_cfg.iommu,
+                    self.force_iommu | disk_cfg.iommu,
                     disk_cfg.num_queues,
                     disk_cfg.queue_size,
                     self.seccomp_action.clone(),
@@ -2021,7 +2026,7 @@ impl DeviceManager {
                         None,
                         Some(net_cfg.mac),
                         &mut net_cfg.host_mac,
-                        net_cfg.iommu,
+                        self.force_iommu | net_cfg.iommu,
                         net_cfg.num_queues,
                         net_cfg.queue_size,
                         self.seccomp_action.clone(),
@@ -2035,7 +2040,7 @@ impl DeviceManager {
                         id.clone(),
                         fds,
                         Some(net_cfg.mac),
-                        net_cfg.iommu,
+                        self.force_iommu | net_cfg.iommu,
                         net_cfg.queue_size,
                         self.seccomp_action.clone(),
                         net_cfg.rate_limiter_config,
@@ -2051,7 +2056,7 @@ impl DeviceManager {
                         Some(net_cfg.mask),
                         Some(net_cfg.mac),
                         &mut net_cfg.host_mac,
-                        net_cfg.iommu,
+                        self.force_iommu | net_cfg.iommu,
                         net_cfg.num_queues,
                         net_cfg.queue_size,
                         self.seccomp_action.clone(),
@@ -2108,7 +2113,7 @@ impl DeviceManager {
                 virtio_devices::Rng::new(
                     id.clone(),
                     rng_path,
-                    rng_config.iommu,
+                    self.force_iommu | rng_config.iommu,
                     self.seccomp_action.clone(),
                 )
                 .map_err(DeviceManagerError::CreateVirtioRng)?,
@@ -2441,7 +2446,7 @@ impl DeviceManager {
                 GuestAddress(region_base),
                 mapping,
                 mmap_region,
-                pmem_cfg.iommu,
+                self.force_iommu | pmem_cfg.iommu,
                 self.seccomp_action.clone(),
             )
             .map_err(DeviceManagerError::CreateVirtioPmem)?,
@@ -2507,7 +2512,7 @@ impl DeviceManager {
                 vsock_cfg.cid,
                 vsock_cfg.socket.clone(),
                 backend,
-                vsock_cfg.iommu,
+                self.force_iommu | vsock_cfg.iommu,
                 self.seccomp_action.clone(),
             )
             .map_err(DeviceManagerError::CreateVirtioVsock)?,
