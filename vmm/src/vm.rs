@@ -538,6 +538,11 @@ impl Vm {
         let numa_nodes =
             Self::create_numa_nodes(config.lock().unwrap().numa.clone(), &memory_manager)?;
 
+        #[cfg(feature = "tdx")]
+        let force_iommu = config.lock().unwrap().tdx.is_some();
+        #[cfg(not(feature = "tdx"))]
+        let force_iommu = false;
+
         let device_manager = DeviceManager::new(
             vm.clone(),
             config.clone(),
@@ -548,6 +553,7 @@ impl Vm {
             #[cfg(feature = "acpi")]
             numa_nodes.clone(),
             &activate_evt,
+            force_iommu,
         )
         .map_err(Error::DeviceManager)?;
 
