@@ -5,10 +5,13 @@
 
 use std::fmt;
 use std::io::{Read, Write};
+use std::os::unix::io::RawFd;
+use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
 #[derive(Debug)]
 pub enum Error {
     Socket(std::io::Error),
+    SocketSendFds(vmm_sys_util::errno::Error),
     StatusCodeParsing(std::num::ParseIntError),
     MissingProtocol,
     ContentLengthParsing(std::num::ParseIntError),
@@ -20,6 +23,7 @@ impl fmt::Display for Error {
         use Error::*;
         match self {
             Socket(e) => write!(f, "Error writing to or reading from HTTP socket: {}", e),
+            SocketSendFds(e) => write!(f, "Error writing to or reading from HTTP socket: {}", e),
             StatusCodeParsing(e) => write!(f, "Error parsing HTTP status code: {}", e),
             MissingProtocol => write!(f, "HTTP output is missing protocol statement"),
             ContentLengthParsing(e) => write!(f, "Error parsing HTTP Content-Length field: {}", e),
@@ -133,21 +137,23 @@ fn parse_http_response(socket: &mut dyn Read) -> Result<Option<String>, Error> {
     }
 }
 
-pub fn simple_api_command<T: Read + Write>(
+pub fn simple_api_command_with_fds<T: Read + Write + ScmSocket>(
     socket: &mut T,
     method: &str,
     c: &str,
     request_body: Option<&str>,
+    request_fds: Vec<RawFd>,
 ) -> Result<(), Error> {
     socket
-        .write_all(
-            format!(
+        .send_with_fds(
+            &[format!(
                 "{} /api/v1/vm.{} HTTP/1.1\r\nHost: localhost\r\nAccept: */*\r\n",
                 method, c
             )
-            .as_bytes(),
+            .as_bytes()],
+            &request_fds,
         )
-        .map_err(Error::Socket)?;
+        .map_err(Error::SocketSendFds)?;
 
     if let Some(request_body) = request_body {
         socket
@@ -169,4 +175,13 @@ pub fn simple_api_command<T: Read + Write>(
         println!("{}", body);
     }
     Ok(())
+}
+
+pub fn simple_api_command<T: Read + Write + ScmSocket>(
+    socket: &mut T,
+    method: &str,
+    c: &str,
+    request_body: Option<&str>,
+) -> Result<(), Error> {
+    simple_api_command_with_fds(socket, method, c, request_body, Vec::new())
 }
