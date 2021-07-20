@@ -757,41 +757,10 @@ impl Vmm {
             })?;
 
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-        // We check the `CPUID` compatibility of between the source vm and destination, which is
-        // mostly about feature compatibility and "topology/sgx" leaves are not relevant.
-        let dest_cpuid = {
-            let vm_config = &vm_migration_config.vm_config.lock().unwrap();
-            #[cfg(feature = "tdx")]
-            let tdx_enabled = vm_config.tdx.is_some();
-            let phys_bits = vm::physical_bits(
-                vm_config.cpus.max_phys_bits,
-                #[cfg(feature = "tdx")]
-                tdx_enabled,
-            );
-            arch::generate_common_cpuid(
-                self.hypervisor.clone(),
-                None,
-                None,
-                phys_bits,
-                vm_config.cpus.kvm_hyperv,
-                #[cfg(feature = "tdx")]
-                tdx_enabled,
-            )
-            .map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!("Error generating common cpuid': {:?}", e))
-            })?
-        };
-        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-        arch::CpuidFeatureEntry::check_cpuid_compatibility(
+        self.vm_check_cpuid_compatibility(
+            &vm_migration_config.vm_config,
             &vm_migration_config.common_cpuid,
-            &dest_cpuid,
-        )
-        .map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!(
-                "Error checking cpu feature compatibility': {:?}",
-                e
-            ))
-        })?;
+        )?;
 
         let exit_evt = self.exit_evt.try_clone().map_err(|e| {
             MigratableError::MigrateReceive(anyhow!("Error cloning exit EventFd: {}", e))
@@ -1164,6 +1133,45 @@ impl Vmm {
         } else {
             Err(MigratableError::MigrateSend(anyhow!("VM is not running")))
         }
+    }
+
+    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+    fn vm_check_cpuid_compatibility(
+        &self,
+        src_vm_config: &Arc<Mutex<VmConfig>>,
+        src_vm_cpuid: &hypervisor::CpuId,
+    ) -> result::Result<(), MigratableError> {
+        // We check the `CPUID` compatibility of between the source vm and destination, which is
+        // mostly about feature compatibility and "topology/sgx" leaves are not relevant.
+        let dest_cpuid = &{
+            let vm_config = &src_vm_config.lock().unwrap();
+
+            #[cfg(feature = "tdx")]
+            let tdx_enabled = vm_config.tdx.is_some();
+            let phys_bits = vm::physical_bits(
+                vm_config.cpus.max_phys_bits,
+                #[cfg(feature = "tdx")]
+                tdx_enabled,
+            );
+            arch::generate_common_cpuid(
+                self.hypervisor.clone(),
+                None,
+                None,
+                phys_bits,
+                vm_config.cpus.kvm_hyperv,
+                #[cfg(feature = "tdx")]
+                tdx_enabled,
+            )
+            .map_err(|e| {
+                MigratableError::MigrateReceive(anyhow!("Error generating common cpuid: {:?}", e))
+            })?
+        };
+        arch::CpuidFeatureEntry::check_cpuid_compatibility(src_vm_cpuid, dest_cpuid).map_err(|e| {
+            MigratableError::MigrateReceive(anyhow!(
+                "Error checking cpu feature compatibility': {:?}",
+                e
+            ))
+        })
     }
 
     fn control_loop(&mut self, api_receiver: Arc<Receiver<ApiRequest>>) -> Result<()> {
