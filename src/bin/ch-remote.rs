@@ -7,6 +7,7 @@
 extern crate clap;
 
 use api_client::simple_api_command;
+use api_client::simple_api_command_with_fds;
 use api_client::Error as ApiClientError;
 use clap::{App, AppSettings, Arg, ArgMatches, SubCommand};
 use option_parser::{ByteSized, ByteSizedParseError};
@@ -178,13 +179,20 @@ fn add_pmem_api_command(socket: &mut UnixStream, config: &str) -> Result<(), Err
 }
 
 fn add_net_api_command(socket: &mut UnixStream, config: &str) -> Result<(), Error> {
-    let net_config = vmm::config::NetConfig::parse(config).map_err(Error::AddNetConfig)?;
+    let mut net_config = vmm::config::NetConfig::parse(config).map_err(Error::AddNetConfig)?;
 
-    simple_api_command(
+    // NetConfig is modified on purpose here by taking the list of file
+    // descriptors out. Keeping the list and send it to the server side
+    // process would not make any sense since the file descriptor may be
+    // represented with different values.
+    let fds = net_config.fds.take().unwrap_or_default();
+
+    simple_api_command_with_fds(
         socket,
         "PUT",
         "add-net",
         Some(&serde_json::to_string(&net_config).unwrap()),
+        fds,
     )
     .map_err(Error::ApiClient)
 }
