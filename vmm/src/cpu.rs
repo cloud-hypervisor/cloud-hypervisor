@@ -533,7 +533,11 @@ impl CpuManager {
             .map(|sgx_epc_region| sgx_epc_region.epc_sections().values().cloned().collect());
         #[cfg(target_arch = "x86_64")]
         let cpuid = {
-            let phys_bits = physical_bits(config.max_phys_bits);
+            let phys_bits = physical_bits(
+                config.max_phys_bits,
+                #[cfg(feature = "tdx")]
+                tdx_enabled,
+            );
             arch::generate_common_cpuid(
                 hypervisor,
                 config

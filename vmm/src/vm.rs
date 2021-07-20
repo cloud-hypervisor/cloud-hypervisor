@@ -483,8 +483,23 @@ impl VmmOps for VmOps {
     }
 }
 
-pub fn physical_bits(max_phys_bits: Option<u8>) -> u8 {
+pub fn physical_bits(max_phys_bits: Option<u8>, #[cfg(feature = "tdx")] tdx_enabled: bool) -> u8 {
+    #[cfg(not(feature = "tdx"))]
     let host_phys_bits = get_host_cpu_phys_bits();
+    #[cfg(feature = "tdx")]
+    let mut host_phys_bits = get_host_cpu_phys_bits();
+
+    #[cfg(feature = "tdx")]
+    if tdx_enabled {
+        // When running TDX guest, the Guest Physical Address space is limited
+        // by a shared bit that is located on bit 47 for 4 level paging, and on
+        // bit 51 for 5 level paging (when GPAW bit is 1). In order to keep
+        // things simple, and since a 47 bits address space is 128TiB large, we
+        // ensure to limit the physical addressable space to 47 bits when
+        // runnning TDX.
+        host_phys_bits = std::cmp::min(host_phys_bits, 47)
+    }
+
     cmp::min(host_phys_bits, max_phys_bits.unwrap_or(host_phys_bits))
 }
 
@@ -734,7 +749,11 @@ impl Vm {
 
         #[cfg(target_arch = "x86_64")]
         vm.enable_split_irq().unwrap();
-        let phys_bits = physical_bits(config.lock().unwrap().cpus.max_phys_bits);
+        let phys_bits = physical_bits(
+            config.lock().unwrap().cpus.max_phys_bits,
+            #[cfg(feature = "tdx")]
+            tdx_enabled,
+        );
         let memory_manager = MemoryManager::new(
             vm.clone(),
             &config.lock().unwrap().memory.clone(),
@@ -805,7 +824,11 @@ impl Vm {
         let memory_manager = if let Some(memory_manager_snapshot) =
             snapshot.snapshots.get(MEMORY_MANAGER_SNAPSHOT_ID)
         {
-            let phys_bits = physical_bits(config.lock().unwrap().cpus.max_phys_bits);
+            let phys_bits = physical_bits(
+                config.lock().unwrap().cpus.max_phys_bits,
+                #[cfg(feature = "tdx")]
+                config.lock().unwrap().tdx.is_some(),
+            );
             MemoryManager::new_from_snapshot(
                 memory_manager_snapshot,
                 vm.clone(),
@@ -847,7 +870,11 @@ impl Vm {
         let vm = hypervisor.create_vm().unwrap();
         #[cfg(target_arch = "x86_64")]
         vm.enable_split_irq().unwrap();
-        let phys_bits = physical_bits(config.lock().unwrap().cpus.max_phys_bits);
+        let phys_bits = physical_bits(
+            config.lock().unwrap().cpus.max_phys_bits,
+            #[cfg(feature = "tdx")]
+            config.lock().unwrap().tdx.is_some(),
+        );
 
         let memory_manager = MemoryManager::new(
             vm.clone(),
