@@ -588,6 +588,7 @@ fn api_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         #[cfg(target_arch = "x86_64")]
         allow_syscall(libc::SYS_epoll_wait),
         allow_syscall(libc::SYS_exit),
+        allow_syscall(libc::SYS_fcntl),
         allow_syscall(libc::SYS_futex),
         allow_syscall(libc::SYS_getrandom),
         allow_syscall_if(libc::SYS_ioctl, create_api_ioctl_seccomp_rule()?),
