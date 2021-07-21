@@ -5089,7 +5089,6 @@ mod tests {
             handle_child_output(r, &output);
         }
 
-        #[test]
         // By design, a guest VM won't be able to connect to the host
         // machine when using a macvtap network interface (while it can
         // communicate externally). As a workaround, this integration
@@ -5099,14 +5098,14 @@ mod tests {
         // routing table, it enables the communications between the
         // guest VM and the host machine.
         // Details: https://wiki.libvirt.org/page/TroubleshootMacvtapHostFail
-        fn test_macvtap() {
+        fn _test_macvtap(hotplug: bool, guest_macvtap_name: &str, host_macvtap_name: &str) {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
+            let api_socket = temp_api_path(&guest.tmp_dir);
             let kernel_path = direct_kernel_boot_path();
             let phy_net = "eth0";
 
             // Create a macvtap interface for the guest VM to use
-            let guest_macvtap_name = "guestmacvtap0";
             assert!(exec_host_command_status(&format!(
                 "sudo ip link add link {} name {} type macvtap mod bridge",
                 phy_net, guest_macvtap_name
@@ -5137,8 +5136,6 @@ mod tests {
 
             // Create a macvtap on the same physical net interface for
             // the host machine to use
-            let host_macvtap_name = "hostmacvtap0";
-
             assert!(exec_host_command_status(&format!(
                 "sudo ip link add link {} name {} type macvtap mod bridge",
                 phy_net, host_macvtap_name
@@ -5156,20 +5153,39 @@ mod tests {
             ))
             .success());
 
-            let mut child = GuestCommand::new(&guest)
+            let mut guest_command = GuestCommand::new(&guest);
+            guest_command
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
-                .args(&[
-                    "--net",
-                    &format!("fd={},mac={}", tap_fd, guest.network.guest_mac),
-                ])
-                .capture_output()
-                .spawn()
-                .unwrap();
+                .args(&["--api-socket", &api_socket]);
 
+            let net_params = format!("fd={},mac={}", tap_fd, guest.network.guest_mac);
+
+            if !hotplug {
+                guest_command.args(&["--net", &net_params]);
+            }
+
+            let mut child = guest_command.capture_output().spawn().unwrap();
+
+            if hotplug {
+                // Give some time to the VMM process to listen to the API
+                // socket. This is the only requirement to avoid the following
+                // call to ch-remote from failing.
+                thread::sleep(std::time::Duration::new(10, 0));
+                // Hotplug the virtio-net device
+                let (cmd_success, cmd_output) =
+                    remote_command_w_output(&api_socket, "add-net", Some(&net_params));
+                assert!(cmd_success);
+                assert!(String::from_utf8_lossy(&cmd_output)
+                    .contains("{\"id\":\"_net2\",\"bdf\":\"0000:00:05.0\"}"));
+            }
+
+            // The functional connectivity provided by the virtio-net device
+            // gets tested through wait_vm_boot() as it expects to receive a
+            // HTTP request, and through the SSH command as well.
             let r = std::panic::catch_unwind(|| {
                 guest.wait_vm_boot(None).unwrap();
 
@@ -5192,6 +5208,17 @@ mod tests {
             let output = child.wait_with_output().unwrap();
 
             handle_child_output(r, &output);
+        }
+
+        #[test]
+        fn test_macvtap() {
+            _test_macvtap(false, "guestmacvtap0", "hostmacvtap0")
+        }
+
+        #[test]
+        #[cfg(target_arch = "x86_64")]
+        fn test_macvtap_hotplug() {
+            _test_macvtap(true, "guestmacvtap1", "hostmacvtap1")
         }
 
         #[test]
