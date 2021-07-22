@@ -765,8 +765,6 @@ impl Vm {
             &config.lock().unwrap().memory.clone(),
             false,
             phys_bits,
-            #[cfg(feature = "tdx")]
-            tdx_enabled,
         )
         .map_err(Error::MemoryManager)?;
 
@@ -887,8 +885,6 @@ impl Vm {
             &config.lock().unwrap().memory.clone(),
             false,
             phys_bits,
-            #[cfg(feature = "tdx")]
-            false,
         )
         .map_err(Error::MemoryManager)?;
 
