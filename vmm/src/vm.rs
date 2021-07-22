@@ -2156,6 +2156,10 @@ impl Vm {
         self.memory_manager.lock().unwrap().start_memory_dirty_log()
     }
 
+    pub fn stop_memory_dirty_log(&self) -> std::result::Result<(), MigratableError> {
+        self.memory_manager.lock().unwrap().stop_memory_dirty_log()
+    }
+
     pub fn dirty_memory_range_table(
         &self,
     ) -> std::result::Result<MemoryRangeTable, MigratableError> {

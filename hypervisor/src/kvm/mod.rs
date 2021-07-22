@@ -384,6 +384,59 @@ impl vm::Vm for KvmVm {
     }
 
     ///
+    /// Start logging dirty pages
+    ///
+    fn start_dirty_log(
+        &self,
+        slot: u32,
+        guest_phys_addr: u64,
+        memory_size: u64,
+        userspace_addr: u64,
+    ) -> vm::Result<()> {
+        let region = self.make_user_memory_region(
+            slot,
+            guest_phys_addr,
+            memory_size,
+            userspace_addr,
+            false,
+            true,
+        );
+        // Safe because guest regions are guaranteed not to overlap.
+        unsafe {
+            self.fd
+                .set_user_memory_region(region)
+                .map_err(|e| vm::HypervisorVmError::StartDirtyLog(e.into()))
+        }
+    }
+
+    ///
+    /// Stop logging dirty pages
+    ///
+    fn stop_dirty_log(
+        &self,
+        slot: u32,
+        guest_phys_addr: u64,
+        memory_size: u64,
+        userspace_addr: u64,
+    ) -> vm::Result<()> {
+        let region = self.make_user_memory_region(
+            slot,
+            guest_phys_addr,
+            memory_size,
+            userspace_addr,
+            false,
+            false,
+        );
+
+        // Safe because guest regions are guaranteed not to overlap.
+        unsafe {
+            self.fd
+                .set_user_memory_region(region)
+                .map_err(|e| vm::HypervisorVmError::StopDirtyLog(e.into()))
+        }
+    }
+
+    ///
     /// Get dirty pages bitmap (one bit per page)
     ///
     fn get_dirty_log(&self, slot: u32, memory_size: u64) -> vm::Result<Vec<u64>> {

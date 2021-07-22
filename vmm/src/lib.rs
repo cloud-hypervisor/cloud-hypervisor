@@ -1049,6 +1049,9 @@ impl Vmm {
             // Send last batch of dirty pages
             Self::vm_maybe_send_dirty_pages(vm, &mut socket)?;
 
+            // Stop logging dirty pages
+            vm.stop_memory_dirty_log()?;
+
             // Capture snapshot and send it
             let vm_snapshot = vm.snapshot()?;
             let snapshot_data = serde_json::to_vec(&vm_snapshot).unwrap();
