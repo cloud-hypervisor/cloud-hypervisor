@@ -139,7 +139,6 @@ pub struct MemoryManager {
     user_provided_zones: bool,
     snapshot_memory_regions: Vec<MemoryRegion>,
     memory_zones: MemoryZones,
-    log_dirty: bool, // Enable dirty logging for created RAM regions
 
     // Keep track of calls to create_userspace_mapping() for guest RAM.
     // This is useful for getting the dirty pages as we need to know the
@@ -510,7 +509,6 @@ impl MemoryManager {
         config: &MemoryConfig,
         prefault: bool,
         phys_bits: u8,
-        #[cfg(feature = "tdx")] tdx_enabled: bool,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         let user_provided_zones = config.size == 0;
         let mut allow_mem_hotplug: bool = false;
@@ -749,11 +747,6 @@ impl MemoryManager {
             .allocate_mmio_addresses(None, MEMORY_MANAGER_ACPI_SIZE as u64, None)
             .ok_or(Error::AllocateMmioAddress)?;
 
-        #[cfg(not(feature = "tdx"))]
-        let log_dirty = true;
-        #[cfg(feature = "tdx")]
-        let log_dirty = !tdx_enabled; // Cannot log dirty pages on a TD
-
         let memory_manager = Arc::new(Mutex::new(MemoryManager {
             boot_guest_memory,
             guest_memory: guest_memory.clone(),
@@ -781,7 +774,6 @@ impl MemoryManager {
             guest_ram_mappings: Vec::new(),
             #[cfg(feature = "acpi")]
             acpi_address,
-            log_dirty,
         }));
 
         for region in guest_memory.memory().iter() {
@@ -792,7 +784,6 @@ impl MemoryManager {
                 region.as_ptr() as u64,
                 config.mergeable,
                 false,
-                log_dirty,
             )?;
             mm.guest_ram_mappings.push(GuestRamMapping {
                 gpa: region.start_addr().raw_value(),
@@ -809,7 +800,6 @@ impl MemoryManager {
                 region.as_ptr() as u64,
                 config.mergeable,
                 false,
-                log_dirty,
             )?;
 
             mm.guest_ram_mappings.push(GuestRamMapping {
@@ -845,14 +835,7 @@ impl MemoryManager {
         prefault: bool,
         phys_bits: u8,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
-        let mm = MemoryManager::new(
-            vm,
-            config,
-            prefault,
-            phys_bits,
-            #[cfg(feature = "tdx")]
-            false,
-        )?;
+        let mm = MemoryManager::new(vm, config, prefault, phys_bits)?;
 
         if let Some(source_url) = source_url {
             let vm_snapshot_path = url_to_path(source_url).map_err(Error::Restore)?;
@@ -1118,7 +1101,6 @@ impl MemoryManager {
             region.as_ptr() as u64,
             self.mergeable,
             false,
-            self.log_dirty,
         )?;
         self.guest_ram_mappings.push(GuestRamMapping {
             gpa: region.start_addr().raw_value(),
@@ -1210,7 +1192,6 @@ impl MemoryManager {
         userspace_addr: u64,
         mergeable: bool,
         readonly: bool,
-        log_dirty: bool,
     ) -> Result<u32, Error> {
         let slot = self.allocate_memory_slot();
         let mem_region = self.vm.make_user_memory_region(
@@ -1219,7 +1200,7 @@ impl MemoryManager {
             memory_size,
             userspace_addr,
             readonly,
-            log_dirty,
+            false, // Always create memory regions without dirty pages log
         );
 
         self.vm
@@ -1453,7 +1434,6 @@ impl MemoryManager {
                 epc_section_start,
                 epc_section.size,
                 host_addr,
-                false,
                 false,
                 false,
             )?;
