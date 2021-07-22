@@ -1,10 +1,18 @@
+- [v17.0](#v170)
+    - [ARM64 NUMA support using ACPI](#arm64-numa-support-using-acpi)
+    - [`Seccomp` support for MSHV backend](#seccomp-support-for-mshv-backend)
+    - [Hotplug of `macvtap` devices](#hotplug-of-macvtap-devices)
+    - [Improved SGX support](#improved-sgx-support)
+    - [Inflight tracking for `vhost-user` devices](#inflight-tracking-for-vhost-user-devices)
+    - [Notable bug fixes](#notable-bug-fixes)
+    - [Contributors](#contributors)
 - [v16.0](#v160)
     - [Improved live migration support](#improved-live-migration-support)
     - [Improved `vhost-user` support](#improved-vhost-user-support)
     - [ARM64 ACPI and UEFI support](#arm64-acpi-and-uefi-support)
-    - [Notable bug fixes](#notable-bug-fixes)
+    - [Notable bug fixes](#notable-bug-fixes-1)
     - [Removed functionality](#removed-functionality)
-    - [Contributors](#contributors)
+    - [Contributors](#contributors-1)
 - [v15.0](#v150)
     - [Version numbering and stability guarantees](#version-numbering-and-stability-guarantees)
     - [Network device rate limiting](#network-device-rate-limiting)
@@ -12,7 +20,7 @@
     - [`--api-socket` supports file descriptor parameter](#--api-socket-supports-file-descriptor-parameter)
     - [Bug fixes](#bug-fixes)
     - [Deprecations](#deprecations)
-    - [Contributors](#contributors-1)
+    - [Contributors](#contributors-2)
 - [v0.14.1](#v0141)
 - [v0.14.0](#v0140)
     - [Structured event monitoring](#structured-event-monitoring)
@@ -22,7 +30,7 @@
     - [PTY control for serial and `virtio-console`](#pty-control-for-serial-and-virtio-console)
     - [Block device rate limiting](#block-device-rate-limiting)
     - [Deprecations](#deprecations-1)
-    - [Contributors](#contributors-2)
+    - [Contributors](#contributors-3)
 - [v0.13.0](#v0130)
     - [Wider VFIO device support](#wider-vfio-device-support)
     - [Improved huge page support](#improved-huge-page-support)
@@ -30,13 +38,13 @@
     - [VHD disk image support](#vhd-disk-image-support)
     - [Improved Virtio device threading](#improved-virtio-device-threading)
     - [Clean shutdown support via synthetic power button](#clean-shutdown-support-via-synthetic-power-button)
-    - [Contributors](#contributors-3)
+    - [Contributors](#contributors-4)
 - [v0.12.0](#v0120)
     - [ARM64 enhancements](#arm64-enhancements)
     - [Removal of `vhost-user-net` and `vhost-user-block` self spawning](#removal-of-vhost-user-net-and-vhost-user-block-self-spawning)
     - [Migration of `vhost-user-fs` backend](#migration-of-vhost-user-fs-backend)
     - [Enhanced "info" API](#enhanced-info-api)
-    - [Contributors](#contributors-4)
+    - [Contributors](#contributors-5)
 - [v0.11.0](#v0110)
     - [`io_uring` support by default for `virtio-block`](#io_uring-support-by-default-for-virtio-block)
     - [Windows Guest Support](#windows-guest-support)
@@ -48,15 +56,15 @@
     - [Default Log Level Changed](#default-log-level-changed)
     - [New `--balloon` Parameter Added](#new---balloon-parameter-added)
     - [Experimental `virtio-watchdog` Support](#experimental-virtio-watchdog-support)
-    - [Notable Bug Fixes](#notable-bug-fixes-1)
-    - [Contributors](#contributors-5)
+    - [Notable Bug Fixes](#notable-bug-fixes-2)
+    - [Contributors](#contributors-6)
 - [v0.10.0](#v0100)
     - [`virtio-block` Support for Multiple Descriptors](#virtio-block-support-for-multiple-descriptors)
     - [Memory Zones](#memory-zones)
     - [`Seccomp` Sandbox Improvements](#seccomp-sandbox-improvements)
     - [Preliminary KVM HyperV Emulation Control](#preliminary-kvm-hyperv-emulation-control)
-    - [Notable Bug Fixes](#notable-bug-fixes-2)
-    - [Contributors](#contributors-6)
+    - [Notable Bug Fixes](#notable-bug-fixes-3)
+    - [Contributors](#contributors-7)
 - [v0.9.0](#v090)
     - [`io_uring` Based Block Device Support](#io_uring-based-block-device-support)
     - [Block and Network Device Statistics](#block-and-network-device-statistics)
@@ -69,17 +77,17 @@
     - [Enhancements to ARM64 Support](#enhancements-to-arm64-support)
     - [Intel SGX Support](#intel-sgx-support)
     - [`Seccomp` Sandbox Improvements](#seccomp-sandbox-improvements-1)
-    - [Notable Bug Fixes](#notable-bug-fixes-3)
-    - [Contributors](#contributors-7)
+    - [Notable Bug Fixes](#notable-bug-fixes-4)
+    - [Contributors](#contributors-8)
 - [v0.8.0](#v080)
     - [Experimental Snapshot and Restore Support](#experimental-snapshot-and-restore-support)
     - [Experimental ARM64 Support](#experimental-arm64-support)
     - [Support for Using 5-level Paging in Guests](#support-for-using-5-level-paging-in-guests)
     - [Virtio Device Interrupt Suppression for Network Devices](#virtio-device-interrupt-suppression-for-network-devices)
     - [`vhost_user_fs` Improvements](#vhost_user_fs-improvements)
-    - [Notable Bug Fixes](#notable-bug-fixes-4)
+    - [Notable Bug Fixes](#notable-bug-fixes-5)
     - [Command Line and API Changes](#command-line-and-api-changes)
-    - [Contributors](#contributors-8)
+    - [Contributors](#contributors-9)
 - [v0.7.0](#v070)
     - [Block, Network, Persistent Memory (PMEM), VirtioFS and Vsock hotplug](#block-network-persistent-memory-pmem-virtiofs-and-vsock-hotplug)
     - [Alternative `libc` Support](#alternative-libc-support)
@@ -89,14 +97,14 @@
     - [`Seccomp` Sandboxing](#seccomp-sandboxing)
     - [Updated Distribution Support](#updated-distribution-support)
     - [Command Line and API Changes](#command-line-and-api-changes-1)
-    - [Contributors](#contributors-9)
+    - [Contributors](#contributors-10)
 - [v0.6.0](#v060)
     - [Directly Assigned Devices Hotplug](#directly-assigned-devices-hotplug)
     - [Shared Filesystem Improvements](#shared-filesystem-improvements)
     - [Block and Networking IO Self Offloading](#block-and-networking-io-self-offloading)
     - [Command Line Interface](#command-line-interface)
     - [PVH Boot](#pvh-boot)
-    - [Contributors](#contributors-10)
+    - [Contributors](#contributors-11)
 - [v0.5.1](#v051)
 - [v0.5.0](#v050)
     - [Virtual Machine Dynamic Resizing](#virtual-machine-dynamic-resizing)
@@ -104,7 +112,7 @@
     - [New Interrupt Management Framework](#new-interrupt-management-framework)
     - [Development Tools](#development-tools)
     - [Kata Containers Integration](#kata-containers-integration)
-    - [Contributors](#contributors-11)
+    - [Contributors](#contributors-12)
 - [v0.4.0](#v040)
     - [Dynamic virtual CPUs addition](#dynamic-virtual-cpus-addition)
     - [Programmatic firmware tables generation](#programmatic-firmware-tables-generation)
@@ -113,7 +121,7 @@
     - [Userspace IOAPIC by default](#userspace-ioapic-by-default)
     - [PCI BAR reprogramming](#pci-bar-reprogramming)
     - [New `cloud-hypervisor` organization](#new-cloud-hypervisor-organization)
-    - [Contributors](#contributors-12)
+    - [Contributors](#contributors-13)
 - [v0.3.0](#v030)
     - [Block device offloading](#block-device-offloading)
     - [Network device backend](#network-device-backend)
@@ -139,6 +147,65 @@
     - [Console over virtio](#console-over-virtio)
     - [Unit testing](#unit-testing)
     - [Integration tests parallelization](#integration-tests-parallelization)
+
+
+# v17.0
+
+This release has been tracked through the [v17.0
+project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/20).
+
+### ARM64 NUMA support using ACPI
+
+The support for ACPI on ARM64 has been enhanced to include support for
+specifying a NUMA configuration using the existing control options.
+
+### `Seccomp` support for MSHV backend
+
+The `seccomp` rules have now been extended to support running against the MSHV
+hypervisor backend.
+
+### Hotplug of `macvtap` devices
+
+Hotplug of `macvtap` devices is now supported with the file descriptor for the
+network device if opened by the user and passed to the VMM. The `ch-remote`
+tool supports this functionality when adding a network device.
+
+### Improved SGX support
+
+The SGX support has been updated to match the latest Linux kernel support and
+now supports SGX provisioning and associating EPC sections to NUMA nodes.
+
+### Inflight tracking for `vhost-user` devices
+
+Support for handling inflight tracking of I/O requests has been added to the
+`vhost-user` devices allowing recovery after device reconnection.
+
+### Notable bug fixes
+
+* VFIO PCI BAR calculation code now correctly handles I/O BARs (#2821).
+* The VMM side of `vhost-user` devices no longer advertise the
+  `VIRTIO_F_RING_PACKED` feature as they are not yet supported in the VMM
+(#2833).
+* On ARM64 VMs can be created with more than 16 vCPUs (#2763).
+
+### Contributors
+
+Many thanks to everyone who has contributed to our release:
+
+* Anatol Belski <anbelski@linux.microsoft.com>
+* Arafatms <arafatms@outlook.com>
+* Bo Chen <chen.bo@intel.com>
+* Fei Li <lifei.shirley@bytedance.com>
+* Henry Wang <Henry.Wang@arm.com>
+* Jiachen Zhang <zhangjiachen.jaycee@bytedance.com>
+* Jianyong Wu <jianyong.wu@arm.com>
+* Li Hangjing <lihangjing@bytedance.com>
+* Michael Zhao <michael.zhao@arm.com>
+* Muminul Islam <muislam@microsoft.com>
+* Rob Bradford <robert.bradford@intel.com>
+* Sebastien Boeuf <sebastien.boeuf@intel.com>
+* Wei Liu <liuwe@microsoft.com>
+* Yukiteru <wfly1998@sina.com>
 
 # v16.0
 
