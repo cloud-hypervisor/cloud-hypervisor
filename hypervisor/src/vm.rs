@@ -168,6 +168,16 @@ pub enum HypervisorVmError {
     #[error("Failed to write to IO Bus: {0}")]
     IoBusWrite(#[source] anyhow::Error),
     ///
+    /// Start dirty log error
+    ///
+    #[error("Failed to get dirty log: {0}")]
+    StartDirtyLog(#[source] anyhow::Error),
+    ///
+    /// Stop dirty log error
+    ///
+    #[error("Failed to get dirty log: {0}")]
+    StopDirtyLog(#[source] anyhow::Error),
+    ///
     /// Get dirty log error
     ///
     #[error("Failed to get dirty log: {0}")]
@@ -270,6 +280,22 @@ pub trait Vm: Send + Sync {
     fn state(&self) -> Result<VmState>;
     /// Set the VM state
     fn set_state(&self, state: VmState) -> Result<()>;
+    /// Start logging dirty pages
+    fn start_dirty_log(
+        &self,
+        slot: u32,
+        guest_phys_addr: u64,
+        memory_size: u64,
+        userspace_addr: u64,
+    ) -> Result<()>;
+    /// Stop logging dirty pages
+    fn stop_dirty_log(
+        &self,
+        slot: u32,
+        guest_phys_addr: u64,
+        memory_size: u64,
+        userspace_addr: u64,
+    ) -> Result<()>;
     /// Get dirty pages bitmap
     fn get_dirty_log(&self, slot: u32, memory_size: u64) -> Result<Vec<u64>>;
     #[cfg(feature = "tdx")]
