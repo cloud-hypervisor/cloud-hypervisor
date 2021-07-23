@@ -6,6 +6,7 @@
     - [Architectures](#architectures)
     - [Guest OS](#guest-os)
 - [2. Getting Started](#2-getting-started)
+  - [Install prerequisites](#install-prerequisites)
   - [Clone and build](#clone-and-build)
     - [Containerized builds and tests](#containerized-builds-and-tests)
   - [Run](#run)
@@ -23,6 +24,7 @@
 - [5. Community](#5-community)
   - [Contribute](#contribute)
   - [Join us](#join-us)
+  - [Security issues](#security-issues)
 
 # 1. What is Cloud Hypervisor?
 
