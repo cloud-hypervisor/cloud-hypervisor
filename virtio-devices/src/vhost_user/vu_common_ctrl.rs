@@ -163,6 +163,8 @@ impl VhostUserHandle {
                 .map_err(Error::VhostUserSetInflight)?;
         }
 
+        let num_queues = queues.len() as usize;
+
         for (queue_index, queue) in queues.into_iter().enumerate() {
             let actual_size: usize = queue.actual_size().try_into().unwrap();
 
@@ -214,11 +216,9 @@ impl VhostUserHandle {
             self.vu
                 .set_vring_kick(queue_index, &queue_evts[queue_index])
                 .map_err(Error::VhostUserSetVringKick)?;
-
-            self.vu
-                .set_vring_enable(queue_index, true)
-                .map_err(Error::VhostUserSetVringEnable)?;
         }
+
+        self.enable_vhost_user_vrings(num_queues, true)?;
 
         if let Some(slave_req_handler) = slave_req_handler {
             self.vu
@@ -231,13 +231,18 @@ impl VhostUserHandle {
         Ok(())
     }
 
-    pub fn reset_vhost_user(&mut self, num_queues: usize) -> Result<()> {
+    fn enable_vhost_user_vrings(&mut self, num_queues: usize, enable: bool) -> Result<()> {
         for queue_index in 0..num_queues {
-            // Disable the vrings.
             self.vu
-                .set_vring_enable(queue_index, false)
+                .set_vring_enable(queue_index, enable)
                 .map_err(Error::VhostUserSetVringEnable)?;
         }
+
+        Ok(())
+    }
+
+    pub fn reset_vhost_user(&mut self, num_queues: usize) -> Result<()> {
+        self.enable_vhost_user_vrings(num_queues, false)?;
 
         // Reset the owner.
         self.vu.reset_owner().map_err(Error::VhostUserResetOwner)
@@ -340,23 +345,17 @@ impl VhostUserHandle {
 
     pub fn pause_vhost_user(&mut self, num_queues: usize) -> Result<()> {
         if self.ready {
-            for i in 0..num_queues {
-                self.vu
-                    .set_vring_enable(i, false)
-                    .map_err(Error::VhostUserSetVringEnable)?;
-            }
+            self.enable_vhost_user_vrings(num_queues, false)?;
         }
+
         Ok(())
     }
 
     pub fn resume_vhost_user(&mut self, num_queues: usize) -> Result<()> {
         if self.ready {
-            for i in 0..num_queues {
-                self.vu
-                    .set_vring_enable(i, true)
-                    .map_err(Error::VhostUserSetVringEnable)?;
-            }
+            self.enable_vhost_user_vrings(num_queues, true)?;
         }
+
         Ok(())
     }
 }
