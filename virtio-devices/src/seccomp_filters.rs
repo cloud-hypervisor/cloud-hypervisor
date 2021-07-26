@@ -111,6 +111,7 @@ fn virtio_block_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_fsync, vec![]),
         (libc::SYS_ftruncate, vec![]),
         (libc::SYS_futex, vec![]),
+        (libc::SYS_getrandom, vec![]),
         (libc::SYS_io_uring_enter, vec![]),
         (libc::SYS_lseek, vec![]),
         (libc::SYS_madvise, vec![]),

@@ -18,6 +18,7 @@ pub mod qcow_sync;
 pub mod raw_async;
 pub mod raw_sync;
 pub mod vhd;
+pub mod vhdx_sync;
 
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, DiskFileError, DiskFileResult};
 #[cfg(feature = "io_uring")]
@@ -602,9 +603,11 @@ pub enum ImageType {
     FixedVhd,
     Qcow2,
     Raw,
+    Vhdx,
 }
 
 const QCOW_MAGIC: u32 = 0x5146_49fb;
+const VHDX_SIGN: u64 = 0x656C_6966_7864_6876;
 
 /// Determine image type through file parsing.
 pub fn detect_image_type(f: &mut File) -> std::io::Result<ImageType> {
@@ -623,6 +626,8 @@ pub fn detect_image_type(f: &mut File) -> std::io::Result<ImageType> {
         ImageType::Qcow2
     } else if vhd::is_fixed_vhd(f)? {
         ImageType::FixedVhd
+    } else if u64::from_le_bytes(s.data[0..8].try_into().unwrap()) == VHDX_SIGN {
+        ImageType::Vhdx
     } else {
         ImageType::Raw
     };
