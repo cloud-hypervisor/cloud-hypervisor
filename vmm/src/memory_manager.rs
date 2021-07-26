@@ -1541,23 +1541,14 @@ impl MemoryManager {
         Ok(table)
     }
 
-    // Start the dirty log on guest RAM in the hypervisor (kvm/mshv).
+    // Start the dirty log in the hypervisor (kvm/mshv).
     // Also, reset the dirty bitmap logged by the vmm.
     // Just before we do a bulk copy we want to start/clear the dirty log so that
     // pages touched during our bulk copy are tracked.
     pub fn start_memory_dirty_log(&self) -> std::result::Result<(), MigratableError> {
-        for r in &self.guest_ram_mappings {
-            let user_addr = self
-                .guest_memory()
-                .memory()
-                .get_host_address(GuestAddress(r.gpa))
-                .unwrap();
-            self.vm
-                .start_dirty_log(r.slot, r.gpa, r.size, user_addr as u64)
-                .map_err(|e| {
-                    MigratableError::MigrateSend(anyhow!("Error starting VM dirty log {}", e))
-                })?;
-        }
+        self.vm.start_dirty_log().map_err(|e| {
+            MigratableError::MigrateSend(anyhow!("Error starting VM dirty log {}", e))
+        })?;
 
         for r in self.guest_memory.memory().iter() {
             r.bitmap().reset();
@@ -1567,18 +1558,9 @@ impl MemoryManager {
     }
 
     pub fn stop_memory_dirty_log(&self) -> std::result::Result<(), MigratableError> {
-        for r in &self.guest_ram_mappings {
-            let user_addr = self
-                .guest_memory()
-                .memory()
-                .get_host_address(GuestAddress(r.gpa))
-                .unwrap();
-            self.vm
-                .stop_dirty_log(r.slot, r.gpa, r.size, user_addr as u64)
-                .map_err(|e| {
-                    MigratableError::MigrateSend(anyhow!("Error stopping VM dirty log {}", e))
-                })?;
-        }
+        self.vm.stop_dirty_log().map_err(|e| {
+            MigratableError::MigrateSend(anyhow!("Error stopping VM dirty log {}", e))
+        })?;
 
         Ok(())
     }

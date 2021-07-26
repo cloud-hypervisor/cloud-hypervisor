@@ -22,6 +22,7 @@ use crate::vm::{self, VmmOps};
 use crate::{arm64_core_reg_id, offset__of};
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
 use serde_derive::{Deserialize, Serialize};
+use std::collections::HashMap;
 #[cfg(target_arch = "aarch64")]
 use std::convert::TryInto;
 #[cfg(target_arch = "x86_64")]
@@ -30,7 +31,7 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
 #[cfg(target_arch = "x86_64")]
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 #[cfg(target_arch = "x86_64")]
 use vm_memory::Address;
 use vmm_sys_util::eventfd::EventFd;
@@ -110,12 +111,21 @@ enum TdxCommand {
 pub struct KvmVmState {}
 
 pub use KvmVmState as VmState;
+
+struct KvmDirtyLogSlot {
+    slot: u32,
+    guest_phys_addr: u64,
+    memory_size: u64,
+    userspace_addr: u64,
+}
+
 /// Wrapper over KVM VM ioctls.
 pub struct KvmVm {
     fd: Arc<VmFd>,
     #[cfg(target_arch = "x86_64")]
     msrs: MsrEntries,
     state: KvmVmState,
+    dirty_log_slots: Arc<RwLock<HashMap<u32, KvmDirtyLogSlot>>>,
 }
 
 ///
@@ -267,10 +277,35 @@ impl vm::Vm for KvmVm {
     /// Creates a guest physical memory region.
     ///
     fn create_user_memory_region(&self, user_memory_region: MemoryRegion) -> vm::Result<()> {
+        let mut region = user_memory_region;
+
+        if (region.flags & KVM_MEM_LOG_DIRTY_PAGES) != 0 {
+            if (region.flags & KVM_MEM_READONLY) != 0 {
+                return Err(vm::HypervisorVmError::CreateUserMemory(anyhow!(
+                    "Error creating regions with both 'dirty-pages-log' and 'read-only'."
+                )));
+            }
+
+            // Keep track of the regions that need dirty pages log
+            self.dirty_log_slots.write().unwrap().insert(
+                region.slot,
+                KvmDirtyLogSlot {
+                    slot: region.slot,
+                    guest_phys_addr: region.guest_phys_addr,
+                    memory_size: region.memory_size,
+                    userspace_addr: region.userspace_addr,
+                },
+            );
+
+            // Always create guest physical memory region without `KVM_MEM_LOG_DIRTY_PAGES`.
+            // For regions that need this flag, dirty pages log will be turned on in `start_dirty_log`.
+            region.flags = 0;
+        }
+
         // Safe because guest regions are guaranteed not to overlap.
         unsafe {
             self.fd
-                .set_user_memory_region(user_memory_region)
+                .set_user_memory_region(region)
                 .map_err(|e| vm::HypervisorVmError::CreateUserMemory(e.into()))
         }
     }
@@ -279,6 +314,9 @@ impl vm::Vm for KvmVm {
     ///
     fn remove_user_memory_region(&self, user_memory_region: MemoryRegion) -> vm::Result<()> {
         let mut region = user_memory_region;
+
+        // Remove the corresponding entry from "self.dirty_log_slots" if needed
+        self.dirty_log_slots.write().unwrap().remove(&region.slot);
 
         // Setting the size to 0 means "remove"
         region.memory_size = 0;
@@ -386,54 +424,49 @@ impl vm::Vm for KvmVm {
     ///
     /// Start logging dirty pages
     ///
-    fn start_dirty_log(
-        &self,
-        slot: u32,
-        guest_phys_addr: u64,
-        memory_size: u64,
-        userspace_addr: u64,
-    ) -> vm::Result<()> {
-        let region = self.make_user_memory_region(
-            slot,
-            guest_phys_addr,
-            memory_size,
-            userspace_addr,
-            false,
-            true,
-        );
-        // Safe because guest regions are guaranteed not to overlap.
-        unsafe {
-            self.fd
-                .set_user_memory_region(region)
-                .map_err(|e| vm::HypervisorVmError::StartDirtyLog(e.into()))
+    fn start_dirty_log(&self) -> vm::Result<()> {
+        let dirty_log_slots = self.dirty_log_slots.read().unwrap();
+        for (_, s) in dirty_log_slots.iter() {
+            let region = MemoryRegion {
+                slot: s.slot,
+                guest_phys_addr: s.guest_phys_addr,
+                memory_size: s.memory_size,
+                userspace_addr: s.userspace_addr,
+                flags: KVM_MEM_LOG_DIRTY_PAGES,
+            };
+            // Safe because guest regions are guaranteed not to overlap.
+            unsafe {
+                self.fd
+                    .set_user_memory_region(region)
+                    .map_err(|e| vm::HypervisorVmError::StartDirtyLog(e.into()))?;
+            }
         }
+
+        Ok(())
     }
 
     ///
     /// Stop logging dirty pages
     ///
-    fn stop_dirty_log(
-        &self,
-        slot: u32,
-        guest_phys_addr: u64,
-        memory_size: u64,
-        userspace_addr: u64,
-    ) -> vm::Result<()> {
-        let region = self.make_user_memory_region(
-            slot,
-            guest_phys_addr,
-            memory_size,
-            userspace_addr,
-            false,
-            false,
-        );
-
-        // Safe because guest regions are guaranteed not to overlap.
-        unsafe {
-            self.fd
-                .set_user_memory_region(region)
-                .map_err(|e| vm::HypervisorVmError::StopDirtyLog(e.into()))
+    fn stop_dirty_log(&self) -> vm::Result<()> {
+        let dirty_log_slots = self.dirty_log_slots.read().unwrap();
+        for (_, s) in dirty_log_slots.iter() {
+            let region = MemoryRegion {
+                slot: s.slot,
+                guest_phys_addr: s.guest_phys_addr,
+                memory_size: s.memory_size,
+                userspace_addr: s.userspace_addr,
+                flags: 0,
+            };
+            // Safe because guest regions are guaranteed not to overlap.
+            unsafe {
+                self.fd
+                    .set_user_memory_region(region)
+                    .map_err(|e| vm::HypervisorVmError::StartDirtyLog(e.into()))?;
+            }
         }
+
+        Ok(())
     }
 
     ///
@@ -624,6 +657,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                 fd: vm_fd,
                 msrs,
                 state: VmState {},
+                dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
             }))
         }
 
@@ -632,6 +666,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             Ok(Arc::new(KvmVm {
                 fd: vm_fd,
                 state: VmState {},
+                dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
             }))
         }
     }

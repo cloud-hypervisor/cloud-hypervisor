@@ -879,13 +879,7 @@ impl vm::Vm for MshvVm {
     ///
     /// Start logging dirty pages
     ///
-    fn start_dirty_log(
-        &self,
-        _slot: u32,
-        _guest_phys_addr: u64,
-        _memory_size: u64,
-        _userspace_addr: u64,
-    ) -> vm::Result<()> {
+    fn start_dirty_log(&self) -> vm::Result<()> {
         Err(vm::HypervisorVmError::StartDirtyLog(anyhow!(
             "functionality not implemented"
         )))
@@ -893,13 +887,7 @@ impl vm::Vm for MshvVm {
     ///
     /// Stop logging dirty pages
     ///
-    fn stop_dirty_log(
-        &self,
-        _slot: u32,
-        _guest_phys_addr: u64,
-        _memory_size: u64,
-        _userspace_addr: u64,
-    ) -> vm::Result<()> {
+    fn stop_dirty_log(&self) -> vm::Result<()> {
         Err(vm::HypervisorVmError::StopDirtyLog(anyhow!(
             "functionality not implemented"
         )))
