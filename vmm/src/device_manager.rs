@@ -2233,7 +2233,9 @@ impl DeviceManager {
                     .memory_manager
                     .lock()
                     .unwrap()
-                    .create_userspace_mapping(cache_base, cache_size, host_addr, false, false)
+                    .create_userspace_mapping(
+                        cache_base, cache_size, host_addr, false, false, false,
+                    )
                     .map_err(DeviceManagerError::MemoryManager)?;
 
                 let region_list = vec![VirtioSharedMemory {
@@ -2424,6 +2426,7 @@ impl DeviceManager {
                 region_size,
                 host_addr,
                 pmem_cfg.mergeable,
+                false,
                 false,
             )
             .map_err(DeviceManagerError::MemoryManager)?;
