@@ -24,7 +24,7 @@ struct MemoryConfig {
 ```
 
 ```
---memory <memory>	Memory parameters "size=<guest_memory_size>,mergeable=on|off,shared=on|off,hugepages=on|off,hotplug_method=acpi|virtio-mem,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>"
+--memory <memory>	Memory parameters "size=<guest_memory_size>,mergeable=on|off,shared=on|off,hugepages=on|off,hugepage_size=<hugepage_size>,hotplug_method=acpi|virtio-mem,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>"
 ```
 
 ### `size`
@@ -87,7 +87,9 @@ the guest will allocate hugepages as well. Another interesting use case is VFIO
 as it speeds up the VM's boot time since the amount of IOMMU mappings are
 reduced.
 
-The user is responsible for ensuring there are sufficient huge pages of the specified size for the VMM to use. Failure to do so may result in strange VMM behaviour.
+The user is responsible for ensuring there are sufficient huge pages of the specified size for the VMM to use.
+Failure to do so may result in strange VMM behaviour, e.g. error with `ReadKernelImage` is common.
+If there is a strange error with `hugepages` enabled, just disable it or check whether there are enough huge pages.
 
 By default this option is turned off.
 
