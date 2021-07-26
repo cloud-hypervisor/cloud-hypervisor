@@ -10,6 +10,7 @@ use crate::{
     VIRTIO_F_RING_EVENT_IDX, VIRTIO_F_VERSION_1,
 };
 use crate::{GuestMemoryMmap, GuestRegionMmap};
+use anyhow::anyhow;
 use net_util::{build_net_config_space, CtrlQueue, MacAddr, VirtioNetConfig};
 use seccomp::{SeccompAction, SeccompFilter};
 use std::ops::Deref;
@@ -100,6 +101,7 @@ pub struct Net {
     ctrl_queue_epoll_thread: Option<thread::JoinHandle<()>>,
     epoll_thread: Option<thread::JoinHandle<()>>,
     seccomp_action: SeccompAction,
+    vu_num_queues: usize,
 }
 
 impl Net {
@@ -161,6 +163,7 @@ impl Net {
 
         // If the control queue feature has been negotiated, let's increase
         // the number of queues.
+        let vu_num_queues = num_queues;
         if acked_features & (1 << VIRTIO_NET_F_CTRL_VQ) != 0 {
             num_queues += 1;
         }
@@ -189,6 +192,7 @@ impl Net {
             ctrl_queue_epoll_thread: None,
             epoll_thread: None,
             seccomp_action,
+            vu_num_queues,
         })
     }
 }
@@ -232,7 +236,6 @@ impl VirtioDevice for Net {
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
-
         self.guest_memory = Some(mem.clone());
 
         let num_queues = queues.len();
@@ -409,21 +412,35 @@ impl VirtioDevice for Net {
 
 impl Pausable for Net {
     fn pause(&mut self) -> result::Result<(), MigratableError> {
+        self.vu
+            .lock()
+            .unwrap()
+            .pause_vhost_user(self.vu_num_queues)
+            .map_err(|e| {
+                MigratableError::Pause(anyhow!("Error pausing vhost-user-net backend: {:?}", e))
+            })?;
+
         self.common.pause()
     }
 
     fn resume(&mut self) -> result::Result<(), MigratableError> {
         self.common.resume()?;
 
-        if let Some(ctrl_queue_epoll_thread) = &self.ctrl_queue_epoll_thread {
-            ctrl_queue_epoll_thread.thread().unpark();
-        }
-
         if let Some(epoll_thread) = &self.epoll_thread {
             epoll_thread.thread().unpark();
         }
 
-        Ok(())
+        if let Some(ctrl_queue_epoll_thread) = &self.ctrl_queue_epoll_thread {
+            ctrl_queue_epoll_thread.thread().unpark();
+        }
+
+        self.vu
+            .lock()
+            .unwrap()
+            .resume_vhost_user(self.vu_num_queues)
+            .map_err(|e| {
+                MigratableError::Resume(anyhow!("Error resuming vhost-user-net backend: {:?}", e))
+            })
     }
 }
 

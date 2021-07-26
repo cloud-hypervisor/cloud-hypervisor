@@ -10,6 +10,7 @@ use crate::{
     VirtioDeviceType, VirtioInterrupt, VirtioSharedMemoryList,
 };
 use crate::{GuestMemoryMmap, GuestRegionMmap, MmapRegion};
+use anyhow::anyhow;
 use libc::{self, c_void, off64_t, pread64, pwrite64};
 use seccomp::{SeccompAction, SeccompFilter};
 use std::io;
@@ -294,6 +295,7 @@ pub struct Fs {
     acked_protocol_features: u64,
     socket_path: String,
     epoll_thread: Option<thread::JoinHandle<()>>,
+    vu_num_queues: usize,
 }
 
 impl Fs {
@@ -380,6 +382,7 @@ impl Fs {
             acked_protocol_features,
             socket_path: path.to_string(),
             epoll_thread: None,
+            vu_num_queues: num_queues,
         })
     }
 }
@@ -607,6 +610,14 @@ impl VirtioDevice for Fs {
 
 impl Pausable for Fs {
     fn pause(&mut self) -> result::Result<(), MigratableError> {
+        self.vu
+            .lock()
+            .unwrap()
+            .pause_vhost_user(self.vu_num_queues)
+            .map_err(|e| {
+                MigratableError::Pause(anyhow!("Error pausing vhost-user-fs backend: {:?}", e))
+            })?;
+
         self.common.pause()
     }
 
@@ -616,7 +627,14 @@ impl Pausable for Fs {
         if let Some(epoll_thread) = &self.epoll_thread {
             epoll_thread.thread().unpark();
         }
-        Ok(())
+
+        self.vu
+            .lock()
+            .unwrap()
+            .resume_vhost_user(self.vu_num_queues)
+            .map_err(|e| {
+                MigratableError::Resume(anyhow!("Error resuming vhost-user-fs backend: {:?}", e))
+            })
     }
 }
 

@@ -63,6 +63,8 @@ pub enum Error {
     VhostUserGetQueueMaxNum(VhostError),
     /// Get protocol features failed.
     VhostUserGetProtocolFeatures(VhostError),
+    /// Get vring base failed.
+    VhostUserGetVringBase(VhostError),
     /// Vhost-user Backend not support vhost-user protocol.
     VhostUserProtocolNotSupport,
     /// Set owner failed.
