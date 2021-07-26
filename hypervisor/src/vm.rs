@@ -281,21 +281,9 @@ pub trait Vm: Send + Sync {
     /// Set the VM state
     fn set_state(&self, state: VmState) -> Result<()>;
     /// Start logging dirty pages
-    fn start_dirty_log(
-        &self,
-        slot: u32,
-        guest_phys_addr: u64,
-        memory_size: u64,
-        userspace_addr: u64,
-    ) -> Result<()>;
+    fn start_dirty_log(&self) -> Result<()>;
     /// Stop logging dirty pages
-    fn stop_dirty_log(
-        &self,
-        slot: u32,
-        guest_phys_addr: u64,
-        memory_size: u64,
-        userspace_addr: u64,
-    ) -> Result<()>;
+    fn stop_dirty_log(&self) -> Result<()>;
     /// Get dirty pages bitmap
     fn get_dirty_log(&self, slot: u32, memory_size: u64) -> Result<Vec<u64>>;
     #[cfg(feature = "tdx")]
