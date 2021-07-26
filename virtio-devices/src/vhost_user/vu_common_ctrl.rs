@@ -141,6 +141,15 @@ impl VhostUserHandle {
         // Let's first provide the memory table to the backend.
         self.update_mem_table(mem)?;
 
+        // Send set_vring_num here, since it could tell backends, like SPDK,
+        // how many virt queues to be handled, which backend required to know
+        // at early stage.
+        for (queue_index, queue) in queues.iter().enumerate() {
+            self.vu
+                .set_vring_num(queue_index, queue.actual_size())
+                .map_err(Error::VhostUserSetVringNum)?;
+        }
+
         // Setup for inflight I/O tracking shared memory.
         if let Some(inflight) = inflight {
             if inflight.fd.is_none() {
@@ -167,10 +176,6 @@ impl VhostUserHandle {
 
         for (queue_index, queue) in queues.into_iter().enumerate() {
             let actual_size: usize = queue.actual_size().try_into().unwrap();
-
-            self.vu
-                .set_vring_num(queue_index, queue.actual_size())
-                .map_err(Error::VhostUserSetVringNum)?;
 
             let config_data = VringConfigData {
                 queue_max_size: queue.get_max_size(),
