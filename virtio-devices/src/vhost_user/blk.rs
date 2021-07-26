@@ -18,6 +18,8 @@ use std::result;
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::vec::Vec;
+use versionize::{VersionMap, Versionize, VersionizeResult};
+use versionize_derive::Versionize;
 use vhost::vhost_user::message::VhostUserConfigFlags;
 use vhost::vhost_user::message::VHOST_USER_CONFIG_OFFSET;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
@@ -29,10 +31,21 @@ use virtio_bindings::bindings::virtio_blk::{
     VIRTIO_BLK_F_SIZE_MAX, VIRTIO_BLK_F_TOPOLOGY, VIRTIO_BLK_F_WRITE_ZEROES,
 };
 use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic};
-use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
+use vm_migration::{
+    Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
+};
 use vmm_sys_util::eventfd::EventFd;
 
 const DEFAULT_QUEUE_NUMBER: usize = 1;
+
+#[derive(Versionize)]
+pub struct State {
+    pub avail_features: u64,
+    pub acked_features: u64,
+    pub config: VirtioBlockConfig,
+}
+
+impl VersionMapped for State {}
 
 struct SlaveReqHandler {}
 impl VhostUserMasterReqHandler for SlaveReqHandler {}
@@ -143,6 +156,20 @@ impl Blk {
             epoll_thread: None,
             vu_num_queues: num_queues,
         })
+    }
+
+    fn state(&self) -> State {
+        State {
+            avail_features: self.common.avail_features,
+            acked_features: self.common.acked_features,
+            config: self.config,
+        }
+    }
+
+    fn set_state(&mut self, state: &State) {
+        self.common.avail_features = state.avail_features;
+        self.common.acked_features = state.acked_features;
+        self.config = state.config;
     }
 }
 
@@ -370,6 +397,15 @@ impl Pausable for Blk {
 impl Snapshottable for Blk {
     fn id(&self) -> String {
         self.id.clone()
+    }
+
+    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+        Snapshot::new_from_versioned_state(&self.id(), &self.state())
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        self.set_state(&snapshot.to_versioned_state(&self.id)?);
+        Ok(())
     }
 }
 impl Transportable for Blk {}
