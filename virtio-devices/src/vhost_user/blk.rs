@@ -128,15 +128,6 @@ impl Blk {
             config.num_queues = num_queues as u16;
         }
 
-        // Send set_vring_base here, since it could tell backends, like SPDK,
-        // how many virt queues to be handled, which backend required to know
-        // at early stage.
-        for i in 0..num_queues {
-            vu.socket_handle()
-                .set_vring_base(i, 0)
-                .map_err(Error::VhostUserSetVringBase)?;
-        }
-
         Ok(Blk {
             common: VirtioCommon {
                 device_type: VirtioDeviceType::Block as u32,

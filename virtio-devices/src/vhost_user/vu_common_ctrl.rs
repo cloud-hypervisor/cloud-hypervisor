@@ -143,6 +143,15 @@ impl VhostUserHandle {
 
         // Setup for inflight I/O tracking shared memory.
         if let Some(inflight) = inflight {
+            // Send set_vring_base here, since it could tell backends, like SPDK,
+            // how many virt queues to be handled, which backend required to know
+            // at early stage.
+            for i in 0..queues.len() {
+                self.vu
+                    .set_vring_base(i, 0)
+                    .map_err(Error::VhostUserSetVringBase)?;
+            }
+
             if inflight.fd.is_none() {
                 let inflight_req_info = VhostUserInflight {
                     mmap_size: 0,
