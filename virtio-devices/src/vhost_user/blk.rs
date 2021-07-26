@@ -24,7 +24,6 @@ use vhost::vhost_user::message::VhostUserConfigFlags;
 use vhost::vhost_user::message::VHOST_USER_CONFIG_OFFSET;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost::vhost_user::{MasterReqHandler, VhostUserMaster, VhostUserMasterReqHandler};
-use vhost::VhostBackend;
 use virtio_bindings::bindings::virtio_blk::{
     VIRTIO_BLK_F_BLK_SIZE, VIRTIO_BLK_F_CONFIG_WCE, VIRTIO_BLK_F_DISCARD, VIRTIO_BLK_F_FLUSH,
     VIRTIO_BLK_F_GEOMETRY, VIRTIO_BLK_F_MQ, VIRTIO_BLK_F_RO, VIRTIO_BLK_F_SEG_MAX,
@@ -126,15 +125,6 @@ impl Blk {
         if let Some(backend_config) = VirtioBlockConfig::from_slice(config_space.as_slice()) {
             config = *backend_config;
             config.num_queues = num_queues as u16;
-        }
-
-        // Send set_vring_base here, since it could tell backends, like SPDK,
-        // how many virt queues to be handled, which backend required to know
-        // at early stage.
-        for i in 0..num_queues {
-            vu.socket_handle()
-                .set_vring_base(i, 0)
-                .map_err(Error::VhostUserSetVringBase)?;
         }
 
         Ok(Blk {
