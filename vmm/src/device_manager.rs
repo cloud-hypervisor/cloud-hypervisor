@@ -383,8 +383,8 @@ pub enum DeviceManagerError {
     /// Expected resources for virtio-pci could not be found.
     MissingVirtioPciResources,
 
-    /// Expected resources for virtio-fs could not be found.
-    MissingVirtioFsResources,
+    /// Expected resources for virtio-pmem could not be found.
+    MissingVirtioPmemResources,
 
     /// Missing PCI b/d/f from the DeviceNode.
     MissingDeviceNodePciBdf,
@@ -2173,10 +2173,6 @@ impl DeviceManager {
                 }
             }
 
-            if cache_range.is_none() {
-                return Err(DeviceManagerError::MissingVirtioFsResources);
-            }
-
             cache_range
         } else {
             None
@@ -2334,7 +2330,7 @@ impl DeviceManager {
             }
 
             if region_range.is_none() {
-                return Err(DeviceManagerError::MissingVirtioFsResources);
+                return Err(DeviceManagerError::MissingVirtioPmemResources);
             }
 
             region_range
