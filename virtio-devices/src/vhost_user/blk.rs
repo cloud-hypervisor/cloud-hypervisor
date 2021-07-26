@@ -9,6 +9,7 @@ use super::{Error, Result, DEFAULT_VIRTIO_FEATURES};
 use crate::vhost_user::{Inflight, VhostUserEpollHandler};
 use crate::VirtioInterrupt;
 use crate::{GuestMemoryMmap, GuestRegionMmap};
+use anyhow::anyhow;
 use block_util::VirtioBlockConfig;
 use std::mem;
 use std::ops::Deref;
@@ -45,6 +46,7 @@ pub struct Blk {
     acked_protocol_features: u64,
     socket_path: String,
     epoll_thread: Option<thread::JoinHandle<()>>,
+    vu_num_queues: usize,
 }
 
 impl Blk {
@@ -139,6 +141,7 @@ impl Blk {
             acked_protocol_features,
             socket_path: vu_cfg.socket,
             epoll_thread: None,
+            vu_num_queues: num_queues,
         })
     }
 }
@@ -209,7 +212,6 @@ impl VirtioDevice for Blk {
         queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
-
         self.guest_memory = Some(mem.clone());
 
         let slave_req_handler: Option<MasterReqHandler<SlaveReqHandler>> = None;
@@ -337,6 +339,14 @@ impl VirtioDevice for Blk {
 
 impl Pausable for Blk {
     fn pause(&mut self) -> result::Result<(), MigratableError> {
+        self.vu
+            .lock()
+            .unwrap()
+            .pause_vhost_user(self.vu_num_queues)
+            .map_err(|e| {
+                MigratableError::Pause(anyhow!("Error pausing vhost-user-blk backend: {:?}", e))
+            })?;
+
         self.common.pause()
     }
 
@@ -346,7 +356,14 @@ impl Pausable for Blk {
         if let Some(epoll_thread) = &self.epoll_thread {
             epoll_thread.thread().unpark();
         }
-        Ok(())
+
+        self.vu
+            .lock()
+            .unwrap()
+            .resume_vhost_user(self.vu_num_queues)
+            .map_err(|e| {
+                MigratableError::Resume(anyhow!("Error resuming vhost-user-blk backend: {:?}", e))
+            })
     }
 }
 

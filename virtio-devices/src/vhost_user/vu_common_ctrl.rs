@@ -31,6 +31,7 @@ pub struct VhostUserConfig {
 #[derive(Clone)]
 pub struct VhostUserHandle {
     vu: Master,
+    ready: bool,
 }
 
 impl VhostUserHandle {
@@ -197,7 +198,7 @@ impl VhostUserHandle {
                 .set_vring_base(
                     queue_index,
                     queue
-                        .avail_index_from_memory(mem)
+                        .used_index_from_memory(mem)
                         .map_err(Error::GetAvailableIndex)?,
                 )
                 .map_err(Error::VhostUserSetVringBase)?;
@@ -222,10 +223,12 @@ impl VhostUserHandle {
         if let Some(slave_req_handler) = slave_req_handler {
             self.vu
                 .set_slave_request_fd(&slave_req_handler.get_tx_raw_fd())
-                .map_err(Error::VhostUserSetSlaveRequestFd)
-        } else {
-            Ok(())
+                .map_err(Error::VhostUserSetSlaveRequestFd)?;
         }
+
+        self.ready = true;
+
+        Ok(())
     }
 
     pub fn reset_vhost_user(&mut self, num_queues: usize) -> Result<()> {
@@ -300,6 +303,7 @@ impl VhostUserHandle {
 
             Ok(VhostUserHandle {
                 vu: Master::from_stream(stream, num_queues),
+                ready: false,
             })
         } else {
             let now = Instant::now();
@@ -307,7 +311,12 @@ impl VhostUserHandle {
             // Retry connecting for a full minute
             let err = loop {
                 let err = match Master::connect(socket_path, num_queues) {
-                    Ok(m) => return Ok(VhostUserHandle { vu: m }),
+                    Ok(m) => {
+                        return Ok(VhostUserHandle {
+                            vu: m,
+                            ready: false,
+                        })
+                    }
                     Err(e) => e,
                 };
                 sleep(Duration::from_millis(100));
@@ -327,5 +336,27 @@ impl VhostUserHandle {
 
     pub fn socket_handle(&mut self) -> &mut Master {
         &mut self.vu
+    }
+
+    pub fn pause_vhost_user(&mut self, num_queues: usize) -> Result<()> {
+        if self.ready {
+            for i in 0..num_queues {
+                self.vu
+                    .set_vring_enable(i, false)
+                    .map_err(Error::VhostUserSetVringEnable)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn resume_vhost_user(&mut self, num_queues: usize) -> Result<()> {
+        if self.ready {
+            for i in 0..num_queues {
+                self.vu
+                    .set_vring_enable(i, true)
+                    .map_err(Error::VhostUserSetVringEnable)?;
+            }
+        }
+        Ok(())
     }
 }
