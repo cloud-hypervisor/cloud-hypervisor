@@ -19,6 +19,8 @@ use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
+use versionize::{VersionMap, Versionize, VersionizeResult};
+use versionize_derive::Versionize;
 use vhost::vhost_user::message::{
     VhostUserFSSlaveMsg, VhostUserFSSlaveMsgFlags, VhostUserProtocolFeatures,
     VhostUserVirtioFeatures, VHOST_USER_FS_SLAVE_ENTRIES,
@@ -29,11 +31,22 @@ use vhost::vhost_user::{
 use vm_memory::{
     Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
 };
-use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
+use vm_migration::{
+    Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
+};
 use vmm_sys_util::eventfd::EventFd;
 
 const NUM_QUEUE_OFFSET: usize = 1;
 const DEFAULT_QUEUE_NUMBER: usize = 2;
+
+#[derive(Versionize)]
+pub struct State {
+    pub avail_features: u64,
+    pub acked_features: u64,
+    pub config: VirtioFsConfig,
+}
+
+impl VersionMapped for State {}
 
 struct SlaveReqHandler {
     cache_offset: GuestAddress,
@@ -263,11 +276,11 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Versionize)]
 #[repr(C, packed)]
-struct VirtioFsConfig {
-    tag: [u8; 36],
-    num_request_queues: u32,
+pub struct VirtioFsConfig {
+    pub tag: [u8; 36],
+    pub num_request_queues: u32,
 }
 
 impl Default for VirtioFsConfig {
@@ -384,6 +397,20 @@ impl Fs {
             epoll_thread: None,
             vu_num_queues: num_queues,
         })
+    }
+
+    fn state(&self) -> State {
+        State {
+            avail_features: self.common.avail_features,
+            acked_features: self.common.acked_features,
+            config: self.config,
+        }
+    }
+
+    fn set_state(&mut self, state: &State) {
+        self.common.avail_features = state.avail_features;
+        self.common.acked_features = state.acked_features;
+        self.config = state.config;
     }
 }
 
@@ -641,6 +668,15 @@ impl Pausable for Fs {
 impl Snapshottable for Fs {
     fn id(&self) -> String {
         self.id.clone()
+    }
+
+    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+        Snapshot::new_from_versioned_state(&self.id(), &self.state())
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        self.set_state(&snapshot.to_versioned_state(&self.id)?);
+        Ok(())
     }
 }
 impl Transportable for Fs {}
