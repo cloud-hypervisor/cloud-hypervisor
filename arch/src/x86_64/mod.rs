@@ -341,10 +341,18 @@ impl CpuidPatch {
     }
 }
 
+#[derive(Debug)]
+enum CpuidCompatibleCheck {
+    BitwiseSubset, // bitwise subset
+    Equal,         // equal in value
+    NumNotGreater, // smaller or equal as a number
+}
+
 pub struct CpuidFeatureEntry {
-    pub function: u32,
-    pub index: u32,
-    pub feature_reg: CpuidReg,
+    function: u32,
+    index: u32,
+    feature_reg: CpuidReg,
+    compatible_check: CpuidCompatibleCheck,
 }
 
 impl CpuidFeatureEntry {
@@ -357,71 +365,109 @@ impl CpuidFeatureEntry {
                 function: 1,
                 index: 0,
                 feature_reg: CpuidReg::ECX,
+                compatible_check: CpuidCompatibleCheck::BitwiseSubset,
             },
             CpuidFeatureEntry {
                 function: 1,
                 index: 0,
                 feature_reg: CpuidReg::EDX,
+                compatible_check: CpuidCompatibleCheck::BitwiseSubset,
             },
             // Leaf 0x7, EAX/EBX/ECX/EDX, extended features
             CpuidFeatureEntry {
                 function: 7,
                 index: 0,
                 feature_reg: CpuidReg::EAX,
+                compatible_check: CpuidCompatibleCheck::NumNotGreater,
             },
             CpuidFeatureEntry {
                 function: 7,
                 index: 0,
                 feature_reg: CpuidReg::EBX,
+                compatible_check: CpuidCompatibleCheck::BitwiseSubset,
             },
             CpuidFeatureEntry {
                 function: 7,
                 index: 0,
                 feature_reg: CpuidReg::ECX,
+                compatible_check: CpuidCompatibleCheck::BitwiseSubset,
             },
             CpuidFeatureEntry {
                 function: 7,
                 index: 0,
                 feature_reg: CpuidReg::EDX,
+                compatible_check: CpuidCompatibleCheck::BitwiseSubset,
             },
             // Leaf 0x7 subleaf 0x1, EAX, extended features
             CpuidFeatureEntry {
                 function: 7,
                 index: 1,
                 feature_reg: CpuidReg::EAX,
+                compatible_check: CpuidCompatibleCheck::BitwiseSubset,
             },
             // Leaf 0x8000_0001, ECX/EDX, CPUID features bits
             CpuidFeatureEntry {
                 function: 0x8000_0001,
                 index: 0,
                 feature_reg: CpuidReg::ECX,
+                compatible_check: CpuidCompatibleCheck::BitwiseSubset,
             },
             CpuidFeatureEntry {
                 function: 0x8000_0001,
                 index: 0,
                 feature_reg: CpuidReg::EDX,
+                compatible_check: CpuidCompatibleCheck::BitwiseSubset,
             },
             // KVM CPUID bits: https://www.kernel.org/doc/html/latest/virt/kvm/cpuid.html
+            // Leaf 0x4000_0000, EAX/EBX/ECX/EDX, KVM CPUID SIGNATURE
+            CpuidFeatureEntry {
+                function: 0x4000_0000,
+                index: 0,
+                feature_reg: CpuidReg::EAX,
+                compatible_check: CpuidCompatibleCheck::NumNotGreater,
+            },
+            CpuidFeatureEntry {
+                function: 0x4000_0000,
+                index: 0,
+                feature_reg: CpuidReg::EBX,
+                compatible_check: CpuidCompatibleCheck::Equal,
+            },
+            CpuidFeatureEntry {
+                function: 0x4000_0000,
+                index: 0,
+                feature_reg: CpuidReg::ECX,
+                compatible_check: CpuidCompatibleCheck::Equal,
+            },
+            CpuidFeatureEntry {
+                function: 0x4000_0000,
+                index: 0,
+                feature_reg: CpuidReg::EDX,
+                compatible_check: CpuidCompatibleCheck::Equal,
+            },
             // Leaf 0x4000_0001, EAX/EBX/ECX/EDX, KVM CPUID features
             CpuidFeatureEntry {
                 function: 0x4000_0001,
                 index: 0,
                 feature_reg: CpuidReg::EAX,
+                compatible_check: CpuidCompatibleCheck::BitwiseSubset,
             },
             CpuidFeatureEntry {
                 function: 0x4000_0001,
                 index: 0,
                 feature_reg: CpuidReg::EBX,
+                compatible_check: CpuidCompatibleCheck::BitwiseSubset,
             },
             CpuidFeatureEntry {
                 function: 0x4000_0001,
                 index: 0,
                 feature_reg: CpuidReg::ECX,
+                compatible_check: CpuidCompatibleCheck::BitwiseSubset,
             },
             CpuidFeatureEntry {
                 function: 0x4000_0001,
                 index: 0,
                 feature_reg: CpuidReg::EDX,
+                compatible_check: CpuidCompatibleCheck::BitwiseSubset,
             },
         ]
     }
@@ -477,14 +523,27 @@ impl CpuidFeatureEntry {
             .zip(dest_vm_features.iter())
             .enumerate()
         {
-            let different_feature_bits = src_vm_feature ^ dest_vm_feature;
-            let src_vm_feature_bits_only = different_feature_bits & src_vm_feature;
-            if src_vm_feature_bits_only != 0 {
+            let entry = &feature_entry_list[i];
+            let entry_compatible;
+            match entry.compatible_check {
+                CpuidCompatibleCheck::BitwiseSubset => {
+                    let different_feature_bits = src_vm_feature ^ dest_vm_feature;
+                    let src_vm_feature_bits_only = different_feature_bits & src_vm_feature;
+                    entry_compatible = src_vm_feature_bits_only == 0;
+                }
+                CpuidCompatibleCheck::Equal => {
+                    entry_compatible = src_vm_feature == dest_vm_feature;
+                }
+                CpuidCompatibleCheck::NumNotGreater => {
+                    entry_compatible = src_vm_feature <= dest_vm_feature;
+                }
+            };
+            if !entry_compatible {
                 error!(
                     "Detected incompatible CPUID entry: leaf={:#02x} (subleaf={:#02x}), register='{:?}', \
-                    source VM feature='{:#04x}', destination VM feature'{:#04x}'.",
-                    feature_entry_list[i].function, feature_entry_list[i].index, feature_entry_list[i].feature_reg,
-                    src_vm_feature, dest_vm_feature
+                    compatilbe_check='{:?}', source VM feature='{:#04x}', destination VM feature'{:#04x}'.",
+                    entry.function, entry.index, entry.feature_reg,
+                    entry.compatible_check, src_vm_feature, dest_vm_feature
                     );
 
                 compatible = false;
