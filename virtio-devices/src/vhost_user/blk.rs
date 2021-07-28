@@ -4,10 +4,7 @@
 use super::super::{
     ActivateError, ActivateResult, Queue, VirtioCommon, VirtioDevice, VirtioDeviceType,
 };
-use super::vu_common_ctrl::{
-    add_memory_region, connect_vhost_user, negotiate_features_vhost_user, reset_vhost_user,
-    setup_vhost_user, update_mem_table, VhostUserConfig,
-};
+use super::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
 use super::{Error, Result, DEFAULT_VIRTIO_FEATURES};
 use crate::vhost_user::{Inflight, VhostUserEpollHandler};
 use crate::VirtioInterrupt;
@@ -23,7 +20,7 @@ use std::vec::Vec;
 use vhost::vhost_user::message::VhostUserConfigFlags;
 use vhost::vhost_user::message::VHOST_USER_CONFIG_OFFSET;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
-use vhost::vhost_user::{Master, MasterReqHandler, VhostUserMaster, VhostUserMasterReqHandler};
+use vhost::vhost_user::{MasterReqHandler, VhostUserMaster, VhostUserMasterReqHandler};
 use vhost::VhostBackend;
 use virtio_bindings::bindings::virtio_blk::{
     VIRTIO_BLK_F_BLK_SIZE, VIRTIO_BLK_F_CONFIG_WCE, VIRTIO_BLK_F_DISCARD, VIRTIO_BLK_F_FLUSH,
@@ -42,7 +39,7 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {}
 pub struct Blk {
     common: VirtioCommon,
     id: String,
-    vhost_user_blk: Arc<Mutex<Master>>,
+    vu: Arc<Mutex<VhostUserHandle>>,
     config: VirtioBlockConfig,
     guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     acked_protocol_features: u64,
@@ -55,8 +52,8 @@ impl Blk {
     pub fn new(id: String, vu_cfg: VhostUserConfig) -> Result<Blk> {
         let num_queues = vu_cfg.num_queues;
 
-        let mut vhost_user_blk =
-            connect_vhost_user(false, &vu_cfg.socket, num_queues as u64, false)?;
+        let mut vu =
+            VhostUserHandle::connect_vhost_user(false, &vu_cfg.socket, num_queues as u64, false)?;
 
         // Filling device and vring features VMM supports.
         let mut avail_features = 1 << VIRTIO_BLK_F_SIZE_MAX
@@ -81,15 +78,12 @@ impl Blk {
             | VhostUserProtocolFeatures::REPLY_ACK
             | VhostUserProtocolFeatures::INFLIGHT_SHMFD;
 
-        let (acked_features, acked_protocol_features) = negotiate_features_vhost_user(
-            &mut vhost_user_blk,
-            avail_features,
-            avail_protocol_features,
-        )?;
+        let (acked_features, acked_protocol_features) =
+            vu.negotiate_features_vhost_user(avail_features, avail_protocol_features)?;
 
         let backend_num_queues =
             if acked_protocol_features & VhostUserProtocolFeatures::MQ.bits() != 0 {
-                vhost_user_blk
+                vu.socket_handle()
                     .get_queue_num()
                     .map_err(Error::VhostUserGetQueueMaxNum)? as usize
             } else {
@@ -104,7 +98,8 @@ impl Blk {
 
         let config_len = mem::size_of::<VirtioBlockConfig>();
         let config_space: Vec<u8> = vec![0u8; config_len as usize];
-        let (_, config_space) = vhost_user_blk
+        let (_, config_space) = vu
+            .socket_handle()
             .get_config(
                 VHOST_USER_CONFIG_OFFSET,
                 config_len as u32,
@@ -122,7 +117,7 @@ impl Blk {
         // how many virt queues to be handled, which backend required to know
         // at early stage.
         for i in 0..num_queues {
-            vhost_user_blk
+            vu.socket_handle()
                 .set_vring_base(i, 0)
                 .map_err(Error::VhostUserSetVringBase)?;
         }
@@ -138,7 +133,7 @@ impl Blk {
                 ..Default::default()
             },
             id,
-            vhost_user_blk: Arc::new(Mutex::new(vhost_user_blk)),
+            vu: Arc::new(Mutex::new(vu)),
             config,
             guest_memory: None,
             acked_protocol_features,
@@ -195,9 +190,10 @@ impl VirtioDevice for Blk {
 
         self.config.writeback = data[0];
         if let Err(e) = self
-            .vhost_user_blk
+            .vu
             .lock()
             .unwrap()
+            .socket_handle()
             .set_config(offset as u32, VhostUserConfigFlags::WRITABLE, data)
             .map_err(Error::VhostUserSetConfig)
         {
@@ -232,24 +228,26 @@ impl VirtioDevice for Blk {
                 None
             };
 
-        setup_vhost_user(
-            &mut self.vhost_user_blk.lock().unwrap(),
-            &mem.memory(),
-            queues.clone(),
-            queue_evts.iter().map(|q| q.try_clone().unwrap()).collect(),
-            &interrupt_cb,
-            backend_acked_features,
-            &slave_req_handler,
-            inflight.as_mut(),
-        )
-        .map_err(ActivateError::VhostUserBlkSetup)?;
+        self.vu
+            .lock()
+            .unwrap()
+            .setup_vhost_user(
+                &mem.memory(),
+                queues.clone(),
+                queue_evts.iter().map(|q| q.try_clone().unwrap()).collect(),
+                &interrupt_cb,
+                backend_acked_features,
+                &slave_req_handler,
+                inflight.as_mut(),
+            )
+            .map_err(ActivateError::VhostUserBlkSetup)?;
 
         // Run a dedicated thread for handling potential reconnections with
         // the backend.
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
         let mut handler: VhostUserEpollHandler<SlaveReqHandler> = VhostUserEpollHandler {
-            vu: self.vhost_user_blk.clone(),
+            vu: self.vu.clone(),
             mem,
             kill_evt,
             pause_evt,
@@ -289,10 +287,12 @@ impl VirtioDevice for Blk {
             self.common.resume().ok()?;
         }
 
-        if let Err(e) = reset_vhost_user(
-            &mut self.vhost_user_blk.lock().unwrap(),
-            self.common.queue_sizes.len(),
-        ) {
+        if let Err(e) = self
+            .vu
+            .lock()
+            .unwrap()
+            .reset_vhost_user(self.common.queue_sizes.len())
+        {
             error!("Failed to reset vhost-user daemon: {:?}", e);
             return None;
         }
@@ -309,7 +309,7 @@ impl VirtioDevice for Blk {
     }
 
     fn shutdown(&mut self) {
-        let _ = unsafe { libc::close(self.vhost_user_blk.lock().unwrap().as_raw_fd()) };
+        let _ = unsafe { libc::close(self.vu.lock().unwrap().socket_handle().as_raw_fd()) };
     }
 
     fn add_memory_region(
@@ -318,14 +318,17 @@ impl VirtioDevice for Blk {
     ) -> std::result::Result<(), crate::Error> {
         if self.acked_protocol_features & VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS.bits() != 0
         {
-            add_memory_region(&mut self.vhost_user_blk.lock().unwrap(), region)
+            self.vu
+                .lock()
+                .unwrap()
+                .add_memory_region(region)
                 .map_err(crate::Error::VhostUserAddMemoryRegion)
         } else if let Some(guest_memory) = &self.guest_memory {
-            update_mem_table(
-                &mut self.vhost_user_blk.lock().unwrap(),
-                guest_memory.memory().deref(),
-            )
-            .map_err(crate::Error::VhostUserUpdateMemory)
+            self.vu
+                .lock()
+                .unwrap()
+                .update_mem_table(guest_memory.memory().deref())
+                .map_err(crate::Error::VhostUserUpdateMemory)
         } else {
             Ok(())
         }
