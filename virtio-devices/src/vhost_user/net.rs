@@ -2,10 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
-use crate::vhost_user::vu_common_ctrl::{
-    add_memory_region, connect_vhost_user, negotiate_features_vhost_user, reset_vhost_user,
-    setup_vhost_user, update_mem_table, VhostUserConfig,
-};
+use crate::vhost_user::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
 use crate::vhost_user::{Error, Inflight, Result, VhostUserEpollHandler};
 use crate::{
     ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
@@ -23,7 +20,7 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::vec::Vec;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
-use vhost::vhost_user::{Master, MasterReqHandler, VhostUserMaster, VhostUserMasterReqHandler};
+use vhost::vhost_user::{MasterReqHandler, VhostUserMaster, VhostUserMasterReqHandler};
 use virtio_bindings::bindings::virtio_net::{
     VIRTIO_NET_F_CSUM, VIRTIO_NET_F_CTRL_VQ, VIRTIO_NET_F_GUEST_CSUM, VIRTIO_NET_F_GUEST_ECN,
     VIRTIO_NET_F_GUEST_TSO4, VIRTIO_NET_F_GUEST_TSO6, VIRTIO_NET_F_GUEST_UFO,
@@ -94,7 +91,7 @@ impl EpollHelperHandler for NetCtrlEpollHandler {
 pub struct Net {
     common: VirtioCommon,
     id: String,
-    vhost_user_net: Arc<Mutex<Master>>,
+    vu: Arc<Mutex<VhostUserHandle>>,
     config: VirtioNetConfig,
     guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     acked_protocol_features: u64,
@@ -136,23 +133,20 @@ impl Net {
         let mut config = VirtioNetConfig::default();
         build_net_config_space(&mut config, mac_addr, num_queues, &mut avail_features);
 
-        let mut vhost_user_net =
-            connect_vhost_user(server, &vu_cfg.socket, num_queues as u64, false)?;
+        let mut vu =
+            VhostUserHandle::connect_vhost_user(server, &vu_cfg.socket, num_queues as u64, false)?;
 
         let avail_protocol_features = VhostUserProtocolFeatures::MQ
             | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
             | VhostUserProtocolFeatures::REPLY_ACK
             | VhostUserProtocolFeatures::INFLIGHT_SHMFD;
 
-        let (mut acked_features, acked_protocol_features) = negotiate_features_vhost_user(
-            &mut vhost_user_net,
-            avail_features,
-            avail_protocol_features,
-        )?;
+        let (mut acked_features, acked_protocol_features) =
+            vu.negotiate_features_vhost_user(avail_features, avail_protocol_features)?;
 
         let backend_num_queues =
             if acked_protocol_features & VhostUserProtocolFeatures::MQ.bits() != 0 {
-                vhost_user_net
+                vu.socket_handle()
                     .get_queue_num()
                     .map_err(Error::VhostUserGetQueueMaxNum)? as usize
             } else {
@@ -186,7 +180,7 @@ impl Net {
                 min_queues: DEFAULT_QUEUE_NUMBER as u16,
                 ..Default::default()
             },
-            vhost_user_net: Arc::new(Mutex::new(vhost_user_net)),
+            vu: Arc::new(Mutex::new(vu)),
             config,
             guest_memory: None,
             acked_protocol_features,
@@ -301,24 +295,26 @@ impl VirtioDevice for Net {
                 None
             };
 
-        setup_vhost_user(
-            &mut self.vhost_user_net.lock().unwrap(),
-            &mem.memory(),
-            queues.clone(),
-            queue_evts.iter().map(|q| q.try_clone().unwrap()).collect(),
-            &interrupt_cb,
-            backend_acked_features,
-            &slave_req_handler,
-            inflight.as_mut(),
-        )
-        .map_err(ActivateError::VhostUserNetSetup)?;
+        self.vu
+            .lock()
+            .unwrap()
+            .setup_vhost_user(
+                &mem.memory(),
+                queues.clone(),
+                queue_evts.iter().map(|q| q.try_clone().unwrap()).collect(),
+                &interrupt_cb,
+                backend_acked_features,
+                &slave_req_handler,
+                inflight.as_mut(),
+            )
+            .map_err(ActivateError::VhostUserNetSetup)?;
 
         // Run a dedicated thread for handling potential reconnections with
         // the backend.
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
         let mut handler: VhostUserEpollHandler<SlaveReqHandler> = VhostUserEpollHandler {
-            vu: self.vhost_user_net.clone(),
+            vu: self.vu.clone(),
             mem,
             kill_evt,
             pause_evt,
@@ -358,10 +354,12 @@ impl VirtioDevice for Net {
             self.common.resume().ok()?;
         }
 
-        if let Err(e) = reset_vhost_user(
-            &mut self.vhost_user_net.lock().unwrap(),
-            self.common.queue_sizes.len(),
-        ) {
+        if let Err(e) = self
+            .vu
+            .lock()
+            .unwrap()
+            .reset_vhost_user(self.common.queue_sizes.len())
+        {
             error!("Failed to reset vhost-user daemon: {:?}", e);
             return None;
         }
@@ -378,7 +376,7 @@ impl VirtioDevice for Net {
     }
 
     fn shutdown(&mut self) {
-        let _ = unsafe { libc::close(self.vhost_user_net.lock().unwrap().as_raw_fd()) };
+        let _ = unsafe { libc::close(self.vu.lock().unwrap().socket_handle().as_raw_fd()) };
 
         // Remove socket path if needed
         if self.server {
@@ -392,14 +390,17 @@ impl VirtioDevice for Net {
     ) -> std::result::Result<(), crate::Error> {
         if self.acked_protocol_features & VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS.bits() != 0
         {
-            add_memory_region(&mut self.vhost_user_net.lock().unwrap(), region)
+            self.vu
+                .lock()
+                .unwrap()
+                .add_memory_region(region)
                 .map_err(crate::Error::VhostUserAddMemoryRegion)
         } else if let Some(guest_memory) = &self.guest_memory {
-            update_mem_table(
-                &mut self.vhost_user_net.lock().unwrap(),
-                guest_memory.memory().deref(),
-            )
-            .map_err(crate::Error::VhostUserUpdateMemory)
+            self.vu
+                .lock()
+                .unwrap()
+                .update_mem_table(guest_memory.memory().deref())
+                .map_err(crate::Error::VhostUserUpdateMemory)
         } else {
             Ok(())
         }

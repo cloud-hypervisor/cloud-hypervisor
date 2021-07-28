@@ -12,12 +12,12 @@ use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::sync::{atomic::AtomicBool, Arc, Barrier, Mutex};
 use vhost::vhost_user::message::{VhostUserInflight, VhostUserVirtioFeatures};
-use vhost::vhost_user::{Master, MasterReqHandler, VhostUserMasterReqHandler};
+use vhost::vhost_user::{MasterReqHandler, VhostUserMasterReqHandler};
 use vhost::Error as VhostError;
 use vm_memory::{Error as MmapError, GuestAddressSpace, GuestMemoryAtomic};
 use vm_virtio::Error as VirtioError;
 use vmm_sys_util::eventfd::EventFd;
-use vu_common_ctrl::{connect_vhost_user, reinitialize_vhost_user};
+use vu_common_ctrl::VhostUserHandle;
 
 pub mod blk;
 pub mod fs;
@@ -138,7 +138,7 @@ pub struct Inflight {
 }
 
 pub struct VhostUserEpollHandler<S: VhostUserMasterReqHandler> {
-    pub vu: Arc<Mutex<Master>>,
+    pub vu: Arc<Mutex<VhostUserHandle>>,
     pub mem: GuestMemoryAtomic<GuestMemoryMmap>,
     pub kill_evt: EventFd,
     pub pause_evt: EventFd,
@@ -161,7 +161,7 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
     ) -> std::result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event_custom(
-            self.vu.lock().unwrap().as_raw_fd(),
+            self.vu.lock().unwrap().socket_handle().as_raw_fd(),
             HUP_CONNECTION_EVENT,
             epoll::Events::EPOLLHUP,
         )?;
@@ -177,12 +177,12 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
 
     fn reconnect(&mut self, helper: &mut EpollHelper) -> std::result::Result<(), EpollHelperError> {
         helper.del_event_custom(
-            self.vu.lock().unwrap().as_raw_fd(),
+            self.vu.lock().unwrap().socket_handle().as_raw_fd(),
             HUP_CONNECTION_EVENT,
             epoll::Events::EPOLLHUP,
         )?;
 
-        let mut vhost_user = connect_vhost_user(
+        let mut vhost_user = VhostUserHandle::connect_vhost_user(
             self.server,
             &self.socket_path,
             self.queues.len() as u64,
@@ -196,29 +196,29 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
         })?;
 
         // Initialize the backend
-        reinitialize_vhost_user(
-            &mut vhost_user,
-            self.mem.memory().deref(),
-            self.queues.clone(),
-            self.queue_evts
-                .iter()
-                .map(|q| q.try_clone().unwrap())
-                .collect(),
-            &self.virtio_interrupt,
-            self.acked_features,
-            self.acked_protocol_features,
-            &self.slave_req_handler,
-            self.inflight.as_mut(),
-        )
-        .map_err(|e| {
-            EpollHelperError::IoError(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("failed reconnecting vhost-user backend{:?}", e),
-            ))
-        })?;
+        vhost_user
+            .reinitialize_vhost_user(
+                self.mem.memory().deref(),
+                self.queues.clone(),
+                self.queue_evts
+                    .iter()
+                    .map(|q| q.try_clone().unwrap())
+                    .collect(),
+                &self.virtio_interrupt,
+                self.acked_features,
+                self.acked_protocol_features,
+                &self.slave_req_handler,
+                self.inflight.as_mut(),
+            )
+            .map_err(|e| {
+                EpollHelperError::IoError(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("failed reconnecting vhost-user backend{:?}", e),
+                ))
+            })?;
 
         helper.add_event_custom(
-            vhost_user.as_raw_fd(),
+            vhost_user.socket_handle().as_raw_fd(),
             HUP_CONNECTION_EVENT,
             epoll::Events::EPOLLHUP,
         )?;
