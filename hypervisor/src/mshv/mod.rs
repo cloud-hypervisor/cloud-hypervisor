@@ -16,7 +16,8 @@ pub use mshv_bindings::*;
 pub use mshv_ioctls::IoEventAddress;
 use mshv_ioctls::{set_registers_64, Mshv, NoDatamatch, VcpuFd, VmFd};
 use serde_derive::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 use vm::DataMatch;
 // x86_64 dependencies
 #[cfg(target_arch = "x86_64")]
@@ -31,7 +32,6 @@ pub use x86_64::*;
 #[cfg(target_arch = "x86_64")]
 use std::fs::File;
 use std::os::unix::io::AsRawFd;
-use std::sync::RwLock;
 
 const DIRTY_BITMAP_CLEAR_DIRTY: u64 = 0x4;
 pub const PAGE_SHIFT: usize = 12;
@@ -42,6 +42,11 @@ pub struct HvState {
 }
 
 pub use HvState as VmState;
+
+struct MshvDirtyLogSlot {
+    guest_pfn: u64,
+    memory_size: u64,
+}
 
 /// Wrapper over mshv system ioctls.
 pub struct MshvHypervisor {
@@ -107,6 +112,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
             msrs,
             hv_state: hv_state_init(),
             vmmops: None,
+            dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
         }))
     }
     ///
@@ -682,6 +688,7 @@ pub struct MshvVm {
     // Hypervisor State
     hv_state: Arc<RwLock<HvState>>,
     vmmops: Option<Arc<dyn vm::VmmOps>>,
+    dirty_log_slots: Arc<RwLock<HashMap<u64, MshvDirtyLogSlot>>>,
 }
 
 fn hv_state_init() -> Arc<RwLock<HvState>> {
@@ -807,6 +814,17 @@ impl vm::Vm for MshvVm {
 
     /// Creates a guest physical memory region.
     fn create_user_memory_region(&self, user_memory_region: MemoryRegion) -> vm::Result<()> {
+        // No matter read only or not we keep track the slots.
+        // For readonly hypervisor can enable the dirty bits,
+        // but a VM exit happens before setting the dirty bits
+        self.dirty_log_slots.write().unwrap().insert(
+            user_memory_region.guest_pfn,
+            MshvDirtyLogSlot {
+                guest_pfn: user_memory_region.guest_pfn,
+                memory_size: user_memory_region.size,
+            },
+        );
+
         self.fd
             .map_user_memory(user_memory_region)
             .map_err(|e| vm::HypervisorVmError::CreateUserMemory(e.into()))?;
@@ -815,6 +833,12 @@ impl vm::Vm for MshvVm {
 
     /// Removes a guest physical memory region.
     fn remove_user_memory_region(&self, user_memory_region: MemoryRegion) -> vm::Result<()> {
+        // Remove the corresponding entry from "self.dirty_log_slots" if needed
+        self.dirty_log_slots
+            .write()
+            .unwrap()
+            .remove(&user_memory_region.guest_pfn);
+
         self.fd
             .unmap_user_memory(user_memory_region)
             .map_err(|e| vm::HypervisorVmError::RemoveUserMemory(e.into()))?;
