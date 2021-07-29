@@ -978,6 +978,14 @@ impl CpuManager {
             .collect()
     }
 
+    #[cfg(target_arch = "aarch64")]
+    pub fn get_vcpu_topology(&self) -> Option<(u8, u8, u8)> {
+        self.config
+            .topology
+            .clone()
+            .map(|t| (t.threads_per_core, t.cores_per_die, t.packages))
+    }
+
     #[cfg(feature = "acpi")]
     pub fn create_madt(&self) -> Sdt {
         use crate::acpi;

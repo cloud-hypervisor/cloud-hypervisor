@@ -1072,6 +1072,7 @@ impl Vm {
     fn configure_system(&mut self) -> Result<()> {
         let cmdline_cstring = self.get_cmdline()?;
         let vcpu_mpidrs = self.cpu_manager.lock().unwrap().get_mpidrs();
+        let vcpu_topology = self.cpu_manager.lock().unwrap().get_vcpu_topology();
         let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
         let initramfs_config = match self.initramfs {
             Some(_) => Some(self.load_initramfs(&mem)?),
@@ -1129,6 +1130,7 @@ impl Vm {
             &mem,
             &cmdline_cstring,
             vcpu_mpidrs,
+            vcpu_topology,
             device_info,
             &initramfs_config,
             &pci_space,
@@ -2652,6 +2654,7 @@ mod tests {
             &mem,
             &CString::new("console=tty0").unwrap(),
             vec![0],
+            Some((0, 0, 0)),
             &dev_info,
             &*gic,
             &None,
