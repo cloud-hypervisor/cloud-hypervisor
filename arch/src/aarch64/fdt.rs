@@ -34,6 +34,9 @@ const MSI_PHANDLE: u32 = 2;
 const CLOCK_PHANDLE: u32 = 3;
 // This is a value for uniquely identifying the FDT node containing the gpio controller.
 const GPIO_PHANDLE: u32 = 4;
+// This is a value for uniquely identifying the FDT node containing the first vCPU.
+// The last number of vCPU phandle depends on the number of vCPUs.
+const FIRST_VCPU_PHANDLE: u32 = 5;
 
 // Read the documentation specified when appending the root node to the FDT.
 const ADDRESS_CELLS: u32 = 0x2;
@@ -137,7 +140,11 @@ fn create_cpu_nodes(
     let cpus_node = fdt.begin_node("cpus")?;
     fdt.property_u32("#address-cells", 0x1)?;
     fdt.property_u32("#size-cells", 0x0)?;
+
     let num_cpus = vcpu_mpidr.len();
+    let threads_per_core = vcpu_topology.unwrap_or_default().0 as u8;
+    let cores_per_package = vcpu_topology.unwrap_or_default().1 as u8;
+    let packages = vcpu_topology.unwrap_or_default().2 as u8;
 
     for (cpu_id, mpidr) in vcpu_mpidr.iter().enumerate().take(num_cpus) {
         let cpu_name = format!("cpu@{:x}", cpu_id);
@@ -151,9 +158,75 @@ fn create_cpu_nodes(
         // Set the field to first 24 bits of the MPIDR - Multiprocessor Affinity Register.
         // See http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.ddi0488c/BABHBJCI.html.
         fdt.property_u32("reg", (mpidr & 0x7FFFFF) as u32)?;
+        fdt.property_u32("phandle", cpu_id as u32 + FIRST_VCPU_PHANDLE)?;
         fdt.end_node(cpu_node)?;
     }
+
+    // If there is a valid cpu topology config, create the cpu-map node.
+    if (threads_per_core > 0)
+        && (cores_per_package > 0)
+        && (packages > 0)
+        && (num_cpus as u8 == threads_per_core * cores_per_package * packages)
+    {
+        let cpu_map_node = fdt.begin_node("cpu-map")?;
+        // Create mappings between CPU index and cluster,core, and thread.
+        let mut cluster_core_thread_to_cpuidx = HashMap::new();
+        for cpu_idx in 0..num_cpus as u8 {
+            if threads_per_core > 1 {
+                cluster_core_thread_to_cpuidx.insert(
+                    (
+                        cpu_idx / (cores_per_package * threads_per_core),
+                        (cpu_idx / threads_per_core) % cores_per_package,
+                        cpu_idx % threads_per_core,
+                    ),
+                    cpu_idx,
+                );
+            } else {
+                cluster_core_thread_to_cpuidx.insert(
+                    (cpu_idx / cores_per_package, cpu_idx % cores_per_package, 0),
+                    cpu_idx,
+                );
+            }
+        }
+
+        // Create device tree nodes with regard of above mapping.
+        for cluster_idx in 0..packages {
+            let cluster_name = format!("cluster{:x}", cluster_idx);
+            let cluster_node = fdt.begin_node(&cluster_name)?;
+
+            for core_idx in 0..cores_per_package {
+                let core_name = format!("core{:x}", core_idx);
+                let core_node = fdt.begin_node(&core_name)?;
+
+                if threads_per_core > 1 {
+                    for thread_idx in 0..threads_per_core {
+                        let thread_name = format!("thread{:x}", thread_idx);
+                        let thread_node = fdt.begin_node(&thread_name)?;
+                        let cpu_idx = cluster_core_thread_to_cpuidx
+                            .get(&(cluster_idx, core_idx, thread_idx))
+                            .unwrap();
+
+                        fdt.property_u32("cpu", *cpu_idx as u32 + FIRST_VCPU_PHANDLE)?;
+                        fdt.end_node(thread_node)?;
+                    }
+                } else {
+                    let cpu_idx = cluster_core_thread_to_cpuidx
+                        .get(&(cluster_idx, core_idx, 0))
+                        .unwrap();
+
+                    fdt.property_u32("cpu", *cpu_idx as u32 + FIRST_VCPU_PHANDLE)?;
+                }
+                fdt.end_node(core_node)?;
+            }
+            fdt.end_node(cluster_node)?;
+        }
+        fdt.end_node(cpu_map_node)?;
+    } else {
+        debug!("Boot using device tree, CPU topology is not (correctly) specified");
+    }
+
     fdt.end_node(cpus_node)?;
+
     Ok(())
 }
 
