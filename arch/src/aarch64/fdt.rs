@@ -72,10 +72,12 @@ pub enum Error {
 type Result<T> = result::Result<T, Error>;
 
 /// Creates the flattened device tree for this aarch64 VM.
+#[allow(clippy::too_many_arguments)]
 pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHasher>(
     guest_mem: &GuestMemoryMmap,
     cmdline: &CStr,
     vcpu_mpidr: Vec<u64>,
+    vcpu_topology: Option<(u8, u8, u8)>,
     device_info: &HashMap<(DeviceType, String), T, S>,
     gic_device: &dyn GicDevice,
     initrd: &Option<InitramfsConfig>,
@@ -98,7 +100,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     // This is not mandatory but we use it to point the root node to the node
     // containing description of the interrupt controller for this VM.
     fdt.property_u32("interrupt-parent", GIC_PHANDLE)?;
-    create_cpu_nodes(&mut fdt, &vcpu_mpidr)?;
+    create_cpu_nodes(&mut fdt, &vcpu_mpidr, vcpu_topology)?;
     create_memory_node(&mut fdt, guest_mem)?;
     create_chosen_node(&mut fdt, cmdline.to_str().unwrap(), initrd)?;
     create_gic_node(&mut fdt, gic_device)?;
@@ -126,7 +128,11 @@ pub fn write_fdt_to_memory(fdt_final: Vec<u8>, guest_mem: &GuestMemoryMmap) -> R
 }
 
 // Following are the auxiliary function for creating the different nodes that we append to our FDT.
-fn create_cpu_nodes(fdt: &mut FdtWriter, vcpu_mpidr: &[u64]) -> FdtWriterResult<()> {
+fn create_cpu_nodes(
+    fdt: &mut FdtWriter,
+    vcpu_mpidr: &[u64],
+    vcpu_topology: Option<(u8, u8, u8)>,
+) -> FdtWriterResult<()> {
     // See https://github.com/torvalds/linux/blob/master/Documentation/devicetree/bindings/arm/cpus.yaml.
     let cpus_node = fdt.begin_node("cpus")?;
     fdt.property_u32("#address-cells", 0x1)?;
