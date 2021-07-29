@@ -63,7 +63,7 @@ pub struct Serial {
     id: String,
     interrupt_enable: u8,
     interrupt_identification: u8,
-    interrupt: Arc<Box<dyn InterruptSourceGroup>>,
+    interrupt: Arc<dyn InterruptSourceGroup>,
     line_control: u8,
     line_status: u8,
     modem_control: u8,
@@ -91,7 +91,7 @@ impl VersionMapped for SerialState {}
 impl Serial {
     pub fn new(
         id: String,
-        interrupt: Arc<Box<dyn InterruptSourceGroup>>,
+        interrupt: Arc<dyn InterruptSourceGroup>,
         out: Option<Box<dyn io::Write + Send>>,
     ) -> Serial {
         Serial {
@@ -113,14 +113,14 @@ impl Serial {
     /// Constructs a Serial port ready for output.
     pub fn new_out(
         id: String,
-        interrupt: Arc<Box<dyn InterruptSourceGroup>>,
+        interrupt: Arc<dyn InterruptSourceGroup>,
         out: Box<dyn io::Write + Send>,
     ) -> Serial {
         Self::new(id, interrupt, Some(out))
     }
 
     /// Constructs a Serial port with no connected output.
-    pub fn new_sink(id: String, interrupt: Arc<Box<dyn InterruptSourceGroup>>) -> Serial {
+    pub fn new_sink(id: String, interrupt: Arc<dyn InterruptSourceGroup>) -> Serial {
         Self::new(id, interrupt, None)
     }
 
@@ -370,7 +370,7 @@ mod tests {
         let serial_out = SharedBuffer::new();
         let mut serial = Serial::new_out(
             String::from(SERIAL_NAME),
-            Arc::new(Box::new(TestInterrupt::new(intr_evt.try_clone().unwrap()))),
+            Arc::new(TestInterrupt::new(intr_evt.try_clone().unwrap())),
             Box::new(serial_out.clone()),
         );
 
@@ -390,7 +390,7 @@ mod tests {
         let serial_out = SharedBuffer::new();
         let mut serial = Serial::new_out(
             String::from(SERIAL_NAME),
-            Arc::new(Box::new(TestInterrupt::new(intr_evt.try_clone().unwrap()))),
+            Arc::new(TestInterrupt::new(intr_evt.try_clone().unwrap())),
             Box::new(serial_out),
         );
 
@@ -427,7 +427,7 @@ mod tests {
         let intr_evt = EventFd::new(0).unwrap();
         let mut serial = Serial::new_sink(
             String::from(SERIAL_NAME),
-            Arc::new(Box::new(TestInterrupt::new(intr_evt.try_clone().unwrap()))),
+            Arc::new(TestInterrupt::new(intr_evt.try_clone().unwrap())),
         );
 
         // write 1 to the interrupt event fd, so that read doesn't block in case the event fd
@@ -449,7 +449,7 @@ mod tests {
         let intr_evt = EventFd::new(0).unwrap();
         let mut serial = Serial::new_sink(
             String::from(SERIAL_NAME),
-            Arc::new(Box::new(TestInterrupt::new(intr_evt.try_clone().unwrap()))),
+            Arc::new(TestInterrupt::new(intr_evt.try_clone().unwrap())),
         );
 
         serial.write(0, LCR as u64, &[LCR_DLAB_BIT]);
@@ -470,7 +470,7 @@ mod tests {
         let intr_evt = EventFd::new(0).unwrap();
         let mut serial = Serial::new_sink(
             String::from(SERIAL_NAME),
-            Arc::new(Box::new(TestInterrupt::new(intr_evt.try_clone().unwrap()))),
+            Arc::new(TestInterrupt::new(intr_evt.try_clone().unwrap())),
         );
 
         serial.write(0, MCR as u64, &[MCR_LOOP_BIT]);
@@ -496,7 +496,7 @@ mod tests {
         let intr_evt = EventFd::new(0).unwrap();
         let mut serial = Serial::new_sink(
             String::from(SERIAL_NAME),
-            Arc::new(Box::new(TestInterrupt::new(intr_evt.try_clone().unwrap()))),
+            Arc::new(TestInterrupt::new(intr_evt.try_clone().unwrap())),
         );
 
         serial.write(0, SCR as u64, &[0x12]);

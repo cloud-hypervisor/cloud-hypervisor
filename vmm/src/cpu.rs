@@ -224,7 +224,7 @@ impl Vcpu {
     pub fn new(
         id: u8,
         vm: &Arc<dyn hypervisor::Vm>,
-        vmmops: Option<Arc<Box<dyn VmmOps>>>,
+        vmmops: Option<Arc<dyn VmmOps>>,
     ) -> Result<Arc<Mutex<Self>>> {
         let vcpu = vm
             .create_vcpu(id, vmmops)
@@ -374,7 +374,7 @@ pub struct CpuManager {
     selected_cpu: u8,
     vcpus: Vec<Arc<Mutex<Vcpu>>>,
     seccomp_action: SeccompAction,
-    vmmops: Arc<Box<dyn VmmOps>>,
+    vmmops: Arc<dyn VmmOps>,
     #[cfg(feature = "acpi")]
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     acpi_address: GuestAddress,
@@ -516,7 +516,7 @@ impl CpuManager {
         reset_evt: EventFd,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         seccomp_action: SeccompAction,
-        vmmops: Arc<Box<dyn VmmOps>>,
+        vmmops: Arc<dyn VmmOps>,
         #[cfg(feature = "tdx")] tdx_enabled: bool,
         #[cfg(feature = "acpi")] numa_nodes: &NumaNodes,
     ) -> Result<Arc<Mutex<CpuManager>>> {

@@ -62,7 +62,7 @@ impl BusDevice for AcpiShutdownDevice {
 
 /// A device for handling ACPI GED event generation
 pub struct AcpiGedDevice {
-    interrupt: Arc<Box<dyn InterruptSourceGroup>>,
+    interrupt: Arc<dyn InterruptSourceGroup>,
     notification_type: AcpiNotificationFlags,
     ged_irq: u32,
     address: GuestAddress,
@@ -70,7 +70,7 @@ pub struct AcpiGedDevice {
 
 impl AcpiGedDevice {
     pub fn new(
-        interrupt: Arc<Box<dyn InterruptSourceGroup>>,
+        interrupt: Arc<dyn InterruptSourceGroup>,
         ged_irq: u32,
         address: GuestAddress,
     ) -> AcpiGedDevice {

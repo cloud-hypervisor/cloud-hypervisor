@@ -580,14 +580,14 @@ impl Vm {
         let mmio_bus = Arc::clone(device_manager.lock().unwrap().mmio_bus());
         // Create the VmOps structure, which implements the VmmOps trait.
         // And send it to the hypervisor.
-        let vm_ops: Arc<Box<dyn VmmOps>> = Arc::new(Box::new(VmOps {
+        let vm_ops: Arc<dyn VmmOps> = Arc::new(VmOps {
             memory,
             #[cfg(target_arch = "x86_64")]
             io_bus,
             mmio_bus,
             #[cfg(target_arch = "x86_64")]
             timestamp: std::time::Instant::now(),
-        }));
+        });
 
         let exit_evt_clone = exit_evt.try_clone().map_err(Error::EventFdClone)?;
         #[cfg(feature = "tdx")]

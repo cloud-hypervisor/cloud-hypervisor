@@ -224,12 +224,12 @@ pub struct Rtc {
     load: u32,
     imsc: u32,
     ris: u32,
-    interrupt: Arc<Box<dyn InterruptSourceGroup>>,
+    interrupt: Arc<dyn InterruptSourceGroup>,
 }
 
 impl Rtc {
     /// Constructs an AMBA PL031 RTC device.
-    pub fn new(interrupt: Arc<Box<dyn InterruptSourceGroup>>) -> Self {
+    pub fn new(interrupt: Arc<dyn InterruptSourceGroup>) -> Self {
         Self {
             // This is used only for duration measuring purposes.
             previous_now: Instant::now(),
@@ -450,9 +450,7 @@ mod tests {
     fn test_rtc_read_write_and_event() {
         let intr_evt = EventFd::new(libc::EFD_NONBLOCK).unwrap();
 
-        let mut rtc = Rtc::new(Arc::new(Box::new(TestInterrupt::new(
-            intr_evt.try_clone().unwrap(),
-        ))));
+        let mut rtc = Rtc::new(Arc::new(TestInterrupt::new(intr_evt.try_clone().unwrap())));
         let mut data = [0; 4];
 
         // Read and write to the MR register.

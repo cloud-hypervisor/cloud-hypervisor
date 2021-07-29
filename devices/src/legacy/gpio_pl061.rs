@@ -86,7 +86,7 @@ pub struct Gpio {
     // Mode Control Select Register
     afsel: u32,
     // GPIO irq_field
-    interrupt: Arc<Box<dyn InterruptSourceGroup>>,
+    interrupt: Arc<dyn InterruptSourceGroup>,
 }
 
 #[derive(Versionize)]
@@ -106,7 +106,7 @@ impl VersionMapped for GpioState {}
 
 impl Gpio {
     /// Constructs an PL061 GPIO device.
-    pub fn new(id: String, interrupt: Arc<Box<dyn InterruptSourceGroup>>) -> Self {
+    pub fn new(id: String, interrupt: Arc<dyn InterruptSourceGroup>) -> Self {
         Self {
             id,
             data: 0,
@@ -376,7 +376,7 @@ mod tests {
         let intr_evt = EventFd::new(libc::EFD_NONBLOCK).unwrap();
         let mut gpio = Gpio::new(
             String::from(GPIO_NAME),
-            Arc::new(Box::new(TestInterrupt::new(intr_evt.try_clone().unwrap()))),
+            Arc::new(TestInterrupt::new(intr_evt.try_clone().unwrap())),
         );
         let mut data = [0; 4];
 
