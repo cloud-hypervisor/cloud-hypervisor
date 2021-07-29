@@ -86,7 +86,7 @@ pub struct Pl011 {
     ifl: u32,
     read_count: u32,
     read_trigger: u32,
-    irq: Arc<Box<dyn InterruptSourceGroup>>,
+    irq: Arc<dyn InterruptSourceGroup>,
     out: Option<Box<dyn io::Write + Send>>,
 }
 
@@ -114,7 +114,7 @@ impl Pl011 {
     /// Constructs an AMBA PL011 UART device.
     pub fn new(
         id: String,
-        irq: Arc<Box<dyn InterruptSourceGroup>>,
+        irq: Arc<dyn InterruptSourceGroup>,
         out: Option<Box<dyn io::Write + Send>>,
     ) -> Self {
         Self {
@@ -440,7 +440,7 @@ mod tests {
         let pl011_out = SharedBuffer::new();
         let mut pl011 = Pl011::new(
             String::from(SERIAL_NAME),
-            Arc::new(Box::new(TestInterrupt::new(intr_evt.try_clone().unwrap()))),
+            Arc::new(TestInterrupt::new(intr_evt.try_clone().unwrap())),
             Some(Box::new(pl011_out.clone())),
         );
 
@@ -460,7 +460,7 @@ mod tests {
         let pl011_out = SharedBuffer::new();
         let mut pl011 = Pl011::new(
             String::from(SERIAL_NAME),
-            Arc::new(Box::new(TestInterrupt::new(intr_evt.try_clone().unwrap()))),
+            Arc::new(TestInterrupt::new(intr_evt.try_clone().unwrap())),
             Some(Box::new(pl011_out)),
         );
 

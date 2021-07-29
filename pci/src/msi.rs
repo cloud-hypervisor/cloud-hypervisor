@@ -159,11 +159,11 @@ impl MsiCap {
 
 pub struct MsiConfig {
     cap: MsiCap,
-    interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>,
+    interrupt_source_group: Arc<dyn InterruptSourceGroup>,
 }
 
 impl MsiConfig {
-    pub fn new(msg_ctl: u16, interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>) -> Self {
+    pub fn new(msg_ctl: u16, interrupt_source_group: Arc<dyn InterruptSourceGroup>) -> Self {
         let cap = MsiCap {
             msg_ctl,
             ..Default::default()

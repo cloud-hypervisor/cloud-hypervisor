@@ -74,7 +74,7 @@ pub struct MsixConfig {
     pub table_entries: Vec<MsixTableEntry>,
     pub pba_entries: Vec<u64>,
     pub devid: u32,
-    interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>,
+    interrupt_source_group: Arc<dyn InterruptSourceGroup>,
     masked: bool,
     enabled: bool,
 }
@@ -82,7 +82,7 @@ pub struct MsixConfig {
 impl MsixConfig {
     pub fn new(
         msix_vectors: u16,
-        interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>,
+        interrupt_source_group: Arc<dyn InterruptSourceGroup>,
         devid: u32,
     ) -> Self {
         assert!(msix_vectors <= MAX_MSIX_VECTORS_PER_DEVICE);

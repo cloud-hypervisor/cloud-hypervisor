@@ -134,7 +134,7 @@ pub struct Ioapic {
     reg_entries: [RedirectionTableEntry; NUM_IOAPIC_PINS],
     used_entries: [bool; NUM_IOAPIC_PINS],
     apic_address: GuestAddress,
-    interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>,
+    interrupt_source_group: Arc<dyn InterruptSourceGroup>,
 }
 
 #[derive(Versionize)]

@@ -178,7 +178,7 @@ impl vm::Vm for KvmVm {
     fn create_vcpu(
         &self,
         id: u8,
-        vmmops: Option<Arc<Box<dyn VmmOps>>>,
+        vmmops: Option<Arc<dyn VmmOps>>,
     ) -> vm::Result<Arc<dyn cpu::Vcpu>> {
         let vc = self
             .fd
@@ -731,7 +731,7 @@ pub struct KvmVcpu {
     fd: VcpuFd,
     #[cfg(target_arch = "x86_64")]
     msrs: MsrEntries,
-    vmmops: Option<Arc<Box<dyn vm::VmmOps>>>,
+    vmmops: Option<Arc<dyn vm::VmmOps>>,
     #[cfg(target_arch = "x86_64")]
     hyperv_synic: AtomicBool,
 }

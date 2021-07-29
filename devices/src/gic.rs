@@ -26,7 +26,7 @@ pub const IRQ_LEGACY_COUNT: usize = 32;
 //   1. Move Gic*.rs from arch/ folder here.
 //   2. Move this file and ioapic.rs to arch/, as they are architecture specific.
 pub struct Gic {
-    interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>,
+    interrupt_source_group: Arc<dyn InterruptSourceGroup>,
     gic_device: Option<Arc<Mutex<Box<dyn GicDevice>>>>,
 }
 

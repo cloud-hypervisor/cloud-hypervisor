@@ -89,14 +89,14 @@ enum InterruptUpdateAction {
 }
 
 struct VfioIntx {
-    interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>,
+    interrupt_source_group: Arc<dyn InterruptSourceGroup>,
     enabled: bool,
 }
 
 struct VfioMsi {
     cfg: MsiConfig,
     cap_offset: u32,
-    interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>,
+    interrupt_source_group: Arc<dyn InterruptSourceGroup>,
 }
 
 impl VfioMsi {
@@ -123,7 +123,7 @@ struct VfioMsix {
     bar: MsixConfig,
     cap: MsixCap,
     cap_offset: u32,
-    interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>,
+    interrupt_source_group: Arc<dyn InterruptSourceGroup>,
 }
 
 impl VfioMsix {
@@ -309,7 +309,7 @@ impl VfioPciDevice {
         device: VfioDevice,
         container: Arc<VfioContainer>,
         msi_interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
-        legacy_interrupt_group: Option<Arc<Box<dyn InterruptSourceGroup>>>,
+        legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
         iommu_attached: bool,
     ) -> Result<Self> {
         let device = Arc::new(device);
@@ -438,7 +438,7 @@ impl VfioPciDevice {
 
     fn initialize_legacy_interrupt(
         &mut self,
-        legacy_interrupt_group: Option<Arc<Box<dyn InterruptSourceGroup>>>,
+        legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
     ) -> Result<()> {
         if let Some(irq_info) = self.device.get_irq_info(VFIO_PCI_INTX_IRQ_INDEX) {
             if irq_info.count == 0 {

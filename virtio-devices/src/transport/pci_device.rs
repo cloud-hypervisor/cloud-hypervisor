@@ -306,7 +306,7 @@ pub struct VirtioPciDevice {
     // PCI interrupts.
     interrupt_status: Arc<AtomicUsize>,
     virtio_interrupt: Option<Arc<dyn VirtioInterrupt>>,
-    interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>,
+    interrupt_source_group: Arc<dyn InterruptSourceGroup>,
 
     // virtio queues
     queues: Vec<Queue>,
@@ -722,14 +722,14 @@ impl VirtioTransport for VirtioPciDevice {
 pub struct VirtioInterruptMsix {
     msix_config: Arc<Mutex<MsixConfig>>,
     config_vector: Arc<AtomicU16>,
-    interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>,
+    interrupt_source_group: Arc<dyn InterruptSourceGroup>,
 }
 
 impl VirtioInterruptMsix {
     pub fn new(
         msix_config: Arc<Mutex<MsixConfig>>,
         config_vector: Arc<AtomicU16>,
-        interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>,
+        interrupt_source_group: Arc<dyn InterruptSourceGroup>,
     ) -> Self {
         VirtioInterruptMsix {
             msix_config,

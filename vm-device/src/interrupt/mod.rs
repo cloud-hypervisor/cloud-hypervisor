@@ -136,8 +136,7 @@ pub trait InterruptManager: Send + Sync {
     /// * interrupt_type: type of interrupt source.
     /// * base: base Interrupt Source ID to be managed by the group object.
     /// * count: number of Interrupt Sources to be managed by the group object.
-    fn create_group(&self, config: Self::GroupConfig)
-        -> Result<Arc<Box<dyn InterruptSourceGroup>>>;
+    fn create_group(&self, config: Self::GroupConfig) -> Result<Arc<dyn InterruptSourceGroup>>;
 
     /// Destroy an [InterruptSourceGroup](trait.InterruptSourceGroup.html) object created by
     /// [create_group()](trait.InterruptManager.html#tymethod.create_group).
@@ -145,7 +144,7 @@ pub trait InterruptManager: Send + Sync {
     /// Assume the caller takes the responsibility to disable all interrupt sources of the group
     /// before calling destroy_group(). This assumption helps to simplify InterruptSourceGroup
     /// implementations.
-    fn destroy_group(&self, group: Arc<Box<dyn InterruptSourceGroup>>) -> Result<()>;
+    fn destroy_group(&self, group: Arc<dyn InterruptSourceGroup>) -> Result<()>;
 }
 
 pub trait InterruptSourceGroup: Send + Sync {

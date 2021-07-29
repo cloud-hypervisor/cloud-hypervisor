@@ -133,7 +133,7 @@ pub struct MshvVcpu {
     cpuid: CpuId,
     msrs: MsrEntries,
     hv_state: Arc<RwLock<HvState>>, // Mshv State
-    vmmops: Option<Arc<Box<dyn vm::VmmOps>>>,
+    vmmops: Option<Arc<dyn vm::VmmOps>>,
 }
 
 /// Implementation of Vcpu trait for Microsoft Hypervisor
@@ -680,7 +680,7 @@ pub struct MshvVm {
     msrs: MsrEntries,
     // Hypervisor State
     hv_state: Arc<RwLock<HvState>>,
-    vmmops: Option<Arc<Box<dyn vm::VmmOps>>>,
+    vmmops: Option<Arc<dyn vm::VmmOps>>,
 }
 
 fn hv_state_init() -> Arc<RwLock<HvState>> {
@@ -742,7 +742,7 @@ impl vm::Vm for MshvVm {
     fn create_vcpu(
         &self,
         id: u8,
-        vmmops: Option<Arc<Box<dyn VmmOps>>>,
+        vmmops: Option<Arc<dyn VmmOps>>,
     ) -> vm::Result<Arc<dyn cpu::Vcpu>> {
         let vcpu_fd = self
             .fd

@@ -291,17 +291,14 @@ impl MsiInterruptManager<IrqRoutingEntry> {
 impl InterruptManager for LegacyUserspaceInterruptManager {
     type GroupConfig = LegacyIrqGroupConfig;
 
-    fn create_group(
-        &self,
-        config: Self::GroupConfig,
-    ) -> Result<Arc<Box<dyn InterruptSourceGroup>>> {
-        Ok(Arc::new(Box::new(LegacyUserspaceInterruptGroup::new(
+    fn create_group(&self, config: Self::GroupConfig) -> Result<Arc<dyn InterruptSourceGroup>> {
+        Ok(Arc::new(LegacyUserspaceInterruptGroup::new(
             self.ioapic.clone(),
             config.irq as u32,
-        ))))
+        )))
     }
 
-    fn destroy_group(&self, _group: Arc<Box<dyn InterruptSourceGroup>>) -> Result<()> {
+    fn destroy_group(&self, _group: Arc<dyn InterruptSourceGroup>) -> Result<()> {
         Ok(())
     }
 }
@@ -309,10 +306,7 @@ impl InterruptManager for LegacyUserspaceInterruptManager {
 impl InterruptManager for MsiInterruptManager<IrqRoutingEntry> {
     type GroupConfig = MsiIrqGroupConfig;
 
-    fn create_group(
-        &self,
-        config: Self::GroupConfig,
-    ) -> Result<Arc<Box<dyn InterruptSourceGroup>>> {
+    fn create_group(&self, config: Self::GroupConfig) -> Result<Arc<dyn InterruptSourceGroup>> {
         let mut allocator = self.allocator.lock().unwrap();
         let mut irq_routes: HashMap<InterruptIndex, InterruptRoute> =
             HashMap::with_capacity(config.count as usize);
@@ -320,14 +314,14 @@ impl InterruptManager for MsiInterruptManager<IrqRoutingEntry> {
             irq_routes.insert(i, InterruptRoute::new(&mut allocator)?);
         }
 
-        Ok(Arc::new(Box::new(MsiInterruptGroup::new(
+        Ok(Arc::new(MsiInterruptGroup::new(
             self.vm.clone(),
             self.gsi_msi_routes.clone(),
             irq_routes,
-        ))))
+        )))
     }
 
-    fn destroy_group(&self, _group: Arc<Box<dyn InterruptSourceGroup>>) -> Result<()> {
+    fn destroy_group(&self, _group: Arc<dyn InterruptSourceGroup>) -> Result<()> {
         Ok(())
     }
 }
