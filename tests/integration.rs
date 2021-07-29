@@ -5285,7 +5285,13 @@ mod tests {
 
             let focal2 = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest2 = Guest::new(Box::new(focal2));
+            let api_socket = temp_api_path(&guest2.tmp_dir);
+
+            // Create the snapshot directory
+            let snapshot_dir = temp_snapshot_dir_path(&guest2.tmp_dir);
+
             let mut child2 = GuestCommand::new(&guest2)
+                .args(&["--api-socket", &api_socket])
                 .args(&["--cpus", "boot=2"])
                 .args(&["--memory", "size=0,shared=on"])
                 .args(&["--memory-zone", "id=mem0,size=1G,shared=on,host_numa_node=0"])
@@ -5328,6 +5334,9 @@ mod tests {
                     .unwrap();
                 });
 
+                // Wait for the server to be listening
+                thread::sleep(std::time::Duration::new(5, 0));
+
                 // Check the connection fails this time
                 assert!(guest2.ssh_command("nc -vz 172.100.0.1 12345").is_err());
 
@@ -5335,6 +5344,68 @@ mod tests {
                 assert!(exec_host_command_status("ovs-vsctl add-port ovsbr0 vhost-user1 -- set Interface vhost-user1 type=dpdkvhostuserclient options:vhost-server-path=/tmp/dpdkvhostclient1").success());
 
                 // And finally check the connection is functional again
+                guest2.ssh_command("nc -vz 172.100.0.1 12345").unwrap();
+
+                // Pause the VM
+                assert!(remote_command(&api_socket, "pause", None));
+
+                // Take a snapshot from the VM
+                assert!(remote_command(
+                    &api_socket,
+                    "snapshot",
+                    Some(format!("file://{}", snapshot_dir).as_str()),
+                ));
+
+                // Wait to make sure the snapshot is completed
+                thread::sleep(std::time::Duration::new(10, 0));
+            });
+
+            // Shutdown the source VM
+            let _ = child2.kill();
+            let output = child2.wait_with_output().unwrap();
+            handle_child_output(r, &output);
+
+            // Remove the vhost-user socket file.
+            Command::new("rm")
+                .arg("-f")
+                .arg("/tmp/dpdkvhostclient2")
+                .output()
+                .unwrap();
+
+            // Restore the VM from the snapshot
+            let mut child2 = GuestCommand::new(&guest2)
+                .args(&["--api-socket", &api_socket])
+                .args(&[
+                    "--restore",
+                    format!("source_url=file://{}", snapshot_dir).as_str(),
+                ])
+                .capture_output()
+                .spawn()
+                .unwrap();
+
+            // Wait for the VM to be restored
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            let r = std::panic::catch_unwind(|| {
+                // Resume the VM
+                assert!(remote_command(&api_socket, "resume", None));
+
+                // Spawn a new netcat listener in the first VM
+                let guest_ip = guest1.network.guest_ip.clone();
+                thread::spawn(move || {
+                    ssh_command_ip(
+                        "nc -l 12345",
+                        &guest_ip,
+                        DEFAULT_SSH_RETRIES,
+                        DEFAULT_SSH_TIMEOUT,
+                    )
+                    .unwrap();
+                });
+
+                // Wait for the server to be listening
+                thread::sleep(std::time::Duration::new(5, 0));
+
+                // And check the connection is still functional after restore
                 guest2.ssh_command("nc -vz 172.100.0.1 12345").unwrap();
             });
 
