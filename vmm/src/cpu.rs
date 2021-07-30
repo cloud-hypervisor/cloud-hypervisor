@@ -191,6 +191,19 @@ struct GicIts {
     pub reserved1: u32,
 }
 
+#[cfg(all(target_arch = "aarch64", feature = "acpi"))]
+#[allow(dead_code)]
+#[repr(packed)]
+struct ProcessorHierarchyNode {
+    pub r#type: u8,
+    pub length: u8,
+    pub reserved: u16,
+    pub flags: u32,
+    pub parent: u32,
+    pub acpi_processor_id: u32,
+    pub num_private_resources: u32,
+}
+
 #[allow(dead_code)]
 #[repr(packed)]
 #[derive(Default)]
@@ -1114,6 +1127,81 @@ impl CpuManager {
         }
 
         madt
+    }
+
+    #[cfg(all(target_arch = "aarch64", feature = "acpi"))]
+    pub fn create_pptt(&self) -> Sdt {
+        let pptt_start = 0;
+        let mut cpus = 0;
+        let mut uid = 0;
+        let threads_per_core = self.get_vcpu_topology().unwrap_or_default().0 as u8;
+        let cores_per_package = self.get_vcpu_topology().unwrap_or_default().1 as u8;
+        let packages = self.get_vcpu_topology().unwrap_or_default().2 as u8;
+
+        let mut pptt = Sdt::new(*b"PPTT", 36, 2, *b"CLOUDH", *b"CHPPTT  ", 1);
+
+        for cluster_idx in 0..packages {
+            if cpus < self.config.boot_vcpus as usize {
+                let cluster_offset = pptt.len() - pptt_start;
+                let cluster_hierarchy_node = ProcessorHierarchyNode {
+                    r#type: 0,
+                    length: 20,
+                    reserved: 0,
+                    flags: 0x2,
+                    parent: 0,
+                    acpi_processor_id: cluster_idx as u32,
+                    num_private_resources: 0,
+                };
+                pptt.append(cluster_hierarchy_node);
+
+                for core_idx in 0..cores_per_package {
+                    let core_offset = pptt.len() - pptt_start;
+
+                    if threads_per_core > 1 {
+                        let core_hierarchy_node = ProcessorHierarchyNode {
+                            r#type: 0,
+                            length: 20,
+                            reserved: 0,
+                            flags: 0x2,
+                            parent: cluster_offset as u32,
+                            acpi_processor_id: core_idx as u32,
+                            num_private_resources: 0,
+                        };
+                        pptt.append(core_hierarchy_node);
+
+                        for _thread_idx in 0..threads_per_core {
+                            let thread_hierarchy_node = ProcessorHierarchyNode {
+                                r#type: 0,
+                                length: 20,
+                                reserved: 0,
+                                flags: 0xE,
+                                parent: core_offset as u32,
+                                acpi_processor_id: uid as u32,
+                                num_private_resources: 0,
+                            };
+                            pptt.append(thread_hierarchy_node);
+                            uid += 1;
+                        }
+                    } else {
+                        let thread_hierarchy_node = ProcessorHierarchyNode {
+                            r#type: 0,
+                            length: 20,
+                            reserved: 0,
+                            flags: 0xA,
+                            parent: cluster_offset as u32,
+                            acpi_processor_id: uid as u32,
+                            num_private_resources: 0,
+                        };
+                        pptt.append(thread_hierarchy_node);
+                        uid += 1;
+                    }
+                }
+                cpus += (cores_per_package * threads_per_core) as usize;
+            }
+        }
+
+        pptt.update_checksum();
+        pptt
     }
 }
 
