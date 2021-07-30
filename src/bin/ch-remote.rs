@@ -27,6 +27,7 @@ enum Error {
     AddFsConfig(vmm::config::Error),
     AddPmemConfig(vmm::config::Error),
     AddNetConfig(vmm::config::Error),
+    AddUserDeviceConfig(vmm::config::Error),
     AddVsockConfig(vmm::config::Error),
     Restore(vmm::config::Error),
 }
@@ -45,6 +46,7 @@ impl fmt::Display for Error {
             AddFsConfig(e) => write!(f, "Error parsing filesystem syntax: {}", e),
             AddPmemConfig(e) => write!(f, "Error parsing persistent memory syntax: {}", e),
             AddNetConfig(e) => write!(f, "Error parsing network syntax: {}", e),
+            AddUserDeviceConfig(e) => write!(f, "Error parsing user device syntax: {}", e),
             AddVsockConfig(e) => write!(f, "Error parsing vsock syntax: {}", e),
             Restore(e) => write!(f, "Error parsing restore syntax: {}", e),
         }
@@ -125,6 +127,19 @@ fn add_device_api_command(socket: &mut UnixStream, config: &str) -> Result<(), E
         socket,
         "PUT",
         "add-device",
+        Some(&serde_json::to_string(&device_config).unwrap()),
+    )
+    .map_err(Error::ApiClient)
+}
+
+fn add_user_device_api_command(socket: &mut UnixStream, config: &str) -> Result<(), Error> {
+    let device_config =
+        vmm::config::UserDeviceConfig::parse(config).map_err(Error::AddUserDeviceConfig)?;
+
+    simple_api_command(
+        socket,
+        "PUT",
+        "add-user-device",
         Some(&serde_json::to_string(&device_config).unwrap()),
     )
     .map_err(Error::ApiClient)
@@ -348,6 +363,14 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
                 .value_of("net_config")
                 .unwrap(),
         ),
+        Some("add-user-device") => add_user_device_api_command(
+            &mut socket,
+            matches
+                .subcommand_matches("add-user-device")
+                .unwrap()
+                .value_of("device_config")
+                .unwrap(),
+        ),
         Some("add-vsock") => add_vsock_api_command(
             &mut socket,
             matches
@@ -449,6 +472,15 @@ fn main() {
                     Arg::with_name("net_config")
                         .index(1)
                         .help(vmm::config::NetConfig::SYNTAX),
+                ),
+        )
+        .subcommand(
+            SubCommand::with_name("add-user-device")
+                .about("Add userspace device")
+                .arg(
+                    Arg::with_name("device_config")
+                        .index(1)
+                        .help(vmm::config::UserDeviceConfig::SYNTAX),
                 ),
         )
         .subcommand(
