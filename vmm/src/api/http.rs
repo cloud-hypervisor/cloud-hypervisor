@@ -77,6 +77,9 @@ pub enum HttpError {
     /// Could not add a device to a VM
     VmAddDevice(ApiError),
 
+    /// Could not add a user device to the VM
+    VmAddUserDevice(ApiError),
+
     /// Could not remove a device from a VM
     VmRemoveDevice(ApiError),
 
@@ -207,6 +210,7 @@ lazy_static! {
         };
 
         r.routes.insert(endpoint!("/vm.add-device"), Box::new(VmActionHandler::new(VmAction::AddDevice(Arc::default()))));
+        r.routes.insert(endpoint!("/vm.add-user-device"), Box::new(VmActionHandler::new(VmAction::AddUserDevice(Arc::default()))));
         r.routes.insert(endpoint!("/vm.add-disk"), Box::new(VmActionHandler::new(VmAction::AddDisk(Arc::default()))));
         r.routes.insert(endpoint!("/vm.add-fs"), Box::new(VmActionHandler::new(VmAction::AddFs(Arc::default()))));
         r.routes.insert(endpoint!("/vm.add-net"), Box::new(VmActionHandler::new(VmAction::AddNet(Arc::default()))));
