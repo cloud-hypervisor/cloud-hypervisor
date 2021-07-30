@@ -3310,6 +3310,28 @@ impl DeviceManager {
         })
     }
 
+    pub fn add_user_device(
+        &mut self,
+        device_cfg: &mut UserDeviceConfig,
+    ) -> DeviceManagerResult<PciDeviceInfo> {
+        let pci = if let Some(pci_bus) = &self.pci_bus {
+            Arc::clone(pci_bus)
+        } else {
+            return Err(DeviceManagerError::NoPciBus);
+        };
+
+        let (device_id, device_name) =
+            self.add_vfio_user_device(&mut pci.lock().unwrap(), device_cfg)?;
+
+        // Update the PCIU bitmap
+        self.pci_devices_up |= 1 << (device_id >> 3);
+
+        Ok(PciDeviceInfo {
+            id: device_name,
+            bdf: device_id,
+        })
+    }
+
     pub fn remove_device(&mut self, id: String) -> DeviceManagerResult<()> {
         // The node can be directly a PCI node in case the 'id' refers to a
         // VFIO device or a virtio-pci one.

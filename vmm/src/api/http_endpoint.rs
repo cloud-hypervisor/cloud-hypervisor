@@ -5,11 +5,11 @@
 
 use crate::api::http::{error_response, EndpointHandler, HttpError};
 use crate::api::{
-    vm_add_device, vm_add_disk, vm_add_fs, vm_add_net, vm_add_pmem, vm_add_vsock, vm_boot,
-    vm_counters, vm_create, vm_delete, vm_info, vm_pause, vm_power_button, vm_reboot,
-    vm_receive_migration, vm_remove_device, vm_resize, vm_resize_zone, vm_restore, vm_resume,
-    vm_send_migration, vm_shutdown, vm_snapshot, vmm_ping, vmm_shutdown, ApiRequest, VmAction,
-    VmConfig,
+    vm_add_device, vm_add_disk, vm_add_fs, vm_add_net, vm_add_pmem, vm_add_user_device,
+    vm_add_vsock, vm_boot, vm_counters, vm_create, vm_delete, vm_info, vm_pause, vm_power_button,
+    vm_reboot, vm_receive_migration, vm_remove_device, vm_resize, vm_resize_zone, vm_restore,
+    vm_resume, vm_send_migration, vm_shutdown, vm_snapshot, vmm_ping, vmm_shutdown, ApiRequest,
+    VmAction, VmConfig,
 };
 use crate::config::NetConfig;
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
@@ -126,6 +126,13 @@ impl EndpointHandler for VmActionHandler {
                     Arc::new(serde_json::from_slice(body.raw())?),
                 )
                 .map_err(HttpError::VmAddVsock),
+
+                AddUserDevice(_) => vm_add_user_device(
+                    api_notifier,
+                    api_sender,
+                    Arc::new(serde_json::from_slice(body.raw())?),
+                )
+                .map_err(HttpError::VmAddUserDevice),
 
                 RemoveDevice(_) => vm_remove_device(
                     api_notifier,

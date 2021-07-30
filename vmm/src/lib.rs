@@ -20,7 +20,8 @@ use crate::api::{
     VmSendMigrationData, VmmPingResponse,
 };
 use crate::config::{
-    DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, RestoreConfig, VmConfig, VsockConfig,
+    DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, RestoreConfig, UserDeviceConfig,
+    VmConfig, VsockConfig,
 };
 use crate::migration::{get_vm_snapshot, recv_vm_snapshot};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
@@ -637,6 +638,21 @@ impl Vmm {
         if let Some(ref mut vm) = self.vm {
             let info = vm.add_device(device_cfg).map_err(|e| {
                 error!("Error when adding new device to the VM: {:?}", e);
+                e
+            })?;
+            serde_json::to_vec(&info).map_err(VmError::SerializeJson)
+        } else {
+            Err(VmError::VmNotRunning)
+        }
+    }
+
+    fn vm_add_user_device(
+        &mut self,
+        device_cfg: UserDeviceConfig,
+    ) -> result::Result<Vec<u8>, VmError> {
+        if let Some(ref mut vm) = self.vm {
+            let info = vm.add_user_device(device_cfg).map_err(|e| {
+                error!("Error when adding new user device to the VM: {:?}", e);
                 e
             })?;
             serde_json::to_vec(&info).map_err(VmError::SerializeJson)
@@ -1411,6 +1427,13 @@ impl Vmm {
                                     let response = self
                                         .vm_add_device(add_device_data.as_ref().clone())
                                         .map_err(ApiError::VmAddDevice)
+                                        .map(ApiResponsePayload::VmAction);
+                                    sender.send(response).map_err(Error::ApiResponseSend)?;
+                                }
+                                ApiRequest::VmAddUserDevice(add_device_data, sender) => {
+                                    let response = self
+                                        .vm_add_user_device(add_device_data.as_ref().clone())
+                                        .map_err(ApiError::VmAddUserDevice)
                                         .map(ApiResponsePayload::VmAction);
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }

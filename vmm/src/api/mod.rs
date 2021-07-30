@@ -34,6 +34,7 @@ pub use self::http::start_http_path_thread;
 pub mod http;
 pub mod http_endpoint;
 
+use crate::config::UserDeviceConfig;
 use crate::config::{
     DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, RestoreConfig, VmConfig, VsockConfig,
 };
@@ -108,6 +109,9 @@ pub enum ApiError {
 
     /// The device could not be added to the VM.
     VmAddDevice(VmError),
+
+    /// The user device could not be added to the VM.
+    VmAddUserDevice(VmError),
 
     /// The device could not be removed from the VM.
     VmRemoveDevice(VmError),
@@ -269,6 +273,9 @@ pub enum ApiRequest {
     /// Add a device to the VM.
     VmAddDevice(Arc<DeviceConfig>, Sender<ApiResponse>),
 
+    /// Add a user device to the VM.
+    VmAddUserDevice(Arc<UserDeviceConfig>, Sender<ApiResponse>),
+
     /// Remove a device from the VM.
     VmRemoveDevice(Arc<VmRemoveDeviceData>, Sender<ApiResponse>),
 
@@ -364,6 +371,9 @@ pub enum VmAction {
     /// Add vsock
     AddVsock(Arc<VsockConfig>),
 
+    /// Add user  device
+    AddUserDevice(Arc<UserDeviceConfig>),
+
     /// Remove VFIO device
     RemoveDevice(Arc<VmRemoveDeviceData>),
 
@@ -411,6 +421,7 @@ fn vm_action(
         AddPmem(v) => ApiRequest::VmAddPmem(v, response_sender),
         AddNet(v) => ApiRequest::VmAddNet(v, response_sender),
         AddVsock(v) => ApiRequest::VmAddVsock(v, response_sender),
+        AddUserDevice(v) => ApiRequest::VmAddUserDevice(v, response_sender),
         RemoveDevice(v) => ApiRequest::VmRemoveDevice(v, response_sender),
         Resize(v) => ApiRequest::VmResize(v, response_sender),
         ResizeZone(v) => ApiRequest::VmResizeZone(v, response_sender),
@@ -570,6 +581,14 @@ pub fn vm_add_device(
     data: Arc<DeviceConfig>,
 ) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::AddDevice(data))
+}
+
+pub fn vm_add_user_device(
+    api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
+    data: Arc<UserDeviceConfig>,
+) -> ApiResult<Option<Body>> {
+    vm_action(api_evt, api_sender, VmAction::AddUserDevice(data))
 }
 
 pub fn vm_remove_device(

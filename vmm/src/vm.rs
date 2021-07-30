@@ -14,8 +14,8 @@
 #[cfg(feature = "acpi")]
 use crate::config::NumaConfig;
 use crate::config::{
-    DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, PmemConfig, ValidationError,
-    VmConfig, VsockConfig,
+    DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, PmemConfig, UserDeviceConfig,
+    ValidationError, VmConfig, VsockConfig,
 };
 use crate::cpu;
 use crate::device_manager::{
@@ -1371,6 +1371,37 @@ impl Vm {
         {
             let mut config = self.config.lock().unwrap();
             Self::add_to_config(&mut config.devices, _device_cfg);
+        }
+
+        self.device_manager
+            .lock()
+            .unwrap()
+            .notify_hotplug(AcpiNotificationFlags::PCI_DEVICES_CHANGED)
+            .map_err(Error::DeviceManager)?;
+
+        Ok(pci_device_info)
+    }
+
+    pub fn add_user_device(&mut self, mut device_cfg: UserDeviceConfig) -> Result<PciDeviceInfo> {
+        {
+            // Validate on a clone of the config
+            let mut config = self.config.lock().unwrap().clone();
+            Self::add_to_config(&mut config.user_devices, device_cfg.clone());
+            config.validate().map_err(Error::ConfigValidation)?;
+        }
+
+        let pci_device_info = self
+            .device_manager
+            .lock()
+            .unwrap()
+            .add_user_device(&mut device_cfg)
+            .map_err(Error::DeviceManager)?;
+
+        // Update VmConfig by adding the new device. This is important to
+        // ensure the device would be created in case of a reboot.
+        {
+            let mut config = self.config.lock().unwrap();
+            Self::add_to_config(&mut config.user_devices, device_cfg);
         }
 
         self.device_manager
