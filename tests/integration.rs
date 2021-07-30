@@ -2012,19 +2012,16 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_cpu_topology_421() {
             test_cpu_topology(4, 2, 1);
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_cpu_topology_142() {
             test_cpu_topology(1, 4, 2);
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_cpu_topology_262() {
             test_cpu_topology(2, 6, 2);
         }
