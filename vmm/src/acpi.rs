@@ -508,6 +508,19 @@ pub fn create_acpi_tables(
     prev_tbl_len = madt.len() as u64;
     prev_tbl_off = madt_offset;
 
+    // PPTT
+    #[cfg(target_arch = "aarch64")]
+    {
+        let pptt = cpu_manager.lock().unwrap().create_pptt();
+        let pptt_offset = prev_tbl_off.checked_add(prev_tbl_len).unwrap();
+        guest_mem
+            .write_slice(pptt.as_slice(), pptt_offset)
+            .expect("Error writing PPTT table");
+        tables.push(pptt_offset.0);
+        prev_tbl_len = pptt.len() as u64;
+        prev_tbl_off = pptt_offset;
+    }
+
     // GTDT
     #[cfg(target_arch = "aarch64")]
     {
