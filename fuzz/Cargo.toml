@@ -14,6 +14,7 @@ libc = "0.2.99"
 libfuzzer-sys = "0.4.2"
 qcow = { path = "../qcow" }
 seccompiler = { git = "https://github.com/rust-vmm/seccompiler"}
+vhdx = { path = "../vhdx" }
 virtio-devices = { path = "../virtio-devices" }
 vmm-sys-util = "0.8.0"
 vm-virtio = { path = "../vm-virtio" }
@@ -40,5 +41,11 @@ doc = false
 [[bin]]
 name = "block"
 path = "fuzz_targets/block.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "vhdx"
+path = "fuzz_targets/vhdx.rs"
 test = false
 doc = false
