@@ -29,7 +29,7 @@ serde_derive = ">=1.0.27"
 serde_json = ">=1.0.9"
 versionize = "0.1.6"
 versionize_derive = "0.1.4"
-vhost = { git = "https://github.com/rust-vmm/vhost", branch = "master", package = "vhost", features = ["vhost-user-master", "vhost-user-slave"] }
+vhost = { git = "https://github.com/rust-vmm/vhost", branch = "master", package = "vhost", features = ["vhost-user-master", "vhost-user-slave", "vhost-kern"] }
 virtio-bindings = { version = "0.1", features = ["virtio-v5_0_0"]}
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
