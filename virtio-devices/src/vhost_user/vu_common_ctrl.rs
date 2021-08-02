@@ -4,22 +4,31 @@
 use super::super::{Descriptor, Queue};
 use super::{Error, Result};
 use crate::vhost_user::Inflight;
-use crate::{get_host_address_range, VirtioInterrupt, VirtioInterruptType};
-use crate::{GuestMemoryMmap, GuestRegionMmap};
+use crate::{
+    get_host_address_range, GuestMemoryMmap, GuestRegionMmap, MmapRegion, VirtioInterrupt,
+    VirtioInterruptType,
+};
 use std::convert::TryInto;
-use std::os::unix::io::AsRawFd;
+use std::ffi;
+use std::fs::File;
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::UnixListener;
 use std::sync::Arc;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 use std::vec::Vec;
+use vhost::vhost_kern::vhost_binding::{VHOST_F_LOG_ALL, VHOST_VRING_F_LOG};
 use vhost::vhost_user::message::{
     VhostUserHeaderFlag, VhostUserInflight, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
 };
 use vhost::vhost_user::{Master, MasterReqHandler, VhostUserMaster, VhostUserMasterReqHandler};
-use vhost::{VhostBackend, VhostUserMemoryRegionInfo, VringConfigData};
-use vm_memory::{Address, Error as MmapError, GuestMemory, GuestMemoryRegion};
+use vhost::{VhostBackend, VhostUserDirtyLogRegion, VhostUserMemoryRegionInfo, VringConfigData};
+use vm_memory::{Address, Error as MmapError, FileOffset, GuestMemory, GuestMemoryRegion};
+use vm_migration::protocol::MemoryRangeTable;
 use vmm_sys_util::eventfd::EventFd;
+
+// Size of a dirty page for vhost-user.
+const VHOST_LOG_PAGE: u64 = 0x1000;
 
 #[derive(Debug, Clone)]
 pub struct VhostUserConfig {
@@ -29,10 +38,19 @@ pub struct VhostUserConfig {
 }
 
 #[derive(Clone)]
+struct VringInfo {
+    config_data: VringConfigData,
+    used_guest_addr: u64,
+}
+
+#[derive(Clone)]
 pub struct VhostUserHandle {
     vu: Master,
     ready: bool,
     supports_migration: bool,
+    shm_log: Option<Arc<MmapRegion>>,
+    acked_features: u64,
+    vrings_info: Option<Vec<VringInfo>>,
 }
 
 impl VhostUserHandle {
@@ -141,6 +159,9 @@ impl VhostUserHandle {
             .set_features(acked_features)
             .map_err(Error::VhostUserSetFeatures)?;
 
+        // Update internal value after it's been sent to the backend.
+        self.acked_features = acked_features;
+
         // Let's first provide the memory table to the backend.
         self.update_mem_table(mem)?;
 
@@ -177,6 +198,7 @@ impl VhostUserHandle {
 
         let num_queues = queues.len() as usize;
 
+        let mut vrings_info = Vec::new();
         for (queue_index, queue) in queues.into_iter().enumerate() {
             let actual_size: usize = queue.actual_size().try_into().unwrap();
 
@@ -200,6 +222,11 @@ impl VhostUserHandle {
                     .ok_or(Error::AvailAddress)? as u64,
                 log_addr: None,
             };
+
+            vrings_info.push(VringInfo {
+                config_data,
+                used_guest_addr: queue.used_ring.raw_value(),
+            });
 
             self.vu
                 .set_vring_addr(queue_index, &config_data)
@@ -234,6 +261,7 @@ impl VhostUserHandle {
                 .map_err(Error::VhostUserSetSlaveRequestFd)?;
         }
 
+        self.vrings_info = Some(vrings_info);
         self.ready = true;
 
         Ok(())
@@ -320,6 +348,9 @@ impl VhostUserHandle {
                 vu: Master::from_stream(stream, num_queues),
                 ready: false,
                 supports_migration: false,
+                shm_log: None,
+                acked_features: 0,
+                vrings_info: None,
             })
         } else {
             let now = Instant::now();
@@ -332,6 +363,9 @@ impl VhostUserHandle {
                             vu: m,
                             ready: false,
                             supports_migration: false,
+                            shm_log: None,
+                            acked_features: 0,
+                            vrings_info: None,
                         })
                     }
                     Err(e) => e,
@@ -377,5 +411,151 @@ impl VhostUserHandle {
         {
             self.supports_migration = true;
         }
+    }
+
+    fn update_log_base(&mut self, last_ram_addr: u64) -> Result<Option<Arc<MmapRegion>>> {
+        // Create the memfd
+        let fd = memfd_create(
+            &ffi::CString::new("vhost_user_dirty_log").unwrap(),
+            libc::MFD_CLOEXEC | libc::MFD_ALLOW_SEALING,
+        )
+        .map_err(Error::MemfdCreate)?;
+
+        // Safe because we checked the file descriptor is valid
+        let file = unsafe { File::from_raw_fd(fd) };
+        // The size of the memory mapping corresponds to the size of a bitmap
+        // covering all guest pages for addresses from 0 to the last physical
+        // address in guest RAM.
+        // A page is always 4kiB from a vhost-user perspective, and each bit is
+        // a page. That's how we can compute mmap_size from the last address.
+        let mmap_size = (last_ram_addr / (VHOST_LOG_PAGE * 8)) + 1;
+        let mmap_handle = file.as_raw_fd();
+
+        // Set shm_log region size
+        file.set_len(mmap_size).map_err(Error::SetFileSize)?;
+
+        // Set the seals
+        let res = unsafe {
+            libc::fcntl(
+                file.as_raw_fd(),
+                libc::F_ADD_SEALS,
+                libc::F_SEAL_GROW | libc::F_SEAL_SHRINK | libc::F_SEAL_SEAL,
+            )
+        };
+        if res < 0 {
+            return Err(Error::SetSeals(std::io::Error::last_os_error()));
+        }
+
+        // Mmap shm_log region
+        let region = MmapRegion::build(
+            Some(FileOffset::new(file, 0)),
+            mmap_size as usize,
+            libc::PROT_READ | libc::PROT_WRITE,
+            libc::MAP_SHARED,
+        )
+        .map_err(Error::NewMmapRegion)?;
+
+        // Make sure we hold onto the region to prevent the mapping from being
+        // released.
+        let old_region = self.shm_log.take();
+        self.shm_log = Some(Arc::new(region));
+
+        // Send the shm_log fd over to the backend
+        let log = VhostUserDirtyLogRegion {
+            mmap_size,
+            mmap_offset: 0,
+            mmap_handle,
+        };
+        self.vu
+            .set_log_base(0, Some(log))
+            .map_err(Error::VhostUserSetLogBase)?;
+
+        Ok(old_region)
+    }
+
+    fn set_vring_logging(&mut self, enable: bool) -> Result<()> {
+        if let Some(vrings_info) = &self.vrings_info {
+            for (i, vring_info) in vrings_info.iter().enumerate() {
+                let mut config_data = vring_info.config_data;
+                config_data.flags = if enable { 1 << VHOST_VRING_F_LOG } else { 0 };
+                config_data.log_addr = if enable {
+                    Some(vring_info.used_guest_addr)
+                } else {
+                    None
+                };
+
+                self.vu
+                    .set_vring_addr(i, &config_data)
+                    .map_err(Error::VhostUserSetVringAddr)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn start_dirty_log(&mut self, last_ram_addr: u64) -> Result<()> {
+        if !self.supports_migration {
+            return Err(Error::MigrationNotSupported);
+        }
+
+        // Set the shm log region
+        self.update_log_base(last_ram_addr)?;
+
+        // Enable VHOST_F_LOG_ALL feature
+        let features = self.acked_features | (1 << VHOST_F_LOG_ALL);
+        self.vu
+            .set_features(features)
+            .map_err(Error::VhostUserSetFeatures)?;
+
+        // Enable dirty page logging of used ring for all queues
+        self.set_vring_logging(true)
+    }
+
+    pub fn stop_dirty_log(&mut self) -> Result<()> {
+        if !self.supports_migration {
+            return Err(Error::MigrationNotSupported);
+        }
+
+        // Disable dirty page logging of used ring for all queues
+        self.set_vring_logging(false)?;
+
+        // Disable VHOST_F_LOG_ALL feature
+        self.vu
+            .set_features(self.acked_features)
+            .map_err(Error::VhostUserSetFeatures)?;
+
+        // This is important here since the log region goes out of scope,
+        // invoking the Drop trait, hence unmapping the memory.
+        self.shm_log = None;
+
+        Ok(())
+    }
+
+    pub fn dirty_log(&mut self, last_ram_addr: u64) -> Result<MemoryRangeTable> {
+        // The log region is updated by creating a new region that is sent to
+        // the backend. This ensures the backend stops logging to the previous
+        // region. The previous region is returned and processed to create the
+        // bitmap representing the dirty pages.
+        if let Some(region) = self.update_log_base(last_ram_addr)? {
+            // Cast the pointer to u64
+            let ptr = region.as_ptr() as *mut u64;
+            // Be careful with the size, as it was based on u8, meaning we must
+            // divide it by 8.
+            let len = region.size() / 8;
+            let bitmap = unsafe { Vec::from_raw_parts(ptr, len, len) };
+            Ok(MemoryRangeTable::from_bitmap(bitmap, 0))
+        } else {
+            Err(Error::MissingShmLogRegion)
+        }
+    }
+}
+
+fn memfd_create(name: &ffi::CStr, flags: u32) -> std::result::Result<RawFd, std::io::Error> {
+    let res = unsafe { libc::syscall(libc::SYS_memfd_create, name.as_ptr(), flags) };
+
+    if res < 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(res as RawFd)
     }
 }
