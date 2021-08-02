@@ -10,7 +10,7 @@ libc = "0.2.98"
 log = "0.4.14"
 net_gen = { path = "../net_gen" }
 rate_limiter = { path = "../rate_limiter" }
-serde = "1.0.126"
+serde = "1.0.127"
 versionize = "0.1.6"
 versionize_derive = "0.1.4"
 virtio-bindings = "0.1.0"
