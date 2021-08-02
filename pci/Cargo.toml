@@ -5,13 +5,14 @@ authors = ["Samuel Ortiz <sameo@linux.intel.com>"]
 edition = "2018"
 
 [dependencies]
-anyhow = "1.0"
+anyhow = "1.0.42"
 byteorder = "1.4.3"
 hypervisor = { path = "../hypervisor" }
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio-ioctls", branch = "master" }
 vmm-sys-util = ">=0.3.1"
 libc = "0.2.98"
 log = "0.4.14"
+thiserror = "1.0.26"
 versionize = "0.1.6"
 versionize_derive = "0.1.4"
 vm-allocator = { path = "../vm-allocator" }

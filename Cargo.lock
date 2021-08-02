@@ -656,6 +656,7 @@ dependencies = [
  "hypervisor",
  "libc",
  "log",
+ "thiserror",
  "versionize",
  "versionize_derive",
  "vfio-bindings",
