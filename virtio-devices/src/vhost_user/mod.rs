@@ -14,7 +14,7 @@ use std::sync::{atomic::AtomicBool, Arc, Barrier, Mutex};
 use vhost::vhost_user::message::{VhostUserInflight, VhostUserVirtioFeatures};
 use vhost::vhost_user::{MasterReqHandler, VhostUserMasterReqHandler};
 use vhost::Error as VhostError;
-use vm_memory::{Error as MmapError, GuestAddressSpace, GuestMemoryAtomic};
+use vm_memory::{mmap::MmapRegionError, Error as MmapError, GuestAddressSpace, GuestMemoryAtomic};
 use vm_virtio::Error as VirtioError;
 use vmm_sys_util::eventfd::EventFd;
 use vu_common_ctrl::VhostUserHandle;
@@ -109,6 +109,8 @@ pub enum Error {
     VhostUserGetInflight(VhostError),
     /// Failed setting inflight shm log.
     VhostUserSetInflight(VhostError),
+    /// Failed setting the log base.
+    VhostUserSetLogBase(VhostError),
     /// Invalid used address.
     UsedAddress,
     /// Invalid features provided from vhost-user backend
@@ -119,6 +121,18 @@ pub enum Error {
     MissingIrqFd,
     /// Failed getting the available index.
     GetAvailableIndex(VirtioError),
+    /// Migration is not supported by this vhost-user device.
+    MigrationNotSupported,
+    /// Failed creating memfd.
+    MemfdCreate(io::Error),
+    /// Failed truncating the file size to the expected size.
+    SetFileSize(io::Error),
+    /// Failed to set the seals on the file.
+    SetSeals(io::Error),
+    /// Failed creating new mmap region
+    NewMmapRegion(MmapRegionError),
+    /// Could not find the shm log region
+    MissingShmLogRegion,
 }
 type Result<T> = std::result::Result<T, Error>;
 
