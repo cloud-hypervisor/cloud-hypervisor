@@ -32,6 +32,7 @@ pub struct VhostUserConfig {
 pub struct VhostUserHandle {
     vu: Master,
     ready: bool,
+    supports_migration: bool,
 }
 
 impl VhostUserHandle {
@@ -119,6 +120,8 @@ impl VhostUserHandle {
         {
             self.vu.set_hdr_flags(VhostUserHeaderFlag::NEED_REPLY);
         }
+
+        self.update_supports_migration(acked_features, acked_protocol_features.bits());
 
         Ok((acked_features, acked_protocol_features.bits()))
     }
@@ -284,6 +287,8 @@ impl VhostUserHandle {
             }
         }
 
+        self.update_supports_migration(acked_features, acked_protocol_features);
+
         self.setup_vhost_user(
             mem,
             queues,
@@ -314,6 +319,7 @@ impl VhostUserHandle {
             Ok(VhostUserHandle {
                 vu: Master::from_stream(stream, num_queues),
                 ready: false,
+                supports_migration: false,
             })
         } else {
             let now = Instant::now();
@@ -325,6 +331,7 @@ impl VhostUserHandle {
                         return Ok(VhostUserHandle {
                             vu: m,
                             ready: false,
+                            supports_migration: false,
                         })
                     }
                     Err(e) => e,
@@ -362,5 +369,13 @@ impl VhostUserHandle {
         }
 
         Ok(())
+    }
+
+    fn update_supports_migration(&mut self, acked_features: u64, acked_protocol_features: u64) {
+        if (acked_features & u64::from(vhost::vhost_kern::vhost_binding::VHOST_F_LOG_ALL) != 0)
+            && (acked_protocol_features & VhostUserProtocolFeatures::LOG_SHMFD.bits() != 0)
+        {
+            self.supports_migration = true;
+        }
     }
 }

@@ -1127,6 +1127,7 @@ source = "git+https://github.com/rust-vmm/vhost?branch=master#37a6a8e46444e9e4b5
 dependencies = [
  "bitflags",
  "libc",
+ "vm-memory",
  "vmm-sys-util",
 ]
 
