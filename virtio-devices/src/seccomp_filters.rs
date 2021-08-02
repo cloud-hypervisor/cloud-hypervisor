@@ -77,6 +77,8 @@ fn create_virtio_mem_ioctl_seccomp_rule() -> Vec<SeccompRule> {
 fn virtio_balloon_thread_rules() -> Vec<SyscallRuleSet> {
     vec![
         allow_syscall(libc::SYS_brk),
+        #[cfg(feature = "mshv")]
+        allow_syscall(libc::SYS_clock_gettime),
         allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_dup),
         allow_syscall(libc::SYS_epoll_create1),
@@ -329,6 +331,8 @@ fn virtio_rng_thread_rules() -> Vec<SyscallRuleSet> {
 fn virtio_vhost_fs_thread_rules() -> Vec<SyscallRuleSet> {
     vec![
         allow_syscall(libc::SYS_brk),
+        #[cfg(feature = "mshv")]
+        allow_syscall(libc::SYS_clock_gettime),
         allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_connect),
         allow_syscall(libc::SYS_dup),
@@ -357,6 +361,8 @@ fn virtio_vhost_fs_thread_rules() -> Vec<SyscallRuleSet> {
 fn virtio_vhost_net_ctl_thread_rules() -> Vec<SyscallRuleSet> {
     vec![
         allow_syscall(libc::SYS_brk),
+        #[cfg(feature = "mshv")]
+        allow_syscall(libc::SYS_clock_gettime),
         allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_dup),
         allow_syscall(libc::SYS_epoll_create1),
@@ -383,6 +389,8 @@ fn virtio_vsock_thread_rules() -> Vec<SyscallRuleSet> {
     vec![
         allow_syscall(libc::SYS_accept4),
         allow_syscall(libc::SYS_brk),
+        #[cfg(feature = "mshv")]
+        allow_syscall(libc::SYS_clock_gettime),
         allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_dup),
         allow_syscall(libc::SYS_epoll_create1),
@@ -406,6 +414,8 @@ fn virtio_vsock_thread_rules() -> Vec<SyscallRuleSet> {
 fn virtio_watchdog_thread_rules() -> Vec<SyscallRuleSet> {
     vec![
         allow_syscall(libc::SYS_brk),
+        #[cfg(feature = "mshv")]
+        allow_syscall(libc::SYS_clock_gettime),
         allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_dup),
         allow_syscall(libc::SYS_epoll_create1),
