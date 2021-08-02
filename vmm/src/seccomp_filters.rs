@@ -517,6 +517,9 @@ fn create_vcpu_ioctl_seccomp_rule_mshv() -> Result<Vec<SeccompRule>, Error> {
         and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_RUN_VP)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_GET_VP_REGISTERS)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_SET_VP_REGISTERS)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_MAP_GUEST_MEMORY)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_UNMAP_GUEST_MEMORY)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, MSHV_VP_TRANSLATE_GVA)?],
     ])
 }
 
