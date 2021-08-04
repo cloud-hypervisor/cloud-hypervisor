@@ -16,6 +16,8 @@ use clap::{App, Arg};
 use vhost_user_block::start_block_backend;
 
 fn main() {
+    env_logger::init();
+
     let cmd_arguments = App::new("vhost-user-blk backend")
         .version(crate_version!())
         .author(crate_authors!())
