@@ -226,7 +226,7 @@ impl DiskConfig for UbuntuDiskConfig {
             .expect("Expected reading user-data file in to succeed");
         user_data_string = user_data_string.replace(
             "@DEFAULT_TCP_LISTENER_MESSAGE",
-            &DEFAULT_TCP_LISTENER_MESSAGE,
+            DEFAULT_TCP_LISTENER_MESSAGE,
         );
         user_data_string = user_data_string.replace("@HOST_IP", &network.host_ip);
         user_data_string =
@@ -234,7 +234,7 @@ impl DiskConfig for UbuntuDiskConfig {
 
         fs::File::create(cloud_init_directory.join("user-data"))
             .unwrap()
-            .write_all(&user_data_string.as_bytes())
+            .write_all(user_data_string.as_bytes())
             .expect("Expected writing out user-data to succeed");
 
         let mut network_config_string = String::new();
@@ -260,7 +260,7 @@ impl DiskConfig for UbuntuDiskConfig {
 
         fs::File::create(cloud_init_directory.join("network-config"))
             .unwrap()
-            .write_all(&network_config_string.as_bytes())
+            .write_all(network_config_string.as_bytes())
             .expect("Expected writing out network-config to succeed");
 
         std::process::Command::new("mkdosfs")
