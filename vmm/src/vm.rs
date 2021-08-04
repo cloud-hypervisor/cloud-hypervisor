@@ -2525,15 +2525,20 @@ impl Transportable for Vm {
 
 impl Migratable for Vm {
     fn start_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
-        self.memory_manager.lock().unwrap().start_dirty_log()
+        self.memory_manager.lock().unwrap().start_dirty_log()?;
+        self.device_manager.lock().unwrap().start_dirty_log()
     }
 
     fn stop_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
-        self.memory_manager.lock().unwrap().stop_dirty_log()
+        self.memory_manager.lock().unwrap().stop_dirty_log()?;
+        self.device_manager.lock().unwrap().stop_dirty_log()
     }
 
     fn dirty_log(&mut self) -> std::result::Result<MemoryRangeTable, MigratableError> {
-        self.memory_manager.lock().unwrap().dirty_log()
+        Ok(MemoryRangeTable::new_from_tables(vec![
+            self.memory_manager.lock().unwrap().dirty_log()?,
+            self.device_manager.lock().unwrap().dirty_log()?,
+        ]))
     }
 }
 
