@@ -41,9 +41,8 @@ use vm_memory::{
     GuestUsize, MmapRegion,
 };
 use vm_migration::{
-    protocol::{MemoryRange, MemoryRangeTable},
-    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
-    Transportable, VersionMapped,
+    protocol::MemoryRangeTable, Migratable, MigratableError, Pausable, Snapshot,
+    SnapshotDataSection, Snapshottable, Transportable, VersionMapped,
 };
 
 #[cfg(feature = "acpi")]
@@ -1499,7 +1498,6 @@ impl MemoryManager {
     pub fn dirty_memory_range_table(
         &self,
     ) -> std::result::Result<MemoryRangeTable, MigratableError> {
-        let page_size = 4096; // TODO: Does this need to vary?
         let mut table = MemoryRangeTable::default();
         for r in &self.guest_ram_mappings {
             let vm_dirty_bitmap = self.vm.get_dirty_log(r.slot, r.gpa, r.size).map_err(|e| {
@@ -1526,37 +1524,18 @@ impl MemoryManager {
                 .map(|(x, y)| x | y)
                 .collect();
 
-            let mut entry: Option<MemoryRange> = None;
-            for (i, block) in dirty_bitmap.iter().enumerate() {
-                for j in 0..64 {
-                    let is_page_dirty = ((block >> j) & 1u64) != 0u64;
-                    let page_offset = ((i * 64) + j) as u64 * page_size;
-                    if is_page_dirty {
-                        if let Some(entry) = &mut entry {
-                            entry.length += page_size;
-                        } else {
-                            entry = Some(MemoryRange {
-                                gpa: r.gpa + page_offset,
-                                length: page_size,
-                            });
-                        }
-                    } else if let Some(entry) = entry.take() {
-                        table.push(entry);
-                    }
-                }
-            }
-            if let Some(entry) = entry.take() {
-                table.push(entry);
-            }
+            let sub_table = MemoryRangeTable::from_bitmap(dirty_bitmap, r.gpa);
 
-            if table.regions().is_empty() {
+            if sub_table.regions().is_empty() {
                 info!("Dirty Memory Range Table is empty");
             } else {
                 info!("Dirty Memory Range Table:");
-                for range in table.regions() {
+                for range in sub_table.regions() {
                     info!("GPA: {:x} size: {} (KiB)", range.gpa, range.length / 1024);
                 }
             }
+
+            table.extend(sub_table);
         }
         Ok(table)
     }
