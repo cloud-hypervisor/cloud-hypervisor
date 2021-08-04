@@ -100,8 +100,8 @@ use vm_memory::{Address, GuestAddress, GuestUsize, MmapRegion};
 #[cfg(all(target_arch = "x86_64", feature = "cmos"))]
 use vm_memory::{GuestAddressSpace, GuestMemory};
 use vm_migration::{
-    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
-    Transportable,
+    protocol::MemoryRangeTable, Migratable, MigratableError, Pausable, Snapshot,
+    SnapshotDataSection, Snapshottable, Transportable,
 };
 use vm_virtio::{VirtioDeviceType, VirtioIommuRemapping};
 use vmm_sys_util::eventfd::EventFd;
@@ -4008,7 +4008,36 @@ impl Snapshottable for DeviceManager {
 }
 
 impl Transportable for DeviceManager {}
-impl Migratable for DeviceManager {}
+
+impl Migratable for DeviceManager {
+    fn start_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
+        for (_, device_node) in self.device_tree.lock().unwrap().iter() {
+            if let Some(migratable) = &device_node.migratable {
+                migratable.lock().unwrap().start_dirty_log()?;
+            }
+        }
+        Ok(())
+    }
+
+    fn stop_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
+        for (_, device_node) in self.device_tree.lock().unwrap().iter() {
+            if let Some(migratable) = &device_node.migratable {
+                migratable.lock().unwrap().stop_dirty_log()?;
+            }
+        }
+        Ok(())
+    }
+
+    fn dirty_log(&mut self) -> std::result::Result<MemoryRangeTable, MigratableError> {
+        let mut tables = Vec::new();
+        for (_, device_node) in self.device_tree.lock().unwrap().iter() {
+            if let Some(migratable) = &device_node.migratable {
+                tables.push(migratable.lock().unwrap().dirty_log()?);
+            }
+        }
+        Ok(MemoryRangeTable::new_from_tables(tables))
+    }
+}
 
 const PCIU_FIELD_OFFSET: u64 = 0;
 const PCID_FIELD_OFFSET: u64 = 4;
