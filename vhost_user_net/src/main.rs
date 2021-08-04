@@ -22,7 +22,7 @@ fn main() {
                 .long("net-backend")
                 .help(vhost_user_net::SYNTAX)
                 .takes_value(true)
-                .min_values(1),
+                .required(true),
         )
         .get_matches();
 
