@@ -30,15 +30,15 @@ This step currently requires QEMU to install Windows onto the guest. QEMU is onl
 Preparing several command parts as these will be used in the follow up sections as well.
 
 ```shell
-IMG_FILE=windows-disk.qcow
+IMG_FILE=windows-disk.raw
 WIN_ISO_FILE=en_windows_server_version_2004_updated_may_2020_x64_dvd_1e7f1cfa.iso
 VIRTIO_ISO_FILE=virtio-win-0.1.185.iso
 OVMF_DIR=./FV
 ```
 
-Create an empty image file, `qcow` or `raw` is supported.
+Create an empty image file, `raw` is supported.
 ```shell
-qemu-img create -f qcow2 $IMG_FILE 30G
+qemu-img create -f raw $IMG_FILE 30G
 ```
 
 Begin the Windows installation process under QEMU
@@ -221,7 +221,7 @@ qemu-system-x86_64 \
 	-m 4G \
 	-cdrom ./$WIN_ISO_FILE \
 	-drive file=./$VIRTIO_ISO_FILE,index=0,media=cdrom
-	-drive if=none,id=root,file=./windbg-disk.qcow \
+	-drive if=none,id=root,file=./windbg-disk.raw \
 	-device virtio-blk-pci,drive=root,disable-legacy=on \
 	-device virtio-net-pci,netdev=mynet0,disable-legacy=on \
 	-netdev user,id=mynet0,net=192.168.178.0/24,host=192.168.178.1,dhcpstart=192.168.178.64,hostname=windbg-host \
@@ -280,7 +280,7 @@ qemu-system-x86_64 \
 	-cpu host \
 	-smp 1 \
 	-m 4G \
-	-drive if=none,id=root,file=./windbg-disk.qcow \
+	-drive if=none,id=root,file=./windbg-disk.raw \
 	-device virtio-blk-pci,drive=root,disable-legacy=on \
 	-serial tcp::4445,server,nowait \
 	-device virtio-net-pci,netdev=mynet0,disable-legacy=on \
