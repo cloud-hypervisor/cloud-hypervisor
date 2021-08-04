@@ -1492,77 +1492,6 @@ impl MemoryManager {
     pub fn memory_zones(&self) -> &MemoryZones {
         &self.memory_zones
     }
-
-    // Generate a table for the pages that are dirty. The dirty pages are collapsed
-    // together in the table if they are contiguous.
-    pub fn dirty_memory_range_table(
-        &self,
-    ) -> std::result::Result<MemoryRangeTable, MigratableError> {
-        let mut table = MemoryRangeTable::default();
-        for r in &self.guest_ram_mappings {
-            let vm_dirty_bitmap = self.vm.get_dirty_log(r.slot, r.gpa, r.size).map_err(|e| {
-                MigratableError::MigrateSend(anyhow!("Error getting VM dirty log {}", e))
-            })?;
-            let vmm_dirty_bitmap = match self.guest_memory.memory().find_region(GuestAddress(r.gpa))
-            {
-                Some(region) => {
-                    assert!(region.start_addr().raw_value() == r.gpa);
-                    assert!(region.len() == r.size);
-                    region.bitmap().get_and_reset()
-                }
-                None => {
-                    return Err(MigratableError::MigrateSend(anyhow!(
-                        "Error finding 'guest memory region' with address {:x}",
-                        r.gpa
-                    )))
-                }
-            };
-
-            let dirty_bitmap: Vec<u64> = vm_dirty_bitmap
-                .iter()
-                .zip(vmm_dirty_bitmap.iter())
-                .map(|(x, y)| x | y)
-                .collect();
-
-            let sub_table = MemoryRangeTable::from_bitmap(dirty_bitmap, r.gpa);
-
-            if sub_table.regions().is_empty() {
-                info!("Dirty Memory Range Table is empty");
-            } else {
-                info!("Dirty Memory Range Table:");
-                for range in sub_table.regions() {
-                    info!("GPA: {:x} size: {} (KiB)", range.gpa, range.length / 1024);
-                }
-            }
-
-            table.extend(sub_table);
-        }
-        Ok(table)
-    }
-
-    // Start the dirty log in the hypervisor (kvm/mshv).
-    // Also, reset the dirty bitmap logged by the vmm.
-    // Just before we do a bulk copy we want to start/clear the dirty log so that
-    // pages touched during our bulk copy are tracked.
-    pub fn start_memory_dirty_log(&self) -> std::result::Result<(), MigratableError> {
-        self.vm.start_dirty_log().map_err(|e| {
-            MigratableError::MigrateSend(anyhow!("Error starting VM dirty log {}", e))
-        })?;
-
-        for r in self.guest_memory.memory().iter() {
-            r.bitmap().reset();
-        }
-
-        Ok(())
-    }
-
-    pub fn stop_memory_dirty_log(&self) -> std::result::Result<(), MigratableError> {
-        self.vm.stop_dirty_log().map_err(|e| {
-            MigratableError::MigrateSend(anyhow!("Error stopping VM dirty log {}", e))
-        })?;
-
-        Ok(())
-    }
 }
 
 #[cfg(feature = "acpi")]
@@ -2055,4 +1984,74 @@ impl Transportable for MemoryManager {
         Ok(())
     }
 }
-impl Migratable for MemoryManager {}
+
+impl Migratable for MemoryManager {
+    // Start the dirty log in the hypervisor (kvm/mshv).
+    // Also, reset the dirty bitmap logged by the vmm.
+    // Just before we do a bulk copy we want to start/clear the dirty log so that
+    // pages touched during our bulk copy are tracked.
+    fn start_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
+        self.vm.start_dirty_log().map_err(|e| {
+            MigratableError::MigrateSend(anyhow!("Error starting VM dirty log {}", e))
+        })?;
+
+        for r in self.guest_memory.memory().iter() {
+            r.bitmap().reset();
+        }
+
+        Ok(())
+    }
+
+    fn stop_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
+        self.vm.stop_dirty_log().map_err(|e| {
+            MigratableError::MigrateSend(anyhow!("Error stopping VM dirty log {}", e))
+        })?;
+
+        Ok(())
+    }
+
+    // Generate a table for the pages that are dirty. The dirty pages are collapsed
+    // together in the table if they are contiguous.
+    fn dirty_log(&mut self) -> std::result::Result<MemoryRangeTable, MigratableError> {
+        let mut table = MemoryRangeTable::default();
+        for r in &self.guest_ram_mappings {
+            let vm_dirty_bitmap = self.vm.get_dirty_log(r.slot, r.gpa, r.size).map_err(|e| {
+                MigratableError::MigrateSend(anyhow!("Error getting VM dirty log {}", e))
+            })?;
+            let vmm_dirty_bitmap = match self.guest_memory.memory().find_region(GuestAddress(r.gpa))
+            {
+                Some(region) => {
+                    assert!(region.start_addr().raw_value() == r.gpa);
+                    assert!(region.len() == r.size);
+                    region.bitmap().get_and_reset()
+                }
+                None => {
+                    return Err(MigratableError::MigrateSend(anyhow!(
+                        "Error finding 'guest memory region' with address {:x}",
+                        r.gpa
+                    )))
+                }
+            };
+
+            let dirty_bitmap: Vec<u64> = vm_dirty_bitmap
+                .iter()
+                .zip(vmm_dirty_bitmap.iter())
+                .map(|(x, y)| x | y)
+                .collect();
+
+            let sub_table = MemoryRangeTable::from_bitmap(dirty_bitmap, r.gpa);
+
+            if sub_table.regions().is_empty() {
+                info!("Dirty Memory Range Table is empty");
+            } else {
+                info!("Dirty Memory Range Table:");
+                for range in sub_table.regions() {
+                    info!("GPA: {:x} size: {} (KiB)", range.gpa, range.length / 1024);
+                }
+            }
+
+            table.extend(sub_table);
+        }
+        Ok(table)
+    }
+}
