@@ -138,6 +138,8 @@ pub enum ValidationError {
     TdxKernelSpecified,
     // Insuffient vCPUs for queues
     TooManyQueues,
+    // Need shared memory for vfio-user
+    UserDevicesRequireSharedMemory,
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -184,6 +186,9 @@ impl fmt::Display for ValidationError {
             }
             TooManyQueues => {
                 write!(f, "Number of vCPUs is insufficient for number of queues")
+            }
+            UserDevicesRequireSharedMemory => {
+                write!(f, "Using user devices requires using shared memory")
             }
         }
     }
@@ -1905,6 +1910,11 @@ impl VmConfig {
             }
         }
 
+        if let Some(user_devices) = &self.user_devices {
+            if !user_devices.is_empty() && !self.memory.shared {
+                return Err(ValidationError::UserDevicesRequireSharedMemory);
+            }
+        }
         Ok(())
     }
 
