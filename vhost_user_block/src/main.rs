@@ -25,7 +25,7 @@ fn main() {
                 .long("block-backend")
                 .help(vhost_user_block::SYNTAX)
                 .takes_value(true)
-                .min_values(1),
+                .required(true),
         )
         .get_matches();
 
