@@ -20,10 +20,10 @@ cargo install cargo-fuzz
 
 ## Running the fuzzers
 
-e.g. To run the `qcow` fuzzer using all available CPUs:
+e.g. To run the `block` fuzzer using all available CPUs:
 
 ```
-cargo fuzz run qcow -j `nproc`
+cargo fuzz run block -j `nproc`
 ```
 
 ## Adding a new fuzzer
