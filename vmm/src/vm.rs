@@ -2156,23 +2156,6 @@ impl Vm {
         Ok(table)
     }
 
-    pub fn start_memory_dirty_log(&self) -> std::result::Result<(), MigratableError> {
-        self.memory_manager.lock().unwrap().start_memory_dirty_log()
-    }
-
-    pub fn stop_memory_dirty_log(&self) -> std::result::Result<(), MigratableError> {
-        self.memory_manager.lock().unwrap().stop_memory_dirty_log()
-    }
-
-    pub fn dirty_memory_range_table(
-        &self,
-    ) -> std::result::Result<MemoryRangeTable, MigratableError> {
-        self.memory_manager
-            .lock()
-            .unwrap()
-            .dirty_memory_range_table()
-    }
-
     pub fn device_tree(&self) -> Arc<Mutex<DeviceTree>> {
         self.device_manager.lock().unwrap().device_tree()
     }
@@ -2539,7 +2522,20 @@ impl Transportable for Vm {
         Ok(())
     }
 }
-impl Migratable for Vm {}
+
+impl Migratable for Vm {
+    fn start_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
+        self.memory_manager.lock().unwrap().start_dirty_log()
+    }
+
+    fn stop_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
+        self.memory_manager.lock().unwrap().stop_dirty_log()
+    }
+
+    fn dirty_log(&mut self) -> std::result::Result<MemoryRangeTable, MigratableError> {
+        self.memory_manager.lock().unwrap().dirty_log()
+    }
+}
 
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 #[cfg(test)]

@@ -41,7 +41,7 @@ use std::sync::{Arc, Mutex};
 use std::{result, thread};
 use thiserror::Error;
 use vm_memory::bitmap::AtomicBitmap;
-use vm_migration::protocol::*;
+use vm_migration::{protocol::*, Migratable};
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -966,7 +966,7 @@ impl Vmm {
         T: Read + Write,
     {
         // Send (dirty) memory table
-        let table = vm.dirty_memory_range_table()?;
+        let table = vm.dirty_log()?;
 
         // But if there are no regions go straight to pause
         if table.regions().is_empty() {
@@ -1067,7 +1067,7 @@ impl Vmm {
                 }
 
                 // Start logging dirty pages
-                vm.start_memory_dirty_log()?;
+                vm.start_dirty_log()?;
 
                 // Send memory table
                 let table = vm.memory_range_table()?;
@@ -1136,7 +1136,7 @@ impl Vmm {
                 // Stop logging dirty pages and keep the source VM paused unpon successful migration
                 Ok(()) => {
                     // Stop logging dirty pages
-                    vm.stop_memory_dirty_log()?;
+                    vm.stop_dirty_log()?;
 
                     Ok(())
                 }
@@ -1145,7 +1145,7 @@ impl Vmm {
                     error!("Migration failed: {:?}", e);
 
                     // Stop logging dirty pages
-                    vm.stop_memory_dirty_log()?;
+                    vm.stop_dirty_log()?;
 
                     if vm.get_state().unwrap() == VmState::Paused {
                         vm.resume()?;
