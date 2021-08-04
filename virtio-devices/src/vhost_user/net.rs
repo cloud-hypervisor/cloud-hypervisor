@@ -30,9 +30,10 @@ use virtio_bindings::bindings::virtio_net::{
     VIRTIO_NET_F_HOST_ECN, VIRTIO_NET_F_HOST_TSO4, VIRTIO_NET_F_HOST_TSO6, VIRTIO_NET_F_HOST_UFO,
     VIRTIO_NET_F_MAC, VIRTIO_NET_F_MRG_RXBUF,
 };
-use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic};
+use vm_memory::{Address, ByteValued, GuestAddressSpace, GuestMemory, GuestMemoryAtomic};
 use vm_migration::{
-    Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
+    protocol::MemoryRangeTable, Migratable, MigratableError, Pausable, Snapshot, Snapshottable,
+    Transportable, VersionMapped,
 };
 use vmm_sys_util::eventfd::EventFd;
 
@@ -486,4 +487,54 @@ impl Snapshottable for Net {
     }
 }
 impl Transportable for Net {}
-impl Migratable for Net {}
+
+impl Migratable for Net {
+    fn start_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
+        if let Some(guest_memory) = &self.guest_memory {
+            let last_ram_addr = guest_memory.memory().last_addr().raw_value();
+            self.vu
+                .lock()
+                .unwrap()
+                .start_dirty_log(last_ram_addr)
+                .map_err(|e| {
+                    MigratableError::MigrateStart(anyhow!(
+                        "Error starting migration for vhost-user-blk backend: {:?}",
+                        e
+                    ))
+                })
+        } else {
+            Err(MigratableError::MigrateStart(anyhow!(
+                "Missing guest memory"
+            )))
+        }
+    }
+
+    fn stop_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
+        self.vu.lock().unwrap().stop_dirty_log().map_err(|e| {
+            MigratableError::MigrateStop(anyhow!(
+                "Error stopping migration for vhost-user-blk backend: {:?}",
+                e
+            ))
+        })
+    }
+
+    fn dirty_log(&mut self) -> std::result::Result<MemoryRangeTable, MigratableError> {
+        if let Some(guest_memory) = &self.guest_memory {
+            let last_ram_addr = guest_memory.memory().last_addr().raw_value();
+            self.vu
+                .lock()
+                .unwrap()
+                .dirty_log(last_ram_addr)
+                .map_err(|e| {
+                    MigratableError::MigrateDirtyRanges(anyhow!(
+                        "Error retrieving dirty ranges from vhost-user-blk backend: {:?}",
+                        e
+                    ))
+                })
+        } else {
+            Err(MigratableError::MigrateDirtyRanges(anyhow!(
+                "Missing guest memory"
+            )))
+        }
+    }
+}
