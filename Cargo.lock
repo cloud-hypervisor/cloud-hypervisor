@@ -1150,6 +1150,7 @@ version = "0.1.0"
 dependencies = [
  "block_util",
  "clap",
+ "env_logger",
  "epoll",
  "libc",
  "log",
@@ -1167,6 +1168,7 @@ name = "vhost_user_net"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "env_logger",
  "epoll",
  "libc",
  "log",

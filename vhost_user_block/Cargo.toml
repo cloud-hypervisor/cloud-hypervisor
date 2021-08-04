@@ -7,6 +7,7 @@ edition = "2018"
 [dependencies]
 block_util = { path = "../block_util" }
 clap = { version = "2.33.3", features=["wrap_help"] }
+env_logger = "0.9.0"
 epoll = ">=4.0.1"
 libc = "0.2.98"
 log = "0.4.14"

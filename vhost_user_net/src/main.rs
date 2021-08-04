@@ -13,6 +13,8 @@ use clap::{App, Arg};
 use vhost_user_net::start_net_backend;
 
 fn main() {
+    env_logger::init();
+
     let cmd_arguments = App::new("vhost-user-net backend")
         .version(crate_version!())
         .author(crate_authors!())
