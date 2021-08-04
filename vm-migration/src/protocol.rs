@@ -184,6 +184,35 @@ pub struct MemoryRangeTable {
 }
 
 impl MemoryRangeTable {
+    pub fn from_bitmap(bitmap: Vec<u64>, start_addr: u64) -> Self {
+        let page_size = 4096;
+        let mut table = MemoryRangeTable::default();
+        let mut entry: Option<MemoryRange> = None;
+        for (i, block) in bitmap.iter().enumerate() {
+            for j in 0..64 {
+                let is_page_dirty = ((block >> j) & 1u64) != 0u64;
+                let page_offset = ((i * 64) + j) as u64 * page_size;
+                if is_page_dirty {
+                    if let Some(entry) = &mut entry {
+                        entry.length += page_size;
+                    } else {
+                        entry = Some(MemoryRange {
+                            gpa: start_addr + page_offset,
+                            length: page_size,
+                        });
+                    }
+                } else if let Some(entry) = entry.take() {
+                    table.push(entry);
+                }
+            }
+        }
+        if let Some(entry) = entry.take() {
+            table.push(entry);
+        }
+
+        table
+    }
+
     pub fn regions(&self) -> &[MemoryRange] {
         &self.data
     }
@@ -222,5 +251,21 @@ impl MemoryRangeTable {
             )
         })
         .map_err(MigratableError::MigrateSocket)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+
+    pub fn extend(&mut self, table: Self) {
+        self.data.extend(table.data)
+    }
+
+    pub fn new_from_tables(tables: Vec<Self>) -> Self {
+        let mut data = Vec::new();
+        for table in tables {
+            data.extend(table.data);
+        }
+        Self { data }
     }
 }
