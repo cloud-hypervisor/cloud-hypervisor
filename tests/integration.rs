@@ -366,7 +366,7 @@ mod tests {
 
             let mut fw_path = workload_path;
             #[cfg(target_arch = "aarch64")]
-            fw_path.push("Image");
+            fw_path.push("CLOUDHV_EFI.fd");
             #[cfg(target_arch = "x86_64")]
             fw_path.push("hypervisor-fw");
             let fw_path = String::from(fw_path.to_str().unwrap());
@@ -859,10 +859,16 @@ mod tests {
         }
     }
 
-    fn test_cpu_topology(threads_per_core: u8, cores_per_package: u8, packages: u8) {
+    fn test_cpu_topology(threads_per_core: u8, cores_per_package: u8, packages: u8, use_fw: bool) {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
         let total_vcpus = threads_per_core * cores_per_package * packages;
+        let direct_kernel_boot_path = direct_kernel_boot_path();
+        let mut kernel_path = direct_kernel_boot_path.to_str().unwrap();
+        if use_fw {
+            kernel_path = guest.fw_path.as_str();
+        }
+
         let mut child = GuestCommand::new(&guest)
             .args(&[
                 "--cpus",
@@ -872,7 +878,7 @@ mod tests {
                 ),
             ])
             .args(&["--memory", "size=512M"])
-            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(&["--kernel", kernel_path])
             .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
@@ -2013,17 +2019,35 @@ mod tests {
 
         #[test]
         fn test_cpu_topology_421() {
-            test_cpu_topology(4, 2, 1);
+            test_cpu_topology(4, 2, 1, false);
         }
 
         #[test]
         fn test_cpu_topology_142() {
-            test_cpu_topology(1, 4, 2);
+            test_cpu_topology(1, 4, 2, false);
         }
 
         #[test]
         fn test_cpu_topology_262() {
-            test_cpu_topology(2, 6, 2);
+            test_cpu_topology(2, 6, 2, false);
+        }
+
+        #[test]
+        #[cfg(all(target_arch = "aarch64", feature = "acpi"))]
+        fn test_cpu_topology_421_fw() {
+            test_cpu_topology(4, 2, 1, true);
+        }
+
+        #[test]
+        #[cfg(all(target_arch = "aarch64", feature = "acpi"))]
+        fn test_cpu_topology_142_fw() {
+            test_cpu_topology(1, 4, 2, true);
+        }
+
+        #[test]
+        #[cfg(all(target_arch = "aarch64", feature = "acpi"))]
+        fn test_cpu_topology_262_fw() {
+            test_cpu_topology(2, 6, 2, true);
         }
 
         #[test]
