@@ -22,7 +22,7 @@ use crate::interrupt::LegacyUserspaceInterruptManager;
 #[cfg(feature = "acpi")]
 use crate::memory_manager::MEMORY_MANAGER_ACPI_SIZE;
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
-#[cfg(feature = "acpi")]
+#[cfg(any(target_arch = "aarch64", feature = "acpi"))]
 use crate::vm::NumaNodes;
 use crate::GuestRegionMmap;
 use crate::PciDeviceInfo;
@@ -919,7 +919,7 @@ pub struct DeviceManager {
     seccomp_action: SeccompAction,
 
     // List of guest NUMA nodes.
-    #[cfg(feature = "acpi")]
+    #[cfg(any(target_arch = "aarch64", feature = "acpi"))]
     numa_nodes: NumaNodes,
 
     // Possible handle to the virtio-balloon device
@@ -952,7 +952,7 @@ impl DeviceManager {
         _exit_evt: &EventFd,
         reset_evt: &EventFd,
         seccomp_action: SeccompAction,
-        #[cfg(feature = "acpi")] numa_nodes: NumaNodes,
+        #[cfg(any(target_arch = "aarch64", feature = "acpi"))] numa_nodes: NumaNodes,
         activate_evt: &EventFd,
         force_iommu: bool,
     ) -> DeviceManagerResult<Arc<Mutex<Self>>> {
@@ -1014,7 +1014,7 @@ impl DeviceManager {
             #[cfg(target_arch = "aarch64")]
             id_to_dev_info: HashMap::new(),
             seccomp_action,
-            #[cfg(feature = "acpi")]
+            #[cfg(any(target_arch = "aarch64", feature = "acpi"))]
             numa_nodes,
             balloon: None,
             activate_evt: activate_evt
@@ -2575,9 +2575,10 @@ impl DeviceManager {
             if let Some(virtio_mem_zone) = memory_zone.virtio_mem_zone() {
                 let id = self.next_device_name(MEM_DEVICE_NAME_PREFIX)?;
                 info!("Creating virtio-mem device: id = {}", id);
-                #[cfg(not(feature = "acpi"))]
+
+                #[cfg(all(target_arch = "x86_64", not(feature = "acpi")))]
                 let node_id: Option<u16> = None;
-                #[cfg(feature = "acpi")]
+                #[cfg(any(target_arch = "aarch64", feature = "acpi"))]
                 let node_id = numa_node_id_from_memory_zone_id(&self.numa_nodes, _memory_zone_id)
                     .map(|i| i as u16);
 
@@ -3668,7 +3669,7 @@ impl DeviceManager {
     }
 }
 
-#[cfg(feature = "acpi")]
+#[cfg(any(target_arch = "aarch64", feature = "acpi"))]
 fn numa_node_id_from_memory_zone_id(numa_nodes: &NumaNodes, memory_zone_id: &str) -> Option<u32> {
     for (numa_node_id, numa_node) in numa_nodes.iter() {
         if numa_node

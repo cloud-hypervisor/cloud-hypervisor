@@ -11,7 +11,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-#[cfg(feature = "acpi")]
+#[cfg(any(target_arch = "aarch64", feature = "acpi"))]
 use crate::config::NumaConfig;
 use crate::config::{
     DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, PmemConfig, ValidationError,
@@ -51,7 +51,9 @@ use signal_hook::{
     iterator::Signals,
 };
 use std::cmp;
-use std::collections::{BTreeMap, HashMap};
+#[cfg(any(target_arch = "aarch64", feature = "acpi"))]
+use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::ffi::CString;
 #[cfg(target_arch = "x86_64")]
@@ -519,7 +521,7 @@ pub struct Vm {
     vm: Arc<dyn hypervisor::Vm>,
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     saved_clock: Option<hypervisor::ClockData>,
-    #[cfg(feature = "acpi")]
+    #[cfg(any(target_arch = "aarch64", feature = "acpi"))]
     numa_nodes: NumaNodes,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
@@ -551,7 +553,7 @@ impl Vm {
         info!("Booting VM from config: {:?}", &config);
 
         // Create NUMA nodes based on NumaConfig.
-        #[cfg(feature = "acpi")]
+        #[cfg(any(target_arch = "aarch64", feature = "acpi"))]
         let numa_nodes =
             Self::create_numa_nodes(config.lock().unwrap().numa.clone(), &memory_manager)?;
 
@@ -567,7 +569,7 @@ impl Vm {
             &exit_evt,
             &reset_evt,
             seccomp_action.clone(),
-            #[cfg(feature = "acpi")]
+            #[cfg(any(target_arch = "aarch64", feature = "acpi"))]
             numa_nodes.clone(),
             &activate_evt,
             force_iommu,
@@ -604,7 +606,7 @@ impl Vm {
             vm_ops,
             #[cfg(feature = "tdx")]
             tdx_enabled,
-            #[cfg(feature = "acpi")]
+            #[cfg(any(target_arch = "aarch64", feature = "acpi"))]
             &numa_nodes,
         )
         .map_err(Error::CpuManager)?;
@@ -642,7 +644,7 @@ impl Vm {
             vm,
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             saved_clock: _saved_clock,
-            #[cfg(feature = "acpi")]
+            #[cfg(any(target_arch = "aarch64", feature = "acpi"))]
             numa_nodes,
             seccomp_action: seccomp_action.clone(),
             exit_evt,
@@ -651,7 +653,7 @@ impl Vm {
         })
     }
 
-    #[cfg(feature = "acpi")]
+    #[cfg(any(target_arch = "aarch64", feature = "acpi"))]
     fn create_numa_nodes(
         configs: Option<Vec<NumaConfig>>,
         memory_manager: &Arc<Mutex<MemoryManager>>,
