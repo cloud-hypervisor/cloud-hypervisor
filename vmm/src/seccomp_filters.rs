@@ -573,6 +573,7 @@ fn vcpu_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_pread64),
         allow_syscall(libc::SYS_pwrite64),
         allow_syscall(libc::SYS_read),
+        allow_syscall(libc::SYS_recvfrom),
         allow_syscall(libc::SYS_recvmsg),
         allow_syscall(libc::SYS_rt_sigaction),
         allow_syscall(libc::SYS_rt_sigprocmask),
@@ -586,6 +587,7 @@ fn vcpu_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         #[cfg(target_arch = "aarch64")]
         allow_syscall(libc::SYS_unlinkat),
         allow_syscall(libc::SYS_write),
+        allow_syscall(libc::SYS_writev),
     ])
 }
 
