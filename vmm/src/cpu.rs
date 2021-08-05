@@ -17,7 +17,7 @@ use crate::memory_manager::MemoryManager;
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 #[cfg(target_arch = "x86_64")]
 use crate::vm::physical_bits;
-#[cfg(feature = "acpi")]
+#[cfg(any(target_arch = "aarch64", feature = "acpi"))]
 use crate::vm::NumaNodes;
 use crate::GuestMemoryMmap;
 use crate::CPU_MANAGER_SNAPSHOT_ID;
@@ -531,7 +531,7 @@ impl CpuManager {
         seccomp_action: SeccompAction,
         vmmops: Arc<dyn VmmOps>,
         #[cfg(feature = "tdx")] tdx_enabled: bool,
-        #[cfg(feature = "acpi")] numa_nodes: &NumaNodes,
+        #[cfg(any(target_arch = "aarch64", feature = "acpi"))] numa_nodes: &NumaNodes,
     ) -> Result<Arc<Mutex<CpuManager>>> {
         let guest_memory = memory_manager.lock().unwrap().guest_memory();
         let mut vcpu_states = Vec::with_capacity(usize::from(config.max_vcpus));
