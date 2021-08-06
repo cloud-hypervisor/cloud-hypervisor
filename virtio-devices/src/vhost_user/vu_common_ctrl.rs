@@ -457,8 +457,7 @@ impl VhostUserHandle {
 
         // Make sure we hold onto the region to prevent the mapping from being
         // released.
-        let old_region = self.shm_log.take();
-        self.shm_log = Some(Arc::new(region));
+        let old_region = self.shm_log.replace(Arc::new(region));
 
         // Send the shm_log fd over to the backend
         let log = VhostUserDirtyLogRegion {
@@ -537,12 +536,14 @@ impl VhostUserHandle {
         // region. The previous region is returned and processed to create the
         // bitmap representing the dirty pages.
         if let Some(region) = self.update_log_base(last_ram_addr)? {
-            // Cast the pointer to u64
-            let ptr = region.as_ptr() as *mut u64;
             // Be careful with the size, as it was based on u8, meaning we must
             // divide it by 8.
             let len = region.size() / 8;
-            let bitmap = unsafe { Vec::from_raw_parts(ptr, len, len) };
+            let bitmap = unsafe {
+                // Cast the pointer to u64
+                let ptr = region.as_ptr() as *const u64;
+                std::slice::from_raw_parts(ptr, len).to_vec()
+            };
             Ok(MemoryRangeTable::from_bitmap(bitmap, 0))
         } else {
             Err(Error::MissingShmLogRegion)
