@@ -11,10 +11,15 @@
 #[macro_use]
 extern crate log;
 
+#[cfg(target_arch = "x86_64")]
+use crate::x86_64::SgxEpcSection;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::result;
+use std::sync::Arc;
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<vm_memory::bitmap::AtomicBitmap>;
+type GuestRegionMmap = vm_memory::GuestRegionMmap<vm_memory::bitmap::AtomicBitmap>;
 
 /// Type for returning error code.
 #[derive(Debug)]
@@ -95,6 +100,19 @@ fn pagesize() -> usize {
     // Trivially safe
     unsafe { libc::sysconf(libc::_SC_PAGESIZE) as usize }
 }
+
+#[derive(Clone, Default)]
+pub struct NumaNode {
+    pub memory_regions: Vec<Arc<GuestRegionMmap>>,
+    pub hotplug_regions: Vec<Arc<GuestRegionMmap>>,
+    pub cpus: Vec<u8>,
+    pub distances: BTreeMap<u32, u8>,
+    pub memory_zones: Vec<String>,
+    #[cfg(target_arch = "x86_64")]
+    pub sgx_epc_sections: Vec<SgxEpcSection>,
+}
+
+pub type NumaNodes = BTreeMap<u32, NumaNode>;
 
 /// Type for passing information about the initramfs in the guest memory.
 pub struct InitramfsConfig {

@@ -17,14 +17,14 @@ use crate::memory_manager::MemoryManager;
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 #[cfg(target_arch = "x86_64")]
 use crate::vm::physical_bits;
-#[cfg(any(target_arch = "aarch64", feature = "acpi"))]
-use crate::vm::NumaNodes;
 use crate::GuestMemoryMmap;
 use crate::CPU_MANAGER_SNAPSHOT_ID;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml, sdt::Sdt};
 use anyhow::anyhow;
 use arch::EntryPoint;
+#[cfg(any(target_arch = "aarch64", feature = "acpi"))]
+use arch::NumaNodes;
 use devices::interrupt_controller::InterruptController;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::kvm::kvm_bindings;
@@ -579,7 +579,7 @@ impl CpuManager {
         let proximity_domain_per_cpu: BTreeMap<u8, u32> = {
             let mut cpu_list = Vec::new();
             for (proximity_domain, numa_node) in numa_nodes.iter() {
-                for cpu in numa_node.cpus().iter() {
+                for cpu in numa_node.cpus.iter() {
                     cpu_list.push((*cpu, *proximity_domain))
                 }
             }

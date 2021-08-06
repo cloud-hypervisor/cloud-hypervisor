@@ -22,8 +22,6 @@ use crate::interrupt::LegacyUserspaceInterruptManager;
 #[cfg(feature = "acpi")]
 use crate::memory_manager::MEMORY_MANAGER_ACPI_SIZE;
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
-#[cfg(any(target_arch = "aarch64", feature = "acpi"))]
-use crate::vm::NumaNodes;
 use crate::GuestRegionMmap;
 use crate::PciDeviceInfo;
 use crate::{device_node, DEVICE_MANAGER_SNAPSHOT_ID};
@@ -34,6 +32,8 @@ use anyhow::anyhow;
 use arch::layout;
 #[cfg(target_arch = "x86_64")]
 use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
+#[cfg(any(target_arch = "aarch64", feature = "acpi"))]
+use arch::NumaNodes;
 #[cfg(target_arch = "aarch64")]
 use arch::{DeviceType, MmioDeviceInfo};
 use block_util::{
@@ -3672,10 +3672,7 @@ impl DeviceManager {
 #[cfg(any(target_arch = "aarch64", feature = "acpi"))]
 fn numa_node_id_from_memory_zone_id(numa_nodes: &NumaNodes, memory_zone_id: &str) -> Option<u32> {
     for (numa_node_id, numa_node) in numa_nodes.iter() {
-        if numa_node
-            .memory_zones()
-            .contains(&memory_zone_id.to_owned())
-        {
+        if numa_node.memory_zones.contains(&memory_zone_id.to_owned()) {
             return Some(*numa_node_id);
         }
     }
