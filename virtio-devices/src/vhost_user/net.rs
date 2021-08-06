@@ -106,7 +106,7 @@ impl EpollHelperHandler for NetCtrlEpollHandler {
 pub struct Net {
     common: VirtioCommon,
     id: String,
-    vu: Arc<Mutex<VhostUserHandle>>,
+    vu: Option<Arc<Mutex<VhostUserHandle>>>,
     config: VirtioNetConfig,
     guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     acked_protocol_features: u64,
@@ -198,7 +198,7 @@ impl Net {
                 min_queues: DEFAULT_QUEUE_NUMBER as u16,
                 ..Default::default()
             },
-            vu: Arc::new(Mutex::new(vu)),
+            vu: Some(Arc::new(Mutex::new(vu))),
             config,
             guest_memory: None,
             acked_protocol_features,
@@ -327,8 +327,12 @@ impl VirtioDevice for Net {
                 None
             };
 
-        self.vu
-            .lock()
+        if self.vu.is_none() {
+            error!("Missing vhost-user handle");
+            return Err(ActivateError::BadActivate);
+        }
+        let vu = self.vu.as_ref().unwrap();
+        vu.lock()
             .unwrap()
             .setup_vhost_user(
                 &mem.memory(),
@@ -346,7 +350,7 @@ impl VirtioDevice for Net {
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
         let mut handler: VhostUserEpollHandler<SlaveReqHandler> = VhostUserEpollHandler {
-            vu: self.vu.clone(),
+            vu: vu.clone(),
             mem,
             kill_evt,
             pause_evt,
@@ -386,14 +390,15 @@ impl VirtioDevice for Net {
             self.common.resume().ok()?;
         }
 
-        if let Err(e) = self
-            .vu
-            .lock()
-            .unwrap()
-            .reset_vhost_user(self.common.queue_sizes.len())
-        {
-            error!("Failed to reset vhost-user daemon: {:?}", e);
-            return None;
+        if let Some(vu) = &self.vu {
+            if let Err(e) = vu
+                .lock()
+                .unwrap()
+                .reset_vhost_user(self.common.queue_sizes.len())
+            {
+                error!("Failed to reset vhost-user daemon: {:?}", e);
+                return None;
+            }
         }
 
         if let Some(kill_evt) = self.common.kill_evt.take() {
@@ -408,7 +413,9 @@ impl VirtioDevice for Net {
     }
 
     fn shutdown(&mut self) {
-        let _ = unsafe { libc::close(self.vu.lock().unwrap().socket_handle().as_raw_fd()) };
+        if let Some(vu) = &self.vu {
+            let _ = unsafe { libc::close(vu.lock().unwrap().socket_handle().as_raw_fd()) };
+        }
 
         // Remove socket path if needed
         if self.server {
@@ -420,34 +427,37 @@ impl VirtioDevice for Net {
         &mut self,
         region: &Arc<GuestRegionMmap>,
     ) -> std::result::Result<(), crate::Error> {
-        if self.acked_protocol_features & VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS.bits() != 0
-        {
-            self.vu
-                .lock()
-                .unwrap()
-                .add_memory_region(region)
-                .map_err(crate::Error::VhostUserAddMemoryRegion)
-        } else if let Some(guest_memory) = &self.guest_memory {
-            self.vu
-                .lock()
-                .unwrap()
-                .update_mem_table(guest_memory.memory().deref())
-                .map_err(crate::Error::VhostUserUpdateMemory)
-        } else {
-            Ok(())
+        if let Some(vu) = &self.vu {
+            if self.acked_protocol_features & VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS.bits()
+                != 0
+            {
+                return vu
+                    .lock()
+                    .unwrap()
+                    .add_memory_region(region)
+                    .map_err(crate::Error::VhostUserAddMemoryRegion);
+            } else if let Some(guest_memory) = &self.guest_memory {
+                return vu
+                    .lock()
+                    .unwrap()
+                    .update_mem_table(guest_memory.memory().deref())
+                    .map_err(crate::Error::VhostUserUpdateMemory);
+            }
         }
+        Ok(())
     }
 }
 
 impl Pausable for Net {
     fn pause(&mut self) -> result::Result<(), MigratableError> {
-        self.vu
-            .lock()
-            .unwrap()
-            .pause_vhost_user(self.vu_num_queues)
-            .map_err(|e| {
-                MigratableError::Pause(anyhow!("Error pausing vhost-user-net backend: {:?}", e))
-            })?;
+        if let Some(vu) = &self.vu {
+            vu.lock()
+                .unwrap()
+                .pause_vhost_user(self.vu_num_queues)
+                .map_err(|e| {
+                    MigratableError::Pause(anyhow!("Error pausing vhost-user-net backend: {:?}", e))
+                })?;
+        }
 
         self.common.pause()
     }
@@ -463,13 +473,19 @@ impl Pausable for Net {
             ctrl_queue_epoll_thread.thread().unpark();
         }
 
-        self.vu
-            .lock()
-            .unwrap()
-            .resume_vhost_user(self.vu_num_queues)
-            .map_err(|e| {
-                MigratableError::Resume(anyhow!("Error resuming vhost-user-net backend: {:?}", e))
-            })
+        if let Some(vu) = &self.vu {
+            vu.lock()
+                .unwrap()
+                .resume_vhost_user(self.vu_num_queues)
+                .map_err(|e| {
+                    MigratableError::Resume(anyhow!(
+                        "Error resuming vhost-user-net backend: {:?}",
+                        e
+                    ))
+                })
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -491,49 +507,56 @@ impl Transportable for Net {}
 
 impl Migratable for Net {
     fn start_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
-        if let Some(guest_memory) = &self.guest_memory {
-            let last_ram_addr = guest_memory.memory().last_addr().raw_value();
-            self.vu
-                .lock()
-                .unwrap()
-                .start_dirty_log(last_ram_addr)
-                .map_err(|e| {
-                    MigratableError::StartDirtyLog(anyhow!(
-                        "Error starting migration for vhost-user-net backend: {:?}",
-                        e
-                    ))
-                })
+        if let Some(vu) = &self.vu {
+            if let Some(guest_memory) = &self.guest_memory {
+                let last_ram_addr = guest_memory.memory().last_addr().raw_value();
+                vu.lock()
+                    .unwrap()
+                    .start_dirty_log(last_ram_addr)
+                    .map_err(|e| {
+                        MigratableError::StartDirtyLog(anyhow!(
+                            "Error starting migration for vhost-user-net backend: {:?}",
+                            e
+                        ))
+                    })
+            } else {
+                Err(MigratableError::StartDirtyLog(anyhow!(
+                    "Missing guest memory"
+                )))
+            }
         } else {
-            Err(MigratableError::StartDirtyLog(anyhow!(
-                "Missing guest memory"
-            )))
+            Ok(())
         }
     }
 
     fn stop_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
-        self.vu.lock().unwrap().stop_dirty_log().map_err(|e| {
-            MigratableError::StopDirtyLog(anyhow!(
-                "Error stopping migration for vhost-user-net backend: {:?}",
-                e
-            ))
-        })
+        if let Some(vu) = &self.vu {
+            vu.lock().unwrap().stop_dirty_log().map_err(|e| {
+                MigratableError::StopDirtyLog(anyhow!(
+                    "Error stopping migration for vhost-user-net backend: {:?}",
+                    e
+                ))
+            })
+        } else {
+            Ok(())
+        }
     }
 
     fn dirty_log(&mut self) -> std::result::Result<MemoryRangeTable, MigratableError> {
-        if let Some(guest_memory) = &self.guest_memory {
-            let last_ram_addr = guest_memory.memory().last_addr().raw_value();
-            self.vu
-                .lock()
-                .unwrap()
-                .dirty_log(last_ram_addr)
-                .map_err(|e| {
+        if let Some(vu) = &self.vu {
+            if let Some(guest_memory) = &self.guest_memory {
+                let last_ram_addr = guest_memory.memory().last_addr().raw_value();
+                vu.lock().unwrap().dirty_log(last_ram_addr).map_err(|e| {
                     MigratableError::DirtyLog(anyhow!(
                         "Error retrieving dirty ranges from vhost-user-net backend: {:?}",
                         e
                     ))
                 })
+            } else {
+                Err(MigratableError::DirtyLog(anyhow!("Missing guest memory")))
+            }
         } else {
-            Err(MigratableError::DirtyLog(anyhow!("Missing guest memory")))
+            Ok(MemoryRangeTable::default())
         }
     }
 }
