@@ -15,4 +15,4 @@ virtio-bindings = "0.1.0"
 vm-memory = { version = "0.6.0", features = ["backend-bitmap"] }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = "0.8.0"
-vhost = { git = "https://github.com/rust-vmm/vhost", branch = "master", package = "vhost", features = ["vhost-user-slave"] }
+vhost = { version = "0.1.0" , features = ["vhost-user-slave"] }
