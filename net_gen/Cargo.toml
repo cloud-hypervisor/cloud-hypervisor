@@ -5,4 +5,4 @@ authors = ["The Chromium OS Authors"]
 edition = "2018"
 
 [dependencies]
-vmm-sys-util = ">=0.3.1"
+vmm-sys-util = "0.8.0"

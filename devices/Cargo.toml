@@ -6,11 +6,11 @@ edition = "2018"
 
 [dependencies]
 acpi_tables = { path = "../acpi_tables", optional = true }
-anyhow = "1.0"
+anyhow = "1.0.42"
 arch = { path = "../arch" }
-bitflags = ">=1.2.1"
+bitflags = "1.2.1"
 byteorder = "1.4.3"
-epoll = ">=4.0.1"
+epoll = "4.3.1"
 libc = "0.2.98"
 log = "0.4.14"
 versionize = "0.1.6"
@@ -18,7 +18,7 @@ versionize_derive = "0.1.4"
 vm-device = { path = "../vm-device" }
 vm-memory = "0.6.0"
 vm-migration = { path = "../vm-migration" }
-vmm-sys-util = ">=0.3.1"
+vmm-sys-util = "0.8.0"
 
 [features]
 default = []

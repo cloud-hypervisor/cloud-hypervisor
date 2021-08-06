@@ -9,15 +9,15 @@ default = []
 io_uring = []
 
 [dependencies]
-io-uring = ">=0.4.0"
+io-uring = "0.5.1"
 libc = "0.2.98"
 log = "0.4.14"
 qcow = { path = "../qcow" }
-thiserror = "1.0"
+thiserror = "1.0.26"
 versionize = "0.1.6"
 versionize_derive = "0.1.4"
-virtio-bindings = { version = "0.1", features = ["virtio-v5_0_0"]}
+virtio-bindings = { version = "0.1.0", features = ["virtio-v5_0_0"] }
 vm-memory = { version = "0.6.0", features = ["backend-mmap", "backend-atomic", "backend-bitmap"] }
 vm-virtio = { path = "../vm-virtio" }
-vmm-sys-util = ">=0.3.1"
+vmm-sys-util = "0.8.0"
 
