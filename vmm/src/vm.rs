@@ -541,6 +541,7 @@ impl Vm {
             hypervisor::ClockData,
         >,
         activate_evt: EventFd,
+        restoring: bool,
     ) -> Result<Self> {
         config
             .lock()
@@ -571,6 +572,7 @@ impl Vm {
             numa_nodes.clone(),
             &activate_evt,
             force_iommu,
+            restoring,
         )
         .map_err(Error::DeviceManager)?;
 
@@ -796,6 +798,7 @@ impl Vm {
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             None,
             activate_evt,
+            false,
         )?;
 
         // The device manager must create the devices from here as it is part
@@ -865,6 +868,7 @@ impl Vm {
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             vm_snapshot.clock,
             activate_evt,
+            true,
         )
     }
 
@@ -907,6 +911,7 @@ impl Vm {
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             None,
             activate_evt,
+            true,
         )
     }
 
