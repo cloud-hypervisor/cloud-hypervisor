@@ -16,7 +16,7 @@ log = "0.4.14"
 versionize = "0.1.6"
 versionize_derive = "0.1.4"
 vm-device = { path = "../vm-device" }
-vm-memory = "0.5.0"
+vm-memory = "0.6.0"
 vm-migration = { path = "../vm-migration" }
 vmm-sys-util = ">=0.3.1"
 

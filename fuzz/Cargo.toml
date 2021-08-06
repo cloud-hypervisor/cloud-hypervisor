@@ -17,7 +17,7 @@ seccomp = { git = "https://github.com/firecracker-microvm/firecracker", tag = "v
 virtio-devices = { path = "../virtio-devices" }
 vmm-sys-util = "0.8.0"
 vm-virtio = { path = "../vm-virtio" }
-vm-memory = "0.5.0"
+vm-memory = "0.6.0"
 
 [dependencies.cloud-hypervisor]
 path = ".."
