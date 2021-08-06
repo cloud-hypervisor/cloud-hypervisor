@@ -49,13 +49,13 @@ pub enum MigratableError {
     MigrateSocket(#[source] std::io::Error),
 
     #[error("Failed to start migration for migratable component: {0}")]
-    MigrateStart(#[source] anyhow::Error),
+    StartDirtyLog(#[source] anyhow::Error),
 
     #[error("Failed to stop migration for migratable component: {0}")]
-    MigrateStop(#[source] anyhow::Error),
+    StopDirtyLog(#[source] anyhow::Error),
 
     #[error("Failed to retrieve dirty ranges for migratable component: {0}")]
-    MigrateDirtyRanges(#[source] anyhow::Error),
+    DirtyLog(#[source] anyhow::Error),
 }
 
 /// A Pausable component can be paused and resumed.

@@ -497,13 +497,13 @@ impl Migratable for Net {
                 .unwrap()
                 .start_dirty_log(last_ram_addr)
                 .map_err(|e| {
-                    MigratableError::MigrateStart(anyhow!(
+                    MigratableError::StartDirtyLog(anyhow!(
                         "Error starting migration for vhost-user-net backend: {:?}",
                         e
                     ))
                 })
         } else {
-            Err(MigratableError::MigrateStart(anyhow!(
+            Err(MigratableError::StartDirtyLog(anyhow!(
                 "Missing guest memory"
             )))
         }
@@ -511,7 +511,7 @@ impl Migratable for Net {
 
     fn stop_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
         self.vu.lock().unwrap().stop_dirty_log().map_err(|e| {
-            MigratableError::MigrateStop(anyhow!(
+            MigratableError::StopDirtyLog(anyhow!(
                 "Error stopping migration for vhost-user-net backend: {:?}",
                 e
             ))
@@ -526,15 +526,13 @@ impl Migratable for Net {
                 .unwrap()
                 .dirty_log(last_ram_addr)
                 .map_err(|e| {
-                    MigratableError::MigrateDirtyRanges(anyhow!(
+                    MigratableError::DirtyLog(anyhow!(
                         "Error retrieving dirty ranges from vhost-user-net backend: {:?}",
                         e
                     ))
                 })
         } else {
-            Err(MigratableError::MigrateDirtyRanges(anyhow!(
-                "Missing guest memory"
-            )))
+            Err(MigratableError::DirtyLog(anyhow!("Missing guest memory")))
         }
     }
 }
