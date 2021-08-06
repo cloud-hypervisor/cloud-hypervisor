@@ -5,4 +5,4 @@ authors = ["The Cloud Hypervisor Authors"]
 edition = "2018"
 
 [dependencies]
-vm-memory = "0.5.0"
+vm-memory = "0.6.0"
