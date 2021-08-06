@@ -562,6 +562,7 @@ fn vcpu_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall_if(libc::SYS_ioctl, create_vcpu_ioctl_seccomp_rule()?),
         allow_syscall(libc::SYS_lseek),
         allow_syscall(libc::SYS_madvise),
+        allow_syscall(libc::SYS_mmap),
         allow_syscall(libc::SYS_mprotect),
         allow_syscall(libc::SYS_munmap),
         allow_syscall(libc::SYS_nanosleep),

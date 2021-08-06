@@ -392,6 +392,7 @@ fn virtio_vsock_thread_rules() -> Vec<SyscallRuleSet> {
         #[cfg(feature = "mshv")]
         allow_syscall(libc::SYS_clock_gettime),
         allow_syscall(libc::SYS_close),
+        allow_syscall(libc::SYS_connect),
         allow_syscall(libc::SYS_dup),
         allow_syscall(libc::SYS_epoll_create1),
         allow_syscall(libc::SYS_epoll_ctl),
@@ -402,11 +403,13 @@ fn virtio_vsock_thread_rules() -> Vec<SyscallRuleSet> {
         allow_syscall_if(libc::SYS_ioctl, create_vsock_ioctl_seccomp_rule()),
         allow_syscall(libc::SYS_futex),
         allow_syscall(libc::SYS_madvise),
+        allow_syscall(libc::SYS_mmap),
         allow_syscall(libc::SYS_munmap),
         allow_syscall(libc::SYS_read),
         allow_syscall(libc::SYS_recvfrom),
         allow_syscall(libc::SYS_rt_sigprocmask),
         allow_syscall(libc::SYS_sigaltstack),
+        allow_syscall(libc::SYS_socket),
         allow_syscall(libc::SYS_write),
     ]
 }
