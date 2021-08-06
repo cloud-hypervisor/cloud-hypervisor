@@ -337,7 +337,8 @@ impl Fs {
         let mut avail_protocol_features = VhostUserProtocolFeatures::MQ
             | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
             | VhostUserProtocolFeatures::REPLY_ACK
-            | VhostUserProtocolFeatures::INFLIGHT_SHMFD;
+            | VhostUserProtocolFeatures::INFLIGHT_SHMFD
+            | VhostUserProtocolFeatures::LOG_SHMFD;
         let slave_protocol_features =
             VhostUserProtocolFeatures::SLAVE_REQ | VhostUserProtocolFeatures::SLAVE_SEND_FD;
         if cache.is_some() {

@@ -91,7 +91,8 @@ impl Blk {
             | VhostUserProtocolFeatures::MQ
             | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
             | VhostUserProtocolFeatures::REPLY_ACK
-            | VhostUserProtocolFeatures::INFLIGHT_SHMFD;
+            | VhostUserProtocolFeatures::INFLIGHT_SHMFD
+            | VhostUserProtocolFeatures::LOG_SHMFD;
 
         let (acked_features, acked_protocol_features) =
             vu.negotiate_features_vhost_user(avail_features, avail_protocol_features)?;
