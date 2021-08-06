@@ -25,7 +25,7 @@ use crate::device_tree::DeviceTree;
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 use crate::migration::{get_vm_snapshot, url_to_path, VM_SNAPSHOT_FILE};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
-use crate::{GuestMemoryMmap, GuestRegionMmap};
+use crate::GuestMemoryMmap;
 use crate::{
     PciDeviceInfo, CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_SNAPSHOT_ID,
 };
@@ -33,9 +33,9 @@ use anyhow::anyhow;
 use arch::get_host_cpu_phys_bits;
 #[cfg(feature = "tdx")]
 use arch::x86_64::tdx::TdvfSection;
-#[cfg(target_arch = "x86_64")]
-use arch::x86_64::SgxEpcSection;
 use arch::EntryPoint;
+#[cfg(any(target_arch = "aarch64", feature = "acpi"))]
+use arch::{NumaNode, NumaNodes};
 use devices::AcpiNotificationFlags;
 use hypervisor::vm::{HypervisorVmError, VmmOps};
 use linux_loader::cmdline::Cmdline;
@@ -265,46 +265,6 @@ pub enum Error {
     FinalizeTdx(hypervisor::HypervisorVmError),
 }
 pub type Result<T> = result::Result<T, Error>;
-
-#[derive(Clone, Default)]
-pub struct NumaNode {
-    memory_regions: Vec<Arc<GuestRegionMmap>>,
-    hotplug_regions: Vec<Arc<GuestRegionMmap>>,
-    cpus: Vec<u8>,
-    distances: BTreeMap<u32, u8>,
-    memory_zones: Vec<String>,
-    #[cfg(target_arch = "x86_64")]
-    sgx_epc_sections: Vec<SgxEpcSection>,
-}
-
-impl NumaNode {
-    pub fn memory_regions(&self) -> &Vec<Arc<GuestRegionMmap>> {
-        &self.memory_regions
-    }
-
-    pub fn hotplug_regions(&self) -> &Vec<Arc<GuestRegionMmap>> {
-        &self.hotplug_regions
-    }
-
-    pub fn cpus(&self) -> &Vec<u8> {
-        &self.cpus
-    }
-
-    pub fn distances(&self) -> &BTreeMap<u32, u8> {
-        &self.distances
-    }
-
-    pub fn memory_zones(&self) -> &Vec<String> {
-        &self.memory_zones
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    pub fn sgx_epc_sections(&self) -> &Vec<SgxEpcSection> {
-        &self.sgx_epc_sections
-    }
-}
-
-pub type NumaNodes = BTreeMap<u32, NumaNode>;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 pub enum VmState {
