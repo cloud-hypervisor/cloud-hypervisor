@@ -498,7 +498,7 @@ impl Migratable for Net {
                 .start_dirty_log(last_ram_addr)
                 .map_err(|e| {
                     MigratableError::MigrateStart(anyhow!(
-                        "Error starting migration for vhost-user-blk backend: {:?}",
+                        "Error starting migration for vhost-user-net backend: {:?}",
                         e
                     ))
                 })
@@ -512,7 +512,7 @@ impl Migratable for Net {
     fn stop_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
         self.vu.lock().unwrap().stop_dirty_log().map_err(|e| {
             MigratableError::MigrateStop(anyhow!(
-                "Error stopping migration for vhost-user-blk backend: {:?}",
+                "Error stopping migration for vhost-user-net backend: {:?}",
                 e
             ))
         })
@@ -527,7 +527,7 @@ impl Migratable for Net {
                 .dirty_log(last_ram_addr)
                 .map_err(|e| {
                     MigratableError::MigrateDirtyRanges(anyhow!(
-                        "Error retrieving dirty ranges from vhost-user-blk backend: {:?}",
+                        "Error retrieving dirty ranges from vhost-user-net backend: {:?}",
                         e
                     ))
                 })
