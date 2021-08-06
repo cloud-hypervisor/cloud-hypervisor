@@ -9,5 +9,5 @@ default = []
 
 [dependencies]
 log = "0.4.14"
-virtio-bindings = { version = "0.1", features = ["virtio-v5_0_0"]}
+virtio-bindings = { version = "0.1.0", features = ["virtio-v5_0_0"] }
 vm-memory = { version = "0.6.0", features = ["backend-mmap", "backend-atomic", "backend-bitmap"] }
