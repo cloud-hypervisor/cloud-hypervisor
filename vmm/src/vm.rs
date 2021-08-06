@@ -1102,6 +1102,7 @@ impl Vm {
             &initramfs_config,
             &pci_space,
             &*gic_device,
+            &self.numa_nodes,
         )
         .map_err(Error::ConfigureSystem)?;
 
@@ -2632,6 +2633,7 @@ mod tests {
             &*gic,
             &None,
             &(0x1_0000_0000, 0x1_0000),
+            &BTreeMap::new(),
         )
         .is_ok())
     }

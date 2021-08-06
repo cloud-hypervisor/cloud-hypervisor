@@ -14,9 +14,7 @@ pub mod regs;
 pub mod uefi;
 
 pub use self::fdt::DeviceInfoForFdt;
-use crate::DeviceType;
-use crate::GuestMemoryMmap;
-use crate::RegionType;
+use crate::{DeviceType, GuestMemoryMmap, NumaNodes, RegionType};
 use gic::GicDevice;
 use log::{log_enabled, Level};
 use std::collections::HashMap;
@@ -145,6 +143,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Bui
     initrd: &Option<super::InitramfsConfig>,
     pci_space_address: &(u64, u64),
     gic_device: &dyn GicDevice,
+    numa_nodes: &NumaNodes,
 ) -> super::Result<()> {
     let fdt_final = fdt::create_fdt(
         guest_mem,
@@ -155,6 +154,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Bui
         gic_device,
         initrd,
         pci_space_address,
+        numa_nodes,
     )
     .map_err(|_| Error::SetupFdt)?;
 
