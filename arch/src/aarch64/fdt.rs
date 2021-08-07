@@ -105,7 +105,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     // This is not mandatory but we use it to point the root node to the node
     // containing description of the interrupt controller for this VM.
     fdt.property_u32("interrupt-parent", GIC_PHANDLE)?;
-    create_cpu_nodes(&mut fdt, &vcpu_mpidr, vcpu_topology)?;
+    create_cpu_nodes(&mut fdt, &vcpu_mpidr, vcpu_topology, numa_nodes)?;
     create_memory_node(&mut fdt, guest_mem)?;
     create_chosen_node(&mut fdt, cmdline.to_str().unwrap(), initrd)?;
     create_gic_node(&mut fdt, gic_device)?;
@@ -140,6 +140,7 @@ fn create_cpu_nodes(
     fdt: &mut FdtWriter,
     vcpu_mpidr: &[u64],
     vcpu_topology: Option<(u8, u8, u8)>,
+    numa_nodes: &NumaNodes,
 ) -> FdtWriterResult<()> {
     // See https://github.com/torvalds/linux/blob/master/Documentation/devicetree/bindings/arm/cpus.yaml.
     let cpus_node = fdt.begin_node("cpus")?;
@@ -164,6 +165,17 @@ fn create_cpu_nodes(
         // See http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.ddi0488c/BABHBJCI.html.
         fdt.property_u32("reg", (mpidr & 0x7FFFFF) as u32)?;
         fdt.property_u32("phandle", cpu_id as u32 + FIRST_VCPU_PHANDLE)?;
+
+        // Add `numa-node-id` property if there is any numa config.
+        if numa_nodes.len() > 1 {
+            for numa_node_idx in 0..numa_nodes.len() {
+                let numa_node = numa_nodes.get(&(numa_node_idx as u32));
+                if numa_node.unwrap().cpus.contains(&(cpu_id as u8)) {
+                    fdt.property_u32("numa-node-id", numa_node_idx as u32)?;
+                }
+            }
+        }
+
         fdt.end_node(cpu_node)?;
     }
 
