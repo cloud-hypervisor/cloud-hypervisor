@@ -441,6 +441,10 @@ Multiple values can be provided to define the list. Each value is a string
 referring to an existing memory zone identifier. Values are separated from
 each other with the `:` separator.
 
+Note that a memory zone must belong to a single NUMA node. The following
+configuration is incorrect, therefore not allowed:
+`--numa guest_numa_id=0,memory_zones=mem0 guest_numa_id=1,memory_zones=mem0`
+
 _Example_
 
 ```
