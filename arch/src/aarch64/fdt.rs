@@ -25,7 +25,7 @@ use super::layout::{
     PCI_HIGH_BASE, PCI_MMCONFIG_SIZE, PCI_MMCONFIG_START,
 };
 use vm_fdt::{FdtWriter, FdtWriterResult};
-use vm_memory::{Address, Bytes, GuestAddress, GuestMemory, GuestMemoryError};
+use vm_memory::{Address, Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryRegion};
 
 // This is a value for uniquely identifying the FDT node declaring the interrupt controller.
 const GIC_PHANDLE: u32 = 1;
@@ -106,7 +106,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     // containing description of the interrupt controller for this VM.
     fdt.property_u32("interrupt-parent", GIC_PHANDLE)?;
     create_cpu_nodes(&mut fdt, &vcpu_mpidr, vcpu_topology, numa_nodes)?;
-    create_memory_node(&mut fdt, guest_mem)?;
+    create_memory_node(&mut fdt, guest_mem, numa_nodes)?;
     create_chosen_node(&mut fdt, cmdline.to_str().unwrap(), initrd)?;
     create_gic_node(&mut fdt, gic_device)?;
     create_timer_node(&mut fdt)?;
@@ -247,16 +247,46 @@ fn create_cpu_nodes(
     Ok(())
 }
 
-fn create_memory_node(fdt: &mut FdtWriter, guest_mem: &GuestMemoryMmap) -> FdtWriterResult<()> {
-    let mem_size = guest_mem.last_addr().raw_value() - super::layout::RAM_64BIT_START + 1;
-    // See https://github.com/torvalds/linux/blob/master/Documentation/devicetree/booting-without-of.txt#L960
-    // for an explanation of this.
-    let mem_reg_prop = [super::layout::RAM_64BIT_START as u64, mem_size as u64];
+fn create_memory_node(
+    fdt: &mut FdtWriter,
+    guest_mem: &GuestMemoryMmap,
+    numa_nodes: &NumaNodes,
+) -> FdtWriterResult<()> {
+    if numa_nodes.len() > 1 {
+        for numa_node_idx in 0..numa_nodes.len() {
+            let numa_node = numa_nodes.get(&(numa_node_idx as u32));
+            // Each memory zone of numa will have its own memory node, but
+            // different numa nodes should not share same memory zones.
+            for memory_region in numa_node.unwrap().memory_regions.iter() {
+                let memory_region_start_addr: u64 = memory_region.start_addr().raw_value();
+                let memory_region_size: u64 = memory_region.size() as u64;
+                let mem_reg_prop = [memory_region_start_addr, memory_region_size];
+                // With feature `acpi` enabled, RAM at 0-4M is for edk2 only
+                // and should be hidden to the guest.
+                #[cfg(feature = "acpi")]
+                if memory_region_start_addr == 0 {
+                    continue;
+                }
 
-    let memory_node = fdt.begin_node("memory")?;
-    fdt.property_string("device_type", "memory")?;
-    fdt.property_array_u64("reg", &mem_reg_prop)?;
-    fdt.end_node(memory_node)?;
+                let memory_node_name = format!("memory@{:x}", memory_region_start_addr);
+                let memory_node = fdt.begin_node(&memory_node_name)?;
+                fdt.property_string("device_type", "memory")?;
+                fdt.property_array_u64("reg", &mem_reg_prop)?;
+                fdt.property_u32("numa-node-id", numa_node_idx as u32)?;
+                fdt.end_node(memory_node)?;
+            }
+        }
+    } else {
+        let mem_size = guest_mem.last_addr().raw_value() - super::layout::RAM_64BIT_START + 1;
+        // See https://github.com/torvalds/linux/blob/master/Documentation/devicetree/booting-without-of.txt#L960
+        // for an explanation of this.
+        let mem_reg_prop = [super::layout::RAM_64BIT_START as u64, mem_size as u64];
+        let memory_node = fdt.begin_node("memory")?;
+
+        fdt.property_string("device_type", "memory")?;
+        fdt.property_array_u64("reg", &mem_reg_prop)?;
+        fdt.end_node(memory_node)?;
+    }
 
     Ok(())
 }
