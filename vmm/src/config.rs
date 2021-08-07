@@ -8,6 +8,7 @@ use net_util::MacAddr;
 use option_parser::{
     ByteSized, IntegerList, OptionParser, OptionParserError, StringList, Toggle, TupleTwoIntegers,
 };
+use std::collections::HashMap;
 use std::convert::From;
 use std::fmt;
 use std::net::Ipv4Addr;
@@ -126,20 +127,22 @@ pub enum ValidationError {
     VnetQueueFdMismatch,
     /// Using reserved fd
     VnetReservedFd,
-    // Hugepages not turned on
+    /// Hugepages not turned on
     HugePageSizeWithoutHugePages,
-    // Huge page size is not power of 2
+    /// Huge page size is not power of 2
     InvalidHugePageSize(u64),
-    // CPU Hotplug not permitted with TDX
+    /// CPU Hotplug not permitted with TDX
     #[cfg(feature = "tdx")]
     TdxNoCpuHotplug,
-    // Specifying kernel not permitted with TDX
+    /// Specifying kernel not permitted with TDX
     #[cfg(feature = "tdx")]
     TdxKernelSpecified,
-    // Insuffient vCPUs for queues
+    /// Insuffient vCPUs for queues
     TooManyQueues,
-    // Need shared memory for vfio-user
+    /// Need shared memory for vfio-user
     UserDevicesRequireSharedMemory,
+    /// Memory zone is reused across NUMA nodes
+    MemoryZoneReused(String, u32, u32),
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -189,6 +192,13 @@ impl fmt::Display for ValidationError {
             }
             UserDevicesRequireSharedMemory => {
                 write!(f, "Using user devices requires using shared memory")
+            }
+            MemoryZoneReused(s, u1, u2) => {
+                write!(
+                    f,
+                    "Memory zone: {} belongs to multiple NUMA nodes {} and {}",
+                    s, u1, u2
+                )
             }
         }
     }
@@ -1915,6 +1925,27 @@ impl VmConfig {
                 return Err(ValidationError::UserDevicesRequireSharedMemory);
             }
         }
+
+        if let Some(numa) = &self.numa {
+            let mut used_numa_node_memory_zones = HashMap::new();
+            for numa_node in numa.iter() {
+                for memory_zone in numa_node.memory_zones.clone().unwrap().iter() {
+                    if !used_numa_node_memory_zones.contains_key(memory_zone) {
+                        used_numa_node_memory_zones
+                            .insert(memory_zone.to_string(), numa_node.guest_numa_id);
+                    } else {
+                        return Err(ValidationError::MemoryZoneReused(
+                            memory_zone.to_string(),
+                            *used_numa_node_memory_zones
+                                .get(&memory_zone.to_string())
+                                .unwrap(),
+                            numa_node.guest_numa_id,
+                        ));
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 
