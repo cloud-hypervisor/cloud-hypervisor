@@ -284,17 +284,10 @@ impl VhostUserHandle {
         self.vu.reset_owner().map_err(Error::VhostUserResetOwner)
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn reinitialize_vhost_user<S: VhostUserMasterReqHandler>(
+    pub fn set_protocol_features_vhost_user(
         &mut self,
-        mem: &GuestMemoryMmap,
-        queues: Vec<Queue>,
-        queue_evts: Vec<EventFd>,
-        virtio_interrupt: &Arc<dyn VirtioInterrupt>,
         acked_features: u64,
         acked_protocol_features: u64,
-        slave_req_handler: &Option<MasterReqHandler<S>>,
-        inflight: Option<&mut Inflight>,
     ) -> Result<()> {
         self.vu.set_owner().map_err(Error::VhostUserSetOwner)?;
         self.vu
@@ -316,6 +309,23 @@ impl VhostUserHandle {
         }
 
         self.update_supports_migration(acked_features, acked_protocol_features);
+
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn reinitialize_vhost_user<S: VhostUserMasterReqHandler>(
+        &mut self,
+        mem: &GuestMemoryMmap,
+        queues: Vec<Queue>,
+        queue_evts: Vec<EventFd>,
+        virtio_interrupt: &Arc<dyn VirtioInterrupt>,
+        acked_features: u64,
+        acked_protocol_features: u64,
+        slave_req_handler: &Option<MasterReqHandler<S>>,
+        inflight: Option<&mut Inflight>,
+    ) -> Result<()> {
+        self.set_protocol_features_vhost_user(acked_features, acked_protocol_features)?;
 
         self.setup_vhost_user(
             mem,
