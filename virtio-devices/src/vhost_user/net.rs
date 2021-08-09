@@ -116,6 +116,7 @@ pub struct Net {
     epoll_thread: Option<thread::JoinHandle<()>>,
     seccomp_action: SeccompAction,
     vu_num_queues: usize,
+    migration_started: bool,
 }
 
 impl Net {
@@ -208,6 +209,7 @@ impl Net {
             epoll_thread: None,
             seccomp_action,
             vu_num_queues,
+            migration_started: false,
         })
     }
 
@@ -495,7 +497,13 @@ impl Snapshottable for Net {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        Snapshot::new_from_versioned_state(&self.id(), &self.state())
+        let snapshot = Snapshot::new_from_versioned_state(&self.id(), &self.state())?;
+
+        if self.migration_started {
+            self.shutdown();
+        }
+
+        Ok(snapshot)
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
@@ -507,6 +515,7 @@ impl Transportable for Net {}
 
 impl Migratable for Net {
     fn start_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
+        self.migration_started = true;
         if let Some(vu) = &self.vu {
             if let Some(guest_memory) = &self.guest_memory {
                 let last_ram_addr = guest_memory.memory().last_addr().raw_value();
@@ -530,6 +539,7 @@ impl Migratable for Net {
     }
 
     fn stop_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
+        self.migration_started = false;
         if let Some(vu) = &self.vu {
             vu.lock().unwrap().stop_dirty_log().map_err(|e| {
                 MigratableError::StopDirtyLog(anyhow!(
