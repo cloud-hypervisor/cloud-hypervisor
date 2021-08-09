@@ -1133,13 +1133,21 @@ impl Vmm {
                 info!("Migration complete");
                 Ok(())
             } {
-                // Stop logging dirty pages and keep the source VM paused unpon successful migration
+                // Stop logging dirty pages and shutdown the source VM paused unpon successful migration
                 Ok(()) => {
                     // Let every Migratable object know about the migration being complete
                     vm.complete_migration()?;
 
                     // Stop logging dirty pages
                     vm.stop_dirty_log()?;
+
+                    // Shutdown the VM after the migration succeeded
+                    self.exit_evt.write(1).map_err(|e| {
+                        MigratableError::MigrateSend(anyhow!(
+                            "Failed shutting down the VM after migration: {:?}",
+                            e
+                        ))
+                    })?;
 
                     Ok(())
                 }
