@@ -1843,7 +1843,7 @@ impl DeviceManager {
                 queue_size: disk_cfg.queue_size,
             };
             let vhost_user_block_device = Arc::new(Mutex::new(
-                match virtio_devices::vhost_user::Blk::new(id.clone(), vu_cfg) {
+                match virtio_devices::vhost_user::Blk::new(id.clone(), vu_cfg, self.restoring) {
                     Ok(vub_device) => vub_device,
                     Err(e) => {
                         return Err(DeviceManagerError::CreateVhostUserBlk(e));
@@ -2000,6 +2000,7 @@ impl DeviceManager {
                     vu_cfg,
                     server,
                     self.seccomp_action.clone(),
+                    self.restoring,
                 ) {
                     Ok(vun_device) => vun_device,
                     Err(e) => {
@@ -2267,6 +2268,7 @@ impl DeviceManager {
                     fs_cfg.queue_size,
                     cache,
                     self.seccomp_action.clone(),
+                    self.restoring,
                 )
                 .map_err(DeviceManagerError::CreateVirtioFs)?,
             ));
