@@ -45,6 +45,9 @@ pub struct State {
     pub avail_features: u64,
     pub acked_features: u64,
     pub config: VirtioFsConfig,
+    pub acked_protocol_features: u64,
+    pub vu_num_queues: usize,
+    pub slave_req_support: bool,
 }
 
 impl VersionMapped for State {}
@@ -315,6 +318,7 @@ pub struct Fs {
 
 impl Fs {
     /// Create a new virtio-fs device.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         path: &str,
@@ -323,11 +327,39 @@ impl Fs {
         queue_size: u16,
         cache: Option<(VirtioSharedMemoryList, MmapRegion)>,
         seccomp_action: SeccompAction,
+        restoring: bool,
     ) -> Result<Fs> {
         let mut slave_req_support = false;
 
         // Calculate the actual number of queues needed.
         let num_queues = NUM_QUEUE_OFFSET + req_num_queues;
+
+        if restoring {
+            // We need 'queue_sizes' to report a number of queues that will be
+            // enough to handle all the potential queues. VirtioPciDevice::new()
+            // will create the actual queues based on this information.
+            return Ok(Fs {
+                id,
+                common: VirtioCommon {
+                    device_type: VirtioDeviceType::Fs as u32,
+                    queue_sizes: vec![queue_size; num_queues],
+                    paused_sync: Some(Arc::new(Barrier::new(2))),
+                    min_queues: DEFAULT_QUEUE_NUMBER as u16,
+                    ..Default::default()
+                },
+                vu: None,
+                config: VirtioFsConfig::default(),
+                cache,
+                slave_req_support,
+                seccomp_action,
+                guest_memory: None,
+                acked_protocol_features: 0,
+                socket_path: path.to_string(),
+                epoll_thread: None,
+                vu_num_queues: num_queues,
+                migration_started: false,
+            });
+        }
 
         // Connect to the vhost-user socket.
         let mut vu = VhostUserHandle::connect_vhost_user(false, path, num_queues as u64, false)?;
@@ -408,6 +440,9 @@ impl Fs {
             avail_features: self.common.avail_features,
             acked_features: self.common.acked_features,
             config: self.config,
+            acked_protocol_features: self.acked_protocol_features,
+            vu_num_queues: self.vu_num_queues,
+            slave_req_support: self.slave_req_support,
         }
     }
 
@@ -415,6 +450,32 @@ impl Fs {
         self.common.avail_features = state.avail_features;
         self.common.acked_features = state.acked_features;
         self.config = state.config;
+        self.acked_protocol_features = state.acked_protocol_features;
+        self.vu_num_queues = state.vu_num_queues;
+        self.slave_req_support = state.slave_req_support;
+
+        let mut vu = match VhostUserHandle::connect_vhost_user(
+            false,
+            &self.socket_path,
+            self.vu_num_queues as u64,
+            false,
+        ) {
+            Ok(r) => r,
+            Err(e) => {
+                error!("Failed connecting vhost-user backend: {:?}", e);
+                return;
+            }
+        };
+
+        if let Err(e) = vu.set_protocol_features_vhost_user(
+            self.common.acked_features,
+            self.acked_protocol_features,
+        ) {
+            error!("Failed setting up vhost-user backend: {:?}", e);
+            return;
+        }
+
+        self.vu = Some(Arc::new(Mutex::new(vu)));
     }
 }
 
