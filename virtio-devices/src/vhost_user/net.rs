@@ -569,4 +569,23 @@ impl Migratable for Net {
             Ok(MemoryRangeTable::default())
         }
     }
+
+    fn complete_migration(&mut self) -> std::result::Result<(), MigratableError> {
+        // Make sure the device thread is killed in order to prevent from
+        // reconnections to the socket.
+        if let Some(kill_evt) = self.common.kill_evt.take() {
+            kill_evt.write(1).map_err(|e| {
+                MigratableError::CompleteMigration(anyhow!(
+                    "Error killing vhost-user-net threads: {:?}",
+                    e
+                ))
+            })?;
+        }
+
+        // Drop the vhost-user handler to avoid further calls to fail because
+        // the connection with the backend has been closed.
+        self.vu = None;
+
+        Ok(())
+    }
 }
