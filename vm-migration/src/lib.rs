@@ -56,6 +56,9 @@ pub enum MigratableError {
 
     #[error("Failed to retrieve dirty ranges for migratable component: {0}")]
     DirtyLog(#[source] anyhow::Error),
+
+    #[error("Failed to complete migration for migratable component: {0}")]
+    CompleteMigration(#[source] anyhow::Error),
 }
 
 /// A Pausable component can be paused and resumed.
@@ -300,5 +303,9 @@ pub trait Migratable: Send + Pausable + Snapshottable + Transportable {
 
     fn dirty_log(&mut self) -> std::result::Result<MemoryRangeTable, MigratableError> {
         Ok(MemoryRangeTable::default())
+    }
+
+    fn complete_migration(&mut self) -> std::result::Result<(), MigratableError> {
+        Ok(())
     }
 }
