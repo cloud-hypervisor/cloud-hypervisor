@@ -2547,6 +2547,11 @@ impl Migratable for Vm {
             self.device_manager.lock().unwrap().dirty_log()?,
         ]))
     }
+
+    fn complete_migration(&mut self) -> std::result::Result<(), MigratableError> {
+        self.memory_manager.lock().unwrap().complete_migration()?;
+        self.device_manager.lock().unwrap().complete_migration()
+    }
 }
 
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
