@@ -4188,6 +4188,15 @@ impl Migratable for DeviceManager {
         }
         Ok(MemoryRangeTable::new_from_tables(tables))
     }
+
+    fn complete_migration(&mut self) -> std::result::Result<(), MigratableError> {
+        for (_, device_node) in self.device_tree.lock().unwrap().iter() {
+            if let Some(migratable) = &device_node.migratable {
+                migratable.lock().unwrap().complete_migration()?;
+            }
+        }
+        Ok(())
+    }
 }
 
 const PCIU_FIELD_OFFSET: u64 = 0;

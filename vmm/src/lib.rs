@@ -1135,6 +1135,9 @@ impl Vmm {
             } {
                 // Stop logging dirty pages and keep the source VM paused unpon successful migration
                 Ok(()) => {
+                    // Let every Migratable object know about the migration being complete
+                    vm.complete_migration()?;
+
                     // Stop logging dirty pages
                     vm.stop_dirty_log()?;
 
