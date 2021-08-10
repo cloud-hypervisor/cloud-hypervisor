@@ -315,9 +315,9 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "libc"
-version = "0.2.98"
+version = "0.2.99"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "320cfe77175da3a483efed4bc0adc1968ca050b098ce4f2f1c13a56626128790"
+checksum = "a7f823d141fe0a24df1e23b4af4e3c7ba9e5966ec514ea068c93024aa7deb765"
 
 [[package]]
 name = "libfuzzer-sys"
@@ -406,6 +406,7 @@ dependencies = [
  "versionize_derive",
  "vfio-bindings",
  "vfio-ioctls",
+ "vfio_user",
  "vm-allocator",
  "vm-device",
  "vm-memory 0.6.0",
@@ -661,9 +662,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "vfio_user"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "log",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "thiserror",
+ "vfio-bindings",
+ "vm-memory 0.5.0",
+ "vmm-sys-util",
+]
+
+[[package]]
 name = "vhost"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vhost?branch=master#14d754c5c77f06d5af8fc48b2634debd5fbd9a18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a6b90237e10f1a61b35fba73885c3567e1a5a8c40d44daae335f7710210a7dc"
 dependencies = [
  "bitflags",
  "libc",
@@ -743,6 +761,7 @@ name = "vm-memory"
 version = "0.5.0"
 source = "git+https://github.com/rust-vmm/vm-memory?rev=5bd7138758183a73ac0da27ce40c004d95f1a7e9#5bd7138758183a73ac0da27ce40c004d95f1a7e9"
 dependencies = [
+ "arc-swap",
  "libc",
  "winapi",
 ]
