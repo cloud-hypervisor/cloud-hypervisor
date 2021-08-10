@@ -9,12 +9,12 @@ block_util = { path = "../block_util" }
 clap = { version = "2.33.3", features = ["wrap_help"] }
 env_logger = "0.9.0"
 epoll = "4.3.1"
-libc = "0.2.98"
+libc = "0.2.99"
 log = "0.4.14"
 option_parser = { path = "../option_parser" }
 qcow = { path = "../qcow" }
 vhost_user_backend = { path = "../vhost_user_backend" }
-vhost = { version = "0.1.0" , features = ["vhost-user-slave"] }
+vhost = { version = "0.1.0", features = ["vhost-user-slave"] }
 virtio-bindings = "0.1.0"
 vm-memory = "0.6.0"
 vmm-sys-util = "0.8.0"

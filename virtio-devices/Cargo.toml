@@ -17,7 +17,7 @@ byteorder = "1.4.3"
 epoll = "4.3.1"
 event_monitor = { path = "../event_monitor" }
 io-uring = "0.5.1"
-libc = "0.2.98"
+libc = "0.2.99"
 log = "0.4.14"
 net_gen = { path = "../net_gen" }
 net_util = { path = "../net_util" }
@@ -29,8 +29,8 @@ serde_derive = "1.0.127"
 serde_json = "1.0.66"
 versionize = "0.1.6"
 versionize_derive = "0.1.4"
-vhost = { version = "0.1.0" , features = ["vhost-user-master", "vhost-user-slave", "vhost-kern"] }
-virtio-bindings = { version = "0.1", features = ["virtio-v5_0_0"]}
+vhost = { version = "0.1.0", features = ["vhost-user-master", "vhost-user-slave", "vhost-kern"] }
+virtio-bindings = { version = "0.1.0", features = ["virtio-v5_0_0"] }
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
 vm-memory = { version = "0.6.0", features = ["backend-mmap", "backend-atomic", "backend-bitmap"] }

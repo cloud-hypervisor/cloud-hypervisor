@@ -10,7 +10,7 @@ byteorder = "1.4.3"
 hypervisor = { path = "../hypervisor" }
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio-ioctls", branch = "master" }
 vmm-sys-util = "0.8.0"
-libc = "0.2.98"
+libc = "0.2.99"
 log = "0.4.14"
 thiserror = "1.0.26"
 versionize = "0.1.6"
