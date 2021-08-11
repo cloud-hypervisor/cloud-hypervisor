@@ -501,11 +501,11 @@ impl Client {
                 .map_err(Error::StreamWrite)?;
 
             let mut reply = DeviceGetRegionInfo::default();
-            info!("Reply: {:?}", reply);
             let (_, fd) = self
                 .stream
                 .recv_with_fd(reply.as_mut_slice())
                 .map_err(Error::ReceiveWithFd)?;
+            info!("Reply: {:?}", reply);
 
             regions.push(Region {
                 flags: reply.region_info.flags,
