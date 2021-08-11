@@ -1398,6 +1398,7 @@ dependencies = [
  "versionize",
  "versionize_derive",
  "vfio-ioctls",
+ "vfio_user",
  "vhdx",
  "virtio-devices",
  "vm-allocator",
