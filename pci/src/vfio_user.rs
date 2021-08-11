@@ -271,6 +271,49 @@ impl PciDevice for VfioUserPciDevice {
         self.common
             .write_bar(base, offset, data, &self.vfio_wrapper)
     }
+
+    fn move_bar(&mut self, old_base: u64, new_base: u64) -> Result<(), std::io::Error> {
+        info!("Moving BAR 0x{:x} -> 0x{:x}", old_base, new_base);
+        for mmio_region in self.common.mmio_regions.iter_mut() {
+            if mmio_region.start.raw_value() == old_base {
+                mmio_region.start = GuestAddress(new_base);
+
+                if let Some(mem_slot) = mmio_region.mem_slot {
+                    if let Some(host_addr) = mmio_region.host_addr {
+                        // Remove original region
+                        let old_region = self.vm.make_user_memory_region(
+                            mem_slot,
+                            old_base,
+                            mmio_region.length as u64,
+                            host_addr as u64,
+                            false,
+                            false,
+                        );
+
+                        self.vm
+                            .remove_user_memory_region(old_region)
+                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+                        let new_region = self.vm.make_user_memory_region(
+                            mem_slot,
+                            new_base,
+                            mmio_region.length as u64,
+                            host_addr as u64,
+                            false,
+                            false,
+                        );
+
+                        self.vm
+                            .create_user_memory_region(new_region)
+                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                    }
+                }
+                info!("Moved bar 0x{:x} -> 0x{:x}", old_base, new_base);
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl VfioUserPciDevice {
