@@ -398,18 +398,10 @@ impl VfioUserPciDevice {
                 mmio_region.mmap_size,
                 mmio_region.mem_slot,
             ) {
-                let file_offset = self
-                    .client
-                    .lock()
-                    .unwrap()
-                    .region(mmio_region.index)
-                    .unwrap()
-                    .file_offset
-                    .clone();
                 // Remove region
                 let r = self.vm.make_user_memory_region(
                     mem_slot,
-                    mmio_region.start.raw_value() + file_offset.unwrap().start(),
+                    mmio_region.start.raw_value(),
                     mmap_size as u64,
                     host_addr as u64,
                     false,
