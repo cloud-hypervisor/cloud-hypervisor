@@ -4,17 +4,15 @@
 use super::vu_common_ctrl::VhostUserHandle;
 use super::{Error, Result, DEFAULT_VIRTIO_FEATURES};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
-use crate::vhost_user::{Inflight, VhostUserEpollHandler};
+use crate::vhost_user::VhostUserCommon;
 use crate::{
     ActivateError, ActivateResult, Queue, UserspaceMapping, VirtioCommon, VirtioDevice,
     VirtioDeviceType, VirtioInterrupt, VirtioSharedMemoryList,
 };
 use crate::{GuestMemoryMmap, GuestRegionMmap, MmapRegion};
-use anyhow::anyhow;
 use libc::{self, c_void, off64_t, pread64, pwrite64};
 use seccomp::{SeccompAction, SeccompFilter};
 use std::io;
-use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::{Arc, Barrier, Mutex};
@@ -300,8 +298,8 @@ unsafe impl ByteValued for VirtioFsConfig {}
 
 pub struct Fs {
     common: VirtioCommon,
+    vu_common: VhostUserCommon,
     id: String,
-    vu: Option<Arc<Mutex<VhostUserHandle>>>,
     config: VirtioFsConfig,
     // Hold ownership of the memory that is allocated for the device
     // which will be automatically dropped when the device is dropped
@@ -309,11 +307,7 @@ pub struct Fs {
     slave_req_support: bool,
     seccomp_action: SeccompAction,
     guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
-    acked_protocol_features: u64,
-    socket_path: String,
     epoll_thread: Option<thread::JoinHandle<()>>,
-    vu_num_queues: usize,
-    migration_started: bool,
 }
 
 impl Fs {
@@ -339,7 +333,6 @@ impl Fs {
             // enough to handle all the potential queues. VirtioPciDevice::new()
             // will create the actual queues based on this information.
             return Ok(Fs {
-                id,
                 common: VirtioCommon {
                     device_type: VirtioDeviceType::Fs as u32,
                     queue_sizes: vec![queue_size; num_queues],
@@ -347,17 +340,18 @@ impl Fs {
                     min_queues: DEFAULT_QUEUE_NUMBER as u16,
                     ..Default::default()
                 },
-                vu: None,
+                vu_common: VhostUserCommon {
+                    socket_path: path.to_string(),
+                    vu_num_queues: num_queues,
+                    ..Default::default()
+                },
+                id,
                 config: VirtioFsConfig::default(),
                 cache,
                 slave_req_support,
                 seccomp_action,
                 guest_memory: None,
-                acked_protocol_features: 0,
-                socket_path: path.to_string(),
                 epoll_thread: None,
-                vu_num_queues: num_queues,
-                migration_started: false,
             });
         }
 
@@ -420,18 +414,20 @@ impl Fs {
                 min_queues: DEFAULT_QUEUE_NUMBER as u16,
                 ..Default::default()
             },
+            vu_common: VhostUserCommon {
+                vu: Some(Arc::new(Mutex::new(vu))),
+                acked_protocol_features,
+                socket_path: path.to_string(),
+                vu_num_queues: num_queues,
+                ..Default::default()
+            },
             id,
-            vu: Some(Arc::new(Mutex::new(vu))),
             config,
             cache,
             slave_req_support,
             seccomp_action,
             guest_memory: None,
-            acked_protocol_features,
-            socket_path: path.to_string(),
             epoll_thread: None,
-            vu_num_queues: num_queues,
-            migration_started: false,
         })
     }
 
@@ -440,8 +436,8 @@ impl Fs {
             avail_features: self.common.avail_features,
             acked_features: self.common.acked_features,
             config: self.config,
-            acked_protocol_features: self.acked_protocol_features,
-            vu_num_queues: self.vu_num_queues,
+            acked_protocol_features: self.vu_common.acked_protocol_features,
+            vu_num_queues: self.vu_common.vu_num_queues,
             slave_req_support: self.slave_req_support,
         }
     }
@@ -450,32 +446,19 @@ impl Fs {
         self.common.avail_features = state.avail_features;
         self.common.acked_features = state.acked_features;
         self.config = state.config;
-        self.acked_protocol_features = state.acked_protocol_features;
-        self.vu_num_queues = state.vu_num_queues;
+        self.vu_common.acked_protocol_features = state.acked_protocol_features;
+        self.vu_common.vu_num_queues = state.vu_num_queues;
         self.slave_req_support = state.slave_req_support;
 
-        let mut vu = match VhostUserHandle::connect_vhost_user(
-            false,
-            &self.socket_path,
-            self.vu_num_queues as u64,
-            false,
-        ) {
-            Ok(r) => r,
-            Err(e) => {
-                error!("Failed connecting vhost-user backend: {:?}", e);
-                return;
-            }
-        };
-
-        if let Err(e) = vu.set_protocol_features_vhost_user(
-            self.common.acked_features,
-            self.acked_protocol_features,
-        ) {
-            error!("Failed setting up vhost-user backend: {:?}", e);
-            return;
+        if let Err(e) = self
+            .vu_common
+            .restore_backend_connection(self.common.acked_features)
+        {
+            error!(
+                "Failed restoring connection with vhost-user backend: {:?}",
+                e
+            );
         }
-
-        self.vu = Some(Arc::new(Mutex::new(vu)));
     }
 }
 
@@ -548,50 +531,20 @@ impl VirtioDevice for Fs {
         let backend_acked_features = self.common.acked_features
             | (self.common.avail_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits());
 
-        let mut inflight: Option<Inflight> =
-            if self.acked_protocol_features & VhostUserProtocolFeatures::INFLIGHT_SHMFD.bits() != 0
-            {
-                Some(Inflight::default())
-            } else {
-                None
-            };
-
-        if self.vu.is_none() {
-            error!("Missing vhost-user handle");
-            return Err(ActivateError::BadActivate);
-        }
-        let vu = self.vu.as_ref().unwrap();
-        vu.lock()
-            .unwrap()
-            .setup_vhost_user(
-                &mem.memory(),
-                queues.clone(),
-                queue_evts.iter().map(|q| q.try_clone().unwrap()).collect(),
-                &interrupt_cb,
-                backend_acked_features,
-                &slave_req_handler,
-                inflight.as_mut(),
-            )
-            .map_err(ActivateError::VhostUserFsSetup)?;
-
         // Run a dedicated thread for handling potential reconnections with
-        // the backend as well as requests initiated by the backend.
+        // the backend.
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
-        let mut handler: VhostUserEpollHandler<SlaveReqHandler> = VhostUserEpollHandler {
-            vu: vu.clone(),
+
+        let mut handler = self.vu_common.activate(
             mem,
-            kill_evt,
-            pause_evt,
             queues,
             queue_evts,
-            virtio_interrupt: interrupt_cb,
-            acked_features: backend_acked_features,
-            acked_protocol_features: self.acked_protocol_features,
-            socket_path: self.socket_path.clone(),
-            server: false,
+            interrupt_cb,
+            backend_acked_features,
             slave_req_handler,
-            inflight,
-        };
+            kill_evt,
+            pause_evt,
+        )?;
 
         let paused = self.common.paused.clone();
         let paused_sync = self.common.paused_sync.clone();
@@ -625,7 +578,7 @@ impl VirtioDevice for Fs {
             self.common.resume().ok()?;
         }
 
-        if let Some(vu) = &self.vu {
+        if let Some(vu) = &self.vu_common.vu {
             if let Err(e) = vu
                 .lock()
                 .unwrap()
@@ -648,9 +601,7 @@ impl VirtioDevice for Fs {
     }
 
     fn shutdown(&mut self) {
-        if let Some(vu) = &self.vu {
-            let _ = unsafe { libc::close(vu.lock().unwrap().socket_handle().as_raw_fd()) };
-        }
+        self.vu_common.shutdown()
     }
 
     fn get_shm_regions(&self) -> Option<VirtioSharedMemoryList> {
@@ -673,24 +624,7 @@ impl VirtioDevice for Fs {
         &mut self,
         region: &Arc<GuestRegionMmap>,
     ) -> std::result::Result<(), crate::Error> {
-        if let Some(vu) = &self.vu {
-            if self.acked_protocol_features & VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS.bits()
-                != 0
-            {
-                return vu
-                    .lock()
-                    .unwrap()
-                    .add_memory_region(region)
-                    .map_err(crate::Error::VhostUserAddMemoryRegion);
-            } else if let Some(guest_memory) = &self.guest_memory {
-                return vu
-                    .lock()
-                    .unwrap()
-                    .update_mem_table(guest_memory.memory().deref())
-                    .map_err(crate::Error::VhostUserUpdateMemory);
-            }
-        }
-        Ok(())
+        self.vu_common.add_memory_region(&self.guest_memory, region)
     }
 
     fn userspace_mappings(&self) -> Vec<UserspaceMapping> {
@@ -711,15 +645,7 @@ impl VirtioDevice for Fs {
 
 impl Pausable for Fs {
     fn pause(&mut self) -> result::Result<(), MigratableError> {
-        if let Some(vu) = &self.vu {
-            vu.lock()
-                .unwrap()
-                .pause_vhost_user(self.vu_num_queues)
-                .map_err(|e| {
-                    MigratableError::Pause(anyhow!("Error pausing vhost-user-fs backend: {:?}", e))
-                })?;
-        }
-
+        self.vu_common.pause()?;
         self.common.pause()
     }
 
@@ -730,19 +656,7 @@ impl Pausable for Fs {
             epoll_thread.thread().unpark();
         }
 
-        if let Some(vu) = &self.vu {
-            vu.lock()
-                .unwrap()
-                .resume_vhost_user(self.vu_num_queues)
-                .map_err(|e| {
-                    MigratableError::Resume(anyhow!(
-                        "Error resuming vhost-user-fs backend: {:?}",
-                        e
-                    ))
-                })
-        } else {
-            Ok(())
-        }
+        self.vu_common.resume()
     }
 }
 
@@ -752,13 +666,7 @@ impl Snapshottable for Fs {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        let snapshot = Snapshot::new_from_versioned_state(&self.id(), &self.state())?;
-
-        if self.migration_started {
-            self.shutdown();
-        }
-
-        Ok(snapshot)
+        self.vu_common.snapshot(&self.id(), &self.state())
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
@@ -770,77 +678,19 @@ impl Transportable for Fs {}
 
 impl Migratable for Fs {
     fn start_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
-        self.migration_started = true;
-        if let Some(vu) = &self.vu {
-            if let Some(guest_memory) = &self.guest_memory {
-                let last_ram_addr = guest_memory.memory().last_addr().raw_value();
-                vu.lock()
-                    .unwrap()
-                    .start_dirty_log(last_ram_addr)
-                    .map_err(|e| {
-                        MigratableError::StartDirtyLog(anyhow!(
-                            "Error starting migration for vhost-user-fs backend: {:?}",
-                            e
-                        ))
-                    })
-            } else {
-                Err(MigratableError::StartDirtyLog(anyhow!(
-                    "Missing guest memory"
-                )))
-            }
-        } else {
-            Ok(())
-        }
+        self.vu_common.start_dirty_log(&self.guest_memory)
     }
 
     fn stop_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
-        self.migration_started = false;
-        if let Some(vu) = &self.vu {
-            vu.lock().unwrap().stop_dirty_log().map_err(|e| {
-                MigratableError::StopDirtyLog(anyhow!(
-                    "Error stopping migration for vhost-user-fs backend: {:?}",
-                    e
-                ))
-            })
-        } else {
-            Ok(())
-        }
+        self.vu_common.stop_dirty_log()
     }
 
     fn dirty_log(&mut self) -> std::result::Result<MemoryRangeTable, MigratableError> {
-        if let Some(vu) = &self.vu {
-            if let Some(guest_memory) = &self.guest_memory {
-                let last_ram_addr = guest_memory.memory().last_addr().raw_value();
-                vu.lock().unwrap().dirty_log(last_ram_addr).map_err(|e| {
-                    MigratableError::DirtyLog(anyhow!(
-                        "Error retrieving dirty ranges from vhost-user-fs backend: {:?}",
-                        e
-                    ))
-                })
-            } else {
-                Err(MigratableError::DirtyLog(anyhow!("Missing guest memory")))
-            }
-        } else {
-            Ok(MemoryRangeTable::default())
-        }
+        self.vu_common.dirty_log(&self.guest_memory)
     }
 
     fn complete_migration(&mut self) -> std::result::Result<(), MigratableError> {
-        // Make sure the device thread is killed in order to prevent from
-        // reconnections to the socket.
-        if let Some(kill_evt) = self.common.kill_evt.take() {
-            kill_evt.write(1).map_err(|e| {
-                MigratableError::CompleteMigration(anyhow!(
-                    "Error killing vhost-user-fs threads: {:?}",
-                    e
-                ))
-            })?;
-        }
-
-        // Drop the vhost-user handler to avoid further calls to fail because
-        // the connection with the backend has been closed.
-        self.vu = None;
-
-        Ok(())
+        self.vu_common
+            .complete_migration(self.common.kill_evt.take())
     }
 }
