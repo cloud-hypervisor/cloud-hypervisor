@@ -385,6 +385,7 @@ impl VfioUserPciDevice {
 
                 mmio_region.mem_slot = Some(slot);
                 mmio_region.host_addr = Some(host_addr as u64);
+                mmio_region.mmap_size = Some(mmio_region.length as usize);
             }
         }
 
