@@ -4,7 +4,7 @@
 
 #![no_main]
 
-use block_util::{async_io::DiskFile, qcow_sync::QcowDiskSync};
+use block_util::{async_io::DiskFile, raw_sync::RawFileDiskSync};
 use libfuzzer_sys::fuzz_target;
 use seccomp::SeccompAction;
 use std::ffi;
@@ -84,7 +84,7 @@ fuzz_target!(|bytes| {
 
     let shm = memfd_create(&ffi::CString::new("fuzz").unwrap(), 0).unwrap();
     let disk_file: File = unsafe { File::from_raw_fd(shm) };
-    let qcow_disk = Box::new(QcowDiskSync::new(disk_file, false)) as Box<dyn DiskFile>;
+    let qcow_disk = Box::new(RawFileDiskSync::new(disk_file)) as Box<dyn DiskFile>;
 
     let mut block = Block::new(
         "tmp".to_owned(),
