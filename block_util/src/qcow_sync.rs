@@ -4,7 +4,7 @@
 
 use crate::async_io::{AsyncIo, AsyncIoResult, DiskFile, DiskFileResult};
 use crate::{disk_size, fsync_sync, read_vectored_sync, write_vectored_sync};
-use qcow::{QcowFile, RawFile};
+use qcow::{QcowFile, RawFile, Result as QcowResult};
 use std::fs::File;
 use std::sync::{Arc, Mutex};
 use vmm_sys_util::eventfd::EventFd;
@@ -15,12 +15,11 @@ pub struct QcowDiskSync {
 }
 
 impl QcowDiskSync {
-    pub fn new(file: File, direct_io: bool) -> Self {
-        QcowDiskSync {
-            qcow_file: QcowFile::from(RawFile::new(file, direct_io))
-                .expect("Failed creating QcowFile"),
+    pub fn new(file: File, direct_io: bool) -> QcowResult<Self> {
+        Ok(QcowDiskSync {
+            qcow_file: QcowFile::from(RawFile::new(file, direct_io))?,
             semaphore: Arc::new(Mutex::new(())),
-        }
+        })
     }
 }
 

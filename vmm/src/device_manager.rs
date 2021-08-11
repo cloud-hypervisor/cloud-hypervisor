@@ -417,6 +417,9 @@ pub enum DeviceManagerError {
     /// Failed to create FixedVhdDiskSync
     CreateFixedVhdDiskSync(io::Error),
 
+    /// Failed to create QcowDiskSync
+    CreateQcowDiskSync(qcow::Error),
+
     /// Failed adding DMA mapping handler to virtio-mem device.
     AddDmaMappingHandlerVirtioMem(virtio_devices::mem::Error),
 
@@ -1936,7 +1939,10 @@ impl DeviceManager {
                 }
                 ImageType::Qcow2 => {
                     info!("Using synchronous QCOW disk file");
-                    Box::new(QcowDiskSync::new(file, disk_cfg.direct)) as Box<dyn DiskFile>
+                    Box::new(
+                        QcowDiskSync::new(file, disk_cfg.direct)
+                            .map_err(DeviceManagerError::CreateQcowDiskSync)?,
+                    ) as Box<dyn DiskFile>
                 }
             };
 
