@@ -421,6 +421,9 @@ impl VfioCommon {
                     bar_addr = allocator
                         .allocate_io_addresses(None, region_size, Some(0x4))
                         .ok_or(PciDeviceError::IoAllocationFailed(region_size))?;
+
+                    // Write the new address to the device
+                    vfio_wrapper.write_config_dword(bar_offset, bar_addr.0 as u32);
                 }
                 #[cfg(target_arch = "aarch64")]
                 unimplemented!()
@@ -451,6 +454,10 @@ impl VfioCommon {
                 bar_addr = allocator
                     .allocate_mmio_addresses(None, region_size, Some(region_size))
                     .ok_or(PciDeviceError::IoAllocationFailed(region_size))?;
+
+                // Write the new address to the device (lower and upper)
+                vfio_wrapper.write_config_dword(bar_offset, bar_addr.0 as u32);
+                vfio_wrapper.write_config_dword(upper_offset, (bar_addr.0 >> 32) as u32);
             } else {
                 // Mask out flag bits (lowest 4 for memory bars)
                 lower &= !0b1111;
@@ -467,6 +474,9 @@ impl VfioCommon {
                 bar_addr = allocator
                     .allocate_mmio_hole_addresses(None, region_size, Some(region_size))
                     .ok_or(PciDeviceError::IoAllocationFailed(region_size))?;
+
+                // Write the new address to the device
+                vfio_wrapper.write_config_dword(bar_offset, bar_addr.0 as u32);
             }
 
             let reg_idx = if bar_id == VFIO_PCI_ROM_REGION_INDEX {
