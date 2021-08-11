@@ -11,7 +11,6 @@ use crate::{
 use hypervisor::HypervisorVmError;
 use std::any::Any;
 use std::os::unix::prelude::AsRawFd;
-use std::path::Path;
 use std::ptr::null_mut;
 use std::sync::{Arc, Barrier, Mutex};
 use std::u32;
@@ -61,12 +60,10 @@ impl PciSubclass for PciVfioUserSubclass {
 impl VfioUserPciDevice {
     pub fn new(
         vm: &Arc<dyn hypervisor::Vm>,
-        path: &Path,
+        client: Arc<Mutex<Client>>,
         msi_interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
     ) -> Result<Self, VfioUserPciDeviceError> {
-        let mut client = Client::new(path).map_err(VfioUserPciDeviceError::Client)?;
-
         // This is used for the BAR and capabilities only
         let configuration = PciConfiguration::new(
             0,
@@ -80,11 +77,14 @@ impl VfioUserPciDevice {
             0,
             None,
         );
-        if client.resettable() {
-            client.reset().map_err(VfioUserPciDeviceError::Client)?;
+        let resettable = client.lock().unwrap().resettable();
+        if resettable {
+            client
+                .lock()
+                .unwrap()
+                .reset()
+                .map_err(VfioUserPciDeviceError::Client)?;
         }
-
-        let client = Arc::new(Mutex::new(client));
 
         let vfio_wrapper = VfioUserClientWrapper {
             client: client.clone(),

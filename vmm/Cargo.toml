@@ -45,6 +45,7 @@ uuid = "0.8.2"
 versionize = "0.1.6"
 versionize_derive = "0.1.4"
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio-ioctls", branch = "main", default-features = false }
+vfio_user = { path = "../vfio_user" }
 vhdx = { path = "../vhdx" }
 virtio-devices = { path = "../virtio-devices" }
 vm-allocator = { path = "../vm-allocator" }

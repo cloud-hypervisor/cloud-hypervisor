@@ -442,6 +442,9 @@ pub enum DeviceManagerError {
     /// Failed removing DMA mapping handler from virtio-mem device.
     RemoveDmaMappingHandlerVirtioMem(virtio_devices::mem::Error),
 
+    /// Failed to create vfio-user client
+    VfioUserCreateClient(vfio_user::Error),
+
     /// Failed to create VFIO user device
     VfioUserCreate(VfioUserPciDeviceError),
 
@@ -3105,9 +3108,14 @@ impl DeviceManager {
             None
         };
 
+        let client = Arc::new(Mutex::new(
+            vfio_user::Client::new(&device_cfg.socket)
+                .map_err(DeviceManagerError::VfioUserCreateClient)?,
+        ));
+
         let mut vfio_user_pci_device = VfioUserPciDevice::new(
             &self.address_manager.vm,
-            &device_cfg.socket,
+            client,
             &self.msi_interrupt_manager,
             legacy_interrupt_group,
         )
