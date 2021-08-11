@@ -2,19 +2,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    EpollHelper, EpollHelperError, EpollHelperHandler, GuestMemoryMmap, Queue, VirtioInterrupt,
-    EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IN_ORDER, VIRTIO_F_NOTIFICATION_DATA,
-    VIRTIO_F_ORDER_PLATFORM, VIRTIO_F_RING_EVENT_IDX, VIRTIO_F_RING_INDIRECT_DESC,
-    VIRTIO_F_VERSION_1,
+    ActivateError, EpollHelper, EpollHelperError, EpollHelperHandler, GuestMemoryMmap,
+    GuestRegionMmap, Queue, VirtioInterrupt, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IN_ORDER,
+    VIRTIO_F_NOTIFICATION_DATA, VIRTIO_F_ORDER_PLATFORM, VIRTIO_F_RING_EVENT_IDX,
+    VIRTIO_F_RING_INDIRECT_DESC, VIRTIO_F_VERSION_1,
 };
+use anyhow::anyhow;
 use std::io;
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::sync::{atomic::AtomicBool, Arc, Barrier, Mutex};
-use vhost::vhost_user::message::{VhostUserInflight, VhostUserVirtioFeatures};
+use versionize::Versionize;
+use vhost::vhost_user::message::{
+    VhostUserInflight, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
+};
 use vhost::vhost_user::{MasterReqHandler, VhostUserMasterReqHandler};
 use vhost::Error as VhostError;
-use vm_memory::{mmap::MmapRegionError, Error as MmapError, GuestAddressSpace, GuestMemoryAtomic};
+use vm_memory::{
+    mmap::MmapRegionError, Address, Error as MmapError, GuestAddressSpace, GuestMemory,
+    GuestMemoryAtomic,
+};
+use vm_migration::{protocol::MemoryRangeTable, MigratableError, Snapshot, VersionMapped};
 use vm_virtio::Error as VirtioError;
 use vmm_sys_util::eventfd::EventFd;
 use vu_common_ctrl::VhostUserHandle;
@@ -272,5 +280,253 @@ impl<S: VhostUserMasterReqHandler> EpollHelperHandler for VhostUserEpollHandler<
         }
 
         false
+    }
+}
+
+#[derive(Default)]
+pub struct VhostUserCommon {
+    pub vu: Option<Arc<Mutex<VhostUserHandle>>>,
+    pub acked_protocol_features: u64,
+    pub socket_path: String,
+    pub vu_num_queues: usize,
+    pub migration_started: bool,
+    pub server: bool,
+}
+
+impl VhostUserCommon {
+    #[allow(clippy::too_many_arguments)]
+    pub fn activate<T: VhostUserMasterReqHandler>(
+        &mut self,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
+        queues: Vec<Queue>,
+        queue_evts: Vec<EventFd>,
+        interrupt_cb: Arc<dyn VirtioInterrupt>,
+        acked_features: u64,
+        slave_req_handler: Option<MasterReqHandler<T>>,
+        kill_evt: EventFd,
+        pause_evt: EventFd,
+    ) -> std::result::Result<VhostUserEpollHandler<T>, ActivateError> {
+        let mut inflight: Option<Inflight> =
+            if self.acked_protocol_features & VhostUserProtocolFeatures::INFLIGHT_SHMFD.bits() != 0
+            {
+                Some(Inflight::default())
+            } else {
+                None
+            };
+
+        if self.vu.is_none() {
+            error!("Missing vhost-user handle");
+            return Err(ActivateError::BadActivate);
+        }
+        let vu = self.vu.as_ref().unwrap();
+        vu.lock()
+            .unwrap()
+            .setup_vhost_user(
+                &mem.memory(),
+                queues.clone(),
+                queue_evts.iter().map(|q| q.try_clone().unwrap()).collect(),
+                &interrupt_cb,
+                acked_features,
+                &slave_req_handler,
+                inflight.as_mut(),
+            )
+            .map_err(ActivateError::VhostUserBlkSetup)?;
+
+        Ok(VhostUserEpollHandler {
+            vu: vu.clone(),
+            mem,
+            kill_evt,
+            pause_evt,
+            queues,
+            queue_evts,
+            virtio_interrupt: interrupt_cb,
+            acked_features,
+            acked_protocol_features: self.acked_protocol_features,
+            socket_path: self.socket_path.clone(),
+            server: self.server,
+            slave_req_handler,
+            inflight,
+        })
+    }
+
+    pub fn restore_backend_connection(&mut self, acked_features: u64) -> Result<()> {
+        let mut vu = VhostUserHandle::connect_vhost_user(
+            self.server,
+            &self.socket_path,
+            self.vu_num_queues as u64,
+            false,
+        )?;
+
+        vu.set_protocol_features_vhost_user(acked_features, self.acked_protocol_features)?;
+
+        self.vu = Some(Arc::new(Mutex::new(vu)));
+
+        Ok(())
+    }
+
+    pub fn shutdown(&mut self) {
+        if let Some(vu) = &self.vu {
+            let _ = unsafe { libc::close(vu.lock().unwrap().socket_handle().as_raw_fd()) };
+        }
+
+        // Remove socket path if needed
+        if self.server {
+            let _ = std::fs::remove_file(&self.socket_path);
+        }
+    }
+
+    pub fn add_memory_region(
+        &mut self,
+        guest_memory: &Option<GuestMemoryAtomic<GuestMemoryMmap>>,
+        region: &Arc<GuestRegionMmap>,
+    ) -> std::result::Result<(), crate::Error> {
+        if let Some(vu) = &self.vu {
+            if self.acked_protocol_features & VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS.bits()
+                != 0
+            {
+                return vu
+                    .lock()
+                    .unwrap()
+                    .add_memory_region(region)
+                    .map_err(crate::Error::VhostUserAddMemoryRegion);
+            } else if let Some(guest_memory) = guest_memory {
+                return vu
+                    .lock()
+                    .unwrap()
+                    .update_mem_table(guest_memory.memory().deref())
+                    .map_err(crate::Error::VhostUserUpdateMemory);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn pause(&mut self) -> std::result::Result<(), MigratableError> {
+        if let Some(vu) = &self.vu {
+            vu.lock()
+                .unwrap()
+                .pause_vhost_user(self.vu_num_queues)
+                .map_err(|e| {
+                    MigratableError::Pause(anyhow!("Error pausing vhost-user-blk backend: {:?}", e))
+                })
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn resume(&mut self) -> std::result::Result<(), MigratableError> {
+        if let Some(vu) = &self.vu {
+            vu.lock()
+                .unwrap()
+                .resume_vhost_user(self.vu_num_queues)
+                .map_err(|e| {
+                    MigratableError::Resume(anyhow!(
+                        "Error resuming vhost-user-blk backend: {:?}",
+                        e
+                    ))
+                })
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn snapshot<T>(
+        &mut self,
+        id: &str,
+        state: &T,
+    ) -> std::result::Result<Snapshot, MigratableError>
+    where
+        T: Versionize + VersionMapped,
+    {
+        let snapshot = Snapshot::new_from_versioned_state(id, state)?;
+
+        if self.migration_started {
+            self.shutdown();
+        }
+
+        Ok(snapshot)
+    }
+
+    pub fn start_dirty_log(
+        &mut self,
+        guest_memory: &Option<GuestMemoryAtomic<GuestMemoryMmap>>,
+    ) -> std::result::Result<(), MigratableError> {
+        self.migration_started = true;
+        if let Some(vu) = &self.vu {
+            if let Some(guest_memory) = guest_memory {
+                let last_ram_addr = guest_memory.memory().last_addr().raw_value();
+                vu.lock()
+                    .unwrap()
+                    .start_dirty_log(last_ram_addr)
+                    .map_err(|e| {
+                        MigratableError::StartDirtyLog(anyhow!(
+                            "Error starting migration for vhost-user backend: {:?}",
+                            e
+                        ))
+                    })
+            } else {
+                Err(MigratableError::StartDirtyLog(anyhow!(
+                    "Missing guest memory"
+                )))
+            }
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn stop_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
+        self.migration_started = false;
+        if let Some(vu) = &self.vu {
+            vu.lock().unwrap().stop_dirty_log().map_err(|e| {
+                MigratableError::StopDirtyLog(anyhow!(
+                    "Error stopping migration for vhost-user backend: {:?}",
+                    e
+                ))
+            })
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn dirty_log(
+        &mut self,
+        guest_memory: &Option<GuestMemoryAtomic<GuestMemoryMmap>>,
+    ) -> std::result::Result<MemoryRangeTable, MigratableError> {
+        if let Some(vu) = &self.vu {
+            if let Some(guest_memory) = guest_memory {
+                let last_ram_addr = guest_memory.memory().last_addr().raw_value();
+                vu.lock().unwrap().dirty_log(last_ram_addr).map_err(|e| {
+                    MigratableError::DirtyLog(anyhow!(
+                        "Error retrieving dirty ranges from vhost-user backend: {:?}",
+                        e
+                    ))
+                })
+            } else {
+                Err(MigratableError::DirtyLog(anyhow!("Missing guest memory")))
+            }
+        } else {
+            Ok(MemoryRangeTable::default())
+        }
+    }
+
+    pub fn complete_migration(
+        &mut self,
+        kill_evt: Option<EventFd>,
+    ) -> std::result::Result<(), MigratableError> {
+        // Make sure the device thread is killed in order to prevent from
+        // reconnections to the socket.
+        if let Some(kill_evt) = kill_evt {
+            kill_evt.write(1).map_err(|e| {
+                MigratableError::CompleteMigration(anyhow!(
+                    "Error killing vhost-user thread: {:?}",
+                    e
+                ))
+            })?;
+        }
+
+        // Drop the vhost-user handler to avoid further calls to fail because
+        // the connection with the backend has been closed.
+        self.vu = None;
+
+        Ok(())
     }
 }
