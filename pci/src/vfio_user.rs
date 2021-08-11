@@ -19,10 +19,14 @@ use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::VfioIrq;
 use vfio_user::{Client, Error as VfioUserError};
 use vm_allocator::SystemAllocator;
+use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig};
 use vm_device::BusDevice;
 use vm_memory::bitmap::AtomicBitmap;
-use vm_memory::{Address, GuestAddress, GuestMemoryRegion, GuestRegionMmap, GuestUsize};
+use vm_memory::{
+    Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryRegion, GuestRegionMmap,
+    GuestUsize,
+};
 use vmm_sys_util::eventfd::EventFd;
 
 pub struct VfioUserPciDevice {
@@ -481,5 +485,59 @@ impl Drop for VfioUserPciDevice {
         if self.common.interrupt.intx_in_use() {
             self.common.disable_intx(&self.vfio_wrapper);
         }
+    }
+}
+
+pub struct VfioUserDmaMapping<M: GuestAddressSpace> {
+    client: Arc<Mutex<Client>>,
+    memory: Arc<M>,
+}
+
+impl<M: GuestAddressSpace> VfioUserDmaMapping<M> {
+    pub fn new(client: Arc<Mutex<Client>>, memory: Arc<M>) -> Self {
+        Self { client, memory }
+    }
+}
+
+impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioUserDmaMapping<M> {
+    fn map(&self, iova: u64, gpa: u64, size: u64) -> std::result::Result<(), std::io::Error> {
+        let mem = self.memory.memory();
+        let guest_addr = GuestAddress(gpa);
+        let region = mem.find_region(guest_addr);
+
+        if let Some(region) = region {
+            let file_offset = region.file_offset().unwrap();
+            let offset = (GuestAddress(gpa).checked_offset_from(region.start_addr())).unwrap()
+                + file_offset.start();
+
+            self.client
+                .lock()
+                .unwrap()
+                .dma_map(offset, iova, size, file_offset.file().as_raw_fd())
+                .map_err(|e| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("Error mapping region: {}", e),
+                    )
+                })
+        } else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Region not found for 0x{:x}", gpa),
+            ));
+        }
+    }
+
+    fn unmap(&self, iova: u64, size: u64) -> std::result::Result<(), std::io::Error> {
+        self.client
+            .lock()
+            .unwrap()
+            .dma_unmap(iova, size)
+            .map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Error unmapping region: {}", e),
+                )
+            })
     }
 }

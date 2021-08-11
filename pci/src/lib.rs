@@ -26,7 +26,7 @@ pub use self::device::{
 pub use self::msi::{msi_num_enabled_vectors, MsiCap, MsiConfig};
 pub use self::msix::{MsixCap, MsixConfig, MsixTableEntry, MSIX_TABLE_ENTRY_SIZE};
 pub use self::vfio::{VfioPciDevice, VfioPciError};
-pub use self::vfio_user::{VfioUserPciDevice, VfioUserPciDeviceError};
+pub use self::vfio_user::{VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError};
 
 /// PCI has four interrupt pins A->D.
 #[derive(Copy, Clone)]

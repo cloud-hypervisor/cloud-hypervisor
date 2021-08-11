@@ -69,7 +69,7 @@ use libc::{
 };
 use pci::{
     DeviceRelocation, PciBarRegionType, PciBus, PciConfigMmio, PciDevice, PciRoot, VfioPciDevice,
-    VfioUserPciDevice, VfioUserPciDeviceError,
+    VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError,
 };
 #[cfg(target_arch = "x86_64")]
 use pci::{PciConfigIo, PCI_CONFIG_IO_PORT, PCI_CONFIG_IO_PORT_SIZE};
@@ -3115,7 +3115,7 @@ impl DeviceManager {
 
         let mut vfio_user_pci_device = VfioUserPciDevice::new(
             &self.address_manager.vm,
-            client,
+            client.clone(),
             &self.msi_interrupt_manager,
             legacy_interrupt_group,
         )
@@ -3126,6 +3126,19 @@ impl DeviceManager {
                 self.memory_manager.lock().unwrap().allocate_memory_slot()
             })
             .map_err(DeviceManagerError::VfioUserMapRegion)?;
+
+        let memory = self.memory_manager.lock().unwrap().guest_memory();
+        let vfio_user_mapping = Arc::new(VfioUserDmaMapping::new(client, Arc::new(memory)));
+        for virtio_mem_device in self.virtio_mem_devices.iter() {
+            virtio_mem_device
+                .lock()
+                .unwrap()
+                .add_dma_mapping_handler(
+                    VirtioMemMappingSource::Device(pci_device_bdf),
+                    vfio_user_mapping.clone(),
+                )
+                .map_err(DeviceManagerError::AddDmaMappingHandlerVirtioMem)?;
+        }
 
         for (_, zone) in self.memory_manager.lock().unwrap().memory_zones().iter() {
             for region in zone.regions() {
@@ -3564,6 +3577,7 @@ impl DeviceManager {
             .pci_device_handle
             .ok_or(DeviceManagerError::MissingPciDevice)?;
         let (pci_device, bus_device, virtio_device) = match pci_device_handle {
+            // No need to remove any virtio-mem mapping here as the container outlives all devices
             PciDeviceHandle::Vfio(vfio_pci_device) => (
                 Arc::clone(&vfio_pci_device) as Arc<Mutex<dyn PciDevice>>,
                 Arc::clone(&vfio_pci_device) as Arc<Mutex<dyn BusDevice>>,
@@ -3592,6 +3606,14 @@ impl DeviceManager {
                         dev.dma_unmap(region)
                             .map_err(DeviceManagerError::VfioUserDmaUnmap)?;
                     }
+                }
+
+                for virtio_mem_device in self.virtio_mem_devices.iter() {
+                    virtio_mem_device
+                        .lock()
+                        .unwrap()
+                        .remove_dma_mapping_handler(VirtioMemMappingSource::Device(pci_device_bdf))
+                        .map_err(DeviceManagerError::RemoveDmaMappingHandlerVirtioMem)?;
                 }
 
                 (
