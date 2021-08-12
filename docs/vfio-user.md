@@ -45,7 +45,6 @@ Use SPDK: https://github.com/spdk/spdk
 
 Compile with `./configure --with-vfio-user`
 
-
 Create an NVMe controller listening on a vfio-user socket with a simple block device:
 
 ```sh
@@ -59,7 +58,7 @@ sleep 2
 sudo ./scripts/rpc.py nvmf_create_transport -t VFIOUSER
 sudo rm -rf /tmp/nvme-vfio-user
 sudo mkdir -p /tmp/nvme-vfio-user
-sudo ./scripts/rpc.py bdev_aio_create ~/images/test-disk.raw test 4096 
+sudo ./scripts/rpc.py bdev_aio_create ~/images/test-disk.raw test 512
 sudo ./scripts/rpc.py nvmf_create_subsystem nqn.2019-07.io.spdk:cnode -a -s test
 sudo ./scripts/rpc.py nvmf_subsystem_add_ns nqn.2019-07.io.spdk:cnode test
 sudo ./scripts/rpc.py nvmf_subsystem_add_listener nqn.2019-07.io.spdk:cnode -t VFIOUSER -a /tmp/nvme-vfio-user -s 0
@@ -70,7 +69,7 @@ Start Cloud Hypervisor:
 
 ```sh
 target/debug/cloud-hypervisor \
-    --memory size=1G,shared=on,hugepages=on \
+    --memory size=1G,shared=on \
     --disk path=~/images/focal-server-cloudimg-amd64.raw \
     --kernel ~/src/linux/vmlinux \
     --cmdline "root=/dev/vda1 console=hvc0" \
