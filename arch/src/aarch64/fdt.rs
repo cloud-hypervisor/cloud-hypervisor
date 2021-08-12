@@ -35,9 +35,12 @@ const MSI_PHANDLE: u32 = 2;
 const CLOCK_PHANDLE: u32 = 3;
 // This is a value for uniquely identifying the FDT node containing the gpio controller.
 const GPIO_PHANDLE: u32 = 4;
+// This is a value for virtio-iommu. Now only one virtio-iommu device is supported.
+const VIRTIO_IOMMU_PHANDLE: u32 = 5;
+// NOTE: Keep FIRST_VCPU_PHANDLE the last PHANDLE defined.
 // This is a value for uniquely identifying the FDT node containing the first vCPU.
 // The last number of vCPU phandle depends on the number of vCPUs.
-const FIRST_VCPU_PHANDLE: u32 = 5;
+const FIRST_VCPU_PHANDLE: u32 = 6;
 
 // Read the documentation specified when appending the root node to the FDT.
 const ADDRESS_CELLS: u32 = 0x2;
@@ -87,6 +90,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     initrd: &Option<InitramfsConfig>,
     pci_space_address: &(u64, u64),
     numa_nodes: &NumaNodes,
+    virtio_iommu_bdf: Option<u32>,
 ) -> FdtWriterResult<Vec<u8>> {
     // Allocate stuff necessary for the holding the blob.
     let mut fdt = FdtWriter::new().unwrap();
@@ -113,7 +117,12 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     create_clock_node(&mut fdt)?;
     create_psci_node(&mut fdt)?;
     create_devices_node(&mut fdt, device_info)?;
-    create_pci_nodes(&mut fdt, pci_space_address.0, pci_space_address.1)?;
+    create_pci_nodes(
+        &mut fdt,
+        pci_space_address.0,
+        pci_space_address.1,
+        virtio_iommu_bdf,
+    )?;
     if numa_nodes.len() > 1 {
         create_distance_map_node(&mut fdt, numa_nodes)?;
     }
@@ -540,6 +549,7 @@ fn create_pci_nodes(
     fdt: &mut FdtWriter,
     pci_device_base: u64,
     pci_device_size: u64,
+    virtio_iommu_bdf: Option<u32>,
 ) -> FdtWriterResult<()> {
     // Add node for PCIe controller.
     // See Documentation/devicetree/bindings/pci/host-generic-pci.txt in the kernel
@@ -603,6 +613,40 @@ fn create_pci_nodes(
     fdt.property_null("interrupt-map-mask")?;
     fdt.property_null("dma-coherent")?;
     fdt.property_u32("msi-parent", MSI_PHANDLE)?;
+
+    if let Some(virtio_iommu_bdf) = virtio_iommu_bdf {
+        // See kernel document Documentation/devicetree/bindings/pci/pci-iommu.txt
+        // for 'iommu-map' attribute setting.
+        let iommu_map = [
+            0_u32,
+            VIRTIO_IOMMU_PHANDLE,
+            0_u32,
+            virtio_iommu_bdf,
+            virtio_iommu_bdf + 1,
+            VIRTIO_IOMMU_PHANDLE,
+            virtio_iommu_bdf + 1,
+            0xffff - virtio_iommu_bdf,
+        ];
+        fdt.property_array_u32("iommu-map", &iommu_map)?;
+
+        // See kernel document Documentation/devicetree/bindings/virtio/iommu.txt
+        // for virtio-iommu node settings.
+        let virtio_iommu_node_name = format!("virtio_iommu@{:x}", virtio_iommu_bdf);
+        let virtio_iommu_node = fdt.begin_node(&virtio_iommu_node_name)?;
+        fdt.property_u32("#iommu-cells", 1)?;
+        fdt.property_string("compatible", "virtio,pci-iommu")?;
+
+        // 'reg' is a five-cell address encoded as
+        // (phys.hi phys.mid phys.lo size.hi size.lo). phys.hi should contain the
+        // device's BDF as 0b00000000 bbbbbbbb dddddfff 00000000. The other cells
+        // should be zero.
+        let reg = [virtio_iommu_bdf << 8, 0_u32, 0_u32, 0_u32, 0_u32];
+        fdt.property_array_u32("reg", &reg)?;
+        fdt.property_u32("phandle", VIRTIO_IOMMU_PHANDLE)?;
+
+        fdt.end_node(virtio_iommu_node)?;
+    }
+
     fdt.end_node(pci_node)?;
 
     Ok(())

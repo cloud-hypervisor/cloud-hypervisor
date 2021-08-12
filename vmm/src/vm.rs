@@ -1077,6 +1077,14 @@ impl Vm {
 
         let pci_space = (pci_space_start.0, pci_space_size);
 
+        let virtio_iommu_bdf = self
+            .device_manager
+            .lock()
+            .unwrap()
+            .iommu_attached_devices()
+            .as_ref()
+            .map(|(v, _)| *v);
+
         #[cfg(feature = "acpi")]
         {
             let _ = crate::acpi::create_acpi_tables(
@@ -1104,6 +1112,7 @@ impl Vm {
             device_info,
             &initramfs_config,
             &pci_space,
+            virtio_iommu_bdf,
             &*gic_device,
             &self.numa_nodes,
         )
@@ -2631,6 +2640,7 @@ mod tests {
             &None,
             &(0x1_0000_0000, 0x1_0000),
             &BTreeMap::new(),
+            None,
         )
         .is_ok())
     }

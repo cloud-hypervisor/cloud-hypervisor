@@ -142,6 +142,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Bui
     device_info: &HashMap<(DeviceType, String), T, S>,
     initrd: &Option<super::InitramfsConfig>,
     pci_space_address: &(u64, u64),
+    virtio_iommu_bdf: Option<u32>,
     gic_device: &dyn GicDevice,
     numa_nodes: &NumaNodes,
 ) -> super::Result<()> {
@@ -155,6 +156,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Bui
         initrd,
         pci_space_address,
         numa_nodes,
+        virtio_iommu_bdf,
     )
     .map_err(|_| Error::SetupFdt)?;
 
