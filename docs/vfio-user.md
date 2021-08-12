@@ -4,11 +4,11 @@ VFIO-user is an *experimental* protocol for allowing devices to be implemented i
 
 The protocol is documented here: https://github.com/nutanix/libvfio-user/blob/master/docs/vfio-user.rst
 
-The Cloud Hypervisor support for such devices is *experimental*. Not all Cloud Hypervisor functionality is supported in particular: hotplug, virtio-mem and iommu are not supported.
+The Cloud Hypervisor support for such devices is *experimental*. Not all Cloud Hypervisor functionality is supported in particular: virtio-mem and iommu are not supported.
 
 ## Usage
 
-The `--user-device socket=<path>` parameter is used to create a vfio-user device when creating the VM specifying the socket to connect to.
+The `--user-device socket=<path>` parameter is used to create a vfio-user device when creating the VM specifying the socket to connect to. The device can also be hotplugged with `ch-remote add-user-device socket=<path>`.
 
 ## Example (GPIO device)
 
