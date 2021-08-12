@@ -78,27 +78,28 @@ Shut the VMM down                   | `/vmm.shutdown` | N/A          | N/A      
 
 #### Virtual Machine (VM) Actions
 
-Action                             | Endpoint            | Request Body              | Response Body            | Prerequisites
------------------------------------|---------------------|---------------------------|--------------------------|---------------------------
-Create the VM                      | `/vm.create`        | `/schemas/VmConfig`       | N/A                      | The VM is not created yet
-Delete the VM                      | `/vm.delete`        | N/A                       | N/A                      | N/A
-Boot the VM                        | `/vm.boot`          | N/A                       | N/A                      | The VM is created but not booted
-Shut the VM down                   | `/vm.shutdown`      | N/A                       | N/A                      | The VM is booted
-Reboot the VM                      | `/vm.reboot`        | N/A                       | N/A                      | The VM is booted
-Pause the VM                       | `/vm.pause`         | N/A                       | N/A                      | The VM is booted
-Resume the VM                      | `/vm.resume`        | N/A                       | N/A                      | The VM is paused
-Add/remove CPUs to/from the VM     | `/vm.resize`        | `/schemas/VmResize`       | N/A                      | The VM is booted
-Add/remove memory from the VM      | `/vm.resize`        | `/schemas/VmResize`       | N/A                      | The VM is booted
-Add/remove memory from a zone      | `/vm.resize-zone`   | `/schemas/VmResizeZone`   | N/A                      | The VM is booted
-Dump the VM information            | `/vm.info`          | N/A                       | `/schemas/VmInfo`        | The VM is created
-Add VFIO PCI device to the VM      | `/vm.add-device`    | `/schemas/VmAddDevice`    | `/schemas/PciDeviceInfo` | The VM is booted
-Add disk device to the VM          | `/vm.add-disk`      | `/schemas/DiskConfig`     | `/schemas/PciDeviceInfo` | The VM is booted
-Add fs device to the VM            | `/vm.add-fs`        | `/schemas/FsConfig`       | `/schemas/PciDeviceInfo` | The VM is booted
-Add pmem device to the VM          | `/vm.add-pmem`      | `/schemas/PmemConfig`     | `/schemas/PciDeviceInfo` | The VM is booted
-Add network device to the VM       | `/vm.add-net`       | `/schemas/NetConfig`      | `/schemas/PciDeviceInfo` | The VM is booted
-Add vsock device to the VM         | `/vm.add-vsock`     | `/schemas/VsockConfig`    | `/schemas/PciDeviceInfo` | The VM is booted
-Remove device from the VM          | `/vm.remove-device` | `/schemas/VmRemoveDevice` | N/A                      | The VM is booted
-Dump the VM counters               | `/vm.counters`      | N/A                       | `/schemas/VmCounters`    | The VM is booted
+Action                             | Endpoint             | Request Body              | Response Body            | Prerequisites
+-----------------------------------|----------------------|---------------------------|--------------------------|---------------------------
+Create the VM                      | `/vm.create`         | `/schemas/VmConfig`       | N/A                      | The VM is not created yet
+Delete the VM                      | `/vm.delete`         | N/A                       | N/A                      | N/A
+Boot the VM                        | `/vm.boot`           | N/A                       | N/A                      | The VM is created but not booted
+Shut the VM down                   | `/vm.shutdown`       | N/A                       | N/A                      | The VM is booted
+Reboot the VM                      | `/vm.reboot`         | N/A                       | N/A                      | The VM is booted
+Pause the VM                       | `/vm.pause`          | N/A                       | N/A                      | The VM is booted
+Resume the VM                      | `/vm.resume`         | N/A                       | N/A                      | The VM is paused
+Add/remove CPUs to/from the VM     | `/vm.resize`         | `/schemas/VmResize`       | N/A                      | The VM is booted
+Add/remove memory from the VM      | `/vm.resize`         | `/schemas/VmResize`       | N/A                      | The VM is booted
+Add/remove memory from a zone      | `/vm.resize-zone`    | `/schemas/VmResizeZone`   | N/A                      | The VM is booted
+Dump the VM information            | `/vm.info`           | N/A                       | `/schemas/VmInfo`        | The VM is created
+Add VFIO PCI device to the VM      | `/vm.add-device`     | `/schemas/VmAddDevice`    | `/schemas/PciDeviceInfo` | The VM is booted
+Add disk device to the VM          | `/vm.add-disk`       | `/schemas/DiskConfig`     | `/schemas/PciDeviceInfo` | The VM is booted
+Add fs device to the VM            | `/vm.add-fs`         | `/schemas/FsConfig`       | `/schemas/PciDeviceInfo` | The VM is booted
+Add pmem device to the VM          | `/vm.add-pmem`       | `/schemas/PmemConfig`     | `/schemas/PciDeviceInfo` | The VM is booted
+Add network device to the VM       | `/vm.add-net`        | `/schemas/NetConfig`      | `/schemas/PciDeviceInfo` | The VM is booted
+Add userspace PCI device to the VM | `/vm.add-user-device`| `/schemas/VmAddUserDevice`| `/schemas/PciDeviceInfo` | The VM is booted
+Add vsock device to the VM         | `/vm.add-vsock`      | `/schemas/VsockConfig`    | `/schemas/PciDeviceInfo` | The VM is booted
+Remove device from the VM          | `/vm.remove-device`  | `/schemas/VmRemoveDevice` | N/A                      | The VM is booted
+Dump the VM counters               | `/vm.counters`       | N/A                       | `/schemas/VmCounters`    | The VM is booted
 
 ### REST API Examples
 
