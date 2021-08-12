@@ -700,6 +700,7 @@ impl CpuManager {
         let cpu_id = vcpu.lock().unwrap().id;
         let reset_evt = self.reset_evt.try_clone().unwrap();
         let exit_evt = self.exit_evt.try_clone().unwrap();
+        let panic_exit_evt = self.exit_evt.try_clone().unwrap();
         let vcpu_kill_signalled = self.vcpus_kill_signalled.clone();
         let vcpu_pause_signalled = self.vcpus_pause_signalled.clone();
 
@@ -707,6 +708,7 @@ impl CpuManager {
         let vcpu_run_interrupted = self.vcpu_states[usize::from(cpu_id)]
             .vcpu_run_interrupted
             .clone();
+        let panic_vcpu_run_interrupted = vcpu_run_interrupted.clone();
 
         info!("Starting vCPU: cpu_id = {}", cpu_id);
 
@@ -728,91 +730,101 @@ impl CpuManager {
                         error!("Error applying seccomp filter: {:?}", e);
                         return;
                     }
-
                     extern "C" fn handle_signal(_: i32, _: *mut siginfo_t, _: *mut c_void) {}
                     // This uses an async signal safe handler to kill the vcpu handles.
                     register_signal_handler(SIGRTMIN(), handle_signal)
                         .expect("Failed to register vcpu signal handler");
-
                     // Block until all CPUs are ready.
                     vcpu_thread_barrier.wait();
 
-                    loop {
-                        // If we are being told to pause, we park the thread
-                        // until the pause boolean is toggled.
-                        // The resume operation is responsible for toggling
-                        // the boolean and unpark the thread.
-                        // We enter a loop because park() could spuriously
-                        // return. We will then park() again unless the
-                        // pause boolean has been toggled.
+                    std::panic::catch_unwind(move || {
+                        loop {
+                            // If we are being told to pause, we park the thread
+                            // until the pause boolean is toggled.
+                            // The resume operation is responsible for toggling
+                            // the boolean and unpark the thread.
+                            // We enter a loop because park() could spuriously
+                            // return. We will then park() again unless the
+                            // pause boolean has been toggled.
 
-                        // Need to use Ordering::SeqCst as we have multiple
-                        // loads and stores to different atomics and we need
-                        // to see them in a consistent order in all threads
+                            // Need to use Ordering::SeqCst as we have multiple
+                            // loads and stores to different atomics and we need
+                            // to see them in a consistent order in all threads
 
-                        if vcpu_pause_signalled.load(Ordering::SeqCst) {
-                            vcpu_run_interrupted.store(true, Ordering::SeqCst);
-                            while vcpu_pause_signalled.load(Ordering::SeqCst) {
-                                thread::park();
+                            if vcpu_pause_signalled.load(Ordering::SeqCst) {
+                                vcpu_run_interrupted.store(true, Ordering::SeqCst);
+                                while vcpu_pause_signalled.load(Ordering::SeqCst) {
+                                    thread::park();
+                                }
+                                vcpu_run_interrupted.store(false, Ordering::SeqCst);
                             }
-                            vcpu_run_interrupted.store(false, Ordering::SeqCst);
-                        }
 
-                        // We've been told to terminate
-                        if vcpu_kill_signalled.load(Ordering::SeqCst)
-                            || vcpu_kill.load(Ordering::SeqCst)
-                        {
-                            vcpu_run_interrupted.store(true, Ordering::SeqCst);
-                            break;
-                        }
+                            // We've been told to terminate
+                            if vcpu_kill_signalled.load(Ordering::SeqCst)
+                                || vcpu_kill.load(Ordering::SeqCst)
+                            {
+                                vcpu_run_interrupted.store(true, Ordering::SeqCst);
+                                break;
+                            }
 
-                        // vcpu.run() returns false on a triple-fault so trigger a reset
-                        match vcpu.lock().unwrap().run() {
-                            Ok(run) => match run {
-                                #[cfg(target_arch = "x86_64")]
-                                VmExit::IoapicEoi(vector) => {
-                                    if let Some(interrupt_controller) = &interrupt_controller_clone
-                                    {
-                                        interrupt_controller
-                                            .lock()
-                                            .unwrap()
-                                            .end_of_interrupt(vector);
+                            // vcpu.run() returns false on a triple-fault so trigger a reset
+                            match vcpu.lock().unwrap().run() {
+                                Ok(run) => match run {
+                                    #[cfg(target_arch = "x86_64")]
+                                    VmExit::IoapicEoi(vector) => {
+                                        if let Some(interrupt_controller) =
+                                            &interrupt_controller_clone
+                                        {
+                                            interrupt_controller
+                                                .lock()
+                                                .unwrap()
+                                                .end_of_interrupt(vector);
+                                        }
                                     }
-                                }
-                                VmExit::Ignore => {}
-                                VmExit::Hyperv => {}
-                                VmExit::Reset => {
-                                    debug!("VmExit::Reset");
-                                    vcpu_run_interrupted.store(true, Ordering::SeqCst);
-                                    reset_evt.write(1).unwrap();
-                                    break;
-                                }
-                                VmExit::Shutdown => {
-                                    debug!("VmExit::Shutdown");
-                                    vcpu_run_interrupted.store(true, Ordering::SeqCst);
-                                    exit_evt.write(1).unwrap();
-                                    break;
-                                }
-                                _ => {
-                                    error!("VCPU generated error: {:?}", Error::UnexpectedVmExit);
-                                    break;
-                                }
-                            },
+                                    VmExit::Ignore => {}
+                                    VmExit::Hyperv => {}
+                                    VmExit::Reset => {
+                                        debug!("VmExit::Reset");
+                                        vcpu_run_interrupted.store(true, Ordering::SeqCst);
+                                        reset_evt.write(1).unwrap();
+                                        break;
+                                    }
+                                    VmExit::Shutdown => {
+                                        debug!("VmExit::Shutdown");
+                                        vcpu_run_interrupted.store(true, Ordering::SeqCst);
+                                        exit_evt.write(1).unwrap();
+                                        break;
+                                    }
+                                    _ => {
+                                        error!(
+                                            "VCPU generated error: {:?}",
+                                            Error::UnexpectedVmExit
+                                        );
+                                        break;
+                                    }
+                                },
 
-                            Err(e) => {
-                                error!("VCPU generated error: {:?}", Error::VcpuRun(e.into()));
+                                Err(e) => {
+                                    error!("VCPU generated error: {:?}", Error::VcpuRun(e.into()));
+                                    break;
+                                }
+                            }
+
+                            // We've been told to terminate
+                            if vcpu_kill_signalled.load(Ordering::SeqCst)
+                                || vcpu_kill.load(Ordering::SeqCst)
+                            {
+                                vcpu_run_interrupted.store(true, Ordering::SeqCst);
                                 break;
                             }
                         }
-
-                        // We've been told to terminate
-                        if vcpu_kill_signalled.load(Ordering::SeqCst)
-                            || vcpu_kill.load(Ordering::SeqCst)
-                        {
-                            vcpu_run_interrupted.store(true, Ordering::SeqCst);
-                            break;
-                        }
-                    }
+                    })
+                    .or_else(|_| {
+                        panic_vcpu_run_interrupted.store(true, Ordering::SeqCst);
+                        error!("vCPU thread panicked");
+                        panic_exit_evt.write(1)
+                    })
+                    .ok();
                 })
                 .map_err(Error::VcpuSpawn)?,
         );
