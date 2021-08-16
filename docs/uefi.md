@@ -41,19 +41,20 @@ CSM is a module that allows to boot legacy operating systems using the OVMF firm
 
 ```shell
 sudo apt-get update
-sudo apt-get install uuid-dev nasm iasl build-essential python3-distutils git
+sudo apt-get install uuid-dev nasm iasl build-essential python3-distutils git libncurses-dev
 
-git checkout https://github.com/cloud-hypervisor/seabios -b ch
+git clone https://github.com/cloud-hypervisor/seabios -b ch
 cd seabios
 make menuconfig
 # Enable `CONFIG_CSM` and `CONFIG_QEMU_HARDWARE`
+# Please make sure `python` is in your path
 make CONFIG_CSM=y CONFIG_QEMU_HARDWARE=y
 cd ..
 
 git clone https://github.com/cloud-hypervisor/edk2 -b ch
 cd edk2
 . edksetup.sh
-git submodule update --init
+git submodule update --init --recursive
 cp ../seabios/out/Csm16.bin OvmfPkg/Csm/Csm16/
 
 echo "ACTIVE_PLATFORM=OvmfPkg/OvmfCh.dsc" >> Conf/target.txt
@@ -61,7 +62,7 @@ echo "TARGET_ARCH=X64" >> Conf/target.txt
 echo "TOOL_CHAIN_TAG=GCC5" >> Conf/target.txt
 
 make -C ./BaseTools
-build
+build -DCSM_ENABLE
 
 ```
 
