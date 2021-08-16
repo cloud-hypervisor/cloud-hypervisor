@@ -19,7 +19,7 @@ acpi_tables = { path = "../acpi_tables", optional = true }
 anyhow = "1.0.42"
 arc-swap = "1.3.0"
 arch = { path = "../arch" }
-bitflags = "1.3.1"
+bitflags = "1.3.2"
 block_util = { path = "../block_util" }
 clap = "2.33.3"
 devices = { path = "../devices" }
