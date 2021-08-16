@@ -5,7 +5,7 @@ authors = ["Samuel Ortiz <sameo@linux.intel.com>"]
 edition = "2018"
 
 [dependencies]
-anyhow = "1.0.42"
+anyhow = "1.0.43"
 byteorder = "1.4.3"
 hypervisor = { path = "../hypervisor" }
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio-ioctls", branch = "master" }

@@ -5,7 +5,7 @@ authors = ["The Cloud Hypervisor Authors"]
 edition = "2018"
 
 [dependencies]
-anyhow = "1.0.42"
+anyhow = "1.0.43"
 thiserror = "1.0.26"
 serde = { version = "1.0.127", features = ["rc"] }
 serde_derive = "1.0.127"
