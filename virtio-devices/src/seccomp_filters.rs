@@ -5,7 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use seccompiler::{
-    BackendError, BpfProgram, Error, SeccompAction, SeccompCmpArgLen as ArgLen, SeccompCmpOp::Eq,
+    BpfProgram, Error, SeccompAction, SeccompCmpArgLen as ArgLen, SeccompCmpOp::Eq,
     SeccompCondition as Cond, SeccompFilter, SeccompRule,
 };
 use std::convert::TryInto;
@@ -441,8 +441,8 @@ fn virtio_watchdog_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
     ]
 }
 
-fn get_seccomp_filter_trap(thread_type: Thread) -> Result<SeccompFilter, BackendError> {
-    let rules = match thread_type {
+fn get_seccomp_rules(thread_type: Thread) -> Vec<(i64, Vec<SeccompRule>)> {
+    match thread_type {
         Thread::VirtioBalloon => virtio_balloon_thread_rules(),
         Thread::VirtioBlock => virtio_block_thread_rules(),
         Thread::VirtioConsole => virtio_console_thread_rules(),
@@ -456,39 +456,7 @@ fn get_seccomp_filter_trap(thread_type: Thread) -> Result<SeccompFilter, Backend
         Thread::VirtioVhostNetCtl => virtio_vhost_net_ctl_thread_rules(),
         Thread::VirtioVsock => virtio_vsock_thread_rules(),
         Thread::VirtioWatchdog => virtio_watchdog_thread_rules(),
-    };
-
-    SeccompFilter::new(
-        rules.into_iter().collect(),
-        SeccompAction::Trap,
-        SeccompAction::Allow,
-        std::env::consts::ARCH.try_into().unwrap(),
-    )
-}
-
-fn get_seccomp_filter_log(thread_type: Thread) -> Result<SeccompFilter, BackendError> {
-    let rules = match thread_type {
-        Thread::VirtioBalloon => virtio_balloon_thread_rules(),
-        Thread::VirtioBlock => virtio_block_thread_rules(),
-        Thread::VirtioConsole => virtio_console_thread_rules(),
-        Thread::VirtioIommu => virtio_iommu_thread_rules(),
-        Thread::VirtioMem => virtio_mem_thread_rules(),
-        Thread::VirtioNet => virtio_net_thread_rules(),
-        Thread::VirtioNetCtl => virtio_net_ctl_thread_rules(),
-        Thread::VirtioPmem => virtio_pmem_thread_rules(),
-        Thread::VirtioRng => virtio_rng_thread_rules(),
-        Thread::VirtioVhostFs => virtio_vhost_fs_thread_rules(),
-        Thread::VirtioVhostNetCtl => virtio_vhost_net_ctl_thread_rules(),
-        Thread::VirtioVsock => virtio_vsock_thread_rules(),
-        Thread::VirtioWatchdog => virtio_watchdog_thread_rules(),
-    };
-
-    SeccompFilter::new(
-        rules.into_iter().collect(),
-        SeccompAction::Log,
-        SeccompAction::Allow,
-        std::env::consts::ARCH.try_into().unwrap(),
-    )
+    }
 }
 
 /// Generate a BPF program based on the seccomp_action value
@@ -498,11 +466,21 @@ pub fn get_seccomp_filter(
 ) -> Result<BpfProgram, Error> {
     match seccomp_action {
         SeccompAction::Allow => Ok(vec![]),
-        SeccompAction::Log => get_seccomp_filter_log(thread_type)
-            .and_then(|filter| filter.try_into())
-            .map_err(Error::Backend),
-        _ => get_seccomp_filter_trap(thread_type)
-            .and_then(|filter| filter.try_into())
-            .map_err(Error::Backend),
+        SeccompAction::Log => SeccompFilter::new(
+            get_seccomp_rules(thread_type).into_iter().collect(),
+            SeccompAction::Log,
+            SeccompAction::Allow,
+            std::env::consts::ARCH.try_into().unwrap(),
+        )
+        .and_then(|filter| filter.try_into())
+        .map_err(Error::Backend),
+        _ => SeccompFilter::new(
+            get_seccomp_rules(thread_type).into_iter().collect(),
+            SeccompAction::Trap,
+            SeccompAction::Allow,
+            std::env::consts::ARCH.try_into().unwrap(),
+        )
+        .and_then(|filter| filter.try_into())
+        .map_err(Error::Backend),
     }
 }

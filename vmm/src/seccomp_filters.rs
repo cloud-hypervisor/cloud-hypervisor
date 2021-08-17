@@ -617,36 +617,13 @@ fn api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
     ])
 }
 
-fn get_seccomp_filter_trap(thread_type: Thread) -> Result<SeccompFilter, BackendError> {
-    let rules = match thread_type {
-        Thread::Api => api_thread_rules()?,
-        Thread::SignalHandler => signal_handler_thread_rules()?,
-        Thread::Vcpu => vcpu_thread_rules()?,
-        Thread::Vmm => vmm_thread_rules()?,
-    };
-
-    SeccompFilter::new(
-        rules.into_iter().collect(),
-        SeccompAction::Trap,
-        SeccompAction::Allow,
-        std::env::consts::ARCH.try_into().unwrap(),
-    )
-}
-
-fn get_seccomp_filter_log(thread_type: Thread) -> Result<SeccompFilter, BackendError> {
-    let rules = match thread_type {
-        Thread::Api => api_thread_rules()?,
-        Thread::SignalHandler => signal_handler_thread_rules()?,
-        Thread::Vcpu => vcpu_thread_rules()?,
-        Thread::Vmm => vmm_thread_rules()?,
-    };
-
-    SeccompFilter::new(
-        rules.into_iter().collect(),
-        SeccompAction::Log,
-        SeccompAction::Allow,
-        std::env::consts::ARCH.try_into().unwrap(),
-    )
+fn get_seccomp_rules(thread_type: Thread) -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
+    match thread_type {
+        Thread::Api => Ok(api_thread_rules()?),
+        Thread::SignalHandler => Ok(signal_handler_thread_rules()?),
+        Thread::Vcpu => Ok(vcpu_thread_rules()?),
+        Thread::Vmm => Ok(vmm_thread_rules()?),
+    }
 }
 
 /// Generate a BPF program based on the seccomp_action value
@@ -656,11 +633,27 @@ pub fn get_seccomp_filter(
 ) -> Result<BpfProgram, Error> {
     match seccomp_action {
         SeccompAction::Allow => Ok(vec![]),
-        SeccompAction::Log => get_seccomp_filter_log(thread_type)
-            .and_then(|filter| filter.try_into())
-            .map_err(Error::Backend),
-        _ => get_seccomp_filter_trap(thread_type)
-            .and_then(|filter| filter.try_into())
-            .map_err(Error::Backend),
+        SeccompAction::Log => SeccompFilter::new(
+            get_seccomp_rules(thread_type)
+                .map_err(Error::Backend)?
+                .into_iter()
+                .collect(),
+            SeccompAction::Log,
+            SeccompAction::Allow,
+            std::env::consts::ARCH.try_into().unwrap(),
+        )
+        .and_then(|filter| filter.try_into())
+        .map_err(Error::Backend),
+        _ => SeccompFilter::new(
+            get_seccomp_rules(thread_type)
+                .map_err(Error::Backend)?
+                .into_iter()
+                .collect(),
+            SeccompAction::Trap,
+            SeccompAction::Allow,
+            std::env::consts::ARCH.try_into().unwrap(),
+        )
+        .and_then(|filter| filter.try_into())
+        .map_err(Error::Backend),
     }
 }
