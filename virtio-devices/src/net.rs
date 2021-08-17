@@ -20,7 +20,7 @@ use net_util::{
     virtio_features_to_tap_offload, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio,
     Tap, TapError, TxVirtio, VirtioNetConfig,
 };
-use seccomp::{SeccompAction, SeccompFilter};
+use seccompiler::{apply_filter, SeccompAction};
 use std::net::Ipv4Addr;
 use std::num::Wrapping;
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -576,7 +576,7 @@ impl VirtioDevice for Net {
             thread::Builder::new()
                 .name(format!("{}_ctrl", self.id))
                 .spawn(move || {
-                    if let Err(e) = SeccompFilter::apply(virtio_net_ctl_seccomp_filter) {
+                    if let Err(e) = apply_filter(&virtio_net_ctl_seccomp_filter) {
                         error!("Error applying seccomp filter: {:?}", e);
                     } else if let Err(e) = ctrl_handler.run_ctrl(paused, paused_sync.unwrap()) {
                         error!("Error running worker: {:?}", e);
@@ -659,7 +659,7 @@ impl VirtioDevice for Net {
             thread::Builder::new()
                 .name(format!("{}_qp{}", self.id.clone(), i))
                 .spawn(move || {
-                    if let Err(e) = SeccompFilter::apply(virtio_net_seccomp_filter) {
+                    if let Err(e) = apply_filter(&virtio_net_seccomp_filter) {
                         error!("Error applying seccomp filter: {:?}", e);
                     } else if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                         error!("Error running worker: {:?}", e);

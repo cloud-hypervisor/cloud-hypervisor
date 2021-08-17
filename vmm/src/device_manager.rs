@@ -66,7 +66,7 @@ use pci::{
     DeviceRelocation, PciBarRegionType, PciBus, PciConfigIo, PciConfigMmio, PciDevice, PciRoot,
     VfioUserPciDevice, VfioUserPciDeviceError,
 };
-use seccomp::SeccompAction;
+use seccompiler::SeccompAction;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fs::{read_link, File, OpenOptions};

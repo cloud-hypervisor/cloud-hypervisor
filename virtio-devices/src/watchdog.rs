@@ -14,7 +14,7 @@ use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::GuestMemoryMmap;
 use crate::{VirtioInterrupt, VirtioInterruptType};
 use anyhow::anyhow;
-use seccomp::{SeccompAction, SeccompFilter};
+use seccompiler::{apply_filter, SeccompAction};
 use std::fs::File;
 use std::io::{self, Read};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
@@ -325,7 +325,7 @@ impl VirtioDevice for Watchdog {
         thread::Builder::new()
             .name(self.id.clone())
             .spawn(move || {
-                if let Err(e) = SeccompFilter::apply(virtio_watchdog_seccomp_filter) {
+                if let Err(e) = apply_filter(&virtio_watchdog_seccomp_filter) {
                     error!("Error applying seccomp filter: {:?}", e);
                 } else if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                     error!("Error running worker: {:?}", e);

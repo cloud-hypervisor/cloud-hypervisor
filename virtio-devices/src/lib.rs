@@ -92,7 +92,7 @@ pub enum ActivateError {
     /// Failed to reset vhost-user daemon.
     VhostUserReset(vhost_user::Error),
     /// Cannot create seccomp filter
-    CreateSeccompFilter(seccomp::SeccompError),
+    CreateSeccompFilter(seccompiler::Error),
     /// Cannot create rate limiter
     CreateRateLimiter(std::io::Error),
 }
@@ -109,7 +109,7 @@ pub enum Error {
     VhostUserAddMemoryRegion(vhost_user::Error),
     SetShmRegionsNotSupported,
     NetQueuePair(::net_util::NetQueuePairError),
-    ApplySeccompFilter(seccomp::Error),
+    ApplySeccompFilter(seccompiler::Error),
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]

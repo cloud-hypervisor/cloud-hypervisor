@@ -32,7 +32,7 @@ use hypervisor::kvm::kvm_bindings;
 use hypervisor::CpuId;
 use hypervisor::{vm::VmmOps, CpuState, HypervisorCpuError, VmExit};
 use libc::{c_void, siginfo_t};
-use seccomp::{SeccompAction, SeccompFilter};
+use seccompiler::{apply_filter, SeccompAction};
 #[cfg(feature = "acpi")]
 use std::collections::BTreeMap;
 use std::os::unix::thread::JoinHandleExt;
@@ -88,10 +88,10 @@ pub enum Error {
     DesiredVCpuCountExceedsMax,
 
     /// Cannot create seccomp filter
-    CreateSeccompFilter(seccomp::SeccompError),
+    CreateSeccompFilter(seccompiler::Error),
 
     /// Cannot apply seccomp filter
-    ApplySeccompFilter(seccomp::Error),
+    ApplySeccompFilter(seccompiler::Error),
 
     /// Error starting vCPU after restore
     StartRestoreVcpu(anyhow::Error),
@@ -725,7 +725,7 @@ impl CpuManager {
                 .spawn(move || {
                     // Apply seccomp filter for vcpu thread.
                     if let Err(e) =
-                        SeccompFilter::apply(vcpu_seccomp_filter).map_err(Error::ApplySeccompFilter)
+                        apply_filter(&vcpu_seccomp_filter).map_err(Error::ApplySeccompFilter)
                     {
                         error!("Error applying seccomp filter: {:?}", e);
                         return;

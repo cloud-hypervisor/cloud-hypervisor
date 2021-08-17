@@ -11,7 +11,7 @@ use crate::{
 };
 use crate::{GuestMemoryMmap, GuestRegionMmap};
 use net_util::{build_net_config_space, CtrlQueue, MacAddr, VirtioNetConfig};
-use seccomp::{SeccompAction, SeccompFilter};
+use seccompiler::{apply_filter, SeccompAction};
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::AtomicBool;
@@ -339,7 +339,7 @@ impl VirtioDevice for Net {
             thread::Builder::new()
                 .name(format!("{}_ctrl", self.id))
                 .spawn(move || {
-                    if let Err(e) = SeccompFilter::apply(virtio_vhost_net_ctl_seccomp_filter) {
+                    if let Err(e) = apply_filter(&virtio_vhost_net_ctl_seccomp_filter) {
                         error!("Error applying seccomp filter: {:?}", e);
                     } else if let Err(e) = ctrl_handler.run_ctrl(paused, paused_sync.unwrap()) {
                         error!("Error running worker: {:?}", e);

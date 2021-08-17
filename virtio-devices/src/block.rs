@@ -22,7 +22,7 @@ use block_util::{
     RequestType, VirtioBlockConfig,
 };
 use rate_limiter::{RateLimiter, TokenType};
-use seccomp::{SeccompAction, SeccompFilter};
+use seccompiler::{apply_filter, SeccompAction};
 use std::io;
 use std::num::Wrapping;
 use std::os::unix::io::AsRawFd;
@@ -596,7 +596,7 @@ impl VirtioDevice for Block {
             thread::Builder::new()
                 .name(format!("{}_q{}", self.id.clone(), i))
                 .spawn(move || {
-                    if let Err(e) = SeccompFilter::apply(virtio_block_seccomp_filter) {
+                    if let Err(e) = apply_filter(&virtio_block_seccomp_filter) {
                         error!("Error applying seccomp filter: {:?}", e);
                     } else if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                         error!("Error running worker: {:?}", e);

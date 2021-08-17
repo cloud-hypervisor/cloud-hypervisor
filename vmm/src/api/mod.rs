@@ -117,10 +117,10 @@ pub enum ApiError {
     VmRemoveDevice(VmError),
 
     /// Cannot create seccomp filter
-    CreateSeccompFilter(seccomp::SeccompError),
+    CreateSeccompFilter(seccompiler::Error),
 
     /// Cannot apply seccomp filter
-    ApplySeccompFilter(seccomp::Error),
+    ApplySeccompFilter(seccompiler::Error),
 
     /// The disk could not be added to the VM.
     VmAddDisk(VmError),

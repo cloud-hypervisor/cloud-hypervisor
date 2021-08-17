@@ -12,7 +12,7 @@ use clap::{App, Arg, ArgGroup, ArgMatches};
 use libc::EFD_NONBLOCK;
 use log::LevelFilter;
 use option_parser::OptionParser;
-use seccomp::SeccompAction;
+use seccompiler::SeccompAction;
 use signal_hook::{
     consts::SIGSYS,
     iterator::{exfiltrator::WithRawSiginfo, SignalsInfo},

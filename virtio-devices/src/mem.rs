@@ -23,7 +23,7 @@ use crate::{GuestMemoryMmap, GuestRegionMmap};
 use crate::{VirtioInterrupt, VirtioInterruptType};
 use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
-use seccomp::{SeccompAction, SeccompFilter};
+use seccompiler::{apply_filter, SeccompAction};
 use std::collections::BTreeMap;
 use std::io;
 use std::mem::size_of;
@@ -961,7 +961,7 @@ impl VirtioDevice for Mem {
         thread::Builder::new()
             .name(self.id.clone())
             .spawn(move || {
-                if let Err(e) = SeccompFilter::apply(virtio_mem_seccomp_filter) {
+                if let Err(e) = apply_filter(&virtio_mem_seccomp_filter) {
                     error!("Error applying seccomp filter: {:?}", e);
                 } else if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                     error!("Error running worker: {:?}", e);

@@ -44,7 +44,7 @@ use linux_loader::loader::elf::PvhBootCapability::PvhEntryPresent;
 #[cfg(target_arch = "aarch64")]
 use linux_loader::loader::pe::Error::InvalidImageMagicNumber;
 use linux_loader::loader::KernelLoader;
-use seccomp::{SeccompAction, SeccompFilter};
+use seccompiler::{apply_filter, SeccompAction};
 use signal_hook::{
     consts::{SIGINT, SIGTERM, SIGWINCH},
     iterator::backend::Handle,
@@ -216,10 +216,10 @@ pub enum Error {
     InvalidNumaConfig,
 
     /// Cannot create seccomp filter
-    CreateSeccompFilter(seccomp::SeccompError),
+    CreateSeccompFilter(seccompiler::Error),
 
     /// Cannot apply seccomp filter
-    ApplySeccompFilter(seccomp::Error),
+    ApplySeccompFilter(seccompiler::Error),
 
     /// Failed resizing a memory zone.
     ResizeZone,
@@ -1880,7 +1880,7 @@ impl Vm {
                         thread::Builder::new()
                             .name("signal_handler".to_string())
                             .spawn(move || {
-                                if let Err(e) = SeccompFilter::apply(signal_handler_seccomp_filter)
+                                if let Err(e) = apply_filter(&signal_handler_seccomp_filter)
                                     .map_err(Error::ApplySeccompFilter)
                                 {
                                     error!("Error applying seccomp filter: {:?}", e);
@@ -2442,7 +2442,7 @@ impl Snapshottable for Vm {
                         thread::Builder::new()
                             .name("signal_handler".to_string())
                             .spawn(move || {
-                                if let Err(e) = SeccompFilter::apply(signal_handler_seccomp_filter)
+                                if let Err(e) = apply_filter(&signal_handler_seccomp_filter)
                                     .map_err(Error::ApplySeccompFilter)
                                 {
                                     error!("Error applying seccomp filter: {:?}", e);

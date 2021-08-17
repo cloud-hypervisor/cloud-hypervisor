@@ -28,7 +28,7 @@ use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::vm::{Error as VmError, Vm, VmState};
 use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
-use seccomp::{SeccompAction, SeccompFilter};
+use seccompiler::{apply_filter, SeccompAction};
 use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::fs::File;
 use std::io;
@@ -121,11 +121,11 @@ pub enum Error {
 
     /// Cannot create seccomp filter
     #[error("Error creating seccomp filter: {0}")]
-    CreateSeccompFilter(seccomp::SeccompError),
+    CreateSeccompFilter(seccompiler::Error),
 
     /// Cannot apply seccomp filter
     #[error("Error applying seccomp filter: {0}")]
-    ApplySeccompFilter(seccomp::Error),
+    ApplySeccompFilter(seccompiler::Error),
 
     /// Error activating virtio devices
     #[error("Error activating virtio devices: {0:?}")]
@@ -263,7 +263,7 @@ pub fn start_vmm_thread(
         .name("vmm".to_string())
         .spawn(move || {
             // Apply seccomp filter for VMM thread.
-            SeccompFilter::apply(vmm_seccomp_filter).map_err(Error::ApplySeccompFilter)?;
+            apply_filter(&vmm_seccomp_filter).map_err(Error::ApplySeccompFilter)?;
 
             let mut vmm = Vmm::new(
                 vmm_version.to_string(),
