@@ -6,7 +6,7 @@
 
 use block_util::{async_io::DiskFile, raw_sync::RawFileDiskSync};
 use libfuzzer_sys::fuzz_target;
-use seccomp::SeccompAction;
+use seccompiler::SeccompAction;
 use std::ffi;
 use std::fs::File;
 use std::io::{self, Cursor, Read, Seek, SeekFrom};
