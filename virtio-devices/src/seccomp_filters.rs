@@ -45,9 +45,6 @@ macro_rules! or {
     ($($x:expr),*) => (vec![$($x),*])
 }
 
-// Define io_uring syscalls as they are not yet part of libc.
-const SYS_IO_URING_ENTER: i64 = 426;
-
 // See include/uapi/asm-generic/ioctls.h in the kernel code.
 const FIONBIO: u64 = 0x5421;
 
@@ -112,14 +109,9 @@ fn virtio_block_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_fallocate, vec![]),
         (libc::SYS_fdatasync, vec![]),
         (libc::SYS_fsync, vec![]),
-        #[cfg(target_arch = "x86_64")]
         (libc::SYS_ftruncate, vec![]),
-        #[cfg(target_arch = "aarch64")]
-        // The definition of libc::SYS_ftruncate is missing on AArch64.
-        // Use a hard-code number instead.
-        (46, vec![]),
         (libc::SYS_futex, vec![]),
-        (SYS_IO_URING_ENTER, vec![]),
+        (libc::SYS_io_uring_enter, vec![]),
         (libc::SYS_lseek, vec![]),
         (libc::SYS_madvise, vec![]),
         (libc::SYS_mmap, vec![]),
