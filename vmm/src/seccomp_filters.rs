@@ -36,11 +36,6 @@ macro_rules! or {
     ($($x:expr),*) => (vec![$($x),*])
 }
 
-// Define io_uring syscalls as they are not yet part of libc.
-const SYS_IO_URING_SETUP: i64 = 425;
-const SYS_IO_URING_ENTER: i64 = 426;
-const SYS_IO_URING_REGISTER: i64 = 427;
-
 // See include/uapi/asm-generic/ioctls.h in the kernel code.
 const TCGETS: u64 = 0x5401;
 const TCSETS: u64 = 0x5402;
@@ -116,12 +111,6 @@ mod kvm {
 
 #[cfg(feature = "kvm")]
 use kvm::*;
-
-// The definition of libc::SYS_ftruncate on AArch64 is different from that on x86_64.
-#[cfg(target_arch = "aarch64")]
-pub const SYS_FTRUNCATE: libc::c_long = 46;
-#[cfg(target_arch = "x86_64")]
-pub const SYS_FTRUNCATE: libc::c_long = 77;
 
 // MSHV IOCTL code. This is unstable until the kernel code has been declared stable.
 #[cfg(feature = "mshv")]
@@ -409,7 +398,7 @@ fn vmm_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
         (libc::SYS_fork, vec![]),
         (libc::SYS_fstat, vec![]),
         (libc::SYS_fsync, vec![]),
-        (SYS_FTRUNCATE, vec![]),
+        (libc::SYS_ftruncate, vec![]),
         #[cfg(target_arch = "aarch64")]
         (libc::SYS_faccessat, vec![]),
         #[cfg(target_arch = "aarch64")]
@@ -421,9 +410,9 @@ fn vmm_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
         (libc::SYS_gettimeofday, vec![]),
         (libc::SYS_getuid, vec![]),
         (libc::SYS_ioctl, create_vmm_ioctl_seccomp_rule()?),
-        (SYS_IO_URING_ENTER, vec![]),
-        (SYS_IO_URING_SETUP, vec![]),
-        (SYS_IO_URING_REGISTER, vec![]),
+        (libc::SYS_io_uring_enter, vec![]),
+        (libc::SYS_io_uring_setup, vec![]),
+        (libc::SYS_io_uring_register, vec![]),
         (libc::SYS_kill, vec![]),
         (libc::SYS_listen, vec![]),
         (libc::SYS_lseek, vec![]),
