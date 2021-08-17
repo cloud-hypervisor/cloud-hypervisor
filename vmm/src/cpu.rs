@@ -724,11 +724,13 @@ impl CpuManager {
                 .name(format!("vcpu{}", cpu_id))
                 .spawn(move || {
                     // Apply seccomp filter for vcpu thread.
-                    if let Err(e) =
-                        apply_filter(&vcpu_seccomp_filter).map_err(Error::ApplySeccompFilter)
-                    {
-                        error!("Error applying seccomp filter: {:?}", e);
-                        return;
+                    if !vcpu_seccomp_filter.is_empty() {
+                        if let Err(e) =
+                            apply_filter(&vcpu_seccomp_filter).map_err(Error::ApplySeccompFilter)
+                        {
+                            error!("Error applying seccomp filter: {:?}", e);
+                            return;
+                        }
                     }
                     extern "C" fn handle_signal(_: i32, _: *mut siginfo_t, _: *mut c_void) {}
                     // This uses an async signal safe handler to kill the vcpu handles.

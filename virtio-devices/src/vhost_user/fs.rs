@@ -556,9 +556,13 @@ impl VirtioDevice for Fs {
         thread::Builder::new()
             .name(self.id.to_string())
             .spawn(move || {
-                if let Err(e) = apply_filter(&virtio_vhost_fs_seccomp_filter) {
-                    error!("Error applying seccomp filter: {:?}", e);
-                } else if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
+                if !virtio_vhost_fs_seccomp_filter.is_empty() {
+                    if let Err(e) = apply_filter(&virtio_vhost_fs_seccomp_filter) {
+                        error!("Error applying seccomp filter: {:?}", e);
+                        return;
+                    }
+                }
+                if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                     error!("Error running vhost-user-fs worker: {:?}", e);
                 }
             })

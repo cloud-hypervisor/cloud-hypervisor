@@ -276,7 +276,9 @@ fn start_http_thread(
         .name("http-server".to_string())
         .spawn(move || {
             // Apply seccomp filter for API thread.
-            apply_filter(&api_seccomp_filter).map_err(Error::ApplySeccompFilter)?;
+            if !api_seccomp_filter.is_empty() {
+                apply_filter(&api_seccomp_filter).map_err(Error::ApplySeccompFilter)?;
+            }
 
             server.start_server().unwrap();
             loop {

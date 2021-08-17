@@ -466,9 +466,13 @@ impl VirtioDevice for Balloon {
         thread::Builder::new()
             .name(self.id.clone())
             .spawn(move || {
-                if let Err(e) = apply_filter(&virtio_balloon_seccomp_filter) {
-                    error!("Error applying seccomp filter: {:?}", e);
-                } else if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
+                if !virtio_balloon_seccomp_filter.is_empty() {
+                    if let Err(e) = apply_filter(&virtio_balloon_seccomp_filter) {
+                        error!("Error applying seccomp filter: {:?}", e);
+                        return;
+                    }
+                }
+                if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                     error!("Error running worker: {:?}", e);
                 }
             })

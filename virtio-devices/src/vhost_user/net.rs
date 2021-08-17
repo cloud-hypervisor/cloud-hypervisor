@@ -339,9 +339,13 @@ impl VirtioDevice for Net {
             thread::Builder::new()
                 .name(format!("{}_ctrl", self.id))
                 .spawn(move || {
-                    if let Err(e) = apply_filter(&virtio_vhost_net_ctl_seccomp_filter) {
-                        error!("Error applying seccomp filter: {:?}", e);
-                    } else if let Err(e) = ctrl_handler.run_ctrl(paused, paused_sync.unwrap()) {
+                    if !virtio_vhost_net_ctl_seccomp_filter.is_empty() {
+                        if let Err(e) = apply_filter(&virtio_vhost_net_ctl_seccomp_filter) {
+                            error!("Error applying seccomp filter: {:?}", e);
+                            return;
+                        }
+                    }
+                    if let Err(e) = ctrl_handler.run_ctrl(paused, paused_sync.unwrap()) {
                         error!("Error running worker: {:?}", e);
                     }
                 })

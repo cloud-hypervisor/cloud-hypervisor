@@ -1880,11 +1880,13 @@ impl Vm {
                         thread::Builder::new()
                             .name("signal_handler".to_string())
                             .spawn(move || {
-                                if let Err(e) = apply_filter(&signal_handler_seccomp_filter)
-                                    .map_err(Error::ApplySeccompFilter)
-                                {
-                                    error!("Error applying seccomp filter: {:?}", e);
-                                    return;
+                                if !signal_handler_seccomp_filter.is_empty() {
+                                    if let Err(e) = apply_filter(&signal_handler_seccomp_filter)
+                                        .map_err(Error::ApplySeccompFilter)
+                                    {
+                                        error!("Error applying seccomp filter: {:?}", e);
+                                        return;
+                                    }
                                 }
 
                                 Vm::os_signal_handler(signals, console, on_tty, exit_evt);
@@ -2442,11 +2444,13 @@ impl Snapshottable for Vm {
                         thread::Builder::new()
                             .name("signal_handler".to_string())
                             .spawn(move || {
-                                if let Err(e) = apply_filter(&signal_handler_seccomp_filter)
-                                    .map_err(Error::ApplySeccompFilter)
-                                {
-                                    error!("Error applying seccomp filter: {:?}", e);
-                                    return;
+                                if !signal_handler_seccomp_filter.is_empty() {
+                                    if let Err(e) = apply_filter(&signal_handler_seccomp_filter)
+                                        .map_err(Error::ApplySeccompFilter)
+                                    {
+                                        error!("Error applying seccomp filter: {:?}", e);
+                                        return;
+                                    }
                                 }
 
                                 Vm::os_signal_handler(signals, console, on_tty, exit_evt)
