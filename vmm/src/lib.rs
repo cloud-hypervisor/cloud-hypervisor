@@ -263,7 +263,9 @@ pub fn start_vmm_thread(
         .name("vmm".to_string())
         .spawn(move || {
             // Apply seccomp filter for VMM thread.
-            apply_filter(&vmm_seccomp_filter).map_err(Error::ApplySeccompFilter)?;
+            if !vmm_seccomp_filter.is_empty() {
+                apply_filter(&vmm_seccomp_filter).map_err(Error::ApplySeccompFilter)?;
+            }
 
             let mut vmm = Vmm::new(
                 vmm_version.to_string(),
