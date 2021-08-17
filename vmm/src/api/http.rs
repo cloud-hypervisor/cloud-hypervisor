@@ -8,7 +8,7 @@ use crate::api::{ApiError, ApiRequest, VmAction};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{Error, Result};
 use micro_http::{Body, HttpServer, MediaType, Method, Request, Response, StatusCode, Version};
-use seccomp::{SeccompAction, SeccompFilter};
+use seccompiler::{apply_filter, SeccompAction};
 use serde_json::Error as SerdeError;
 use std::collections::HashMap;
 use std::fs::File;
@@ -276,7 +276,7 @@ fn start_http_thread(
         .name("http-server".to_string())
         .spawn(move || {
             // Apply seccomp filter for API thread.
-            SeccompFilter::apply(api_seccomp_filter).map_err(Error::ApplySeccompFilter)?;
+            apply_filter(&api_seccomp_filter).map_err(Error::ApplySeccompFilter)?;
 
             server.start_server().unwrap();
             loop {

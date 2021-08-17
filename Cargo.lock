@@ -204,7 +204,7 @@ dependencies = [
  "log",
  "net_util",
  "option_parser",
- "seccomp",
+ "seccompiler",
  "serde_json",
  "signal-hook",
  "test_infra",
@@ -873,9 +873,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d29ab0c6d3fc0ee92fe66e2d99f700eab17a8d57d1c1d3b748380fb20baa78cd"
 
 [[package]]
-name = "seccomp"
+name = "seccompiler"
 version = "0.1.0"
-source = "git+https://github.com/firecracker-microvm/firecracker?tag=v0.24.5#cd36c699f3cb3d531289aadee26c45c1306edcfc"
+source = "git+https://github.com/rust-vmm/seccompiler#da5788d52f1ae8886d8ed4624199b7e9fa64ac04"
 dependencies = [
  "libc",
 ]
@@ -1223,7 +1223,7 @@ dependencies = [
  "net_util",
  "pci",
  "rate_limiter",
- "seccomp",
+ "seccompiler",
  "serde",
  "serde_derive",
  "serde_json",
@@ -1337,7 +1337,7 @@ dependencies = [
  "option_parser",
  "pci",
  "qcow",
- "seccomp",
+ "seccompiler",
  "serde",
  "serde_derive",
  "serde_json",

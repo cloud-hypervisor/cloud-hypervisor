@@ -11,7 +11,7 @@ use crate::{
 };
 use crate::{GuestMemoryMmap, GuestRegionMmap, MmapRegion};
 use libc::{self, c_void, off64_t, pread64, pwrite64};
-use seccomp::{SeccompAction, SeccompFilter};
+use seccompiler::{apply_filter, SeccompAction};
 use std::io;
 use std::os::unix::io::AsRawFd;
 use std::result;
@@ -556,7 +556,7 @@ impl VirtioDevice for Fs {
         thread::Builder::new()
             .name(self.id.to_string())
             .spawn(move || {
-                if let Err(e) = SeccompFilter::apply(virtio_vhost_fs_seccomp_filter) {
+                if let Err(e) = apply_filter(&virtio_vhost_fs_seccomp_filter) {
                     error!("Error applying seccomp filter: {:?}", e);
                 } else if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                     error!("Error running vhost-user-fs worker: {:?}", e);
