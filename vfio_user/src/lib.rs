@@ -410,7 +410,7 @@ impl Client {
             .write_all(dma_unmap.as_slice())
             .map_err(Error::StreamWrite)?;
 
-        let mut reply = Header::default();
+        let mut reply = DmaUnmap::default();
         self.stream
             .read_exact(reply.as_mut_slice())
             .map_err(Error::StreamRead)?;
