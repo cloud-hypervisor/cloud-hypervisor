@@ -1,0 +1,59 @@
+name: Cloud Hypervisor AArch64 Release
+on: [create]
+jobs:
+  release:
+    if: github.event_name == 'create' && github.event.ref_type == 'tag'
+    name: Release (AArch64)
+    runs-on: ubuntu-latest
+    continue-on-error: false
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v2
+      - name: Install Rust toolchain (aarch64-unknown-linux-gnu)
+        uses: actions-rs/toolchain@v1
+        with:
+            toolchain: stable
+            target: aarch64-unknown-linux-gnu
+            override: true
+      - name: Install Rust toolchain (aarch64-unknown-linux-musl)
+        uses: actions-rs/toolchain@v1
+        with:
+            toolchain: stable
+            target: aarch64-unknown-linux-musl
+            override: true
+      - name: Static Build
+        uses: actions-rs/cargo@v1
+        with:
+            use-cross: true
+            command: build
+            args: --all --release --target=aarch64-unknown-linux-musl
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: ${{ github.ref }}
+          draft: true
+          prerelease: true
+      - name: Upload static AArch64 cloud-hypervisor
+        id: upload-release-static-aarch64-cloud-hypervisor
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: target/aarch64-unknown-linux-musl/release/cloud-hypervisor
+          asset_name: cloud-hypervisor-static-aarch64
+          asset_content_type: application/octet-stream
+      - name: Upload static AArch64 ch-remote
+        id: upload-release-static-aarch64-ch-remote
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: target/aarch64-unknown-linux-musl/release/ch-remote
+          asset_name: ch-remote-static-aarch64
+          asset_content_type: application/octet-stream
