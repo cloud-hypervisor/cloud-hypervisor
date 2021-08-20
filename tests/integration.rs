@@ -756,6 +756,27 @@ mod tests {
             )
             .unwrap();
         }
+
+        fn check_devices_common(&self, socket: Option<&String>, console_text: Option<&String>) {
+            // Check block devices are readable
+            self.ssh_command("sudo dd if=/dev/vda of=/dev/null bs=1M iflag=direct count=1024")
+                .unwrap();
+            self.ssh_command("sudo dd if=/dev/vdb of=/dev/null bs=1M iflag=direct count=8")
+                .unwrap();
+            // Check if the rng device is readable
+            self.ssh_command("sudo head -c 1000 /dev/hwrng > /dev/null")
+                .unwrap();
+            // Check vsock
+            if let Some(socket) = socket {
+                self.check_vsock(socket.as_str());
+            }
+            // Check if the console is usable
+            if let Some(console_text) = console_text {
+                let console_cmd = format!("echo {} | sudo tee /dev/hvc0", console_text);
+                self.ssh_command(&console_cmd).unwrap();
+            }
+            // The net device is 'automatically' exercised through the above 'ssh' commands
+        }
     }
 
     struct GuestCommand<'a> {
@@ -4894,7 +4915,6 @@ mod tests {
                 .unwrap();
 
             let console_text = String::from("On a branch floating down river a cricket, singing.");
-            let console_cmd = format!("echo {} | sudo tee /dev/hvc0", console_text);
             // Create the snapshot directory
             let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
 
@@ -4905,22 +4925,8 @@ mod tests {
                 assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
                 // Check the guest RAM
                 assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
-                // Check block devices are readable
-                guest
-                    .ssh_command("sudo dd if=/dev/vda of=/dev/null bs=1M iflag=direct count=1024")
-                    .unwrap();
-                guest
-                    .ssh_command("sudo dd if=/dev/vdb of=/dev/null bs=1M iflag=direct count=8")
-                    .unwrap();
-                // Check if the rng device is readable
-                guest
-                    .ssh_command("sudo head -c 1000 /dev/hwrng > /dev/null")
-                    .unwrap();
-                // Check vsock
-                guest.check_vsock(socket.as_str());
-                // Check if the console is usable
-
-                guest.ssh_command(&console_cmd).unwrap();
+                // Check the guest virtio-devices, e.g. block, rng, vsock, console, and net
+                guest.check_devices_common(Some(&socket), Some(&console_text));
 
                 // x86_64: We check that removing and adding back the virtio-net device
                 // does not break the snapshot/restore support for virtio-pci.
@@ -4996,19 +5002,9 @@ mod tests {
                 // Perform same checks to validate VM has been properly restored
                 assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
                 assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
-                guest
-                    .ssh_command("sudo dd if=/dev/vda of=/dev/null bs=1M iflag=direct count=1024")
-                    .unwrap();
-                guest
-                    .ssh_command("sudo dd if=/dev/vdb of=/dev/null bs=1M iflag=direct count=8")
-                    .unwrap();
-                guest
-                    .ssh_command("sudo head -c 1000 /dev/hwrng > /dev/null")
-                    .unwrap();
-                guest.check_vsock(socket.as_str());
-                guest.ssh_command(&console_cmd).unwrap();
-                // Shutdown the target VM and check console output
+                guest.check_devices_common(Some(&socket), Some(&console_text));
             });
+            // Shutdown the target VM and check console output
             let _ = child.kill();
             let output = child.wait_with_output().unwrap();
             handle_child_output(r, &output);
