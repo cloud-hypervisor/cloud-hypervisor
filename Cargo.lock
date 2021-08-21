@@ -560,7 +560,7 @@ dependencies = [
 [[package]]
 name = "mshv-bindings"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/mshv?branch=master#39a77bc8e4ed50fcfb5bc9f5ab540c7039278fb6"
+source = "git+https://github.com/rust-vmm/mshv?branch=master#b51905f5f15de80ed40207af2e9e74e4478f26ea"
 dependencies = [
  "libc",
  "serde",
@@ -572,7 +572,7 @@ dependencies = [
 [[package]]
 name = "mshv-ioctls"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/mshv?branch=master#39a77bc8e4ed50fcfb5bc9f5ab540c7039278fb6"
+source = "git+https://github.com/rust-vmm/mshv?branch=master#b51905f5f15de80ed40207af2e9e74e4478f26ea"
 dependencies = [
  "libc",
  "mshv-bindings",
@@ -993,9 +993,9 @@ checksum = "8ea5119cdb4c55b55d432abb513a0429384878c15dde60cc77b1c99de1a95a6a"
 
 [[package]]
 name = "syn"
-version = "1.0.74"
+version = "1.0.75"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1873d832550d4588c3dbc20f01361ab00bfe741048f71e3fecf145a7cc18b29c"
+checksum = "b7f58f7e8eaa0009c5fec437aabf511bd9933e4b2d7407bd05273c01a8906ea7"
 dependencies = [
  "proc-macro2",
  "quote",
