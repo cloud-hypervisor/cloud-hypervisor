@@ -2,7 +2,7 @@ pipeline{
 	agent none
 	stages {
 		stage ('Early checks') {
-			agent { node { label 'master' } }
+			agent { node { label 'built-in' } }
 			stages {
 				stage ('Check for RFC/WIP builds') {
 					when {
