@@ -2,11 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-use libc::{clock_gettime, gmtime_r, time_t, timespec, tm, CLOCK_REALTIME};
+use libc::{clock_gettime, gmtime_r, timespec, tm, CLOCK_REALTIME};
 use std::cmp::min;
 use std::mem;
 use std::sync::{Arc, Barrier};
 use vm_device::BusDevice;
+
+// https://github.com/rust-lang/libc/issues/1848
+#[cfg_attr(target_env = "musl", allow(deprecated))]
+use libc::time_t;
 
 const INDEX_MASK: u8 = 0x7f;
 const INDEX_OFFSET: u64 = 0x0;
@@ -85,6 +89,8 @@ impl BusDevice for Cmos {
                     let mut timespec: timespec = mem::zeroed();
                     clock_gettime(CLOCK_REALTIME, &mut timespec as *mut _);
 
+                    // https://github.com/rust-lang/libc/issues/1848
+                    #[cfg_attr(target_env = "musl", allow(deprecated))]
                     let now: time_t = timespec.tv_sec;
                     let mut tm: tm = mem::zeroed();
                     gmtime_r(&now, &mut tm as *mut _);
