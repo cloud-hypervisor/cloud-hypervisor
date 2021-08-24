@@ -36,7 +36,7 @@ option_parser = { path = "../option_parser" }
 pci = { path = "../pci" }
 qcow = { path = "../qcow" }
 seccompiler = { git = "https://github.com/rust-vmm/seccompiler"}
-serde = { version = "1.0.127", features = ["rc"] }
+serde = { version = "1.0.129", features = ["rc"] }
 serde_derive = "1.0.129"
 serde_json = "1.0.66"
 signal-hook = "0.3.9"
