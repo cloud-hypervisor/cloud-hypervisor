@@ -39,9 +39,9 @@ checksum = "237430fd6ed3740afe94eefcc278ae21e050285be882804e0d6e8695f0c94691"
 
 [[package]]
 name = "arc-swap"
-version = "1.3.0"
+version = "1.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e906254e445520903e7fc9da4f709886c84ae4bc4ddaf0e093188d66df4dc820"
+checksum = "34a23efe54373080cf871532e2d01076be41c4c896d32ef63af1b2dded924b03"
 
 [[package]]
 name = "arch"
@@ -294,9 +294,9 @@ dependencies = [
 
 [[package]]
 name = "io-uring"
-version = "0.5.1"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb82832e05cc4ca298f198a8db108837b4f7b7b1248e3cba8e48f151aece80cf"
+checksum = "8d75829ed9377bab6c90039fe47b9d84caceb4b5063266142e21bcce6550cda8"
 dependencies = [
  "bitflags",
  "libc",
@@ -304,9 +304,9 @@ dependencies = [
 
 [[package]]
 name = "itoa"
-version = "0.4.7"
+version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd25036021b0de88a0aff6b850051563c6516d0bf53f8638938edbb9de732736"
+checksum = "b71991ff56294aa922b450139ee08b3bfc70982c6b2c7562771375cf73542dd4"
 
 [[package]]
 name = "kvm-bindings"
@@ -525,15 +525,15 @@ checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
 
 [[package]]
 name = "serde"
-version = "1.0.127"
+version = "1.0.129"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f03b9878abf6d14e6779d3f24f07b2cfa90352cfec4acc5aab8f1ac7f146fae8"
+checksum = "d1f72836d2aa753853178eda473a3b9d8e4eefdaf20523b919677e6de489f8f1"
 
 [[package]]
 name = "serde_derive"
-version = "1.0.127"
+version = "1.0.129"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a024926d3432516606328597e0f224a51355a493b49fdd67e9209187cbe55ecc"
+checksum = "e57ae87ad533d9a56427558b516d0adac283614e347abf85b0dc0cbbf0a249f3"
 dependencies = [
  "proc-macro2",
  "quote",
