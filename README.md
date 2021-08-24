@@ -1,5 +1,3 @@
-[![Build Status](https://travis-ci.com/cloud-hypervisor/cloud-hypervisor.svg?branch=master)](https://travis-ci.com/cloud-hypervisor/cloud-hypervisor)
-
 - [1. What is Cloud Hypervisor?](#1-what-is-cloud-hypervisor)
   - [Objectives](#objectives)
     - [High Level](#high-level)

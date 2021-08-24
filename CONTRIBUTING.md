@@ -55,7 +55,7 @@ you want to merge your changes to `cloud-hypervisor`:
    into your github organization.
 2. Within your fork, create a branch for your contribution.
 3. [Create a pull request](https://help.github.com/articles/creating-a-pull-request-from-a-fork/)
-   against the master branch of the Cloud Hypervisor repository.
+   against the main branch of the Cloud Hypervisor repository.
 4. Add reviewers to your pull request and then work with your reviewers to address
    any comments and obtain minimum of 2 [maintainers](MAINTAINERS.md) approvals.
    To update your pull request amend existing commits whenever applicable and
