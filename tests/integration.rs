@@ -6772,4 +6772,217 @@ mod tests {
             handle_child_output(r, &output);
         }
     }
+
+    mod live_migration {
+        use crate::tests::*;
+
+        // This test exercises the local live-migration between two Cloud Hypervisor VMs on the
+        // same host. It ensures the following behaviors:
+        // 1. The source VM is up and functional (including various virtio-devices are working properly);
+        // 2. The 'send-migration' and 'receive-migration' command finished successfully;
+        // 3. The source VM terminated gracefully after live migration;
+        // 4. The destination VM is functional (including various virtio-devices are working properly) after
+        //    live migration;
+        // Note: This test does not use vsock as we can't create two identical vsock on the same host.
+        #[test]
+        fn test_live_migration() {
+            let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(Box::new(focal));
+            let kernel_path = direct_kernel_boot_path();
+            let console_text = String::from("On a branch floating down river a cricket, singing.");
+            let net_id = "net123";
+            let net_params = format!(
+                "id={},tap=,mac={},ip={},mask=255.255.255.0",
+                net_id, guest.network.guest_mac, guest.network.host_ip
+            );
+
+            // Start the source VM
+            let src_api_socket = temp_api_path(&guest.tmp_dir);
+            let mut src_child = GuestCommand::new(&guest)
+                .args(&["--cpus", "boot=4"])
+                .args(&["--memory", "size=4G"])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+                .default_disks()
+                .args(&["--net", net_params.as_str()])
+                .args(&["--api-socket", &src_api_socket])
+                .capture_output()
+                .spawn()
+                .unwrap();
+
+            // Start the destination VM
+            let mut dest_api_socket = temp_api_path(&guest.tmp_dir);
+            dest_api_socket.push_str(".dest");
+            let mut dest_child = GuestCommand::new(&guest)
+                .args(&["--api-socket", &dest_api_socket])
+                .capture_output()
+                .spawn()
+                .unwrap();
+
+            let r = std::panic::catch_unwind(|| {
+                guest.wait_vm_boot(Some(30)).unwrap();
+
+                // Make sure the source VM is functaionl
+                // Check the number of vCPUs
+                assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
+                // Check the guest RAM
+                assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+                // Check the guest virtio-devices, e.g. block, rng, console, and net
+                guest.check_devices_common(None, Some(&console_text));
+
+                // x86_64: Following what's done in the `test_snapshot_restore`, we need
+                // to make sure that removing and adding back the virtio-net device does
+                // not break the live-migration support for virtio-pci.
+                #[cfg(target_arch = "x86_64")]
+                {
+                    assert!(remote_command(
+                        &src_api_socket,
+                        "remove-device",
+                        Some(net_id),
+                    ));
+                    thread::sleep(std::time::Duration::new(10, 0));
+
+                    // Plug the virtio-net device again
+                    assert!(remote_command(
+                        &src_api_socket,
+                        "add-net",
+                        Some(net_params.as_str()),
+                    ));
+                    thread::sleep(std::time::Duration::new(10, 0));
+                }
+
+                // Start the live-migration
+                let migration_socket = String::from(
+                    guest
+                        .tmp_dir
+                        .as_path()
+                        .join("live-migration.sock")
+                        .to_str()
+                        .unwrap(),
+                );
+                // Start to receive migration from the destintion VM
+                let mut receive_migration = Command::new(clh_command("ch-remote"))
+                    .args(&[
+                        &format!("--api-socket={}", &dest_api_socket),
+                        "receive-migration",
+                        &format! {"unix:{}", migration_socket},
+                    ])
+                    .stderr(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .spawn()
+                    .unwrap();
+                // Give it '1s' to make sure the 'migration_socket' file is properly created
+                thread::sleep(std::time::Duration::new(1, 0));
+                // Start to send migration from the source VM
+                let mut send_migration = Command::new(clh_command("ch-remote"))
+                    .args(&[
+                        &format!("--api-socket={}", &src_api_socket),
+                        "send-migration",
+                        &format! {"unix:{}", migration_socket},
+                    ])
+                    .stderr(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .spawn()
+                    .unwrap();
+
+                let mut success;
+                // The 'send-migration' command should be executed successfully within the given timeout
+                if let Some(status) = send_migration
+                    .wait_timeout(std::time::Duration::from_secs(30))
+                    .unwrap()
+                {
+                    success = status.success();
+                } else {
+                    success = false;
+                }
+                if !success {
+                    let _ = send_migration.kill();
+                    let output = send_migration.wait_with_output().unwrap();
+                    eprintln!("\n\n==== Start 'send_migration' output ====\n\n---stdout---\n{}\n\n---stderr---\n{}\n\n==== End 'send_migration' output ====\n\n",
+                    String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+                }
+                // The 'receive-migration' command should be executed successfully within the given timeout
+                if let Some(status) = receive_migration
+                    .wait_timeout(std::time::Duration::from_secs(30))
+                    .unwrap()
+                {
+                    success = status.success();
+                } else {
+                    success = false;
+                }
+                if !success {
+                    let _ = receive_migration.kill();
+                    let output = receive_migration.wait_with_output().unwrap();
+                    eprintln!("\n\n==== Start 'receive_migration' output ====\n\n---stdout---\n{}\n\n---stderr---\n{}\n\n==== End 'receive_migration' output ====\n\n",
+                    String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+                }
+                assert!(
+                    success,
+                    "Unsuccessful command: 'send-migration' or 'receive-migration'."
+                );
+            });
+
+            let print_and_panic = |src_vm: Child, dest_vm: Child, message: &str| -> ! {
+                let mut src_vm = src_vm;
+                let mut dest_vm = dest_vm;
+
+                let _ = src_vm.kill();
+                let src_output = src_vm.wait_with_output().unwrap();
+                eprintln!(
+                    "\n\n==== Start 'source_vm' stdout ====\n\n{}\n\n==== End 'source_vm' stdout ====",
+                    String::from_utf8_lossy(&src_output.stdout)
+                );
+                eprintln!(
+                    "\n\n==== Start 'source_vm' stderr ====\n\n{}\n\n==== End 'source_vm' stderr ====",
+                    String::from_utf8_lossy(&src_output.stderr)
+                );
+                let _ = dest_vm.kill();
+                let dest_output = dest_vm.wait_with_output().unwrap();
+                eprintln!(
+                    "\n\n==== Start 'destination_vm' stdout ====\n\n{}\n\n==== End 'destination_vm' stdout ====",
+                    String::from_utf8_lossy(&dest_output.stdout)
+                );
+                eprintln!(
+                    "\n\n==== Start 'destination_vm' stderr ====\n\n{}\n\n==== End 'destination_vm' stderr ====",
+                    String::from_utf8_lossy(&dest_output.stderr)
+                );
+
+                panic!("Test failed: {}", message)
+            };
+
+            // Check and report any errors occured during the live-migration
+            if r.is_err() {
+                print_and_panic(src_child, dest_child, "Error occured during live-migration");
+            }
+
+            // Check the source vm has been terminated successful (give it '3s' to settle)
+            thread::sleep(std::time::Duration::new(3, 0));
+            if !src_child.try_wait().unwrap().map_or(false, |s| s.success()) {
+                print_and_panic(
+                    src_child,
+                    dest_child,
+                    "source VM was not terminated successfully.",
+                );
+            };
+
+            // Post live-migration check to make sure the destination VM is funcational
+            let r = std::panic::catch_unwind(|| {
+                // Perform same checks to validate VM has been properly migrated
+                assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
+                assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+                guest.check_devices_common(None, Some(&console_text));
+            });
+
+            // Clean-up the destination VM and make sure it terminated correctly
+            let _ = dest_child.kill();
+            let dest_output = dest_child.wait_with_output().unwrap();
+            handle_child_output(r, &dest_output);
+
+            // Check the destination VM has the expected 'concole_text' from its output
+            let r = std::panic::catch_unwind(|| {
+                assert!(String::from_utf8_lossy(&dest_output.stdout).contains(&console_text));
+            });
+            handle_child_output(r, &dest_output);
+        }
+    }
 }
