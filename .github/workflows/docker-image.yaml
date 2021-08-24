@@ -2,7 +2,7 @@ name: Cloud-Hypervisor's Docker image update
 
 on:
   push:
-    branches: master
+    branches: main
     paths: resources/Dockerfile
 
 jobs:

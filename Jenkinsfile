@@ -14,7 +14,7 @@ pipeline{
 					}
 				}
 				stage ('Cancel older builds') {
-					when { not { branch 'master' } }
+					when { not { branch 'main' } }
 					steps {
 						cancelPreviousBuilds()
 					}
@@ -110,7 +110,7 @@ pipeline{
 					agent { node { label 'bionic-sgx' } }
 					when {
 						beforeAgent true
-						branch 'master'
+						branch 'main'
 					}
 					stages {
 						stage ('Checkout') {
@@ -146,7 +146,7 @@ pipeline{
 					agent { node { label 'bionic-vfio' } }
 					when {
 						beforeAgent true
-						branch 'master'
+						branch 'main'
 					}
 					stages {
 						stage ('Checkout') {
@@ -221,15 +221,15 @@ pipeline{
 	post {
 		regression {
 			script {
-				if (env.BRANCH_NAME == 'master') {
-					slackSend (color: '#ff0000', message: '"master" branch build is now failing')
+				if (env.BRANCH_NAME == 'main') {
+					slackSend (color: '#ff0000', message: '"main" branch build is now failing')
 				}
 			}
 		}
 		fixed {
 			script {
-				if (env.BRANCH_NAME == 'master') {
-					slackSend (color: '#00ff00', message: '"master" branch build is now fixed')
+				if (env.BRANCH_NAME == 'main') {
+					slackSend (color: '#00ff00', message: '"main" branch build is now fixed')
 				}
 			}
 		}
