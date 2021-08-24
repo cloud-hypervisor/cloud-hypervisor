@@ -1265,19 +1265,12 @@ impl cpu::Vcpu for KvmVcpu {
         // call KVM_GET_ONE_REG on each id in order to save all of them. We carve out from the list
         // the core registers which are represented in the kernel by kvm_regs structure and for which
         // we can calculate the id based on the offset in the structure.
-
-        reg_list.retain(|regid| *regid != 0);
-        reg_list.as_slice().to_vec().sort_unstable();
-
         reg_list.retain(|regid| is_system_register(*regid));
 
         // Now, for the rest of the registers left in the previously fetched register list, we are
         // simply calling KVM_GET_ONE_REG.
         let indices = reg_list.as_slice();
-        for (_pos, index) in indices.iter().enumerate() {
-            if _pos > 230 {
-                break;
-            }
+        for index in indices.iter() {
             state.push(kvm_bindings::kvm_one_reg {
                 id: *index,
                 addr: self
