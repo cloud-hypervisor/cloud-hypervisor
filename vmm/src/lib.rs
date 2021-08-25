@@ -148,7 +148,8 @@ pub enum EpollDispatch {
     Stdin,
     Api,
     ActivateVirtioDevices,
-    Pty,
+    ConsolePty,
+    SerialPty,
 }
 
 pub struct EpollContext {
@@ -392,12 +393,12 @@ impl Vmm {
                 )?;
                 if let Some(serial_pty) = vm.serial_pty() {
                     self.epoll
-                        .add_event(&serial_pty.main, EpollDispatch::Pty)
+                        .add_event(&serial_pty.main, EpollDispatch::SerialPty)
                         .map_err(VmError::EventfdError)?;
                 };
                 if let Some(console_pty) = vm.console_pty() {
                     self.epoll
-                        .add_event(&console_pty.main, EpollDispatch::Pty)
+                        .add_event(&console_pty.main, EpollDispatch::ConsolePty)
                         .map_err(VmError::EventfdError)?;
                 };
                 self.vm = Some(vm);
@@ -1295,9 +1296,9 @@ impl Vmm {
                                     .map_err(Error::ActivateVirtioDevices)?;
                             }
                         }
-                        EpollDispatch::Pty => {
+                        event @ (EpollDispatch::ConsolePty | EpollDispatch::SerialPty) => {
                             if let Some(ref vm) = self.vm {
-                                vm.handle_pty().map_err(Error::Pty)?;
+                                vm.handle_pty(event).map_err(Error::Pty)?;
                             }
                         }
                         EpollDispatch::Api => {

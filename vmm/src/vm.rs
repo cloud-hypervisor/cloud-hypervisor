@@ -17,7 +17,6 @@ use crate::config::{
     ConsoleOutputMode, DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, PmemConfig,
     UserDeviceConfig, ValidationError, VmConfig, VsockConfig,
 };
-use crate::cpu;
 use crate::device_manager::{
     self, get_win_size, Console, DeviceManager, DeviceManagerError, PtyPair,
 };
@@ -26,6 +25,7 @@ use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 use crate::migration::{get_vm_snapshot, url_to_path, VM_SNAPSHOT_FILE};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::GuestMemoryMmap;
+use crate::{cpu, EpollDispatch};
 use crate::{
     PciDeviceInfo, CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_SNAPSHOT_ID,
 };
@@ -1911,28 +1911,32 @@ impl Vm {
         Ok(())
     }
 
-    pub fn handle_pty(&self) -> Result<()> {
+    pub fn handle_pty(&self, event: EpollDispatch) -> Result<()> {
         // Could be a little dangerous, picks up a lock on device_manager
         // and goes into a blocking read. If the epoll loops starts to be
         // services by multiple threads likely need to revist this.
         let dm = self.device_manager.lock().unwrap();
-        let mut out = [0u8; 64];
-        if let Some(mut pty) = dm.serial_pty() {
-            let count = pty.main.read(&mut out).map_err(Error::PtyConsole)?;
-            let console = dm.console();
-            if console.input_enabled() {
-                console
-                    .queue_input_bytes_serial(&out[..count])
-                    .map_err(Error::Console)?;
-            }
-        };
-        let count = match dm.console_pty() {
-            Some(mut pty) => pty.main.read(&mut out).map_err(Error::PtyConsole)?,
-            None => return Ok(()),
-        };
-        let console = dm.console();
-        if console.input_enabled() {
-            console.queue_input_bytes_console(&out[..count])
+
+        if matches!(event, EpollDispatch::SerialPty) {
+            if let Some(mut pty) = dm.serial_pty() {
+                let mut out = [0u8; 64];
+                let count = pty.main.read(&mut out).map_err(Error::PtyConsole)?;
+                let console = dm.console();
+                if console.input_enabled() {
+                    console
+                        .queue_input_bytes_serial(&out[..count])
+                        .map_err(Error::Console)?;
+                }
+            };
+        } else if matches!(event, EpollDispatch::ConsolePty) {
+            if let Some(mut pty) = dm.console_pty() {
+                let mut out = [0u8; 64];
+                let count = pty.main.read(&mut out).map_err(Error::PtyConsole)?;
+                let console = dm.console();
+                if console.input_enabled() {
+                    console.queue_input_bytes_console(&out[..count])
+                }
+            };
         }
 
         Ok(())
