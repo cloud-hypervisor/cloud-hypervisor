@@ -50,8 +50,8 @@ Create an NVMe controller listening on a vfio-user socket with a simple block de
 ```sh
 sudo scripts/setup.sh
 rm ~/images/test-disk.raw
-mkfs.ext4  ~/images/test-disk.raw
 truncate ~/images/test-disk.raw -s 128M
+mkfs.ext4  ~/images/test-disk.raw
 sudo killall ./build/bin/nvmf_tgt
 sudo ./build/bin/nvmf_tgt -i 0 -e 0xFFFF -m 0x1 &
 sleep 2
