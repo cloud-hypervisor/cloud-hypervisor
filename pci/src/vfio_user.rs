@@ -234,6 +234,10 @@ impl PciDevice for VfioUserPciDevice {
         self.common.allocate_bars(allocator, &self.vfio_wrapper)
     }
 
+    fn free_bars(&mut self, allocator: &mut SystemAllocator) -> Result<(), PciDeviceError> {
+        self.common.free_bars(allocator)
+    }
+
     fn as_any(&mut self) -> &mut dyn Any {
         self
     }
