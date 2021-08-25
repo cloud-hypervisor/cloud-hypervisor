@@ -569,10 +569,6 @@ fn vcpu_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
         (libc::SYS_sigaltstack, vec![]),
         (libc::SYS_tgkill, vec![]),
         (libc::SYS_tkill, vec![]),
-        #[cfg(target_arch = "x86_64")]
-        (libc::SYS_unlink, vec![]),
-        #[cfg(target_arch = "aarch64")]
-        (libc::SYS_unlinkat, vec![]),
         (libc::SYS_write, vec![]),
         (libc::SYS_writev, vec![]),
     ])
