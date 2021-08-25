@@ -36,7 +36,7 @@ $ target/release/ch-remote --api-socket=/tmp/api1 send-migration unix:/tmp/sock
 
 When the above commands completed, the source VM should be successfully
 migrated to the destination VM. Now the destination VM is running while
-the source VM is paused.
+the source VM is terminated gracefully.
 
 ## Nested-VM Migration
 
@@ -136,4 +136,4 @@ vm-1:~$ sudo ./ch-remote --api-socket=/tmp/api1 send-migration unix:/tmp/sock1
 When the above commands completed, the source VM should be successfully
 migrated to the destination VM without interrupting our testing guest
 workload. Now the destination VM is running the testing guest workload
-while the source VM is paused.
+while the source VM is terminated gracefully.
