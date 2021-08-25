@@ -535,21 +535,6 @@ pub struct Console {
 }
 
 impl Console {
-    pub fn queue_input_bytes(&self, out: &[u8]) -> vmm_sys_util::errno::Result<()> {
-        match self.input {
-            Some(ConsoleInput::Serial) => {
-                self.queue_input_bytes_serial(out)?;
-            }
-
-            Some(ConsoleInput::VirtioConsole) => {
-                self.queue_input_bytes_console(out);
-            }
-            None => {}
-        }
-
-        Ok(())
-    }
-
     pub fn queue_input_bytes_serial(&self, out: &[u8]) -> vmm_sys_util::errno::Result<()> {
         if self.serial.is_some() {
             self.serial

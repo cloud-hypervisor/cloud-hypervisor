@@ -14,8 +14,8 @@
 #[cfg(any(target_arch = "aarch64", feature = "acpi"))]
 use crate::config::NumaConfig;
 use crate::config::{
-    DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, PmemConfig, UserDeviceConfig,
-    ValidationError, VmConfig, VsockConfig,
+    ConsoleOutputMode, DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, PmemConfig,
+    UserDeviceConfig, ValidationError, VmConfig, VsockConfig,
 };
 use crate::cpu;
 use crate::device_manager::{
@@ -1950,19 +1950,25 @@ impl Vm {
             out[0] = 0x0d;
         }
 
-        if self
-            .device_manager
-            .lock()
-            .unwrap()
-            .console()
-            .input_enabled()
-        {
+        if matches!(
+            self.config.lock().unwrap().serial.mode,
+            ConsoleOutputMode::Tty
+        ) {
             self.device_manager
                 .lock()
                 .unwrap()
                 .console()
-                .queue_input_bytes(&out[..count])
+                .queue_input_bytes_serial(&out[..count])
                 .map_err(Error::Console)?;
+        } else if matches!(
+            self.config.lock().unwrap().console.mode,
+            ConsoleOutputMode::Tty
+        ) {
+            self.device_manager
+                .lock()
+                .unwrap()
+                .console()
+                .queue_input_bytes_console(&out[..count])
         }
 
         Ok(())
