@@ -178,16 +178,17 @@ cmd_help() {
     echo ""
     echo "    tests [--unit|--cargo|--all] [--libc musl|gnu] [-- [<cargo test args>]]"
     echo "        Run the Cloud Hypervisor tests."
-    echo "        --unit                Run the unit tests."
-    echo "        --cargo               Run the cargo tests."
-    echo "        --integration         Run the integration tests."
-    echo "        --integration-sgx     Run the SGX integration tests."
-    echo "        --integration-vfio    Run the VFIO integration tests."
-    echo "        --integration-windows Run the Windows guest integration tests."
-    echo "        --libc                Select the C library Cloud Hypervisor will be built against. Default is gnu"
-    echo "        --volumes             Hash separated volumes to be exported. Example --volumes /mnt:/mnt#/myvol:/myvol"
-    echo "        --hypervisor          Underlying hypervisor. Options kvm, mshv"
-    echo "        --all                 Run all tests."
+    echo "        --unit                       Run the unit tests."
+    echo "        --cargo                      Run the cargo tests."
+    echo "        --integration                Run the integration tests."
+    echo "        --integration-sgx            Run the SGX integration tests."
+    echo "        --integration-vfio           Run the VFIO integration tests."
+    echo "        --integration-windows        Run the Windows guest integration tests."
+    echo "        --integration-live-migration Run the live-migration integration tests."
+    echo "        --libc                       Select the C library Cloud Hypervisor will be built against. Default is gnu"
+    echo "        --volumes                    Hash separated volumes to be exported. Example --volumes /mnt:/mnt#/myvol:/myvol"
+    echo "        --hypervisor                 Underlying hypervisor. Options kvm, mshv"
+    echo "        --all                        Run all tests."
     echo ""
     echo "    build-container [--type]"
     echo "        Build the Cloud Hypervisor container."
@@ -298,19 +299,21 @@ cmd_tests() {
     integration_sgx=false
     integration_vfio=false
     integration_windows=false
+    integration_live_migration=false
     libc="gnu"
     arg_vols=""
     hypervisor="kvm"
     exported_device="/dev/kvm"
     while [ $# -gt 0 ]; do
 	case "$1" in
-            "-h"|"--help")           { cmd_help; exit 1; } ;;
-            "--unit")                { unit=true; } ;;
-            "--cargo")               { cargo=true; } ;;
-            "--integration")         { integration=true; } ;;
-            "--integration-sgx")     { integration_sgx=true; } ;;
-            "--integration-vfio")    { integration_vfio=true; } ;;
-            "--integration-windows") { integration_windows=true; } ;;
+            "-h"|"--help")                  { cmd_help; exit 1; } ;;
+            "--unit")                       { unit=true; } ;;
+            "--cargo")                      { cargo=true; } ;;
+            "--integration")                { integration=true; } ;;
+            "--integration-sgx")            { integration_sgx=true; } ;;
+            "--integration-vfio")           { integration_vfio=true; } ;;
+            "--integration-windows")        { integration_windows=true; } ;;
+            "--integration-live-migration") { integration_live_migration=true; } ;;
             "--libc")
                 shift
                 [[ "$1" =~ ^(musl|gnu)$ ]] || \
@@ -453,6 +456,25 @@ cmd_tests() {
 	       --env CH_LIBC="${libc}" \
 	       "$CTR_IMAGE" \
 	       ./scripts/run_integration_tests_windows.sh "$@" || fix_dir_perms $? || exit $?
+    fi
+
+    if [ "$integration_live_migration" = true ] ;  then
+	say "Running 'live migration' integration tests for $target..."
+	$DOCKER_RUNTIME run \
+	       --workdir "$CTR_CLH_ROOT_DIR" \
+	       --rm \
+	       --privileged \
+	       --security-opt seccomp=unconfined \
+	       --ipc=host \
+	       --net="$CTR_CLH_NET" \
+	       --mount type=tmpfs,destination=/tmp \
+	       --volume /dev:/dev \
+	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR"  $exported_volumes \
+	       --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
+	       --env USER="root" \
+	       --env CH_LIBC="${libc}" \
+	       "$CTR_IMAGE" \
+	       ./scripts/run_integration_tests_live_migration.sh "$@" || fix_dir_perms $? || exit $?
     fi
     fix_dir_perms $?
 }
