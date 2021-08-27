@@ -486,15 +486,23 @@ impl vm::Vm for KvmVm {
         #[repr(C)]
         struct TdxInitVm {
             max_vcpus: u32,
-            reserved: u32,
+            tsc_khz: u32,
             attributes: u64,
             cpuid: u64,
+            mrconfigid: [u64; 6],
+            mrowner: [u64; 6],
+            mrownerconfig: [u64; 6],
+            reserved: [u64; 43],
         }
         let data = TdxInitVm {
             max_vcpus,
-            reserved: 0,
+            tsc_khz: 0,
             attributes: 1, // TDX1_TD_ATTRIBUTE_DEBUG,
             cpuid: cpuid.as_fam_struct_ptr() as u64,
+            mrconfigid: [0; 6],
+            mrowner: [0; 6],
+            mrownerconfig: [0; 6],
+            reserved: [0; 43],
         };
 
         tdx_command(
