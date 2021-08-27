@@ -472,7 +472,7 @@ pub fn get_win_size() -> (u16, u16) {
 const TIOCSPTLCK: libc::c_int = 0x4004_5431;
 const TIOCGTPEER: libc::c_int = 0x5441;
 
-pub fn create_pty() -> io::Result<(File, File, PathBuf)> {
+pub fn create_pty(non_blocking: bool) -> io::Result<(File, File, PathBuf)> {
     // Try to use /dev/pts/ptmx first then fall back to /dev/ptmx
     // This is done to try and use the devpts filesystem that
     // could be available for use in the process's namespace first.
@@ -480,17 +480,19 @@ pub fn create_pty() -> io::Result<(File, File, PathBuf)> {
     // kernels could have things setup differently.
     // See https://www.kernel.org/doc/Documentation/filesystems/devpts.txt
     // for further details.
+
+    let options = libc::O_NOCTTY | if non_blocking { libc::O_NONBLOCK } else { 0 };
     let main = match OpenOptions::new()
         .read(true)
         .write(true)
-        .custom_flags(libc::O_NOCTTY)
+        .custom_flags(options)
         .open("/dev/pts/ptmx")
     {
         Ok(f) => f,
         _ => OpenOptions::new()
             .read(true)
             .write(true)
-            .custom_flags(libc::O_NOCTTY)
+            .custom_flags(options)
             .open("/dev/ptmx")?,
     };
     let mut unlock: libc::c_ulong = 0;
@@ -567,6 +569,14 @@ impl Console {
 
     pub fn input_enabled(&self) -> bool {
         self.input.is_some()
+    }
+
+    pub fn flush_serial_buffer(&self) -> vmm_sys_util::errno::Result<()> {
+        if let Some(serial) = self.serial.as_ref() {
+            serial.lock().unwrap().flush_buffer()?;
+        }
+
+        Ok(())
     }
 }
 
@@ -1711,7 +1721,7 @@ impl DeviceManager {
                     Some(Box::new(writer))
                 } else {
                     let (main, mut sub, path) =
-                        create_pty().map_err(DeviceManagerError::SerialPtyOpen)?;
+                        create_pty(true).map_err(DeviceManagerError::SerialPtyOpen)?;
                     self.set_raw_mode(&mut sub)
                         .map_err(DeviceManagerError::SetPtyRaw)?;
                     self.config.lock().unwrap().serial.file = Some(path.clone());
@@ -1744,7 +1754,7 @@ impl DeviceManager {
                     Some(Box::new(writer))
                 } else {
                     let (main, mut sub, path) =
-                        create_pty().map_err(DeviceManagerError::ConsolePtyOpen)?;
+                        create_pty(false).map_err(DeviceManagerError::ConsolePtyOpen)?;
                     self.set_raw_mode(&mut sub)
                         .map_err(DeviceManagerError::SetPtyRaw)?;
                     self.config.lock().unwrap().console.file = Some(path.clone());

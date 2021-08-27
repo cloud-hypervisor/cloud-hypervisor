@@ -5,6 +5,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
+use crate::legacy::serial_buffer::SerialBuffer;
 use std::collections::VecDeque;
 use std::sync::{Arc, Barrier};
 use std::{io, result};
@@ -72,6 +73,7 @@ pub struct Serial {
     baud_divisor: u16,
     in_buffer: VecDeque<u8>,
     out: Option<Box<dyn io::Write + Send>>,
+    buffer: SerialBuffer,
 }
 
 #[derive(Versionize)]
@@ -107,6 +109,7 @@ impl Serial {
             baud_divisor: DEFAULT_BAUD_DIVISOR,
             in_buffer: VecDeque::new(),
             out,
+            buffer: SerialBuffer::new(),
         }
     }
 
@@ -122,6 +125,14 @@ impl Serial {
     /// Constructs a Serial port with no connected output.
     pub fn new_sink(id: String, interrupt: Arc<dyn InterruptSourceGroup>) -> Serial {
         Self::new(id, interrupt, None)
+    }
+
+    pub fn flush_buffer(&mut self) -> Result<()> {
+        if let Some(out) = self.out.as_mut() {
+            self.buffer.flush_buffer(out)?;
+        }
+
+        Ok(())
     }
 
     /// Queues raw bytes for the guest to read and signals the interrupt if the line status would
@@ -203,8 +214,7 @@ impl Serial {
                     }
                 } else {
                     if let Some(out) = self.out.as_mut() {
-                        out.write_all(&[v])?;
-                        out.flush()?;
+                        self.buffer.write_to(v, out)?;
                     }
                     self.thr_empty()?;
                 }

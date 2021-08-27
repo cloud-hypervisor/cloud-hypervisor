@@ -236,6 +236,9 @@ pub enum Error {
     /// Kernel lacks PVH header
     KernelMissingPvhHeader,
 
+    /// Error flushing serial PTY
+    FlushSerialPty(vmm_sys_util::errno::Error),
+
     /// Error doing I/O on TDX firmware file
     #[cfg(feature = "tdx")]
     LoadTdvf(std::io::Error),
@@ -1940,6 +1943,15 @@ impl Vm {
         }
 
         Ok(())
+    }
+
+    pub fn flush_serial_pty(&self) -> Result<()> {
+        self.device_manager
+            .lock()
+            .unwrap()
+            .console()
+            .flush_serial_buffer()
+            .map_err(Error::FlushSerialPty)
     }
 
     pub fn handle_stdin(&self) -> Result<()> {

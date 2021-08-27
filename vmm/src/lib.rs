@@ -150,6 +150,7 @@ pub enum EpollDispatch {
     ActivateVirtioDevices,
     ConsolePty,
     SerialPty,
+    SerialPtyOut,
 }
 
 pub struct EpollContext {
@@ -201,6 +202,22 @@ impl EpollContext {
             epoll::ControlOptions::EPOLL_CTL_ADD,
             fd.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, dispatch_index),
+        )?;
+        self.dispatch_table.push(Some(token));
+
+        Ok(())
+    }
+
+    fn add_out_event<T>(&mut self, fd: &T, token: EpollDispatch) -> result::Result<(), io::Error>
+    where
+        T: AsRawFd,
+    {
+        let dispatch_index = self.dispatch_table.len() as u64;
+        epoll::ctl(
+            self.epoll_file.as_raw_fd(),
+            epoll::ControlOptions::EPOLL_CTL_ADD,
+            fd.as_raw_fd(),
+            epoll::Event::new(epoll::Events::EPOLLOUT, dispatch_index),
         )?;
         self.dispatch_table.push(Some(token));
 
@@ -393,7 +410,13 @@ impl Vmm {
                 )?;
                 if let Some(serial_pty) = vm.serial_pty() {
                     self.epoll
-                        .add_event(&serial_pty.main, EpollDispatch::SerialPty)
+                        .add_event(
+                            &serial_pty.main.try_clone().unwrap(),
+                            EpollDispatch::SerialPty,
+                        )
+                        .map_err(VmError::EventfdError)?;
+                    self.epoll
+                        .add_out_event(&serial_pty.main, EpollDispatch::SerialPtyOut)
                         .map_err(VmError::EventfdError)?;
                 };
                 if let Some(console_pty) = vm.console_pty() {
@@ -1299,6 +1322,11 @@ impl Vmm {
                         event @ (EpollDispatch::ConsolePty | EpollDispatch::SerialPty) => {
                             if let Some(ref vm) = self.vm {
                                 vm.handle_pty(event).map_err(Error::Pty)?;
+                            }
+                        }
+                        EpollDispatch::SerialPtyOut => {
+                            if let Some(ref vm) = self.vm {
+                                vm.flush_serial_pty().map_err(Error::Pty)?;
                             }
                         }
                         EpollDispatch::Api => {

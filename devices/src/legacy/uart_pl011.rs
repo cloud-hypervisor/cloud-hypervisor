@@ -6,6 +6,7 @@
 //! This module implements an ARM PrimeCell UART(PL011).
 //!
 
+use crate::legacy::serial_buffer::SerialBuffer;
 use crate::{read_le_u32, write_le_u32};
 use std::collections::VecDeque;
 use std::fmt;
@@ -51,8 +52,7 @@ pub enum Error {
     BadWriteOffset(u64),
     DmaNotImplemented,
     InterruptFailure(io::Error),
-    WriteAllFailure(io::Error),
-    FlushFailure(io::Error),
+    WriteFailure(io::Error),
 }
 
 impl fmt::Display for Error {
@@ -61,8 +61,7 @@ impl fmt::Display for Error {
             Error::BadWriteOffset(offset) => write!(f, "pl011_write: Bad Write Offset: {}", offset),
             Error::DmaNotImplemented => write!(f, "pl011: DMA not implemented."),
             Error::InterruptFailure(e) => write!(f, "Failed to trigger interrupt: {}", e),
-            Error::WriteAllFailure(e) => write!(f, "Failed to write: {}", e),
-            Error::FlushFailure(e) => write!(f, "Failed to flush: {}", e),
+            Error::WriteFailure(e) => write!(f, "Failed to write: {}", e),
         }
     }
 }
@@ -88,6 +87,7 @@ pub struct Pl011 {
     read_trigger: u32,
     irq: Arc<dyn InterruptSourceGroup>,
     out: Option<Box<dyn io::Write + Send>>,
+    buffer: SerialBuffer,
 }
 
 #[derive(Versionize)]
@@ -135,7 +135,16 @@ impl Pl011 {
             read_trigger: 1u32,
             irq,
             out,
+            buffer: SerialBuffer::new(),
         }
+    }
+
+    pub fn flush_buffer(&mut self) -> std::result::Result<(), std::io::Error> {
+        if let Some(out) = self.out.as_mut() {
+            self.buffer.flush_buffer(out)?;
+        }
+
+        Ok(())
     }
 
     fn state(&self) -> Pl011State {
@@ -220,9 +229,9 @@ impl Pl011 {
             UARTDR => {
                 self.int_level |= PL011_INT_TX;
                 if let Some(out) = self.out.as_mut() {
-                    out.write_all(&[val.to_le_bytes()[0]])
-                        .map_err(Error::WriteAllFailure)?;
-                    out.flush().map_err(Error::FlushFailure)?;
+                    self.buffer
+                        .write_to(val.to_le_bytes()[0], out)
+                        .map_err(Error::WriteFailure)?;
                 }
             }
             UARTRSR_UARTECR => {
