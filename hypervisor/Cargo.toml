@@ -22,7 +22,7 @@ mshv-bindings = {git = "https://github.com/rust-vmm/mshv", branch = "master", fe
 mshv-ioctls = { git = "https://github.com/rust-vmm/mshv", branch = "master", optional  = true}
 serde = { version = "1.0.129", features = ["rc"] }
 serde_derive = "1.0.129"
-serde_json = "1.0.66"
+serde_json = "1.0.67"
 vm-memory = { version = "0.6.0", features = ["backend-mmap", "backend-atomic"] }
 vmm-sys-util = { version = "0.8.0", features = ["with-serde"] }
 
