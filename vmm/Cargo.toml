@@ -38,7 +38,7 @@ qcow = { path = "../qcow" }
 seccompiler = { git = "https://github.com/rust-vmm/seccompiler"}
 serde = { version = "1.0.129", features = ["rc"] }
 serde_derive = "1.0.129"
-serde_json = "1.0.66"
+serde_json = "1.0.67"
 signal-hook = "0.3.9"
 thiserror = "1.0.26"
 uuid = "0.8.2"
