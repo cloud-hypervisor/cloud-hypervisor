@@ -59,6 +59,7 @@ pub mod vm;
 
 #[cfg(feature = "acpi")]
 mod acpi;
+mod serial_buffer;
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 type GuestRegionMmap = vm_memory::GuestRegionMmap<AtomicBitmap>;
