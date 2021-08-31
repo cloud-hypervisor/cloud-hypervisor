@@ -22,6 +22,7 @@ use crate::interrupt::LegacyUserspaceInterruptManager;
 #[cfg(feature = "acpi")]
 use crate::memory_manager::MEMORY_MANAGER_ACPI_SIZE;
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
+use crate::serial_buffer::SerialBuffer;
 use crate::GuestRegionMmap;
 use crate::PciDeviceInfo;
 use crate::{device_node, DEVICE_MANAGER_SNAPSHOT_ID};
@@ -1707,8 +1708,9 @@ impl DeviceManager {
                 if let Some(pty) = serial_pty {
                     self.config.lock().unwrap().serial.file = Some(pty.path.clone());
                     let writer = pty.main.try_clone().unwrap();
+                    let buffer = SerialBuffer::new(Box::new(writer));
                     self.serial_pty = Some(Arc::new(Mutex::new(pty)));
-                    Some(Box::new(writer))
+                    Some(Box::new(buffer))
                 } else {
                     let (main, mut sub, path) =
                         create_pty().map_err(DeviceManagerError::SerialPtyOpen)?;
@@ -1716,8 +1718,9 @@ impl DeviceManager {
                         .map_err(DeviceManagerError::SetPtyRaw)?;
                     self.config.lock().unwrap().serial.file = Some(path.clone());
                     let writer = main.try_clone().unwrap();
+                    let buffer = SerialBuffer::new(Box::new(writer));
                     self.serial_pty = Some(Arc::new(Mutex::new(PtyPair { main, sub, path })));
-                    Some(Box::new(writer))
+                    Some(Box::new(buffer))
                 }
             }
             ConsoleOutputMode::Tty => Some(Box::new(stdout())),
