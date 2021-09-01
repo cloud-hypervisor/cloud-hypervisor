@@ -191,9 +191,6 @@ pub mod kvm {
 
         /// Save the state of GICv3ITS.
         fn state(&self, gicr_typers: &[u64]) -> Result<Gicv3ItsState> {
-            // Flush redistributors pending tables to guest RAM.
-            save_pending_tables(self.device()).map_err(Error::SavePendingTables)?;
-
             let gicd_ctlr =
                 read_ctlr(self.device()).map_err(Error::SaveDistributorCtrlRegisters)?;
 
@@ -205,10 +202,6 @@ pub mod kvm {
 
             let icc_state =
                 get_icc_regs(self.device(), gicr_typers).map_err(Error::SaveIccRegisters)?;
-
-            // Save GICv3ITS registers
-            gicv3_its_tables_access(self.its_device().unwrap(), true)
-                .map_err(Error::SaveITSTables)?;
 
             let its_baser_state: [u64; 8] = [0; 8];
             for i in 0..8 {
@@ -501,7 +494,23 @@ pub mod kvm {
         }
     }
 
-    impl Pausable for KvmGicV3Its {}
+    impl Pausable for KvmGicV3Its {
+        fn pause(&mut self) -> std::result::Result<(), MigratableError> {
+            // Flush redistributors pending tables to guest RAM.
+            save_pending_tables(self.device()).map_err(|e| {
+                MigratableError::Pause(anyhow!(
+                    "Could not save GICv3ITS GIC pending tables {:?}",
+                    e
+                ))
+            })?;
+            // Flush ITS tables to guest RAM.
+            gicv3_its_tables_access(self.its_device().unwrap(), true).map_err(|e| {
+                MigratableError::Pause(anyhow!("Could not save GICv3ITS ITS tables {:?}", e))
+            })?;
+
+            Ok(())
+        }
+    }
     impl Transportable for KvmGicV3Its {}
     impl Migratable for KvmGicV3Its {}
 }
