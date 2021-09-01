@@ -6800,8 +6800,7 @@ mod tests {
         // 4. The destination VM is functional (including various virtio-devices are working properly) after
         //    live migration;
         // Note: This test does not use vsock as we can't create two identical vsock on the same host.
-        #[test]
-        fn test_live_migration() {
+        fn _test_live_migration(numa: bool) {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
             let kernel_path = direct_kernel_boot_path();
@@ -6812,11 +6811,28 @@ mod tests {
                 net_id, guest.network.guest_mac, guest.network.host_ip
             );
 
+            let memory_param: &[&str] = if numa {
+                &[
+                    "--memory",
+                    "size=0",
+                    "--memory-zone",
+                    "id=mem0,size=1G",
+                    "id=mem1,size=1G",
+                    "id=mem2,size=2G",
+                    "--numa",
+                    "guest_numa_id=0,cpus=0-2:9,distances=1@15:2@20,memory_zones=mem0",
+                    "guest_numa_id=1,cpus=3-4:6-8,distances=0@20:2@25,memory_zones=mem1",
+                    "guest_numa_id=2,cpus=5:10-11,distances=0@25:1@30,memory_zones=mem2",
+                ]
+            } else {
+                &["--memory", "size=4G"]
+            };
+
             // Start the source VM
             let src_api_socket = temp_api_path(&guest.tmp_dir);
             let mut src_child = GuestCommand::new(&guest)
-                .args(&["--cpus", "boot=4"])
-                .args(&["--memory", "size=4G"])
+                .args(&["--cpus", "boot=6,max=12"])
+                .args(memory_param)
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
@@ -6840,7 +6856,7 @@ mod tests {
 
                 // Make sure the source VM is functaionl
                 // Check the number of vCPUs
-                assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
+                assert_eq!(guest.get_cpu_count().unwrap_or_default(), 6);
                 // Check the guest RAM
                 assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
                 // Check the guest virtio-devices, e.g. block, rng, console, and net
@@ -6984,9 +7000,36 @@ mod tests {
             // Post live-migration check to make sure the destination VM is funcational
             let r = std::panic::catch_unwind(|| {
                 // Perform same checks to validate VM has been properly migrated
-                assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
+                assert_eq!(guest.get_cpu_count().unwrap_or_default(), 6);
                 assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
                 guest.check_devices_common(None, Some(&console_text));
+
+                // Perform NUMA related checks
+                if numa {
+                    guest.check_numa_common(
+                        Some(&[960_000, 960_000, 1_920_000]),
+                        Some(&[vec![0, 1, 2], vec![3, 4], vec![5]]),
+                        Some(&["10 15 20", "20 10 25", "25 30 10"]),
+                    );
+
+                    // AArch64 currently does not support hotplug, and therefore we only
+                    // test hotplug-related function on x86_64 here.
+                    #[cfg(target_arch = "x86_64")]
+                    {
+                        guest.enable_memory_hotplug();
+
+                        // Resize to the maximum amount of CPUs and check each NUMA
+                        // node has been assigned the right CPUs set.
+                        resize_command(&dest_api_socket, Some(12), None, None);
+                        thread::sleep(std::time::Duration::new(5, 0));
+
+                        guest.check_numa_common(
+                            None,
+                            Some(&[vec![0, 1, 2, 9], vec![3, 4, 6, 7, 8], vec![5, 10, 11]]),
+                            None,
+                        );
+                    }
+                }
             });
 
             // Clean-up the destination VM and make sure it terminated correctly
@@ -6999,6 +7042,16 @@ mod tests {
                 assert!(String::from_utf8_lossy(&dest_output.stdout).contains(&console_text));
             });
             handle_child_output(r, &dest_output);
+        }
+
+        #[test]
+        fn test_live_migration_basic() {
+            _test_live_migration(false)
+        }
+
+        #[test]
+        fn test_live_migration_numa() {
+            _test_live_migration(true)
         }
     }
 }
