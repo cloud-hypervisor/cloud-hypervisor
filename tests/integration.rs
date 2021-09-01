@@ -562,6 +562,35 @@ mod tests {
             }
         }
 
+        fn check_numa_common(
+            &self,
+            mem_ref: Option<&[u32]>,
+            node_ref: Option<&[Vec<usize>]>,
+            distance_ref: Option<&[&str]>,
+        ) {
+            if let Some(mem_ref) = mem_ref {
+                // Check each NUMA node has been assigned the right amount of
+                // memory.
+                for (i, &m) in mem_ref.iter().enumerate() {
+                    assert!(self.get_numa_node_memory(i).unwrap_or_default() > m);
+                }
+            }
+
+            if let Some(node_ref) = node_ref {
+                // Check each NUMA node has been assigned the right CPUs set.
+                for (i, n) in node_ref.iter().enumerate() {
+                    self.check_numa_node_cpus(i, n.clone()).unwrap();
+                }
+            }
+
+            if let Some(distance_ref) = distance_ref {
+                // Check each NUMA node has been assigned the right distances.
+                for (i, &d) in distance_ref.iter().enumerate() {
+                    assert!(self.check_numa_node_distances(i, d).unwrap());
+                }
+            }
+        }
+
         fn check_sgx_support(&self) -> Result<(), Error> {
             self.ssh_command(
                 "cpuid -l 0x7 -s 0 | tr -s [:space:] | grep -q 'SGX: \
@@ -996,21 +1025,11 @@ mod tests {
         let r = std::panic::catch_unwind(|| {
             guest.wait_vm_boot(None).unwrap();
 
-            // Check each NUMA node has been assigned the right amount of
-            // memory.
-            assert!(guest.get_numa_node_memory(0).unwrap_or_default() > 960_000);
-            assert!(guest.get_numa_node_memory(1).unwrap_or_default() > 1_920_000);
-            assert!(guest.get_numa_node_memory(2).unwrap_or_default() > 2_880_000);
-
-            // Check each NUMA node has been assigned the right CPUs set.
-            guest.check_numa_node_cpus(0, vec![0, 1, 2]).unwrap();
-            guest.check_numa_node_cpus(1, vec![3, 4]).unwrap();
-            guest.check_numa_node_cpus(2, vec![5]).unwrap();
-
-            // Check each NUMA node has been assigned the right distances.
-            assert!(guest.check_numa_node_distances(0, "10 15 20").unwrap());
-            assert!(guest.check_numa_node_distances(1, "20 10 25").unwrap());
-            assert!(guest.check_numa_node_distances(2, "25 30 10").unwrap());
+            guest.check_numa_common(
+                Some(&[960_000, 1_920_000, 2_880_000]),
+                Some(&[vec![0, 1, 2], vec![3, 4], vec![5]]),
+                Some(&["10 15 20", "20 10 25", "25 30 10"]),
+            );
 
             // AArch64 currently does not support hotplug, and therefore we only
             // test hotplug-related function on x86_64 here.
@@ -1021,21 +1040,18 @@ mod tests {
                 // Resize every memory zone and check each associated NUMA node
                 // has been assigned the right amount of memory.
                 resize_zone_command(&api_socket, "mem0", "4G");
-                thread::sleep(std::time::Duration::new(5, 0));
-                assert!(guest.get_numa_node_memory(0).unwrap_or_default() > 3_840_000);
                 resize_zone_command(&api_socket, "mem1", "4G");
-                thread::sleep(std::time::Duration::new(5, 0));
-                assert!(guest.get_numa_node_memory(1).unwrap_or_default() > 3_840_000);
                 resize_zone_command(&api_socket, "mem2", "4G");
-                thread::sleep(std::time::Duration::new(5, 0));
-                assert!(guest.get_numa_node_memory(2).unwrap_or_default() > 3_840_000);
-
                 // Resize to the maximum amount of CPUs and check each NUMA
                 // node has been assigned the right CPUs set.
                 resize_command(&api_socket, Some(12), None, None);
-                guest.check_numa_node_cpus(0, vec![0, 1, 2, 9]).unwrap();
-                guest.check_numa_node_cpus(1, vec![3, 4, 6, 7, 8]).unwrap();
-                guest.check_numa_node_cpus(2, vec![5, 10, 11]).unwrap();
+                thread::sleep(std::time::Duration::new(5, 0));
+
+                guest.check_numa_common(
+                    Some(&[3_840_000, 3_840_000, 3_840_000]),
+                    Some(&[vec![0, 1, 2, 9], vec![3, 4, 6, 7, 8], vec![5, 10, 11]]),
+                    None,
+                );
             }
         });
 
