@@ -109,9 +109,6 @@ pub mod kvm {
 
         /// Save the state of GIC.
         fn state(&self, gicr_typers: &[u64]) -> Result<Gicv3State> {
-            // Flush redistributors pending tables to guest RAM.
-            save_pending_tables(self.device()).map_err(Error::SavePendingTables)?;
-
             let gicd_ctlr =
                 read_ctlr(self.device()).map_err(Error::SaveDistributorCtrlRegisters)?;
 
@@ -255,7 +252,16 @@ pub mod kvm {
         }
     }
 
-    impl Pausable for KvmGicV3 {}
+    impl Pausable for KvmGicV3 {
+        fn pause(&mut self) -> std::result::Result<(), MigratableError> {
+            // Flush redistributors pending tables to guest RAM.
+            save_pending_tables(self.device()).map_err(|e| {
+                MigratableError::Pause(anyhow!("Could not save GICv3 GIC pending tables {:?}", e))
+            })?;
+
+            Ok(())
+        }
+    }
     impl Transportable for KvmGicV3 {}
     impl Migratable for KvmGicV3 {}
 }

@@ -29,6 +29,8 @@ use crate::{device_node, DEVICE_MANAGER_SNAPSHOT_ID};
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml};
 use anyhow::anyhow;
+#[cfg(target_arch = "aarch64")]
+use arch::aarch64::gic::gicv3_its::kvm::KvmGicV3Its;
 #[cfg(feature = "acpi")]
 use arch::layout;
 #[cfg(target_arch = "x86_64")]
@@ -4131,6 +4133,27 @@ impl Pausable for DeviceManager {
             if let Some(migratable) = &device_node.migratable {
                 migratable.lock().unwrap().pause()?;
             }
+        }
+        // On AArch64, the pause of device manager needs to trigger
+        // a "pause" of GIC, which will flush the GIC pending tables
+        // and ITS tables to guest RAM.
+        #[cfg(target_arch = "aarch64")]
+        {
+            let gic_device = Arc::clone(
+                self.get_interrupt_controller()
+                    .unwrap()
+                    .lock()
+                    .unwrap()
+                    .get_gic_device()
+                    .unwrap(),
+            );
+            gic_device
+                .lock()
+                .unwrap()
+                .as_any_concrete_mut()
+                .downcast_mut::<KvmGicV3Its>()
+                .unwrap()
+                .pause()?;
         }
 
         Ok(())
