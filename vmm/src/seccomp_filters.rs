@@ -359,6 +359,7 @@ fn signal_handler_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
         (libc::SYS_munmap, vec![]),
         (libc::SYS_recvfrom, vec![]),
         (libc::SYS_rt_sigprocmask, vec![]),
+        (libc::SYS_rt_sigreturn, vec![]),
         (libc::SYS_sendto, vec![]),
         (libc::SYS_sigaltstack, vec![]),
         (libc::SYS_write, vec![]),

@@ -76,6 +76,7 @@ use vm_migration::{
     Transportable,
 };
 use vmm_sys_util::eventfd::EventFd;
+use vmm_sys_util::signal::unblock_signal;
 use vmm_sys_util::terminal::Terminal;
 
 #[cfg(target_arch = "aarch64")]
@@ -464,6 +465,8 @@ pub fn physical_bits(max_phys_bits: Option<u8>, #[cfg(feature = "tdx")] tdx_enab
 
     cmp::min(host_phys_bits, max_phys_bits.unwrap_or(host_phys_bits))
 }
+
+pub const HANDLED_SIGNALS: [i32; 3] = [SIGWINCH, SIGTERM, SIGINT];
 
 pub struct Vm {
     kernel: Option<File>,
@@ -1591,6 +1594,10 @@ impl Vm {
         on_tty: bool,
         exit_evt: EventFd,
     ) {
+        for sig in HANDLED_SIGNALS {
+            unblock_signal(sig).unwrap();
+        }
+
         for signal in signals.forever() {
             match signal {
                 SIGWINCH => {
@@ -1867,7 +1874,7 @@ impl Vm {
             .input_enabled()
         {
             let console = self.device_manager.lock().unwrap().console().clone();
-            let signals = Signals::new(&[SIGWINCH, SIGINT, SIGTERM]);
+            let signals = Signals::new(&HANDLED_SIGNALS);
             match signals {
                 Ok(signals) => {
                     self.signals = Some(signals.handle());
