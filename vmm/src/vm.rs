@@ -2027,13 +2027,18 @@ impl Vm {
             .set_gicr_typers(&saved_vcpu_states);
 
         vm_snapshot.add_snapshot(
-            gic_device
+            if let Some(gicv3_its) = gic_device
                 .lock()
                 .unwrap()
                 .as_any_concrete_mut()
                 .downcast_mut::<KvmGicV3Its>()
-                .unwrap()
-                .snapshot()?,
+            {
+                gicv3_its.snapshot()?
+            } else {
+                return Err(MigratableError::Snapshot(anyhow!(
+                    "GicDevice downcast to KvmGicV3Its failed when snapshotting VM!"
+                )));
+            },
         );
 
         Ok(())
@@ -2071,13 +2076,18 @@ impl Vm {
 
         // Restore GIC states.
         if let Some(gicv3_its_snapshot) = vm_snapshot.snapshots.get(GIC_V3_ITS_SNAPSHOT_ID) {
-            gic_device
+            if let Some(gicv3_its) = gic_device
                 .lock()
                 .unwrap()
                 .as_any_concrete_mut()
                 .downcast_mut::<KvmGicV3Its>()
-                .unwrap()
-                .restore(*gicv3_its_snapshot.clone())?;
+            {
+                gicv3_its.restore(*gicv3_its_snapshot.clone())?;
+            } else {
+                return Err(MigratableError::Restore(anyhow!(
+                    "GicDevice downcast to KvmGicV3Its failed when restoring VM!"
+                )));
+            };
         } else {
             return Err(MigratableError::Restore(anyhow!(
                 "Missing GicV3Its snapshot"

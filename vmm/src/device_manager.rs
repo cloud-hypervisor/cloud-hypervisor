@@ -4142,14 +4142,19 @@ impl Pausable for DeviceManager {
                     .get_gic_device()
                     .unwrap(),
             );
-            gic_device
+            if let Some(gicv3_its) = gic_device
                 .lock()
                 .unwrap()
                 .as_any_concrete_mut()
                 .downcast_mut::<KvmGicV3Its>()
-                .unwrap()
-                .pause()?;
-        }
+            {
+                gicv3_its.pause()?;
+            } else {
+                return Err(MigratableError::Pause(anyhow!(
+                    "GicDevice downcast to KvmGicV3Its failed when pausing device manager!"
+                )));
+            };
+        };
 
         Ok(())
     }
