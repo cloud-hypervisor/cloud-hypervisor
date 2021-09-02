@@ -4,11 +4,16 @@ version = "0.1.0"
 authors = ["Samuel Ortiz <sameo@linux.intel.com>"]
 edition = "2018"
 
+[features]
+default = []
+kvm = ["vfio-ioctls/kvm"]
+mshv = ["vfio-ioctls/mshv"]
+
 [dependencies]
 anyhow = "1.0.43"
 byteorder = "1.4.3"
 hypervisor = { path = "../hypervisor" }
-vfio-ioctls = { git = "https://github.com/rust-vmm/vfio-ioctls", branch = "main" }
+vfio-ioctls = { git = "https://github.com/rust-vmm/vfio-ioctls", branch = "main", default-features = false }
 vfio_user = { path = "../vfio_user" }
 vmm-sys-util = "0.8.0"
 libc = "0.2.101"
