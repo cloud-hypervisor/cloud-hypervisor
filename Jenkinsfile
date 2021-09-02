@@ -107,7 +107,7 @@ pipeline{
 					}
 				}
 				stage ('Worker build - Windows guest') {
-					agent { node { label 'hirsute' } }
+					agent { node { label 'hirsute-small' } }
 					environment {
         					AZURE_CONNECTION_STRING = credentials('46b4e7d6-315f-4cc1-8333-b58780863b9b')
 					}
