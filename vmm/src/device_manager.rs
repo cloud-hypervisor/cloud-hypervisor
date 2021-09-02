@@ -3689,13 +3689,43 @@ impl DeviceManager {
 
     #[cfg(target_arch = "aarch64")]
     pub fn notify_power_button(&self) -> DeviceManagerResult<()> {
-        self.gpio_device
+        // There are three use cases:
+        // 1. The Cloud Hypervisor is built without feature acpi.
+        // 2. The Cloud Hypervisor is built with feature acpi, but users will
+        // use direct kernel boot with device tree.
+        // 3. The Cloud Hypervisor is built with feature acpi, and users will
+        // use ACPI+UEFI boot.
+        #[cfg(not(feature = "acpi"))]
+        // The `return` here will trigger a GPIO pin 3 event, which will trigger
+        // a power button event for use case 1.
+        return self
+            .gpio_device
             .as_ref()
             .unwrap()
             .lock()
             .unwrap()
             .trigger_key(3)
-            .map_err(DeviceManagerError::AArch64PowerButtonNotification)
+            .map_err(DeviceManagerError::AArch64PowerButtonNotification);
+        #[cfg(feature = "acpi")]
+        {
+            // Trigger a GPIO pin 3 event to satisify use case 2.
+            self.gpio_device
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .trigger_key(3)
+                .map_err(DeviceManagerError::AArch64PowerButtonNotification)?;
+            // Trigger a GED power button event to satisify use case 3.
+            return self
+                .ged_notification_device
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .notify(AcpiNotificationFlags::POWER_BUTTON_CHANGED)
+                .map_err(DeviceManagerError::PowerButtonNotification);
+        }
     }
 
     pub fn iommu_attached_devices(&self) -> &Option<(u32, Vec<u32>)> {
