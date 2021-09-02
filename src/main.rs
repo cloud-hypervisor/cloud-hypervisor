@@ -26,6 +26,7 @@ use std::thread;
 use thiserror::Error;
 use vmm::config;
 use vmm_sys_util::eventfd::EventFd;
+use vmm_sys_util::signal::block_signal;
 
 #[derive(Error, Debug)]
 enum Error {
@@ -494,6 +495,13 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
                 }
             })
             .unwrap();
+    }
+
+    // Before we start any threads, mask the signals we'll be
+    // installing handlers for, to make sure they only ever run on the
+    // dedicated signal handling thread we'll start in a bit.
+    for sig in vmm::vm::HANDLED_SIGNALS {
+        block_signal(sig).unwrap();
     }
 
     event!("vmm", "starting");
