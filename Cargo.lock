@@ -560,7 +560,7 @@ dependencies = [
 [[package]]
 name = "mshv-bindings"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/mshv?branch=master#e83d66e94f219ace46f33e78ff3b6eb3016dfab3"
+source = "git+https://github.com/rust-vmm/mshv?branch=main#4e9a304b049d1e92d794e209987670d2277608a7"
 dependencies = [
  "libc",
  "serde",
@@ -572,7 +572,7 @@ dependencies = [
 [[package]]
 name = "mshv-ioctls"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/mshv?branch=master#e83d66e94f219ace46f33e78ff3b6eb3016dfab3"
+source = "git+https://github.com/rust-vmm/mshv?branch=main#4e9a304b049d1e92d794e209987670d2277608a7"
 dependencies = [
  "libc",
  "mshv-bindings",
@@ -1147,7 +1147,7 @@ dependencies = [
 [[package]]
 name = "vfio-ioctls"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vfio-ioctls?branch=master#bc30df33beb35d56b04658f7733bc9832c623fe1"
+source = "git+https://github.com/rust-vmm/vfio-ioctls?branch=main#bc30df33beb35d56b04658f7733bc9832c623fe1"
 dependencies = [
  "byteorder",
  "kvm-bindings",
@@ -1316,7 +1316,7 @@ dependencies = [
 [[package]]
 name = "vm-fdt"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vm-fdt?branch=master#031572a6edc2f566a7278f1e17088fc5308d27ab"
+source = "git+https://github.com/rust-vmm/vm-fdt?branch=main#fbf4f7f054cb92690544dd44c83a9572519beed0"
 
 [[package]]
 name = "vm-memory"
