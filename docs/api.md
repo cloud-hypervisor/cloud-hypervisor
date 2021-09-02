@@ -85,6 +85,7 @@ Delete the VM                      | `/vm.delete`         | N/A                 
 Boot the VM                        | `/vm.boot`           | N/A                       | N/A                      | The VM is created but not booted
 Shut the VM down                   | `/vm.shutdown`       | N/A                       | N/A                      | The VM is booted
 Reboot the VM                      | `/vm.reboot`         | N/A                       | N/A                      | The VM is booted
+Trigger power button of the VM     | `/vm.power-button`   | N/A                       | N/A                      | The VM is booted
 Pause the VM                       | `/vm.pause`          | N/A                       | N/A                      | The VM is booted
 Resume the VM                      | `/vm.resume`         | N/A                       | N/A                      | The VM is paused
 Add/remove CPUs to/from the VM     | `/vm.resize`         | `/schemas/VmResize`       | N/A                      | The VM is booted
