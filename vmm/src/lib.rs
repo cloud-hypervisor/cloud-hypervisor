@@ -150,8 +150,7 @@ pub enum EpollDispatch {
     Stdin = 2,
     Api = 3,
     ActivateVirtioDevices = 4,
-    ConsolePty = 5,
-    SerialPty = 6,
+    SerialPty = 5,
     Unknown,
 }
 
@@ -164,8 +163,7 @@ impl From<u64> for EpollDispatch {
             2 => Stdin,
             3 => Api,
             4 => ActivateVirtioDevices,
-            5 => ConsolePty,
-            6 => SerialPty,
+            5 => SerialPty,
             _ => Unknown,
         }
     }
@@ -324,10 +322,6 @@ impl Vmm {
         let reset_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
         let activate_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
 
-        if unsafe { libc::isatty(libc::STDIN_FILENO as i32) } != 0 {
-            epoll.add_stdin().map_err(Error::Epoll)?;
-        }
-
         epoll
             .add_event(&exit_evt, EpollDispatch::Exit)
             .map_err(Error::Epoll)?;
@@ -400,11 +394,14 @@ impl Vmm {
                         .add_event(&serial_pty.main, EpollDispatch::SerialPty)
                         .map_err(VmError::EventfdError)?;
                 };
-                if let Some(console_pty) = vm.console_pty() {
-                    self.epoll
-                        .add_event(&console_pty.main, EpollDispatch::ConsolePty)
-                        .map_err(VmError::EventfdError)?;
-                };
+                if matches!(
+                    vm_config.lock().unwrap().serial.mode,
+                    config::ConsoleOutputMode::Tty
+                ) && unsafe { libc::isatty(libc::STDIN_FILENO as i32) } != 0
+                {
+                    self.epoll.add_stdin().map_err(VmError::EventfdError)?;
+                }
+
                 self.vm = Some(vm);
             }
         }
@@ -1302,7 +1299,7 @@ impl Vmm {
                                 .map_err(Error::ActivateVirtioDevices)?;
                         }
                     }
-                    event @ (EpollDispatch::ConsolePty | EpollDispatch::SerialPty) => {
+                    event @ EpollDispatch::SerialPty => {
                         if let Some(ref vm) = self.vm {
                             vm.handle_pty(event).map_err(Error::Pty)?;
                         }

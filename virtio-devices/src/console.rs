@@ -14,9 +14,9 @@ use libc::EFD_NONBLOCK;
 use seccompiler::{apply_filter, SeccompAction};
 use std::cmp;
 use std::collections::VecDeque;
+use std::fs::File;
 use std::io;
-use std::io::Write;
-use std::ops::DerefMut;
+use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -40,6 +40,8 @@ const OUTPUT_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
 const INPUT_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
 // Console configuration change event is triggered.
 const CONFIG_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 4;
+// File written to (input ready)
+const FILE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 5;
 
 //Console size feature bit
 const VIRTIO_CONSOLE_F_SIZE: u64 = 0;
@@ -61,13 +63,49 @@ struct ConsoleEpollHandler {
     mem: GuestMemoryAtomic<GuestMemoryMmap>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     in_buffer: Arc<Mutex<VecDeque<u8>>>,
-    out: Arc<Mutex<Box<dyn io::Write + Send + Sync + 'static>>>,
+    endpoint: Endpoint,
     input_queue_evt: EventFd,
     output_queue_evt: EventFd,
     input_evt: EventFd,
     config_evt: EventFd,
     kill_evt: EventFd,
     pause_evt: EventFd,
+}
+
+pub enum Endpoint {
+    File(File),
+    FilePair(File, File),
+    Null,
+}
+
+impl Endpoint {
+    fn out_file(&self) -> Option<&File> {
+        match self {
+            Self::File(f) => Some(f),
+            Self::FilePair(f, _) => Some(f),
+            Self::Null => None,
+        }
+    }
+
+    fn in_file(&self) -> Option<&File> {
+        match self {
+            Self::File(_) => None,
+            Self::FilePair(_, f) => Some(f),
+            Self::Null => None,
+        }
+    }
+}
+
+impl Clone for Endpoint {
+    fn clone(&self) -> Self {
+        match self {
+            Self::File(f) => Self::File(f.try_clone().unwrap()),
+            Self::FilePair(f_out, f_in) => {
+                Self::FilePair(f_out.try_clone().unwrap(), f_in.try_clone().unwrap())
+            }
+            Self::Null => Self::Null,
+        }
+    }
 }
 
 impl ConsoleEpollHandler {
@@ -127,14 +165,10 @@ impl ConsoleEpollHandler {
         let mem = self.mem.memory();
         for avail_desc in trans_queue.iter(&mem) {
             let len;
-            let mut out = self.out.lock().unwrap();
-            let _ = mem.write_to(
-                avail_desc.addr,
-                &mut out.deref_mut(),
-                avail_desc.len as usize,
-            );
-            let _ = out.flush();
-
+            if let Some(ref mut out) = self.endpoint.out_file() {
+                let _ = mem.write_to(avail_desc.addr, out, avail_desc.len as usize);
+                let _ = out.flush();
+            }
             len = avail_desc.len;
             used_desc_heads[used_count] = (avail_desc.index, len);
             used_count += 1;
@@ -165,6 +199,9 @@ impl ConsoleEpollHandler {
         helper.add_event(self.output_queue_evt.as_raw_fd(), OUTPUT_QUEUE_EVENT)?;
         helper.add_event(self.input_evt.as_raw_fd(), INPUT_EVENT)?;
         helper.add_event(self.config_evt.as_raw_fd(), CONFIG_EVENT)?;
+        if let Some(in_file) = self.endpoint.in_file() {
+            helper.add_event(in_file.as_raw_fd(), FILE_EVENT)?;
+        }
         helper.run(paused, paused_sync, self)?;
 
         Ok(())
@@ -217,6 +254,22 @@ impl EpollHelperHandler for ConsoleEpollHandler {
                     return true;
                 }
             }
+            FILE_EVENT => {
+                let mut input = [0u8; 64];
+                if let Some(ref mut in_file) = self.endpoint.in_file() {
+                    if let Ok(count) = in_file.read(&mut input) {
+                        let mut in_buffer = self.in_buffer.lock().unwrap();
+                        in_buffer.extend(&input[..count]);
+                    }
+
+                    if self.process_input_queue() {
+                        if let Err(e) = self.signal_used_queue() {
+                            error!("Failed to signal used queue: {:?}", e);
+                            return true;
+                        }
+                    }
+                }
+            }
             _ => {
                 error!("Unknown event for virtio-console");
                 return true;
@@ -226,22 +279,14 @@ impl EpollHelperHandler for ConsoleEpollHandler {
     }
 }
 
-/// Input device.
-pub struct ConsoleInput {
-    input_evt: EventFd,
+/// Resize handler
+pub struct ConsoleResizer {
     config_evt: EventFd,
-    in_buffer: Arc<Mutex<VecDeque<u8>>>,
     config: Arc<Mutex<VirtioConsoleConfig>>,
     acked_features: AtomicU64,
 }
 
-impl ConsoleInput {
-    pub fn queue_input_bytes(&self, input: &[u8]) {
-        let mut in_buffer = self.in_buffer.lock().unwrap();
-        in_buffer.extend(input);
-        let _ = self.input_evt.write(1);
-    }
-
+impl ConsoleResizer {
     pub fn update_console_size(&self, cols: u16, rows: u16) {
         if self
             .acked_features
@@ -276,9 +321,10 @@ pub struct Console {
     common: VirtioCommon,
     id: String,
     config: Arc<Mutex<VirtioConsoleConfig>>,
-    input: Arc<ConsoleInput>,
-    out: Arc<Mutex<Box<dyn io::Write + Send + Sync + 'static>>>,
+    resizer: Arc<ConsoleResizer>,
+    endpoint: Endpoint,
     seccomp_action: SeccompAction,
+    in_buffer: Arc<Mutex<VecDeque<u8>>>,
 }
 
 #[derive(Versionize)]
@@ -295,25 +341,22 @@ impl Console {
     /// Create a new virtio console device that gets random data from /dev/urandom.
     pub fn new(
         id: String,
-        out: Box<dyn io::Write + Send + Sync + 'static>,
+        endpoint: Endpoint,
         cols: u16,
         rows: u16,
         iommu: bool,
         seccomp_action: SeccompAction,
-    ) -> io::Result<(Console, Arc<ConsoleInput>)> {
+    ) -> io::Result<(Console, Arc<ConsoleResizer>)> {
         let mut avail_features = 1u64 << VIRTIO_F_VERSION_1 | 1u64 << VIRTIO_CONSOLE_F_SIZE;
 
         if iommu {
             avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
         }
 
-        let input_evt = EventFd::new(EFD_NONBLOCK).unwrap();
         let config_evt = EventFd::new(EFD_NONBLOCK).unwrap();
         let console_config = Arc::new(Mutex::new(VirtioConsoleConfig::new(cols, rows)));
-        let console_input = Arc::new(ConsoleInput {
-            input_evt,
+        let resizer = Arc::new(ConsoleResizer {
             config_evt,
-            in_buffer: Arc::new(Mutex::new(VecDeque::new())),
             config: console_config.clone(),
             acked_features: AtomicU64::new(0),
         });
@@ -330,11 +373,12 @@ impl Console {
                 },
                 id,
                 config: console_config,
-                input: console_input.clone(),
-                out: Arc::new(Mutex::new(out)),
+                resizer: resizer.clone(),
+                endpoint,
                 seccomp_action,
+                in_buffer: Arc::new(Mutex::new(VecDeque::new())),
             },
-            console_input,
+            resizer,
         ))
     }
 
@@ -343,7 +387,7 @@ impl Console {
             avail_features: self.common.avail_features,
             acked_features: self.common.acked_features,
             config: *(self.config.lock().unwrap()),
-            in_buffer: self.input.in_buffer.lock().unwrap().clone().into(),
+            in_buffer: self.in_buffer.lock().unwrap().clone().into(),
         }
     }
 
@@ -351,7 +395,7 @@ impl Console {
         self.common.avail_features = state.avail_features;
         self.common.acked_features = state.acked_features;
         *(self.config.lock().unwrap()) = state.config;
-        *(self.input.in_buffer.lock().unwrap()) = state.in_buffer.clone().into();
+        *(self.in_buffer.lock().unwrap()) = state.in_buffer.clone().into();
     }
 }
 
@@ -393,7 +437,7 @@ impl VirtioDevice for Console {
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
-        self.input
+        self.resizer
             .acked_features
             .store(self.common.acked_features, Ordering::Relaxed);
 
@@ -404,17 +448,18 @@ impl VirtioDevice for Console {
         }
 
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
+        let input_evt = EventFd::new(EFD_NONBLOCK).unwrap();
 
         let mut handler = ConsoleEpollHandler {
             queues,
             mem,
             interrupt_cb,
-            in_buffer: self.input.in_buffer.clone(),
-            out: self.out.clone(),
+            in_buffer: self.in_buffer.clone(),
+            endpoint: self.endpoint.clone(),
             input_queue_evt: queue_evts.remove(0),
             output_queue_evt: queue_evts.remove(0),
-            input_evt: self.input.input_evt.try_clone().unwrap(),
-            config_evt: self.input.config_evt.try_clone().unwrap(),
+            input_evt,
+            config_evt: self.resizer.config_evt.try_clone().unwrap(),
             kill_evt,
             pause_evt,
         };
