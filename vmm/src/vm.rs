@@ -1928,15 +1928,6 @@ impl Vm {
                         .map_err(Error::Console)?;
                 }
             };
-        } else if matches!(event, EpollDispatch::ConsolePty) {
-            if let Some(mut pty) = dm.console_pty() {
-                let mut out = [0u8; 64];
-                let count = pty.main.read(&mut out).map_err(Error::PtyConsole)?;
-                let console = dm.console();
-                if console.input_enabled() {
-                    console.queue_input_bytes_console(&out[..count])
-                }
-            };
         }
 
         Ok(())
@@ -1964,15 +1955,6 @@ impl Vm {
                 .console()
                 .queue_input_bytes_serial(&out[..count])
                 .map_err(Error::Console)?;
-        } else if matches!(
-            self.config.lock().unwrap().console.mode,
-            ConsoleOutputMode::Tty
-        ) {
-            self.device_manager
-                .lock()
-                .unwrap()
-                .console()
-                .queue_input_bytes_console(&out[..count])
         }
 
         Ok(())

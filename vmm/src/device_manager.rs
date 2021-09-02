@@ -71,7 +71,7 @@ use seccompiler::SeccompAction;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fs::{read_link, File, OpenOptions};
-use std::io::{self, sink, stdout, Seek, SeekFrom};
+use std::io::{self, stdout, Seek, SeekFrom};
 use std::mem::zeroed;
 use std::num::Wrapping;
 use std::os::unix::fs::OpenOptionsExt;
@@ -86,7 +86,7 @@ use vfio_ioctls::{VfioContainer, VfioDevice};
 use virtio_devices::transport::VirtioPciDevice;
 use virtio_devices::transport::VirtioTransport;
 use virtio_devices::vhost_user::VhostUserConfig;
-use virtio_devices::{DmaRemapping, IommuMapping};
+use virtio_devices::{DmaRemapping, Endpoint, IommuMapping};
 use virtio_devices::{VirtioSharedMemory, VirtioSharedMemoryList};
 use vm_allocator::SystemAllocator;
 #[cfg(feature = "kvm")]
@@ -533,7 +533,7 @@ pub struct Console {
     serial: Option<Arc<Mutex<Serial>>>,
     #[cfg(target_arch = "aarch64")]
     serial: Option<Arc<Mutex<Pl011>>>,
-    virtio_console_input: Option<Arc<virtio_devices::ConsoleInput>>,
+    console_resizer: Option<Arc<virtio_devices::ConsoleResizer>>,
     input: Option<ConsoleInput>,
 }
 
@@ -550,21 +550,9 @@ impl Console {
         Ok(())
     }
 
-    pub fn queue_input_bytes_console(&self, out: &[u8]) {
-        if self.virtio_console_input.is_some() {
-            self.virtio_console_input
-                .as_ref()
-                .unwrap()
-                .queue_input_bytes(out);
-        }
-    }
-
     pub fn update_console_size(&self, cols: u16, rows: u16) {
-        if self.virtio_console_input.is_some() {
-            self.virtio_console_input
-                .as_ref()
-                .unwrap()
-                .update_console_size(cols, rows)
+        if let Some(resizer) = self.console_resizer.as_ref() {
+            resizer.update_console_size(cols, rows)
         }
     }
 
@@ -1693,6 +1681,81 @@ impl DeviceManager {
         self.modify_mode(f.as_raw_fd(), |t| t.c_lflag &= !(ICANON | ECHO | ISIG))
     }
 
+    fn add_virtio_console_device(
+        &mut self,
+        virtio_devices: &mut Vec<(VirtioDeviceArc, bool, String)>,
+        console_pty: Option<PtyPair>,
+    ) -> DeviceManagerResult<Option<Arc<virtio_devices::ConsoleResizer>>> {
+        let console_config = self.config.lock().unwrap().console.clone();
+        let endpoint = match console_config.mode {
+            ConsoleOutputMode::File => {
+                let file = File::create(console_config.file.as_ref().unwrap())
+                    .map_err(DeviceManagerError::ConsoleOutputFileOpen)?;
+                Endpoint::File(file)
+            }
+            ConsoleOutputMode::Pty => {
+                if let Some(pty) = console_pty {
+                    self.config.lock().unwrap().console.file = Some(pty.path.clone());
+                    let file = pty.main.try_clone().unwrap();
+                    self.console_pty = Some(Arc::new(Mutex::new(pty)));
+                    Endpoint::FilePair(file.try_clone().unwrap(), file)
+                } else {
+                    let (main, mut sub, path) =
+                        create_pty(false).map_err(DeviceManagerError::ConsolePtyOpen)?;
+                    self.set_raw_mode(&mut sub)
+                        .map_err(DeviceManagerError::SetPtyRaw)?;
+                    self.config.lock().unwrap().console.file = Some(path.clone());
+                    let file = main.try_clone().unwrap();
+                    self.console_pty = Some(Arc::new(Mutex::new(PtyPair { main, sub, path })));
+                    Endpoint::FilePair(file.try_clone().unwrap(), file)
+                }
+            }
+            ConsoleOutputMode::Tty => {
+                // If an interactive TTY then we can accept input
+                if unsafe { libc::isatty(libc::STDIN_FILENO) == 1 } {
+                    Endpoint::FilePair(
+                        // Duplicating the file descriptors like this is needed as otherwise
+                        // they will be closed on a reboot and the numbers reused
+                        unsafe { File::from_raw_fd(libc::dup(libc::STDOUT_FILENO)) },
+                        unsafe { File::from_raw_fd(libc::dup(libc::STDIN_FILENO)) },
+                    )
+                } else {
+                    Endpoint::File(unsafe { File::from_raw_fd(libc::dup(libc::STDOUT_FILENO)) })
+                }
+            }
+            ConsoleOutputMode::Null => Endpoint::Null,
+            ConsoleOutputMode::Off => return Ok(None),
+        };
+        let (col, row) = get_win_size();
+        let id = String::from(CONSOLE_DEVICE_NAME);
+
+        let (virtio_console_device, console_resizer) = virtio_devices::Console::new(
+            id.clone(),
+            endpoint,
+            col,
+            row,
+            self.force_iommu | console_config.iommu,
+            self.seccomp_action.clone(),
+        )
+        .map_err(DeviceManagerError::CreateVirtioConsole)?;
+        let virtio_console_device = Arc::new(Mutex::new(virtio_console_device));
+        virtio_devices.push((
+            Arc::clone(&virtio_console_device) as VirtioDeviceArc,
+            console_config.iommu,
+            id.clone(),
+        ));
+
+        // Fill the device tree with a new node. In case of restore, we
+        // know there is nothing to do, so we can simply override the
+        // existing entry.
+        self.device_tree
+            .lock()
+            .unwrap()
+            .insert(id.clone(), device_node!(id, virtio_console_device));
+
+        Ok(Some(console_resizer))
+    }
+
     fn add_console_device(
         &mut self,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
@@ -1700,6 +1763,7 @@ impl DeviceManager {
         serial_pty: Option<PtyPair>,
         console_pty: Option<PtyPair>,
     ) -> DeviceManagerResult<Arc<Console>> {
+        let console_config = self.config.lock().unwrap().console.clone();
         let serial_config = self.config.lock().unwrap().serial.clone();
         let serial_writer: Option<Box<dyn io::Write + Send>> = match serial_config.mode {
             ConsoleOutputMode::File => Some(Box::new(
@@ -1734,66 +1798,7 @@ impl DeviceManager {
             None
         };
 
-        // Create serial and virtio-console
-        let console_config = self.config.lock().unwrap().console.clone();
-        let console_writer: Option<Box<dyn io::Write + Send + Sync>> = match console_config.mode {
-            ConsoleOutputMode::File => Some(Box::new(
-                File::create(console_config.file.as_ref().unwrap())
-                    .map_err(DeviceManagerError::ConsoleOutputFileOpen)?,
-            )),
-            ConsoleOutputMode::Pty => {
-                if let Some(pty) = console_pty {
-                    self.config.lock().unwrap().console.file = Some(pty.path.clone());
-                    let writer = pty.main.try_clone().unwrap();
-                    self.console_pty = Some(Arc::new(Mutex::new(pty)));
-                    Some(Box::new(writer))
-                } else {
-                    let (main, mut sub, path) =
-                        create_pty(false).map_err(DeviceManagerError::ConsolePtyOpen)?;
-                    self.set_raw_mode(&mut sub)
-                        .map_err(DeviceManagerError::SetPtyRaw)?;
-                    self.config.lock().unwrap().console.file = Some(path.clone());
-                    let writer = main.try_clone().unwrap();
-                    self.console_pty = Some(Arc::new(Mutex::new(PtyPair { main, sub, path })));
-                    Some(Box::new(writer))
-                }
-            }
-            ConsoleOutputMode::Tty => Some(Box::new(stdout())),
-            ConsoleOutputMode::Null => Some(Box::new(sink())),
-            ConsoleOutputMode::Off => None,
-        };
-        let (col, row) = get_win_size();
-        let virtio_console_input = if let Some(writer) = console_writer {
-            let id = String::from(CONSOLE_DEVICE_NAME);
-
-            let (virtio_console_device, virtio_console_input) = virtio_devices::Console::new(
-                id.clone(),
-                writer,
-                col,
-                row,
-                self.force_iommu | console_config.iommu,
-                self.seccomp_action.clone(),
-            )
-            .map_err(DeviceManagerError::CreateVirtioConsole)?;
-            let virtio_console_device = Arc::new(Mutex::new(virtio_console_device));
-            virtio_devices.push((
-                Arc::clone(&virtio_console_device) as VirtioDeviceArc,
-                console_config.iommu,
-                id.clone(),
-            ));
-
-            // Fill the device tree with a new node. In case of restore, we
-            // know there is nothing to do, so we can simply override the
-            // existing entry.
-            self.device_tree
-                .lock()
-                .unwrap()
-                .insert(id.clone(), device_node!(id, virtio_console_device));
-
-            Some(virtio_console_input)
-        } else {
-            None
-        };
+        let console_resizer = self.add_virtio_console_device(virtio_devices, console_pty)?;
 
         let input = if serial_config.mode.input_enabled() {
             Some(ConsoleInput::Serial)
@@ -1805,8 +1810,8 @@ impl DeviceManager {
 
         Ok(Arc::new(Console {
             serial,
-            virtio_console_input,
             input,
+            console_resizer,
         }))
     }
 
