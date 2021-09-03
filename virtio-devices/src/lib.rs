@@ -32,6 +32,7 @@ pub mod net;
 mod pmem;
 mod rng;
 pub mod seccomp_filters;
+mod thread_helper;
 pub mod transport;
 pub mod vhost_user;
 pub mod vsock;

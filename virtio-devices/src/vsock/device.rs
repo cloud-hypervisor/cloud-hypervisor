@@ -28,24 +28,23 @@
 /// - a backend FD.
 ///
 use super::{VsockBackend, VsockPacket};
-use crate::seccomp_filters::{get_seccomp_filter, Thread};
+use crate::seccomp_filters::Thread;
 use crate::Error as DeviceError;
 use crate::GuestMemoryMmap;
 use crate::VirtioInterrupt;
 use crate::{
-    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
-    VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
-    VIRTIO_F_IN_ORDER, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
+    thread_helper::spawn_virtio_thread, ActivateResult, EpollHelper, EpollHelperError,
+    EpollHelperHandler, Queue, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType,
+    EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IN_ORDER, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
 use byteorder::{ByteOrder, LittleEndian};
-use seccompiler::{apply_filter, SeccompAction};
+use seccompiler::SeccompAction;
 use std::io;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::result;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, RwLock};
-use std::thread;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use vm_memory::{GuestAddressSpace, GuestMemoryAtomic};
@@ -434,28 +433,18 @@ where
         let paused = self.common.paused.clone();
         let paused_sync = self.common.paused_sync.clone();
         let mut epoll_threads = Vec::new();
-        // Retrieve seccomp filter for virtio_vsock thread
-        let virtio_vsock_seccomp_filter =
-            get_seccomp_filter(&self.seccomp_action, Thread::VirtioVsock)
-                .map_err(ActivateError::CreateSeccompFilter)?;
-        thread::Builder::new()
-            .name(self.id.clone())
-            .spawn(move || {
-                if !virtio_vsock_seccomp_filter.is_empty() {
-                    if let Err(e) = apply_filter(&virtio_vsock_seccomp_filter) {
-                        error!("Error applying seccomp filter: {:?}", e);
-                        return;
-                    }
-                }
+
+        spawn_virtio_thread(
+            &self.id,
+            &self.seccomp_action,
+            Thread::VirtioVsock,
+            &mut epoll_threads,
+            move || {
                 if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                     error!("Error running worker: {:?}", e);
                 }
-            })
-            .map(|thread| epoll_threads.push(thread))
-            .map_err(|e| {
-                error!("failed to clone the vsock epoll thread: {}", e);
-                ActivateError::BadActivate
-            })?;
+            },
+        )?;
 
         self.common.epoll_threads = Some(epoll_threads);
 
@@ -513,6 +502,7 @@ mod tests {
     use super::super::*;
     use super::*;
     use crate::vsock::device::{BACKEND_EVENT, EVT_QUEUE_EVENT, RX_QUEUE_EVENT, TX_QUEUE_EVENT};
+    use crate::ActivateError;
     use libc::EFD_NONBLOCK;
 
     #[test]

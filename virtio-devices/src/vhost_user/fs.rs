@@ -3,7 +3,8 @@
 
 use super::vu_common_ctrl::VhostUserHandle;
 use super::{Error, Result, DEFAULT_VIRTIO_FEATURES};
-use crate::seccomp_filters::{get_seccomp_filter, Thread};
+use crate::seccomp_filters::Thread;
+use crate::thread_helper::spawn_virtio_thread;
 use crate::vhost_user::VhostUserCommon;
 use crate::{
     ActivateError, ActivateResult, Queue, UserspaceMapping, VirtioCommon, VirtioDevice,
@@ -11,7 +12,7 @@ use crate::{
 };
 use crate::{GuestMemoryMmap, GuestRegionMmap, MmapRegion};
 use libc::{self, c_void, off64_t, pread64, pwrite64};
-use seccompiler::{apply_filter, SeccompAction};
+use seccompiler::SeccompAction;
 use std::io;
 use std::os::unix::io::AsRawFd;
 use std::result;
@@ -549,28 +550,19 @@ impl VirtioDevice for Fs {
         let paused = self.common.paused.clone();
         let paused_sync = self.common.paused_sync.clone();
 
-        let virtio_vhost_fs_seccomp_filter =
-            get_seccomp_filter(&self.seccomp_action, Thread::VirtioVhostFs)
-                .map_err(ActivateError::CreateSeccompFilter)?;
-
-        thread::Builder::new()
-            .name(self.id.to_string())
-            .spawn(move || {
-                if !virtio_vhost_fs_seccomp_filter.is_empty() {
-                    if let Err(e) = apply_filter(&virtio_vhost_fs_seccomp_filter) {
-                        error!("Error applying seccomp filter: {:?}", e);
-                        return;
-                    }
-                }
+        let mut epoll_threads = Vec::new();
+        spawn_virtio_thread(
+            &self.id,
+            &self.seccomp_action,
+            Thread::VirtioVhostFs,
+            &mut epoll_threads,
+            move || {
                 if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
-                    error!("Error running vhost-user-fs worker: {:?}", e);
+                    error!("Error running worker: {:?}", e);
                 }
-            })
-            .map(|thread| self.epoll_thread = Some(thread))
-            .map_err(|e| {
-                error!("failed to clone queue EventFd: {}", e);
-                ActivateError::BadActivate
-            })?;
+            },
+        )?;
+        self.epoll_thread = Some(epoll_threads.remove(0));
 
         event!("virtio-device", "activated", "id", &self.id);
         Ok(())

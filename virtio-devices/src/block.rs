@@ -14,7 +14,8 @@ use super::{
     RateLimiterConfig, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType,
     EPOLL_HELPER_EVENT_LAST,
 };
-use crate::seccomp_filters::{get_seccomp_filter, Thread};
+use crate::seccomp_filters::Thread;
+use crate::thread_helper::spawn_virtio_thread;
 use crate::GuestMemoryMmap;
 use crate::VirtioInterrupt;
 use block_util::{
@@ -22,7 +23,7 @@ use block_util::{
     RequestType, VirtioBlockConfig,
 };
 use rate_limiter::{RateLimiter, TokenType};
-use seccompiler::{apply_filter, SeccompAction};
+use seccompiler::SeccompAction;
 use std::io;
 use std::num::Wrapping;
 use std::os::unix::io::AsRawFd;
@@ -30,7 +31,6 @@ use std::path::PathBuf;
 use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
-use std::thread;
 use std::{collections::HashMap, convert::TryInto};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
@@ -588,29 +588,17 @@ impl VirtioDevice for Block {
             let paused = self.common.paused.clone();
             let paused_sync = self.common.paused_sync.clone();
 
-            // Retrieve seccomp filter for virtio_block thread
-            let virtio_block_seccomp_filter =
-                get_seccomp_filter(&self.seccomp_action, Thread::VirtioBlock)
-                    .map_err(ActivateError::CreateSeccompFilter)?;
-
-            thread::Builder::new()
-                .name(format!("{}_q{}", self.id.clone(), i))
-                .spawn(move || {
-                    if !virtio_block_seccomp_filter.is_empty() {
-                        if let Err(e) = apply_filter(&virtio_block_seccomp_filter) {
-                            error!("Error applying seccomp filter: {:?}", e);
-                            return;
-                        }
-                    }
+            spawn_virtio_thread(
+                &format!("{}_q{}", self.id.clone(), i),
+                &self.seccomp_action,
+                Thread::VirtioBlock,
+                &mut epoll_threads,
+                move || {
                     if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                         error!("Error running worker: {:?}", e);
                     }
-                })
-                .map(|thread| epoll_threads.push(thread))
-                .map_err(|e| {
-                    error!("failed to clone the virtio-block epoll thread: {}", e);
-                    ActivateError::BadActivate
-                })?;
+                },
+            )?;
         }
 
         self.common.epoll_threads = Some(epoll_threads);

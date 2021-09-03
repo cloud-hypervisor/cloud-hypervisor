@@ -20,7 +20,9 @@ pub enum Thread {
     VirtioNetCtl,
     VirtioPmem,
     VirtioRng,
+    VirtioVhostBlock,
     VirtioVhostFs,
+    VirtioVhostNet,
     VirtioVhostNetCtl,
     VirtioVsock,
     VirtioWatchdog,
@@ -372,6 +374,65 @@ fn virtio_vhost_net_ctl_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
     ]
 }
 
+fn virtio_vhost_net_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
+    vec![
+        (libc::SYS_accept4, vec![]),
+        (libc::SYS_bind, vec![]),
+        (libc::SYS_brk, vec![]),
+        #[cfg(feature = "mshv")]
+        (libc::SYS_clock_gettime, vec![]),
+        (libc::SYS_close, vec![]),
+        (libc::SYS_dup, vec![]),
+        (libc::SYS_epoll_create1, vec![]),
+        (libc::SYS_epoll_ctl, vec![]),
+        (libc::SYS_epoll_pwait, vec![]),
+        #[cfg(target_arch = "x86_64")]
+        (libc::SYS_epoll_wait, vec![]),
+        (libc::SYS_exit, vec![]),
+        (libc::SYS_futex, vec![]),
+        (libc::SYS_getcwd, vec![]),
+        (libc::SYS_listen, vec![]),
+        (libc::SYS_munmap, vec![]),
+        (libc::SYS_madvise, vec![]),
+        (libc::SYS_read, vec![]),
+        (libc::SYS_recvmsg, vec![]),
+        (libc::SYS_rt_sigprocmask, vec![]),
+        (libc::SYS_rt_sigreturn, vec![]),
+        (libc::SYS_sendmsg, vec![]),
+        (libc::SYS_sendto, vec![]),
+        (libc::SYS_sigaltstack, vec![]),
+        (libc::SYS_socket, vec![]),
+        #[cfg(target_arch = "x86_64")]
+        (libc::SYS_unlink, vec![]),
+        #[cfg(target_arch = "aarch64")]
+        (libc::SYS_unlinkat, vec![]),
+        (libc::SYS_write, vec![]),
+    ]
+}
+
+fn virtio_vhost_block_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
+    vec![
+        (libc::SYS_brk, vec![]),
+        #[cfg(feature = "mshv")]
+        (libc::SYS_clock_gettime, vec![]),
+        (libc::SYS_close, vec![]),
+        (libc::SYS_dup, vec![]),
+        (libc::SYS_epoll_create1, vec![]),
+        (libc::SYS_epoll_ctl, vec![]),
+        (libc::SYS_epoll_pwait, vec![]),
+        #[cfg(target_arch = "x86_64")]
+        (libc::SYS_epoll_wait, vec![]),
+        (libc::SYS_exit, vec![]),
+        (libc::SYS_futex, vec![]),
+        (libc::SYS_munmap, vec![]),
+        (libc::SYS_madvise, vec![]),
+        (libc::SYS_read, vec![]),
+        (libc::SYS_rt_sigprocmask, vec![]),
+        (libc::SYS_sigaltstack, vec![]),
+        (libc::SYS_write, vec![]),
+    ]
+}
+
 fn create_vsock_ioctl_seccomp_rule() -> Vec<SeccompRule> {
     or![and![Cond::new(1, ArgLen::Dword, Eq, FIONBIO,).unwrap()],]
 }
@@ -445,7 +506,9 @@ fn get_seccomp_rules(thread_type: Thread) -> Vec<(i64, Vec<SeccompRule>)> {
         Thread::VirtioNetCtl => virtio_net_ctl_thread_rules(),
         Thread::VirtioPmem => virtio_pmem_thread_rules(),
         Thread::VirtioRng => virtio_rng_thread_rules(),
+        Thread::VirtioVhostBlock => virtio_vhost_block_thread_rules(),
         Thread::VirtioVhostFs => virtio_vhost_fs_thread_rules(),
+        Thread::VirtioVhostNet => virtio_vhost_net_thread_rules(),
         Thread::VirtioVhostNetCtl => virtio_vhost_net_ctl_thread_rules(),
         Thread::VirtioVsock => virtio_vsock_thread_rules(),
         Thread::VirtioWatchdog => virtio_watchdog_thread_rules(),

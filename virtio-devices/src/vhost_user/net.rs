@@ -1,17 +1,18 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::seccomp_filters::{get_seccomp_filter, Thread};
+use crate::seccomp_filters::Thread;
+use crate::thread_helper::spawn_virtio_thread;
 use crate::vhost_user::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
 use crate::vhost_user::{Error, Result, VhostUserCommon};
 use crate::{
-    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
-    VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterrupt, EPOLL_HELPER_EVENT_LAST,
+    ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue, VirtioCommon,
+    VirtioDevice, VirtioDeviceType, VirtioInterrupt, EPOLL_HELPER_EVENT_LAST,
     VIRTIO_F_RING_EVENT_IDX, VIRTIO_F_VERSION_1,
 };
 use crate::{GuestMemoryMmap, GuestRegionMmap};
 use net_util::{build_net_config_space, CtrlQueue, MacAddr, VirtioNetConfig};
-use seccompiler::{apply_filter, SeccompAction};
+use seccompiler::SeccompAction;
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::AtomicBool;
@@ -332,28 +333,19 @@ impl VirtioDevice for Net {
             self.common.paused_sync = Some(Arc::new(Barrier::new(3)));
             let paused_sync = self.common.paused_sync.clone();
 
-            // Retrieve seccomp filter for virtio_net_ctl thread
-            let virtio_vhost_net_ctl_seccomp_filter =
-                get_seccomp_filter(&self.seccomp_action, Thread::VirtioVhostNetCtl)
-                    .map_err(ActivateError::CreateSeccompFilter)?;
-            thread::Builder::new()
-                .name(format!("{}_ctrl", self.id))
-                .spawn(move || {
-                    if !virtio_vhost_net_ctl_seccomp_filter.is_empty() {
-                        if let Err(e) = apply_filter(&virtio_vhost_net_ctl_seccomp_filter) {
-                            error!("Error applying seccomp filter: {:?}", e);
-                            return;
-                        }
-                    }
+            let mut epoll_threads = Vec::new();
+            spawn_virtio_thread(
+                &format!("{}_ctrl", &self.id),
+                &self.seccomp_action,
+                Thread::VirtioVhostNetCtl,
+                &mut epoll_threads,
+                move || {
                     if let Err(e) = ctrl_handler.run_ctrl(paused, paused_sync.unwrap()) {
                         error!("Error running worker: {:?}", e);
                     }
-                })
-                .map(|thread| self.ctrl_queue_epoll_thread = Some(thread))
-                .map_err(|e| {
-                    error!("failed to clone queue EventFd: {}", e);
-                    ActivateError::BadActivate
-                })?;
+                },
+            )?;
+            self.ctrl_queue_epoll_thread = Some(epoll_threads.remove(0));
         }
 
         let slave_req_handler: Option<MasterReqHandler<SlaveReqHandler>> = None;
@@ -383,18 +375,19 @@ impl VirtioDevice for Net {
         let paused = self.common.paused.clone();
         let paused_sync = self.common.paused_sync.clone();
 
-        thread::Builder::new()
-            .name(self.id.to_string())
-            .spawn(move || {
+        let mut epoll_threads = Vec::new();
+        spawn_virtio_thread(
+            &self.id,
+            &self.seccomp_action,
+            Thread::VirtioVhostNet,
+            &mut epoll_threads,
+            move || {
                 if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
-                    error!("Error running vhost-user-net worker: {:?}", e);
+                    error!("Error running worker: {:?}", e);
                 }
-            })
-            .map(|thread| self.epoll_thread = Some(thread))
-            .map_err(|e| {
-                error!("failed to clone queue EventFd: {}", e);
-                ActivateError::BadActivate
-            })?;
+            },
+        )?;
+        self.epoll_thread = Some(epoll_threads.remove(0));
 
         Ok(())
     }

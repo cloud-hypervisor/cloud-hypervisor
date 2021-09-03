@@ -11,7 +11,8 @@ use super::{
     RateLimiterConfig, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType,
     EPOLL_HELPER_EVENT_LAST,
 };
-use crate::seccomp_filters::{get_seccomp_filter, Thread};
+use crate::seccomp_filters::Thread;
+use crate::thread_helper::spawn_virtio_thread;
 use crate::GuestMemoryMmap;
 use crate::VirtioInterrupt;
 use net_util::CtrlQueue;
@@ -20,7 +21,7 @@ use net_util::{
     virtio_features_to_tap_offload, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio,
     Tap, TapError, TxVirtio, VirtioNetConfig,
 };
-use seccompiler::{apply_filter, SeccompAction};
+use seccompiler::SeccompAction;
 use std::net::Ipv4Addr;
 use std::num::Wrapping;
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -569,28 +570,19 @@ impl VirtioDevice for Net {
             self.common.paused_sync = Some(Arc::new(Barrier::new(self.taps.len() + 2)));
             let paused_sync = self.common.paused_sync.clone();
 
-            // Retrieve seccomp filter for virtio_net_ctl thread
-            let virtio_net_ctl_seccomp_filter =
-                get_seccomp_filter(&self.seccomp_action, Thread::VirtioNetCtl)
-                    .map_err(ActivateError::CreateSeccompFilter)?;
-            thread::Builder::new()
-                .name(format!("{}_ctrl", self.id))
-                .spawn(move || {
-                    if !virtio_net_ctl_seccomp_filter.is_empty() {
-                        if let Err(e) = apply_filter(&virtio_net_ctl_seccomp_filter) {
-                            error!("Error applying seccomp filter: {:?}", e);
-                            return;
-                        }
-                    }
+            let mut epoll_threads = Vec::new();
+            spawn_virtio_thread(
+                &format!("{}_ctrl", &self.id),
+                &self.seccomp_action,
+                Thread::VirtioNetCtl,
+                &mut epoll_threads,
+                move || {
                     if let Err(e) = ctrl_handler.run_ctrl(paused, paused_sync.unwrap()) {
                         error!("Error running worker: {:?}", e);
                     }
-                })
-                .map(|thread| self.ctrl_queue_epoll_thread = Some(thread))
-                .map_err(|e| {
-                    error!("failed to clone queue EventFd: {}", e);
-                    ActivateError::BadActivate
-                })?;
+                },
+            )?;
+            self.ctrl_queue_epoll_thread = Some(epoll_threads.remove(0));
         }
 
         let event_idx = self.common.feature_acked(VIRTIO_RING_F_EVENT_IDX.into());
@@ -656,28 +648,18 @@ impl VirtioDevice for Net {
 
             let paused = self.common.paused.clone();
             let paused_sync = self.common.paused_sync.clone();
-            // Retrieve seccomp filter for virtio_net thread
-            let virtio_net_seccomp_filter =
-                get_seccomp_filter(&self.seccomp_action, Thread::VirtioNet)
-                    .map_err(ActivateError::CreateSeccompFilter)?;
-            thread::Builder::new()
-                .name(format!("{}_qp{}", self.id.clone(), i))
-                .spawn(move || {
-                    if !virtio_net_seccomp_filter.is_empty() {
-                        if let Err(e) = apply_filter(&virtio_net_seccomp_filter) {
-                            error!("Error applying seccomp filter: {:?}", e);
-                            return;
-                        }
-                    }
+
+            spawn_virtio_thread(
+                &format!("{}_qp{}", self.id.clone(), i),
+                &self.seccomp_action,
+                Thread::VirtioNet,
+                &mut epoll_threads,
+                move || {
                     if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                         error!("Error running worker: {:?}", e);
                     }
-                })
-                .map(|thread| epoll_threads.push(thread))
-                .map_err(|e| {
-                    error!("failed to clone queue EventFd: {}", e);
-                    ActivateError::BadActivate
-                })?;
+                },
+            )?;
         }
 
         self.common.epoll_threads = Some(epoll_threads);
