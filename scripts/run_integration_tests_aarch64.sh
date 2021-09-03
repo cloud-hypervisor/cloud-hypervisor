@@ -249,7 +249,7 @@ process_common_args "$@"
 
 # aarch64 not supported for MSHV
 if [[ "$hypervisor" = "mshv" ]]; then
-    echo "Aarch64 is not supported in Microsoft Hypervisor"
+    echo "AArch64 is not supported in Microsoft Hypervisor"
     exit 1
 fi
 
@@ -301,5 +301,12 @@ service openvswitch-switch restart
 
 time cargo test $features_test "tests::parallel::$test_filter"
 RES=$?
+
+if [ $RES -eq 0 ]; then
+    time cargo test $features_test "tests::live_migration::$test_filter" -- --test-threads=1
+    RES=$?
+else
+    exit $RES
+fi
 
 exit $RES
