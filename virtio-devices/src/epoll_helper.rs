@@ -131,11 +131,11 @@ impl EpollHelper {
 
                 match ev_type {
                     EPOLL_HELPER_EVENT_KILL => {
-                        debug!("KILL_EVENT received, stopping epoll loop");
+                        info!("KILL_EVENT received, stopping epoll loop");
                         return Ok(());
                     }
                     EPOLL_HELPER_EVENT_PAUSE => {
-                        debug!("PAUSE_EVENT received, pausing epoll loop");
+                        info!("PAUSE_EVENT received, pausing epoll loop");
 
                         // Acknowledge the pause is effective by using the
                         // paused_sync barrier.

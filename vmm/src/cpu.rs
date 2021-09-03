@@ -1605,7 +1605,7 @@ impl Snapshottable for CpuManager {
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
         for (cpu_id, snapshot) in snapshot.snapshots.iter() {
-            debug!("Restoring VCPU {}", cpu_id);
+            info!("Restoring VCPU {}", cpu_id);
             self.create_vcpu(cpu_id.parse::<u8>().unwrap(), None, Some(*snapshot.clone()))
                 .map_err(|e| MigratableError::Restore(anyhow!("Could not create vCPU {:?}", e)))?;
         }
