@@ -2188,7 +2188,7 @@ impl DeviceManager {
         // Look for the id in the device tree. If it can be found, that means
         // the device is being restored, otherwise it's created from scratch.
         let cache_range = if let Some(node) = self.device_tree.lock().unwrap().get(&id) {
-            debug!("Restoring virtio-fs {} resources", id);
+            info!("Restoring virtio-fs {} resources", id);
 
             let mut cache_range: Option<(u64, u64)> = None;
             for resource in node.resources.iter() {
@@ -2345,7 +2345,7 @@ impl DeviceManager {
         // Look for the id in the device tree. If it can be found, that means
         // the device is being restored, otherwise it's created from scratch.
         let region_range = if let Some(node) = self.device_tree.lock().unwrap().get(&id) {
-            debug!("Restoring virtio-pmem {} resources", id);
+            info!("Restoring virtio-pmem {} resources", id);
 
             let mut region_range: Option<(u64, u64)> = None;
             for resource in node.resources.iter() {
@@ -3067,7 +3067,7 @@ impl DeviceManager {
         // the device is being restored, otherwise it's created from scratch.
         let (pci_device_bdf, config_bar_addr) =
             if let Some(node) = self.device_tree.lock().unwrap().get(&id) {
-                debug!("Restoring virtio-pci {} resources", id);
+                info!("Restoring virtio-pci {} resources", id);
                 let pci_device_bdf = node
                     .pci_bdf
                     .ok_or(DeviceManagerError::MissingDeviceNodePciBdf)?;
@@ -3660,7 +3660,7 @@ impl DeviceManager {
         {
             // Restore the node
             if let Some(migratable) = &node.migratable {
-                debug!("Restoring {} from DeviceManager", node.id);
+                info!("Restoring {} from DeviceManager", node.id);
                 if let Some(snapshot) = snapshot.snapshots.get(&node.id) {
                     migratable.lock().unwrap().pause()?;
                     migratable.lock().unwrap().restore(*snapshot.clone())?;
