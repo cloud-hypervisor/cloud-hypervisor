@@ -34,7 +34,7 @@ impl BusDevice for I8042Device {
 
     fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         if data.len() == 1 && data[0] == 0xfe && offset == 3 {
-            debug!("i8042 reset signalled");
+            info!("i8042 reset signalled");
             if let Err(e) = self.reset_evt.write(1) {
                 error!("Error triggering i8042 reset event: {}", e);
             }

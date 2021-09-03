@@ -786,13 +786,13 @@ impl CpuManager {
                                     VmExit::Ignore => {}
                                     VmExit::Hyperv => {}
                                     VmExit::Reset => {
-                                        debug!("VmExit::Reset");
+                                        info!("VmExit::Reset");
                                         vcpu_run_interrupted.store(true, Ordering::SeqCst);
                                         reset_evt.write(1).unwrap();
                                         break;
                                     }
                                     VmExit::Shutdown => {
-                                        debug!("VmExit::Shutdown");
+                                        info!("VmExit::Shutdown");
                                         vcpu_run_interrupted.store(true, Ordering::SeqCst);
                                         exit_evt.write(1).unwrap();
                                         break;
