@@ -6,7 +6,7 @@ version = 3
 name = "acpi_tables"
 version = "0.1.0"
 dependencies = [
- "vm-memory 0.6.0",
+ "vm-memory",
 ]
 
 [[package]]
@@ -60,7 +60,7 @@ dependencies = [
  "versionize",
  "versionize_derive",
  "vm-fdt",
- "vm-memory 0.6.0",
+ "vm-memory",
  "vm-migration",
  "vmm-sys-util",
 ]
@@ -104,7 +104,7 @@ dependencies = [
  "versionize_derive",
  "vhdx",
  "virtio-bindings",
- "vm-memory 0.6.0",
+ "vm-memory",
  "vm-virtio",
  "vmm-sys-util",
 ]
@@ -160,7 +160,7 @@ dependencies = [
  "serde_json",
  "signal-hook",
  "thiserror",
- "vm-memory 0.6.0",
+ "vm-memory",
  "vmm",
  "vmm-sys-util",
 ]
@@ -177,7 +177,7 @@ dependencies = [
  "seccompiler",
  "vhdx",
  "virtio-devices",
- "vm-memory 0.6.0",
+ "vm-memory",
  "vm-virtio",
  "vmm-sys-util",
 ]
@@ -212,7 +212,7 @@ dependencies = [
  "versionize",
  "versionize_derive",
  "vm-device",
- "vm-memory 0.6.0",
+ "vm-memory",
  "vm-migration",
  "vmm-sys-util",
 ]
@@ -278,7 +278,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "thiserror",
- "vm-memory 0.6.0",
+ "vm-memory",
  "vmm-sys-util",
 ]
 
@@ -358,7 +358,7 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c819cc8275b0f2c1ed9feec455ca288b45d82932384a6a5f7a86812ee3427459"
 dependencies = [
- "vm-memory 0.6.0",
+ "vm-memory",
 ]
 
 [[package]]
@@ -399,7 +399,7 @@ dependencies = [
  "versionize",
  "versionize_derive",
  "virtio-bindings",
- "vm-memory 0.6.0",
+ "vm-memory",
  "vm-virtio",
  "vmm-sys-util",
 ]
@@ -431,7 +431,7 @@ dependencies = [
  "vfio_user",
  "vm-allocator",
  "vm-device",
- "vm-memory 0.6.0",
+ "vm-memory",
  "vm-migration",
  "vmm-sys-util",
 ]
@@ -584,9 +584,9 @@ checksum = "8ea5119cdb4c55b55d432abb513a0429384878c15dde60cc77b1c99de1a95a6a"
 
 [[package]]
 name = "syn"
-version = "1.0.75"
+version = "1.0.76"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7f58f7e8eaa0009c5fec437aabf511bd9933e4b2d7407bd05273c01a8906ea7"
+checksum = "c6f107db402c2c2055242dbf4d2af0e69197202e9faacbef9571bbe47f5a1b84"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -699,14 +699,14 @@ dependencies = [
 [[package]]
 name = "vfio-ioctls"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vfio-ioctls?branch=master#9b84069e9f419c5369b9a313859cac7e9828d331"
+source = "git+https://github.com/rust-vmm/vfio-ioctls?branch=main#1080e8079976a44fd80311907cadd541a062b4bc"
 dependencies = [
  "byteorder",
  "kvm-bindings",
  "kvm-ioctls",
  "log",
  "vfio-bindings",
- "vm-memory 0.5.0",
+ "vm-memory",
  "vmm-sys-util",
 ]
 
@@ -722,7 +722,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "vfio-bindings",
- "vm-memory 0.5.0",
+ "vm-memory",
  "vmm-sys-util",
 ]
 
@@ -748,7 +748,7 @@ checksum = "8a6b90237e10f1a61b35fba73885c3567e1a5a8c40d44daae335f7710210a7dc"
 dependencies = [
  "bitflags",
  "libc",
- "vm-memory 0.6.0",
+ "vm-memory",
  "vmm-sys-util",
 ]
 
@@ -785,7 +785,7 @@ dependencies = [
  "virtio-bindings",
  "vm-allocator",
  "vm-device",
- "vm-memory 0.6.0",
+ "vm-memory",
  "vm-migration",
  "vm-virtio",
  "vmm-sys-util",
@@ -797,7 +797,7 @@ version = "0.1.0"
 dependencies = [
  "arch",
  "libc",
- "vm-memory 0.6.0",
+ "vm-memory",
 ]
 
 [[package]]
@@ -810,24 +810,14 @@ dependencies = [
  "serde_json",
  "thiserror",
  "vfio-ioctls",
- "vm-memory 0.6.0",
+ "vm-memory",
  "vmm-sys-util",
 ]
 
 [[package]]
 name = "vm-fdt"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vm-fdt?branch=master#af59838e5df826cd3153d92ed1546f0b2cc454f7"
-
-[[package]]
-name = "vm-memory"
-version = "0.5.0"
-source = "git+https://github.com/rust-vmm/vm-memory?rev=5bd7138758183a73ac0da27ce40c004d95f1a7e9#5bd7138758183a73ac0da27ce40c004d95f1a7e9"
-dependencies = [
- "arc-swap",
- "libc",
- "winapi",
-]
+source = "git+https://github.com/rust-vmm/vm-fdt?branch=main#720e48e435b791ec6cbe8d2b229448b71dcb1ab9"
 
 [[package]]
 name = "vm-memory"
@@ -851,7 +841,7 @@ dependencies = [
  "thiserror",
  "versionize",
  "versionize_derive",
- "vm-memory 0.6.0",
+ "vm-memory",
 ]
 
 [[package]]
@@ -860,7 +850,7 @@ version = "0.1.0"
 dependencies = [
  "log",
  "virtio-bindings",
- "vm-memory 0.6.0",
+ "vm-memory",
 ]
 
 [[package]]
@@ -901,7 +891,7 @@ dependencies = [
  "virtio-devices",
  "vm-allocator",
  "vm-device",
- "vm-memory 0.6.0",
+ "vm-memory",
  "vm-migration",
  "vm-virtio",
  "vmm-sys-util",
@@ -946,3 +936,8 @@ name = "winapi-x86_64-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
+
+[[patch.unused]]
+name = "vm-memory"
+version = "0.5.0"
+source = "git+https://github.com/rust-vmm/vm-memory?rev=5bd7138758183a73ac0da27ce40c004d95f1a7e9#5bd7138758183a73ac0da27ce40c004d95f1a7e9"
