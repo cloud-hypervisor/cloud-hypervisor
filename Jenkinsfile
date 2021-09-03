@@ -106,6 +106,78 @@ pipeline{
 						}
 					}
 				}
+				stage ('Worker build SGX') {
+					agent { node { label 'bionic-sgx' } }
+					when {
+						beforeAgent true
+						branch 'main'
+					}
+					stages {
+						stage ('Checkout') {
+							steps {
+								checkout scm
+							}
+						}
+						stage ('Run SGX integration tests') {
+							options {
+								timeout(time: 1, unit: 'HOURS')
+							}
+							steps {
+								sh "scripts/dev_cli.sh tests --integration-sgx"
+							}
+						}
+						stage ('Run SGX integration tests for musl') {
+							options {
+								timeout(time: 1, unit: 'HOURS')
+							}
+							steps {
+								sh "scripts/dev_cli.sh tests --integration-sgx --libc musl"
+							}
+						}
+					}
+					post {
+						always {
+							sh "sudo chown -R jenkins.jenkins ${WORKSPACE}"
+							deleteDir()
+						}
+					}
+				}
+				stage ('Worker build VFIO') {
+					agent { node { label 'bionic-vfio' } }
+					when {
+						beforeAgent true
+						branch 'main'
+					}
+					stages {
+						stage ('Checkout') {
+							steps {
+								checkout scm
+							}
+						}
+						stage ('Run VFIO integration tests') {
+							options {
+								timeout(time: 1, unit: 'HOURS')
+							}
+							steps {
+								sh "scripts/dev_cli.sh tests --integration-vfio"
+							}
+						}
+						stage ('Run VFIO integration tests for musl') {
+							options {
+								timeout(time: 1, unit: 'HOURS')
+							}
+							steps {
+								sh "scripts/dev_cli.sh tests --integration-vfio --libc musl"
+							}
+						}
+					}
+					post {
+						always {
+							sh "sudo chown -R jenkins.jenkins ${WORKSPACE}"
+							deleteDir()
+						}
+					}
+				}
 				stage ('Worker build - Windows guest') {
 					agent { node { label 'hirsute' } }
 					environment {
