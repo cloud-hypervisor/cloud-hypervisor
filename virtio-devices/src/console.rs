@@ -3,15 +3,16 @@
 
 use super::Error as DeviceError;
 use super::{
-    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
-    VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
+    ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue, VirtioCommon,
+    VirtioDevice, VirtioDeviceType, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
     VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
-use crate::seccomp_filters::{get_seccomp_filter, Thread};
+use crate::seccomp_filters::Thread;
+use crate::thread_helper::spawn_virtio_thread;
 use crate::GuestMemoryMmap;
 use crate::VirtioInterrupt;
 use libc::EFD_NONBLOCK;
-use seccompiler::{apply_filter, SeccompAction};
+use seccompiler::SeccompAction;
 use std::cmp;
 use std::collections::VecDeque;
 use std::fs::File;
@@ -21,7 +22,6 @@ use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
-use std::thread;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic};
@@ -467,28 +467,18 @@ impl VirtioDevice for Console {
         let paused = self.common.paused.clone();
         let paused_sync = self.common.paused_sync.clone();
         let mut epoll_threads = Vec::new();
-        // Retrieve seccomp filter for virtio_console thread
-        let virtio_console_seccomp_filter =
-            get_seccomp_filter(&self.seccomp_action, Thread::VirtioConsole)
-                .map_err(ActivateError::CreateSeccompFilter)?;
-        thread::Builder::new()
-            .name(self.id.clone())
-            .spawn(move || {
-                if !virtio_console_seccomp_filter.is_empty() {
-                    if let Err(e) = apply_filter(&virtio_console_seccomp_filter) {
-                        error!("Error applying seccomp filter: {:?}", e);
-                        return;
-                    }
-                }
+
+        spawn_virtio_thread(
+            &self.id,
+            &self.seccomp_action,
+            Thread::VirtioConsole,
+            &mut epoll_threads,
+            move || {
                 if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                     error!("Error running worker: {:?}", e);
                 }
-            })
-            .map(|thread| epoll_threads.push(thread))
-            .map_err(|e| {
-                error!("failed to clone the virtio-console epoll thread: {}", e);
-                ActivateError::BadActivate
-            })?;
+            },
+        )?;
 
         self.common.epoll_threads = Some(epoll_threads);
 

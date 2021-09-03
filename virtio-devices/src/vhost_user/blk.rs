@@ -1,15 +1,16 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::super::{
-    ActivateError, ActivateResult, Queue, VirtioCommon, VirtioDevice, VirtioDeviceType,
-};
+use super::super::{ActivateResult, Queue, VirtioCommon, VirtioDevice, VirtioDeviceType};
 use super::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
 use super::{Error, Result, DEFAULT_VIRTIO_FEATURES};
+use crate::seccomp_filters::Thread;
+use crate::thread_helper::spawn_virtio_thread;
 use crate::vhost_user::VhostUserCommon;
 use crate::VirtioInterrupt;
 use crate::{GuestMemoryMmap, GuestRegionMmap};
 use block_util::VirtioBlockConfig;
+use seccompiler::SeccompAction;
 use std::mem;
 use std::result;
 use std::sync::{Arc, Barrier, Mutex};
@@ -57,11 +58,17 @@ pub struct Blk {
     config: VirtioBlockConfig,
     guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     epoll_thread: Option<thread::JoinHandle<()>>,
+    seccomp_action: SeccompAction,
 }
 
 impl Blk {
     /// Create a new vhost-user-blk device
-    pub fn new(id: String, vu_cfg: VhostUserConfig, restoring: bool) -> Result<Blk> {
+    pub fn new(
+        id: String,
+        vu_cfg: VhostUserConfig,
+        restoring: bool,
+        seccomp_action: SeccompAction,
+    ) -> Result<Blk> {
         let num_queues = vu_cfg.num_queues;
 
         if restoring {
@@ -85,6 +92,7 @@ impl Blk {
                 config: VirtioBlockConfig::default(),
                 guest_memory: None,
                 epoll_thread: None,
+                seccomp_action,
             });
         }
 
@@ -171,6 +179,7 @@ impl Blk {
             config,
             guest_memory: None,
             epoll_thread: None,
+            seccomp_action,
         })
     }
 
@@ -298,18 +307,20 @@ impl VirtioDevice for Blk {
         let paused = self.common.paused.clone();
         let paused_sync = self.common.paused_sync.clone();
 
-        thread::Builder::new()
-            .name(self.id.to_string())
-            .spawn(move || {
+        let mut epoll_threads = Vec::new();
+
+        spawn_virtio_thread(
+            &self.id,
+            &self.seccomp_action,
+            Thread::VirtioVhostBlock,
+            &mut epoll_threads,
+            move || {
                 if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
-                    error!("Error running vhost-user-blk worker: {:?}", e);
+                    error!("Error running worker: {:?}", e);
                 }
-            })
-            .map(|thread| self.epoll_thread = Some(thread))
-            .map_err(|e| {
-                error!("failed to clone queue EventFd: {}", e);
-                ActivateError::BadActivate
-            })?;
+            },
+        )?;
+        self.epoll_thread = Some(epoll_threads.remove(0));
 
         Ok(())
     }
