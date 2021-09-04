@@ -560,7 +560,7 @@ dependencies = [
 [[package]]
 name = "mshv-bindings"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/mshv?branch=main#4e9a304b049d1e92d794e209987670d2277608a7"
+source = "git+https://github.com/rust-vmm/mshv?branch=main#0d6e4e82b9b575798de333e362129515e81049cb"
 dependencies = [
  "libc",
  "serde",
@@ -572,7 +572,7 @@ dependencies = [
 [[package]]
 name = "mshv-ioctls"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/mshv?branch=main#4e9a304b049d1e92d794e209987670d2277608a7"
+source = "git+https://github.com/rust-vmm/mshv?branch=main#0d6e4e82b9b575798de333e362129515e81049cb"
 dependencies = [
  "libc",
  "mshv-bindings",
@@ -1147,7 +1147,7 @@ dependencies = [
 [[package]]
 name = "vfio-ioctls"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vfio-ioctls?branch=main#bc30df33beb35d56b04658f7733bc9832c623fe1"
+source = "git+https://github.com/rust-vmm/vfio-ioctls?branch=main#1080e8079976a44fd80311907cadd541a062b4bc"
 dependencies = [
  "byteorder",
  "kvm-bindings",
