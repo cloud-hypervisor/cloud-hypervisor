@@ -541,7 +541,7 @@ checksum = "308cc39be01b73d0d18f82a0e7b2a3df85245f84af96fdddc5d202d27e47b86a"
 [[package]]
 name = "micro_http"
 version = "0.1.0"
-source = "git+https://github.com/firecracker-microvm/micro-http?branch=main#c1a38b507c293ac7f6da374667828ac68121b376"
+source = "git+https://github.com/firecracker-microvm/micro-http?branch=main#36e59a083e76a2449e0f58e4283d201bc72fdf13"
 dependencies = [
  "libc",
  "vmm-sys-util",
@@ -560,7 +560,7 @@ dependencies = [
 [[package]]
 name = "mshv-bindings"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/mshv?branch=main#4e9a304b049d1e92d794e209987670d2277608a7"
+source = "git+https://github.com/rust-vmm/mshv?branch=main#0d6e4e82b9b575798de333e362129515e81049cb"
 dependencies = [
  "libc",
  "serde",
@@ -572,7 +572,7 @@ dependencies = [
 [[package]]
 name = "mshv-ioctls"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/mshv?branch=main#4e9a304b049d1e92d794e209987670d2277608a7"
+source = "git+https://github.com/rust-vmm/mshv?branch=main#0d6e4e82b9b575798de333e362129515e81049cb"
 dependencies = [
  "libc",
  "mshv-bindings",
