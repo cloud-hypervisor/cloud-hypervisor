@@ -54,8 +54,6 @@ const EVENT_Q_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
 /// will conflict with x86.
 const PROBE_PROP_SIZE: u32 =
     (size_of::<VirtioIommuProbeProperty>() + size_of::<VirtioIommuProbeResvMem>()) as u32;
-const MSI_IOVA_START: u64 = 0xfee0_0000;
-const MSI_IOVA_END: u64 = 0xfeef_ffff;
 
 /// Virtio IOMMU features
 #[allow(unused)]
@@ -352,6 +350,7 @@ impl Request {
         mapping: &Arc<IommuMapping>,
         ext_mapping: &BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
         ext_domain_mapping: &mut BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
+        msi_iova_space: (u64, u64),
     ) -> result::Result<usize, Error> {
         // The head contains the request type which MUST be readable.
         if avail_desc.is_write_only() {
@@ -371,6 +370,8 @@ impl Request {
         } else {
             return Err(Error::InvalidRequest);
         };
+
+        let (msi_iova_start, msi_iova_end) = msi_iova_space;
 
         // Create the reply
         let mut reply: Vec<u8> = Vec::new();
@@ -515,8 +516,8 @@ impl Request {
 
                 let resv_mem = VirtioIommuProbeResvMem {
                     subtype: VIRTIO_IOMMU_RESV_MEM_T_MSI,
-                    start: MSI_IOVA_START,
-                    end: MSI_IOVA_END,
+                    start: msi_iova_start,
+                    end: msi_iova_end,
                     ..Default::default()
                 };
                 reply.extend_from_slice(resv_mem.as_slice());
@@ -562,6 +563,7 @@ struct IommuEpollHandler {
     mapping: Arc<IommuMapping>,
     ext_mapping: BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
     ext_domain_mapping: BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
+    msi_iova_space: (u64, u64),
 }
 
 impl IommuEpollHandler {
@@ -576,6 +578,7 @@ impl IommuEpollHandler {
                 &self.mapping,
                 &self.ext_mapping,
                 &mut self.ext_domain_mapping,
+                self.msi_iova_space,
             ) {
                 Ok(len) => len as u32,
                 Err(e) => {
@@ -702,6 +705,7 @@ pub struct Iommu {
     ext_mapping: BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
+    msi_iova_space: (u64, u64),
 }
 
 #[derive(Versionize)]
@@ -719,6 +723,7 @@ impl Iommu {
         id: String,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
+        msi_iova_space: (u64, u64),
     ) -> io::Result<(Self, Arc<IommuMapping>)> {
         let config = VirtioIommuConfig {
             page_size_mask: VIRTIO_IOMMU_PAGE_SIZE_MASK,
@@ -748,6 +753,7 @@ impl Iommu {
                 ext_mapping: BTreeMap::new(),
                 seccomp_action,
                 exit_evt,
+                msi_iova_space,
             },
             mapping,
         ))
@@ -843,6 +849,7 @@ impl VirtioDevice for Iommu {
             mapping: self.mapping.clone(),
             ext_mapping: self.ext_mapping.clone(),
             ext_domain_mapping: BTreeMap::new(),
+            msi_iova_space: self.msi_iova_space,
         };
 
         let paused = self.common.paused.clone();

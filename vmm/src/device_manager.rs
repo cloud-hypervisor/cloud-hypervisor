@@ -1141,6 +1141,20 @@ impl DeviceManager {
         self.device_id_cnt = state.device_id_cnt;
     }
 
+    fn get_msi_iova_space(&mut self) -> (u64, u64) {
+        #[cfg(target_arch = "aarch64")]
+        {
+            let vcpus = self.config.lock().unwrap().cpus.boot_vcpus;
+            let msi_start = arch::layout::GIC_V3_DIST_START
+                - arch::layout::GIC_V3_REDIST_SIZE * (vcpus as u64)
+                - arch::layout::GIC_V3_ITS_SIZE;
+            let msi_end = msi_start + arch::layout::GIC_V3_ITS_SIZE - 1;
+            (msi_start, msi_end)
+        }
+        #[cfg(target_arch = "x86_64")]
+        (0xfee0_0000, 0xfeef_ffff)
+    }
+
     #[cfg(target_arch = "aarch64")]
     /// Gets the information of the devices registered up to some point in time.
     pub fn get_device_info(&self) -> &HashMap<(DeviceType, String), MmioDeviceInfo> {
@@ -1167,6 +1181,7 @@ impl DeviceManager {
                 self.exit_evt
                     .try_clone()
                     .map_err(DeviceManagerError::EventFd)?,
+                self.get_msi_iova_space(),
             )
             .map_err(DeviceManagerError::CreateVirtioIommu)?;
             let device = Arc::new(Mutex::new(device));
