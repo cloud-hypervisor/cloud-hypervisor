@@ -13,6 +13,7 @@ pub mod kvm {
     use crate::aarch64::gic::gicv3::kvm::KvmGicV3;
     use crate::aarch64::gic::kvm::{save_pending_tables, KvmGicDevice};
     use crate::aarch64::gic::GicDevice;
+    use crate::layout;
     use anyhow::anyhow;
     use hypervisor::kvm::kvm_bindings;
     use hypervisor::CpuState;
@@ -179,10 +180,8 @@ pub mod kvm {
     impl VersionMapped for Gicv3ItsState {}
 
     impl KvmGicV3Its {
-        const KVM_VGIC_V3_ITS_SIZE: u64 = (2 * KvmGicV3::SZ_64K);
-
         fn get_msi_size() -> u64 {
-            KvmGicV3Its::KVM_VGIC_V3_ITS_SIZE
+            layout::GIC_V3_ITS_SIZE
         }
 
         fn get_msi_addr(vcpu_count: u64) -> u64 {

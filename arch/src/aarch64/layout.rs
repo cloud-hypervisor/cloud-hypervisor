@@ -55,6 +55,17 @@ pub const UEFI_SIZE: u64 = 0x040_0000;
 /// Below this address will reside the GIC, above this address will reside the MMIO devices.
 pub const MAPPED_IO_START: u64 = 0x0900_0000;
 
+/// See kernel file arch/arm64/include/uapi/asm/kvm.h for the GIC related definitions.
+/// 0x08ff_0000 ~ 0x0900_0000 is reserved for GICv3 Distributor
+pub const GIC_V3_DIST_SIZE: u64 = 0x01_0000;
+pub const GIC_V3_DIST_START: u64 = MAPPED_IO_START - GIC_V3_DIST_SIZE;
+/// Below 0x08ff_0000 is reserved for GICv3 Redistributor.
+/// The size defined here is for each vcpu.
+/// The total size is 'number_of_vcpu * GIC_V3_REDIST_SIZE'
+pub const GIC_V3_REDIST_SIZE: u64 = 0x02_0000;
+/// Below Redistributor area is GICv3 ITS
+pub const GIC_V3_ITS_SIZE: u64 = 0x02_0000;
+
 /// Space 0x0900_0000 ~ 0x0905_0000 is reserved for legacy devices.
 pub const LEGACY_SERIAL_MAPPED_IO_START: u64 = 0x0900_0000;
 pub const LEGACY_RTC_MAPPED_IO_START: u64 = 0x0901_0000;
