@@ -4265,7 +4265,6 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_virtio_mem() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
