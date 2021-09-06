@@ -78,23 +78,17 @@ pub mod kvm {
     impl VersionMapped for Gicv3State {}
 
     impl KvmGicV3 {
-        // Unfortunately bindgen omits defines that are based on other defines.
-        // See arch/arm64/include/uapi/asm/kvm.h file from the linux kernel.
-        pub const SZ_64K: u64 = 0x0001_0000;
-        const KVM_VGIC_V3_DIST_SIZE: u64 = KvmGicV3::SZ_64K;
-        const KVM_VGIC_V3_REDIST_SIZE: u64 = (2 * KvmGicV3::SZ_64K);
-
         // Device trees specific constants
         pub const ARCH_GIC_V3_MAINT_IRQ: u32 = 9;
 
         /// Get the address of the GIC distributor.
         pub fn get_dist_addr() -> u64 {
-            layout::MAPPED_IO_START - KvmGicV3::KVM_VGIC_V3_DIST_SIZE
+            layout::GIC_V3_DIST_START
         }
 
         /// Get the size of the GIC distributor.
         pub fn get_dist_size() -> u64 {
-            KvmGicV3::KVM_VGIC_V3_DIST_SIZE
+            layout::GIC_V3_DIST_SIZE
         }
 
         /// Get the address of the GIC redistributors.
@@ -104,7 +98,7 @@ pub mod kvm {
 
         /// Get the size of the GIC redistributors.
         pub fn get_redists_size(vcpu_count: u64) -> u64 {
-            vcpu_count * KvmGicV3::KVM_VGIC_V3_REDIST_SIZE
+            vcpu_count * layout::GIC_V3_REDIST_SIZE
         }
 
         /// Save the state of GIC.
