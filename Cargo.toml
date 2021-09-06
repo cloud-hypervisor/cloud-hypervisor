@@ -25,7 +25,7 @@ option_parser = { path = "option_parser" }
 seccompiler = { git = "https://github.com/rust-vmm/seccompiler"}
 serde_json = "1.0.67"
 signal-hook = "0.3.10"
-thiserror = "1.0.28"
+thiserror = "1.0.29"
 vmm = { path = "vmm" }
 vmm-sys-util = "0.8.0"
 vm-memory = "0.6.0"
