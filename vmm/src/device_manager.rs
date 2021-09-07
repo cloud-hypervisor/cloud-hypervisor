@@ -1807,8 +1807,8 @@ impl DeviceManager {
 
         Ok(Arc::new(Console {
             serial,
-            input,
             console_resizer,
+            input,
         }))
     }
 
