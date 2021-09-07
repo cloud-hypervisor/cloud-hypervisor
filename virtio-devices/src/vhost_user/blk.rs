@@ -59,6 +59,7 @@ pub struct Blk {
     guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     epoll_thread: Option<thread::JoinHandle<()>>,
     seccomp_action: SeccompAction,
+    exit_evt: EventFd,
 }
 
 impl Blk {
@@ -68,6 +69,7 @@ impl Blk {
         vu_cfg: VhostUserConfig,
         restoring: bool,
         seccomp_action: SeccompAction,
+        exit_evt: EventFd,
     ) -> Result<Blk> {
         let num_queues = vu_cfg.num_queues;
 
@@ -93,6 +95,7 @@ impl Blk {
                 guest_memory: None,
                 epoll_thread: None,
                 seccomp_action,
+                exit_evt,
             });
         }
 
@@ -180,6 +183,7 @@ impl Blk {
             guest_memory: None,
             epoll_thread: None,
             seccomp_action,
+            exit_evt,
         })
     }
 
@@ -314,6 +318,7 @@ impl VirtioDevice for Blk {
             &self.seccomp_action,
             Thread::VirtioVhostBlock,
             &mut epoll_threads,
+            &self.exit_evt,
             move || {
                 if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                     error!("Error running worker: {:?}", e);

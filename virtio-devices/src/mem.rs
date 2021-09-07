@@ -746,10 +746,12 @@ pub struct Mem {
     hugepages: bool,
     dma_mapping_handlers: Arc<Mutex<BTreeMap<u32, Arc<dyn ExternalDmaMapping>>>>,
     blocks_state: Arc<Mutex<BlocksState>>,
+    exit_evt: EventFd,
 }
 
 impl Mem {
     // Create a new virtio-mem device.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         region: &Arc<GuestRegionMmap>,
@@ -758,6 +760,7 @@ impl Mem {
         numa_node_id: Option<u16>,
         initial_size: u64,
         hugepages: bool,
+        exit_evt: EventFd,
     ) -> io::Result<Mem> {
         let region_len = region.len();
 
@@ -835,6 +838,7 @@ impl Mem {
                 (config.region_size / config.block_size)
                     as usize
             ]))),
+            exit_evt,
         })
     }
 
@@ -961,6 +965,7 @@ impl VirtioDevice for Mem {
             &self.seccomp_action,
             Thread::VirtioMem,
             &mut epoll_threads,
+            &self.exit_evt,
             move || {
                 if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                     error!("Error running worker: {:?}", e);

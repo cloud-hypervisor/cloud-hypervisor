@@ -309,6 +309,7 @@ pub struct Fs {
     seccomp_action: SeccompAction,
     guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     epoll_thread: Option<thread::JoinHandle<()>>,
+    exit_evt: EventFd,
 }
 
 impl Fs {
@@ -323,6 +324,7 @@ impl Fs {
         cache: Option<(VirtioSharedMemoryList, MmapRegion)>,
         seccomp_action: SeccompAction,
         restoring: bool,
+        exit_evt: EventFd,
     ) -> Result<Fs> {
         let mut slave_req_support = false;
 
@@ -353,6 +355,7 @@ impl Fs {
                 seccomp_action,
                 guest_memory: None,
                 epoll_thread: None,
+                exit_evt,
             });
         }
 
@@ -429,6 +432,7 @@ impl Fs {
             seccomp_action,
             guest_memory: None,
             epoll_thread: None,
+            exit_evt,
         })
     }
 
@@ -556,6 +560,7 @@ impl VirtioDevice for Fs {
             &self.seccomp_action,
             Thread::VirtioVhostFs,
             &mut epoll_threads,
+            &self.exit_evt,
             move || {
                 if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                     error!("Error running worker: {:?}", e);

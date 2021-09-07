@@ -264,6 +264,7 @@ pub struct Pmem {
     config: VirtioPmemConfig,
     mapping: UserspaceMapping,
     seccomp_action: SeccompAction,
+    exit_evt: EventFd,
 
     // Hold ownership of the memory that is allocated for the device
     // which will be automatically dropped when the device is dropped
@@ -280,6 +281,7 @@ pub struct PmemState {
 impl VersionMapped for PmemState {}
 
 impl Pmem {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         disk: File,
@@ -288,6 +290,7 @@ impl Pmem {
         _region: MmapRegion,
         iommu: bool,
         seccomp_action: SeccompAction,
+        exit_evt: EventFd,
     ) -> io::Result<Pmem> {
         let config = VirtioPmemConfig {
             start: addr.raw_value().to_le(),
@@ -315,6 +318,7 @@ impl Pmem {
             mapping,
             seccomp_action,
             _region,
+            exit_evt,
         })
     }
 
@@ -396,6 +400,7 @@ impl VirtioDevice for Pmem {
                 &self.seccomp_action,
                 Thread::VirtioPmem,
                 &mut epoll_threads,
+                &self.exit_evt,
                 move || {
                     if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                         error!("Error running worker: {:?}", e);

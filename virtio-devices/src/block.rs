@@ -365,6 +365,7 @@ pub struct Block {
     counters: BlockCounters,
     seccomp_action: SeccompAction,
     rate_limiter_config: Option<RateLimiterConfig>,
+    exit_evt: EventFd,
 }
 
 #[derive(Versionize)]
@@ -391,6 +392,7 @@ impl Block {
         queue_size: u16,
         seccomp_action: SeccompAction,
         rate_limiter_config: Option<RateLimiterConfig>,
+        exit_evt: EventFd,
     ) -> io::Result<Self> {
         let disk_size = disk_image.size().map_err(|e| {
             io::Error::new(
@@ -448,6 +450,7 @@ impl Block {
             counters: BlockCounters::default(),
             seccomp_action,
             rate_limiter_config,
+            exit_evt,
         })
     }
 
@@ -593,6 +596,7 @@ impl VirtioDevice for Block {
                 &self.seccomp_action,
                 Thread::VirtioBlock,
                 &mut epoll_threads,
+                &self.exit_evt,
                 move || {
                     if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                         error!("Error running worker: {:?}", e);

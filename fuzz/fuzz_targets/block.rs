@@ -17,7 +17,7 @@ use std::sync::Arc;
 use virtio_devices::{Block, VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
 use vm_virtio::Queue;
-use vmm_sys_util::eventfd::EventFd;
+use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
 const MEM_SIZE: u64 = 256 * 1024 * 1024;
 const DESC_SIZE: u64 = 16; // Bytes in one virtio descriptor.
@@ -96,6 +96,7 @@ fuzz_target!(|bytes| {
         256,
         SeccompAction::Allow,
         None,
+        EventFd::new(EFD_NONBLOCK).unwrap(),
     )
     .unwrap();
 

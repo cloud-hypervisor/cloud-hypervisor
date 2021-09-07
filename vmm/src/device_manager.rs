@@ -891,9 +891,7 @@ pub struct DeviceManager {
     device_tree: Arc<Mutex<DeviceTree>>,
 
     // Exit event
-    #[cfg(feature = "acpi")]
     exit_evt: EventFd,
-
     reset_evt: EventFd,
 
     #[cfg(target_arch = "aarch64")]
@@ -936,7 +934,7 @@ impl DeviceManager {
         vm: Arc<dyn hypervisor::Vm>,
         config: Arc<Mutex<VmConfig>>,
         memory_manager: Arc<Mutex<MemoryManager>>,
-        _exit_evt: &EventFd,
+        exit_evt: &EventFd,
         reset_evt: &EventFd,
         seccomp_action: SeccompAction,
         #[cfg(any(target_arch = "aarch64", feature = "acpi"))] numa_nodes: NumaNodes,
@@ -996,8 +994,7 @@ impl DeviceManager {
             pci_devices_down: 0,
             pci_irq_slots: [0; 32],
             device_tree,
-            #[cfg(feature = "acpi")]
-            exit_evt: _exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
+            exit_evt: exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
             reset_evt: reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
             #[cfg(target_arch = "aarch64")]
             id_to_dev_info: HashMap::new(),
@@ -1175,9 +1172,14 @@ impl DeviceManager {
         let iommu_id = String::from(IOMMU_DEVICE_NAME);
 
         let (iommu_device, iommu_mapping) = if self.config.lock().unwrap().iommu {
-            let (device, mapping) =
-                virtio_devices::Iommu::new(iommu_id.clone(), self.seccomp_action.clone())
-                    .map_err(DeviceManagerError::CreateVirtioIommu)?;
+            let (device, mapping) = virtio_devices::Iommu::new(
+                iommu_id.clone(),
+                self.seccomp_action.clone(),
+                self.exit_evt
+                    .try_clone()
+                    .map_err(DeviceManagerError::EventFd)?,
+            )
+            .map_err(DeviceManagerError::CreateVirtioIommu)?;
             let device = Arc::new(Mutex::new(device));
             self.iommu_device = Some(Arc::clone(&device));
 
@@ -1738,6 +1740,9 @@ impl DeviceManager {
             row,
             self.force_iommu | console_config.iommu,
             self.seccomp_action.clone(),
+            self.exit_evt
+                .try_clone()
+                .map_err(DeviceManagerError::EventFd)?,
         )
         .map_err(DeviceManagerError::CreateVirtioConsole)?;
         let virtio_console_device = Arc::new(Mutex::new(virtio_console_device));
@@ -1872,6 +1877,9 @@ impl DeviceManager {
                     vu_cfg,
                     self.restoring,
                     self.seccomp_action.clone(),
+                    self.exit_evt
+                        .try_clone()
+                        .map_err(DeviceManagerError::EventFd)?,
                 ) {
                     Ok(vub_device) => vub_device,
                     Err(e) => {
@@ -1973,6 +1981,9 @@ impl DeviceManager {
                     disk_cfg.queue_size,
                     self.seccomp_action.clone(),
                     disk_cfg.rate_limiter_config,
+                    self.exit_evt
+                        .try_clone()
+                        .map_err(DeviceManagerError::EventFd)?,
                 )
                 .map_err(DeviceManagerError::CreateVirtioBlock)?,
             ));
@@ -2040,6 +2051,9 @@ impl DeviceManager {
                     server,
                     self.seccomp_action.clone(),
                     self.restoring,
+                    self.exit_evt
+                        .try_clone()
+                        .map_err(DeviceManagerError::EventFd)?,
                 ) {
                     Ok(vun_device) => vun_device,
                     Err(e) => {
@@ -2076,6 +2090,9 @@ impl DeviceManager {
                         net_cfg.queue_size,
                         self.seccomp_action.clone(),
                         net_cfg.rate_limiter_config,
+                        self.exit_evt
+                            .try_clone()
+                            .map_err(DeviceManagerError::EventFd)?,
                     )
                     .map_err(DeviceManagerError::CreateVirtioNet)?,
                 ))
@@ -2089,6 +2106,9 @@ impl DeviceManager {
                         net_cfg.queue_size,
                         self.seccomp_action.clone(),
                         net_cfg.rate_limiter_config,
+                        self.exit_evt
+                            .try_clone()
+                            .map_err(DeviceManagerError::EventFd)?,
                     )
                     .map_err(DeviceManagerError::CreateVirtioNet)?,
                 ))
@@ -2106,6 +2126,9 @@ impl DeviceManager {
                         net_cfg.queue_size,
                         self.seccomp_action.clone(),
                         net_cfg.rate_limiter_config,
+                        self.exit_evt
+                            .try_clone()
+                            .map_err(DeviceManagerError::EventFd)?,
                     )
                     .map_err(DeviceManagerError::CreateVirtioNet)?,
                 ))
@@ -2160,6 +2183,9 @@ impl DeviceManager {
                     rng_path,
                     self.force_iommu | rng_config.iommu,
                     self.seccomp_action.clone(),
+                    self.exit_evt
+                        .try_clone()
+                        .map_err(DeviceManagerError::EventFd)?,
                 )
                 .map_err(DeviceManagerError::CreateVirtioRng)?,
             ));
@@ -2308,6 +2334,9 @@ impl DeviceManager {
                     cache,
                     self.seccomp_action.clone(),
                     self.restoring,
+                    self.exit_evt
+                        .try_clone()
+                        .map_err(DeviceManagerError::EventFd)?,
                 )
                 .map_err(DeviceManagerError::CreateVirtioFs)?,
             ));
@@ -2490,6 +2519,9 @@ impl DeviceManager {
                 mmap_region,
                 self.force_iommu | pmem_cfg.iommu,
                 self.seccomp_action.clone(),
+                self.exit_evt
+                    .try_clone()
+                    .map_err(DeviceManagerError::EventFd)?,
             )
             .map_err(DeviceManagerError::CreateVirtioPmem)?,
         ));
@@ -2556,6 +2588,9 @@ impl DeviceManager {
                 backend,
                 self.force_iommu | vsock_cfg.iommu,
                 self.seccomp_action.clone(),
+                self.exit_evt
+                    .try_clone()
+                    .map_err(DeviceManagerError::EventFd)?,
             )
             .map_err(DeviceManagerError::CreateVirtioVsock)?,
         ));
@@ -2619,6 +2654,9 @@ impl DeviceManager {
                         node_id,
                         virtio_mem_zone.hotplugged_size(),
                         virtio_mem_zone.hugepages(),
+                        self.exit_evt
+                            .try_clone()
+                            .map_err(DeviceManagerError::EventFd)?,
                     )
                     .map_err(DeviceManagerError::CreateVirtioMem)?,
                 ));
@@ -2659,6 +2697,9 @@ impl DeviceManager {
                     balloon_config.size,
                     balloon_config.deflate_on_oom,
                     self.seccomp_action.clone(),
+                    self.exit_evt
+                        .try_clone()
+                        .map_err(DeviceManagerError::EventFd)?,
                 )
                 .map_err(DeviceManagerError::CreateVirtioBalloon)?,
             ));
@@ -2697,6 +2738,9 @@ impl DeviceManager {
                 id.clone(),
                 self.reset_evt.try_clone().unwrap(),
                 self.seccomp_action.clone(),
+                self.exit_evt
+                    .try_clone()
+                    .map_err(DeviceManagerError::EventFd)?,
             )
             .map_err(DeviceManagerError::CreateVirtioWatchdog)?,
         ));

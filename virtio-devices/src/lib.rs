@@ -80,8 +80,12 @@ pub enum ActivateError {
     BadActivate,
     /// Queue number is not correct
     BadQueueNum,
-    /// Failed to clone Kill event
+    /// Failed to clone Kill event fd
     CloneKillEventFd,
+    /// Failed to clone exit event fd
+    CloneExitEventFd(std::io::Error),
+    // Failed to spawn thread
+    ThreadSpawn(std::io::Error),
     /// Failed to create Vhost-user interrupt eventfd
     VhostIrqCreate,
     /// Failed to setup vhost-user-fs daemon.

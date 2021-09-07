@@ -275,6 +275,7 @@ mod tests {
                     TestBackend::new(),
                     false,
                     seccompiler::SeccompAction::Trap,
+                    EventFd::new(EFD_NONBLOCK).unwrap(),
                 )
                 .unwrap(),
             }
