@@ -985,7 +985,7 @@ mod tests {
     }
 
     #[allow(unused_variables)]
-    fn test_guest_numa_nodes(acpi: bool) {
+    fn _test_guest_numa_nodes(acpi: bool) {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
         let api_socket = temp_api_path(&guest.tmp_dir);
@@ -2106,41 +2106,6 @@ mod tests {
         }
 
         #[test]
-        #[cfg(all(target_arch = "aarch64", feature = "acpi"))]
-        fn test_edk2_acpi_launch() {
-            let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-
-            vec![Box::new(focal)].drain(..).for_each(|disk_config| {
-                let guest = Guest::new(disk_config);
-
-                let mut child = GuestCommand::new(&guest)
-                    .args(&["--cpus", "boot=1"])
-                    .args(&["--memory", "size=512M"])
-                    .args(&["--kernel", edk2_path().to_str().unwrap()])
-                    .default_disks()
-                    .default_net()
-                    .args(&["--serial", "tty", "--console", "off"])
-                    .capture_output()
-                    .spawn()
-                    .unwrap();
-
-                let r = std::panic::catch_unwind(|| {
-                    guest.wait_vm_boot(Some(120)).unwrap();
-
-                    assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
-                    assert!(guest.get_total_memory().unwrap_or_default() > 400_000);
-                    assert!(guest.get_entropy().unwrap_or_default() >= 900);
-                    assert_eq!(guest.get_pci_bridge_class().unwrap_or_default(), "0x060000");
-                });
-
-                let _ = child.kill();
-                let output = child.wait_with_output().unwrap();
-
-                handle_child_output(r, &output);
-            });
-        }
-
-        #[test]
         fn test_multi_cpu() {
             let bionic = UbuntuDiskConfig::new(BIONIC_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(bionic));
@@ -2201,24 +2166,6 @@ mod tests {
         #[test]
         fn test_cpu_topology_262() {
             test_cpu_topology(2, 6, 2, false);
-        }
-
-        #[test]
-        #[cfg(all(target_arch = "aarch64", feature = "acpi"))]
-        fn test_cpu_topology_421_fw() {
-            test_cpu_topology(4, 2, 1, true);
-        }
-
-        #[test]
-        #[cfg(all(target_arch = "aarch64", feature = "acpi"))]
-        fn test_cpu_topology_142_fw() {
-            test_cpu_topology(1, 4, 2, true);
-        }
-
-        #[test]
-        #[cfg(all(target_arch = "aarch64", feature = "acpi"))]
-        fn test_cpu_topology_262_fw() {
-            test_cpu_topology(2, 6, 2, true);
         }
 
         #[test]
@@ -2330,12 +2277,6 @@ mod tests {
         }
 
         #[test]
-        #[cfg(all(target_arch = "aarch64", feature = "acpi"))]
-        fn test_power_button_acpi_aarch64() {
-            _test_power_button(true);
-        }
-
-        #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_user_defined_memory_regions() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -2404,15 +2345,8 @@ mod tests {
         }
 
         #[test]
-        #[cfg(feature = "acpi")]
-        fn test_guest_numa_nodes_acpi() {
-            test_guest_numa_nodes(true);
-        }
-
-        #[test]
-        #[cfg(target_arch = "aarch64")]
-        fn test_guest_numa_nodes_dt() {
-            test_guest_numa_nodes(false);
+        fn test_guest_numa_nodes() {
+            _test_guest_numa_nodes(false);
         }
 
         #[test]
@@ -7071,6 +7005,70 @@ mod tests {
         #[test]
         fn test_live_migration_numa() {
             _test_live_migration(true)
+        }
+    }
+
+    #[cfg(all(target_arch = "aarch64", feature = "acpi"))]
+    mod aarch64_acpi {
+        use crate::tests::*;
+
+        #[test]
+        fn test_simple_launch_acpi() {
+            let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+
+            vec![Box::new(focal)].drain(..).for_each(|disk_config| {
+                let guest = Guest::new(disk_config);
+
+                let mut child = GuestCommand::new(&guest)
+                    .args(&["--cpus", "boot=1"])
+                    .args(&["--memory", "size=512M"])
+                    .args(&["--kernel", edk2_path().to_str().unwrap()])
+                    .default_disks()
+                    .default_net()
+                    .args(&["--serial", "tty", "--console", "off"])
+                    .capture_output()
+                    .spawn()
+                    .unwrap();
+
+                let r = std::panic::catch_unwind(|| {
+                    guest.wait_vm_boot(Some(120)).unwrap();
+
+                    assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
+                    assert!(guest.get_total_memory().unwrap_or_default() > 400_000);
+                    assert!(guest.get_entropy().unwrap_or_default() >= 900);
+                    assert_eq!(guest.get_pci_bridge_class().unwrap_or_default(), "0x060000");
+                });
+
+                let _ = child.kill();
+                let output = child.wait_with_output().unwrap();
+
+                handle_child_output(r, &output);
+            });
+        }
+
+        #[test]
+        fn test_guest_numa_nodes_acpi() {
+            _test_guest_numa_nodes(true);
+        }
+
+        #[test]
+        fn test_cpu_topology_421_acpi() {
+            test_cpu_topology(4, 2, 1, true);
+        }
+
+        #[test]
+        fn test_cpu_topology_142_acpi() {
+            test_cpu_topology(1, 4, 2, true);
+        }
+
+        #[test]
+        fn test_cpu_topology_262_acpi() {
+            test_cpu_topology(2, 6, 2, true);
+        }
+
+        #[test]
+        fn test_power_button_acpi() {
+            _test_power_button(true);
         }
     }
 }
