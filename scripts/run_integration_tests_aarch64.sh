@@ -303,6 +303,15 @@ service openvswitch-switch restart
 time cargo test $features_test "tests::parallel::$test_filter"
 RES=$?
 
+# Run some tests in sequence since the result could be affected by other tests
+# running in parallel.
+if [ $RES -eq 0 ]; then
+    time cargo test $features_test "tests::sequential::$test_filter" -- --test-threads=1
+    RES=$?
+else
+    exit $RES
+fi
+
 # Run all ACPI test cases
 if [ $RES -eq 0 ]; then
     time cargo test $features_test "tests::aarch64_acpi::$test_filter"
