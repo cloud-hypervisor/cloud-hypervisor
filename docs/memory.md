@@ -91,6 +91,8 @@ The user is responsible for ensuring there are sufficient huge pages of the spec
 Failure to do so may result in strange VMM behaviour, e.g. error with `ReadKernelImage` is common.
 If there is a strange error with `hugepages` enabled, just disable it or check whether there are enough huge pages.
 
+Note that with `dirty-log` enabled, VMM still costs huge pages but KVM will never use them as huge pages.
+
 By default this option is turned off.
 
 _Example_
