@@ -299,9 +299,19 @@ ovs-vsctl init
 ovs-vsctl set Open_vSwitch . other_config:dpdk-init=true
 service openvswitch-switch restart
 
+# Run all direct kernel boot (Device Tree) test cases in mod `parallel`
 time cargo test $features_test "tests::parallel::$test_filter"
 RES=$?
 
+# Run all ACPI test cases
+if [ $RES -eq 0 ]; then
+    time cargo test $features_test "tests::aarch64_acpi::$test_filter"
+    RES=$?
+else
+    exit $RES
+fi
+
+# Run all test cases related to live migration
 if [ $RES -eq 0 ]; then
     time cargo test $features_test "tests::live_migration::$test_filter" -- --test-threads=1
     RES=$?
