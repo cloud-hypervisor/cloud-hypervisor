@@ -39,6 +39,12 @@ jobs:
 
       - name: Build (kvm)
         run: cargo rustc --bin cloud-hypervisor --no-default-features --features "kvm"  -- -D warnings
+
+      - name: Build (acpi,mshv)
+        run: cargo rustc --bin cloud-hypervisor --no-default-features --features "acpi,mshv"  -- -D warnings
+
+      - name: Build (mshv)
+        run: cargo rustc --bin cloud-hypervisor --no-default-features --features "mshv"  -- -D warnings
         
       - name: Release Build (default features)
         run: cargo build --all --release --target=${{ matrix.target }}
