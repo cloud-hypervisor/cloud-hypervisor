@@ -478,6 +478,9 @@ components:
         watchdog:
           type: boolean
           default: false
+        dirty_log:
+          type: boolean
+          default: true
       description: Virtual machine configuration
 
     CpuTopology:

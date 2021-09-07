@@ -510,6 +510,7 @@ impl MemoryManager {
         prefault: bool,
         phys_bits: u8,
         #[cfg(feature = "tdx")] tdx_enabled: bool,
+        dirty_log: bool,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         let user_provided_zones = config.size == 0;
         let mut allow_mem_hotplug: bool = false;
@@ -749,7 +750,7 @@ impl MemoryManager {
             .ok_or(Error::AllocateMmioAddress)?;
 
         #[cfg(not(feature = "tdx"))]
-        let log_dirty = true;
+        let log_dirty = dirty_log;
         #[cfg(feature = "tdx")]
         let log_dirty = !tdx_enabled; // Cannot log dirty pages on a TD
 
@@ -851,6 +852,7 @@ impl MemoryManager {
             phys_bits,
             #[cfg(feature = "tdx")]
             false,
+            true,
         )?;
 
         if let Some(source_url) = source_url {

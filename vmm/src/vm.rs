@@ -710,8 +710,9 @@ impl Vm {
         serial_pty: Option<PtyPair>,
         console_pty: Option<PtyPair>,
     ) -> Result<Self> {
+        let guard = config.lock().unwrap();
         #[cfg(feature = "tdx")]
-        let tdx_enabled = config.lock().unwrap().tdx.is_some();
+        let tdx_enabled = guard.tdx.is_some();
         hypervisor.check_required_extensions().unwrap();
         #[cfg(feature = "tdx")]
         let vm = hypervisor
@@ -727,23 +728,24 @@ impl Vm {
         #[cfg(target_arch = "x86_64")]
         vm.enable_split_irq().unwrap();
         let phys_bits = physical_bits(
-            config.lock().unwrap().cpus.max_phys_bits,
+            guard.cpus.max_phys_bits,
             #[cfg(feature = "tdx")]
             tdx_enabled,
         );
         let memory_manager = MemoryManager::new(
             vm.clone(),
-            &config.lock().unwrap().memory.clone(),
+            &guard.memory.clone(),
             false,
             phys_bits,
             #[cfg(feature = "tdx")]
             tdx_enabled,
+            guard.dirty_log,
         )
         .map_err(Error::MemoryManager)?;
 
         #[cfg(target_arch = "x86_64")]
         {
-            if let Some(sgx_epc_config) = config.lock().unwrap().sgx_epc.clone() {
+            if let Some(sgx_epc_config) = guard.sgx_epc.clone() {
                 memory_manager
                     .lock()
                     .unwrap()
@@ -751,6 +753,8 @@ impl Vm {
                     .map_err(Error::MemoryManager)?;
             }
         }
+
+        drop(guard);
 
         let new_vm = Vm::new_from_memory_manager(
             config,
@@ -847,23 +851,27 @@ impl Vm {
     ) -> Result<Self> {
         hypervisor.check_required_extensions().unwrap();
         let vm = hypervisor.create_vm().unwrap();
+        let guard = config.lock().unwrap();
         #[cfg(target_arch = "x86_64")]
         vm.enable_split_irq().unwrap();
         let phys_bits = physical_bits(
-            config.lock().unwrap().cpus.max_phys_bits,
+            guard.cpus.max_phys_bits,
             #[cfg(feature = "tdx")]
-            config.lock().unwrap().tdx.is_some(),
+            guard.tdx.is_some(),
         );
 
         let memory_manager = MemoryManager::new(
             vm.clone(),
-            &config.lock().unwrap().memory.clone(),
+            &guard.memory.clone(),
             false,
             phys_bits,
             #[cfg(feature = "tdx")]
             false,
+            guard.dirty_log,
         )
         .map_err(Error::MemoryManager)?;
+
+        drop(guard);
 
         Vm::new_from_memory_manager(
             config,

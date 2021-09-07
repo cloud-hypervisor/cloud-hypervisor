@@ -189,7 +189,7 @@ fn create_app<'a, 'b>(
                 .long("kernel")
                 .help(
                     "Path to loaded kernel. This may be a kernel or firmware that supports a PVH \
-                entry point (e.g. vmlinux) or architecture equivalent",
+                    entry point (e.g. vmlinux) or architecture equivalent",
                 )
                 .takes_value(true)
                 .group("vm-config"),
@@ -356,6 +356,17 @@ fn create_app<'a, 'b>(
                 .takes_value(true)
                 .possible_values(&["true", "false", "log"])
                 .default_value("true"),
+        )
+        .arg(
+            Arg::with_name("dirty-log")
+                .long("dirty-log")
+                .help(
+                    "Enable dirty log. \
+                    With dirty log enabled, VM can migration but cannot use huge pages"
+                )
+                .takes_value(true)
+                .possible_values(&["on", "off"])
+                .default_value("on"),
         );
 
     #[cfg(target_arch = "x86_64")]
@@ -681,6 +692,7 @@ mod unit_tests {
                 watchdog: false,
                 #[cfg(feature = "tdx")]
                 tdx: None,
+                dirty_log: true,
             };
 
             aver_eq!(tb, expected_vm_config, result_vm_config);

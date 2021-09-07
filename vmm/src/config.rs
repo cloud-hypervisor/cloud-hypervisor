@@ -95,6 +95,8 @@ pub enum Error {
     ParseUserDevice(OptionParserError),
     /// Missing socket for userspace device
     ParseUserDeviceSocketMissing,
+    /// No valid value given for dirty log
+    ParseDirtyLogInvalidValue,
 }
 
 #[derive(Debug)]
@@ -252,6 +254,9 @@ impl fmt::Display for Error {
             ParseTdx(o) => write!(f, "Error parsing --tdx: {}", o),
             #[cfg(feature = "tdx")]
             FirmwarePathMissing => write!(f, "TDX firmware missing"),
+            ParseDirtyLogInvalidValue => {
+                write!(f, "Error parsing --dirty-log: invalid value")
+            }
         }
     }
 }
@@ -282,6 +287,7 @@ pub struct VmParams<'a> {
     pub watchdog: bool,
     #[cfg(feature = "tdx")]
     pub tdx: Option<&'a str>,
+    pub dirty_log: Option<&'a str>,
 }
 
 impl<'a> VmParams<'a> {
@@ -312,6 +318,7 @@ impl<'a> VmParams<'a> {
         let watchdog = args.is_present("watchdog");
         #[cfg(feature = "tdx")]
         let tdx = args.value_of("tdx");
+        let dirty_log = args.value_of("dirty-log");
         VmParams {
             cpus,
             memory,
@@ -336,6 +343,7 @@ impl<'a> VmParams<'a> {
             watchdog,
             #[cfg(feature = "tdx")]
             tdx,
+            dirty_log,
         }
     }
 }
@@ -1825,6 +1833,12 @@ pub struct VmConfig {
     pub watchdog: bool,
     #[cfg(feature = "tdx")]
     pub tdx: Option<TdxConfig>,
+    #[serde(default = "default_dirty_log")]
+    pub dirty_log: bool,
+}
+
+fn default_dirty_log() -> bool {
+    true
 }
 
 impl VmConfig {
@@ -2089,6 +2103,18 @@ impl VmConfig {
         #[cfg(feature = "tdx")]
         let tdx = vm_params.tdx.map(TdxConfig::parse).transpose()?;
 
+        let dirty_log = if let Some(dirty) = vm_params.dirty_log {
+            match dirty {
+                "on" => true,
+                "off" => false,
+                _ => {
+                    return Err(Error::ParseDirtyLogInvalidValue);
+                }
+            }
+        } else {
+            true
+        };
+
         let config = VmConfig {
             cpus: CpusConfig::parse(vm_params.cpus)?,
             memory: MemoryConfig::parse(vm_params.memory, vm_params.memory_zones)?,
@@ -2113,6 +2139,7 @@ impl VmConfig {
             watchdog: vm_params.watchdog,
             #[cfg(feature = "tdx")]
             tdx,
+            dirty_log,
         };
         config.validate().map_err(Error::Validation)?;
         Ok(config)
@@ -2722,6 +2749,7 @@ mod tests {
             watchdog: false,
             #[cfg(feature = "tdx")]
             tdx: None,
+            dirty_log: true,
         };
 
         assert!(valid_config.validate().is_ok());
