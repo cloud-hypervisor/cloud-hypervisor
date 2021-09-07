@@ -113,6 +113,7 @@ pub struct Net {
     ctrl_queue_epoll_thread: Option<thread::JoinHandle<()>>,
     epoll_thread: Option<thread::JoinHandle<()>>,
     seccomp_action: SeccompAction,
+    exit_evt: EventFd,
 }
 
 impl Net {
@@ -124,6 +125,7 @@ impl Net {
         server: bool,
         seccomp_action: SeccompAction,
         restoring: bool,
+        exit_evt: EventFd,
     ) -> Result<Net> {
         let mut num_queues = vu_cfg.num_queues;
 
@@ -152,6 +154,7 @@ impl Net {
                 ctrl_queue_epoll_thread: None,
                 epoll_thread: None,
                 seccomp_action,
+                exit_evt,
             });
         }
 
@@ -237,6 +240,7 @@ impl Net {
             ctrl_queue_epoll_thread: None,
             epoll_thread: None,
             seccomp_action,
+            exit_evt,
         })
     }
 
@@ -339,6 +343,7 @@ impl VirtioDevice for Net {
                 &self.seccomp_action,
                 Thread::VirtioVhostNetCtl,
                 &mut epoll_threads,
+                &self.exit_evt,
                 move || {
                     if let Err(e) = ctrl_handler.run_ctrl(paused, paused_sync.unwrap()) {
                         error!("Error running worker: {:?}", e);
@@ -381,6 +386,7 @@ impl VirtioDevice for Net {
             &self.seccomp_action,
             Thread::VirtioVhostNet,
             &mut epoll_threads,
+            &self.exit_evt,
             move || {
                 if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                     error!("Error running worker: {:?}", e);

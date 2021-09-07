@@ -129,6 +129,7 @@ pub struct Rng {
     id: String,
     random_file: Option<File>,
     seccomp_action: SeccompAction,
+    exit_evt: EventFd,
 }
 
 #[derive(Versionize)]
@@ -146,6 +147,7 @@ impl Rng {
         path: &str,
         iommu: bool,
         seccomp_action: SeccompAction,
+        exit_evt: EventFd,
     ) -> io::Result<Rng> {
         let random_file = File::open(path)?;
         let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
@@ -166,6 +168,7 @@ impl Rng {
             id,
             random_file: Some(random_file),
             seccomp_action,
+            exit_evt,
         })
     }
 
@@ -241,6 +244,7 @@ impl VirtioDevice for Rng {
                 &self.seccomp_action,
                 Thread::VirtioRng,
                 &mut epoll_threads,
+                &self.exit_evt,
                 move || {
                     if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                         error!("Error running worker: {:?}", e);

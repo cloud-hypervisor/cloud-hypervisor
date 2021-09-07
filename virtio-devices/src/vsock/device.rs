@@ -303,6 +303,7 @@ pub struct Vsock<B: VsockBackend> {
     backend: Arc<RwLock<B>>,
     path: PathBuf,
     seccomp_action: SeccompAction,
+    exit_evt: EventFd,
 }
 
 #[derive(Versionize)]
@@ -326,6 +327,7 @@ where
         backend: B,
         iommu: bool,
         seccomp_action: SeccompAction,
+        exit_evt: EventFd,
     ) -> io::Result<Vsock<B>> {
         let mut avail_features = 1u64 << VIRTIO_F_VERSION_1 | 1u64 << VIRTIO_F_IN_ORDER;
 
@@ -347,6 +349,7 @@ where
             backend: Arc::new(RwLock::new(backend)),
             path,
             seccomp_action,
+            exit_evt,
         })
     }
 
@@ -439,6 +442,7 @@ where
             &self.seccomp_action,
             Thread::VirtioVsock,
             &mut epoll_threads,
+            &self.exit_evt,
             move || {
                 if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                     error!("Error running worker: {:?}", e);

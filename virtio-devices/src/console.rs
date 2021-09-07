@@ -325,6 +325,7 @@ pub struct Console {
     endpoint: Endpoint,
     seccomp_action: SeccompAction,
     in_buffer: Arc<Mutex<VecDeque<u8>>>,
+    exit_evt: EventFd,
 }
 
 #[derive(Versionize)]
@@ -346,6 +347,7 @@ impl Console {
         rows: u16,
         iommu: bool,
         seccomp_action: SeccompAction,
+        exit_evt: EventFd,
     ) -> io::Result<(Console, Arc<ConsoleResizer>)> {
         let mut avail_features = 1u64 << VIRTIO_F_VERSION_1 | 1u64 << VIRTIO_CONSOLE_F_SIZE;
 
@@ -377,6 +379,7 @@ impl Console {
                 endpoint,
                 seccomp_action,
                 in_buffer: Arc::new(Mutex::new(VecDeque::new())),
+                exit_evt,
             },
             resizer,
         ))
@@ -473,6 +476,7 @@ impl VirtioDevice for Console {
             &self.seccomp_action,
             Thread::VirtioConsole,
             &mut epoll_threads,
+            &self.exit_evt,
             move || {
                 if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                     error!("Error running worker: {:?}", e);

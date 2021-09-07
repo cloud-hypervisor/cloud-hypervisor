@@ -166,6 +166,7 @@ pub struct Watchdog {
     reset_evt: EventFd,
     last_ping_time: Arc<Mutex<Option<Instant>>>,
     timer: File,
+    exit_evt: EventFd,
 }
 
 #[derive(Versionize)]
@@ -183,6 +184,7 @@ impl Watchdog {
         id: String,
         reset_evt: EventFd,
         seccomp_action: SeccompAction,
+        exit_evt: EventFd,
     ) -> io::Result<Watchdog> {
         let avail_features = 1u64 << VIRTIO_F_VERSION_1;
         let timer_fd = timerfd_create().map_err(|e| {
@@ -204,6 +206,7 @@ impl Watchdog {
             reset_evt,
             last_ping_time: Arc::new(Mutex::new(None)),
             timer,
+            exit_evt,
         })
     }
 
@@ -324,6 +327,7 @@ impl VirtioDevice for Watchdog {
             &self.seccomp_action,
             Thread::VirtioWatchdog,
             &mut epoll_threads,
+            &self.exit_evt,
             move || {
                 if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                     error!("Error running worker: {:?}", e);

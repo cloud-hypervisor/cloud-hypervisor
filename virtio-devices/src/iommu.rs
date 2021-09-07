@@ -701,6 +701,7 @@ pub struct Iommu {
     mapping: Arc<IommuMapping>,
     ext_mapping: BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
     seccomp_action: SeccompAction,
+    exit_evt: EventFd,
 }
 
 #[derive(Versionize)]
@@ -714,7 +715,11 @@ struct IommuState {
 impl VersionMapped for IommuState {}
 
 impl Iommu {
-    pub fn new(id: String, seccomp_action: SeccompAction) -> io::Result<(Self, Arc<IommuMapping>)> {
+    pub fn new(
+        id: String,
+        seccomp_action: SeccompAction,
+        exit_evt: EventFd,
+    ) -> io::Result<(Self, Arc<IommuMapping>)> {
         let config = VirtioIommuConfig {
             page_size_mask: VIRTIO_IOMMU_PAGE_SIZE_MASK,
             probe_size: PROBE_PROP_SIZE,
@@ -742,6 +747,7 @@ impl Iommu {
                 mapping: mapping.clone(),
                 ext_mapping: BTreeMap::new(),
                 seccomp_action,
+                exit_evt,
             },
             mapping,
         ))
@@ -847,6 +853,7 @@ impl VirtioDevice for Iommu {
             &self.seccomp_action,
             Thread::VirtioIommu,
             &mut epoll_threads,
+            &self.exit_evt,
             move || {
                 if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                     error!("Error running worker: {:?}", e);

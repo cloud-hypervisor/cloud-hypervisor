@@ -342,6 +342,7 @@ pub struct Balloon {
     resize: VirtioBalloonResize,
     config: Arc<Mutex<VirtioBalloonConfig>>,
     seccomp_action: SeccompAction,
+    exit_evt: EventFd,
 }
 
 impl Balloon {
@@ -351,6 +352,7 @@ impl Balloon {
         size: u64,
         deflate_on_oom: bool,
         seccomp_action: SeccompAction,
+        exit_evt: EventFd,
     ) -> io::Result<Self> {
         let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
         if deflate_on_oom {
@@ -375,6 +377,7 @@ impl Balloon {
             resize: VirtioBalloonResize::new()?,
             config: Arc::new(Mutex::new(config)),
             seccomp_action,
+            exit_evt,
         })
     }
 
@@ -466,6 +469,7 @@ impl VirtioDevice for Balloon {
             &self.seccomp_action,
             Thread::VirtioBalloon,
             &mut epoll_threads,
+            &self.exit_evt,
             move || {
                 if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                     error!("Error running worker: {:?}", e);

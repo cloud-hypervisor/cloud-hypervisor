@@ -355,6 +355,7 @@ pub struct Net {
     counters: NetCounters,
     seccomp_action: SeccompAction,
     rate_limiter_config: Option<RateLimiterConfig>,
+    exit_evt: EventFd,
 }
 
 #[derive(Versionize)]
@@ -379,6 +380,7 @@ impl Net {
         queue_size: u16,
         seccomp_action: SeccompAction,
         rate_limiter_config: Option<RateLimiterConfig>,
+        exit_evt: EventFd,
     ) -> Result<Self> {
         let mut avail_features = 1 << VIRTIO_NET_F_CSUM
             | 1 << VIRTIO_NET_F_CTRL_GUEST_OFFLOADS
@@ -424,6 +426,7 @@ impl Net {
             counters: NetCounters::default(),
             seccomp_action,
             rate_limiter_config,
+            exit_evt,
         })
     }
 
@@ -442,6 +445,7 @@ impl Net {
         queue_size: u16,
         seccomp_action: SeccompAction,
         rate_limiter_config: Option<RateLimiterConfig>,
+        exit_evt: EventFd,
     ) -> Result<Self> {
         let taps = open_tap(if_name, ip_addr, netmask, host_mac, num_queues / 2, None)
             .map_err(Error::OpenTap)?;
@@ -455,9 +459,11 @@ impl Net {
             queue_size,
             seccomp_action,
             rate_limiter_config,
+            exit_evt,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn from_tap_fds(
         id: String,
         fds: &[RawFd],
@@ -466,6 +472,7 @@ impl Net {
         queue_size: u16,
         seccomp_action: SeccompAction,
         rate_limiter_config: Option<RateLimiterConfig>,
+        exit_evt: EventFd,
     ) -> Result<Self> {
         let mut taps: Vec<Tap> = Vec::new();
         let num_queue_pairs = fds.len();
@@ -489,6 +496,7 @@ impl Net {
             queue_size,
             seccomp_action,
             rate_limiter_config,
+            exit_evt,
         )
     }
 
@@ -576,6 +584,7 @@ impl VirtioDevice for Net {
                 &self.seccomp_action,
                 Thread::VirtioNetCtl,
                 &mut epoll_threads,
+                &self.exit_evt,
                 move || {
                     if let Err(e) = ctrl_handler.run_ctrl(paused, paused_sync.unwrap()) {
                         error!("Error running worker: {:?}", e);
@@ -654,6 +663,7 @@ impl VirtioDevice for Net {
                 &self.seccomp_action,
                 Thread::VirtioNet,
                 &mut epoll_threads,
+                &self.exit_evt,
                 move || {
                     if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                         error!("Error running worker: {:?}", e);
