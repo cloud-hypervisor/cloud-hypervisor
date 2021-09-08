@@ -520,10 +520,6 @@ pub fn create_pty(non_blocking: bool) -> io::Result<(File, File, PathBuf)> {
     Ok((main, unsafe { File::from_raw_fd(sub_fd) }, path))
 }
 
-enum ConsoleInput {
-    Serial,
-    VirtioConsole,
-}
 #[derive(Default)]
 pub struct Console {
     #[cfg(target_arch = "x86_64")]
@@ -532,7 +528,6 @@ pub struct Console {
     #[cfg(target_arch = "aarch64")]
     serial: Option<Arc<Mutex<Pl011>>>,
     console_resizer: Option<Arc<virtio_devices::ConsoleResizer>>,
-    input: Option<ConsoleInput>,
 }
 
 impl Console {
@@ -552,10 +547,6 @@ impl Console {
         if let Some(resizer) = self.console_resizer.as_ref() {
             resizer.update_console_size(cols, rows)
         }
-    }
-
-    pub fn input_enabled(&self) -> bool {
-        self.input.is_some()
     }
 }
 
@@ -1770,7 +1761,6 @@ impl DeviceManager {
         serial_pty: Option<PtyPair>,
         console_pty: Option<PtyPair>,
     ) -> DeviceManagerResult<Arc<Console>> {
-        let console_config = self.config.lock().unwrap().console.clone();
         let serial_config = self.config.lock().unwrap().serial.clone();
         let serial_writer: Option<Box<dyn io::Write + Send>> = match serial_config.mode {
             ConsoleOutputMode::File => Some(Box::new(
@@ -1807,17 +1797,8 @@ impl DeviceManager {
 
         let console_resizer = self.add_virtio_console_device(virtio_devices, console_pty)?;
 
-        let input = if serial_config.mode.input_enabled() {
-            Some(ConsoleInput::Serial)
-        } else if console_config.mode.input_enabled() {
-            Some(ConsoleInput::VirtioConsole)
-        } else {
-            None
-        };
-
         Ok(Arc::new(Console {
             serial,
-            input,
             console_resizer,
         }))
     }
