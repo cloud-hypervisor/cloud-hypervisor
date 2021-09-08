@@ -15,7 +15,7 @@ use versionize::{VersionMap, Versionize};
 pub mod protocol;
 
 /// Global VMM version for versioning
-const MAJOR_VERSION: u16 = 17;
+const MAJOR_VERSION: u16 = 18;
 const MINOR_VERSION: u16 = 0;
 const VMM_VERSION: u16 = MAJOR_VERSION << 12 | MINOR_VERSION & 0b1111;
 
