@@ -63,6 +63,7 @@ use std::io::{self, Read, Write};
 use std::io::{Seek, SeekFrom};
 use std::num::Wrapping;
 use std::ops::Deref;
+use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Mutex, RwLock};
 use std::{result, str, thread};
 use vm_device::Bus;
@@ -1592,7 +1593,7 @@ impl Vm {
         mut signals: Signals,
         console_input_clone: Arc<Console>,
         on_tty: bool,
-        exit_evt: EventFd,
+        exit_evt: &EventFd,
     ) {
         for sig in HANDLED_SIGNALS {
             unblock_signal(sig).unwrap();
@@ -1820,11 +1821,18 @@ impl Vm {
                                     .map_err(Error::ApplySeccompFilter)
                                 {
                                     error!("Error applying seccomp filter: {:?}", e);
+                                    exit_evt.write(1).ok();
                                     return;
                                 }
                             }
-
-                            Vm::os_signal_handler(signals, console, on_tty, exit_evt);
+                            std::panic::catch_unwind(AssertUnwindSafe(|| {
+                                Vm::os_signal_handler(signals, console, on_tty, &exit_evt);
+                            }))
+                            .map_err(|_| {
+                                error!("signal_handler thead panicked");
+                                exit_evt.write(1).ok()
+                            })
+                            .ok();
                         })
                         .map_err(Error::SignalHandlerSpawn)?,
                 );
