@@ -1755,7 +1755,12 @@ impl DeviceManager {
             .unwrap()
             .insert(id.clone(), device_node!(id, virtio_console_device));
 
-        Ok(Some(console_resizer))
+        // Only provide a resizer (for SIGWINCH handling) if the console is attached to the TTY
+        Ok(if matches!(console_config.mode, ConsoleOutputMode::Tty) {
+            Some(console_resizer)
+        } else {
+            None
+        })
     }
 
     fn add_console_device(
