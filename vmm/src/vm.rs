@@ -1800,7 +1800,7 @@ impl Vm {
         Ok(())
     }
 
-    fn setup_interactive(&mut self) -> Result<()> {
+    fn setup_signal_handler(&mut self) -> Result<()> {
         let console = self.device_manager.lock().unwrap().console().clone();
         let signals = Signals::new(&HANDLED_SIGNALS);
         match signals {
@@ -1831,7 +1831,10 @@ impl Vm {
             }
             Err(e) => error!("Signal not found {}", e),
         }
+        Ok(())
+    }
 
+    fn setup_tty(&self) -> Result<()> {
         if self.on_tty {
             io::stdin()
                 .lock()
@@ -1908,7 +1911,8 @@ impl Vm {
             .start_boot_vcpus()
             .map_err(Error::CpuManager)?;
 
-        self.setup_interactive()?;
+        self.setup_signal_handler()?;
+        self.setup_tty()?;
 
         let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
         *state = new_state;
@@ -2418,9 +2422,11 @@ impl Snapshottable for Vm {
                 MigratableError::Restore(anyhow!("Cannot start restored vCPUs: {:#?}", e))
             })?;
 
-        self.setup_interactive().map_err(|e| {
-            MigratableError::Restore(anyhow!("Could not setup terminal and signals: {:#?}", e))
+        self.setup_signal_handler().map_err(|e| {
+            MigratableError::Restore(anyhow!("Could not setup signal handler: {:#?}", e))
         })?;
+        self.setup_tty()
+            .map_err(|e| MigratableError::Restore(anyhow!("Could not setup tty: {:#?}", e)))?;
 
         let mut state = self
             .state
