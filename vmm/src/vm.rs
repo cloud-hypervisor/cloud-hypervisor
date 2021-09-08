@@ -1800,6 +1800,56 @@ impl Vm {
         Ok(())
     }
 
+    fn setup_interactive(&mut self) -> Result<()> {
+        if self
+            .device_manager
+            .lock()
+            .unwrap()
+            .console()
+            .input_enabled()
+        {
+            let console = self.device_manager.lock().unwrap().console().clone();
+            let signals = Signals::new(&HANDLED_SIGNALS);
+            match signals {
+                Ok(signals) => {
+                    self.signals = Some(signals.handle());
+                    let exit_evt = self.exit_evt.try_clone().map_err(Error::EventFdClone)?;
+                    let on_tty = self.on_tty;
+                    let signal_handler_seccomp_filter =
+                        get_seccomp_filter(&self.seccomp_action, Thread::SignalHandler)
+                            .map_err(Error::CreateSeccompFilter)?;
+                    self.threads.push(
+                        thread::Builder::new()
+                            .name("signal_handler".to_string())
+                            .spawn(move || {
+                                if !signal_handler_seccomp_filter.is_empty() {
+                                    if let Err(e) = apply_filter(&signal_handler_seccomp_filter)
+                                        .map_err(Error::ApplySeccompFilter)
+                                    {
+                                        error!("Error applying seccomp filter: {:?}", e);
+                                        return;
+                                    }
+                                }
+
+                                Vm::os_signal_handler(signals, console, on_tty, exit_evt);
+                            })
+                            .map_err(Error::SignalHandlerSpawn)?,
+                    );
+                }
+                Err(e) => error!("Signal not found {}", e),
+            }
+
+            if self.on_tty {
+                io::stdin()
+                    .lock()
+                    .set_raw_mode()
+                    .map_err(Error::SetTerminalRaw)?;
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn boot(&mut self) -> Result<()> {
         info!("Booting VM");
         event!("vm", "booting");
@@ -1866,51 +1916,7 @@ impl Vm {
             .start_boot_vcpus()
             .map_err(Error::CpuManager)?;
 
-        if self
-            .device_manager
-            .lock()
-            .unwrap()
-            .console()
-            .input_enabled()
-        {
-            let console = self.device_manager.lock().unwrap().console().clone();
-            let signals = Signals::new(&HANDLED_SIGNALS);
-            match signals {
-                Ok(signals) => {
-                    self.signals = Some(signals.handle());
-                    let exit_evt = self.exit_evt.try_clone().map_err(Error::EventFdClone)?;
-                    let on_tty = self.on_tty;
-                    let signal_handler_seccomp_filter =
-                        get_seccomp_filter(&self.seccomp_action, Thread::SignalHandler)
-                            .map_err(Error::CreateSeccompFilter)?;
-                    self.threads.push(
-                        thread::Builder::new()
-                            .name("signal_handler".to_string())
-                            .spawn(move || {
-                                if !signal_handler_seccomp_filter.is_empty() {
-                                    if let Err(e) = apply_filter(&signal_handler_seccomp_filter)
-                                        .map_err(Error::ApplySeccompFilter)
-                                    {
-                                        error!("Error applying seccomp filter: {:?}", e);
-                                        return;
-                                    }
-                                }
-
-                                Vm::os_signal_handler(signals, console, on_tty, exit_evt);
-                            })
-                            .map_err(Error::SignalHandlerSpawn)?,
-                    );
-                }
-                Err(e) => error!("Signal not found {}", e),
-            }
-
-            if self.on_tty {
-                io::stdin()
-                    .lock()
-                    .set_raw_mode()
-                    .map_err(Error::SetTerminalRaw)?;
-            }
-        }
+        self.setup_interactive()?;
 
         let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
         *state = new_state;
@@ -2422,68 +2428,9 @@ impl Snapshottable for Vm {
                 MigratableError::Restore(anyhow!("Cannot start restored vCPUs: {:#?}", e))
             })?;
 
-        if self
-            .device_manager
-            .lock()
-            .unwrap()
-            .console()
-            .input_enabled()
-        {
-            let console = self.device_manager.lock().unwrap().console().clone();
-            let signals = Signals::new(&[SIGWINCH, SIGINT, SIGTERM]);
-            match signals {
-                Ok(signals) => {
-                    self.signals = Some(signals.handle());
-
-                    let on_tty = self.on_tty;
-                    let signal_handler_seccomp_filter =
-                        get_seccomp_filter(&self.seccomp_action, Thread::SignalHandler).map_err(
-                            |e| {
-                                MigratableError::Restore(anyhow!(
-                                    "Could not create seccomp filter: {:#?}",
-                                    Error::CreateSeccompFilter(e)
-                                ))
-                            },
-                        )?;
-                    let exit_evt = self.exit_evt.try_clone().map_err(|e| {
-                        MigratableError::Restore(anyhow!("Could not clone exit event fd: {:?}", e))
-                    })?;
-
-                    self.threads.push(
-                        thread::Builder::new()
-                            .name("signal_handler".to_string())
-                            .spawn(move || {
-                                if !signal_handler_seccomp_filter.is_empty() {
-                                    if let Err(e) = apply_filter(&signal_handler_seccomp_filter)
-                                        .map_err(Error::ApplySeccompFilter)
-                                    {
-                                        error!("Error applying seccomp filter: {:?}", e);
-                                        return;
-                                    }
-                                }
-
-                                Vm::os_signal_handler(signals, console, on_tty, exit_evt)
-                            })
-                            .map_err(|e| {
-                                MigratableError::Restore(anyhow!(
-                                    "Could not start console signal thread: {:#?}",
-                                    e
-                                ))
-                            })?,
-                    );
-                }
-                Err(e) => error!("Signal not found {}", e),
-            }
-
-            if self.on_tty {
-                io::stdin().lock().set_raw_mode().map_err(|e| {
-                    MigratableError::Restore(anyhow!(
-                        "Could not set terminal in raw mode: {:#?}",
-                        e
-                    ))
-                })?;
-            }
-        }
+        self.setup_interactive().map_err(|e| {
+            MigratableError::Restore(anyhow!("Could not setup terminal and signals: {:#?}", e))
+        })?;
 
         let mut state = self
             .state
