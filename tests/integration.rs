@@ -2853,19 +2853,16 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_virtio_pmem_persist_writes() {
             test_virtio_pmem(false, false)
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_virtio_pmem_discard_writes() {
             test_virtio_pmem(true, false)
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_virtio_pmem_with_size() {
             test_virtio_pmem(true, true)
         }
