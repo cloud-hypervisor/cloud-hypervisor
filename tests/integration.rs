@@ -1608,7 +1608,15 @@ mod tests {
         prepare_daemon: &dyn Fn(&TempDir, &str, &str) -> (std::process::Child, String),
         hotplug: bool,
     ) {
-        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        #[cfg(target_arch = "aarch64")]
+        let focal_image = if hotplug {
+            FOCAL_IMAGE_UPDATE_KERNEL_NAME.to_string()
+        } else {
+            FOCAL_IMAGE_NAME.to_string()
+        };
+        #[cfg(target_arch = "x86_64")]
+        let focal_image = FOCAL_IMAGE_NAME.to_string();
+        let focal = UbuntuDiskConfig::new(focal_image);
         let guest = Guest::new(Box::new(focal));
         let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -1618,7 +1626,14 @@ mod tests {
         let mut shared_dir = workload_path;
         shared_dir.push("shared_dir");
 
+        #[cfg(target_arch = "x86_64")]
         let kernel_path = direct_kernel_boot_path();
+        #[cfg(target_arch = "aarch64")]
+        let kernel_path = if hotplug {
+            edk2_path()
+        } else {
+            direct_kernel_boot_path()
+        };
 
         let (dax_vmm_param, dax_mount_param) = if dax { ("on", "-o dax") } else { ("off", "") };
         let cache_size_vmm_param = if let Some(cache) = cache_size {
@@ -1860,7 +1875,14 @@ mod tests {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
 
+        #[cfg(target_arch = "x86_64")]
         let kernel_path = direct_kernel_boot_path();
+        #[cfg(target_arch = "aarch64")]
+        let kernel_path = if hotplug {
+            edk2_path()
+        } else {
+            direct_kernel_boot_path()
+        };
 
         let socket = temp_vsock_path(&guest.tmp_dir);
         let api_socket = temp_api_path(&guest.tmp_dir);
@@ -1903,16 +1925,10 @@ mod tests {
 
             // Validate vsock works as expected.
             guest.check_vsock(socket.as_str());
+            guest.reboot_linux(0, None);
+            // Validate vsock still works after a reboot.
+            guest.check_vsock(socket.as_str());
 
-            // AArch64 currently does not support reboot, and therefore we
-            // skip the reboot test here.
-            #[cfg(target_arch = "x86_64")]
-            {
-                guest.reboot_linux(0, None);
-
-                // Validate vsock still works after a reboot.
-                guest.check_vsock(socket.as_str());
-            }
             if hotplug {
                 assert!(remote_command(&api_socket, "remove-device", Some("test0")));
             }
@@ -3081,27 +3097,23 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         #[cfg(not(feature = "mshv"))]
         fn test_virtio_fs_hotplug_dax_on() {
             test_virtio_fs(true, None, "none", &prepare_virtiofsd, true)
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_virtio_fs_hotplug_dax_off() {
             test_virtio_fs(false, None, "none", &prepare_virtiofsd, true)
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         #[cfg(not(feature = "mshv"))]
         fn test_virtio_fs_hotplug_dax_on_w_virtiofsd_rs_daemon() {
             test_virtio_fs(true, None, "never", &prepare_virtiofsd_rs_daemon, true)
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_virtio_fs_hotplug_dax_off_w_virtiofsd_rs_daemon() {
             test_virtio_fs(false, None, "never", &prepare_virtiofsd_rs_daemon, true)
         }
@@ -3977,7 +3989,6 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_virtio_vsock_hotplug() {
             _test_virtio_vsock(true);
         }
@@ -4112,7 +4123,6 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         // We cannot force the software running in the guest to reprogram the BAR
         // with some different addresses, but we have a reliable way of testing it
         // with a standard Linux kernel.
@@ -4125,10 +4135,16 @@ mod tests {
         fn test_pci_bar_reprogramming() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
+
+            #[cfg(target_arch = "x86_64")]
+            let kernel_path = direct_kernel_boot_path();
+            #[cfg(target_arch = "aarch64")]
+            let kernel_path = edk2_path();
+
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
-                .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .args(&[
@@ -4557,12 +4573,14 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_disk_hotplug() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
 
+            #[cfg(target_arch = "x86_64")]
             let kernel_path = direct_kernel_boot_path();
+            #[cfg(target_arch = "aarch64")]
+            let kernel_path = edk2_path();
 
             let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -4772,12 +4790,18 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_pmem_hotplug() {
-            let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            #[cfg(target_arch = "aarch64")]
+            let focal_image = FOCAL_IMAGE_UPDATE_KERNEL_NAME.to_string();
+            #[cfg(target_arch = "x86_64")]
+            let focal_image = FOCAL_IMAGE_NAME.to_string();
+            let focal = UbuntuDiskConfig::new(focal_image);
             let guest = Guest::new(Box::new(focal));
 
+            #[cfg(target_arch = "x86_64")]
             let kernel_path = direct_kernel_boot_path();
+            #[cfg(target_arch = "aarch64")]
+            let kernel_path = edk2_path();
 
             let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -4881,12 +4905,14 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_net_hotplug() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
 
+            #[cfg(target_arch = "x86_64")]
             let kernel_path = direct_kernel_boot_path();
+            #[cfg(target_arch = "aarch64")]
+            let kernel_path = edk2_path();
 
             let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -4912,8 +4938,13 @@ mod tests {
                     Some(guest.default_net_string().as_str()),
                 );
                 assert!(cmd_success);
+
+                #[cfg(target_arch = "x86_64")]
                 assert!(String::from_utf8_lossy(&cmd_output)
                     .contains("{\"id\":\"_net2\",\"bdf\":\"0000:00:05.0\"}"));
+                #[cfg(target_arch = "aarch64")]
+                assert!(String::from_utf8_lossy(&cmd_output)
+                    .contains("{\"id\":\"_net0\",\"bdf\":\"0000:00:05.0\"}"));
 
                 thread::sleep(std::time::Duration::new(5, 0));
 
@@ -4929,7 +4960,14 @@ mod tests {
                 );
 
                 // Remove network
-                assert!(remote_command(&api_socket, "remove-device", Some("_net2")));
+                assert!(remote_command(
+                    &api_socket,
+                    "remove-device",
+                    #[cfg(target_arch = "x86_64")]
+                    Some("_net2"),
+                    #[cfg(target_arch = "aarch64")]
+                    Some("_net0")
+                ));
                 thread::sleep(std::time::Duration::new(5, 0));
 
                 // Add network again
@@ -4939,8 +4977,12 @@ mod tests {
                     Some(guest.default_net_string().as_str()),
                 );
                 assert!(cmd_success);
+                #[cfg(target_arch = "x86_64")]
                 assert!(String::from_utf8_lossy(&cmd_output)
                     .contains("{\"id\":\"_net3\",\"bdf\":\"0000:00:05.0\"}"));
+                #[cfg(target_arch = "aarch64")]
+                assert!(String::from_utf8_lossy(&cmd_output)
+                    .contains("{\"id\":\"_net1\",\"bdf\":\"0000:00:05.0\"}"));
 
                 thread::sleep(std::time::Duration::new(5, 0));
 
@@ -5437,7 +5479,12 @@ mod tests {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
             let api_socket = temp_api_path(&guest.tmp_dir);
+
+            #[cfg(target_arch = "x86_64")]
             let kernel_path = direct_kernel_boot_path();
+            #[cfg(target_arch = "aarch64")]
+            let kernel_path = edk2_path();
+
             let phy_net = "eth0";
 
             // Create a macvtap interface for the guest VM to use
@@ -5514,8 +5561,12 @@ mod tests {
                 let (cmd_success, cmd_output) =
                     remote_command_w_output(&api_socket, "add-net", Some(&net_params));
                 assert!(cmd_success);
+                #[cfg(target_arch = "x86_64")]
                 assert!(String::from_utf8_lossy(&cmd_output)
                     .contains("{\"id\":\"_net2\",\"bdf\":\"0000:00:05.0\"}"));
+                #[cfg(target_arch = "aarch64")]
+                assert!(String::from_utf8_lossy(&cmd_output)
+                    .contains("{\"id\":\"_net0\",\"bdf\":\"0000:00:05.0\"}"));
             }
 
             // The functional connectivity provided by the virtio-net device
@@ -5551,7 +5602,6 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_macvtap_hotplug() {
             _test_macvtap(true, "guestmacvtap1", "hostmacvtap1")
         }
