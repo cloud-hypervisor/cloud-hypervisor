@@ -878,11 +878,9 @@ impl MemoryManager {
             }
 
             mm.lock().unwrap().fill_saved_regions(saved_regions)?;
-
-            Ok(mm)
-        } else {
-            Ok(mm)
         }
+
+        Ok(mm)
     }
 
     fn memfd_create(name: &ffi::CStr, flags: u32) -> Result<RawFd, io::Error> {
