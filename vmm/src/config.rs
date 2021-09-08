@@ -1452,12 +1452,6 @@ pub enum ConsoleOutputMode {
     Null,
 }
 
-impl ConsoleOutputMode {
-    pub fn input_enabled(&self) -> bool {
-        matches!(self, ConsoleOutputMode::Tty | ConsoleOutputMode::Pty)
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct ConsoleConfig {
     #[serde(default = "default_consoleconfig_file")]
