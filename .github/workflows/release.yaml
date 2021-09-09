@@ -25,6 +25,18 @@ jobs:
         run: cargo build --all --release --target=x86_64-unknown-linux-musl
       - name: Strip cloud-hypervisor binaries
         run: strip target/*/release/cloud-hypervisor
+      - name: Install Rust toolchain (aarch64-unknown-linux-musl)
+        uses: actions-rs/toolchain@v1
+        with:
+            toolchain: stable
+            target: aarch64-unknown-linux-musl
+            override: true
+      - name: Static Build (AArch64)
+        uses: actions-rs/cargo@v1
+        with:
+            use-cross: true
+            command: build
+            args: --all --release --target=aarch64-unknown-linux-musl
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
@@ -64,4 +76,24 @@ jobs:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: target/x86_64-unknown-linux-gnu/release/ch-remote
           asset_name: ch-remote
+          asset_content_type: application/octet-stream
+      - name: Upload static AArch64 cloud-hypervisor
+        id: upload-release-static-aarch64-cloud-hypervisor
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: target/aarch64-unknown-linux-musl/release/cloud-hypervisor
+          asset_name: cloud-hypervisor-static-aarch64
+          asset_content_type: application/octet-stream
+      - name: Upload static AArch64 ch-remote
+        id: upload-release-static-aarch64-ch-remote
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: target/aarch64-unknown-linux-musl/release/ch-remote
+          asset_name: ch-remote-static-aarch64
           asset_content_type: application/octet-stream
