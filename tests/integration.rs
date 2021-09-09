@@ -349,6 +349,106 @@ mod tests {
         cmd.status().expect("Failed to launch ch-remote").success()
     }
 
+    // Setup two guests and ensure they are connected through ovs-dpdk
+    fn setup_ovs_dpdk_guests(guest1: &Guest, guest2: &Guest, api_socket: &str) -> (Child, Child) {
+        // Create OVS-DPDK bridge and ports
+        assert!(exec_host_command_status(
+            "ovs-vsctl add-br ovsbr0 -- set bridge ovsbr0 datapath_type=netdev",
+        )
+        .success());
+        assert!(exec_host_command_status("ovs-vsctl add-port ovsbr0 vhost-user1 -- set Interface vhost-user1 type=dpdkvhostuserclient options:vhost-server-path=/tmp/dpdkvhostclient1").success());
+        assert!(exec_host_command_status("ovs-vsctl add-port ovsbr0 vhost-user2 -- set Interface vhost-user2 type=dpdkvhostuserclient options:vhost-server-path=/tmp/dpdkvhostclient2").success());
+        assert!(exec_host_command_status("ip link set up dev ovsbr0").success());
+        assert!(exec_host_command_status("service openvswitch-switch restart").success());
+
+        let mut child1 = GuestCommand::new(guest1)
+                    .args(&["--cpus", "boot=2"])
+                    .args(&["--memory", "size=0,shared=on"])
+                    .args(&["--memory-zone", "id=mem0,size=1G,shared=on,host_numa_node=0"])
+                    .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+                    .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+                    .default_disks()
+                    .args(&["--net", guest1.default_net_string().as_str(), "vhost_user=true,socket=/tmp/dpdkvhostclient1,num_queues=2,queue_size=256,vhost_mode=server"])
+                    .capture_output()
+                    .spawn()
+                    .unwrap();
+
+        #[cfg(target_arch = "x86_64")]
+        let guest_net_iface = "ens5";
+        #[cfg(target_arch = "aarch64")]
+        let guest_net_iface = "enp0s5";
+
+        let r = std::panic::catch_unwind(|| {
+            guest1.wait_vm_boot(None).unwrap();
+
+            guest1
+                .ssh_command(&format!(
+                    "sudo ip addr add 172.100.0.1/24 dev {}",
+                    guest_net_iface
+                ))
+                .unwrap();
+            guest1
+                .ssh_command(&format!("sudo ip link set up dev {}", guest_net_iface))
+                .unwrap();
+
+            let guest_ip = guest1.network.guest_ip.clone();
+            thread::spawn(move || {
+                ssh_command_ip(
+                    "nc -l 12345",
+                    &guest_ip,
+                    DEFAULT_SSH_RETRIES,
+                    DEFAULT_SSH_TIMEOUT,
+                )
+                .unwrap();
+            });
+        });
+        if r.is_err() {
+            let _ = child1.kill();
+            let output = child1.wait_with_output().unwrap();
+            handle_child_output(r, &output);
+            panic!("Test should already be failed/panicked"); // To explicitly mark this block never return
+        }
+
+        let mut child2 = GuestCommand::new(guest2)
+                    .args(&["--api-socket", api_socket])
+                    .args(&["--cpus", "boot=2"])
+                    .args(&["--memory", "size=0,shared=on"])
+                    .args(&["--memory-zone", "id=mem0,size=1G,shared=on,host_numa_node=0"])
+                    .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+                    .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+                    .default_disks()
+                    .args(&["--net", guest2.default_net_string().as_str(), "vhost_user=true,socket=/tmp/dpdkvhostclient2,num_queues=2,queue_size=256,vhost_mode=server"])
+                    .capture_output()
+                    .spawn()
+                    .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest2.wait_vm_boot(None).unwrap();
+
+            guest2
+                .ssh_command(&format!(
+                    "sudo ip addr add 172.100.0.2/24 dev {}",
+                    guest_net_iface
+                ))
+                .unwrap();
+            guest2
+                .ssh_command(&format!("sudo ip link set up dev {}", guest_net_iface))
+                .unwrap();
+
+            // Check the connection works properly between the two VMs
+            guest2.ssh_command("nc -vz 172.100.0.1 12345").unwrap();
+        });
+        if r.is_err() {
+            let _ = child1.kill();
+            let _ = child2.kill();
+            let output = child2.wait_with_output().unwrap();
+            handle_child_output(r, &output);
+            panic!("Test should already be failed/panicked"); // To explicitly mark this block never return
+        }
+
+        (child1, child2)
+    }
+
     #[derive(Debug)]
     enum Error {
         Parsing(std::num::ParseIntError),
@@ -5340,102 +5440,19 @@ mod tests {
 
         #[test]
         fn test_ovs_dpdk() {
-            // Create OVS-DPDK bridge and ports
-            assert!(exec_host_command_status(
-                "ovs-vsctl add-br ovsbr0 -- set bridge ovsbr0 datapath_type=netdev",
-            )
-            .success());
-            assert!(exec_host_command_status("ovs-vsctl add-port ovsbr0 vhost-user1 -- set Interface vhost-user1 type=dpdkvhostuserclient options:vhost-server-path=/tmp/dpdkvhostclient1").success());
-            assert!(exec_host_command_status("ovs-vsctl add-port ovsbr0 vhost-user2 -- set Interface vhost-user2 type=dpdkvhostuserclient options:vhost-server-path=/tmp/dpdkvhostclient2").success());
-            assert!(exec_host_command_status("ip link set up dev ovsbr0").success());
-            assert!(exec_host_command_status("service openvswitch-switch restart").success());
-
             let focal1 = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest1 = Guest::new(Box::new(focal1));
-            let mut child1 = GuestCommand::new(&guest1)
-                .args(&["--cpus", "boot=2"])
-                .args(&["--memory", "size=0,shared=on"])
-                .args(&["--memory-zone", "id=mem0,size=1G,shared=on,host_numa_node=0"])
-                .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-                .default_disks()
-                .args(&["--net", guest1.default_net_string().as_str(), "vhost_user=true,socket=/tmp/dpdkvhostclient1,num_queues=2,queue_size=256,vhost_mode=server"])
-                .capture_output()
-                .spawn()
-                .unwrap();
-
-            #[cfg(target_arch = "x86_64")]
-            let guest_net_iface = "ens5";
-            #[cfg(target_arch = "aarch64")]
-            let guest_net_iface = "enp0s5";
-
-            let r = std::panic::catch_unwind(|| {
-                guest1.wait_vm_boot(None).unwrap();
-
-                guest1
-                    .ssh_command(&format!(
-                        "sudo ip addr add 172.100.0.1/24 dev {}",
-                        guest_net_iface
-                    ))
-                    .unwrap();
-                guest1
-                    .ssh_command(&format!("sudo ip link set up dev {}", guest_net_iface))
-                    .unwrap();
-
-                let guest_ip = guest1.network.guest_ip.clone();
-                thread::spawn(move || {
-                    ssh_command_ip(
-                        "nc -l 12345",
-                        &guest_ip,
-                        DEFAULT_SSH_RETRIES,
-                        DEFAULT_SSH_TIMEOUT,
-                    )
-                    .unwrap();
-                });
-            });
-            if r.is_err() {
-                let _ = child1.kill();
-                let output = child1.wait_with_output().unwrap();
-                handle_child_output(r, &output);
-                panic!("Test should already be failed/panicked"); // To explicitly mark this block never return
-            }
 
             let focal2 = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest2 = Guest::new(Box::new(focal2));
             let api_socket = temp_api_path(&guest2.tmp_dir);
 
+            let (mut child1, mut child2) = setup_ovs_dpdk_guests(&guest1, &guest2, &api_socket);
+
             // Create the snapshot directory
             let snapshot_dir = temp_snapshot_dir_path(&guest2.tmp_dir);
 
-            let mut child2 = GuestCommand::new(&guest2)
-                .args(&["--api-socket", &api_socket])
-                .args(&["--cpus", "boot=2"])
-                .args(&["--memory", "size=0,shared=on"])
-                .args(&["--memory-zone", "id=mem0,size=1G,shared=on,host_numa_node=0"])
-                .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-                .default_disks()
-                .args(&["--net", guest2.default_net_string().as_str(), "vhost_user=true,socket=/tmp/dpdkvhostclient2,num_queues=2,queue_size=256,vhost_mode=server"])
-                .capture_output()
-                .spawn()
-                .unwrap();
-
             let r = std::panic::catch_unwind(|| {
-                guest2.wait_vm_boot(None).unwrap();
-
-                guest2
-                    .ssh_command(&format!(
-                        "sudo ip addr add 172.100.0.2/24 dev {}",
-                        guest_net_iface
-                    ))
-                    .unwrap();
-                guest2
-                    .ssh_command(&format!("sudo ip link set up dev {}", guest_net_iface))
-                    .unwrap();
-
-                // Check the connection works properly between the two VMs
-                guest2.ssh_command("nc -vz 172.100.0.1 12345").unwrap();
-
                 // Remove one of the two ports from the OVS bridge
                 assert!(exec_host_command_status("ovs-vsctl del-port vhost-user1").success());
 
