@@ -202,12 +202,6 @@ sudo bash -c "echo 1 > /sys/kernel/mm/ksm/run"
 echo 6144 | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
-# Setup ovs-dpdk
-service openvswitch-switch start
-ovs-vsctl init
-ovs-vsctl set Open_vSwitch . other_config:dpdk-init=true
-service openvswitch-switch restart
-
 export RUST_BACKTRACE=1
 time cargo test $features_test "tests::parallel::$test_filter"
 RES=$?

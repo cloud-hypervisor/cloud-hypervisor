@@ -83,12 +83,6 @@ strip target/$BUILD_TARGET/release/ch-remote
 echo 6144 | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
-# Setup ovs-dpdk
-service openvswitch-switch start
-ovs-vsctl init
-ovs-vsctl set Open_vSwitch . other_config:dpdk-init=true
-service openvswitch-switch restart
-
 export RUST_BACKTRACE=1
 time cargo test $features_test "tests::live_migration::$test_filter" -- --test-threads=1
 RES=$?

@@ -349,8 +349,17 @@ mod tests {
         cmd.status().expect("Failed to launch ch-remote").success()
     }
 
-    // Setup two guests and ensure they are connected through ovs-dpdk
-    fn setup_ovs_dpdk_guests(guest1: &Guest, guest2: &Guest, api_socket: &str) -> (Child, Child) {
+    // setup OVS-DPDK bridge and ports
+    fn setup_ovs_dpdk() {
+        // setup OVS-DPDK
+        assert!(exec_host_command_status("service openvswitch-switch start").success());
+        assert!(exec_host_command_status("ovs-vsctl init").success());
+        assert!(exec_host_command_status(
+            "ovs-vsctl set Open_vSwitch . other_config:dpdk-init=true"
+        )
+        .success());
+        assert!(exec_host_command_status("service openvswitch-switch restart").success());
+
         // Create OVS-DPDK bridge and ports
         assert!(exec_host_command_status(
             "ovs-vsctl add-br ovsbr0 -- set bridge ovsbr0 datapath_type=netdev",
@@ -360,6 +369,14 @@ mod tests {
         assert!(exec_host_command_status("ovs-vsctl add-port ovsbr0 vhost-user2 -- set Interface vhost-user2 type=dpdkvhostuserclient options:vhost-server-path=/tmp/dpdkvhostclient2").success());
         assert!(exec_host_command_status("ip link set up dev ovsbr0").success());
         assert!(exec_host_command_status("service openvswitch-switch restart").success());
+    }
+    fn cleanup_ovs_dpdk() {
+        assert!(exec_host_command_status("ovs-vsctl del-br ovsbr0").success());
+        exec_host_command_status("rm -f ovs-vsctl /tmp/dpdkvhostclient1 /tmp/dpdkvhostclient2");
+    }
+    // Setup two guests and ensure they are connected through ovs-dpdk
+    fn setup_ovs_dpdk_guests(guest1: &Guest, guest2: &Guest, api_socket: &str) -> (Child, Child) {
+        setup_ovs_dpdk();
 
         let mut child1 = GuestCommand::new(guest1)
                     .args(&["--cpus", "boot=2"])
@@ -403,6 +420,8 @@ mod tests {
             });
         });
         if r.is_err() {
+            cleanup_ovs_dpdk();
+
             let _ = child1.kill();
             let output = child1.wait_with_output().unwrap();
             handle_child_output(r, &output);
@@ -439,6 +458,8 @@ mod tests {
             guest2.ssh_command("nc -vz 172.100.0.1 12345").unwrap();
         });
         if r.is_err() {
+            cleanup_ovs_dpdk();
+
             let _ = child1.kill();
             let _ = child2.kill();
             let output = child2.wait_with_output().unwrap();
@@ -5543,6 +5564,8 @@ mod tests {
                 guest2.ssh_command("nc -vz 172.100.0.1 12345").unwrap();
             });
 
+            cleanup_ovs_dpdk();
+
             let _ = child1.kill();
             let _ = child2.kill();
 
@@ -7156,6 +7179,8 @@ mod tests {
                     String::from_utf8_lossy(&ovs_output.stderr)
                 );
 
+                cleanup_ovs_dpdk();
+
                 panic!("Test failed: {}", message)
             };
 
@@ -7202,6 +7227,8 @@ mod tests {
                 migration_guest
                     .ssh_command("nc -vz 172.100.0.1 12345")
                     .unwrap();
+
+                cleanup_ovs_dpdk();
             });
 
             // Clean-up the destination VM and OVS VM, and make sure they terminated correctly
