@@ -7019,6 +7019,199 @@ mod tests {
         fn test_live_migration_numa() {
             _test_live_migration(true)
         }
+        #[test]
+        fn test_live_migration_ovs_dpdk() {
+            let ovs_focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let ovs_guest = Guest::new(Box::new(ovs_focal));
+
+            let migration_focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let migration_guest = Guest::new(Box::new(migration_focal));
+            let src_api_socket = temp_api_path(&migration_guest.tmp_dir);
+
+            // Start two VMs that are connected through ovs-dpdk and one of the VMs is the source VM for live-migration
+            let (mut ovs_child, mut src_child) =
+                setup_ovs_dpdk_guests(&ovs_guest, &migration_guest, &src_api_socket);
+
+            // Start the destination VM
+            let mut dest_api_socket = temp_api_path(&migration_guest.tmp_dir);
+            dest_api_socket.push_str(".dest");
+            let mut dest_child = GuestCommand::new(&migration_guest)
+                .args(&["--api-socket", &dest_api_socket])
+                .capture_output()
+                .spawn()
+                .unwrap();
+
+            let r = std::panic::catch_unwind(|| {
+                // Give it '1s' to make sure the 'dest_api_socket' file is properly created
+                thread::sleep(std::time::Duration::new(1, 0));
+
+                // Start the live-migration
+                let migration_socket = String::from(
+                    migration_guest
+                        .tmp_dir
+                        .as_path()
+                        .join("live-migration.sock")
+                        .to_str()
+                        .unwrap(),
+                );
+                // Start to receive migration from the destintion VM
+                let mut receive_migration = Command::new(clh_command("ch-remote"))
+                    .args(&[
+                        &format!("--api-socket={}", &dest_api_socket),
+                        "receive-migration",
+                        &format! {"unix:{}", migration_socket},
+                    ])
+                    .stderr(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .spawn()
+                    .unwrap();
+                // Give it '1s' to make sure the 'migration_socket' file is properly created
+                thread::sleep(std::time::Duration::new(1, 0));
+                // Start to send migration from the source VM
+                let mut send_migration = Command::new(clh_command("ch-remote"))
+                    .args(&[
+                        &format!("--api-socket={}", &src_api_socket),
+                        "send-migration",
+                        &format! {"unix:{}", migration_socket},
+                    ])
+                    .stderr(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .spawn()
+                    .unwrap();
+
+                let mut success;
+                // The 'send-migration' command should be executed successfully within the given timeout
+                if let Some(status) = send_migration
+                    .wait_timeout(std::time::Duration::from_secs(30))
+                    .unwrap()
+                {
+                    success = status.success();
+                } else {
+                    success = false;
+                }
+                if !success {
+                    let _ = send_migration.kill();
+                    let output = send_migration.wait_with_output().unwrap();
+                    eprintln!("\n\n==== Start 'send_migration' output ====\n\n---stdout---\n{}\n\n---stderr---\n{}\n\n==== End 'send_migration' output ====\n\n",
+                    String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+                }
+                // The 'receive-migration' command should be executed successfully within the given timeout
+                if let Some(status) = receive_migration
+                    .wait_timeout(std::time::Duration::from_secs(30))
+                    .unwrap()
+                {
+                    success = status.success();
+                } else {
+                    success = false;
+                }
+                if !success {
+                    let _ = receive_migration.kill();
+                    let output = receive_migration.wait_with_output().unwrap();
+                    eprintln!("\n\n==== Start 'receive_migration' output ====\n\n---stdout---\n{}\n\n---stderr---\n{}\n\n==== End 'receive_migration' output ====\n\n",
+                    String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+                }
+                assert!(
+                    success,
+                    "Unsuccessful command: 'send-migration' or 'receive-migration'."
+                );
+            });
+
+            let print_and_panic = |src_vm: Child,
+                                   dest_vm: Child,
+                                   ovs_vm: Child,
+                                   message: &str|
+             -> ! {
+                let mut src_vm = src_vm;
+                let mut dest_vm = dest_vm;
+                let mut ovs_vm = ovs_vm;
+
+                let _ = src_vm.kill();
+                let src_output = src_vm.wait_with_output().unwrap();
+                eprintln!(
+                    "\n\n==== Start 'source_vm' stdout ====\n\n{}\n\n==== End 'source_vm' stdout ====",
+                    String::from_utf8_lossy(&src_output.stdout)
+                );
+                eprintln!(
+                    "\n\n==== Start 'source_vm' stderr ====\n\n{}\n\n==== End 'source_vm' stderr ====",
+                    String::from_utf8_lossy(&src_output.stderr)
+                );
+                let _ = dest_vm.kill();
+                let dest_output = dest_vm.wait_with_output().unwrap();
+                eprintln!(
+                    "\n\n==== Start 'destination_vm' stdout ====\n\n{}\n\n==== End 'destination_vm' stdout ====",
+                    String::from_utf8_lossy(&dest_output.stdout)
+                );
+                eprintln!(
+                    "\n\n==== Start 'destination_vm' stderr ====\n\n{}\n\n==== End 'destination_vm' stderr ====",
+                    String::from_utf8_lossy(&dest_output.stderr)
+                );
+                let _ = ovs_vm.kill();
+                let ovs_output = ovs_vm.wait_with_output().unwrap();
+                eprintln!(
+                    "\n\n==== Start 'ovs_vm' stdout ====\n\n{}\n\n==== End 'ovs_vm' stdout ====",
+                    String::from_utf8_lossy(&ovs_output.stdout)
+                );
+                eprintln!(
+                    "\n\n==== Start 'ovs_vm' stderr ====\n\n{}\n\n==== End 'ovs_vm' stderr ====",
+                    String::from_utf8_lossy(&ovs_output.stderr)
+                );
+
+                panic!("Test failed: {}", message)
+            };
+
+            // Check and report any errors occured during the live-migration
+            if r.is_err() {
+                print_and_panic(
+                    src_child,
+                    dest_child,
+                    ovs_child,
+                    "Error occured during live-migration",
+                );
+            }
+
+            // Check the source vm has been terminated successful (give it '3s' to settle)
+            thread::sleep(std::time::Duration::new(3, 0));
+            if !src_child.try_wait().unwrap().map_or(false, |s| s.success()) {
+                print_and_panic(
+                    src_child,
+                    dest_child,
+                    ovs_child,
+                    "source VM was not terminated successfully.",
+                );
+            };
+
+            // Post live-migration check to make sure the destination VM is funcational
+            let r = std::panic::catch_unwind(|| {
+                // Perform same checks to validate VM has been properly migrated
+                // Spawn a new netcat listener in the OVS VM
+                let guest_ip = ovs_guest.network.guest_ip.clone();
+                thread::spawn(move || {
+                    ssh_command_ip(
+                        "nc -l 12345",
+                        &guest_ip,
+                        DEFAULT_SSH_RETRIES,
+                        DEFAULT_SSH_TIMEOUT,
+                    )
+                    .unwrap();
+                });
+
+                // Wait for the server to be listening
+                thread::sleep(std::time::Duration::new(5, 0));
+
+                // And check the connection is still functional after live-migration
+                migration_guest
+                    .ssh_command("nc -vz 172.100.0.1 12345")
+                    .unwrap();
+            });
+
+            // Clean-up the destination VM and OVS VM, and make sure they terminated correctly
+            let _ = dest_child.kill();
+            let _ = ovs_child.kill();
+            let dest_output = dest_child.wait_with_output().unwrap();
+            handle_child_output(r, &dest_output);
+            let ovs_output = ovs_child.wait_with_output().unwrap();
+            handle_child_output(Ok(()), &ovs_output);
+        }
     }
 
     #[cfg(all(target_arch = "aarch64", feature = "acpi"))]

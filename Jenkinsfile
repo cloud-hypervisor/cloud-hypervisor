@@ -228,6 +228,7 @@ pipeline{
 								timeout(time: 1, unit: 'HOURS')
 							}
 							steps {
+								sh "sudo modprobe openvswitch"
 								sh "scripts/dev_cli.sh tests --integration-live-migration"
 							}
 						}
@@ -236,6 +237,7 @@ pipeline{
 								timeout(time: 1, unit: 'HOURS')
 							}
 							steps {
+								sh "sudo modprobe openvswitch"
 								sh "scripts/dev_cli.sh tests --integration-live-migration --libc musl"
 							}
 						}
