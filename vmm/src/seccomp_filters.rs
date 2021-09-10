@@ -15,6 +15,7 @@ pub enum Thread {
     SignalHandler,
     Vcpu,
     Vmm,
+    PtyForeground,
 }
 
 /// Shorthand for chaining `SeccompCondition`s with the `and` operator  in a `SeccompRule`.
@@ -39,6 +40,8 @@ macro_rules! or {
 // See include/uapi/asm-generic/ioctls.h in the kernel code.
 const TCGETS: u64 = 0x5401;
 const TCSETS: u64 = 0x5402;
+const TIOCSCTTY: u64 = 0x540E;
+const TIOCSPGRP: u64 = 0x5410;
 const TIOCGWINSZ: u64 = 0x5413;
 const TIOCSPTLCK: u64 = 0x4004_5431;
 const TIOCGTPEER: u64 = 0x5441;
@@ -217,9 +220,11 @@ fn create_vmm_ioctl_seccomp_rule_common() -> Result<Vec<SeccompRule>, BackendErr
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCSIFNETMASK)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TCSETS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TCGETS)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, TIOCGWINSZ)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, TIOCSPTLCK)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TIOCGTPEER)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TIOCGWINSZ)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TIOCSCTTY)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TIOCSPGRP)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TIOCSPTLCK)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TUNGETFEATURES)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TUNGETIFF)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TUNSETIFF)?],
@@ -367,6 +372,35 @@ fn signal_handler_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
     ])
 }
 
+fn create_pty_foreground_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, BackendError> {
+    Ok(or![
+        and![Cond::new(1, ArgLen::Dword, Eq, TIOCSCTTY)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TIOCSPGRP)?],
+    ])
+}
+
+fn pty_foreground_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
+    Ok(vec![
+        (libc::SYS_close, vec![]),
+        (libc::SYS_exit_group, vec![]),
+        (libc::SYS_getpgid, vec![]),
+        #[cfg(target_arch = "x86_64")]
+        (libc::SYS_getpgrp, vec![]),
+        (libc::SYS_ioctl, create_pty_foreground_ioctl_seccomp_rule()?),
+        (libc::SYS_munmap, vec![]),
+        #[cfg(target_arch = "x86_64")]
+        (libc::SYS_poll, vec![]),
+        #[cfg(target_arch = "aarch64")]
+        (libc::SYS_ppoll, vec![]),
+        (libc::SYS_read, vec![]),
+        (libc::SYS_rt_sigaction, vec![]),
+        (libc::SYS_rt_sigreturn, vec![]),
+        (libc::SYS_setsid, vec![]),
+        (libc::SYS_sigaltstack, vec![]),
+        (libc::SYS_write, vec![]),
+    ])
+}
+
 // The filter containing the white listed syscall rules required by the VMM to
 // function.
 fn vmm_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
@@ -381,6 +415,7 @@ fn vmm_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
         (libc::SYS_clock_gettime, vec![]),
         (libc::SYS_clock_nanosleep, vec![]),
         (libc::SYS_clone, vec![]),
+        (libc::SYS_clone3, vec![]),
         (libc::SYS_close, vec![]),
         (libc::SYS_connect, vec![]),
         (libc::SYS_dup, vec![]),
@@ -406,6 +441,9 @@ fn vmm_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
         #[cfg(target_arch = "aarch64")]
         (libc::SYS_newfstatat, vec![]),
         (libc::SYS_futex, vec![]),
+        (libc::SYS_getpgid, vec![]),
+        #[cfg(target_arch = "x86_64")]
+        (libc::SYS_getpgrp, vec![]),
         (libc::SYS_getpid, vec![]),
         (libc::SYS_getrandom, vec![]),
         (libc::SYS_gettid, vec![]),
@@ -431,6 +469,10 @@ fn vmm_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
         (libc::SYS_open, vec![]),
         (libc::SYS_openat, vec![]),
         (libc::SYS_pipe2, vec![]),
+        #[cfg(target_arch = "x86_64")]
+        (libc::SYS_poll, vec![]),
+        #[cfg(target_arch = "aarch64")]
+        (libc::SYS_ppoll, vec![]),
         (libc::SYS_prctl, vec![]),
         (libc::SYS_pread64, vec![]),
         (libc::SYS_preadv, vec![]),
@@ -454,6 +496,7 @@ fn vmm_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
         (libc::SYS_sendto, vec![]),
         (libc::SYS_set_robust_list, vec![]),
         (libc::SYS_set_tid_address, vec![]),
+        (libc::SYS_setsid, vec![]),
         (libc::SYS_sigaltstack, vec![]),
         (
             libc::SYS_socket,
@@ -615,6 +658,7 @@ fn get_seccomp_rules(thread_type: Thread) -> Result<Vec<(i64, Vec<SeccompRule>)>
         Thread::SignalHandler => Ok(signal_handler_thread_rules()?),
         Thread::Vcpu => Ok(vcpu_thread_rules()?),
         Thread::Vmm => Ok(vmm_thread_rules()?),
+        Thread::PtyForeground => Ok(pty_foreground_thread_rules()?),
     }
 }
 
