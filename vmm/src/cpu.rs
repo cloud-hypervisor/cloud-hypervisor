@@ -406,14 +406,14 @@ const CPU_SELECTION_OFFSET: u64 = 0;
 impl BusDevice for CpuManager {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
         // The Linux kernel, quite reasonably, doesn't zero the memory it gives us.
-        data.copy_from_slice(&[0; 8][0..data.len()]);
+        data.fill(0);
 
         match offset {
             CPU_SELECTION_OFFSET => {
                 data[0] = self.selected_cpu;
             }
             CPU_STATUS_OFFSET => {
-                if self.selected_cpu < self.present_vcpus() {
+                if self.selected_cpu < self.max_vcpus() {
                     let state = &self.vcpu_states[usize::from(self.selected_cpu)];
                     if state.active() {
                         data[0] |= 1 << CPU_ENABLE_FLAG;
@@ -424,6 +424,8 @@ impl BusDevice for CpuManager {
                     if state.removing {
                         data[0] |= 1 << CPU_REMOVING_FLAG;
                     }
+                } else {
+                    warn!("Out of range vCPU id: {}", self.selected_cpu);
                 }
             }
             _ => {
@@ -441,23 +443,28 @@ impl BusDevice for CpuManager {
                 self.selected_cpu = data[0];
             }
             CPU_STATUS_OFFSET => {
-                let state = &mut self.vcpu_states[usize::from(self.selected_cpu)];
-                // The ACPI code writes back a 1 to acknowledge the insertion
-                if (data[0] & (1 << CPU_INSERTING_FLAG) == 1 << CPU_INSERTING_FLAG)
-                    && state.inserting
-                {
-                    state.inserting = false;
-                }
-                // Ditto for removal
-                if (data[0] & (1 << CPU_REMOVING_FLAG) == 1 << CPU_REMOVING_FLAG) && state.removing
-                {
-                    state.removing = false;
-                }
-                // Trigger removal of vCPU
-                if data[0] & (1 << CPU_EJECT_FLAG) == 1 << CPU_EJECT_FLAG {
-                    if let Err(e) = self.remove_vcpu(self.selected_cpu) {
-                        error!("Error removing vCPU: {:?}", e);
+                if self.selected_cpu < self.max_vcpus() {
+                    let state = &mut self.vcpu_states[usize::from(self.selected_cpu)];
+                    // The ACPI code writes back a 1 to acknowledge the insertion
+                    if (data[0] & (1 << CPU_INSERTING_FLAG) == 1 << CPU_INSERTING_FLAG)
+                        && state.inserting
+                    {
+                        state.inserting = false;
                     }
+                    // Ditto for removal
+                    if (data[0] & (1 << CPU_REMOVING_FLAG) == 1 << CPU_REMOVING_FLAG)
+                        && state.removing
+                    {
+                        state.removing = false;
+                    }
+                    // Trigger removal of vCPU
+                    if data[0] & (1 << CPU_EJECT_FLAG) == 1 << CPU_EJECT_FLAG {
+                        if let Err(e) = self.remove_vcpu(self.selected_cpu) {
+                            error!("Error removing vCPU: {:?}", e);
+                        }
+                    }
+                } else {
+                    warn!("Out of range vCPU id: {}", self.selected_cpu);
                 }
             }
             _ => {
