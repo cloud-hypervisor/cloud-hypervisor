@@ -315,7 +315,7 @@ impl BusDevice for MemoryManager {
                 }
                 STATUS_OFFSET => {
                     // The Linux kernel, quite reasonably, doesn't zero the memory it gives us.
-                    data.copy_from_slice(&[0; 8][0..data.len()]);
+                    data.fill(0);
                     if state.active {
                         data[0] |= 1 << ENABLE_FLAG;
                     }
@@ -333,6 +333,8 @@ impl BusDevice for MemoryManager {
                     );
                 }
             }
+        } else {
+            warn!("Out of range memory slot: {}", self.selected_slot);
         }
     }
 
@@ -342,18 +344,22 @@ impl BusDevice for MemoryManager {
                 self.selected_slot = usize::from(data[0]);
             }
             STATUS_OFFSET => {
-                let state = &mut self.hotplug_slots[self.selected_slot];
-                // The ACPI code writes back a 1 to acknowledge the insertion
-                if (data[0] & (1 << INSERTING_FLAG) == 1 << INSERTING_FLAG) && state.inserting {
-                    state.inserting = false;
-                }
-                // Ditto for removal
-                if (data[0] & (1 << REMOVING_FLAG) == 1 << REMOVING_FLAG) && state.removing {
-                    state.removing = false;
-                }
-                // Trigger removal of "DIMM"
-                if data[0] & (1 << EJECT_FLAG) == 1 << EJECT_FLAG {
-                    warn!("Ejection of memory not currently supported");
+                if self.selected_slot < self.hotplug_slots.len() {
+                    let state = &mut self.hotplug_slots[self.selected_slot];
+                    // The ACPI code writes back a 1 to acknowledge the insertion
+                    if (data[0] & (1 << INSERTING_FLAG) == 1 << INSERTING_FLAG) && state.inserting {
+                        state.inserting = false;
+                    }
+                    // Ditto for removal
+                    if (data[0] & (1 << REMOVING_FLAG) == 1 << REMOVING_FLAG) && state.removing {
+                        state.removing = false;
+                    }
+                    // Trigger removal of "DIMM"
+                    if data[0] & (1 << EJECT_FLAG) == 1 << EJECT_FLAG {
+                        warn!("Ejection of memory not currently supported");
+                    }
+                } else {
+                    warn!("Out of range memory slot: {}", self.selected_slot);
                 }
             }
             _ => {
