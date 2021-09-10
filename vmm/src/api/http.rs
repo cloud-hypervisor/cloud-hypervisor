@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::os::unix::io::{IntoRawFd, RawFd};
 use std::os::unix::net::UnixListener;
+use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
@@ -267,6 +268,7 @@ fn start_http_thread(
     api_notifier: EventFd,
     api_sender: Sender<ApiRequest>,
     seccomp_action: &SeccompAction,
+    exit_evt: EventFd,
 ) -> Result<thread::JoinHandle<Result<()>>> {
     // Retrieve seccomp filter for API thread
     let api_seccomp_filter =
@@ -277,32 +279,44 @@ fn start_http_thread(
         .spawn(move || {
             // Apply seccomp filter for API thread.
             if !api_seccomp_filter.is_empty() {
-                apply_filter(&api_seccomp_filter).map_err(Error::ApplySeccompFilter)?;
+                apply_filter(&api_seccomp_filter)
+                    .map_err(Error::ApplySeccompFilter)
+                    .map_err(|e| {
+                        error!("Error applying seccomp filter: {:?}", e);
+                        exit_evt.write(1).ok();
+                        e
+                    })?;
             }
 
-            server.start_server().unwrap();
-            loop {
-                match server.requests() {
-                    Ok(request_vec) => {
-                        for server_request in request_vec {
-                            server
-                                .respond(server_request.process(|request| {
+            std::panic::catch_unwind(AssertUnwindSafe(move || {
+                server.start_server().unwrap();
+                loop {
+                    match server.requests() {
+                        Ok(request_vec) => {
+                            for server_request in request_vec {
+                                if let Err(e) = server.respond(server_request.process(|request| {
                                     handle_http_request(request, &api_notifier, &api_sender)
-                                }))
-                                .or_else(|e| {
+                                })) {
                                     error!("HTTP server error on response: {}", e);
-                                    Ok(())
-                                })?;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!(
+                                "HTTP server error on retrieving incoming request. Error: {}",
+                                e
+                            );
                         }
                     }
-                    Err(e) => {
-                        error!(
-                            "HTTP server error on retrieving incoming request. Error: {}",
-                            e
-                        );
-                    }
                 }
-            }
+            }))
+            .map_err(|_| {
+                error!("http-server thread panicked");
+                exit_evt.write(1).ok()
+            })
+            .ok();
+
+            Ok(())
         })
         .map_err(Error::HttpThreadSpawn)
 }
@@ -312,13 +326,14 @@ pub fn start_http_path_thread(
     api_notifier: EventFd,
     api_sender: Sender<ApiRequest>,
     seccomp_action: &SeccompAction,
+    exit_evt: EventFd,
 ) -> Result<thread::JoinHandle<Result<()>>> {
     std::fs::remove_file(path).unwrap_or_default();
     let socket_path = PathBuf::from(path);
     let socket_fd = UnixListener::bind(socket_path).map_err(Error::CreateApiServerSocket)?;
     let server =
         HttpServer::new_from_fd(socket_fd.into_raw_fd()).map_err(Error::CreateApiServer)?;
-    start_http_thread(server, api_notifier, api_sender, seccomp_action)
+    start_http_thread(server, api_notifier, api_sender, seccomp_action, exit_evt)
 }
 
 pub fn start_http_fd_thread(
@@ -326,7 +341,8 @@ pub fn start_http_fd_thread(
     api_notifier: EventFd,
     api_sender: Sender<ApiRequest>,
     seccomp_action: &SeccompAction,
+    exit_evt: EventFd,
 ) -> Result<thread::JoinHandle<Result<()>>> {
     let server = HttpServer::new_from_fd(fd).map_err(Error::CreateApiServer)?;
-    start_http_thread(server, api_notifier, api_sender, seccomp_action)
+    start_http_thread(server, api_notifier, api_sender, seccomp_action, exit_evt)
 }
