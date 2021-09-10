@@ -17,9 +17,7 @@ use crate::config::{
     ConsoleOutputMode, DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, PmemConfig,
     UserDeviceConfig, ValidationError, VmConfig, VsockConfig,
 };
-use crate::device_manager::{
-    self, get_win_size, Console, DeviceManager, DeviceManagerError, PtyPair,
-};
+use crate::device_manager::{self, Console, DeviceManager, DeviceManagerError, PtyPair};
 use crate::device_tree::DeviceTree;
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 use crate::migration::{get_vm_snapshot, url_to_path, VM_SNAPSHOT_FILE};
@@ -1602,8 +1600,7 @@ impl Vm {
         for signal in signals.forever() {
             match signal {
                 SIGWINCH => {
-                    let (col, row) = get_win_size();
-                    console_input_clone.update_console_size(col, row);
+                    console_input_clone.update_console_size();
                 }
                 SIGTERM | SIGINT => {
                     if on_tty {

@@ -62,7 +62,7 @@ use hypervisor::DeviceFd;
 use hypervisor::IoEventAddress;
 use libc::{
     isatty, tcgetattr, tcsetattr, termios, ECHO, ICANON, ISIG, MAP_NORESERVE, MAP_PRIVATE,
-    MAP_SHARED, O_TMPFILE, PROT_READ, PROT_WRITE, TCSANOW, TIOCGWINSZ,
+    MAP_SHARED, O_TMPFILE, PROT_READ, PROT_WRITE, TCSANOW,
 };
 use pci::VfioPciDevice;
 use pci::{
@@ -450,24 +450,6 @@ type VirtioDeviceArc = Arc<Mutex<dyn virtio_devices::VirtioDevice>>;
 #[cfg(feature = "acpi")]
 const DEVICE_MANAGER_ACPI_SIZE: usize = 0x10;
 
-pub fn get_win_size() -> (u16, u16) {
-    #[repr(C)]
-    #[derive(Default)]
-    struct WindowSize {
-        rows: u16,
-        cols: u16,
-        xpixel: u16,
-        ypixel: u16,
-    }
-    let ws: WindowSize = WindowSize::default();
-
-    unsafe {
-        libc::ioctl(0, TIOCGWINSZ, &ws);
-    }
-
-    (ws.cols, ws.rows)
-}
-
 const TIOCSPTLCK: libc::c_int = 0x4004_5431;
 const TIOCGTPEER: libc::c_int = 0x5441;
 
@@ -543,9 +525,9 @@ impl Console {
         Ok(())
     }
 
-    pub fn update_console_size(&self, cols: u16, rows: u16) {
+    pub fn update_console_size(&self) {
         if let Some(resizer) = self.console_resizer.as_ref() {
-            resizer.update_console_size(cols, rows)
+            resizer.update_console_size()
         }
     }
 }
@@ -1716,14 +1698,11 @@ impl DeviceManager {
             ConsoleOutputMode::Null => Endpoint::Null,
             ConsoleOutputMode::Off => return Ok(None),
         };
-        let (col, row) = get_win_size();
         let id = String::from(CONSOLE_DEVICE_NAME);
 
         let (virtio_console_device, console_resizer) = virtio_devices::Console::new(
             id.clone(),
             endpoint,
-            col,
-            row,
             self.force_iommu | console_config.iommu,
             self.seccomp_action.clone(),
             self.exit_evt

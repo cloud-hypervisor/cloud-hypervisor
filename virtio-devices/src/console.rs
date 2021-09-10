@@ -11,7 +11,7 @@ use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::GuestMemoryMmap;
 use crate::VirtioInterrupt;
-use libc::EFD_NONBLOCK;
+use libc::{EFD_NONBLOCK, TIOCGWINSZ};
 use seccompiler::SeccompAction;
 use std::cmp;
 use std::collections::VecDeque;
@@ -46,13 +46,24 @@ const FILE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 5;
 //Console size feature bit
 const VIRTIO_CONSOLE_F_SIZE: u64 = 0;
 
-#[derive(Copy, Clone, Debug, Default, Versionize)]
+#[derive(Copy, Clone, Debug, Versionize)]
 #[repr(C, packed)]
 pub struct VirtioConsoleConfig {
     cols: u16,
     rows: u16,
     max_nr_ports: u32,
     emerg_wr: u32,
+}
+
+impl Default for VirtioConsoleConfig {
+    fn default() -> Self {
+        VirtioConsoleConfig {
+            cols: 0,
+            rows: 0,
+            max_nr_ports: 1,
+            emerg_wr: 0,
+        }
+    }
 }
 
 // Safe because it only has data and has no implicit padding.
@@ -287,12 +298,13 @@ pub struct ConsoleResizer {
 }
 
 impl ConsoleResizer {
-    pub fn update_console_size(&self, cols: u16, rows: u16) {
+    pub fn update_console_size(&self) {
         if self
             .acked_features
             .fetch_and(1u64 << VIRTIO_CONSOLE_F_SIZE, Ordering::AcqRel)
             != 0
         {
+            let (cols, rows) = get_win_size();
             self.config.lock().unwrap().update_console_size(cols, rows);
             //Send the interrupt to the driver
             let _ = self.config_evt.write(1);
@@ -301,15 +313,6 @@ impl ConsoleResizer {
 }
 
 impl VirtioConsoleConfig {
-    pub fn new(cols: u16, rows: u16) -> Self {
-        VirtioConsoleConfig {
-            cols,
-            rows,
-            max_nr_ports: 1u32,
-            emerg_wr: 0u32,
-        }
-    }
-
     pub fn update_console_size(&mut self, cols: u16, rows: u16) {
         self.cols = cols;
         self.rows = rows;
@@ -336,6 +339,24 @@ pub struct ConsoleState {
     in_buffer: Vec<u8>,
 }
 
+fn get_win_size() -> (u16, u16) {
+    #[repr(C)]
+    #[derive(Default)]
+    struct WindowSize {
+        rows: u16,
+        cols: u16,
+        xpixel: u16,
+        ypixel: u16,
+    }
+    let ws: WindowSize = WindowSize::default();
+
+    unsafe {
+        libc::ioctl(0, TIOCGWINSZ, &ws);
+    }
+
+    (ws.cols, ws.rows)
+}
+
 impl VersionMapped for ConsoleState {}
 
 impl Console {
@@ -343,8 +364,6 @@ impl Console {
     pub fn new(
         id: String,
         endpoint: Endpoint,
-        cols: u16,
-        rows: u16,
         iommu: bool,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
@@ -356,12 +375,14 @@ impl Console {
         }
 
         let config_evt = EventFd::new(EFD_NONBLOCK).unwrap();
-        let console_config = Arc::new(Mutex::new(VirtioConsoleConfig::new(cols, rows)));
+        let console_config = Arc::new(Mutex::new(VirtioConsoleConfig::default()));
         let resizer = Arc::new(ConsoleResizer {
             config_evt,
             config: console_config.clone(),
             acked_features: AtomicU64::new(0),
         });
+
+        resizer.update_console_size();
 
         Ok((
             Console {

@@ -48,6 +48,7 @@ macro_rules! or {
 }
 
 // See include/uapi/asm-generic/ioctls.h in the kernel code.
+const TIOCGWINSZ: u64 = 0x5413;
 const FIONBIO: u64 = 0x5421;
 
 // See include/uapi/linux/vfio.h in the kernel code.
@@ -56,6 +57,10 @@ const VFIO_IOMMU_UNMAP_DMA: u64 = 0x3b72;
 
 // See include/uapi/linux/if_tun.h in the kernel code.
 const TUNSETOFFLOAD: u64 = 0x4004_54d0;
+
+fn create_virtio_console_ioctl_seccomp_rule() -> Vec<SeccompRule> {
+    or![and![Cond::new(1, ArgLen::Dword, Eq, TIOCGWINSZ).unwrap()]]
+}
 
 fn create_virtio_iommu_ioctl_seccomp_rule() -> Vec<SeccompRule> {
     or![
@@ -99,6 +104,7 @@ fn virtio_block_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
 
 fn virtio_console_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
     vec![
+        (libc::SYS_ioctl, create_virtio_console_ioctl_seccomp_rule()),
         (libc::SYS_mprotect, vec![]),
         (libc::SYS_prctl, vec![]),
         (libc::SYS_sched_getaffinity, vec![]),
