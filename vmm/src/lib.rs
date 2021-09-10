@@ -262,30 +262,47 @@ pub fn start_vmm_thread(
         get_seccomp_filter(seccomp_action, Thread::Vmm).map_err(Error::CreateSeccompFilter)?;
 
     let vmm_seccomp_action = seccomp_action.clone();
-    let thread = thread::Builder::new()
-        .name("vmm".to_string())
-        .spawn(move || {
-            // Apply seccomp filter for VMM thread.
-            if !vmm_seccomp_filter.is_empty() {
-                apply_filter(&vmm_seccomp_filter).map_err(Error::ApplySeccompFilter)?;
-            }
+    let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
+    let thread = {
+        let exit_evt = exit_evt.try_clone().map_err(Error::EventFdClone)?;
+        thread::Builder::new()
+            .name("vmm".to_string())
+            .spawn(move || {
+                // Apply seccomp filter for VMM thread.
+                if !vmm_seccomp_filter.is_empty() {
+                    apply_filter(&vmm_seccomp_filter).map_err(Error::ApplySeccompFilter)?;
+                }
 
-            let mut vmm = Vmm::new(
-                vmm_version.to_string(),
-                api_event,
-                vmm_seccomp_action,
-                hypervisor,
-            )?;
+                let mut vmm = Vmm::new(
+                    vmm_version.to_string(),
+                    api_event,
+                    vmm_seccomp_action,
+                    hypervisor,
+                    exit_evt,
+                )?;
 
-            vmm.control_loop(Arc::new(api_receiver))
-        })
-        .map_err(Error::VmmThreadSpawn)?;
+                vmm.control_loop(Arc::new(api_receiver))
+            })
+            .map_err(Error::VmmThreadSpawn)?
+    };
 
     // The VMM thread is started, we can start serving HTTP requests
     if let Some(http_path) = http_path {
-        api::start_http_path_thread(http_path, http_api_event, api_sender, seccomp_action)?;
+        api::start_http_path_thread(
+            http_path,
+            http_api_event,
+            api_sender,
+            seccomp_action,
+            exit_evt,
+        )?;
     } else if let Some(http_fd) = http_fd {
-        api::start_http_fd_thread(http_fd, http_api_event, api_sender, seccomp_action)?;
+        api::start_http_fd_thread(
+            http_fd,
+            http_api_event,
+            api_sender,
+            seccomp_action,
+            exit_evt,
+        )?;
     }
     Ok(thread)
 }
@@ -316,9 +333,9 @@ impl Vmm {
         api_evt: EventFd,
         seccomp_action: SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
+        exit_evt: EventFd,
     ) -> Result<Self> {
         let mut epoll = EpollContext::new().map_err(Error::Epoll)?;
-        let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
         let reset_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
         let activate_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
 
