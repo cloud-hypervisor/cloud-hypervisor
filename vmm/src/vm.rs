@@ -708,6 +708,7 @@ impl Vm {
         activate_evt: EventFd,
         serial_pty: Option<PtyPair>,
         console_pty: Option<PtyPair>,
+        console_resize_pipe: Option<File>,
     ) -> Result<Self> {
         #[cfg(feature = "tdx")]
         let tdx_enabled = config.lock().unwrap().tdx.is_some();
@@ -771,7 +772,7 @@ impl Vm {
             .device_manager
             .lock()
             .unwrap()
-            .create_devices(serial_pty, console_pty)
+            .create_devices(serial_pty, console_pty, console_resize_pipe)
             .map_err(Error::DeviceManager)?;
         Ok(new_vm)
     }
@@ -1138,6 +1139,10 @@ impl Vm {
 
     pub fn console_pty(&self) -> Option<PtyPair> {
         self.device_manager.lock().unwrap().console_pty()
+    }
+
+    pub fn console_resize_pipe(&self) -> Option<Arc<File>> {
+        self.device_manager.lock().unwrap().console_resize_pipe()
     }
 
     pub fn shutdown(&mut self) -> Result<()> {

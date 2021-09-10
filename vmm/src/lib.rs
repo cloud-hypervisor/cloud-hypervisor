@@ -47,6 +47,7 @@ use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, Transport
 use vmm_sys_util::eventfd::EventFd;
 
 pub mod api;
+mod clone3;
 pub mod config;
 pub mod cpu;
 pub mod device_manager;
@@ -55,6 +56,7 @@ pub mod interrupt;
 pub mod memory_manager;
 pub mod migration;
 pub mod seccomp_filters;
+mod sigwinch_listener;
 pub mod vm;
 
 #[cfg(feature = "acpi")]
@@ -405,6 +407,7 @@ impl Vmm {
                     activate_evt,
                     None,
                     None,
+                    None,
                 )?;
                 if let Some(serial_pty) = vm.serial_pty() {
                     self.epoll
@@ -532,6 +535,10 @@ impl Vmm {
             let config = vm.get_config();
             let serial_pty = vm.serial_pty();
             let console_pty = vm.console_pty();
+            let console_resize_pipe = vm
+                .console_resize_pipe()
+                .as_ref()
+                .map(|pipe| pipe.try_clone().unwrap());
             self.vm_shutdown()?;
 
             let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
@@ -556,6 +563,7 @@ impl Vmm {
                 activate_evt,
                 serial_pty,
                 console_pty,
+                console_resize_pipe,
             )?);
         }
 

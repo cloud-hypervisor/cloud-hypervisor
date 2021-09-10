@@ -42,6 +42,8 @@ const INPUT_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
 const CONFIG_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 4;
 // File written to (input ready)
 const FILE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 5;
+// Console resized
+const RESIZE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 6;
 
 //Console size feature bit
 const VIRTIO_CONSOLE_F_SIZE: u64 = 0;
@@ -74,11 +76,13 @@ struct ConsoleEpollHandler {
     mem: GuestMemoryAtomic<GuestMemoryMmap>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     in_buffer: Arc<Mutex<VecDeque<u8>>>,
+    resizer: Arc<ConsoleResizer>,
     endpoint: Endpoint,
     input_queue_evt: EventFd,
     output_queue_evt: EventFd,
     input_evt: EventFd,
     config_evt: EventFd,
+    resize_pipe: Option<File>,
     kill_evt: EventFd,
     pause_evt: EventFd,
 }
@@ -210,6 +214,9 @@ impl ConsoleEpollHandler {
         helper.add_event(self.output_queue_evt.as_raw_fd(), OUTPUT_QUEUE_EVENT)?;
         helper.add_event(self.input_evt.as_raw_fd(), INPUT_EVENT)?;
         helper.add_event(self.config_evt.as_raw_fd(), CONFIG_EVENT)?;
+        if let Some(resize_pipe) = self.resize_pipe.as_ref() {
+            helper.add_event(resize_pipe.as_raw_fd(), RESIZE_EVENT)?;
+        }
         if let Some(in_file) = self.endpoint.in_file() {
             helper.add_event(in_file.as_raw_fd(), FILE_EVENT)?;
         }
@@ -264,6 +271,14 @@ impl EpollHelperHandler for ConsoleEpollHandler {
                     error!("Failed to signal console driver: {:?}", e);
                     return true;
                 }
+            }
+            RESIZE_EVENT => {
+                if let Err(e) = self.resize_pipe.as_ref().unwrap().read_exact(&mut [0]) {
+                    error!("Failed to get resize event: {:?}", e);
+                    return true;
+                }
+
+                self.resizer.update_console_size();
             }
             FILE_EVENT => {
                 let mut input = [0u8; 64];
@@ -328,6 +343,7 @@ pub struct Console {
     id: String,
     config: Arc<Mutex<VirtioConsoleConfig>>,
     resizer: Arc<ConsoleResizer>,
+    resize_pipe: Option<File>,
     endpoint: Endpoint,
     seccomp_action: SeccompAction,
     in_buffer: Arc<Mutex<VecDeque<u8>>>,
@@ -367,6 +383,7 @@ impl Console {
     pub fn new(
         id: String,
         endpoint: Endpoint,
+        resize_pipe: Option<File>,
         iommu: bool,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
@@ -401,6 +418,7 @@ impl Console {
                 id,
                 config: console_config,
                 resizer: resizer.clone(),
+                resize_pipe,
                 endpoint,
                 seccomp_action,
                 in_buffer: Arc::new(Mutex::new(VecDeque::new())),
@@ -488,6 +506,8 @@ impl VirtioDevice for Console {
             output_queue_evt: queue_evts.remove(0),
             input_evt,
             config_evt: self.resizer.config_evt.try_clone().unwrap(),
+            resize_pipe: self.resize_pipe.as_ref().map(|p| p.try_clone().unwrap()),
+            resizer: Arc::clone(&self.resizer),
             kill_evt,
             pause_evt,
         };

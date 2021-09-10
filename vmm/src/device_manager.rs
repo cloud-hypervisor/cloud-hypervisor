@@ -22,7 +22,9 @@ use crate::interrupt::LegacyUserspaceInterruptManager;
 #[cfg(feature = "acpi")]
 use crate::memory_manager::MEMORY_MANAGER_ACPI_SIZE;
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
+use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::serial_buffer::SerialBuffer;
+use crate::sigwinch_listener::start_sigwinch_listener;
 use crate::GuestRegionMmap;
 use crate::PciDeviceInfo;
 use crate::{device_node, DEVICE_MANAGER_SNAPSHOT_ID};
@@ -791,6 +793,9 @@ pub struct DeviceManager {
     // serial PTY
     serial_pty: Option<Arc<Mutex<PtyPair>>>,
 
+    // pty foreground status,
+    console_resize_pipe: Option<Arc<File>>,
+
     // Interrupt controller
     #[cfg(target_arch = "x86_64")]
     interrupt_controller: Option<Arc<Mutex<ioapic::Ioapic>>>,
@@ -977,6 +982,7 @@ impl DeviceManager {
             acpi_address,
             serial_pty: None,
             console_pty: None,
+            console_resize_pipe: None,
             virtio_mem_devices: Vec::new(),
             #[cfg(target_arch = "aarch64")]
             gpio_device: None,
@@ -1011,10 +1017,15 @@ impl DeviceManager {
             .map(|pty| pty.lock().unwrap().clone())
     }
 
+    pub fn console_resize_pipe(&self) -> Option<Arc<File>> {
+        self.console_resize_pipe.as_ref().map(Arc::clone)
+    }
+
     pub fn create_devices(
         &mut self,
         serial_pty: Option<PtyPair>,
         console_pty: Option<PtyPair>,
+        console_resize_pipe: Option<File>,
     ) -> DeviceManagerResult<()> {
         let mut virtio_devices: Vec<(VirtioDeviceArc, bool, String)> = Vec::new();
 
@@ -1069,6 +1080,7 @@ impl DeviceManager {
             &mut virtio_devices,
             serial_pty,
             console_pty,
+            console_resize_pipe,
         )?;
 
         // Reserve some IRQs for PCI devices in case they need to support INTx.
@@ -1653,10 +1665,22 @@ impl DeviceManager {
         self.modify_mode(f.as_raw_fd(), |t| t.c_lflag &= !(ICANON | ECHO | ISIG))
     }
 
+    fn listen_for_sigwinch_on_tty(&mut self, pty: &File) -> std::io::Result<()> {
+        let seccomp_filter =
+            get_seccomp_filter(&self.seccomp_action, Thread::PtyForeground).unwrap();
+
+        let pipe = start_sigwinch_listener(seccomp_filter, pty)?;
+
+        self.console_resize_pipe = Some(Arc::new(pipe));
+
+        Ok(())
+    }
+
     fn add_virtio_console_device(
         &mut self,
         virtio_devices: &mut Vec<(VirtioDeviceArc, bool, String)>,
         console_pty: Option<PtyPair>,
+        resize_pipe: Option<File>,
     ) -> DeviceManagerResult<Option<Arc<virtio_devices::ConsoleResizer>>> {
         let console_config = self.config.lock().unwrap().console.clone();
         let endpoint = match console_config.mode {
@@ -1670,6 +1694,7 @@ impl DeviceManager {
                     self.config.lock().unwrap().console.file = Some(pty.path.clone());
                     let file = pty.main.try_clone().unwrap();
                     self.console_pty = Some(Arc::new(Mutex::new(pty)));
+                    self.console_resize_pipe = Some(Arc::new(resize_pipe.unwrap()));
                     Endpoint::FilePair(file.try_clone().unwrap(), file)
                 } else {
                     let (main, mut sub, path) =
@@ -1678,6 +1703,8 @@ impl DeviceManager {
                         .map_err(DeviceManagerError::SetPtyRaw)?;
                     self.config.lock().unwrap().console.file = Some(path.clone());
                     let file = main.try_clone().unwrap();
+                    assert!(resize_pipe.is_none());
+                    self.listen_for_sigwinch_on_tty(&sub).unwrap();
                     self.console_pty = Some(Arc::new(Mutex::new(PtyPair { main, sub, path })));
                     Endpoint::FilePair(file.try_clone().unwrap(), file)
                 }
@@ -1703,6 +1730,9 @@ impl DeviceManager {
         let (virtio_console_device, console_resizer) = virtio_devices::Console::new(
             id.clone(),
             endpoint,
+            self.console_resize_pipe
+                .as_ref()
+                .map(|p| p.try_clone().unwrap()),
             self.force_iommu | console_config.iommu,
             self.seccomp_action.clone(),
             self.exit_evt
@@ -1739,6 +1769,7 @@ impl DeviceManager {
         virtio_devices: &mut Vec<(VirtioDeviceArc, bool, String)>,
         serial_pty: Option<PtyPair>,
         console_pty: Option<PtyPair>,
+        console_resize_pipe: Option<File>,
     ) -> DeviceManagerResult<Arc<Console>> {
         let serial_config = self.config.lock().unwrap().serial.clone();
         let serial_writer: Option<Box<dyn io::Write + Send>> = match serial_config.mode {
@@ -1774,7 +1805,8 @@ impl DeviceManager {
             None
         };
 
-        let console_resizer = self.add_virtio_console_device(virtio_devices, console_pty)?;
+        let console_resizer =
+            self.add_virtio_console_device(virtio_devices, console_pty, console_resize_pipe)?;
 
         Ok(Arc::new(Console {
             serial,
@@ -4243,7 +4275,7 @@ impl Snapshottable for DeviceManager {
 
         // Now that DeviceManager is updated with the right states, it's time
         // to create the devices based on the configuration.
-        self.create_devices(None, None)
+        self.create_devices(None, None, None)
             .map_err(|e| MigratableError::Restore(anyhow!("Could not create devices {:?}", e)))?;
 
         Ok(())
