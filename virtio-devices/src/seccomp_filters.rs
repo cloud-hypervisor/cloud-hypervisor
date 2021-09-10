@@ -84,7 +84,6 @@ fn virtio_block_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_getrandom, vec![]),
         (libc::SYS_io_uring_enter, vec![]),
         (libc::SYS_lseek, vec![]),
-        (libc::SYS_mmap, vec![]),
         (libc::SYS_mprotect, vec![]),
         (libc::SYS_openat, vec![]),
         (libc::SYS_prctl, vec![]),
@@ -100,7 +99,6 @@ fn virtio_block_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
 
 fn virtio_console_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
     vec![
-        (libc::SYS_mmap, vec![]),
         (libc::SYS_mprotect, vec![]),
         (libc::SYS_prctl, vec![]),
         (libc::SYS_sched_getaffinity, vec![]),
@@ -111,7 +109,6 @@ fn virtio_console_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
 fn virtio_iommu_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
     vec![
         (libc::SYS_ioctl, create_virtio_iommu_ioctl_seccomp_rule()),
-        (libc::SYS_mmap, vec![]),
         (libc::SYS_mprotect, vec![]),
     ]
 }
@@ -146,7 +143,6 @@ fn virtio_pmem_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
 
 fn virtio_rng_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
     vec![
-        (libc::SYS_mmap, vec![]),
         (libc::SYS_mprotect, vec![]),
         (libc::SYS_prctl, vec![]),
         (libc::SYS_sched_getaffinity, vec![]),
@@ -157,7 +153,6 @@ fn virtio_rng_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
 fn virtio_vhost_fs_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
     vec![
         (libc::SYS_connect, vec![]),
-        (libc::SYS_mmap, vec![]),
         (libc::SYS_nanosleep, vec![]),
         (libc::SYS_recvmsg, vec![]),
         (libc::SYS_sendmsg, vec![]),
@@ -201,7 +196,6 @@ fn virtio_vsock_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_accept4, vec![]),
         (libc::SYS_connect, vec![]),
         (libc::SYS_ioctl, create_vsock_ioctl_seccomp_rule()),
-        (libc::SYS_mmap, vec![]),
         (libc::SYS_recvfrom, vec![]),
         (libc::SYS_socket, vec![]),
     ]
@@ -209,7 +203,6 @@ fn virtio_vsock_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
 
 fn virtio_watchdog_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
     vec![
-        (libc::SYS_mmap, vec![]),
         (libc::SYS_mprotect, vec![]),
         (libc::SYS_prctl, vec![]),
         (libc::SYS_sched_getaffinity, vec![]),
@@ -255,6 +248,7 @@ fn virtio_thread_common() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_exit, vec![]),
         (libc::SYS_futex, vec![]),
         (libc::SYS_madvise, vec![]),
+        (libc::SYS_mmap, vec![]),
         (libc::SYS_munmap, vec![]),
         (libc::SYS_read, vec![]),
         (libc::SYS_rt_sigprocmask, vec![]),
