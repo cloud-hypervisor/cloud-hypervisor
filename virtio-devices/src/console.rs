@@ -293,21 +293,24 @@ impl EpollHelperHandler for ConsoleEpollHandler {
 /// Resize handler
 pub struct ConsoleResizer {
     config_evt: EventFd,
+    tty: Option<File>,
     config: Arc<Mutex<VirtioConsoleConfig>>,
     acked_features: AtomicU64,
 }
 
 impl ConsoleResizer {
     pub fn update_console_size(&self) {
-        if self
-            .acked_features
-            .fetch_and(1u64 << VIRTIO_CONSOLE_F_SIZE, Ordering::AcqRel)
-            != 0
-        {
-            let (cols, rows) = get_win_size();
+        if let Some(tty) = self.tty.as_ref() {
+            let (cols, rows) = get_win_size(tty);
             self.config.lock().unwrap().update_console_size(cols, rows);
-            //Send the interrupt to the driver
-            let _ = self.config_evt.write(1);
+            if self
+                .acked_features
+                .fetch_and(1u64 << VIRTIO_CONSOLE_F_SIZE, Ordering::AcqRel)
+                != 0
+            {
+                // Send the interrupt to the driver
+                let _ = self.config_evt.write(1);
+            }
         }
     }
 }
@@ -339,7 +342,7 @@ pub struct ConsoleState {
     in_buffer: Vec<u8>,
 }
 
-fn get_win_size() -> (u16, u16) {
+fn get_win_size(tty: &dyn AsRawFd) -> (u16, u16) {
     #[repr(C)]
     #[derive(Default)]
     struct WindowSize {
@@ -351,7 +354,7 @@ fn get_win_size() -> (u16, u16) {
     let ws: WindowSize = WindowSize::default();
 
     unsafe {
-        libc::ioctl(0, TIOCGWINSZ, &ws);
+        libc::ioctl(tty.as_raw_fd(), TIOCGWINSZ, &ws);
     }
 
     (ws.cols, ws.rows)
@@ -379,6 +382,7 @@ impl Console {
         let resizer = Arc::new(ConsoleResizer {
             config_evt,
             config: console_config.clone(),
+            tty: endpoint.out_file().as_ref().map(|t| t.try_clone().unwrap()),
             acked_features: AtomicU64::new(0),
         });
 
