@@ -11,7 +11,7 @@ mshv = ["mshv-ioctls", "mshv-bindings"]
 tdx = []
 
 [dependencies]
-anyhow = "1.0.43"
+anyhow = "1.0.44"
 epoll = "4.3.1"
 thiserror = "1.0.29"
 libc = "0.2.101"
