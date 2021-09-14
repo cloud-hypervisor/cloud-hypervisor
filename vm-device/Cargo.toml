@@ -14,7 +14,7 @@ anyhow = "1.0.44"
 thiserror = "1.0.29"
 serde = { version = "1.0.130", features = ["rc"] }
 serde_derive = "1.0.130"
-serde_json = "1.0.67"
+serde_json = "1.0.68"
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio-ioctls", branch = "main", default-features = false }
 vm-memory = { version = "0.6.0", features = ["backend-mmap"] }
 vmm-sys-util = "0.8.0"
