@@ -265,7 +265,7 @@ pub enum DeviceManagerError {
     VfioMapRegion(pci::VfioPciError),
 
     /// Failed to DMA map VFIO device.
-    VfioDmaMap(pci::VfioPciError),
+    VfioDmaMap(vfio_ioctls::VfioError),
 
     /// Failed to DMA unmap VFIO device.
     VfioDmaUnmap(pci::VfioPciError),
@@ -370,7 +370,7 @@ pub enum DeviceManagerError {
     VirtioMemRangeAllocation,
 
     /// Failed updating guest memory for VFIO PCI device.
-    UpdateMemoryForVfioPciDevice(pci::VfioPciError),
+    UpdateMemoryForVfioPciDevice(vfio_ioctls::VfioError),
 
     /// Trying to use a directory for pmem but no size specified
     PmemWithDirectorySizeMissing,
@@ -401,6 +401,9 @@ pub enum DeviceManagerError {
 
     /// Missing virtio-balloon, can't proceed as expected.
     MissingVirtioBalloon,
+
+    /// Missing virtual IOMMU device
+    MissingVirtualIommu,
 
     /// Failed to do power button notification
     PowerButtonNotification(io::Error),
@@ -841,6 +844,11 @@ pub struct DeviceManager {
     // Passthrough device handle
     passthrough_device: Option<Arc<dyn hypervisor::Device>>,
 
+    // VFIO container
+    // Only one container can be created, therefore it is stored as part of the
+    // DeviceManager to be reused.
+    vfio_container: Option<Arc<VfioContainer>>,
+
     // Paravirtualized IOMMU
     iommu_device: Option<Arc<Mutex<virtio_devices::Iommu>>>,
 
@@ -961,6 +969,7 @@ impl DeviceManager {
             msi_interrupt_manager,
             legacy_interrupt_manager: None,
             passthrough_device: None,
+            vfio_container: None,
             iommu_device: None,
             iommu_attached_devices: None,
             pci_devices_up: 0,
@@ -2790,27 +2799,11 @@ impl DeviceManager {
         self.add_vfio_device(pci, device_cfg)
     }
 
-    fn add_vfio_device(
-        &mut self,
-        pci: &mut PciBus,
-        device_cfg: &mut DeviceConfig,
-    ) -> DeviceManagerResult<(u32, String)> {
+    fn create_vfio_container(&self) -> DeviceManagerResult<Arc<VfioContainer>> {
         let passthrough_device = self
             .passthrough_device
             .as_ref()
             .ok_or(DeviceManagerError::NoDevicePassthroughSupport)?;
-
-        // We need to shift the device id since the 3 first bits
-        // are dedicated to the PCI function, and we know we don't
-        // do multifunction. Also, because we only support one PCI
-        // bus, the bus 0, we don't need to add anything to the
-        // global device ID.
-        let pci_device_bdf = pci
-            .next_device_id()
-            .map_err(DeviceManagerError::NextPciDeviceId)?
-            << 3;
-
-        let memory = self.memory_manager.lock().unwrap().guest_memory();
 
         // Safe because we know the RawFd is valid.
         //
@@ -2830,31 +2823,94 @@ impl DeviceManager {
         //   1. When running on KVM or MSHV, passthrough_device wraps around DeviceFd.
         //   2. The conversion here extracts the raw fd and then turns the raw fd into a DeviceFd
         //      of the same (correct) type.
-        let vfio_container = Arc::new(
+        Ok(Arc::new(
             VfioContainer::new(Arc::new(unsafe { DeviceFd::from_raw_fd(dup_device_fd) }))
                 .map_err(DeviceManagerError::VfioCreate)?,
-        );
+        ))
+    }
 
-        let vfio_device = VfioDevice::new(&device_cfg.path, Arc::clone(&vfio_container))
-            .map_err(DeviceManagerError::VfioCreate)?;
+    fn add_vfio_device(
+        &mut self,
+        pci: &mut PciBus,
+        device_cfg: &mut DeviceConfig,
+    ) -> DeviceManagerResult<(u32, String)> {
+        // We need to shift the device id since the 3 first bits
+        // are dedicated to the PCI function, and we know we don't
+        // do multifunction. Also, because we only support one PCI
+        // bus, the bus 0, we don't need to add anything to the
+        // global device ID.
+        let pci_device_bdf = pci
+            .next_device_id()
+            .map_err(DeviceManagerError::NextPciDeviceId)?
+            << 3;
 
-        let vfio_mapping = Arc::new(VfioDmaMapping::new(
-            Arc::clone(&vfio_container),
-            Arc::new(memory),
-        ));
-        if device_cfg.iommu {
+        let mut needs_dma_mapping = false;
+
+        // Here we create a new VFIO container for two reasons. Either this is
+        // the first VFIO device, meaning we need a new VFIO container, which
+        // will be shared with other VFIO devices. Or the new VFIO device is
+        // attached to a vIOMMU, meaning we must create a dedicated VFIO
+        // container. In the vIOMMU use case, we can't let all devices under
+        // the same VFIO container since we couldn't map/unmap memory for each
+        // device. That's simply because the map/unmap operations happen at the
+        // VFIO container level.
+        let vfio_container = if device_cfg.iommu {
+            let vfio_container = self.create_vfio_container()?;
+
+            let vfio_mapping = Arc::new(VfioDmaMapping::new(
+                Arc::clone(&vfio_container),
+                Arc::new(self.memory_manager.lock().unwrap().guest_memory()),
+            ));
+
             if let Some(iommu) = &self.iommu_device {
                 iommu
                     .lock()
                     .unwrap()
                     .add_external_mapping(pci_device_bdf, vfio_mapping);
+            } else {
+                return Err(DeviceManagerError::MissingVirtualIommu);
             }
+
+            vfio_container
+        } else if let Some(vfio_container) = &self.vfio_container {
+            Arc::clone(vfio_container)
         } else {
+            let vfio_container = self.create_vfio_container()?;
+            needs_dma_mapping = true;
+            self.vfio_container = Some(Arc::clone(&vfio_container));
+
+            vfio_container
+        };
+
+        let vfio_device = VfioDevice::new(&device_cfg.path, Arc::clone(&vfio_container))
+            .map_err(DeviceManagerError::VfioCreate)?;
+
+        if needs_dma_mapping {
+            // Register DMA mapping in IOMMU.
+            // Do not register virtio-mem regions, as they are handled directly by
+            // virtio-mem device itself.
+            for (_, zone) in self.memory_manager.lock().unwrap().memory_zones().iter() {
+                for region in zone.regions() {
+                    vfio_container
+                        .vfio_dma_map(
+                            region.start_addr().raw_value(),
+                            region.len() as u64,
+                            region.as_ptr() as u64,
+                        )
+                        .map_err(DeviceManagerError::VfioDmaMap)?;
+                }
+            }
+
+            let vfio_mapping = Arc::new(VfioDmaMapping::new(
+                Arc::clone(&vfio_container),
+                Arc::new(self.memory_manager.lock().unwrap().guest_memory()),
+            ));
+
             for virtio_mem_device in self.virtio_mem_devices.iter() {
                 virtio_mem_device
                     .lock()
                     .unwrap()
-                    .add_dma_mapping_handler(pci_device_bdf, vfio_mapping.clone())
+                    .add_dma_mapping_handler(vfio_mapping.clone())
                     .map_err(DeviceManagerError::AddDmaMappingHandlerVirtioMem)?;
             }
         }
@@ -2908,21 +2964,6 @@ impl DeviceManager {
                 base: region.start.0,
                 size: region.length as u64,
             });
-        }
-
-        // Register DMA mapping in IOMMU.
-        // Do not register virtio-mem regions, as they are handled directly by
-        // virtio-mem device itself.
-        for (_, zone) in self.memory_manager.lock().unwrap().memory_zones().iter() {
-            for region in zone.regions() {
-                vfio_pci_device
-                    .dma_map(
-                        region.start_addr().raw_value(),
-                        region.len() as u64,
-                        region.as_ptr() as u64,
-                    )
-                    .map_err(DeviceManagerError::VfioDmaMap)?;
-            }
         }
 
         let vfio_pci_device = Arc::new(Mutex::new(vfio_pci_device));
@@ -3266,8 +3307,19 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::UpdateMemoryForVirtioDevice)?;
         }
 
-        #[allow(clippy::single_match)]
         // Take care of updating the memory for VFIO PCI devices.
+        if let Some(vfio_container) = &self.vfio_container {
+            vfio_container
+                .vfio_dma_map(
+                    new_region.start_addr().raw_value(),
+                    new_region.len() as u64,
+                    new_region.as_ptr() as u64,
+                )
+                .map_err(DeviceManagerError::UpdateMemoryForVfioPciDevice)?;
+        }
+
+        #[allow(clippy::single_match)]
+        // Take care of updating the memory for vfio-user devices.
         {
             let device_tree = self.device_tree.lock().unwrap();
             for pci_device_node in device_tree.pci_devices() {
@@ -3276,18 +3328,6 @@ impl DeviceManager {
                     .as_ref()
                     .ok_or(DeviceManagerError::MissingPciDevice)?
                 {
-                    #[cfg(feature = "kvm")]
-                    PciDeviceHandle::Vfio(vfio_pci_device) => {
-                        vfio_pci_device
-                            .lock()
-                            .unwrap()
-                            .dma_map(
-                                new_region.start_addr().raw_value(),
-                                new_region.len() as u64,
-                                new_region.as_ptr() as u64,
-                            )
-                            .map_err(DeviceManagerError::UpdateMemoryForVfioPciDevice)?;
-                    }
                     PciDeviceHandle::VfioUser(vfio_user_pci_device) => {
                         vfio_user_pci_device
                             .lock()
@@ -3466,38 +3506,11 @@ impl DeviceManager {
             .pci_device_handle
             .ok_or(DeviceManagerError::MissingPciDevice)?;
         let (pci_device, bus_device, virtio_device) = match pci_device_handle {
-            PciDeviceHandle::Vfio(vfio_pci_device) => {
-                {
-                    // Unregister DMA mapping in IOMMU.
-                    // Do not unregister the virtio-mem region, as it is
-                    // directly handled by the virtio-mem device.
-                    let dev = vfio_pci_device.lock().unwrap();
-                    for (_, zone) in self.memory_manager.lock().unwrap().memory_zones().iter() {
-                        for region in zone.regions() {
-                            dev.dma_unmap(region.start_addr().raw_value(), region.len() as u64)
-                                .map_err(DeviceManagerError::VfioDmaUnmap)?;
-                        }
-                    }
-
-                    // Unregister the VFIO mapping handler from all virtio-mem
-                    // devices.
-                    if !dev.iommu_attached() {
-                        for virtio_mem_device in self.virtio_mem_devices.iter() {
-                            virtio_mem_device
-                                .lock()
-                                .unwrap()
-                                .remove_dma_mapping_handler(pci_device_bdf)
-                                .map_err(DeviceManagerError::RemoveDmaMappingHandlerVirtioMem)?;
-                        }
-                    }
-                }
-
-                (
-                    Arc::clone(&vfio_pci_device) as Arc<Mutex<dyn PciDevice>>,
-                    Arc::clone(&vfio_pci_device) as Arc<Mutex<dyn BusDevice>>,
-                    None as Option<VirtioDeviceArc>,
-                )
-            }
+            PciDeviceHandle::Vfio(vfio_pci_device) => (
+                Arc::clone(&vfio_pci_device) as Arc<Mutex<dyn PciDevice>>,
+                Arc::clone(&vfio_pci_device) as Arc<Mutex<dyn BusDevice>>,
+                None as Option<VirtioDeviceArc>,
+            ),
             PciDeviceHandle::Virtio(virtio_pci_device) => {
                 let bar_addr = virtio_pci_device.lock().unwrap().config_bar_addr();
                 for (event, addr) in virtio_pci_device.lock().unwrap().ioeventfds(bar_addr) {
