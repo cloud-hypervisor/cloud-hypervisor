@@ -51,13 +51,14 @@ impl Cmos {
 impl BusDevice for Cmos {
     fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         if data.len() != 1 {
+            warn!("Invalid write size on CMOS device: {}", data.len());
             return None;
         }
 
         match offset {
             INDEX_OFFSET => self.index = data[0] & INDEX_MASK,
             DATA_OFFSET => self.data[self.index as usize] = data[0],
-            o => panic!("bad write offset on CMOS device: {}", o),
+            o => warn!("bad write offset on CMOS device: {}", o),
         };
         None
     }
@@ -69,6 +70,7 @@ impl BusDevice for Cmos {
         }
 
         if data.len() != 1 {
+            warn!("Invalid read size on CMOS device: {}", data.len());
             return;
         }
 
@@ -126,7 +128,10 @@ impl BusDevice for Cmos {
                     }
                 }
             }
-            o => panic!("bad read offset on CMOS device: {}", o),
+            o => {
+                warn!("bad read offset on CMOS device: {}", o);
+                0
+            }
         }
     }
 }
