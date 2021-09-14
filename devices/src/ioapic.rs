@@ -149,7 +149,10 @@ impl VersionMapped for IoapicState {}
 
 impl BusDevice for Ioapic {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
-        assert!(data.len() == 4);
+        if data.len() != std::mem::size_of::<u32>() {
+            warn!("Invalid read size on IOAPIC: {}", data.len());
+            return;
+        }
 
         debug!("IOAPIC_R @ offset 0x{:x}", offset);
 
@@ -166,7 +169,10 @@ impl BusDevice for Ioapic {
     }
 
     fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
-        assert!(data.len() == 4);
+        if data.len() != std::mem::size_of::<u32>() {
+            warn!("Invalid write size on IOAPIC: {}", data.len());
+            return None;
+        }
 
         debug!("IOAPIC_W @ offset 0x{:x}", offset);
 
@@ -226,6 +232,10 @@ impl Ioapic {
             IOAPIC_REG_ID => self.id_reg = (val >> 24) & 0xf,
             IOWIN_OFF..=REG_MAX_OFFSET => {
                 let (index, is_high_bits) = decode_irq_from_selector(self.reg_sel as u8);
+                if index > NUM_IOAPIC_PINS {
+                    warn!("IOAPIC index out of range: {}", index);
+                    return;
+                }
                 if is_high_bits {
                     self.reg_entries[index] &= 0xffff_ffff;
                     self.reg_entries[index] |= u64::from(val) << 32;
@@ -259,6 +269,10 @@ impl Ioapic {
             IOAPIC_REG_ID | IOAPIC_REG_ARBITRATION_ID => (self.id_reg & 0xf) << 24,
             IOWIN_OFF..=REG_MAX_OFFSET => {
                 let (index, is_high_bits) = decode_irq_from_selector(self.reg_sel as u8);
+                if index > NUM_IOAPIC_PINS {
+                    warn!("IOAPIC index out of range: {}", index);
+                    return 0;
+                }
                 if is_high_bits {
                     (self.reg_entries[index] >> 32) as u32
                 } else {
