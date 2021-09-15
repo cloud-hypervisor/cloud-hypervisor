@@ -5,6 +5,6 @@ authors = ["The Chromium OS Authors"]
 edition = "2018"
 
 [dependencies]
-libc = "0.2.101"
+libc = "0.2.102"
 vm-memory = "0.6.0"
 arch = { path = "../arch" }

@@ -8,7 +8,7 @@ edition = "2018"
 clap = { version = "2.33.3", features = ["wrap_help"] }
 env_logger = "0.9.0"
 epoll = "4.3.1"
-libc = "0.2.101"
+libc = "0.2.102"
 log = "0.4.14"
 net_util = { path = "../net_util" }
 option_parser = { path = "../option_parser" }
