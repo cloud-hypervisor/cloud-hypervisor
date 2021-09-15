@@ -9,7 +9,7 @@ block_util = { path = "../block_util" }
 clap = { version = "2.33.3", features = ["wrap_help"] }
 env_logger = "0.9.0"
 epoll = "4.3.1"
-libc = "0.2.101"
+libc = "0.2.102"
 log = "0.4.14"
 option_parser = { path = "../option_parser" }
 qcow = { path = "../qcow" }
