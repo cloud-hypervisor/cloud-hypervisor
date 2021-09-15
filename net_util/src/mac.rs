@@ -82,21 +82,12 @@ impl MacAddr {
     pub fn local_random() -> MacAddr {
         // Generate a fully random MAC
         let mut random_bytes = [0u8; MAC_ADDR_LEN];
-        unsafe {
-            // Man page says this function will not be interrupted by a signal
-            // for requests less than 256 bytes
-            if libc::getrandom(
-                random_bytes.as_mut_ptr() as *mut _ as *mut libc::c_void,
-                MAC_ADDR_LEN,
-                0,
-            ) < 0
-            {
-                error!(
-                    "Error populating MAC address with random data: {}",
-                    std::io::Error::last_os_error()
-                )
-            }
-        };
+        if let Err(e) = getrandom::getrandom(&mut random_bytes) {
+            error!(
+                "Error populating MAC address with random data: {}",
+                e.to_string()
+            );
+        }
 
         // Set the first byte to make the OUI a locally administered OUI
         random_bytes[0] = 0x2e;
