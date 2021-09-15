@@ -5,4 +5,4 @@ authors = ["The Cloud Hypervisor Authors"]
 edition = "2018"
 
 [dependencies]
-vmm-sys-util = "0.8.0"
+vmm-sys-util = "0.9.0"
