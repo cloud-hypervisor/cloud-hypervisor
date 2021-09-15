@@ -600,6 +600,7 @@ name = "net_util"
 version = "0.1.0"
 dependencies = [
  "epoll",
+ "getrandom",
  "lazy_static",
  "libc",
  "log",
