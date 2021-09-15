@@ -501,7 +501,9 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
     // installing handlers for, to make sure they only ever run on the
     // dedicated signal handling thread we'll start in a bit.
     for sig in vmm::vm::HANDLED_SIGNALS {
-        block_signal(sig).unwrap();
+        if let Err(e) = block_signal(sig) {
+            eprintln!("Error blocking signals: {}", e);
+        }
     }
 
     event!("vmm", "starting");
