@@ -16,7 +16,7 @@ versionize_derive = "0.1.4"
 virtio-bindings = "0.1.0"
 vm-memory = { version = "0.6.0", features = ["backend-mmap", "backend-atomic", "backend-bitmap"] }
 vm-virtio = { path = "../vm-virtio" }
-vmm-sys-util = "0.8.0"
+vmm-sys-util = "0.9.0"
 
 [dev-dependencies]
 lazy_static = "1.4.0"
