@@ -320,9 +320,9 @@ dependencies = [
 
 [[package]]
 name = "kvm-ioctls"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2924454e22895c738e43331ae310459c74a11ded9c97dc250129ee10d2f9ca2"
+checksum = "48dc14f9047df1873cf6942caccc7431d19c3d496ca7a0d162260c4cf0f64b76"
 dependencies = [
  "kvm-bindings",
  "libc",
@@ -699,7 +699,7 @@ dependencies = [
 [[package]]
 name = "vfio-ioctls"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vfio-ioctls?branch=main#a8ee64b978ccd000df88732814d626651a091891"
+source = "git+https://github.com/rust-vmm/vfio-ioctls?branch=main#d51c1fad37be30c20385c55a217e2d90972ea31d"
 dependencies = [
  "byteorder",
  "kvm-bindings",
@@ -743,8 +743,7 @@ dependencies = [
 [[package]]
 name = "vhost"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a6b90237e10f1a61b35fba73885c3567e1a5a8c40d44daae335f7710210a7dc"
+source = "git+https://github.com/rust-vmm/vhost?branch=main#354dd56adf00614f606ff39257a1257c2f6c5b82"
 dependencies = [
  "bitflags",
  "libc",
@@ -899,9 +898,9 @@ dependencies = [
 
 [[package]]
 name = "vmm-sys-util"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01cf11afbc4ebc0d5c7a7748a77d19e2042677fc15faa2f4ccccb27c18a60605"
+checksum = "733537bded03aaa93543f785ae997727b30d1d9f4a03b7861d23290474242e11"
 dependencies = [
  "bitflags",
  "libc",
@@ -936,8 +935,3 @@ name = "winapi-x86_64-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
-
-[[patch.unused]]
-name = "vm-memory"
-version = "0.5.0"
-source = "git+https://github.com/rust-vmm/vm-memory?rev=5bd7138758183a73ac0da27ce40c004d95f1a7e9#5bd7138758183a73ac0da27ce40c004d95f1a7e9"

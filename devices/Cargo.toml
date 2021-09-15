@@ -18,7 +18,7 @@ versionize_derive = "0.1.4"
 vm-device = { path = "../vm-device" }
 vm-memory = "0.6.0"
 vm-migration = { path = "../vm-migration" }
-vmm-sys-util = "0.8.0"
+vmm-sys-util = "0.9.0"
 
 [features]
 default = []

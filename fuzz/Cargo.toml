@@ -16,7 +16,7 @@ qcow = { path = "../qcow" }
 seccompiler = { git = "https://github.com/rust-vmm/seccompiler"}
 vhdx = { path = "../vhdx" }
 virtio-devices = { path = "../virtio-devices" }
-vmm-sys-util = "0.8.0"
+vmm-sys-util = "0.9.0"
 vm-virtio = { path = "../vm-virtio" }
 vm-memory = "0.6.0"
 
@@ -25,8 +25,8 @@ path = ".."
 
 [patch.crates-io]
 kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch-v0.5.0", features = ["with-serde", "fam-wrappers"] }
-vm-memory = { git = "https://github.com/rust-vmm/vm-memory", rev = "5bd7138758183a73ac0da27ce40c004d95f1a7e9"}
 versionize_derive = { git = "https://github.com/cloud-hypervisor/versionize_derive", branch = "ch" }
+vhost = { git = "https://github.com/rust-vmm/vhost", branch = "main", features = ["vhost-user-master", "vhost-user-slave", "vhost-kern"] }
 
 # Prevent this from interfering with workspaces
 [workspace]

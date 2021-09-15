@@ -6,4 +6,4 @@ edition = "2018"
 [dependencies]
 libc = "0.2.102"
 log = "0.4.14"
-vmm-sys-util = "0.8.0"
+vmm-sys-util = "0.9.0"
