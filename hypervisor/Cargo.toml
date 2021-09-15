@@ -17,7 +17,7 @@ thiserror = "1.0.29"
 libc = "0.2.101"
 log = "0.4.14"
 kvm-ioctls = { version = "0.9.0", optional = true }
-kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch-v0.4.0", features = ["with-serde", "fam-wrappers"], optional  = true }
+kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch-v0.5.0", features = ["with-serde", "fam-wrappers"], optional  = true }
 mshv-bindings = {git = "https://github.com/rust-vmm/mshv", branch = "main", features = ["with-serde", "fam-wrappers"], optional  = true }
 mshv-ioctls = { git = "https://github.com/rust-vmm/mshv", branch = "main", optional  = true}
 serde = { version = "1.0.130", features = ["rc"] }
