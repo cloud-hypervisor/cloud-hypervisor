@@ -28,7 +28,7 @@ checksum = "61604a8f862e1d5c3229fdd78f8b02c68dcf73a4c4b05fd636d12240aaa242c1"
 name = "api_client"
 version = "0.1.0"
 dependencies = [
- "vmm-sys-util",
+ "vmm-sys-util 0.8.0",
 ]
 
 [[package]]
@@ -62,7 +62,7 @@ dependencies = [
  "vm-fdt",
  "vm-memory",
  "vm-migration",
- "vmm-sys-util",
+ "vmm-sys-util 0.8.0",
 ]
 
 [[package]]
@@ -106,7 +106,7 @@ dependencies = [
  "virtio-bindings",
  "vm-memory",
  "vm-virtio",
- "vmm-sys-util",
+ "vmm-sys-util 0.8.0",
 ]
 
 [[package]]
@@ -162,7 +162,7 @@ dependencies = [
  "thiserror",
  "vm-memory",
  "vmm",
- "vmm-sys-util",
+ "vmm-sys-util 0.8.0",
 ]
 
 [[package]]
@@ -179,7 +179,7 @@ dependencies = [
  "virtio-devices",
  "vm-memory",
  "vm-virtio",
- "vmm-sys-util",
+ "vmm-sys-util 0.9.0",
 ]
 
 [[package]]
@@ -214,7 +214,7 @@ dependencies = [
  "vm-device",
  "vm-memory",
  "vm-migration",
- "vmm-sys-util",
+ "vmm-sys-util 0.8.0",
 ]
 
 [[package]]
@@ -279,7 +279,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "vm-memory",
- "vmm-sys-util",
+ "vmm-sys-util 0.8.0",
 ]
 
 [[package]]
@@ -315,7 +315,7 @@ source = "git+https://github.com/cloud-hypervisor/kvm-bindings?branch=ch-v0.5.0#
 dependencies = [
  "serde",
  "serde_derive",
- "vmm-sys-util",
+ "vmm-sys-util 0.9.0",
 ]
 
 [[package]]
@@ -326,7 +326,7 @@ checksum = "f2924454e22895c738e43331ae310459c74a11ded9c97dc250129ee10d2f9ca2"
 dependencies = [
  "kvm-bindings",
  "libc",
- "vmm-sys-util",
+ "vmm-sys-util 0.9.0",
 ]
 
 [[package]]
@@ -376,14 +376,14 @@ version = "0.1.0"
 source = "git+https://github.com/firecracker-microvm/micro-http?branch=main#9517a300370a158a7af0996b7eebf040d171e1a4"
 dependencies = [
  "libc",
- "vmm-sys-util",
+ "vmm-sys-util 0.9.0",
 ]
 
 [[package]]
 name = "net_gen"
 version = "0.1.0"
 dependencies = [
- "vmm-sys-util",
+ "vmm-sys-util 0.8.0",
 ]
 
 [[package]]
@@ -401,7 +401,7 @@ dependencies = [
  "virtio-bindings",
  "vm-memory",
  "vm-virtio",
- "vmm-sys-util",
+ "vmm-sys-util 0.8.0",
 ]
 
 [[package]]
@@ -433,7 +433,7 @@ dependencies = [
  "vm-device",
  "vm-memory",
  "vm-migration",
- "vmm-sys-util",
+ "vmm-sys-util 0.8.0",
 ]
 
 [[package]]
@@ -453,7 +453,7 @@ dependencies = [
  "libc",
  "log",
  "remain",
- "vmm-sys-util",
+ "vmm-sys-util 0.8.0",
 ]
 
 [[package]]
@@ -471,7 +471,7 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "log",
- "vmm-sys-util",
+ "vmm-sys-util 0.8.0",
 ]
 
 [[package]]
@@ -674,7 +674,7 @@ dependencies = [
  "serde_derive",
  "syn",
  "versionize_derive",
- "vmm-sys-util",
+ "vmm-sys-util 0.9.0",
 ]
 
 [[package]]
@@ -693,7 +693,7 @@ version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a21f546f2bda37f5a8cfb138c87f95b8e34d2d78d6a7a92ba3785f4e08604a7"
 dependencies = [
- "vmm-sys-util",
+ "vmm-sys-util 0.9.0",
 ]
 
 [[package]]
@@ -707,7 +707,7 @@ dependencies = [
  "log",
  "vfio-bindings",
  "vm-memory",
- "vmm-sys-util",
+ "vmm-sys-util 0.8.0",
 ]
 
 [[package]]
@@ -723,7 +723,7 @@ dependencies = [
  "thiserror",
  "vfio-bindings",
  "vm-memory",
- "vmm-sys-util",
+ "vmm-sys-util 0.9.0",
 ]
 
 [[package]]
@@ -737,7 +737,7 @@ dependencies = [
  "remain",
  "thiserror",
  "uuid",
- "vmm-sys-util",
+ "vmm-sys-util 0.9.0",
 ]
 
 [[package]]
@@ -749,7 +749,7 @@ dependencies = [
  "bitflags",
  "libc",
  "vm-memory",
- "vmm-sys-util",
+ "vmm-sys-util 0.9.0",
 ]
 
 [[package]]
@@ -788,7 +788,7 @@ dependencies = [
  "vm-memory",
  "vm-migration",
  "vm-virtio",
- "vmm-sys-util",
+ "vmm-sys-util 0.8.0",
 ]
 
 [[package]]
@@ -811,7 +811,7 @@ dependencies = [
  "thiserror",
  "vfio-ioctls",
  "vm-memory",
- "vmm-sys-util",
+ "vmm-sys-util 0.8.0",
 ]
 
 [[package]]
@@ -894,7 +894,7 @@ dependencies = [
  "vm-memory",
  "vm-migration",
  "vm-virtio",
- "vmm-sys-util",
+ "vmm-sys-util 0.8.0",
 ]
 
 [[package]]
@@ -907,6 +907,16 @@ dependencies = [
  "libc",
  "serde",
  "serde_derive",
+]
+
+[[package]]
+name = "vmm-sys-util"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "733537bded03aaa93543f785ae997727b30d1d9f4a03b7861d23290474242e11"
+dependencies = [
+ "bitflags",
+ "libc",
 ]
 
 [[package]]
