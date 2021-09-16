@@ -24,6 +24,7 @@ use crate::memory_manager::MEMORY_MANAGER_ACPI_SIZE;
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::serial_buffer::SerialBuffer;
+use crate::serial_manager::{Error as SerialManagerError, SerialManager};
 use crate::sigwinch_listener::start_sigwinch_listener;
 use crate::GuestRegionMmap;
 use crate::PciDeviceInfo;
@@ -197,6 +198,12 @@ pub enum DeviceManagerError {
 
     /// Cannot open qcow disk path
     QcowDeviceCreate(qcow::Error),
+
+    /// Cannot create serial manager
+    CreateSerialManager(SerialManagerError),
+
+    /// Cannot spawn the serial manager thread
+    SpawnSerialManager(SerialManagerError),
 
     /// Cannot open tap interface
     OpenTap(net_util::TapError),
@@ -509,27 +516,10 @@ pub fn create_pty(non_blocking: bool) -> io::Result<(File, File, PathBuf)> {
 
 #[derive(Default)]
 pub struct Console {
-    #[cfg(target_arch = "x86_64")]
-    // Serial port on 0x3f8
-    serial: Option<Arc<Mutex<Serial>>>,
-    #[cfg(target_arch = "aarch64")]
-    serial: Option<Arc<Mutex<Pl011>>>,
     console_resizer: Option<Arc<virtio_devices::ConsoleResizer>>,
 }
 
 impl Console {
-    pub fn queue_input_bytes_serial(&self, out: &[u8]) -> vmm_sys_util::errno::Result<()> {
-        if self.serial.is_some() {
-            self.serial
-                .as_ref()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .queue_input_bytes(out)?;
-        }
-        Ok(())
-    }
-
     pub fn update_console_size(&self) {
         if let Some(resizer) = self.console_resizer.as_ref() {
             resizer.update_console_size()
@@ -796,6 +786,9 @@ pub struct DeviceManager {
     // serial PTY
     serial_pty: Option<Arc<Mutex<PtyPair>>>,
 
+    // Serial Manager
+    serial_manager: Option<Arc<SerialManager>>,
+
     // pty foreground status,
     console_resize_pipe: Option<Arc<File>>,
 
@@ -990,6 +983,7 @@ impl DeviceManager {
             #[cfg(feature = "acpi")]
             acpi_address,
             serial_pty: None,
+            serial_manager: None,
             console_pty: None,
             console_resize_pipe: None,
             virtio_mem_devices: Vec::new(),
@@ -1808,19 +1802,34 @@ impl DeviceManager {
             ConsoleOutputMode::Tty => Some(Box::new(stdout())),
             ConsoleOutputMode::Off | ConsoleOutputMode::Null => None,
         };
-        let serial = if serial_config.mode != ConsoleOutputMode::Off {
-            Some(self.add_serial_device(interrupt_manager, serial_writer)?)
-        } else {
-            None
-        };
+        if serial_config.mode != ConsoleOutputMode::Off {
+            let serial = self.add_serial_device(interrupt_manager, serial_writer)?;
+            self.serial_manager = match serial_config.mode {
+                ConsoleOutputMode::Pty | ConsoleOutputMode::Tty => {
+                    let serial_manager =
+                        SerialManager::new(serial, self.serial_pty.clone(), serial_config.mode)
+                            .map_err(DeviceManagerError::CreateSerialManager)?;
+                    if let Some(mut serial_manager) = serial_manager {
+                        serial_manager
+                            .start_thread(
+                                self.exit_evt
+                                    .try_clone()
+                                    .map_err(DeviceManagerError::EventFd)?,
+                            )
+                            .map_err(DeviceManagerError::SpawnSerialManager)?;
+                        Some(Arc::new(serial_manager))
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+        }
 
         let console_resizer =
             self.add_virtio_console_device(virtio_devices, console_pty, console_resize_pipe)?;
 
-        Ok(Arc::new(Console {
-            serial,
-            console_resizer,
-        }))
+        Ok(Arc::new(Console { console_resizer }))
     }
 
     fn make_virtio_devices(&mut self) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool, String)>> {
