@@ -62,6 +62,7 @@ pub mod vm;
 #[cfg(feature = "acpi")]
 mod acpi;
 mod serial_buffer;
+mod serial_manager;
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 type GuestRegionMmap = vm_memory::GuestRegionMmap<AtomicBitmap>;
@@ -149,10 +150,8 @@ pub type Result<T> = result::Result<T, Error>;
 pub enum EpollDispatch {
     Exit = 0,
     Reset = 1,
-    Stdin = 2,
-    Api = 3,
-    ActivateVirtioDevices = 4,
-    SerialPty = 5,
+    Api = 2,
+    ActivateVirtioDevices = 3,
     Unknown,
 }
 
@@ -162,10 +161,8 @@ impl From<u64> for EpollDispatch {
         match v {
             0 => Exit,
             1 => Reset,
-            2 => Stdin,
-            3 => Api,
-            4 => ActivateVirtioDevices,
-            5 => SerialPty,
+            2 => Api,
+            3 => ActivateVirtioDevices,
             _ => Unknown,
         }
     }
@@ -182,18 +179,6 @@ impl EpollContext {
         let epoll_file = unsafe { File::from_raw_fd(epoll_fd) };
 
         Ok(EpollContext { epoll_file })
-    }
-
-    pub fn add_stdin(&mut self) -> result::Result<(), io::Error> {
-        let dispatch_index = EpollDispatch::Stdin as u64;
-        epoll::ctl(
-            self.epoll_file.as_raw_fd(),
-            epoll::ControlOptions::EPOLL_CTL_ADD,
-            libc::STDIN_FILENO,
-            epoll::Event::new(epoll::Events::EPOLLIN, dispatch_index),
-        )?;
-
-        Ok(())
     }
 
     fn add_event<T>(&mut self, fd: &T, token: EpollDispatch) -> result::Result<(), io::Error>
@@ -409,18 +394,6 @@ impl Vmm {
                     None,
                     None,
                 )?;
-                if let Some(serial_pty) = vm.serial_pty() {
-                    self.epoll
-                        .add_event(&serial_pty.main, EpollDispatch::SerialPty)
-                        .map_err(VmError::EventfdError)?;
-                };
-                if matches!(
-                    vm_config.lock().unwrap().serial.mode,
-                    config::ConsoleOutputMode::Tty
-                ) && unsafe { libc::isatty(libc::STDIN_FILENO as i32) } != 0
-                {
-                    self.epoll.add_stdin().map_err(VmError::EventfdError)?;
-                }
 
                 self.vm = Some(vm);
             }
@@ -1308,11 +1281,6 @@ impl Vmm {
                         self.reset_evt.read().map_err(Error::EventFdRead)?;
                         self.vm_reboot().map_err(Error::VmReboot)?;
                     }
-                    EpollDispatch::Stdin => {
-                        if let Some(ref vm) = self.vm {
-                            vm.handle_stdin().map_err(Error::Stdin)?;
-                        }
-                    }
                     EpollDispatch::ActivateVirtioDevices => {
                         if let Some(ref vm) = self.vm {
                             let count = self.activate_evt.read().map_err(Error::EventFdRead)?;
@@ -1322,11 +1290,6 @@ impl Vmm {
                             );
                             vm.activate_virtio_devices()
                                 .map_err(Error::ActivateVirtioDevices)?;
-                        }
-                    }
-                    event @ EpollDispatch::SerialPty => {
-                        if let Some(ref vm) = self.vm {
-                            vm.handle_pty(event).map_err(Error::Pty)?;
                         }
                     }
                     EpollDispatch::Api => {

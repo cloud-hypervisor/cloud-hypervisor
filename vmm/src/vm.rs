@@ -14,16 +14,16 @@
 #[cfg(any(target_arch = "aarch64", feature = "acpi"))]
 use crate::config::NumaConfig;
 use crate::config::{
-    ConsoleOutputMode, DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, PmemConfig,
-    UserDeviceConfig, ValidationError, VmConfig, VsockConfig,
+    DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, PmemConfig, UserDeviceConfig,
+    ValidationError, VmConfig, VsockConfig,
 };
+use crate::cpu;
 use crate::device_manager::{self, Console, DeviceManager, DeviceManagerError, PtyPair};
 use crate::device_tree::DeviceTree;
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 use crate::migration::{get_vm_snapshot, url_to_path, VM_SNAPSHOT_FILE};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::GuestMemoryMmap;
-use crate::{cpu, EpollDispatch};
 use crate::{
     PciDeviceInfo, CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_SNAPSHOT_ID,
 };
@@ -1927,53 +1927,6 @@ impl Vm {
         let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
         *state = new_state;
         event!("vm", "booted");
-        Ok(())
-    }
-
-    pub fn handle_pty(&self, event: EpollDispatch) -> Result<()> {
-        // Could be a little dangerous, picks up a lock on device_manager
-        // and goes into a blocking read. If the epoll loops starts to be
-        // services by multiple threads likely need to revist this.
-        let dm = self.device_manager.lock().unwrap();
-
-        if matches!(event, EpollDispatch::SerialPty) {
-            if let Some(mut pty) = dm.serial_pty() {
-                let mut out = [0u8; 64];
-                let count = pty.main.read(&mut out).map_err(Error::PtyConsole)?;
-                let console = dm.console();
-                console
-                    .queue_input_bytes_serial(&out[..count])
-                    .map_err(Error::Console)?;
-            };
-        }
-
-        Ok(())
-    }
-
-    pub fn handle_stdin(&self) -> Result<()> {
-        let mut out = [0u8; 64];
-        let count = io::stdin()
-            .lock()
-            .read_raw(&mut out)
-            .map_err(Error::Console)?;
-
-        // Replace "\n" with "\r" to deal with Windows SAC (#1170)
-        if count == 1 && out[0] == 0x0a {
-            out[0] = 0x0d;
-        }
-
-        if matches!(
-            self.config.lock().unwrap().serial.mode,
-            ConsoleOutputMode::Tty
-        ) {
-            self.device_manager
-                .lock()
-                .unwrap()
-                .console()
-                .queue_input_bytes_serial(&out[..count])
-                .map_err(Error::Console)?;
-        }
-
         Ok(())
     }
 
