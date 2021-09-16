@@ -3973,7 +3973,6 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         // This test validates that it can find the virtio-iommu device at first.
         // It also verifies that both disks and the network card are attached to
         // the virtual IOMMU by looking at /sys/kernel/iommu_groups directory.
@@ -4017,28 +4016,47 @@ mod tests {
                     .does_device_vendor_pair_match("0x1057", "0x1af4")
                     .unwrap_or_default());
 
-                // Verify the first disk is located under IOMMU group 0.
+                // For AArch64, now virtual IOMMU is only tested on FDT, not ACPI.
+                // In the case of FDT, the behavior of IOMMU is a bit different with ACPI. All the
+                // devices on the PCI bus will be attached to the virtual IOMMU, except the
+                // virtio-iommu device itself. So these devices will all be added to IOMMU groups,
+                // and appear under folder '/sys/kernel/iommu_groups/'.
+                // The result is, on AArch64 IOMMU group '0' contains "0000:00:01.0" which is the
+                // console. The first disk "0000:00:02.0" is in group '1'.
+                // While on X86, console device is not attached to IOMMU. So the IOMMU group '0'
+                // contains "0000:00:02.0" which is the first disk.
+                //
+                // Verify the iommu group of the first disk.
+                let iommu_group = if cfg!(target_arch = "x86_64") { 0 } else { 1 };
                 assert_eq!(
                     guest
-                        .ssh_command("ls /sys/kernel/iommu_groups/0/devices")
+                        .ssh_command(
+                            format!("ls /sys/kernel/iommu_groups/{}/devices", iommu_group).as_str()
+                        )
                         .unwrap()
                         .trim(),
                     "0000:00:02.0"
                 );
 
-                // Verify the second disk is located under IOMMU group 1.
+                // Verify the iommu group of the second disk.
+                let iommu_group = if cfg!(target_arch = "x86_64") { 1 } else { 2 };
                 assert_eq!(
                     guest
-                        .ssh_command("ls /sys/kernel/iommu_groups/1/devices")
+                        .ssh_command(
+                            format!("ls /sys/kernel/iommu_groups/{}/devices", iommu_group).as_str()
+                        )
                         .unwrap()
                         .trim(),
                     "0000:00:03.0"
                 );
 
-                // Verify the network card is located under IOMMU group 2.
+                // Verify the iommu group of the network card.
+                let iommu_group = if cfg!(target_arch = "x86_64") { 2 } else { 3 };
                 assert_eq!(
                     guest
-                        .ssh_command("ls /sys/kernel/iommu_groups/2/devices")
+                        .ssh_command(
+                            format!("ls /sys/kernel/iommu_groups/{}/devices", iommu_group).as_str()
+                        )
                         .unwrap()
                         .trim(),
                     "0000:00:04.0"
