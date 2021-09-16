@@ -766,7 +766,7 @@ pub struct PtyPair {
     pub path: PathBuf,
 }
 
-impl PtyPair {
+impl Clone for PtyPair {
     fn clone(&self) -> Self {
         PtyPair {
             main: self.main.try_clone().unwrap(),
