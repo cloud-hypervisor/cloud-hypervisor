@@ -1008,7 +1008,7 @@ impl DeviceManager {
             )?);
         }
 
-        let device_manager = DeviceManager {
+        let mut device_manager = DeviceManager {
             address_manager: Arc::clone(&address_manager),
             console: Arc::new(Console::default()),
             interrupt_controller: None,
@@ -1055,6 +1055,9 @@ impl DeviceManager {
             io_uring_supported: None,
         };
 
+        // Add IOAPIC early for fast path
+        device_manager.add_interrupt_controller()?;
+
         let device_manager = Arc::new(Mutex::new(device_manager));
 
         #[cfg(feature = "acpi")]
@@ -1094,15 +1097,13 @@ impl DeviceManager {
     ) -> DeviceManagerResult<()> {
         let mut virtio_devices: Vec<(VirtioDeviceArc, bool, String, u16)> = Vec::new();
 
-        let interrupt_controller = self.add_interrupt_controller()?;
-
         // Now we can create the legacy interrupt manager, which needs the freshly
         // formed IOAPIC device.
         let legacy_interrupt_manager: Arc<
             dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>,
-        > = Arc::new(LegacyUserspaceInterruptManager::new(Arc::clone(
-            &interrupt_controller,
-        )));
+        > = Arc::new(LegacyUserspaceInterruptManager::new(
+            self.interrupt_controller.as_ref().unwrap().clone(),
+        ));
 
         #[cfg(feature = "acpi")]
         {
@@ -3410,6 +3411,12 @@ impl DeviceManager {
     #[cfg(any(target_arch = "aarch64", feature = "acpi"))]
     pub(crate) fn pci_segments(&self) -> &Vec<PciSegment> {
         &self.pci_segments
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    // Used to provide a fast path for handling MMIO exits
+    pub fn ioapic(&self) -> Option<Arc<Mutex<ioapic::Ioapic>>> {
+        self.interrupt_controller.clone()
     }
 
     pub fn console(&self) -> &Arc<Console> {
