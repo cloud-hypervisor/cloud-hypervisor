@@ -29,6 +29,8 @@ use crate::{
 };
 use anyhow::anyhow;
 use arch::get_host_cpu_phys_bits;
+#[cfg(target_arch = "x86_64")]
+use arch::layout::{IOAPIC_SIZE, IOAPIC_START};
 #[cfg(feature = "tdx")]
 use arch::x86_64::tdx::TdvfSection;
 use arch::EntryPoint;
@@ -65,6 +67,8 @@ use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Mutex, RwLock};
 use std::{result, str, thread};
 use vm_device::Bus;
+#[cfg(target_arch = "x86_64")]
+use vm_device::BusDevice;
 use vm_memory::{
     Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
     GuestMemoryRegion,
@@ -360,6 +364,8 @@ struct VmOps {
     mmio_bus: Arc<Bus>,
     #[cfg(target_arch = "x86_64")]
     timestamp: std::time::Instant,
+    #[cfg(target_arch = "x86_64")]
+    ioapic: Arc<Mutex<dyn BusDevice>>,
 }
 
 impl VmOps {
@@ -394,6 +400,15 @@ impl VmmOps for VmOps {
     }
 
     fn mmio_read(&self, gpa: u64, data: &mut [u8]) -> hypervisor::vm::Result<()> {
+        #[cfg(target_arch = "x86_64")]
+        if gpa >= IOAPIC_START.0 && gpa < IOAPIC_START.0 + IOAPIC_SIZE {
+            self.ioapic
+                .lock()
+                .unwrap()
+                .read(IOAPIC_START.0, gpa - IOAPIC_START.0, data);
+            return Ok(());
+        }
+
         if let Err(vm_device::BusError::MissingAddressRange) = self.mmio_bus.read(gpa, data) {
             warn!("Guest MMIO read to unregistered address 0x{:x}", gpa);
         }
@@ -401,6 +416,15 @@ impl VmmOps for VmOps {
     }
 
     fn mmio_write(&self, gpa: u64, data: &[u8]) -> hypervisor::vm::Result<()> {
+        #[cfg(target_arch = "x86_64")]
+        if gpa >= IOAPIC_START.0 && gpa < IOAPIC_START.0 + IOAPIC_SIZE {
+            self.ioapic
+                .lock()
+                .unwrap()
+                .write(IOAPIC_START.0, gpa - IOAPIC_START.0, data);
+            return Ok(());
+        }
+
         match self.mmio_bus.write(gpa, data) {
             Err(vm_device::BusError::MissingAddressRange) => {
                 warn!("Guest MMIO write to unregistered address 0x{:x}", gpa);
@@ -553,6 +577,8 @@ impl Vm {
             mmio_bus,
             #[cfg(target_arch = "x86_64")]
             timestamp: std::time::Instant::now(),
+            #[cfg(target_arch = "x86_64")]
+            ioapic: device_manager.lock().unwrap().ioapic().unwrap() as Arc<Mutex<dyn BusDevice>>,
         });
 
         let exit_evt_clone = exit_evt.try_clone().map_err(Error::EventFdClone)?;

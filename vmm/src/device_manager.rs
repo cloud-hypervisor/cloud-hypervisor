@@ -946,7 +946,7 @@ impl DeviceManager {
             .unwrap()
             .allocate_mmio_addresses(None, DEVICE_MANAGER_ACPI_SIZE as u64, None)
             .ok_or(DeviceManagerError::AllocateIoPort)?;
-        let device_manager = DeviceManager {
+        let mut device_manager = DeviceManager {
             address_manager: Arc::clone(&address_manager),
             console: Arc::new(Console::default()),
             interrupt_controller: None,
@@ -993,6 +993,8 @@ impl DeviceManager {
             restoring,
         };
 
+        device_manager.add_interrupt_controller()?;
+
         let device_manager = Arc::new(Mutex::new(device_manager));
 
         #[cfg(feature = "acpi")]
@@ -1032,15 +1034,13 @@ impl DeviceManager {
     ) -> DeviceManagerResult<()> {
         let mut virtio_devices: Vec<(VirtioDeviceArc, bool, String)> = Vec::new();
 
-        let interrupt_controller = self.add_interrupt_controller()?;
-
         // Now we can create the legacy interrupt manager, which needs the freshly
         // formed IOAPIC device.
         let legacy_interrupt_manager: Arc<
             dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>,
-        > = Arc::new(LegacyUserspaceInterruptManager::new(Arc::clone(
-            &interrupt_controller,
-        )));
+        > = Arc::new(LegacyUserspaceInterruptManager::new(
+            self.interrupt_controller.clone().unwrap() as Arc<Mutex<dyn InterruptController>>,
+        ));
 
         #[cfg(feature = "acpi")]
         {
@@ -3312,6 +3312,12 @@ impl DeviceManager {
         self.interrupt_controller
             .as_ref()
             .map(|ic| ic.clone() as Arc<Mutex<dyn InterruptController>>)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    // Used to provide a fast path for handling MMIO exits
+    pub fn ioapic(&self) -> Option<Arc<Mutex<ioapic::Ioapic>>> {
+        self.interrupt_controller.clone()
     }
 
     pub fn console(&self) -> &Arc<Console> {
