@@ -7028,7 +7028,7 @@ mod tests {
                         // Resize to the maximum amount of CPUs and check each NUMA
                         // node has been assigned the right CPUs set.
                         resize_command(&dest_api_socket, Some(12), None, None);
-                        thread::sleep(std::time::Duration::new(5, 0));
+                        thread::sleep(std::time::Duration::new(10, 0));
 
                         guest.check_numa_common(
                             None,
