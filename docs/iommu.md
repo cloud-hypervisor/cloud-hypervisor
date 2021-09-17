@@ -121,6 +121,29 @@ lspci
 00:04.0 Unassigned class [ffff]: Red Hat, Inc. Virtio RNG
 ```
 
+### Work with FDT on AArch64
+
+On AArch64 architecture, the virtual IOMMU can still be used even if ACPI is not
+enabled. But the effect is different with what the aforementioned test showed.
+
+When ACPI is disabled, virtual IOMMU is supported through Flattened Device Tree
+(FDT). In this case, the guest kernel can not tell which device should be
+IOMMU-attached and which should not. No matter how many devices you attached to
+the virtual IOMMU by setting `iommu=on` option, all the devices on the PCI bus
+will be attached to the virtual IOMMU (except the IOMMU itself). Each of the
+devices will be added into a IOMMU group.
+
+As a result, the directory content of `/sys/kernel/iommu_groups` would be:
+
+```bash
+ls /sys/kernel/iommu_groups/0/devices/
+0000:00:02.0
+ls /sys/kernel/iommu_groups/1/devices/
+0000:00:03.0
+ls /sys/kernel/iommu_groups/2/devices/
+0000:00:04.0
+```
+
 ## Faster mappings
 
 By default, the guest memory is mapped with 4k pages and no huge pages, which
