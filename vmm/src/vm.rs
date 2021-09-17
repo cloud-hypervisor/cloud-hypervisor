@@ -65,6 +65,8 @@ use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Mutex, RwLock};
 use std::{result, str, thread};
 use vm_device::Bus;
+#[cfg(target_arch = "x86_64")]
+use vm_device::BusDevice;
 use vm_memory::{
     Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
     GuestMemoryRegion,
@@ -360,6 +362,8 @@ struct VmOps {
     mmio_bus: Arc<Bus>,
     #[cfg(target_arch = "x86_64")]
     timestamp: std::time::Instant,
+    #[cfg(target_arch = "x86_64")]
+    pci_config_io: Arc<Mutex<dyn BusDevice>>,
 }
 
 impl VmOps {
@@ -417,6 +421,17 @@ impl VmmOps for VmOps {
 
     #[cfg(target_arch = "x86_64")]
     fn pio_read(&self, port: u64, data: &mut [u8]) -> hypervisor::vm::Result<()> {
+        use pci::{PCI_CONFIG_IO_PORT, PCI_CONFIG_IO_PORT_SIZE};
+
+        if (PCI_CONFIG_IO_PORT..(PCI_CONFIG_IO_PORT + PCI_CONFIG_IO_PORT_SIZE)).contains(&port) {
+            self.pci_config_io.lock().unwrap().read(
+                PCI_CONFIG_IO_PORT,
+                port - PCI_CONFIG_IO_PORT,
+                data,
+            );
+            return Ok(());
+        }
+
         if let Err(vm_device::BusError::MissingAddressRange) = self.io_bus.read(port, data) {
             warn!("Guest PIO read to unregistered address 0x{:x}", port);
         }
@@ -425,8 +440,19 @@ impl VmmOps for VmOps {
 
     #[cfg(target_arch = "x86_64")]
     fn pio_write(&self, port: u64, data: &[u8]) -> hypervisor::vm::Result<()> {
+        use pci::{PCI_CONFIG_IO_PORT, PCI_CONFIG_IO_PORT_SIZE};
+
         if port == DEBUG_IOPORT as u64 && data.len() == 1 {
             self.log_debug_ioport(data[0]);
+            return Ok(());
+        }
+
+        if (PCI_CONFIG_IO_PORT..(PCI_CONFIG_IO_PORT + PCI_CONFIG_IO_PORT_SIZE)).contains(&port) {
+            self.pci_config_io.lock().unwrap().write(
+                PCI_CONFIG_IO_PORT,
+                port - PCI_CONFIG_IO_PORT,
+                data,
+            );
             return Ok(());
         }
 
@@ -546,6 +572,10 @@ impl Vm {
         let mmio_bus = Arc::clone(device_manager.lock().unwrap().mmio_bus());
         // Create the VmOps structure, which implements the VmmOps trait.
         // And send it to the hypervisor.
+
+        #[cfg(target_arch = "x86_64")]
+        let pci_config_io =
+            device_manager.lock().unwrap().pci_config_io() as Arc<Mutex<dyn BusDevice>>;
         let vm_ops: Arc<dyn VmmOps> = Arc::new(VmOps {
             memory,
             #[cfg(target_arch = "x86_64")]
@@ -553,6 +583,8 @@ impl Vm {
             mmio_bus,
             #[cfg(target_arch = "x86_64")]
             timestamp: std::time::Instant::now(),
+            #[cfg(target_arch = "x86_64")]
+            pci_config_io,
         });
 
         let exit_evt_clone = exit_evt.try_clone().map_err(Error::EventFdClone)?;

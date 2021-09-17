@@ -67,11 +67,12 @@ use libc::{
     isatty, tcgetattr, tcsetattr, termios, ECHO, ICANON, ISIG, MAP_NORESERVE, MAP_PRIVATE,
     MAP_SHARED, O_TMPFILE, PROT_READ, PROT_WRITE, TCSANOW,
 };
-use pci::VfioPciDevice;
 use pci::{
-    DeviceRelocation, PciBarRegionType, PciBus, PciConfigIo, PciConfigMmio, PciDevice, PciRoot,
+    DeviceRelocation, PciBarRegionType, PciBus, PciConfigMmio, PciDevice, PciRoot, VfioPciDevice,
     VfioUserPciDevice, VfioUserPciDeviceError,
 };
+#[cfg(target_arch = "x86_64")]
+use pci::{PciConfigIo, PCI_CONFIG_IO_PORT, PCI_CONFIG_IO_PORT_SIZE};
 use seccompiler::SeccompAction;
 use std::collections::HashMap;
 use std::convert::TryInto;
@@ -826,6 +827,9 @@ pub struct DeviceManager {
     // Keep a reference to the PCI bus
     pci_bus: Option<Arc<Mutex<PciBus>>>,
 
+    #[cfg(target_arch = "x86_64")]
+    pci_config_io: Arc<Mutex<PciConfigIo>>,
+
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     // MSI Interrupt Manager
     msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
@@ -959,6 +963,9 @@ impl DeviceManager {
             bus_devices: Vec::new(),
             device_id_cnt: Wrapping(0),
             pci_bus: None,
+            #[cfg(target_arch = "x86_64")]
+            // Create early so ready for use in `VmmOps`
+            pci_config_io: Arc::new(Mutex::new(PciConfigIo::new())),
             msi_interrupt_manager,
             legacy_interrupt_manager: None,
             passthrough_device: None,
@@ -1222,13 +1229,22 @@ impl DeviceManager {
         }
 
         let pci_bus = Arc::new(Mutex::new(pci_bus));
-        let pci_config_io = Arc::new(Mutex::new(PciConfigIo::new(Arc::clone(&pci_bus))));
+        #[cfg(target_arch = "x86_64")]
+        self.pci_config_io
+            .lock()
+            .unwrap()
+            .set_bus(Arc::clone(&pci_bus));
+        #[cfg(target_arch = "x86_64")]
         self.bus_devices
-            .push(Arc::clone(&pci_config_io) as Arc<Mutex<dyn BusDevice>>);
+            .push(Arc::clone(&self.pci_config_io) as Arc<Mutex<dyn BusDevice>>);
         #[cfg(target_arch = "x86_64")]
         self.address_manager
             .io_bus
-            .insert(pci_config_io, 0xcf8, 0x8)
+            .insert(
+                self.pci_config_io.clone(),
+                PCI_CONFIG_IO_PORT,
+                PCI_CONFIG_IO_PORT_SIZE,
+            )
             .map_err(DeviceManagerError::BusError)?;
         let pci_config_mmio = Arc::new(Mutex::new(PciConfigMmio::new(Arc::clone(&pci_bus))));
         self.bus_devices
@@ -3312,6 +3328,12 @@ impl DeviceManager {
         self.interrupt_controller
             .as_ref()
             .map(|ic| ic.clone() as Arc<Mutex<dyn InterruptController>>)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    // Used to provide a fast path for handling PIO exits
+    pub fn pci_config_io(&self) -> Arc<Mutex<PciConfigIo>> {
+        self.pci_config_io.clone()
     }
 
     pub fn console(&self) -> &Arc<Console> {
