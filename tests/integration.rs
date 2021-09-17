@@ -104,18 +104,11 @@ mod tests {
         shared_dir: &str,
         cache: &str,
     ) -> (std::process::Child, String) {
-        let mut workload_path = dirs::home_dir().unwrap();
-        workload_path.push("workloads");
-
-        let mut virtiofsd_path = workload_path;
-        virtiofsd_path.push("virtiofsd");
-        let virtiofsd_path = String::from(virtiofsd_path.to_str().unwrap());
-
         let virtiofsd_socket_path =
             String::from(tmp_dir.as_path().join("virtiofs.sock").to_str().unwrap());
 
         // Start the daemon
-        let child = Command::new(virtiofsd_path.as_str())
+        let child = Command::new("virtiofsd")
             .args(&[format!("--socket-path={}", virtiofsd_socket_path).as_str()])
             .args(&["-o", format!("source={}", shared_dir).as_str()])
             .args(&["-o", format!("cache={}", cache).as_str()])
