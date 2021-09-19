@@ -39,9 +39,9 @@ checksum = "577b08a4acd7b99869f863c50011b01eb73424ccc798ecd996f2e24817adfca7"
 
 [[package]]
 name = "arc-swap"
-version = "1.3.2"
+version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5ab7d9e73059c86c36473f459b52adbd99c3554a4fec492caef460806006f00"
+checksum = "e6df5aef5c5830360ce5218cecb8f018af3438af5686ae945094affc86fdec63"
 
 [[package]]
 name = "arch"
@@ -391,6 +391,7 @@ name = "net_util"
 version = "0.1.0"
 dependencies = [
  "epoll",
+ "getrandom",
  "libc",
  "log",
  "net_gen",
