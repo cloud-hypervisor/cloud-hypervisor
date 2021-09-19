@@ -4116,6 +4116,8 @@ impl Aml for DeviceManager {
         pci_dsdt_inner_data.push(&seg);
         let uid = aml::Name::new("_UID".into(), &aml::ZERO);
         pci_dsdt_inner_data.push(&uid);
+        let cca = aml::Name::new("_CCA".into(), &aml::ONE);
+        pci_dsdt_inner_data.push(&cca);
         let supp = aml::Name::new("SUPP".into(), &aml::ZERO);
         pci_dsdt_inner_data.push(&supp);
 
