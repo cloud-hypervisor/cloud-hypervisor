@@ -288,9 +288,7 @@ impl cpu::Vcpu for MshvVcpu {
     }
     #[allow(non_upper_case_globals)]
     fn run(&self) -> std::result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
-        // Safe because this is just only done during initialization.
-        // TODO don't zero it everytime we enter this function.
-        let hv_message: hv_message = unsafe { std::mem::zeroed() };
+        let hv_message: hv_message = hv_message::default();
         match self.fd.run(hv_message) {
             Ok(x) => match x.header.message_type {
                 hv_message_type_HVMSG_X64_HALT => {
