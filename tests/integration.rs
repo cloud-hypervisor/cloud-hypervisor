@@ -4994,6 +4994,7 @@ mod tests {
                 .args(&["--api-socket", &api_socket])
                 .args(&["--cpus", "boot=4"])
                 .args(&["--memory", "size=4G"])
+                .args(&["--balloon", "size=0"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&[
                     "--disk",
@@ -5022,6 +5023,12 @@ mod tests {
                 assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
                 // Check the guest RAM
                 assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+                // Use balloon to remove RAM from the VM
+                resize_command(&api_socket, None, None, Some(1 << 30));
+                thread::sleep(std::time::Duration::new(5, 0));
+                let total_memory = guest.get_total_memory().unwrap_or_default();
+                assert!(total_memory > 2_880_000);
+                assert!(total_memory < 3_840_000);
                 // Check the guest virtio-devices, e.g. block, rng, vsock, console, and net
                 guest.check_devices_common(Some(&socket), Some(&console_text));
 
@@ -5098,6 +5105,12 @@ mod tests {
 
                 // Perform same checks to validate VM has been properly restored
                 assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
+                let total_memory = guest.get_total_memory().unwrap_or_default();
+                assert!(total_memory > 2_880_000);
+                assert!(total_memory < 3_840_000);
+                // Deflate balloon to restore entire RAM to the VM
+                resize_command(&api_socket, None, None, Some(0));
+                thread::sleep(std::time::Duration::new(5, 0));
                 assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
                 guest.check_devices_common(Some(&socket), Some(&console_text));
             });
