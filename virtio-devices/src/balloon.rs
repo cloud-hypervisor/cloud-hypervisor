@@ -29,12 +29,15 @@ use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex};
+use versionize::{VersionMap, Versionize, VersionizeResult};
+use versionize_derive::Versionize;
 use vm_memory::GuestMemory;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
     GuestMemoryError,
 };
-use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
+use vm_migration::VersionMapped;
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: u16 = 128;
@@ -82,8 +85,8 @@ pub enum Error {
 
 // Got from include/uapi/linux/virtio_balloon.h
 #[repr(C)]
-#[derive(Copy, Clone, Debug, Default)]
-struct VirtioBalloonConfig {
+#[derive(Copy, Clone, Debug, Default, Versionize)]
+pub struct VirtioBalloonConfig {
     // Number of pages host wants Guest to give up.
     num_pages: u32,
     // Number of pages we've actually got in balloon.
@@ -120,11 +123,11 @@ struct VirtioBalloonResize {
 }
 
 impl VirtioBalloonResize {
-    pub fn new() -> io::Result<Self> {
+    pub fn new(size: u64) -> io::Result<Self> {
         let (tx, rx) = mpsc::channel();
 
         Ok(Self {
-            size: Arc::new(AtomicU64::new(0)),
+            size: Arc::new(AtomicU64::new(size)),
             tx,
             rx,
             evt: EventFd::new(EFD_NONBLOCK)?,
@@ -335,6 +338,15 @@ impl EpollHelperHandler for BalloonEpollHandler {
     }
 }
 
+#[derive(Versionize)]
+pub struct BalloonState {
+    pub avail_features: u64,
+    pub acked_features: u64,
+    pub config: VirtioBalloonConfig,
+}
+
+impl VersionMapped for BalloonState {}
+
 // Virtio device for exposing entropy to the guest OS through virtio.
 pub struct Balloon {
     common: VirtioCommon,
@@ -374,7 +386,7 @@ impl Balloon {
                 ..Default::default()
             },
             id,
-            resize: VirtioBalloonResize::new()?,
+            resize: VirtioBalloonResize::new(size)?,
             config: Arc::new(Mutex::new(config)),
             seccomp_action,
             exit_evt,
@@ -388,6 +400,20 @@ impl Balloon {
     // Get the actual size of the virtio-balloon.
     pub fn get_actual(&self) -> u64 {
         (self.config.lock().unwrap().actual as u64) << VIRTIO_BALLOON_PFN_SHIFT
+    }
+
+    fn state(&self) -> BalloonState {
+        BalloonState {
+            avail_features: self.common.avail_features,
+            acked_features: self.common.acked_features,
+            config: *(self.config.lock().unwrap()),
+        }
+    }
+
+    fn set_state(&mut self, state: &BalloonState) {
+        self.common.avail_features = state.avail_features;
+        self.common.acked_features = state.acked_features;
+        *(self.config.lock().unwrap()) = state.config;
     }
 }
 
@@ -502,6 +528,15 @@ impl Pausable for Balloon {
 impl Snapshottable for Balloon {
     fn id(&self) -> String {
         self.id.clone()
+    }
+
+    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+        Snapshot::new_from_versioned_state(&self.id(), &self.state())
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        self.set_state(&snapshot.to_versioned_state(&self.id)?);
+        Ok(())
     }
 }
 impl Transportable for Balloon {}
