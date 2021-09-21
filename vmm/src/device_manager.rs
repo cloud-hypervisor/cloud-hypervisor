@@ -91,6 +91,7 @@ use vfio_ioctls::{VfioContainer, VfioDevice};
 use virtio_devices::transport::VirtioPciDevice;
 use virtio_devices::transport::VirtioTransport;
 use virtio_devices::vhost_user::VhostUserConfig;
+use virtio_devices::VirtioMemMappingSource;
 use virtio_devices::{DmaRemapping, Endpoint, IommuMapping};
 use virtio_devices::{VirtioSharedMemory, VirtioSharedMemoryList};
 use vm_allocator::SystemAllocator;
@@ -2950,7 +2951,10 @@ impl DeviceManager {
                 virtio_mem_device
                     .lock()
                     .unwrap()
-                    .add_dma_mapping_handler(vfio_mapping.clone())
+                    .add_dma_mapping_handler(
+                        VirtioMemMappingSource::Container,
+                        vfio_mapping.clone(),
+                    )
                     .map_err(DeviceManagerError::AddDmaMappingHandlerVirtioMem)?;
             }
         }
