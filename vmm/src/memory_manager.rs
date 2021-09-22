@@ -37,8 +37,7 @@ use vm_device::BusDevice;
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
     mmap::MmapRegionError, Address, Bytes, Error as MmapError, GuestAddress, GuestAddressSpace,
-    GuestMemory, GuestMemoryAtomic, GuestMemoryError, GuestMemoryLoadGuard, GuestMemoryRegion,
-    GuestUsize, MmapRegion,
+    GuestMemory, GuestMemoryAtomic, GuestMemoryError, GuestMemoryRegion, GuestUsize, MmapRegion,
 };
 use vm_migration::{
     protocol::MemoryRangeTable, Migratable, MigratableError, Pausable, Snapshot,
@@ -129,7 +128,6 @@ pub struct MemoryManager {
     boot_ram: u64,
     current_ram: u64,
     next_hotplug_slot: usize,
-    snapshot: Mutex<Option<GuestMemoryLoadGuard<GuestMemoryMmap>>>,
     shared: bool,
     hugepages: bool,
     hugepage_size: Option<u64>,
@@ -774,7 +772,6 @@ impl MemoryManager {
             boot_ram: ram_size,
             current_ram: ram_size,
             next_hotplug_slot: 0,
-            snapshot: Mutex::new(None),
             shared: config.shared,
             hugepages: config.hugepages,
             hugepage_size: config.hugepage_size,
@@ -1944,9 +1941,6 @@ impl Snapshottable for MemoryManager {
             &MemoryManagerSnapshotData { memory_regions },
         )?);
 
-        let mut memory_snapshot = self.snapshot.lock().unwrap();
-        *memory_snapshot = Some(guest_memory);
-
         Ok(memory_manager_snapshot)
     }
 }
@@ -1959,28 +1953,27 @@ impl Transportable for MemoryManager {
     ) -> result::Result<(), MigratableError> {
         let vm_memory_snapshot_path = url_to_path(destination_url)?;
 
-        if let Some(guest_memory) = &*self.snapshot.lock().unwrap() {
-            for region in self.snapshot_memory_regions.iter() {
-                if let Some(content) = &region.content {
-                    let mut memory_region_path = vm_memory_snapshot_path.clone();
-                    memory_region_path.push(content);
+        let guest_memory = self.guest_memory.memory();
+        for region in self.snapshot_memory_regions.iter() {
+            if let Some(content) = &region.content {
+                let mut memory_region_path = vm_memory_snapshot_path.clone();
+                memory_region_path.push(content);
 
-                    // Create the snapshot file for the region
-                    let mut memory_region_file = OpenOptions::new()
-                        .read(true)
-                        .write(true)
-                        .create_new(true)
-                        .open(memory_region_path)
-                        .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+                // Create the snapshot file for the region
+                let mut memory_region_file = OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .create_new(true)
+                    .open(memory_region_path)
+                    .map_err(|e| MigratableError::MigrateSend(e.into()))?;
 
-                    guest_memory
-                        .write_all_to(
-                            GuestAddress(region.start_addr),
-                            &mut memory_region_file,
-                            region.size as usize,
-                        )
-                        .map_err(|e| MigratableError::MigrateSend(e.into()))?;
-                }
+                guest_memory
+                    .write_all_to(
+                        GuestAddress(region.start_addr),
+                        &mut memory_region_file,
+                        region.size as usize,
+                    )
+                    .map_err(|e| MigratableError::MigrateSend(e.into()))?;
             }
         }
         Ok(())
