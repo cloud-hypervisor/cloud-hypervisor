@@ -759,7 +759,7 @@ impl MemoryManager {
         #[cfg(feature = "tdx")]
         let log_dirty = !tdx_enabled; // Cannot log dirty pages on a TD
 
-        let memory_manager = Arc::new(Mutex::new(MemoryManager {
+        let mut memory_manager = MemoryManager {
             boot_guest_memory,
             guest_memory: guest_memory.clone(),
             next_memory_slot: 0,
@@ -787,11 +787,10 @@ impl MemoryManager {
             #[cfg(feature = "acpi")]
             acpi_address,
             log_dirty,
-        }));
+        };
 
         for region in guest_memory.memory().iter() {
-            let mut mm = memory_manager.lock().unwrap();
-            let slot = mm.create_userspace_mapping(
+            let slot = memory_manager.create_userspace_mapping(
                 region.start_addr().raw_value(),
                 region.len() as u64,
                 region.as_ptr() as u64,
@@ -799,7 +798,7 @@ impl MemoryManager {
                 false,
                 log_dirty,
             )?;
-            mm.guest_ram_mappings.push(GuestRamMapping {
+            memory_manager.guest_ram_mappings.push(GuestRamMapping {
                 gpa: region.start_addr().raw_value(),
                 size: region.len(),
                 slot,
@@ -807,8 +806,7 @@ impl MemoryManager {
         }
 
         for region in virtio_mem_regions.drain(..) {
-            let mut mm = memory_manager.lock().unwrap();
-            let slot = mm.create_userspace_mapping(
+            let slot = memory_manager.create_userspace_mapping(
                 region.start_addr().raw_value(),
                 region.len() as u64,
                 region.as_ptr() as u64,
@@ -817,7 +815,7 @@ impl MemoryManager {
                 log_dirty,
             )?;
 
-            mm.guest_ram_mappings.push(GuestRamMapping {
+            memory_manager.guest_ram_mappings.push(GuestRamMapping {
                 gpa: region.start_addr().raw_value(),
                 size: region.len(),
                 slot,
@@ -827,7 +825,7 @@ impl MemoryManager {
                 .unwrap()
                 .allocate_mmio_addresses(Some(region.start_addr()), region.len(), None)
                 .ok_or(Error::MemoryRangeAllocation)?;
-            mm.add_region(region)?;
+            memory_manager.add_region(region)?;
         }
 
         // Allocate RAM and Reserved address ranges.
@@ -839,7 +837,7 @@ impl MemoryManager {
                 .ok_or(Error::MemoryRangeAllocation)?;
         }
 
-        Ok(memory_manager)
+        Ok(Arc::new(Mutex::new(memory_manager)))
     }
 
     pub fn new_from_snapshot(
