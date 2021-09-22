@@ -392,6 +392,12 @@ pub struct BlocksState {
 }
 
 impl BlocksState {
+    fn new(region_size: u64) -> Self {
+        BlocksState {
+            bitmap: vec![false; (region_size / VIRTIO_MEM_DEFAULT_BLOCK_SIZE) as usize],
+        }
+    }
+
     fn is_range_state(&self, first_block_index: usize, nb_blocks: u16, plug: bool) -> bool {
         for state in self
             .bitmap
@@ -855,9 +861,7 @@ impl Mem {
             seccomp_action,
             hugepages,
             dma_mapping_handlers: Arc::new(Mutex::new(BTreeMap::new())),
-            blocks_state: Arc::new(Mutex::new(BlocksState {
-                bitmap: vec![false; (config.region_size / config.block_size) as usize],
-            })),
+            blocks_state: Arc::new(Mutex::new(BlocksState::new(config.region_size))),
             exit_evt,
         })
     }
