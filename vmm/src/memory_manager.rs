@@ -698,11 +698,12 @@ impl MemoryManager {
 
                         virtio_mem_regions.push(region.clone());
 
+                        let hotplugged_size = zone.hotplugged_size.unwrap_or(0);
                         memory_zone.virtio_mem_zone = Some(VirtioMemZone {
                             region,
-                            resize_handler: virtio_devices::Resize::new()
+                            resize_handler: virtio_devices::Resize::new(hotplugged_size)
                                 .map_err(Error::EventFdFail)?,
-                            hotplugged_size: zone.hotplugged_size.unwrap_or(0),
+                            hotplugged_size,
                             hugepages: zone.hugepages,
                         });
 
