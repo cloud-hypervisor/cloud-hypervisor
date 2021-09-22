@@ -17,7 +17,7 @@ use vm_device::interrupt::{
 use vmm_sys_util::eventfd::EventFd;
 
 /// Reuse std::io::Result to simplify interoperability among crates.
-pub type Result<T> = std::io::Result<T>;
+pub(crate) type Result<T> = std::io::Result<T>;
 
 struct InterruptRoute {
     gsi: u32,
@@ -26,7 +26,7 @@ struct InterruptRoute {
 }
 
 impl InterruptRoute {
-    pub fn new(allocator: &mut SystemAllocator) -> Result<Self> {
+    pub(crate) fn new(allocator: &mut SystemAllocator) -> Result<Self> {
         let irq_fd = EventFd::new(libc::EFD_NONBLOCK)?;
         let gsi = allocator
             .allocate_gsi()
@@ -39,7 +39,7 @@ impl InterruptRoute {
         })
     }
 
-    pub fn enable(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
+    pub(crate) fn enable(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
         if !self.registered.load(Ordering::Acquire) {
             vm.register_irqfd(&self.irq_fd, self.gsi).map_err(|e| {
                 io::Error::new(
@@ -55,7 +55,7 @@ impl InterruptRoute {
         Ok(())
     }
 
-    pub fn disable(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
+    pub(crate) fn disable(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
         if self.registered.load(Ordering::Acquire) {
             vm.unregister_irqfd(&self.irq_fd, self.gsi).map_err(|e| {
                 io::Error::new(
@@ -71,11 +71,11 @@ impl InterruptRoute {
         Ok(())
     }
 
-    pub fn trigger(&self) -> Result<()> {
+    pub(crate) fn trigger(&self) -> Result<()> {
         self.irq_fd.write(1)
     }
 
-    pub fn notifier(&self) -> Option<EventFd> {
+    pub(crate) fn notifier(&self) -> Option<EventFd> {
         Some(
             self.irq_fd
                 .try_clone()
@@ -84,12 +84,12 @@ impl InterruptRoute {
     }
 }
 
-pub struct RoutingEntry<IrqRoutingEntry> {
+pub(crate) struct RoutingEntry<IrqRoutingEntry> {
     route: IrqRoutingEntry,
     masked: bool,
 }
 
-pub struct MsiInterruptGroup<IrqRoutingEntry> {
+pub(crate) struct MsiInterruptGroup<IrqRoutingEntry> {
     vm: Arc<dyn hypervisor::Vm>,
     gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<IrqRoutingEntry>>>>,
     irq_routes: HashMap<InterruptIndex, InterruptRoute>,
@@ -222,7 +222,7 @@ impl InterruptSourceGroup for MsiInterruptGroup<IrqRoutingEntry> {
     }
 }
 
-pub struct LegacyUserspaceInterruptGroup {
+pub(crate) struct LegacyUserspaceInterruptGroup {
     ioapic: Arc<Mutex<dyn InterruptController>>,
     irq: u32,
 }
@@ -256,24 +256,24 @@ impl InterruptSourceGroup for LegacyUserspaceInterruptGroup {
     }
 }
 
-pub struct LegacyUserspaceInterruptManager {
+pub(crate) struct LegacyUserspaceInterruptManager {
     ioapic: Arc<Mutex<dyn InterruptController>>,
 }
 
-pub struct MsiInterruptManager<IrqRoutingEntry> {
+pub(crate) struct MsiInterruptManager<IrqRoutingEntry> {
     allocator: Arc<Mutex<SystemAllocator>>,
     vm: Arc<dyn hypervisor::Vm>,
     gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<IrqRoutingEntry>>>>,
 }
 
 impl LegacyUserspaceInterruptManager {
-    pub fn new(ioapic: Arc<Mutex<dyn InterruptController>>) -> Self {
+    pub(crate) fn new(ioapic: Arc<Mutex<dyn InterruptController>>) -> Self {
         LegacyUserspaceInterruptManager { ioapic }
     }
 }
 
 impl MsiInterruptManager<IrqRoutingEntry> {
-    pub fn new(allocator: Arc<Mutex<SystemAllocator>>, vm: Arc<dyn hypervisor::Vm>) -> Self {
+    pub(crate) fn new(allocator: Arc<Mutex<SystemAllocator>>, vm: Arc<dyn hypervisor::Vm>) -> Self {
         // Create a shared list of GSI that can be shared through all PCI
         // devices. This way, we can maintain the full list of used GSI,
         // preventing one device from overriding interrupts setting from
@@ -327,16 +327,16 @@ impl InterruptManager for MsiInterruptManager<IrqRoutingEntry> {
 }
 
 #[cfg(feature = "kvm")]
-pub mod kvm {
+pub(crate) mod kvm {
     use super::*;
     use hypervisor::kvm::KVM_MSI_VALID_DEVID;
     use hypervisor::kvm::{kvm_irq_routing_entry, KVM_IRQ_ROUTING_IRQCHIP, KVM_IRQ_ROUTING_MSI};
 
     type KvmRoutingEntry = RoutingEntry<kvm_irq_routing_entry>;
-    pub type KvmMsiInterruptManager = MsiInterruptManager<kvm_irq_routing_entry>;
+    pub(crate) type KvmMsiInterruptManager = MsiInterruptManager<kvm_irq_routing_entry>;
 
     impl KvmRoutingEntry {
-        pub fn make_entry(
+        pub(crate) fn make_entry(
             vm: &Arc<dyn hypervisor::Vm>,
             gsi: u32,
             config: &InterruptSourceConfig,
@@ -388,15 +388,15 @@ pub mod kvm {
 }
 
 #[cfg(feature = "mshv")]
-pub mod mshv {
+pub(crate) mod mshv {
     use super::*;
     use hypervisor::mshv::*;
 
     type MshvRoutingEntry = RoutingEntry<mshv_msi_routing_entry>;
-    pub type MshvMsiInterruptManager = MsiInterruptManager<mshv_msi_routing_entry>;
+    pub(crate) type MshvMsiInterruptManager = MsiInterruptManager<mshv_msi_routing_entry>;
 
     impl MshvRoutingEntry {
-        pub fn make_entry(
+        pub(crate) fn make_entry(
             _vm: &Arc<dyn hypervisor::Vm>,
             gsi: u32,
             config: &InterruptSourceConfig,

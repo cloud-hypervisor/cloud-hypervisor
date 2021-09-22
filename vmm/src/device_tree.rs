@@ -9,20 +9,20 @@ use vm_device::Resource;
 use vm_migration::Migratable;
 
 #[derive(Clone, Serialize, Deserialize)]
-pub struct DeviceNode {
-    pub id: String,
-    pub resources: Vec<Resource>,
-    pub parent: Option<String>,
-    pub children: Vec<String>,
+pub(crate) struct DeviceNode {
+    pub(crate) id: String,
+    pub(crate) resources: Vec<Resource>,
+    pub(crate) parent: Option<String>,
+    pub(crate) children: Vec<String>,
     #[serde(skip)]
-    pub migratable: Option<Arc<Mutex<dyn Migratable>>>,
-    pub pci_bdf: Option<u32>,
+    pub(crate) migratable: Option<Arc<Mutex<dyn Migratable>>>,
+    pub(crate) pci_bdf: Option<u32>,
     #[serde(skip)]
-    pub pci_device_handle: Option<PciDeviceHandle>,
+    pub(crate) pci_device_handle: Option<PciDeviceHandle>,
 }
 
 impl DeviceNode {
-    pub fn new(id: String, migratable: Option<Arc<Mutex<dyn Migratable>>>) -> Self {
+    pub(crate) fn new(id: String, migratable: Option<Arc<Mutex<dyn Migratable>>>) -> Self {
         DeviceNode {
             id,
             resources: Vec::new(),
@@ -52,37 +52,37 @@ macro_rules! device_node {
 pub struct DeviceTree(HashMap<String, DeviceNode>);
 
 impl DeviceTree {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         DeviceTree(HashMap::new())
     }
-    pub fn contains_key(&self, k: &str) -> bool {
+    pub(crate) fn contains_key(&self, k: &str) -> bool {
         self.0.contains_key(k)
     }
-    pub fn get(&self, k: &str) -> Option<&DeviceNode> {
+    pub(crate) fn get(&self, k: &str) -> Option<&DeviceNode> {
         self.0.get(k)
     }
-    pub fn get_mut(&mut self, k: &str) -> Option<&mut DeviceNode> {
+    pub(crate) fn get_mut(&mut self, k: &str) -> Option<&mut DeviceNode> {
         self.0.get_mut(k)
     }
-    pub fn insert(&mut self, k: String, v: DeviceNode) -> Option<DeviceNode> {
+    pub(crate) fn insert(&mut self, k: String, v: DeviceNode) -> Option<DeviceNode> {
         self.0.insert(k, v)
     }
-    pub fn remove(&mut self, k: &str) -> Option<DeviceNode> {
+    pub(crate) fn remove(&mut self, k: &str) -> Option<DeviceNode> {
         self.0.remove(k)
     }
-    pub fn iter(&self) -> std::collections::hash_map::Iter<String, DeviceNode> {
+    pub(crate) fn iter(&self) -> std::collections::hash_map::Iter<String, DeviceNode> {
         self.0.iter()
     }
-    pub fn breadth_first_traversal(&self) -> BftIter {
+    pub(crate) fn breadth_first_traversal(&self) -> BftIter {
         BftIter::new(&self.0)
     }
-    pub fn pci_devices(&self) -> Vec<&DeviceNode> {
+    pub(crate) fn pci_devices(&self) -> Vec<&DeviceNode> {
         self.0
             .values()
             .filter(|v| v.pci_bdf.is_some() && v.pci_device_handle.is_some())
             .collect()
     }
-    pub fn remove_node_by_pci_bdf(&mut self, pci_bdf: u32) -> Option<DeviceNode> {
+    pub(crate) fn remove_node_by_pci_bdf(&mut self, pci_bdf: u32) -> Option<DeviceNode> {
         let mut id = None;
         for (k, v) in self.0.iter() {
             if let Some(bdf) = v.pci_bdf {
@@ -102,7 +102,7 @@ impl DeviceTree {
 }
 
 // Breadth first traversal iterator.
-pub struct BftIter<'a> {
+pub(crate) struct BftIter<'a> {
     nodes: Vec<&'a DeviceNode>,
 }
 

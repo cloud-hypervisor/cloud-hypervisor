@@ -266,7 +266,7 @@ pub enum Error {
     #[cfg(feature = "tdx")]
     FinalizeTdx(hypervisor::HypervisorVmError),
 }
-pub type Result<T> = result::Result<T, Error>;
+pub(crate) type Result<T> = result::Result<T, Error>;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 pub enum VmState {
@@ -322,7 +322,7 @@ const DEBUG_IOPORT_PREFIX: &str = "Debug I/O port";
 ///
 /// Since we're not a physical platform, we can freely assign code ranges for
 /// debugging specific parts of our virtual platform.
-pub enum DebugIoPortRange {
+pub(crate) enum DebugIoPortRange {
     Firmware,
     Bootloader,
     Kernel,
@@ -471,7 +471,10 @@ impl VmmOps for VmOps {
     }
 }
 
-pub fn physical_bits(max_phys_bits: Option<u8>, #[cfg(feature = "tdx")] tdx_enabled: bool) -> u8 {
+pub(crate) fn physical_bits(
+    max_phys_bits: Option<u8>,
+    #[cfg(feature = "tdx")] tdx_enabled: bool,
+) -> u8 {
     #[cfg(not(feature = "tdx"))]
     let host_phys_bits = get_host_cpu_phys_bits();
     #[cfg(feature = "tdx")]
@@ -493,7 +496,7 @@ pub fn physical_bits(max_phys_bits: Option<u8>, #[cfg(feature = "tdx")] tdx_enab
 
 pub const HANDLED_SIGNALS: [i32; 3] = [SIGWINCH, SIGTERM, SIGINT];
 
-pub struct Vm {
+pub(crate) struct Vm {
     kernel: Option<File>,
     initramfs: Option<File>,
     threads: Vec<thread::JoinHandle<()>>,
@@ -731,7 +734,7 @@ impl Vm {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub(crate) fn new(
         config: Arc<Mutex<VmConfig>>,
         exit_evt: EventFd,
         reset_evt: EventFd,
@@ -810,7 +813,7 @@ impl Vm {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn new_from_snapshot(
+    pub(crate) fn new_from_snapshot(
         snapshot: &Snapshot,
         exit_evt: EventFd,
         reset_evt: EventFd,
@@ -869,7 +872,7 @@ impl Vm {
         )
     }
 
-    pub fn new_from_migration(
+    pub(crate) fn new_from_migration(
         config: Arc<Mutex<VmConfig>>,
         exit_evt: EventFd,
         reset_evt: EventFd,
@@ -1174,19 +1177,19 @@ impl Vm {
         Ok(())
     }
 
-    pub fn serial_pty(&self) -> Option<PtyPair> {
+    pub(crate) fn serial_pty(&self) -> Option<PtyPair> {
         self.device_manager.lock().unwrap().serial_pty()
     }
 
-    pub fn console_pty(&self) -> Option<PtyPair> {
+    pub(crate) fn console_pty(&self) -> Option<PtyPair> {
         self.device_manager.lock().unwrap().console_pty()
     }
 
-    pub fn console_resize_pipe(&self) -> Option<Arc<File>> {
+    pub(crate) fn console_resize_pipe(&self) -> Option<Arc<File>> {
         self.device_manager.lock().unwrap().console_resize_pipe()
     }
 
-    pub fn shutdown(&mut self) -> Result<()> {
+    pub(crate) fn shutdown(&mut self) -> Result<()> {
         let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
         let new_state = VmState::Shutdown;
 
@@ -1230,7 +1233,7 @@ impl Vm {
         Ok(())
     }
 
-    pub fn resize(
+    pub(crate) fn resize(
         &mut self,
         desired_vcpus: Option<u8>,
         desired_memory: Option<u64>,
@@ -1318,7 +1321,7 @@ impl Vm {
         Ok(())
     }
 
-    pub fn resize_zone(&mut self, id: String, desired_memory: u64) -> Result<()> {
+    pub(crate) fn resize_zone(&mut self, id: String, desired_memory: u64) -> Result<()> {
         let memory_config = &mut self.config.lock().unwrap().memory;
 
         if let Some(zones) = &mut memory_config.zones {
@@ -1362,7 +1365,7 @@ impl Vm {
         }
     }
 
-    pub fn add_device(&mut self, mut _device_cfg: DeviceConfig) -> Result<PciDeviceInfo> {
+    pub(crate) fn add_device(&mut self, mut _device_cfg: DeviceConfig) -> Result<PciDeviceInfo> {
         {
             // Validate on a clone of the config
             let mut config = self.config.lock().unwrap().clone();
@@ -1393,7 +1396,10 @@ impl Vm {
         Ok(pci_device_info)
     }
 
-    pub fn add_user_device(&mut self, mut device_cfg: UserDeviceConfig) -> Result<PciDeviceInfo> {
+    pub(crate) fn add_user_device(
+        &mut self,
+        mut device_cfg: UserDeviceConfig,
+    ) -> Result<PciDeviceInfo> {
         {
             // Validate on a clone of the config
             let mut config = self.config.lock().unwrap().clone();
@@ -1424,7 +1430,7 @@ impl Vm {
         Ok(pci_device_info)
     }
 
-    pub fn remove_device(&mut self, _id: String) -> Result<()> {
+    pub(crate) fn remove_device(&mut self, _id: String) -> Result<()> {
         self.device_manager
             .lock()
             .unwrap()
@@ -1470,7 +1476,7 @@ impl Vm {
         Ok(())
     }
 
-    pub fn add_disk(&mut self, mut _disk_cfg: DiskConfig) -> Result<PciDeviceInfo> {
+    pub(crate) fn add_disk(&mut self, mut _disk_cfg: DiskConfig) -> Result<PciDeviceInfo> {
         {
             // Validate on a clone of the config
             let mut config = self.config.lock().unwrap().clone();
@@ -1501,7 +1507,7 @@ impl Vm {
         Ok(pci_device_info)
     }
 
-    pub fn add_fs(&mut self, mut _fs_cfg: FsConfig) -> Result<PciDeviceInfo> {
+    pub(crate) fn add_fs(&mut self, mut _fs_cfg: FsConfig) -> Result<PciDeviceInfo> {
         {
             // Validate on a clone of the config
             let mut config = self.config.lock().unwrap().clone();
@@ -1532,7 +1538,7 @@ impl Vm {
         Ok(pci_device_info)
     }
 
-    pub fn add_pmem(&mut self, mut _pmem_cfg: PmemConfig) -> Result<PciDeviceInfo> {
+    pub(crate) fn add_pmem(&mut self, mut _pmem_cfg: PmemConfig) -> Result<PciDeviceInfo> {
         {
             // Validate on a clone of the config
             let mut config = self.config.lock().unwrap().clone();
@@ -1563,7 +1569,7 @@ impl Vm {
         Ok(pci_device_info)
     }
 
-    pub fn add_net(&mut self, mut _net_cfg: NetConfig) -> Result<PciDeviceInfo> {
+    pub(crate) fn add_net(&mut self, mut _net_cfg: NetConfig) -> Result<PciDeviceInfo> {
         {
             // Validate on a clone of the config
             let mut config = self.config.lock().unwrap().clone();
@@ -1594,7 +1600,7 @@ impl Vm {
         Ok(pci_device_info)
     }
 
-    pub fn add_vsock(&mut self, mut _vsock_cfg: VsockConfig) -> Result<PciDeviceInfo> {
+    pub(crate) fn add_vsock(&mut self, mut _vsock_cfg: VsockConfig) -> Result<PciDeviceInfo> {
         if self.config.lock().unwrap().vsock.is_some() {
             return Err(Error::TooManyVsockDevices);
         }
@@ -1629,7 +1635,7 @@ impl Vm {
         Ok(pci_device_info)
     }
 
-    pub fn counters(&self) -> Result<HashMap<String, HashMap<&'static str, Wrapping<u64>>>> {
+    pub(crate) fn counters(&self) -> Result<HashMap<String, HashMap<&'static str, Wrapping<u64>>>> {
         Ok(self.device_manager.lock().unwrap().counters())
     }
 
@@ -1896,7 +1902,7 @@ impl Vm {
         Ok(())
     }
 
-    pub fn boot(&mut self) -> Result<()> {
+    pub(crate) fn boot(&mut self) -> Result<()> {
         info!("Booting VM");
         event!("vm", "booting");
         let current_state = self.get_state()?;
@@ -1972,12 +1978,12 @@ impl Vm {
     }
 
     /// Gets a thread-safe reference counted pointer to the VM configuration.
-    pub fn get_config(&self) -> Arc<Mutex<VmConfig>> {
+    pub(crate) fn get_config(&self) -> Arc<Mutex<VmConfig>> {
         Arc::clone(&self.config)
     }
 
     /// Get the VM state. Returns an error if the state is poisoned.
-    pub fn get_state(&self) -> Result<VmState> {
+    pub(crate) fn get_state(&self) -> Result<VmState> {
         self.state
             .try_read()
             .map_err(|_| Error::PoisonedState)
@@ -1986,7 +1992,7 @@ impl Vm {
 
     /// Load saved clock from snapshot
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-    pub fn load_clock_from_snapshot(
+    pub(crate) fn load_clock_from_snapshot(
         &mut self,
         snapshot: &Snapshot,
     ) -> Result<Option<hypervisor::ClockData>> {
@@ -2107,11 +2113,11 @@ impl Vm {
     }
 
     /// Gets the actual size of the balloon.
-    pub fn balloon_size(&self) -> u64 {
+    pub(crate) fn balloon_size(&self) -> u64 {
         self.device_manager.lock().unwrap().balloon_size()
     }
 
-    pub fn receive_memory_regions<F>(
+    pub(crate) fn receive_memory_regions<F>(
         &mut self,
         ranges: &MemoryRangeTable,
         fd: &mut F,
@@ -2134,7 +2140,7 @@ impl Vm {
         Ok(())
     }
 
-    pub fn send_memory_regions<F>(
+    pub(crate) fn send_memory_regions<F>(
         &mut self,
         ranges: &MemoryRangeTable,
         fd: &mut F,
@@ -2158,7 +2164,9 @@ impl Vm {
         Ok(())
     }
 
-    pub fn memory_range_table(&self) -> std::result::Result<MemoryRangeTable, MigratableError> {
+    pub(crate) fn memory_range_table(
+        &self,
+    ) -> std::result::Result<MemoryRangeTable, MigratableError> {
         let mut table = MemoryRangeTable::default();
         let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
 
@@ -2172,11 +2180,11 @@ impl Vm {
         Ok(table)
     }
 
-    pub fn device_tree(&self) -> Arc<Mutex<DeviceTree>> {
+    pub(crate) fn device_tree(&self) -> Arc<Mutex<DeviceTree>> {
         self.device_manager.lock().unwrap().device_tree()
     }
 
-    pub fn activate_virtio_devices(&self) -> Result<()> {
+    pub(crate) fn activate_virtio_devices(&self) -> Result<()> {
         self.device_manager
             .lock()
             .unwrap()
@@ -2185,7 +2193,7 @@ impl Vm {
     }
 
     #[cfg(target_arch = "x86_64")]
-    pub fn power_button(&self) -> Result<()> {
+    pub(crate) fn power_button(&self) -> Result<()> {
         #[cfg(feature = "acpi")]
         return self
             .device_manager
@@ -2198,7 +2206,7 @@ impl Vm {
     }
 
     #[cfg(target_arch = "aarch64")]
-    pub fn power_button(&self) -> Result<()> {
+    pub(crate) fn power_button(&self) -> Result<()> {
         self.device_manager
             .lock()
             .unwrap()
@@ -2270,16 +2278,16 @@ impl Pausable for Vm {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct VmSnapshot {
-    pub config: Arc<Mutex<VmConfig>>,
+pub(crate) struct VmSnapshot {
+    pub(crate) config: Arc<Mutex<VmConfig>>,
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-    pub clock: Option<hypervisor::ClockData>,
-    pub state: Option<hypervisor::VmState>,
+    pub(crate) clock: Option<hypervisor::ClockData>,
+    pub(crate) state: Option<hypervisor::VmState>,
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-    pub common_cpuid: hypervisor::CpuId,
+    pub(crate) common_cpuid: hypervisor::CpuId,
 }
 
-pub const VM_SNAPSHOT_ID: &str = "vm";
+pub(crate) const VM_SNAPSHOT_ID: &str = "vm";
 impl Snapshottable for Vm {
     fn id(&self) -> String {
         VM_SNAPSHOT_ID.to_string()
@@ -2633,7 +2641,7 @@ mod tests {
 
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 #[test]
-pub fn test_vm() {
+pub(crate) fn test_vm() {
     use hypervisor::VmExit;
     use vm_memory::{GuestMemory, GuestMemoryRegion};
     // This example based on https://lwn.net/Articles/658511/

@@ -51,7 +51,7 @@ use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::{register_signal_handler, SIGRTMIN};
 
 #[cfg(feature = "acpi")]
-pub const CPU_MANAGER_ACPI_SIZE: usize = 0xc;
+pub(crate) const CPU_MANAGER_ACPI_SIZE: usize = 0xc;
 
 #[derive(Debug)]
 pub enum Error {
@@ -105,119 +105,119 @@ pub enum Error {
     #[cfg(feature = "tdx")]
     InitializeTdx(hypervisor::HypervisorCpuError),
 }
-pub type Result<T> = result::Result<T, Error>;
+pub(crate) type Result<T> = result::Result<T, Error>;
 
 #[cfg(all(target_arch = "x86_64", feature = "acpi"))]
 #[allow(dead_code)]
 #[repr(packed)]
 struct LocalApic {
-    pub r#type: u8,
-    pub length: u8,
-    pub processor_id: u8,
-    pub apic_id: u8,
-    pub flags: u32,
+    pub(crate) r#type: u8,
+    pub(crate) length: u8,
+    pub(crate) processor_id: u8,
+    pub(crate) apic_id: u8,
+    pub(crate) flags: u32,
 }
 
 #[allow(dead_code)]
 #[repr(packed)]
 #[derive(Default)]
 struct Ioapic {
-    pub r#type: u8,
-    pub length: u8,
-    pub ioapic_id: u8,
+    pub(crate) r#type: u8,
+    pub(crate) length: u8,
+    pub(crate) ioapic_id: u8,
     _reserved: u8,
-    pub apic_address: u32,
-    pub gsi_base: u32,
+    pub(crate) apic_address: u32,
+    pub(crate) gsi_base: u32,
 }
 
 #[cfg(all(target_arch = "aarch64", feature = "acpi"))]
 #[allow(dead_code)]
 #[repr(packed)]
 struct GicC {
-    pub r#type: u8,
-    pub length: u8,
-    pub reserved0: u16,
-    pub cpu_interface_number: u32,
-    pub uid: u32,
-    pub flags: u32,
-    pub parking_version: u32,
-    pub performance_interrupt: u32,
-    pub parked_address: u64,
-    pub base_address: u64,
-    pub gicv_base_address: u64,
-    pub gich_base_address: u64,
-    pub vgic_interrupt: u32,
-    pub gicr_base_address: u64,
-    pub mpidr: u64,
-    pub proc_power_effi_class: u8,
-    pub reserved1: u8,
-    pub spe_overflow_interrupt: u16,
+    pub(crate) r#type: u8,
+    pub(crate) length: u8,
+    pub(crate) reserved0: u16,
+    pub(crate) cpu_interface_number: u32,
+    pub(crate) uid: u32,
+    pub(crate) flags: u32,
+    pub(crate) parking_version: u32,
+    pub(crate) performance_interrupt: u32,
+    pub(crate) parked_address: u64,
+    pub(crate) base_address: u64,
+    pub(crate) gicv_base_address: u64,
+    pub(crate) gich_base_address: u64,
+    pub(crate) vgic_interrupt: u32,
+    pub(crate) gicr_base_address: u64,
+    pub(crate) mpidr: u64,
+    pub(crate) proc_power_effi_class: u8,
+    pub(crate) reserved1: u8,
+    pub(crate) spe_overflow_interrupt: u16,
 }
 
 #[cfg(all(target_arch = "aarch64", feature = "acpi"))]
 #[allow(dead_code)]
 #[repr(packed)]
 struct GicD {
-    pub r#type: u8,
-    pub length: u8,
-    pub reserved0: u16,
-    pub gic_id: u32,
-    pub base_address: u64,
-    pub global_irq_base: u32,
-    pub version: u8,
-    pub reserved1: [u8; 3],
+    pub(crate) r#type: u8,
+    pub(crate) length: u8,
+    pub(crate) reserved0: u16,
+    pub(crate) gic_id: u32,
+    pub(crate) base_address: u64,
+    pub(crate) global_irq_base: u32,
+    pub(crate) version: u8,
+    pub(crate) reserved1: [u8; 3],
 }
 
 #[cfg(all(target_arch = "aarch64", feature = "acpi"))]
 #[allow(dead_code)]
 #[repr(packed)]
 struct GicR {
-    pub r#type: u8,
-    pub length: u8,
-    pub reserved: u16,
-    pub base_address: u64,
-    pub range_length: u32,
+    pub(crate) r#type: u8,
+    pub(crate) length: u8,
+    pub(crate) reserved: u16,
+    pub(crate) base_address: u64,
+    pub(crate) range_length: u32,
 }
 
 #[cfg(all(target_arch = "aarch64", feature = "acpi"))]
 #[allow(dead_code)]
 #[repr(packed)]
 struct GicIts {
-    pub r#type: u8,
-    pub length: u8,
-    pub reserved0: u16,
-    pub translation_id: u32,
-    pub base_address: u64,
-    pub reserved1: u32,
+    pub(crate) r#type: u8,
+    pub(crate) length: u8,
+    pub(crate) reserved0: u16,
+    pub(crate) translation_id: u32,
+    pub(crate) base_address: u64,
+    pub(crate) reserved1: u32,
 }
 
 #[cfg(all(target_arch = "aarch64", feature = "acpi"))]
 #[allow(dead_code)]
 #[repr(packed)]
 struct ProcessorHierarchyNode {
-    pub r#type: u8,
-    pub length: u8,
-    pub reserved: u16,
-    pub flags: u32,
-    pub parent: u32,
-    pub acpi_processor_id: u32,
-    pub num_private_resources: u32,
+    pub(crate) r#type: u8,
+    pub(crate) length: u8,
+    pub(crate) reserved: u16,
+    pub(crate) flags: u32,
+    pub(crate) parent: u32,
+    pub(crate) acpi_processor_id: u32,
+    pub(crate) num_private_resources: u32,
 }
 
 #[allow(dead_code)]
 #[repr(packed)]
 #[derive(Default)]
 struct InterruptSourceOverride {
-    pub r#type: u8,
-    pub length: u8,
-    pub bus: u8,
-    pub source: u8,
-    pub gsi: u32,
-    pub flags: u16,
+    pub(crate) r#type: u8,
+    pub(crate) length: u8,
+    pub(crate) bus: u8,
+    pub(crate) source: u8,
+    pub(crate) gsi: u32,
+    pub(crate) flags: u16,
 }
 
 /// A wrapper around creating and using a kvm-based VCPU.
-pub struct Vcpu {
+pub(crate) struct Vcpu {
     // The hypervisor abstracted CPU.
     vcpu: Arc<dyn hypervisor::Vcpu>,
     id: u8,
@@ -234,7 +234,7 @@ impl Vcpu {
     /// * `id` - Represents the CPU number between [0, max vcpus).
     /// * `vm` - The virtual machine this vcpu will get attached to.
     /// * `vmmops` - Optional object for exit handling.
-    pub fn new(
+    pub(crate) fn new(
         id: u8,
         vm: &Arc<dyn hypervisor::Vm>,
         vmmops: Option<Arc<dyn VmmOps>>,
@@ -259,7 +259,7 @@ impl Vcpu {
     /// * `kernel_entry_point` - Kernel entry point address in guest memory and boot protocol used.
     /// * `vm_memory` - Guest memory.
     /// * `cpuid` - (x86_64) CpuId, wrapper over the `kvm_cpuid2` structure.
-    pub fn configure(
+    pub(crate) fn configure(
         &mut self,
         #[cfg(target_arch = "aarch64")] vm: &Arc<dyn hypervisor::Vm>,
         kernel_entry_point: Option<EntryPoint>,
@@ -290,19 +290,19 @@ impl Vcpu {
 
     /// Gets the MPIDR register value.
     #[cfg(target_arch = "aarch64")]
-    pub fn get_mpidr(&self) -> u64 {
+    pub(crate) fn get_mpidr(&self) -> u64 {
         self.mpidr
     }
 
     /// Gets the saved vCPU state.
     #[cfg(target_arch = "aarch64")]
-    pub fn get_saved_state(&self) -> Option<CpuState> {
+    pub(crate) fn get_saved_state(&self) -> Option<CpuState> {
         self.saved_state.clone()
     }
 
     /// Initializes an aarch64 specific vcpu for booting Linux.
     #[cfg(target_arch = "aarch64")]
-    pub fn init(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
+    pub(crate) fn init(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
         let mut kvi: kvm_bindings::kvm_vcpu_init = kvm_bindings::kvm_vcpu_init::default();
 
         // This reads back the kernel's preferred target type.
@@ -321,7 +321,7 @@ impl Vcpu {
     ///
     /// Note that the state of the VCPU and associated VM must be setup first for this to do
     /// anything useful.
-    pub fn run(&self) -> std::result::Result<VmExit, HypervisorCpuError> {
+    pub(crate) fn run(&self) -> std::result::Result<VmExit, HypervisorCpuError> {
         self.vcpu.run()
     }
 }
@@ -368,7 +368,7 @@ impl Snapshottable for Vcpu {
     }
 }
 
-pub struct CpuManager {
+pub(crate) struct CpuManager {
     config: CpusConfig,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     interrupt_controller: Option<Arc<Mutex<dyn InterruptController>>>,
@@ -527,7 +527,7 @@ impl VcpuState {
 impl CpuManager {
     #[allow(unused_variables)]
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub(crate) fn new(
         config: &CpusConfig,
         device_manager: &Arc<Mutex<DeviceManager>>,
         memory_manager: &Arc<Mutex<MemoryManager>>,
@@ -895,16 +895,16 @@ impl CpuManager {
         Ok(())
     }
 
-    pub fn create_boot_vcpus(&mut self, entry_point: Option<EntryPoint>) -> Result<()> {
+    pub(crate) fn create_boot_vcpus(&mut self, entry_point: Option<EntryPoint>) -> Result<()> {
         self.create_vcpus(self.boot_vcpus(), entry_point)
     }
 
     // Starts all the vCPUs that the VM is booting with. Blocks until all vCPUs are running.
-    pub fn start_boot_vcpus(&mut self) -> Result<()> {
+    pub(crate) fn start_boot_vcpus(&mut self) -> Result<()> {
         self.activate_vcpus(self.boot_vcpus(), false)
     }
 
-    pub fn start_restored_vcpus(&mut self) -> Result<()> {
+    pub(crate) fn start_restored_vcpus(&mut self) -> Result<()> {
         let vcpu_numbers = self.vcpus.len();
         let vcpu_thread_barrier = Arc::new(Barrier::new((vcpu_numbers + 1) as usize));
         // Restore the vCPUs in "paused" state.
@@ -923,7 +923,7 @@ impl CpuManager {
         Ok(())
     }
 
-    pub fn resize(&mut self, desired_vcpus: u8) -> Result<bool> {
+    pub(crate) fn resize(&mut self, desired_vcpus: u8) -> Result<bool> {
         match desired_vcpus.cmp(&self.present_vcpus()) {
             cmp::Ordering::Greater => {
                 self.create_vcpus(desired_vcpus, None)?;
@@ -938,7 +938,7 @@ impl CpuManager {
         }
     }
 
-    pub fn shutdown(&mut self) -> Result<()> {
+    pub(crate) fn shutdown(&mut self) -> Result<()> {
         // Tell the vCPUs to stop themselves next time they go through the loop
         self.vcpus_kill_signalled.store(true, Ordering::SeqCst);
 
@@ -966,7 +966,7 @@ impl CpuManager {
     }
 
     #[cfg(feature = "tdx")]
-    pub fn initialize_tdx(&self, hob_address: u64) -> Result<()> {
+    pub(crate) fn initialize_tdx(&self, hob_address: u64) -> Result<()> {
         for vcpu in &self.vcpus {
             vcpu.lock()
                 .unwrap()
@@ -977,17 +977,12 @@ impl CpuManager {
         Ok(())
     }
 
-    pub fn boot_vcpus(&self) -> u8 {
+    pub(crate) fn boot_vcpus(&self) -> u8 {
         self.config.boot_vcpus
     }
 
-    pub fn max_vcpus(&self) -> u8 {
+    pub(crate) fn max_vcpus(&self) -> u8 {
         self.config.max_vcpus
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    pub fn common_cpuid(&self) -> CpuId {
-        self.cpuid.clone()
     }
 
     fn present_vcpus(&self) -> u8 {
@@ -997,7 +992,7 @@ impl CpuManager {
     }
 
     #[cfg(target_arch = "aarch64")]
-    pub fn get_mpidrs(&self) -> Vec<u64> {
+    pub(crate) fn get_mpidrs(&self) -> Vec<u64> {
         self.vcpus
             .iter()
             .map(|cpu| cpu.lock().unwrap().get_mpidr())
@@ -1005,7 +1000,7 @@ impl CpuManager {
     }
 
     #[cfg(target_arch = "aarch64")]
-    pub fn get_saved_states(&self) -> Vec<CpuState> {
+    pub(crate) fn get_saved_states(&self) -> Vec<CpuState> {
         self.vcpus
             .iter()
             .map(|cpu| cpu.lock().unwrap().get_saved_state().unwrap())
@@ -1013,7 +1008,7 @@ impl CpuManager {
     }
 
     #[cfg(target_arch = "aarch64")]
-    pub fn get_vcpu_topology(&self) -> Option<(u8, u8, u8)> {
+    pub(crate) fn get_vcpu_topology(&self) -> Option<(u8, u8, u8)> {
         self.config
             .topology
             .clone()
@@ -1021,7 +1016,7 @@ impl CpuManager {
     }
 
     #[cfg(feature = "acpi")]
-    pub fn create_madt(&self) -> Sdt {
+    pub(crate) fn create_madt(&self) -> Sdt {
         use crate::acpi;
         // This is also checked in the commandline parsing.
         assert!(self.config.boot_vcpus <= self.config.max_vcpus);
@@ -1151,7 +1146,7 @@ impl CpuManager {
     }
 
     #[cfg(all(target_arch = "aarch64", feature = "acpi"))]
-    pub fn create_pptt(&self) -> Sdt {
+    pub(crate) fn create_pptt(&self) -> Sdt {
         let pptt_start = 0;
         let mut cpus = 0;
         let mut uid = 0;

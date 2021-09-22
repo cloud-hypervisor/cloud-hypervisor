@@ -23,7 +23,7 @@ use vmm_sys_util::eventfd::EventFd;
 
 /// Errors associated with VMM management
 #[derive(Debug)]
-pub enum HttpError {
+pub(crate) enum HttpError {
     /// API request receive error
     SerdeJsonDeserialize(SerdeError),
 
@@ -65,9 +65,6 @@ pub enum HttpError {
 
     /// Could not restore a VM
     VmRestore(ApiError),
-
-    /// Could not act on a VM
-    VmAction(ApiError),
 
     /// Could not resize a VM
     VmResize(ApiError),
@@ -126,7 +123,7 @@ impl From<serde_json::Error> for HttpError {
 
 const HTTP_ROOT: &str = "/api/v1";
 
-pub fn error_response(error: HttpError, status: StatusCode) -> Response {
+pub(crate) fn error_response(error: HttpError, status: StatusCode) -> Response {
     let mut response = Response::new(Version::Http11, status);
     response.set_body(Body::new(format!("{:?}", error)));
 
@@ -134,7 +131,7 @@ pub fn error_response(error: HttpError, status: StatusCode) -> Response {
 }
 
 /// An HTTP endpoint handler interface
-pub trait EndpointHandler: Sync + Send {
+pub(crate) trait EndpointHandler: Sync + Send {
     /// Handles an HTTP request.
     /// After parsing the request, the handler could decide to send an
     /// associated API request down to the VMM API server to e.g. create
@@ -192,9 +189,9 @@ pub trait EndpointHandler: Sync + Send {
 }
 
 /// An HTTP routes structure.
-pub struct HttpRoutes {
+pub(crate) struct HttpRoutes {
     /// routes is a hash table mapping endpoint URIs to their endpoint handlers.
-    pub routes: HashMap<String, Box<dyn EndpointHandler + Sync + Send>>,
+    pub(crate) routes: HashMap<String, Box<dyn EndpointHandler + Sync + Send>>,
 }
 
 macro_rules! endpoint {
@@ -205,7 +202,7 @@ macro_rules! endpoint {
 
 lazy_static! {
     /// HTTP_ROUTES contain all the cloud-hypervisor HTTP routes.
-    pub static ref HTTP_ROUTES: HttpRoutes = {
+    pub(crate) static ref HTTP_ROUTES: HttpRoutes = {
         let mut r = HttpRoutes {
             routes: HashMap::new(),
         };
@@ -321,7 +318,7 @@ fn start_http_thread(
         .map_err(Error::HttpThreadSpawn)
 }
 
-pub fn start_http_path_thread(
+pub(crate) fn start_http_path_thread(
     path: &str,
     api_notifier: EventFd,
     api_sender: Sender<ApiRequest>,
@@ -336,7 +333,7 @@ pub fn start_http_path_thread(
     start_http_thread(server, api_notifier, api_sender, seccomp_action, exit_evt)
 }
 
-pub fn start_http_fd_thread(
+pub(crate) fn start_http_fd_thread(
     fd: RawFd,
     api_notifier: EventFd,
     api_sender: Sender<ApiRequest>,

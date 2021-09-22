@@ -460,7 +460,7 @@ pub enum DeviceManagerError {
     /// Failed to update memory mappings for VFIO user device
     UpdateMemoryForVfioUserPciDevice(VfioUserPciDeviceError),
 }
-pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
+pub(crate) type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
 type VirtioDeviceArc = Arc<Mutex<dyn virtio_devices::VirtioDevice>>;
 
@@ -470,7 +470,7 @@ const DEVICE_MANAGER_ACPI_SIZE: usize = 0x10;
 const TIOCSPTLCK: libc::c_int = 0x4004_5431;
 const TIOCGTPEER: libc::c_int = 0x5441;
 
-pub fn create_pty(non_blocking: bool) -> io::Result<(File, File, PathBuf)> {
+pub(crate) fn create_pty(non_blocking: bool) -> io::Result<(File, File, PathBuf)> {
     // Try to use /dev/pts/ptmx first then fall back to /dev/ptmx
     // This is done to try and use the devpts filesystem that
     // could be available for use in the process's namespace first.
@@ -520,12 +520,12 @@ pub fn create_pty(non_blocking: bool) -> io::Result<(File, File, PathBuf)> {
 }
 
 #[derive(Default)]
-pub struct Console {
+pub(crate) struct Console {
     console_resizer: Option<Arc<virtio_devices::ConsoleResizer>>,
 }
 
 impl Console {
-    pub fn update_console_size(&self) {
+    pub(crate) fn update_console_size(&self) {
         if let Some(resizer) = self.console_resizer.as_ref() {
             resizer.update_console_size()
         }
@@ -755,10 +755,10 @@ struct DeviceManagerState {
 }
 
 #[derive(Debug)]
-pub struct PtyPair {
-    pub main: File,
-    pub sub: File,
-    pub path: PathBuf,
+pub(crate) struct PtyPair {
+    pub(crate) main: File,
+    pub(crate) sub: File,
+    pub(crate) path: PathBuf,
 }
 
 impl Clone for PtyPair {
@@ -772,13 +772,13 @@ impl Clone for PtyPair {
 }
 
 #[derive(Clone)]
-pub enum PciDeviceHandle {
+pub(crate) enum PciDeviceHandle {
     Vfio(Arc<Mutex<VfioPciDevice>>),
     Virtio(Arc<Mutex<VirtioPciDevice>>),
     VfioUser(Arc<Mutex<VfioUserPciDevice>>),
 }
 
-pub struct DeviceManager {
+pub(crate) struct DeviceManager {
     // Manage address space related to devices
     address_manager: Arc<AddressManager>,
 
@@ -912,7 +912,7 @@ pub struct DeviceManager {
 
 impl DeviceManager {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub(crate) fn new(
         vm: Arc<dyn hypervisor::Vm>,
         config: Arc<Mutex<VmConfig>>,
         memory_manager: Arc<Mutex<MemoryManager>>,
@@ -1019,23 +1019,23 @@ impl DeviceManager {
         Ok(device_manager)
     }
 
-    pub fn serial_pty(&self) -> Option<PtyPair> {
+    pub(crate) fn serial_pty(&self) -> Option<PtyPair> {
         self.serial_pty
             .as_ref()
             .map(|pty| pty.lock().unwrap().clone())
     }
 
-    pub fn console_pty(&self) -> Option<PtyPair> {
+    pub(crate) fn console_pty(&self) -> Option<PtyPair> {
         self.console_pty
             .as_ref()
             .map(|pty| pty.lock().unwrap().clone())
     }
 
-    pub fn console_resize_pipe(&self) -> Option<Arc<File>> {
+    pub(crate) fn console_resize_pipe(&self) -> Option<Arc<File>> {
         self.console_resize_pipe.as_ref().map(Arc::clone)
     }
 
-    pub fn create_devices(
+    pub(crate) fn create_devices(
         &mut self,
         serial_pty: Option<PtyPair>,
         console_pty: Option<PtyPair>,
@@ -1162,7 +1162,7 @@ impl DeviceManager {
 
     #[cfg(target_arch = "aarch64")]
     /// Gets the information of the devices registered up to some point in time.
-    pub fn get_device_info(&self) -> &HashMap<(DeviceType, String), MmioDeviceInfo> {
+    pub(crate) fn get_device_info(&self) -> &HashMap<(DeviceType, String), MmioDeviceInfo> {
         &self.id_to_dev_info
     }
 
@@ -1290,7 +1290,7 @@ impl DeviceManager {
     }
 
     #[cfg(target_arch = "aarch64")]
-    pub fn get_interrupt_controller(&mut self) -> Option<&Arc<Mutex<gic::Gic>>> {
+    pub(crate) fn get_interrupt_controller(&mut self) -> Option<&Arc<Mutex<gic::Gic>>> {
         self.interrupt_controller.as_ref()
     }
 
@@ -3337,19 +3337,19 @@ impl DeviceManager {
     }
 
     #[cfg(target_arch = "x86_64")]
-    pub fn io_bus(&self) -> &Arc<Bus> {
+    pub(crate) fn io_bus(&self) -> &Arc<Bus> {
         &self.address_manager.io_bus
     }
 
-    pub fn mmio_bus(&self) -> &Arc<Bus> {
+    pub(crate) fn mmio_bus(&self) -> &Arc<Bus> {
         &self.address_manager.mmio_bus
     }
 
-    pub fn allocator(&self) -> &Arc<Mutex<SystemAllocator>> {
+    pub(crate) fn allocator(&self) -> &Arc<Mutex<SystemAllocator>> {
         &self.address_manager.allocator
     }
 
-    pub fn interrupt_controller(&self) -> Option<Arc<Mutex<dyn InterruptController>>> {
+    pub(crate) fn interrupt_controller(&self) -> Option<Arc<Mutex<dyn InterruptController>>> {
         self.interrupt_controller
             .as_ref()
             .map(|ic| ic.clone() as Arc<Mutex<dyn InterruptController>>)
@@ -3357,19 +3357,22 @@ impl DeviceManager {
 
     #[cfg(target_arch = "x86_64")]
     // Used to provide a fast path for handling PIO exits
-    pub fn pci_config_io(&self) -> Arc<Mutex<PciConfigIo>> {
+    pub(crate) fn pci_config_io(&self) -> Arc<Mutex<PciConfigIo>> {
         self.pci_config_io.clone()
     }
 
-    pub fn console(&self) -> &Arc<Console> {
+    pub(crate) fn console(&self) -> &Arc<Console> {
         &self.console
     }
 
-    pub fn cmdline_additions(&self) -> &[String] {
+    pub(crate) fn cmdline_additions(&self) -> &[String] {
         self.cmdline_additions.as_slice()
     }
 
-    pub fn update_memory(&self, new_region: &Arc<GuestRegionMmap>) -> DeviceManagerResult<()> {
+    pub(crate) fn update_memory(
+        &self,
+        new_region: &Arc<GuestRegionMmap>,
+    ) -> DeviceManagerResult<()> {
         for (virtio_device, _, _) in self.virtio_devices.iter() {
             virtio_device
                 .lock()
@@ -3414,7 +3417,7 @@ impl DeviceManager {
         Ok(())
     }
 
-    pub fn activate_virtio_devices(&self) -> DeviceManagerResult<()> {
+    pub(crate) fn activate_virtio_devices(&self) -> DeviceManagerResult<()> {
         // Find virtio pci devices and activate any pending ones
         let device_tree = self.device_tree.lock().unwrap();
         for pci_device_node in device_tree.pci_devices() {
@@ -3430,7 +3433,7 @@ impl DeviceManager {
         Ok(())
     }
 
-    pub fn notify_hotplug(
+    pub(crate) fn notify_hotplug(
         &self,
         _notification_type: AcpiNotificationFlags,
     ) -> DeviceManagerResult<()> {
@@ -3447,7 +3450,7 @@ impl DeviceManager {
         return Ok(());
     }
 
-    pub fn add_device(
+    pub(crate) fn add_device(
         &mut self,
         device_cfg: &mut DeviceConfig,
     ) -> DeviceManagerResult<PciDeviceInfo> {
@@ -3469,7 +3472,7 @@ impl DeviceManager {
         })
     }
 
-    pub fn add_user_device(
+    pub(crate) fn add_user_device(
         &mut self,
         device_cfg: &mut UserDeviceConfig,
     ) -> DeviceManagerResult<PciDeviceInfo> {
@@ -3491,7 +3494,7 @@ impl DeviceManager {
         })
     }
 
-    pub fn remove_device(&mut self, id: String) -> DeviceManagerResult<()> {
+    pub(crate) fn remove_device(&mut self, id: String) -> DeviceManagerResult<()> {
         // The node can be directly a PCI node in case the 'id' refers to a
         // VFIO device or a virtio-pci one.
         // In case the 'id' refers to a virtio device, we must find the PCI
@@ -3547,7 +3550,7 @@ impl DeviceManager {
         Ok(())
     }
 
-    pub fn eject_device(&mut self, device_id: u8) -> DeviceManagerResult<()> {
+    pub(crate) fn eject_device(&mut self, device_id: u8) -> DeviceManagerResult<()> {
         // Retrieve the PCI bus.
         let pci = if let Some(pci_bus) = &self.pci_bus {
             Arc::clone(pci_bus)
@@ -3713,32 +3716,44 @@ impl DeviceManager {
         Ok(PciDeviceInfo { id, bdf: device_id })
     }
 
-    pub fn add_disk(&mut self, disk_cfg: &mut DiskConfig) -> DeviceManagerResult<PciDeviceInfo> {
+    pub(crate) fn add_disk(
+        &mut self,
+        disk_cfg: &mut DiskConfig,
+    ) -> DeviceManagerResult<PciDeviceInfo> {
         let (device, iommu_attached, id) = self.make_virtio_block_device(disk_cfg)?;
         self.hotplug_virtio_pci_device(device, iommu_attached, id)
     }
 
-    pub fn add_fs(&mut self, fs_cfg: &mut FsConfig) -> DeviceManagerResult<PciDeviceInfo> {
+    pub(crate) fn add_fs(&mut self, fs_cfg: &mut FsConfig) -> DeviceManagerResult<PciDeviceInfo> {
         let (device, iommu_attached, id) = self.make_virtio_fs_device(fs_cfg)?;
         self.hotplug_virtio_pci_device(device, iommu_attached, id)
     }
 
-    pub fn add_pmem(&mut self, pmem_cfg: &mut PmemConfig) -> DeviceManagerResult<PciDeviceInfo> {
+    pub(crate) fn add_pmem(
+        &mut self,
+        pmem_cfg: &mut PmemConfig,
+    ) -> DeviceManagerResult<PciDeviceInfo> {
         let (device, iommu_attached, id) = self.make_virtio_pmem_device(pmem_cfg)?;
         self.hotplug_virtio_pci_device(device, iommu_attached, id)
     }
 
-    pub fn add_net(&mut self, net_cfg: &mut NetConfig) -> DeviceManagerResult<PciDeviceInfo> {
+    pub(crate) fn add_net(
+        &mut self,
+        net_cfg: &mut NetConfig,
+    ) -> DeviceManagerResult<PciDeviceInfo> {
         let (device, iommu_attached, id) = self.make_virtio_net_device(net_cfg)?;
         self.hotplug_virtio_pci_device(device, iommu_attached, id)
     }
 
-    pub fn add_vsock(&mut self, vsock_cfg: &mut VsockConfig) -> DeviceManagerResult<PciDeviceInfo> {
+    pub(crate) fn add_vsock(
+        &mut self,
+        vsock_cfg: &mut VsockConfig,
+    ) -> DeviceManagerResult<PciDeviceInfo> {
         let (device, iommu_attached, id) = self.make_virtio_vsock_device(vsock_cfg)?;
         self.hotplug_virtio_pci_device(device, iommu_attached, id)
     }
 
-    pub fn counters(&self) -> HashMap<String, HashMap<&'static str, Wrapping<u64>>> {
+    pub(crate) fn counters(&self) -> HashMap<String, HashMap<&'static str, Wrapping<u64>>> {
         let mut counters = HashMap::new();
 
         for (virtio_device, _, id) in &self.virtio_devices {
@@ -3751,7 +3766,7 @@ impl DeviceManager {
         counters
     }
 
-    pub fn resize_balloon(&mut self, size: u64) -> DeviceManagerResult<()> {
+    pub(crate) fn resize_balloon(&mut self, size: u64) -> DeviceManagerResult<()> {
         if let Some(balloon) = &self.balloon {
             return balloon
                 .lock()
@@ -3764,7 +3779,7 @@ impl DeviceManager {
         Err(DeviceManagerError::MissingVirtioBalloon)
     }
 
-    pub fn balloon_size(&self) -> u64 {
+    pub(crate) fn balloon_size(&self) -> u64 {
         if let Some(balloon) = &self.balloon {
             return balloon.lock().unwrap().get_actual();
         }
@@ -3772,11 +3787,11 @@ impl DeviceManager {
         0
     }
 
-    pub fn device_tree(&self) -> Arc<Mutex<DeviceTree>> {
+    pub(crate) fn device_tree(&self) -> Arc<Mutex<DeviceTree>> {
         self.device_tree.clone()
     }
 
-    pub fn restore_devices(
+    pub(crate) fn restore_devices(
         &mut self,
         snapshot: Snapshot,
     ) -> std::result::Result<(), MigratableError> {
@@ -3815,7 +3830,7 @@ impl DeviceManager {
 
     #[cfg(feature = "acpi")]
     #[cfg(target_arch = "x86_64")]
-    pub fn notify_power_button(&self) -> DeviceManagerResult<()> {
+    pub(crate) fn notify_power_button(&self) -> DeviceManagerResult<()> {
         self.ged_notification_device
             .as_ref()
             .unwrap()
@@ -3826,7 +3841,7 @@ impl DeviceManager {
     }
 
     #[cfg(target_arch = "aarch64")]
-    pub fn notify_power_button(&self) -> DeviceManagerResult<()> {
+    pub(crate) fn notify_power_button(&self) -> DeviceManagerResult<()> {
         // There are three use cases:
         // 1. The Cloud Hypervisor is built without feature acpi.
         // 2. The Cloud Hypervisor is built with feature acpi, but users will
@@ -3866,7 +3881,7 @@ impl DeviceManager {
         }
     }
 
-    pub fn iommu_attached_devices(&self) -> &Option<(u32, Vec<u32>)> {
+    pub(crate) fn iommu_attached_devices(&self) -> &Option<(u32, Vec<u32>)> {
         &self.iommu_attached_devices
     }
 }

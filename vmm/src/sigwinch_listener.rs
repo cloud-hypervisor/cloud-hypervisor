@@ -105,7 +105,7 @@ fn sigwinch_listener_main(seccomp_filter: BpfProgram, tx: File, tty: &File) -> !
     exit(0);
 }
 
-pub fn start_sigwinch_listener(seccomp_filter: BpfProgram, pty: &File) -> io::Result<File> {
+pub(crate) fn start_sigwinch_listener(seccomp_filter: BpfProgram, pty: &File) -> io::Result<File> {
     let mut pipe = [-1; 2];
     if unsafe { pipe2(pipe.as_mut_ptr(), O_CLOEXEC) } == -1 {
         return Err(io::Error::last_os_error());

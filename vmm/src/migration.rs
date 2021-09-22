@@ -9,9 +9,9 @@ use std::io::BufReader;
 use std::path::PathBuf;
 use vm_migration::{MigratableError, Snapshot};
 
-pub const VM_SNAPSHOT_FILE: &str = "vm.json";
+pub(crate) const VM_SNAPSHOT_FILE: &str = "vm.json";
 
-pub fn url_to_path(url: &str) -> std::result::Result<PathBuf, MigratableError> {
+pub(crate) fn url_to_path(url: &str) -> std::result::Result<PathBuf, MigratableError> {
     let path: PathBuf = url
         .strip_prefix("file://")
         .ok_or_else(|| {
@@ -28,7 +28,7 @@ pub fn url_to_path(url: &str) -> std::result::Result<PathBuf, MigratableError> {
     Ok(path)
 }
 
-pub fn recv_vm_snapshot(source_url: &str) -> std::result::Result<Snapshot, MigratableError> {
+pub(crate) fn recv_vm_snapshot(source_url: &str) -> std::result::Result<Snapshot, MigratableError> {
     let mut vm_snapshot_path = url_to_path(source_url)?;
 
     vm_snapshot_path.push(VM_SNAPSHOT_FILE);
@@ -43,7 +43,9 @@ pub fn recv_vm_snapshot(source_url: &str) -> std::result::Result<Snapshot, Migra
     Ok(vm_snapshot)
 }
 
-pub fn get_vm_snapshot(snapshot: &Snapshot) -> std::result::Result<VmSnapshot, MigratableError> {
+pub(crate) fn get_vm_snapshot(
+    snapshot: &Snapshot,
+) -> std::result::Result<VmSnapshot, MigratableError> {
     if let Some(vm_section) = snapshot
         .snapshot_data
         .get(&format!("{}-section", VM_SNAPSHOT_ID))

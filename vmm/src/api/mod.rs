@@ -28,11 +28,11 @@
 //!    response channel Receiver.
 //! 5. The thread handles the response and forwards potential errors.
 
-pub use self::http::start_http_fd_thread;
-pub use self::http::start_http_path_thread;
+pub(crate) use self::http::start_http_fd_thread;
+pub(crate) use self::http::start_http_path_thread;
 
-pub mod http;
-pub mod http_endpoint;
+pub(crate) mod http;
+pub(crate) mod http_endpoint;
 
 use crate::config::UserDeviceConfig;
 use crate::config::{
@@ -146,7 +146,7 @@ pub enum ApiError {
     /// Error triggering power button
     VmPowerButton(VmError),
 }
-pub type ApiResult<T> = std::result::Result<T, ApiError>;
+pub(crate) type ApiResult<T> = std::result::Result<T, ApiError>;
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct VmInfo {
@@ -331,7 +331,7 @@ pub fn vm_create(
 /// Represents a VM related action.
 /// This is mostly used to factorize code between VM routines
 /// that only differ by the IPC command they send.
-pub enum VmAction {
+pub(crate) enum VmAction {
     /// Boot a VM
     Boot,
 
@@ -449,38 +449,56 @@ pub fn vm_boot(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<Op
     vm_action(api_evt, api_sender, VmAction::Boot)
 }
 
-pub fn vm_delete(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<Option<Body>> {
+pub(crate) fn vm_delete(
+    api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
+) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::Delete)
 }
 
-pub fn vm_shutdown(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<Option<Body>> {
+pub(crate) fn vm_shutdown(
+    api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
+) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::Shutdown)
 }
 
-pub fn vm_reboot(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<Option<Body>> {
+pub(crate) fn vm_reboot(
+    api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
+) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::Reboot)
 }
 
-pub fn vm_pause(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<Option<Body>> {
+pub(crate) fn vm_pause(
+    api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
+) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::Pause)
 }
 
-pub fn vm_resume(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<Option<Body>> {
+pub(crate) fn vm_resume(
+    api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
+) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::Resume)
 }
 
-pub fn vm_counters(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<Option<Body>> {
+pub(crate) fn vm_counters(
+    api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
+) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::Counters)
 }
 
-pub fn vm_power_button(
+pub(crate) fn vm_power_button(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
 ) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::PowerButton)
 }
 
-pub fn vm_receive_migration(
+pub(crate) fn vm_receive_migration(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
     data: Arc<VmReceiveMigrationData>,
@@ -488,7 +506,7 @@ pub fn vm_receive_migration(
     vm_action(api_evt, api_sender, VmAction::ReceiveMigration(data))
 }
 
-pub fn vm_send_migration(
+pub(crate) fn vm_send_migration(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
     data: Arc<VmSendMigrationData>,
@@ -496,7 +514,7 @@ pub fn vm_send_migration(
     vm_action(api_evt, api_sender, VmAction::SendMigration(data))
 }
 
-pub fn vm_snapshot(
+pub(crate) fn vm_snapshot(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
     data: Arc<VmSnapshotConfig>,
@@ -512,7 +530,7 @@ pub fn vm_restore(
     vm_action(api_evt, api_sender, VmAction::Restore(data))
 }
 
-pub fn vm_info(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<VmInfo> {
+pub(crate) fn vm_info(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<VmInfo> {
     let (response_sender, response_receiver) = channel();
 
     // Send the VM request.
@@ -529,7 +547,10 @@ pub fn vm_info(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<Vm
     }
 }
 
-pub fn vmm_ping(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<VmmPingResponse> {
+pub(crate) fn vmm_ping(
+    api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
+) -> ApiResult<VmmPingResponse> {
     let (response_sender, response_receiver) = channel();
 
     api_sender
@@ -545,7 +566,7 @@ pub fn vmm_ping(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<V
     }
 }
 
-pub fn vmm_shutdown(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<()> {
+pub(crate) fn vmm_shutdown(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<()> {
     let (response_sender, response_receiver) = channel();
 
     // Send the VMM shutdown request.
@@ -559,7 +580,7 @@ pub fn vmm_shutdown(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResu
     Ok(())
 }
 
-pub fn vm_resize(
+pub(crate) fn vm_resize(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
     data: Arc<VmResizeData>,
@@ -567,7 +588,7 @@ pub fn vm_resize(
     vm_action(api_evt, api_sender, VmAction::Resize(data))
 }
 
-pub fn vm_resize_zone(
+pub(crate) fn vm_resize_zone(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
     data: Arc<VmResizeZoneData>,
@@ -575,7 +596,7 @@ pub fn vm_resize_zone(
     vm_action(api_evt, api_sender, VmAction::ResizeZone(data))
 }
 
-pub fn vm_add_device(
+pub(crate) fn vm_add_device(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
     data: Arc<DeviceConfig>,
@@ -583,7 +604,7 @@ pub fn vm_add_device(
     vm_action(api_evt, api_sender, VmAction::AddDevice(data))
 }
 
-pub fn vm_add_user_device(
+pub(crate) fn vm_add_user_device(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
     data: Arc<UserDeviceConfig>,
@@ -591,7 +612,7 @@ pub fn vm_add_user_device(
     vm_action(api_evt, api_sender, VmAction::AddUserDevice(data))
 }
 
-pub fn vm_remove_device(
+pub(crate) fn vm_remove_device(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
     data: Arc<VmRemoveDeviceData>,
@@ -599,7 +620,7 @@ pub fn vm_remove_device(
     vm_action(api_evt, api_sender, VmAction::RemoveDevice(data))
 }
 
-pub fn vm_add_disk(
+pub(crate) fn vm_add_disk(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
     data: Arc<DiskConfig>,
@@ -607,7 +628,7 @@ pub fn vm_add_disk(
     vm_action(api_evt, api_sender, VmAction::AddDisk(data))
 }
 
-pub fn vm_add_fs(
+pub(crate) fn vm_add_fs(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
     data: Arc<FsConfig>,
@@ -615,7 +636,7 @@ pub fn vm_add_fs(
     vm_action(api_evt, api_sender, VmAction::AddFs(data))
 }
 
-pub fn vm_add_pmem(
+pub(crate) fn vm_add_pmem(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
     data: Arc<PmemConfig>,
@@ -623,7 +644,7 @@ pub fn vm_add_pmem(
     vm_action(api_evt, api_sender, VmAction::AddPmem(data))
 }
 
-pub fn vm_add_net(
+pub(crate) fn vm_add_net(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
     data: Arc<NetConfig>,
@@ -631,7 +652,7 @@ pub fn vm_add_net(
     vm_action(api_evt, api_sender, VmAction::AddNet(data))
 }
 
-pub fn vm_add_vsock(
+pub(crate) fn vm_add_vsock(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
     data: Arc<VsockConfig>,

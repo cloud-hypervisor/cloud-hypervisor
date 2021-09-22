@@ -10,7 +10,7 @@ use seccompiler::{
 };
 use std::convert::TryInto;
 
-pub enum Thread {
+pub(crate) enum Thread {
     Api,
     SignalHandler,
     Vcpu,
@@ -83,33 +83,33 @@ const VFIO_DEVICE_IOEVENTFD: u64 = 0x3b74;
 // See include/uapi/linux/kvm.h in the kernel code.
 #[cfg(feature = "kvm")]
 mod kvm {
-    pub const KVM_GET_API_VERSION: u64 = 0xae00;
-    pub const KVM_CREATE_VM: u64 = 0xae01;
-    pub const KVM_CHECK_EXTENSION: u64 = 0xae03;
-    pub const KVM_GET_VCPU_MMAP_SIZE: u64 = 0xae04;
-    pub const KVM_CREATE_VCPU: u64 = 0xae41;
-    pub const KVM_CREATE_IRQCHIP: u64 = 0xae60;
-    pub const KVM_RUN: u64 = 0xae80;
-    pub const KVM_SET_MP_STATE: u64 = 0x4004_ae99;
-    pub const KVM_SET_GSI_ROUTING: u64 = 0x4008_ae6a;
-    pub const KVM_SET_DEVICE_ATTR: u64 = 0x4018_aee1;
-    pub const KVM_SET_ONE_REG: u64 = 0x4010_aeac;
-    pub const KVM_SET_USER_MEMORY_REGION: u64 = 0x4020_ae46;
-    pub const KVM_IRQFD: u64 = 0x4020_ae76;
-    pub const KVM_IOEVENTFD: u64 = 0x4040_ae79;
-    pub const KVM_SET_VCPU_EVENTS: u64 = 0x4040_aea0;
-    pub const KVM_ENABLE_CAP: u64 = 0x4068_aea3;
-    pub const KVM_SET_REGS: u64 = 0x4090_ae82;
-    pub const KVM_GET_MP_STATE: u64 = 0x8004_ae98;
-    pub const KVM_GET_DEVICE_ATTR: u64 = 0x4018_aee2;
-    pub const KVM_GET_DIRTY_LOG: u64 = 0x4010_ae42;
-    pub const KVM_GET_VCPU_EVENTS: u64 = 0x8040_ae9f;
-    pub const KVM_GET_ONE_REG: u64 = 0x4010_aeab;
-    pub const KVM_GET_REGS: u64 = 0x8090_ae81;
-    pub const KVM_GET_SUPPORTED_CPUID: u64 = 0xc008_ae05;
-    pub const KVM_CREATE_DEVICE: u64 = 0xc00c_aee0;
-    pub const KVM_GET_REG_LIST: u64 = 0xc008_aeb0;
-    pub const KVM_MEMORY_ENCRYPT_OP: u64 = 0xc008_aeba;
+    pub(crate) const KVM_GET_API_VERSION: u64 = 0xae00;
+    pub(crate) const KVM_CREATE_VM: u64 = 0xae01;
+    pub(crate) const KVM_CHECK_EXTENSION: u64 = 0xae03;
+    pub(crate) const KVM_GET_VCPU_MMAP_SIZE: u64 = 0xae04;
+    pub(crate) const KVM_CREATE_VCPU: u64 = 0xae41;
+    pub(crate) const KVM_CREATE_IRQCHIP: u64 = 0xae60;
+    pub(crate) const KVM_RUN: u64 = 0xae80;
+    pub(crate) const KVM_SET_MP_STATE: u64 = 0x4004_ae99;
+    pub(crate) const KVM_SET_GSI_ROUTING: u64 = 0x4008_ae6a;
+    pub(crate) const KVM_SET_DEVICE_ATTR: u64 = 0x4018_aee1;
+    pub(crate) const KVM_SET_ONE_REG: u64 = 0x4010_aeac;
+    pub(crate) const KVM_SET_USER_MEMORY_REGION: u64 = 0x4020_ae46;
+    pub(crate) const KVM_IRQFD: u64 = 0x4020_ae76;
+    pub(crate) const KVM_IOEVENTFD: u64 = 0x4040_ae79;
+    pub(crate) const KVM_SET_VCPU_EVENTS: u64 = 0x4040_aea0;
+    pub(crate) const KVM_ENABLE_CAP: u64 = 0x4068_aea3;
+    pub(crate) const KVM_SET_REGS: u64 = 0x4090_ae82;
+    pub(crate) const KVM_GET_MP_STATE: u64 = 0x8004_ae98;
+    pub(crate) const KVM_GET_DEVICE_ATTR: u64 = 0x4018_aee2;
+    pub(crate) const KVM_GET_DIRTY_LOG: u64 = 0x4010_ae42;
+    pub(crate) const KVM_GET_VCPU_EVENTS: u64 = 0x8040_ae9f;
+    pub(crate) const KVM_GET_ONE_REG: u64 = 0x4010_aeab;
+    pub(crate) const KVM_GET_REGS: u64 = 0x8090_ae81;
+    pub(crate) const KVM_GET_SUPPORTED_CPUID: u64 = 0xc008_ae05;
+    pub(crate) const KVM_CREATE_DEVICE: u64 = 0xc00c_aee0;
+    pub(crate) const KVM_GET_REG_LIST: u64 = 0xc008_aeb0;
+    pub(crate) const KVM_MEMORY_ENCRYPT_OP: u64 = 0xc008_aeba;
 }
 
 #[cfg(feature = "kvm")]
@@ -118,22 +118,22 @@ use kvm::*;
 // MSHV IOCTL code. This is unstable until the kernel code has been declared stable.
 #[cfg(feature = "mshv")]
 mod mshv {
-    pub const MSHV_GET_API_VERSION: u64 = 0xb800;
-    pub const MSHV_CREATE_VM: u64 = 0x4028_b801;
-    pub const MSHV_MAP_GUEST_MEMORY: u64 = 0x4020_b802;
-    pub const MSHV_UNMAP_GUEST_MEMORY: u64 = 0x4020_b803;
-    pub const MSHV_CREATE_VP: u64 = 0x4004_b804;
-    pub const MSHV_IRQFD: u64 = 0x4010_b80e;
-    pub const MSHV_IOEVENTFD: u64 = 0x4020_b80f;
-    pub const MSHV_SET_MSI_ROUTING: u64 = 0x4008_b811;
-    pub const MSHV_GET_VP_REGISTERS: u64 = 0xc010_b805;
-    pub const MSHV_SET_VP_REGISTERS: u64 = 0x4010_b806;
-    pub const MSHV_RUN_VP: u64 = 0x8100_b807;
-    pub const MSHV_GET_VP_STATE: u64 = 0xc028_b80a;
-    pub const MSHV_SET_VP_STATE: u64 = 0xc028_b80b;
-    pub const MSHV_SET_PARTITION_PROPERTY: u64 = 0x4010_b80c;
-    pub const MSHV_GET_GPA_ACCESS_STATES: u64 = 0xc01c_b812;
-    pub const MSHV_VP_TRANSLATE_GVA: u64 = 0xc020_b80e;
+    pub(crate) const MSHV_GET_API_VERSION: u64 = 0xb800;
+    pub(crate) const MSHV_CREATE_VM: u64 = 0x4028_b801;
+    pub(crate) const MSHV_MAP_GUEST_MEMORY: u64 = 0x4020_b802;
+    pub(crate) const MSHV_UNMAP_GUEST_MEMORY: u64 = 0x4020_b803;
+    pub(crate) const MSHV_CREATE_VP: u64 = 0x4004_b804;
+    pub(crate) const MSHV_IRQFD: u64 = 0x4010_b80e;
+    pub(crate) const MSHV_IOEVENTFD: u64 = 0x4020_b80f;
+    pub(crate) const MSHV_SET_MSI_ROUTING: u64 = 0x4008_b811;
+    pub(crate) const MSHV_GET_VP_REGISTERS: u64 = 0xc010_b805;
+    pub(crate) const MSHV_SET_VP_REGISTERS: u64 = 0x4010_b806;
+    pub(crate) const MSHV_RUN_VP: u64 = 0x8100_b807;
+    pub(crate) const MSHV_GET_VP_STATE: u64 = 0xc028_b80a;
+    pub(crate) const MSHV_SET_VP_STATE: u64 = 0xc028_b80b;
+    pub(crate) const MSHV_SET_PARTITION_PROPERTY: u64 = 0x4010_b80c;
+    pub(crate) const MSHV_GET_GPA_ACCESS_STATES: u64 = 0xc01c_b812;
+    pub(crate) const MSHV_VP_TRANSLATE_GVA: u64 = 0xc020_b80e;
 }
 #[cfg(feature = "mshv")]
 use mshv::*;
@@ -663,7 +663,7 @@ fn get_seccomp_rules(thread_type: Thread) -> Result<Vec<(i64, Vec<SeccompRule>)>
 }
 
 /// Generate a BPF program based on the seccomp_action value
-pub fn get_seccomp_filter(
+pub(crate) fn get_seccomp_filter(
     seccomp_action: &SeccompAction,
     thread_type: Thread,
 ) -> Result<BpfProgram, Error> {

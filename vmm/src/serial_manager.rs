@@ -49,11 +49,11 @@ pub enum Error {
     #[error("Error spawning SerialManager thread: {0}")]
     SpawnSerialManager(#[source] io::Error),
 }
-pub type Result<T> = result::Result<T, Error>;
+pub(crate) type Result<T> = result::Result<T, Error>;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u64)]
-pub enum EpollDispatch {
+pub(crate) enum EpollDispatch {
     File = 0,
     Kill = 1,
     Unknown,
@@ -70,7 +70,7 @@ impl From<u64> for EpollDispatch {
     }
 }
 
-pub struct SerialManager {
+pub(crate) struct SerialManager {
     #[cfg(target_arch = "x86_64")]
     serial: Arc<Mutex<Serial>>,
     #[cfg(target_arch = "aarch64")]
@@ -82,7 +82,7 @@ pub struct SerialManager {
 }
 
 impl SerialManager {
-    pub fn new(
+    pub(crate) fn new(
         #[cfg(target_arch = "x86_64")] serial: Arc<Mutex<Serial>>,
         #[cfg(target_arch = "aarch64")] serial: Arc<Mutex<Pl011>>,
         pty_pair: Option<Arc<Mutex<PtyPair>>>,
@@ -154,7 +154,7 @@ impl SerialManager {
         }))
     }
 
-    pub fn start_thread(&mut self, exit_evt: EventFd) -> Result<()> {
+    pub(crate) fn start_thread(&mut self, exit_evt: EventFd) -> Result<()> {
         // Don't allow this to be run if the handle exists
         if self.handle.is_some() {
             warn!("Tried to start multiple SerialManager threads, ignoring");

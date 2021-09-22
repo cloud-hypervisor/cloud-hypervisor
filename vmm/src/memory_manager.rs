@@ -46,7 +46,7 @@ use vm_migration::{
 };
 
 #[cfg(feature = "acpi")]
-pub const MEMORY_MANAGER_ACPI_SIZE: usize = 0x18;
+pub(crate) const MEMORY_MANAGER_ACPI_SIZE: usize = 0x18;
 
 const DEFAULT_MEMORY_ZONE: &str = "mem0";
 
@@ -69,7 +69,7 @@ struct HotPlugState {
     removing: bool,
 }
 
-pub struct VirtioMemZone {
+pub(crate) struct VirtioMemZone {
     region: Arc<GuestRegionMmap>,
     resize_handler: virtio_devices::Resize,
     hotplugged_size: u64,
@@ -77,36 +77,36 @@ pub struct VirtioMemZone {
 }
 
 impl VirtioMemZone {
-    pub fn region(&self) -> &Arc<GuestRegionMmap> {
+    pub(crate) fn region(&self) -> &Arc<GuestRegionMmap> {
         &self.region
     }
-    pub fn resize_handler(&self) -> &virtio_devices::Resize {
+    pub(crate) fn resize_handler(&self) -> &virtio_devices::Resize {
         &self.resize_handler
     }
-    pub fn hotplugged_size(&self) -> u64 {
+    pub(crate) fn hotplugged_size(&self) -> u64 {
         self.hotplugged_size
     }
-    pub fn hugepages(&self) -> bool {
+    pub(crate) fn hugepages(&self) -> bool {
         self.hugepages
     }
 }
 
 #[derive(Default)]
-pub struct MemoryZone {
+pub(crate) struct MemoryZone {
     regions: Vec<Arc<GuestRegionMmap>>,
     virtio_mem_zone: Option<VirtioMemZone>,
 }
 
 impl MemoryZone {
-    pub fn regions(&self) -> &Vec<Arc<GuestRegionMmap>> {
+    pub(crate) fn regions(&self) -> &Vec<Arc<GuestRegionMmap>> {
         &self.regions
     }
-    pub fn virtio_mem_zone(&self) -> &Option<VirtioMemZone> {
+    pub(crate) fn virtio_mem_zone(&self) -> &Option<VirtioMemZone> {
         &self.virtio_mem_zone
     }
 }
 
-pub type MemoryZones = HashMap<String, MemoryZone>;
+pub(crate) type MemoryZones = HashMap<String, MemoryZone>;
 
 struct GuestRamMapping {
     slot: u32,
@@ -114,13 +114,13 @@ struct GuestRamMapping {
     size: u64,
 }
 
-pub struct MemoryManager {
+pub(crate) struct MemoryManager {
     boot_guest_memory: GuestMemoryMmap,
     guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
     next_memory_slot: u32,
     start_of_device_area: GuestAddress,
     end_of_device_area: GuestAddress,
-    pub vm: Arc<dyn hypervisor::Vm>,
+    pub(crate) vm: Arc<dyn hypervisor::Vm>,
     hotplug_slots: Vec<HotPlugState>,
     selected_slot: usize,
     mergeable: bool,
@@ -146,7 +146,7 @@ pub struct MemoryManager {
     guest_ram_mappings: Vec<GuestRamMapping>,
 
     #[cfg(feature = "acpi")]
-    pub acpi_address: GuestAddress,
+    pub(crate) acpi_address: GuestAddress,
 }
 
 #[derive(Debug)]
@@ -510,7 +510,7 @@ impl MemoryManager {
         Ok(())
     }
 
-    pub fn new(
+    pub(crate) fn new(
         vm: Arc<dyn hypervisor::Vm>,
         config: &MemoryConfig,
         prefault: bool,
@@ -842,7 +842,7 @@ impl MemoryManager {
         Ok(memory_manager)
     }
 
-    pub fn new_from_snapshot(
+    pub(crate) fn new_from_snapshot(
         snapshot: &Snapshot,
         vm: Arc<dyn hypervisor::Vm>,
         config: &MemoryConfig,
@@ -1096,7 +1096,7 @@ impl MemoryManager {
         Ok(start_addr)
     }
 
-    pub fn add_ram_region(
+    pub(crate) fn add_ram_region(
         &mut self,
         start_addr: GuestAddress,
         size: usize,
@@ -1180,33 +1180,33 @@ impl MemoryManager {
         Ok(region)
     }
 
-    pub fn guest_memory(&self) -> GuestMemoryAtomic<GuestMemoryMmap> {
+    pub(crate) fn guest_memory(&self) -> GuestMemoryAtomic<GuestMemoryMmap> {
         self.guest_memory.clone()
     }
 
-    pub fn boot_guest_memory(&self) -> GuestMemoryMmap {
+    pub(crate) fn boot_guest_memory(&self) -> GuestMemoryMmap {
         self.boot_guest_memory.clone()
     }
 
-    pub fn allocator(&self) -> Arc<Mutex<SystemAllocator>> {
+    pub(crate) fn allocator(&self) -> Arc<Mutex<SystemAllocator>> {
         self.allocator.clone()
     }
 
-    pub fn start_of_device_area(&self) -> GuestAddress {
+    pub(crate) fn start_of_device_area(&self) -> GuestAddress {
         self.start_of_device_area
     }
 
-    pub fn end_of_device_area(&self) -> GuestAddress {
+    pub(crate) fn end_of_device_area(&self) -> GuestAddress {
         self.end_of_device_area
     }
 
-    pub fn allocate_memory_slot(&mut self) -> u32 {
+    pub(crate) fn allocate_memory_slot(&mut self) -> u32 {
         let slot_id = self.next_memory_slot;
         self.next_memory_slot += 1;
         slot_id
     }
 
-    pub fn create_userspace_mapping(
+    pub(crate) fn create_userspace_mapping(
         &mut self,
         guest_phys_addr: u64,
         memory_size: u64,
@@ -1262,7 +1262,7 @@ impl MemoryManager {
         Ok(slot)
     }
 
-    pub fn remove_userspace_mapping(
+    pub(crate) fn remove_userspace_mapping(
         &mut self,
         guest_phys_addr: u64,
         memory_size: u64,
@@ -1317,7 +1317,7 @@ impl MemoryManager {
         Ok(())
     }
 
-    pub fn virtio_mem_resize(&mut self, id: &str, size: u64) -> Result<(), Error> {
+    pub(crate) fn virtio_mem_resize(&mut self, id: &str, size: u64) -> Result<(), Error> {
         if let Some(memory_zone) = self.memory_zones.get_mut(id) {
             if let Some(virtio_mem_zone) = memory_zone.virtio_mem_zone() {
                 virtio_mem_zone
@@ -1340,7 +1340,10 @@ impl MemoryManager {
     /// guest memory, the new region is returned to the caller. The virtio-mem
     /// use case never adds a new region as the whole hotpluggable memory has
     /// already been allocated at boot time.
-    pub fn resize(&mut self, desired_ram: u64) -> Result<Option<Arc<GuestRegionMmap>>, Error> {
+    pub(crate) fn resize(
+        &mut self,
+        desired_ram: u64,
+    ) -> Result<Option<Arc<GuestRegionMmap>>, Error> {
         if self.user_provided_zones {
             error!(
                 "Not allowed to resize guest memory when backed with user \
@@ -1368,7 +1371,7 @@ impl MemoryManager {
         Ok(region)
     }
 
-    pub fn resize_zone(&mut self, id: &str, virtio_mem_size: u64) -> Result<(), Error> {
+    pub(crate) fn resize_zone(&mut self, id: &str, virtio_mem_size: u64) -> Result<(), Error> {
         if !self.user_provided_zones {
             error!(
                 "Not allowed to resize guest memory zone when no zone is \
@@ -1381,7 +1384,7 @@ impl MemoryManager {
     }
 
     #[cfg(target_arch = "x86_64")]
-    pub fn setup_sgx(
+    pub(crate) fn setup_sgx(
         &mut self,
         sgx_epc_config: Vec<SgxEpcConfig>,
         vm: &Arc<dyn hypervisor::Vm>,
@@ -1478,11 +1481,11 @@ impl MemoryManager {
     }
 
     #[cfg(target_arch = "x86_64")]
-    pub fn sgx_epc_region(&self) -> &Option<SgxEpcRegion> {
+    pub(crate) fn sgx_epc_region(&self) -> &Option<SgxEpcRegion> {
         &self.sgx_epc_region
     }
 
-    pub fn is_hardlink(f: &File) -> bool {
+    pub(crate) fn is_hardlink(f: &File) -> bool {
         let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
         let ret = unsafe { libc::fstat(f.as_raw_fd(), stat.as_mut_ptr()) };
         if ret != 0 {
@@ -1493,7 +1496,7 @@ impl MemoryManager {
         unsafe { (*stat.as_ptr()).st_nlink as usize > 0 }
     }
 
-    pub fn memory_zones(&self) -> &MemoryZones {
+    pub(crate) fn memory_zones(&self) -> &MemoryZones {
         &self.memory_zones
     }
 }
@@ -1877,14 +1880,14 @@ impl Aml for MemoryManager {
 impl Pausable for MemoryManager {}
 
 #[derive(Clone, Versionize)]
-pub struct MemoryRegion {
+pub(crate) struct MemoryRegion {
     content: Option<String>,
     start_addr: u64,
     size: u64,
 }
 
 #[derive(Versionize)]
-pub struct MemoryManagerSnapshotData {
+pub(crate) struct MemoryManagerSnapshotData {
     memory_regions: Vec<MemoryRegion>,
 }
 

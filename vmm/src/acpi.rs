@@ -21,28 +21,28 @@ use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemoryRegion};
 
 /* Values for Type in APIC sub-headers */
 #[cfg(target_arch = "x86_64")]
-pub const ACPI_APIC_PROCESSOR: u8 = 0;
+pub(crate) const ACPI_APIC_PROCESSOR: u8 = 0;
 #[cfg(target_arch = "x86_64")]
-pub const ACPI_APIC_IO: u8 = 1;
+pub(crate) const ACPI_APIC_IO: u8 = 1;
 #[cfg(target_arch = "x86_64")]
-pub const ACPI_APIC_XRUPT_OVERRIDE: u8 = 2;
+pub(crate) const ACPI_APIC_XRUPT_OVERRIDE: u8 = 2;
 #[cfg(target_arch = "aarch64")]
-pub const ACPI_APIC_GENERIC_CPU_INTERFACE: u8 = 11;
+pub(crate) const ACPI_APIC_GENERIC_CPU_INTERFACE: u8 = 11;
 #[cfg(target_arch = "aarch64")]
-pub const ACPI_APIC_GENERIC_DISTRIBUTOR: u8 = 12;
+pub(crate) const ACPI_APIC_GENERIC_DISTRIBUTOR: u8 = 12;
 #[cfg(target_arch = "aarch64")]
-pub const ACPI_APIC_GENERIC_REDISTRIBUTOR: u8 = 14;
+pub(crate) const ACPI_APIC_GENERIC_REDISTRIBUTOR: u8 = 14;
 #[cfg(target_arch = "aarch64")]
-pub const ACPI_APIC_GENERIC_TRANSLATOR: u8 = 15;
+pub(crate) const ACPI_APIC_GENERIC_TRANSLATOR: u8 = 15;
 
 #[allow(dead_code)]
 #[repr(packed)]
 #[derive(Default)]
 struct PciRangeEntry {
-    pub base_address: u64,
-    pub segment: u16,
-    pub start: u8,
-    pub end: u8,
+    pub(crate) base_address: u64,
+    pub(crate) segment: u16,
+    pub(crate) start: u8,
+    pub(crate) end: u8,
     _reserved: u32,
 }
 
@@ -50,16 +50,16 @@ struct PciRangeEntry {
 #[repr(packed)]
 #[derive(Default)]
 struct MemoryAffinity {
-    pub type_: u8,
-    pub length: u8,
-    pub proximity_domain: u32,
+    pub(crate) type_: u8,
+    pub(crate) length: u8,
+    pub(crate) proximity_domain: u32,
     _reserved1: u16,
-    pub base_addr_lo: u32,
-    pub base_addr_hi: u32,
-    pub length_lo: u32,
-    pub length_hi: u32,
+    pub(crate) base_addr_lo: u32,
+    pub(crate) base_addr_hi: u32,
+    pub(crate) length_lo: u32,
+    pub(crate) length_hi: u32,
     _reserved2: u32,
-    pub flags: u32,
+    pub(crate) flags: u32,
     _reserved3: u64,
 }
 
@@ -67,13 +67,13 @@ struct MemoryAffinity {
 #[repr(packed)]
 #[derive(Default)]
 struct ProcessorLocalX2ApicAffinity {
-    pub type_: u8,
-    pub length: u8,
+    pub(crate) type_: u8,
+    pub(crate) length: u8,
     _reserved1: u16,
-    pub proximity_domain: u32,
-    pub x2apic_id: u32,
-    pub flags: u32,
-    pub clock_domain: u32,
+    pub(crate) proximity_domain: u32,
+    pub(crate) x2apic_id: u32,
+    pub(crate) flags: u32,
+    pub(crate) clock_domain: u32,
     _reserved2: u32,
 }
 
@@ -81,16 +81,16 @@ struct ProcessorLocalX2ApicAffinity {
 #[repr(packed)]
 #[derive(Default)]
 struct ProcessorGiccAffinity {
-    pub type_: u8,
-    pub length: u8,
-    pub proximity_domain: u32,
-    pub acpi_processor_uid: u32,
-    pub flags: u32,
-    pub clock_domain: u32,
+    pub(crate) type_: u8,
+    pub(crate) length: u8,
+    pub(crate) proximity_domain: u32,
+    pub(crate) acpi_processor_uid: u32,
+    pub(crate) flags: u32,
+    pub(crate) clock_domain: u32,
 }
 
 bitflags! {
-    pub struct MemAffinityFlags: u32 {
+    pub(crate) struct MemAffinityFlags: u32 {
         const NOFLAGS = 0;
         const ENABLE = 0b1;
         const HOTPLUGGABLE = 0b10;
@@ -141,11 +141,11 @@ impl MemoryAffinity {
 #[repr(packed)]
 #[derive(Default)]
 struct ViotVirtioPciNode {
-    pub type_: u8,
+    pub(crate) type_: u8,
     _reserved: u8,
-    pub length: u16,
-    pub pci_segment: u16,
-    pub pci_bdf_number: u16,
+    pub(crate) length: u16,
+    pub(crate) pci_segment: u16,
+    pub(crate) pci_bdf_number: u16,
     _reserved2: [u8; 8],
 }
 
@@ -153,19 +153,19 @@ struct ViotVirtioPciNode {
 #[repr(packed)]
 #[derive(Default)]
 struct ViotPciRangeNode {
-    pub type_: u8,
+    pub(crate) type_: u8,
     _reserved: u8,
-    pub length: u16,
-    pub endpoint_start: u32,
-    pub pci_segment_start: u16,
-    pub pci_segment_end: u16,
-    pub pci_bdf_start: u16,
-    pub pci_bdf_end: u16,
-    pub output_node: u16,
+    pub(crate) length: u16,
+    pub(crate) endpoint_start: u32,
+    pub(crate) pci_segment_start: u16,
+    pub(crate) pci_segment_end: u16,
+    pub(crate) pci_bdf_start: u16,
+    pub(crate) pci_bdf_end: u16,
+    pub(crate) output_node: u16,
     _reserved2: [u8; 6],
 }
 
-pub fn create_dsdt_table(
+pub(crate) fn create_dsdt_table(
     device_manager: &Arc<Mutex<DeviceManager>>,
     cpu_manager: &Arc<Mutex<CpuManager>>,
     memory_manager: &Arc<Mutex<MemoryManager>>,
@@ -472,7 +472,7 @@ fn create_viot_table(iommu_bdf: u32, devices_bdf: &[u32]) -> Sdt {
     viot
 }
 
-pub fn create_acpi_tables(
+pub(crate) fn create_acpi_tables(
     guest_mem: &GuestMemoryMmap,
     device_manager: &Arc<Mutex<DeviceManager>>,
     cpu_manager: &Arc<Mutex<CpuManager>>,

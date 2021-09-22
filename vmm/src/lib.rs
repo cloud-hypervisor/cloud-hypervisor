@@ -49,15 +49,17 @@ use vmm_sys_util::eventfd::EventFd;
 pub mod api;
 mod clone3;
 pub mod config;
-pub mod cpu;
-pub mod device_manager;
-pub mod device_tree;
-pub mod interrupt;
-pub mod memory_manager;
-pub mod migration;
-pub mod seccomp_filters;
+pub(crate) mod cpu;
+pub(crate) mod device_manager;
+pub(crate) mod device_tree;
+pub(crate) mod interrupt;
+pub(crate) mod memory_manager;
+pub(crate) mod migration;
+pub(crate) mod seccomp_filters;
 mod sigwinch_listener;
-pub mod vm;
+pub(crate) mod vm;
+
+pub use crate::vm::HANDLED_SIGNALS;
 
 #[cfg(feature = "acpi")]
 mod acpi;
@@ -143,11 +145,11 @@ pub enum Error {
     #[error("Error creation API server's socket {0:?}")]
     CreateApiServerSocket(#[source] io::Error),
 }
-pub type Result<T> = result::Result<T, Error>;
+pub(crate) type Result<T> = result::Result<T, Error>;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u64)]
-pub enum EpollDispatch {
+pub(crate) enum EpollDispatch {
     Exit = 0,
     Reset = 1,
     Api = 2,
@@ -168,12 +170,12 @@ impl From<u64> for EpollDispatch {
     }
 }
 
-pub struct EpollContext {
+pub(crate) struct EpollContext {
     epoll_file: File,
 }
 
 impl EpollContext {
-    pub fn new() -> result::Result<EpollContext, io::Error> {
+    pub(crate) fn new() -> result::Result<EpollContext, io::Error> {
         let epoll_fd = epoll::create(true)?;
         // Use 'File' to enforce closing on 'epoll_fd'
         let epoll_file = unsafe { File::from_raw_fd(epoll_fd) };
@@ -203,9 +205,9 @@ impl AsRawFd for EpollContext {
     }
 }
 
-pub struct PciDeviceInfo {
-    pub id: String,
-    pub bdf: u32,
+pub(crate) struct PciDeviceInfo {
+    pub(crate) id: String,
+    pub(crate) bdf: u32,
 }
 
 impl Serialize for PciDeviceInfo {
@@ -301,7 +303,7 @@ struct VmMigrationConfig {
     common_cpuid: hypervisor::CpuId,
 }
 
-pub struct Vmm {
+pub(crate) struct Vmm {
     epoll: EpollContext,
     exit_evt: EventFd,
     reset_evt: EventFd,

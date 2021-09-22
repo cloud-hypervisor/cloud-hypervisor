@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex};
 use vmm_sys_util::eventfd::EventFd;
 
 // /api/v1/vm.create handler
-pub struct VmCreate {}
+pub(crate) struct VmCreate {}
 
 impl EndpointHandler for VmCreate {
     fn handle_request(
@@ -60,12 +60,12 @@ impl EndpointHandler for VmCreate {
 }
 
 // Common handler for boot, shutdown and reboot
-pub struct VmActionHandler {
+pub(crate) struct VmActionHandler {
     action: VmAction,
 }
 
 impl VmActionHandler {
-    pub fn new(action: VmAction) -> Self {
+    pub(crate) fn new(action: VmAction) -> Self {
         VmActionHandler { action }
     }
 }
@@ -216,7 +216,7 @@ impl EndpointHandler for VmActionHandler {
 }
 
 // /api/v1/vm.info handler
-pub struct VmInfo {}
+pub(crate) struct VmInfo {}
 
 impl EndpointHandler for VmInfo {
     fn handle_request(
@@ -242,7 +242,7 @@ impl EndpointHandler for VmInfo {
 }
 
 // /api/v1/vmm.info handler
-pub struct VmmPing {}
+pub(crate) struct VmmPing {}
 
 impl EndpointHandler for VmmPing {
     fn handle_request(
@@ -268,7 +268,7 @@ impl EndpointHandler for VmmPing {
 }
 
 // /api/v1/vmm.shutdown handler
-pub struct VmmShutdown {}
+pub(crate) struct VmmShutdown {}
 
 impl EndpointHandler for VmmShutdown {
     fn handle_request(
