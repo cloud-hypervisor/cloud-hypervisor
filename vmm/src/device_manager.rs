@@ -128,7 +128,6 @@ const GPIO_DEVICE_NAME_PREFIX: &str = "_gpio";
 const CONSOLE_DEVICE_NAME: &str = "_console";
 const DISK_DEVICE_NAME_PREFIX: &str = "_disk";
 const FS_DEVICE_NAME_PREFIX: &str = "_fs";
-const MEM_DEVICE_NAME_PREFIX: &str = "_mem";
 const BALLOON_DEVICE_NAME: &str = "_balloon";
 const NET_DEVICE_NAME_PREFIX: &str = "_net";
 const PMEM_DEVICE_NAME_PREFIX: &str = "_pmem";
@@ -2670,20 +2669,19 @@ impl DeviceManager {
 
         let mm = self.memory_manager.clone();
         let mm = mm.lock().unwrap();
-        for (_memory_zone_id, memory_zone) in mm.memory_zones().iter() {
+        for (memory_zone_id, memory_zone) in mm.memory_zones().iter() {
             if let Some(virtio_mem_zone) = memory_zone.virtio_mem_zone() {
-                let id = self.next_device_name(MEM_DEVICE_NAME_PREFIX)?;
-                info!("Creating virtio-mem device: id = {}", id);
+                info!("Creating virtio-mem device: id = {}", memory_zone_id);
 
                 #[cfg(all(target_arch = "x86_64", not(feature = "acpi")))]
                 let node_id: Option<u16> = None;
                 #[cfg(any(target_arch = "aarch64", feature = "acpi"))]
-                let node_id = numa_node_id_from_memory_zone_id(&self.numa_nodes, _memory_zone_id)
+                let node_id = numa_node_id_from_memory_zone_id(&self.numa_nodes, memory_zone_id)
                     .map(|i| i as u16);
 
                 let virtio_mem_device = Arc::new(Mutex::new(
                     virtio_devices::Mem::new(
-                        id.clone(),
+                        memory_zone_id.clone(),
                         virtio_mem_zone.region(),
                         virtio_mem_zone
                             .resize_handler()
@@ -2705,16 +2703,16 @@ impl DeviceManager {
                 devices.push((
                     Arc::clone(&virtio_mem_device) as VirtioDeviceArc,
                     false,
-                    id.clone(),
+                    memory_zone_id.clone(),
                 ));
 
                 // Fill the device tree with a new node. In case of restore, we
                 // know there is nothing to do, so we can simply override the
                 // existing entry.
-                self.device_tree
-                    .lock()
-                    .unwrap()
-                    .insert(id.clone(), device_node!(id, virtio_mem_device));
+                self.device_tree.lock().unwrap().insert(
+                    memory_zone_id.clone(),
+                    device_node!(memory_zone_id, virtio_mem_device),
+                );
             }
         }
 
