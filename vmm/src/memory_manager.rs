@@ -1314,11 +1314,14 @@ impl MemoryManager {
 
     pub fn virtio_mem_resize(&mut self, id: &str, size: u64) -> Result<(), Error> {
         if let Some(memory_zone) = self.memory_zones.get_mut(id) {
-            if let Some(virtio_mem_zone) = memory_zone.virtio_mem_zone() {
+            if let Some(virtio_mem_zone) = &mut memory_zone.virtio_mem_zone {
                 virtio_mem_zone
                     .resize_handler()
                     .work(size)
                     .map_err(Error::VirtioMemResizeFail)?;
+
+                // Keep the hotplugged_size up to date.
+                virtio_mem_zone.hotplugged_size = size;
             } else {
                 error!("Failed resizing virtio-mem region: No virtio-mem handler");
                 return Err(Error::MissingVirtioMemHandler);
