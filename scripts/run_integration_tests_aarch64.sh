@@ -114,8 +114,6 @@ update_workloads() {
         popd
     fi
 
-    # Convert the raw image to qcow2 image to remove compressed blocks from the disk. Therefore letting the
-    # qcow2 format image can be directly used in the integration test.
     FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME="focal-server-cloudimg-arm64-custom.qcow2"
     FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_DOWNLOAD_URL="https://cloud-hypervisor.azureedge.net/$FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME"
     FOCAL_OS_QCOW2_UNCOMPRESSED_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME"
@@ -161,12 +159,14 @@ update_workloads() {
 
     # Build custom kernel based on virtio-pmem and virtio-fs upstream patches
     PE_IMAGE="$WORKLOADS_DIR/Image"
+    BZ_IMAGE="$WORKLOADS_DIR/Image.gz"
     LINUX_CUSTOM_DIR="$WORKLOADS_DIR/linux-custom"
 
     build_custom_linux_kernel() {
         pushd $LINUX_CUSTOM_DIR
         time make -j `nproc`
-        cp arch/arm64/boot/Image $WORKLOADS_DIR/Image || exit 1
+        cp arch/arm64/boot/Image "$PE_IMAGE" || exit 1
+        cp arch/arm64/boot/Image.gz "$BZ_IMAGE" || exit 1
         popd
     }
 
@@ -192,6 +192,17 @@ update_workloads() {
     cp $SRCDIR/resources/linux-config-aarch64 $LINUX_CUSTOM_DIR/.config
     build_custom_linux_kernel
 
+    # Update the kernel in the cloud image for some tests that requires recent kernel version
+    FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_NAME="focal-server-cloudimg-arm64-custom-update-kernel.raw"
+    cp "$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_NAME" "$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_NAME"
+    FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR="$WORKLOADS_DIR/focal-server-cloudimg-root"
+    mkdir -p "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR"
+    # Mount the 'raw' image, replace the compressed kernel file and umount the working folder
+    guestmount -a "$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_NAME" -m /dev/sda1 "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR" || exit 1
+    cp "$BZ_IMAGE" "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR"/boot/vmlinuz
+    guestunmount "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR"
+
+    # Build virtiofsd
     VIRTIOFSD_RS="$WORKLOADS_DIR/virtiofsd-rs"
     VIRTIOFSD_RS_DIR="virtiofsd_rs_build"
     if [ ! -f "$VIRTIOFSD_RS" ]; then
