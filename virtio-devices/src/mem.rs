@@ -40,6 +40,7 @@ use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
     GuestMemoryError, GuestMemoryRegion,
 };
+use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
 };
@@ -425,6 +426,26 @@ impl BlocksState {
 
     fn inner(&self) -> &Vec<bool> {
         &self.bitmap
+    }
+
+    pub fn memory_ranges(&self, start_addr: u64, plugged: bool) -> MemoryRangeTable {
+        let mut bitmap: Vec<u64> = Vec::new();
+        let mut i = 0;
+        for (j, bit) in self.bitmap.iter().enumerate() {
+            if j % 64 == 0 {
+                bitmap.push(0);
+
+                if j != 0 {
+                    i += 1;
+                }
+            }
+
+            if *bit == plugged {
+                bitmap[i] |= 1 << (j % 64);
+            }
+        }
+
+        MemoryRangeTable::from_bitmap(bitmap, start_addr, VIRTIO_MEM_DEFAULT_BLOCK_SIZE)
     }
 }
 
