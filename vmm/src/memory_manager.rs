@@ -2038,7 +2038,7 @@ impl Migratable for MemoryManager {
                 .map(|(x, y)| x | y)
                 .collect();
 
-            let sub_table = MemoryRangeTable::from_bitmap(dirty_bitmap, r.gpa);
+            let sub_table = MemoryRangeTable::from_bitmap(dirty_bitmap, r.gpa, 4096);
 
             if sub_table.regions().is_empty() {
                 info!("Dirty Memory Range Table is empty");
