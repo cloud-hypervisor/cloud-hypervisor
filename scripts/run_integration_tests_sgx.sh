@@ -5,6 +5,12 @@ source $HOME/.cargo/env
 source $(dirname "$0")/test-util.sh
 
 process_common_args "$@"
+
+if [[ "$hypervisor" = "mshv" ]]; then
+    echo "Unsupported SGX test for MSHV"
+    exit 1
+fi
+
 # For now these values are deafult for kvm
 features_build=""
 features_test="--features integration_tests"

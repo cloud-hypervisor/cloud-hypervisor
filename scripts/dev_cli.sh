@@ -243,8 +243,8 @@ cmd_build() {
     ensure_latest_ctr
 
     process_volumes_args
-    if [[ "$hypervisor" != "kvm" ]]; then
-        die "Hypervisor value must be kvm"
+    if [[ ! ("$hypervisor" = "kvm" ||  "$hypervisor" = "mshv") ]]; then
+        die "Hypervisor value must be kvm or mshv"
     fi
     if [[ "$hypervisor" = "mshv" ]]; then
         exported_device="/dev/mshv"
@@ -336,12 +336,14 @@ cmd_tests() {
 	esac
 	shift
     done
-    if [[ "$hypervisor" != "kvm" ]]; then
-        die "Hypervisor value must be kvm"
+    if [[ ! ("$hypervisor" = "kvm" ||  "$hypervisor" = "mshv") ]]; then
+        die "Hypervisor value must be kvm or mshv"
     fi
+
     if [[ "$hypervisor" = "mshv" ]]; then
         exported_device="/dev/mshv"
     fi
+
     set -- "$@" '--hypervisor' $hypervisor
 
     ensure_build_dir
