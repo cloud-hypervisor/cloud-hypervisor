@@ -15,6 +15,11 @@ process_common_args "$@"
 features_build=""
 features_test="--features integration_tests"
 
+if [ "$hypervisor" = "mshv" ] ;  then
+    features_build="--no-default-features --features mshv,common"
+    features_test="--no-default-features --features mshv,common,integration_tests"
+fi
+
 cp scripts/sha1sums-x86_64 $WORKLOADS_DIR
 
 FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/rust-hypervisor-firmware/releases/latest | grep "browser_download_url" | grep -o 'https://.*[^ "]')

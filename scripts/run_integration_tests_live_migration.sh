@@ -15,6 +15,11 @@ process_common_args "$@"
 features_build=""
 features_test="--features integration_tests"
 
+if [ "$hypervisor" = "mshv" ] ;  then
+    features_build="--no-default-features --features mshv,common"
+    features_test="--no-default-features --features mshv,common,integration_tests"
+fi
+
 cp scripts/sha1sums-x86_64 $WORKLOADS_DIR
 
 FOCAL_OS_IMAGE_NAME="focal-server-cloudimg-amd64-custom-20210609-0.qcow2"
