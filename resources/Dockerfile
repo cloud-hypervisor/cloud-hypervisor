@@ -59,9 +59,14 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
         # On AArch64, `setcap` binary should be installed via `libcap2-bin`.
         # The `setcap` binary is used in integration tests.
+        # `libguestfs-tools` is used for modifying cloud image kernel, and it requires
+        # kernel (any version) image in `/boot` and modules in `/lib/modules`.
         apt-get update \
         && apt-get -yq upgrade \
-        && DEBIAN_FRONTEND=noninteractive apt-get install -yq libcap2-bin \
+        && DEBIAN_FRONTEND=noninteractive apt-get install -yq \
+        libcap2-bin \
+        libguestfs-tools \
+        linux-image-5.8.0-63-generic \
         && apt-get clean \
         && rm -rf /var/lib/apt/lists/*;	fi
 
