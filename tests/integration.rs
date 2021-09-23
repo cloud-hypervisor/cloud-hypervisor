@@ -583,7 +583,7 @@ mod tests {
         }
 
         fn api_create_body(&self, cpu_count: u8) -> String {
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(all(target_arch = "x86_64", not(feature = "mshv")))]
             format! {"{{\"cpus\":{{\"boot_vcpus\":{},\"max_vcpus\":{}}},\"kernel\":{{\"path\":\"{}\"}},\"cmdline\":{{\"args\": \"\"}},\"net\":[{{\"ip\":\"{}\", \"mask\":\"255.255.255.0\", \"mac\":\"{}\"}}], \"disks\":[{{\"path\":\"{}\"}}, {{\"path\":\"{}\"}}]}}",
                      cpu_count,
                      cpu_count,
@@ -593,7 +593,8 @@ mod tests {
                      self.disk_config.disk(DiskType::OperatingSystem).unwrap().as_str(),
                      self.disk_config.disk(DiskType::CloudInit).unwrap().as_str(),
             }
-            #[cfg(target_arch = "aarch64")]
+
+            #[cfg(any(target_arch = "aarch64", feature = "mshv"))]
             format! {"{{\"cpus\":{{\"boot_vcpus\":{},\"max_vcpus\":{}}},\"kernel\":{{\"path\":\"{}\"}},\"cmdline\":{{\"args\": \"{}\"}},\"net\":[{{\"ip\":\"{}\", \"mask\":\"255.255.255.0\", \"mac\":\"{}\"}}], \"disks\":[{{\"path\":\"{}\"}}, {{\"path\":\"{}\"}}]}}",
                      cpu_count,
                      cpu_count,
@@ -2382,22 +2383,26 @@ mod tests {
         }
 
         #[test]
+        #[cfg(not(feature = "mshv"))]
         fn test_cpu_topology_421() {
             test_cpu_topology(4, 2, 1, false);
         }
 
         #[test]
+        #[cfg(not(feature = "mshv"))]
         fn test_cpu_topology_142() {
             test_cpu_topology(1, 4, 2, false);
         }
 
         #[test]
+        #[cfg(not(feature = "mshv"))]
         fn test_cpu_topology_262() {
             test_cpu_topology(2, 6, 2, false);
         }
 
         #[test]
         #[cfg(target_arch = "x86_64")]
+        #[cfg(not(feature = "mshv"))]
         fn test_cpu_physical_bits() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
@@ -2433,6 +2438,7 @@ mod tests {
         }
 
         #[test]
+        #[cfg(not(feature = "mshv"))]
         fn test_large_vm() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
@@ -2473,6 +2479,7 @@ mod tests {
         }
 
         #[test]
+        #[cfg(not(feature = "mshv"))]
         fn test_huge_memory() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
@@ -2505,6 +2512,7 @@ mod tests {
         }
 
         #[test]
+        #[cfg(not(feature = "mshv"))]
         fn test_user_defined_memory_regions() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
@@ -2572,6 +2580,7 @@ mod tests {
         }
 
         #[test]
+        #[cfg(not(feature = "mshv"))]
         fn test_guest_numa_nodes() {
             _test_guest_numa_nodes(false);
         }
@@ -3021,11 +3030,13 @@ mod tests {
         }
 
         #[test]
+        #[cfg(not(feature = "mshv"))]
         fn test_virtio_fs_dax_on_default_cache_size() {
             test_virtio_fs(true, None, "none", &prepare_virtiofsd, false)
         }
 
         #[test]
+        #[cfg(not(feature = "mshv"))]
         fn test_virtio_fs_dax_on_cache_size_1_gib() {
             test_virtio_fs(true, Some(0x4000_0000), "none", &prepare_virtiofsd, false)
         }
@@ -3036,11 +3047,13 @@ mod tests {
         }
 
         #[test]
+        #[cfg(not(feature = "mshv"))]
         fn test_virtio_fs_dax_on_default_cache_size_w_virtiofsd_rs_daemon() {
             test_virtio_fs(true, None, "none", &prepare_virtofsd_rs_daemon, false)
         }
 
         #[test]
+        #[cfg(not(feature = "mshv"))]
         fn test_virtio_fs_dax_on_cache_size_1_gib_w_virtiofsd_rs_daemon() {
             test_virtio_fs(
                 true,
@@ -3058,6 +3071,7 @@ mod tests {
 
         #[test]
         #[cfg(target_arch = "x86_64")]
+        #[cfg(not(feature = "mshv"))]
         fn test_virtio_fs_hotplug_dax_on() {
             test_virtio_fs(true, None, "none", &prepare_virtiofsd, true)
         }
@@ -3070,6 +3084,7 @@ mod tests {
 
         #[test]
         #[cfg(target_arch = "x86_64")]
+        #[cfg(not(feature = "mshv"))]
         fn test_virtio_fs_hotplug_dax_on_w_virtiofsd_rs_daemon() {
             test_virtio_fs(true, None, "none", &prepare_virtofsd_rs_daemon, true)
         }
@@ -3601,6 +3616,7 @@ mod tests {
 
         #[test]
         #[cfg(target_arch = "x86_64")]
+        #[cfg(not(feature = "mshv"))]
         // The VFIO integration test starts cloud-hypervisor guest with 3 TAP
         // backed networking interfaces, bound through a simple bridge on the host.
         // So if the nested cloud-hypervisor succeeds in getting a directly
@@ -4349,6 +4365,7 @@ mod tests {
         }
 
         #[test]
+        #[cfg(not(feature = "mshv"))]
         fn test_virtio_mem() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
@@ -4422,6 +4439,7 @@ mod tests {
 
         #[test]
         #[cfg(target_arch = "x86_64")]
+        #[cfg(not(feature = "mshv"))]
         // Test both vCPU and memory resizing together
         fn test_resize() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -5506,6 +5524,7 @@ mod tests {
         }
 
         #[test]
+        #[cfg(not(feature = "mshv"))]
         fn test_ovs_dpdk() {
             let focal1 = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest1 = Guest::new(Box::new(focal1));
@@ -7085,10 +7104,12 @@ mod tests {
         }
 
         #[test]
+        #[cfg(not(feature = "mshv"))]
         fn test_live_migration_numa() {
             _test_live_migration(true)
         }
         #[test]
+        #[cfg(not(feature = "mshv"))]
         fn test_live_migration_ovs_dpdk() {
             let ovs_focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let ovs_guest = Guest::new(Box::new(ovs_focal));
