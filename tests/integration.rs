@@ -64,6 +64,9 @@ mod tests {
     #[cfg(target_arch = "aarch64")]
     const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64-custom.raw";
     #[cfg(target_arch = "aarch64")]
+    const FOCAL_IMAGE_UPDATE_KERNEL_NAME: &str =
+        "focal-server-cloudimg-arm64-custom-update-kernel.raw";
+    #[cfg(target_arch = "aarch64")]
     const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-arm64-custom.qcow2";
     #[cfg(target_arch = "x86_64")]
     const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-amd64-custom-20210609-0.qcow2";
@@ -2175,6 +2178,117 @@ mod tests {
         total_mem - actual_mem
     }
 
+    // This test validates that it can find the virtio-iommu device at first.
+    // It also verifies that both disks and the network card are attached to
+    // the virtual IOMMU by looking at /sys/kernel/iommu_groups directory.
+    // The last interesting part of this test is that it exercises the network
+    // interface attached to the virtual IOMMU since this is the one used to
+    // send all commands through SSH.
+    fn _test_virtio_iommu(acpi: bool) {
+        // Virtio-iommu support is ready in recent kernel (v5.14). But the kernel in
+        // Focal image is still old.
+        // So if ACPI is enabled on AArch64, we use a modified Focal image in which
+        // the kernel binary has been updated.
+        #[cfg(target_arch = "aarch64")]
+        let focal_image = FOCAL_IMAGE_UPDATE_KERNEL_NAME.to_string();
+        #[cfg(target_arch = "x86_64")]
+        let focal_image = FOCAL_IMAGE_NAME.to_string();
+        let focal = UbuntuDiskConfig::new(focal_image);
+        let guest = Guest::new(Box::new(focal));
+
+        #[cfg(target_arch = "x86_64")]
+        let kernel_path = direct_kernel_boot_path();
+        #[cfg(target_arch = "aarch64")]
+        let kernel_path = if acpi {
+            edk2_path()
+        } else {
+            direct_kernel_boot_path()
+        };
+
+        let mut child = GuestCommand::new(&guest)
+            .args(&["--cpus", "boot=1"])
+            .args(&["--memory", "size=512M"])
+            .args(&["--kernel", kernel_path.to_str().unwrap()])
+            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(&[
+                "--disk",
+                format!(
+                    "path={},iommu=on",
+                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                )
+                .as_str(),
+                format!(
+                    "path={},iommu=on",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                )
+                .as_str(),
+            ])
+            .args(&["--net", guest.default_net_string_w_iommu().as_str()])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            // Verify the virtio-iommu device is present.
+            assert!(guest
+                .does_device_vendor_pair_match("0x1057", "0x1af4")
+                .unwrap_or_default());
+
+            // On AArch64, if the guest system boots from FDT, the behavior of IOMMU is a bit
+            // different with ACPI.
+            // All devices on the PCI bus will be attached to the virtual IOMMU, except the
+            // virtio-iommu device itself. So these devices will all be added to IOMMU groups,
+            // and appear under folder '/sys/kernel/iommu_groups/'.
+            // The result is, in the case of FDT, IOMMU group '0' contains "0000:00:01.0"
+            // which is the console. The first disk "0000:00:02.0" is in group '1'.
+            // While on ACPI, console device is not attached to IOMMU. So the IOMMU group '0'
+            // contains "0000:00:02.0" which is the first disk.
+            //
+            // Verify the iommu group of the first disk.
+            let iommu_group = if acpi { 0 } else { 1 };
+            assert_eq!(
+                guest
+                    .ssh_command(
+                        format!("ls /sys/kernel/iommu_groups/{}/devices", iommu_group).as_str()
+                    )
+                    .unwrap()
+                    .trim(),
+                "0000:00:02.0"
+            );
+
+            // Verify the iommu group of the second disk.
+            let iommu_group = if acpi { 1 } else { 2 };
+            assert_eq!(
+                guest
+                    .ssh_command(
+                        format!("ls /sys/kernel/iommu_groups/{}/devices", iommu_group).as_str()
+                    )
+                    .unwrap()
+                    .trim(),
+                "0000:00:03.0"
+            );
+
+            // Verify the iommu group of the network card.
+            let iommu_group = if acpi { 2 } else { 3 };
+            assert_eq!(
+                guest
+                    .ssh_command(
+                        format!("ls /sys/kernel/iommu_groups/{}/devices", iommu_group).as_str()
+                    )
+                    .unwrap()
+                    .trim(),
+                "0000:00:04.0"
+            );
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
     mod parallel {
         use std::io::SeekFrom;
 
@@ -3966,100 +4080,8 @@ mod tests {
         }
 
         #[test]
-        // This test validates that it can find the virtio-iommu device at first.
-        // It also verifies that both disks and the network card are attached to
-        // the virtual IOMMU by looking at /sys/kernel/iommu_groups directory.
-        // The last interesting part of this test is that it exercises the network
-        // interface attached to the virtual IOMMU since this is the one used to
-        // send all commands through SSH.
         fn test_virtio_iommu() {
-            let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-            let guest = Guest::new(Box::new(focal));
-
-            let kernel_path = direct_kernel_boot_path();
-
-            let mut child = GuestCommand::new(&guest)
-                .args(&["--cpus", "boot=1"])
-                .args(&["--memory", "size=512M"])
-                .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-                .args(&[
-                    "--disk",
-                    format!(
-                        "path={},iommu=on",
-                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-                    )
-                    .as_str(),
-                    format!(
-                        "path={},iommu=on",
-                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                    )
-                    .as_str(),
-                ])
-                .args(&["--net", guest.default_net_string_w_iommu().as_str()])
-                .capture_output()
-                .spawn()
-                .unwrap();
-
-            let r = std::panic::catch_unwind(|| {
-                guest.wait_vm_boot(None).unwrap();
-
-                // Verify the virtio-iommu device is present.
-                assert!(guest
-                    .does_device_vendor_pair_match("0x1057", "0x1af4")
-                    .unwrap_or_default());
-
-                // For AArch64, now virtual IOMMU is only tested on FDT, not ACPI.
-                // In the case of FDT, the behavior of IOMMU is a bit different with ACPI. All the
-                // devices on the PCI bus will be attached to the virtual IOMMU, except the
-                // virtio-iommu device itself. So these devices will all be added to IOMMU groups,
-                // and appear under folder '/sys/kernel/iommu_groups/'.
-                // The result is, on AArch64 IOMMU group '0' contains "0000:00:01.0" which is the
-                // console. The first disk "0000:00:02.0" is in group '1'.
-                // While on X86, console device is not attached to IOMMU. So the IOMMU group '0'
-                // contains "0000:00:02.0" which is the first disk.
-                //
-                // Verify the iommu group of the first disk.
-                let iommu_group = if cfg!(target_arch = "x86_64") { 0 } else { 1 };
-                assert_eq!(
-                    guest
-                        .ssh_command(
-                            format!("ls /sys/kernel/iommu_groups/{}/devices", iommu_group).as_str()
-                        )
-                        .unwrap()
-                        .trim(),
-                    "0000:00:02.0"
-                );
-
-                // Verify the iommu group of the second disk.
-                let iommu_group = if cfg!(target_arch = "x86_64") { 1 } else { 2 };
-                assert_eq!(
-                    guest
-                        .ssh_command(
-                            format!("ls /sys/kernel/iommu_groups/{}/devices", iommu_group).as_str()
-                        )
-                        .unwrap()
-                        .trim(),
-                    "0000:00:03.0"
-                );
-
-                // Verify the iommu group of the network card.
-                let iommu_group = if cfg!(target_arch = "x86_64") { 2 } else { 3 };
-                assert_eq!(
-                    guest
-                        .ssh_command(
-                            format!("ls /sys/kernel/iommu_groups/{}/devices", iommu_group).as_str()
-                        )
-                        .unwrap()
-                        .trim(),
-                    "0000:00:04.0"
-                );
-            });
-
-            let _ = child.kill();
-            let output = child.wait_with_output().unwrap();
-
-            handle_child_output(r, &output);
+            _test_virtio_iommu(cfg!(target_arch = "x86_64"))
         }
 
         #[test]
@@ -7326,6 +7348,11 @@ mod tests {
         #[test]
         fn test_power_button_acpi() {
             _test_power_button(true);
+        }
+
+        #[test]
+        fn test_virtio_iommu() {
+            _test_virtio_iommu(true)
         }
     }
 }
