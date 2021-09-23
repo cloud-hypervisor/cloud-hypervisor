@@ -30,6 +30,7 @@ use std::result;
 use std::sync::{Arc, Barrier, Mutex};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
+use virtio_devices::BlocksState;
 #[cfg(target_arch = "x86_64")]
 use vm_allocator::GsiApic;
 use vm_allocator::SystemAllocator;
@@ -73,6 +74,7 @@ pub struct VirtioMemZone {
     resize_handler: virtio_devices::Resize,
     hotplugged_size: u64,
     hugepages: bool,
+    blocks_state: Arc<Mutex<BlocksState>>,
 }
 
 impl VirtioMemZone {
@@ -87,6 +89,15 @@ impl VirtioMemZone {
     }
     pub fn hugepages(&self) -> bool {
         self.hugepages
+    }
+    pub fn blocks_state(&self) -> &Arc<Mutex<BlocksState>> {
+        &self.blocks_state
+    }
+    pub fn plugged_ranges(&self) -> MemoryRangeTable {
+        self.blocks_state
+            .lock()
+            .unwrap()
+            .memory_ranges(self.region.start_addr().raw_value(), true)
     }
 }
 
@@ -699,12 +710,14 @@ impl MemoryManager {
                         virtio_mem_regions.push(region.clone());
 
                         let hotplugged_size = zone.hotplugged_size.unwrap_or(0);
+                        let region_size = region.len();
                         memory_zone.virtio_mem_zone = Some(VirtioMemZone {
                             region,
                             resize_handler: virtio_devices::Resize::new(hotplugged_size)
                                 .map_err(Error::EventFdFail)?,
                             hotplugged_size,
                             hugepages: zone.hugepages,
+                            blocks_state: Arc::new(Mutex::new(BlocksState::new(region_size))),
                         });
 
                         start_of_device_area = start_addr
