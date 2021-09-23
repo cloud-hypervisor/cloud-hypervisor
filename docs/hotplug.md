@@ -159,6 +159,8 @@ The same API can also be used to reduce the desired RAM for a VM. It is importan
 
 Extra PCI devices can be added and removed from a running Cloud Hypervisor instance. This is controlled by making a HTTP API request to the VMM to ask for the additional device to be added, or for the existing device to be removed.
 
+Note: On AArch64 platform, PCI device hotplug can only be achieved using ACPI. Please refer to the [documentation](arm64.md#uefi-booting) for more information.
+
 To use PCI device hotplug start the VM with the HTTP server.
 
 ```shell
