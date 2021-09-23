@@ -2694,6 +2694,7 @@ impl DeviceManager {
                         self.exit_evt
                             .try_clone()
                             .map_err(DeviceManagerError::EventFd)?,
+                        virtio_mem_zone.blocks_state().clone(),
                     )
                     .map_err(DeviceManagerError::CreateVirtioMem)?,
                 ));

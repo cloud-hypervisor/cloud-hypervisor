@@ -393,7 +393,7 @@ pub struct BlocksState {
 }
 
 impl BlocksState {
-    fn new(region_size: u64) -> Self {
+    pub fn new(region_size: u64) -> Self {
         BlocksState {
             bitmap: vec![false; (region_size / VIRTIO_MEM_DEFAULT_BLOCK_SIZE) as usize],
         }
@@ -810,6 +810,7 @@ impl Mem {
         initial_size: u64,
         hugepages: bool,
         exit_evt: EventFd,
+        blocks_state: Arc<Mutex<BlocksState>>,
     ) -> io::Result<Mem> {
         let region_len = region.len();
 
@@ -882,7 +883,7 @@ impl Mem {
             seccomp_action,
             hugepages,
             dma_mapping_handlers: Arc::new(Mutex::new(BTreeMap::new())),
-            blocks_state: Arc::new(Mutex::new(BlocksState::new(config.region_size))),
+            blocks_state,
             exit_evt,
         })
     }
