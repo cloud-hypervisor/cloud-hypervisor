@@ -554,7 +554,7 @@ impl VhostUserHandle {
                 let ptr = region.as_ptr() as *const u64;
                 std::slice::from_raw_parts(ptr, len).to_vec()
             };
-            Ok(MemoryRangeTable::from_bitmap(bitmap, 0))
+            Ok(MemoryRangeTable::from_bitmap(bitmap, 0, 4096))
         } else {
             Err(Error::MissingShmLogRegion)
         }

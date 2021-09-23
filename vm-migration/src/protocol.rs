@@ -184,8 +184,7 @@ pub struct MemoryRangeTable {
 }
 
 impl MemoryRangeTable {
-    pub fn from_bitmap(bitmap: Vec<u64>, start_addr: u64) -> Self {
-        let page_size = 4096;
+    pub fn from_bitmap(bitmap: Vec<u64>, start_addr: u64, page_size: u64) -> Self {
         let mut table = MemoryRangeTable::default();
         let mut entry: Option<MemoryRange> = None;
         for (i, block) in bitmap.iter().enumerate() {
