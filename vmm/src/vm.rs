@@ -66,9 +66,10 @@ use std::{result, str, thread};
 use vm_device::Bus;
 #[cfg(target_arch = "x86_64")]
 use vm_device::BusDevice;
+#[cfg(feature = "tdx")]
+use vm_memory::GuestMemory;
 use vm_memory::{
-    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
-    GuestMemoryRegion,
+    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryRegion,
 };
 use vm_migration::{
     protocol::{MemoryRange, MemoryRangeTable},
@@ -2189,13 +2190,18 @@ impl Vm {
 
     pub fn memory_range_table(&self) -> std::result::Result<MemoryRangeTable, MigratableError> {
         let mut table = MemoryRangeTable::default();
-        let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
+        let mm = self.memory_manager.lock().unwrap();
 
-        for region in guest_memory.memory().iter() {
-            table.push(MemoryRange {
-                gpa: region.start_addr().raw_value(),
-                length: region.len() as u64,
-            });
+        for memory_zone in mm.memory_zones().values() {
+            for region in memory_zone.regions() {
+                table.push(MemoryRange {
+                    gpa: region.start_addr().raw_value(),
+                    length: region.len() as u64,
+                });
+            }
+            if let Some(virtio_mem_zone) = memory_zone.virtio_mem_zone() {
+                table.extend(virtio_mem_zone.plugged_ranges());
+            }
         }
 
         Ok(table)
