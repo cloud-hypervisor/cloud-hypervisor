@@ -82,7 +82,7 @@ type Result<T> = result::Result<T, Error>;
 #[allow(clippy::too_many_arguments)]
 pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHasher>(
     guest_mem: &GuestMemoryMmap,
-    cmdline: &CStr,
+    cmdline: &str,
     vcpu_mpidr: Vec<u64>,
     vcpu_topology: Option<(u8, u8, u8)>,
     device_info: &HashMap<(DeviceType, String), T, S>,
@@ -111,7 +111,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     fdt.property_u32("interrupt-parent", GIC_PHANDLE)?;
     create_cpu_nodes(&mut fdt, &vcpu_mpidr, vcpu_topology, numa_nodes)?;
     create_memory_node(&mut fdt, guest_mem, numa_nodes)?;
-    create_chosen_node(&mut fdt, cmdline.to_str().unwrap(), initrd)?;
+    create_chosen_node(&mut fdt, cmdline, initrd)?;
     create_gic_node(&mut fdt, gic_device)?;
     create_timer_node(&mut fdt)?;
     create_clock_node(&mut fdt)?;

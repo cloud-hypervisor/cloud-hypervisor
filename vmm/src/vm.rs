@@ -53,7 +53,6 @@ use std::cmp;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::convert::TryInto;
-use std::ffi::CString;
 #[cfg(target_arch = "x86_64")]
 use std::fmt;
 use std::fs::{File, OpenOptions};
@@ -111,9 +110,6 @@ pub enum Error {
 
     /// Cannot modify the command line
     CmdLineInsertStr(linux_loader::cmdline::Error),
-
-    /// Cannot convert command line into CString
-    CmdLineCString(std::ffi::NulError),
 
     /// Cannot configure system
     ConfigureSystem(arch::Error),
@@ -935,7 +931,7 @@ impl Vm {
         Ok(arch::InitramfsConfig { address, size })
     }
 
-    fn get_cmdline(&mut self) -> Result<CString> {
+    fn get_cmdline(&mut self) -> Result<Cmdline> {
         let mut cmdline = Cmdline::new(arch::CMDLINE_MAX_SIZE);
         cmdline
             .insert_str(self.config.lock().unwrap().cmdline.args.clone())
@@ -943,7 +939,7 @@ impl Vm {
         for entry in self.device_manager.lock().unwrap().cmdline_additions() {
             cmdline.insert_str(entry).map_err(Error::CmdLineInsertStr)?;
         }
-        CString::new(cmdline).map_err(Error::CmdLineCString)
+        Ok(cmdline)
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -988,7 +984,7 @@ impl Vm {
     #[cfg(target_arch = "x86_64")]
     fn load_kernel(&mut self) -> Result<EntryPoint> {
         info!("Loading kernel");
-        let cmdline_cstring = self.get_cmdline()?;
+        let cmdline = self.get_cmdline()?;
         let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
         let mem = guest_memory.memory();
         let mut kernel = self.kernel.as_ref().unwrap();
@@ -1004,12 +1000,8 @@ impl Vm {
             }
         };
 
-        linux_loader::loader::load_cmdline(
-            mem.deref(),
-            arch::layout::CMDLINE_START,
-            &cmdline_cstring,
-        )
-        .map_err(Error::LoadCmdLine)?;
+        linux_loader::loader::load_cmdline(mem.deref(), arch::layout::CMDLINE_START, &cmdline)
+            .map_err(Error::LoadCmdLine)?;
 
         if let PvhEntryPresent(entry_addr) = entry_addr.pvh_boot_cap {
             // Use the PVH kernel entry point to boot the guest
@@ -1072,7 +1064,7 @@ impl Vm {
 
     #[cfg(target_arch = "aarch64")]
     fn configure_system(&mut self) -> Result<()> {
-        let cmdline_cstring = self.get_cmdline()?;
+        let cmdline = self.get_cmdline()?;
         let vcpu_mpidrs = self.cpu_manager.lock().unwrap().get_mpidrs();
         let vcpu_topology = self.cpu_manager.lock().unwrap().get_vcpu_topology();
         let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
@@ -1138,7 +1130,7 @@ impl Vm {
 
         arch::configure_system(
             &mem,
-            &cmdline_cstring,
+            cmdline.as_str(),
             vcpu_mpidrs,
             vcpu_topology,
             device_info,
@@ -2617,7 +2609,7 @@ mod tests {
         let gic = create_gic(&vm, 1).unwrap();
         assert!(create_fdt(
             &mem,
-            &CString::new("console=tty0").unwrap(),
+            "console=tty0",
             vec![0],
             Some((0, 0, 0)),
             &dev_info,
