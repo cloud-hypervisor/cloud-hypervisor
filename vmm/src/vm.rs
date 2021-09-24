@@ -467,24 +467,24 @@ impl VmmOps for VmOps {
     }
 }
 
-pub fn physical_bits(max_phys_bits: Option<u8>, #[cfg(feature = "tdx")] tdx_enabled: bool) -> u8 {
-    #[cfg(not(feature = "tdx"))]
+pub fn physical_bits(max_phys_bits: Option<u8>) -> u8 {
     let host_phys_bits = get_host_cpu_phys_bits();
-    #[cfg(feature = "tdx")]
-    let mut host_phys_bits = get_host_cpu_phys_bits();
 
-    #[cfg(feature = "tdx")]
-    if tdx_enabled {
-        // When running TDX guest, the Guest Physical Address space is limited
-        // by a shared bit that is located on bit 47 for 4 level paging, and on
-        // bit 51 for 5 level paging (when GPAW bit is 1). In order to keep
-        // things simple, and since a 47 bits address space is 128TiB large, we
-        // ensure to limit the physical addressable space to 47 bits when
-        // runnning TDX.
-        host_phys_bits = std::cmp::min(host_phys_bits, 47)
-    }
-
-    cmp::min(host_phys_bits, max_phys_bits.unwrap_or(host_phys_bits))
+    // When running on a platform with TDX, the guest physical address space
+    // is limited by a shared bit that is located on bit 47 for 4 level
+    // paging, and on bit 51 for 5 level paging (when GPAW bit is 1). In order
+    // to keep things simple, and since a 47 bits address space is 128TiB
+    // large, we limit the physical addressable space to 47 bits as we
+    // currently have no way to detect that we are on such a platform.
+    let bits = cmp::min(
+        47,
+        cmp::min(host_phys_bits, max_phys_bits.unwrap_or(host_phys_bits)),
+    );
+    info!(
+        "Using physical address bits: {} ({} detected)",
+        bits, host_phys_bits
+    );
+    bits
 }
 
 pub const HANDLED_SIGNALS: [i32; 3] = [SIGWINCH, SIGTERM, SIGINT];
@@ -754,11 +754,7 @@ impl Vm {
 
         #[cfg(target_arch = "x86_64")]
         vm.enable_split_irq().unwrap();
-        let phys_bits = physical_bits(
-            config.lock().unwrap().cpus.max_phys_bits,
-            #[cfg(feature = "tdx")]
-            tdx_enabled,
-        );
+        let phys_bits = physical_bits(config.lock().unwrap().cpus.max_phys_bits);
         let memory_manager = MemoryManager::new(
             vm.clone(),
             &config.lock().unwrap().memory.clone(),
@@ -830,11 +826,7 @@ impl Vm {
         let memory_manager = if let Some(memory_manager_snapshot) =
             snapshot.snapshots.get(MEMORY_MANAGER_SNAPSHOT_ID)
         {
-            let phys_bits = physical_bits(
-                config.lock().unwrap().cpus.max_phys_bits,
-                #[cfg(feature = "tdx")]
-                config.lock().unwrap().tdx.is_some(),
-            );
+            let phys_bits = physical_bits(config.lock().unwrap().cpus.max_phys_bits);
             MemoryManager::new_from_snapshot(
                 memory_manager_snapshot,
                 vm.clone(),
@@ -877,11 +869,7 @@ impl Vm {
         let vm = hypervisor.create_vm().unwrap();
         #[cfg(target_arch = "x86_64")]
         vm.enable_split_irq().unwrap();
-        let phys_bits = physical_bits(
-            config.lock().unwrap().cpus.max_phys_bits,
-            #[cfg(feature = "tdx")]
-            config.lock().unwrap().tdx.is_some(),
-        );
+        let phys_bits = physical_bits(config.lock().unwrap().cpus.max_phys_bits);
 
         let memory_manager = MemoryManager::new(
             vm.clone(),
@@ -2300,11 +2288,7 @@ impl Snapshottable for Vm {
         let common_cpuid = {
             #[cfg(feature = "tdx")]
             let tdx_enabled = self.config.lock().unwrap().tdx.is_some();
-            let phys_bits = physical_bits(
-                self.config.lock().unwrap().cpus.max_phys_bits,
-                #[cfg(feature = "tdx")]
-                tdx_enabled,
-            );
+            let phys_bits = physical_bits(self.config.lock().unwrap().cpus.max_phys_bits);
             arch::generate_common_cpuid(
                 self.hypervisor.clone(),
                 None,
