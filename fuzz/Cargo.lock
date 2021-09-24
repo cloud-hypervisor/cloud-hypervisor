@@ -354,9 +354,9 @@ dependencies = [
 
 [[package]]
 name = "linux-loader"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c819cc8275b0f2c1ed9feec455ca288b45d82932384a6a5f7a86812ee3427459"
+checksum = "8a5e77493808403a6bd56a301a64ea6b9342e36ea845044bf0dfdf56fe52fa08"
 dependencies = [
  "vm-memory",
 ]
@@ -887,6 +887,7 @@ dependencies = [
  "versionize",
  "versionize_derive",
  "vfio-ioctls",
+ "vfio_user",
  "vhdx",
  "virtio-devices",
  "vm-allocator",
