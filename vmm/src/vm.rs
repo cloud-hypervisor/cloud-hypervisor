@@ -2115,14 +2115,33 @@ impl Vm {
         let mem = guest_memory.memory();
 
         for range in ranges.regions() {
-            mem.read_exact_from(GuestAddress(range.gpa), fd, range.length as usize)
-                .map_err(|e| {
-                    MigratableError::MigrateReceive(anyhow!(
-                        "Error transferring memory to socket: {}",
-                        e
-                    ))
-                })?;
+            let mut offset: u64 = 0;
+            // Here we are manually handling the retry in case we can't the
+            // whole region at once because we can't use the implementation
+            // from vm-memory::GuestMemory of read_exact_from() as it is not
+            // following the correct behavior. For more info about this issue
+            // see: https://github.com/rust-vmm/vm-memory/issues/174
+            loop {
+                let bytes_read = mem
+                    .read_from(
+                        GuestAddress(range.gpa + offset),
+                        fd,
+                        (range.length - offset) as usize,
+                    )
+                    .map_err(|e| {
+                        MigratableError::MigrateReceive(anyhow!(
+                            "Error receiving memory from socket: {}",
+                            e
+                        ))
+                    })?;
+                offset += bytes_read as u64;
+
+                if offset == range.length {
+                    break;
+                }
+            }
         }
+
         Ok(())
     }
 
@@ -2138,13 +2157,31 @@ impl Vm {
         let mem = guest_memory.memory();
 
         for range in ranges.regions() {
-            mem.write_all_to(GuestAddress(range.gpa), fd, range.length as usize)
-                .map_err(|e| {
-                    MigratableError::MigrateSend(anyhow!(
-                        "Error transferring memory to socket: {}",
-                        e
-                    ))
-                })?;
+            let mut offset: u64 = 0;
+            // Here we are manually handling the retry in case we can't the
+            // whole region at once because we can't use the implementation
+            // from vm-memory::GuestMemory of write_all_to() as it is not
+            // following the correct behavior. For more info about this issue
+            // see: https://github.com/rust-vmm/vm-memory/issues/174
+            loop {
+                let bytes_written = mem
+                    .write_to(
+                        GuestAddress(range.gpa + offset),
+                        fd,
+                        (range.length - offset) as usize,
+                    )
+                    .map_err(|e| {
+                        MigratableError::MigrateSend(anyhow!(
+                            "Error transferring memory to socket: {}",
+                            e
+                        ))
+                    })?;
+                offset += bytes_written as u64;
+
+                if offset == range.length {
+                    break;
+                }
+            }
         }
 
         Ok(())
