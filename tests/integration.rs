@@ -547,6 +547,7 @@ mod tests {
             )
         }
 
+        #[cfg(target_arch = "x86_64")]
         fn ssh_command_l1(&self, command: &str) -> Result<String, SshCommandError> {
             ssh_command_ip(
                 command,
@@ -556,6 +557,7 @@ mod tests {
             )
         }
 
+        #[cfg(target_arch = "x86_64")]
         fn ssh_command_l2_1(&self, command: &str) -> Result<String, SshCommandError> {
             ssh_command_ip(
                 command,
@@ -565,6 +567,7 @@ mod tests {
             )
         }
 
+        #[cfg(target_arch = "x86_64")]
         fn ssh_command_l2_2(&self, command: &str) -> Result<String, SshCommandError> {
             ssh_command_ip(
                 command,
@@ -574,6 +577,7 @@ mod tests {
             )
         }
 
+        #[cfg(target_arch = "x86_64")]
         fn ssh_command_l2_3(&self, command: &str) -> Result<String, SshCommandError> {
             ssh_command_ip(
                 command,
@@ -615,6 +619,7 @@ mod tests {
                 .map_err(Error::Parsing)
         }
 
+        #[cfg(target_arch = "x86_64")]
         fn get_initial_apicid(&self) -> Result<u32, Error> {
             self.ssh_command("grep \"initial apicid\" /proc/cpuinfo | grep -o \"[0-9]*\"")?
                 .trim()
@@ -629,6 +634,7 @@ mod tests {
                 .map_err(Error::Parsing)
         }
 
+        #[cfg(target_arch = "x86_64")]
         fn get_total_memory_l2(&self) -> Result<u32, Error> {
             self.ssh_command_l2_1("grep MemTotal /proc/meminfo | grep -o \"[0-9]*\"")?
                 .trim()
@@ -710,6 +716,7 @@ mod tests {
             }
         }
 
+        #[cfg(target_arch = "x86_64")]
         fn check_sgx_support(&self) -> Result<(), Error> {
             self.ssh_command(
                 "cpuid -l 0x7 -s 0 | tr -s [:space:] | grep -q 'SGX: \
@@ -850,6 +857,7 @@ mod tests {
             );
         }
 
+        #[cfg(target_arch = "x86_64")]
         fn check_nvidia_gpu(&self) {
             // Run CUDA sample to validate it can find the device
             let device_query_result = self
@@ -2132,6 +2140,7 @@ mod tests {
 
     // VFIO test network setup.
     // We reserve a different IP class for it: 172.18.0.0/24.
+    #[cfg(target_arch = "x86_64")]
     fn setup_vfio_network_interfaces() {
         // 'vfio-br0'
         assert!(exec_host_command_status("sudo ip link add name vfio-br0 type bridge").success());
@@ -2156,6 +2165,7 @@ mod tests {
     }
 
     // Tear VFIO test network down
+    #[cfg(target_arch = "x86_64")]
     fn cleanup_vfio_network_interfaces() {
         assert!(exec_host_command_status("sudo ip link del vfio-br0").success());
         assert!(exec_host_command_status("sudo ip link del vfio-tap0").success());
@@ -4973,7 +4983,10 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
+            #[cfg(target_arch = "x86_64")]
             let mut kernels = vec![direct_kernel_boot_path()];
+            #[cfg(target_arch = "aarch64")]
+            let kernels = vec![direct_kernel_boot_path()];
 
             #[cfg(target_arch = "x86_64")]
             {
