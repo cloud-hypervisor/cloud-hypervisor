@@ -997,7 +997,6 @@ impl VirtioDevice for Mem {
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
-        let config = self.config.lock().unwrap();
         let mut handler = MemEpollHandler {
             host_addr: self.host_addr,
             host_fd: self.host_fd,
@@ -1014,12 +1013,20 @@ impl VirtioDevice for Mem {
             dma_mapping_handlers: Arc::clone(&self.dma_mapping_handlers),
         };
 
-        handler
-            .discard_memory_range(0, config.region_size)
-            .map_err(|e| {
-                error!("failed discarding memory range: {:?}", e);
-                ActivateError::BadActivate
-            })?;
+        let unplugged_memory_ranges = self.blocks_state.lock().unwrap().memory_ranges(0, false);
+        for range in unplugged_memory_ranges.regions() {
+            handler
+                .discard_memory_range(range.gpa, range.length)
+                .map_err(|e| {
+                    error!(
+                        "failed discarding memory range [0x{:x}-0x{:x}]: {:?}",
+                        range.gpa,
+                        range.gpa + range.length - 1,
+                        e
+                    );
+                    ActivateError::BadActivate
+                })?;
+        }
 
         let paused = self.common.paused.clone();
         let paused_sync = self.common.paused_sync.clone();
