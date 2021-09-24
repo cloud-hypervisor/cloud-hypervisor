@@ -138,6 +138,10 @@ impl Pl011 {
         }
     }
 
+    pub fn set_out(&mut self, out: Box<dyn io::Write + Send>) {
+        self.out = Some(out);
+    }
+
     fn state(&self) -> Pl011State {
         Pl011State {
             flags: self.flags,
@@ -189,6 +193,13 @@ impl Pl011 {
             self.trigger_interrupt()?;
         }
 
+        Ok(())
+    }
+
+    pub fn flush_output(&mut self) -> result::Result<(), io::Error> {
+        if let Some(out) = self.out.as_mut() {
+            out.flush()?;
+        }
         Ok(())
     }
 

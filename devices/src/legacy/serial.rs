@@ -124,12 +124,23 @@ impl Serial {
         Self::new(id, interrupt, None)
     }
 
+    pub fn set_out(&mut self, out: Box<dyn io::Write + Send>) {
+        self.out = Some(out);
+    }
+
     /// Queues raw bytes for the guest to read and signals the interrupt if the line status would
     /// change.
     pub fn queue_input_bytes(&mut self, c: &[u8]) -> Result<()> {
         if !self.is_loop() {
             self.in_buffer.extend(c);
             self.recv_data()?;
+        }
+        Ok(())
+    }
+
+    pub fn flush_output(&mut self) -> result::Result<(), io::Error> {
+        if let Some(out) = self.out.as_mut() {
+            out.flush()?;
         }
         Ok(())
     }
