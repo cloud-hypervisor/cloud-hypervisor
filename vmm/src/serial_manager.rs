@@ -5,6 +5,7 @@
 
 use crate::config::ConsoleOutputMode;
 use crate::device_manager::PtyPair;
+use crate::serial_buffer::SerialBuffer;
 #[cfg(target_arch = "aarch64")]
 use devices::legacy::Pl011;
 #[cfg(target_arch = "x86_64")]
@@ -36,6 +37,10 @@ pub enum Error {
     /// Cannot queue input to the serial device.
     #[error("Error queuing input to the serial device: {0}")]
     QueueInput(#[source] vmm_sys_util::errno::Error),
+
+    /// Cannot flush output on the serial buffer.
+    #[error("Error flushing serial device's output buffer: {0}")]
+    FlushOutput(#[source] io::Error),
 
     /// Cannot make the file descriptor non-blocking.
     #[error("Error making input file descriptor non-blocking: {0}")]
@@ -142,6 +147,14 @@ impl SerialManager {
         )
         .map_err(Error::Epoll)?;
 
+        if mode == ConsoleOutputMode::Pty {
+            let writer = in_file.try_clone().map_err(Error::FileClone)?;
+            let mut buffer = SerialBuffer::new(Box::new(writer));
+            buffer.add_out_fd(in_file.as_raw_fd());
+            buffer.add_epoll_fd(epoll_fd);
+            serial.as_ref().lock().unwrap().set_out(Box::new(buffer));
+        }
+
         // Use 'File' to enforce closing on 'epoll_fd'
         let epoll_file = unsafe { File::from_raw_fd(epoll_fd) };
 
@@ -201,21 +214,31 @@ impl SerialManager {
                                     warn!("Unknown serial manager loop event: {}", event);
                                 }
                                 EpollDispatch::File => {
-                                    let mut input = [0u8; 64];
-                                    let count =
-                                        in_file.read(&mut input).map_err(Error::ReadInput)?;
-
-                                    // Replace "\n" with "\r" to deal with Windows SAC (#1170)
-                                    if count == 1 && input[0] == 0x0a {
-                                        input[0] = 0x0d;
+                                    if event.events & libc::EPOLLOUT as u32 != 0 {
+                                        serial
+                                            .as_ref()
+                                            .lock()
+                                            .unwrap()
+                                            .flush_output()
+                                            .map_err(Error::FlushOutput)?;
                                     }
+                                    if event.events & libc::EPOLLIN as u32 != 0 {
+                                        let mut input = [0u8; 64];
+                                        let count =
+                                            in_file.read(&mut input).map_err(Error::ReadInput)?;
 
-                                    serial
-                                        .as_ref()
-                                        .lock()
-                                        .unwrap()
-                                        .queue_input_bytes(&input[..count])
-                                        .map_err(Error::QueueInput)?;
+                                        // Replace "\n" with "\r" to deal with Windows SAC (#1170)
+                                        if count == 1 && input[0] == 0x0a {
+                                            input[0] = 0x0d;
+                                        }
+
+                                        serial
+                                            .as_ref()
+                                            .lock()
+                                            .unwrap()
+                                            .queue_input_bytes(&input[..count])
+                                            .map_err(Error::QueueInput)?;
+                                    }
                                 }
                                 EpollDispatch::Kill => {
                                     info!("KILL event received, stopping epoll loop");

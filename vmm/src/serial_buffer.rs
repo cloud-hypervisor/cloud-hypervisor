@@ -3,7 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use crate::serial_manager::EpollDispatch;
+
 use std::io::Write;
+use std::os::unix::io::RawFd;
 
 // Circular buffer implementation for serial output.
 // Read from head; push to tail
@@ -12,6 +15,9 @@ pub(crate) struct SerialBuffer {
     head: usize,
     tail: usize,
     out: Box<dyn Write + Send>,
+    buffering: bool,
+    out_fd: Option<RawFd>,
+    epoll_fd: Option<RawFd>,
 }
 
 const MAX_BUFFER_SIZE: usize = 16 << 10;
@@ -23,10 +29,21 @@ impl SerialBuffer {
             head: 0,
             tail: 0,
             out,
+            buffering: false,
+            out_fd: None,
+            epoll_fd: None,
         }
     }
 
-    pub(crate) fn flush_buffer(&mut self) -> Result<(), std::io::Error> {
+    pub(crate) fn add_out_fd(&mut self, out_fd: RawFd) {
+        self.out_fd = Some(out_fd);
+    }
+
+    pub(crate) fn add_epoll_fd(&mut self, epoll_fd: RawFd) {
+        self.epoll_fd = Some(epoll_fd);
+    }
+
+    pub fn flush_buffer(&mut self) -> Result<(), std::io::Error> {
         if self.tail <= self.head {
             // The buffer to be written is in two parts
             let buf = &self.buffer[self.head..];
@@ -45,6 +62,7 @@ impl SerialBuffer {
                     if !matches!(e.kind(), std::io::ErrorKind::WouldBlock) {
                         return Err(e);
                     }
+                    self.add_out_poll()?;
                     return Ok(());
                 }
             }
@@ -58,6 +76,7 @@ impl SerialBuffer {
                     self.buffer.shrink_to_fit();
                     self.head = 0;
                     self.tail = 0;
+                    self.remove_out_poll()?;
                 } else {
                     self.head += bytes_written;
                 }
@@ -67,9 +86,43 @@ impl SerialBuffer {
                 if !matches!(e.kind(), std::io::ErrorKind::WouldBlock) {
                     return Err(e);
                 }
+                self.add_out_poll()?;
             }
         }
 
+        Ok(())
+    }
+
+    fn add_out_poll(&mut self) -> Result<(), std::io::Error> {
+        if self.out_fd.is_some() && self.epoll_fd.is_some() && !self.buffering {
+            self.buffering = true;
+            let out_fd = self.out_fd.as_ref().unwrap();
+            let epoll_fd = self.epoll_fd.as_ref().unwrap();
+            epoll::ctl(
+                *epoll_fd,
+                epoll::ControlOptions::EPOLL_CTL_MOD,
+                *out_fd,
+                epoll::Event::new(
+                    epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
+                    EpollDispatch::File as u64,
+                ),
+            )?;
+        }
+        Ok(())
+    }
+
+    fn remove_out_poll(&mut self) -> Result<(), std::io::Error> {
+        if self.out_fd.is_some() && self.epoll_fd.is_some() && self.buffering {
+            self.buffering = false;
+            let out_fd = self.out_fd.as_ref().unwrap();
+            let epoll_fd = self.epoll_fd.as_ref().unwrap();
+            epoll::ctl(
+                *epoll_fd,
+                epoll::ControlOptions::EPOLL_CTL_MOD,
+                *out_fd,
+                epoll::Event::new(epoll::Events::EPOLLIN, EpollDispatch::File as u64),
+            )?;
+        }
         Ok(())
     }
 }
@@ -83,6 +136,7 @@ impl Write for SerialBuffer {
                     if !matches!(e.kind(), std::io::ErrorKind::WouldBlock) {
                         return Err(e);
                     }
+                    self.add_out_poll()?;
                     self.buffer.push(*v);
                     self.tail += 1;
                 } else {
@@ -116,6 +170,6 @@ impl Write for SerialBuffer {
     }
 
     fn flush(&mut self) -> Result<(), std::io::Error> {
-        Ok(())
+        self.flush_buffer()
     }
 }

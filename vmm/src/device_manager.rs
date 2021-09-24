@@ -23,7 +23,6 @@ use crate::interrupt::LegacyUserspaceInterruptManager;
 use crate::memory_manager::MEMORY_MANAGER_ACPI_SIZE;
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
-use crate::serial_buffer::SerialBuffer;
 use crate::serial_manager::{Error as SerialManagerError, SerialManager};
 use crate::sigwinch_listener::start_sigwinch_listener;
 use crate::GuestRegionMmap;
@@ -1818,21 +1817,16 @@ impl DeviceManager {
             ConsoleOutputMode::Pty => {
                 if let Some(pty) = serial_pty {
                     self.config.lock().unwrap().serial.file = Some(pty.path.clone());
-                    let writer = pty.main.try_clone().unwrap();
-                    let buffer = SerialBuffer::new(Box::new(writer));
                     self.serial_pty = Some(Arc::new(Mutex::new(pty)));
-                    Some(Box::new(buffer))
                 } else {
                     let (main, mut sub, path) =
                         create_pty(true).map_err(DeviceManagerError::SerialPtyOpen)?;
                     self.set_raw_mode(&mut sub)
                         .map_err(DeviceManagerError::SetPtyRaw)?;
                     self.config.lock().unwrap().serial.file = Some(path.clone());
-                    let writer = main.try_clone().unwrap();
-                    let buffer = SerialBuffer::new(Box::new(writer));
                     self.serial_pty = Some(Arc::new(Mutex::new(PtyPair { main, sub, path })));
-                    Some(Box::new(buffer))
                 }
+                None
             }
             ConsoleOutputMode::Tty => Some(Box::new(stdout())),
             ConsoleOutputMode::Off | ConsoleOutputMode::Null => None,
