@@ -4285,12 +4285,18 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_memory_hotplug() {
-            let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            #[cfg(target_arch = "aarch64")]
+            let focal_image = FOCAL_IMAGE_UPDATE_KERNEL_NAME.to_string();
+            #[cfg(target_arch = "x86_64")]
+            let focal_image = FOCAL_IMAGE_NAME.to_string();
+            let focal = UbuntuDiskConfig::new(focal_image);
             let guest = Guest::new(Box::new(focal));
             let api_socket = temp_api_path(&guest.tmp_dir);
 
+            #[cfg(target_arch = "aarch64")]
+            let kernel_path = edk2_path();
+            #[cfg(target_arch = "x86_64")]
             let kernel_path = direct_kernel_boot_path();
 
             let mut child = GuestCommand::new(&guest)
@@ -4697,7 +4703,6 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_virtio_balloon() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
