@@ -67,6 +67,11 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
         libcap2-bin \
         libguestfs-tools \
         linux-image-5.8.0-63-generic \
+        autotools-dev \
+        autoconf \
+        automake \
+        perl \
+        texinfo \
         && apt-get clean \
         && rm -rf /var/lib/apt/lists/*;	fi
 
