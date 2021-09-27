@@ -22,6 +22,8 @@ jobs:
             target: ${{ matrix.target }}
             override: true
       - name: Install Cargo fuzz
-        run: cargo install -f cargo-fuzz
+        # Temporary fix for cargo-fuzz on latest nightly: https://github.com/rust-fuzz/cargo-fuzz/issues/276
+        #run: cargo install cargo-fuzz
+        run: cargo install --git https://github.com/rust-fuzz/cargo-fuzz --rev b4df3e58f767b5cad8d1aa6753961003f56f3609
       - name: Cargo Fuzz Build
         run: cargo fuzz build
