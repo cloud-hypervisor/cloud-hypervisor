@@ -8,7 +8,6 @@ export BUILD_TARGET=${BUILD_TARGET-aarch64-unknown-linux-gnu}
 
 WORKLOADS_DIR="$HOME/workloads"
 WORKLOADS_LOCK="$WORKLOADS_DIR/integration_test.lock"
-EDK2_BUILD_DIR="$WORKLOADS_DIR/edk2_build"
 
 mkdir -p "$WORKLOADS_DIR"
 
@@ -70,65 +69,36 @@ build_custom_linux() {
 }
 
 build_edk2() {
+    EDK2_BUILD_DIR="$WORKLOADS_DIR/edk2_build"
     EDK2_REPO="https://github.com/tianocore/edk2.git"
-    EDK2_DIR="edk2"
-    EDK2_BRANCH="master"
+    EDK2_DIR="$EDK2_BUILD_DIR/edk2"
     EDK2_PLAT_REPO="https://github.com/tianocore/edk2-platforms.git"
-    EDK2_PLAT_DIR="edk2-platforms"
+    EDK2_PLAT_DIR="$EDK2_BUILD_DIR/edk2-platforms"
     ACPICA_REPO="https://github.com/acpica/acpica.git"
-    ACPICA_DIR="acpica"
-
+    ACPICA_DIR="$EDK2_BUILD_DIR/acpica"
     export WORKSPACE="$EDK2_BUILD_DIR"
-    export PACKAGES_PATH="$WORKSPACE/$EDK2_DIR:$WORKSPACE/$EDK2_PLAT_DIR"
-    export IASL_PREFIX="$WORKSPACE/acpica/generate/unix/bin/"
+    export PACKAGES_PATH="$EDK2_DIR:$EDK2_PLAT_DIR"
+    export IASL_PREFIX="$ACPICA_DIR/generate/unix/bin/"
 
-    cd "$WORKLOADS_DIR"
-    if [ ! -d "$WORKSPACE" ]; then
-        mkdir -p "$WORKSPACE"
+    if [ ! -d "$EDK2_BUILD_DIR" ]; then
+        mkdir -p "$EDK2_BUILD_DIR"
     fi
 
-    pushd "$WORKSPACE"
+    # Prepare source code
+    checkout_repo "$EDK2_DIR" "$EDK2_REPO" master "46b4606ba23498d3d0e66b53e498eb3d5d592586"
+    pushd "$EDK2_DIR"
+    git submodule update --init
+    popd
+    checkout_repo "$EDK2_PLAT_DIR" "$EDK2_PLAT_REPO" master "8227e9e9f6a8aefbd772b40138f835121ccb2307"
+    checkout_repo "$ACPICA_DIR" "$ACPICA_REPO" master "b9c69f81a05c45611c91ea9cbce8756078d76233"
 
-    # Check whether the local HEAD commit same as the remote HEAD or not. Remove the folder if they are different.
-    if [ -d "$EDK2_DIR" ]; then
-        pushd $EDK2_DIR
-        git fetch
-        EDK2_LOCAL_HEAD=$(git rev-parse HEAD)
-        EDK2_REMOTE_HEAD=$(git rev-parse remotes/origin/$EDK2_BRANCH)
-        popd
-        if [ "$EDK2_LOCAL_HEAD" != "$EDK2_REMOTE_HEAD" ]; then
-            # If EDK2 code is out of date, remove and rebuild all
-            rm -rf "$EDK2_DIR"
-            rm -rf "$EDK2_PLAT_DIR"
-            rm -rf "$ACPICA_DIR"
-        fi
-    fi
-
-    if [ ! -d "$EDK2_DIR" ]; then
-        time git clone --depth 1 "$EDK2_REPO" -b "$EDK2_BRANCH" "$EDK2_DIR"
-        pushd $EDK2_DIR
-        git submodule update --init
-        popd
-    fi
-
-    if [ ! -d "$EDK2_PLAT_DIR" ]; then
-        time git clone --depth 1 "$EDK2_PLAT_REPO" -b master "$EDK2_PLAT_DIR"
-    fi
-
-    if [ ! -d "$ACPICA_DIR" ]; then
-        time git clone --depth 1 "$ACPICA_REPO" -b master "$ACPICA_DIR"
-    fi
-
-    make -C "$ACPICA_DIR"/
-
+    pushd "$EDK2_BUILD_DIR"
+    # Build
+    make -C acpica -j `nproc`
     source edk2/edksetup.sh
-    make -C edk2/BaseTools
-
-    build -a AARCH64 -t GCC5 -p ArmVirtPkg/ArmVirtCloudHv.dsc -b RELEASE
+    make -C edk2/BaseTools -j `nproc`
+    build -a AARCH64 -t GCC5 -p ArmVirtPkg/ArmVirtCloudHv.dsc -b RELEASE -n 0
     cp Build/ArmVirtCloudHv-AARCH64/RELEASE_GCC5/FV/CLOUDHV_EFI.fd "$WORKLOADS_DIR"
-
-    echo "Info: build UEFI successfully"
-
     popd
 }
 
