@@ -66,15 +66,14 @@ use std::{result, str, thread};
 use vm_device::Bus;
 #[cfg(target_arch = "x86_64")]
 use vm_device::BusDevice;
+#[cfg(any(target_arch = "aarch64", feature = "tdx"))]
+use vm_memory::Address;
+use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
 #[cfg(feature = "tdx")]
-use vm_memory::GuestMemory;
-use vm_memory::{
-    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryRegion,
-};
+use vm_memory::{GuestMemory, GuestMemoryRegion};
 use vm_migration::{
-    protocol::{MemoryRange, MemoryRangeTable},
-    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
-    Transportable,
+    protocol::MemoryRangeTable, Migratable, MigratableError, Pausable, Snapshot,
+    SnapshotDataSection, Snapshottable, Transportable,
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::unblock_signal;
@@ -2189,22 +2188,7 @@ impl Vm {
     }
 
     pub fn memory_range_table(&self) -> std::result::Result<MemoryRangeTable, MigratableError> {
-        let mut table = MemoryRangeTable::default();
-        let mm = self.memory_manager.lock().unwrap();
-
-        for memory_zone in mm.memory_zones().values() {
-            for region in memory_zone.regions() {
-                table.push(MemoryRange {
-                    gpa: region.start_addr().raw_value(),
-                    length: region.len() as u64,
-                });
-            }
-            if let Some(virtio_mem_zone) = memory_zone.virtio_mem_zone() {
-                table.extend(virtio_mem_zone.plugged_ranges());
-            }
-        }
-
-        Ok(table)
+        self.memory_manager.lock().unwrap().memory_range_table()
     }
 
     pub fn device_tree(&self) -> Arc<Mutex<DeviceTree>> {
@@ -2670,7 +2654,7 @@ mod tests {
 #[test]
 pub fn test_vm() {
     use hypervisor::VmExit;
-    use vm_memory::{GuestMemory, GuestMemoryRegion};
+    use vm_memory::{Address, GuestMemory, GuestMemoryRegion};
     // This example based on https://lwn.net/Articles/658511/
     let code = [
         0xba, 0xf8, 0x03, /* mov $0x3f8, %dx */
