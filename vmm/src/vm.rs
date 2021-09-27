@@ -2188,7 +2188,10 @@ impl Vm {
     }
 
     pub fn memory_range_table(&self) -> std::result::Result<MemoryRangeTable, MigratableError> {
-        self.memory_manager.lock().unwrap().memory_range_table()
+        self.memory_manager
+            .lock()
+            .unwrap()
+            .memory_range_table(false)
     }
 
     pub fn device_tree(&self) -> Arc<Mutex<DeviceTree>> {

@@ -50,6 +50,8 @@ pub const MEMORY_MANAGER_ACPI_SIZE: usize = 0x18;
 
 const DEFAULT_MEMORY_ZONE: &str = "mem0";
 
+const SNAPSHOT_FILENAME: &str = "memory-ranges";
+
 #[cfg(target_arch = "x86_64")]
 const X86_64_IRQ_BASE: u32 = 5;
 
@@ -145,7 +147,7 @@ pub struct MemoryManager {
     #[cfg(target_arch = "x86_64")]
     sgx_epc_region: Option<SgxEpcRegion>,
     user_provided_zones: bool,
-    snapshot_memory_regions: Vec<MemoryRegion>,
+    snapshot_memory_ranges: MemoryRangeTable,
     memory_zones: MemoryZones,
     log_dirty: bool, // Enable dirty logging for created RAM regions
 
@@ -496,23 +498,42 @@ impl MemoryManager {
         Ok((mem_regions, memory_zones))
     }
 
-    fn fill_saved_regions(&mut self, saved_regions: Vec<MemoryRegion>) -> Result<(), Error> {
-        for region in saved_regions {
-            if let Some(content) = region.content {
-                // Open (read only) the snapshot file for the given region.
-                let mut memory_region_file = OpenOptions::new()
-                    .read(true)
-                    .open(content)
-                    .map_err(Error::SnapshotOpen)?;
+    fn fill_saved_regions(
+        &mut self,
+        file_path: PathBuf,
+        saved_regions: MemoryRangeTable,
+    ) -> Result<(), Error> {
+        if saved_regions.is_empty() {
+            return Ok(());
+        }
 
-                self.guest_memory
-                    .memory()
-                    .read_exact_from(
-                        GuestAddress(region.start_addr),
-                        &mut memory_region_file,
-                        region.size as usize,
+        // Open (read only) the snapshot file.
+        let mut memory_file = OpenOptions::new()
+            .read(true)
+            .open(file_path)
+            .map_err(Error::SnapshotOpen)?;
+
+        let guest_memory = self.guest_memory.memory();
+        for range in saved_regions.regions() {
+            let mut offset: u64 = 0;
+            // Here we are manually handling the retry in case we can't write
+            // the whole region at once because we can't use the implementation
+            // from vm-memory::GuestMemory of read_exact_from() as it is not
+            // following the correct behavior. For more info about this issue
+            // see: https://github.com/rust-vmm/vm-memory/issues/174
+            loop {
+                let bytes_read = guest_memory
+                    .read_from(
+                        GuestAddress(range.gpa + offset),
+                        &mut memory_file,
+                        (range.length - offset) as usize,
                     )
                     .map_err(Error::SnapshotCopy)?;
+                offset += bytes_read as u64;
+
+                if offset == range.length {
+                    break;
+                }
             }
         }
 
@@ -792,7 +813,7 @@ impl MemoryManager {
             #[cfg(target_arch = "x86_64")]
             sgx_epc_region: None,
             user_provided_zones,
-            snapshot_memory_regions: Vec::new(),
+            snapshot_memory_ranges: MemoryRangeTable::default(),
             memory_zones,
             guest_ram_mappings: Vec::new(),
             #[cfg(feature = "acpi")]
@@ -869,30 +890,16 @@ impl MemoryManager {
         )?;
 
         if let Some(source_url) = source_url {
-            let vm_snapshot_path = url_to_path(source_url).map_err(Error::Restore)?;
+            let mut memory_file_path = url_to_path(source_url).map_err(Error::Restore)?;
+            memory_file_path.push(String::from(SNAPSHOT_FILENAME));
 
             let mem_snapshot: MemoryManagerSnapshotData = snapshot
                 .to_versioned_state(MEMORY_MANAGER_SNAPSHOT_ID)
                 .map_err(Error::Restore)?;
 
-            // Here we turn the content file name into a content file path as
-            // this will be needed to copy the content of the saved memory
-            // region into the newly created memory region.
-            // We simply ignore the content files that are None, as they
-            // represent regions that have been directly saved by the user, with
-            // no need for saving into a dedicated external file. For these
-            // files, the VmConfig already contains the information on where to
-            // find them.
-            let mut saved_regions = mem_snapshot.memory_regions;
-            for region in saved_regions.iter_mut() {
-                if let Some(content) = &mut region.content {
-                    let mut memory_region_path = vm_snapshot_path.clone();
-                    memory_region_path.push(content.clone());
-                    *content = memory_region_path.to_str().unwrap().to_owned();
-                }
-            }
-
-            mm.lock().unwrap().fill_saved_regions(saved_regions)?;
+            mm.lock()
+                .unwrap()
+                .fill_saved_regions(memory_file_path, mem_snapshot.memory_ranges)?;
         }
 
         Ok(mm)
@@ -1509,18 +1516,41 @@ impl MemoryManager {
         &self.memory_zones
     }
 
-    pub fn memory_range_table(&self) -> std::result::Result<MemoryRangeTable, MigratableError> {
+    pub fn memory_range_table(
+        &self,
+        snapshot: bool,
+    ) -> std::result::Result<MemoryRangeTable, MigratableError> {
         let mut table = MemoryRangeTable::default();
 
         for memory_zone in self.memory_zones.values() {
+            if let Some(virtio_mem_zone) = memory_zone.virtio_mem_zone() {
+                table.extend(virtio_mem_zone.plugged_ranges());
+            }
+
             for region in memory_zone.regions() {
+                if snapshot {
+                    if let Some(file_offset) = region.file_offset() {
+                        if (region.flags() & libc::MAP_SHARED == libc::MAP_SHARED)
+                            && Self::is_hardlink(file_offset.file())
+                        {
+                            // In this very specific case, we know the memory
+                            // region is backed by a file on the host filesystem
+                            // that can be accessed by the user, and additionally
+                            // the mapping is shared, which means that modifications
+                            // to the content are written to the actual file.
+                            // When meeting these conditions, we can skip the
+                            // copy of the memory content for this specific region,
+                            // as we can assume the user will have it saved through
+                            // the backing file already.
+                            continue;
+                        }
+                    }
+                }
+
                 table.push(MemoryRange {
                     gpa: region.start_addr().raw_value(),
                     length: region.len() as u64,
                 });
-            }
-            if let Some(virtio_mem_zone) = memory_zone.virtio_mem_zone() {
-                table.extend(virtio_mem_zone.plugged_ranges());
             }
         }
 
@@ -1906,16 +1936,9 @@ impl Aml for MemoryManager {
 
 impl Pausable for MemoryManager {}
 
-#[derive(Clone, Versionize)]
-pub struct MemoryRegion {
-    content: Option<String>,
-    start_addr: u64,
-    size: u64,
-}
-
 #[derive(Versionize)]
 pub struct MemoryManagerSnapshotData {
-    memory_regions: Vec<MemoryRegion>,
+    memory_ranges: MemoryRangeTable,
 }
 
 impl VersionMapped for MemoryManagerSnapshotData {}
@@ -1927,53 +1950,22 @@ impl Snapshottable for MemoryManager {
 
     fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         let mut memory_manager_snapshot = Snapshot::new(MEMORY_MANAGER_SNAPSHOT_ID);
-        let guest_memory = self.guest_memory.memory();
 
-        let mut memory_regions: Vec<MemoryRegion> = Vec::new();
+        let memory_ranges = self.memory_range_table(true)?;
 
-        for (index, region) in guest_memory.iter().enumerate() {
-            if region.len() == 0 {
-                return Err(MigratableError::Snapshot(anyhow!("Zero length region")));
-            }
-
-            let mut content = Some(PathBuf::from(format!("memory-region-{}", index)));
-            if let Some(file_offset) = region.file_offset() {
-                if (region.flags() & libc::MAP_SHARED == libc::MAP_SHARED)
-                    && Self::is_hardlink(file_offset.file())
-                {
-                    // In this very specific case, we know the memory region
-                    // is backed by a file on the host filesystem that can be
-                    // accessed by the user, and additionally the mapping is
-                    // shared, which means that modifications to the content
-                    // are written to the actual file.
-                    // When meeting these conditions, we can skip the copy of
-                    // the memory content for this specific region, as we can
-                    // assume the user will have it saved through the backing
-                    // file already.
-                    content = None;
-                }
-            }
-
-            memory_regions.push(MemoryRegion {
-                content: content.map(|p| p.to_str().unwrap().to_owned()),
-                start_addr: region.start_addr().0,
-                size: region.len(),
-            });
-        }
-
-        // Store locally this list of regions as it will be used through the
+        // Store locally this list of ranges as it will be used through the
         // Transportable::send() implementation. The point is to avoid the
         // duplication of code regarding the creation of the path for each
         // region. The 'snapshot' step creates the list of memory regions,
         // including information about the need to copy a memory region or
         // not. This saves the 'send' step having to go through the same
         // process, and instead it can directly proceed with storing the
-        // memory region content for the regions requiring it.
-        self.snapshot_memory_regions = memory_regions.clone();
+        // memory range content for the ranges requiring it.
+        self.snapshot_memory_ranges = memory_ranges.clone();
 
         memory_manager_snapshot.add_data_section(SnapshotDataSection::new_from_versioned_state(
             MEMORY_MANAGER_SNAPSHOT_ID,
-            &MemoryManagerSnapshotData { memory_regions },
+            &MemoryManagerSnapshotData { memory_ranges },
         )?);
 
         Ok(memory_manager_snapshot)
@@ -1986,29 +1978,43 @@ impl Transportable for MemoryManager {
         _snapshot: &Snapshot,
         destination_url: &str,
     ) -> result::Result<(), MigratableError> {
-        let vm_memory_snapshot_path = url_to_path(destination_url)?;
+        if self.snapshot_memory_ranges.is_empty() {
+            return Ok(());
+        }
+
+        let mut memory_file_path = url_to_path(destination_url)?;
+        memory_file_path.push(String::from(SNAPSHOT_FILENAME));
+
+        // Create the snapshot file for the entire memory
+        let mut memory_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(memory_file_path)
+            .map_err(|e| MigratableError::MigrateSend(e.into()))?;
 
         let guest_memory = self.guest_memory.memory();
-        for region in self.snapshot_memory_regions.iter() {
-            if let Some(content) = &region.content {
-                let mut memory_region_path = vm_memory_snapshot_path.clone();
-                memory_region_path.push(content);
 
-                // Create the snapshot file for the region
-                let mut memory_region_file = OpenOptions::new()
-                    .read(true)
-                    .write(true)
-                    .create_new(true)
-                    .open(memory_region_path)
-                    .map_err(|e| MigratableError::MigrateSend(e.into()))?;
-
-                guest_memory
-                    .write_all_to(
-                        GuestAddress(region.start_addr),
-                        &mut memory_region_file,
-                        region.size as usize,
+        for range in self.snapshot_memory_ranges.regions() {
+            let mut offset: u64 = 0;
+            // Here we are manually handling the retry in case we can't read
+            // the whole region at once because we can't use the implementation
+            // from vm-memory::GuestMemory of write_all_to() as it is not
+            // following the correct behavior. For more info about this issue
+            // see: https://github.com/rust-vmm/vm-memory/issues/174
+            loop {
+                let bytes_written = guest_memory
+                    .write_to(
+                        GuestAddress(range.gpa + offset),
+                        &mut memory_file,
+                        (range.length - offset) as usize,
                     )
                     .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+                offset += bytes_written as u64;
+
+                if offset == range.length {
+                    break;
+                }
             }
         }
         Ok(())
