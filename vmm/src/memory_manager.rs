@@ -41,8 +41,8 @@ use vm_memory::{
     GuestMemory, GuestMemoryAtomic, GuestMemoryError, GuestMemoryRegion, GuestUsize, MmapRegion,
 };
 use vm_migration::{
-    protocol::MemoryRangeTable, Migratable, MigratableError, Pausable, Snapshot,
-    SnapshotDataSection, Snapshottable, Transportable, VersionMapped,
+    protocol::MemoryRange, protocol::MemoryRangeTable, Migratable, MigratableError, Pausable,
+    Snapshot, SnapshotDataSection, Snapshottable, Transportable, VersionMapped,
 };
 
 #[cfg(feature = "acpi")]
@@ -1507,6 +1507,24 @@ impl MemoryManager {
 
     pub fn memory_zones(&self) -> &MemoryZones {
         &self.memory_zones
+    }
+
+    pub fn memory_range_table(&self) -> std::result::Result<MemoryRangeTable, MigratableError> {
+        let mut table = MemoryRangeTable::default();
+
+        for memory_zone in self.memory_zones.values() {
+            for region in memory_zone.regions() {
+                table.push(MemoryRange {
+                    gpa: region.start_addr().raw_value(),
+                    length: region.len() as u64,
+                });
+            }
+            if let Some(virtio_mem_zone) = memory_zone.virtio_mem_zone() {
+                table.extend(virtio_mem_zone.plugged_ranges());
+            }
+        }
+
+        Ok(table)
     }
 }
 
