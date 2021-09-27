@@ -4445,7 +4445,7 @@ impl BusDevice for DeviceManager {
                 assert!(data.len() == B0EJ_FIELD_SIZE);
                 // Always return an empty bitmap since the eject is always
                 // taken care of right away during a write access.
-                data.copy_from_slice(&[0, 0, 0, 0]);
+                data.fill(0);
             }
             _ => error!(
                 "Accessing unknown location at base 0x{:x}, offset 0x{:x}",
@@ -4465,15 +4465,14 @@ impl BusDevice for DeviceManager {
                 assert!(data.len() == B0EJ_FIELD_SIZE);
                 let mut data_array: [u8; 4] = [0, 0, 0, 0];
                 data_array.copy_from_slice(data);
-                let device_bitmap = u32::from_le_bytes(data_array);
+                let mut slot_bitmap = u32::from_le_bytes(data_array);
 
-                for device_id in 0..32 {
-                    let mask = 1u32 << device_id;
-                    if (device_bitmap & mask) == mask {
-                        if let Err(e) = self.eject_device(device_id as u8) {
-                            error!("Failed ejecting device {}: {:?}", device_id, e);
-                        }
+                while slot_bitmap > 0 {
+                    let slot_id = slot_bitmap.trailing_zeros();
+                    if let Err(e) = self.eject_device(slot_id as u8) {
+                        error!("Failed ejecting device {}: {:?}", slot_id, e);
                     }
+                    slot_bitmap &= !(1 << slot_id);
                 }
             }
             _ => error!(
