@@ -10,7 +10,7 @@ cargo-fuzz = true
 
 [dependencies]
 block_util = { path = "../block_util" }
-libc = "0.2.102"
+libc = "0.2.103"
 libfuzzer-sys = "0.4.2"
 qcow = { path = "../qcow" }
 seccompiler = { git = "https://github.com/rust-vmm/seccompiler"}
