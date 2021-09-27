@@ -52,6 +52,23 @@ checkout_repo() {
     fi
 }
 
+build_custom_linux() {
+    SRCDIR=$PWD
+    LINUX_CUSTOM_DIR="$WORKLOADS_DIR/linux-custom"
+    LINUX_CUSTOM_BRANCH="ch-5.14"
+    LINUX_CUSTOM_URL="https://github.com/cloud-hypervisor/linux.git"
+
+    checkout_repo "$LINUX_CUSTOM_DIR" "$LINUX_CUSTOM_URL" "$LINUX_CUSTOM_BRANCH"
+
+    cp $SRCDIR/resources/linux-config-aarch64 $LINUX_CUSTOM_DIR/.config
+
+    pushd $LINUX_CUSTOM_DIR
+    time make -j `nproc`
+    cp arch/arm64/boot/Image "$WORKLOADS_DIR/" || exit 1
+    cp arch/arm64/boot/Image.gz "$WORKLOADS_DIR/" || exit 1
+    popd
+}
+
 build_edk2() {
     EDK2_REPO="https://github.com/tianocore/edk2.git"
     EDK2_DIR="edk2"
@@ -197,40 +214,8 @@ update_workloads() {
     fi
     popd
 
-    # Build custom kernel based on virtio-pmem and virtio-fs upstream patches
-    PE_IMAGE="$WORKLOADS_DIR/Image"
-    BZ_IMAGE="$WORKLOADS_DIR/Image.gz"
-    LINUX_CUSTOM_DIR="$WORKLOADS_DIR/linux-custom"
-
-    build_custom_linux_kernel() {
-        pushd $LINUX_CUSTOM_DIR
-        time make -j `nproc`
-        cp arch/arm64/boot/Image "$PE_IMAGE" || exit 1
-        cp arch/arm64/boot/Image.gz "$BZ_IMAGE" || exit 1
-        popd
-    }
-
-    SRCDIR=$PWD
-    LINUX_CUSTOM_BRANCH="ch-5.14"
-
-    # Check whether the local HEAD commit same as the remote HEAD or not. Remove the folder if they are different.
-    if [ -d "$LINUX_CUSTOM_DIR" ]; then
-        pushd $LINUX_CUSTOM_DIR
-        git fetch
-        LINUX_CUSTOM_LOCAL_HEAD=$(git rev-parse HEAD)
-        LINUX_CUSTOM_REMOTE_HEAD=$(git rev-parse remotes/origin/$LINUX_CUSTOM_BRANCH)
-        popd
-        if [ "$LINUX_CUSTOM_LOCAL_HEAD" != "$LINUX_CUSTOM_REMOTE_HEAD" ]; then
-            rm -rf "$LINUX_CUSTOM_DIR"
-        fi
-    fi
-
-    if [ ! -d "$LINUX_CUSTOM_DIR" ]; then
-        time git clone --depth 1 "https://github.com/cloud-hypervisor/linux.git" -b $LINUX_CUSTOM_BRANCH $LINUX_CUSTOM_DIR
-    fi
-
-    cp $SRCDIR/resources/linux-config-aarch64 $LINUX_CUSTOM_DIR/.config
-    build_custom_linux_kernel
+    # Build custom kernel for guest VMs
+    build_custom_linux
 
     # Update the kernel in the cloud image for some tests that requires recent kernel version
     FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_NAME="focal-server-cloudimg-arm64-custom-update-kernel.raw"
@@ -239,7 +224,7 @@ update_workloads() {
     mkdir -p "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR"
     # Mount the 'raw' image, replace the compressed kernel file and umount the working folder
     guestmount -a "$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_NAME" -m /dev/sda1 "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR" || exit 1
-    cp "$BZ_IMAGE" "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR"/boot/vmlinuz
+    cp "$WORKLOADS_DIR"/Image.gz "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR"/boot/vmlinuz
     guestunmount "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR"
 
     # Build virtiofsd
