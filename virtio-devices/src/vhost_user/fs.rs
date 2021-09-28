@@ -521,7 +521,14 @@ impl VirtioDevice for Fs {
                     MasterReqHandler::new(vu_master_req_handler).map_err(|e| {
                         ActivateError::VhostUserFsSetup(Error::MasterReqHandlerCreation(e))
                     })?;
-                req_handler.set_reply_ack_flag(true);
+
+                if self.vu_common.acked_protocol_features
+                    & VhostUserProtocolFeatures::REPLY_ACK.bits()
+                    != 0
+                {
+                    req_handler.set_reply_ack_flag(true);
+                }
+
                 Some(req_handler)
             } else {
                 None
