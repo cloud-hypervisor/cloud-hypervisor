@@ -4129,7 +4129,7 @@ impl Aml for DeviceManager {
         let crs = aml::Name::new(
             "_CRS".into(),
             &aml::ResourceTemplate::new(vec![
-                &aml::AddressSpace::new_bus_number(0x0u16, 0xffu16),
+                &aml::AddressSpace::new_bus_number(0x0u16, 0x0u16),
                 #[cfg(target_arch = "x86_64")]
                 &aml::Io::new(0xcf8, 0xcf8, 1, 0x8),
                 #[cfg(target_arch = "aarch64")]
