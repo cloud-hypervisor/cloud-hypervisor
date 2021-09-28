@@ -6849,11 +6849,11 @@ mod tests {
             let memory_param: &[&str] = if numa {
                 &[
                     "--memory",
-                    "size=0",
+                    "size=0,hotplug_method=virtio-mem",
                     "--memory-zone",
-                    "id=mem0,size=1G",
-                    "id=mem1,size=1G",
-                    "id=mem2,size=2G",
+                    "id=mem0,size=1G,hotplug_size=32G",
+                    "id=mem1,size=1G,hotplug_size=32G",
+                    "id=mem2,size=1G,hotplug_size=32G",
                     "--numa",
                     "guest_numa_id=0,cpus=0-2:9,distances=1@15:2@20,memory_zones=mem0",
                     "guest_numa_id=1,cpus=3-4:6-8,distances=0@20:2@25,memory_zones=mem1",
@@ -6893,9 +6893,40 @@ mod tests {
                 // Check the number of vCPUs
                 assert_eq!(guest.get_cpu_count().unwrap_or_default(), 6);
                 // Check the guest RAM
-                assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+                assert!(guest.get_total_memory().unwrap_or_default() > 2_880_000);
                 // Check the guest virtio-devices, e.g. block, rng, console, and net
                 guest.check_devices_common(None, Some(&console_text));
+
+                // Check the NUMA parameters are applied correctly and resize
+                // each zone to test the case where we migrate a VM with the
+                // virtio-mem regions being used.
+                if numa {
+                    guest.check_numa_common(
+                        Some(&[960_000, 960_000, 960_000]),
+                        Some(&[vec![0, 1, 2], vec![3, 4], vec![5]]),
+                        Some(&["10 15 20", "20 10 25", "25 30 10"]),
+                    );
+
+                    // AArch64 currently does not support hotplug, and therefore we only
+                    // test hotplug-related function on x86_64 here.
+                    #[cfg(target_arch = "x86_64")]
+                    {
+                        guest.enable_memory_hotplug();
+
+                        // Resize every memory zone and check each associated NUMA node
+                        // has been assigned the right amount of memory.
+                        resize_zone_command(&src_api_socket, "mem0", "2G");
+                        resize_zone_command(&src_api_socket, "mem1", "2G");
+                        resize_zone_command(&src_api_socket, "mem2", "2G");
+                        thread::sleep(std::time::Duration::new(5, 0));
+
+                        guest.check_numa_common(
+                            Some(&[1_920_000, 1_920_000, 1_920_000]),
+                            None,
+                            None,
+                        );
+                    }
+                }
 
                 // x86_64: Following what's done in the `test_snapshot_restore`, we need
                 // to make sure that removing and adding back the virtio-net device does
@@ -7036,30 +7067,51 @@ mod tests {
             let r = std::panic::catch_unwind(|| {
                 // Perform same checks to validate VM has been properly migrated
                 assert_eq!(guest.get_cpu_count().unwrap_or_default(), 6);
-                assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+                if numa {
+                    #[cfg(target_arch = "x86_64")]
+                    assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
+                    #[cfg(target_arch = "aarch64")]
+                    assert!(guest.get_total_memory().unwrap_or_default() > 2_880_000);
+                } else {
+                    assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+                }
                 guest.check_devices_common(None, Some(&console_text));
 
                 // Perform NUMA related checks
                 if numa {
-                    guest.check_numa_common(
-                        Some(&[960_000, 960_000, 1_920_000]),
-                        Some(&[vec![0, 1, 2], vec![3, 4], vec![5]]),
-                        Some(&["10 15 20", "20 10 25", "25 30 10"]),
-                    );
+                    #[cfg(target_arch = "aarch64")]
+                    {
+                        guest.check_numa_common(
+                            Some(&[960_000, 960_000, 960_000]),
+                            Some(&[vec![0, 1, 2], vec![3, 4], vec![5]]),
+                            Some(&["10 15 20", "20 10 25", "25 30 10"]),
+                        );
+                    }
 
                     // AArch64 currently does not support hotplug, and therefore we only
                     // test hotplug-related function on x86_64 here.
                     #[cfg(target_arch = "x86_64")]
                     {
+                        guest.check_numa_common(
+                            Some(&[1_920_000, 1_920_000, 1_920_000]),
+                            Some(&[vec![0, 1, 2], vec![3, 4], vec![5]]),
+                            Some(&["10 15 20", "20 10 25", "25 30 10"]),
+                        );
+
                         guest.enable_memory_hotplug();
 
+                        // Resize every memory zone and check each associated NUMA node
+                        // has been assigned the right amount of memory.
+                        resize_zone_command(&dest_api_socket, "mem0", "4G");
+                        resize_zone_command(&dest_api_socket, "mem1", "4G");
+                        resize_zone_command(&dest_api_socket, "mem2", "4G");
                         // Resize to the maximum amount of CPUs and check each NUMA
                         // node has been assigned the right CPUs set.
                         resize_command(&dest_api_socket, Some(12), None, None);
                         thread::sleep(std::time::Duration::new(5, 0));
 
                         guest.check_numa_common(
-                            None,
+                            Some(&[3_840_000, 3_840_000, 3_840_000]),
                             Some(&[vec![0, 1, 2, 9], vec![3, 4, 6, 7, 8], vec![5, 10, 11]]),
                             None,
                         );
