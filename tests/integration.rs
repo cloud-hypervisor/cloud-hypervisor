@@ -62,20 +62,20 @@ mod tests {
     #[cfg(target_arch = "aarch64")]
     const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-arm64.raw";
     #[cfg(target_arch = "aarch64")]
-    const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64-custom.raw";
+    const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64-custom-20210929-0.raw";
     #[cfg(target_arch = "aarch64")]
     const FOCAL_IMAGE_UPDATE_KERNEL_NAME: &str =
-        "focal-server-cloudimg-arm64-custom-update-kernel.raw";
+        "focal-server-cloudimg-arm64-custom-20210929-0-update-kernel.raw";
     #[cfg(target_arch = "aarch64")]
-    const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-arm64-custom.qcow2";
+    const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-arm64-custom-20210929-0.qcow2";
     #[cfg(target_arch = "x86_64")]
     const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-amd64-custom-20210609-0.qcow2";
     #[cfg(target_arch = "aarch64")]
-    const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-arm64-custom.vhd";
+    const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-arm64-custom-20210929-0.vhd";
     #[cfg(target_arch = "x86_64")]
     const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-amd64-custom-20210609-0.vhd";
     #[cfg(target_arch = "aarch64")]
-    const FOCAL_IMAGE_NAME_VHDX: &str = "focal-server-cloudimg-arm64-custom.vhdx";
+    const FOCAL_IMAGE_NAME_VHDX: &str = "focal-server-cloudimg-arm64-custom-20210929-0.vhdx";
     #[cfg(target_arch = "x86_64")]
     const FOCAL_IMAGE_NAME_VHDX: &str = "focal-server-cloudimg-amd64-custom-20210609-0.vhdx";
     #[cfg(target_arch = "x86_64")]
