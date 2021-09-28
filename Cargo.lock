@@ -569,7 +569,7 @@ dependencies = [
 [[package]]
 name = "mshv-bindings"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/mshv?branch=main#0b5835475c8bb2114b727a87285275290eaa6cd9"
+source = "git+https://github.com/rust-vmm/mshv?branch=main#74e46d4eac8af64c030a3f5d4e5658111daa6fd6"
 dependencies = [
  "libc",
  "serde",
@@ -581,7 +581,7 @@ dependencies = [
 [[package]]
 name = "mshv-ioctls"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/mshv?branch=main#0b5835475c8bb2114b727a87285275290eaa6cd9"
+source = "git+https://github.com/rust-vmm/mshv?branch=main#74e46d4eac8af64c030a3f5d4e5658111daa6fd6"
 dependencies = [
  "libc",
  "mshv-bindings",
@@ -1327,7 +1327,7 @@ dependencies = [
 [[package]]
 name = "vm-fdt"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vm-fdt?branch=main#ddb3fad52461a8664c584db40ed1bc910123cd9e"
+source = "git+https://github.com/rust-vmm/vm-fdt?branch=main#57796cde6a56a3c55bae4856a7694bbb6f13263a"
 
 [[package]]
 name = "vm-memory"
