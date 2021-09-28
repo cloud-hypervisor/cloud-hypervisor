@@ -123,10 +123,10 @@ mod tests {
         (child, virtiofsd_socket_path)
     }
 
-    fn prepare_virtofsd_rs_daemon(
+    fn prepare_virtiofsd_rs_daemon(
         tmp_dir: &TempDir,
         shared_dir: &str,
-        _cache: &str,
+        cache: &str,
     ) -> (std::process::Child, String) {
         let mut workload_path = dirs::home_dir().unwrap();
         workload_path.push("workloads");
@@ -142,6 +142,7 @@ mod tests {
         let child = Command::new(virtiofsd_path.as_str())
             .args(&["--shared-dir", shared_dir])
             .args(&["--socket", virtiofsd_socket_path.as_str()])
+            .args(&["--cache", cache])
             .spawn()
             .unwrap();
 
@@ -3037,7 +3038,7 @@ mod tests {
 
         #[test]
         fn test_virtio_fs_dax_on_default_cache_size_w_virtiofsd_rs_daemon() {
-            test_virtio_fs(true, None, "none", &prepare_virtofsd_rs_daemon, false)
+            test_virtio_fs(true, None, "never", &prepare_virtiofsd_rs_daemon, false)
         }
 
         #[test]
@@ -3045,15 +3046,15 @@ mod tests {
             test_virtio_fs(
                 true,
                 Some(0x4000_0000),
-                "none",
-                &prepare_virtofsd_rs_daemon,
+                "never",
+                &prepare_virtiofsd_rs_daemon,
                 false,
             )
         }
 
         #[test]
         fn test_virtio_fs_dax_off_w_virtiofsd_rs_daemon() {
-            test_virtio_fs(false, None, "none", &prepare_virtofsd_rs_daemon, false)
+            test_virtio_fs(false, None, "never", &prepare_virtiofsd_rs_daemon, false)
         }
 
         #[test]
@@ -3071,13 +3072,13 @@ mod tests {
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_virtio_fs_hotplug_dax_on_w_virtiofsd_rs_daemon() {
-            test_virtio_fs(true, None, "none", &prepare_virtofsd_rs_daemon, true)
+            test_virtio_fs(true, None, "never", &prepare_virtiofsd_rs_daemon, true)
         }
 
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_virtio_fs_hotplug_dax_off_w_virtiofsd_rs_daemon() {
-            test_virtio_fs(false, None, "none", &prepare_virtofsd_rs_daemon, true)
+            test_virtio_fs(false, None, "never", &prepare_virtiofsd_rs_daemon, true)
         }
 
         #[test]
