@@ -49,7 +49,7 @@ test_infra = { path = "test_infra" }
 wait-timeout = "0.2.0"
 
 [features]
-default = ["acpi", "cmos", "io_uring", "kvm"]
+default = ["common", "kvm"]
 # Common features for all hypervisors
 common = ["acpi", "cmos", "fwdebug", "io_uring"]
 acpi = ["vmm/acpi"]
