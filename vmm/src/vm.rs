@@ -762,7 +762,7 @@ impl Vm {
         let memory_manager = MemoryManager::new(
             vm.clone(),
             &config.lock().unwrap().memory.clone(),
-            false,
+            None,
             phys_bits,
             #[cfg(feature = "tdx")]
             tdx_enabled,
@@ -886,7 +886,7 @@ impl Vm {
         let memory_manager = MemoryManager::new(
             vm.clone(),
             &config.lock().unwrap().memory.clone(),
-            false,
+            None,
             phys_bits,
             #[cfg(feature = "tdx")]
             false,

@@ -144,6 +144,7 @@ pub struct MemoryManager {
     shared: bool,
     hugepages: bool,
     hugepage_size: Option<u64>,
+    prefault: bool,
     #[cfg(target_arch = "x86_64")]
     sgx_epc_region: Option<SgxEpcRegion>,
     user_provided_zones: bool,
@@ -399,7 +400,7 @@ impl MemoryManager {
     fn create_memory_regions_from_zones(
         ram_regions: &[(GuestAddress, usize)],
         zones: &[MemoryZoneConfig],
-        prefault: bool,
+        prefault: Option<bool>,
     ) -> Result<(Vec<Arc<GuestRegionMmap>>, MemoryZones), Error> {
         let mut zones = zones.to_owned();
         let mut mem_regions = Vec::new();
@@ -447,7 +448,10 @@ impl MemoryManager {
                     file_offset,
                     region_start,
                     region_size,
-                    prefault,
+                    match prefault {
+                        Some(pf) => pf,
+                        None => zone.prefault,
+                    },
                     zone.shared,
                     zone.hugepages,
                     zone.hugepage_size,
@@ -543,7 +547,7 @@ impl MemoryManager {
     pub fn new(
         vm: Arc<dyn hypervisor::Vm>,
         config: &MemoryConfig,
-        prefault: bool,
+        prefault: Option<bool>,
         phys_bits: u8,
         #[cfg(feature = "tdx")] tdx_enabled: bool,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
@@ -601,6 +605,7 @@ impl MemoryManager {
                 host_numa_node: None,
                 hotplug_size: config.hotplug_size,
                 hotplugged_size: config.hotplugged_size,
+                prefault: config.prefault,
             }];
 
             (config.size, zones)
@@ -716,12 +721,18 @@ impl MemoryManager {
                                 * virtio_devices::VIRTIO_MEM_ALIGN_SIZE,
                         );
 
+                        // When `prefault` is set by vm_restore, memory manager
+                        // will create ram region with `prefault` option in
+                        // restore config rather than same option in zone
                         let region = MemoryManager::create_ram_region(
                             &None,
                             0,
                             start_addr,
                             hotplug_size as usize,
-                            false,
+                            match prefault {
+                                Some(pf) => pf,
+                                None => zone.prefault,
+                            },
                             zone.shared,
                             zone.hugepages,
                             zone.hugepage_size,
@@ -810,6 +821,7 @@ impl MemoryManager {
             shared: config.shared,
             hugepages: config.hugepages,
             hugepage_size: config.hugepage_size,
+            prefault: config.prefault,
             #[cfg(target_arch = "x86_64")]
             sgx_epc_region: None,
             user_provided_zones,
@@ -883,7 +895,7 @@ impl MemoryManager {
         let mm = MemoryManager::new(
             vm,
             config,
-            prefault,
+            Some(prefault),
             phys_bits,
             #[cfg(feature = "tdx")]
             false,
@@ -1123,7 +1135,7 @@ impl MemoryManager {
             0,
             start_addr,
             size,
-            false,
+            self.prefault,
             self.shared,
             self.hugepages,
             self.hugepage_size,
