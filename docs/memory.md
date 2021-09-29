@@ -13,18 +13,19 @@ easiest way to get started with Cloud-Hypervisor.
 struct MemoryConfig {
     size: u64,
     mergeable: bool,
-    shared: bool,
-    hugepages: bool,
-    hugepage_size: Option<u64>,
     hotplug_method: HotplugMethod,
     hotplug_size: Option<u64>,
     hotplugged_size: Option<u64>,
+    shared: bool,
+    hugepages: bool,
+    hugepage_size: Option<u64>,
+    prefault: bool,
     zones: Option<Vec<MemoryZoneConfig>>,
 }
 ```
 
 ```
---memory <memory>	Memory parameters "size=<guest_memory_size>,mergeable=on|off,shared=on|off,hugepages=on|off,hugepage_size=<hugepage_size>,hotplug_method=acpi|virtio-mem,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>"
+--memory <memory>	Memory parameters "size=<guest_memory_size>,mergeable=on|off,shared=on|off,hugepages=on|off,hugepage_size=<hugepage_size>,hotplug_method=acpi|virtio-mem,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>,prefault=on|off" [default: size=512M]
 ```
 
 ### `size`
@@ -57,46 +58,6 @@ _Example_
 
 ```
 --memory size=1G,mergeable=on
-```
-
-### `shared`
-
-Specifies if the memory must be `mmap(2)` with `MAP_SHARED` flag.
-
-By sharing a memory mapping, one can share the guest RAM with other processes
-running on the host. One can use this option when running vhost-user devices
-as part of the VM device model, as they will be driven by standalone daemons
-needing access to the guest RAM content.
-
-By default this option is turned off, which results in performing `mmap(2)`
-with `MAP_PRIVATE` flag.
-
-_Example_
-
-```
---memory size=1G,shared=on
-```
-
-### `hugepages` and `hugepage_size`
-
-Specifies if the memory must be created and `mmap(2)` with `MAP_HUGETLB` and size
-flags. This performs a memory mapping relying on the specified huge page size. If no huge page size is supplied the system's default huge page size is used.
-
-By using hugepages, one can improve the overall performance of the VM, assuming
-the guest will allocate hugepages as well. Another interesting use case is VFIO
-as it speeds up the VM's boot time since the amount of IOMMU mappings are
-reduced.
-
-The user is responsible for ensuring there are sufficient huge pages of the specified size for the VMM to use.
-Failure to do so may result in strange VMM behaviour, e.g. error with `ReadKernelImage` is common.
-If there is a strange error with `hugepages` enabled, just disable it or check whether there are enough huge pages.
-
-By default this option is turned off.
-
-_Example_
-
-```
---memory size=1G,hugepages=on,hugepage_size=2M
 ```
 
 ### `hotplug_method`
@@ -144,6 +105,72 @@ _Example_
 --memory size=1G,hotplug_method=virtio-mem,hotplug_size=1G,hotplugged_size=512M
 ```
 
+### `shared`
+
+Specifies if the memory must be `mmap(2)` with `MAP_SHARED` flag.
+
+By sharing a memory mapping, one can share the guest RAM with other processes
+running on the host. One can use this option when running vhost-user devices
+as part of the VM device model, as they will be driven by standalone daemons
+needing access to the guest RAM content.
+
+By default this option is turned off, which results in performing `mmap(2)`
+with `MAP_PRIVATE` flag.
+
+_Example_
+
+```
+--memory size=1G,shared=on
+```
+
+### `hugepages` and `hugepage_size`
+
+Specifies if the memory must be created and `mmap(2)` with `MAP_HUGETLB` and size
+flags. This performs a memory mapping relying on the specified huge page size.
+If no huge page size is supplied the system's default huge page size is used.
+
+By using hugepages, one can improve the overall performance of the VM, assuming
+the guest will allocate hugepages as well. Another interesting use case is VFIO
+as it speeds up the VM's boot time since the amount of IOMMU mappings are
+reduced.
+
+The user is responsible for ensuring there are sufficient huge pages of the
+specified size for the VMM to use. Failure to do so may result in strange VMM
+behaviour, e.g. error with `ReadKernelImage` is common. If there is a strange
+error with `hugepages` enabled, just disable it or check whether there are enough
+huge pages.
+
+By default this option is turned off.
+
+_Example_
+
+```
+--memory size=1G,hugepages=on,hugepage_size=2M
+```
+
+### `prefault`
+
+Specifies if the memory must be `mmap(2)` with `MAP_POPULATE` flag.
+
+By triggering prefault, one can allocate all required physical memory and create
+its page tables while calling `mmap`. With physical memory allocated, the number
+of page faults will decrease during running, and performance will also improve.
+
+Note that boot of VM will be slower with `prefault` enabled because of allocating
+physical memory and creating page tables in advance, and physical memory of the
+specified size will be consumed quickly.
+
+This option only takes effect at boot of VM. There is also a `prefault` option in
+restore and its choice will overwrite `prefault` in memory.
+
+By default this option is turned off.
+
+_Example_
+
+```
+--memory size=1G,prefault=on
+```
+
 ## Advanced Parameters
 
 `MemoryZoneConfig` or what is known as `--memory-zone` from the CLI perspective
@@ -157,14 +184,16 @@ struct MemoryZoneConfig {
     file: Option<PathBuf>,
     shared: bool,
     hugepages: bool,
+    hugepage_size: Option<u64>,
     host_numa_node: Option<u32>,
     hotplug_size: Option<u64>,
     hotplugged_size: Option<u64>,
+    prefault: bool,
 }
 ```
 
 ```
---memory-zone <memory-zone>	User defined memory zone parameters "size=<guest_memory_region_size>,file=<backing_file>,shared=on|off,hugepages=on|off,host_numa_node=<node_id>,id=<zone_identifier>,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>"
+--memory-zone <memory-zone>	User defined memory zone parameters "size=<guest_memory_region_size>,file=<backing_file>,shared=on|off,hugepages=on|off,hugepage_size=<hugepage_size>,host_numa_node=<node_id>,id=<zone_identifier>,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>,prefault=on|off"
 ```
 
 This parameter expects one or more occurences, allowing for a list of memory
@@ -252,16 +281,22 @@ _Example_
 --memory-zone id=mem0,size=1G,shared=on
 ```
 
-### `hugepages`
+### `hugepages` and `hugepage_size`
 
-Specifies if the memory zone must be `mmap(2)` with `MAP_HUGETLB` and
-`MAP_HUGE_2MB` flags. This performs a memory zone mapping relying on 2MiB
-pages instead of the default 4kiB pages.
+Specifies if the memory must be created and `mmap(2)` with `MAP_HUGETLB` and size
+flags. This performs a memory mapping relying on the specified huge page size.
+If no huge page size is supplied the system's default huge page size is used.
 
 By using hugepages, one can improve the overall performance of the VM, assuming
 the guest will allocate hugepages as well. Another interesting use case is VFIO
 as it speeds up the VM's boot time since the amount of IOMMU mappings are
 reduced.
+
+The user is responsible for ensuring there are sufficient huge pages of the
+specified size for the VMM to use. Failure to do so may result in strange VMM
+behaviour, e.g. error with `ReadKernelImage` is common. If there is a strange
+error with `hugepages` enabled, just disable it or check whether there are enough
+huge pages.
 
 By default this option is turned off.
 
@@ -269,7 +304,7 @@ _Example_
 
 ```
 --memory size=0
---memory-zone id=mem0,size=1G,hugepages=on
+--memory-zone id=mem0,size=1G,hugepages=on,hugepage_size=2M
 ```
 
 ### `host_numa_node`
@@ -334,6 +369,30 @@ _Example_
 ```
 --memory size=0,hotplug_method=virtio-mem
 --memory-zone id=mem0,size=1G,hotplug_size=1G,hotplugged_size=512M
+```
+
+### `prefault`
+
+Specifies if the memory must be `mmap(2)` with `MAP_POPULATE` flag.
+
+By triggering prefault, one can allocate all required physical memory and create
+its page tables while calling `mmap`. With physical memory allocated, the number
+of page faults will decrease during running, and performance will also improve.
+
+Note that boot of VM will be slower with `prefault` enabled because of allocating
+physical memory and creating page tables in advance, and physical memory of the
+specified size will be consumed quickly.
+
+This option only takes effect at boot of VM. There is also a `prefault` option in
+restore and its choice will overwrite `prefault` in memory.
+
+By default this option is turned off.
+
+_Example_
+
+```
+--memory size=0
+--memory-zone id=mem0,size=1G,prefault=on
 ```
 
 ## NUMA settings
