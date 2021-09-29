@@ -163,7 +163,8 @@ fn create_app<'a, 'b>(
                      hugepages=on|off,hugepage_size=<hugepage_size>,\
                      hotplug_method=acpi|virtio-mem,\
                      hotplug_size=<hotpluggable_memory_size>,\
-                     hotplugged_size=<hotplugged_memory_size>\"",
+                     hotplugged_size=<hotplugged_memory_size>,\
+                     prefault=on|off\"",
                 )
                 .default_value(default_memory)
                 .group("vm-config"),
@@ -178,7 +179,8 @@ fn create_app<'a, 'b>(
                      hugepages=on|off,hugepage_size=<hugepage_size>,\
                      host_numa_node=<node_id>,\
                      id=<zone_identifier>,hotplug_size=<hotpluggable_memory_size>,\
-                     hotplugged_size=<hotplugged_memory_size>\"",
+                     hotplugged_size=<hotplugged_memory_size>,\
+                     prefault=on|off\"",
                 )
                 .takes_value(true)
                 .min_values(1)
@@ -644,8 +646,9 @@ mod unit_tests {
                     hotplugged_size: None,
                     shared: false,
                     hugepages: false,
-                    zones: None,
                     hugepage_size: None,
+                    prefault: false,
+                    zones: None,
                 },
                 kernel: Some(KernelConfig {
                     path: PathBuf::from("/path/to/kernel"),
