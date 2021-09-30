@@ -1013,7 +1013,7 @@ impl Vm {
     }
 
     #[cfg(target_arch = "x86_64")]
-    fn configure_system(&mut self) -> Result<()> {
+    fn configure_system(&mut self, #[cfg(feature = "acpi")] rsdp_addr: GuestAddress) -> Result<()> {
         info!("Configuring system");
         let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
 
@@ -1024,23 +1024,10 @@ impl Vm {
 
         let boot_vcpus = self.cpu_manager.lock().unwrap().boot_vcpus();
 
-        #[allow(unused_mut, unused_assignments)]
-        let mut rsdp_addr: Option<GuestAddress> = None;
-
         #[cfg(feature = "acpi")]
-        {
-            rsdp_addr = Some(crate::acpi::create_acpi_tables(
-                &mem,
-                &self.device_manager,
-                &self.cpu_manager,
-                &self.memory_manager,
-                &self.numa_nodes,
-            ));
-            info!(
-                "Created ACPI tables: rsdp_addr = 0x{:x}",
-                rsdp_addr.unwrap().0
-            );
-        }
+        let rsdp_addr = Some(rsdp_addr);
+        #[cfg(not(feature = "acpi"))]
+        let rsdp_addr = None;
 
         let sgx_epc_region = self
             .memory_manager
@@ -1063,7 +1050,10 @@ impl Vm {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn configure_system(&mut self) -> Result<()> {
+    fn configure_system(
+        &mut self,
+        #[cfg(feature = "acpi")] _rsdp_addr: GuestAddress,
+    ) -> Result<()> {
         let cmdline = self.get_cmdline()?;
         let vcpu_mpidrs = self.cpu_manager.lock().unwrap().get_mpidrs();
         let vcpu_topology = self.cpu_manager.lock().unwrap().get_vcpu_topology();
@@ -1108,17 +1098,6 @@ impl Vm {
             .iommu_attached_devices()
             .as_ref()
             .map(|(v, _)| *v);
-
-        #[cfg(feature = "acpi")]
-        {
-            let _ = crate::acpi::create_acpi_tables(
-                &mem,
-                &self.device_manager,
-                &self.cpu_manager,
-                &self.memory_manager,
-                &self.numa_nodes,
-            );
-        }
 
         let gic_device = create_gic(
             &self.memory_manager.lock().as_ref().unwrap().vm,
@@ -1923,6 +1902,22 @@ impl Vm {
         #[cfg(feature = "tdx")]
         let sections = self.extract_tdvf_sections()?;
 
+        #[cfg(feature = "acpi")]
+        let rsdp_addr = {
+            let mem = self.memory_manager.lock().unwrap().guest_memory().memory();
+
+            let rsdp_addr = crate::acpi::create_acpi_tables(
+                &mem,
+                &self.device_manager,
+                &self.cpu_manager,
+                &self.memory_manager,
+                &self.numa_nodes,
+            );
+            info!("Created ACPI tables: rsdp_addr = 0x{:x}", rsdp_addr.0);
+
+            rsdp_addr
+        };
+
         // Configuring the TDX regions requires that the vCPUs are created
         #[cfg(feature = "tdx")]
         let hob_address = if self.config.lock().unwrap().tdx.is_some() {
@@ -1932,7 +1927,14 @@ impl Vm {
         };
 
         // Configure shared state based on loaded kernel
-        entry_point.map(|_| self.configure_system()).transpose()?;
+        entry_point
+            .map(|_| {
+                self.configure_system(
+                    #[cfg(feature = "acpi")]
+                    rsdp_addr,
+                )
+            })
+            .transpose()?;
 
         #[cfg(feature = "tdx")]
         if let Some(hob_address) = hob_address {
