@@ -174,6 +174,16 @@ pub enum HypervisorCpuError {
     #[error("Failed to get debug registers: {0}")]
     GetDebugRegs(#[source] anyhow::Error),
     ///
+    /// Setting misc register error
+    ///
+    #[error("Failed to set misc registers: {0}")]
+    SetMiscRegs(#[source] anyhow::Error),
+    ///
+    /// Getting misc register error
+    ///
+    #[error("Failed to get misc registers: {0}")]
+    GetMiscRegs(#[source] anyhow::Error),
+    ///
     /// Write to Guest Mem
     ///
     #[error("Failed to write to Guest Mem at: {0}")]
