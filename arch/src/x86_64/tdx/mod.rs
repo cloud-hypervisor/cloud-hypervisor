@@ -60,6 +60,59 @@ impl Default for TdvfSectionType {
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Default, Debug)]
+pub struct TdVmmDataRegion {
+    pub start_address: u64,
+    pub length: u64,
+    pub region_type: TdVmmDataRegionType,
+}
+
+unsafe impl ByteValued for TdVmmDataRegion {}
+
+#[repr(u16)]
+#[derive(Clone, Copy, Debug)]
+pub enum TdVmmDataRegionType {
+    Signature = 0x0000,
+    InterfaceVersion = 0x0001,
+    SystemUuid = 0x0002,
+    RamSize = 0x0003,
+    GraphicsEnabled = 0x0004,
+    SmpCpuCount = 0x0005,
+    MachineId = 0x0006,
+    KernelAddress = 0x0007,
+    KernelSize = 0x0008,
+    KernelCommandLine = 0x0009,
+    InitrdAddress = 0x000a,
+    InitrdSize = 0x000b,
+    BootDevice = 0x000c,
+    NumaData = 0x000d,
+    BootMenu = 0x000e,
+    MaximumCpuCount = 0x000f,
+    KernelEntry = 0x0010,
+    KernelData = 0x0011,
+    InitrdData = 0x0012,
+    CommandLineAddress = 0x0013,
+    CommandLineSize = 0x0014,
+    CommandLineData = 0x0015,
+    KernelSetupAddress = 0x0016,
+    KernelSetupSize = 0x0017,
+    KernelSetupData = 0x0018,
+    FileDir = 0x0019,
+    AcpiTables = 0x8000,
+    SmbiosTables = 0x8001,
+    Irq0Override = 0x8002,
+    E820Table = 0x8003,
+    HpetData = 0x8004,
+    Reserved = 0xffff,
+}
+
+impl Default for TdVmmDataRegionType {
+    fn default() -> Self {
+        TdVmmDataRegionType::Reserved
+    }
+}
+
 pub fn parse_tdvf_sections(file: &mut File) -> Result<Vec<TdvfSection>, TdvfError> {
     // The 32-bit offset to the TDVF metadata is located 32 bytes from
     // the end of the file.
@@ -120,6 +173,7 @@ pub fn parse_tdvf_sections(file: &mut File) -> Result<Vec<TdvfSection>, TdvfErro
 enum HobType {
     Handoff = 0x1,
     ResourceDescriptor = 0x3,
+    GuidExtension = 0x4,
     Unused = 0xfffe,
     EndOfHobList = 0xffff,
 }
@@ -173,6 +227,22 @@ struct HobResourceDescriptor {
     resource_length: u64,
 }
 unsafe impl ByteValued for HobResourceDescriptor {}
+
+#[repr(C)]
+#[derive(Copy, Clone, Default, Debug)]
+struct HobGuidType {
+    header: HobHeader,
+    name: EfiGuid,
+}
+unsafe impl ByteValued for HobGuidType {}
+
+#[repr(C)]
+#[derive(Copy, Clone, Default, Debug)]
+struct TdVmmData {
+    guid_type: HobGuidType,
+    region: TdVmmDataRegion,
+}
+unsafe impl ByteValued for TdVmmData {}
 
 pub struct TdHob {
     start_offset: u64,
@@ -302,6 +372,38 @@ impl TdHob {
              */
             0x403,
         )
+    }
+
+    pub fn add_td_vmm_data(
+        &mut self,
+        mem: &GuestMemoryMmap,
+        region: TdVmmDataRegion,
+    ) -> Result<(), TdvfError> {
+        let td_vmm_data = TdVmmData {
+            guid_type: HobGuidType {
+                header: HobHeader {
+                    r#type: HobType::GuidExtension,
+                    length: std::mem::size_of::<TdVmmData>() as u16,
+                    reserved: 0,
+                },
+                // TD_VMM_DATA_GUID CF2643E4-C0D3-46FF-0000-72EE623DDE38
+                name: EfiGuid {
+                    data1: 0xcf26_43e4,
+                    data2: 0xc0d3,
+                    data3: 0x46ff,
+                    data4: [0x00, 0x00, 0x72, 0xee, 0x62, 0x3d, 0xde, 0x38],
+                },
+            },
+            region,
+        };
+        info!(
+            "Writing HOB TD_VMM_DATA {:x} {:x?}",
+            self.current_offset, td_vmm_data
+        );
+        mem.write_obj(td_vmm_data, GuestAddress(self.current_offset))
+            .map_err(TdvfError::GuestMemoryWriteHob)?;
+        self.update_offset::<TdVmmData>();
+        Ok(())
     }
 }
 
