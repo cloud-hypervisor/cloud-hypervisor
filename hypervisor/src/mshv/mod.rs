@@ -506,6 +506,13 @@ impl cpu::Vcpu for MshvVcpu {
         self.set_xcrs(&state.xcrs)?;
         self.set_lapic(&state.lapic)?;
         self.set_xsave(&state.xsave)?;
+        // These registers are global and needed to be set only for first VCPU
+        // as Microsoft Hypervisor allows setting this regsier for only one VCPU
+        if self.vp_index == 0 {
+            self.fd
+                .set_misc_regs(&state.misc)
+                .map_err(|e| cpu::HypervisorCpuError::SetMiscRegs(e.into()))?
+        }
         self.fd
             .set_debug_regs(&state.dbg)
             .map_err(|e| cpu::HypervisorCpuError::SetDebugRegs(e.into()))?;
@@ -524,10 +531,15 @@ impl cpu::Vcpu for MshvVcpu {
         self.get_msrs(&mut msrs)?;
         let lapic = self.get_lapic()?;
         let xsave = self.get_xsave()?;
+        let misc = self
+            .fd
+            .get_misc_regs()
+            .map_err(|e| cpu::HypervisorCpuError::GetMiscRegs(e.into()))?;
         let dbg = self
             .fd
             .get_debug_regs()
             .map_err(|e| cpu::HypervisorCpuError::GetDebugRegs(e.into()))?;
+
         Ok(CpuState {
             msrs,
             vcpu_events,
@@ -538,6 +550,7 @@ impl cpu::Vcpu for MshvVcpu {
             lapic,
             dbg,
             xsave,
+            misc,
         })
     }
     #[cfg(target_arch = "x86_64")]
