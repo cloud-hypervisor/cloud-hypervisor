@@ -1038,11 +1038,7 @@ impl Vmm {
         let common_cpuid = {
             #[cfg(feature = "tdx")]
             let tdx_enabled = vm_config.lock().unwrap().tdx.is_some();
-            let phys_bits = vm::physical_bits(
-                vm_config.lock().unwrap().cpus.max_phys_bits,
-                #[cfg(feature = "tdx")]
-                tdx_enabled,
-            );
+            let phys_bits = vm::physical_bits(vm_config.lock().unwrap().cpus.max_phys_bits);
             arch::generate_common_cpuid(
                 hypervisor,
                 None,
@@ -1210,11 +1206,7 @@ impl Vmm {
 
             #[cfg(feature = "tdx")]
             let tdx_enabled = vm_config.tdx.is_some();
-            let phys_bits = vm::physical_bits(
-                vm_config.cpus.max_phys_bits,
-                #[cfg(feature = "tdx")]
-                tdx_enabled,
-            );
+            let phys_bits = vm::physical_bits(vm_config.cpus.max_phys_bits);
             arch::generate_common_cpuid(
                 self.hypervisor.clone(),
                 None,

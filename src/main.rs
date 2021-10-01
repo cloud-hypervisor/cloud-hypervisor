@@ -117,7 +117,8 @@ impl log::Log for Logger {
 }
 
 fn prepare_default_values() -> (String, String, String) {
-    let default_vcpus = format! {"boot={}", config::DEFAULT_VCPUS};
+    let default_vcpus =
+        format! {"boot={},max_phys_bits={}", config::DEFAULT_VCPUS,config::DEFAULT_MAX_PHYS_BITS};
     let default_memory = format! {"size={}M", config::DEFAULT_MEMORY_MB};
     let default_rng = format! {"src={}", config::DEFAULT_RNG_SOURCE};
 
@@ -636,7 +637,7 @@ mod unit_tests {
                     max_vcpus: 1,
                     topology: None,
                     kvm_hyperv: false,
-                    max_phys_bits: None,
+                    max_phys_bits: 46,
                 },
                 memory: MemoryConfig {
                     size: 536_870_912,
