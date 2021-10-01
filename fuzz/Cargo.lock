@@ -503,8 +503,9 @@ checksum = "71d301d4193d031abdd79ff7e3dd721168a9572ef3fe51a1517aba235bd8f86e"
 
 [[package]]
 name = "seccompiler"
-version = "0.1.0"
-source = "git+https://github.com/rust-vmm/seccompiler#da5788d52f1ae8886d8ed4624199b7e9fa64ac04"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e01d1292a1131b22ccea49f30bd106f1238b5ddeec1a98d39268dcc31d540e68"
 dependencies = [
  "libc",
 ]
