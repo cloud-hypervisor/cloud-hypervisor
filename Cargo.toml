@@ -22,7 +22,7 @@ hypervisor = { path = "hypervisor" }
 libc = "0.2.103"
 log = { version = "0.4.14", features = ["std"] }
 option_parser = { path = "option_parser" }
-seccompiler = { git = "https://github.com/rust-vmm/seccompiler"}
+seccompiler = "0.2.0"
 serde_json = "1.0.68"
 signal-hook = "0.3.10"
 thiserror = "1.0.29"
