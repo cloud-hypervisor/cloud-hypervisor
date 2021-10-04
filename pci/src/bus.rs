@@ -188,23 +188,18 @@ impl PciBus {
     }
 }
 
-#[derive(Default)]
 pub struct PciConfigIo {
     /// Config space register.
     config_address: u32,
-    pci_bus: Option<Arc<Mutex<PciBus>>>,
+    pci_bus: Arc<Mutex<PciBus>>,
 }
 
 impl PciConfigIo {
-    pub fn new() -> Self {
+    pub fn new(pci_bus: Arc<Mutex<PciBus>>) -> Self {
         PciConfigIo {
             config_address: 0,
-            pci_bus: None,
+            pci_bus,
         }
-    }
-
-    pub fn set_bus(&mut self, pci_bus: Arc<Mutex<PciBus>>) {
-        self.pci_bus = Some(pci_bus)
     }
 
     pub fn config_space_read(&self) -> u32 {
@@ -228,7 +223,6 @@ impl PciConfigIo {
 
         self.pci_bus
             .as_ref()
-            .unwrap()
             .lock()
             .unwrap()
             .devices
@@ -256,7 +250,7 @@ impl PciConfigIo {
             return None;
         }
 
-        let pci_bus = self.pci_bus.as_ref().unwrap().lock().unwrap();
+        let pci_bus = self.pci_bus.as_ref().lock().unwrap();
         if let Some(d) = pci_bus.devices.get(&(device as u32)) {
             let mut device = d.lock().unwrap();
 

@@ -826,11 +826,7 @@ pub struct DeviceManager {
     // Counter to keep track of the consumed device IDs.
     device_id_cnt: Wrapping<usize>,
 
-    // Keep a reference to the PCI bus
-    pci_bus: Option<Arc<Mutex<PciBus>>>,
-
-    #[cfg(target_arch = "x86_64")]
-    pci_config_io: Arc<Mutex<PciConfigIo>>,
+    pci_segment: PciSegment,
 
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     // MSI Interrupt Manager
@@ -856,15 +852,6 @@ pub struct DeviceManager {
     // representing the devices attached to the virtual IOMMU. This is useful
     // information for filling the ACPI VIOT table.
     iommu_attached_devices: Option<(u32, Vec<u32>)>,
-
-    // Bitmap of PCI devices to hotplug.
-    pci_devices_up: u32,
-
-    // Bitmap of PCI devices to hotunplug.
-    pci_devices_down: u32,
-
-    // List of allocated IRQs for each PCI slot.
-    pci_irq_slots: [u8; 32],
 
     // Tree of devices, representing the dependencies between devices.
     // Useful for introspection, snapshot and restore.
@@ -906,6 +893,120 @@ pub struct DeviceManager {
 
     // Helps identify if the VM is currently being restored
     restoring: bool,
+}
+
+struct PciSegment {
+    id: u16,
+    pci_bus: Arc<Mutex<PciBus>>,
+    pci_config_mmio: Arc<Mutex<PciConfigMmio>>,
+    mmio_config_address: u64,
+
+    #[cfg(target_arch = "x86_64")]
+    pci_config_io: Option<Arc<Mutex<PciConfigIo>>>,
+
+    // Bitmap of PCI devices to hotplug.
+    pci_devices_up: u32,
+    // Bitmap of PCI devices to hotunplug.
+    pci_devices_down: u32,
+    // List of allocated IRQs for each PCI slot.
+    pci_irq_slots: [u8; 32],
+}
+
+impl PciSegment {
+    fn new_default_segment(
+        address_manager: &Arc<AddressManager>,
+    ) -> DeviceManagerResult<PciSegment> {
+        let pci_root = PciRoot::new(None);
+        let pci_bus = Arc::new(Mutex::new(PciBus::new(
+            pci_root,
+            Arc::clone(address_manager) as Arc<dyn DeviceRelocation>,
+        )));
+
+        let pci_config_mmio = Arc::new(Mutex::new(PciConfigMmio::new(Arc::clone(&pci_bus))));
+        address_manager
+            .mmio_bus
+            .insert(
+                Arc::clone(&pci_config_mmio) as Arc<Mutex<dyn BusDevice>>,
+                arch::layout::PCI_MMCONFIG_START.0,
+                arch::layout::PCI_MMCONFIG_SIZE,
+            )
+            .map_err(DeviceManagerError::BusError)?;
+
+        #[cfg(target_arch = "x86_64")]
+        let pci_config_io = Arc::new(Mutex::new(PciConfigIo::new(Arc::clone(&pci_bus))));
+
+        #[cfg(target_arch = "x86_64")]
+        address_manager
+            .io_bus
+            .insert(
+                pci_config_io.clone(),
+                PCI_CONFIG_IO_PORT,
+                PCI_CONFIG_IO_PORT_SIZE,
+            )
+            .map_err(DeviceManagerError::BusError)?;
+
+        let mut segment = PciSegment {
+            id: 0,
+            pci_bus,
+            pci_config_mmio,
+            mmio_config_address: arch::layout::PCI_MMCONFIG_START.0,
+            pci_devices_up: 0,
+            pci_devices_down: 0,
+            pci_irq_slots: [0; 32],
+            #[cfg(target_arch = "x86_64")]
+            pci_config_io: Some(pci_config_io),
+        };
+
+        // Reserve some IRQs for PCI devices in case they need to support INTx.
+        segment.reserve_legacy_interrupts_for_pci_devices(address_manager)?;
+
+        info!(
+            "Adding PCI segment: id={}, PCI MMIO config address: 0x{:x}",
+            segment.id, segment.mmio_config_address
+        );
+        Ok(segment)
+    }
+
+    fn next_device_bdf(&self) -> DeviceManagerResult<u32> {
+        // We need to shift the device id since the 3 first bits
+        // are dedicated to the PCI function, and we know we don't
+        // do multifunction. Also, because we only support one PCI
+        // bus, the bus 0, we don't need to add anything to the
+        // global device ID.
+        Ok(self
+            .pci_bus
+            .lock()
+            .unwrap()
+            .next_device_id()
+            .map_err(DeviceManagerError::NextPciDeviceId)?
+            << 3)
+    }
+
+    fn reserve_legacy_interrupts_for_pci_devices(
+        &mut self,
+        address_manager: &Arc<AddressManager>,
+    ) -> DeviceManagerResult<()> {
+        // Reserve 8 IRQs which will be shared across all PCI devices.
+        let num_irqs = 8;
+        let mut irqs: Vec<u8> = Vec::new();
+        for _ in 0..num_irqs {
+            irqs.push(
+                address_manager
+                    .allocator
+                    .lock()
+                    .unwrap()
+                    .allocate_irq()
+                    .ok_or(DeviceManagerError::AllocateIrq)? as u8,
+            );
+        }
+
+        // There are 32 devices on the PCI bus, let's assign them an IRQ.
+        for i in 0..32 {
+            self.pci_irq_slots[i] = irqs[(i % num_irqs) as usize];
+        }
+
+        Ok(())
+    }
 }
 
 impl DeviceManager {
@@ -964,19 +1065,13 @@ impl DeviceManager {
             virtio_devices: Vec::new(),
             bus_devices: Vec::new(),
             device_id_cnt: Wrapping(0),
-            pci_bus: None,
-            #[cfg(target_arch = "x86_64")]
-            // Create early so ready for use in `VmmOps`
-            pci_config_io: Arc::new(Mutex::new(PciConfigIo::new())),
             msi_interrupt_manager,
             legacy_interrupt_manager: None,
             passthrough_device: None,
             vfio_container: None,
             iommu_device: None,
             iommu_attached_devices: None,
-            pci_devices_up: 0,
-            pci_devices_down: 0,
-            pci_irq_slots: [0; 32],
+            pci_segment: PciSegment::new_default_segment(&address_manager)?,
             device_tree,
             exit_evt: exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
             reset_evt: reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
@@ -1095,9 +1190,6 @@ impl DeviceManager {
             console_resize_pipe,
         )?;
 
-        // Reserve some IRQs for PCI devices in case they need to support INTx.
-        self.reserve_legacy_interrupts_for_pci_devices()?;
-
         self.legacy_interrupt_manager = Some(legacy_interrupt_manager);
 
         virtio_devices.append(&mut self.make_virtio_devices()?);
@@ -1105,29 +1197,6 @@ impl DeviceManager {
         self.add_pci_devices(virtio_devices.clone())?;
 
         self.virtio_devices = virtio_devices;
-
-        Ok(())
-    }
-
-    fn reserve_legacy_interrupts_for_pci_devices(&mut self) -> DeviceManagerResult<()> {
-        // Reserve 8 IRQs which will be shared across all PCI devices.
-        let num_irqs = 8;
-        let mut irqs: Vec<u8> = Vec::new();
-        for _ in 0..num_irqs {
-            irqs.push(
-                self.address_manager
-                    .allocator
-                    .lock()
-                    .unwrap()
-                    .allocate_irq()
-                    .ok_or(DeviceManagerError::AllocateIrq)? as u8,
-            );
-        }
-
-        // There are 32 devices on the PCI bus, let's assign them an IRQ.
-        for i in 0..32 {
-            self.pci_irq_slots[i] = irqs[(i % num_irqs) as usize];
-        }
 
         Ok(())
     }
@@ -1169,12 +1238,6 @@ impl DeviceManager {
         &mut self,
         virtio_devices: Vec<(VirtioDeviceArc, bool, String)>,
     ) -> DeviceManagerResult<()> {
-        let pci_root = PciRoot::new(None);
-        let mut pci_bus = PciBus::new(
-            pci_root,
-            Arc::clone(&self.address_manager) as Arc<dyn DeviceRelocation>,
-        );
-
         let iommu_id = String::from(IOMMU_DEVICE_NAME);
 
         let (iommu_device, iommu_mapping) = if self.config.lock().unwrap().iommu {
@@ -1204,63 +1267,40 @@ impl DeviceManager {
         };
 
         let mut iommu_attached_devices = Vec::new();
+        {
+            for (device, iommu_attached, id) in virtio_devices {
+                let mapping: &Option<Arc<IommuMapping>> = if iommu_attached {
+                    &iommu_mapping
+                } else {
+                    &None
+                };
 
-        for (device, iommu_attached, id) in virtio_devices {
-            let mapping: &Option<Arc<IommuMapping>> = if iommu_attached {
-                &iommu_mapping
-            } else {
-                &None
-            };
+                let dev_id = self.add_virtio_pci_device(device, mapping, id)?;
 
-            let dev_id = self.add_virtio_pci_device(device, &mut pci_bus, mapping, id)?;
+                if iommu_attached {
+                    iommu_attached_devices.push(dev_id);
+                }
+            }
 
-            if iommu_attached {
-                iommu_attached_devices.push(dev_id);
+            let mut vfio_iommu_device_ids = self.add_vfio_devices()?;
+            iommu_attached_devices.append(&mut vfio_iommu_device_ids);
+
+            let mut vfio_user_iommu_device_ids = self.add_user_devices()?;
+            iommu_attached_devices.append(&mut vfio_user_iommu_device_ids);
+
+            if let Some(iommu_device) = iommu_device {
+                let dev_id = self.add_virtio_pci_device(iommu_device, &None, iommu_id)?;
+                self.iommu_attached_devices = Some((dev_id, iommu_attached_devices));
             }
         }
 
-        let mut vfio_iommu_device_ids = self.add_vfio_devices(&mut pci_bus)?;
-        iommu_attached_devices.append(&mut vfio_iommu_device_ids);
-
-        let mut vfio_user_iommu_device_ids = self.add_user_devices(&mut pci_bus)?;
-        iommu_attached_devices.append(&mut vfio_user_iommu_device_ids);
-
-        if let Some(iommu_device) = iommu_device {
-            let dev_id = self.add_virtio_pci_device(iommu_device, &mut pci_bus, &None, iommu_id)?;
-            self.iommu_attached_devices = Some((dev_id, iommu_attached_devices));
-        }
-
-        let pci_bus = Arc::new(Mutex::new(pci_bus));
-        #[cfg(target_arch = "x86_64")]
-        self.pci_config_io
-            .lock()
-            .unwrap()
-            .set_bus(Arc::clone(&pci_bus));
         #[cfg(target_arch = "x86_64")]
         self.bus_devices
-            .push(Arc::clone(&self.pci_config_io) as Arc<Mutex<dyn BusDevice>>);
-        #[cfg(target_arch = "x86_64")]
-        self.address_manager
-            .io_bus
-            .insert(
-                self.pci_config_io.clone(),
-                PCI_CONFIG_IO_PORT,
-                PCI_CONFIG_IO_PORT_SIZE,
-            )
-            .map_err(DeviceManagerError::BusError)?;
-        let pci_config_mmio = Arc::new(Mutex::new(PciConfigMmio::new(Arc::clone(&pci_bus))));
-        self.bus_devices
-            .push(Arc::clone(&pci_config_mmio) as Arc<Mutex<dyn BusDevice>>);
-        self.address_manager
-            .mmio_bus
-            .insert(
-                pci_config_mmio,
-                arch::layout::PCI_MMCONFIG_START.0,
-                arch::layout::PCI_MMCONFIG_SIZE,
-            )
-            .map_err(DeviceManagerError::BusError)?;
+            .push(Arc::clone(self.pci_segment.pci_config_io.as_ref().unwrap())
+                as Arc<Mutex<dyn BusDevice>>);
 
-        self.pci_bus = Some(pci_bus);
+        self.bus_devices
+            .push(Arc::clone(&self.pci_segment.pci_config_mmio) as Arc<Mutex<dyn BusDevice>>);
 
         Ok(())
     }
@@ -2819,7 +2859,6 @@ impl DeviceManager {
 
     fn add_passthrough_device(
         &mut self,
-        pci: &mut PciBus,
         device_cfg: &mut DeviceConfig,
     ) -> DeviceManagerResult<(u32, String)> {
         // If the passthrough device has not been created yet, it is created
@@ -2833,7 +2872,7 @@ impl DeviceManager {
             );
         }
 
-        self.add_vfio_device(pci, device_cfg)
+        self.add_vfio_device(device_cfg)
     }
 
     fn create_vfio_container(&self) -> DeviceManagerResult<Arc<VfioContainer>> {
@@ -2868,18 +2907,9 @@ impl DeviceManager {
 
     fn add_vfio_device(
         &mut self,
-        pci: &mut PciBus,
         device_cfg: &mut DeviceConfig,
     ) -> DeviceManagerResult<(u32, String)> {
-        // We need to shift the device id since the 3 first bits
-        // are dedicated to the PCI function, and we know we don't
-        // do multifunction. Also, because we only support one PCI
-        // bus, the bus 0, we don't need to add anything to the
-        // global device ID.
-        let pci_device_bdf = pci
-            .next_device_id()
-            .map_err(DeviceManagerError::NextPciDeviceId)?
-            << 3;
+        let pci_device_bdf = self.pci_segment.next_device_bdf()?;
 
         let mut needs_dma_mapping = false;
 
@@ -2955,19 +2985,19 @@ impl DeviceManager {
             }
         }
 
-        let legacy_interrupt_group = if let Some(legacy_interrupt_manager) =
-            &self.legacy_interrupt_manager
-        {
-            Some(
-                legacy_interrupt_manager
-                    .create_group(LegacyIrqGroupConfig {
-                        irq: self.pci_irq_slots[(pci_device_bdf >> 3) as usize] as InterruptIndex,
-                    })
-                    .map_err(DeviceManagerError::CreateInterruptGroup)?,
-            )
-        } else {
-            None
-        };
+        let legacy_interrupt_group =
+            if let Some(legacy_interrupt_manager) = &self.legacy_interrupt_manager {
+                Some(
+                    legacy_interrupt_manager
+                        .create_group(LegacyIrqGroupConfig {
+                            irq: self.pci_segment.pci_irq_slots[(pci_device_bdf >> 3) as usize]
+                                as InterruptIndex,
+                        })
+                        .map_err(DeviceManagerError::CreateInterruptGroup)?,
+                )
+            } else {
+                None
+            };
 
         let mut vfio_pci_device = VfioPciDevice::new(
             &self.address_manager.vm,
@@ -3009,7 +3039,6 @@ impl DeviceManager {
         let vfio_pci_device = Arc::new(Mutex::new(vfio_pci_device));
 
         self.add_pci_device(
-            pci,
             vfio_pci_device.clone(),
             vfio_pci_device.clone(),
             pci_device_bdf,
@@ -3028,7 +3057,6 @@ impl DeviceManager {
 
     fn add_pci_device(
         &mut self,
-        pci_bus: &mut PciBus,
         bus_device: Arc<Mutex<dyn BusDevice>>,
         pci_device: Arc<Mutex<dyn PciDevice>>,
         bdf: u32,
@@ -3038,6 +3066,8 @@ impl DeviceManager {
             .unwrap()
             .allocate_bars(&mut self.address_manager.allocator.lock().unwrap())
             .map_err(DeviceManagerError::AllocateBars)?;
+
+        let mut pci_bus = self.pci_segment.pci_bus.lock().unwrap();
 
         pci_bus
             .add_device(bdf, pci_device)
@@ -3058,13 +3088,13 @@ impl DeviceManager {
         Ok(bars)
     }
 
-    fn add_vfio_devices(&mut self, pci: &mut PciBus) -> DeviceManagerResult<Vec<u32>> {
+    fn add_vfio_devices(&mut self) -> DeviceManagerResult<Vec<u32>> {
         let mut iommu_attached_device_ids = Vec::new();
         let mut devices = self.config.lock().unwrap().devices.clone();
 
         if let Some(device_list_cfg) = &mut devices {
             for device_cfg in device_list_cfg.iter_mut() {
-                let (device_id, _) = self.add_passthrough_device(pci, device_cfg)?;
+                let (device_id, _) = self.add_passthrough_device(device_cfg)?;
                 if device_cfg.iommu && self.iommu_device.is_some() {
                     iommu_attached_device_ids.push(device_id);
                 }
@@ -3079,27 +3109,23 @@ impl DeviceManager {
 
     fn add_vfio_user_device(
         &mut self,
-        pci: &mut PciBus,
         device_cfg: &mut UserDeviceConfig,
     ) -> DeviceManagerResult<(u32, String)> {
-        let pci_device_bdf = pci
-            .next_device_id()
-            .map_err(DeviceManagerError::NextPciDeviceId)?
-            << 3;
+        let pci_device_bdf = self.pci_segment.next_device_bdf()?;
 
-        let legacy_interrupt_group = if let Some(legacy_interrupt_manager) =
-            &self.legacy_interrupt_manager
-        {
-            Some(
-                legacy_interrupt_manager
-                    .create_group(LegacyIrqGroupConfig {
-                        irq: self.pci_irq_slots[(pci_device_bdf >> 3) as usize] as InterruptIndex,
-                    })
-                    .map_err(DeviceManagerError::CreateInterruptGroup)?,
-            )
-        } else {
-            None
-        };
+        let legacy_interrupt_group =
+            if let Some(legacy_interrupt_manager) = &self.legacy_interrupt_manager {
+                Some(
+                    legacy_interrupt_manager
+                        .create_group(LegacyIrqGroupConfig {
+                            irq: self.pci_segment.pci_irq_slots[(pci_device_bdf >> 3) as usize]
+                                as InterruptIndex,
+                        })
+                        .map_err(DeviceManagerError::CreateInterruptGroup)?,
+                )
+            } else {
+                None
+            };
 
         let client = Arc::new(Mutex::new(
             vfio_user::Client::new(&device_cfg.socket)
@@ -3156,7 +3182,6 @@ impl DeviceManager {
         };
 
         self.add_pci_device(
-            pci,
             vfio_user_pci_device.clone(),
             vfio_user_pci_device.clone(),
             pci_device_bdf,
@@ -3175,12 +3200,12 @@ impl DeviceManager {
         Ok((pci_device_bdf, vfio_user_name))
     }
 
-    fn add_user_devices(&mut self, pci: &mut PciBus) -> DeviceManagerResult<Vec<u32>> {
+    fn add_user_devices(&mut self) -> DeviceManagerResult<Vec<u32>> {
         let mut user_devices = self.config.lock().unwrap().user_devices.clone();
 
         if let Some(device_list_cfg) = &mut user_devices {
             for device_cfg in device_list_cfg.iter_mut() {
-                let (_device_id, _id) = self.add_vfio_user_device(pci, device_cfg)?;
+                let (_device_id, _id) = self.add_vfio_user_device(device_cfg)?;
             }
         }
 
@@ -3193,7 +3218,6 @@ impl DeviceManager {
     fn add_virtio_pci_device(
         &mut self,
         virtio_device: VirtioDeviceArc,
-        pci: &mut PciBus,
         iommu_mapping: &Option<Arc<IommuMapping>>,
         virtio_device_id: String,
     ) -> DeviceManagerResult<u32> {
@@ -3212,7 +3236,11 @@ impl DeviceManager {
                     .pci_bdf
                     .ok_or(DeviceManagerError::MissingDeviceNodePciBdf)?;
 
-                pci.get_device_id((pci_device_bdf >> 3) as usize)
+                self.pci_segment
+                    .pci_bus
+                    .lock()
+                    .unwrap()
+                    .get_device_id((pci_device_bdf >> 3) as usize)
                     .map_err(DeviceManagerError::GetPciDeviceId)?;
 
                 if node.resources.is_empty() {
@@ -3231,14 +3259,7 @@ impl DeviceManager {
 
                 (pci_device_bdf, config_bar_addr)
             } else {
-                // We need to shift the device id since the 3 first bits are dedicated
-                // to the PCI function, and we know we don't do multifunction.
-                // Also, because we only support one PCI bus, the bus 0, we don't need
-                // to add anything to the global device ID.
-                let pci_device_bdf = pci
-                    .next_device_id()
-                    .map_err(DeviceManagerError::NextPciDeviceId)?
-                    << 3;
+                let pci_device_bdf = self.pci_segment.next_device_bdf()?;
 
                 (pci_device_bdf, None)
             };
@@ -3299,7 +3320,6 @@ impl DeviceManager {
 
         let virtio_pci_device = Arc::new(Mutex::new(virtio_pci_device));
         let bars = self.add_pci_device(
-            pci,
             virtio_pci_device.clone(),
             virtio_pci_device.clone(),
             pci_device_bdf,
@@ -3351,7 +3371,7 @@ impl DeviceManager {
     #[cfg(target_arch = "x86_64")]
     // Used to provide a fast path for handling PIO exits
     pub fn pci_config_io(&self) -> Arc<Mutex<PciConfigIo>> {
-        self.pci_config_io.clone()
+        Arc::clone(self.pci_segment.pci_config_io.as_ref().unwrap())
     }
 
     pub fn console(&self) -> &Arc<Console> {
@@ -3444,17 +3464,10 @@ impl DeviceManager {
         &mut self,
         device_cfg: &mut DeviceConfig,
     ) -> DeviceManagerResult<PciDeviceInfo> {
-        let pci = if let Some(pci_bus) = &self.pci_bus {
-            Arc::clone(pci_bus)
-        } else {
-            return Err(DeviceManagerError::NoPciBus);
-        };
-
-        let (device_id, device_name) =
-            self.add_passthrough_device(&mut pci.lock().unwrap(), device_cfg)?;
+        let (device_id, device_name) = self.add_passthrough_device(device_cfg)?;
 
         // Update the PCIU bitmap
-        self.pci_devices_up |= 1 << (device_id >> 3);
+        self.pci_segment.pci_devices_up |= 1 << (device_id >> 3);
 
         Ok(PciDeviceInfo {
             id: device_name,
@@ -3466,17 +3479,10 @@ impl DeviceManager {
         &mut self,
         device_cfg: &mut UserDeviceConfig,
     ) -> DeviceManagerResult<PciDeviceInfo> {
-        let pci = if let Some(pci_bus) = &self.pci_bus {
-            Arc::clone(pci_bus)
-        } else {
-            return Err(DeviceManagerError::NoPciBus);
-        };
-
-        let (device_id, device_name) =
-            self.add_vfio_user_device(&mut pci.lock().unwrap(), device_cfg)?;
+        let (device_id, device_name) = self.add_vfio_user_device(device_cfg)?;
 
         // Update the PCIU bitmap
-        self.pci_devices_up |= 1 << (device_id >> 3);
+        self.pci_segment.pci_devices_up |= 1 << (device_id >> 3);
 
         Ok(PciDeviceInfo {
             id: device_name,
@@ -3535,24 +3541,19 @@ impl DeviceManager {
         }
 
         // Update the PCID bitmap
-        self.pci_devices_down |= 1 << (pci_device_bdf >> 3);
+        self.pci_segment.pci_devices_down |= 1 << (pci_device_bdf >> 3);
 
         Ok(())
     }
 
     pub fn eject_device(&mut self, device_id: u8) -> DeviceManagerResult<()> {
-        // Retrieve the PCI bus.
-        let pci = if let Some(pci_bus) = &self.pci_bus {
-            Arc::clone(pci_bus)
-        } else {
-            return Err(DeviceManagerError::NoPciBus);
-        };
-
         // Convert the device ID into the corresponding b/d/f.
         let pci_device_bdf = (device_id as u32) << 3;
 
         // Give the PCI device ID back to the PCI bus.
-        pci.lock()
+        self.pci_segment
+            .pci_bus
+            .lock()
             .unwrap()
             .put_device_id(device_id as usize)
             .map_err(DeviceManagerError::PutPciDeviceId)?;
@@ -3625,7 +3626,9 @@ impl DeviceManager {
             .map_err(DeviceManagerError::FreePciBars)?;
 
         // Remove the device from the PCI bus
-        pci.lock()
+        self.pci_segment
+            .pci_bus
+            .lock()
             .unwrap()
             .remove_by_device(&pci_device)
             .map_err(DeviceManagerError::RemoveDeviceFromPciBus)?;
@@ -3685,23 +3688,16 @@ impl DeviceManager {
             warn!("Placing device behind vIOMMU is not available for hotplugged devices");
         }
 
-        let pci = if let Some(pci_bus) = &self.pci_bus {
-            Arc::clone(pci_bus)
-        } else {
-            return Err(DeviceManagerError::NoPciBus);
-        };
-
         // Add the virtio device to the device manager list. This is important
         // as the list is used to notify virtio devices about memory updates
         // for instance.
         self.virtio_devices
             .push((device.clone(), iommu_attached, id.clone()));
 
-        let device_id =
-            self.add_virtio_pci_device(device, &mut pci.lock().unwrap(), &None, id.clone())?;
+        let device_id = self.add_virtio_pci_device(device, &None, id.clone())?;
 
         // Update the PCIU bitmap
-        self.pci_devices_up |= 1 << (device_id >> 3);
+        self.pci_segment.pci_devices_up |= 1 << (device_id >> 3);
 
         Ok(PciDeviceInfo { id, bdf: device_id })
     }
@@ -4171,6 +4167,7 @@ impl Aml for DeviceManager {
 
         // Build PCI routing table, listing IRQs assigned to PCI devices.
         let prt_package_list: Vec<(u32, u32)> = self
+            .pci_segment
             .pci_irq_slots
             .iter()
             .enumerate()
@@ -4424,15 +4421,15 @@ impl BusDevice for DeviceManager {
         match offset {
             PCIU_FIELD_OFFSET => {
                 assert!(data.len() == PCIU_FIELD_SIZE);
-                data.copy_from_slice(&self.pci_devices_up.to_le_bytes());
+                data.copy_from_slice(&self.pci_segment.pci_devices_up.to_le_bytes());
                 // Clear the PCIU bitmap
-                self.pci_devices_up = 0;
+                self.pci_segment.pci_devices_up = 0;
             }
             PCID_FIELD_OFFSET => {
                 assert!(data.len() == PCID_FIELD_SIZE);
-                data.copy_from_slice(&self.pci_devices_down.to_le_bytes());
+                data.copy_from_slice(&self.pci_segment.pci_devices_down.to_le_bytes());
                 // Clear the PCID bitmap
-                self.pci_devices_down = 0;
+                self.pci_segment.pci_devices_down = 0;
             }
             B0EJ_FIELD_OFFSET => {
                 assert!(data.len() == B0EJ_FIELD_SIZE);
