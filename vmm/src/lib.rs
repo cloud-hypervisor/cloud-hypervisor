@@ -46,6 +46,8 @@ use vm_migration::{protocol::*, Migratable};
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
+#[cfg(feature = "acpi")]
+mod acpi;
 pub mod api;
 mod clone3;
 pub mod config;
@@ -55,14 +57,12 @@ pub mod device_tree;
 pub mod interrupt;
 pub mod memory_manager;
 pub mod migration;
+mod pci_segment;
 pub mod seccomp_filters;
-mod sigwinch_listener;
-pub mod vm;
-
-#[cfg(feature = "acpi")]
-mod acpi;
 mod serial_buffer;
 mod serial_manager;
+mod sigwinch_listener;
+pub mod vm;
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 type GuestRegionMmap = vm_memory::GuestRegionMmap<AtomicBitmap>;
