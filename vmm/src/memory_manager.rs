@@ -544,17 +544,13 @@ impl MemoryManager {
         Ok(())
     }
 
-    pub fn new(
-        vm: Arc<dyn hypervisor::Vm>,
+    pub fn validate_memory_config(
         config: &MemoryConfig,
-        prefault: Option<bool>,
-        phys_bits: u8,
-        #[cfg(feature = "tdx")] tdx_enabled: bool,
-    ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
-        let user_provided_zones = config.size == 0;
-        let mut allow_mem_hotplug: bool = false;
+        user_provided_zones: bool,
+    ) -> Result<(u64, Vec<MemoryZoneConfig>, bool), Error> {
+        let mut allow_mem_hotplug = false;
 
-        let (ram_size, zones) = if !user_provided_zones {
+        if !user_provided_zones {
             if config.zones.is_some() {
                 error!(
                     "User defined memory regions can't be provided if the \
@@ -608,7 +604,7 @@ impl MemoryManager {
                 prefault: config.prefault,
             }];
 
-            (config.size, zones)
+            Ok((config.size, zones, allow_mem_hotplug))
         } else {
             if config.zones.is_none() {
                 error!(
@@ -669,8 +665,21 @@ impl MemoryManager {
                 }
             }
 
-            (total_ram_size, zones)
-        };
+            Ok((total_ram_size, zones, allow_mem_hotplug))
+        }
+    }
+
+    pub fn new(
+        vm: Arc<dyn hypervisor::Vm>,
+        config: &MemoryConfig,
+        prefault: Option<bool>,
+        phys_bits: u8,
+        #[cfg(feature = "tdx")] tdx_enabled: bool,
+    ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
+        let user_provided_zones = config.size == 0;
+
+        let (ram_size, zones, allow_mem_hotplug) =
+            Self::validate_memory_config(config, user_provided_zones)?;
 
         // Init guest memory
         let arch_mem_regions = arch::arch_memory_regions(ram_size);
