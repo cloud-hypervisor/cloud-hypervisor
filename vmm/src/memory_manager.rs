@@ -124,6 +124,8 @@ struct GuestRamMapping {
     slot: u32,
     gpa: u64,
     size: u64,
+    #[allow(dead_code)]
+    zone_id: String,
 }
 
 pub struct MemoryManager {
@@ -671,25 +673,40 @@ impl MemoryManager {
     }
 
     fn allocate_address_space(&mut self) -> Result<(), Error> {
-        for region in self.guest_memory.memory().iter() {
-            let slot = self.create_userspace_mapping(
-                region.start_addr().raw_value(),
-                region.len() as u64,
-                region.as_ptr() as u64,
-                self.mergeable,
-                false,
-                self.log_dirty,
-            )?;
-            self.guest_ram_mappings.push(GuestRamMapping {
-                gpa: region.start_addr().raw_value(),
-                size: region.len(),
-                slot,
-            });
-            self.allocator
-                .lock()
-                .unwrap()
-                .allocate_mmio_addresses(Some(region.start_addr()), region.len(), None)
-                .ok_or(Error::MemoryRangeAllocation)?;
+        let mut list = Vec::new();
+
+        for (zone_id, memory_zone) in self.memory_zones.iter() {
+            let mut regions = memory_zone.regions().clone();
+
+            if let Some(virtio_mem_zone) = memory_zone.virtio_mem_zone() {
+                regions.push(virtio_mem_zone.region().clone());
+            }
+
+            list.push((zone_id.clone(), regions));
+        }
+
+        for (zone_id, regions) in list {
+            for region in regions {
+                let slot = self.create_userspace_mapping(
+                    region.start_addr().raw_value(),
+                    region.len() as u64,
+                    region.as_ptr() as u64,
+                    self.mergeable,
+                    false,
+                    self.log_dirty,
+                )?;
+                self.guest_ram_mappings.push(GuestRamMapping {
+                    gpa: region.start_addr().raw_value(),
+                    size: region.len(),
+                    slot,
+                    zone_id: zone_id.clone(),
+                });
+                self.allocator
+                    .lock()
+                    .unwrap()
+                    .allocate_mmio_addresses(Some(region.start_addr()), region.len(), None)
+                    .ok_or(Error::MemoryRangeAllocation)?;
+            }
         }
 
         // Allocate SubRegion and Reserved address ranges.
@@ -1160,6 +1177,7 @@ impl MemoryManager {
             gpa: region.start_addr().raw_value(),
             size: region.len(),
             slot,
+            zone_id: DEFAULT_MEMORY_ZONE.to_string(),
         });
 
         self.add_region(Arc::clone(&region))?;
