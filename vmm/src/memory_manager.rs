@@ -151,6 +151,7 @@ pub struct MemoryManager {
     snapshot_memory_ranges: MemoryRangeTable,
     memory_zones: MemoryZones,
     log_dirty: bool, // Enable dirty logging for created RAM regions
+    arch_mem_regions: Vec<(GuestAddress, usize, RegionType)>,
 
     // Keep track of calls to create_userspace_mapping() for guest RAM.
     // This is useful for getting the dirty pages as we need to know the
@@ -544,7 +545,7 @@ impl MemoryManager {
         Ok(())
     }
 
-    pub fn validate_memory_config(
+    fn validate_memory_config(
         config: &MemoryConfig,
         user_provided_zones: bool,
     ) -> Result<(u64, Vec<MemoryZoneConfig>, bool), Error> {
@@ -667,6 +668,45 @@ impl MemoryManager {
 
             Ok((total_ram_size, zones, allow_mem_hotplug))
         }
+    }
+
+    fn allocate_address_space(&mut self) -> Result<(), Error> {
+        for region in self.guest_memory.memory().iter() {
+            let slot = self.create_userspace_mapping(
+                region.start_addr().raw_value(),
+                region.len() as u64,
+                region.as_ptr() as u64,
+                self.mergeable,
+                false,
+                self.log_dirty,
+            )?;
+            self.guest_ram_mappings.push(GuestRamMapping {
+                gpa: region.start_addr().raw_value(),
+                size: region.len(),
+                slot,
+            });
+            self.allocator
+                .lock()
+                .unwrap()
+                .allocate_mmio_addresses(Some(region.start_addr()), region.len(), None)
+                .ok_or(Error::MemoryRangeAllocation)?;
+        }
+
+        // Allocate SubRegion and Reserved address ranges.
+        for region in self.arch_mem_regions.iter() {
+            if region.2 == RegionType::Ram {
+                // Ignore the RAM type since ranges have already been allocated
+                // based on the GuestMemory regions.
+                continue;
+            }
+            self.allocator
+                .lock()
+                .unwrap()
+                .allocate_mmio_addresses(Some(region.0), region.1 as GuestUsize, None)
+                .ok_or(Error::MemoryRangeAllocation)?;
+        }
+
+        Ok(())
     }
 
     pub fn new(
@@ -815,7 +855,7 @@ impl MemoryManager {
 
         let mut memory_manager = MemoryManager {
             boot_guest_memory,
-            guest_memory: guest_memory.clone(),
+            guest_memory,
             next_memory_slot: 0,
             start_of_device_area,
             end_of_device_area,
@@ -823,7 +863,7 @@ impl MemoryManager {
             hotplug_slots,
             selected_slot: 0,
             mergeable: config.mergeable,
-            allocator: allocator.clone(),
+            allocator,
             hotplug_method: config.hotplug_method.clone(),
             boot_ram: ram_size,
             current_ram: ram_size,
@@ -841,42 +881,10 @@ impl MemoryManager {
             #[cfg(feature = "acpi")]
             acpi_address,
             log_dirty,
+            arch_mem_regions,
         };
 
-        for region in guest_memory.memory().iter() {
-            let slot = memory_manager.create_userspace_mapping(
-                region.start_addr().raw_value(),
-                region.len() as u64,
-                region.as_ptr() as u64,
-                config.mergeable,
-                false,
-                log_dirty,
-            )?;
-            memory_manager.guest_ram_mappings.push(GuestRamMapping {
-                gpa: region.start_addr().raw_value(),
-                size: region.len(),
-                slot,
-            });
-            allocator
-                .lock()
-                .unwrap()
-                .allocate_mmio_addresses(Some(region.start_addr()), region.len(), None)
-                .ok_or(Error::MemoryRangeAllocation)?;
-        }
-
-        // Allocate SubRegion and Reserved address ranges.
-        for region in arch_mem_regions.iter() {
-            if region.2 == RegionType::Ram {
-                // Ignore the RAM type since ranges have already been allocated
-                // based on the GuestMemory regions.
-                continue;
-            }
-            allocator
-                .lock()
-                .unwrap()
-                .allocate_mmio_addresses(Some(region.0), region.1 as GuestUsize, None)
-                .ok_or(Error::MemoryRangeAllocation)?;
-        }
+        memory_manager.allocate_address_space()?;
 
         Ok(Arc::new(Mutex::new(memory_manager)))
     }
