@@ -693,7 +693,7 @@ impl MemoryManager {
         let (mem_regions, mut memory_zones) =
             Self::create_memory_regions_from_zones(&ram_regions, &zones, prefault)?;
 
-        let guest_memory =
+        let mut guest_memory =
             GuestMemoryMmap::from_arc_regions(mem_regions).map_err(Error::GuestMemory)?;
 
         let boot_guest_memory = guest_memory.clone();
@@ -707,7 +707,6 @@ impl MemoryManager {
 
         let mut start_of_device_area =
             MemoryManager::start_addr(guest_memory.last_addr(), allow_mem_hotplug)?;
-        let mut virtio_mem_regions: Vec<Arc<GuestRegionMmap>> = Vec::new();
 
         // Update list of memory zones for resize.
         for zone in zones {
@@ -748,7 +747,9 @@ impl MemoryManager {
                             zone.host_numa_node,
                         )?;
 
-                        virtio_mem_regions.push(region.clone());
+                        guest_memory = guest_memory
+                            .insert_region(Arc::clone(&region))
+                            .map_err(Error::GuestMemory)?;
 
                         let hotplugged_size = zone.hotplugged_size.unwrap_or(0);
                         let region_size = region.len();
@@ -856,33 +857,20 @@ impl MemoryManager {
                 size: region.len(),
                 slot,
             });
-        }
-
-        for region in virtio_mem_regions.drain(..) {
-            let slot = memory_manager.create_userspace_mapping(
-                region.start_addr().raw_value(),
-                region.len() as u64,
-                region.as_ptr() as u64,
-                config.mergeable,
-                false,
-                log_dirty,
-            )?;
-
-            memory_manager.guest_ram_mappings.push(GuestRamMapping {
-                gpa: region.start_addr().raw_value(),
-                size: region.len(),
-                slot,
-            });
             allocator
                 .lock()
                 .unwrap()
                 .allocate_mmio_addresses(Some(region.start_addr()), region.len(), None)
                 .ok_or(Error::MemoryRangeAllocation)?;
-            memory_manager.add_region(region)?;
         }
 
-        // Allocate RAM and Reserved address ranges.
+        // Allocate SubRegion and Reserved address ranges.
         for region in arch_mem_regions.iter() {
+            if region.2 == RegionType::Ram {
+                // Ignore the RAM type since ranges have already been allocated
+                // based on the GuestMemory regions.
+                continue;
+            }
             allocator
                 .lock()
                 .unwrap()
