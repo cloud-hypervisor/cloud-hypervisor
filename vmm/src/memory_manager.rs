@@ -63,7 +63,7 @@ const MPOL_BIND: u32 = 2;
 const MPOL_MF_STRICT: u32 = 1;
 const MPOL_MF_MOVE: u32 = 1 << 1;
 
-#[derive(Default)]
+#[derive(Clone, Default, Versionize)]
 struct HotPlugState {
     base: u64,
     length: u64,
@@ -121,6 +121,7 @@ impl MemoryZone {
 
 pub type MemoryZones = HashMap<String, MemoryZone>;
 
+#[derive(Clone, Versionize)]
 struct GuestRamMapping {
     slot: u32,
     gpa: u64,
@@ -128,6 +129,13 @@ struct GuestRamMapping {
     zone_id: String,
     virtio_mem: bool,
     file_offset: u64,
+}
+
+#[derive(Clone, Versionize)]
+struct ArchMemRegion {
+    base: u64,
+    size: usize,
+    r_type: RegionType,
 }
 
 pub struct MemoryManager {
@@ -155,7 +163,7 @@ pub struct MemoryManager {
     snapshot_memory_ranges: MemoryRangeTable,
     memory_zones: MemoryZones,
     log_dirty: bool, // Enable dirty logging for created RAM regions
-    arch_mem_regions: Vec<(GuestAddress, usize, RegionType)>,
+    arch_mem_regions: Vec<ArchMemRegion>,
 
     // Keep track of calls to create_userspace_mapping() for guest RAM.
     // This is useful for getting the dirty pages as we need to know the
@@ -784,7 +792,7 @@ impl MemoryManager {
 
         // Allocate SubRegion and Reserved address ranges.
         for region in self.arch_mem_regions.iter() {
-            if region.2 == RegionType::Ram {
+            if region.r_type == RegionType::Ram {
                 // Ignore the RAM type since ranges have already been allocated
                 // based on the GuestMemory regions.
                 continue;
@@ -792,7 +800,11 @@ impl MemoryManager {
             self.allocator
                 .lock()
                 .unwrap()
-                .allocate_mmio_addresses(Some(region.0), region.1 as GuestUsize, None)
+                .allocate_mmio_addresses(
+                    Some(GuestAddress(region.base)),
+                    region.size as GuestUsize,
+                    None,
+                )
                 .ok_or(Error::MemoryRangeAllocation)?;
         }
 
@@ -818,6 +830,15 @@ impl MemoryManager {
             .iter()
             .filter(|r| r.2 == RegionType::Ram)
             .map(|r| (r.0, r.1))
+            .collect();
+
+        let arch_mem_regions: Vec<ArchMemRegion> = arch_mem_regions
+            .iter()
+            .map(|(a, b, c)| ArchMemRegion {
+                base: a.0,
+                size: *b,
+                r_type: *c,
+            })
             .collect();
 
         let (mem_regions, mut memory_zones) =
@@ -2049,6 +2070,15 @@ impl Pausable for MemoryManager {}
 #[derive(Versionize)]
 pub struct MemoryManagerSnapshotData {
     memory_ranges: MemoryRangeTable,
+    guest_ram_mappings: Vec<GuestRamMapping>,
+    start_of_device_area: u64,
+    boot_ram: u64,
+    current_ram: u64,
+    arch_mem_regions: Vec<ArchMemRegion>,
+    hotplug_slots: Vec<HotPlugState>,
+    next_memory_slot: u32,
+    selected_slot: usize,
+    next_hotplug_slot: usize,
 }
 
 impl VersionMapped for MemoryManagerSnapshotData {}
@@ -2075,7 +2105,18 @@ impl Snapshottable for MemoryManager {
 
         memory_manager_snapshot.add_data_section(SnapshotDataSection::new_from_versioned_state(
             MEMORY_MANAGER_SNAPSHOT_ID,
-            &MemoryManagerSnapshotData { memory_ranges },
+            &MemoryManagerSnapshotData {
+                memory_ranges,
+                guest_ram_mappings: self.guest_ram_mappings.clone(),
+                start_of_device_area: self.start_of_device_area.0,
+                boot_ram: self.boot_ram,
+                current_ram: self.current_ram,
+                arch_mem_regions: self.arch_mem_regions.clone(),
+                hotplug_slots: self.hotplug_slots.clone(),
+                next_memory_slot: self.next_memory_slot,
+                selected_slot: self.selected_slot,
+                next_hotplug_slot: self.next_hotplug_slot,
+            },
         )?);
 
         Ok(memory_manager_snapshot)
