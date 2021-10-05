@@ -46,14 +46,12 @@ pub(crate) struct PciSegment {
 }
 
 impl PciSegment {
-    pub(crate) fn new_default_segment(
+    pub(crate) fn new(
+        id: u16,
         address_manager: &Arc<AddressManager>,
         start_of_device_area: u64,
         end_of_device_area: u64,
     ) -> DeviceManagerResult<PciSegment> {
-        // Default segment
-        let id = 0u16;
-
         let pci_root = PciRoot::new(None);
         let pci_bus = Arc::new(Mutex::new(PciBus::new(
             pci_root,
@@ -61,7 +59,6 @@ impl PciSegment {
         )));
 
         let pci_config_mmio = Arc::new(Mutex::new(PciConfigMmio::new(Arc::clone(&pci_bus))));
-
         let mmio_config_address = layout::PCI_MMCONFIG_START.0 + PCI_MMIO_CONFIG_SIZE * id as u64;
 
         address_manager
@@ -70,19 +67,6 @@ impl PciSegment {
                 Arc::clone(&pci_config_mmio) as Arc<Mutex<dyn BusDevice>>,
                 mmio_config_address,
                 PCI_MMIO_CONFIG_SIZE,
-            )
-            .map_err(DeviceManagerError::BusError)?;
-
-        #[cfg(target_arch = "x86_64")]
-        let pci_config_io = Arc::new(Mutex::new(PciConfigIo::new(Arc::clone(&pci_bus))));
-
-        #[cfg(target_arch = "x86_64")]
-        address_manager
-            .io_bus
-            .insert(
-                pci_config_io.clone(),
-                PCI_CONFIG_IO_PORT,
-                PCI_CONFIG_IO_PORT_SIZE,
             )
             .map_err(DeviceManagerError::BusError)?;
 
@@ -95,7 +79,7 @@ impl PciSegment {
             pci_devices_down: 0,
             pci_irq_slots: [0; 32],
             #[cfg(target_arch = "x86_64")]
-            pci_config_io: Some(pci_config_io),
+            pci_config_io: None,
             start_of_device_area,
             end_of_device_area,
         };
@@ -108,6 +92,38 @@ impl PciSegment {
             segment.id, segment.mmio_config_address, segment.start_of_device_area, segment.end_of_device_area
         );
         Ok(segment)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    pub(crate) fn new_default_segment(
+        address_manager: &Arc<AddressManager>,
+        start_of_device_area: u64,
+        end_of_device_area: u64,
+    ) -> DeviceManagerResult<PciSegment> {
+        let mut segment = Self::new(0, address_manager, start_of_device_area, end_of_device_area)?;
+        let pci_config_io = Arc::new(Mutex::new(PciConfigIo::new(Arc::clone(&segment.pci_bus))));
+
+        address_manager
+            .io_bus
+            .insert(
+                pci_config_io.clone(),
+                PCI_CONFIG_IO_PORT,
+                PCI_CONFIG_IO_PORT_SIZE,
+            )
+            .map_err(DeviceManagerError::BusError)?;
+
+        segment.pci_config_io = Some(pci_config_io);
+
+        Ok(segment)
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    pub(crate) fn new_default_segment(
+        address_manager: &Arc<AddressManager>,
+        start_of_device_area: u64,
+        end_of_device_area: u64,
+    ) -> DeviceManagerResult<PciSegment> {
+        Self::new(0, address_manager, start_of_device_area, end_of_device_area)
     }
 
     pub(crate) fn next_device_bdf(&self) -> DeviceManagerResult<u32> {
