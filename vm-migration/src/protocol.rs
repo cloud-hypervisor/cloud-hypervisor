@@ -174,13 +174,13 @@ impl Response {
 unsafe impl ByteValued for Response {}
 
 #[repr(C)]
-#[derive(Clone, Versionize)]
+#[derive(Clone, Serialize, Deserialize, Versionize)]
 pub struct MemoryRange {
     pub gpa: u64,
     pub length: u64,
 }
 
-#[derive(Clone, Default, Versionize)]
+#[derive(Clone, Default, Serialize, Deserialize, Versionize)]
 pub struct MemoryRangeTable {
     data: Vec<MemoryRange>,
 }

@@ -28,6 +28,7 @@ use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::vm::{Error as VmError, Vm, VmState};
 use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
+use memory_manager::MemoryManagerSnapshotData;
 use seccompiler::{apply_filter, SeccompAction};
 use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::fs::File;
@@ -299,6 +300,7 @@ struct VmMigrationConfig {
     vm_config: Arc<Mutex<VmConfig>>,
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     common_cpuid: hypervisor::CpuId,
+    memory_manager_data: MemoryManagerSnapshotData,
 }
 
 pub struct Vmm {
@@ -764,7 +766,7 @@ impl Vmm {
     where
         T: Read + Write,
     {
-        // Read in config data
+        // Read in config data along with memory manager data
         let mut data = Vec::with_capacity(req.length() as usize);
         unsafe {
             data.set_len(req.length() as usize);
@@ -802,6 +804,7 @@ impl Vmm {
             &self.seccomp_action,
             self.hypervisor.clone(),
             activate_evt,
+            &vm_migration_config.memory_manager_data,
         )
         .map_err(|e| {
             MigratableError::MigrateReceive(anyhow!("Error creating VM from snapshot: {:?}", e))
@@ -1057,8 +1060,8 @@ impl Vmm {
             vm_config,
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             common_cpuid,
+            memory_manager_data: vm.memory_manager_data(),
         };
-
         let config_data = serde_json::to_vec(&vm_migration_config).unwrap();
         Request::config(config_data.len() as u64).write_to(&mut socket)?;
         socket
