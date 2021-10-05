@@ -218,6 +218,9 @@ pub enum Error {
     /// Cannot restore VM
     Restore(MigratableError),
 
+    /// Cannot restore VM because source URL is missing
+    RestoreMissingSourceUrl,
+
     /// Cannot create the system allocator
     CreateSystemAllocator,
 
@@ -516,7 +519,6 @@ impl MemoryManager {
     }
 
     // Restore both GuestMemory regions along with MemoryZone zones.
-    #[allow(dead_code)]
     fn restore_memory_regions_and_zones(
         guest_ram_mappings: &[GuestRamMapping],
         zones_config: &[MemoryZoneConfig],
@@ -817,37 +819,9 @@ impl MemoryManager {
         prefault: Option<bool>,
         phys_bits: u8,
         #[cfg(feature = "tdx")] tdx_enabled: bool,
+        restore_data: Option<&MemoryManagerSnapshotData>,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         let user_provided_zones = config.size == 0;
-
-        let (ram_size, zones, allow_mem_hotplug) =
-            Self::validate_memory_config(config, user_provided_zones)?;
-
-        // Init guest memory
-        let arch_mem_regions = arch::arch_memory_regions(ram_size);
-
-        let ram_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
-            .iter()
-            .filter(|r| r.2 == RegionType::Ram)
-            .map(|r| (r.0, r.1))
-            .collect();
-
-        let arch_mem_regions: Vec<ArchMemRegion> = arch_mem_regions
-            .iter()
-            .map(|(a, b, c)| ArchMemRegion {
-                base: a.0,
-                size: *b,
-                r_type: *c,
-            })
-            .collect();
-
-        let (mem_regions, mut memory_zones) =
-            Self::create_memory_regions_from_zones(&ram_regions, &zones, prefault)?;
-
-        let mut guest_memory =
-            GuestMemoryMmap::from_arc_regions(mem_regions).map_err(Error::GuestMemory)?;
-
-        let boot_guest_memory = guest_memory.clone();
 
         let mmio_address_space_size = mmio_address_space_size(phys_bits);
         debug_assert_eq!(
@@ -856,77 +830,154 @@ impl MemoryManager {
         );
         let end_of_device_area = GuestAddress(mmio_address_space_size - 1);
 
-        let mut start_of_device_area =
-            MemoryManager::start_addr(guest_memory.last_addr(), allow_mem_hotplug)?;
+        let (ram_size, zones, allow_mem_hotplug) =
+            Self::validate_memory_config(config, user_provided_zones)?;
 
-        // Update list of memory zones for resize.
-        for zone in zones.iter() {
-            if let Some(memory_zone) = memory_zones.get_mut(&zone.id) {
-                if let Some(hotplug_size) = zone.hotplug_size {
-                    if hotplug_size == 0 {
-                        error!("'hotplug_size' can't be 0");
-                        return Err(Error::InvalidHotplugSize);
+        let (
+            start_of_device_area,
+            boot_ram,
+            current_ram,
+            arch_mem_regions,
+            memory_zones,
+            guest_memory,
+            boot_guest_memory,
+            hotplug_slots,
+            next_memory_slot,
+            selected_slot,
+            next_hotplug_slot,
+        ) = if let Some(data) = restore_data {
+            let (regions, memory_zones) =
+                Self::restore_memory_regions_and_zones(&data.guest_ram_mappings, &zones, prefault)?;
+            let guest_memory =
+                GuestMemoryMmap::from_arc_regions(regions).map_err(Error::GuestMemory)?;
+            let boot_guest_memory = guest_memory.clone();
+            (
+                GuestAddress(data.start_of_device_area),
+                data.boot_ram,
+                data.current_ram,
+                data.arch_mem_regions.clone(),
+                memory_zones,
+                guest_memory,
+                boot_guest_memory,
+                data.hotplug_slots.clone(),
+                data.next_memory_slot,
+                data.selected_slot,
+                data.next_hotplug_slot,
+            )
+        } else {
+            // Init guest memory
+            let arch_mem_regions = arch::arch_memory_regions(ram_size);
+
+            let ram_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
+                .iter()
+                .filter(|r| r.2 == RegionType::Ram)
+                .map(|r| (r.0, r.1))
+                .collect();
+
+            let arch_mem_regions: Vec<ArchMemRegion> = arch_mem_regions
+                .iter()
+                .map(|(a, b, c)| ArchMemRegion {
+                    base: a.0,
+                    size: *b,
+                    r_type: *c,
+                })
+                .collect();
+
+            let (mem_regions, mut memory_zones) =
+                Self::create_memory_regions_from_zones(&ram_regions, &zones, prefault)?;
+
+            let mut guest_memory =
+                GuestMemoryMmap::from_arc_regions(mem_regions).map_err(Error::GuestMemory)?;
+
+            let boot_guest_memory = guest_memory.clone();
+
+            let mut start_of_device_area =
+                MemoryManager::start_addr(guest_memory.last_addr(), allow_mem_hotplug)?;
+
+            // Update list of memory zones for resize.
+            for zone in zones.iter() {
+                if let Some(memory_zone) = memory_zones.get_mut(&zone.id) {
+                    if let Some(hotplug_size) = zone.hotplug_size {
+                        if hotplug_size == 0 {
+                            error!("'hotplug_size' can't be 0");
+                            return Err(Error::InvalidHotplugSize);
+                        }
+
+                        if !user_provided_zones && config.hotplug_method == HotplugMethod::Acpi {
+                            start_of_device_area = start_of_device_area
+                                .checked_add(hotplug_size)
+                                .ok_or(Error::GuestAddressOverFlow)?;
+                        } else {
+                            // Alignment must be "natural" i.e. same as size of block
+                            let start_addr = GuestAddress(
+                                (start_of_device_area.0 + virtio_devices::VIRTIO_MEM_ALIGN_SIZE
+                                    - 1)
+                                    / virtio_devices::VIRTIO_MEM_ALIGN_SIZE
+                                    * virtio_devices::VIRTIO_MEM_ALIGN_SIZE,
+                            );
+
+                            // When `prefault` is set by vm_restore, memory manager
+                            // will create ram region with `prefault` option in
+                            // restore config rather than same option in zone
+                            let region = MemoryManager::create_ram_region(
+                                &None,
+                                0,
+                                start_addr,
+                                hotplug_size as usize,
+                                match prefault {
+                                    Some(pf) => pf,
+                                    None => zone.prefault,
+                                },
+                                zone.shared,
+                                zone.hugepages,
+                                zone.hugepage_size,
+                                zone.host_numa_node,
+                            )?;
+
+                            guest_memory = guest_memory
+                                .insert_region(Arc::clone(&region))
+                                .map_err(Error::GuestMemory)?;
+
+                            let hotplugged_size = zone.hotplugged_size.unwrap_or(0);
+                            let region_size = region.len();
+                            memory_zone.virtio_mem_zone = Some(VirtioMemZone {
+                                region,
+                                resize_handler: virtio_devices::Resize::new(hotplugged_size)
+                                    .map_err(Error::EventFdFail)?,
+                                hotplugged_size,
+                                hugepages: zone.hugepages,
+                                blocks_state: Arc::new(Mutex::new(BlocksState::new(region_size))),
+                            });
+
+                            start_of_device_area = start_addr
+                                .checked_add(hotplug_size)
+                                .ok_or(Error::GuestAddressOverFlow)?;
+                        }
                     }
-
-                    if !user_provided_zones && config.hotplug_method == HotplugMethod::Acpi {
-                        start_of_device_area = start_of_device_area
-                            .checked_add(hotplug_size)
-                            .ok_or(Error::GuestAddressOverFlow)?;
-                    } else {
-                        // Alignment must be "natural" i.e. same as size of block
-                        let start_addr = GuestAddress(
-                            (start_of_device_area.0 + virtio_devices::VIRTIO_MEM_ALIGN_SIZE - 1)
-                                / virtio_devices::VIRTIO_MEM_ALIGN_SIZE
-                                * virtio_devices::VIRTIO_MEM_ALIGN_SIZE,
-                        );
-
-                        // When `prefault` is set by vm_restore, memory manager
-                        // will create ram region with `prefault` option in
-                        // restore config rather than same option in zone
-                        let region = MemoryManager::create_ram_region(
-                            &None,
-                            0,
-                            start_addr,
-                            hotplug_size as usize,
-                            match prefault {
-                                Some(pf) => pf,
-                                None => zone.prefault,
-                            },
-                            zone.shared,
-                            zone.hugepages,
-                            zone.hugepage_size,
-                            zone.host_numa_node,
-                        )?;
-
-                        guest_memory = guest_memory
-                            .insert_region(Arc::clone(&region))
-                            .map_err(Error::GuestMemory)?;
-
-                        let hotplugged_size = zone.hotplugged_size.unwrap_or(0);
-                        let region_size = region.len();
-                        memory_zone.virtio_mem_zone = Some(VirtioMemZone {
-                            region,
-                            resize_handler: virtio_devices::Resize::new(hotplugged_size)
-                                .map_err(Error::EventFdFail)?,
-                            hotplugged_size,
-                            hugepages: zone.hugepages,
-                            blocks_state: Arc::new(Mutex::new(BlocksState::new(region_size))),
-                        });
-
-                        start_of_device_area = start_addr
-                            .checked_add(hotplug_size)
-                            .ok_or(Error::GuestAddressOverFlow)?;
-                    }
+                } else {
+                    return Err(Error::MissingZoneIdentifier);
                 }
-            } else {
-                return Err(Error::MissingZoneIdentifier);
             }
-        }
+
+            let mut hotplug_slots = Vec::with_capacity(HOTPLUG_COUNT);
+            hotplug_slots.resize_with(HOTPLUG_COUNT, HotPlugState::default);
+
+            (
+                start_of_device_area,
+                ram_size,
+                ram_size,
+                arch_mem_regions,
+                memory_zones,
+                guest_memory,
+                boot_guest_memory,
+                hotplug_slots,
+                0,
+                0,
+                0,
+            )
+        };
 
         let guest_memory = GuestMemoryAtomic::new(guest_memory);
-
-        let mut hotplug_slots = Vec::with_capacity(HOTPLUG_COUNT);
-        hotplug_slots.resize_with(HOTPLUG_COUNT, HotPlugState::default);
 
         // Both MMIO and PIO address spaces start at address 0.
         let allocator = Arc::new(Mutex::new(
@@ -967,18 +1018,18 @@ impl MemoryManager {
         let mut memory_manager = MemoryManager {
             boot_guest_memory,
             guest_memory,
-            next_memory_slot: 0,
+            next_memory_slot,
             start_of_device_area,
             end_of_device_area,
             vm,
             hotplug_slots,
-            selected_slot: 0,
+            selected_slot,
             mergeable: config.mergeable,
             allocator,
             hotplug_method: config.hotplug_method.clone(),
-            boot_ram: ram_size,
-            current_ram: ram_size,
-            next_hotplug_slot: 0,
+            boot_ram,
+            current_ram,
+            next_hotplug_slot,
             shared: config.shared,
             hugepages: config.hugepages,
             hugepage_size: config.hugepage_size,
@@ -1008,15 +1059,6 @@ impl MemoryManager {
         prefault: bool,
         phys_bits: u8,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
-        let mm = MemoryManager::new(
-            vm,
-            config,
-            Some(prefault),
-            phys_bits,
-            #[cfg(feature = "tdx")]
-            false,
-        )?;
-
         if let Some(source_url) = source_url {
             let mut memory_file_path = url_to_path(source_url).map_err(Error::Restore)?;
             memory_file_path.push(String::from(SNAPSHOT_FILENAME));
@@ -1025,12 +1067,24 @@ impl MemoryManager {
                 .to_versioned_state(MEMORY_MANAGER_SNAPSHOT_ID)
                 .map_err(Error::Restore)?;
 
+            let mm = MemoryManager::new(
+                vm,
+                config,
+                Some(prefault),
+                phys_bits,
+                #[cfg(feature = "tdx")]
+                false,
+                None,
+            )?;
+
             mm.lock()
                 .unwrap()
                 .fill_saved_regions(memory_file_path, mem_snapshot.memory_ranges)?;
-        }
 
-        Ok(mm)
+            Ok(mm)
+        } else {
+            Err(Error::RestoreMissingSourceUrl)
+        }
     }
 
     fn memfd_create(name: &ffi::CStr, flags: u32) -> Result<RawFd, io::Error> {

@@ -750,6 +750,7 @@ impl Vm {
             phys_bits,
             #[cfg(feature = "tdx")]
             tdx_enabled,
+            None,
         )
         .map_err(Error::MemoryManager)?;
 
@@ -866,6 +867,7 @@ impl Vm {
             phys_bits,
             #[cfg(feature = "tdx")]
             false,
+            None,
         )
         .map_err(Error::MemoryManager)?;
 
