@@ -35,6 +35,7 @@ use virtio_devices::BlocksState;
 use vm_allocator::GsiApic;
 use vm_allocator::SystemAllocator;
 use vm_device::BusDevice;
+use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
     mmap::MmapRegionError, Address, Bytes, Error as MmapError, GuestAddress, GuestAddressSpace,
@@ -126,6 +127,8 @@ struct GuestRamMapping {
     size: u64,
     #[allow(dead_code)]
     zone_id: String,
+    #[allow(dead_code)]
+    virtio_mem: bool,
 }
 
 pub struct MemoryManager {
@@ -676,17 +679,22 @@ impl MemoryManager {
         let mut list = Vec::new();
 
         for (zone_id, memory_zone) in self.memory_zones.iter() {
-            let mut regions = memory_zone.regions().clone();
+            let mut regions: Vec<(Arc<vm_memory::GuestRegionMmap<AtomicBitmap>>, bool)> =
+                memory_zone
+                    .regions()
+                    .iter()
+                    .map(|r| (r.clone(), false))
+                    .collect();
 
             if let Some(virtio_mem_zone) = memory_zone.virtio_mem_zone() {
-                regions.push(virtio_mem_zone.region().clone());
+                regions.push((virtio_mem_zone.region().clone(), true));
             }
 
             list.push((zone_id.clone(), regions));
         }
 
         for (zone_id, regions) in list {
-            for region in regions {
+            for (region, virtio_mem) in regions {
                 let slot = self.create_userspace_mapping(
                     region.start_addr().raw_value(),
                     region.len() as u64,
@@ -700,6 +708,7 @@ impl MemoryManager {
                     size: region.len(),
                     slot,
                     zone_id: zone_id.clone(),
+                    virtio_mem,
                 });
                 self.allocator
                     .lock()
@@ -1178,6 +1187,7 @@ impl MemoryManager {
             size: region.len(),
             slot,
             zone_id: DEFAULT_MEMORY_ZONE.to_string(),
+            virtio_mem: false,
         });
 
         self.add_region(Arc::clone(&region))?;
