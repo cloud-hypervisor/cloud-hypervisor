@@ -311,7 +311,7 @@ impl Aml for PciSegment {
         pci_dsdt_inner_data.push(&cid);
         let adr = aml::Name::new("_ADR".into(), &aml::ZERO);
         pci_dsdt_inner_data.push(&adr);
-        let seg = aml::Name::new("_SEG".into(), &aml::ZERO);
+        let seg = aml::Name::new("_SEG".into(), &self.id);
         pci_dsdt_inner_data.push(&seg);
         let uid = aml::Name::new("_UID".into(), &aml::ZERO);
         pci_dsdt_inner_data.push(&uid);
