@@ -1074,7 +1074,7 @@ impl MemoryManager {
                 phys_bits,
                 #[cfg(feature = "tdx")]
                 false,
-                None,
+                Some(&mem_snapshot),
             )?;
 
             mm.lock()
