@@ -25,10 +25,10 @@ use vm_device::BusDevice;
 const PCI_MMIO_CONFIG_SIZE: u64 = 4096 * 256;
 
 pub(crate) struct PciSegment {
-    id: u16,
+    pub(crate) id: u16,
     pub(crate) pci_bus: Arc<Mutex<PciBus>>,
     pub(crate) pci_config_mmio: Arc<Mutex<PciConfigMmio>>,
-    mmio_config_address: u64,
+    pub(crate) mmio_config_address: u64,
 
     #[cfg(target_arch = "x86_64")]
     pub(crate) pci_config_io: Option<Arc<Mutex<PciConfigIo>>>,

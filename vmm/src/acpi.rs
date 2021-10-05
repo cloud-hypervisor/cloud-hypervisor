@@ -222,20 +222,22 @@ fn create_facp_table(dsdt_offset: GuestAddress) -> Sdt {
     facp
 }
 
-fn create_mcfg_table() -> Sdt {
+fn create_mcfg_table(device_manager: &Arc<Mutex<DeviceManager>>) -> Sdt {
     let mut mcfg = Sdt::new(*b"MCFG", 36, 1, *b"CLOUDH", *b"CHMCFG  ", 1);
 
     // MCFG reserved 8 bytes
     mcfg.append(0u64);
 
-    // 32-bit PCI enhanced configuration mechanism
-    mcfg.append(PciRangeEntry {
-        base_address: arch::layout::PCI_MMCONFIG_START.0,
-        segment: 0,
-        start: 0,
-        end: 0,
-        ..Default::default()
-    });
+    for segment in device_manager.lock().unwrap().pci_segments() {
+        // 32-bit PCI enhanced configuration mechanism
+        mcfg.append(PciRangeEntry {
+            base_address: segment.mmio_config_address,
+            segment: segment.id,
+            start: 0,
+            end: 0,
+            ..Default::default()
+        });
+    }
     mcfg
 }
 
@@ -536,7 +538,7 @@ pub fn create_acpi_tables(
     }
 
     // MCFG
-    let mcfg = create_mcfg_table();
+    let mcfg = create_mcfg_table(device_manager);
     let mcfg_offset = prev_tbl_off.checked_add(prev_tbl_len).unwrap();
     guest_mem
         .write_slice(mcfg.as_slice(), mcfg_offset)
