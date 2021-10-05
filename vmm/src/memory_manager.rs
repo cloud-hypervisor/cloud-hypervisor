@@ -125,11 +125,8 @@ struct GuestRamMapping {
     slot: u32,
     gpa: u64,
     size: u64,
-    #[allow(dead_code)]
     zone_id: String,
-    #[allow(dead_code)]
     virtio_mem: bool,
-    #[allow(dead_code)]
     file_offset: u64,
 }
 
@@ -510,6 +507,63 @@ impl MemoryManager {
         Ok((mem_regions, memory_zones))
     }
 
+    // Restore both GuestMemory regions along with MemoryZone zones.
+    #[allow(dead_code)]
+    fn restore_memory_regions_and_zones(
+        guest_ram_mappings: &[GuestRamMapping],
+        zones_config: &[MemoryZoneConfig],
+        prefault: Option<bool>,
+    ) -> Result<(Vec<Arc<GuestRegionMmap>>, MemoryZones), Error> {
+        let mut memory_regions = Vec::new();
+        let mut memory_zones = HashMap::new();
+
+        for zone_config in zones_config {
+            memory_zones.insert(zone_config.id.clone(), MemoryZone::default());
+        }
+
+        for guest_ram_mapping in guest_ram_mappings {
+            for zone_config in zones_config {
+                if guest_ram_mapping.zone_id == zone_config.id {
+                    let region = MemoryManager::create_ram_region(
+                        &zone_config.file,
+                        guest_ram_mapping.file_offset,
+                        GuestAddress(guest_ram_mapping.gpa),
+                        guest_ram_mapping.size as usize,
+                        match prefault {
+                            Some(pf) => pf,
+                            None => zone_config.prefault,
+                        },
+                        zone_config.shared,
+                        zone_config.hugepages,
+                        zone_config.hugepage_size,
+                        zone_config.host_numa_node,
+                    )?;
+                    memory_regions.push(Arc::clone(&region));
+                    if let Some(memory_zone) = memory_zones.get_mut(&guest_ram_mapping.zone_id) {
+                        if guest_ram_mapping.virtio_mem {
+                            let hotplugged_size = zone_config.hotplugged_size.unwrap_or(0);
+                            let region_size = region.len();
+                            memory_zone.virtio_mem_zone = Some(VirtioMemZone {
+                                region,
+                                resize_handler: virtio_devices::Resize::new(hotplugged_size)
+                                    .map_err(Error::EventFdFail)?,
+                                hotplugged_size,
+                                hugepages: zone_config.hugepages,
+                                blocks_state: Arc::new(Mutex::new(BlocksState::new(region_size))),
+                            });
+                        } else {
+                            memory_zone.regions.push(region);
+                        }
+                    }
+                }
+            }
+        }
+
+        memory_regions.sort_by_key(|x| x.start_addr());
+
+        Ok((memory_regions, memory_zones))
+    }
+
     fn fill_saved_regions(
         &mut self,
         file_path: PathBuf,
@@ -785,7 +839,7 @@ impl MemoryManager {
             MemoryManager::start_addr(guest_memory.last_addr(), allow_mem_hotplug)?;
 
         // Update list of memory zones for resize.
-        for zone in zones {
+        for zone in zones.iter() {
             if let Some(memory_zone) = memory_zones.get_mut(&zone.id) {
                 if let Some(hotplug_size) = zone.hotplug_size {
                     if hotplug_size == 0 {
