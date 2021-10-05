@@ -1188,14 +1188,16 @@ impl DeviceManager {
             }
         }
 
-        #[cfg(target_arch = "x86_64")]
-        self.bus_devices.push(
-            Arc::clone(self.pci_segments[0].pci_config_io.as_ref().unwrap())
-                as Arc<Mutex<dyn BusDevice>>,
-        );
+        for segment in &self.pci_segments {
+            #[cfg(target_arch = "x86_64")]
+            if let Some(pci_config_io) = segment.pci_config_io.as_ref() {
+                self.bus_devices
+                    .push(Arc::clone(pci_config_io) as Arc<Mutex<dyn BusDevice>>);
+            }
 
-        self.bus_devices
-            .push(Arc::clone(&self.pci_segments[0].pci_config_mmio) as Arc<Mutex<dyn BusDevice>>);
+            self.bus_devices
+                .push(Arc::clone(&segment.pci_config_mmio) as Arc<Mutex<dyn BusDevice>>);
+        }
 
         Ok(())
     }
