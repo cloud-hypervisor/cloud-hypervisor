@@ -129,6 +129,8 @@ struct GuestRamMapping {
     zone_id: String,
     #[allow(dead_code)]
     virtio_mem: bool,
+    #[allow(dead_code)]
+    file_offset: u64,
 }
 
 pub struct MemoryManager {
@@ -703,12 +705,20 @@ impl MemoryManager {
                     false,
                     self.log_dirty,
                 )?;
+
+                let file_offset = if let Some(file_offset) = region.file_offset() {
+                    file_offset.start()
+                } else {
+                    0
+                };
+
                 self.guest_ram_mappings.push(GuestRamMapping {
                     gpa: region.start_addr().raw_value(),
                     size: region.len(),
                     slot,
                     zone_id: zone_id.clone(),
                     virtio_mem,
+                    file_offset,
                 });
                 self.allocator
                     .lock()
@@ -1188,6 +1198,7 @@ impl MemoryManager {
             slot,
             zone_id: DEFAULT_MEMORY_ZONE.to_string(),
             virtio_mem: false,
+            file_offset: 0,
         });
 
         self.add_region(Arc::clone(&region))?;
