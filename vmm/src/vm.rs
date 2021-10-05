@@ -20,7 +20,9 @@ use crate::config::{
 use crate::cpu;
 use crate::device_manager::{self, Console, DeviceManager, DeviceManagerError, PtyPair};
 use crate::device_tree::DeviceTree;
-use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
+use crate::memory_manager::{
+    Error as MemoryManagerError, MemoryManager, MemoryManagerSnapshotData,
+};
 use crate::migration::{get_vm_snapshot, url_to_path, VM_SNAPSHOT_FILE};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::GuestMemoryMmap;
@@ -853,6 +855,7 @@ impl Vm {
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         activate_evt: EventFd,
+        memory_manager_data: &MemoryManagerSnapshotData,
     ) -> Result<Self> {
         hypervisor.check_required_extensions().unwrap();
         let vm = hypervisor.create_vm().unwrap();
@@ -867,7 +870,7 @@ impl Vm {
             phys_bits,
             #[cfg(feature = "tdx")]
             false,
-            None,
+            Some(memory_manager_data),
         )
         .map_err(Error::MemoryManager)?;
 
@@ -2268,6 +2271,10 @@ impl Vm {
             .unwrap()
             .notify_power_button()
             .map_err(Error::PowerButton)
+    }
+
+    pub fn memory_manager_data(&self) -> MemoryManagerSnapshotData {
+        self.memory_manager.lock().unwrap().snapshot_data()
     }
 }
 

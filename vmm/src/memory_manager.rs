@@ -63,7 +63,7 @@ const MPOL_BIND: u32 = 2;
 const MPOL_MF_STRICT: u32 = 1;
 const MPOL_MF_MOVE: u32 = 1 << 1;
 
-#[derive(Clone, Default, Versionize)]
+#[derive(Clone, Default, Serialize, Deserialize, Versionize)]
 struct HotPlugState {
     base: u64,
     length: u64,
@@ -121,7 +121,7 @@ impl MemoryZone {
 
 pub type MemoryZones = HashMap<String, MemoryZone>;
 
-#[derive(Clone, Versionize)]
+#[derive(Clone, Serialize, Deserialize, Versionize)]
 struct GuestRamMapping {
     slot: u32,
     gpa: u64,
@@ -131,7 +131,7 @@ struct GuestRamMapping {
     file_offset: u64,
 }
 
-#[derive(Clone, Versionize)]
+#[derive(Clone, Serialize, Deserialize, Versionize)]
 struct ArchMemRegion {
     base: u64,
     size: usize,
@@ -1741,6 +1741,21 @@ impl MemoryManager {
 
         Ok(table)
     }
+
+    pub fn snapshot_data(&self) -> MemoryManagerSnapshotData {
+        MemoryManagerSnapshotData {
+            memory_ranges: self.snapshot_memory_ranges.clone(),
+            guest_ram_mappings: self.guest_ram_mappings.clone(),
+            start_of_device_area: self.start_of_device_area.0,
+            boot_ram: self.boot_ram,
+            current_ram: self.current_ram,
+            arch_mem_regions: self.arch_mem_regions.clone(),
+            hotplug_slots: self.hotplug_slots.clone(),
+            next_memory_slot: self.next_memory_slot,
+            selected_slot: self.selected_slot,
+            next_hotplug_slot: self.next_hotplug_slot,
+        }
+    }
 }
 
 #[cfg(feature = "acpi")]
@@ -2121,7 +2136,7 @@ impl Aml for MemoryManager {
 
 impl Pausable for MemoryManager {}
 
-#[derive(Versionize)]
+#[derive(Clone, Serialize, Deserialize, Versionize)]
 pub struct MemoryManagerSnapshotData {
     memory_ranges: MemoryRangeTable,
     guest_ram_mappings: Vec<GuestRamMapping>,
@@ -2155,22 +2170,11 @@ impl Snapshottable for MemoryManager {
         // not. This saves the 'send' step having to go through the same
         // process, and instead it can directly proceed with storing the
         // memory range content for the ranges requiring it.
-        self.snapshot_memory_ranges = memory_ranges.clone();
+        self.snapshot_memory_ranges = memory_ranges;
 
         memory_manager_snapshot.add_data_section(SnapshotDataSection::new_from_versioned_state(
             MEMORY_MANAGER_SNAPSHOT_ID,
-            &MemoryManagerSnapshotData {
-                memory_ranges,
-                guest_ram_mappings: self.guest_ram_mappings.clone(),
-                start_of_device_area: self.start_of_device_area.0,
-                boot_ram: self.boot_ram,
-                current_ram: self.current_ram,
-                arch_mem_regions: self.arch_mem_regions.clone(),
-                hotplug_slots: self.hotplug_slots.clone(),
-                next_memory_slot: self.next_memory_slot,
-                selected_slot: self.selected_slot,
-                next_hotplug_slot: self.next_hotplug_slot,
-            },
+            &self.snapshot_data(),
         )?);
 
         Ok(memory_manager_snapshot)

@@ -10,6 +10,8 @@
 
 #[macro_use]
 extern crate log;
+#[macro_use]
+extern crate serde_derive;
 
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::SgxEpcSection;
@@ -57,7 +59,7 @@ pub enum Error {
 pub type Result<T> = result::Result<T, Error>;
 
 /// Type for memory region types.
-#[derive(Clone, Copy, PartialEq, Debug, Versionize)]
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize, Versionize)]
 pub enum RegionType {
     /// RAM type
     Ram,
