@@ -3903,8 +3903,11 @@ impl Aml for DeviceManager {
             .unwrap()
             .to_aml_bytes();
 
-        let pci_dsdt_data = self.pci_segments[0].to_aml_bytes();
-        bytes.extend_from_slice(pci_dsdt_data.as_slice());
+        for segment in &self.pci_segments {
+            let pci_dsdt_data = segment.to_aml_bytes();
+            bytes.extend_from_slice(pci_dsdt_data.as_slice());
+        }
+
         bytes.extend_from_slice(mbrd_dsdt_data.as_slice());
         if self.config.lock().unwrap().serial.mode != ConsoleOutputMode::Off {
             bytes.extend_from_slice(com1_dsdt_data.as_slice());
