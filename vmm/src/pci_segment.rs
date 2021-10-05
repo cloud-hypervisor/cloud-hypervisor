@@ -21,6 +21,9 @@ use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 use vm_device::BusDevice;
 
+// One bus with potentially 256 devices (32 slots x 8 functions).
+const PCI_MMIO_CONFIG_SIZE: u64 = 4096 * 256;
+
 pub(crate) struct PciSegment {
     id: u16,
     pub(crate) pci_bus: Arc<Mutex<PciBus>>,
@@ -48,6 +51,9 @@ impl PciSegment {
         start_of_device_area: u64,
         end_of_device_area: u64,
     ) -> DeviceManagerResult<PciSegment> {
+        // Default segment
+        let id = 0u16;
+
         let pci_root = PciRoot::new(None);
         let pci_bus = Arc::new(Mutex::new(PciBus::new(
             pci_root,
@@ -55,12 +61,15 @@ impl PciSegment {
         )));
 
         let pci_config_mmio = Arc::new(Mutex::new(PciConfigMmio::new(Arc::clone(&pci_bus))));
+
+        let mmio_config_address = layout::PCI_MMCONFIG_START.0 + PCI_MMIO_CONFIG_SIZE * id as u64;
+
         address_manager
             .mmio_bus
             .insert(
                 Arc::clone(&pci_config_mmio) as Arc<Mutex<dyn BusDevice>>,
-                arch::layout::PCI_MMCONFIG_START.0,
-                arch::layout::PCI_MMCONFIG_SIZE,
+                mmio_config_address,
+                PCI_MMIO_CONFIG_SIZE,
             )
             .map_err(DeviceManagerError::BusError)?;
 
@@ -78,10 +87,10 @@ impl PciSegment {
             .map_err(DeviceManagerError::BusError)?;
 
         let mut segment = PciSegment {
-            id: 0,
+            id,
             pci_bus,
             pci_config_mmio,
-            mmio_config_address: arch::layout::PCI_MMCONFIG_START.0,
+            mmio_config_address,
             pci_devices_up: 0,
             pci_devices_down: 0,
             pci_irq_slots: [0; 32],
