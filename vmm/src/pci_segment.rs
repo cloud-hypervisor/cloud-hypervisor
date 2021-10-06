@@ -356,35 +356,56 @@ impl Aml for PciSegment {
         let pci_dsm = PciDsmMethod {};
         pci_dsdt_inner_data.push(&pci_dsm);
 
-        let crs = aml::Name::new(
-            "_CRS".into(),
-            &aml::ResourceTemplate::new(vec![
-                &aml::AddressSpace::new_bus_number(0x0u16, 0x0u16),
-                #[cfg(target_arch = "x86_64")]
-                &aml::Io::new(0xcf8, 0xcf8, 1, 0x8),
-                &aml::Memory32Fixed::new(
-                    true,
-                    self.mmio_config_address as u32,
-                    PCI_MMIO_CONFIG_SIZE as u32,
-                ),
-                &aml::AddressSpace::new_memory(
-                    aml::AddressSpaceCachable::NotCacheable,
-                    true,
-                    layout::MEM_32BIT_DEVICES_START.0 as u32,
-                    (layout::MEM_32BIT_DEVICES_START.0 + layout::MEM_32BIT_DEVICES_SIZE - 1) as u32,
-                ),
-                &aml::AddressSpace::new_memory(
-                    aml::AddressSpaceCachable::NotCacheable,
-                    true,
-                    self.start_of_device_area,
-                    self.end_of_device_area,
-                ),
-                #[cfg(target_arch = "x86_64")]
-                &aml::AddressSpace::new_io(0u16, 0x0cf7u16),
-                #[cfg(target_arch = "x86_64")]
-                &aml::AddressSpace::new_io(0x0d00u16, 0xffffu16),
-            ]),
-        );
+        let crs = if self.id == 0 {
+            aml::Name::new(
+                "_CRS".into(),
+                &aml::ResourceTemplate::new(vec![
+                    &aml::AddressSpace::new_bus_number(0x0u16, 0x0u16),
+                    #[cfg(target_arch = "x86_64")]
+                    &aml::Io::new(0xcf8, 0xcf8, 1, 0x8),
+                    &aml::Memory32Fixed::new(
+                        true,
+                        self.mmio_config_address as u32,
+                        PCI_MMIO_CONFIG_SIZE as u32,
+                    ),
+                    &aml::AddressSpace::new_memory(
+                        aml::AddressSpaceCachable::NotCacheable,
+                        true,
+                        layout::MEM_32BIT_DEVICES_START.0 as u32,
+                        (layout::MEM_32BIT_DEVICES_START.0 + layout::MEM_32BIT_DEVICES_SIZE - 1)
+                            as u32,
+                    ),
+                    &aml::AddressSpace::new_memory(
+                        aml::AddressSpaceCachable::NotCacheable,
+                        true,
+                        self.start_of_device_area,
+                        self.end_of_device_area,
+                    ),
+                    #[cfg(target_arch = "x86_64")]
+                    &aml::AddressSpace::new_io(0u16, 0x0cf7u16),
+                    #[cfg(target_arch = "x86_64")]
+                    &aml::AddressSpace::new_io(0x0d00u16, 0xffffu16),
+                ]),
+            )
+        } else {
+            aml::Name::new(
+                "_CRS".into(),
+                &aml::ResourceTemplate::new(vec![
+                    &aml::AddressSpace::new_bus_number(0x0u16, 0x0u16),
+                    &aml::Memory32Fixed::new(
+                        true,
+                        self.mmio_config_address as u32,
+                        PCI_MMIO_CONFIG_SIZE as u32,
+                    ),
+                    &aml::AddressSpace::new_memory(
+                        aml::AddressSpaceCachable::NotCacheable,
+                        true,
+                        self.start_of_device_area,
+                        self.end_of_device_area,
+                    ),
+                ]),
+            )
+        };
         pci_dsdt_inner_data.push(&crs);
 
         let mut pci_devices = Vec::new();
