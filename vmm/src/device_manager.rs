@@ -2923,6 +2923,7 @@ impl DeviceManager {
         self.add_pci_device(
             vfio_pci_device.clone(),
             vfio_pci_device.clone(),
+            0,
             pci_device_bdf,
         )?;
 
@@ -2958,6 +2959,7 @@ impl DeviceManager {
         &mut self,
         bus_device: Arc<Mutex<dyn BusDevice>>,
         pci_device: Arc<Mutex<dyn PciDevice>>,
+        segment_id: u16,
         bdf: u32,
     ) -> DeviceManagerResult<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>> {
         let bars = pci_device
@@ -2966,7 +2968,10 @@ impl DeviceManager {
             .allocate_bars(&mut self.address_manager.allocator.lock().unwrap())
             .map_err(DeviceManagerError::AllocateBars)?;
 
-        let mut pci_bus = self.pci_segments[0].pci_bus.lock().unwrap();
+        let mut pci_bus = self.pci_segments[segment_id as usize]
+            .pci_bus
+            .lock()
+            .unwrap();
 
         pci_bus
             .add_device(bdf, pci_device)
@@ -3083,6 +3088,7 @@ impl DeviceManager {
         self.add_pci_device(
             vfio_user_pci_device.clone(),
             vfio_user_pci_device.clone(),
+            0,
             pci_device_bdf,
         )?;
 
@@ -3213,6 +3219,7 @@ impl DeviceManager {
         let bars = self.add_pci_device(
             virtio_pci_device.clone(),
             virtio_pci_device.clone(),
+            0,
             pci_device_bdf,
         )?;
 
