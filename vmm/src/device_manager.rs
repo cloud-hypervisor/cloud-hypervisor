@@ -400,6 +400,9 @@ pub enum DeviceManagerError {
     /// Missing PCI b/d/f from the DeviceNode.
     MissingDeviceNodePciBdf,
 
+    /// Missing PCI segment id from the DeviceNode.
+    MissingDeviceNodePciSegmentId,
+
     /// No support for device passthrough
     NoDevicePassthroughSupport,
 
@@ -2806,7 +2809,9 @@ impl DeviceManager {
         &mut self,
         device_cfg: &mut DeviceConfig,
     ) -> DeviceManagerResult<(u32, String)> {
-        let pci_device_bdf = self.pci_segments[0].next_device_bdf()?;
+        // TODO: Fill with PCI segment ID from config when available
+        let pci_segment_id = 0;
+        let pci_device_bdf = self.pci_segments[pci_segment_id as usize].next_device_bdf()?;
 
         let mut needs_dma_mapping = false;
 
@@ -2887,7 +2892,8 @@ impl DeviceManager {
                 Some(
                     legacy_interrupt_manager
                         .create_group(LegacyIrqGroupConfig {
-                            irq: self.pci_segments[0].pci_irq_slots[(pci_device_bdf >> 3) as usize]
+                            irq: self.pci_segments[pci_segment_id as usize].pci_irq_slots
+                                [(pci_device_bdf >> 3) as usize]
                                 as InterruptIndex,
                         })
                         .map_err(DeviceManagerError::CreateInterruptGroup)?,
@@ -2923,7 +2929,7 @@ impl DeviceManager {
         self.add_pci_device(
             vfio_pci_device.clone(),
             vfio_pci_device.clone(),
-            0,
+            pci_segment_id,
             pci_device_bdf,
         )?;
 
@@ -2945,6 +2951,7 @@ impl DeviceManager {
         }
 
         node.pci_bdf = Some(pci_device_bdf);
+        node.pci_segment_id = Some(pci_segment_id);
         node.pci_device_handle = Some(PciDeviceHandle::Vfio(vfio_pci_device));
 
         self.device_tree
@@ -3015,14 +3022,17 @@ impl DeviceManager {
         &mut self,
         device_cfg: &mut UserDeviceConfig,
     ) -> DeviceManagerResult<(u32, String)> {
-        let pci_device_bdf = self.pci_segments[0].next_device_bdf()?;
+        // TODO: Fill with PCI segment ID from config when available
+        let pci_segment_id = 0;
+        let pci_device_bdf = self.pci_segments[pci_segment_id as usize].next_device_bdf()?;
 
         let legacy_interrupt_group =
             if let Some(legacy_interrupt_manager) = &self.legacy_interrupt_manager {
                 Some(
                     legacy_interrupt_manager
                         .create_group(LegacyIrqGroupConfig {
-                            irq: self.pci_segments[0].pci_irq_slots[(pci_device_bdf >> 3) as usize]
+                            irq: self.pci_segments[pci_segment_id as usize].pci_irq_slots
+                                [(pci_device_bdf >> 3) as usize]
                                 as InterruptIndex,
                         })
                         .map_err(DeviceManagerError::CreateInterruptGroup)?,
@@ -3088,13 +3098,14 @@ impl DeviceManager {
         self.add_pci_device(
             vfio_user_pci_device.clone(),
             vfio_user_pci_device.clone(),
-            0,
+            pci_segment_id,
             pci_device_bdf,
         )?;
 
         let mut node = device_node!(vfio_user_name);
 
         node.pci_bdf = Some(pci_device_bdf);
+        node.pci_segment_id = Some(pci_segment_id);
         node.pci_device_handle = Some(PciDeviceHandle::VfioUser(vfio_user_pci_device));
 
         self.device_tree
@@ -3126,6 +3137,8 @@ impl DeviceManager {
         iommu_mapping: &Option<Arc<IommuMapping>>,
         virtio_device_id: String,
     ) -> DeviceManagerResult<u32> {
+        // TODO: Fill with PCI segment ID from config when available
+        let pci_segment_id: u16 = 0;
         let id = format!("{}-{}", VIRTIO_PCI_DEVICE_NAME_PREFIX, virtio_device_id);
 
         // Add the new virtio-pci node to the device tree.
@@ -3134,40 +3147,44 @@ impl DeviceManager {
 
         // Look for the id in the device tree. If it can be found, that means
         // the device is being restored, otherwise it's created from scratch.
-        let (pci_device_bdf, config_bar_addr) =
-            if let Some(node) = self.device_tree.lock().unwrap().get(&id) {
-                info!("Restoring virtio-pci {} resources", id);
-                let pci_device_bdf = node
-                    .pci_bdf
-                    .ok_or(DeviceManagerError::MissingDeviceNodePciBdf)?;
+        let (pci_segment_id, pci_device_bdf, config_bar_addr) = if let Some(node) =
+            self.device_tree.lock().unwrap().get(&id)
+        {
+            info!("Restoring virtio-pci {} resources", id);
+            let pci_device_bdf = node
+                .pci_bdf
+                .ok_or(DeviceManagerError::MissingDeviceNodePciBdf)?;
+            let pci_segment_id = node
+                .pci_segment_id
+                .ok_or(DeviceManagerError::MissingDeviceNodePciSegmentId)?;
 
-                self.pci_segments[0]
-                    .pci_bus
-                    .lock()
-                    .unwrap()
-                    .get_device_id((pci_device_bdf >> 3) as usize)
-                    .map_err(DeviceManagerError::GetPciDeviceId)?;
+            self.pci_segments[pci_segment_id as usize]
+                .pci_bus
+                .lock()
+                .unwrap()
+                .get_device_id((pci_device_bdf >> 3) as usize)
+                .map_err(DeviceManagerError::GetPciDeviceId)?;
 
-                if node.resources.is_empty() {
+            if node.resources.is_empty() {
+                return Err(DeviceManagerError::MissingVirtioPciResources);
+            }
+
+            // We know the configuration BAR address is stored on the first
+            // resource in the list.
+            let config_bar_addr = match node.resources[0] {
+                Resource::MmioAddressRange { base, .. } => Some(base),
+                _ => {
+                    error!("Unexpected resource {:?} for {}", node.resources[0], id);
                     return Err(DeviceManagerError::MissingVirtioPciResources);
                 }
-
-                // We know the configuration BAR address is stored on the first
-                // resource in the list.
-                let config_bar_addr = match node.resources[0] {
-                    Resource::MmioAddressRange { base, .. } => Some(base),
-                    _ => {
-                        error!("Unexpected resource {:?} for {}", node.resources[0], id);
-                        return Err(DeviceManagerError::MissingVirtioPciResources);
-                    }
-                };
-
-                (pci_device_bdf, config_bar_addr)
-            } else {
-                let pci_device_bdf = self.pci_segments[0].next_device_bdf()?;
-
-                (pci_device_bdf, None)
             };
+
+            (pci_segment_id, pci_device_bdf, config_bar_addr)
+        } else {
+            let pci_device_bdf = self.pci_segments[pci_segment_id as usize].next_device_bdf()?;
+
+            (pci_segment_id, pci_device_bdf, None)
+        };
 
         // Update the existing virtio node by setting the parent.
         if let Some(node) = self.device_tree.lock().unwrap().get_mut(&virtio_device_id) {
@@ -3219,7 +3236,7 @@ impl DeviceManager {
         let bars = self.add_pci_device(
             virtio_pci_device.clone(),
             virtio_pci_device.clone(),
-            0,
+            pci_segment_id,
             pci_device_bdf,
         )?;
 
@@ -3241,6 +3258,7 @@ impl DeviceManager {
         }
         node.migratable = Some(Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn Migratable>>);
         node.pci_bdf = Some(pci_device_bdf);
+        node.pci_segment_id = Some(pci_segment_id);
         node.pci_device_handle = Some(PciDeviceHandle::Virtio(virtio_pci_device));
         self.device_tree.lock().unwrap().insert(id, node);
 
@@ -3449,12 +3467,12 @@ impl DeviceManager {
         Ok(())
     }
 
-    pub fn eject_device(&mut self, device_id: u8) -> DeviceManagerResult<()> {
+    pub fn eject_device(&mut self, pci_segment_id: u16, device_id: u8) -> DeviceManagerResult<()> {
         // Convert the device ID into the corresponding b/d/f.
         let pci_device_bdf = (device_id as u32) << 3;
 
         // Give the PCI device ID back to the PCI bus.
-        self.pci_segments[0]
+        self.pci_segments[pci_segment_id as usize]
             .pci_bus
             .lock()
             .unwrap()
@@ -3464,7 +3482,7 @@ impl DeviceManager {
         // Remove the device from the device tree along with its children.
         let mut device_tree = self.device_tree.lock().unwrap();
         let pci_device_node = device_tree
-            .remove_node_by_pci_bdf(pci_device_bdf)
+            .remove_node_by_pci_bdf(pci_segment_id, pci_device_bdf)
             .ok_or(DeviceManagerError::MissingPciDevice)?;
         for child in pci_device_node.children.iter() {
             device_tree.remove(child);
@@ -3529,7 +3547,7 @@ impl DeviceManager {
             .map_err(DeviceManagerError::FreePciBars)?;
 
         // Remove the device from the PCI bus
-        self.pci_segments[0]
+        self.pci_segments[pci_segment_id as usize]
             .pci_bus
             .lock()
             .unwrap()
@@ -4112,7 +4130,7 @@ impl BusDevice for DeviceManager {
 
                 while slot_bitmap > 0 {
                     let slot_id = slot_bitmap.trailing_zeros();
-                    if let Err(e) = self.eject_device(slot_id as u8) {
+                    if let Err(e) = self.eject_device(0, slot_id as u8) {
                         error!("Failed ejecting device {}: {:?}", slot_id, e);
                     }
                     slot_bitmap &= !(1 << slot_id);
