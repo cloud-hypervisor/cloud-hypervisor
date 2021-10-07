@@ -1695,23 +1695,33 @@ pub struct UserDeviceConfig {
     pub socket: PathBuf,
     #[serde(default)]
     pub id: Option<String>,
+    #[serde(default)]
+    pub pci_segment: u16,
 }
 
 impl UserDeviceConfig {
-    pub const SYNTAX: &'static str = "Userspace device socket=<socket_path>,id=<device_id>\"";
+    pub const SYNTAX: &'static str =
+        "Userspace device socket=<socket_path>,id=<device_id>,pci_segment=<segment_id>\"";
     pub fn parse(user_device: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
-        parser.add("socket").add("id");
+        parser.add("socket").add("id").add("pci_segment");
         parser.parse(user_device).map_err(Error::ParseUserDevice)?;
 
         let socket = parser
             .get("socket")
             .map(PathBuf::from)
             .ok_or(Error::ParseUserDeviceSocketMissing)?;
-
         let id = parser.get("id");
+        let pci_segment = parser
+            .convert::<u16>("pci_segment")
+            .map_err(Error::ParseUserDevice)?
+            .unwrap_or_default();
 
-        Ok(UserDeviceConfig { socket, id })
+        Ok(UserDeviceConfig {
+            socket,
+            id,
+            pci_segment,
+        })
     }
 }
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
