@@ -56,6 +56,7 @@ dependencies = [
  "linux-loader",
  "log",
  "serde",
+ "serde_derive",
  "thiserror",
  "versionize",
  "versionize_derive",
@@ -744,8 +745,9 @@ dependencies = [
 
 [[package]]
 name = "vhost"
-version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vhost?branch=main#354dd56adf00614f606ff39257a1257c2f6c5b82"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d23ddeb452fb4f837526c6298cc8a2f4948e5595b0328a3d61b5eebe51874d7"
 dependencies = [
  "bitflags",
  "libc",
