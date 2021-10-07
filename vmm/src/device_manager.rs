@@ -2851,8 +2851,7 @@ impl DeviceManager {
         &mut self,
         device_cfg: &mut DeviceConfig,
     ) -> DeviceManagerResult<(u32, String)> {
-        // TODO: Fill with PCI segment ID from config when available
-        let pci_segment_id = 0;
+        let pci_segment_id = device_cfg.pci_segment;
         let pci_device_bdf = self.pci_segments[pci_segment_id as usize].next_device_bdf()?;
 
         let mut needs_dma_mapping = false;
@@ -3435,7 +3434,7 @@ impl DeviceManager {
         let (device_id, device_name) = self.add_passthrough_device(device_cfg)?;
 
         // Update the PCIU bitmap
-        self.pci_segments[0].pci_devices_up |= 1 << (device_id >> 3);
+        self.pci_segments[device_cfg.pci_segment as usize].pci_devices_up |= 1 << (device_id >> 3);
 
         Ok(PciDeviceInfo {
             id: device_name,

@@ -1654,14 +1654,16 @@ pub struct DeviceConfig {
     pub iommu: bool,
     #[serde(default)]
     pub id: Option<String>,
+    #[serde(default)]
+    pub pci_segment: u16,
 }
 
 impl DeviceConfig {
     pub const SYNTAX: &'static str =
-        "Direct device assignment parameters \"path=<device_path>,iommu=on|off,id=<device_id>\"";
+        "Direct device assignment parameters \"path=<device_path>,iommu=on|off,id=<device_id>,pci_segment=<segment_id>\"";
     pub fn parse(device: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
-        parser.add("path").add("id").add("iommu");
+        parser.add("path").add("id").add("iommu").add("pci_segment");
         parser.parse(device).map_err(Error::ParseDevice)?;
 
         let path = parser
@@ -1674,7 +1676,17 @@ impl DeviceConfig {
             .unwrap_or(Toggle(false))
             .0;
         let id = parser.get("id");
-        Ok(DeviceConfig { path, iommu, id })
+        let pci_segment = parser
+            .convert::<u16>("pci_segment")
+            .map_err(Error::ParseDevice)?
+            .unwrap_or_default();
+
+        Ok(DeviceConfig {
+            path,
+            iommu,
+            id,
+            pci_segment,
+        })
     }
 }
 
@@ -2754,7 +2766,8 @@ mod tests {
             DeviceConfig {
                 path: PathBuf::from("/path/to/device"),
                 id: None,
-                iommu: false
+                iommu: false,
+                ..Default::default()
             }
         );
 
@@ -2763,7 +2776,8 @@ mod tests {
             DeviceConfig {
                 path: PathBuf::from("/path/to/device"),
                 id: None,
-                iommu: true
+                iommu: true,
+                ..Default::default()
             }
         );
 
@@ -2772,7 +2786,8 @@ mod tests {
             DeviceConfig {
                 path: PathBuf::from("/path/to/device"),
                 id: Some("mydevice0".to_owned()),
-                iommu: true
+                iommu: true,
+                ..Default::default()
             }
         );
 
