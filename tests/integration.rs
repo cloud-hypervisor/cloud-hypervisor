@@ -52,44 +52,44 @@ mod tests {
     impl std::panic::RefUnwindSafe for Guest {}
 
     #[cfg(target_arch = "x86_64")]
-    const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-amd64.raw";
+    mod x86_64 {
+        pub const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-amd64.raw";
+        pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-0.raw";
+        pub const FOCAL_SGX_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-sgx.raw";
+        pub const HIRSUTE_NVIDIA_IMAGE_NAME: &str = "hirsute-server-cloudimg-amd64-nvidia.raw";
+        pub const FOCAL_IMAGE_NAME_QCOW2: &str =
+            "focal-server-cloudimg-amd64-custom-20210609-0.qcow2";
+        pub const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-amd64-custom-20210609-0.vhd";
+        pub const FOCAL_IMAGE_NAME_VHDX: &str =
+            "focal-server-cloudimg-amd64-custom-20210609-0.vhdx";
+        pub const WINDOWS_IMAGE_NAME: &str = "windows-server-2019.raw";
+        pub const OVMF_NAME: &str = "OVMF-4b47d0c6c8.fd";
+        pub const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'IO-APIC.*ttyS0' /proc/interrupts || true";
+    }
+
     #[cfg(target_arch = "x86_64")]
-    const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-0.raw";
-    #[cfg(target_arch = "x86_64")]
-    const FOCAL_SGX_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-sgx.raw";
-    #[cfg(target_arch = "x86_64")]
-    const HIRSUTE_NVIDIA_IMAGE_NAME: &str = "hirsute-server-cloudimg-amd64-nvidia.raw";
+    use x86_64::*;
+
     #[cfg(target_arch = "aarch64")]
-    const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-arm64.raw";
+    mod aarch64 {
+        pub const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-arm64.raw";
+        pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64-custom-20210929-0.raw";
+        pub const FOCAL_IMAGE_UPDATE_KERNEL_NAME: &str =
+            "focal-server-cloudimg-arm64-custom-20210929-0-update-kernel.raw";
+        pub const FOCAL_IMAGE_NAME_QCOW2: &str =
+            "focal-server-cloudimg-arm64-custom-20210929-0.qcow2";
+        pub const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-arm64-custom-20210929-0.vhd";
+        pub const FOCAL_IMAGE_NAME_VHDX: &str =
+            "focal-server-cloudimg-arm64-custom-20210929-0.vhdx";
+        pub const GREP_SERIAL_IRQ_CMD: &str =
+            "grep -c 'GICv3.*uart-pl011' /proc/interrupts || true";
+    }
+
     #[cfg(target_arch = "aarch64")]
-    const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64-custom-20210929-0.raw";
-    #[cfg(target_arch = "aarch64")]
-    const FOCAL_IMAGE_UPDATE_KERNEL_NAME: &str =
-        "focal-server-cloudimg-arm64-custom-20210929-0-update-kernel.raw";
-    #[cfg(target_arch = "aarch64")]
-    const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-arm64-custom-20210929-0.qcow2";
-    #[cfg(target_arch = "x86_64")]
-    const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-amd64-custom-20210609-0.qcow2";
-    #[cfg(target_arch = "aarch64")]
-    const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-arm64-custom-20210929-0.vhd";
-    #[cfg(target_arch = "x86_64")]
-    const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-amd64-custom-20210609-0.vhd";
-    #[cfg(target_arch = "aarch64")]
-    const FOCAL_IMAGE_NAME_VHDX: &str = "focal-server-cloudimg-arm64-custom-20210929-0.vhdx";
-    #[cfg(target_arch = "x86_64")]
-    const FOCAL_IMAGE_NAME_VHDX: &str = "focal-server-cloudimg-amd64-custom-20210609-0.vhdx";
-    #[cfg(target_arch = "x86_64")]
-    const WINDOWS_IMAGE_NAME: &str = "windows-server-2019.raw";
-    #[cfg(target_arch = "x86_64")]
-    const OVMF_NAME: &str = "OVMF-4b47d0c6c8.fd";
+    use aarch64::*;
 
     const DIRECT_KERNEL_BOOT_CMDLINE: &str =
         "root=/dev/vda1 console=hvc0 rw systemd.journald.forward_to_console=1";
-
-    #[cfg(target_arch = "x86_64")]
-    const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'IO-APIC.*ttyS0' /proc/interrupts || true";
-    #[cfg(target_arch = "aarch64")]
-    const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'GICv3.*uart-pl011' /proc/interrupts || true";
 
     const PIPE_SIZE: i32 = 32 << 20;
 
