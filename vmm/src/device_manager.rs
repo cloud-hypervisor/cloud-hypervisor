@@ -1176,7 +1176,7 @@ impl DeviceManager {
                     &None
                 };
 
-                let dev_id = self.add_virtio_pci_device(device, mapping, id)?;
+                let dev_id = self.add_virtio_pci_device(device, mapping, id, 0)?;
 
                 if iommu_attached {
                     iommu_attached_devices.push(dev_id);
@@ -1190,7 +1190,7 @@ impl DeviceManager {
             iommu_attached_devices.append(&mut vfio_user_iommu_device_ids);
 
             if let Some(iommu_device) = iommu_device {
-                let dev_id = self.add_virtio_pci_device(iommu_device, &None, iommu_id)?;
+                let dev_id = self.add_virtio_pci_device(iommu_device, &None, iommu_id, 0)?;
                 self.iommu_attached_devices = Some((dev_id, iommu_attached_devices));
             }
         }
@@ -3140,9 +3140,8 @@ impl DeviceManager {
         virtio_device: VirtioDeviceArc,
         iommu_mapping: &Option<Arc<IommuMapping>>,
         virtio_device_id: String,
+        pci_segment_id: u16,
     ) -> DeviceManagerResult<u32> {
-        // TODO: Fill with PCI segment ID from config when available
-        let pci_segment_id: u16 = 0;
         let id = format!("{}-{}", VIRTIO_PCI_DEVICE_NAME_PREFIX, virtio_device_id);
 
         // Add the new virtio-pci node to the device tree.
@@ -3617,6 +3616,7 @@ impl DeviceManager {
         device: VirtioDeviceArc,
         iommu_attached: bool,
         id: String,
+        pci_segment_id: u16,
     ) -> DeviceManagerResult<PciDeviceInfo> {
         if iommu_attached {
             warn!("Placing device behind vIOMMU is not available for hotplugged devices");
@@ -3628,37 +3628,37 @@ impl DeviceManager {
         self.virtio_devices
             .push((device.clone(), iommu_attached, id.clone()));
 
-        let device_id = self.add_virtio_pci_device(device, &None, id.clone())?;
+        let device_id = self.add_virtio_pci_device(device, &None, id.clone(), pci_segment_id)?;
 
         // Update the PCIU bitmap
-        self.pci_segments[0].pci_devices_up |= 1 << (device_id >> 3);
+        self.pci_segments[pci_segment_id as usize].pci_devices_up |= 1 << (device_id >> 3);
 
         Ok(PciDeviceInfo { id, bdf: device_id })
     }
 
     pub fn add_disk(&mut self, disk_cfg: &mut DiskConfig) -> DeviceManagerResult<PciDeviceInfo> {
         let (device, iommu_attached, id) = self.make_virtio_block_device(disk_cfg)?;
-        self.hotplug_virtio_pci_device(device, iommu_attached, id)
+        self.hotplug_virtio_pci_device(device, iommu_attached, id, 0)
     }
 
     pub fn add_fs(&mut self, fs_cfg: &mut FsConfig) -> DeviceManagerResult<PciDeviceInfo> {
         let (device, iommu_attached, id) = self.make_virtio_fs_device(fs_cfg)?;
-        self.hotplug_virtio_pci_device(device, iommu_attached, id)
+        self.hotplug_virtio_pci_device(device, iommu_attached, id, 0)
     }
 
     pub fn add_pmem(&mut self, pmem_cfg: &mut PmemConfig) -> DeviceManagerResult<PciDeviceInfo> {
         let (device, iommu_attached, id) = self.make_virtio_pmem_device(pmem_cfg)?;
-        self.hotplug_virtio_pci_device(device, iommu_attached, id)
+        self.hotplug_virtio_pci_device(device, iommu_attached, id, 0)
     }
 
     pub fn add_net(&mut self, net_cfg: &mut NetConfig) -> DeviceManagerResult<PciDeviceInfo> {
         let (device, iommu_attached, id) = self.make_virtio_net_device(net_cfg)?;
-        self.hotplug_virtio_pci_device(device, iommu_attached, id)
+        self.hotplug_virtio_pci_device(device, iommu_attached, id, 0)
     }
 
     pub fn add_vsock(&mut self, vsock_cfg: &mut VsockConfig) -> DeviceManagerResult<PciDeviceInfo> {
         let (device, iommu_attached, id) = self.make_virtio_vsock_device(vsock_cfg)?;
-        self.hotplug_virtio_pci_device(device, iommu_attached, id)
+        self.hotplug_virtio_pci_device(device, iommu_attached, id, 0)
     }
 
     pub fn counters(&self) -> HashMap<String, HashMap<&'static str, Wrapping<u64>>> {
