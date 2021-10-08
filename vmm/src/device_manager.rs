@@ -3435,7 +3435,11 @@ impl DeviceManager {
 
         let pci_device_bdf = pci_device_node
             .pci_bdf
-            .ok_or(DeviceManagerError::MissingPciDevice)?;
+            .ok_or(DeviceManagerError::MissingDeviceNodePciBdf)?;
+        let pci_segment_id = pci_device_node
+            .pci_segment_id
+            .ok_or(DeviceManagerError::MissingDeviceNodePciSegmentId)?;
+
         let pci_device_handle = pci_device_node
             .pci_device_handle
             .as_ref()
@@ -3462,7 +3466,7 @@ impl DeviceManager {
         }
 
         // Update the PCID bitmap
-        self.pci_segments[0].pci_devices_down |= 1 << (pci_device_bdf >> 3);
+        self.pci_segments[pci_segment_id as usize].pci_devices_down |= 1 << (pci_device_bdf >> 3);
 
         Ok(())
     }
