@@ -84,7 +84,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
 use std::result;
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Mutex};
 use vfio_ioctls::{VfioContainer, VfioDevice};
 use virtio_devices::transport::VirtioPciDevice;
 use virtio_devices::transport::VirtioTransport;
@@ -883,6 +883,8 @@ pub struct DeviceManager {
 
     #[cfg(feature = "acpi")]
     acpi_address: GuestAddress,
+    #[cfg(feature = "acpi")]
+    selected_segment: usize,
 
     // Possible handle to the virtio-balloon device
     virtio_mem_devices: Vec<Arc<Mutex<virtio_devices::Mem>>>,
@@ -983,6 +985,8 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::EventFd)?,
             #[cfg(feature = "acpi")]
             acpi_address,
+            #[cfg(feature = "acpi")]
+            selected_segment: 0,
             serial_pty: None,
             serial_manager: None,
             console_pty: None,
@@ -3472,6 +3476,11 @@ impl DeviceManager {
     }
 
     pub fn eject_device(&mut self, pci_segment_id: u16, device_id: u8) -> DeviceManagerResult<()> {
+        info!(
+            "Ejecting device_id = {} on segment_id={}",
+            device_id, pci_segment_id
+        );
+
         // Convert the device ID into the corresponding b/d/f.
         let pci_device_bdf = (device_id as u32) << 3;
 
@@ -3803,6 +3812,19 @@ impl Aml for DeviceManager {
         use arch::aarch64::DeviceInfoForFdt;
 
         let mut bytes = Vec::new();
+
+        let mut pci_scan_methods = Vec::new();
+        for i in 0..self.pci_segments.len() {
+            pci_scan_methods.push(aml::MethodCall::new(
+                format!("\\_SB_.PCI{:X}.PCNT", i).as_str().into(),
+                vec![],
+            ));
+        }
+        let mut pci_scan_inner: Vec<&dyn Aml> = Vec::new();
+        for method in &pci_scan_methods {
+            pci_scan_inner.push(method)
+        }
+
         // PCI hotplug controller
         bytes.extend_from_slice(
             &aml::Device::new(
@@ -3836,15 +3858,18 @@ impl Aml for DeviceManager {
                             aml::FieldEntry::Named(*b"PCIU", 32),
                             aml::FieldEntry::Named(*b"PCID", 32),
                             aml::FieldEntry::Named(*b"B0EJ", 32),
+                            aml::FieldEntry::Named(*b"PSEG", 32),
                         ],
                     ),
                     &aml::Method::new(
                         "PCEJ".into(),
-                        1,
+                        2,
                         true,
                         vec![
                             // Take lock defined above
                             &aml::Acquire::new("BLCK".into(), 0xffff),
+                            // Choose the current segment
+                            &aml::Store::new(&aml::Path::new("PSEG"), &aml::Arg(1)),
                             // Write PCI bus number (in first argument) to I/O port via field
                             &aml::ShiftLeft::new(&aml::Path::new("B0EJ"), &aml::ONE, &aml::Arg(0)),
                             // Release lock
@@ -3853,6 +3878,7 @@ impl Aml for DeviceManager {
                             &aml::Return::new(&aml::ZERO),
                         ],
                     ),
+                    &aml::Method::new("PSCN".into(), 0, true, pci_scan_inner),
                 ],
             )
             .to_aml_bytes(),
@@ -4083,34 +4109,56 @@ impl Migratable for DeviceManager {
     }
 }
 
+#[cfg(feature = "acpi")]
 const PCIU_FIELD_OFFSET: u64 = 0;
+#[cfg(feature = "acpi")]
 const PCID_FIELD_OFFSET: u64 = 4;
+#[cfg(feature = "acpi")]
 const B0EJ_FIELD_OFFSET: u64 = 8;
-
+#[cfg(feature = "acpi")]
+const PSEG_FIELD_OFFSET: u64 = 12;
+#[cfg(feature = "acpi")]
 const PCIU_FIELD_SIZE: usize = 4;
+#[cfg(feature = "acpi")]
 const PCID_FIELD_SIZE: usize = 4;
+#[cfg(feature = "acpi")]
 const B0EJ_FIELD_SIZE: usize = 4;
+#[cfg(feature = "acpi")]
+const PSEG_FIELD_SIZE: usize = 4;
 
+#[cfg(feature = "acpi")]
 impl BusDevice for DeviceManager {
     fn read(&mut self, base: u64, offset: u64, data: &mut [u8]) {
         match offset {
             PCIU_FIELD_OFFSET => {
                 assert!(data.len() == PCIU_FIELD_SIZE);
-                data.copy_from_slice(&self.pci_segments[0].pci_devices_up.to_le_bytes());
+                data.copy_from_slice(
+                    &self.pci_segments[self.selected_segment]
+                        .pci_devices_up
+                        .to_le_bytes(),
+                );
                 // Clear the PCIU bitmap
-                self.pci_segments[0].pci_devices_up = 0;
+                self.pci_segments[self.selected_segment].pci_devices_up = 0;
             }
             PCID_FIELD_OFFSET => {
                 assert!(data.len() == PCID_FIELD_SIZE);
-                data.copy_from_slice(&self.pci_segments[0].pci_devices_down.to_le_bytes());
+                data.copy_from_slice(
+                    &self.pci_segments[self.selected_segment]
+                        .pci_devices_down
+                        .to_le_bytes(),
+                );
                 // Clear the PCID bitmap
-                self.pci_segments[0].pci_devices_down = 0;
+                self.pci_segments[self.selected_segment].pci_devices_down = 0;
             }
             B0EJ_FIELD_OFFSET => {
                 assert!(data.len() == B0EJ_FIELD_SIZE);
                 // Always return an empty bitmap since the eject is always
                 // taken care of right away during a write access.
                 data.fill(0);
+            }
+            PSEG_FIELD_OFFSET => {
+                assert_eq!(data.len(), PSEG_FIELD_SIZE);
+                data.copy_from_slice(&(self.selected_segment as u32).to_le_bytes());
             }
             _ => error!(
                 "Accessing unknown location at base 0x{:x}, offset 0x{:x}",
@@ -4124,7 +4172,7 @@ impl BusDevice for DeviceManager {
         )
     }
 
-    fn write(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
+    fn write(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<std::sync::Barrier>> {
         match offset {
             B0EJ_FIELD_OFFSET => {
                 assert!(data.len() == B0EJ_FIELD_SIZE);
@@ -4134,11 +4182,26 @@ impl BusDevice for DeviceManager {
 
                 while slot_bitmap > 0 {
                     let slot_id = slot_bitmap.trailing_zeros();
-                    if let Err(e) = self.eject_device(0, slot_id as u8) {
+                    if let Err(e) = self.eject_device(self.selected_segment as u16, slot_id as u8) {
                         error!("Failed ejecting device {}: {:?}", slot_id, e);
                     }
                     slot_bitmap &= !(1 << slot_id);
                 }
+            }
+            PSEG_FIELD_OFFSET => {
+                assert_eq!(data.len(), PSEG_FIELD_SIZE);
+                let mut data_array: [u8; 4] = [0, 0, 0, 0];
+                data_array.copy_from_slice(data);
+                let selected_segment = u32::from_le_bytes(data_array) as usize;
+                if selected_segment >= self.pci_segments.len() {
+                    error!(
+                        "Segment selection out of range: {} >= {}",
+                        selected_segment,
+                        self.pci_segments.len()
+                    );
+                    return None;
+                }
+                self.selected_segment = selected_segment;
             }
             _ => error!(
                 "Accessing unknown location at base 0x{:x}, offset 0x{:x}",

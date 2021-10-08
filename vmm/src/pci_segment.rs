@@ -189,7 +189,7 @@ impl Aml for PciDevSlot {
                     true,
                     vec![&aml::MethodCall::new(
                         "\\_SB_.PHPR.PCEJ".into(),
-                        vec![&aml::Path::new("_SUN")],
+                        vec![&aml::Path::new("_SUN"), &aml::Path::new("_SEG")],
                     )],
                 ),
             ],
@@ -245,6 +245,8 @@ impl Aml for PciDevSlotMethods {
                 0,
                 true,
                 vec![
+                    &aml::Acquire::new("\\_SB_.PHPR.BLCK".into(), 0xffff),
+                    &aml::Store::new(&aml::Path::new("\\_SB_.PHPR.PSEG"), &aml::Path::new("_SEG")),
                     &aml::MethodCall::new(
                         "DVNT".into(),
                         vec![&aml::Path::new("\\_SB_.PHPR.PCIU"), &aml::ONE],
@@ -253,6 +255,7 @@ impl Aml for PciDevSlotMethods {
                         "DVNT".into(),
                         vec![&aml::Path::new("\\_SB_.PHPR.PCID"), &3usize],
                     ),
+                    &aml::Release::new("\\_SB_.PHPR.BLCK".into()),
                 ],
             )
             .to_aml_bytes(),
