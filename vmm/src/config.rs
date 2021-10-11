@@ -32,6 +32,9 @@ pub const DEFAULT_QUEUE_SIZE_VUNET: u16 = 256;
 pub const DEFAULT_NUM_QUEUES_VUBLK: usize = 1;
 pub const DEFAULT_QUEUE_SIZE_VUBLK: u16 = 128;
 
+pub const DEFAULT_NUM_PCI_SEGMENTS: u16 = 1;
+const MAX_NUM_PCI_SEGMENTS: u16 = 16;
+
 /// Errors associated with VM configuration parameters.
 #[derive(Debug)]
 pub enum Error {
@@ -101,6 +104,8 @@ pub enum Error {
     ParseUserDevice(OptionParserError),
     /// Missing socket for userspace device
     ParseUserDeviceSocketMissing,
+    /// Failed parsing platform parameters
+    ParsePlatform(OptionParserError),
 }
 
 #[derive(Debug)]
@@ -149,6 +154,8 @@ pub enum ValidationError {
     UserDevicesRequireSharedMemory,
     /// Memory zone is reused across NUMA nodes
     MemoryZoneReused(String, u32, u32),
+    /// Invalid number of PCI segments
+    InvalidNumPciSegments(u16),
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -206,6 +213,13 @@ impl fmt::Display for ValidationError {
                     s, u1, u2
                 )
             }
+            InvalidNumPciSegments(n) => {
+                write!(
+                    f,
+                    "Number of PCI segments ({}) not in range of 1 to {}",
+                    n, MAX_NUM_PCI_SEGMENTS
+                )
+            }
         }
     }
 }
@@ -258,6 +272,7 @@ impl fmt::Display for Error {
             ParseTdx(o) => write!(f, "Error parsing --tdx: {}", o),
             #[cfg(feature = "tdx")]
             FirmwarePathMissing => write!(f, "TDX firmware missing"),
+            ParsePlatform(o) => write!(f, "Error parsing --platform: {}", o),
         }
     }
 }
@@ -288,6 +303,7 @@ pub struct VmParams<'a> {
     pub watchdog: bool,
     #[cfg(feature = "tdx")]
     pub tdx: Option<&'a str>,
+    pub platform: Option<&'a str>,
 }
 
 impl<'a> VmParams<'a> {
@@ -316,6 +332,7 @@ impl<'a> VmParams<'a> {
         let sgx_epc: Option<Vec<&str>> = args.values_of("sgx-epc").map(|x| x.collect());
         let numa: Option<Vec<&str>> = args.values_of("numa").map(|x| x.collect());
         let watchdog = args.is_present("watchdog");
+        let platform = args.value_of("platform");
         #[cfg(feature = "tdx")]
         let tdx = args.value_of("tdx");
         VmParams {
@@ -342,6 +359,7 @@ impl<'a> VmParams<'a> {
             watchdog,
             #[cfg(feature = "tdx")]
             tdx,
+            platform,
         }
     }
 }
@@ -480,6 +498,48 @@ impl Default for CpusConfig {
             topology: None,
             kvm_hyperv: false,
             max_phys_bits: DEFAULT_MAX_PHYS_BITS,
+        }
+    }
+}
+
+fn default_platformconfig_num_pci_segments() -> u16 {
+    DEFAULT_NUM_PCI_SEGMENTS
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct PlatformConfig {
+    #[serde(default = "default_platformconfig_num_pci_segments")]
+    pub num_pci_segments: u16,
+}
+
+impl PlatformConfig {
+    pub fn parse(platform: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        parser.add("num_pci_segments");
+        parser.parse(platform).map_err(Error::ParseCpus)?;
+
+        let num_pci_segments: u16 = parser
+            .convert("num_pci_segments")
+            .map_err(Error::ParsePlatform)?
+            .unwrap_or(DEFAULT_NUM_PCI_SEGMENTS);
+        Ok(PlatformConfig { num_pci_segments })
+    }
+
+    pub fn validate(&self) -> ValidationResult<()> {
+        if self.num_pci_segments == 0 || self.num_pci_segments > MAX_NUM_PCI_SEGMENTS {
+            return Err(ValidationError::InvalidNumPciSegments(
+                self.num_pci_segments,
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+impl Default for PlatformConfig {
+    fn default() -> Self {
+        PlatformConfig {
+            num_pci_segments: DEFAULT_NUM_PCI_SEGMENTS,
         }
     }
 }
@@ -1849,6 +1909,7 @@ pub struct VmConfig {
     pub watchdog: bool,
     #[cfg(feature = "tdx")]
     pub tdx: Option<TdxConfig>,
+    pub platform: Option<PlatformConfig>,
 }
 
 impl VmConfig {
@@ -1970,6 +2031,8 @@ impl VmConfig {
             }
         }
 
+        self.platform.as_ref().map(|p| p.validate()).transpose()?;
+
         Ok(())
     }
 
@@ -2072,6 +2135,8 @@ impl VmConfig {
             vsock = Some(vsock_config);
         }
 
+        let platform = vm_params.platform.map(PlatformConfig::parse).transpose()?;
+
         #[cfg(target_arch = "x86_64")]
         let mut sgx_epc: Option<Vec<SgxEpcConfig>> = None;
         #[cfg(target_arch = "x86_64")]
@@ -2137,6 +2202,7 @@ impl VmConfig {
             watchdog: vm_params.watchdog,
             #[cfg(feature = "tdx")]
             tdx,
+            platform,
         };
         config.validate().map_err(Error::Validation)?;
         Ok(config)
@@ -2747,6 +2813,7 @@ mod tests {
             watchdog: false,
             #[cfg(feature = "tdx")]
             tdx: None,
+            platform: None,
         };
 
         assert!(valid_config.validate().is_ok());
@@ -2860,9 +2927,21 @@ mod tests {
         invalid_config.memory.hugepage_size = Some(2 << 20);
         assert!(invalid_config.validate().is_err());
 
-        let mut invalid_config = valid_config;
+        let mut invalid_config = valid_config.clone();
         invalid_config.memory.hugepages = true;
         invalid_config.memory.hugepage_size = Some(3 << 20);
+        assert!(invalid_config.validate().is_err());
+
+        let mut still_valid_config = valid_config.clone();
+        still_valid_config.platform = Some(PlatformConfig {
+            num_pci_segments: 16,
+        });
+        assert!(still_valid_config.validate().is_ok());
+
+        let mut invalid_config = valid_config;
+        invalid_config.platform = Some(PlatformConfig {
+            num_pci_segments: 17,
+        });
         assert!(invalid_config.validate().is_err());
     }
 }
