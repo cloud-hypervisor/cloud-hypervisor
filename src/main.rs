@@ -156,6 +156,15 @@ fn create_app<'a, 'b>(
                 .group("vm-config"),
         )
         .arg(
+            Arg::with_name("platform")
+                .long("platform")
+                .help(
+                    "num_pci_segments=<num pci segments>",
+                )
+                .takes_value(true)
+                .group("vm-config"),
+        )
+        .arg(
             Arg::with_name("memory")
                 .long("memory")
                 .help(
@@ -687,6 +696,7 @@ mod unit_tests {
                 watchdog: false,
                 #[cfg(feature = "tdx")]
                 tdx: None,
+                platform: None,
             };
 
             aver_eq!(tb, expected_vm_config, result_vm_config);
