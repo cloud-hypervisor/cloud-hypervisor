@@ -948,6 +948,23 @@ impl DeviceManager {
         let start_of_device_area = memory_manager.lock().unwrap().start_of_device_area().0;
         let end_of_device_area = memory_manager.lock().unwrap().end_of_device_area().0;
 
+        let mut pci_segments = vec![PciSegment::new_default_segment(
+            &address_manager,
+            start_of_device_area,
+            end_of_device_area,
+        )?];
+
+        if let Some(platform_config) = config.lock().unwrap().platform.as_ref() {
+            for i in 1..platform_config.num_pci_segments {
+                pci_segments.push(PciSegment::new(
+                    i as u16,
+                    &address_manager,
+                    start_of_device_area,
+                    end_of_device_area,
+                )?);
+            }
+        }
+
         let device_manager = DeviceManager {
             address_manager: Arc::clone(&address_manager),
             console: Arc::new(Console::default()),
@@ -966,11 +983,7 @@ impl DeviceManager {
             vfio_container: None,
             iommu_device: None,
             iommu_attached_devices: None,
-            pci_segments: vec![PciSegment::new_default_segment(
-                &address_manager,
-                start_of_device_area,
-                end_of_device_area,
-            )?],
+            pci_segments,
             device_tree,
             exit_evt: exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
             reset_evt: reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
