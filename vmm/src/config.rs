@@ -821,6 +821,8 @@ pub struct DiskConfig {
     // For testing use only. Not exposed in API.
     #[serde(default)]
     pub disable_io_uring: bool,
+    #[serde(default)]
+    pub pci_segment: u16,
 }
 
 fn default_diskconfig_num_queues() -> usize {
@@ -850,6 +852,7 @@ impl Default for DiskConfig {
             id: None,
             disable_io_uring: false,
             rate_limiter_config: None,
+            pci_segment: 0,
         }
     }
 }
@@ -861,7 +864,7 @@ impl DiskConfig {
          vhost_user=on|off,socket=<vhost_user_socket_path>,poll_queue=on|off,\
          bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,\
          ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,\
-         id=<device_id>\"";
+         id=<device_id>,pci_segment=<segment_id>\"";
 
     pub fn parse(disk: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -882,7 +885,8 @@ impl DiskConfig {
             .add("ops_one_time_burst")
             .add("ops_refill_time")
             .add("id")
-            .add("_disable_io_uring");
+            .add("_disable_io_uring")
+            .add("pci_segment");
         parser.parse(disk).map_err(Error::ParseDisk)?;
 
         let path = parser.get("path").map(PathBuf::from);
@@ -926,6 +930,10 @@ impl DiskConfig {
             .map_err(Error::ParseDisk)?
             .unwrap_or(Toggle(false))
             .0;
+        let pci_segment = parser
+            .convert("pci_segment")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_default();
         let bw_size = parser
             .convert("bw_size")
             .map_err(Error::ParseDisk)?
@@ -994,6 +1002,7 @@ impl DiskConfig {
             rate_limiter_config,
             id,
             disable_io_uring,
+            pci_segment,
         })
     }
 
@@ -1064,6 +1073,8 @@ pub struct NetConfig {
     pub fds: Option<Vec<i32>>,
     #[serde(default)]
     pub rate_limiter_config: Option<RateLimiterConfig>,
+    #[serde(default)]
+    pub pci_segment: u16,
 }
 
 fn default_netconfig_tap() -> Option<String> {
@@ -1107,6 +1118,7 @@ impl Default for NetConfig {
             id: None,
             fds: None,
             rate_limiter_config: None,
+            pci_segment: 0,
         }
     }
 }
@@ -1117,7 +1129,7 @@ impl NetConfig {
     num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,id=<device_id>,\
     vhost_user=<vhost_user_enable>,socket=<vhost_user_socket_path>,vhost_mode=client|server,\
     bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,\
-    ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>\"";
+    ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,pci_segment=<segment_id>\"";
 
     pub fn parse(net: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -1141,7 +1153,8 @@ impl NetConfig {
             .add("bw_refill_time")
             .add("ops_size")
             .add("ops_one_time_burst")
-            .add("ops_refill_time");
+            .add("ops_refill_time")
+            .add("pci_segment");
         parser.parse(net).map_err(Error::ParseNetwork)?;
 
         let tap = parser.get("tap");
@@ -1186,7 +1199,10 @@ impl NetConfig {
             .convert::<IntegerList>("fd")
             .map_err(Error::ParseNetwork)?
             .map(|v| v.0.iter().map(|e| *e as i32).collect());
-
+        let pci_segment = parser
+            .convert("pci_segment")
+            .map_err(Error::ParseNetwork)?
+            .unwrap_or_default();
         let bw_size = parser
             .convert("bw_size")
             .map_err(Error::ParseDisk)?
@@ -1253,6 +1269,7 @@ impl NetConfig {
             id,
             fds,
             rate_limiter_config,
+            pci_segment,
         };
         Ok(config)
     }
@@ -1370,6 +1387,8 @@ pub struct FsConfig {
     pub cache_size: u64,
     #[serde(default)]
     pub id: Option<String>,
+    #[serde(default)]
+    pub pci_segment: u16,
 }
 
 fn default_fsconfig_num_queues() -> usize {
@@ -1398,6 +1417,7 @@ impl Default for FsConfig {
             dax: default_fsconfig_dax(),
             cache_size: default_fsconfig_cache_size(),
             id: None,
+            pci_segment: 0,
         }
     }
 }
@@ -1406,7 +1426,7 @@ impl FsConfig {
     pub const SYNTAX: &'static str = "virtio-fs parameters \
     \"tag=<tag_name>,socket=<socket_path>,num_queues=<number_of_queues>,\
     queue_size=<size_of_each_queue>,dax=on|off,cache_size=<DAX cache size: \
-    default 8Gib>,id=<device_id>\"";
+    default 8Gib>,id=<device_id>,pci_segment=<segment_id>\"";
 
     pub fn parse(fs: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -1417,7 +1437,8 @@ impl FsConfig {
             .add("queue_size")
             .add("num_queues")
             .add("socket")
-            .add("id");
+            .add("id")
+            .add("pci_segment");
         parser.parse(fs).map_err(Error::ParseFileSystem)?;
 
         let tag = parser.get("tag").ok_or(Error::ParseFsTagMissing)?;
@@ -1450,6 +1471,11 @@ impl FsConfig {
 
         let id = parser.get("id");
 
+        let pci_segment = parser
+            .convert("pci_segment")
+            .map_err(Error::ParseFileSystem)?
+            .unwrap_or_default();
+
         Ok(FsConfig {
             tag,
             socket,
@@ -1458,6 +1484,7 @@ impl FsConfig {
             dax,
             cache_size,
             id,
+            pci_segment,
         })
     }
 
@@ -1483,12 +1510,14 @@ pub struct PmemConfig {
     pub discard_writes: bool,
     #[serde(default)]
     pub id: Option<String>,
+    #[serde(default)]
+    pub pci_segment: u16,
 }
 
 impl PmemConfig {
     pub const SYNTAX: &'static str = "Persistent memory parameters \
     \"file=<backing_file_path>,size=<persistent_memory_size>,iommu=on|off,\
-    mergeable=on|off,discard_writes=on|off,id=<device_id>\"";
+    mergeable=on|off,discard_writes=on|off,id=<device_id>,pci_segment=<segment_id>\"";
     pub fn parse(pmem: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
@@ -1497,7 +1526,8 @@ impl PmemConfig {
             .add("mergeable")
             .add("iommu")
             .add("discard_writes")
-            .add("id");
+            .add("id")
+            .add("pci_segment");
         parser.parse(pmem).map_err(Error::ParsePersistentMemory)?;
 
         let file = PathBuf::from(parser.get("file").ok_or(Error::ParsePmemFileMissing)?);
@@ -1521,6 +1551,10 @@ impl PmemConfig {
             .unwrap_or(Toggle(false))
             .0;
         let id = parser.get("id");
+        let pci_segment = parser
+            .convert("pci_segment")
+            .map_err(Error::ParsePersistentMemory)?
+            .unwrap_or_default();
 
         Ok(PmemConfig {
             file,
@@ -1529,6 +1563,7 @@ impl PmemConfig {
             mergeable,
             discard_writes,
             id,
+            pci_segment,
         })
     }
 }
@@ -1675,14 +1710,21 @@ pub struct VsockConfig {
     pub iommu: bool,
     #[serde(default)]
     pub id: Option<String>,
+    #[serde(default)]
+    pub pci_segment: u16,
 }
 
 impl VsockConfig {
     pub const SYNTAX: &'static str = "Virtio VSOCK parameters \
-        \"cid=<context_id>,socket=<socket_path>,iommu=on|off,id=<device_id>\"";
+        \"cid=<context_id>,socket=<socket_path>,iommu=on|off,id=<device_id>,pci_segment=<segment_id>\"";
     pub fn parse(vsock: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
-        parser.add("socket").add("cid").add("iommu").add("id");
+        parser
+            .add("socket")
+            .add("cid")
+            .add("iommu")
+            .add("id")
+            .add("pci_segment");
         parser.parse(vsock).map_err(Error::ParseVsock)?;
 
         let socket = parser
@@ -1699,12 +1741,17 @@ impl VsockConfig {
             .map_err(Error::ParseVsock)?
             .ok_or(Error::ParseVsockCidMissing)?;
         let id = parser.get("id");
+        let pci_segment = parser
+            .convert("pci_segment")
+            .map_err(Error::ParseVsock)?
+            .unwrap_or_default();
 
         Ok(VsockConfig {
             cid,
             socket,
             iommu,
             id,
+            pci_segment,
         })
     }
 }
@@ -2743,6 +2790,7 @@ mod tests {
                 socket: PathBuf::from("/tmp/sock"),
                 iommu: false,
                 id: None,
+                ..Default::default()
             }
         );
         assert_eq!(
@@ -2752,6 +2800,7 @@ mod tests {
                 socket: PathBuf::from("/tmp/sock"),
                 iommu: true,
                 id: None,
+                ..Default::default()
             }
         );
         Ok(())
