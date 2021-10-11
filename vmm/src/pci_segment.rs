@@ -51,6 +51,7 @@ impl PciSegment {
         address_manager: &Arc<AddressManager>,
         start_of_device_area: u64,
         end_of_device_area: u64,
+        pci_irq_slots: &[u8; 32],
     ) -> DeviceManagerResult<PciSegment> {
         let pci_root = PciRoot::new(None);
         let pci_bus = Arc::new(Mutex::new(PciBus::new(
@@ -70,22 +71,19 @@ impl PciSegment {
             )
             .map_err(DeviceManagerError::BusError)?;
 
-        let mut segment = PciSegment {
+        let segment = PciSegment {
             id,
             pci_bus,
             pci_config_mmio,
             mmio_config_address,
             pci_devices_up: 0,
             pci_devices_down: 0,
-            pci_irq_slots: [0; 32],
             #[cfg(target_arch = "x86_64")]
             pci_config_io: None,
             start_of_device_area,
             end_of_device_area,
+            pci_irq_slots: *pci_irq_slots,
         };
-
-        // Reserve some IRQs for PCI devices in case they need to support INTx.
-        segment.reserve_legacy_interrupts_for_pci_devices(address_manager)?;
 
         info!(
             "Adding PCI segment: id={}, PCI MMIO config address: 0x{:x}, device area [0x{:x}-0x{:x}",
@@ -99,8 +97,15 @@ impl PciSegment {
         address_manager: &Arc<AddressManager>,
         start_of_device_area: u64,
         end_of_device_area: u64,
+        pci_irq_slots: &[u8; 32],
     ) -> DeviceManagerResult<PciSegment> {
-        let mut segment = Self::new(0, address_manager, start_of_device_area, end_of_device_area)?;
+        let mut segment = Self::new(
+            0,
+            address_manager,
+            start_of_device_area,
+            end_of_device_area,
+            pci_irq_slots,
+        )?;
         let pci_config_io = Arc::new(Mutex::new(PciConfigIo::new(Arc::clone(&segment.pci_bus))));
 
         address_manager
@@ -122,8 +127,15 @@ impl PciSegment {
         address_manager: &Arc<AddressManager>,
         start_of_device_area: u64,
         end_of_device_area: u64,
+        pci_irq_slots: &[u8; 32],
     ) -> DeviceManagerResult<PciSegment> {
-        Self::new(0, address_manager, start_of_device_area, end_of_device_area)
+        Self::new(
+            0,
+            address_manager,
+            start_of_device_area,
+            end_of_device_area,
+            pci_irq_slots,
+        )
     }
 
     pub(crate) fn next_device_bdf(&self) -> DeviceManagerResult<u32> {
@@ -141,9 +153,9 @@ impl PciSegment {
             << 3)
     }
 
-    fn reserve_legacy_interrupts_for_pci_devices(
-        &mut self,
+    pub fn reserve_legacy_interrupts_for_pci_devices(
         address_manager: &Arc<AddressManager>,
+        pci_irq_slots: &mut [u8; 32],
     ) -> DeviceManagerResult<()> {
         // Reserve 8 IRQs which will be shared across all PCI devices.
         let num_irqs = 8;
@@ -161,7 +173,7 @@ impl PciSegment {
 
         // There are 32 devices on the PCI bus, let's assign them an IRQ.
         for i in 0..32 {
-            self.pci_irq_slots[i] = irqs[(i % num_irqs) as usize];
+            pci_irq_slots[i] = irqs[(i % num_irqs) as usize];
         }
 
         Ok(())

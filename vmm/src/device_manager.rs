@@ -948,10 +948,17 @@ impl DeviceManager {
         let start_of_device_area = memory_manager.lock().unwrap().start_of_device_area().0;
         let end_of_device_area = memory_manager.lock().unwrap().end_of_device_area().0;
 
+        let mut pci_irq_slots = [0; 32];
+        PciSegment::reserve_legacy_interrupts_for_pci_devices(
+            &address_manager,
+            &mut pci_irq_slots,
+        )?;
+
         let mut pci_segments = vec![PciSegment::new_default_segment(
             &address_manager,
             start_of_device_area,
             end_of_device_area,
+            &pci_irq_slots,
         )?];
 
         if let Some(platform_config) = config.lock().unwrap().platform.as_ref() {
@@ -961,6 +968,7 @@ impl DeviceManager {
                     &address_manager,
                     start_of_device_area,
                     end_of_device_area,
+                    &pci_irq_slots,
                 )?);
             }
         }
