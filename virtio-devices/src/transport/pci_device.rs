@@ -350,6 +350,7 @@ impl VirtioPciDevice {
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         pci_device_bdf: u32,
         activate_evt: EventFd,
+        use_64bit_bar: bool,
     ) -> Result<Self> {
         let device_clone = device.clone();
         let locked_device = device_clone.lock().unwrap();
@@ -389,22 +390,15 @@ impl VirtioPciDevice {
             (None, None)
         };
 
-        // All device types *except* virtio block devices should be allocated a 64-bit bar
-        // The block devices should be given a 32-bit BAR so that they are easily accessible
-        // to firmware without requiring excessive identity mapping.
-        let mut use_64bit_bar = true;
         let (class, subclass) = match VirtioDeviceType::from(locked_device.device_type()) {
             VirtioDeviceType::Net => (
                 PciClassCode::NetworkController,
                 &PciNetworkControllerSubclass::EthernetController as &dyn PciSubclass,
             ),
-            VirtioDeviceType::Block => {
-                use_64bit_bar = false;
-                (
-                    PciClassCode::MassStorage,
-                    &PciMassStorageSubclass::MassStorage as &dyn PciSubclass,
-                )
-            }
+            VirtioDeviceType::Block => (
+                PciClassCode::MassStorage,
+                &PciMassStorageSubclass::MassStorage as &dyn PciSubclass,
+            ),
             _ => (
                 PciClassCode::Other,
                 &PciVirtioSubclass::NonTransitionalBase as &dyn PciSubclass,

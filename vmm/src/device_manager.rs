@@ -3236,6 +3236,7 @@ impl DeviceManager {
         };
 
         let memory = self.memory_manager.lock().unwrap().guest_memory();
+        let device_type = virtio_device.lock().unwrap().device_type();
         let mut virtio_pci_device = VirtioPciDevice::new(
             id.clone(),
             memory,
@@ -3247,6 +3248,11 @@ impl DeviceManager {
             self.activate_evt
                 .try_clone()
                 .map_err(DeviceManagerError::EventFd)?,
+            // All device types *except* virtio block devices should be allocated a 64-bit bar
+            // The block devices should be given a 32-bit BAR so that they are easily accessible
+            // to firmware without requiring excessive identity mapping.
+            // The exception being if not on the default PCI segment.
+            pci_segment_id > 0 || device_type != VirtioDeviceType::Block as u32,
         )
         .map_err(DeviceManagerError::VirtioDevice)?;
 
