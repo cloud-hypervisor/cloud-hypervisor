@@ -156,6 +156,8 @@ pub enum ValidationError {
     MemoryZoneReused(String, u32, u32),
     /// Invalid number of PCI segments
     InvalidNumPciSegments(u16),
+    /// Invalid PCI segment id
+    InvalidPciSegment(u16),
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -219,6 +221,9 @@ impl fmt::Display for ValidationError {
                     "Number of PCI segments ({}) not in range of 1 to {}",
                     n, MAX_NUM_PCI_SEGMENTS
                 )
+            }
+            InvalidPciSegment(pci_segment) => {
+                write!(f, "Invalid PCI segment id{}", pci_segment)
             }
         }
     }
@@ -1011,6 +1016,12 @@ impl DiskConfig {
             return Err(ValidationError::TooManyQueues);
         }
 
+        if let Some(platform_config) = vm_config.platform.as_ref() {
+            if self.pci_segment >= platform_config.num_pci_segments {
+                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
+            }
+        }
+
         Ok(())
     }
 }
@@ -1295,6 +1306,12 @@ impl NetConfig {
             return Err(ValidationError::TooManyQueues);
         }
 
+        if let Some(platform_config) = vm_config.platform.as_ref() {
+            if self.pci_segment >= platform_config.num_pci_segments {
+                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
+            }
+        }
+
         Ok(())
     }
 }
@@ -1493,6 +1510,12 @@ impl FsConfig {
             return Err(ValidationError::TooManyQueues);
         }
 
+        if let Some(platform_config) = vm_config.platform.as_ref() {
+            if self.pci_segment >= platform_config.num_pci_segments {
+                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
+            }
+        }
+
         Ok(())
     }
 }
@@ -1565,6 +1588,16 @@ impl PmemConfig {
             id,
             pci_segment,
         })
+    }
+
+    pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        if let Some(platform_config) = vm_config.platform.as_ref() {
+            if self.pci_segment >= platform_config.num_pci_segments {
+                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -1688,6 +1721,16 @@ impl DeviceConfig {
             pci_segment,
         })
     }
+
+    pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        if let Some(platform_config) = vm_config.platform.as_ref() {
+            if self.pci_segment >= platform_config.num_pci_segments {
+                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
@@ -1722,6 +1765,16 @@ impl UserDeviceConfig {
             id,
             pci_segment,
         })
+    }
+
+    pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        if let Some(platform_config) = vm_config.platform.as_ref() {
+            if self.pci_segment >= platform_config.num_pci_segments {
+                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
+            }
+        }
+
+        Ok(())
     }
 }
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
@@ -1775,6 +1828,16 @@ impl VsockConfig {
             id,
             pci_segment,
         })
+    }
+
+    pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        if let Some(platform_config) = vm_config.platform.as_ref() {
+            if self.pci_segment >= platform_config.num_pci_segments {
+                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -2050,6 +2113,12 @@ impl VmConfig {
             }
         }
 
+        if let Some(pmems) = &self.pmem {
+            for pmem in pmems {
+                pmem.validate(self)?;
+            }
+        }
+
         if let Some(t) = &self.cpus.topology {
             if t.threads_per_core == 0
                 || t.cores_per_die == 0
@@ -2078,6 +2147,20 @@ impl VmConfig {
             if !user_devices.is_empty() && !self.memory.shared {
                 return Err(ValidationError::UserDevicesRequireSharedMemory);
             }
+
+            for user_device in user_devices {
+                user_device.validate(self)?;
+            }
+        }
+
+        if let Some(devices) = &self.devices {
+            for device in devices {
+                device.validate(self)?;
+            }
+        }
+
+        if let Some(vsock) = &self.vsock {
+            vsock.validate(self)?;
         }
 
         if let Some(numa) = &self.numa {
