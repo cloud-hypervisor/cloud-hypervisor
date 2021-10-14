@@ -2886,7 +2886,7 @@ impl DeviceManager {
                 None
             };
 
-        let mut vfio_pci_device = VfioPciDevice::new(
+        let vfio_pci_device = VfioPciDevice::new(
             &self.address_manager.vm,
             vfio_device,
             vfio_container,
@@ -2908,21 +2908,6 @@ impl DeviceManager {
             id
         };
 
-        vfio_pci_device
-            .map_mmio_regions(&self.address_manager.vm, || {
-                self.memory_manager.lock().unwrap().allocate_memory_slot()
-            })
-            .map_err(DeviceManagerError::VfioMapRegion)?;
-
-        let mut node = device_node!(vfio_name);
-
-        for region in vfio_pci_device.mmio_regions() {
-            node.resources.push(Resource::MmioAddressRange {
-                base: region.start.0,
-                size: region.length as u64,
-            });
-        }
-
         let vfio_pci_device = Arc::new(Mutex::new(vfio_pci_device));
 
         self.add_pci_device(
@@ -2930,6 +2915,23 @@ impl DeviceManager {
             vfio_pci_device.clone(),
             pci_device_bdf,
         )?;
+
+        vfio_pci_device
+            .lock()
+            .unwrap()
+            .map_mmio_regions(&self.address_manager.vm, || {
+                self.memory_manager.lock().unwrap().allocate_memory_slot()
+            })
+            .map_err(DeviceManagerError::VfioMapRegion)?;
+
+        let mut node = device_node!(vfio_name);
+
+        for region in vfio_pci_device.lock().unwrap().mmio_regions() {
+            node.resources.push(Resource::MmioAddressRange {
+                base: region.start.0,
+                size: region.length as u64,
+            });
+        }
 
         node.pci_bdf = Some(pci_device_bdf);
         node.pci_device_handle = Some(PciDeviceHandle::Vfio(vfio_pci_device));
