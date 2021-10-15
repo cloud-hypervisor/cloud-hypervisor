@@ -593,7 +593,7 @@ impl DeviceRelocation for AddressManager {
                         .allocate_mmio_hole_addresses(
                             Some(GuestAddress(new_base)),
                             len as GuestUsize,
-                            None,
+                            Some(len),
                         )
                         .ok_or_else(|| {
                             io::Error::new(
@@ -613,7 +613,7 @@ impl DeviceRelocation for AddressManager {
                         .allocate_mmio_addresses(
                             Some(GuestAddress(new_base)),
                             len as GuestUsize,
-                            None,
+                            Some(len),
                         )
                         .ok_or_else(|| {
                             io::Error::new(
