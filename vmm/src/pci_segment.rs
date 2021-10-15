@@ -19,6 +19,7 @@ use pci::{PciConfigIo, PCI_CONFIG_IO_PORT, PCI_CONFIG_IO_PORT_SIZE};
 use std::sync::{Arc, Mutex};
 #[cfg(feature = "acpi")]
 use uuid::Uuid;
+use vm_allocator::AddressAllocator;
 use vm_device::BusDevice;
 
 // One bus with potentially 256 devices (32 slots x 8 functions).
@@ -43,14 +44,15 @@ pub(crate) struct PciSegment {
     // Device memory covered by this segment
     pub(crate) start_of_device_area: u64,
     pub(crate) end_of_device_area: u64,
+
+    pub(crate) allocator: Arc<Mutex<AddressAllocator>>,
 }
 
 impl PciSegment {
     pub(crate) fn new(
         id: u16,
         address_manager: &Arc<AddressManager>,
-        start_of_device_area: u64,
-        end_of_device_area: u64,
+        allocator: Arc<Mutex<AddressAllocator>>,
         pci_irq_slots: &[u8; 32],
     ) -> DeviceManagerResult<PciSegment> {
         let pci_root = PciRoot::new(None);
@@ -71,6 +73,9 @@ impl PciSegment {
             )
             .map_err(DeviceManagerError::BusError)?;
 
+        let start_of_device_area = allocator.lock().unwrap().base().0;
+        let end_of_device_area = allocator.lock().unwrap().end().0;
+
         let segment = PciSegment {
             id,
             pci_bus,
@@ -80,6 +85,7 @@ impl PciSegment {
             pci_devices_down: 0,
             #[cfg(target_arch = "x86_64")]
             pci_config_io: None,
+            allocator,
             start_of_device_area,
             end_of_device_area,
             pci_irq_slots: *pci_irq_slots,
@@ -95,17 +101,10 @@ impl PciSegment {
     #[cfg(target_arch = "x86_64")]
     pub(crate) fn new_default_segment(
         address_manager: &Arc<AddressManager>,
-        start_of_device_area: u64,
-        end_of_device_area: u64,
+        allocator: Arc<Mutex<AddressAllocator>>,
         pci_irq_slots: &[u8; 32],
     ) -> DeviceManagerResult<PciSegment> {
-        let mut segment = Self::new(
-            0,
-            address_manager,
-            start_of_device_area,
-            end_of_device_area,
-            pci_irq_slots,
-        )?;
+        let mut segment = Self::new(0, address_manager, allocator, pci_irq_slots)?;
         let pci_config_io = Arc::new(Mutex::new(PciConfigIo::new(Arc::clone(&segment.pci_bus))));
 
         address_manager
@@ -125,17 +124,10 @@ impl PciSegment {
     #[cfg(target_arch = "aarch64")]
     pub(crate) fn new_default_segment(
         address_manager: &Arc<AddressManager>,
-        start_of_device_area: u64,
-        end_of_device_area: u64,
+        allocator: Arc<Mutex<AddressAllocator>>,
         pci_irq_slots: &[u8; 32],
     ) -> DeviceManagerResult<PciSegment> {
-        Self::new(
-            0,
-            address_manager,
-            start_of_device_area,
-            end_of_device_area,
-            pci_irq_slots,
-        )
+        Self::new(0, address_manager, allocator, pci_irq_slots)
     }
 
     pub(crate) fn next_device_bdf(&self) -> DeviceManagerResult<u32> {

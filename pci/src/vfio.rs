@@ -19,7 +19,7 @@ use std::sync::{Arc, Barrier};
 use thiserror::Error;
 use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::{VfioContainer, VfioDevice, VfioIrq};
-use vm_allocator::SystemAllocator;
+use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
 };
@@ -361,6 +361,7 @@ impl VfioCommon {
     pub(crate) fn allocate_bars(
         &mut self,
         allocator: &mut SystemAllocator,
+        mmio_allocator: &mut AddressAllocator,
         vfio_wrapper: &dyn Vfio,
     ) -> Result<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>, PciDeviceError> {
         let mut ranges = Vec::new();
@@ -458,8 +459,8 @@ impl VfioCommon {
                 region_size = (!combined_size + 1) as u64;
 
                 // BAR allocation must be naturally aligned
-                bar_addr = allocator
-                    .allocate_mmio_addresses(None, region_size, Some(region_size))
+                bar_addr = mmio_allocator
+                    .allocate(None, region_size, Some(region_size))
                     .ok_or(PciDeviceError::IoAllocationFailed(region_size))?;
             } else {
                 // Mask out flag bits (lowest 4 for memory bars)
@@ -526,6 +527,7 @@ impl VfioCommon {
     pub(crate) fn free_bars(
         &mut self,
         allocator: &mut SystemAllocator,
+        mmio_allocator: &mut AddressAllocator,
     ) -> Result<(), PciDeviceError> {
         for region in self.mmio_regions.iter() {
             match region.type_ {
@@ -539,7 +541,7 @@ impl VfioCommon {
                     allocator.free_mmio_hole_addresses(region.start, region.length);
                 }
                 PciBarRegionType::Memory64BitRegion => {
-                    allocator.free_mmio_addresses(region.start, region.length);
+                    mmio_allocator.free(region.start, region.length);
                 }
             }
         }
@@ -1293,12 +1295,18 @@ impl PciDevice for VfioPciDevice {
     fn allocate_bars(
         &mut self,
         allocator: &mut SystemAllocator,
+        mmio_allocator: &mut AddressAllocator,
     ) -> Result<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>, PciDeviceError> {
-        self.common.allocate_bars(allocator, &self.vfio_wrapper)
+        self.common
+            .allocate_bars(allocator, mmio_allocator, &self.vfio_wrapper)
     }
 
-    fn free_bars(&mut self, allocator: &mut SystemAllocator) -> Result<(), PciDeviceError> {
-        self.common.free_bars(allocator)
+    fn free_bars(
+        &mut self,
+        allocator: &mut SystemAllocator,
+        mmio_allocator: &mut AddressAllocator,
+    ) -> Result<(), PciDeviceError> {
+        self.common.free_bars(allocator, mmio_allocator)
     }
 
     fn write_config_register(

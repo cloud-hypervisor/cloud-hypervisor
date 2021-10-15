@@ -31,7 +31,7 @@ use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_queue::AccessPlatform;
 use virtio_queue::{defs::VIRTQ_MSI_NO_VECTOR, Error as QueueError, Queue};
-use vm_allocator::SystemAllocator;
+use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
 };
@@ -842,6 +842,7 @@ impl PciDevice for VirtioPciDevice {
     fn allocate_bars(
         &mut self,
         allocator: &mut SystemAllocator,
+        mmio_allocator: &mut AddressAllocator,
     ) -> std::result::Result<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>, PciDeviceError>
     {
         let mut ranges = Vec::new();
@@ -852,8 +853,8 @@ impl PciDevice for VirtioPciDevice {
         // See http://docs.oasis-open.org/virtio/virtio/v1.0/cs04/virtio-v1.0-cs04.html#x1-740004
         let (virtio_pci_bar_addr, region_type) = if self.use_64bit_bar {
             let region_type = PciBarRegionType::Memory64BitRegion;
-            let addr = allocator
-                .allocate_mmio_addresses(
+            let addr = mmio_allocator
+                .allocate(
                     self.settings_bar_addr,
                     CAPABILITY_BAR_SIZE,
                     Some(CAPABILITY_BAR_SIZE),
@@ -925,6 +926,7 @@ impl PciDevice for VirtioPciDevice {
     fn free_bars(
         &mut self,
         allocator: &mut SystemAllocator,
+        mmio_allocator: &mut AddressAllocator,
     ) -> std::result::Result<(), PciDeviceError> {
         for (addr, length, type_) in self.bar_regions.drain(..) {
             match type_ {
@@ -932,7 +934,7 @@ impl PciDevice for VirtioPciDevice {
                     allocator.free_mmio_hole_addresses(addr, length);
                 }
                 PciBarRegionType::Memory64BitRegion => {
-                    allocator.free_mmio_addresses(addr, length);
+                    mmio_allocator.free(addr, length);
                 }
                 _ => error!("Unexpected PCI bar type"),
             }

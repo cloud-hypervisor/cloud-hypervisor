@@ -18,7 +18,7 @@ use thiserror::Error;
 use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::VfioIrq;
 use vfio_user::{Client, Error as VfioUserError};
-use vm_allocator::SystemAllocator;
+use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig};
 use vm_device::BusDevice;
@@ -234,12 +234,18 @@ impl PciDevice for VfioUserPciDevice {
     fn allocate_bars(
         &mut self,
         allocator: &mut SystemAllocator,
+        mmio_allocator: &mut AddressAllocator,
     ) -> Result<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>, PciDeviceError> {
-        self.common.allocate_bars(allocator, &self.vfio_wrapper)
+        self.common
+            .allocate_bars(allocator, mmio_allocator, &self.vfio_wrapper)
     }
 
-    fn free_bars(&mut self, allocator: &mut SystemAllocator) -> Result<(), PciDeviceError> {
-        self.common.free_bars(allocator)
+    fn free_bars(
+        &mut self,
+        allocator: &mut SystemAllocator,
+        mmio_allocator: &mut AddressAllocator,
+    ) -> Result<(), PciDeviceError> {
+        self.common.free_bars(allocator, mmio_allocator)
     }
 
     fn as_any(&mut self) -> &mut dyn Any {
