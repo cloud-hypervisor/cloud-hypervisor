@@ -201,6 +201,16 @@ impl AddressAllocator {
             }
         }
     }
+
+    /// Start address of the allocator
+    pub fn base(&self) -> GuestAddress {
+        self.base
+    }
+
+    /// Last address of the allocator
+    pub fn end(&self) -> GuestAddress {
+        self.end
+    }
 }
 
 #[cfg(test)]
