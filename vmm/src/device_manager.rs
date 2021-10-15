@@ -2293,11 +2293,11 @@ impl DeviceManager {
                 let (cache_base, cache_size) = if let Some((base, size)) = cache_range {
                     // The memory needs to be 2MiB aligned in order to support
                     // hugepages.
-                    self.address_manager
+                    self.pci_segments[fs_cfg.pci_segment as usize]
                         .allocator
                         .lock()
                         .unwrap()
-                        .allocate_mmio_addresses(
+                        .allocate(
                             Some(GuestAddress(base)),
                             size as GuestUsize,
                             Some(0x0020_0000),
@@ -2309,12 +2309,11 @@ impl DeviceManager {
                     let size = fs_cfg.cache_size;
                     // The memory needs to be 2MiB aligned in order to support
                     // hugepages.
-                    let base = self
-                        .address_manager
+                    let base = self.pci_segments[fs_cfg.pci_segment as usize]
                         .allocator
                         .lock()
                         .unwrap()
-                        .allocate_mmio_addresses(None, size as GuestUsize, Some(0x0020_0000))
+                        .allocate(None, size as GuestUsize, Some(0x0020_0000))
                         .ok_or(DeviceManagerError::FsRangeAllocation)?;
 
                     (base.raw_value(), size)
@@ -2491,11 +2490,11 @@ impl DeviceManager {
         let (region_base, region_size) = if let Some((base, size)) = region_range {
             // The memory needs to be 2MiB aligned in order to support
             // hugepages.
-            self.address_manager
+            self.pci_segments[pmem_cfg.pci_segment as usize]
                 .allocator
                 .lock()
                 .unwrap()
-                .allocate_mmio_addresses(
+                .allocate(
                     Some(GuestAddress(base)),
                     size as GuestUsize,
                     Some(0x0020_0000),
@@ -2506,12 +2505,11 @@ impl DeviceManager {
         } else {
             // The memory needs to be 2MiB aligned in order to support
             // hugepages.
-            let base = self
-                .address_manager
+            let base = self.pci_segments[pmem_cfg.pci_segment as usize]
                 .allocator
                 .lock()
                 .unwrap()
-                .allocate_mmio_addresses(None, size as GuestUsize, Some(0x0020_0000))
+                .allocate(None, size as GuestUsize, Some(0x0020_0000))
                 .ok_or(DeviceManagerError::PmemRangeAllocation)?;
 
             (base.raw_value(), size)
