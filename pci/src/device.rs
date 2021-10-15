@@ -7,7 +7,7 @@ use std::any::Any;
 use std::fmt::{self, Display};
 use std::sync::{Arc, Barrier};
 use std::{self, io, result};
-use vm_allocator::SystemAllocator;
+use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::BusDevice;
 use vm_memory::{GuestAddress, GuestUsize};
 
@@ -52,12 +52,17 @@ pub trait PciDevice: BusDevice {
     fn allocate_bars(
         &mut self,
         _allocator: &mut SystemAllocator,
+        _mmio_allocator: &mut AddressAllocator,
     ) -> Result<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>> {
         Ok(Vec::new())
     }
 
     /// Frees the PCI BARs previously allocated with a call to allocate_bars().
-    fn free_bars(&mut self, _allocator: &mut SystemAllocator) -> Result<()> {
+    fn free_bars(
+        &mut self,
+        _allocator: &mut SystemAllocator,
+        _mmio_allocator: &mut AddressAllocator,
+    ) -> Result<()> {
         Ok(())
     }
 

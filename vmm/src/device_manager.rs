@@ -93,7 +93,7 @@ use virtio_devices::{AccessPlatformMapping, VirtioMemMappingSource};
 use virtio_devices::{Endpoint, IommuMapping};
 use virtio_devices::{VirtioSharedMemory, VirtioSharedMemoryList};
 use virtio_queue::AccessPlatform;
-use vm_allocator::SystemAllocator;
+use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::dma_mapping::vfio::VfioDmaMapping;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, LegacyIrqGroupConfig, MsiIrqGroupConfig,
@@ -540,6 +540,7 @@ pub(crate) struct AddressManager {
     pub(crate) mmio_bus: Arc<Bus>,
     vm: Arc<dyn hypervisor::Vm>,
     device_tree: Arc<Mutex<DeviceTree>>,
+    pci_mmio_allocators: Vec<Arc<Mutex<AddressAllocator>>>,
 }
 
 impl DeviceRelocation for AddressManager {
@@ -604,25 +605,35 @@ impl DeviceRelocation for AddressManager {
                             )
                         })?;
                 } else {
-                    self.allocator
-                        .lock()
-                        .unwrap()
-                        .free_mmio_addresses(GuestAddress(old_base), len as GuestUsize);
+                    // Find the specific allocator that this BAR was allocated from and use it for new one
+                    for allocator in &self.pci_mmio_allocators {
+                        let allocator_base = allocator.lock().unwrap().base();
+                        let allocator_end = allocator.lock().unwrap().end();
 
-                    self.allocator
-                        .lock()
-                        .unwrap()
-                        .allocate_mmio_addresses(
-                            Some(GuestAddress(new_base)),
-                            len as GuestUsize,
-                            Some(len),
-                        )
-                        .ok_or_else(|| {
-                            io::Error::new(
-                                io::ErrorKind::Other,
-                                "failed allocating new 64 bits MMIO range",
-                            )
-                        })?;
+                        if old_base >= allocator_base.0 && old_base <= allocator_end.0 {
+                            allocator
+                                .lock()
+                                .unwrap()
+                                .free(GuestAddress(old_base), len as GuestUsize);
+
+                            allocator
+                                .lock()
+                                .unwrap()
+                                .allocate(
+                                    Some(GuestAddress(new_base)),
+                                    len as GuestUsize,
+                                    Some(len),
+                                )
+                                .ok_or_else(|| {
+                                    io::Error::new(
+                                        io::ErrorKind::Other,
+                                        "failed allocating new 64 bits MMIO range",
+                                    )
+                                })?;
+
+                            break;
+                        }
+                    }
                 }
 
                 // Update MMIO bus
@@ -916,6 +927,30 @@ impl DeviceManager {
     ) -> DeviceManagerResult<Arc<Mutex<Self>>> {
         let device_tree = Arc::new(Mutex::new(DeviceTree::new()));
 
+        let num_pci_segments =
+            if let Some(platform_config) = config.lock().unwrap().platform.as_ref() {
+                platform_config.num_pci_segments
+            } else {
+                1
+            };
+
+        let start_of_device_area = memory_manager.lock().unwrap().start_of_device_area().0;
+        let end_of_device_area = memory_manager.lock().unwrap().end_of_device_area().0;
+
+        // Start each PCI segment range on a 4GiB boundary
+        let pci_segment_size = (end_of_device_area - start_of_device_area + 1)
+            / ((4 << 30) * num_pci_segments as u64)
+            * (4 << 30);
+
+        let mut pci_mmio_allocators = vec![];
+        for i in 0..num_pci_segments as u64 {
+            let mmio_start = start_of_device_area + i * pci_segment_size;
+            let allocator = Arc::new(Mutex::new(
+                AddressAllocator::new(GuestAddress(mmio_start), pci_segment_size).unwrap(),
+            ));
+            pci_mmio_allocators.push(allocator)
+        }
+
         let address_manager = Arc::new(AddressManager {
             allocator: memory_manager.lock().unwrap().allocator(),
             #[cfg(target_arch = "x86_64")]
@@ -923,6 +958,7 @@ impl DeviceManager {
             mmio_bus: Arc::new(Bus::new()),
             vm: vm.clone(),
             device_tree: Arc::clone(&device_tree),
+            pci_mmio_allocators,
         });
 
         // First we create the MSI interrupt manager, the legacy one is created
@@ -945,9 +981,6 @@ impl DeviceManager {
             .allocate_mmio_addresses(None, DEVICE_MANAGER_ACPI_SIZE as u64, None)
             .ok_or(DeviceManagerError::AllocateIoPort)?;
 
-        let start_of_device_area = memory_manager.lock().unwrap().start_of_device_area().0;
-        let end_of_device_area = memory_manager.lock().unwrap().end_of_device_area().0;
-
         let mut pci_irq_slots = [0; 32];
         PciSegment::reserve_legacy_interrupts_for_pci_devices(
             &address_manager,
@@ -956,21 +989,17 @@ impl DeviceManager {
 
         let mut pci_segments = vec![PciSegment::new_default_segment(
             &address_manager,
-            start_of_device_area,
-            end_of_device_area,
+            Arc::clone(&address_manager.pci_mmio_allocators[0]),
             &pci_irq_slots,
         )?];
 
-        if let Some(platform_config) = config.lock().unwrap().platform.as_ref() {
-            for i in 1..platform_config.num_pci_segments {
-                pci_segments.push(PciSegment::new(
-                    i as u16,
-                    &address_manager,
-                    start_of_device_area,
-                    end_of_device_area,
-                    &pci_irq_slots,
-                )?);
-            }
+        for i in 1..num_pci_segments as usize {
+            pci_segments.push(PciSegment::new(
+                i as u16,
+                &address_manager,
+                Arc::clone(&address_manager.pci_mmio_allocators[i]),
+                &pci_irq_slots,
+            )?);
         }
 
         let device_manager = DeviceManager {
@@ -3013,7 +3042,13 @@ impl DeviceManager {
         let bars = pci_device
             .lock()
             .unwrap()
-            .allocate_bars(&mut self.address_manager.allocator.lock().unwrap())
+            .allocate_bars(
+                &mut self.address_manager.allocator.lock().unwrap(),
+                &mut self.pci_segments[segment_id as usize]
+                    .allocator
+                    .lock()
+                    .unwrap(),
+            )
             .map_err(DeviceManagerError::AllocateBars)?;
 
         let mut pci_bus = self.pci_segments[segment_id as usize]
@@ -3597,7 +3632,13 @@ impl DeviceManager {
         pci_device
             .lock()
             .unwrap()
-            .free_bars(&mut self.address_manager.allocator.lock().unwrap())
+            .free_bars(
+                &mut self.address_manager.allocator.lock().unwrap(),
+                &mut self.pci_segments[pci_segment_id as usize]
+                    .allocator
+                    .lock()
+                    .unwrap(),
+            )
             .map_err(DeviceManagerError::FreePciBars)?;
 
         // Remove the device from the PCI bus
