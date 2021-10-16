@@ -88,7 +88,7 @@ If the build goes well, the EDK2 binary is available at `edk2/Build/ArmVirtCloud
 
 ```bash
 $ pushd $CLOUDH
-$ sudo RUST_BACKTRACE=1 $CLOUDH/cloud-hypervisor/target/debug/cloud-hypervisor --api-socket /tmp/cloud-hypervisor.sock --kernel $CLOUDH/edk2/edk2/Build/ArmVirtCloudHv-AARCH64/RELEASE_GCC5/FV/CLOUDHV_EFI.fd --disk path=$CLOUDH/focal-server-cloudimg-arm64.raw --cpus boot=4 --memory size=4096M --serial tty --console off --log-file log.log -vvv --net tap=,mac=12:34:56:78:90:01,ip=192.168.1.1,mask=255.255.255.0
+$ sudo RUST_BACKTRACE=1 $CLOUDH/cloud-hypervisor/target/debug/cloud-hypervisor --api-socket /tmp/cloud-hypervisor.sock --kernel $CLOUDH/edk2/Build/ArmVirtCloudHv-AARCH64/RELEASE_GCC5/FV/CLOUDHV_EFI.fd --disk path=$CLOUDH/focal-server-cloudimg-arm64.raw --cpus boot=4 --memory size=4096M --serial tty --console off --log-file log.log -vvv --net tap=,mac=12:34:56:78:90:01,ip=192.168.1.1,mask=255.255.255.0
 $ popd
 ```
 
