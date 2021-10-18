@@ -27,6 +27,7 @@ pub use self::msi::{msi_num_enabled_vectors, MsiCap, MsiConfig};
 pub use self::msix::{MsixCap, MsixConfig, MsixTableEntry, MSIX_TABLE_ENTRY_SIZE};
 pub use self::vfio::{VfioPciDevice, VfioPciError};
 pub use self::vfio_user::{VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError};
+use std::fmt::Display;
 
 /// PCI has four interrupt pins A->D.
 #[derive(Copy, Clone)]
@@ -47,3 +48,76 @@ impl PciInterruptPin {
 pub const PCI_CONFIG_IO_PORT: u64 = 0xcf8;
 #[cfg(target_arch = "x86_64")]
 pub const PCI_CONFIG_IO_PORT_SIZE: u64 = 0x8;
+
+#[derive(Clone, Copy, PartialEq, PartialOrd)]
+pub struct PciBdf(u32);
+
+impl PciBdf {
+    pub fn segment(&self) -> u16 {
+        ((self.0 >> 16) & 0xffff) as u16
+    }
+
+    pub fn bus(&self) -> u8 {
+        ((self.0 >> 8) & 0xff) as u8
+    }
+
+    pub fn device(&self) -> u8 {
+        ((self.0 >> 3) & 0x1f) as u8
+    }
+
+    pub fn function(&self) -> u8 {
+        (self.0 & 0x7) as u8
+    }
+
+    pub fn new(segment: u16, bus: u8, device: u8, function: u8) -> Self {
+        Self(
+            (segment as u32) << 16
+                | (bus as u32) << 8
+                | ((device & 0x1f) as u32) << 3
+                | (function & 0x7) as u32,
+        )
+    }
+}
+
+impl From<u32> for PciBdf {
+    fn from(bdf: u32) -> Self {
+        Self(bdf)
+    }
+}
+
+impl From<PciBdf> for u32 {
+    fn from(bdf: PciBdf) -> Self {
+        bdf.0
+    }
+}
+
+impl From<&PciBdf> for u32 {
+    fn from(bdf: &PciBdf) -> Self {
+        bdf.0
+    }
+}
+
+impl From<PciBdf> for u16 {
+    fn from(bdf: PciBdf) -> Self {
+        (bdf.0 & 0xffff) as u16
+    }
+}
+
+impl From<&PciBdf> for u16 {
+    fn from(bdf: &PciBdf) -> Self {
+        (bdf.0 & 0xffff) as u16
+    }
+}
+
+impl Display for PciBdf {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{:04x}:{:02x}:{:02x}.{:01x}",
+            self.segment(),
+            self.bus(),
+            self.device(),
+            self.function()
+        )
+    }
+}
