@@ -29,6 +29,7 @@ use crate::vm::{Error as VmError, Vm, VmState};
 use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
 use memory_manager::MemoryManagerSnapshotData;
+use pci::PciBdf;
 use seccompiler::{apply_filter, SeccompAction};
 use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::fs::File;
@@ -206,7 +207,7 @@ impl AsRawFd for EpollContext {
 
 pub struct PciDeviceInfo {
     pub id: String,
-    pub bdf: u32,
+    pub bdf: PciBdf,
 }
 
 impl Serialize for PciDeviceInfo {
@@ -214,15 +215,7 @@ impl Serialize for PciDeviceInfo {
     where
         S: Serializer,
     {
-        // Transform the PCI b/d/f into a standardized string.
-        let segment = (self.bdf >> 16) & 0xffff;
-        let bus = (self.bdf >> 8) & 0xff;
-        let device = (self.bdf >> 3) & 0x1f;
-        let function = self.bdf & 0x7;
-        let bdf_str = format!(
-            "{:04x}:{:02x}:{:02x}.{:01x}",
-            segment, bus, device, function
-        );
+        let bdf_str = self.bdf.to_string();
 
         // Serialize the structure.
         let mut state = serializer.serialize_struct("PciDeviceInfo", 2)?;

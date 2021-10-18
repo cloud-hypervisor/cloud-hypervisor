@@ -1096,7 +1096,7 @@ impl Vm {
             device_info,
             &initramfs_config,
             &pci_space,
-            virtio_iommu_bdf,
+            virtio_iommu_bdf.map(|bdf| bdf.into()),
             &*gic_device,
             &self.numa_nodes,
         )

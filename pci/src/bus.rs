@@ -140,12 +140,8 @@ impl PciBus {
         Ok(())
     }
 
-    pub fn add_device(
-        &mut self,
-        pci_device_bdf: u32,
-        device: Arc<Mutex<dyn PciDevice>>,
-    ) -> Result<()> {
-        self.devices.insert(pci_device_bdf >> 3, device);
+    pub fn add_device(&mut self, device_id: u32, device: Arc<Mutex<dyn PciDevice>>) -> Result<()> {
+        self.devices.insert(device_id, device);
         Ok(())
     }
 

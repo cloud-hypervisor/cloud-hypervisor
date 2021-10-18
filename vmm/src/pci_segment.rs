@@ -13,7 +13,7 @@ use crate::device_manager::{AddressManager, DeviceManagerError, DeviceManagerRes
 #[cfg(feature = "acpi")]
 use acpi_tables::aml::{self, Aml};
 use arch::layout;
-use pci::{DeviceRelocation, PciBus, PciConfigMmio, PciRoot};
+use pci::{DeviceRelocation, PciBdf, PciBus, PciConfigMmio, PciRoot};
 #[cfg(target_arch = "x86_64")]
 use pci::{PciConfigIo, PCI_CONFIG_IO_PORT, PCI_CONFIG_IO_PORT_SIZE};
 use std::sync::{Arc, Mutex};
@@ -130,19 +130,17 @@ impl PciSegment {
         Self::new(0, address_manager, allocator, pci_irq_slots)
     }
 
-    pub(crate) fn next_device_bdf(&self) -> DeviceManagerResult<u32> {
-        // We need to shift the device id since the 3 first bits
-        // are dedicated to the PCI function, and we know we don't
-        // do multifunction. Also, because we only support one PCI
-        // bus, the bus 0, we don't need to add anything to the
-        // global device ID.
-        Ok(self
-            .pci_bus
-            .lock()
-            .unwrap()
-            .next_device_id()
-            .map_err(DeviceManagerError::NextPciDeviceId)?
-            << 3)
+    pub(crate) fn next_device_bdf(&self) -> DeviceManagerResult<PciBdf> {
+        Ok(PciBdf::new(
+            self.id,
+            0,
+            self.pci_bus
+                .lock()
+                .unwrap()
+                .next_device_id()
+                .map_err(DeviceManagerError::NextPciDeviceId)? as u8,
+            0,
+        ))
     }
 
     pub fn reserve_legacy_interrupts_for_pci_devices(

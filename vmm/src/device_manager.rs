@@ -70,7 +70,7 @@ use libc::{
 #[cfg(target_arch = "x86_64")]
 use pci::PciConfigIo;
 use pci::{
-    DeviceRelocation, PciBarRegionType, PciDevice, VfioPciDevice, VfioUserDmaMapping,
+    DeviceRelocation, PciBarRegionType, PciBdf, PciDevice, VfioPciDevice, VfioUserDmaMapping,
     VfioUserPciDevice, VfioUserPciDeviceError,
 };
 use seccompiler::SeccompAction;
@@ -865,7 +865,7 @@ pub struct DeviceManager {
     // It contains the virtual IOMMU PCI BDF along with the list of PCI BDF
     // representing the devices attached to the virtual IOMMU. This is useful
     // information for filling the ACPI VIOT table.
-    iommu_attached_devices: Option<(u32, Vec<u32>)>,
+    iommu_attached_devices: Option<(PciBdf, Vec<PciBdf>)>,
 
     // Tree of devices, representing the dependencies between devices.
     // Useful for introspection, snapshot and restore.
@@ -2829,7 +2829,7 @@ impl DeviceManager {
     fn add_passthrough_device(
         &mut self,
         device_cfg: &mut DeviceConfig,
-    ) -> DeviceManagerResult<(u32, String)> {
+    ) -> DeviceManagerResult<(PciBdf, String)> {
         // If the passthrough device has not been created yet, it is created
         // here and stored in the DeviceManager structure for future needs.
         if self.passthrough_device.is_none() {
@@ -2877,7 +2877,7 @@ impl DeviceManager {
     fn add_vfio_device(
         &mut self,
         device_cfg: &mut DeviceConfig,
-    ) -> DeviceManagerResult<(u32, String)> {
+    ) -> DeviceManagerResult<(PciBdf, String)> {
         let pci_segment_id = device_cfg.pci_segment;
         let pci_device_bdf = self.pci_segments[pci_segment_id as usize].next_device_bdf()?;
 
@@ -2903,7 +2903,7 @@ impl DeviceManager {
                 iommu
                     .lock()
                     .unwrap()
-                    .add_external_mapping(pci_device_bdf, vfio_mapping);
+                    .add_external_mapping(pci_device_bdf.into(), vfio_mapping);
             } else {
                 return Err(DeviceManagerError::MissingVirtualIommu);
             }
@@ -2961,7 +2961,7 @@ impl DeviceManager {
                     legacy_interrupt_manager
                         .create_group(LegacyIrqGroupConfig {
                             irq: self.pci_segments[pci_segment_id as usize].pci_irq_slots
-                                [(pci_device_bdf >> 3) as usize]
+                                [pci_device_bdf.device() as usize]
                                 as InterruptIndex,
                         })
                         .map_err(DeviceManagerError::CreateInterruptGroup)?,
@@ -3018,7 +3018,7 @@ impl DeviceManager {
             });
         }
 
-        node.pci_bdf = Some(pci_device_bdf);
+        node.pci_bdf = Some(pci_device_bdf.into());
         node.pci_segment_id = Some(pci_segment_id);
         node.pci_device_handle = Some(PciDeviceHandle::Vfio(vfio_pci_device));
 
@@ -3035,7 +3035,7 @@ impl DeviceManager {
         bus_device: Arc<Mutex<dyn BusDevice>>,
         pci_device: Arc<Mutex<dyn PciDevice>>,
         segment_id: u16,
-        bdf: u32,
+        bdf: PciBdf,
     ) -> DeviceManagerResult<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>> {
         let bars = pci_device
             .lock()
@@ -3055,7 +3055,7 @@ impl DeviceManager {
             .unwrap();
 
         pci_bus
-            .add_device(bdf, pci_device)
+            .add_device(bdf.device() as u32, pci_device)
             .map_err(DeviceManagerError::AddPciDevice)?;
 
         self.bus_devices.push(Arc::clone(&bus_device));
@@ -3073,7 +3073,7 @@ impl DeviceManager {
         Ok(bars)
     }
 
-    fn add_vfio_devices(&mut self) -> DeviceManagerResult<Vec<u32>> {
+    fn add_vfio_devices(&mut self) -> DeviceManagerResult<Vec<PciBdf>> {
         let mut iommu_attached_device_ids = Vec::new();
         let mut devices = self.config.lock().unwrap().devices.clone();
 
@@ -3095,7 +3095,7 @@ impl DeviceManager {
     fn add_vfio_user_device(
         &mut self,
         device_cfg: &mut UserDeviceConfig,
-    ) -> DeviceManagerResult<(u32, String)> {
+    ) -> DeviceManagerResult<(PciBdf, String)> {
         let pci_segment_id = device_cfg.pci_segment;
         let pci_device_bdf = self.pci_segments[pci_segment_id as usize].next_device_bdf()?;
 
@@ -3105,7 +3105,7 @@ impl DeviceManager {
                     legacy_interrupt_manager
                         .create_group(LegacyIrqGroupConfig {
                             irq: self.pci_segments[pci_segment_id as usize].pci_irq_slots
-                                [(pci_device_bdf >> 3) as usize]
+                                [pci_device_bdf.device() as usize]
                                 as InterruptIndex,
                         })
                         .map_err(DeviceManagerError::CreateInterruptGroup)?,
@@ -3140,7 +3140,7 @@ impl DeviceManager {
                 .lock()
                 .unwrap()
                 .add_dma_mapping_handler(
-                    VirtioMemMappingSource::Device(pci_device_bdf),
+                    VirtioMemMappingSource::Device(pci_device_bdf.into()),
                     vfio_user_mapping.clone(),
                 )
                 .map_err(DeviceManagerError::AddDmaMappingHandlerVirtioMem)?;
@@ -3177,7 +3177,7 @@ impl DeviceManager {
 
         let mut node = device_node!(vfio_user_name);
 
-        node.pci_bdf = Some(pci_device_bdf);
+        node.pci_bdf = Some(pci_device_bdf.into());
         node.pci_segment_id = Some(pci_segment_id);
         node.pci_device_handle = Some(PciDeviceHandle::VfioUser(vfio_user_pci_device));
 
@@ -3189,7 +3189,7 @@ impl DeviceManager {
         Ok((pci_device_bdf, vfio_user_name))
     }
 
-    fn add_user_devices(&mut self) -> DeviceManagerResult<Vec<u32>> {
+    fn add_user_devices(&mut self) -> DeviceManagerResult<Vec<PciBdf>> {
         let mut user_devices = self.config.lock().unwrap().user_devices.clone();
 
         if let Some(device_list_cfg) = &mut user_devices {
@@ -3210,7 +3210,7 @@ impl DeviceManager {
         iommu_mapping: &Option<Arc<IommuMapping>>,
         virtio_device_id: String,
         pci_segment_id: u16,
-    ) -> DeviceManagerResult<u32> {
+    ) -> DeviceManagerResult<PciBdf> {
         let id = format!("{}-{}", VIRTIO_PCI_DEVICE_NAME_PREFIX, virtio_device_id);
 
         // Add the new virtio-pci node to the device tree.
@@ -3223,9 +3223,10 @@ impl DeviceManager {
             self.device_tree.lock().unwrap().get(&id)
         {
             info!("Restoring virtio-pci {} resources", id);
-            let pci_device_bdf = node
+            let pci_device_bdf: PciBdf = node
                 .pci_bdf
-                .ok_or(DeviceManagerError::MissingDeviceNodePciBdf)?;
+                .ok_or(DeviceManagerError::MissingDeviceNodePciBdf)?
+                .into();
             let pci_segment_id = node
                 .pci_segment_id
                 .ok_or(DeviceManagerError::MissingDeviceNodePciSegmentId)?;
@@ -3234,7 +3235,7 @@ impl DeviceManager {
                 .pci_bus
                 .lock()
                 .unwrap()
-                .get_device_id((pci_device_bdf >> 3) as usize)
+                .get_device_id(pci_device_bdf.device() as usize)
                 .map_err(DeviceManagerError::GetPciDeviceId)?;
 
             if node.resources.is_empty() {
@@ -3276,7 +3277,7 @@ impl DeviceManager {
         let access_platform: Option<Arc<dyn AccessPlatform>> = if let Some(mapping) = iommu_mapping
         {
             Some(Arc::new(AccessPlatformMapping::new(
-                pci_device_bdf,
+                pci_device_bdf.into(),
                 mapping.clone(),
             )))
         } else {
@@ -3292,7 +3293,7 @@ impl DeviceManager {
             msix_num,
             access_platform,
             &self.msi_interrupt_manager,
-            pci_device_bdf,
+            pci_device_bdf.into(),
             self.activate_evt
                 .try_clone()
                 .map_err(DeviceManagerError::EventFd)?,
@@ -3335,7 +3336,7 @@ impl DeviceManager {
             });
         }
         node.migratable = Some(Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn Migratable>>);
-        node.pci_bdf = Some(pci_device_bdf);
+        node.pci_bdf = Some(pci_device_bdf.into());
         node.pci_segment_id = Some(pci_segment_id);
         node.pci_device_handle = Some(PciDeviceHandle::Virtio(virtio_pci_device));
         self.device_tree.lock().unwrap().insert(id, node);
@@ -3463,14 +3464,14 @@ impl DeviceManager {
         &mut self,
         device_cfg: &mut DeviceConfig,
     ) -> DeviceManagerResult<PciDeviceInfo> {
-        let (device_id, device_name) = self.add_passthrough_device(device_cfg)?;
+        let (bdf, device_name) = self.add_passthrough_device(device_cfg)?;
 
         // Update the PCIU bitmap
-        self.pci_segments[device_cfg.pci_segment as usize].pci_devices_up |= 1 << (device_id >> 3);
+        self.pci_segments[device_cfg.pci_segment as usize].pci_devices_up |= 1 << bdf.device();
 
         Ok(PciDeviceInfo {
             id: device_name,
-            bdf: device_id,
+            bdf,
         })
     }
 
@@ -3478,14 +3479,14 @@ impl DeviceManager {
         &mut self,
         device_cfg: &mut UserDeviceConfig,
     ) -> DeviceManagerResult<PciDeviceInfo> {
-        let (device_id, device_name) = self.add_vfio_user_device(device_cfg)?;
+        let (bdf, device_name) = self.add_vfio_user_device(device_cfg)?;
 
         // Update the PCIU bitmap
-        self.pci_segments[device_cfg.pci_segment as usize].pci_devices_up |= 1 << (device_id >> 3);
+        self.pci_segments[device_cfg.pci_segment as usize].pci_devices_up |= 1 << bdf.device();
 
         Ok(PciDeviceInfo {
             id: device_name,
-            bdf: device_id,
+            bdf,
         })
     }
 
@@ -3511,9 +3512,10 @@ impl DeviceManager {
                 .ok_or(DeviceManagerError::MissingNode)?
         };
 
-        let pci_device_bdf = pci_device_node
+        let pci_device_bdf: PciBdf = pci_device_node
             .pci_bdf
-            .ok_or(DeviceManagerError::MissingDeviceNodePciBdf)?;
+            .ok_or(DeviceManagerError::MissingDeviceNodePciBdf)?
+            .into();
         let pci_segment_id = pci_device_node
             .pci_segment_id
             .ok_or(DeviceManagerError::MissingDeviceNodePciSegmentId)?;
@@ -3544,7 +3546,7 @@ impl DeviceManager {
         }
 
         // Update the PCID bitmap
-        self.pci_segments[pci_segment_id as usize].pci_devices_down |= 1 << (pci_device_bdf >> 3);
+        self.pci_segments[pci_segment_id as usize].pci_devices_down |= 1 << pci_device_bdf.device();
 
         Ok(())
     }
@@ -3556,7 +3558,7 @@ impl DeviceManager {
         );
 
         // Convert the device ID into the corresponding b/d/f.
-        let pci_device_bdf = (device_id as u32) << 3;
+        let pci_device_bdf = PciBdf::new(pci_segment_id, 0, device_id, 0);
 
         // Give the PCI device ID back to the PCI bus.
         self.pci_segments[pci_segment_id as usize]
@@ -3569,7 +3571,7 @@ impl DeviceManager {
         // Remove the device from the device tree along with its children.
         let mut device_tree = self.device_tree.lock().unwrap();
         let pci_device_node = device_tree
-            .remove_node_by_pci_bdf(pci_segment_id, pci_device_bdf)
+            .remove_node_by_pci_bdf(pci_segment_id, pci_device_bdf.into())
             .ok_or(DeviceManagerError::MissingPciDevice)?;
         for child in pci_device_node.children.iter() {
             device_tree.remove(child);
@@ -3614,7 +3616,9 @@ impl DeviceManager {
                     virtio_mem_device
                         .lock()
                         .unwrap()
-                        .remove_dma_mapping_handler(VirtioMemMappingSource::Device(pci_device_bdf))
+                        .remove_dma_mapping_handler(VirtioMemMappingSource::Device(
+                            pci_device_bdf.into(),
+                        ))
                         .map_err(DeviceManagerError::RemoveDmaMappingHandlerVirtioMem)?;
                 }
 
@@ -3709,12 +3713,12 @@ impl DeviceManager {
         self.virtio_devices
             .push((device.clone(), iommu_attached, id.clone(), pci_segment_id));
 
-        let device_id = self.add_virtio_pci_device(device, &None, id.clone(), pci_segment_id)?;
+        let bdf = self.add_virtio_pci_device(device, &None, id.clone(), pci_segment_id)?;
 
         // Update the PCIU bitmap
-        self.pci_segments[pci_segment_id as usize].pci_devices_up |= 1 << (device_id >> 3);
+        self.pci_segments[pci_segment_id as usize].pci_devices_up |= 1 << bdf.device();
 
-        Ok(PciDeviceInfo { id, bdf: device_id })
+        Ok(PciDeviceInfo { id, bdf })
     }
 
     pub fn add_disk(&mut self, disk_cfg: &mut DiskConfig) -> DeviceManagerResult<PciDeviceInfo> {
@@ -3873,7 +3877,7 @@ impl DeviceManager {
         }
     }
 
-    pub fn iommu_attached_devices(&self) -> &Option<(u32, Vec<u32>)> {
+    pub fn iommu_attached_devices(&self) -> &Option<(PciBdf, Vec<PciBdf>)> {
         &self.iommu_attached_devices
     }
 }
