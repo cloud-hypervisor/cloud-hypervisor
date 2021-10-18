@@ -16,6 +16,7 @@ use arch::DeviceType;
 use arch::NumaNodes;
 
 use bitflags::bitflags;
+use pci::PciBdf;
 use std::sync::{Arc, Mutex};
 use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemoryRegion};
 
@@ -438,7 +439,7 @@ fn create_iort_table() -> Sdt {
     iort
 }
 
-fn create_viot_table(iommu_bdf: u32, devices_bdf: &[u32]) -> Sdt {
+fn create_viot_table(iommu_bdf: &PciBdf, devices_bdf: &[PciBdf]) -> Sdt {
     // VIOT
     let mut viot = Sdt::new(*b"VIOT", 36, 0, *b"CLOUDH", *b"CHVIOT  ", 0);
     // Node count
@@ -452,8 +453,8 @@ fn create_viot_table(iommu_bdf: u32, devices_bdf: &[u32]) -> Sdt {
     viot.append(ViotVirtioPciNode {
         type_: 3,
         length: 16,
-        pci_segment: 0,
-        pci_bdf_number: iommu_bdf as u16,
+        pci_segment: iommu_bdf.segment(),
+        pci_bdf_number: iommu_bdf.into(),
         ..Default::default()
     });
 
@@ -461,11 +462,11 @@ fn create_viot_table(iommu_bdf: u32, devices_bdf: &[u32]) -> Sdt {
         viot.append(ViotPciRangeNode {
             type_: 1,
             length: 24,
-            endpoint_start: *device_bdf,
-            pci_segment_start: 0,
-            pci_segment_end: 0,
-            pci_bdf_start: *device_bdf as u16,
-            pci_bdf_end: *device_bdf as u16,
+            endpoint_start: device_bdf.into(),
+            pci_segment_start: device_bdf.segment(),
+            pci_segment_end: device_bdf.segment(),
+            pci_bdf_start: device_bdf.into(),
+            pci_bdf_end: device_bdf.into(),
             output_node: 48,
             ..Default::default()
         });
@@ -619,7 +620,7 @@ pub fn create_acpi_tables(
     // VIOT
     if let Some((iommu_bdf, devices_bdf)) = device_manager.lock().unwrap().iommu_attached_devices()
     {
-        let viot = create_viot_table(*iommu_bdf, devices_bdf);
+        let viot = create_viot_table(iommu_bdf, devices_bdf);
 
         let viot_offset = prev_tbl_off.checked_add(prev_tbl_len).unwrap();
         guest_mem
