@@ -684,9 +684,10 @@ mod tests {
             let mut epoll_helper =
                 EpollHelper::new(&ctx.handler.kill_evt, &ctx.handler.pause_evt).unwrap();
 
-            if !ctx.handler.handle_event(&mut epoll_helper, &event) {
-                panic!("handle_event() should have failed");
-            }
+            assert!(
+                ctx.handler.handle_event(&mut epoll_helper, &event),
+                "handle_event() should have failed"
+            );
         }
     }
 
@@ -752,9 +753,10 @@ mod tests {
             let mut epoll_helper =
                 EpollHelper::new(&ctx.handler.kill_evt, &ctx.handler.pause_evt).unwrap();
 
-            if !ctx.handler.handle_event(&mut epoll_helper, &event) {
-                panic!("handle_event() should have failed");
-            }
+            assert!(
+                ctx.handler.handle_event(&mut epoll_helper, &event),
+                "handle_event() should have failed"
+            );
         }
     }
 
@@ -771,9 +773,10 @@ mod tests {
             let mut epoll_helper =
                 EpollHelper::new(&ctx.handler.kill_evt, &ctx.handler.pause_evt).unwrap();
 
-            if !ctx.handler.handle_event(&mut epoll_helper, &event) {
-                panic!("handle_event() should have failed");
-            }
+            assert!(
+                ctx.handler.handle_event(&mut epoll_helper, &event),
+                "handle_event() should have failed"
+            );
         }
     }
 
@@ -842,8 +845,9 @@ mod tests {
         let mut epoll_helper =
             EpollHelper::new(&ctx.handler.kill_evt, &ctx.handler.pause_evt).unwrap();
 
-        if !ctx.handler.handle_event(&mut epoll_helper, &event) {
-            panic!("handle_event() should have failed");
-        }
+        assert!(
+            ctx.handler.handle_event(&mut epoll_helper, &event),
+            "handle_event() should have failed"
+        );
     }
 }
