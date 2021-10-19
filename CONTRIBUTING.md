@@ -1,6 +1,13 @@
 # Contributing to Cloud Hypervisor
 
-Cloud Hypervisor is an open source project licensed under the [Apache v2 License](https://opensource.org/licenses/Apache-2.0) and the [BSD 3 Clause](https://opensource.org/licenses/BSD-3-Clause) license.
+Cloud Hypervisor is an open source project licensed under the [Apache v2
+License](https://opensource.org/licenses/Apache-2.0) and the [BSD 3
+Clause](https://opensource.org/licenses/BSD-3-Clause) license. Contributions
+can be made under either license or both. Individual files contain details of
+their licensing and changes to that file are under the same license unless the
+contribution changes the license of the file. When importing code from a third
+party project (e.g. Firecracker or CrosVM) please respect the license of those
+projects.
 
 ## Coding Style
 
