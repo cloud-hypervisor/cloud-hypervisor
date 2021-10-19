@@ -348,8 +348,8 @@ impl RegionTableEntry {
 
 #[derive(Clone, Debug)]
 struct RegionEntry {
-    start: u64,
-    end: u64,
+    _start: u64,
+    _end: u64,
 }
 
 enum HeaderNo {
@@ -360,17 +360,17 @@ enum HeaderNo {
 /// Contains the information from the header of a VHDx file
 #[derive(Clone, Debug)]
 pub struct VhdxHeader {
-    file_type_identifier: FileTypeIdentifier,
+    _file_type_identifier: FileTypeIdentifier,
     header_1: Header,
     header_2: Header,
     region_table_1: RegionTableHeader,
-    region_table_2: RegionTableHeader,
+    _region_table_2: RegionTableHeader,
 }
 
 impl VhdxHeader {
     /// Creates a VhdxHeader from a reference to a file
     pub fn new(f: &mut File) -> Result<VhdxHeader> {
-        let file_type_identifier: FileTypeIdentifier = FileTypeIdentifier::new(f)?;
+        let _file_type_identifier: FileTypeIdentifier = FileTypeIdentifier::new(f)?;
         let header_1 = Header::new(f, HEADER_1_START);
         let header_2 = Header::new(f, HEADER_2_START);
 
@@ -383,11 +383,11 @@ impl VhdxHeader {
         let (header_1, header_2) =
             VhdxHeader::update_headers(f, header_1, header_2, file_write_guid)?;
         Ok(VhdxHeader {
-            file_type_identifier,
+            _file_type_identifier,
             header_1,
             header_2,
             region_table_1: RegionTableHeader::new(f, REGION_TABLE_1_START)?,
-            region_table_2: RegionTableHeader::new(f, REGION_TABLE_2_START)?,
+            _region_table_2: RegionTableHeader::new(f, REGION_TABLE_2_START)?,
         })
     }
 
