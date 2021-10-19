@@ -342,12 +342,14 @@ impl cpu::Vcpu for MshvVcpu {
                         _ => {}
                     }
 
-                    if unsafe { access_info.__bindgen_anon_1.string_op() } == 1 {
-                        panic!("String IN/OUT not supported");
-                    }
-                    if unsafe { access_info.__bindgen_anon_1.rep_prefix() } == 1 {
-                        panic!("Rep IN/OUT not supported");
-                    }
+                    assert!(
+                        !(unsafe { access_info.__bindgen_anon_1.string_op() } == 1),
+                        "String IN/OUT not supported"
+                    );
+                    assert!(
+                        !(unsafe { access_info.__bindgen_anon_1.rep_prefix() } == 1),
+                        "Rep IN/OUT not supported"
+                    );
 
                     if is_write {
                         let data = (info.rax as u32).to_le_bytes();
