@@ -75,6 +75,7 @@ const VIRTIO_IOMMU_PAGE_SIZE_MASK: u64 = (2 << 20) | (4 << 10);
 
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
+#[allow(dead_code)]
 struct VirtioIommuRange32 {
     start: u32,
     end: u32,
@@ -84,6 +85,7 @@ unsafe impl ByteValued for VirtioIommuRange32 {}
 
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
+#[allow(dead_code)]
 struct VirtioIommuRange64 {
     start: u64,
     end: u64,
@@ -93,13 +95,14 @@ unsafe impl ByteValued for VirtioIommuRange64 {}
 
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
+#[allow(dead_code)]
 struct VirtioIommuConfig {
     page_size_mask: u64,
     input_range: VirtioIommuRange64,
     domain_range: VirtioIommuRange32,
     probe_size: u32,
     bypass: u8,
-    reserved: [u8; 7],
+    _reserved: [u8; 7],
 }
 
 unsafe impl ByteValued for VirtioIommuConfig {}
@@ -115,7 +118,7 @@ const VIRTIO_IOMMU_T_PROBE: u8 = 5;
 #[repr(packed)]
 struct VirtioIommuReqHead {
     type_: u8,
-    reserved: [u8; 3],
+    _reserved: [u8; 3],
 }
 
 unsafe impl ByteValued for VirtioIommuReqHead {}
@@ -141,9 +144,10 @@ const VIRTIO_IOMMU_S_NOMEM: u8 = 8;
 
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
+#[allow(dead_code)]
 struct VirtioIommuReqTail {
     status: u8,
-    reserved: [u8; 3],
+    _reserved: [u8; 3],
 }
 
 unsafe impl ByteValued for VirtioIommuReqTail {}
@@ -154,7 +158,7 @@ unsafe impl ByteValued for VirtioIommuReqTail {}
 struct VirtioIommuReqAttach {
     domain: u32,
     endpoint: u32,
-    reserved: [u8; 8],
+    _reserved: [u8; 8],
 }
 
 unsafe impl ByteValued for VirtioIommuReqAttach {}
@@ -165,7 +169,7 @@ unsafe impl ByteValued for VirtioIommuReqAttach {}
 struct VirtioIommuReqDetach {
     domain: u32,
     endpoint: u32,
-    reserved: [u8; 8],
+    _reserved: [u8; 8],
 }
 
 unsafe impl ByteValued for VirtioIommuReqDetach {}
@@ -189,7 +193,7 @@ struct VirtioIommuReqMap {
     virt_start: u64,
     virt_end: u64,
     phys_start: u64,
-    flags: u32,
+    _flags: u32,
 }
 
 unsafe impl ByteValued for VirtioIommuReqMap {}
@@ -201,7 +205,7 @@ struct VirtioIommuReqUnmap {
     domain: u32,
     virt_start: u64,
     virt_end: u64,
-    reserved: [u8; 4],
+    _reserved: [u8; 4],
 }
 
 unsafe impl ByteValued for VirtioIommuReqUnmap {}
@@ -216,15 +220,17 @@ const VIRTIO_IOMMU_PROBE_T_MASK: u16 = 0xfff;
 /// PROBE request
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
+#[allow(dead_code)]
 struct VirtioIommuReqProbe {
     endpoint: u32,
-    reserved: [u64; 8],
+    _reserved: [u64; 8],
 }
 
 unsafe impl ByteValued for VirtioIommuReqProbe {}
 
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
+#[allow(dead_code)]
 struct VirtioIommuProbeProperty {
     type_: u16,
     length: u16,
@@ -239,9 +245,10 @@ const VIRTIO_IOMMU_RESV_MEM_T_MSI: u8 = 1;
 
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
+#[allow(dead_code)]
 struct VirtioIommuProbeResvMem {
     subtype: u8,
-    reserved: [u8; 3],
+    _reserved: [u8; 3],
     start: u64,
     end: u64,
 }
