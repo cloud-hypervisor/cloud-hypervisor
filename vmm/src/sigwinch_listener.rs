@@ -94,9 +94,11 @@ fn sigwinch_listener_main(seccomp_filter: BpfProgram, tx: File, tty: &File) -> !
 
         while unsafe { poll(&mut pollfd, 1, -1) } == -1 {
             let e = io::Error::last_os_error();
-            if !matches!(e.kind(), ErrorKind::Interrupted | ErrorKind::WouldBlock) {
-                panic!("poll: {}", e);
-            }
+            assert!(
+                matches!(e.kind(), ErrorKind::Interrupted | ErrorKind::WouldBlock),
+                "poll: {}",
+                e
+            );
         }
 
         assert_eq!(pollfd.revents, POLLERR);
