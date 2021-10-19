@@ -3518,9 +3518,7 @@ mod tests {
                         }
                         Err(mpsc::TryRecvError::Empty) => {
                             empty += 1;
-                            if empty > 5 {
-                                panic!("No login on pty");
-                            }
+                            assert!(!(empty > 5), "No login on pty");
                         }
                         _ => panic!("No login on pty"),
                     }
