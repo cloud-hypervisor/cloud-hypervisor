@@ -216,7 +216,7 @@ impl VhostUserBackend for VhostUserNetBackend {
                 let mut vring = vrings[1].write().unwrap();
                 if thread
                     .net
-                    .process_tx(&mut vring.mut_queue())
+                    .process_tx(vring.mut_queue())
                     .map_err(Error::NetQueuePair)?
                 {
                     vring
@@ -228,7 +228,7 @@ impl VhostUserBackend for VhostUserNetBackend {
                 let mut vring = vrings[0].write().unwrap();
                 if thread
                     .net
-                    .process_rx(&mut vring.mut_queue())
+                    .process_rx(vring.mut_queue())
                     .map_err(Error::NetQueuePair)?
                 {
                     vring
