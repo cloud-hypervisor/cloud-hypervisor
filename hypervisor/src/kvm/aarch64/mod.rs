@@ -115,9 +115,13 @@ pub fn is_system_register(regid: u64) -> bool {
     }
 
     let size = regid & KVM_REG_SIZE_MASK;
-    if size != KVM_REG_SIZE_U32 && size != KVM_REG_SIZE_U64 {
-        panic!("Unexpected register size for system register {}", size);
-    }
+
+    assert!(
+        !(size != KVM_REG_SIZE_U32 && size != KVM_REG_SIZE_U64),
+        "Unexpected register size for system register {}",
+        size
+    );
+
     true
 }
 
