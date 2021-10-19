@@ -121,7 +121,7 @@ pub fn unregister_listener(
 }
 
 pub fn build_net_config_space(
-    mut config: &mut VirtioNetConfig,
+    config: &mut VirtioNetConfig,
     mac: MacAddr,
     num_queues: usize,
     avail_features: &mut u64,
@@ -129,7 +129,7 @@ pub fn build_net_config_space(
     config.mac.copy_from_slice(mac.get_bytes());
     *avail_features |= 1 << VIRTIO_NET_F_MAC;
 
-    build_net_config_space_with_mq(&mut config, num_queues, avail_features);
+    build_net_config_space_with_mq(config, num_queues, avail_features);
 }
 
 pub fn build_net_config_space_with_mq(
