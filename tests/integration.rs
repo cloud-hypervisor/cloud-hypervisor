@@ -4789,6 +4789,16 @@ mod tests {
 
         #[test]
         fn test_pmem_hotplug() {
+            _test_pmem_hotplug(None)
+        }
+
+        #[cfg(target_arch = "x86_64")]
+        #[test]
+        fn test_pmem_multi_segment_hotplug() {
+            _test_pmem_hotplug(Some(15))
+        }
+
+        fn _test_pmem_hotplug(pci_segment: Option<u16>) {
             #[cfg(target_arch = "aarch64")]
             let focal_image = FOCAL_IMAGE_UPDATE_KERNEL_NAME.to_string();
             #[cfg(target_arch = "x86_64")]
@@ -4803,17 +4813,22 @@ mod tests {
 
             let api_socket = temp_api_path(&guest.tmp_dir);
 
-            let mut child = GuestCommand::new(&guest)
-                .args(&["--api-socket", &api_socket])
+            let mut cmd = GuestCommand::new(&guest);
+
+            cmd.args(&["--api-socket", &api_socket])
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .default_net()
-                .capture_output()
-                .spawn()
-                .unwrap();
+                .capture_output();
+
+            if pci_segment.is_some() {
+                cmd.args(&["--platform", "num_pci_segments=16"]);
+            }
+
+            let mut child = cmd.spawn().unwrap();
 
             let r = std::panic::catch_unwind(|| {
                 guest.wait_vm_boot(None).unwrap();
@@ -4835,13 +4850,25 @@ mod tests {
                     &api_socket,
                     "add-pmem",
                     Some(&format!(
-                        "file={},id=test0",
-                        pmem_temp_file.as_path().to_str().unwrap()
+                        "file={},id=test0{}",
+                        pmem_temp_file.as_path().to_str().unwrap(),
+                        if let Some(pci_segment) = pci_segment {
+                            format!(",pci_segment={}", pci_segment)
+                        } else {
+                            "".to_owned()
+                        }
                     )),
                 );
                 assert!(cmd_success);
-                assert!(String::from_utf8_lossy(&cmd_output)
-                    .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}"));
+                if let Some(pci_segment) = pci_segment {
+                    assert!(String::from_utf8_lossy(&cmd_output).contains(&format!(
+                        "{{\"id\":\"test0\",\"bdf\":\"{:04x}:00:01.0\"}}",
+                        pci_segment
+                    )));
+                } else {
+                    assert!(String::from_utf8_lossy(&cmd_output)
+                        .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}"));
+                }
 
                 // Check that /dev/pmem0 exists and the block size is 128M
                 assert_eq!(
