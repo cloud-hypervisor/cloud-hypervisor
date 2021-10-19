@@ -44,7 +44,7 @@ where
                     return;
                 }
             }
-            std::panic::catch_unwind(AssertUnwindSafe(move || f()))
+            std::panic::catch_unwind(AssertUnwindSafe(f))
                 .or_else(|_| {
                     error!("{} thread panicked", thread_name);
                     thread_exit_evt.write(1)
