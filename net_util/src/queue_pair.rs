@@ -268,19 +268,16 @@ pub struct NetQueuePair {
 }
 
 impl NetQueuePair {
-    pub fn process_tx(&mut self, mut queue: &mut Queue) -> Result<bool, NetQueuePairError> {
+    pub fn process_tx(&mut self, queue: &mut Queue) -> Result<bool, NetQueuePairError> {
         let mem = self
             .mem
             .as_ref()
             .ok_or(NetQueuePairError::NoMemoryConfigured)
             .map(|m| m.memory())?;
 
-        let tx_tap_retry = self.tx.process_desc_chain(
-            &mem,
-            &mut self.tap,
-            &mut queue,
-            &mut self.tx_rate_limiter,
-        )?;
+        let tx_tap_retry =
+            self.tx
+                .process_desc_chain(&mem, &mut self.tap, queue, &mut self.tx_rate_limiter)?;
 
         // We got told to try again when writing to the tap. Wait for the TAP to be writable
         if tx_tap_retry && !self.tx_tap_listening {
@@ -317,19 +314,17 @@ impl NetQueuePair {
         Ok(queue.needs_notification(&mem, queue.next_used))
     }
 
-    pub fn process_rx(&mut self, mut queue: &mut Queue) -> Result<bool, NetQueuePairError> {
+    pub fn process_rx(&mut self, queue: &mut Queue) -> Result<bool, NetQueuePairError> {
         let mem = self
             .mem
             .as_ref()
             .ok_or(NetQueuePairError::NoMemoryConfigured)
             .map(|m| m.memory())?;
 
-        self.rx_desc_avail = !self.rx.process_desc_chain(
-            &mem,
-            &mut self.tap,
-            &mut queue,
-            &mut self.rx_rate_limiter,
-        )?;
+        self.rx_desc_avail =
+            !self
+                .rx
+                .process_desc_chain(&mem, &mut self.tap, queue, &mut self.rx_rate_limiter)?;
         let rate_limit_reached = self
             .rx_rate_limiter
             .as_ref()
