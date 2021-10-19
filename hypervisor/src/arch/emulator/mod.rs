@@ -18,7 +18,18 @@ pub struct Exception<T: Debug> {
 
 impl<T: Debug> Display for Exception<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Exception {:?} at IP {:#x}", self.vector, self.ip)
+        write!(
+            f,
+            "Exception {:?} at IP {:#x}{}{}",
+            self.vector,
+            self.ip,
+            self.error
+                .map(|e| format!(": error {:x}", e))
+                .unwrap_or_else(|| "".to_owned()),
+            self.payload
+                .map(|payload| format!(": payload {:x}", payload))
+                .unwrap_or_else(|| "".to_owned())
+        )
     }
 }
 
