@@ -102,6 +102,25 @@ build_edk2() {
     popd
 }
 
+build_spdk_nvme() {
+    SPDK_DIR="$WORKLOADS_DIR/spdk"
+    SPDK_REPO="https://github.com/spdk/spdk.git"
+    checkout_repo "$SPDK_DIR" "$SPDK_REPO" master "a827fd7eeca67209d4c0aaad9a3ed55692e7e36e"
+
+    pushd $SPDK_DIR
+    git submodule update --init
+    apt-get update
+    ./scripts/pkgdep.sh
+    ./configure --with-vfio-user
+    chmod +x /usr/local/lib/python3.8/dist-packages/ninja/data/bin/ninja
+    make -j `nproc`
+    mkdir /usr/local/bin/spdk-nvme
+    cp ./build/bin/nvmf_tgt /usr/local/bin/spdk-nvme
+    cp ./scripts/rpc.py /usr/local/bin/spdk-nvme
+    cp -r ./scripts/rpc /usr/local/bin/spdk-nvme
+    popd
+}
+
 update_workloads() {
     cp scripts/sha1sums-aarch64 $WORKLOADS_DIR
 
@@ -233,6 +252,9 @@ update_workloads() {
         echo "bar" > "$SHARED_DIR/file3" || exit 1
     fi
 
+    # checkout and build SPDK NVMe
+    build_spdk_nvme
+
     # Check and build EDK2 binary
     build_edk2
 }
@@ -284,8 +306,9 @@ sudo bash -c "echo 1000000 > /sys/kernel/mm/ksm/pages_to_scan"
 sudo bash -c "echo 10 > /sys/kernel/mm/ksm/sleep_millisecs"
 sudo bash -c "echo 1 > /sys/kernel/mm/ksm/run"
 
-# Setup huge-pages for ovs-dpdk
-echo 2048 | sudo tee /proc/sys/vm/nr_hugepages
+# Setup huge-pages for ovs-dpdk and vfio-user
+echo 6144 | sudo tee /proc/sys/vm/nr_hugepages
+sudo chmod a+rwX /dev/hugepages
 
 # Run all direct kernel boot (Device Tree) test cases in mod `parallel`
 time cargo test $features_test "tests::parallel::$test_filter"
