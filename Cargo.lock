@@ -545,7 +545,7 @@ checksum = "308cc39be01b73d0d18f82a0e7b2a3df85245f84af96fdddc5d202d27e47b86a"
 [[package]]
 name = "micro_http"
 version = "0.1.0"
-source = "git+https://github.com/firecracker-microvm/micro-http?branch=main#36e59a083e76a2449e0f58e4283d201bc72fdf13"
+source = "git+https://github.com/firecracker-microvm/micro-http?branch=main#0a58eb1ece68e326e68365c4297d0a7c08ecd9bc"
 dependencies = [
  "libc",
  "vmm-sys-util",
