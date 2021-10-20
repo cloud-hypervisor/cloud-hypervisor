@@ -23,7 +23,7 @@ mshv-ioctls = { git = "https://github.com/rust-vmm/mshv", branch = "main", optio
 serde = { version = "1.0.130", features = ["rc"] }
 serde_derive = "1.0.130"
 serde_json = "1.0.68"
-vm-memory = { version = "0.6.0", features = ["backend-mmap", "backend-atomic"] }
+vm-memory = { version = "0.7.0", features = ["backend-mmap", "backend-atomic"] }
 vmm-sys-util = { version = "0.9.0", features = ["with-serde"] }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies.iced-x86]
