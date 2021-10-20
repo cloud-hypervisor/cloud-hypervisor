@@ -102,6 +102,25 @@ build_edk2() {
     popd
 }
 
+build_spdk_nvme() {
+    SPDK_DIR="$WORKLOADS_DIR/spdk"
+    SPDK_REPO="https://github.com/spdk/spdk.git"
+    checkout_repo "$SPDK_DIR" "$SPDK_REPO" master "f9c496b8e21a8f499df268818bf8b5d8e2b19f04"
+
+    pushd $SPDK_DIR
+    git submodule update --init
+    apt-get update
+    ./scripts/pkgdep.sh
+    ./configure --with-vfio-user
+    chmod +x /usr/local/lib/python3.8/dist-packages/ninja/data/bin/ninja
+    make -j `nproc`
+    mkdir /usr/local/bin/spdk-nvme
+    cp ./build/bin/nvmf_tgt /usr/local/bin/spdk-nvme
+    cp ./scripts/rpc.py /usr/local/bin/spdk-nvme
+    cp -r ./scripts/rpc /usr/local/bin/spdk-nvme
+    popd
+}
+
 update_workloads() {
     cp scripts/sha1sums-aarch64 $WORKLOADS_DIR
 
@@ -232,6 +251,9 @@ update_workloads() {
         echo "foo" > "$SHARED_DIR/file1"
         echo "bar" > "$SHARED_DIR/file3" || exit 1
     fi
+
+    # checkout and build SPDK NVMe
+    build_spdk_nvme
 
     # Check and build EDK2 binary
     build_edk2
