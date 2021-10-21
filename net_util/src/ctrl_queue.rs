@@ -21,8 +21,8 @@ pub enum Error {
     GuestMemory(GuestMemoryError),
     /// No control header descriptor
     NoControlHeaderDescriptor,
-    /// No queue pairs number.
-    NoQueuePairsDescriptor,
+    /// Missing the data descriptor in the chain.
+    NoDataDescriptor,
     /// No status descriptor
     NoStatusDescriptor,
     /// Failed adding used index
@@ -65,7 +65,7 @@ impl CtrlQueue {
                 .memory()
                 .read_obj(ctrl_desc.addr())
                 .map_err(Error::GuestMemory)?;
-            let data_desc = desc_chain.next().ok_or(Error::NoQueuePairsDescriptor)?;
+            let data_desc = desc_chain.next().ok_or(Error::NoDataDescriptor)?;
             let status_desc = desc_chain.next().ok_or(Error::NoStatusDescriptor)?;
 
             let ok = match u32::from(ctrl_hdr.class) {
