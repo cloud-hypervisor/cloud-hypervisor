@@ -19,7 +19,9 @@ use byteorder::{ByteOrder, LittleEndian};
 
 use super::defs;
 use super::{Result, VsockError};
-use crate::{get_host_address_range, DescriptorChain};
+use crate::{get_host_address_range, GuestMemoryMmap};
+use virtio_queue::DescriptorChain;
+use vm_memory::GuestMemoryAtomic;
 
 // The vsock packet header is defined by the C struct:
 //
@@ -103,7 +105,11 @@ impl VsockPacket {
     /// descriptor can optionally end the chain. Bounds and pointer checks are performed when
     /// creating the wrapper.
     ///
-    pub fn from_tx_virtq_head(head: &DescriptorChain) -> Result<Self> {
+    pub fn from_tx_virtq_head(
+        desc_chain: &mut DescriptorChain<GuestMemoryAtomic<GuestMemoryMmap>>,
+    ) -> Result<Self> {
+        let head = desc_chain.next().ok_or(VsockError::HdrDescMissing)?;
+
         // All buffers in the TX queue must be readable.
         //
         if head.is_write_only() {
@@ -111,12 +117,12 @@ impl VsockPacket {
         }
 
         // The packet header should fit inside the head descriptor.
-        if head.len < VSOCK_PKT_HDR_SIZE as u32 {
-            return Err(VsockError::HdrDescTooSmall(head.len));
+        if head.len() < VSOCK_PKT_HDR_SIZE as u32 {
+            return Err(VsockError::HdrDescTooSmall(head.len()));
         }
 
         let mut pkt = Self {
-            hdr: get_host_address_range(head.mem, head.addr, VSOCK_PKT_HDR_SIZE)
+            hdr: get_host_address_range(desc_chain.memory(), head.addr(), VSOCK_PKT_HDR_SIZE)
                 .ok_or(VsockError::GuestMemory)? as *mut u8,
             buf: None,
             buf_size: 0,
@@ -134,7 +140,7 @@ impl VsockPacket {
         }
 
         // If the packet header showed a non-zero length, there should be a data descriptor here.
-        let buf_desc = head.next_descriptor().ok_or(VsockError::BufDescMissing)?;
+        let buf_desc = desc_chain.next().ok_or(VsockError::BufDescMissing)?;
 
         // TX data should be read-only.
         if buf_desc.is_write_only() {
@@ -143,13 +149,13 @@ impl VsockPacket {
 
         // The data buffer should be large enough to fit the size of the data, as described by
         // the header descriptor.
-        if buf_desc.len < pkt.len() {
+        if buf_desc.len() < pkt.len() {
             return Err(VsockError::BufDescTooSmall);
         }
 
-        pkt.buf_size = buf_desc.len as usize;
+        pkt.buf_size = buf_desc.len() as usize;
         pkt.buf = Some(
-            get_host_address_range(buf_desc.mem, buf_desc.addr, pkt.buf_size)
+            get_host_address_range(desc_chain.memory(), buf_desc.addr(), pkt.buf_size)
                 .ok_or(VsockError::GuestMemory)? as *mut u8,
         );
 
@@ -161,7 +167,11 @@ impl VsockPacket {
     /// There must be two descriptors in the chain, both writable: a header descriptor and a data
     /// descriptor. Bounds and pointer checks are performed when creating the wrapper.
     ///
-    pub fn from_rx_virtq_head(head: &DescriptorChain) -> Result<Self> {
+    pub fn from_rx_virtq_head(
+        desc_chain: &mut DescriptorChain<GuestMemoryAtomic<GuestMemoryMmap>>,
+    ) -> Result<Self> {
+        let head = desc_chain.next().ok_or(VsockError::HdrDescMissing)?;
+
         // All RX buffers must be writable.
         //
         if !head.is_write_only() {
@@ -169,22 +179,22 @@ impl VsockPacket {
         }
 
         // The packet header should fit inside the head descriptor.
-        if head.len < VSOCK_PKT_HDR_SIZE as u32 {
-            return Err(VsockError::HdrDescTooSmall(head.len));
+        if head.len() < VSOCK_PKT_HDR_SIZE as u32 {
+            return Err(VsockError::HdrDescTooSmall(head.len()));
         }
 
         // All RX descriptor chains should have a header and a data descriptor.
         if !head.has_next() {
             return Err(VsockError::BufDescMissing);
         }
-        let buf_desc = head.next_descriptor().ok_or(VsockError::BufDescMissing)?;
-        let buf_size = buf_desc.len as usize;
+        let buf_desc = desc_chain.next().ok_or(VsockError::BufDescMissing)?;
+        let buf_size = buf_desc.len() as usize;
 
         Ok(Self {
-            hdr: get_host_address_range(head.mem, head.addr, VSOCK_PKT_HDR_SIZE)
+            hdr: get_host_address_range(desc_chain.memory(), head.addr(), VSOCK_PKT_HDR_SIZE)
                 .ok_or(VsockError::GuestMemory)? as *mut u8,
             buf: Some(
-                get_host_address_range(buf_desc.mem, buf_desc.addr, buf_size)
+                get_host_address_range(desc_chain.memory(), buf_desc.addr(), buf_size)
                     .ok_or(VsockError::GuestMemory)? as *mut u8,
             ),
             buf_size,
@@ -343,9 +353,9 @@ mod tests {
     use super::*;
     use crate::vsock::defs::MAX_PKT_BUF_SIZE;
     use crate::GuestMemoryMmap;
+    use virtio_queue::defs::VIRTQ_DESC_F_WRITE;
     use vm_memory::GuestAddress;
     use vm_virtio::queue::testing::VirtqDesc as GuestQDesc;
-    use vm_virtio::queue::VIRTQ_DESC_F_WRITE;
 
     macro_rules! create_context {
         ($test_ctx:ident, $handler_ctx:ident) => {
@@ -365,8 +375,9 @@ mod tests {
         };
         ($test_ctx:expr, $handler_ctx:expr, $err:pat, $ctor:ident, $vq:expr) => {
             match VsockPacket::$ctor(
-                &$handler_ctx.handler.queues[$vq]
-                    .iter(&$test_ctx.mem)
+                &mut $handler_ctx.handler.queues[$vq]
+                    .iter()
+                    .unwrap()
                     .next()
                     .unwrap(),
             ) {
@@ -394,8 +405,9 @@ mod tests {
             create_context!(test_ctx, handler_ctx);
 
             let pkt = VsockPacket::from_tx_virtq_head(
-                &handler_ctx.handler.queues[1]
-                    .iter(&test_ctx.mem)
+                &mut handler_ctx.handler.queues[1]
+                    .iter()
+                    .unwrap()
                     .next()
                     .unwrap(),
             )
@@ -430,8 +442,9 @@ mod tests {
             create_context!(test_ctx, handler_ctx);
             set_pkt_len(0, &handler_ctx.guest_txvq.dtable[0], &test_ctx.mem);
             let mut pkt = VsockPacket::from_tx_virtq_head(
-                &handler_ctx.handler.queues[1]
-                    .iter(&test_ctx.mem)
+                &mut handler_ctx.handler.queues[1]
+                    .iter()
+                    .unwrap()
                     .next()
                     .unwrap(),
             )
@@ -486,8 +499,9 @@ mod tests {
         {
             create_context!(test_ctx, handler_ctx);
             let pkt = VsockPacket::from_rx_virtq_head(
-                &handler_ctx.handler.queues[0]
-                    .iter(&test_ctx.mem)
+                &mut handler_ctx.handler.queues[0]
+                    .iter()
+                    .unwrap()
                     .next()
                     .unwrap(),
             )
@@ -541,8 +555,9 @@ mod tests {
 
         create_context!(test_ctx, handler_ctx);
         let mut pkt = VsockPacket::from_rx_virtq_head(
-            &handler_ctx.handler.queues[0]
-                .iter(&test_ctx.mem)
+            &mut handler_ctx.handler.queues[0]
+                .iter()
+                .unwrap()
                 .next()
                 .unwrap(),
         )
@@ -630,8 +645,9 @@ mod tests {
     fn test_packet_buf() {
         create_context!(test_ctx, handler_ctx);
         let mut pkt = VsockPacket::from_rx_virtq_head(
-            &handler_ctx.handler.queues[0]
-                .iter(&test_ctx.mem)
+            &mut handler_ctx.handler.queues[0]
+                .iter()
+                .unwrap()
                 .next()
                 .unwrap(),
         )

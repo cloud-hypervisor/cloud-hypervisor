@@ -6,7 +6,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use crate::{ActivateError, ActivateResult, Error, Queue};
+use crate::{ActivateError, ActivateResult, Error};
 use crate::{GuestMemoryMmap, GuestRegionMmap};
 use libc::EFD_NONBLOCK;
 use std::collections::HashMap;
@@ -17,6 +17,7 @@ use std::sync::{
     Arc, Barrier,
 };
 use std::thread;
+use virtio_queue::Queue;
 use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestUsize};
 use vm_migration::{MigratableError, Pausable};
 use vm_virtio::VirtioDeviceType;
@@ -31,9 +32,13 @@ pub trait VirtioInterrupt: Send + Sync {
     fn trigger(
         &self,
         int_type: &VirtioInterruptType,
-        queue: Option<&Queue>,
+        queue: Option<&Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
     ) -> std::result::Result<(), std::io::Error>;
-    fn notifier(&self, _int_type: &VirtioInterruptType, _queue: Option<&Queue>) -> Option<EventFd> {
+    fn notifier(
+        &self,
+        _int_type: &VirtioInterruptType,
+        _queue: Option<&Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
+    ) -> Option<EventFd> {
         None
     }
 }
@@ -107,7 +112,7 @@ pub trait VirtioDevice: Send {
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_evt: Arc<dyn VirtioInterrupt>,
-        queues: Vec<Queue>,
+        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
         queue_evts: Vec<EventFd>,
     ) -> ActivateResult;
 
@@ -247,7 +252,7 @@ impl VirtioCommon {
 
     pub fn activate(
         &mut self,
-        queues: &[Queue],
+        queues: &[Queue<GuestMemoryAtomic<GuestMemoryMmap>>],
         queue_evts: &[EventFd],
         interrupt_cb: &Arc<dyn VirtioInterrupt>,
     ) -> ActivateResult {

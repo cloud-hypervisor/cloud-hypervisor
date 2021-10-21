@@ -818,8 +818,9 @@ mod tests {
             let mut handler_ctx = vsock_test_ctx.create_epoll_handler_context();
             let stream = TestStream::new();
             let mut pkt = VsockPacket::from_rx_virtq_head(
-                &handler_ctx.handler.queues[0]
-                    .iter(&vsock_test_ctx.mem)
+                &mut handler_ctx.handler.queues[0]
+                    .iter()
+                    .unwrap()
                     .next()
                     .unwrap(),
             )

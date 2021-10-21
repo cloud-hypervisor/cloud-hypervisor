@@ -10,7 +10,6 @@ extern crate log;
 use std::error;
 use std::fs::File;
 use std::io;
-use std::num::Wrapping;
 use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
 use std::result;
 use std::sync::{Arc, Mutex, RwLock};
@@ -26,9 +25,10 @@ use vhost::vhost_user::{
     VhostUserSlaveReqHandlerMut,
 };
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
+use virtio_queue::Queue;
 use vm_memory::guest_memory::FileOffset;
-use vm_memory::{bitmap::AtomicBitmap, GuestAddress, MmapRegion};
-use vm_virtio::Queue;
+use vm_memory::GuestAddressSpace;
+use vm_memory::{bitmap::AtomicBitmap, GuestAddress, GuestMemoryAtomic, MmapRegion};
 use vmm_sys_util::eventfd::EventFd;
 
 pub type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
@@ -82,9 +82,6 @@ pub trait VhostUserBackend: Send + Sync + 'static {
 
     /// Tell the backend if EVENT_IDX has been negotiated.
     fn set_event_idx(&mut self, enabled: bool);
-
-    /// Update guest memory regions.
-    fn update_memory(&mut self, mem: GuestMemoryMmap) -> result::Result<(), io::Error>;
 
     /// This function gets called if the backend registered some additional
     /// listeners onto specific file descriptors. The library can handle
@@ -232,7 +229,7 @@ struct AddrMapping {
 }
 
 pub struct Vring {
-    queue: Queue,
+    queue: Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
     kick: Option<EventFd>,
     call: Option<EventFd>,
     #[allow(dead_code)]
@@ -241,9 +238,9 @@ pub struct Vring {
 }
 
 impl Vring {
-    fn new(max_queue_size: u16) -> Self {
+    fn new(mem: GuestMemoryAtomic<GuestMemoryMmap>, max_queue_size: u16) -> Self {
         Vring {
-            queue: Queue::new(max_queue_size),
+            queue: Queue::new(mem, max_queue_size),
             kick: None,
             call: None,
             err: None,
@@ -251,7 +248,7 @@ impl Vring {
         }
     }
 
-    pub fn mut_queue(&mut self) -> &mut Queue {
+    pub fn mut_queue(&mut self) -> &mut Queue<GuestMemoryAtomic<GuestMemoryMmap>> {
         &mut self.queue
     }
 
@@ -468,7 +465,7 @@ struct VhostUserHandler<S: VhostUserBackend> {
     max_queue_size: usize,
     queues_per_thread: Vec<u64>,
     mappings: Vec<AddrMapping>,
-    guest_memory: Option<GuestMemoryMmap>,
+    guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
     vrings: Vec<Arc<RwLock<Vring>>>,
     worker_threads: Vec<thread::JoinHandle<VringWorkerResult<()>>>,
 }
@@ -478,10 +475,14 @@ impl<S: VhostUserBackend> VhostUserHandler<S> {
         let num_queues = backend.read().unwrap().num_queues();
         let max_queue_size = backend.read().unwrap().max_queue_size();
         let queues_per_thread = backend.read().unwrap().queues_per_thread();
+        let guest_memory = GuestMemoryAtomic::new(GuestMemoryMmap::new());
 
         let mut vrings: Vec<Arc<RwLock<Vring>>> = Vec::new();
         for _ in 0..num_queues {
-            let vring = Arc::new(RwLock::new(Vring::new(max_queue_size as u16)));
+            let vring = Arc::new(RwLock::new(Vring::new(
+                guest_memory.clone(),
+                max_queue_size as u16,
+            )));
             vrings.push(vring);
         }
 
@@ -544,7 +545,7 @@ impl<S: VhostUserBackend> VhostUserHandler<S> {
             max_queue_size,
             queues_per_thread,
             mappings: Vec::new(),
-            guest_memory: None,
+            guest_memory,
             vrings,
             worker_threads,
         })
@@ -649,15 +650,7 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandlerMut for VhostUserHandler<S> {
         let mem = GuestMemoryMmap::from_ranges_with_files(regions).map_err(|e| {
             VhostUserError::ReqHandlerError(io::Error::new(io::ErrorKind::Other, e))
         })?;
-        self.backend
-            .write()
-            .unwrap()
-            .update_memory(mem.clone())
-            .map_err(|e| {
-                VhostUserError::ReqHandlerError(io::Error::new(io::ErrorKind::Other, e))
-            })?;
-
-        self.guest_memory = Some(mem);
+        self.guest_memory.lock().unwrap().replace(mem);
         self.mappings = mappings;
 
         Ok(())
@@ -671,7 +664,12 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandlerMut for VhostUserHandler<S> {
         if index as usize >= self.num_queues || num == 0 || num as usize > self.max_queue_size {
             return Err(VhostUserError::InvalidParam);
         }
-        self.vrings[index as usize].write().unwrap().queue.size = num as u16;
+        self.vrings[index as usize]
+            .write()
+            .unwrap()
+            .queue
+            .state
+            .size = num as u16;
         Ok(())
     }
 
@@ -702,13 +700,20 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandlerMut for VhostUserHandler<S> {
                 .write()
                 .unwrap()
                 .queue
+                .state
                 .desc_table = GuestAddress(desc_table);
             self.vrings[index as usize]
                 .write()
                 .unwrap()
                 .queue
+                .state
                 .avail_ring = GuestAddress(avail_ring);
-            self.vrings[index as usize].write().unwrap().queue.used_ring = GuestAddress(used_ring);
+            self.vrings[index as usize]
+                .write()
+                .unwrap()
+                .queue
+                .state
+                .used_ring = GuestAddress(used_ring);
             Ok(())
         } else {
             Err(VhostUserError::InvalidParam)
@@ -720,8 +725,7 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandlerMut for VhostUserHandler<S> {
             .write()
             .unwrap()
             .queue
-            .next_avail = Wrapping(base as u16);
-        self.vrings[index as usize].write().unwrap().queue.next_used = Wrapping(base as u16);
+            .set_next_avail(base as u16);
 
         let event_idx: bool = (self.acked_features & (1 << VIRTIO_RING_F_EVENT_IDX)) != 0;
         self.vrings[index as usize]
@@ -742,7 +746,12 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandlerMut for VhostUserHandler<S> {
         // that file descriptor is readable) on the descriptor specified by
         // VHOST_USER_SET_VRING_KICK, and stop ring upon receiving
         // VHOST_USER_GET_VRING_BASE.
-        self.vrings[index as usize].write().unwrap().queue.ready = false;
+        self.vrings[index as usize]
+            .write()
+            .unwrap()
+            .queue
+            .state
+            .ready = false;
         if let Some(fd) = self.vrings[index as usize].read().unwrap().kick.as_ref() {
             for (thread_index, queues_mask) in self.queues_per_thread.iter().enumerate() {
                 let shifted_queues_mask = queues_mask >> index;
@@ -764,8 +773,7 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandlerMut for VhostUserHandler<S> {
             .read()
             .unwrap()
             .queue
-            .next_avail
-            .0 as u16;
+            .next_avail();
 
         Ok(VhostUserVringState::new(index, u32::from(next_avail)))
     }
@@ -783,7 +791,12 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandlerMut for VhostUserHandler<S> {
         // that file descriptor is readable) on the descriptor specified by
         // VHOST_USER_SET_VRING_KICK, and stop ring upon receiving
         // VHOST_USER_GET_VRING_BASE.
-        self.vrings[index as usize].write().unwrap().queue.ready = true;
+        self.vrings[index as usize]
+            .write()
+            .unwrap()
+            .queue
+            .state
+            .ready = true;
         if let Some(fd) = self.vrings[index as usize].read().unwrap().kick.as_ref() {
             for (thread_index, queues_mask) in self.queues_per_thread.iter().enumerate() {
                 let shifted_queues_mask = queues_mask >> index;
@@ -890,25 +903,14 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandlerMut for VhostUserHandler<S> {
             )?,
         );
 
-        let guest_memory = if let Some(guest_memory) = &self.guest_memory {
-            guest_memory.insert_region(guest_region).map_err(|e| {
-                VhostUserError::ReqHandlerError(io::Error::new(io::ErrorKind::Other, e))
-            })?
-        } else {
-            GuestMemoryMmap::from_arc_regions(vec![guest_region]).map_err(|e| {
-                VhostUserError::ReqHandlerError(io::Error::new(io::ErrorKind::Other, e))
-            })?
-        };
-
-        self.backend
-            .write()
-            .unwrap()
-            .update_memory(guest_memory.clone())
+        let guest_memory = self
+            .guest_memory
+            .memory()
+            .insert_region(guest_region)
             .map_err(|e| {
                 VhostUserError::ReqHandlerError(io::Error::new(io::ErrorKind::Other, e))
             })?;
-
-        self.guest_memory = Some(guest_memory);
+        self.guest_memory.lock().unwrap().replace(guest_memory);
 
         self.mappings.push(AddrMapping {
             vmm_addr: region.user_addr,
@@ -920,26 +922,14 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandlerMut for VhostUserHandler<S> {
     }
 
     fn remove_mem_region(&mut self, region: &VhostUserSingleMemoryRegion) -> VhostUserResult<()> {
-        let guest_memory = if let Some(guest_memory) = &self.guest_memory {
-            let (updated_guest_memory, _) = guest_memory
-                .remove_region(GuestAddress(region.guest_phys_addr), region.memory_size)
-                .map_err(|e| {
-                    VhostUserError::ReqHandlerError(io::Error::new(io::ErrorKind::Other, e))
-                })?;
-            updated_guest_memory
-        } else {
-            return Err(VhostUserError::InvalidOperation);
-        };
-
-        self.backend
-            .write()
-            .unwrap()
-            .update_memory(guest_memory.clone())
+        let (guest_memory, _) = self
+            .guest_memory
+            .memory()
+            .remove_region(GuestAddress(region.guest_phys_addr), region.memory_size)
             .map_err(|e| {
                 VhostUserError::ReqHandlerError(io::Error::new(io::ErrorKind::Other, e))
             })?;
-
-        self.guest_memory = Some(guest_memory);
+        self.guest_memory.lock().unwrap().replace(guest_memory);
 
         self.mappings
             .retain(|mapping| mapping.gpa_base != region.guest_phys_addr);

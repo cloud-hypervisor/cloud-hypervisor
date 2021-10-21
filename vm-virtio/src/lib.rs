@@ -10,16 +10,10 @@
 
 //! Implements virtio queues
 
-#[macro_use]
-extern crate log;
-
 use std::fmt;
 
 pub mod queue;
 pub use queue::*;
-
-pub type VirtioIommuRemapping =
-    Box<dyn Fn(u64) -> std::result::Result<u64, std::io::Error> + Send + Sync>;
 
 pub const VIRTIO_MSI_NO_VECTOR: u16 = 0xffff;
 

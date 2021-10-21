@@ -26,6 +26,7 @@ pub enum EpollHelperError {
     Ctl(std::io::Error),
     IoError(std::io::Error),
     Wait(std::io::Error),
+    QueueRingIndex(virtio_queue::Error),
 }
 
 pub const EPOLL_HELPER_EVENT_PAUSE: u16 = 0;

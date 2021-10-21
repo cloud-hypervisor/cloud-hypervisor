@@ -91,9 +91,10 @@ use vfio_ioctls::{VfioContainer, VfioDevice};
 use virtio_devices::transport::VirtioPciDevice;
 use virtio_devices::transport::VirtioTransport;
 use virtio_devices::vhost_user::VhostUserConfig;
-use virtio_devices::VirtioMemMappingSource;
-use virtio_devices::{DmaRemapping, Endpoint, IommuMapping};
+use virtio_devices::{AccessPlatformMapping, VirtioMemMappingSource};
+use virtio_devices::{Endpoint, IommuMapping};
 use virtio_devices::{VirtioSharedMemory, VirtioSharedMemoryList};
+use virtio_queue::AccessPlatform;
 use vm_allocator::SystemAllocator;
 use vm_device::dma_mapping::vfio::VfioDmaMapping;
 use vm_device::interrupt::{
@@ -109,7 +110,7 @@ use vm_migration::{
     protocol::MemoryRangeTable, Migratable, MigratableError, Pausable, Snapshot,
     SnapshotDataSection, Snapshottable, Transportable,
 };
-use vm_virtio::{VirtioDeviceType, VirtioIommuRemapping};
+use vm_virtio::VirtioDeviceType;
 use vmm_sys_util::eventfd::EventFd;
 
 #[cfg(target_arch = "aarch64")]
@@ -3165,26 +3166,18 @@ impl DeviceManager {
         // about a virtio config change.
         let msix_num = (virtio_device.lock().unwrap().queue_max_sizes().len() + 1) as u16;
 
-        // Create the callback from the implementation of the DmaRemapping
-        // trait. The point with the callback is to simplify the code as we
-        // know about the device ID from this point.
-        let iommu_mapping_cb: Option<Arc<VirtioIommuRemapping>> =
-            if let Some(mapping) = iommu_mapping {
-                let mapping_clone = mapping.clone();
-                Some(Arc::new(Box::new(move |addr: u64| {
-                    mapping_clone.translate(pci_device_bdf, addr).map_err(|e| {
-                        std::io::Error::new(
-                            std::io::ErrorKind::Other,
-                            format!(
-                                "failed to translate addr 0x{:x} for device 00:{:02x}.0 {}",
-                                addr, pci_device_bdf, e
-                            ),
-                        )
-                    })
-                }) as VirtioIommuRemapping))
-            } else {
-                None
-            };
+        // Create the AccessPlatform trait from the implementation IommuMapping.
+        // This will provide address translation for any virtio device sitting
+        // behind a vIOMMU.
+        let access_platform: Option<Arc<dyn AccessPlatform>> = if let Some(mapping) = iommu_mapping
+        {
+            Some(Arc::new(AccessPlatformMapping::new(
+                pci_device_bdf,
+                mapping.clone(),
+            )))
+        } else {
+            None
+        };
 
         let memory = self.memory_manager.lock().unwrap().guest_memory();
         let mut virtio_pci_device = VirtioPciDevice::new(
@@ -3192,7 +3185,7 @@ impl DeviceManager {
             memory,
             virtio_device,
             msix_num,
-            iommu_mapping_cb,
+            access_platform,
             &self.msi_interrupt_manager,
             pci_device_bdf,
             self.activate_evt

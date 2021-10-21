@@ -6,9 +6,9 @@ use crate::thread_helper::spawn_virtio_thread;
 use crate::vhost_user::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
 use crate::vhost_user::{Error, Result, VhostUserCommon};
 use crate::{
-    ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue, VirtioCommon,
-    VirtioDevice, VirtioDeviceType, VirtioInterrupt, EPOLL_HELPER_EVENT_LAST,
-    VIRTIO_F_RING_EVENT_IDX, VIRTIO_F_VERSION_1,
+    ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, VirtioCommon, VirtioDevice,
+    VirtioDeviceType, VirtioInterrupt, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_RING_EVENT_IDX,
+    VIRTIO_F_VERSION_1,
 };
 use crate::{GuestMemoryMmap, GuestRegionMmap};
 use net_util::{build_net_config_space, CtrlQueue, MacAddr, VirtioNetConfig};
@@ -29,7 +29,8 @@ use virtio_bindings::bindings::virtio_net::{
     VIRTIO_NET_F_HOST_ECN, VIRTIO_NET_F_HOST_TSO4, VIRTIO_NET_F_HOST_TSO6, VIRTIO_NET_F_HOST_UFO,
     VIRTIO_NET_F_MAC, VIRTIO_NET_F_MRG_RXBUF,
 };
-use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic};
+use virtio_queue::Queue;
+use vm_memory::{ByteValued, GuestMemoryAtomic};
 use vm_migration::{
     protocol::MemoryRangeTable, Migratable, MigratableError, Pausable, Snapshot, Snapshottable,
     Transportable, VersionMapped,
@@ -62,7 +63,7 @@ pub struct NetCtrlEpollHandler {
     pub pause_evt: EventFd,
     pub ctrl_q: CtrlQueue,
     pub queue_evt: EventFd,
-    pub queue: Queue,
+    pub queue: Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
 }
 
 impl NetCtrlEpollHandler {
@@ -84,12 +85,11 @@ impl EpollHelperHandler for NetCtrlEpollHandler {
         let ev_type = event.data as u16;
         match ev_type {
             CTRL_QUEUE_EVENT => {
-                let mem = self.mem.memory();
                 if let Err(e) = self.queue_evt.read() {
                     error!("failed to get ctl queue event: {:?}", e);
                     return true;
                 }
-                if let Err(e) = self.ctrl_q.process(&mem, &mut self.queue) {
+                if let Err(e) = self.ctrl_q.process(&mut self.queue) {
                     error!("failed to process ctrl queue: {:?}", e);
                     return true;
                 }
@@ -308,7 +308,7 @@ impl VirtioDevice for Net {
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        mut queues: Vec<Queue>,
+        mut queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;

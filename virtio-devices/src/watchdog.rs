@@ -7,8 +7,8 @@
 
 use super::Error as DeviceError;
 use super::{
-    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
-    VirtioCommon, VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_VERSION_1,
+    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, VirtioCommon,
+    VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_VERSION_1,
 };
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
@@ -25,7 +25,8 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::time::Instant;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use vm_memory::{Bytes, GuestAddressSpace, GuestMemoryAtomic};
+use virtio_queue::Queue;
+use vm_memory::{Bytes, GuestMemoryAtomic};
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
@@ -46,8 +47,7 @@ const WATCHDOG_TIMER_INTERVAL: i64 = 15;
 const WATCHDOG_TIMEOUT: u64 = WATCHDOG_TIMER_INTERVAL as u64 + 5;
 
 struct WatchdogEpollHandler {
-    queues: Vec<Queue>,
-    mem: GuestMemoryAtomic<GuestMemoryMmap>,
+    queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     queue_evt: EventFd,
     kill_evt: EventFd,
@@ -64,12 +64,13 @@ impl WatchdogEpollHandler {
         let queue = &mut self.queues[0];
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
-        let mem = self.mem.memory();
-        for avail_desc in queue.iter(&mem) {
+        for mut desc_chain in queue.iter().unwrap() {
+            let desc = desc_chain.next().unwrap();
+
             let mut len = 0;
 
-            if avail_desc.is_write_only() && mem.write_obj(1u8, avail_desc.addr).is_ok() {
-                len = avail_desc.len;
+            if desc.is_write_only() && desc_chain.memory().write_obj(1u8, desc.addr()).is_ok() {
+                len = desc.len();
                 // If this is the first "ping" then setup the timer
                 if self.last_ping_time.lock().unwrap().is_none() {
                     info!(
@@ -83,12 +84,12 @@ impl WatchdogEpollHandler {
                 self.last_ping_time.lock().unwrap().replace(Instant::now());
             }
 
-            used_desc_heads[used_count] = (avail_desc.index, len);
+            used_desc_heads[used_count] = (desc_chain.head_index(), len);
             used_count += 1;
         }
 
         for &(desc_index, len) in &used_desc_heads[..used_count] {
-            queue.add_used(&mem, desc_index, len);
+            queue.add_used(desc_index, len).unwrap();
         }
         used_count > 0
     }
@@ -288,9 +289,9 @@ impl VirtioDevice for Watchdog {
 
     fn activate(
         &mut self,
-        mem: GuestMemoryAtomic<GuestMemoryMmap>,
+        _mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        queues: Vec<Queue>,
+        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
@@ -308,7 +309,6 @@ impl VirtioDevice for Watchdog {
 
         let mut handler = WatchdogEpollHandler {
             queues,
-            mem,
             interrupt_cb,
             queue_evt: queue_evts.remove(0),
             kill_evt,

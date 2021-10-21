@@ -17,7 +17,6 @@ use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::Read;
 use std::io::{Seek, SeekFrom, Write};
-use std::num::Wrapping;
 use std::ops::DerefMut;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
@@ -30,7 +29,7 @@ use std::vec::Vec;
 use std::{convert, error, fmt, io};
 use vhost::vhost_user::message::*;
 use vhost::vhost_user::Listener;
-use vhost_user_backend::{GuestMemoryMmap, VhostUserBackend, VhostUserDaemon, Vring};
+use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring};
 use virtio_bindings::bindings::virtio_blk::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use vm_memory::ByteValued;
@@ -87,7 +86,6 @@ impl convert::From<Error> for io::Error {
 }
 
 struct VhostUserBlkThread {
-    mem: Option<GuestMemoryMmap>,
     disk_image: Arc<Mutex<dyn DiskFile>>,
     disk_image_id: Vec<u8>,
     disk_nsectors: u64,
@@ -104,7 +102,6 @@ impl VhostUserBlkThread {
         writeback: Arc<AtomicBool>,
     ) -> Result<Self> {
         Ok(VhostUserBlkThread {
-            mem: None,
             disk_image,
             disk_image_id,
             disk_nsectors,
@@ -116,22 +113,18 @@ impl VhostUserBlkThread {
 
     fn process_queue(&mut self, vring: &mut Vring) -> bool {
         let mut used_any = false;
-        let mem = match self.mem.as_ref() {
-            Some(m) => m,
-            None => return false,
-        };
 
-        while let Some(head) = vring.mut_queue().iter(mem).next() {
+        while let Some(mut desc_chain) = vring.mut_queue().iter().unwrap().next() {
             debug!("got an element in the queue");
             let len;
-            match Request::parse(&head, mem) {
+            match Request::parse(&mut desc_chain) {
                 Ok(mut request) => {
                     debug!("element is a valid request");
                     request.set_writeback(self.writeback.load(Ordering::Acquire));
                     let status = match request.execute(
                         &mut self.disk_image.lock().unwrap().deref_mut(),
                         self.disk_nsectors,
-                        mem,
+                        desc_chain.memory(),
                         &self.disk_image_id,
                     ) {
                         Ok(l) => {
@@ -143,7 +136,10 @@ impl VhostUserBlkThread {
                             e.status()
                         }
                     };
-                    mem.write_obj(status, request.status_addr).unwrap();
+                    desc_chain
+                        .memory()
+                        .write_obj(status, request.status_addr)
+                        .unwrap();
                 }
                 Err(err) => {
                     error!("failed to parse available descriptor chain: {:?}", err);
@@ -153,8 +149,8 @@ impl VhostUserBlkThread {
 
             if self.event_idx {
                 let queue = vring.mut_queue();
-                if let Some(used_idx) = queue.add_used(mem, head.index, len) {
-                    if queue.needs_notification(mem, Wrapping(used_idx)) {
+                if queue.add_used(desc_chain.head_index(), len).is_ok() {
+                    if queue.needs_notification().unwrap() {
                         debug!("signalling queue");
                         vring.signal_used_queue().unwrap();
                     } else {
@@ -164,7 +160,10 @@ impl VhostUserBlkThread {
                 }
             } else {
                 debug!("signalling queue");
-                vring.mut_queue().add_used(mem, head.index, len);
+                vring
+                    .mut_queue()
+                    .add_used(desc_chain.head_index(), len)
+                    .unwrap();
                 vring.signal_used_queue().unwrap();
                 used_any = true;
             }
@@ -316,13 +315,6 @@ impl VhostUserBackend for VhostUserBlkBackend {
         }
     }
 
-    fn update_memory(&mut self, mem: GuestMemoryMmap) -> VhostUserBackendResult<()> {
-        for thread in self.threads.iter() {
-            thread.lock().unwrap().mem = Some(mem.clone());
-        }
-        Ok(())
-    }
-
     fn handle_event(
         &self,
         device_event: u16,
@@ -360,9 +352,7 @@ impl VhostUserBackend for VhostUserBlkBackend {
                     // calling process_queue() until it stops finding new
                     // requests on the queue.
                     loop {
-                        vring
-                            .mut_queue()
-                            .update_avail_event(thread.mem.as_ref().unwrap());
+                        vring.mut_queue().enable_notification().unwrap();
                         if !thread.process_queue(&mut vring) {
                             break;
                         }

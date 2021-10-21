@@ -51,7 +51,7 @@ pub use self::rng::*;
 pub use self::vsock::*;
 pub use self::watchdog::*;
 use vm_memory::{bitmap::AtomicBitmap, GuestAddress, GuestMemory};
-use vm_virtio::{queue::*, VirtioDeviceType};
+use vm_virtio::VirtioDeviceType;
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 type GuestRegionMmap = vm_memory::GuestRegionMmap<AtomicBitmap>;
@@ -115,6 +115,8 @@ pub enum Error {
     SetShmRegionsNotSupported,
     NetQueuePair(::net_util::NetQueuePairError),
     ApplySeccompFilter(seccompiler::Error),
+    QueueAddUsed(virtio_queue::Error),
+    QueueIterator(virtio_queue::Error),
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]

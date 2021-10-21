@@ -36,11 +36,11 @@ use std::sync::{Arc, Mutex};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_bindings::bindings::virtio_blk::*;
+use virtio_queue::DescriptorChain;
 use vm_memory::{
     bitmap::AtomicBitmap, bitmap::Bitmap, ByteValued, Bytes, GuestAddress, GuestMemory,
-    GuestMemoryError,
+    GuestMemoryAtomic, GuestMemoryError,
 };
-use vm_virtio::DescriptorChain;
 use vmm_sys_util::eventfd::EventFd;
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
@@ -179,25 +179,32 @@ pub struct Request {
 
 impl Request {
     pub fn parse(
-        avail_desc: &DescriptorChain,
-        mem: &GuestMemoryMmap,
+        desc_chain: &mut DescriptorChain<GuestMemoryAtomic<GuestMemoryMmap>>,
     ) -> result::Result<Request, Error> {
+        let hdr_desc = desc_chain
+            .next()
+            .ok_or(Error::DescriptorChainTooShort)
+            .map_err(|e| {
+                error!("Missing head descriptor");
+                e
+            })?;
+
         // The head contains the request type which MUST be readable.
-        if avail_desc.is_write_only() {
+        if hdr_desc.is_write_only() {
             return Err(Error::UnexpectedWriteOnlyDescriptor);
         }
 
         let mut req = Request {
-            request_type: request_type(mem, avail_desc.addr)?,
-            sector: sector(mem, avail_desc.addr)?,
+            request_type: request_type(desc_chain.memory(), hdr_desc.addr())?,
+            sector: sector(desc_chain.memory(), hdr_desc.addr())?,
             data_descriptors: Vec::new(),
             status_addr: GuestAddress(0),
             writeback: true,
         };
 
         let status_desc;
-        let mut desc = avail_desc
-            .next_descriptor()
+        let mut desc = desc_chain
+            .next()
             .ok_or(Error::DescriptorChainTooShort)
             .map_err(|e| {
                 error!("Only head descriptor present: request = {:?}", req);
@@ -222,9 +229,9 @@ impl Request {
                 if !desc.is_write_only() && req.request_type == RequestType::GetDeviceId {
                     return Err(Error::UnexpectedReadOnlyDescriptor);
                 }
-                req.data_descriptors.push((desc.addr, desc.len));
-                desc = desc
-                    .next_descriptor()
+                req.data_descriptors.push((desc.addr(), desc.len()));
+                desc = desc_chain
+                    .next()
                     .ok_or(Error::DescriptorChainTooShort)
                     .map_err(|e| {
                         error!("DescriptorChain corrupted: request = {:?}", req);
@@ -239,11 +246,11 @@ impl Request {
             return Err(Error::UnexpectedReadOnlyDescriptor);
         }
 
-        if status_desc.len < 1 {
+        if status_desc.len() < 1 {
             return Err(Error::DescriptorLengthTooSmall);
         }
 
-        req.status_addr = status_desc.addr;
+        req.status_addr = status_desc.addr();
 
         Ok(req)
     }

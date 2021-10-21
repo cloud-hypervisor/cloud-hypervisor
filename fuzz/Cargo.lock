@@ -105,6 +105,7 @@ dependencies = [
  "versionize_derive",
  "vhdx",
  "virtio-bindings",
+ "virtio-queue",
  "vm-memory",
  "vm-virtio",
  "vmm-sys-util",
@@ -178,6 +179,7 @@ dependencies = [
  "seccompiler",
  "vhdx",
  "virtio-devices",
+ "virtio-queue",
  "vm-memory",
  "vm-virtio",
  "vmm-sys-util",
@@ -401,6 +403,7 @@ dependencies = [
  "versionize",
  "versionize_derive",
  "virtio-bindings",
+ "virtio-queue",
  "vm-memory",
  "vm-virtio",
  "vmm-sys-util",
@@ -786,11 +789,22 @@ dependencies = [
  "versionize_derive",
  "vhost",
  "virtio-bindings",
+ "virtio-queue",
  "vm-allocator",
  "vm-device",
  "vm-memory",
  "vm-migration",
  "vm-virtio",
+ "vmm-sys-util",
+]
+
+[[package]]
+name = "virtio-queue"
+version = "0.1.0"
+source = "git+https://github.com/sboeuf/vm-virtio?branch=fork_vm_virtio#223246e132e49bba58adb3d4156e25ff977c0eb1"
+dependencies = [
+ "log",
+ "vm-memory",
  "vmm-sys-util",
 ]
 
@@ -853,6 +867,7 @@ version = "0.1.0"
 dependencies = [
  "log",
  "virtio-bindings",
+ "virtio-queue",
  "vm-memory",
 ]
 
@@ -893,6 +908,7 @@ dependencies = [
  "vfio_user",
  "vhdx",
  "virtio-devices",
+ "virtio-queue",
  "vm-allocator",
  "vm-device",
  "vm-memory",

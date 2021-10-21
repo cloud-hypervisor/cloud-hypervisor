@@ -1,7 +1,6 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::super::{Descriptor, Queue};
 use super::{Error, Result};
 use crate::vhost_user::Inflight;
 use crate::{
@@ -13,6 +12,7 @@ use std::ffi;
 use std::fs::File;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::UnixListener;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
@@ -23,7 +23,10 @@ use vhost::vhost_user::message::{
 };
 use vhost::vhost_user::{Master, MasterReqHandler, VhostUserMaster, VhostUserMasterReqHandler};
 use vhost::{VhostBackend, VhostUserDirtyLogRegion, VhostUserMemoryRegionInfo, VringConfigData};
-use vm_memory::{Address, Error as MmapError, FileOffset, GuestMemory, GuestMemoryRegion};
+use virtio_queue::{Descriptor, Queue};
+use vm_memory::{
+    Address, Error as MmapError, FileOffset, GuestMemory, GuestMemoryAtomic, GuestMemoryRegion,
+};
 use vm_migration::protocol::MemoryRangeTable;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -148,7 +151,7 @@ impl VhostUserHandle {
     pub fn setup_vhost_user<S: VhostUserMasterReqHandler>(
         &mut self,
         mem: &GuestMemoryMmap,
-        queues: Vec<Queue>,
+        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
         queue_evts: Vec<EventFd>,
         virtio_interrupt: &Arc<dyn VirtioInterrupt>,
         acked_features: u64,
@@ -203,29 +206,37 @@ impl VhostUserHandle {
             let actual_size: usize = queue.actual_size().try_into().unwrap();
 
             let config_data = VringConfigData {
-                queue_max_size: queue.get_max_size(),
+                queue_max_size: queue.max_size(),
                 queue_size: queue.actual_size(),
                 flags: 0u32,
                 desc_table_addr: get_host_address_range(
                     mem,
-                    queue.desc_table,
+                    queue.state.desc_table,
                     actual_size * std::mem::size_of::<Descriptor>(),
                 )
                 .ok_or(Error::DescriptorTableAddress)? as u64,
                 // The used ring is {flags: u16; idx: u16; virtq_used_elem [{id: u16, len: u16}; actual_size]},
                 // i.e. 4 + (4 + 4) * actual_size.
-                used_ring_addr: get_host_address_range(mem, queue.used_ring, 4 + actual_size * 8)
-                    .ok_or(Error::UsedAddress)? as u64,
+                used_ring_addr: get_host_address_range(
+                    mem,
+                    queue.state.used_ring,
+                    4 + actual_size * 8,
+                )
+                .ok_or(Error::UsedAddress)? as u64,
                 // The used ring is {flags: u16; idx: u16; elem [u16; actual_size]},
                 // i.e. 4 + (2) * actual_size.
-                avail_ring_addr: get_host_address_range(mem, queue.avail_ring, 4 + actual_size * 2)
-                    .ok_or(Error::AvailAddress)? as u64,
+                avail_ring_addr: get_host_address_range(
+                    mem,
+                    queue.state.avail_ring,
+                    4 + actual_size * 2,
+                )
+                .ok_or(Error::AvailAddress)? as u64,
                 log_addr: None,
             };
 
             vrings_info.push(VringInfo {
                 config_data,
-                used_guest_addr: queue.used_ring.raw_value(),
+                used_guest_addr: queue.state.used_ring.raw_value(),
             });
 
             self.vu
@@ -235,8 +246,9 @@ impl VhostUserHandle {
                 .set_vring_base(
                     queue_index,
                     queue
-                        .used_index_from_memory(mem)
-                        .map_err(Error::GetAvailableIndex)?,
+                        .avail_idx(Ordering::Acquire)
+                        .map_err(Error::GetAvailableIndex)?
+                        .0,
                 )
                 .map_err(Error::VhostUserSetVringBase)?;
 
@@ -317,7 +329,7 @@ impl VhostUserHandle {
     pub fn reinitialize_vhost_user<S: VhostUserMasterReqHandler>(
         &mut self,
         mem: &GuestMemoryMmap,
-        queues: Vec<Queue>,
+        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
         queue_evts: Vec<EventFd>,
         virtio_interrupt: &Arc<dyn VirtioInterrupt>,
         acked_features: u64,

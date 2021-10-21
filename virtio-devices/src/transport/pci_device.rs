@@ -10,7 +10,7 @@ use super::VirtioPciCommonConfig;
 use crate::transport::VirtioTransport;
 use crate::GuestMemoryMmap;
 use crate::{
-    ActivateResult, Queue, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
+    ActivateResult, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
     DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED, DEVICE_FEATURES_OK,
     DEVICE_INIT,
 };
@@ -24,30 +24,28 @@ use pci::{
 use std::any::Any;
 use std::cmp;
 use std::io::Write;
-use std::num::Wrapping;
 use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
+use virtio_queue::AccessPlatform;
+use virtio_queue::{defs::VIRTQ_MSI_NO_VECTOR, Error as QueueError, Queue};
 use vm_allocator::SystemAllocator;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
 };
 use vm_device::BusDevice;
-use vm_memory::{
-    Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestUsize, Le32,
-};
+use vm_memory::{Address, ByteValued, GuestAddress, GuestMemoryAtomic, GuestUsize, Le32};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
 };
-use vm_virtio::{queue, VirtioIommuRemapping, VIRTIO_MSI_NO_VECTOR};
 use vmm_sys_util::{errno::Result, eventfd::EventFd};
 
 #[derive(Debug)]
 enum Error {
     /// Failed to retrieve queue ring's index.
-    QueueRingIndex(queue::Error),
+    QueueRingIndex(QueueError),
 }
 
 #[allow(clippy::enum_variant_names)]
@@ -309,7 +307,7 @@ pub struct VirtioPciDevice {
     interrupt_source_group: Arc<dyn InterruptSourceGroup>,
 
     // virtio queues
-    queues: Vec<Queue>,
+    queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
     queue_evts: Vec<EventFd>,
 
     // Guest memory
@@ -348,7 +346,7 @@ impl VirtioPciDevice {
         memory: GuestMemoryAtomic<GuestMemoryMmap>,
         device: Arc<Mutex<dyn VirtioDevice>>,
         msix_num: u16,
-        iommu_mapping_cb: Option<Arc<VirtioIommuRemapping>>,
+        access_platform: Option<Arc<dyn AccessPlatform>>,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         pci_device_bdf: u32,
         activate_evt: EventFd,
@@ -363,8 +361,11 @@ impl VirtioPciDevice {
             .queue_max_sizes()
             .iter()
             .map(|&s| {
-                let mut queue = Queue::new(s);
-                queue.iommu_mapping_cb = iommu_mapping_cb.clone();
+                let mut queue = Queue::<
+                    GuestMemoryAtomic<GuestMemoryMmap>,
+                    virtio_queue::QueueState<GuestMemoryAtomic<GuestMemoryMmap>>,
+                >::new(memory.clone(), s);
+                queue.state.access_platform = access_platform.clone();
                 queue
             })
             .collect();
@@ -432,7 +433,7 @@ impl VirtioPciDevice {
                 device_feature_select: 0,
                 driver_feature_select: 0,
                 queue_select: 0,
-                msix_config: Arc::new(AtomicU16::new(VIRTIO_MSI_NO_VECTOR)),
+                msix_config: Arc::new(AtomicU16::new(VIRTQ_MSI_NO_VECTOR)),
             },
             msix_config,
             msix_num,
@@ -472,13 +473,13 @@ impl VirtioPciDevice {
                 .queues
                 .iter()
                 .map(|q| QueueState {
-                    max_size: q.max_size,
-                    size: q.size,
-                    ready: q.ready,
-                    vector: q.vector,
-                    desc_table: q.desc_table.0,
-                    avail_ring: q.avail_ring.0,
-                    used_ring: q.used_ring.0,
+                    max_size: q.max_size(),
+                    size: q.state.size,
+                    ready: q.state.ready,
+                    vector: q.state.vector,
+                    desc_table: q.state.desc_table.0,
+                    avail_ring: q.state.avail_ring.0,
+                    used_ring: q.state.used_ring.0,
                 })
                 .collect(),
         }
@@ -491,27 +492,25 @@ impl VirtioPciDevice {
             .store(state.interrupt_status, Ordering::Release);
 
         // Update virtqueues indexes for both available and used rings.
-        if let Some(mem) = self.memory.as_ref() {
-            let mem = mem.memory();
-            for (i, queue) in self.queues.iter_mut().enumerate() {
-                queue.max_size = state.queues[i].max_size;
-                queue.size = state.queues[i].size;
-                queue.ready = state.queues[i].ready;
-                queue.vector = state.queues[i].vector;
-                queue.desc_table = GuestAddress(state.queues[i].desc_table);
-                queue.avail_ring = GuestAddress(state.queues[i].avail_ring);
-                queue.used_ring = GuestAddress(state.queues[i].used_ring);
-                queue.next_avail = Wrapping(
-                    queue
-                        .used_index_from_memory(&mem)
-                        .map_err(Error::QueueRingIndex)?,
-                );
-                queue.next_used = Wrapping(
-                    queue
-                        .used_index_from_memory(&mem)
-                        .map_err(Error::QueueRingIndex)?,
-                );
-            }
+        for (i, queue) in self.queues.iter_mut().enumerate() {
+            queue.state.size = state.queues[i].size;
+            queue.state.ready = state.queues[i].ready;
+            queue.state.vector = state.queues[i].vector;
+            queue.state.desc_table = GuestAddress(state.queues[i].desc_table);
+            queue.state.avail_ring = GuestAddress(state.queues[i].avail_ring);
+            queue.state.used_ring = GuestAddress(state.queues[i].used_ring);
+            queue.set_next_avail(
+                queue
+                    .used_idx(Ordering::Acquire)
+                    .map_err(Error::QueueRingIndex)?
+                    .0,
+            );
+            queue.set_next_used(
+                queue
+                    .used_idx(Ordering::Acquire)
+                    .map_err(Error::QueueRingIndex)?
+                    .0,
+            );
         }
 
         Ok(())
@@ -673,10 +672,10 @@ impl VirtioPciDevice {
                 let mut device = self.device.lock().unwrap();
                 let mut queue_evts = Vec::new();
                 let mut queues = self.queues.clone();
-                queues.retain(|q| q.ready);
+                queues.retain(|q| q.state.ready);
                 for (i, queue) in queues.iter().enumerate() {
                     queue_evts.push(self.queue_evts[i].try_clone().unwrap());
-                    if !queue.is_valid(&mem.memory()) {
+                    if !queue.is_valid() {
                         error!("Queue {} is not valid", i);
                     }
                 }
@@ -743,20 +742,20 @@ impl VirtioInterrupt for VirtioInterruptMsix {
     fn trigger(
         &self,
         int_type: &VirtioInterruptType,
-        queue: Option<&Queue>,
+        queue: Option<&Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
     ) -> std::result::Result<(), std::io::Error> {
         let vector = match int_type {
             VirtioInterruptType::Config => self.config_vector.load(Ordering::Acquire),
             VirtioInterruptType::Queue => {
                 if let Some(q) = queue {
-                    q.vector
+                    q.state.vector
                 } else {
                     0
                 }
             }
         };
 
-        if vector == VIRTIO_MSI_NO_VECTOR {
+        if vector == VIRTQ_MSI_NO_VECTOR {
             return Ok(());
         }
 
@@ -776,12 +775,16 @@ impl VirtioInterrupt for VirtioInterruptMsix {
             .trigger(vector as InterruptIndex)
     }
 
-    fn notifier(&self, int_type: &VirtioInterruptType, queue: Option<&Queue>) -> Option<EventFd> {
+    fn notifier(
+        &self,
+        int_type: &VirtioInterruptType,
+        queue: Option<&Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
+    ) -> Option<EventFd> {
         let vector = match int_type {
             VirtioInterruptType::Config => self.config_vector.load(Ordering::Acquire),
             VirtioInterruptType::Queue => {
                 if let Some(q) = queue {
-                    q.vector
+                    q.state.vector
                 } else {
                     0
                 }

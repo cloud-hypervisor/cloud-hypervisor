@@ -34,7 +34,7 @@ use crate::GuestMemoryMmap;
 use crate::VirtioInterrupt;
 use crate::{
     thread_helper::spawn_virtio_thread, ActivateResult, EpollHelper, EpollHelperError,
-    EpollHelperHandler, Queue, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType,
+    EpollHelperHandler, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType,
     EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IN_ORDER, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
 use byteorder::{ByteOrder, LittleEndian};
@@ -47,7 +47,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, RwLock};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use vm_memory::{GuestAddressSpace, GuestMemoryAtomic};
+use virtio_queue::Queue;
+use vm_memory::GuestMemoryAtomic;
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
 };
@@ -86,7 +87,7 @@ pub const BACKEND_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 4;
 ///
 pub struct VsockEpollHandler<B: VsockBackend> {
     pub mem: GuestMemoryAtomic<GuestMemoryMmap>,
-    pub queues: Vec<Queue>,
+    pub queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
     pub queue_evts: Vec<EventFd>,
     pub kill_evt: EventFd,
     pub pause_evt: EventFd,
@@ -101,7 +102,10 @@ where
     /// Signal the guest driver that we've used some virtio buffers that it had previously made
     /// available.
     ///
-    fn signal_used_queue(&self, queue: &Queue) -> result::Result<(), DeviceError> {
+    fn signal_used_queue(
+        &self,
+        queue: &Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
+    ) -> result::Result<(), DeviceError> {
         debug!("vsock: raising IRQ");
 
         self.interrupt_cb
@@ -120,16 +124,17 @@ where
 
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
-        let mem = self.mem.memory();
-        for avail_desc in self.queues[0].iter(&mem) {
-            let used_len = match VsockPacket::from_rx_virtq_head(&avail_desc) {
+
+        let mut avail_iter = self.queues[0].iter().map_err(DeviceError::QueueIterator)?;
+        for mut desc_chain in &mut avail_iter {
+            let used_len = match VsockPacket::from_rx_virtq_head(&mut desc_chain) {
                 Ok(mut pkt) => {
                     if self.backend.write().unwrap().recv_pkt(&mut pkt).is_ok() {
                         pkt.hdr().len() as u32 + pkt.len()
                     } else {
                         // We are using a consuming iterator over the virtio buffers, so, if we can't
                         // fill in this buffer, we'll need to undo the last iterator step.
-                        self.queues[0].go_to_previous_position();
+                        avail_iter.go_to_previous_position();
                         break;
                     }
                 }
@@ -139,12 +144,14 @@ where
                 }
             };
 
-            used_desc_heads[used_count] = (avail_desc.index, used_len);
+            used_desc_heads[used_count] = (desc_chain.head_index(), used_len);
             used_count += 1;
         }
 
         for &(desc_index, len) in &used_desc_heads[..used_count] {
-            self.queues[0].add_used(&mem, desc_index, len);
+            self.queues[0]
+                .add_used(desc_index, len)
+                .map_err(DeviceError::QueueAddUsed)?;
         }
 
         if used_count > 0 {
@@ -162,29 +169,32 @@ where
 
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
-        let mem = self.mem.memory();
-        for avail_desc in self.queues[1].iter(&mem) {
-            let pkt = match VsockPacket::from_tx_virtq_head(&avail_desc) {
+
+        let mut avail_iter = self.queues[1].iter().map_err(DeviceError::QueueIterator)?;
+        for mut desc_chain in &mut avail_iter {
+            let pkt = match VsockPacket::from_tx_virtq_head(&mut desc_chain) {
                 Ok(pkt) => pkt,
                 Err(e) => {
                     error!("vsock: error reading TX packet: {:?}", e);
-                    used_desc_heads[used_count] = (avail_desc.index, 0);
+                    used_desc_heads[used_count] = (desc_chain.head_index(), 0);
                     used_count += 1;
                     continue;
                 }
             };
 
             if self.backend.write().unwrap().send_pkt(&pkt).is_err() {
-                self.queues[1].go_to_previous_position();
+                avail_iter.go_to_previous_position();
                 break;
             }
 
-            used_desc_heads[used_count] = (avail_desc.index, 0);
+            used_desc_heads[used_count] = (desc_chain.head_index(), 0);
             used_count += 1;
         }
 
         for &(desc_index, len) in &used_desc_heads[..used_count] {
-            self.queues[1].add_used(&mem, desc_index, len);
+            self.queues[1]
+                .add_used(desc_index, len)
+                .map_err(DeviceError::QueueAddUsed)?;
         }
 
         if used_count > 0 {
@@ -417,7 +427,7 @@ where
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        queues: Vec<Queue>,
+        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
         queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
@@ -578,12 +588,18 @@ mod tests {
             other => panic!("{:?}", other),
         }
 
+        let memory = GuestMemoryAtomic::new(ctx.mem.clone());
+
         // Test a correct activation.
         ctx.device
             .activate(
-                GuestMemoryAtomic::new(ctx.mem.clone()),
+                memory.clone(),
                 Arc::new(NoopVirtioInterrupt {}),
-                vec![Queue::new(256), Queue::new(256), Queue::new(256)],
+                vec![
+                    Queue::new(memory.clone(), 256),
+                    Queue::new(memory.clone(), 256),
+                    Queue::new(memory, 256),
+                ],
                 vec![
                     EventFd::new(EFD_NONBLOCK).unwrap(),
                     EventFd::new(EFD_NONBLOCK).unwrap(),
@@ -599,8 +615,9 @@ mod tests {
         {
             let test_ctx = TestContext::new();
             let ctx = test_ctx.create_epoll_handler_context();
+            let memory = GuestMemoryAtomic::new(test_ctx.mem.clone());
 
-            let queue = Queue::new(256);
+            let queue = Queue::new(memory, 256);
             assert!(ctx.handler.signal_used_queue(&queue).is_ok());
         }
     }
