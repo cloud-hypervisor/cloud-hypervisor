@@ -1,0 +1,18 @@
+[package]
+name = "virtio-queue"
+version = "0.1.0"
+authors = ["The Chromium OS Authors"]
+description = "virtio queue implementation"
+repository = "https://github.com/rust-vmm/vm-virtio"
+keywords = ["virtio"]
+readme = "README.md"
+license = "Apache-2.0 OR MIT"
+edition = "2018"
+
+[features]
+test-utils = []
+
+[dependencies]
+vm-memory = "0.6.0"
+vmm-sys-util = ">=0.8.0"
+log = ">=0.4.6"
