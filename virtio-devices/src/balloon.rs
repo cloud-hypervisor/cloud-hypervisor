@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use super::{
-    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
-    VirtioCommon, VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_VERSION_1,
+    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, VirtioCommon,
+    VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_VERSION_1,
 };
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
@@ -31,11 +31,9 @@ use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
+use virtio_queue::Queue;
 use vm_memory::GuestMemory;
-use vm_memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
-    GuestMemoryError,
-};
+use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryError};
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
@@ -81,6 +79,12 @@ pub enum Error {
     ProcessQueueWrongEvType(u16),
     // Fail tp signal
     FailedSignal(io::Error),
+    /// Descriptor chain is too short
+    DescriptorChainTooShort,
+    /// Failed adding used index
+    QueueAddUsed(virtio_queue::Error),
+    /// Failed creating an iterator over the queue
+    QueueIterator(virtio_queue::Error),
 }
 
 // Got from include/uapi/linux/virtio_balloon.h
@@ -152,8 +156,7 @@ impl VirtioBalloonResize {
 struct BalloonEpollHandler {
     config: Arc<Mutex<VirtioBalloonConfig>>,
     resize_receiver: VirtioBalloonResizeReceiver,
-    queues: Vec<Queue>,
-    mem: GuestMemoryAtomic<GuestMemoryMmap>,
+    queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     inflate_queue_evt: EventFd,
     deflate_queue_evt: EventFd,
@@ -165,7 +168,7 @@ impl BalloonEpollHandler {
     fn signal(
         &self,
         int_type: &VirtioInterruptType,
-        queue: Option<&Queue>,
+        queue: Option<&Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
     ) -> result::Result<(), Error> {
         self.interrupt_cb.trigger(int_type, queue).map_err(|e| {
             error!("Failed to signal used queue: {:?}", e);
@@ -182,38 +185,45 @@ impl BalloonEpollHandler {
 
         let mut used_desc_heads = [0; QUEUE_SIZE as usize];
         let mut used_count = 0;
-        let mem = self.mem.memory();
-        for avail_desc in self.queues[queue_index].iter(&mem) {
-            used_desc_heads[used_count] = avail_desc.index;
+        for mut desc_chain in self.queues[queue_index]
+            .iter()
+            .map_err(Error::QueueIterator)?
+        {
+            let desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
+
+            used_desc_heads[used_count] = desc_chain.head_index();
             used_count += 1;
 
             let data_chunk_size = size_of::<u32>();
 
             // The head contains the request type which MUST be readable.
-            if avail_desc.is_write_only() {
+            if desc.is_write_only() {
                 error!("The head contains the request type is not right");
                 return Err(Error::UnexpectedWriteOnlyDescriptor);
             }
-            if avail_desc.len as usize % data_chunk_size != 0 {
-                error!("the request size {} is not right", avail_desc.len);
+            if desc.len() as usize % data_chunk_size != 0 {
+                error!("the request size {} is not right", desc.len());
                 return Err(Error::InvalidRequest);
             }
 
             let mut offset = 0u64;
-            while offset < avail_desc.len as u64 {
-                let addr = avail_desc.addr.checked_add(offset).unwrap();
-                let pfn: u32 = mem.read_obj(addr).map_err(Error::GuestMemory)?;
+            while offset < desc.len() as u64 {
+                let addr = desc.addr().checked_add(offset).unwrap();
+                let pfn: u32 = desc_chain
+                    .memory()
+                    .read_obj(addr)
+                    .map_err(Error::GuestMemory)?;
                 offset += data_chunk_size as u64;
 
                 let gpa = (pfn as u64) << VIRTIO_BALLOON_PFN_SHIFT;
-                if let Ok(hva) = mem.get_host_address(GuestAddress(gpa)) {
+                if let Ok(hva) = desc_chain.memory().get_host_address(GuestAddress(gpa)) {
                     let advice = match ev_type {
                         INFLATE_QUEUE_EVENT => {
-                            let region =
-                                mem.find_region(GuestAddress(gpa))
-                                    .ok_or(Error::GuestMemory(
-                                        GuestMemoryError::InvalidGuestAddress(GuestAddress(gpa)),
-                                    ))?;
+                            let region = desc_chain.memory().find_region(GuestAddress(gpa)).ok_or(
+                                Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(
+                                    GuestAddress(gpa),
+                                )),
+                            )?;
                             if let Some(f_off) = region.file_offset() {
                                 let offset = hva as usize - region.as_ptr() as usize;
                                 let res = unsafe {
@@ -253,7 +263,9 @@ impl BalloonEpollHandler {
         }
 
         for &desc_index in &used_desc_heads[..used_count] {
-            self.queues[queue_index].add_used(&mem, desc_index, 0);
+            self.queues[queue_index]
+                .add_used(desc_index, 0)
+                .map_err(Error::QueueAddUsed)?;
         }
         if used_count > 0 {
             self.signal(&VirtioInterruptType::Queue, Some(&self.queues[queue_index]))?;
@@ -463,9 +475,9 @@ impl VirtioDevice for Balloon {
 
     fn activate(
         &mut self,
-        mem: GuestMemoryAtomic<GuestMemoryMmap>,
+        _mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        queues: Vec<Queue>,
+        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
@@ -478,7 +490,6 @@ impl VirtioDevice for Balloon {
                 ActivateError::BadActivate
             })?,
             queues,
-            mem,
             interrupt_cb,
             inflate_queue_evt: queue_evts.remove(0),
             deflate_queue_evt: queue_evts.remove(0),

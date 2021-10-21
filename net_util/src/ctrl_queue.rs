@@ -12,17 +12,25 @@ use virtio_bindings::bindings::virtio_net::{
     VIRTIO_NET_F_GUEST_ECN, VIRTIO_NET_F_GUEST_TSO4, VIRTIO_NET_F_GUEST_TSO6,
     VIRTIO_NET_F_GUEST_UFO, VIRTIO_NET_OK,
 };
-use vm_memory::{ByteValued, Bytes, GuestMemoryError};
-use vm_virtio::Queue;
+use virtio_queue::Queue;
+use vm_memory::{ByteValued, Bytes, GuestMemoryAtomic, GuestMemoryError};
 
 #[derive(Debug)]
 pub enum Error {
     /// Read queue failed.
     GuestMemory(GuestMemoryError),
+    /// No control header descriptor
+    NoControlHeaderDescriptor,
     /// No queue pairs number.
     NoQueuePairsDescriptor,
     /// No status descriptor
     NoStatusDescriptor,
+    /// Failed adding used index
+    QueueAddUsed(virtio_queue::Error),
+    /// Failed creating an iterator over the queue
+    QueueIterator(virtio_queue::Error),
+    /// Failed enabling notification for the queue
+    QueueEnableNotification(virtio_queue::Error),
 }
 
 type Result<T> = std::result::Result<T, Error>;
@@ -45,22 +53,26 @@ impl CtrlQueue {
         CtrlQueue { taps }
     }
 
-    pub fn process(&mut self, mem: &GuestMemoryMmap, queue: &mut Queue) -> Result<bool> {
+    pub fn process(
+        &mut self,
+        queue: &mut Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
+    ) -> Result<bool> {
         let mut used_desc_heads = Vec::new();
-        for avail_desc in queue.iter(mem) {
-            let ctrl_hdr: ControlHeader =
-                mem.read_obj(avail_desc.addr).map_err(Error::GuestMemory)?;
-            let data_desc = avail_desc
-                .next_descriptor()
-                .ok_or(Error::NoQueuePairsDescriptor)?;
-            let status_desc = data_desc
-                .next_descriptor()
-                .ok_or(Error::NoStatusDescriptor)?;
+        for mut desc_chain in queue.iter().map_err(Error::QueueIterator)? {
+            let ctrl_desc = desc_chain.next().ok_or(Error::NoControlHeaderDescriptor)?;
+
+            let ctrl_hdr: ControlHeader = desc_chain
+                .memory()
+                .read_obj(ctrl_desc.addr())
+                .map_err(Error::GuestMemory)?;
+            let data_desc = desc_chain.next().ok_or(Error::NoQueuePairsDescriptor)?;
+            let status_desc = desc_chain.next().ok_or(Error::NoStatusDescriptor)?;
 
             let ok = match u32::from(ctrl_hdr.class) {
                 VIRTIO_NET_CTRL_MQ => {
-                    let queue_pairs = mem
-                        .read_obj::<u16>(data_desc.addr)
+                    let queue_pairs = desc_chain
+                        .memory()
+                        .read_obj::<u16>(data_desc.addr())
                         .map_err(Error::GuestMemory)?;
                     if u32::from(ctrl_hdr.cmd) != VIRTIO_NET_CTRL_MQ_VQ_PAIRS_SET {
                         warn!("Unsupported command: {}", ctrl_hdr.cmd);
@@ -76,8 +88,9 @@ impl CtrlQueue {
                     }
                 }
                 VIRTIO_NET_CTRL_GUEST_OFFLOADS => {
-                    let features = mem
-                        .read_obj::<u64>(data_desc.addr)
+                    let features = desc_chain
+                        .memory()
+                        .read_obj::<u64>(data_desc.addr())
                         .map_err(Error::GuestMemory)?;
                     if u32::from(ctrl_hdr.cmd) != VIRTIO_NET_CTRL_GUEST_OFFLOADS_SET {
                         warn!("Unsupported command: {}", ctrl_hdr.cmd);
@@ -102,17 +115,24 @@ impl CtrlQueue {
                 }
             };
 
-            mem.write_obj(
-                if ok { VIRTIO_NET_OK } else { VIRTIO_NET_ERR } as u8,
-                status_desc.addr,
-            )
-            .map_err(Error::GuestMemory)?;
-            used_desc_heads.push((avail_desc.index, avail_desc.len));
+            desc_chain
+                .memory()
+                .write_obj(
+                    if ok { VIRTIO_NET_OK } else { VIRTIO_NET_ERR } as u8,
+                    status_desc.addr(),
+                )
+                .map_err(Error::GuestMemory)?;
+            let len = ctrl_desc.len() + data_desc.len() + status_desc.len();
+            used_desc_heads.push((desc_chain.head_index(), len));
         }
 
         for (desc_index, len) in used_desc_heads.iter() {
-            queue.add_used(mem, *desc_index, *len);
-            queue.update_avail_event(mem);
+            queue
+                .add_used(*desc_index, *len)
+                .map_err(Error::QueueAddUsed)?;
+            queue
+                .enable_notification()
+                .map_err(Error::QueueEnableNotification)?;
         }
 
         Ok(!used_desc_heads.is_empty())

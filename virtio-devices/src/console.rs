@@ -3,9 +3,9 @@
 
 use super::Error as DeviceError;
 use super::{
-    ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue, VirtioCommon,
-    VirtioDevice, VirtioDeviceType, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
-    VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
+    ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, VirtioCommon, VirtioDevice,
+    VirtioDeviceType, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IOMMU_PLATFORM,
+    VIRTIO_F_VERSION_1,
 };
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
@@ -24,7 +24,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic};
+use virtio_queue::Queue;
+use vm_memory::{ByteValued, Bytes, GuestMemoryAtomic};
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
@@ -72,8 +73,7 @@ impl Default for VirtioConsoleConfig {
 unsafe impl ByteValued for VirtioConsoleConfig {}
 
 struct ConsoleEpollHandler {
-    queues: Vec<Queue>,
-    mem: GuestMemoryAtomic<GuestMemoryMmap>,
+    queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     in_buffer: Arc<Mutex<VecDeque<u8>>>,
     resizer: Arc<ConsoleResizer>,
@@ -140,17 +140,21 @@ impl ConsoleEpollHandler {
             return false;
         }
 
-        let mem = self.mem.memory();
-        for avail_desc in recv_queue.iter(&mem) {
-            let len = cmp::min(avail_desc.len as u32, in_buffer.len() as u32);
+        let mut avail_iter = recv_queue.iter().unwrap();
+        for mut desc_chain in &mut avail_iter {
+            let desc = desc_chain.next().unwrap();
+            let len = cmp::min(desc.len() as u32, in_buffer.len() as u32);
             let source_slice = in_buffer.drain(..len as usize).collect::<Vec<u8>>();
-            if let Err(e) = mem.write_slice(&source_slice[..], avail_desc.addr) {
+            if let Err(e) = desc_chain
+                .memory()
+                .write_slice(&source_slice[..], desc.addr())
+            {
                 error!("Failed to write slice: {:?}", e);
-                recv_queue.go_to_previous_position();
+                avail_iter.go_to_previous_position();
                 break;
             }
 
-            used_desc_heads[used_count] = (avail_desc.index, len);
+            used_desc_heads[used_count] = (desc_chain.head_index(), len);
             used_count += 1;
 
             if in_buffer.is_empty() {
@@ -159,7 +163,7 @@ impl ConsoleEpollHandler {
         }
 
         for &(desc_index, len) in &used_desc_heads[..used_count] {
-            recv_queue.add_used(&mem, desc_index, len);
+            recv_queue.add_used(desc_index, len).unwrap();
         }
 
         used_count > 0
@@ -177,20 +181,20 @@ impl ConsoleEpollHandler {
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
 
-        let mem = self.mem.memory();
-        for avail_desc in trans_queue.iter(&mem) {
-            let len;
+        for mut desc_chain in trans_queue.iter().unwrap() {
+            let desc = desc_chain.next().unwrap();
             if let Some(ref mut out) = self.endpoint.out_file() {
-                let _ = mem.write_to(avail_desc.addr, out, avail_desc.len as usize);
+                let _ = desc_chain
+                    .memory()
+                    .write_to(desc.addr(), out, desc.len() as usize);
                 let _ = out.flush();
             }
-            len = avail_desc.len;
-            used_desc_heads[used_count] = (avail_desc.index, len);
+            used_desc_heads[used_count] = (desc_chain.head_index(), desc.len());
             used_count += 1;
         }
 
         for &(desc_index, len) in &used_desc_heads[..used_count] {
-            trans_queue.add_used(&mem, desc_index, len);
+            trans_queue.add_used(desc_index, len).unwrap();
         }
         used_count > 0
     }
@@ -477,9 +481,9 @@ impl VirtioDevice for Console {
 
     fn activate(
         &mut self,
-        mem: GuestMemoryAtomic<GuestMemoryMmap>,
+        _mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        queues: Vec<Queue>,
+        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
@@ -498,7 +502,6 @@ impl VirtioDevice for Console {
 
         let mut handler = ConsoleEpollHandler {
             queues,
-            mem,
             interrupt_cb,
             in_buffer: self.in_buffer.clone(),
             endpoint: self.endpoint.clone(),

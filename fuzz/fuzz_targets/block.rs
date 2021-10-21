@@ -15,9 +15,11 @@ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
 use std::sync::Arc;
 use virtio_devices::{Block, VirtioDevice, VirtioInterrupt, VirtioInterruptType};
-use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
-use vm_virtio::Queue;
+use virtio_queue::{Queue, QueueState};
+use vm_memory::{bitmap::AtomicBitmap, Bytes, GuestAddress, GuestMemoryAtomic};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
+
+type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
 const MEM_SIZE: u64 = 256 * 1024 * 1024;
 const DESC_SIZE: u64 = 16; // Bytes in one virtio descriptor.
@@ -73,10 +75,14 @@ fuzz_target!(|bytes| {
         return;
     }
 
-    let mut q = Queue::new(QUEUE_SIZE);
-    q.ready = true;
-    q.size = QUEUE_SIZE / 2;
-    q.max_size = QUEUE_SIZE;
+    let guest_memory = GuestMemoryAtomic::new(mem);
+
+    let mut q = Queue::<
+        GuestMemoryAtomic<GuestMemoryMmap>,
+        QueueState<GuestMemoryAtomic<GuestMemoryMmap>>,
+    >::new(guest_memory.clone(), QUEUE_SIZE);
+    q.state.ready = true;
+    q.state.size = QUEUE_SIZE / 2;
 
     let queue_evts: Vec<EventFd> = vec![EventFd::new(0).unwrap()];
     let queue_fd = queue_evts[0].as_raw_fd();
@@ -102,7 +108,7 @@ fuzz_target!(|bytes| {
 
     block
         .activate(
-            GuestMemoryAtomic::new(mem),
+            guest_memory,
             Arc::new(NoopVirtioInterrupt {}),
             vec![q],
             queue_evts,
@@ -134,7 +140,7 @@ impl VirtioInterrupt for NoopVirtioInterrupt {
     fn trigger(
         &self,
         _int_type: &VirtioInterruptType,
-        _queue: Option<&Queue>,
+        _queue: Option<&Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
     ) -> std::result::Result<(), std::io::Error> {
         Ok(())
     }

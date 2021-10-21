@@ -4,8 +4,8 @@
 
 use super::Error as DeviceError;
 use super::{
-    ActivateResult, DescriptorChain, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
-    VirtioCommon, VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_VERSION_1,
+    ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, VirtioCommon, VirtioDevice,
+    VirtioDeviceType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_VERSION_1,
 };
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
@@ -23,11 +23,9 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, RwLock};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
+use virtio_queue::{AccessPlatform, DescriptorChain, Queue};
 use vm_device::dma_mapping::ExternalDmaMapping;
-use vm_memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
-    GuestMemoryError,
-};
+use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryError};
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
@@ -352,27 +350,36 @@ impl Request {
     // is created based on the information provided from the guest driver for
     // virtio-iommu (giving the link device_id <=> domain).
     fn parse(
-        avail_desc: &DescriptorChain,
-        mem: &GuestMemoryMmap,
+        desc_chain: &mut DescriptorChain<GuestMemoryAtomic<GuestMemoryMmap>>,
         mapping: &Arc<IommuMapping>,
         ext_mapping: &BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
         ext_domain_mapping: &mut BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
         msi_iova_space: (u64, u64),
     ) -> result::Result<usize, Error> {
-        // The head contains the request type which MUST be readable.
-        if avail_desc.is_write_only() {
+        let desc = desc_chain
+            .next()
+            .ok_or(Error::DescriptorChainTooShort)
+            .map_err(|e| {
+                error!("Missing head descriptor");
+                e
+            })?;
+
+        // The descriptor contains the request type which MUST be readable.
+        if desc.is_write_only() {
             return Err(Error::UnexpectedWriteOnlyDescriptor);
         }
 
-        if (avail_desc.len as usize) < size_of::<VirtioIommuReqHead>() {
+        if (desc.len() as usize) < size_of::<VirtioIommuReqHead>() {
             return Err(Error::InvalidRequest);
         }
 
-        let req_head: VirtioIommuReqHead =
-            mem.read_obj(avail_desc.addr).map_err(Error::GuestMemory)?;
+        let req_head: VirtioIommuReqHead = desc_chain
+            .memory()
+            .read_obj(desc.addr())
+            .map_err(Error::GuestMemory)?;
         let req_offset = size_of::<VirtioIommuReqHead>();
-        let desc_size_left = (avail_desc.len as usize) - req_offset;
-        let req_addr = if let Some(addr) = avail_desc.addr.checked_add(req_offset as u64) {
+        let desc_size_left = (desc.len() as usize) - req_offset;
+        let req_addr = if let Some(addr) = desc.addr().checked_add(req_offset as u64) {
             addr
         } else {
             return Err(Error::InvalidRequest);
@@ -389,7 +396,8 @@ impl Request {
                     return Err(Error::InvalidAttachRequest);
                 }
 
-                let req: VirtioIommuReqAttach = mem
+                let req: VirtioIommuReqAttach = desc_chain
+                    .memory()
                     .read_obj(req_addr as GuestAddress)
                     .map_err(Error::GuestMemory)?;
                 debug!("Attach request {:?}", req);
@@ -419,7 +427,8 @@ impl Request {
                     return Err(Error::InvalidDetachRequest);
                 }
 
-                let req: VirtioIommuReqDetach = mem
+                let req: VirtioIommuReqDetach = desc_chain
+                    .memory()
                     .read_obj(req_addr as GuestAddress)
                     .map_err(Error::GuestMemory)?;
                 debug!("Detach request {:?}", req);
@@ -445,7 +454,8 @@ impl Request {
                     return Err(Error::InvalidMapRequest);
                 }
 
-                let req: VirtioIommuReqMap = mem
+                let req: VirtioIommuReqMap = desc_chain
+                    .memory()
                     .read_obj(req_addr as GuestAddress)
                     .map_err(Error::GuestMemory)?;
                 debug!("Map request {:?}", req);
@@ -481,7 +491,8 @@ impl Request {
                     return Err(Error::InvalidUnmapRequest);
                 }
 
-                let req: VirtioIommuReqUnmap = mem
+                let req: VirtioIommuReqUnmap = desc_chain
+                    .memory()
                     .read_obj(req_addr as GuestAddress)
                     .map_err(Error::GuestMemory)?;
                 debug!("Unmap request {:?}", req);
@@ -510,7 +521,8 @@ impl Request {
                     return Err(Error::InvalidProbeRequest);
                 }
 
-                let req: VirtioIommuReqProbe = mem
+                let req: VirtioIommuReqProbe = desc_chain
+                    .memory()
                     .read_obj(req_addr as GuestAddress)
                     .map_err(Error::GuestMemory)?;
                 debug!("Probe request {:?}", req);
@@ -534,16 +546,14 @@ impl Request {
             _ => return Err(Error::InvalidRequest),
         };
 
-        let status_desc = avail_desc
-            .next_descriptor()
-            .ok_or(Error::DescriptorChainTooShort)?;
+        let status_desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
 
         // The status MUST always be writable
         if !status_desc.is_write_only() {
             return Err(Error::UnexpectedReadOnlyDescriptor);
         }
 
-        if status_desc.len < hdr_len + size_of::<VirtioIommuReqTail>() as u32 {
+        if status_desc.len() < hdr_len + size_of::<VirtioIommuReqTail>() as u32 {
             return Err(Error::BufferLengthTooSmall);
         }
 
@@ -553,7 +563,9 @@ impl Request {
         };
         reply.extend_from_slice(tail.as_slice());
 
-        mem.write_slice(reply.as_slice(), status_desc.addr)
+        desc_chain
+            .memory()
+            .write_slice(reply.as_slice(), status_desc.addr())
             .map_err(Error::GuestMemory)?;
 
         Ok((hdr_len as usize) + size_of::<VirtioIommuReqTail>())
@@ -561,8 +573,7 @@ impl Request {
 }
 
 struct IommuEpollHandler {
-    queues: Vec<Queue>,
-    mem: GuestMemoryAtomic<GuestMemoryMmap>,
+    queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     queue_evts: Vec<EventFd>,
     kill_evt: EventFd,
@@ -577,11 +588,9 @@ impl IommuEpollHandler {
     fn request_queue(&mut self) -> bool {
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
-        let mem = self.mem.memory();
-        for avail_desc in self.queues[0].iter(&mem) {
+        for mut desc_chain in self.queues[0].iter().unwrap() {
             let len = match Request::parse(
-                &avail_desc,
-                &mem,
+                &mut desc_chain,
                 &self.mapping,
                 &self.ext_mapping,
                 &mut self.ext_domain_mapping,
@@ -594,12 +603,12 @@ impl IommuEpollHandler {
                 }
             };
 
-            used_desc_heads[used_count] = (avail_desc.index, len);
+            used_desc_heads[used_count] = (desc_chain.head_index(), len);
             used_count += 1;
         }
 
         for &(desc_index, len) in &used_desc_heads[..used_count] {
-            self.queues[0].add_used(&mem, desc_index, len);
+            self.queues[0].add_used(desc_index, len).unwrap();
         }
         used_count > 0
     }
@@ -608,7 +617,10 @@ impl IommuEpollHandler {
         false
     }
 
-    fn signal_used_queue(&self, queue: &Queue) -> result::Result<(), DeviceError> {
+    fn signal_used_queue(
+        &self,
+        queue: &Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
+    ) -> result::Result<(), DeviceError> {
         self.interrupt_cb
             .trigger(&VirtioInterruptType::Queue, Some(queue))
             .map_err(|e| {
@@ -666,12 +678,13 @@ impl EpollHelperHandler for IommuEpollHandler {
     }
 }
 
-#[derive(Clone, Copy, Versionize)]
+#[derive(Clone, Copy, Debug, Versionize)]
 struct Mapping {
     gpa: u64,
     size: u64,
 }
 
+#[derive(Debug)]
 pub struct IommuMapping {
     // Domain related to an endpoint.
     endpoints: Arc<RwLock<BTreeMap<u32, u32>>>,
@@ -701,6 +714,24 @@ impl DmaRemapping for IommuMapping {
 
         debug!("Into same addr...");
         Ok(addr)
+    }
+}
+
+#[derive(Debug)]
+pub struct AccessPlatformMapping {
+    id: u32,
+    mapping: Arc<IommuMapping>,
+}
+
+impl AccessPlatformMapping {
+    pub fn new(id: u32, mapping: Arc<IommuMapping>) -> Self {
+        AccessPlatformMapping { id, mapping }
+    }
+}
+
+impl AccessPlatform for AccessPlatformMapping {
+    fn translate(&self, base: u64, _size: u64) -> std::result::Result<u64, std::io::Error> {
+        self.mapping.translate(self.id, base)
     }
 }
 
@@ -839,16 +870,15 @@ impl VirtioDevice for Iommu {
 
     fn activate(
         &mut self,
-        mem: GuestMemoryAtomic<GuestMemoryMmap>,
+        _mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        queues: Vec<Queue>,
+        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
         queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
         let mut handler = IommuEpollHandler {
             queues,
-            mem,
             interrupt_cb,
             queue_evts,
             kill_evt,

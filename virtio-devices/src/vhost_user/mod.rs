@@ -3,7 +3,7 @@
 
 use crate::{
     ActivateError, EpollHelper, EpollHelperError, EpollHelperHandler, GuestMemoryMmap,
-    GuestRegionMmap, Queue, VirtioInterrupt, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IN_ORDER,
+    GuestRegionMmap, VirtioInterrupt, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IN_ORDER,
     VIRTIO_F_NOTIFICATION_DATA, VIRTIO_F_ORDER_PLATFORM, VIRTIO_F_RING_EVENT_IDX,
     VIRTIO_F_RING_INDIRECT_DESC, VIRTIO_F_VERSION_1,
 };
@@ -18,12 +18,13 @@ use vhost::vhost_user::message::{
 };
 use vhost::vhost_user::{MasterReqHandler, VhostUserMasterReqHandler};
 use vhost::Error as VhostError;
+use virtio_queue::Error as QueueError;
+use virtio_queue::Queue;
 use vm_memory::{
     mmap::MmapRegionError, Address, Error as MmapError, GuestAddressSpace, GuestMemory,
     GuestMemoryAtomic,
 };
 use vm_migration::{protocol::MemoryRangeTable, MigratableError, Snapshot, VersionMapped};
-use vm_virtio::Error as VirtioError;
 use vmm_sys_util::eventfd::EventFd;
 use vu_common_ctrl::VhostUserHandle;
 
@@ -128,7 +129,7 @@ pub enum Error {
     /// Missing IrqFd
     MissingIrqFd,
     /// Failed getting the available index.
-    GetAvailableIndex(VirtioError),
+    GetAvailableIndex(QueueError),
     /// Migration is not supported by this vhost-user device.
     MigrationNotSupported,
     /// Failed creating memfd.
@@ -166,7 +167,7 @@ pub struct VhostUserEpollHandler<S: VhostUserMasterReqHandler> {
     pub mem: GuestMemoryAtomic<GuestMemoryMmap>,
     pub kill_evt: EventFd,
     pub pause_evt: EventFd,
-    pub queues: Vec<Queue>,
+    pub queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
     pub queue_evts: Vec<EventFd>,
     pub virtio_interrupt: Arc<dyn VirtioInterrupt>,
     pub acked_features: u64,
@@ -298,7 +299,7 @@ impl VhostUserCommon {
     pub fn activate<T: VhostUserMasterReqHandler>(
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
-        queues: Vec<Queue>,
+        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
         queue_evts: Vec<EventFd>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         acked_features: u64,

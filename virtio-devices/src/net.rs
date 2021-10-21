@@ -7,7 +7,7 @@
 
 use super::Error as DeviceError;
 use super::{
-    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
+    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler,
     RateLimiterConfig, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType,
     EPOLL_HELPER_EVENT_LAST,
 };
@@ -35,7 +35,8 @@ use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_bindings::bindings::virtio_net::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
-use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic};
+use virtio_queue::Queue;
+use vm_memory::{ByteValued, GuestMemoryAtomic};
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
@@ -45,12 +46,11 @@ use vmm_sys_util::eventfd::EventFd;
 const CTRL_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 
 pub struct NetCtrlEpollHandler {
-    pub mem: GuestMemoryAtomic<GuestMemoryMmap>,
     pub kill_evt: EventFd,
     pub pause_evt: EventFd,
     pub ctrl_q: CtrlQueue,
     pub queue_evt: EventFd,
-    pub queue: Queue,
+    pub queue: Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
 }
 
 impl NetCtrlEpollHandler {
@@ -72,12 +72,11 @@ impl EpollHelperHandler for NetCtrlEpollHandler {
         let ev_type = event.data as u16;
         match ev_type {
             CTRL_QUEUE_EVENT => {
-                let mem = self.mem.memory();
                 if let Err(e) = self.queue_evt.read() {
                     error!("failed to get ctl queue event: {:?}", e);
                     return true;
                 }
-                if let Err(e) = self.ctrl_q.process(&mem, &mut self.queue) {
+                if let Err(e) = self.ctrl_q.process(&mut self.queue) {
                     error!("failed to process ctrl queue: {:?}", e);
                     return true;
                 }
@@ -125,7 +124,7 @@ struct NetEpollHandler {
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     kill_evt: EventFd,
     pause_evt: EventFd,
-    queue_pair: Vec<Queue>,
+    queue_pair: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
     queue_evt_pair: Vec<EventFd>,
     // Always generate interrupts until the driver has signalled to the device.
     // This mitigates a problem with interrupts from tap events being "lost" upon
@@ -135,7 +134,10 @@ struct NetEpollHandler {
 }
 
 impl NetEpollHandler {
-    fn signal_used_queue(&self, queue: &Queue) -> result::Result<(), DeviceError> {
+    fn signal_used_queue(
+        &self,
+        queue: &Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
+    ) -> result::Result<(), DeviceError> {
         self.interrupt_cb
             .trigger(&VirtioInterruptType::Queue, Some(queue))
             .map_err(|e| {
@@ -235,8 +237,11 @@ impl NetEpollHandler {
         // If there are some already available descriptors on the RX queue,
         // then we can start the thread while listening onto the TAP.
         if self.queue_pair[0]
-            .available_descriptors(&self.net.mem.as_ref().unwrap().memory())
-            .unwrap()
+            .used_idx(Ordering::Acquire)
+            .map_err(EpollHelperError::QueueRingIndex)?
+            < self.queue_pair[0]
+                .avail_idx(Ordering::Acquire)
+                .map_err(EpollHelperError::QueueRingIndex)?
         {
             helper.add_event(self.net.tap.as_raw_fd(), RX_TAP_EVENT)?;
             self.net.rx_tap_listening = true;
@@ -549,9 +554,9 @@ impl VirtioDevice for Net {
 
     fn activate(
         &mut self,
-        mem: GuestMemoryAtomic<GuestMemoryMmap>,
+        _mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        mut queues: Vec<Queue>,
+        mut queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
@@ -563,7 +568,6 @@ impl VirtioDevice for Net {
 
             let (kill_evt, pause_evt) = self.common.dup_eventfds();
             let mut ctrl_handler = NetCtrlEpollHandler {
-                mem: mem.clone(),
                 kill_evt,
                 pause_evt,
                 ctrl_q: CtrlQueue::new(self.taps.clone()),
@@ -632,7 +636,6 @@ impl VirtioDevice for Net {
 
             let mut handler = NetEpollHandler {
                 net: NetQueuePair {
-                    mem: Some(mem.clone()),
                     tap_for_write_epoll: tap.clone(),
                     tap,
                     rx,

@@ -7,8 +7,8 @@ use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::vhost_user::VhostUserCommon;
 use crate::{
-    ActivateError, ActivateResult, Queue, UserspaceMapping, VirtioCommon, VirtioDevice,
-    VirtioDeviceType, VirtioInterrupt, VirtioSharedMemoryList,
+    ActivateError, ActivateResult, UserspaceMapping, VirtioCommon, VirtioDevice, VirtioDeviceType,
+    VirtioInterrupt, VirtioSharedMemoryList,
 };
 use crate::{GuestMemoryMmap, GuestRegionMmap, MmapRegion};
 use libc::{self, c_void, off64_t, pread64, pwrite64};
@@ -27,6 +27,7 @@ use vhost::vhost_user::message::{
 use vhost::vhost_user::{
     HandlerResult, MasterReqHandler, VhostUserMaster, VhostUserMasterReqHandler,
 };
+use virtio_queue::Queue;
 use vm_memory::{
     Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
 };
@@ -501,7 +502,7 @@ impl VirtioDevice for Fs {
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        queues: Vec<Queue>,
+        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
         queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;

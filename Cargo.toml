@@ -83,6 +83,7 @@ members = [
     "vhost_user_block",
     "vhost_user_net",
     "virtio-devices",
+    "virtio-queue",
     "vmm",
     "vm-allocator",
     "vm-device",

@@ -8,9 +8,9 @@
 
 use super::Error as DeviceError;
 use super::{
-    ActivateError, ActivateResult, DescriptorChain, EpollHelper, EpollHelperError,
-    EpollHelperHandler, Queue, UserspaceMapping, VirtioCommon, VirtioDevice, VirtioDeviceType,
-    EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
+    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler,
+    UserspaceMapping, VirtioCommon, VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST,
+    VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
@@ -27,10 +27,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use vm_memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
-    GuestMemoryError,
-};
+use virtio_queue::{DescriptorChain, Queue};
+use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryError};
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
@@ -116,48 +114,48 @@ struct Request {
 
 impl Request {
     fn parse(
-        avail_desc: &DescriptorChain,
-        mem: &GuestMemoryMmap,
+        desc_chain: &mut DescriptorChain<GuestMemoryAtomic<GuestMemoryMmap>>,
     ) -> result::Result<Request, Error> {
-        // The head contains the request type which MUST be readable.
-        if avail_desc.is_write_only() {
+        let desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
+        // The descriptor contains the request type which MUST be readable.
+        if desc.is_write_only() {
             return Err(Error::UnexpectedWriteOnlyDescriptor);
         }
 
-        if avail_desc.len as usize != size_of::<VirtioPmemReq>() {
+        if desc.len() as usize != size_of::<VirtioPmemReq>() {
             return Err(Error::InvalidRequest);
         }
 
-        let request: VirtioPmemReq = mem.read_obj(avail_desc.addr).map_err(Error::GuestMemory)?;
+        let request: VirtioPmemReq = desc_chain
+            .memory()
+            .read_obj(desc.addr())
+            .map_err(Error::GuestMemory)?;
 
         let request_type = match request.type_ {
             VIRTIO_PMEM_REQ_TYPE_FLUSH => RequestType::Flush,
             _ => return Err(Error::InvalidRequest),
         };
 
-        let status_desc = avail_desc
-            .next_descriptor()
-            .ok_or(Error::DescriptorChainTooShort)?;
+        let status_desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
 
         // The status MUST always be writable
         if !status_desc.is_write_only() {
             return Err(Error::UnexpectedReadOnlyDescriptor);
         }
 
-        if (status_desc.len as usize) < size_of::<VirtioPmemResp>() {
+        if (status_desc.len() as usize) < size_of::<VirtioPmemResp>() {
             return Err(Error::BufferLengthTooSmall);
         }
 
         Ok(Request {
             type_: request_type,
-            status_addr: status_desc.addr,
+            status_addr: status_desc.addr(),
         })
     }
 }
 
 struct PmemEpollHandler {
-    queue: Queue,
-    mem: GuestMemoryAtomic<GuestMemoryMmap>,
+    queue: Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
     disk: File,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     queue_evt: EventFd,
@@ -169,9 +167,8 @@ impl PmemEpollHandler {
     fn process_queue(&mut self) -> bool {
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
-        let mem = self.mem.memory();
-        for avail_desc in self.queue.iter(&mem) {
-            let len = match Request::parse(&avail_desc, &mem) {
+        for mut desc_chain in self.queue.iter().unwrap() {
+            let len = match Request::parse(&mut desc_chain) {
                 Ok(ref req) if (req.type_ == RequestType::Flush) => {
                     let status_code = match self.disk.sync_all() {
                         Ok(()) => VIRTIO_PMEM_RESP_TYPE_OK,
@@ -182,7 +179,7 @@ impl PmemEpollHandler {
                     };
 
                     let resp = VirtioPmemResp { ret: status_code };
-                    match mem.write_obj(resp, req.status_addr) {
+                    match desc_chain.memory().write_obj(resp, req.status_addr) {
                         Ok(_) => size_of::<VirtioPmemResp>() as u32,
                         Err(e) => {
                             error!("bad guest memory address: {}", e);
@@ -201,12 +198,12 @@ impl PmemEpollHandler {
                 }
             };
 
-            used_desc_heads[used_count] = (avail_desc.index, len);
+            used_desc_heads[used_count] = (desc_chain.head_index(), len);
             used_count += 1;
         }
 
         for &(desc_index, len) in &used_desc_heads[..used_count] {
-            self.queue.add_used(&mem, desc_index, len);
+            self.queue.add_used(desc_index, len).unwrap();
         }
         used_count > 0
     }
@@ -369,9 +366,9 @@ impl VirtioDevice for Pmem {
 
     fn activate(
         &mut self,
-        mem: GuestMemoryAtomic<GuestMemoryMmap>,
+        _mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        mut queues: Vec<Queue>,
+        mut queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
@@ -383,7 +380,6 @@ impl VirtioDevice for Pmem {
             })?;
             let mut handler = PmemEpollHandler {
                 queue: queues.remove(0),
-                mem,
                 disk,
                 interrupt_cb,
                 queue_evt: queue_evts.remove(0),

@@ -75,6 +75,8 @@ pub enum VsockError {
     GuestMemoryBounds,
     /// The vsock header descriptor length is too small.
     HdrDescTooSmall(u32),
+    /// The vsock header descriptor is expected, but missing.
+    HdrDescMissing,
     /// The vsock header `len` field holds an invalid value.
     InvalidPktLen(u32),
     /// A data fetch was attempted when no data was available.
@@ -168,10 +170,9 @@ mod tests {
     use std::os::unix::io::AsRawFd;
     use std::path::PathBuf;
     use std::sync::{Arc, RwLock};
+    use virtio_queue::{defs::VIRTQ_DESC_F_NEXT, defs::VIRTQ_DESC_F_WRITE, Queue};
     use vm_memory::{GuestAddress, GuestMemoryAtomic};
     use vm_virtio::queue::testing::VirtQueue as GuestQ;
-    use vm_virtio::queue::Queue;
-    use vm_virtio::queue::{VIRTQ_DESC_F_NEXT, VIRTQ_DESC_F_WRITE};
     use vmm_sys_util::eventfd::EventFd;
 
     pub struct NoopVirtioInterrupt {}
@@ -180,7 +181,7 @@ mod tests {
         fn trigger(
             &self,
             _int_type: &VirtioInterruptType,
-            _queue: Option<&Queue>,
+            _queue: Option<&Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
         ) -> std::result::Result<(), std::io::Error> {
             Ok(())
         }

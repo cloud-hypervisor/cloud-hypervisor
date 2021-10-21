@@ -10,7 +10,7 @@
 
 use super::Error as DeviceError;
 use super::{
-    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
+    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler,
     RateLimiterConfig, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType,
     EPOLL_HELPER_EVENT_LAST,
 };
@@ -35,6 +35,7 @@ use std::{collections::HashMap, convert::TryInto};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_bindings::bindings::virtio_blk::*;
+use virtio_queue::Queue;
 use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -62,6 +63,10 @@ pub enum Error {
     AsyncRequestFailure,
     /// Failed synchronizing the file
     Fsync(AsyncIoError),
+    /// Failed adding used index
+    QueueAddUsed(virtio_queue::Error),
+    /// Failed creating an iterator over the queue
+    QueueIterator(virtio_queue::Error),
 }
 
 pub type Result<T> = result::Result<T, Error>;
@@ -75,7 +80,7 @@ pub struct BlockCounters {
 }
 
 struct BlockEpollHandler {
-    queue: Queue,
+    queue: Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
     mem: GuestMemoryAtomic<GuestMemoryMmap>,
     disk_image: Box<dyn AsyncIo>,
     disk_nsectors: u64,
@@ -93,13 +98,13 @@ struct BlockEpollHandler {
 impl BlockEpollHandler {
     fn process_queue_submit(&mut self) -> Result<bool> {
         let queue = &mut self.queue;
-        let mem = self.mem.memory();
 
         let mut used_desc_heads = Vec::new();
         let mut used_count = 0;
 
-        for avail_desc in queue.iter(&mem) {
-            let mut request = Request::parse(&avail_desc, &mem).map_err(Error::RequestParsing)?;
+        let mut avail_iter = queue.iter().map_err(Error::QueueIterator)?;
+        for mut desc_chain in &mut avail_iter {
+            let mut request = Request::parse(&mut desc_chain).map_err(Error::RequestParsing)?;
 
             if let Some(rate_limiter) = &mut self.rate_limiter {
                 // If limiter.consume() fails it means there is no more TokenType::Ops
@@ -107,7 +112,7 @@ impl BlockEpollHandler {
                 if !rate_limiter.consume(1, TokenType::Ops) {
                     // Stop processing the queue and return this descriptor chain to the
                     // avail ring, for later processing.
-                    queue.go_to_previous_position();
+                    avail_iter.go_to_previous_position();
                     break;
                 }
                 // Exercise the rate limiter only if this request is of data transfer type.
@@ -126,7 +131,7 @@ impl BlockEpollHandler {
                         rate_limiter.manual_replenish(1, TokenType::Ops);
                         // Stop processing the queue and return this descriptor chain to the
                         // avail ring, for later processing.
-                        queue.go_to_previous_position();
+                        avail_iter.go_to_previous_position();
                         break;
                     }
                 };
@@ -136,29 +141,34 @@ impl BlockEpollHandler {
 
             if request
                 .execute_async(
-                    &mem,
+                    desc_chain.memory(),
                     self.disk_nsectors,
                     self.disk_image.as_mut(),
                     &self.disk_image_id,
-                    avail_desc.index as u64,
+                    desc_chain.head_index() as u64,
                 )
                 .map_err(Error::RequestExecuting)?
             {
-                self.request_list.insert(avail_desc.index, request);
+                self.request_list.insert(desc_chain.head_index(), request);
             } else {
                 // We use unwrap because the request parsing process already
                 // checked that the status_addr was valid.
-                mem.write_obj(VIRTIO_BLK_S_OK, request.status_addr).unwrap();
+                desc_chain
+                    .memory()
+                    .write_obj(VIRTIO_BLK_S_OK, request.status_addr)
+                    .unwrap();
 
                 // If no asynchronous operation has been submitted, we can
                 // simply return the used descriptor.
-                used_desc_heads.push((avail_desc.index, 0));
+                used_desc_heads.push((desc_chain.head_index(), 0));
                 used_count += 1;
             }
         }
 
         for &(desc_index, len) in used_desc_heads.iter() {
-            queue.add_used(&mem, desc_index, len);
+            queue
+                .add_used(desc_index, len)
+                .map_err(Error::QueueAddUsed)?;
         }
 
         Ok(used_count > 0)
@@ -221,7 +231,9 @@ impl BlockEpollHandler {
         }
 
         for &(desc_index, len) in used_desc_heads.iter() {
-            queue.add_used(&mem, desc_index, len);
+            queue
+                .add_used(desc_index, len)
+                .map_err(Error::QueueAddUsed)?;
         }
 
         self.counters
@@ -545,7 +557,7 @@ impl VirtioDevice for Block {
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        mut queues: Vec<Queue>,
+        mut queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
@@ -557,7 +569,7 @@ impl VirtioDevice for Block {
         for i in 0..queues.len() {
             let queue_evt = queue_evts.remove(0);
             let queue = queues.remove(0);
-            let queue_size = queue.size;
+            let queue_size = queue.state.size;
             let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
             let rate_limiter: Option<RateLimiter> = self

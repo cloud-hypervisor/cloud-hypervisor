@@ -4,8 +4,8 @@
 
 use super::Error as DeviceError;
 use super::{
-    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
-    VirtioCommon, VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IOMMU_PLATFORM,
+    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, VirtioCommon,
+    VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IOMMU_PLATFORM,
     VIRTIO_F_VERSION_1,
 };
 use crate::seccomp_filters::Thread;
@@ -21,7 +21,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use vm_memory::{Bytes, GuestAddressSpace, GuestMemoryAtomic};
+use virtio_queue::Queue;
+use vm_memory::{Bytes, GuestMemoryAtomic};
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
@@ -33,8 +34,7 @@ const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE];
 const QUEUE_AVAIL_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 
 struct RngEpollHandler {
-    queues: Vec<Queue>,
-    mem: GuestMemoryAtomic<GuestMemoryMmap>,
+    queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
     random_file: File,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     queue_evt: EventFd,
@@ -48,31 +48,28 @@ impl RngEpollHandler {
 
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
-        let mem = self.mem.memory();
-        for avail_desc in queue.iter(&mem) {
+        for mut desc_chain in queue.iter().unwrap() {
+            let desc = desc_chain.next().unwrap();
             let mut len = 0;
 
             // Drivers can only read from the random device.
-            if avail_desc.is_write_only() {
+            if desc.is_write_only() {
                 // Fill the read with data from the random device on the host.
-                if mem
-                    .read_from(
-                        avail_desc.addr,
-                        &mut self.random_file,
-                        avail_desc.len as usize,
-                    )
+                if desc_chain
+                    .memory()
+                    .read_from(desc.addr(), &mut self.random_file, desc.len() as usize)
                     .is_ok()
                 {
-                    len = avail_desc.len;
+                    len = desc.len();
                 }
             }
 
-            used_desc_heads[used_count] = (avail_desc.index, len);
+            used_desc_heads[used_count] = (desc_chain.head_index(), len);
             used_count += 1;
         }
 
         for &(desc_index, len) in &used_desc_heads[..used_count] {
-            queue.add_used(&mem, desc_index, len);
+            queue.add_used(desc_index, len).unwrap();
         }
         used_count > 0
     }
@@ -213,9 +210,9 @@ impl VirtioDevice for Rng {
 
     fn activate(
         &mut self,
-        mem: GuestMemoryAtomic<GuestMemoryMmap>,
+        _mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        queues: Vec<Queue>,
+        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
@@ -228,7 +225,6 @@ impl VirtioDevice for Rng {
             })?;
             let mut handler = RngEpollHandler {
                 queues,
-                mem,
                 random_file,
                 interrupt_cb,
                 queue_evt: queue_evts.remove(0),

@@ -10,8 +10,8 @@ use std::num::Wrapping;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use vm_memory::{Bytes, GuestAddressSpace, GuestMemory, GuestMemoryAtomic};
-use vm_virtio::Queue;
+use virtio_queue::Queue;
+use vm_memory::{Bytes, GuestMemory, GuestMemoryAtomic};
 
 #[derive(Clone)]
 pub struct TxVirtio {
@@ -35,78 +35,93 @@ impl TxVirtio {
 
     pub fn process_desc_chain(
         &mut self,
-        mem: &GuestMemoryMmap,
         tap: &mut Tap,
-        queue: &mut Queue,
+        queue: &mut Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
         rate_limiter: &mut Option<RateLimiter>,
     ) -> Result<bool, NetQueuePairError> {
         let mut retry_write = false;
         let mut rate_limit_reached = false;
-        while let Some(avail_desc) = queue.iter(mem).next() {
-            if rate_limit_reached {
-                queue.go_to_previous_position();
+
+        loop {
+            let used_desc_head: (u16, u32);
+            let mut avail_iter = queue
+                .iter()
+                .map_err(NetQueuePairError::QueueIteratorFailed)?;
+
+            if let Some(mut desc_chain) = avail_iter.next() {
+                if rate_limit_reached {
+                    avail_iter.go_to_previous_position();
+                    break;
+                }
+
+                let mut next_desc = desc_chain.next();
+
+                let mut iovecs = Vec::new();
+                while let Some(desc) = next_desc {
+                    if !desc.is_write_only() && desc.len() > 0 {
+                        let buf = desc_chain
+                            .memory()
+                            .get_slice(desc.addr(), desc.len() as usize)
+                            .map_err(NetQueuePairError::GuestMemory)?
+                            .as_ptr();
+                        let iovec = libc::iovec {
+                            iov_base: buf as *mut libc::c_void,
+                            iov_len: desc.len() as libc::size_t,
+                        };
+                        iovecs.push(iovec);
+                    }
+                    next_desc = desc_chain.next();
+                }
+
+                let len = if !iovecs.is_empty() {
+                    let result = unsafe {
+                        libc::writev(
+                            tap.as_raw_fd() as libc::c_int,
+                            iovecs.as_ptr() as *const libc::iovec,
+                            iovecs.len() as libc::c_int,
+                        )
+                    };
+
+                    if result < 0 {
+                        let e = std::io::Error::last_os_error();
+
+                        /* EAGAIN */
+                        if e.kind() == std::io::ErrorKind::WouldBlock {
+                            avail_iter.go_to_previous_position();
+                            retry_write = true;
+                            break;
+                        }
+                        error!("net: tx: failed writing to tap: {}", e);
+                        return Err(NetQueuePairError::WriteTap(e));
+                    }
+
+                    self.counter_bytes += Wrapping(result as u64 - vnet_hdr_len() as u64);
+                    self.counter_frames += Wrapping(1);
+
+                    result as u32
+                } else {
+                    0
+                };
+
+                used_desc_head = (desc_chain.head_index(), len);
+
+                // For the sake of simplicity (similar to the RX rate limiting), we always
+                // let the 'last' descriptor chain go-through even if it was over the rate
+                // limit, and simply stop processing oncoming `avail_desc` if any.
+                if let Some(rate_limiter) = rate_limiter {
+                    rate_limit_reached = !rate_limiter.consume(1, TokenType::Ops)
+                        || !rate_limiter.consume(len as u64, TokenType::Bytes);
+                }
+            } else {
                 break;
             }
 
-            let head_index = avail_desc.index;
-            let mut next_desc = Some(avail_desc);
-
-            let mut iovecs = Vec::new();
-            while let Some(desc) = next_desc {
-                if !desc.is_write_only() && desc.len > 0 {
-                    let buf = mem
-                        .get_slice(desc.addr, desc.len as usize)
-                        .map_err(NetQueuePairError::GuestMemory)?
-                        .as_ptr();
-                    let iovec = libc::iovec {
-                        iov_base: buf as *mut libc::c_void,
-                        iov_len: desc.len as libc::size_t,
-                    };
-                    iovecs.push(iovec);
-                }
-                next_desc = desc.next_descriptor();
-            }
-
-            let len = if !iovecs.is_empty() {
-                let result = unsafe {
-                    libc::writev(
-                        tap.as_raw_fd() as libc::c_int,
-                        iovecs.as_ptr() as *const libc::iovec,
-                        iovecs.len() as libc::c_int,
-                    )
-                };
-
-                if result < 0 {
-                    let e = std::io::Error::last_os_error();
-
-                    /* EAGAIN */
-                    if e.kind() == std::io::ErrorKind::WouldBlock {
-                        queue.go_to_previous_position();
-                        retry_write = true;
-                        break;
-                    }
-                    error!("net: tx: failed writing to tap: {}", e);
-                    return Err(NetQueuePairError::WriteTap(e));
-                }
-
-                self.counter_bytes += Wrapping(result as u64 - vnet_hdr_len() as u64);
-                self.counter_frames += Wrapping(1);
-
-                result as u32
-            } else {
-                0
-            };
-
-            queue.add_used(mem, head_index, 0);
-            queue.update_avail_event(mem);
-
-            // For the sake of simplicity (similar to the RX rate limiting), we always
-            // let the 'last' descriptor chain go-through even if it was over the rate
-            // limit, and simply stop processing oncoming `avail_desc` if any.
-            if let Some(rate_limiter) = rate_limiter {
-                rate_limit_reached = !rate_limiter.consume(1, TokenType::Ops)
-                    || !rate_limiter.consume(len as u64, TokenType::Bytes);
-            }
+            queue
+                .add_used(used_desc_head.0, used_desc_head.1)
+                .map_err(NetQueuePairError::QueueAddUsed)?;
+            queue
+                .enable_notification()
+                .map_err(NetQueuePairError::QueueEnableNotification)?;
         }
 
         Ok(retry_write)
@@ -135,87 +150,106 @@ impl RxVirtio {
 
     pub fn process_desc_chain(
         &mut self,
-        mem: &GuestMemoryMmap,
         tap: &mut Tap,
-        queue: &mut Queue,
+        queue: &mut Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
         rate_limiter: &mut Option<RateLimiter>,
     ) -> Result<bool, NetQueuePairError> {
         let mut exhausted_descs = true;
         let mut rate_limit_reached = false;
 
-        while let Some(avail_desc) = queue.iter(mem).next() {
-            if rate_limit_reached {
-                exhausted_descs = false;
-                queue.go_to_previous_position();
+        loop {
+            let used_desc_head: (u16, u32);
+            let mut avail_iter = queue
+                .iter()
+                .map_err(NetQueuePairError::QueueIteratorFailed)?;
+
+            if let Some(mut desc_chain) = avail_iter.next() {
+                if rate_limit_reached {
+                    exhausted_descs = false;
+                    avail_iter.go_to_previous_position();
+                    break;
+                }
+
+                let desc = desc_chain
+                    .next()
+                    .ok_or(NetQueuePairError::DescriptorChainTooShort)?;
+                let num_buffers_addr = desc_chain.memory().checked_offset(desc.addr(), 10).unwrap();
+                let mut next_desc = Some(desc);
+
+                let mut iovecs = Vec::new();
+                while let Some(desc) = next_desc {
+                    if desc.is_write_only() && desc.len() > 0 {
+                        let buf = desc_chain
+                            .memory()
+                            .get_slice(desc.addr(), desc.len() as usize)
+                            .map_err(NetQueuePairError::GuestMemory)?
+                            .as_ptr();
+                        let iovec = libc::iovec {
+                            iov_base: buf as *mut libc::c_void,
+                            iov_len: desc.len() as libc::size_t,
+                        };
+                        iovecs.push(iovec);
+                    }
+                    next_desc = desc_chain.next();
+                }
+
+                let len = if !iovecs.is_empty() {
+                    let result = unsafe {
+                        libc::readv(
+                            tap.as_raw_fd() as libc::c_int,
+                            iovecs.as_ptr() as *const libc::iovec,
+                            iovecs.len() as libc::c_int,
+                        )
+                    };
+                    if result < 0 {
+                        let e = std::io::Error::last_os_error();
+                        exhausted_descs = false;
+                        avail_iter.go_to_previous_position();
+
+                        /* EAGAIN */
+                        if e.kind() == std::io::ErrorKind::WouldBlock {
+                            break;
+                        }
+
+                        error!("net: rx: failed reading from tap: {}", e);
+                        return Err(NetQueuePairError::ReadTap(e));
+                    }
+
+                    // Write num_buffers to guest memory. We simply write 1 as we
+                    // never spread the frame over more than one descriptor chain.
+                    desc_chain
+                        .memory()
+                        .write_obj(1u16, num_buffers_addr)
+                        .map_err(NetQueuePairError::GuestMemory)?;
+
+                    self.counter_bytes += Wrapping(result as u64 - vnet_hdr_len() as u64);
+                    self.counter_frames += Wrapping(1);
+
+                    result as u32
+                } else {
+                    0
+                };
+
+                used_desc_head = (desc_chain.head_index(), len);
+
+                // For the sake of simplicity (keeping the handling of RX_QUEUE_EVENT and
+                // RX_TAP_EVENT totally asynchronous), we always let the 'last' descriptor
+                // chain go-through even if it was over the rate limit, and simply stop
+                // processing oncoming `avail_desc` if any.
+                if let Some(rate_limiter) = rate_limiter {
+                    rate_limit_reached = !rate_limiter.consume(1, TokenType::Ops)
+                        || !rate_limiter.consume(len as u64, TokenType::Bytes);
+                }
+            } else {
                 break;
             }
 
-            let head_index = avail_desc.index;
-            let num_buffers_addr = mem.checked_offset(avail_desc.addr, 10).unwrap();
-            let mut next_desc = Some(avail_desc);
-
-            let mut iovecs = Vec::new();
-            while let Some(desc) = next_desc {
-                if desc.is_write_only() && desc.len > 0 {
-                    let buf = mem
-                        .get_slice(desc.addr, desc.len as usize)
-                        .map_err(NetQueuePairError::GuestMemory)?
-                        .as_ptr();
-                    let iovec = libc::iovec {
-                        iov_base: buf as *mut libc::c_void,
-                        iov_len: desc.len as libc::size_t,
-                    };
-                    iovecs.push(iovec);
-                }
-                next_desc = desc.next_descriptor();
-            }
-
-            let len = if !iovecs.is_empty() {
-                let result = unsafe {
-                    libc::readv(
-                        tap.as_raw_fd() as libc::c_int,
-                        iovecs.as_ptr() as *const libc::iovec,
-                        iovecs.len() as libc::c_int,
-                    )
-                };
-                if result < 0 {
-                    let e = std::io::Error::last_os_error();
-                    exhausted_descs = false;
-                    queue.go_to_previous_position();
-
-                    /* EAGAIN */
-                    if e.kind() == std::io::ErrorKind::WouldBlock {
-                        break;
-                    }
-
-                    error!("net: rx: failed reading from tap: {}", e);
-                    return Err(NetQueuePairError::ReadTap(e));
-                }
-
-                // Write num_buffers to guest memory. We simply write 1 as we
-                // never spread the frame over more than one descriptor chain.
-                mem.write_obj(1u16, num_buffers_addr)
-                    .map_err(NetQueuePairError::GuestMemory)?;
-
-                self.counter_bytes += Wrapping(result as u64 - vnet_hdr_len() as u64);
-                self.counter_frames += Wrapping(1);
-
-                result as u32
-            } else {
-                0
-            };
-
-            queue.add_used(mem, head_index, len);
-            queue.update_avail_event(mem);
-
-            // For the sake of simplicity (keeping the handling of RX_QUEUE_EVENT and
-            // RX_TAP_EVENT totally asynchronous), we always let the 'last' descriptor
-            // chain go-through even if it was over the rate limit, and simply stop
-            // processing oncoming `avail_desc` if any.
-            if let Some(rate_limiter) = rate_limiter {
-                rate_limit_reached = !rate_limiter.consume(1, TokenType::Ops)
-                    || !rate_limiter.consume(len as u64, TokenType::Bytes);
-            }
+            queue
+                .add_used(used_desc_head.0, used_desc_head.1)
+                .map_err(NetQueuePairError::QueueAddUsed)?;
+            queue
+                .enable_notification()
+                .map_err(NetQueuePairError::QueueEnableNotification)?;
         }
 
         Ok(exhausted_descs)
@@ -244,10 +278,19 @@ pub enum NetQueuePairError {
     ReadTap(io::Error),
     /// Error related to guest memory
     GuestMemory(vm_memory::GuestMemoryError),
+    /// Returned an error while iterating through the queue
+    QueueIteratorFailed(virtio_queue::Error),
+    /// Descriptor chain is too short
+    DescriptorChainTooShort,
+    /// Failed to determine if queue needed notification
+    QueueNeedsNotification(virtio_queue::Error),
+    /// Failed to enable notification on the queue
+    QueueEnableNotification(virtio_queue::Error),
+    /// Failed to add used index to the queue
+    QueueAddUsed(virtio_queue::Error),
 }
 
 pub struct NetQueuePair {
-    pub mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     pub tap: Tap,
     // With epoll each FD must be unique. So in order to filter the
     // events we need to get a second FD responding to the original
@@ -268,16 +311,13 @@ pub struct NetQueuePair {
 }
 
 impl NetQueuePair {
-    pub fn process_tx(&mut self, queue: &mut Queue) -> Result<bool, NetQueuePairError> {
-        let mem = self
-            .mem
-            .as_ref()
-            .ok_or(NetQueuePairError::NoMemoryConfigured)
-            .map(|m| m.memory())?;
-
+    pub fn process_tx(
+        &mut self,
+        queue: &mut Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
+    ) -> Result<bool, NetQueuePairError> {
         let tx_tap_retry =
             self.tx
-                .process_desc_chain(&mem, &mut self.tap, queue, &mut self.tx_rate_limiter)?;
+                .process_desc_chain(&mut self.tap, queue, &mut self.tx_rate_limiter)?;
 
         // We got told to try again when writing to the tap. Wait for the TAP to be writable
         if tx_tap_retry && !self.tx_tap_listening {
@@ -311,20 +351,19 @@ impl NetQueuePair {
         self.tx.counter_bytes = Wrapping(0);
         self.tx.counter_frames = Wrapping(0);
 
-        Ok(queue.needs_notification(&mem, queue.next_used))
+        queue
+            .needs_notification()
+            .map_err(NetQueuePairError::QueueNeedsNotification)
     }
 
-    pub fn process_rx(&mut self, queue: &mut Queue) -> Result<bool, NetQueuePairError> {
-        let mem = self
-            .mem
-            .as_ref()
-            .ok_or(NetQueuePairError::NoMemoryConfigured)
-            .map(|m| m.memory())?;
-
+    pub fn process_rx(
+        &mut self,
+        queue: &mut Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
+    ) -> Result<bool, NetQueuePairError> {
         self.rx_desc_avail =
             !self
                 .rx
-                .process_desc_chain(&mem, &mut self.tap, queue, &mut self.rx_rate_limiter)?;
+                .process_desc_chain(&mut self.tap, queue, &mut self.rx_rate_limiter)?;
         let rate_limit_reached = self
             .rx_rate_limiter
             .as_ref()
@@ -353,6 +392,8 @@ impl NetQueuePair {
         self.rx.counter_bytes = Wrapping(0);
         self.rx.counter_frames = Wrapping(0);
 
-        Ok(queue.needs_notification(&mem, queue.next_used))
+        queue
+            .needs_notification()
+            .map_err(NetQueuePairError::QueueNeedsNotification)
     }
 }
