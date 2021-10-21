@@ -15,4 +15,4 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         pip3 install -U dco-check
-        dco-check
+        dco-check -e "49699333+dependabot[bot]@users.noreply.github.com"
