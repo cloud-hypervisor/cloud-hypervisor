@@ -6,5 +6,5 @@ edition = "2018"
 
 [dependencies]
 libc = "0.2.104"
-vm-memory = "0.7.0"
+vm-memory = "0.6.0"
 arch = { path = "../arch" }
