@@ -5775,7 +5775,10 @@ mod tests {
 
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
+            #[cfg(target_arch = "x86_64")]
             let kernel_path = direct_kernel_boot_path();
+            #[cfg(target_arch = "aarch64")]
+            let kernel_path = edk2_path();
             let api_socket = temp_api_path(&guest.tmp_dir);
             let mut child = GuestCommand::new(&guest)
                 .args(&["--api-socket", &api_socket])
