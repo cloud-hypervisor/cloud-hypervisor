@@ -22,7 +22,7 @@ serde_derive = "1.0.130"
 thiserror = "1.0.30"
 versionize = "0.1.6"
 versionize_derive = "0.1.4"
-vm-memory = { version = "0.7.0", features = ["backend-mmap", "backend-bitmap"] }
+vm-memory = { version = "0.6.0", features = ["backend-mmap", "backend-bitmap"] }
 vm-migration = { path = "../vm-migration" }
 vmm-sys-util = { version = "0.9.0", features = ["with-serde"] }
 
