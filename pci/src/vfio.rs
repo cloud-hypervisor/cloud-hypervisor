@@ -11,6 +11,7 @@ use crate::{
 use byteorder::{ByteOrder, LittleEndian};
 use hypervisor::HypervisorVmError;
 use std::any::Any;
+use std::collections::BTreeMap;
 use std::io;
 use std::os::unix::io::AsRawFd;
 use std::ptr::null_mut;
@@ -209,6 +210,14 @@ impl Interrupt {
 }
 
 #[derive(Copy, Clone)]
+pub struct UserMemoryRegion {
+    slot: u32,
+    start: u64,
+    size: u64,
+    host_addr: u64,
+}
+
+#[derive(Clone)]
 pub struct MmioRegion {
     pub start: GuestAddress,
     pub length: GuestUsize,
@@ -217,6 +226,7 @@ pub struct MmioRegion {
     pub(crate) mem_slot: Option<u32>,
     pub(crate) host_addr: Option<u64>,
     pub(crate) mmap_size: Option<usize>,
+    pub(crate) user_memory_regions: Vec<UserMemoryRegion>,
 }
 #[derive(Debug, Error)]
 pub enum VfioError {
@@ -501,6 +511,7 @@ impl VfioCommon {
                 mem_slot: None,
                 host_addr: None,
                 mmap_size: None,
+                user_memory_regions: Vec::new(),
             });
 
             bar_id += 1;
@@ -786,7 +797,7 @@ impl VfioCommon {
             if addr >= region.start.raw_value()
                 && addr < region.start.unchecked_add(region.length).raw_value()
             {
-                return Some(*region);
+                return Some(region.clone());
             }
         }
         None
@@ -999,6 +1010,85 @@ impl VfioPciDevice {
         self.iommu_attached
     }
 
+    fn align_4k(address: u64) -> u64 {
+        (address + 0xfff) & 0xffff_ffff_ffff_f000
+    }
+
+    fn is_4k_aligned(address: u64) -> bool {
+        (address & 0xfff) == 0
+    }
+
+    fn is_4k_multiple(size: u64) -> bool {
+        (size & 0xfff) == 0
+    }
+
+    fn generate_user_memory_regions<F>(
+        region_index: u32,
+        region_start: u64,
+        region_size: u64,
+        host_addr: u64,
+        mem_slot: F,
+        vfio_msix: Option<&VfioMsix>,
+    ) -> Vec<UserMemoryRegion>
+    where
+        F: Fn() -> u32,
+    {
+        if !Self::is_4k_aligned(region_start) {
+            error!(
+                "Region start address 0x{:x} must be at least aligned on 4KiB",
+                region_start
+            );
+        }
+        if !Self::is_4k_multiple(region_size) {
+            error!(
+                "Region size 0x{:x} must be at least a multiple of 4KiB",
+                region_size
+            );
+        }
+
+        // Using a BtreeMap as the list provided through the iterator is sorted
+        // by key. This ensures proper split of the whole region.
+        let mut inter_ranges = BTreeMap::new();
+        if let Some(msix) = vfio_msix {
+            if region_index == msix.cap.table_bir() {
+                let (offset, size) = msix.cap.table_range();
+                let base = region_start + offset;
+                inter_ranges.insert(base, size);
+            }
+            if region_index == msix.cap.pba_bir() {
+                let (offset, size) = msix.cap.pba_range();
+                let base = region_start + offset;
+                inter_ranges.insert(base, size);
+            }
+        }
+
+        let mut user_memory_regions = Vec::new();
+        let mut new_start = region_start;
+        for (range_start, range_size) in inter_ranges {
+            if range_start > new_start {
+                user_memory_regions.push(UserMemoryRegion {
+                    slot: mem_slot(),
+                    start: new_start,
+                    size: range_start - new_start,
+                    host_addr: host_addr + new_start - region_start,
+                });
+            }
+
+            new_start = Self::align_4k(range_start + range_size);
+        }
+
+        if region_start + region_size > new_start {
+            user_memory_regions.push(UserMemoryRegion {
+                slot: mem_slot(),
+                start: new_start,
+                size: region_start + region_size - new_start,
+                host_addr: host_addr + new_start - region_start,
+            });
+        }
+
+        user_memory_regions
+    }
+
     /// Map MMIO regions into the guest, and avoid VM exits when the guest tries
     /// to reach those regions.
     ///
@@ -1018,16 +1108,6 @@ impl VfioPciDevice {
         let fd = self.device.as_raw_fd();
 
         for region in self.common.mmio_regions.iter_mut() {
-            // We want to skip the mapping of the BAR containing the MSI-X
-            // table even if it is mappable. The reason is we need to trap
-            // any access to the MSI-X table and update the GSI routing
-            // accordingly.
-            if let Some(msix) = &self.common.interrupt.msix {
-                if region.index == msix.cap.table_bir() || region.index == msix.cap.pba_bir() {
-                    continue;
-                }
-            }
-
             let region_flags = self.device.get_region_flags(region.index);
             if region_flags & VFIO_REGION_INFO_FLAG_MMAP != 0 {
                 let mut prot = 0;
@@ -1037,8 +1117,13 @@ impl VfioPciDevice {
                 if region_flags & VFIO_REGION_INFO_FLAG_WRITE != 0 {
                     prot |= libc::PROT_WRITE;
                 }
-                let (mmap_offset, mmap_size) = self.device.get_region_mmap(region.index);
-                let offset = self.device.get_region_offset(region.index) + mmap_offset;
+
+                // We ignore the mmap offset because we only support running on
+                // host with VFIO newer than 4.16. That's because sparse mmap
+                // has been deprecated and instead MSI-X regions can now be
+                // entirely mapped.
+                let (_, mmap_size) = self.device.get_region_mmap(region.index);
+                let offset = self.device.get_region_offset(region.index);
 
                 let host_addr = unsafe {
                     libc::mmap(
@@ -1052,30 +1137,45 @@ impl VfioPciDevice {
                 };
 
                 if host_addr == libc::MAP_FAILED {
-                    error!(
-                        "Could not mmap regions, error:{}",
+                    warn!(
+                        "Could not mmap region index {}: {}",
+                        region.index,
                         io::Error::last_os_error()
                     );
                     continue;
                 }
 
-                let slot = mem_slot();
-                let mem_region = vm.make_user_memory_region(
-                    slot,
-                    region.start.raw_value() + mmap_offset,
-                    mmap_size as u64,
+                // In case the region that is being mapped contains the MSI-X
+                // vectors table or the MSI-X PBA table, we must adjust what
+                // is being declared through the hypervisor. We want to make
+                // sure we will still trap MMIO accesses to these MSI-X
+                // specific ranges.
+                let user_memory_regions = Self::generate_user_memory_regions(
+                    region.index,
+                    region.start.raw_value(),
+                    mmap_size,
                     host_addr as u64,
-                    false,
-                    false,
+                    &mem_slot,
+                    self.common.interrupt.msix.as_ref(),
                 );
+                for user_memory_region in user_memory_regions.iter() {
+                    let mem_region = vm.make_user_memory_region(
+                        user_memory_region.slot,
+                        user_memory_region.start,
+                        user_memory_region.size,
+                        user_memory_region.host_addr,
+                        false,
+                        false,
+                    );
 
-                vm.create_user_memory_region(mem_region)
-                    .map_err(VfioPciError::MapRegionGuest)?;
+                    vm.create_user_memory_region(mem_region)
+                        .map_err(VfioPciError::MapRegionGuest)?;
+                }
 
                 // Update the region with memory mapped info.
-                region.mem_slot = Some(slot);
                 region.host_addr = Some(host_addr as u64);
                 region.mmap_size = Some(mmap_size as usize);
+                region.user_memory_regions = user_memory_regions;
             }
         }
 
@@ -1084,17 +1184,13 @@ impl VfioPciDevice {
 
     pub fn unmap_mmio_regions(&mut self) {
         for region in self.common.mmio_regions.iter() {
-            if let (Some(host_addr), Some(mmap_size), Some(mem_slot)) =
-                (region.host_addr, region.mmap_size, region.mem_slot)
-            {
-                let (mmap_offset, _) = self.device.get_region_mmap(region.index);
-
+            for user_memory_region in region.user_memory_regions.iter() {
                 // Remove region
                 let r = self.vm.make_user_memory_region(
-                    mem_slot,
-                    region.start.raw_value() + mmap_offset,
-                    mmap_size as u64,
-                    host_addr as u64,
+                    user_memory_region.slot,
+                    user_memory_region.start,
+                    user_memory_region.size,
+                    user_memory_region.host_addr,
                     false,
                     false,
                 );
@@ -1102,7 +1198,9 @@ impl VfioPciDevice {
                 if let Err(e) = self.vm.remove_user_memory_region(r) {
                     error!("Could not remove the userspace memory region: {}", e);
                 }
+            }
 
+            if let (Some(host_addr), Some(mmap_size)) = (region.host_addr, region.mmap_size) {
                 let ret = unsafe { libc::munmap(host_addr as *mut libc::c_void, mmap_size) };
                 if ret != 0 {
                     error!(
@@ -1242,38 +1340,41 @@ impl PciDevice for VfioPciDevice {
             if region.start.raw_value() == old_base {
                 region.start = GuestAddress(new_base);
 
-                if let Some(mem_slot) = region.mem_slot {
-                    if let Some(host_addr) = region.host_addr {
-                        let (mmap_offset, mmap_size) = self.device.get_region_mmap(region.index);
+                for user_memory_region in region.user_memory_regions.iter_mut() {
+                    // Remove old region
+                    let old_mem_region = self.vm.make_user_memory_region(
+                        user_memory_region.slot,
+                        user_memory_region.start,
+                        user_memory_region.size,
+                        user_memory_region.host_addr,
+                        false,
+                        false,
+                    );
 
-                        // Remove old region
-                        let old_mem_region = self.vm.make_user_memory_region(
-                            mem_slot,
-                            old_base + mmap_offset,
-                            mmap_size as u64,
-                            host_addr as u64,
-                            false,
-                            false,
-                        );
+                    self.vm
+                        .remove_user_memory_region(old_mem_region)
+                        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
-                        self.vm
-                            .remove_user_memory_region(old_mem_region)
-                            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-
-                        // Insert new region
-                        let new_mem_region = self.vm.make_user_memory_region(
-                            mem_slot,
-                            new_base + mmap_offset,
-                            mmap_size as u64,
-                            host_addr as u64,
-                            false,
-                            false,
-                        );
-
-                        self.vm
-                            .create_user_memory_region(new_mem_region)
-                            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                    // Update the user memory region with the correct start address.
+                    if new_base > old_base {
+                        user_memory_region.start += new_base - old_base;
+                    } else {
+                        user_memory_region.start -= old_base - new_base;
                     }
+
+                    // Insert new region
+                    let new_mem_region = self.vm.make_user_memory_region(
+                        user_memory_region.slot,
+                        user_memory_region.start,
+                        user_memory_region.size,
+                        user_memory_region.host_addr,
+                        false,
+                        false,
+                    );
+
+                    self.vm
+                        .create_user_memory_region(new_mem_region)
+                        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
                 }
             }
         }
