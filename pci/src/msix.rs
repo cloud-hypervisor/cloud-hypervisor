@@ -533,4 +533,16 @@ impl MsixCap {
     pub fn table_size(&self) -> u16 {
         (self.msg_ctl & 0x7ff) + 1
     }
+
+    pub fn table_range(&self) -> (u64, u64) {
+        // The table takes 16 bytes per entry.
+        let size = self.table_size() as u64 * 16;
+        (self.table_offset() as u64, size)
+    }
+
+    pub fn pba_range(&self) -> (u64, u64) {
+        // The table takes 1 bit per entry modulo 8 bytes.
+        let size = ((self.table_size() as u64 / 64) + 1) * 8;
+        (self.pba_offset() as u64, size)
+    }
 }
