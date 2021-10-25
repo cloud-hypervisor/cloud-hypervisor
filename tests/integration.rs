@@ -1607,6 +1607,7 @@ mod tests {
         virtiofsd_cache: &str,
         prepare_daemon: &dyn Fn(&TempDir, &str, &str) -> (std::process::Child, String),
         hotplug: bool,
+        pci_segment: Option<u16>,
     ) {
         #[cfg(target_arch = "aarch64")]
         let focal_image = if hotplug {
@@ -1657,10 +1658,20 @@ mod tests {
             .default_disks()
             .default_net()
             .args(&["--api-socket", &api_socket]);
+        if pci_segment.is_some() {
+            guest_command.args(&["--platform", "num_pci_segments=16"]);
+        }
 
         let fs_params = format!(
-            "id=myfs0,tag=myfs,socket={},num_queues=1,queue_size=1024,dax={}{}",
-            virtiofsd_socket_path, dax_vmm_param, cache_size_vmm_param
+            "id=myfs0,tag=myfs,socket={},num_queues=1,queue_size=1024,dax={}{}{}",
+            virtiofsd_socket_path,
+            dax_vmm_param,
+            cache_size_vmm_param,
+            if let Some(pci_segment) = pci_segment {
+                format!(",pci_segment={}", pci_segment)
+            } else {
+                "".to_owned()
+            }
         );
 
         if !hotplug {
@@ -1677,8 +1688,16 @@ mod tests {
                 let (cmd_success, cmd_output) =
                     remote_command_w_output(&api_socket, "add-fs", Some(&fs_params));
                 assert!(cmd_success);
-                assert!(String::from_utf8_lossy(&cmd_output)
-                    .contains("{\"id\":\"myfs0\",\"bdf\":\"0000:00:06.0\"}"));
+
+                if let Some(pci_segment) = pci_segment {
+                    assert!(String::from_utf8_lossy(&cmd_output).contains(&format!(
+                        "{{\"id\":\"myfs0\",\"bdf\":\"{:04x}:00:01.0\"}}",
+                        pci_segment
+                    )));
+                } else {
+                    assert!(String::from_utf8_lossy(&cmd_output)
+                        .contains("{\"id\":\"myfs0\",\"bdf\":\"0000:00:06.0\"}"));
+                }
 
                 thread::sleep(std::time::Duration::new(10, 0));
             }
@@ -1749,16 +1768,31 @@ mod tests {
             let r = std::panic::catch_unwind(|| {
                 thread::sleep(std::time::Duration::new(10, 0));
                 let fs_params = format!(
-                    "id=myfs0,tag=myfs,socket={},num_queues=1,queue_size=1024,dax={}{}",
-                    virtiofsd_socket_path, dax_vmm_param, cache_size_vmm_param
+                    "id=myfs0,tag=myfs,socket={},num_queues=1,queue_size=1024,dax={}{}{}",
+                    virtiofsd_socket_path,
+                    dax_vmm_param,
+                    cache_size_vmm_param,
+                    if let Some(pci_segment) = pci_segment {
+                        format!(",pci_segment={}", pci_segment)
+                    } else {
+                        "".to_owned()
+                    }
                 );
 
                 // Add back and check it works
                 let (cmd_success, cmd_output) =
                     remote_command_w_output(&api_socket, "add-fs", Some(&fs_params));
                 assert!(cmd_success);
-                assert!(String::from_utf8_lossy(&cmd_output)
-                    .contains("{\"id\":\"myfs0\",\"bdf\":\"0000:00:06.0\"}"));
+                if let Some(pci_segment) = pci_segment {
+                    assert!(String::from_utf8_lossy(&cmd_output).contains(&format!(
+                        "{{\"id\":\"myfs0\",\"bdf\":\"{:04x}:00:01.0\"}}",
+                        pci_segment
+                    )));
+                } else {
+                    assert!(String::from_utf8_lossy(&cmd_output)
+                        .contains("{\"id\":\"myfs0\",\"bdf\":\"0000:00:06.0\"}"));
+                }
+
                 thread::sleep(std::time::Duration::new(10, 0));
                 // Mount shared directory through virtio_fs filesystem
                 let mount_cmd = format!(
@@ -3059,24 +3093,38 @@ mod tests {
         #[test]
         #[cfg(not(feature = "mshv"))]
         fn test_virtio_fs_dax_on_default_cache_size() {
-            test_virtio_fs(true, None, "none", &prepare_virtiofsd, false)
+            test_virtio_fs(true, None, "none", &prepare_virtiofsd, false, None)
         }
 
         #[test]
         #[cfg(not(feature = "mshv"))]
         fn test_virtio_fs_dax_on_cache_size_1_gib() {
-            test_virtio_fs(true, Some(0x4000_0000), "none", &prepare_virtiofsd, false)
+            test_virtio_fs(
+                true,
+                Some(0x4000_0000),
+                "none",
+                &prepare_virtiofsd,
+                false,
+                None,
+            )
         }
 
         #[test]
         fn test_virtio_fs_dax_off() {
-            test_virtio_fs(false, None, "none", &prepare_virtiofsd, false)
+            test_virtio_fs(false, None, "none", &prepare_virtiofsd, false, None)
         }
 
         #[test]
         #[cfg(not(feature = "mshv"))]
         fn test_virtio_fs_dax_on_default_cache_size_w_virtiofsd_rs_daemon() {
-            test_virtio_fs(true, None, "never", &prepare_virtiofsd_rs_daemon, false)
+            test_virtio_fs(
+                true,
+                None,
+                "never",
+                &prepare_virtiofsd_rs_daemon,
+                false,
+                None,
+            )
         }
 
         #[test]
@@ -3088,34 +3136,82 @@ mod tests {
                 "never",
                 &prepare_virtiofsd_rs_daemon,
                 false,
+                None,
             )
         }
 
         #[test]
         fn test_virtio_fs_dax_off_w_virtiofsd_rs_daemon() {
-            test_virtio_fs(false, None, "never", &prepare_virtiofsd_rs_daemon, false)
+            test_virtio_fs(
+                false,
+                None,
+                "never",
+                &prepare_virtiofsd_rs_daemon,
+                false,
+                None,
+            )
         }
 
         #[test]
         #[cfg(not(feature = "mshv"))]
         fn test_virtio_fs_hotplug_dax_on() {
-            test_virtio_fs(true, None, "none", &prepare_virtiofsd, true)
+            test_virtio_fs(true, None, "none", &prepare_virtiofsd, true, None)
         }
 
         #[test]
         fn test_virtio_fs_hotplug_dax_off() {
-            test_virtio_fs(false, None, "none", &prepare_virtiofsd, true)
+            test_virtio_fs(false, None, "none", &prepare_virtiofsd, true, None)
         }
 
         #[test]
         #[cfg(not(feature = "mshv"))]
         fn test_virtio_fs_hotplug_dax_on_w_virtiofsd_rs_daemon() {
-            test_virtio_fs(true, None, "never", &prepare_virtiofsd_rs_daemon, true)
+            test_virtio_fs(
+                true,
+                None,
+                "never",
+                &prepare_virtiofsd_rs_daemon,
+                true,
+                None,
+            )
         }
 
         #[test]
         fn test_virtio_fs_hotplug_dax_off_w_virtiofsd_rs_daemon() {
-            test_virtio_fs(false, None, "never", &prepare_virtiofsd_rs_daemon, true)
+            test_virtio_fs(
+                false,
+                None,
+                "never",
+                &prepare_virtiofsd_rs_daemon,
+                true,
+                None,
+            )
+        }
+
+        #[test]
+        #[cfg(all(not(feature = "mshv"), target_arch = "x86_64"))]
+        fn test_virtio_fs_multi_segment_hotplug() {
+            test_virtio_fs(
+                true,
+                Some(0x4000_0000),
+                "none",
+                &prepare_virtiofsd,
+                true,
+                Some(15),
+            )
+        }
+
+        #[test]
+        #[cfg(all(not(feature = "mshv"), target_arch = "x86_64"))]
+        fn test_virtio_fs_multi_segment() {
+            test_virtio_fs(
+                true,
+                Some(0x4000_0000),
+                "none",
+                &prepare_virtiofsd,
+                false,
+                Some(15),
+            )
         }
 
         #[test]
