@@ -13,6 +13,6 @@ edition = "2018"
 test-utils = []
 
 [dependencies]
-vm-memory = "0.6.0"
+vm-memory = "0.7.0"
 vmm-sys-util = ">=0.8.0"
 log = ">=0.4.6"

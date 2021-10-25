@@ -705,7 +705,7 @@ dependencies = [
 [[package]]
 name = "vfio-ioctls"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vfio-ioctls?branch=main#d51c1fad37be30c20385c55a217e2d90972ea31d"
+source = "git+https://github.com/rust-vmm/vfio-ioctls?branch=main#491a0f89a08e2e4c19b19c1109615505228495f6"
 dependencies = [
  "byteorder",
  "kvm-bindings",
@@ -749,8 +749,7 @@ dependencies = [
 [[package]]
 name = "vhost"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d23ddeb452fb4f837526c6298cc8a2f4948e5595b0328a3d61b5eebe51874d7"
+source = "git+https://github.com/rust-vmm/vhost#fca9e5195645efe48cdd8a0159966a13951cc70d"
 dependencies = [
  "bitflags",
  "libc",
@@ -801,7 +800,6 @@ dependencies = [
 [[package]]
 name = "virtio-queue"
 version = "0.1.0"
-source = "git+https://github.com/sboeuf/vm-virtio?branch=fork_vm_virtio#223246e132e49bba58adb3d4156e25ff977c0eb1"
 dependencies = [
  "log",
  "vm-memory",
@@ -838,9 +836,9 @@ source = "git+https://github.com/rust-vmm/vm-fdt?branch=main#720e48e435b791ec6cb
 
 [[package]]
 name = "vm-memory"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a8ebcb86ca457f9d6e14cf97009f679952eba42f0113de5db596e514cd0e43b"
+checksum = "339d4349c126fdcd87e034631d7274370cf19eb0e87b33166bcd956589fc72c5"
 dependencies = [
  "arc-swap",
  "libc",
@@ -956,3 +954,8 @@ name = "winapi-x86_64-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
+
+[[patch.unused]]
+name = "vfio-ioctls"
+version = "0.1.0"
+source = "git+https://github.com/rust-vmm/vfio-ioctls#491a0f89a08e2e4c19b19c1109615505228495f6"

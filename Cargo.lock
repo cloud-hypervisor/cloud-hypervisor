@@ -1196,8 +1196,7 @@ dependencies = [
 [[package]]
 name = "vhost"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d23ddeb452fb4f837526c6298cc8a2f4948e5595b0328a3d61b5eebe51874d7"
+source = "git+https://github.com/rust-vmm/vhost#fca9e5195645efe48cdd8a0159966a13951cc70d"
 dependencies = [
  "bitflags",
  "libc",
@@ -1336,9 +1335,9 @@ source = "git+https://github.com/rust-vmm/vm-fdt?branch=main#bb53be431b20465f816
 
 [[package]]
 name = "vm-memory"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a8ebcb86ca457f9d6e14cf97009f679952eba42f0113de5db596e514cd0e43b"
+checksum = "339d4349c126fdcd87e034631d7274370cf19eb0e87b33166bcd956589fc72c5"
 dependencies = [
  "arc-swap",
  "libc",
@@ -1494,3 +1493,8 @@ dependencies = [
  "syn",
  "synstructure",
 ]
+
+[[patch.unused]]
+name = "vfio-ioctls"
+version = "0.1.0"
+source = "git+https://github.com/rust-vmm/vfio-ioctls#491a0f89a08e2e4c19b19c1109615505228495f6"

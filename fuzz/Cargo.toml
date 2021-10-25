@@ -19,7 +19,7 @@ virtio-devices = { path = "../virtio-devices" }
 virtio-queue = { path = "../virtio-queue" }
 vmm-sys-util = "0.9.0"
 vm-virtio = { path = "../vm-virtio" }
-vm-memory = "0.6.0"
+vm-memory = "0.7.0"
 
 [dependencies.cloud-hypervisor]
 path = ".."
@@ -27,6 +27,8 @@ path = ".."
 [patch.crates-io]
 kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch-v0.5.0", features = ["with-serde", "fam-wrappers"] }
 versionize_derive = { git = "https://github.com/cloud-hypervisor/versionize_derive", branch = "ch" }
+vhost = { git = "https://github.com/rust-vmm/vhost" }
+vfio-ioctls = { git = "https://github.com/rust-vmm/vfio-ioctls" }
 
 # Prevent this from interfering with workspaces
 [workspace]
