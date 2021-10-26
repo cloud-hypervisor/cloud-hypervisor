@@ -16,7 +16,6 @@ pub struct DeviceNode {
     pub children: Vec<String>,
     #[serde(skip)]
     pub migratable: Option<Arc<Mutex<dyn Migratable>>>,
-    pub pci_segment_id: Option<u16>,
     pub pci_bdf: Option<u32>,
     #[serde(skip)]
     pub pci_device_handle: Option<PciDeviceHandle>,
@@ -32,7 +31,6 @@ impl DeviceNode {
             migratable,
             pci_bdf: None,
             pci_device_handle: None,
-            pci_segment_id: None,
         }
     }
 }
@@ -81,20 +79,14 @@ impl DeviceTree {
     pub fn pci_devices(&self) -> Vec<&DeviceNode> {
         self.0
             .values()
-            .filter(|v| {
-                v.pci_bdf.is_some() && v.pci_segment_id.is_some() && v.pci_device_handle.is_some()
-            })
+            .filter(|v| v.pci_bdf.is_some() && v.pci_device_handle.is_some())
             .collect()
     }
 
-    pub fn remove_node_by_pci_bdf(
-        &mut self,
-        pci_segment_id: u16,
-        pci_bdf: u32,
-    ) -> Option<DeviceNode> {
+    pub fn remove_node_by_pci_bdf(&mut self, pci_bdf: u32) -> Option<DeviceNode> {
         let mut id = None;
         for (k, v) in self.0.iter() {
-            if v.pci_segment_id == Some(pci_segment_id) && v.pci_bdf == Some(pci_bdf) {
+            if v.pci_bdf == Some(pci_bdf) {
                 id = Some(k.clone());
                 break;
             }
