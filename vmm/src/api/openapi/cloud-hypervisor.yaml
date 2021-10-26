@@ -687,6 +687,9 @@ components:
           default: true
         rate_limiter_config:
             $ref: '#/components/schemas/RateLimiterConfig'
+        pci_segment:
+          type: integer
+          format: int16
         id:
           type: string
 
@@ -728,6 +731,9 @@ components:
           items:
             type: integer
             format: int32
+        pci_segment:
+          type: integer
+          format: int16
         rate_limiter_config:
             $ref: '#/components/schemas/RateLimiterConfig'
 
@@ -783,6 +789,9 @@ components:
           type: integer
           format: int64
           default: 8589934592
+        pci_segment:
+          type: integer
+          format: int16
         id:
           type: string
 
@@ -805,6 +814,9 @@ components:
         discard_writes:
           type: boolean
           default: false
+        pci_segment:
+          type: integer
+          format: int16
         id:
           type: string
 
@@ -832,6 +844,9 @@ components:
         iommu:
           type: boolean
           default: false
+        pci_segment:
+          type: integer
+          format: int16
         id:
           type: string
 
@@ -852,6 +867,9 @@ components:
         iommu:
           type: boolean
           default: false
+        pci_segment:
+          type: integer
+          format: int16
         id:
           type: string
 
