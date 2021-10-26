@@ -117,6 +117,8 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
        && cd spdk \
        && git checkout a827fd7eeca67209d4c0aaad9a3ed55692e7e36e \
        && git submodule update --init \
+       && sed -i 's/pip3 install meson/pip3 install meson==0.59.2/g'  scripts/pkgdep/ubuntu.sh \
+       && sed -i 's/meson/meson==0.59.2/g'  scripts/pkgdep/requirements.txt \
        && apt-get update \
        && ./scripts/pkgdep.sh \
        && ./configure --with-vfio-user \
