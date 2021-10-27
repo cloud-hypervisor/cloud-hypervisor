@@ -1392,6 +1392,11 @@ impl Vm {
             devices.retain(|dev| dev.id.as_ref() != Some(&_id));
         }
 
+        // Remove if VFIO user device
+        if let Some(user_devices) = config.user_devices.as_mut() {
+            user_devices.retain(|dev| dev.id.as_ref() != Some(&_id));
+        }
+
         // Remove if disk device
         if let Some(disks) = config.disks.as_mut() {
             disks.retain(|dev| dev.id.as_ref() != Some(&_id));
