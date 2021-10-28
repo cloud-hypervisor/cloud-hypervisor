@@ -1314,11 +1314,11 @@ impl Vm {
         }
     }
 
-    pub fn add_device(&mut self, mut _device_cfg: DeviceConfig) -> Result<PciDeviceInfo> {
+    pub fn add_device(&mut self, mut device_cfg: DeviceConfig) -> Result<PciDeviceInfo> {
         {
             // Validate on a clone of the config
             let mut config = self.config.lock().unwrap().clone();
-            Self::add_to_config(&mut config.devices, _device_cfg.clone());
+            Self::add_to_config(&mut config.devices, device_cfg.clone());
             config.validate().map_err(Error::ConfigValidation)?;
         }
 
@@ -1326,14 +1326,14 @@ impl Vm {
             .device_manager
             .lock()
             .unwrap()
-            .add_device(&mut _device_cfg)
+            .add_device(&mut device_cfg)
             .map_err(Error::DeviceManager)?;
 
         // Update VmConfig by adding the new device. This is important to
         // ensure the device would be created in case of a reboot.
         {
             let mut config = self.config.lock().unwrap();
-            Self::add_to_config(&mut config.devices, _device_cfg);
+            Self::add_to_config(&mut config.devices, device_cfg);
         }
 
         self.device_manager
@@ -1376,11 +1376,11 @@ impl Vm {
         Ok(pci_device_info)
     }
 
-    pub fn remove_device(&mut self, _id: String) -> Result<()> {
+    pub fn remove_device(&mut self, id: String) -> Result<()> {
         self.device_manager
             .lock()
             .unwrap()
-            .remove_device(_id.clone())
+            .remove_device(id.clone())
             .map_err(Error::DeviceManager)?;
 
         // Update VmConfig by removing the device. This is important to
@@ -1389,32 +1389,32 @@ impl Vm {
 
         // Remove if VFIO device
         if let Some(devices) = config.devices.as_mut() {
-            devices.retain(|dev| dev.id.as_ref() != Some(&_id));
+            devices.retain(|dev| dev.id.as_ref() != Some(&id));
         }
 
         // Remove if VFIO user device
         if let Some(user_devices) = config.user_devices.as_mut() {
-            user_devices.retain(|dev| dev.id.as_ref() != Some(&_id));
+            user_devices.retain(|dev| dev.id.as_ref() != Some(&id));
         }
 
         // Remove if disk device
         if let Some(disks) = config.disks.as_mut() {
-            disks.retain(|dev| dev.id.as_ref() != Some(&_id));
+            disks.retain(|dev| dev.id.as_ref() != Some(&id));
         }
 
         // Remove if net device
         if let Some(net) = config.net.as_mut() {
-            net.retain(|dev| dev.id.as_ref() != Some(&_id));
+            net.retain(|dev| dev.id.as_ref() != Some(&id));
         }
 
         // Remove if pmem device
         if let Some(pmem) = config.pmem.as_mut() {
-            pmem.retain(|dev| dev.id.as_ref() != Some(&_id));
+            pmem.retain(|dev| dev.id.as_ref() != Some(&id));
         }
 
         // Remove if vsock device
         if let Some(vsock) = config.vsock.as_ref() {
-            if vsock.id.as_ref() == Some(&_id) {
+            if vsock.id.as_ref() == Some(&id) {
                 config.vsock = None;
             }
         }
@@ -1427,11 +1427,11 @@ impl Vm {
         Ok(())
     }
 
-    pub fn add_disk(&mut self, mut _disk_cfg: DiskConfig) -> Result<PciDeviceInfo> {
+    pub fn add_disk(&mut self, mut disk_cfg: DiskConfig) -> Result<PciDeviceInfo> {
         {
             // Validate on a clone of the config
             let mut config = self.config.lock().unwrap().clone();
-            Self::add_to_config(&mut config.disks, _disk_cfg.clone());
+            Self::add_to_config(&mut config.disks, disk_cfg.clone());
             config.validate().map_err(Error::ConfigValidation)?;
         }
 
@@ -1439,14 +1439,14 @@ impl Vm {
             .device_manager
             .lock()
             .unwrap()
-            .add_disk(&mut _disk_cfg)
+            .add_disk(&mut disk_cfg)
             .map_err(Error::DeviceManager)?;
 
         // Update VmConfig by adding the new device. This is important to
         // ensure the device would be created in case of a reboot.
         {
             let mut config = self.config.lock().unwrap();
-            Self::add_to_config(&mut config.disks, _disk_cfg);
+            Self::add_to_config(&mut config.disks, disk_cfg);
         }
 
         self.device_manager
@@ -1458,11 +1458,11 @@ impl Vm {
         Ok(pci_device_info)
     }
 
-    pub fn add_fs(&mut self, mut _fs_cfg: FsConfig) -> Result<PciDeviceInfo> {
+    pub fn add_fs(&mut self, mut fs_cfg: FsConfig) -> Result<PciDeviceInfo> {
         {
             // Validate on a clone of the config
             let mut config = self.config.lock().unwrap().clone();
-            Self::add_to_config(&mut config.fs, _fs_cfg.clone());
+            Self::add_to_config(&mut config.fs, fs_cfg.clone());
             config.validate().map_err(Error::ConfigValidation)?;
         }
 
@@ -1470,14 +1470,14 @@ impl Vm {
             .device_manager
             .lock()
             .unwrap()
-            .add_fs(&mut _fs_cfg)
+            .add_fs(&mut fs_cfg)
             .map_err(Error::DeviceManager)?;
 
         // Update VmConfig by adding the new device. This is important to
         // ensure the device would be created in case of a reboot.
         {
             let mut config = self.config.lock().unwrap();
-            Self::add_to_config(&mut config.fs, _fs_cfg);
+            Self::add_to_config(&mut config.fs, fs_cfg);
         }
 
         self.device_manager
@@ -1489,11 +1489,11 @@ impl Vm {
         Ok(pci_device_info)
     }
 
-    pub fn add_pmem(&mut self, mut _pmem_cfg: PmemConfig) -> Result<PciDeviceInfo> {
+    pub fn add_pmem(&mut self, mut pmem_cfg: PmemConfig) -> Result<PciDeviceInfo> {
         {
             // Validate on a clone of the config
             let mut config = self.config.lock().unwrap().clone();
-            Self::add_to_config(&mut config.pmem, _pmem_cfg.clone());
+            Self::add_to_config(&mut config.pmem, pmem_cfg.clone());
             config.validate().map_err(Error::ConfigValidation)?;
         }
 
@@ -1501,14 +1501,14 @@ impl Vm {
             .device_manager
             .lock()
             .unwrap()
-            .add_pmem(&mut _pmem_cfg)
+            .add_pmem(&mut pmem_cfg)
             .map_err(Error::DeviceManager)?;
 
         // Update VmConfig by adding the new device. This is important to
         // ensure the device would be created in case of a reboot.
         {
             let mut config = self.config.lock().unwrap();
-            Self::add_to_config(&mut config.pmem, _pmem_cfg);
+            Self::add_to_config(&mut config.pmem, pmem_cfg);
         }
 
         self.device_manager
@@ -1520,11 +1520,11 @@ impl Vm {
         Ok(pci_device_info)
     }
 
-    pub fn add_net(&mut self, mut _net_cfg: NetConfig) -> Result<PciDeviceInfo> {
+    pub fn add_net(&mut self, mut net_cfg: NetConfig) -> Result<PciDeviceInfo> {
         {
             // Validate on a clone of the config
             let mut config = self.config.lock().unwrap().clone();
-            Self::add_to_config(&mut config.net, _net_cfg.clone());
+            Self::add_to_config(&mut config.net, net_cfg.clone());
             config.validate().map_err(Error::ConfigValidation)?;
         }
 
@@ -1532,14 +1532,14 @@ impl Vm {
             .device_manager
             .lock()
             .unwrap()
-            .add_net(&mut _net_cfg)
+            .add_net(&mut net_cfg)
             .map_err(Error::DeviceManager)?;
 
         // Update VmConfig by adding the new device. This is important to
         // ensure the device would be created in case of a reboot.
         {
             let mut config = self.config.lock().unwrap();
-            Self::add_to_config(&mut config.net, _net_cfg);
+            Self::add_to_config(&mut config.net, net_cfg);
         }
 
         self.device_manager
@@ -1551,7 +1551,7 @@ impl Vm {
         Ok(pci_device_info)
     }
 
-    pub fn add_vsock(&mut self, mut _vsock_cfg: VsockConfig) -> Result<PciDeviceInfo> {
+    pub fn add_vsock(&mut self, mut vsock_cfg: VsockConfig) -> Result<PciDeviceInfo> {
         if self.config.lock().unwrap().vsock.is_some() {
             return Err(Error::TooManyVsockDevices);
         }
@@ -1559,7 +1559,7 @@ impl Vm {
         {
             // Validate on a clone of the config
             let mut config = self.config.lock().unwrap().clone();
-            config.vsock = Some(_vsock_cfg.clone());
+            config.vsock = Some(vsock_cfg.clone());
             config.validate().map_err(Error::ConfigValidation)?;
         }
 
@@ -1567,14 +1567,14 @@ impl Vm {
             .device_manager
             .lock()
             .unwrap()
-            .add_vsock(&mut _vsock_cfg)
+            .add_vsock(&mut vsock_cfg)
             .map_err(Error::DeviceManager)?;
 
         // Update VmConfig by adding the new device. This is important to
         // ensure the device would be created in case of a reboot.
         {
             let mut config = self.config.lock().unwrap();
-            config.vsock = Some(_vsock_cfg);
+            config.vsock = Some(vsock_cfg);
         }
 
         self.device_manager
