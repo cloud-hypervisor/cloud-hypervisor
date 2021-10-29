@@ -144,6 +144,7 @@ pub struct MemoryManager {
     next_memory_slot: u32,
     start_of_device_area: GuestAddress,
     end_of_device_area: GuestAddress,
+    end_of_ram_area: GuestAddress,
     pub vm: Arc<dyn hypervisor::Vm>,
     hotplug_slots: Vec<HotPlugState>,
     selected_slot: usize,
@@ -1016,12 +1017,17 @@ impl MemoryManager {
         #[cfg(feature = "tdx")]
         let log_dirty = !tdx_enabled; // Cannot log dirty pages on a TD
 
+        // If running on SGX the start of device area and RAM area may diverge but
+        // at this point they are next to each other.
+        let end_of_ram_area = start_of_device_area.unchecked_sub(1);
+
         let mut memory_manager = MemoryManager {
             boot_guest_memory,
             guest_memory,
             next_memory_slot,
             start_of_device_area,
             end_of_device_area,
+            end_of_ram_area,
             vm,
             hotplug_slots,
             selected_slot,
@@ -1357,7 +1363,7 @@ impl MemoryManager {
 
         let start_addr = MemoryManager::start_addr(self.guest_memory.memory().last_addr(), true)?;
 
-        if start_addr.checked_add(size.try_into().unwrap()).unwrap() > self.start_of_device_area() {
+        if start_addr.checked_add(size.try_into().unwrap()).unwrap() >= self.end_of_ram_area {
             return Err(Error::InsufficientHotplugRam);
         }
 
