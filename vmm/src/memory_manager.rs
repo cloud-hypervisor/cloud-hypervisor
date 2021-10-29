@@ -1622,15 +1622,12 @@ impl MemoryManager {
             epc_region_size += epc_section.size;
         }
 
-        // Now that we know about the total size for the EPC region, we can
-        // proceed with the allocation of the entire range. The EPC region
-        // must be 4kiB aligned.
-        let epc_region_start = self
-            .allocator
-            .lock()
-            .unwrap()
-            .allocate_mmio_addresses(None, epc_region_size as GuestUsize, Some(0x1000))
-            .ok_or(Error::SgxEpcRangeAllocation)?;
+        // Place the SGX EPC region on a 4k boundary between the RAM and the device area
+        let epc_region_start =
+            GuestAddress(((self.start_of_device_area.0 + 0xfff) / 0x1000) * 0x1000);
+        self.start_of_device_area = epc_region_start
+            .checked_add(epc_region_size)
+            .ok_or(Error::GuestAddressOverFlow)?;
 
         let mut sgx_epc_region = SgxEpcRegion::new(epc_region_start, epc_region_size as GuestUsize);
 
