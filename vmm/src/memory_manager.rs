@@ -33,7 +33,7 @@ use versionize_derive::Versionize;
 use virtio_devices::BlocksState;
 #[cfg(target_arch = "x86_64")]
 use vm_allocator::GsiApic;
-use vm_allocator::SystemAllocator;
+use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::BusDevice;
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::guest_memory::FileOffset;
@@ -165,6 +165,7 @@ pub struct MemoryManager {
     memory_zones: MemoryZones,
     log_dirty: bool, // Enable dirty logging for created RAM regions
     arch_mem_regions: Vec<ArchMemRegion>,
+    ram_allocator: AddressAllocator,
 
     // Keep track of calls to create_userspace_mapping() for guest RAM.
     // This is useful for getting the dirty pages as we need to know the
@@ -785,10 +786,8 @@ impl MemoryManager {
                     virtio_mem,
                     file_offset,
                 });
-                self.allocator
-                    .lock()
-                    .unwrap()
-                    .allocate_mmio_addresses(Some(region.start_addr()), region.len(), None)
+                self.ram_allocator
+                    .allocate(Some(region.start_addr()), region.len(), None)
                     .ok_or(Error::MemoryRangeAllocation)?;
             }
         }
@@ -800,10 +799,8 @@ impl MemoryManager {
                 // based on the GuestMemory regions.
                 continue;
             }
-            self.allocator
-                .lock()
-                .unwrap()
-                .allocate_mmio_addresses(
+            self.ram_allocator
+                .allocate(
                     Some(GuestAddress(region.base)),
                     region.size as GuestUsize,
                     None,
@@ -1020,6 +1017,7 @@ impl MemoryManager {
         // If running on SGX the start of device area and RAM area may diverge but
         // at this point they are next to each other.
         let end_of_ram_area = start_of_device_area.unchecked_sub(1);
+        let ram_allocator = AddressAllocator::new(GuestAddress(0), start_of_device_area.0).unwrap();
 
         let mut memory_manager = MemoryManager {
             boot_guest_memory,
@@ -1051,6 +1049,7 @@ impl MemoryManager {
             acpi_address,
             log_dirty,
             arch_mem_regions,
+            ram_allocator,
         };
 
         memory_manager.allocate_address_space()?;
@@ -1376,10 +1375,8 @@ impl MemoryManager {
         }
 
         // Tell the allocator
-        self.allocator
-            .lock()
-            .unwrap()
-            .allocate_mmio_addresses(Some(start_addr), size as GuestUsize, None)
+        self.ram_allocator
+            .allocate(Some(start_addr), size as GuestUsize, None)
             .ok_or(Error::MemoryRangeAllocation)?;
 
         // Update the slot so that it can be queried via the I/O port
