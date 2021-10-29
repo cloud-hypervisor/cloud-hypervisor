@@ -47,13 +47,13 @@ fn pagesize() -> usize {
 ///   assert_eq!(allocator.allocate_irq(), Some(6));
 ///   #[cfg(target_arch = "aarch64")]
 ///   assert_eq!(allocator.allocate_irq(), Some(33));
-///   assert_eq!(allocator.allocate_mmio_addresses(None, 0x1000, Some(0x1000)), Some(GuestAddress(0x1fff_f000)));
+///   assert_eq!(allocator.allocate_platform_mmio_addresses(None, 0x1000, Some(0x1000)), Some(GuestAddress(0x1fff_f000)));
 ///
 /// ```
 pub struct SystemAllocator {
     #[cfg(target_arch = "x86_64")]
     io_address_space: AddressAllocator,
-    mmio_address_space: AddressAllocator,
+    platform_mmio_address_space: AddressAllocator,
     mmio_hole_address_space: AddressAllocator,
     gsi_allocator: GsiAllocator,
 }
@@ -64,8 +64,8 @@ impl SystemAllocator {
     ///
     /// * `io_base` - (X86) The starting address of IO memory.
     /// * `io_size` - (X86) The size of IO memory.
-    /// * `mmio_base` - The starting address of MMIO memory.
-    /// * `mmio_size` - The size of MMIO memory.
+    /// * `platform_mmio_base` - The starting address of platform MMIO memory.
+    /// * `platform_mmio_size` - The size of platform MMIO memory.
     /// * `mmio_hole_base` - The starting address of MMIO memory in 32-bit address space.
     /// * `mmio_hole_size` - The size of MMIO memory in 32-bit address space.
     /// * `apics` - (X86) Vector of APIC's.
@@ -73,8 +73,8 @@ impl SystemAllocator {
     pub fn new(
         #[cfg(target_arch = "x86_64")] io_base: GuestAddress,
         #[cfg(target_arch = "x86_64")] io_size: GuestUsize,
-        mmio_base: GuestAddress,
-        mmio_size: GuestUsize,
+        platform_mmio_base: GuestAddress,
+        platform_mmio_size: GuestUsize,
         mmio_hole_base: GuestAddress,
         mmio_hole_size: GuestUsize,
         #[cfg(target_arch = "x86_64")] apics: Vec<GsiApic>,
@@ -82,7 +82,10 @@ impl SystemAllocator {
         Some(SystemAllocator {
             #[cfg(target_arch = "x86_64")]
             io_address_space: AddressAllocator::new(io_base, io_size)?,
-            mmio_address_space: AddressAllocator::new(mmio_base, mmio_size)?,
+            platform_mmio_address_space: AddressAllocator::new(
+                platform_mmio_base,
+                platform_mmio_size,
+            )?,
             mmio_hole_address_space: AddressAllocator::new(mmio_hole_base, mmio_hole_size)?,
             #[cfg(target_arch = "x86_64")]
             gsi_allocator: GsiAllocator::new(apics),
@@ -113,14 +116,14 @@ impl SystemAllocator {
             .allocate(address, size, Some(align_size.unwrap_or(0x1)))
     }
 
-    /// Reserves a section of `size` bytes of MMIO address space.
-    pub fn allocate_mmio_addresses(
+    /// Reserves a section of `size` bytes of platform MMIO address space.
+    pub fn allocate_platform_mmio_addresses(
         &mut self,
         address: Option<GuestAddress>,
         size: GuestUsize,
         align_size: Option<GuestUsize>,
     ) -> Option<GuestAddress> {
-        self.mmio_address_space.allocate(
+        self.platform_mmio_address_space.allocate(
             address,
             size,
             Some(align_size.unwrap_or(pagesize() as u64)),
@@ -148,10 +151,10 @@ impl SystemAllocator {
         self.io_address_space.free(address, size)
     }
 
-    /// Free an MMIO address range.
+    /// Free a platform MMIO address range.
     /// We can only free a range if it matches exactly an already allocated range.
-    pub fn free_mmio_addresses(&mut self, address: GuestAddress, size: GuestUsize) {
-        self.mmio_address_space.free(address, size)
+    pub fn free_platform_mmio_addresses(&mut self, address: GuestAddress, size: GuestUsize) {
+        self.platform_mmio_address_space.free(address, size)
     }
 
     /// Free an MMIO address range from the 32 bits hole.
