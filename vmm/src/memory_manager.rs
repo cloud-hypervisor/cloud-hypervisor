@@ -820,6 +820,7 @@ impl MemoryManager {
         phys_bits: u8,
         #[cfg(feature = "tdx")] tdx_enabled: bool,
         restore_data: Option<&MemoryManagerSnapshotData>,
+        #[cfg(target_arch = "x86_64")] sgx_epc_config: Option<Vec<SgxEpcConfig>>,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         let user_provided_zones = config.size == 0;
 
@@ -1047,6 +1048,10 @@ impl MemoryManager {
         };
 
         memory_manager.allocate_address_space()?;
+        #[cfg(target_arch = "x86_64")]
+        if let Some(sgx_epc_config) = sgx_epc_config {
+            memory_manager.setup_sgx(sgx_epc_config)?;
+        }
 
         Ok(Arc::new(Mutex::new(memory_manager)))
     }
@@ -1075,6 +1080,8 @@ impl MemoryManager {
                 #[cfg(feature = "tdx")]
                 false,
                 Some(&mem_snapshot),
+                #[cfg(target_arch = "x86_64")]
+                None,
             )?;
 
             mm.lock()
@@ -1585,16 +1592,13 @@ impl MemoryManager {
     }
 
     #[cfg(target_arch = "x86_64")]
-    pub fn setup_sgx(
-        &mut self,
-        sgx_epc_config: Vec<SgxEpcConfig>,
-        vm: &Arc<dyn hypervisor::Vm>,
-    ) -> Result<(), Error> {
+    pub fn setup_sgx(&mut self, sgx_epc_config: Vec<SgxEpcConfig>) -> Result<(), Error> {
         let file = OpenOptions::new()
             .read(true)
             .open("/dev/sgx_provision")
             .map_err(Error::SgxProvisionOpen)?;
-        vm.enable_sgx_attribute(file)
+        self.vm
+            .enable_sgx_attribute(file)
             .map_err(Error::SgxEnableProvisioning)?;
 
         // Go over each EPC section and verify its size is a 4k multiple. At
