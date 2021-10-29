@@ -5,6 +5,7 @@
 use crate::cpu::CpuManager;
 use crate::device_manager::DeviceManager;
 use crate::memory_manager::MemoryManager;
+use crate::pci_segment::PciSegment;
 use crate::{GuestMemoryMmap, GuestRegionMmap};
 use acpi_tables::sdt::GenericAddress;
 use acpi_tables::{aml::Aml, rsdp::Rsdp, sdt::Sdt};
@@ -223,13 +224,13 @@ fn create_facp_table(dsdt_offset: GuestAddress) -> Sdt {
     facp
 }
 
-fn create_mcfg_table(device_manager: &Arc<Mutex<DeviceManager>>) -> Sdt {
+fn create_mcfg_table(pci_segments: &[PciSegment]) -> Sdt {
     let mut mcfg = Sdt::new(*b"MCFG", 36, 1, *b"CLOUDH", *b"CHMCFG  ", 1);
 
     // MCFG reserved 8 bytes
     mcfg.append(0u64);
 
-    for segment in device_manager.lock().unwrap().pci_segments() {
+    for segment in pci_segments {
         // 32-bit PCI enhanced configuration mechanism
         mcfg.append(PciRangeEntry {
             base_address: segment.mmio_config_address,
@@ -539,7 +540,7 @@ pub fn create_acpi_tables(
     }
 
     // MCFG
-    let mcfg = create_mcfg_table(device_manager);
+    let mcfg = create_mcfg_table(device_manager.lock().unwrap().pci_segments());
     let mcfg_offset = prev_tbl_off.checked_add(prev_tbl_len).unwrap();
     guest_mem
         .write_slice(mcfg.as_slice(), mcfg_offset)
