@@ -1632,6 +1632,10 @@ impl MemoryManager {
             .ok_or(Error::GuestAddressOverFlow)?;
 
         let mut sgx_epc_region = SgxEpcRegion::new(epc_region_start, epc_region_size as GuestUsize);
+        info!(
+            "SGX EPC region: 0x{:x} (0x{:x})",
+            epc_region_start.0, epc_region_size
+        );
 
         // Each section can be memory mapped into the allocated region.
         let mut epc_section_start = epc_region_start.raw_value();
@@ -1664,6 +1668,11 @@ impl MemoryManager {
                     0,
                 )
             } as u64;
+
+            info!(
+                "Adding SGX EPC section: 0x{:x} (0x{:x})",
+                epc_section_start, epc_section.size
+            );
 
             let _mem_slot = self.create_userspace_mapping(
                 epc_section_start,
