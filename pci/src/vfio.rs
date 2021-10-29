@@ -18,7 +18,7 @@ use std::ptr::null_mut;
 use std::sync::{Arc, Barrier};
 use thiserror::Error;
 use vfio_bindings::bindings::vfio::*;
-use vfio_ioctls::{VfioContainer, VfioDevice, VfioIrq};
+use vfio_ioctls::{VfioContainer, VfioDevice, VfioIrq, VfioRegionInfoCap};
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
@@ -1120,11 +1120,25 @@ impl VfioPciDevice {
                     prot |= libc::PROT_WRITE;
                 }
 
-                // We ignore the mmap offset because we only support running on
-                // host with VFIO newer than 4.16. That's because sparse mmap
-                // has been deprecated and instead MSI-X regions can now be
-                // entirely mapped.
-                let (_, mmap_size) = self.device.get_region_mmap(region.index);
+                // Retrieve the list of capabilities found on the region
+                let caps = if region_flags & VFIO_REGION_INFO_FLAG_CAPS != 0 {
+                    self.device.get_region_caps(region.index)
+                } else {
+                    Vec::new()
+                };
+
+                // Don't try to mmap the region if it contains MSI-X table or
+                // MSI-X PBA subregion, and if we couldn't find MSIX_MAPPABLE
+                // in the list of supported capabilities.
+                if let Some(msix) = self.common.interrupt.msix.as_ref() {
+                    if (region.index == msix.cap.table_bir() || region.index == msix.cap.pba_bir())
+                        && !caps.contains(&VfioRegionInfoCap::MsixMappable)
+                    {
+                        continue;
+                    }
+                }
+
+                let mmap_size = self.device.get_region_size(region.index);
                 let offset = self.device.get_region_offset(region.index);
 
                 let host_addr = unsafe {
@@ -1139,7 +1153,7 @@ impl VfioPciDevice {
                 };
 
                 if host_addr == libc::MAP_FAILED {
-                    warn!(
+                    error!(
                         "Could not mmap region index {}: {}",
                         region.index,
                         io::Error::last_os_error()
