@@ -745,6 +745,10 @@ impl Vm {
         #[cfg(target_arch = "x86_64")]
         vm.enable_split_irq().unwrap();
         let phys_bits = physical_bits(config.lock().unwrap().cpus.max_phys_bits);
+
+        #[cfg(target_arch = "x86_64")]
+        let sgx_epc_config = config.lock().unwrap().sgx_epc.clone();
+
         let memory_manager = MemoryManager::new(
             vm.clone(),
             &config.lock().unwrap().memory.clone(),
@@ -753,19 +757,10 @@ impl Vm {
             #[cfg(feature = "tdx")]
             tdx_enabled,
             None,
+            #[cfg(target_arch = "x86_64")]
+            sgx_epc_config,
         )
         .map_err(Error::MemoryManager)?;
-
-        #[cfg(target_arch = "x86_64")]
-        {
-            if let Some(sgx_epc_config) = config.lock().unwrap().sgx_epc.clone() {
-                memory_manager
-                    .lock()
-                    .unwrap()
-                    .setup_sgx(sgx_epc_config, &vm)
-                    .map_err(Error::MemoryManager)?;
-            }
-        }
 
         let new_vm = Vm::new_from_memory_manager(
             config,
@@ -871,6 +866,8 @@ impl Vm {
             #[cfg(feature = "tdx")]
             false,
             Some(memory_manager_data),
+            #[cfg(target_arch = "x86_64")]
+            None,
         )
         .map_err(Error::MemoryManager)?;
 
