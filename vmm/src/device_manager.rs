@@ -975,7 +975,7 @@ impl DeviceManager {
             .allocator
             .lock()
             .unwrap()
-            .allocate_mmio_addresses(None, DEVICE_MANAGER_ACPI_SIZE as u64, None)
+            .allocate_platform_mmio_addresses(None, DEVICE_MANAGER_ACPI_SIZE as u64, None)
             .ok_or(DeviceManagerError::AllocateIoPort)?;
 
         let mut pci_irq_slots = [0; 32];
@@ -1366,7 +1366,11 @@ impl DeviceManager {
             .allocator
             .lock()
             .unwrap()
-            .allocate_mmio_addresses(None, devices::acpi::GED_DEVICE_ACPI_SIZE as u64, None)
+            .allocate_platform_mmio_addresses(
+                None,
+                devices::acpi::GED_DEVICE_ACPI_SIZE as u64,
+                None,
+            )
             .ok_or(DeviceManagerError::AllocateMmioAddress)?;
         let ged_device = Arc::new(Mutex::new(devices::AcpiGedDevice::new(
             interrupt_group,

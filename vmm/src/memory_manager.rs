@@ -63,6 +63,9 @@ const MPOL_BIND: u32 = 2;
 const MPOL_MF_STRICT: u32 = 1;
 const MPOL_MF_MOVE: u32 = 1 << 1;
 
+// Reserve 1 MiB for platform MMIO devices (e.g. ACPI control devices)
+const PLATFORM_DEVICE_AREA_SIZE: u64 = 1 << 20;
+
 #[derive(Clone, Default, Serialize, Deserialize, Versionize)]
 struct HotPlugState {
     base: u64,
@@ -827,7 +830,9 @@ impl MemoryManager {
             (((mmio_address_space_size) >> 16) << 16),
             mmio_address_space_size
         );
-        let end_of_device_area = GuestAddress(mmio_address_space_size - 1);
+        let start_of_platform_device_area =
+            GuestAddress(mmio_address_space_size - PLATFORM_DEVICE_AREA_SIZE);
+        let end_of_device_area = start_of_platform_device_area.unchecked_sub(1);
 
         let (ram_size, zones, allow_mem_hotplug) =
             Self::validate_memory_config(config, user_provided_zones)?;
@@ -989,8 +994,8 @@ impl MemoryManager {
                 {
                     1 << 16
                 },
-                GuestAddress(0),
-                mmio_address_space_size,
+                start_of_platform_device_area,
+                PLATFORM_DEVICE_AREA_SIZE,
                 layout::MEM_32BIT_DEVICES_START,
                 layout::MEM_32BIT_DEVICES_SIZE,
                 #[cfg(target_arch = "x86_64")]
@@ -1006,7 +1011,7 @@ impl MemoryManager {
         let acpi_address = allocator
             .lock()
             .unwrap()
-            .allocate_mmio_addresses(None, MEMORY_MANAGER_ACPI_SIZE as u64, None)
+            .allocate_platform_mmio_addresses(None, MEMORY_MANAGER_ACPI_SIZE as u64, None)
             .ok_or(Error::AllocateMmioAddress)?;
 
         #[cfg(not(feature = "tdx"))]

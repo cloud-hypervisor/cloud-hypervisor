@@ -575,7 +575,7 @@ impl CpuManager {
             .allocator()
             .lock()
             .unwrap()
-            .allocate_mmio_addresses(None, CPU_MANAGER_ACPI_SIZE as u64, None)
+            .allocate_platform_mmio_addresses(None, CPU_MANAGER_ACPI_SIZE as u64, None)
             .ok_or(Error::AllocateMmmioAddress)?;
 
         #[cfg(feature = "acpi")]
