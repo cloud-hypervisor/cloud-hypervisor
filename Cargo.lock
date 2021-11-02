@@ -565,7 +565,7 @@ dependencies = [
 [[package]]
 name = "mshv-bindings"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/mshv?branch=main#424f51a5fc40f30a7787576981dd549950677420"
+source = "git+https://github.com/rust-vmm/mshv?branch=main#4ed2146b7c3369c731f6c0337d6e7370aebda452"
 dependencies = [
  "libc",
  "serde",
@@ -577,7 +577,7 @@ dependencies = [
 [[package]]
 name = "mshv-ioctls"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/mshv?branch=main#424f51a5fc40f30a7787576981dd549950677420"
+source = "git+https://github.com/rust-vmm/mshv?branch=main#4ed2146b7c3369c731f6c0337d6e7370aebda452"
 dependencies = [
  "libc",
  "mshv-bindings",
@@ -625,9 +625,9 @@ dependencies = [
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.68"
+version = "0.9.70"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c571f25d3f66dd427e417cebf73dbe2361d6125cf6e3a70d143fdf97c9f5150"
+checksum = "c6517987b3f8226b5da3661dad65ff7f300cc59fb5ea8333ca191fc65fde3edf"
 dependencies = [
  "autocfg",
  "cc",
