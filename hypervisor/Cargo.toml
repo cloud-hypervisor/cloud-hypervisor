@@ -14,7 +14,7 @@ tdx = []
 anyhow = "1.0.44"
 epoll = "4.3.1"
 thiserror = "1.0.30"
-libc = "0.2.105"
+libc = "0.2.106"
 log = "0.4.14"
 kvm-ioctls = { version = "0.10.0", optional = true }
 kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch-v0.5.0", features = ["with-serde", "fam-wrappers"], optional  = true }
