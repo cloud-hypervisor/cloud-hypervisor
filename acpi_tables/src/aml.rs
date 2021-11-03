@@ -303,36 +303,31 @@ pub struct ResourceTemplate<'a> {
 }
 
 impl<'a> Aml for ResourceTemplate<'a> {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+        let mut tmp = Vec::new();
         // Add buffer data
         for child in &self.children {
-            bytes.append(&mut child.to_aml_bytes());
+            tmp.append(&mut child.to_aml_bytes());
         }
 
         // Mark with end and mark checksum as as always valid
-        bytes.push(0x79); /* EndTag */
-        bytes.push(0); /* zero checksum byte */
+        tmp.push(0x79); /* EndTag */
+        tmp.push(0); /* zero checksum byte */
 
         // Buffer length is an encoded integer including buffer data
         // and EndTag and checksum byte
-        let mut buffer_length = bytes.len().to_aml_bytes();
+        let mut buffer_length = tmp.len().to_aml_bytes();
         buffer_length.reverse();
         for byte in buffer_length {
-            bytes.insert(0, byte);
+            tmp.insert(0, byte);
         }
 
         // PkgLength is everything else
-        let mut pkg_length = create_pkg_length(&bytes, true);
-        pkg_length.reverse();
-        for byte in pkg_length {
-            bytes.insert(0, byte);
-        }
+        let mut pkg_length = create_pkg_length(&tmp, true);
 
-        bytes.insert(0, 0x11); /* BufferOp */
-
-        bytes
+        bytes.push(0x11); /* BufferOp */
+        bytes.append(&mut pkg_length);
+        bytes.append(&mut tmp);
     }
 }
 
