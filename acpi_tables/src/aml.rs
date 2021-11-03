@@ -869,11 +869,10 @@ impl<'a> Store<'a> {
 }
 
 impl<'a> Aml for Store<'a> {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = vec![0x70]; /* StoreOp */
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+        bytes.push(0x70); /* StoreOp */
         bytes.extend_from_slice(&self.value.to_aml_bytes());
         bytes.extend_from_slice(&self.name.to_aml_bytes());
-        bytes
     }
 }
 
