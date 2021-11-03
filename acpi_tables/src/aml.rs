@@ -927,11 +927,10 @@ impl Release {
 }
 
 impl Aml for Release {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = vec![0x5b]; /* ExtOpPrefix */
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+        bytes.push(0x5b); /* ExtOpPrefix */
         bytes.push(0x27); /* ReleaseOp */
-        bytes.extend_from_slice(&self.mutex.to_aml_bytes());
-        bytes
+        self.mutex.append_aml_bytes(bytes);
     }
 }
 
