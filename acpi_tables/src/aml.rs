@@ -109,7 +109,7 @@ pub type Word = u16;
 impl Aml for Word {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         bytes.push(0x0b); /* WordPrefix */
-        bytes.append(&mut self.to_le_bytes().to_vec());
+        bytes.extend_from_slice(&self.to_le_bytes())
     }
 }
 
@@ -118,7 +118,7 @@ pub type DWord = u32;
 impl Aml for DWord {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         bytes.push(0x0c); /* DWordPrefix */
-        bytes.append(&mut self.to_le_bytes().to_vec());
+        bytes.extend_from_slice(&self.to_le_bytes())
     }
 }
 
@@ -127,7 +127,7 @@ pub type QWord = u64;
 impl Aml for QWord {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         bytes.push(0x0e); /* QWordPrefix */
-        bytes.append(&mut self.to_le_bytes().to_vec());
+        bytes.extend_from_slice(&self.to_le_bytes())
     }
 }
 
