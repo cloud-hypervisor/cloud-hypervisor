@@ -842,11 +842,9 @@ impl<'a> Aml for LessThan<'a> {
 pub struct Arg(pub u8);
 
 impl Aml for Arg {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         assert!(self.0 <= 6);
         bytes.push(0x68 + self.0); /* Arg0Op */
-        bytes
     }
 }
 
