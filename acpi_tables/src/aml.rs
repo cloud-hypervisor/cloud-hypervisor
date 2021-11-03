@@ -260,23 +260,19 @@ impl Aml for EisaName {
     }
 }
 
-fn create_integer(v: usize) -> Vec<u8> {
-    if v <= u8::max_value().into() {
-        (v as u8).to_aml_bytes()
-    } else if v <= u16::max_value().into() {
-        (v as u16).to_aml_bytes()
-    } else if v <= u32::max_value() as usize {
-        (v as u32).to_aml_bytes()
-    } else {
-        (v as u64).to_aml_bytes()
-    }
-}
-
 pub type Usize = usize;
 
 impl Aml for Usize {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        create_integer(*self)
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+        if *self <= u8::max_value().into() {
+            (*self as u8).append_aml_bytes(bytes)
+        } else if *self <= u16::max_value().into() {
+            (*self as u16).append_aml_bytes(bytes)
+        } else if *self <= u32::max_value() as usize {
+            (*self as u32).append_aml_bytes(bytes)
+        } else {
+            (*self as u64).append_aml_bytes(bytes)
+        }
     }
 }
 
