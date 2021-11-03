@@ -813,11 +813,10 @@ impl<'a> Equal<'a> {
 }
 
 impl<'a> Aml for Equal<'a> {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = vec![0x93]; /* LEqualOp */
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+        bytes.push(0x93); /* LEqualOp */
         bytes.extend_from_slice(&self.left.to_aml_bytes());
         bytes.extend_from_slice(&self.right.to_aml_bytes());
-        bytes
     }
 }
 
