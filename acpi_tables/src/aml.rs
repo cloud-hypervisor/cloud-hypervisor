@@ -416,7 +416,7 @@ impl<T> AddressSpace<T> {
 
     fn push_header(&self, bytes: &mut Vec<u8>, descriptor: u8, length: usize) {
         bytes.push(descriptor); /* Word Address Space Descriptor */
-        bytes.append(&mut (length as u16).to_le_bytes().to_vec());
+        bytes.extend_from_slice(&(length as u16).to_le_bytes());
         bytes.push(self.r#type as u8); /* type */
         let generic_flags = 1 << 2 /* Min Fixed */ | 1 << 3; /* Max Fixed */
         bytes.push(generic_flags);
@@ -425,65 +425,53 @@ impl<T> AddressSpace<T> {
 }
 
 impl Aml for AddressSpace<u16> {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         self.push_header(
-            &mut bytes,
+            bytes,
             0x88,                               /* Word Address Space Descriptor */
             3 + 5 * std::mem::size_of::<u16>(), /* 3 bytes of header + 5 u16 fields */
         );
 
-        bytes.append(&mut 0u16.to_le_bytes().to_vec()); /* Granularity */
-        bytes.append(&mut self.min.to_le_bytes().to_vec()); /* Min */
-        bytes.append(&mut self.max.to_le_bytes().to_vec()); /* Max */
-        bytes.append(&mut 0u16.to_le_bytes().to_vec()); /* Translation */
+        bytes.extend_from_slice(&0u16.to_le_bytes()); /* Granularity */
+        bytes.extend_from_slice(&self.min.to_le_bytes()); /* Min */
+        bytes.extend_from_slice(&self.max.to_le_bytes()); /* Max */
+        bytes.extend_from_slice(&0u16.to_le_bytes()); /* Translation */
         let len = self.max - self.min + 1;
-        bytes.append(&mut len.to_le_bytes().to_vec()); /* Length */
-
-        bytes
+        bytes.extend_from_slice(&len.to_le_bytes()); /* Length */
     }
 }
 
 impl Aml for AddressSpace<u32> {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         self.push_header(
-            &mut bytes,
+            bytes,
             0x87,                               /* DWord Address Space Descriptor */
             3 + 5 * std::mem::size_of::<u32>(), /* 3 bytes of header + 5 u32 fields */
         );
 
-        bytes.append(&mut 0u32.to_le_bytes().to_vec()); /* Granularity */
-        bytes.append(&mut self.min.to_le_bytes().to_vec()); /* Min */
-        bytes.append(&mut self.max.to_le_bytes().to_vec()); /* Max */
-        bytes.append(&mut 0u32.to_le_bytes().to_vec()); /* Translation */
+        bytes.extend_from_slice(&0u32.to_le_bytes()); /* Granularity */
+        bytes.extend_from_slice(&self.min.to_le_bytes()); /* Min */
+        bytes.extend_from_slice(&self.max.to_le_bytes()); /* Max */
+        bytes.extend_from_slice(&0u32.to_le_bytes()); /* Translation */
         let len = self.max - self.min + 1;
-        bytes.append(&mut len.to_le_bytes().to_vec()); /* Length */
-
-        bytes
+        bytes.extend_from_slice(&len.to_le_bytes()); /* Length */
     }
 }
 
 impl Aml for AddressSpace<u64> {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         self.push_header(
-            &mut bytes,
+            bytes,
             0x8A,                               /* QWord Address Space Descriptor */
             3 + 5 * std::mem::size_of::<u64>(), /* 3 bytes of header + 5 u64 fields */
         );
 
-        bytes.append(&mut 0u64.to_le_bytes().to_vec()); /* Granularity */
-        bytes.append(&mut self.min.to_le_bytes().to_vec()); /* Min */
-        bytes.append(&mut self.max.to_le_bytes().to_vec()); /* Max */
-        bytes.append(&mut 0u64.to_le_bytes().to_vec()); /* Translation */
+        bytes.extend_from_slice(&0u64.to_le_bytes()); /* Granularity */
+        bytes.extend_from_slice(&self.min.to_le_bytes()); /* Min */
+        bytes.extend_from_slice(&self.max.to_le_bytes()); /* Max */
+        bytes.extend_from_slice(&0u64.to_le_bytes()); /* Translation */
         let len = self.max - self.min + 1;
-        bytes.append(&mut len.to_le_bytes().to_vec()); /* Length */
-
-        bytes
+        bytes.extend_from_slice(&len.to_le_bytes()); /* Length */
     }
 }
 
