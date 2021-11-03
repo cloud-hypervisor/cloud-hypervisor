@@ -851,11 +851,9 @@ impl Aml for Arg {
 pub struct Local(pub u8);
 
 impl Aml for Local {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         assert!(self.0 <= 7);
         bytes.push(0x60 + self.0); /* Local0Op */
-        bytes
     }
 }
 
