@@ -354,15 +354,13 @@ impl Memory32Fixed {
 }
 
 impl Aml for Memory32Fixed {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = vec![0x86]; /* Memory32Fixed */
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+        bytes.push(0x86); /* Memory32Fixed */
         bytes.append(&mut 9u16.to_le_bytes().to_vec());
-
         // 9 bytes of payload
         bytes.push(self.read_write as u8);
         bytes.append(&mut self.base.to_le_bytes().to_vec());
         bytes.append(&mut self.length.to_le_bytes().to_vec());
-        bytes
     }
 }
 
