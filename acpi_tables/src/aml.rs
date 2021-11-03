@@ -531,8 +531,8 @@ impl Interrupt {
 }
 
 impl Aml for Interrupt {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = vec![0x89]; /* Extended IRQ Descriptor */
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+        bytes.push(0x89); /* Extended IRQ Descriptor */
         bytes.append(&mut 6u16.to_le_bytes().to_vec());
         let flags = (self.shared as u8) << 3
             | (self.active_low as u8) << 2
@@ -541,8 +541,6 @@ impl Aml for Interrupt {
         bytes.push(flags);
         bytes.push(1u8); /* count */
         bytes.append(&mut self.number.to_le_bytes().to_vec());
-
-        bytes
     }
 }
 
