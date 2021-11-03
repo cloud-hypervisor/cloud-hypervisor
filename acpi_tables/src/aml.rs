@@ -1056,20 +1056,16 @@ impl Buffer {
 }
 
 impl Aml for Buffer {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(&self.data.len().to_aml_bytes());
-        bytes.extend_from_slice(&self.data);
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+        let mut tmp = Vec::new();
+        tmp.extend_from_slice(&self.data.len().to_aml_bytes());
+        tmp.extend_from_slice(&self.data);
 
-        let mut pkg_length = create_pkg_length(&bytes, true);
-        pkg_length.reverse();
-        for byte in pkg_length {
-            bytes.insert(0, byte);
-        }
+        let mut pkg_length = create_pkg_length(&tmp, true);
 
-        bytes.insert(0, 0x11); /* BufferOp */
-
-        bytes
+        bytes.push(0x11); /* BufferOp */
+        bytes.append(&mut pkg_length);
+        bytes.append(&mut tmp);
     }
 }
 
