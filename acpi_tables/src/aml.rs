@@ -761,15 +761,13 @@ impl OpRegion {
 }
 
 impl Aml for OpRegion {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.append(&mut self.path.to_aml_bytes());
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+        bytes.push(0x5b); /* ExtOpPrefix */
+        bytes.push(0x80); /* OpRegionOp */
+        self.path.append_aml_bytes(bytes);
         bytes.push(self.space as u8);
-        bytes.extend_from_slice(&self.offset.to_aml_bytes()); /* RegionOffset */
-        bytes.extend_from_slice(&self.length.to_aml_bytes()); /* RegionLen */
-        bytes.insert(0, 0x80); /* OpRegionOp */
-        bytes.insert(0, 0x5b); /* ExtOpPrefix */
-        bytes
+        self.offset.append_aml_bytes(bytes); /* RegionOffset */
+        self.length.append_aml_bytes(bytes); /* RegionLen */
     }
 }
 
