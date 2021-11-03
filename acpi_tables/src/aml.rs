@@ -646,10 +646,9 @@ impl<'a> Return<'a> {
 }
 
 impl<'a> Aml for Return<'a> {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = vec![0xa4]; /* ReturnOp */
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+        bytes.push(0xa4); /* ReturnOp */
         bytes.append(&mut self.value.to_aml_bytes());
-        bytes
     }
 }
 
