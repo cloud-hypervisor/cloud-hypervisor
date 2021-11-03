@@ -1088,22 +1088,20 @@ impl<'a, T> CreateField<'a, T> {
 }
 
 impl<'a> Aml for CreateField<'a, u64> {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = vec![0x8f]; /* CreateQWordFieldOp */
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+        bytes.push(0x8f); /* CreateQWordFieldOp */
         bytes.extend_from_slice(&self.buffer.to_aml_bytes());
         bytes.extend_from_slice(&self.offset.to_aml_bytes());
-        bytes.extend_from_slice(&self.field.to_aml_bytes());
-        bytes
+        self.field.append_aml_bytes(bytes);
     }
 }
 
 impl<'a> Aml for CreateField<'a, u32> {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = vec![0x8a]; /* CreateDWordFieldOp */
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+        bytes.push(0x8a); /* CreateDWordFieldOp */
         bytes.extend_from_slice(&self.buffer.to_aml_bytes());
         bytes.extend_from_slice(&self.offset.to_aml_bytes());
-        bytes.extend_from_slice(&self.field.to_aml_bytes());
-        bytes
+        self.field.append_aml_bytes(bytes);
     }
 }
 
