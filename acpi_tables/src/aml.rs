@@ -946,11 +946,10 @@ impl<'a> Notify<'a> {
 }
 
 impl<'a> Aml for Notify<'a> {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = vec![0x86]; /* NotifyOp */
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+        bytes.push(0x86); /* NotifyOp */
         bytes.extend_from_slice(&self.object.to_aml_bytes());
         bytes.extend_from_slice(&self.value.to_aml_bytes());
-        bytes
     }
 }
 
