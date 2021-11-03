@@ -832,11 +832,10 @@ impl<'a> LessThan<'a> {
 }
 
 impl<'a> Aml for LessThan<'a> {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = vec![0x95]; /* LLessOp */
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+        bytes.push(0x95); /* LLessOp */
         bytes.extend_from_slice(&self.left.to_aml_bytes());
         bytes.extend_from_slice(&self.right.to_aml_bytes());
-        bytes
     }
 }
 
