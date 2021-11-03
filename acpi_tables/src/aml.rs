@@ -578,21 +578,18 @@ pub struct Scope<'a> {
 }
 
 impl<'a> Aml for Scope<'a> {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.append(&mut self.path.to_aml_bytes());
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+        let mut tmp = Vec::new();
+        tmp.append(&mut self.path.to_aml_bytes());
         for child in &self.children {
-            bytes.append(&mut child.to_aml_bytes());
+            tmp.append(&mut child.to_aml_bytes());
         }
 
-        let mut pkg_length = create_pkg_length(&bytes, true);
-        pkg_length.reverse();
-        for byte in pkg_length {
-            bytes.insert(0, byte);
-        }
+        let mut pkg_length = create_pkg_length(&tmp, true);
 
-        bytes.insert(0, 0x10); /* ScopeOp */
-        bytes
+        bytes.push(0x10); /* ScopeOp */
+        bytes.append(&mut pkg_length);
+        bytes.append(&mut tmp)
     }
 }
 
