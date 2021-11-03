@@ -136,8 +136,10 @@ pub struct Name {
 }
 
 impl Aml for Name {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        self.bytes.clone()
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+        // TODO: Refactor this to make more efficient but there are
+        // lifetime/ownership challenges.
+        bytes.append(&mut self.bytes.clone())
     }
 }
 
