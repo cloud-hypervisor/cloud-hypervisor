@@ -98,40 +98,36 @@ impl From<&str> for Path {
 pub type Byte = u8;
 
 impl Aml for Byte {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = vec![0x0a]; /* BytePrefix */
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+        bytes.push(0x0a); /* BytePrefix */
         bytes.push(*self);
-        bytes
     }
 }
 
 pub type Word = u16;
 
 impl Aml for Word {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = vec![0x0bu8]; /* WordPrefix */
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+        bytes.push(0x0b); /* WordPrefix */
         bytes.append(&mut self.to_le_bytes().to_vec());
-        bytes
     }
 }
 
 pub type DWord = u32;
 
 impl Aml for DWord {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = vec![0x0c]; /* DWordPrefix */
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+        bytes.push(0x0c); /* DWordPrefix */
         bytes.append(&mut self.to_le_bytes().to_vec());
-        bytes
     }
 }
 
 pub type QWord = u64;
 
 impl Aml for QWord {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = vec![0x0e]; /* QWordPrefix */
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+        bytes.push(0x0e); /* QWordPrefix */
         bytes.append(&mut self.to_le_bytes().to_vec());
-        bytes
     }
 }
 
