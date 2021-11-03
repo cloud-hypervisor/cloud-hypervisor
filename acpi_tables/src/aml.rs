@@ -888,12 +888,11 @@ impl Mutex {
 }
 
 impl Aml for Mutex {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = vec![0x5b]; /* ExtOpPrefix */
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+        bytes.push(0x5b); /* ExtOpPrefix */
         bytes.push(0x01); /* MutexOp */
-        bytes.extend_from_slice(&self.path.to_aml_bytes());
+        self.path.append_aml_bytes(bytes);
         bytes.push(self.sync_level);
-        bytes
     }
 }
 
