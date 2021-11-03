@@ -255,8 +255,8 @@ impl EisaName {
 }
 
 impl Aml for EisaName {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        self.value.to_aml_bytes()
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+        self.value.append_aml_bytes(bytes)
     }
 }
 
