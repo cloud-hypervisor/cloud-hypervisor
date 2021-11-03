@@ -908,12 +908,11 @@ impl Acquire {
 }
 
 impl Aml for Acquire {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = vec![0x5b]; /* ExtOpPrefix */
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+        bytes.push(0x5b); /* ExtOpPrefix */
         bytes.push(0x23); /* AcquireOp */
-        bytes.extend_from_slice(&self.mutex.to_aml_bytes());
+        self.mutex.append_aml_bytes(bytes);
         bytes.extend_from_slice(&self.timeout.to_le_bytes());
-        bytes
     }
 }
 
