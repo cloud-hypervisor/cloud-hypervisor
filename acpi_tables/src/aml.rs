@@ -276,26 +276,25 @@ impl Aml for Usize {
     }
 }
 
-fn create_aml_string(v: &str) -> Vec<u8> {
-    let mut data = vec![0x0D]; /* String Op */
-    data.extend_from_slice(v.as_bytes());
-    data.push(0x0); /* NullChar */
-    data
+fn append_aml_string(v: &str, bytes: &mut Vec<u8>) {
+    bytes.push(0x0D); /* String Op */
+    bytes.extend_from_slice(v.as_bytes());
+    bytes.push(0x0); /* NullChar */
 }
 
 pub type AmlStr = &'static str;
 
 impl Aml for AmlStr {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        create_aml_string(self)
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+        append_aml_string(self, bytes)
     }
 }
 
 pub type AmlString = String;
 
 impl Aml for AmlString {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        create_aml_string(self)
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+        append_aml_string(self, bytes)
     }
 }
 
