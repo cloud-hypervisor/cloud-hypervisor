@@ -699,35 +699,32 @@ impl Field {
 }
 
 impl Aml for Field {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.append(&mut self.path.to_aml_bytes());
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+        let mut tmp = Vec::new();
+        tmp.append(&mut self.path.to_aml_bytes());
 
         let flags: u8 = self.access_type as u8 | (self.update_rule as u8) << 5;
-        bytes.push(flags);
+        tmp.push(flags);
 
         for field in self.fields.iter() {
             match field {
                 FieldEntry::Named(name, length) => {
-                    bytes.extend_from_slice(name);
-                    bytes.append(&mut create_pkg_length(&vec![0; *length], false));
+                    tmp.extend_from_slice(name);
+                    tmp.append(&mut create_pkg_length(&vec![0; *length], false));
                 }
                 FieldEntry::Reserved(length) => {
-                    bytes.push(0x0);
-                    bytes.append(&mut create_pkg_length(&vec![0; *length], false));
+                    tmp.push(0x0);
+                    tmp.append(&mut create_pkg_length(&vec![0; *length], false));
                 }
             }
         }
 
-        let mut pkg_length = create_pkg_length(&bytes, true);
-        pkg_length.reverse();
-        for byte in pkg_length {
-            bytes.insert(0, byte);
-        }
+        let mut pkg_length = create_pkg_length(&tmp, true);
 
-        bytes.insert(0, 0x81); /* FieldOp */
-        bytes.insert(0, 0x5b); /* ExtOpPrefix */
-        bytes
+        bytes.push(0x5b); /* ExtOpPrefix */
+        bytes.push(0x81); /* FieldOp */
+        bytes.append(&mut pkg_length);
+        bytes.append(&mut tmp)
     }
 }
 
