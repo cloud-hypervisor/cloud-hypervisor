@@ -1037,13 +1037,11 @@ impl<'a> MethodCall<'a> {
 }
 
 impl<'a> Aml for MethodCall<'a> {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(&self.name.to_aml_bytes());
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+        self.name.append_aml_bytes(bytes);
         for arg in self.args.iter() {
             bytes.extend_from_slice(&arg.to_aml_bytes());
         }
-        bytes
     }
 }
 
