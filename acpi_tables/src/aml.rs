@@ -356,11 +356,11 @@ impl Memory32Fixed {
 impl Aml for Memory32Fixed {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         bytes.push(0x86); /* Memory32Fixed */
-        bytes.append(&mut 9u16.to_le_bytes().to_vec());
+        bytes.extend_from_slice(&9u16.to_le_bytes());
         // 9 bytes of payload
         bytes.push(self.read_write as u8);
-        bytes.append(&mut self.base.to_le_bytes().to_vec());
-        bytes.append(&mut self.length.to_le_bytes().to_vec());
+        bytes.extend_from_slice(&self.base.to_le_bytes());
+        bytes.extend_from_slice(&self.length.to_le_bytes());
     }
 }
 
