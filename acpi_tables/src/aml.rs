@@ -968,21 +968,18 @@ impl<'a> While<'a> {
 }
 
 impl<'a> Aml for While<'a> {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(&self.predicate.to_aml_bytes());
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+        let mut tmp = Vec::new();
+        tmp.extend_from_slice(&self.predicate.to_aml_bytes());
         for child in self.while_children.iter() {
-            bytes.extend_from_slice(&child.to_aml_bytes());
+            tmp.extend_from_slice(&child.to_aml_bytes());
         }
 
-        let mut pkg_length = create_pkg_length(&bytes, true);
-        pkg_length.reverse();
-        for byte in pkg_length {
-            bytes.insert(0, byte);
-        }
+        let mut pkg_length = create_pkg_length(&tmp, true);
 
-        bytes.insert(0, 0xa2); /* WhileOp */
-        bytes
+        bytes.push(0xa2); /* WhileOp */
+        bytes.append(&mut pkg_length);
+        bytes.append(&mut tmp);
     }
 }
 
