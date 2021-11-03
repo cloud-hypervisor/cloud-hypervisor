@@ -6,7 +6,15 @@
 use std::marker::PhantomData;
 
 pub trait Aml {
-    fn to_aml_bytes(&self) -> Vec<u8>;
+    fn append_aml_bytes(&self, _v: &mut Vec<u8>) {
+        unimplemented!()
+    }
+
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let mut v = Vec::new();
+        self.append_aml_bytes(&mut v);
+        v
+    }
 }
 
 pub const ZERO: Zero = Zero {};
