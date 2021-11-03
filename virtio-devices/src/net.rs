@@ -34,7 +34,9 @@ use std::{collections::HashMap, convert::TryInto};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_bindings::bindings::virtio_net::*;
-use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
+use virtio_bindings::bindings::virtio_ring::{
+    VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC,
+};
 use virtio_queue::Queue;
 use vm_memory::{ByteValued, GuestMemoryAtomic};
 use vm_migration::VersionMapped;
@@ -398,7 +400,9 @@ impl Net {
             | 1 << VIRTIO_NET_F_HOST_TSO4
             | 1 << VIRTIO_NET_F_HOST_TSO6
             | 1 << VIRTIO_NET_F_HOST_UFO
+            | 1 << VIRTIO_NET_F_MRG_RXBUF
             | 1 << VIRTIO_RING_F_EVENT_IDX
+            | 1 << VIRTIO_RING_F_INDIRECT_DESC
             | 1 << VIRTIO_F_VERSION_1;
 
         if iommu {
