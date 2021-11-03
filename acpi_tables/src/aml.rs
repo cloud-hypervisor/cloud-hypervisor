@@ -496,10 +496,9 @@ impl Io {
 impl Aml for Io {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         bytes.push(0x47); /* Io Port Descriptor */
-
         bytes.push(1); /* IODecode16 */
-        bytes.append(&mut self.min.to_le_bytes().to_vec());
-        bytes.append(&mut self.max.to_le_bytes().to_vec());
+        bytes.extend_from_slice(&self.min.to_le_bytes());
+        bytes.extend_from_slice(&self.max.to_le_bytes());
         bytes.push(self.alignment);
         bytes.push(self.length);
     }
