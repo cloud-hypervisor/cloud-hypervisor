@@ -998,12 +998,11 @@ macro_rules! binary_op {
         }
 
         impl<'a> Aml for $name<'a> {
-            fn to_aml_bytes(&self) -> Vec<u8> {
-                let mut bytes = vec![$opcode]; /* Op for the binary operator */
+            fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+                bytes.push($opcode); /* Op for the binary operator */
                 bytes.extend_from_slice(&self.a.to_aml_bytes());
                 bytes.extend_from_slice(&self.b.to_aml_bytes());
                 bytes.extend_from_slice(&self.target.to_aml_bytes());
-                bytes
             }
         }
     };
