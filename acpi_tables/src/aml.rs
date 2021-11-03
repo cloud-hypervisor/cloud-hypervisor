@@ -50,9 +50,7 @@ pub struct Path {
 }
 
 impl Aml for Path {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         if self.root {
             bytes.push(b'\\');
         }
@@ -72,8 +70,6 @@ impl Aml for Path {
         for part in self.name_parts.clone().iter_mut() {
             bytes.append(&mut part.to_vec());
         }
-
-        bytes
     }
 }
 
