@@ -618,23 +618,20 @@ impl<'a> Method<'a> {
 }
 
 impl<'a> Aml for Method<'a> {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.append(&mut self.path.to_aml_bytes());
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+        let mut tmp = Vec::new();
+        tmp.append(&mut self.path.to_aml_bytes());
         let flags: u8 = (self.args & 0x7) | (self.serialized as u8) << 3;
-        bytes.push(flags);
+        tmp.push(flags);
         for child in &self.children {
-            bytes.append(&mut child.to_aml_bytes());
+            tmp.append(&mut child.to_aml_bytes());
         }
 
-        let mut pkg_length = create_pkg_length(&bytes, true);
-        pkg_length.reverse();
-        for byte in pkg_length {
-            bytes.insert(0, byte);
-        }
+        let mut pkg_length = create_pkg_length(&tmp, true);
 
-        bytes.insert(0, 0x14); /* MethodOp */
-        bytes
+        bytes.push(0x14); /* MethodOp */
+        bytes.append(&mut pkg_length);
+        bytes.append(&mut tmp)
     }
 }
 
