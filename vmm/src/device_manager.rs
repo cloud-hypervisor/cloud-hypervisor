@@ -3889,11 +3889,9 @@ fn numa_node_id_from_memory_zone_id(numa_nodes: &NumaNodes, memory_zone_id: &str
 
 #[cfg(feature = "acpi")]
 impl Aml for DeviceManager {
-    fn to_aml_bytes(&self) -> Vec<u8> {
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         #[cfg(target_arch = "aarch64")]
         use arch::aarch64::DeviceInfoForFdt;
-
-        let mut bytes = Vec::new();
 
         let mut pci_scan_methods = Vec::new();
         for i in 0..self.pci_segments.len() {
@@ -3908,65 +3906,67 @@ impl Aml for DeviceManager {
         }
 
         // PCI hotplug controller
-        bytes.extend_from_slice(
-            &aml::Device::new(
-                "_SB_.PHPR".into(),
-                vec![
-                    &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0A06")),
-                    &aml::Name::new("_STA".into(), &0x0bu8),
-                    &aml::Name::new("_UID".into(), &"PCI Hotplug Controller"),
-                    &aml::Mutex::new("BLCK".into(), 0),
-                    &aml::Name::new(
-                        "_CRS".into(),
-                        &aml::ResourceTemplate::new(vec![&aml::AddressSpace::new_memory(
-                            aml::AddressSpaceCachable::NotCacheable,
-                            true,
-                            self.acpi_address.0 as u64,
-                            self.acpi_address.0 + DEVICE_MANAGER_ACPI_SIZE as u64 - 1,
-                        )]),
-                    ),
-                    // OpRegion and Fields map MMIO range into individual field values
-                    &aml::OpRegion::new(
-                        "PCST".into(),
-                        aml::OpRegionSpace::SystemMemory,
-                        self.acpi_address.0 as usize,
-                        DEVICE_MANAGER_ACPI_SIZE,
-                    ),
-                    &aml::Field::new(
-                        "PCST".into(),
-                        aml::FieldAccessType::DWord,
-                        aml::FieldUpdateRule::WriteAsZeroes,
-                        vec![
-                            aml::FieldEntry::Named(*b"PCIU", 32),
-                            aml::FieldEntry::Named(*b"PCID", 32),
-                            aml::FieldEntry::Named(*b"B0EJ", 32),
-                            aml::FieldEntry::Named(*b"PSEG", 32),
-                        ],
-                    ),
-                    &aml::Method::new(
-                        "PCEJ".into(),
-                        2,
+        aml::Device::new(
+            "_SB_.PHPR".into(),
+            vec![
+                &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0A06")),
+                &aml::Name::new("_STA".into(), &0x0bu8),
+                &aml::Name::new("_UID".into(), &"PCI Hotplug Controller"),
+                &aml::Mutex::new("BLCK".into(), 0),
+                &aml::Name::new(
+                    "_CRS".into(),
+                    &aml::ResourceTemplate::new(vec![&aml::AddressSpace::new_memory(
+                        aml::AddressSpaceCachable::NotCacheable,
                         true,
-                        vec![
-                            // Take lock defined above
-                            &aml::Acquire::new("BLCK".into(), 0xffff),
-                            // Choose the current segment
-                            &aml::Store::new(&aml::Path::new("PSEG"), &aml::Arg(1)),
-                            // Write PCI bus number (in first argument) to I/O port via field
-                            &aml::ShiftLeft::new(&aml::Path::new("B0EJ"), &aml::ONE, &aml::Arg(0)),
-                            // Release lock
-                            &aml::Release::new("BLCK".into()),
-                            // Return 0
-                            &aml::Return::new(&aml::ZERO),
-                        ],
-                    ),
-                    &aml::Method::new("PSCN".into(), 0, true, pci_scan_inner),
-                ],
-            )
-            .to_aml_bytes(),
-        );
+                        self.acpi_address.0 as u64,
+                        self.acpi_address.0 + DEVICE_MANAGER_ACPI_SIZE as u64 - 1,
+                    )]),
+                ),
+                // OpRegion and Fields map MMIO range into individual field values
+                &aml::OpRegion::new(
+                    "PCST".into(),
+                    aml::OpRegionSpace::SystemMemory,
+                    self.acpi_address.0 as usize,
+                    DEVICE_MANAGER_ACPI_SIZE,
+                ),
+                &aml::Field::new(
+                    "PCST".into(),
+                    aml::FieldAccessType::DWord,
+                    aml::FieldUpdateRule::WriteAsZeroes,
+                    vec![
+                        aml::FieldEntry::Named(*b"PCIU", 32),
+                        aml::FieldEntry::Named(*b"PCID", 32),
+                        aml::FieldEntry::Named(*b"B0EJ", 32),
+                        aml::FieldEntry::Named(*b"PSEG", 32),
+                    ],
+                ),
+                &aml::Method::new(
+                    "PCEJ".into(),
+                    2,
+                    true,
+                    vec![
+                        // Take lock defined above
+                        &aml::Acquire::new("BLCK".into(), 0xffff),
+                        // Choose the current segment
+                        &aml::Store::new(&aml::Path::new("PSEG"), &aml::Arg(1)),
+                        // Write PCI bus number (in first argument) to I/O port via field
+                        &aml::ShiftLeft::new(&aml::Path::new("B0EJ"), &aml::ONE, &aml::Arg(0)),
+                        // Release lock
+                        &aml::Release::new("BLCK".into()),
+                        // Return 0
+                        &aml::Return::new(&aml::ZERO),
+                    ],
+                ),
+                &aml::Method::new("PSCN".into(), 0, true, pci_scan_inner),
+            ],
+        )
+        .append_aml_bytes(bytes);
 
-        let mbrd_dsdt_data = aml::Device::new(
+        for segment in &self.pci_segments {
+            segment.append_aml_bytes(bytes);
+        }
+
+        aml::Device::new(
             "_SB_.MBRD".into(),
             vec![
                 &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0C02")),
@@ -3981,7 +3981,7 @@ impl Aml for DeviceManager {
                 ),
             ],
         )
-        .to_aml_bytes();
+        .append_aml_bytes(bytes);
 
         // Serial device
         #[cfg(target_arch = "x86_64")]
@@ -3998,68 +3998,54 @@ impl Aml for DeviceManager {
                 // If serial is turned off, add a fake device with invalid irq.
                 31
             };
-        let com1_dsdt_data = aml::Device::new(
-            "_SB_.COM1".into(),
-            vec![
-                &aml::Name::new(
-                    "_HID".into(),
-                    #[cfg(target_arch = "x86_64")]
-                    &aml::EisaName::new("PNP0501"),
-                    #[cfg(target_arch = "aarch64")]
-                    &"ARMH0011",
-                ),
-                &aml::Name::new("_UID".into(), &aml::ZERO),
-                &aml::Name::new(
-                    "_CRS".into(),
-                    &aml::ResourceTemplate::new(vec![
-                        &aml::Interrupt::new(true, true, false, false, serial_irq),
+        if self.config.lock().unwrap().serial.mode != ConsoleOutputMode::Off {
+            aml::Device::new(
+                "_SB_.COM1".into(),
+                vec![
+                    &aml::Name::new(
+                        "_HID".into(),
                         #[cfg(target_arch = "x86_64")]
-                        &aml::Io::new(0x3f8, 0x3f8, 0, 0x8),
+                        &aml::EisaName::new("PNP0501"),
                         #[cfg(target_arch = "aarch64")]
-                        &aml::Memory32Fixed::new(
-                            true,
-                            arch::layout::LEGACY_SERIAL_MAPPED_IO_START as u32,
-                            MMIO_LEN as u32,
-                        ),
-                    ]),
-                ),
-            ],
-        )
-        .to_aml_bytes();
+                        &"ARMH0011",
+                    ),
+                    &aml::Name::new("_UID".into(), &aml::ZERO),
+                    &aml::Name::new(
+                        "_CRS".into(),
+                        &aml::ResourceTemplate::new(vec![
+                            &aml::Interrupt::new(true, true, false, false, serial_irq),
+                            #[cfg(target_arch = "x86_64")]
+                            &aml::Io::new(0x3f8, 0x3f8, 0, 0x8),
+                            #[cfg(target_arch = "aarch64")]
+                            &aml::Memory32Fixed::new(
+                                true,
+                                arch::layout::LEGACY_SERIAL_MAPPED_IO_START as u32,
+                                MMIO_LEN as u32,
+                            ),
+                        ]),
+                    ),
+                ],
+            )
+            .append_aml_bytes(bytes);
+        }
 
-        let s5_sleep_data =
-            aml::Name::new("_S5_".into(), &aml::Package::new(vec![&5u8])).to_aml_bytes();
+        aml::Name::new("_S5_".into(), &aml::Package::new(vec![&5u8])).append_aml_bytes(bytes);
 
-        let power_button_dsdt_data = aml::Device::new(
+        aml::Device::new(
             "_SB_.PWRB".into(),
             vec![
                 &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0C0C")),
                 &aml::Name::new("_UID".into(), &aml::ZERO),
             ],
         )
-        .to_aml_bytes();
+        .append_aml_bytes(bytes);
 
-        let ged_data = self
-            .ged_notification_device
+        self.ged_notification_device
             .as_ref()
             .unwrap()
             .lock()
             .unwrap()
-            .to_aml_bytes();
-
-        for segment in &self.pci_segments {
-            let pci_dsdt_data = segment.to_aml_bytes();
-            bytes.extend_from_slice(pci_dsdt_data.as_slice());
-        }
-
-        bytes.extend_from_slice(mbrd_dsdt_data.as_slice());
-        if self.config.lock().unwrap().serial.mode != ConsoleOutputMode::Off {
-            bytes.extend_from_slice(com1_dsdt_data.as_slice());
-        }
-        bytes.extend_from_slice(s5_sleep_data.as_slice());
-        bytes.extend_from_slice(power_button_dsdt_data.as_slice());
-        bytes.extend_from_slice(ged_data.as_slice());
-        bytes
+            .append_aml_bytes(bytes);
     }
 }
 
