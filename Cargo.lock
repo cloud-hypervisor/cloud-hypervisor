@@ -1150,7 +1150,7 @@ dependencies = [
 [[package]]
 name = "vfio-ioctls"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vfio-ioctls?branch=main#491a0f89a08e2e4c19b19c1109615505228495f6"
+source = "git+https://github.com/rust-vmm/vfio-ioctls?branch=main#adbc9444387a9276e568fd2e31ed19bd0cd96611"
 dependencies = [
  "byteorder",
  "kvm-bindings",
