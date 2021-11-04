@@ -177,7 +177,7 @@ struct PciDevSlot {
 
 #[cfg(feature = "acpi")]
 impl Aml for PciDevSlot {
-    fn to_aml_bytes(&self) -> Vec<u8> {
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         let sun = self.device_id;
         let adr: u32 = (self.device_id as u32) << 16;
         aml::Device::new(
@@ -196,7 +196,7 @@ impl Aml for PciDevSlot {
                 ),
             ],
         )
-        .to_aml_bytes()
+        .append_aml_bytes(bytes)
     }
 }
 
@@ -207,18 +207,15 @@ struct PciDevSlotNotify {
 
 #[cfg(feature = "acpi")]
 impl Aml for PciDevSlotNotify {
-    fn to_aml_bytes(&self) -> Vec<u8> {
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         let device_id_mask: u32 = 1 << self.device_id;
         let object = aml::Path::new(&format!("S{:03}", self.device_id));
-        let mut bytes = aml::And::new(&aml::Local(0), &aml::Arg(0), &device_id_mask).to_aml_bytes();
-        bytes.extend_from_slice(
-            &aml::If::new(
-                &aml::Equal::new(&aml::Local(0), &device_id_mask),
-                vec![&aml::Notify::new(&object, &aml::Arg(1))],
-            )
-            .to_aml_bytes(),
-        );
-        bytes
+        aml::And::new(&aml::Local(0), &aml::Arg(0), &device_id_mask).append_aml_bytes(bytes);
+        aml::If::new(
+            &aml::Equal::new(&aml::Local(0), &device_id_mask),
+            vec![&aml::Notify::new(&object, &aml::Arg(1))],
+        )
+        .append_aml_bytes(bytes);
     }
 }
 
@@ -227,7 +224,7 @@ struct PciDevSlotMethods {}
 
 #[cfg(feature = "acpi")]
 impl Aml for PciDevSlotMethods {
-    fn to_aml_bytes(&self) -> Vec<u8> {
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         let mut device_notifies = Vec::new();
         for device_id in 0..32 {
             device_notifies.push(PciDevSlotNotify { device_id });
@@ -238,31 +235,26 @@ impl Aml for PciDevSlotMethods {
             device_notifies_refs.push(device_notify);
         }
 
-        let mut bytes =
-            aml::Method::new("DVNT".into(), 2, true, device_notifies_refs).to_aml_bytes();
-
-        bytes.extend_from_slice(
-            &aml::Method::new(
-                "PCNT".into(),
-                0,
-                true,
-                vec![
-                    &aml::Acquire::new("\\_SB_.PHPR.BLCK".into(), 0xffff),
-                    &aml::Store::new(&aml::Path::new("\\_SB_.PHPR.PSEG"), &aml::Path::new("_SEG")),
-                    &aml::MethodCall::new(
-                        "DVNT".into(),
-                        vec![&aml::Path::new("\\_SB_.PHPR.PCIU"), &aml::ONE],
-                    ),
-                    &aml::MethodCall::new(
-                        "DVNT".into(),
-                        vec![&aml::Path::new("\\_SB_.PHPR.PCID"), &3usize],
-                    ),
-                    &aml::Release::new("\\_SB_.PHPR.BLCK".into()),
-                ],
-            )
-            .to_aml_bytes(),
-        );
-        bytes
+        aml::Method::new("DVNT".into(), 2, true, device_notifies_refs).append_aml_bytes(bytes);
+        aml::Method::new(
+            "PCNT".into(),
+            0,
+            true,
+            vec![
+                &aml::Acquire::new("\\_SB_.PHPR.BLCK".into(), 0xffff),
+                &aml::Store::new(&aml::Path::new("\\_SB_.PHPR.PSEG"), &aml::Path::new("_SEG")),
+                &aml::MethodCall::new(
+                    "DVNT".into(),
+                    vec![&aml::Path::new("\\_SB_.PHPR.PCIU"), &aml::ONE],
+                ),
+                &aml::MethodCall::new(
+                    "DVNT".into(),
+                    vec![&aml::Path::new("\\_SB_.PHPR.PCID"), &3usize],
+                ),
+                &aml::Release::new("\\_SB_.PHPR.BLCK".into()),
+            ],
+        )
+        .append_aml_bytes(bytes)
     }
 }
 
@@ -271,7 +263,7 @@ struct PciDsmMethod {}
 
 #[cfg(feature = "acpi")]
 impl Aml for PciDsmMethod {
-    fn to_aml_bytes(&self) -> Vec<u8> {
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         // Refer to ACPI spec v6.3 Ch 9.1.1 and PCI Firmware spec v3.3 Ch 4.6.1
         // _DSM (Device Specific Method), the following is the implementation in ASL.
         /*
@@ -327,13 +319,13 @@ impl Aml for PciDsmMethod {
                 &aml::Return::new(&aml::Buffer::new(vec![0])),
             ],
         )
-        .to_aml_bytes()
+        .append_aml_bytes(bytes)
     }
 }
 
 #[cfg(feature = "acpi")]
 impl Aml for PciSegment {
-    fn to_aml_bytes(&self) -> Vec<u8> {
+    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         let mut pci_dsdt_inner_data: Vec<&dyn aml::Aml> = Vec::new();
         let hid = aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0A08"));
         pci_dsdt_inner_data.push(&hid);
@@ -447,6 +439,6 @@ impl Aml for PciSegment {
             format!("_SB_.PCI{:X}", self.id).as_str().into(),
             pci_dsdt_inner_data,
         )
-        .to_aml_bytes()
+        .append_aml_bytes(bytes)
     }
 }
