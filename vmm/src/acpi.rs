@@ -19,6 +19,7 @@ use arch::NumaNodes;
 use bitflags::bitflags;
 use pci::PciBdf;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemoryRegion};
 
 /* Values for Type in APIC sub-headers */
@@ -483,6 +484,7 @@ pub fn create_acpi_tables(
     memory_manager: &Arc<Mutex<MemoryManager>>,
     numa_nodes: &NumaNodes,
 ) -> GuestAddress {
+    let start_time = Instant::now();
     let mut prev_tbl_len: u64;
     let mut prev_tbl_off: GuestAddress;
     let rsdp_offset = arch::layout::RSDP_POINTER;
@@ -649,5 +651,9 @@ pub fn create_acpi_tables(
         .write_slice(rsdp.as_slice(), rsdp_offset)
         .expect("Error writing RSDP");
 
+    info!(
+        "Generated ACPI tables: took {}µs",
+        Instant::now().duration_since(start_time).as_micros()
+    );
     rsdp_offset
 }
