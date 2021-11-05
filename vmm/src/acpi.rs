@@ -176,9 +176,12 @@ pub fn create_dsdt_table(
     // DSDT
     let mut dsdt = Sdt::new(*b"DSDT", 36, 6, *b"CLOUDH", *b"CHDSDT  ", 1);
 
-    dsdt.append_slice(device_manager.lock().unwrap().to_aml_bytes().as_slice());
-    dsdt.append_slice(cpu_manager.lock().unwrap().to_aml_bytes().as_slice());
-    dsdt.append_slice(memory_manager.lock().unwrap().to_aml_bytes().as_slice());
+    let mut bytes = Vec::new();
+
+    device_manager.lock().unwrap().append_aml_bytes(&mut bytes);
+    cpu_manager.lock().unwrap().append_aml_bytes(&mut bytes);
+    memory_manager.lock().unwrap().append_aml_bytes(&mut bytes);
+    dsdt.append_slice(&bytes);
 
     dsdt
 }
