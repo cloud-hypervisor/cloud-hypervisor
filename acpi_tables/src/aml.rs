@@ -68,7 +68,7 @@ impl Aml for Path {
         };
 
         for part in self.name_parts.clone().iter_mut() {
-            bytes.append(&mut part.to_vec());
+            bytes.extend_from_slice(&part.to_vec());
         }
     }
 }
@@ -139,7 +139,7 @@ impl Aml for Name {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         // TODO: Refactor this to make more efficient but there are
         // lifetime/ownership challenges.
-        bytes.append(&mut self.bytes.clone())
+        bytes.extend_from_slice(&self.bytes.clone())
     }
 }
 
@@ -163,11 +163,11 @@ impl<'a> Aml for Package<'a> {
             child.append_aml_bytes(&mut tmp);
         }
 
-        let mut pkg_length = create_pkg_length(&tmp, true);
+        let pkg_length = create_pkg_length(&tmp, true);
 
         bytes.push(0x12); /* PackageOp */
-        bytes.append(&mut pkg_length);
-        bytes.append(&mut tmp);
+        bytes.extend_from_slice(&pkg_length);
+        bytes.extend_from_slice(&tmp);
     }
 }
 
@@ -323,11 +323,11 @@ impl<'a> Aml for ResourceTemplate<'a> {
         }
 
         // PkgLength is everything else
-        let mut pkg_length = create_pkg_length(&tmp, true);
+        let pkg_length = create_pkg_length(&tmp, true);
 
         bytes.push(0x11); /* BufferOp */
-        bytes.append(&mut pkg_length);
-        bytes.append(&mut tmp);
+        bytes.extend_from_slice(&pkg_length);
+        bytes.extend_from_slice(&tmp);
     }
 }
 
@@ -558,12 +558,12 @@ impl<'a> Aml for Device<'a> {
             child.append_aml_bytes(&mut tmp);
         }
 
-        let mut pkg_length = create_pkg_length(&tmp, true);
+        let pkg_length = create_pkg_length(&tmp, true);
 
         bytes.push(0x5b); /* ExtOpPrefix */
         bytes.push(0x82); /* DeviceOp */
-        bytes.append(&mut pkg_length);
-        bytes.append(&mut tmp);
+        bytes.extend_from_slice(&pkg_length);
+        bytes.extend_from_slice(&tmp);
     }
 }
 
@@ -586,11 +586,11 @@ impl<'a> Aml for Scope<'a> {
             child.append_aml_bytes(&mut tmp);
         }
 
-        let mut pkg_length = create_pkg_length(&tmp, true);
+        let pkg_length = create_pkg_length(&tmp, true);
 
         bytes.push(0x10); /* ScopeOp */
-        bytes.append(&mut pkg_length);
-        bytes.append(&mut tmp)
+        bytes.extend_from_slice(&pkg_length);
+        bytes.extend_from_slice(&tmp)
     }
 }
 
@@ -628,11 +628,11 @@ impl<'a> Aml for Method<'a> {
             child.append_aml_bytes(&mut tmp);
         }
 
-        let mut pkg_length = create_pkg_length(&tmp, true);
+        let pkg_length = create_pkg_length(&tmp, true);
 
         bytes.push(0x14); /* MethodOp */
-        bytes.append(&mut pkg_length);
-        bytes.append(&mut tmp)
+        bytes.extend_from_slice(&pkg_length);
+        bytes.extend_from_slice(&tmp)
     }
 }
 
@@ -711,21 +711,21 @@ impl Aml for Field {
             match field {
                 FieldEntry::Named(name, length) => {
                     tmp.extend_from_slice(name);
-                    tmp.append(&mut create_pkg_length(&vec![0; *length], false));
+                    tmp.extend_from_slice(&create_pkg_length(&vec![0; *length], false));
                 }
                 FieldEntry::Reserved(length) => {
                     tmp.push(0x0);
-                    tmp.append(&mut create_pkg_length(&vec![0; *length], false));
+                    tmp.extend_from_slice(&create_pkg_length(&vec![0; *length], false));
                 }
             }
         }
 
-        let mut pkg_length = create_pkg_length(&tmp, true);
+        let pkg_length = create_pkg_length(&tmp, true);
 
         bytes.push(0x5b); /* ExtOpPrefix */
         bytes.push(0x81); /* FieldOp */
-        bytes.append(&mut pkg_length);
-        bytes.append(&mut tmp)
+        bytes.extend_from_slice(&pkg_length);
+        bytes.extend_from_slice(&tmp)
     }
 }
 
@@ -794,11 +794,11 @@ impl<'a> Aml for If<'a> {
             child.append_aml_bytes(&mut tmp);
         }
 
-        let mut pkg_length = create_pkg_length(&tmp, true);
+        let pkg_length = create_pkg_length(&tmp, true);
 
         bytes.push(0xa0); /* IfOp */
-        bytes.append(&mut pkg_length);
-        bytes.append(&mut tmp);
+        bytes.extend_from_slice(&pkg_length);
+        bytes.extend_from_slice(&tmp);
     }
 }
 
@@ -976,11 +976,11 @@ impl<'a> Aml for While<'a> {
             child.append_aml_bytes(&mut tmp)
         }
 
-        let mut pkg_length = create_pkg_length(&tmp, true);
+        let pkg_length = create_pkg_length(&tmp, true);
 
         bytes.push(0xa2); /* WhileOp */
-        bytes.append(&mut pkg_length);
-        bytes.append(&mut tmp);
+        bytes.extend_from_slice(&pkg_length);
+        bytes.extend_from_slice(&tmp);
     }
 }
 
@@ -1062,11 +1062,11 @@ impl Aml for Buffer {
         self.data.len().append_aml_bytes(&mut tmp);
         tmp.extend_from_slice(&self.data);
 
-        let mut pkg_length = create_pkg_length(&tmp, true);
+        let pkg_length = create_pkg_length(&tmp, true);
 
         bytes.push(0x11); /* BufferOp */
-        bytes.append(&mut pkg_length);
-        bytes.append(&mut tmp);
+        bytes.extend_from_slice(&pkg_length);
+        bytes.extend_from_slice(&tmp);
     }
 }
 
