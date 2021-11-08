@@ -1136,9 +1136,9 @@ mod tests {
             ])
             .args(&[
                 "--numa",
-                "guest_numa_id=0,cpus=0-2:9,distances=1@15:2@20,memory_zones=mem0",
-                "guest_numa_id=1,cpus=3-4:6-8,distances=0@20:2@25,memory_zones=mem1",
-                "guest_numa_id=2,cpus=5:10-11,distances=0@25:1@30,memory_zones=mem2",
+                "guest_numa_id=0,cpus=[0-2,9],distances=[1@15,2@20],memory_zones=mem0",
+                "guest_numa_id=1,cpus=[3-4,6-8],distances=[0@20,2@25],memory_zones=mem1",
+                "guest_numa_id=2,cpus=[5,10-11],distances=[0@25,1@30],memory_zones=mem2",
             ])
             .args(&["--kernel", kernel_path.to_str().unwrap()])
             .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
@@ -5580,7 +5580,7 @@ mod tests {
                 .args(&[
                     "--net",
                     &format!(
-                        "fd={}:{},mac={},num_queues={}",
+                        "fd=[{},{}],mac={},num_queues={}",
                         taps[0].as_raw_fd(),
                         taps[1].as_raw_fd(),
                         guest.network.guest_mac,
@@ -7114,9 +7114,9 @@ mod tests {
                     "id=mem1,size=1G,hotplug_size=32G",
                     "id=mem2,size=1G,hotplug_size=32G",
                     "--numa",
-                    "guest_numa_id=0,cpus=0-2:9,distances=1@15:2@20,memory_zones=mem0",
-                    "guest_numa_id=1,cpus=3-4:6-8,distances=0@20:2@25,memory_zones=mem1",
-                    "guest_numa_id=2,cpus=5:10-11,distances=0@25:1@30,memory_zones=mem2",
+                    "guest_numa_id=0,cpus=[0-2,9],distances=[1@15,2@20],memory_zones=mem0",
+                    "guest_numa_id=1,cpus=[3-4,6-8],distances=[0@20,2@25],memory_zones=mem1",
+                    "guest_numa_id=2,cpus=[5,10-11],distances=[0@25,1@30],memory_zones=mem2",
                 ]
             } else {
                 &["--memory", "size=4G"]

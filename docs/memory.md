@@ -446,17 +446,20 @@ integer of 8 bits.
 
 For instance, if one needs to attach all CPUs from 0 to 4 to a specific node,
 the syntax using `-` will help define a contiguous range with `cpus=0-4`. The
-same example could also be described with `cpus=0:1:2:3:4`.
+same example could also be described with `cpus=[0,1,2,3,4]`.
 
-A combination of both `-` and `:` separators is useful when one might need to
+A combination of both `-` and `,` separators is useful when one might need to
 describe a list containing all CPUs from 0 to 99 and the CPU 255, as it could
-simply be described with `cpus=0-99:255`.
+simply be described with `cpus=[0-99,255]`.
+
+As soon as one tries to describe a list of values, `[` and `]` must be used to
+demarcate the list.
 
 _Example_
 
 ```
 --cpus boot=8
---numa guest_numa_id=0,cpus=1-3:7 guest_numa_id=1,cpus=0:4-6
+--numa guest_numa_id=0,cpus=[1-3,7] guest_numa_id=1,cpus=[0,4-6]
 ```
 
 ### `distances`
@@ -473,7 +476,10 @@ node. The second value is an unsigned integer of 8 bits as it represents the
 distance between the current NUMA node and the destination NUMA node. The two
 values are separated by `@` (`value1@value2`), meaning the destination NUMA
 node `value1` is located at a distance of `value2`. Each tuple is separated
-from the others with `:` separator.
+from the others with `,` separator.
+
+As soon as one tries to describe a list of values, `[` and `]` must be used to
+demarcate the list.
 
 For instance, if one wants to define 3 NUMA nodes, with each node located at
 different distances, it can be described with the following example.
@@ -481,7 +487,7 @@ different distances, it can be described with the following example.
 _Example_
 
 ```
---numa guest_numa_id=0,distances=1@15:2@25 guest_numa_id=1,distances=0@15:2@20 guest_numa_id=2,distances=0@25:1@20
+--numa guest_numa_id=0,distances=[1@15,2@25] guest_numa_id=1,distances=[0@15,2@20] guest_numa_id=2,distances=[0@25,1@20]
 ```
 
 ### `memory_zones`
@@ -498,7 +504,10 @@ workload run more efficiently.
 
 Multiple values can be provided to define the list. Each value is a string
 referring to an existing memory zone identifier. Values are separated from
-each other with the `:` separator.
+each other with the `,` separator.
+
+As soon as one tries to describe a list of values, `[` and `]` must be used to
+demarcate the list.
 
 Note that a memory zone must belong to a single NUMA node. The following
 configuration is incorrect, therefore not allowed:
@@ -509,7 +518,7 @@ _Example_
 ```
 --memory size=0
 --memory-zone id=mem0,size=1G id=mem1,size=1G id=mem2,size=1G
---numa guest_numa_id=0,memory_zones=mem0:mem2 guest_numa_id=1,memory_zones=mem1
+--numa guest_numa_id=0,memory_zones=[mem0,mem2] guest_numa_id=1,memory_zones=mem1
 ```
 
 ### `sgx_epc_sections`
@@ -520,13 +529,16 @@ which must be seen by the guest as belonging to the NUMA node `guest_numa_id`.
 
 Multiple values can be provided to define the list. Each value is a string
 referring to an existing SGX EPC section identifier. Values are separated from
-each other with the `:` separator.
+each other with the `,` separator.
+
+As soon as one tries to describe a list of values, `[` and `]` must be used to
+demarcate the list.
 
 _Example_
 
 ```
 --sgx-epc id=epc0,size=32M id=epc1,size=64M id=epc2,size=32M
---numa guest_numa_id=0,sgx_epc_sections=epc1 guest_numa_id=1,sgx_epc_sections=epc0:epc2
+--numa guest_numa_id=0,sgx_epc_sections=epc1 guest_numa_id=1,sgx_epc_sections=[epc0,epc2]
 ```
 
 ### PCI bus
