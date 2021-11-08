@@ -202,7 +202,11 @@ impl FromStr for IntegerList {
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         let mut integer_list = Vec::new();
-        let ranges_list: Vec<&str> = s.trim().split(':').collect();
+        let ranges_list: Vec<&str> = s
+            .trim()
+            .trim_matches(|c| c == '[' || c == ']')
+            .split(',')
+            .collect();
 
         for range in ranges_list.iter() {
             let items: Vec<&str> = range.split('-').collect();
@@ -246,7 +250,11 @@ impl FromStr for TupleTwoIntegers {
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         let mut list = Vec::new();
-        let tuples_list: Vec<&str> = s.trim().split(':').collect();
+        let tuples_list: Vec<&str> = s
+            .trim()
+            .trim_matches(|c| c == '[' || c == ']')
+            .split(',')
+            .collect();
 
         for tuple in tuples_list.iter() {
             let items: Vec<&str> = tuple.split('@').collect();
@@ -281,7 +289,12 @@ impl FromStr for StringList {
     type Err = StringListParseError;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        let string_list: Vec<String> = s.trim().split(':').map(|e| e.to_owned()).collect();
+        let string_list: Vec<String> = s
+            .trim()
+            .trim_matches(|c| c == '[' || c == ']')
+            .split(',')
+            .map(|e| e.to_owned())
+            .collect();
 
         Ok(StringList(string_list))
     }
