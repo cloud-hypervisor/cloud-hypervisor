@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::num::ParseIntError;
 use std::str::FromStr;
 
 #[derive(Default)]
@@ -240,17 +241,39 @@ impl FromStr for IntegerList {
     }
 }
 
-pub struct TupleTwoIntegers(pub Vec<(u64, u64)>);
+pub trait TupleValue {
+    fn parse_value(input: &str) -> Result<Self, ParseIntError>
+    where
+        Self: Sized;
+}
 
-pub enum TupleTwoIntegersParseError {
+impl TupleValue for u64 {
+    fn parse_value(input: &str) -> Result<Self, ParseIntError> {
+        input.parse::<u64>()
+    }
+}
+
+impl TupleValue for Vec<u64> {
+    fn parse_value(input: &str) -> Result<Self, ParseIntError> {
+        input
+            .trim_matches(|c| c == '[' || c == ']')
+            .split(',')
+            .map(|i| i.parse::<u64>())
+            .collect::<Result<Vec<u64>, _>>()
+    }
+}
+
+pub struct Tuple<T>(pub Vec<(u64, T)>);
+
+pub enum TupleError {
     InvalidValue(String),
 }
 
-impl FromStr for TupleTwoIntegers {
-    type Err = TupleTwoIntegersParseError;
+impl<T: TupleValue> FromStr for Tuple<T> {
+    type Err = TupleError;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        let mut list = Vec::new();
+        let mut list: Vec<(u64, T)> = Vec::new();
         let tuples_list: Vec<&str> = s
             .trim()
             .trim_matches(|c| c == '[' || c == ']')
@@ -261,22 +284,19 @@ impl FromStr for TupleTwoIntegers {
             let items: Vec<&str> = tuple.split('@').collect();
 
             if items.len() != 2 {
-                return Err(TupleTwoIntegersParseError::InvalidValue(
-                    (*tuple).to_string(),
-                ));
+                return Err(TupleError::InvalidValue((*tuple).to_string()));
             }
 
             let item1 = items[0]
                 .parse::<u64>()
-                .map_err(|_| TupleTwoIntegersParseError::InvalidValue(items[0].to_owned()))?;
-            let item2 = items[1]
-                .parse::<u64>()
-                .map_err(|_| TupleTwoIntegersParseError::InvalidValue(items[1].to_owned()))?;
+                .map_err(|_| TupleError::InvalidValue(items[0].to_owned()))?;
+            let item2 = TupleValue::parse_value(items[1])
+                .map_err(|_| TupleError::InvalidValue(items[1].to_owned()))?;
 
             list.push((item1, item2));
         }
 
-        Ok(TupleTwoIntegers(list))
+        Ok(Tuple(list))
     }
 }
 

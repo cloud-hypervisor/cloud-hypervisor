@@ -6,7 +6,7 @@
 use clap::ArgMatches;
 use net_util::MacAddr;
 use option_parser::{
-    ByteSized, IntegerList, OptionParser, OptionParserError, StringList, Toggle, TupleTwoIntegers,
+    ByteSized, IntegerList, OptionParser, OptionParserError, StringList, Toggle, Tuple,
 };
 use std::collections::HashMap;
 use std::convert::From;
@@ -1942,7 +1942,7 @@ impl NumaConfig {
             .map_err(Error::ParseNuma)?
             .map(|v| v.0.iter().map(|e| *e as u8).collect());
         let distances = parser
-            .convert::<TupleTwoIntegers>("distances")
+            .convert::<Tuple<u64>>("distances")
             .map_err(Error::ParseNuma)?
             .map(|v| {
                 v.0.iter()
