@@ -1,3 +1,9 @@
+# This spec file assumes you're building on an environment where:
+# * You have access to the internet during the build
+# * You have rustup installed on your system
+# * You have both x86_64-unknown-linux-gnu and  x86_64-unknown-linux-musl
+#   targets installed.
+
 Name:           cloud-hypervisor
 Summary:        Cloud Hypervisor is an open source Virtual Machine Monitor (VMM) that runs on top of KVM.
 Version:        19.0
