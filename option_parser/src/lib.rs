@@ -50,9 +50,9 @@ impl OptionParser {
         }
 
         let mut options_list: Vec<String> = Vec::new();
-        let mut merge_elements = false;
+        let mut opened_brackets: usize = 0;
         for element in input.trim().split(',') {
-            if merge_elements {
+            if opened_brackets > 0 {
                 if let Some(last) = options_list.last_mut() {
                     *last = format!("{},{}", last, element);
                 } else {
@@ -62,11 +62,12 @@ impl OptionParser {
                 options_list.push(element.to_string());
             }
 
-            if element.contains('[') {
-                merge_elements = true;
-            }
-            if element.contains(']') {
-                merge_elements = false;
+            opened_brackets += element.matches('[').count();
+            let closing_brackets = element.matches(']').count();
+            if closing_brackets > opened_brackets {
+                return Err(OptionParserError::InvalidSyntax(input.to_owned()));
+            } else {
+                opened_brackets -= closing_brackets;
             }
         }
 
