@@ -49,7 +49,26 @@ impl OptionParser {
             return Ok(());
         }
 
-        let options_list: Vec<&str> = input.trim().split(',').collect();
+        let mut options_list: Vec<String> = Vec::new();
+        let mut merge_elements = false;
+        for element in input.trim().split(',') {
+            if merge_elements {
+                if let Some(last) = options_list.last_mut() {
+                    *last = format!("{},{}", last, element);
+                } else {
+                    return Err(OptionParserError::InvalidSyntax(input.to_owned()));
+                }
+            } else {
+                options_list.push(element.to_string());
+            }
+
+            if element.contains('[') {
+                merge_elements = true;
+            }
+            if element.contains(']') {
+                merge_elements = false;
+            }
+        }
 
         for option in options_list.iter() {
             let parts: Vec<&str> = option.split('=').collect();
