@@ -4,6 +4,8 @@
 # * You have both x86_64-unknown-linux-gnu and  x86_64-unknown-linux-musl
 #   targets installed.
 
+%define using_rustup 1
+
 Name:           cloud-hypervisor
 Summary:        Cloud Hypervisor is an open source Virtual Machine Monitor (VMM) that runs on top of KVM.
 Version:        19.0
@@ -18,7 +20,7 @@ BuildRequires:  glibc-devel
 BuildRequires:  binutils
 BuildRequires:  git
 
-%if 0%{?fedora} || 0%{?rhel}
+%if ! 0%{?using_rustup}
 BuildRequires:  rust
 BuildRequires:  cargo
 %endif
@@ -58,11 +60,17 @@ if [[ $? -ne 0 ]]; then
 	echo "Cargo not found, please install cargo. exiting"
 	exit 0
 fi
+
+%if 0%{?using_rustup}
 which rustup
 if [[ $? -ne 0 ]]; then
 	echo "Rustup not found please install rustup #curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
 fi
+%endif
+
 echo ${cargo_version}
+
+%if 0%{?using_rustup}
 rustup target list --installed | grep x86_64-unknown-linux-gnu
 if [[ $? -ne 0 ]]; then
          echo "Target  x86_64-unknown-linux-gnu not found, please install(#rustup target add x86_64-unknown-linux-gnu). exiting"
@@ -71,6 +79,7 @@ rustup target list --installed | grep x86_64-unknown-linux-musl
 if [[ $? -ne 0 ]]; then
          echo "Target  x86_64-unknown-linux-musl not found, please install(#rustup target add x86_64-unknown-linux-musl). exiting"
 fi
+%endif
 
 cargo build --release --target=x86_64-unknown-linux-gnu --all
 cargo build --release --target=x86_64-unknown-linux-musl --all
