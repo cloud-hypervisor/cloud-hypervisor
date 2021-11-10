@@ -33,7 +33,6 @@ use hypervisor::CpuId;
 use hypervisor::{vm::VmmOps, CpuState, HypervisorCpuError, VmExit};
 use libc::{c_void, siginfo_t};
 use seccompiler::{apply_filter, SeccompAction};
-#[cfg(feature = "acpi")]
 use std::collections::BTreeMap;
 use std::os::unix::thread::JoinHandleExt;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -104,6 +103,9 @@ pub enum Error {
 
     #[cfg(feature = "tdx")]
     InitializeTdx(hypervisor::HypervisorCpuError),
+
+    /// Failed scheduling the thread on the expected CPU set.
+    ScheduleCpuSet,
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -393,6 +395,7 @@ pub struct CpuManager {
     acpi_address: GuestAddress,
     #[cfg(feature = "acpi")]
     proximity_domain_per_cpu: BTreeMap<u8, u32>,
+    affinity: BTreeMap<u8, Vec<u8>>,
 }
 
 const CPU_ENABLE_FLAG: usize = 0;
@@ -591,6 +594,15 @@ impl CpuManager {
         .into_iter()
         .collect();
 
+        let affinity = if let Some(cpu_affinity) = config.affinity.as_ref() {
+            cpu_affinity
+                .iter()
+                .map(|a| (a.vcpu, a.host_cpus.clone()))
+                .collect()
+        } else {
+            BTreeMap::new()
+        };
+
         let cpu_manager = Arc::new(Mutex::new(CpuManager {
             config: config.clone(),
             interrupt_controller: device_manager.interrupt_controller().clone(),
@@ -611,6 +623,7 @@ impl CpuManager {
             acpi_address,
             #[cfg(feature = "acpi")]
             proximity_domain_per_cpu,
+            affinity,
         }));
 
         #[cfg(feature = "acpi")]
@@ -713,7 +726,15 @@ impl CpuManager {
             .clone();
         let panic_vcpu_run_interrupted = vcpu_run_interrupted.clone();
 
-        info!("Starting vCPU: cpu_id = {}", cpu_id);
+        // Prepare the CPU set the current vCPU is expected to run onto.
+        let cpuset = self.affinity.get(&cpu_id).map(|host_cpus| {
+            let mut cpuset: libc::cpu_set_t = unsafe { std::mem::zeroed() };
+            unsafe { libc::CPU_ZERO(&mut cpuset) };
+            for host_cpu in host_cpus {
+                unsafe { libc::CPU_SET(*host_cpu as usize, &mut cpuset) };
+            }
+            cpuset
+        });
 
         // Retrieve seccomp filter for vcpu thread
         let vcpu_seccomp_filter = get_seccomp_filter(&self.seccomp_action, Thread::Vcpu)
@@ -722,10 +743,32 @@ impl CpuManager {
         #[cfg(target_arch = "x86_64")]
         let interrupt_controller_clone = self.interrupt_controller.as_ref().cloned();
 
+        info!("Starting vCPU: cpu_id = {}", cpu_id);
+
         let handle = Some(
             thread::Builder::new()
                 .name(format!("vcpu{}", cpu_id))
                 .spawn(move || {
+                    // Schedule the thread to run on the expected CPU set
+                    if let Some(cpuset) = cpuset.as_ref() {
+                        let ret = unsafe {
+                            libc::sched_setaffinity(
+                                0,
+                                std::mem::size_of::<libc::cpu_set_t>(),
+                                cpuset as *const libc::cpu_set_t,
+                            )
+                        };
+
+                        if ret != 0 {
+                            error!(
+                                "Failed scheduling the vCPU {} on the expected CPU set: {}",
+                                cpu_id,
+                                io::Error::last_os_error()
+                            );
+                            return;
+                        }
+                    }
+
                     // Apply seccomp filter for vcpu thread.
                     if !vcpu_seccomp_filter.is_empty() {
                         if let Err(e) =

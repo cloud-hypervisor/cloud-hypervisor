@@ -647,6 +647,7 @@ mod unit_tests {
                     topology: None,
                     kvm_hyperv: false,
                     max_phys_bits: 46,
+                    affinity: None,
                 },
                 memory: MemoryConfig {
                     size: 536_870_912,

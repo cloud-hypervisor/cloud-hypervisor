@@ -398,6 +398,12 @@ impl FromStr for HotplugMethod {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct CpuAffinity {
+    pub vcpu: u8,
+    pub host_cpus: Vec<u8>,
+}
+
 pub enum CpuTopologyParseError {
     InvalidValue(String),
 }
@@ -453,6 +459,8 @@ pub struct CpusConfig {
     pub kvm_hyperv: bool,
     #[serde(default = "default_cpuconfig_max_phys_bits")]
     pub max_phys_bits: u8,
+    #[serde(default)]
+    pub affinity: Option<Vec<CpuAffinity>>,
 }
 
 impl CpusConfig {
@@ -463,7 +471,8 @@ impl CpusConfig {
             .add("max")
             .add("topology")
             .add("kvm_hyperv")
-            .add("max_phys_bits");
+            .add("max_phys_bits")
+            .add("affinity");
         parser.parse(cpus).map_err(Error::ParseCpus)?;
 
         let boot_vcpus: u8 = parser
@@ -484,6 +493,17 @@ impl CpusConfig {
             .convert::<u8>("max_phys_bits")
             .map_err(Error::ParseCpus)?
             .unwrap_or(DEFAULT_MAX_PHYS_BITS);
+        let affinity = parser
+            .convert::<Tuple<u8, Vec<u8>>>("affinity")
+            .map_err(Error::ParseCpus)?
+            .map(|v| {
+                v.0.iter()
+                    .map(|(e1, e2)| CpuAffinity {
+                        vcpu: *e1,
+                        host_cpus: e2.clone(),
+                    })
+                    .collect()
+            });
 
         Ok(CpusConfig {
             boot_vcpus,
@@ -491,6 +511,7 @@ impl CpusConfig {
             topology,
             kvm_hyperv,
             max_phys_bits,
+            affinity,
         })
     }
 }
@@ -503,6 +524,7 @@ impl Default for CpusConfig {
             topology: None,
             kvm_hyperv: false,
             max_phys_bits: DEFAULT_MAX_PHYS_BITS,
+            affinity: None,
         }
     }
 }
