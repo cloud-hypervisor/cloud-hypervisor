@@ -25,6 +25,7 @@ pub enum TdvfError {
 
 // TDVF_DESCRIPTOR
 #[repr(packed)]
+#[derive(Default)]
 pub struct TdvfDescriptor {
     signature: [u8; 4],
     length: u32,
@@ -128,7 +129,7 @@ pub fn parse_tdvf_sections(file: &mut File) -> Result<Vec<TdvfSection>, TdvfErro
     file.seek(SeekFrom::Start(descriptor_offset))
         .map_err(TdvfError::ReadDescriptor)?;
 
-    let mut descriptor: TdvfDescriptor = unsafe { std::mem::zeroed() };
+    let mut descriptor: TdvfDescriptor = Default::default();
     // Safe as we read exactly the size of the descriptor header
     file.read_exact(unsafe {
         std::slice::from_raw_parts_mut(
