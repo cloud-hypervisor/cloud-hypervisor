@@ -6,6 +6,8 @@ edition = "2018"
 
 [features]
 default = []
+pci_support = ["pci"]
+mmio_support = []
 io_uring = ["block_util/io_uring"]
 mshv = []
 
@@ -21,7 +23,7 @@ libc = "0.2.108"
 log = "0.4.14"
 net_gen = { path = "../net_gen" }
 net_util = { path = "../net_util" }
-pci = { path = "../pci" }
+pci = { path = "../pci", optional = true }
 rate_limiter = { path = "../rate_limiter" }
 seccompiler = "0.2.0"
 serde = "1.0.130"
