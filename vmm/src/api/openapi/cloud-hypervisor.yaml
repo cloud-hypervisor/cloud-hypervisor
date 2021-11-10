@@ -480,6 +480,16 @@ components:
           default: false
       description: Virtual machine configuration
 
+    CpuAffinity:
+      type: object
+      properties:
+        vcpu:
+          type: integer
+        host_cpus:
+          type: array
+          items:
+            type: integer
+
     CpuTopology:
       type: object
       properties:
@@ -507,9 +517,13 @@ components:
           default: 1
           type: integer
         topology:
-            $ref: '#/components/schemas/CpuTopology'
+          $ref: '#/components/schemas/CpuTopology'
         max_phys_bits:
           type: integer
+        affinity:
+          type: array
+          items:
+            $ref: '#/components/schemas/CpuAffinity'
 
     MemoryZoneConfig:
       required:

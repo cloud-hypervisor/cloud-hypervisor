@@ -492,6 +492,7 @@ fn vmm_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
         (libc::SYS_rt_sigprocmask, vec![]),
         (libc::SYS_rt_sigreturn, vec![]),
         (libc::SYS_sched_getaffinity, vec![]),
+        (libc::SYS_sched_setaffinity, vec![]),
         (libc::SYS_sendmsg, vec![]),
         (libc::SYS_sendto, vec![]),
         (libc::SYS_set_robust_list, vec![]),
