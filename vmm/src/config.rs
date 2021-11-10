@@ -1942,7 +1942,7 @@ impl NumaConfig {
             .map_err(Error::ParseNuma)?
             .map(|v| v.0.iter().map(|e| *e as u8).collect());
         let distances = parser
-            .convert::<Tuple<u64>>("distances")
+            .convert::<Tuple<u64, u64>>("distances")
             .map_err(Error::ParseNuma)?
             .map(|v| {
                 v.0.iter()

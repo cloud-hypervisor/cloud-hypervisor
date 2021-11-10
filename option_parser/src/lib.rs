@@ -38,6 +38,32 @@ impl fmt::Display for OptionParserError {
 }
 type OptionParserResult<T> = std::result::Result<T, OptionParserError>;
 
+fn split_commas_outside_brackets(s: &str) -> OptionParserResult<Vec<String>> {
+    let mut list: Vec<String> = Vec::new();
+    let mut opened_brackets: usize = 0;
+    for element in s.trim().split(',') {
+        if opened_brackets > 0 {
+            if let Some(last) = list.last_mut() {
+                *last = format!("{},{}", last, element);
+            } else {
+                return Err(OptionParserError::InvalidSyntax(s.to_owned()));
+            }
+        } else {
+            list.push(element.to_string());
+        }
+
+        opened_brackets += element.matches('[').count();
+        let closing_brackets = element.matches(']').count();
+        if closing_brackets > opened_brackets {
+            return Err(OptionParserError::InvalidSyntax(s.to_owned()));
+        } else {
+            opened_brackets -= closing_brackets;
+        }
+    }
+
+    Ok(list)
+}
+
 impl OptionParser {
     pub fn new() -> Self {
         Self {
@@ -50,29 +76,7 @@ impl OptionParser {
             return Ok(());
         }
 
-        let mut options_list: Vec<String> = Vec::new();
-        let mut opened_brackets: usize = 0;
-        for element in input.trim().split(',') {
-            if opened_brackets > 0 {
-                if let Some(last) = options_list.last_mut() {
-                    *last = format!("{},{}", last, element);
-                } else {
-                    return Err(OptionParserError::InvalidSyntax(input.to_owned()));
-                }
-            } else {
-                options_list.push(element.to_string());
-            }
-
-            opened_brackets += element.matches('[').count();
-            let closing_brackets = element.matches(']').count();
-            if closing_brackets > opened_brackets {
-                return Err(OptionParserError::InvalidSyntax(input.to_owned()));
-            } else {
-                opened_brackets -= closing_brackets;
-            }
-        }
-
-        for option in options_list.iter() {
+        for option in split_commas_outside_brackets(input)?.iter() {
             let parts: Vec<&str> = option.split('=').collect();
 
             match self.options.get_mut(parts[0]) {
@@ -242,44 +246,54 @@ impl FromStr for IntegerList {
 }
 
 pub trait TupleValue {
-    fn parse_value(input: &str) -> Result<Self, ParseIntError>
+    fn parse_value(input: &str) -> Result<Self, TupleError>
     where
         Self: Sized;
 }
 
 impl TupleValue for u64 {
-    fn parse_value(input: &str) -> Result<Self, ParseIntError> {
-        input.parse::<u64>()
+    fn parse_value(input: &str) -> Result<Self, TupleError> {
+        input.parse::<u64>().map_err(TupleError::InvalidInteger)
+    }
+}
+
+impl TupleValue for Vec<u8> {
+    fn parse_value(input: &str) -> Result<Self, TupleError> {
+        Ok(IntegerList::from_str(input)
+            .map_err(TupleError::InvalidIntegerList)?
+            .0
+            .iter()
+            .map(|v| *v as u8)
+            .collect())
     }
 }
 
 impl TupleValue for Vec<u64> {
-    fn parse_value(input: &str) -> Result<Self, ParseIntError> {
-        input
-            .trim_matches(|c| c == '[' || c == ']')
-            .split(',')
-            .map(|i| i.parse::<u64>())
-            .collect::<Result<Vec<u64>, _>>()
+    fn parse_value(input: &str) -> Result<Self, TupleError> {
+        Ok(IntegerList::from_str(input)
+            .map_err(TupleError::InvalidIntegerList)?
+            .0)
     }
 }
 
-pub struct Tuple<T>(pub Vec<(u64, T)>);
+pub struct Tuple<S, T>(pub Vec<(S, T)>);
 
 pub enum TupleError {
     InvalidValue(String),
+    SplitOutsideBrackets(OptionParserError),
+    InvalidIntegerList(IntegerListParseError),
+    InvalidInteger(ParseIntError),
 }
 
-impl<T: TupleValue> FromStr for Tuple<T> {
+impl<S: FromStr, T: TupleValue> FromStr for Tuple<S, T> {
     type Err = TupleError;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        let mut list: Vec<(u64, T)> = Vec::new();
-        let tuples_list: Vec<&str> = s
-            .trim()
-            .trim_matches(|c| c == '[' || c == ']')
-            .split(',')
-            .collect();
+        let mut list: Vec<(S, T)> = Vec::new();
 
+        let tuples_list =
+            split_commas_outside_brackets(s.trim().trim_matches(|c| c == '[' || c == ']'))
+                .map_err(TupleError::SplitOutsideBrackets)?;
         for tuple in tuples_list.iter() {
             let items: Vec<&str> = tuple.split('@').collect();
 
@@ -288,10 +302,9 @@ impl<T: TupleValue> FromStr for Tuple<T> {
             }
 
             let item1 = items[0]
-                .parse::<u64>()
+                .parse::<S>()
                 .map_err(|_| TupleError::InvalidValue(items[0].to_owned()))?;
-            let item2 = TupleValue::parse_value(items[1])
-                .map_err(|_| TupleError::InvalidValue(items[1].to_owned()))?;
+            let item2 = TupleValue::parse_value(items[1])?;
 
             list.push((item1, item2));
         }
