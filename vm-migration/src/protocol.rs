@@ -174,7 +174,7 @@ impl Response {
 unsafe impl ByteValued for Response {}
 
 #[repr(C)]
-#[derive(Clone, Serialize, Deserialize, Versionize)]
+#[derive(Clone, Default, Serialize, Deserialize, Versionize)]
 pub struct MemoryRange {
     pub gpa: u64,
     pub length: u64,
@@ -227,10 +227,11 @@ impl MemoryRangeTable {
     pub fn read_from(fd: &mut dyn Read, length: u64) -> Result<MemoryRangeTable, MigratableError> {
         assert!(length as usize % std::mem::size_of::<MemoryRange>() == 0);
 
-        let mut data = Vec::with_capacity(length as usize / (std::mem::size_of::<MemoryRange>()));
-        unsafe {
-            data.set_len(length as usize / (std::mem::size_of::<MemoryRange>()));
-        }
+        let mut data: Vec<MemoryRange> = Vec::new();
+        data.resize_with(
+            length as usize / (std::mem::size_of::<MemoryRange>()),
+            Default::default,
+        );
         fd.read_exact(unsafe {
             std::slice::from_raw_parts_mut(
                 data.as_ptr() as *mut MemoryRange as *mut u8,
