@@ -161,7 +161,7 @@ mod tests {
 
         let mac = MacAddr::parse_str("12:34:56:78:9a:BC").unwrap();
 
-        println!("parsed MAC address: {}", mac.to_string());
+        println!("parsed MAC address: {}", mac);
 
         let bytes = mac.get_bytes();
         assert_eq!(bytes, [0x12u8, 0x34, 0x56, 0x78, 0x9a, 0xbc]);
