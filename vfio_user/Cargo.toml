@@ -5,7 +5,7 @@ authors = ["The Cloud Hypervisor Authors"]
 edition = "2018"
 
 [dependencies]
-anyhow = "1.0.46"
+anyhow = "1.0.45"
 libc = "0.2.107"
 log = "0.4.14"
 serde = {version = ">=1.0.27", features = ["rc"] }

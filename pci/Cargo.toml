@@ -10,7 +10,7 @@ kvm = ["vfio-ioctls/kvm"]
 mshv = ["vfio-ioctls/mshv"]
 
 [dependencies]
-anyhow = "1.0.46"
+anyhow = "1.0.45"
 byteorder = "1.4.3"
 hypervisor = { path = "../hypervisor" }
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio-ioctls", branch = "main", default-features = false }
