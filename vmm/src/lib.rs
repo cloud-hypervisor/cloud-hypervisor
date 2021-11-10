@@ -760,10 +760,8 @@ impl Vmm {
         T: Read + Write,
     {
         // Read in config data along with memory manager data
-        let mut data = Vec::with_capacity(req.length() as usize);
-        unsafe {
-            data.set_len(req.length() as usize);
-        }
+        let mut data: Vec<u8> = Vec::new();
+        data.resize_with(req.length() as usize, Default::default);
         socket
             .read_exact(&mut data)
             .map_err(MigratableError::MigrateSocket)?;
@@ -818,10 +816,8 @@ impl Vmm {
         T: Read + Write,
     {
         // Read in state data
-        let mut data = Vec::with_capacity(req.length() as usize);
-        unsafe {
-            data.set_len(req.length() as usize);
-        }
+        let mut data: Vec<u8> = Vec::new();
+        data.resize_with(req.length() as usize, Default::default);
         socket
             .read_exact(&mut data)
             .map_err(MigratableError::MigrateSocket)?;
