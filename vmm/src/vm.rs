@@ -318,7 +318,7 @@ const DEBUG_IOPORT_PREFIX: &str = "Debug I/O port";
 
 #[cfg(target_arch = "x86_64")]
 /// Debug I/O port, see:
-/// https://www.intel.com/content/www/us/en/support/articles/000005500/boards-and-kits.html
+/// <https://www.intel.com/content/www/us/en/support/articles/000005500/boards-and-kits.html>
 ///
 /// Since we're not a physical platform, we can freely assign code ranges for
 /// debugging specific parts of our virtual platform.
