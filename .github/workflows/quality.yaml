@@ -4,7 +4,7 @@ on: [pull_request, create]
 jobs:
   build:
     if: github.event_name == 'pull_request'
-    name: Quality (clippy, rustfmt)
+    name: Quality (clippy, rustfmt, rustdoc)
     runs-on: ubuntu-latest
     continue-on-error: ${{ matrix.experimental }}
     strategy:
@@ -56,6 +56,12 @@ jobs:
 
       - name: Clippy (integration tests)
         run: cargo clippy --all --all-targets --tests --features "integration_tests" -- -D warnings
+
+      - name: Doc (all features,kvm)
+        run: RUSTDOCFLAGS="-Dwarnings" cargo doc --workspace --no-default-features --features "common,kvm"
+
+      - name: Doc (all features,mshv)
+        run: RUSTDOCFLAGS="-Dwarnings" cargo doc --workspace --no-default-features --features "common,mshv"
 
       - name: Check build did not modify any files
         run: test -z "$(git status --porcelain)"
