@@ -69,12 +69,16 @@ make
 ```
 
 ### Set the SPDK environment
+
+Run SPDK vhost target with 2 CPU cores, i.e., core 0 and 1.
 ```bash
 sudo HUGEMEM=2048 scripts/setup.sh
 sudo ./build/bin/vhost -S /var/tmp -s 1024 -m 0x3 &
 ```
 
 ### Create 512M block device
+
+Create a 512M (first parameter) block device with 512 bytes (second parameter) block size.
 ```bash
 sudo scripts/rpc.py bdev_malloc_create 512 512 -b Malloc0
 sudo scripts/rpc.py vhost_create_blk_controller --cpumask 0x1 vhost.1 Malloc0
