@@ -98,25 +98,17 @@ rm -rf %{buildroot}
 %files
 %defattr(-,root,root,-)
 %{_bindir}/ch-remote
-%{_bindir}/cloud-hypervisor
+%caps(cap_net_admin=ep) %{_bindir}/cloud-hypervisor
 %{_libdir}/cloud-hypervisor/vhost_user_block
-%{_libdir}/cloud-hypervisor/vhost_user_net
+%caps(cap_net_admin=ep) %{_libdir}/cloud-hypervisor/vhost_user_net
 %if 0%{?using_musl_libc}
 %{_libdir}/cloud-hypervisor/static/ch-remote
-%{_libdir}/cloud-hypervisor/static/cloud-hypervisor
+%caps(cap_net_admim=ep) %{_libdir}/cloud-hypervisor/static/cloud-hypervisor
 %{_libdir}/cloud-hypervisor/static/vhost_user_block
-%{_libdir}/cloud-hypervisor/static/vhost_user_net
+%caps(cap_net_admin=ep) %{_libdir}/cloud-hypervisor/static/vhost_user_net
 %endif
 %license LICENSE-APACHE
 %license LICENSE-BSD-3-Clause
-
-%post
-setcap cap_net_admin+ep %{_bindir}/cloud-hypervisor
-setcap cap_net_admin+ep %{_libdir}/cloud-hypervisor/vhost_user_net
-%if 0%{?using_musl_libc}
-setcap cap_net_admin+ep %{_libdir}/cloud-hypervisor/static/cloud-hypervisor
-setcap cap_net_admin+ep %{_libdir}/cloud-hypervisor/static/vhost_user_net
-%endif
 
 
 %changelog
