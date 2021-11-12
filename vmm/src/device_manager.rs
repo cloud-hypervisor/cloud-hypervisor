@@ -906,6 +906,9 @@ pub struct DeviceManager {
 
     // Helps identify if the VM is currently being restored
     restoring: bool,
+
+    // io_uring availability if detected
+    io_uring_supported: Option<bool>,
 }
 
 impl DeviceManager {
@@ -1043,6 +1046,7 @@ impl DeviceManager {
             gpio_device: None,
             force_iommu,
             restoring,
+            io_uring_supported: None,
         };
 
         let device_manager = Arc::new(Mutex::new(device_manager));
@@ -1886,6 +1890,17 @@ impl DeviceManager {
         Ok(devices)
     }
 
+    // Cache whether io_uring is supported to avoid probing for very block device
+    fn io_uring_is_supported(&mut self) -> bool {
+        if let Some(supported) = self.io_uring_supported {
+            return supported;
+        }
+
+        let supported = block_io_uring_is_supported();
+        self.io_uring_supported = Some(supported);
+        supported
+    }
+
     fn make_virtio_block_device(
         &mut self,
         disk_cfg: &mut DiskConfig,
@@ -1962,7 +1977,7 @@ impl DeviceManager {
                 ImageType::FixedVhd => {
                     // Use asynchronous backend relying on io_uring if the
                     // syscalls are supported.
-                    if block_io_uring_is_supported() && !disk_cfg.disable_io_uring {
+                    if self.io_uring_is_supported() && !disk_cfg.disable_io_uring {
                         info!("Using asynchronous fixed VHD disk file (io_uring)");
                         Box::new(
                             FixedVhdDiskAsync::new(file)
@@ -1979,7 +1994,7 @@ impl DeviceManager {
                 ImageType::Raw => {
                     // Use asynchronous backend relying on io_uring if the
                     // syscalls are supported.
-                    if block_io_uring_is_supported() && !disk_cfg.disable_io_uring {
+                    if self.io_uring_is_supported() && !disk_cfg.disable_io_uring {
                         info!("Using asynchronous RAW disk file (io_uring)");
                         Box::new(RawFileDisk::new(file)) as Box<dyn DiskFile>
                     } else {
