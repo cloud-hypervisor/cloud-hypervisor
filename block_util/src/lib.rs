@@ -28,8 +28,6 @@ use std::convert::TryInto;
 use std::fs::File;
 use std::io::{self, IoSlice, IoSliceMut, Read, Seek, SeekFrom, Write};
 use std::os::linux::fs::MetadataExt;
-#[cfg(feature = "io_uring")]
-use std::os::unix::io::AsRawFd;
 use std::path::Path;
 use std::result;
 use std::sync::{Arc, Mutex};
@@ -439,25 +437,6 @@ pub fn block_io_uring_is_supported() -> bool {
     };
 
     let submitter = io_uring.submitter();
-
-    let event_fd = match EventFd::new(libc::EFD_NONBLOCK) {
-        Ok(fd) => fd,
-        Err(e) => {
-            info!("{} failed to create eventfd: {}", error_msg, e);
-            return false;
-        }
-    };
-
-    // Check we can register an eventfd as this is going to be needed while
-    // using io_uring with the virtio block device. This also validates that
-    // io_uring_register() syscall is supported.
-    match submitter.register_eventfd(event_fd.as_raw_fd()) {
-        Ok(_) => {}
-        Err(e) => {
-            info!("{} failed to register eventfd: {}", error_msg, e);
-            return false;
-        }
-    }
 
     let mut probe = Probe::new();
 
