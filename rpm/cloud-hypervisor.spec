@@ -97,8 +97,16 @@ rm -rf %{buildroot}
 
 %files
 %defattr(-,root,root,-)
-%{_bindir}/*
-%{_libdir}/cloud-hypervisor
+%{_bindir}/ch-remote
+%{_bindir}/cloud-hypervisor
+%{_libdir}/cloud-hypervisor/vhost_user_block
+%{_libdir}/cloud-hypervisor/vhost_user_net
+%if 0%{?using_musl_libc}
+%{_libdir}/cloud-hypervisor/static/ch-remote
+%{_libdir}/cloud-hypervisor/static/cloud-hypervisor
+%{_libdir}/cloud-hypervisor/static/vhost_user_block
+%{_libdir}/cloud-hypervisor/static/vhost_user_net
+%endif
 %license LICENSE-APACHE
 %license LICENSE-BSD-3-Clause
 
