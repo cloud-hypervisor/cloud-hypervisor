@@ -1,4 +1,4 @@
-name: Cloud-Hypervisor's Docker image update
+name: Cloud Hypervisor's Docker image update
 
 on:
   push:

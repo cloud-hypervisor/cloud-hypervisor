@@ -1,7 +1,7 @@
 # Intel SGX
 
 Intel® Software Guard Extensions (Intel® SGX) is an Intel technology designed
-to increase the security of application code and data. Cloud-Hypervisor supports
+to increase the security of application code and data. Cloud Hypervisor supports
 SGX virtualization through KVM. Because SGX is built on hardware features that
 cannot be emulated in software, virtualizing SGX requires support in KVM and in
 the host kernel. The required Linux and KVM changes can be found in the
@@ -17,12 +17,12 @@ For more information about SGX, please refer to the [SGX Homepage](https://softw
 For more information about SGX SDK and how to test SGX, please refer to the
 following [instructions](https://github.com/intel/linux-sgx).
 
-## Cloud-Hypervisor support
+## Cloud Hypervisor support
 
 Assuming the host exposes `/dev/sgx_vepc`, we can pass SGX enclaves through
 the guest.
 
-In order to use SGX enclaves within a Cloud-Hypervisor VM, we must define one
+In order to use SGX enclaves within a Cloud Hypervisor VM, we must define one
 or several Enclave Page Cache (EPC) sections. Here is an example of a VM being
 created with 2 EPC sections, the first one being 64MiB with pre-allocated
 memory, the second one being 32MiB with no pre-allocated memory.
