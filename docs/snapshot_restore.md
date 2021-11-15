@@ -11,9 +11,9 @@ before the snapshot was performed.
 This feature is important for the project as it establishes the first step
 towards the support for live migration.
 
-## Snapshot a Cloud-Hypervisor VM
+## Snapshot a Cloud Hypervisor VM
 
-First thing, we must run a Cloud-Hypervisor VM:
+First thing, we must run a Cloud Hypervisor VM:
 
 ```bash
 ./cloud-hypervisor \
@@ -54,7 +54,7 @@ drwxr-xr-x 47 foo bar       4096 Jul 22 11:47 ../
 In this particular example, we can observe that 2 memory region files were
 created. That is explained by the size of the guest RAM, which is 4GiB in this
 case. Because it exceeds 3GiB (which is where we can find a ~1GiB memory hole),
-Cloud-Hypervisor needs 2 distinct memory regions to be created. Each memory
+Cloud Hypervisor needs 2 distinct memory regions to be created. Each memory
 region's content is stored through a dedicated file, which explains why we end
 up with 2 different files, the first one containing the guest RAM range 0-3GiB
 and the second one containing the guest RAM range 3-4GiB.
@@ -65,7 +65,7 @@ with the correct amount of CPUs, RAM, and other expected devices. The state
 bits are used to restore each component in the state it was left before the
 snapshot occurred.
 
-## Restore a Cloud-Hypervisor VM
+## Restore a Cloud Hypervisor VM
 
 Given that one has access to an existing snapshot in `/home/foo/snapshot`,
 it is possible to create a new VM based on this snapshot with the following 

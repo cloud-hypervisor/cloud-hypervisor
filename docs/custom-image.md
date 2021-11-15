@@ -72,7 +72,7 @@ mount -t devpts devpts /dev/pts
 
 ### Install needed packages
 
-In the context Cloud-Hypervisor's integration tests, we need several utilities.
+In the context Cloud Hypervisor's integration tests, we need several utilities.
 Here is the way to install them for a Ubuntu image. This step is specific to
 Ubuntu distributions.
 

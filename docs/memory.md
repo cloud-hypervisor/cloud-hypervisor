@@ -1,13 +1,13 @@
 # Memory
 
-Cloud-Hypervisor has many ways to expose memory to the guest VM. This document
-aims to explain what Cloud-Hypervisor is capable of and how it can be used to
+Cloud Hypervisor has many ways to expose memory to the guest VM. This document
+aims to explain what Cloud Hypervisor is capable of and how it can be used to
 meet the needs of very different use cases.
 
 ## Basic Parameters
 
 `MemoryConfig` or what is known as `--memory` from the CLI perspective is the
-easiest way to get started with Cloud-Hypervisor.
+easiest way to get started with Cloud Hypervisor.
 
 ```rust
 struct MemoryConfig {

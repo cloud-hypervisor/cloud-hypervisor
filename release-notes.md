@@ -1244,7 +1244,7 @@ Highlights for `cloud-hypervisor` version 0.4.0 include:
 
 ### Dynamic virtual CPUs addition
 
-As a way to vertically scale Cloud-Hypervisor guests, we now support dynamically
+As a way to vertically scale Cloud Hypervisor guests, we now support dynamically
 adding virtual CPUs to the guests, a mechanism also known as CPU hot plug.
 Through hardware-reduced ACPI notifications, Cloud Hypervisor can now add CPUs
 to an already running guest and the high level operations for that process are
