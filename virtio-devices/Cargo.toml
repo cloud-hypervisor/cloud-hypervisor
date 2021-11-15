@@ -11,7 +11,7 @@ mshv = []
 
 [dependencies]
 anyhow = "1.0.45"
-arc-swap = "1.4.0"
+arc-swap = "1.5.0"
 block_util = { path = "../block_util" }
 byteorder = "1.4.3"
 epoll = "4.3.1"
