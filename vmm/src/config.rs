@@ -169,7 +169,7 @@ impl fmt::Display for ValidationError {
             DoubleTtyMode => write!(f, "Console mode tty specified for both serial and console"),
             KernelMissing => write!(f, "No kernel specified"),
             ConsoleFileMissing => write!(f, "Path missing when using file console mode"),
-            CpusMaxLowerThanBoot => write!(f, "Max CPUs greater than boot CPUs"),
+            CpusMaxLowerThanBoot => write!(f, "Max CPUs lower than boot CPUs"),
             DiskSocketAndPath => write!(f, "Disk path and vhost socket both provided"),
             VhostUserRequiresSharedMemory => {
                 write!(f, "Using vhost-user requires using shared memory")
