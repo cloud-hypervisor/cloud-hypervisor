@@ -26,10 +26,6 @@ pub use kvm_bindings::{
 use serde_derive::{Deserialize, Serialize};
 pub use {kvm_ioctls::Cap, kvm_ioctls::Kvm};
 
-// Following are macros that help with getting the ID of a aarch64 core register.
-// The core register are represented by the user_pt_regs structure. Look for it in
-// arch/arm64/include/uapi/asm/ptrace.h.
-
 // This macro gets the offset of a structure (i.e `str`) member (i.e `field`) without having
 // an instance of that structure.
 #[macro_export]
@@ -52,6 +48,10 @@ macro_rules! offset__of {
         unsafe { member.offset_from(base as *const u8) as usize }
     });
 }
+
+// Following are macros that help with getting the ID of a aarch64 core register.
+// The core register are represented by the user_pt_regs structure. Look for it in
+// arch/arm64/include/uapi/asm/ptrace.h.
 
 // Get the ID of a core register
 #[macro_export]
