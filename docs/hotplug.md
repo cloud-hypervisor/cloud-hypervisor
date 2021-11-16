@@ -1,6 +1,6 @@
 # Cloud Hypervisor Hot Plug
 
-Currently Cloud Hypervisor only support hot plugging of CPU devices.
+Currently Cloud Hypervisor only supports hot plugging of CPU devices.
 
 ## Kernel support
 
@@ -9,7 +9,7 @@ or by using this kernel patch (available in 5.5-rc1 and later): https://git.kern
 
 ## CPU Hot Plug
 
-Extra vCPUs can be added and removed from a running Cloud Hypervisor instance. This is controlled by two mechanisms:
+Extra vCPUs can be added and removed from a running `cloud-hypervisor` instance. This is controlled by two mechanisms:
 
 1. Specifying a number of maximum potential vCPUs that is greater than the number of default (boot) vCPUs.
 2. Making a HTTP API request to the VMM to ask for the additional vCPUs to be added.
@@ -65,7 +65,7 @@ As per adding CPUs to the guest, after a reboot the VM will be running with the 
 
 ### ACPI method
 
-Extra memory can be added from a running Cloud Hypervisor instance. This is controlled by two mechanisms:
+Extra memory can be added from a running `cloud-hypervisor` instance. This is controlled by two mechanisms:
 
 1. Allocating some of the guest physical address space for hotplug memory.
 2. Making a HTTP API request to the VMM to ask for a new amount of RAM to be assigned to the VM. In the case of expanding the memory for the VM the new memory will be hotplugged into the running VM, if reducing the size of the memory then change will take effect after the next reboot.
@@ -157,7 +157,7 @@ The same API can also be used to reduce the desired RAM for a VM. It is importan
 
 ## PCI Device Hot Plug
 
-Extra PCI devices can be added and removed from a running Cloud Hypervisor instance. This is controlled by making a HTTP API request to the VMM to ask for the additional device to be added, or for the existing device to be removed.
+Extra PCI devices can be added and removed from a running `cloud-hypervisor` instance. This is controlled by making a HTTP API request to the VMM to ask for the additional device to be added, or for the existing device to be removed.
 
 Note: On AArch64 platform, PCI device hotplug can only be achieved using ACPI. Please refer to the [documentation](arm64.md#uefi-booting) for more information.
 
