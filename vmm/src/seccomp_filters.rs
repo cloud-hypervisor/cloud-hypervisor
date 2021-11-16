@@ -588,6 +588,7 @@ fn vcpu_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
         (libc::SYS_close, vec![]),
         (libc::SYS_dup, vec![]),
         (libc::SYS_exit, vec![]),
+        (libc::SYS_epoll_ctl, vec![]),
         (libc::SYS_fstat, vec![]),
         (libc::SYS_futex, vec![]),
         (libc::SYS_getrandom, vec![]),
