@@ -36,14 +36,22 @@ Now that we have identified the device, we must unbind it from its native driver
 First we add VFIO support to the host:
 
 ```
-$ sudo modprobe vfio_pci
-$ sudo modprobe vfio_iommu_type1 allow_unsafe_interrupts
+# modprobe -r vfio_pci
+# modprobe -r vfio_iommu_type1
+# modprobe vfio_iommu_type1 allow_unsafe_interrupts
+# modprobe vfio_pci
+```
+
+In case the VFIO drivers are built-in, enable unsafe interrupts with:
+
+```
+# echo 1 > /sys/module/vfio_iommu_type1/parameters/allow_unsafe_interrupts
 ```
 
 Then we unbind it from its native driver:
 
 ```
-$ echo 0000:01:00.0 > /sys/bus/pci/devices/0000\:01\:00.0/driver/unbind
+# echo 0000:01:00.0 > /sys/bus/pci/devices/0000\:01\:00.0/driver/unbind
 ```
 
 And finally we bind it to the VFIO driver. To do that we first need to get the
@@ -53,8 +61,14 @@ device's VID (Vendor ID) and PID (Product ID):
 $ lspci -n -s 01:00.0
 01:00.0 ff00: 10ec:525a (rev 01)
 
-$ echo 10ec 525a > /sys/bus/pci/drivers/vfio-pci/new_id
-$ echo 0000:01:00.0 > /sys/bus/pci/drivers/vfio-pci/bind
+# echo 10ec 525a > /sys/bus/pci/drivers/vfio-pci/new_id
+```
+
+If you have more than one device with the same `vendorID`/`deviceID`, starting
+with the second device, the binding is performed as follows:
+
+```
+# echo 0000:02:00.0 > /sys/bus/pci/drivers/vfio-pci/bind
 ```
 
 Now the device is managed by the VFIO framework.
@@ -79,3 +93,33 @@ takes the device's sysfs path as an argument. In our example it is
 The guest kernel will then detect the card reader on its PCI bus and provided
 that support for this device is enabled, it will probe and enable it for the
 guest to use.
+
+In case you want to pass multiple devices, here is the correct syntax:
+
+```
+--device path=/sys/bus/pci/devices/0000:01:00.0/ path=/sys/bus/pci/devices/0000:02:00.0/
+```
+
+### Multiple devices in the same IOMMU group
+
+There are cases where multiple devices can be found under the same IOMMU group.
+This happens often with graphics card embedding an audio controller.
+
+```
+$ lspci
+[...]
+01:00.0 VGA compatible controller: NVIDIA Corporation GK208B [GeForce GT 710] (rev a1)
+01:00.1 Audio device: NVIDIA Corporation GK208 HDMI/DP Audio Controller (rev a1)
+[...]
+```
+
+This is usually exposed as follows through `sysfs`:
+
+```
+$ ls /sys/kernel/iommu_groups/22/devices/
+0000:01:00.0  0000:01:00.1
+```
+
+This means these two devices are under the same IOMMU group 22. In such case,
+it is important to bind both devices to VFIO and pass them both through the
+VM, otherwise this could cause some functional and security issues.
