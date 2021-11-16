@@ -67,7 +67,9 @@ fn sigwinch_listener_main(seccomp_filter: BpfProgram, tx: File, tty: &File) -> !
 
     unblock_all_signals().unwrap();
 
-    apply_filter(&seccomp_filter).unwrap();
+    if !seccomp_filter.is_empty() {
+        apply_filter(&seccomp_filter).unwrap();
+    }
 
     register_signal_handler(SIGWINCH, sigwinch_handler).unwrap();
 
