@@ -95,22 +95,4 @@ mod tests {
         let mut klapic = LapicState::default();
         set_klapic_reg(&mut klapic, reg_offset, 3);
     }
-
-    #[test]
-    fn test_apic_delivery_mode() {
-        let mut v: Vec<u32> = Vec::new();
-        v.resize(20, 0);
-
-        unsafe {
-            assert_eq!(
-                libc::getrandom(v.as_mut_ptr() as *mut _ as *mut libc::c_void, 80, 0),
-                80
-            );
-        }
-
-        v.iter_mut()
-            .for_each(|x| *x = set_apic_delivery_mode(*x, 2));
-        let after: Vec<u32> = v.iter().map(|x| ((*x & !0x700) | ((2) << 8))).collect();
-        assert_eq!(v, after);
-    }
 }
