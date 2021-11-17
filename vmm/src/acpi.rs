@@ -403,15 +403,21 @@ fn create_spcr_table(base_address: u64, gsi: u32) -> Sdt {
 }
 
 #[cfg(target_arch = "aarch64")]
-fn create_iort_table() -> Sdt {
+fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
     const ACPI_IORT_NODE_ITS_GROUP: u8 = 0x00;
     const ACPI_IORT_NODE_PCI_ROOT_COMPLEX: u8 = 0x02;
+    const ACPI_IORT_NODE_ROOT_COMPLEX_OFFSET: usize = 72;
+    const ACPI_IORT_NODE_ROOT_COMPLEX_SIZE: usize = 52;
 
-    // IORT
-    let mut iort = Sdt::new(*b"IORT", 124, 2, *b"CLOUDH", *b"CHIORT  ", 1);
-    // Nodes: PCI Root Complex, ITS
-    // Note: We currently do not support SMMU
-    iort.write(36, (2u32).to_le());
+    // The IORT table containes:
+    // - Header (size = 40)
+    // - 1 x ITS Group Node (size = 24)
+    // - N x Root Complex Node (N = number of pci segments, size = 52 x N)
+    let iort_table_size: u32 = (ACPI_IORT_NODE_ROOT_COMPLEX_OFFSET
+        + ACPI_IORT_NODE_ROOT_COMPLEX_SIZE * pci_segments.len())
+        as u32;
+    let mut iort = Sdt::new(*b"IORT", iort_table_size, 2, *b"CLOUDH", *b"CHIORT  ", 1);
+    iort.write(36, ((1 + pci_segments.len()) as u32).to_le());
     iort.write(40, (48u32).to_le());
 
     // ITS group node
@@ -421,23 +427,34 @@ fn create_iort_table() -> Sdt {
     // ITS counts
     iort.write(64, (1u32).to_le());
 
-    // Root Complex Node
-    iort.write(72, ACPI_IORT_NODE_PCI_ROOT_COMPLEX as u8);
-    // Length of the root complex node in bytes
-    iort.write(73, (52u16).to_le());
-    // Mapping counts
-    iort.write(80, (1u32).to_le());
-    // Offset from the start of the RC node to the start of its Array of ID mappings
-    iort.write(84, (32u32).to_le());
-    // Fully coherent device
-    iort.write(88, (1u32).to_le());
-    // CCA = CPM = DCAS = 1
-    iort.write(95, 3u8);
-    // Identity RID mapping covering the whole input RID range
-    iort.write(108, (0xffff_u32).to_le());
-    // id_mapping_array_output_reference should be
-    // the ITS group node (the first node) if no SMMU
-    iort.write(116, (48u32).to_le());
+    // Root Complex Nodes
+    for (i, segment) in pci_segments.iter().enumerate() {
+        let node_offset: usize =
+            ACPI_IORT_NODE_ROOT_COMPLEX_OFFSET + i * ACPI_IORT_NODE_ROOT_COMPLEX_SIZE;
+        iort.write(node_offset, ACPI_IORT_NODE_PCI_ROOT_COMPLEX as u8);
+        // Length of the root complex node in bytes
+        iort.write(
+            node_offset + 1,
+            (ACPI_IORT_NODE_ROOT_COMPLEX_SIZE as u16).to_le(),
+        );
+        // Revision
+        iort.write(node_offset + 3, (3u8).to_le());
+        // Mapping counts
+        iort.write(node_offset + 8, (1u32).to_le());
+        // Offset from the start of the RC node to the start of its Array of ID mappings
+        iort.write(node_offset + 12, (32u32).to_le());
+        // Fully coherent device
+        iort.write(node_offset + 16, (1u32).to_le());
+        // CCA = CPM = DCAS = 1
+        iort.write(node_offset + 24, 3u8);
+        // PCI segment number
+        iort.write(node_offset + 28, (segment.id as u32).to_le());
+        // Identity RID mapping covering the whole input RID range
+        iort.write(node_offset + 36, (0xffff_u32).to_le());
+        // id_mapping_array_output_reference should be
+        // the ITS group node (the first node) if no SMMU
+        iort.write(node_offset + 44, (48u32).to_le());
+    }
 
     iort.update_checksum();
 
@@ -613,7 +630,7 @@ pub fn create_acpi_tables(
 
     #[cfg(target_arch = "aarch64")]
     {
-        let iort = create_iort_table();
+        let iort = create_iort_table(device_manager.lock().unwrap().pci_segments());
         let iort_offset = prev_tbl_off.checked_add(prev_tbl_len).unwrap();
         guest_mem
             .write_slice(iort.as_slice(), iort_offset)
