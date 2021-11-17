@@ -178,6 +178,7 @@ impl EpollContext {
     pub fn new() -> result::Result<EpollContext, io::Error> {
         let epoll_fd = epoll::create(true)?;
         // Use 'File' to enforce closing on 'epoll_fd'
+        // SAFETY: the epoll_fd returned by epoll::create is valid and owned by us.
         let epoll_file = unsafe { File::from_raw_fd(epoll_fd) };
 
         Ok(EpollContext { epoll_file })
