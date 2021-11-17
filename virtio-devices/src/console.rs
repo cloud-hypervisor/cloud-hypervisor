@@ -69,7 +69,7 @@ impl Default for VirtioConsoleConfig {
     }
 }
 
-// Safe because it only has data and has no implicit padding.
+// SAFETY: it only has data and has no implicit padding.
 unsafe impl ByteValued for VirtioConsoleConfig {}
 
 struct ConsoleEpollHandler {

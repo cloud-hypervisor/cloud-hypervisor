@@ -100,7 +100,7 @@ pub struct VirtioBalloonConfig {
 const CONFIG_ACTUAL_OFFSET: u64 = 4;
 const CONFIG_ACTUAL_SIZE: usize = 4;
 
-// Safe because it only has data and has no implicit padding.
+// SAFETY: it only has data and has no implicit padding.
 unsafe impl ByteValued for VirtioBalloonConfig {}
 
 struct VirtioBalloonResizeReceiver {
