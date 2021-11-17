@@ -75,7 +75,7 @@ struct VirtioPciCap {
     offset: Le32,     // Offset within bar.
     length: Le32,     // Length of the structure, in bytes.
 }
-// It is safe to implement ByteValued. All members are simple numbers and any value is valid.
+// SAFETY: All members are simple numbers and any value is valid.
 unsafe impl ByteValued for VirtioPciCap {}
 
 impl PciCapability for VirtioPciCap {
@@ -111,7 +111,7 @@ struct VirtioPciNotifyCap {
     cap: VirtioPciCap,
     notify_off_multiplier: Le32,
 }
-// It is safe to implement ByteValued. All members are simple numbers and any value is valid.
+// SAFETY: All members are simple numbers and any value is valid.
 unsafe impl ByteValued for VirtioPciNotifyCap {}
 
 impl PciCapability for VirtioPciNotifyCap {
@@ -156,7 +156,7 @@ struct VirtioPciCap64 {
     offset_hi: Le32,
     length_hi: Le32,
 }
-// It is safe to implement ByteValued. All members are simple numbers and any value is valid.
+// SAFETY: All members are simple numbers and any value is valid.
 unsafe impl ByteValued for VirtioPciCap64 {}
 
 impl PciCapability for VirtioPciCap64 {
@@ -194,7 +194,7 @@ struct VirtioPciCfgCap {
     cap: VirtioPciCap,
     pci_cfg_data: [u8; 4],
 }
-// It is safe to implement ByteValued. All members are simple numbers and any value is valid.
+// SAFETY: All members are simple numbers and any value is valid.
 unsafe impl ByteValued for VirtioPciCfgCap {}
 
 impl PciCapability for VirtioPciCfgCap {

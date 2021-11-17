@@ -149,7 +149,7 @@ struct VirtioMemReq {
     padding_1: [u16; 3],
 }
 
-// Safe because it only has data and has no implicit padding.
+// SAFETY: it only has data and has no implicit padding.
 unsafe impl ByteValued for VirtioMemReq {}
 
 #[repr(C)]
@@ -160,7 +160,7 @@ struct VirtioMemResp {
     state: u16,
 }
 
-// Safe because it only has data and has no implicit padding.
+// SAFETY: it only has data and has no implicit padding.
 unsafe impl ByteValued for VirtioMemResp {}
 
 #[repr(C)]
@@ -186,7 +186,7 @@ pub struct VirtioMemConfig {
     requested_size: u64,
 }
 
-// Safe because it only has data and has no implicit padding.
+// SAFETY: it only has data and has no implicit padding.
 unsafe impl ByteValued for VirtioMemConfig {}
 
 impl VirtioMemConfig {

@@ -79,8 +79,6 @@ struct VirtioIommuRange32 {
     end: u32,
 }
 
-unsafe impl ByteValued for VirtioIommuRange32 {}
-
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
 #[allow(dead_code)]
@@ -88,8 +86,6 @@ struct VirtioIommuRange64 {
     start: u64,
     end: u64,
 }
-
-unsafe impl ByteValued for VirtioIommuRange64 {}
 
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
@@ -102,8 +98,6 @@ struct VirtioIommuConfig {
     bypass: u8,
     _reserved: [u8; 7],
 }
-
-unsafe impl ByteValued for VirtioIommuConfig {}
 
 /// Virtio IOMMU request type
 const VIRTIO_IOMMU_T_ATTACH: u8 = 1;
@@ -118,8 +112,6 @@ struct VirtioIommuReqHead {
     type_: u8,
     _reserved: [u8; 3],
 }
-
-unsafe impl ByteValued for VirtioIommuReqHead {}
 
 /// Virtio IOMMU request status
 const VIRTIO_IOMMU_S_OK: u8 = 0;
@@ -148,8 +140,6 @@ struct VirtioIommuReqTail {
     _reserved: [u8; 3],
 }
 
-unsafe impl ByteValued for VirtioIommuReqTail {}
-
 /// ATTACH request
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
@@ -159,8 +149,6 @@ struct VirtioIommuReqAttach {
     _reserved: [u8; 8],
 }
 
-unsafe impl ByteValued for VirtioIommuReqAttach {}
-
 /// DETACH request
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
@@ -169,8 +157,6 @@ struct VirtioIommuReqDetach {
     endpoint: u32,
     _reserved: [u8; 8],
 }
-
-unsafe impl ByteValued for VirtioIommuReqDetach {}
 
 /// Virtio IOMMU request MAP flags
 #[allow(unused)]
@@ -194,8 +180,6 @@ struct VirtioIommuReqMap {
     _flags: u32,
 }
 
-unsafe impl ByteValued for VirtioIommuReqMap {}
-
 /// UNMAP request
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
@@ -205,8 +189,6 @@ struct VirtioIommuReqUnmap {
     virt_end: u64,
     _reserved: [u8; 4],
 }
-
-unsafe impl ByteValued for VirtioIommuReqUnmap {}
 
 /// Virtio IOMMU request PROBE types
 #[allow(unused)]
@@ -224,8 +206,6 @@ struct VirtioIommuReqProbe {
     _reserved: [u64; 8],
 }
 
-unsafe impl ByteValued for VirtioIommuReqProbe {}
-
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
 #[allow(dead_code)]
@@ -233,8 +213,6 @@ struct VirtioIommuProbeProperty {
     type_: u16,
     length: u16,
 }
-
-unsafe impl ByteValued for VirtioIommuProbeProperty {}
 
 /// Virtio IOMMU request PROBE property RESV_MEM subtypes
 #[allow(unused)]
@@ -250,8 +228,6 @@ struct VirtioIommuProbeResvMem {
     start: u64,
     end: u64,
 }
-
-unsafe impl ByteValued for VirtioIommuProbeResvMem {}
 
 /// Virtio IOMMU fault flags
 #[allow(unused)]
@@ -284,6 +260,19 @@ struct VirtioIommuFault {
     address: u64,
 }
 
+// SAFETY: these data structures only contain integers and have no implicit padding
+unsafe impl ByteValued for VirtioIommuRange32 {}
+unsafe impl ByteValued for VirtioIommuRange64 {}
+unsafe impl ByteValued for VirtioIommuConfig {}
+unsafe impl ByteValued for VirtioIommuReqHead {}
+unsafe impl ByteValued for VirtioIommuReqTail {}
+unsafe impl ByteValued for VirtioIommuReqAttach {}
+unsafe impl ByteValued for VirtioIommuReqDetach {}
+unsafe impl ByteValued for VirtioIommuReqMap {}
+unsafe impl ByteValued for VirtioIommuReqUnmap {}
+unsafe impl ByteValued for VirtioIommuReqProbe {}
+unsafe impl ByteValued for VirtioIommuProbeProperty {}
+unsafe impl ByteValued for VirtioIommuProbeResvMem {}
 unsafe impl ByteValued for VirtioIommuFault {}
 
 #[derive(Debug)]
