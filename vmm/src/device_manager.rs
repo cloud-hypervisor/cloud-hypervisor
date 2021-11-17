@@ -64,8 +64,8 @@ use hypervisor::DeviceFd;
 #[cfg(feature = "mshv")]
 use hypervisor::IoEventAddress;
 use libc::{
-    isatty, tcgetattr, tcsetattr, termios, ECHO, ICANON, ISIG, MAP_NORESERVE, MAP_PRIVATE,
-    MAP_SHARED, O_TMPFILE, PROT_READ, PROT_WRITE, TCSANOW,
+    cfmakeraw, isatty, tcgetattr, tcsetattr, termios, MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED,
+    O_TMPFILE, PROT_READ, PROT_WRITE, TCSANOW,
 };
 #[cfg(target_arch = "x86_64")]
 use pci::PciConfigIo;
@@ -1697,7 +1697,7 @@ impl DeviceManager {
     }
 
     fn set_raw_mode(&self, f: &mut File) -> vmm_sys_util::errno::Result<()> {
-        self.modify_mode(f.as_raw_fd(), |t| t.c_lflag &= !(ICANON | ECHO | ISIG))
+        self.modify_mode(f.as_raw_fd(), |t| unsafe { cfmakeraw(t) })
     }
 
     fn listen_for_sigwinch_on_tty(&mut self, pty: &File) -> std::io::Result<()> {
