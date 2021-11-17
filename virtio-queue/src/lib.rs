@@ -94,6 +94,9 @@ pub struct Descriptor {
     next: u16,
 }
 
+// SAFETY: Descriptor only contains a series of integers and has no implicit padding
+unsafe impl ByteValued for Descriptor {}
+
 #[allow(clippy::len_without_is_empty)]
 impl Descriptor {
     /// Creates a new descriptor
@@ -148,8 +151,6 @@ impl Descriptor {
         self.flags & VIRTQ_DESC_F_WRITE != 0
     }
 }
-
-unsafe impl ByteValued for Descriptor {}
 
 /// A virtio descriptor chain.
 #[derive(Clone, Debug)]
@@ -421,6 +422,9 @@ pub struct VirtqUsedElem {
     len: u32,
 }
 
+// SAFETY: VirtqUsedElem only contains a series of integers and has no implicit padding
+unsafe impl ByteValued for VirtqUsedElem {}
+
 impl VirtqUsedElem {
     /// Create a new `VirtqUsedElem` instance.
     pub fn new(id: u16, len: u32) -> Self {
@@ -430,8 +434,6 @@ impl VirtqUsedElem {
         }
     }
 }
-
-unsafe impl ByteValued for VirtqUsedElem {}
 
 /// Struct to hold an exclusive reference to the underlying `QueueState` object.
 pub enum QueueStateGuard<'a, M: GuestAddressSpace> {
