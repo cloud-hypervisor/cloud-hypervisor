@@ -19,6 +19,7 @@ pub struct Rsdp {
     _reserved: [u8; 3],
 }
 
+// SAFETY: Rsdp only contains a series of integers
 unsafe impl ByteValued for Rsdp {}
 
 impl Rsdp {
