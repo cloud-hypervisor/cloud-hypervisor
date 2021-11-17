@@ -35,7 +35,7 @@ struct MpcLintsrcWrapper(mpspec::mpc_lintsrc);
 #[derive(Copy, Clone, Default)]
 struct MpfIntelWrapper(mpspec::mpf_intel);
 
-// These `mpspec` wrapper types are only data, reading them from data is a safe initialization.
+// SAFETY: These `mpspec` wrapper types are only data, reading them from data is a safe initialization.
 unsafe impl ByteValued for MpcBusWrapper {}
 unsafe impl ByteValued for MpcCpuWrapper {}
 unsafe impl ByteValued for MpcIntsrcWrapper {}

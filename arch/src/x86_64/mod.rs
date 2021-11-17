@@ -118,17 +118,15 @@ impl SgxEpcRegion {
 #[derive(Copy, Clone, Default)]
 struct StartInfoWrapper(hvm_start_info);
 
-// It is safe to initialize StartInfoWrapper which is a wrapper over `hvm_start_info` (a series of ints).
-unsafe impl ByteValued for StartInfoWrapper {}
-
 #[derive(Copy, Clone, Default)]
 struct MemmapTableEntryWrapper(hvm_memmap_table_entry);
-
-unsafe impl ByteValued for MemmapTableEntryWrapper {}
 
 #[derive(Copy, Clone, Default)]
 struct ModlistEntryWrapper(hvm_modlist_entry);
 
+// SAFETY: These data structures only contain a series of integers
+unsafe impl ByteValued for StartInfoWrapper {}
+unsafe impl ByteValued for MemmapTableEntryWrapper {}
 unsafe impl ByteValued for ModlistEntryWrapper {}
 
 // This is a workaround to the Rust enforcement specifying that any implementation of a foreign
@@ -139,7 +137,7 @@ unsafe impl ByteValued for ModlistEntryWrapper {}
 #[derive(Copy, Clone, Default)]
 struct BootParamsWrapper(boot_params);
 
-// It is safe to initialize BootParamsWrap which is a wrapper over `boot_params` (a series of ints).
+// SAFETY: BootParamsWrap is a wrapper over `boot_params` (a series of ints).
 unsafe impl ByteValued for BootParamsWrapper {}
 
 #[derive(Debug)]
