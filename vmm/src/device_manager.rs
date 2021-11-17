@@ -492,6 +492,7 @@ pub fn create_pty(non_blocking: bool) -> io::Result<(File, File, PathBuf)> {
             .open("/dev/ptmx")?,
     };
     let mut unlock: libc::c_ulong = 0;
+    // SAFETY: FFI call into libc, trivially safe
     unsafe {
         libc::ioctl(
             main.as_raw_fd(),
@@ -500,6 +501,7 @@ pub fn create_pty(non_blocking: bool) -> io::Result<(File, File, PathBuf)> {
         )
     };
 
+    // SAFETY: FFI call into libc, trivally safe
     let sub_fd = unsafe {
         libc::ioctl(
             main.as_raw_fd(),
@@ -514,6 +516,7 @@ pub fn create_pty(non_blocking: bool) -> io::Result<(File, File, PathBuf)> {
     let proc_path = PathBuf::from(format!("/proc/self/fd/{}", sub_fd));
     let path = read_link(proc_path)?;
 
+    // SAFETY: sub_fd is checked to be valid before being wrapped in File
     Ok((main, unsafe { File::from_raw_fd(sub_fd) }, path))
 }
 
@@ -1674,20 +1677,21 @@ impl DeviceManager {
         fd: RawFd,
         f: F,
     ) -> vmm_sys_util::errno::Result<()> {
-        // Safe because we check the return value of isatty.
+        // SAFETY: safe because we check the return value of isatty.
         if unsafe { isatty(fd) } != 1 {
             return Ok(());
         }
 
-        // The following pair are safe because termios gets totally overwritten by tcgetattr and we
-        // check the return result.
+        // SAFETY: The following pair are safe because termios gets totally overwritten by tcgetattr
+        // and we check the return result.
         let mut termios: termios = unsafe { zeroed() };
         let ret = unsafe { tcgetattr(fd, &mut termios as *mut _) };
         if ret < 0 {
             return vmm_sys_util::errno::errno_result();
         }
         f(&mut termios);
-        // Safe because the syscall will only read the extent of termios and we check the return result.
+        // SAFETY: Safe because the syscall will only read the extent of termios and we check
+        // the return result.
         let ret = unsafe { tcsetattr(fd, TCSANOW, &termios as *const _) };
         if ret < 0 {
             return vmm_sys_util::errno::errno_result();
@@ -1697,6 +1701,7 @@ impl DeviceManager {
     }
 
     fn set_raw_mode(&self, f: &mut File) -> vmm_sys_util::errno::Result<()> {
+        // SAFETY: FFI call. Variable t is guaranteed to be a valid termios from modify_mode.
         self.modify_mode(f.as_raw_fd(), |t| unsafe { cfmakeraw(t) })
     }
 
@@ -1746,6 +1751,7 @@ impl DeviceManager {
             }
             ConsoleOutputMode::Tty => {
                 // If an interactive TTY then we can accept input
+                // SAFETY: FFI call. Trivially safe.
                 if unsafe { libc::isatty(libc::STDIN_FILENO) == 1 } {
                     Endpoint::FilePair(
                         // Duplicating the file descriptors like this is needed as otherwise
