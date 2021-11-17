@@ -73,8 +73,6 @@ struct Header {
     error: u32,
 }
 
-unsafe impl ByteValued for Header {}
-
 #[repr(C)]
 #[derive(Default, Clone, Copy, Debug)]
 struct Version {
@@ -82,7 +80,6 @@ struct Version {
     major: u16,
     minor: u16,
 }
-unsafe impl ByteValued for Version {}
 
 #[derive(Serialize, Deserialize, Debug)]
 struct MigrationCapabilities {
@@ -128,8 +125,6 @@ struct DmaMap {
     size: u64,
 }
 
-unsafe impl ByteValued for DmaMap {}
-
 #[repr(C)]
 #[derive(Default, Clone, Copy, Debug)]
 struct DmaUnmap {
@@ -139,8 +134,6 @@ struct DmaUnmap {
     address: u64,
     size: u64,
 }
-
-unsafe impl ByteValued for DmaUnmap {}
 
 #[repr(C)]
 #[derive(Default, Clone, Copy, Debug)]
@@ -152,16 +145,12 @@ struct DeviceGetInfo {
     num_irqs: u32,
 }
 
-unsafe impl ByteValued for DeviceGetInfo {}
-
 #[repr(C)]
 #[derive(Default, Clone, Copy, Debug)]
 struct DeviceGetRegionInfo {
     header: Header,
     region_info: vfio_region_info,
 }
-
-unsafe impl ByteValued for DeviceGetRegionInfo {}
 
 #[repr(C)]
 #[derive(Default, Clone, Copy, Debug)]
@@ -172,8 +161,6 @@ struct RegionAccess {
     count: u32,
 }
 
-unsafe impl ByteValued for RegionAccess {}
-
 #[repr(C)]
 #[derive(Default, Clone, Copy, Debug)]
 struct GetIrqInfo {
@@ -183,8 +170,6 @@ struct GetIrqInfo {
     index: u32,
     count: u32,
 }
-
-unsafe impl ByteValued for GetIrqInfo {}
 
 #[repr(C)]
 #[derive(Default, Clone, Copy, Debug)]
@@ -197,14 +182,22 @@ struct SetIrqs {
     count: u32,
 }
 
-unsafe impl ByteValued for SetIrqs {}
-
 #[repr(C)]
 #[derive(Default, Clone, Copy, Debug)]
 struct DeviceReset {
     header: Header,
 }
 
+// SAFETY: these data structures only contain a sereis of integers
+unsafe impl ByteValued for Header {}
+unsafe impl ByteValued for Version {}
+unsafe impl ByteValued for DmaMap {}
+unsafe impl ByteValued for DmaUnmap {}
+unsafe impl ByteValued for DeviceGetInfo {}
+unsafe impl ByteValued for DeviceGetRegionInfo {}
+unsafe impl ByteValued for RegionAccess {}
+unsafe impl ByteValued for GetIrqInfo {}
+unsafe impl ByteValued for SetIrqs {}
 unsafe impl ByteValued for DeviceReset {}
 
 #[derive(Serialize, Deserialize, Debug)]
