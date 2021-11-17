@@ -961,7 +961,7 @@ mod tests {
         foo: u8,
     }
 
-    // It is safe to implement BytesValued; all members are simple numbers and any value is valid.
+    // SAFETY: All members are simple numbers and any value is valid.
     unsafe impl ByteValued for TestCap {}
 
     impl PciCapability for TestCap {
