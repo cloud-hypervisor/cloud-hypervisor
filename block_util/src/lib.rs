@@ -409,8 +409,6 @@ pub struct VirtioBlockConfig {
     pub write_zeroes_may_unmap: u8,
     pub unused1: [u8; 3],
 }
-unsafe impl ByteValued for VirtioBlockConfig {}
-
 #[derive(Copy, Clone, Debug, Default, Versionize)]
 #[repr(C, packed)]
 pub struct VirtioBlockGeometry {
@@ -418,6 +416,9 @@ pub struct VirtioBlockGeometry {
     pub heads: u8,
     pub sectors: u8,
 }
+
+// SAFETY: these data structures only contain a series of integers
+unsafe impl ByteValued for VirtioBlockConfig {}
 unsafe impl ByteValued for VirtioBlockGeometry {}
 
 /// Check if io_uring for block device can be used on the current system, as
