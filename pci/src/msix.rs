@@ -468,7 +468,7 @@ pub struct MsixCap {
     pub pba: u32,
 }
 
-// It is safe to implement ByteValued. All members are simple numbers and any value is valid.
+// SAFETY: All members are simple numbers and any value is valid.
 unsafe impl ByteValued for MsixCap {}
 
 impl PciCapability for MsixCap {
