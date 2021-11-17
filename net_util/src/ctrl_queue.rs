@@ -42,6 +42,7 @@ pub struct ControlHeader {
     pub cmd: u8,
 }
 
+// SAFETY: ControlHeader only contains a series of integers
 unsafe impl ByteValued for ControlHeader {}
 
 pub struct CtrlQueue {

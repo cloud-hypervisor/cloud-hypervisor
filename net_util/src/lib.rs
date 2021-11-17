@@ -59,7 +59,7 @@ pub struct VirtioNetConfig {
     pub duplex: u8,
 }
 
-// Safe because it only has data and has no implicit padding.
+// SAFETY: it only has data and has no implicit padding.
 unsafe impl ByteValued for VirtioNetConfig {}
 
 /// Create a sockaddr_in from an IPv4 address, and expose it as
