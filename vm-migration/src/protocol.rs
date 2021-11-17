@@ -57,6 +57,9 @@ pub struct Request {
     length: u64, // Length of payload for command excluding the Request struct
 }
 
+// SAFETY: Request contains a series of integers with no implicit padding
+unsafe impl ByteValued for Request {}
+
 impl Request {
     pub fn new(command: Command, length: u64) -> Self {
         Self {
@@ -112,8 +115,6 @@ impl Request {
     }
 }
 
-unsafe impl ByteValued for Request {}
-
 #[repr(u16)]
 #[derive(Copy, Clone, PartialEq)]
 pub enum Status {
@@ -135,6 +136,9 @@ pub struct Response {
     padding: [u8; 6],
     length: u64, // Length of payload for command excluding the Response struct
 }
+
+// SAFETY: Response contains a series of integers with no implicit padding
+unsafe impl ByteValued for Response {}
 
 impl Response {
     pub fn new(status: Status, length: u64) -> Self {
@@ -170,8 +174,6 @@ impl Response {
             .map_err(MigratableError::MigrateSocket)
     }
 }
-
-unsafe impl ByteValued for Response {}
 
 #[repr(C)]
 #[derive(Clone, Default, Serialize, Deserialize, Versionize)]
