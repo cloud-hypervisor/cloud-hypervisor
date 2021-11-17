@@ -82,7 +82,6 @@ pub struct Smbios30Entrypoint {
     pub max_size: u32,
     pub physptr: u64,
 }
-unsafe impl ByteValued for Smbios30Entrypoint {}
 
 impl Clone for Smbios30Entrypoint {
     fn clone(&self) -> Self {
@@ -112,8 +111,6 @@ impl Clone for SmbiosBiosInfo {
     }
 }
 
-unsafe impl ByteValued for SmbiosBiosInfo {}
-
 #[repr(packed)]
 #[derive(Default, Copy)]
 pub struct SmbiosSysInfo {
@@ -136,6 +133,9 @@ impl Clone for SmbiosSysInfo {
     }
 }
 
+// SAFETY: These data structures only contain a series of integers
+unsafe impl ByteValued for Smbios30Entrypoint {}
+unsafe impl ByteValued for SmbiosBiosInfo {}
 unsafe impl ByteValued for SmbiosSysInfo {}
 
 fn write_and_incr<T: ByteValued>(

@@ -69,8 +69,6 @@ pub struct TdVmmDataRegion {
     pub region_type: TdVmmDataRegionType,
 }
 
-unsafe impl ByteValued for TdVmmDataRegion {}
-
 #[repr(u16)]
 #[derive(Clone, Copy, Debug)]
 pub enum TdVmmDataRegionType {
@@ -192,7 +190,6 @@ struct HobHeader {
     length: u16,
     reserved: u32,
 }
-unsafe impl ByteValued for HobHeader {}
 
 #[repr(C)]
 #[derive(Copy, Clone, Default, Debug)]
@@ -206,7 +203,6 @@ struct HobHandoffInfoTable {
     efi_free_memory_bottom: u64,
     efi_end_of_hob_list: u64,
 }
-unsafe impl ByteValued for HobHandoffInfoTable {}
 
 #[repr(C)]
 #[derive(Copy, Clone, Default, Debug)]
@@ -227,7 +223,6 @@ struct HobResourceDescriptor {
     physical_start: u64,
     resource_length: u64,
 }
-unsafe impl ByteValued for HobResourceDescriptor {}
 
 #[repr(C)]
 #[derive(Copy, Clone, Default, Debug)]
@@ -235,7 +230,6 @@ struct HobGuidType {
     header: HobHeader,
     name: EfiGuid,
 }
-unsafe impl ByteValued for HobGuidType {}
 
 #[repr(C)]
 #[derive(Copy, Clone, Default, Debug)]
@@ -243,6 +237,13 @@ struct TdVmmData {
     guid_type: HobGuidType,
     region: TdVmmDataRegion,
 }
+
+// SAFETY: These data structures only contain a series of integers
+unsafe impl ByteValued for TdVmmDataRegion {}
+unsafe impl ByteValued for HobHeader {}
+unsafe impl ByteValued for HobHandoffInfoTable {}
+unsafe impl ByteValued for HobResourceDescriptor {}
+unsafe impl ByteValued for HobGuidType {}
 unsafe impl ByteValued for TdVmmData {}
 
 pub struct TdHob {
