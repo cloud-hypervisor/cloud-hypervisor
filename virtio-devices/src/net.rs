@@ -488,6 +488,7 @@ impl Net {
 
         for fd in fds.iter() {
             // Duplicate so that it can survive reboots
+            // SAFETY: FFI call to dup. Trivially safe.
             let fd = unsafe { libc::dup(*fd) };
             if fd < 0 {
                 return Err(Error::DuplicateTapFd(std::io::Error::last_os_error()));
