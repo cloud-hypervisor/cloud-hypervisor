@@ -457,6 +457,9 @@ pub enum DeviceManagerError {
 
     /// Failed to update memory mappings for VFIO user device
     UpdateMemoryForVfioUserPciDevice(VfioUserPciDeviceError),
+
+    /// Cannot duplicate file descriptor
+    DupFd(vmm_sys_util::errno::Error),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -1750,17 +1753,32 @@ impl DeviceManager {
                 }
             }
             ConsoleOutputMode::Tty => {
+                // Duplicating the file descriptors like this is needed as otherwise
+                // they will be closed on a reboot and the numbers reused
+
+                // SAFETY: FFI call to dup. Trivially safe.
+                let stdout = unsafe { libc::dup(libc::STDOUT_FILENO) };
+                if stdout == -1 {
+                    return vmm_sys_util::errno::errno_result().map_err(DeviceManagerError::DupFd);
+                }
+                // SAFETY: stdout is valid and owned solely by us.
+                let stdout = unsafe { File::from_raw_fd(stdout) };
+
                 // If an interactive TTY then we can accept input
                 // SAFETY: FFI call. Trivially safe.
                 if unsafe { libc::isatty(libc::STDIN_FILENO) == 1 } {
-                    Endpoint::FilePair(
-                        // Duplicating the file descriptors like this is needed as otherwise
-                        // they will be closed on a reboot and the numbers reused
-                        unsafe { File::from_raw_fd(libc::dup(libc::STDOUT_FILENO)) },
-                        unsafe { File::from_raw_fd(libc::dup(libc::STDIN_FILENO)) },
-                    )
+                    // SAFETY: FFI call to dup. Trivially safe.
+                    let stdin = unsafe { libc::dup(libc::STDIN_FILENO) };
+                    if stdin == -1 {
+                        return vmm_sys_util::errno::errno_result()
+                            .map_err(DeviceManagerError::DupFd);
+                    }
+                    // SAFETY: stdin is valid and owned solely by us.
+                    let stdin = unsafe { File::from_raw_fd(stdin) };
+
+                    Endpoint::FilePair(stdout, stdin)
                 } else {
-                    Endpoint::File(unsafe { File::from_raw_fd(libc::dup(libc::STDOUT_FILENO)) })
+                    Endpoint::File(stdout)
                 }
             }
             ConsoleOutputMode::Null => Endpoint::Null,
@@ -2885,6 +2903,9 @@ impl DeviceManager {
         // descriptor opened from DeviceFd, preventing from unexpected behavior
         // where the VfioContainer would try to use a closed file descriptor.
         let dup_device_fd = unsafe { libc::dup(passthrough_device.as_raw_fd()) };
+        if dup_device_fd == -1 {
+            return vmm_sys_util::errno::errno_result().map_err(DeviceManagerError::DupFd);
+        }
 
         // SAFETY the raw fd conversion here is safe because:
         //   1. When running on KVM or MSHV, passthrough_device wraps around DeviceFd.
