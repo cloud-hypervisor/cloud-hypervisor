@@ -302,6 +302,7 @@ impl cpu::Vcpu for MshvVcpu {
                 hv_message_type_HVMSG_X64_IO_PORT_INTERCEPT => {
                     let info = x.to_ioport_info().unwrap();
                     let access_info = info.access_info;
+                    // SAFETY: access_info is valid, otherwise we won't be here
                     let len = unsafe { access_info.__bindgen_anon_1.access_size() } as usize;
                     let is_write = info.header.intercept_access_type == 1;
                     let port = info.port_number;
@@ -342,6 +343,7 @@ impl cpu::Vcpu for MshvVcpu {
                         _ => {}
                     }
 
+                    // SAFETY: access_info is valid, otherwise we won't be here
                     assert!(
                         !(unsafe { access_info.__bindgen_anon_1.string_op() } == 1),
                         "String IN/OUT not supported"
@@ -629,6 +631,7 @@ impl<'a> MshvEmulatorContext<'a> {
             .translate_gva(gva, flags.into())
             .map_err(|e| PlatformError::TranslateVirtualAddress(anyhow!(e)))?;
 
+        // SAFETY: r is valid, otherwise this function will have returned
         let result_code = unsafe { r.1.__bindgen_anon_1.result_code };
         match result_code {
             hv_translate_gva_result_code_HV_TRANSLATE_GVA_SUCCESS => Ok(r.0),
@@ -950,6 +953,9 @@ impl vm::Vm for MshvVm {
             vec_with_array_field::<mshv_msi_routing, mshv_msi_routing_entry>(entries.len());
         msi_routing[0].nr = entries.len() as u32;
 
+        // SAFETY: msi_routing initialized with entries.len() and now it is being turned into
+        // entries_slice with entries.len() again. It is guaranteed to be large enough to hold
+        // everything from entries.
         unsafe {
             let entries_slice: &mut [mshv_msi_routing_entry] =
                 msi_routing[0].entries.as_mut_slice(entries.len());
