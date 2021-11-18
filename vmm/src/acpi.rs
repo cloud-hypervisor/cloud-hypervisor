@@ -407,12 +407,12 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
     const ACPI_IORT_NODE_ITS_GROUP: u8 = 0x00;
     const ACPI_IORT_NODE_PCI_ROOT_COMPLEX: u8 = 0x02;
     const ACPI_IORT_NODE_ROOT_COMPLEX_OFFSET: usize = 72;
-    const ACPI_IORT_NODE_ROOT_COMPLEX_SIZE: usize = 52;
+    const ACPI_IORT_NODE_ROOT_COMPLEX_SIZE: usize = 60;
 
     // The IORT table containes:
     // - Header (size = 40)
     // - 1 x ITS Group Node (size = 24)
-    // - N x Root Complex Node (N = number of pci segments, size = 52 x N)
+    // - N x Root Complex Node (N = number of pci segments, size = 60 x N)
     let iort_table_size: u32 = (ACPI_IORT_NODE_ROOT_COMPLEX_OFFSET
         + ACPI_IORT_NODE_ROOT_COMPLEX_SIZE * pci_segments.len())
         as u32;
@@ -442,18 +442,31 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
         // Mapping counts
         iort.write(node_offset + 8, (1u32).to_le());
         // Offset from the start of the RC node to the start of its Array of ID mappings
-        iort.write(node_offset + 12, (32u32).to_le());
+        iort.write(node_offset + 12, (36u32).to_le());
         // Fully coherent device
         iort.write(node_offset + 16, (1u32).to_le());
         // CCA = CPM = DCAS = 1
         iort.write(node_offset + 24, 3u8);
         // PCI segment number
         iort.write(node_offset + 28, (segment.id as u32).to_le());
-        // Identity RID mapping covering the whole input RID range
-        iort.write(node_offset + 36, (0xffff_u32).to_le());
+
+        // From offset 32 onward is the space for ID mappings Array.
+        // Now we have only one mapping.
+        let mapping_offset: usize = node_offset + 36;
+        // The lowest value in the input range
+        iort.write(mapping_offset, (0u32).to_le());
+        // The number of IDs in the range minus one:
+        // This should cover all the devices of a segment:
+        // 1 (bus) x 32 (devices) x 8 (functions) = 256
+        // Note: Currently only 1 bus is supported in a segment.
+        iort.write(mapping_offset + 4, (255_u32).to_le());
+        // The lowest value in the output range
+        iort.write(mapping_offset + 8, ((256 * segment.id) as u32).to_le());
         // id_mapping_array_output_reference should be
         // the ITS group node (the first node) if no SMMU
-        iort.write(node_offset + 44, (48u32).to_le());
+        iort.write(mapping_offset + 12, (48u32).to_le());
+        // Flags
+        iort.write(mapping_offset + 16, (0u32).to_le());
     }
 
     iort.update_checksum();
