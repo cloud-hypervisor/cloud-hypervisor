@@ -574,8 +574,6 @@ impl Vm {
         });
 
         let exit_evt_clone = exit_evt.try_clone().map_err(Error::EventFdClone)?;
-        #[cfg(feature = "tdx")]
-        let tdx_enabled = config.lock().unwrap().tdx.is_some();
         let cpu_manager = cpu::CpuManager::new(
             &config.lock().unwrap().cpus.clone(),
             &device_manager,
@@ -587,7 +585,7 @@ impl Vm {
             seccomp_action.clone(),
             vm_ops,
             #[cfg(feature = "tdx")]
-            tdx_enabled,
+            config.lock().unwrap().tdx.is_some(),
             #[cfg(any(target_arch = "aarch64", feature = "acpi"))]
             &numa_nodes,
         )
