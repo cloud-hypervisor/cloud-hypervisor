@@ -34,6 +34,9 @@ jobs:
           git rev-list origin/main..$GITHUB_SHA | xargs -t -I % sh -c 'git checkout %; cargo check --all --target=${{ matrix.target }}'
           git checkout $GITHUB_SHA
 
+      - name: Build (default + tdx)
+        run: cargo rustc --bin cloud-hypervisor --features "tdx" -- -D warnings
+
       - name: Build (acpi,kvm)
         run: cargo rustc --bin cloud-hypervisor --no-default-features --features "acpi,kvm"  -- -D warnings
 
