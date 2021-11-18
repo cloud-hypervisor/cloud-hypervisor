@@ -653,8 +653,6 @@ mod mock_vmm {
         state: Arc<Mutex<CpuState>>,
     }
 
-    unsafe impl Sync for MockVmm {}
-
     pub type MockResult = Result<(), EmulationError<Exception>>;
 
     impl MockVmm {
