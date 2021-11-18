@@ -116,6 +116,146 @@ impl VfioUserPciDevice {
             common,
         })
     }
+
+    pub fn map_mmio_regions<F>(
+        &mut self,
+        vm: &Arc<dyn hypervisor::Vm>,
+        mem_slot: F,
+    ) -> Result<(), VfioUserPciDeviceError>
+    where
+        F: Fn() -> u32,
+    {
+        for mmio_region in &mut self.common.mmio_regions {
+            let region_flags = self
+                .client
+                .lock()
+                .unwrap()
+                .region(mmio_region.index)
+                .unwrap()
+                .flags;
+            let file_offset = self
+                .client
+                .lock()
+                .unwrap()
+                .region(mmio_region.index)
+                .unwrap()
+                .file_offset
+                .clone();
+
+            if region_flags & VFIO_REGION_INFO_FLAG_MMAP != 0 {
+                let mut prot = 0;
+                if region_flags & VFIO_REGION_INFO_FLAG_READ != 0 {
+                    prot |= libc::PROT_READ;
+                }
+                if region_flags & VFIO_REGION_INFO_FLAG_WRITE != 0 {
+                    prot |= libc::PROT_WRITE;
+                }
+
+                let host_addr = unsafe {
+                    libc::mmap(
+                        null_mut(),
+                        mmio_region.length as usize,
+                        prot,
+                        libc::MAP_SHARED,
+                        file_offset.as_ref().unwrap().file().as_raw_fd(),
+                        file_offset.as_ref().unwrap().start() as libc::off_t,
+                    )
+                };
+
+                if host_addr == libc::MAP_FAILED {
+                    error!(
+                        "Could not mmap regions, error:{}",
+                        std::io::Error::last_os_error()
+                    );
+                    continue;
+                }
+
+                let slot = mem_slot();
+                let mem_region = vm.make_user_memory_region(
+                    slot,
+                    mmio_region.start.0,
+                    mmio_region.length as u64,
+                    host_addr as u64,
+                    false,
+                    false,
+                );
+
+                vm.create_user_memory_region(mem_region)
+                    .map_err(VfioUserPciDeviceError::MapRegionGuest)?;
+
+                mmio_region.mem_slot = Some(slot);
+                mmio_region.host_addr = Some(host_addr as u64);
+                mmio_region.mmap_size = Some(mmio_region.length as usize);
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn unmap_mmio_regions(&mut self) {
+        for mmio_region in self.common.mmio_regions.iter() {
+            if let (Some(host_addr), Some(mmap_size), Some(mem_slot)) = (
+                mmio_region.host_addr,
+                mmio_region.mmap_size,
+                mmio_region.mem_slot,
+            ) {
+                // Remove region
+                let r = self.vm.make_user_memory_region(
+                    mem_slot,
+                    mmio_region.start.raw_value(),
+                    mmap_size as u64,
+                    host_addr as u64,
+                    false,
+                    false,
+                );
+
+                if let Err(e) = self.vm.remove_user_memory_region(r) {
+                    error!("Could not remove the userspace memory region: {}", e);
+                }
+
+                let ret = unsafe { libc::munmap(host_addr as *mut libc::c_void, mmap_size) };
+                if ret != 0 {
+                    error!(
+                        "Could not unmap region {}, error:{}",
+                        mmio_region.index,
+                        std::io::Error::last_os_error()
+                    );
+                }
+            }
+        }
+    }
+
+    pub fn dma_map(
+        &mut self,
+        region: &GuestRegionMmap<AtomicBitmap>,
+    ) -> Result<(), VfioUserPciDeviceError> {
+        let (fd, offset) = match region.file_offset() {
+            Some(_file_offset) => (_file_offset.file().as_raw_fd(), _file_offset.start()),
+            None => return Ok(()),
+        };
+
+        self.client
+            .lock()
+            .unwrap()
+            .dma_map(
+                offset,
+                region.start_addr().raw_value(),
+                region.len() as u64,
+                fd,
+            )
+            .map_err(VfioUserPciDeviceError::DmaMap)
+    }
+
+    pub fn dma_unmap(
+        &mut self,
+        region: &GuestRegionMmap<AtomicBitmap>,
+    ) -> Result<(), VfioUserPciDeviceError> {
+        self.client
+            .lock()
+            .unwrap()
+            .dma_unmap(region.start_addr().raw_value(), region.len() as u64)
+            .map_err(VfioUserPciDeviceError::DmaUnmap)
+    }
 }
 
 impl BusDevice for VfioUserPciDevice {
@@ -327,148 +467,6 @@ impl PciDevice for VfioUserPciDevice {
         }
 
         Ok(())
-    }
-}
-
-impl VfioUserPciDevice {
-    pub fn map_mmio_regions<F>(
-        &mut self,
-        vm: &Arc<dyn hypervisor::Vm>,
-        mem_slot: F,
-    ) -> Result<(), VfioUserPciDeviceError>
-    where
-        F: Fn() -> u32,
-    {
-        for mmio_region in &mut self.common.mmio_regions {
-            let region_flags = self
-                .client
-                .lock()
-                .unwrap()
-                .region(mmio_region.index)
-                .unwrap()
-                .flags;
-            let file_offset = self
-                .client
-                .lock()
-                .unwrap()
-                .region(mmio_region.index)
-                .unwrap()
-                .file_offset
-                .clone();
-
-            if region_flags & VFIO_REGION_INFO_FLAG_MMAP != 0 {
-                let mut prot = 0;
-                if region_flags & VFIO_REGION_INFO_FLAG_READ != 0 {
-                    prot |= libc::PROT_READ;
-                }
-                if region_flags & VFIO_REGION_INFO_FLAG_WRITE != 0 {
-                    prot |= libc::PROT_WRITE;
-                }
-
-                let host_addr = unsafe {
-                    libc::mmap(
-                        null_mut(),
-                        mmio_region.length as usize,
-                        prot,
-                        libc::MAP_SHARED,
-                        file_offset.as_ref().unwrap().file().as_raw_fd(),
-                        file_offset.as_ref().unwrap().start() as libc::off_t,
-                    )
-                };
-
-                if host_addr == libc::MAP_FAILED {
-                    error!(
-                        "Could not mmap regions, error:{}",
-                        std::io::Error::last_os_error()
-                    );
-                    continue;
-                }
-
-                let slot = mem_slot();
-                let mem_region = vm.make_user_memory_region(
-                    slot,
-                    mmio_region.start.0,
-                    mmio_region.length as u64,
-                    host_addr as u64,
-                    false,
-                    false,
-                );
-
-                vm.create_user_memory_region(mem_region)
-                    .map_err(VfioUserPciDeviceError::MapRegionGuest)?;
-
-                mmio_region.mem_slot = Some(slot);
-                mmio_region.host_addr = Some(host_addr as u64);
-                mmio_region.mmap_size = Some(mmio_region.length as usize);
-            }
-        }
-
-        Ok(())
-    }
-
-    pub fn unmap_mmio_regions(&mut self) {
-        for mmio_region in self.common.mmio_regions.iter() {
-            if let (Some(host_addr), Some(mmap_size), Some(mem_slot)) = (
-                mmio_region.host_addr,
-                mmio_region.mmap_size,
-                mmio_region.mem_slot,
-            ) {
-                // Remove region
-                let r = self.vm.make_user_memory_region(
-                    mem_slot,
-                    mmio_region.start.raw_value(),
-                    mmap_size as u64,
-                    host_addr as u64,
-                    false,
-                    false,
-                );
-
-                if let Err(e) = self.vm.remove_user_memory_region(r) {
-                    error!("Could not remove the userspace memory region: {}", e);
-                }
-
-                let ret = unsafe { libc::munmap(host_addr as *mut libc::c_void, mmap_size) };
-                if ret != 0 {
-                    error!(
-                        "Could not unmap region {}, error:{}",
-                        mmio_region.index,
-                        std::io::Error::last_os_error()
-                    );
-                }
-            }
-        }
-    }
-
-    pub fn dma_map(
-        &mut self,
-        region: &GuestRegionMmap<AtomicBitmap>,
-    ) -> Result<(), VfioUserPciDeviceError> {
-        let (fd, offset) = match region.file_offset() {
-            Some(_file_offset) => (_file_offset.file().as_raw_fd(), _file_offset.start()),
-            None => return Ok(()),
-        };
-
-        self.client
-            .lock()
-            .unwrap()
-            .dma_map(
-                offset,
-                region.start_addr().raw_value(),
-                region.len() as u64,
-                fd,
-            )
-            .map_err(VfioUserPciDeviceError::DmaMap)
-    }
-
-    pub fn dma_unmap(
-        &mut self,
-        region: &GuestRegionMmap<AtomicBitmap>,
-    ) -> Result<(), VfioUserPciDeviceError> {
-        self.client
-            .lock()
-            .unwrap()
-            .dma_unmap(region.start_addr().raw_value(), region.len() as u64)
-            .map_err(VfioUserPciDeviceError::DmaUnmap)
     }
 }
 
