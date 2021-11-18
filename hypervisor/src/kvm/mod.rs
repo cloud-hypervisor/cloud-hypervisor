@@ -238,6 +238,9 @@ impl vm::Vm for KvmVm {
         irq_routing[0].nr = entries.len() as u32;
         irq_routing[0].flags = 0;
 
+        // SAFETY: irq_routing initialized with entries.len() and now it is being turned into
+        // entries_slice with entries.len() again. It is guaranteed to be large enough to hold
+        // everything from entries.
         unsafe {
             let entries_slice: &mut [kvm_irq_routing_entry] =
                 irq_routing[0].entries.as_mut_slice(entries.len());
@@ -302,7 +305,7 @@ impl vm::Vm for KvmVm {
             region.flags = 0;
         }
 
-        // Safe because guest regions are guaranteed not to overlap.
+        // SAFETY: Safe because guest regions are guaranteed not to overlap.
         unsafe {
             self.fd
                 .set_user_memory_region(region)
@@ -320,7 +323,7 @@ impl vm::Vm for KvmVm {
 
         // Setting the size to 0 means "remove"
         region.memory_size = 0;
-        // Safe because guest regions are guaranteed not to overlap.
+        // SAFETY: Safe because guest regions are guaranteed not to overlap.
         unsafe {
             self.fd
                 .set_user_memory_region(region)
@@ -434,7 +437,7 @@ impl vm::Vm for KvmVm {
                 userspace_addr: s.userspace_addr,
                 flags: KVM_MEM_LOG_DIRTY_PAGES,
             };
-            // Safe because guest regions are guaranteed not to overlap.
+            // SAFETY: Safe because guest regions are guaranteed not to overlap.
             unsafe {
                 self.fd
                     .set_user_memory_region(region)
@@ -458,7 +461,7 @@ impl vm::Vm for KvmVm {
                 userspace_addr: s.userspace_addr,
                 flags: 0,
             };
-            // Safe because guest regions are guaranteed not to overlap.
+            // SAFETY: Safe because guest regions are guaranteed not to overlap.
             unsafe {
                 self.fd
                     .set_user_memory_region(region)
@@ -574,6 +577,7 @@ fn tdx_command(
         metadata,
         data,
     };
+    // SAFETY: FFI call. All input parameters are valid.
     let ret = unsafe {
         ioctl_with_val(
             fd,
