@@ -900,7 +900,7 @@ pub struct DeviceManager {
     #[cfg(feature = "acpi")]
     selected_segment: usize,
 
-    // Possible handle to the virtio-balloon device
+    // Possible handle to the virtio-mem device
     virtio_mem_devices: Vec<Arc<Mutex<virtio_devices::Mem>>>,
 
     #[cfg(target_arch = "aarch64")]
