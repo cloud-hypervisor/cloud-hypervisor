@@ -178,7 +178,7 @@ pub enum DeviceManagerError {
     /// Cannot create virtio-vsock device
     CreateVirtioVsock(io::Error),
 
-    /// Failed converting Path to &str for the virtio-vsock device.
+    /// Failed to convert Path to &str for the virtio-vsock device.
     CreateVsockConvertPath,
 
     /// Cannot create virtio-vsock backend
@@ -193,7 +193,7 @@ pub enum DeviceManagerError {
     /// Cannot create virtio-watchdog device
     CreateVirtioWatchdog(io::Error),
 
-    /// Failed parsing disk image format
+    /// Failed to parse disk image format
     DetectImageType(io::Error),
 
     /// Cannot open qcow disk path
@@ -292,10 +292,10 @@ pub enum DeviceManagerError {
     /// Failed to allocate MMIO address
     AllocateMmioAddress,
 
-    // Failed to make hotplug notification
+    /// Failed to make hotplug notification
     HotPlugNotification(io::Error),
 
-    // Error from a memory manager operation
+    /// Error from a memory manager operation
     MemoryManager(MemoryManagerError),
 
     /// Failed to create new interrupt source group.
@@ -304,13 +304,13 @@ pub enum DeviceManagerError {
     /// Failed to update interrupt source group.
     UpdateInterruptGroup(io::Error),
 
-    /// Failed creating interrupt controller.
+    /// Failed to create interrupt controller.
     CreateInterruptController(interrupt_controller::Error),
 
-    /// Failed creating a new MmapRegion instance.
+    /// Failed to create a new MmapRegion instance.
     NewMmapRegion(vm_memory::mmap::MmapRegionError),
 
-    /// Failed cloning a File.
+    /// Failed to clone a File.
     CloneFile(io::Error),
 
     /// Failed to create socket file
@@ -331,13 +331,13 @@ pub enum DeviceManagerError {
     /// Missing PCI device.
     MissingPciDevice,
 
-    /// Failed removing a PCI device from the PCI bus.
+    /// Failed to remove a PCI device from the PCI bus.
     RemoveDeviceFromPciBus(pci::PciRootError),
 
-    /// Failed removing a bus device from the IO bus.
+    /// Failed to remove a bus device from the IO bus.
     RemoveDeviceFromIoBus(vm_device::BusError),
 
-    /// Failed removing a bus device from the MMIO bus.
+    /// Failed to remove a bus device from the MMIO bus.
     RemoveDeviceFromMmioBus(vm_device::BusError),
 
     /// Failed to find the device corresponding to a specific PCI b/d/f.
@@ -364,7 +364,7 @@ pub enum DeviceManagerError {
     /// No disk path was specified when one was expected
     NoDiskPath,
 
-    /// Failed updating guest memory for virtio device.
+    /// Failed to update guest memory for virtio device.
     UpdateMemoryForVirtioDevice(virtio_devices::Error),
 
     /// Cannot create virtio-mem device
@@ -376,7 +376,7 @@ pub enum DeviceManagerError {
     /// Cannot find a memory range for virtio-mem memory
     VirtioMemRangeAllocation,
 
-    /// Failed updating guest memory for VFIO PCI device.
+    /// Failed to update guest memory for VFIO PCI device.
     UpdateMemoryForVfioPciDevice(vfio_ioctls::VfioError),
 
     /// Trying to use a directory for pmem but no size specified
@@ -434,10 +434,10 @@ pub enum DeviceManagerError {
     /// Failed to create FixedVhdxDiskSync
     CreateFixedVhdxDiskSync(vhdx::vhdx::VhdxError),
 
-    /// Failed adding DMA mapping handler to virtio-mem device.
+    /// Failed to add DMA mapping handler to virtio-mem device.
     AddDmaMappingHandlerVirtioMem(virtio_devices::mem::Error),
 
-    /// Failed removing DMA mapping handler from virtio-mem device.
+    /// Failed to remove DMA mapping handler from virtio-mem device.
     RemoveDmaMappingHandlerVirtioMem(virtio_devices::mem::Error),
 
     /// Failed to create vfio-user client
