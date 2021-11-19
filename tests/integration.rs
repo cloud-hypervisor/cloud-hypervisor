@@ -3231,7 +3231,7 @@ mod tests {
         }
 
         #[test]
-        #[cfg(all(not(feature = "mshv"), target_arch = "x86_64"))]
+        #[cfg(not(feature = "mshv"))]
         fn test_virtio_fs_multi_segment_hotplug() {
             test_virtio_fs(
                 true,
@@ -4930,7 +4930,6 @@ mod tests {
             _test_pmem_hotplug(None)
         }
 
-        #[cfg(target_arch = "x86_64")]
         #[test]
         fn test_pmem_multi_segment_hotplug() {
             _test_pmem_hotplug(Some(15))
@@ -5072,7 +5071,6 @@ mod tests {
             _test_net_hotplug(None)
         }
 
-        #[cfg(target_arch = "x86_64")]
         #[test]
         fn test_net_multi_segment_hotplug() {
             _test_net_hotplug(Some(15))
