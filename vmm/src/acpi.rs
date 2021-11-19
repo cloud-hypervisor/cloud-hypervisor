@@ -439,6 +439,8 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
         );
         // Revision
         iort.write(node_offset + 3, (3u8).to_le());
+        // Node ID
+        iort.write(node_offset + 4, (segment.id as u32).to_le());
         // Mapping counts
         iort.write(node_offset + 8, (1u32).to_le());
         // Offset from the start of the RC node to the start of its Array of ID mappings
@@ -449,6 +451,8 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
         iort.write(node_offset + 24, 3u8);
         // PCI segment number
         iort.write(node_offset + 28, (segment.id as u32).to_le());
+        // Memory address size limit
+        iort.write(node_offset + 32, (64u8).to_le());
 
         // From offset 32 onward is the space for ID mappings Array.
         // Now we have only one mapping.
