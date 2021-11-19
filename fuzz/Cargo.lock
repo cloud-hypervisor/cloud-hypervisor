@@ -20,9 +20,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.46"
+version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3aa828229c44c0293dd7d4d2300bdfc4d2883ffdba934c069a6b968957a81f70"
+checksum = "38d9ff5d688f1c13395289f67db01d4826b46dd694e7580accdc3e8430f2d98e"
 
 [[package]]
 name = "api_client"
@@ -274,7 +274,7 @@ dependencies = [
  "epoll",
  "iced-x86",
  "kvm-bindings",
- "kvm-ioctls",
+ "kvm-ioctls 0.11.0",
  "libc",
  "log",
  "serde",
@@ -326,6 +326,17 @@ name = "kvm-ioctls"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48dc14f9047df1873cf6942caccc7431d19c3d496ca7a0d162260c4cf0f64b76"
+dependencies = [
+ "kvm-bindings",
+ "libc",
+ "vmm-sys-util",
+]
+
+[[package]]
+name = "kvm-ioctls"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97422ba48d7ffb66fd4d18130f72ab66f9bbbf791fb7a87b9291cdcfec437593"
 dependencies = [
  "kvm-bindings",
  "libc",
@@ -709,7 +720,7 @@ source = "git+https://github.com/rust-vmm/vfio-ioctls?branch=main#8f7f2210ebe716
 dependencies = [
  "byteorder",
  "kvm-bindings",
- "kvm-ioctls",
+ "kvm-ioctls 0.10.0",
  "log",
  "vfio-bindings",
  "vm-memory",
