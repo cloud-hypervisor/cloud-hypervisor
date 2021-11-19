@@ -274,7 +274,7 @@ dependencies = [
  "epoll",
  "iced-x86",
  "kvm-bindings",
- "kvm-ioctls 0.11.0",
+ "kvm-ioctls",
  "libc",
  "log",
  "serde",
@@ -318,17 +318,6 @@ source = "git+https://github.com/cloud-hypervisor/kvm-bindings?branch=ch-v0.5.0#
 dependencies = [
  "serde",
  "serde_derive",
- "vmm-sys-util",
-]
-
-[[package]]
-name = "kvm-ioctls"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48dc14f9047df1873cf6942caccc7431d19c3d496ca7a0d162260c4cf0f64b76"
-dependencies = [
- "kvm-bindings",
- "libc",
  "vmm-sys-util",
 ]
 
@@ -720,7 +709,7 @@ source = "git+https://github.com/rust-vmm/vfio-ioctls?branch=main#8f7f2210ebe716
 dependencies = [
  "byteorder",
  "kvm-bindings",
- "kvm-ioctls 0.10.0",
+ "kvm-ioctls",
  "log",
  "vfio-bindings",
  "vm-memory",
