@@ -1148,11 +1148,16 @@ impl DeviceManager {
             console_resize_pipe,
         )?;
 
-        self.legacy_interrupt_manager = Some(legacy_interrupt_manager);
-
         virtio_devices.append(&mut self.make_virtio_devices()?);
 
-        self.add_pci_devices(virtio_devices.clone())?;
+        if cfg!(feature = "pci_support") {
+            self.add_pci_devices(virtio_devices.clone())?;
+        // } else if cfg!(feature = "mmio_support") {
+        } else {
+            self.add_mmio_devices(virtio_devices.clone(), &legacy_interrupt_manager)?;
+        }
+
+        self.legacy_interrupt_manager = Some(legacy_interrupt_manager);
 
         self.virtio_devices = virtio_devices;
 
@@ -1263,6 +1268,15 @@ impl DeviceManager {
                 .push(Arc::clone(&segment.pci_config_mmio) as Arc<Mutex<dyn BusDevice>>);
         }
 
+        Ok(())
+    }
+
+    #[allow(unused_variables)]
+    fn add_mmio_devices(
+        &mut self,
+        virtio_devices: Vec<(VirtioDeviceArc, bool, String, u16)>,
+        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
+    ) -> DeviceManagerResult<()> {
         Ok(())
     }
 
