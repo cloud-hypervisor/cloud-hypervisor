@@ -263,7 +263,7 @@ impl VirtioMmioDevice {
         }
     }
 
-    pub fn assign_interrupt(&mut self, interrupt: Arc<Box<dyn InterruptSourceGroup>>) {
+    pub fn assign_interrupt(&mut self, interrupt: Arc<dyn InterruptSourceGroup>) {
         self.virtio_interrupt = Some(Arc::new(VirtioInterruptIntx::new(
             self.interrupt_status.clone(),
             interrupt,

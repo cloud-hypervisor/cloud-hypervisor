@@ -111,7 +111,6 @@ use vm_migration::{
 use vm_virtio::VirtioDeviceType;
 use vmm_sys_util::eventfd::EventFd;
 
-#[cfg(target_arch = "aarch64")]
 const MMIO_LEN: u64 = 0x1000;
 
 const VFIO_DEVICE_NAME_PREFIX: &str = "_vfio";
@@ -138,6 +137,7 @@ const WATCHDOG_DEVICE_NAME: &str = "_watchdog";
 const IOMMU_DEVICE_NAME: &str = "_iommu";
 
 const VIRTIO_PCI_DEVICE_NAME_PREFIX: &str = "_virtio-pci";
+const VIRTIO_MMIO_DEVICE_NAME_PREFIX: &str = "_virtio-mmio";
 
 /// Errors associated with device manager
 #[derive(Debug)]
@@ -388,8 +388,14 @@ pub enum DeviceManagerError {
     /// Could not find the node in the device tree.
     MissingNode,
 
+    /// Could not find a MMIO range.
+    MmioRangeAllocation,
+
     /// Resource was already found.
     ResourceAlreadyExists,
+
+    /// Expected resources for virtio-mmio could not be found.
+    MissingVirtioMmioResources,
 
     /// Expected resources for virtio-pci could not be found.
     MissingVirtioPciResources,
@@ -1277,6 +1283,13 @@ impl DeviceManager {
         virtio_devices: Vec<(VirtioDeviceArc, bool, String, u16)>,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
     ) -> DeviceManagerResult<()> {
+        #[cfg(feature = "mmio_support")]
+        {
+            for (device, _, id, _) in virtio_devices {
+                self.add_virtio_mmio_device(id, device, interrupt_manager)?;
+            }
+        }
+
         Ok(())
     }
 
@@ -3402,6 +3415,170 @@ impl DeviceManager {
         self.device_tree.lock().unwrap().insert(id, node);
 
         Ok(pci_device_bdf)
+    }
+
+    fn add_virtio_mmio_device(
+        &mut self,
+        virtio_device_id: String,
+        virtio_device: VirtioDeviceArc,
+        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
+    ) -> DeviceManagerResult<()> {
+        let id = format!("{}-{}", VIRTIO_MMIO_DEVICE_NAME_PREFIX, virtio_device_id);
+
+        // Create the new virtio-mmio node that will be added later to the
+        // device tree.
+        let mut node = device_node!(id);
+        node.children = vec![virtio_device_id.clone()];
+
+        // Look for the id in the device tree. If it can be found, that means
+        // the device is being restored, otherwise it's created from scratch.
+        let (mmio_range, mmio_irq) = if let Some(node) = self.device_tree.lock().unwrap().get(&id) {
+            debug!("Restoring virtio-mmio {} resources", id);
+
+            let mut mmio_range: Option<(u64, u64)> = None;
+            let mut mmio_irq: Option<u32> = None;
+            for resource in node.resources.iter() {
+                match resource {
+                    Resource::MmioAddressRange { base, size } => {
+                        if mmio_range.is_some() {
+                            return Err(DeviceManagerError::ResourceAlreadyExists);
+                        }
+
+                        mmio_range = Some((*base, *size));
+                    }
+                    Resource::LegacyIrq(irq) => {
+                        if mmio_irq.is_some() {
+                            return Err(DeviceManagerError::ResourceAlreadyExists);
+                        }
+
+                        mmio_irq = Some(*irq);
+                    }
+                    _ => {
+                        error!("Unexpected resource {:?} for {}", resource, id);
+                    }
+                }
+            }
+
+            if mmio_range.is_none() || mmio_irq.is_none() {
+                return Err(DeviceManagerError::MissingVirtioMmioResources);
+            }
+
+            (mmio_range, mmio_irq)
+        } else {
+            (None, None)
+        };
+
+        // Update the existing virtio node by setting the parent.
+        if let Some(node) = self.device_tree.lock().unwrap().get_mut(&virtio_device_id) {
+            node.parent = Some(id.clone());
+        } else {
+            return Err(DeviceManagerError::MissingNode);
+        }
+
+        let (mmio_base, mmio_size) = if let Some((base, size)) = mmio_range {
+            self.address_manager
+                .allocator
+                .lock()
+                .unwrap()
+                .allocate_platform_mmio_addresses(Some(GuestAddress(base)), size, Some(size))
+                .ok_or(DeviceManagerError::MmioRangeAllocation)?;
+
+            (base, size)
+        } else {
+            let size = MMIO_LEN;
+            let base = self
+                .address_manager
+                .allocator
+                .lock()
+                .unwrap()
+                .allocate_platform_mmio_addresses(None, size, Some(size))
+                .ok_or(DeviceManagerError::MmioRangeAllocation)?;
+
+            (base.raw_value(), size)
+        };
+
+        let irq_num = if let Some(irq) = mmio_irq {
+            irq
+        } else {
+            self.address_manager
+                .allocator
+                .lock()
+                .unwrap()
+                .allocate_irq()
+                .ok_or(DeviceManagerError::AllocateIrq)?
+        };
+
+        #[cfg(target_arch = "aarch64")]
+        {
+            let device_type = virtio_device.lock().unwrap().device_type();
+            self.id_to_dev_info.insert(
+                (DeviceType::Virtio(device_type), virtio_device_id),
+                MMIODeviceInfo {
+                    addr: mmio_base,
+                    len: mmio_size,
+                    irq: irq_num,
+                },
+            );
+        }
+
+        let memory = self.memory_manager.lock().unwrap().guest_memory();
+        let mut mmio_device = virtio_devices::transport::VirtioMmioDevice::new(
+            id.clone(),
+            memory,
+            virtio_device,
+            None,
+            self.activate_evt
+                .try_clone()
+                .map_err(DeviceManagerError::EventFd)?,
+        )
+        .map_err(DeviceManagerError::VirtioDevice)?;
+
+        for (i, (event, addr)) in mmio_device.ioeventfds(mmio_base).iter().enumerate() {
+            let io_addr = IoEventAddress::Mmio(*addr);
+            self.address_manager
+                .vm
+                .register_ioevent(
+                    event,
+                    &io_addr,
+                    Some(hypervisor::vm::DataMatch::DataMatch32(i as u32)),
+                )
+                .map_err(|e| DeviceManagerError::RegisterIoevent(e.into()))?;
+        }
+
+        let interrupt_group = interrupt_manager
+            .create_group(LegacyIrqGroupConfig {
+                irq: irq_num as InterruptIndex,
+            })
+            .map_err(DeviceManagerError::CreateInterruptGroup)?;
+
+        mmio_device.assign_interrupt(interrupt_group);
+
+        let mmio_device_arc = Arc::new(Mutex::new(mmio_device));
+        self.bus_devices
+            .push(Arc::clone(&mmio_device_arc) as Arc<Mutex<dyn BusDevice>>);
+        self.address_manager
+            .mmio_bus
+            .insert(mmio_device_arc.clone(), mmio_base, MMIO_LEN)
+            .map_err(DeviceManagerError::BusError)?;
+
+        #[cfg(target_arch = "x86_64")]
+        self.cmdline_additions.push(format!(
+            "virtio_mmio.device={}K@0x{:08x}:{}",
+            mmio_size / 1024,
+            mmio_base,
+            irq_num
+        ));
+
+        // Update the device tree with correct resource information.
+        node.resources.push(Resource::MmioAddressRange {
+            base: mmio_base,
+            size: mmio_size,
+        });
+        node.resources.push(Resource::LegacyIrq(irq_num));
+        node.migratable = Some(Arc::clone(&mmio_device_arc) as Arc<Mutex<dyn Migratable>>);
+        self.device_tree.lock().unwrap().insert(id, node);
+
+        Ok(())
     }
 
     #[cfg(target_arch = "x86_64")]
