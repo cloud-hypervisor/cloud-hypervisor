@@ -126,6 +126,7 @@ impl VirtioMmioDevice {
         memory: GuestMemoryAtomic<GuestMemoryMmap>,
         device: Arc<Mutex<dyn VirtioDevice>>,
         access_platform: Option<Arc<dyn AccessPlatform>>,
+        interrupt: Arc<dyn InterruptSourceGroup>,
         activate_evt: EventFd,
     ) -> Result<VirtioMmioDevice> {
         let device_clone = device.clone();
@@ -146,6 +147,18 @@ impl VirtioMmioDevice {
                 queue
             })
             .collect();
+
+        /*
+        self.virtio_interrupt = Some(Arc::new(VirtioInterruptIntx::new(
+            self.interrupt_status.clone(),
+            interrupt,
+        )));
+        */
+        let interrupt_status = Arc::new(AtomicUsize::new(0));
+        let virtio_interrupt: Option<Arc<dyn VirtioInterrupt>> = Some(Arc::new(
+            VirtioInterruptIntx::new(interrupt_status.clone(), interrupt),
+        ));
+
         Ok(VirtioMmioDevice {
             id,
             device,
@@ -153,8 +166,8 @@ impl VirtioMmioDevice {
             features_select: 0,
             acked_features_select: 0,
             queue_select: 0,
-            interrupt_status: Arc::new(AtomicUsize::new(0)),
-            virtio_interrupt: None,
+            interrupt_status,
+            virtio_interrupt,
             driver_status: DEVICE_INIT,
             config_generation: 0,
             queues,
