@@ -148,12 +148,6 @@ impl VirtioMmioDevice {
             })
             .collect();
 
-        /*
-        self.virtio_interrupt = Some(Arc::new(VirtioInterruptIntx::new(
-            self.interrupt_status.clone(),
-            interrupt,
-        )));
-        */
         let interrupt_status = Arc::new(AtomicUsize::new(0));
         let virtio_interrupt: Option<Arc<dyn VirtioInterrupt>> = Some(Arc::new(
             VirtioInterruptIntx::new(interrupt_status.clone(), interrupt),
