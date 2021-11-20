@@ -3522,11 +3522,18 @@ impl DeviceManager {
         }
 
         let memory = self.memory_manager.lock().unwrap().guest_memory();
-        let mut mmio_device = virtio_devices::transport::VirtioMmioDevice::new(
+        let interrupt_group = interrupt_manager
+            .create_group(LegacyIrqGroupConfig {
+                irq: irq_num as InterruptIndex,
+            })
+            .map_err(DeviceManagerError::CreateInterruptGroup)?;
+
+        let mmio_device = virtio_devices::transport::VirtioMmioDevice::new(
             id.clone(),
             memory,
             virtio_device,
             None,
+            interrupt_group,
             self.activate_evt
                 .try_clone()
                 .map_err(DeviceManagerError::EventFd)?,
@@ -3544,14 +3551,6 @@ impl DeviceManager {
                 )
                 .map_err(|e| DeviceManagerError::RegisterIoevent(e.into()))?;
         }
-
-        let interrupt_group = interrupt_manager
-            .create_group(LegacyIrqGroupConfig {
-                irq: irq_num as InterruptIndex,
-            })
-            .map_err(DeviceManagerError::CreateInterruptGroup)?;
-
-        mmio_device.assign_interrupt(interrupt_group);
 
         let mmio_device_arc = Arc::new(Mutex::new(mmio_device));
         self.bus_devices
