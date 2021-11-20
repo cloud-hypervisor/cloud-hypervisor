@@ -38,13 +38,13 @@ const INTERRUPT_STATUS_CONFIG_CHANGED: u32 = 0x2;
 
 pub struct VirtioInterruptIntx {
     interrupt_status: Arc<AtomicUsize>,
-    interrupt: Arc<Box<dyn InterruptSourceGroup>>,
+    interrupt: Arc<dyn InterruptSourceGroup>,
 }
 
 impl VirtioInterruptIntx {
     pub fn new(
         interrupt_status: Arc<AtomicUsize>,
-        interrupt: Arc<Box<dyn InterruptSourceGroup>>,
+        interrupt: Arc<dyn InterruptSourceGroup>,
     ) -> Self {
         VirtioInterruptIntx {
             interrupt_status,
