@@ -45,7 +45,9 @@ Use SPDK: https://github.com/spdk/spdk
 
 Compile with `./configure --with-vfio-user`
 
-Create an NVMe controller listening on a vfio-user socket with a simple block device:
+Create an NVMe controller listening on a vfio-user socket with a simple AIO block device in spdk.
+More details of configuring SPDK bdev can be viewed in [SPDK bdev](https://spdk.io/doc/bdev.html).
+More details of setting SPDK NVMe-oF target can be viewed in [SDPK NVMe-oF tgt](https://spdk.io/doc/nvmf.html).
 
 ```sh
 sudo scripts/setup.sh
