@@ -9,7 +9,7 @@ default = []
 
 [dependencies]
 epoll = "4.3.1"
-libc = "0.2.107"
+libc = "0.2.108"
 log = "0.4.14"
 virtio-bindings = "0.1.0"
 virtio-queue = { path = "../virtio-queue" }
