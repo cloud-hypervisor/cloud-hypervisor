@@ -1140,9 +1140,8 @@ dependencies = [
 
 [[package]]
 name = "vfio-bindings"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a21f546f2bda37f5a8cfb138c87f95b8e34d2d78d6a7a92ba3785f4e08604a7"
+version = "0.3.0"
+source = "git+https://github.com/jiangliu/vfio-ioctls?branch=ioctls#46fc9af3d498a13a291e431f83db6b34f5fdc780"
 dependencies = [
  "vmm-sys-util",
 ]
@@ -1150,14 +1149,16 @@ dependencies = [
 [[package]]
 name = "vfio-ioctls"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vfio-ioctls?branch=main#bcf2e6486d44e342d49784813394bd5429d42a35"
+source = "git+https://github.com/jiangliu/vfio-ioctls?branch=ioctls#46fc9af3d498a13a291e431f83db6b34f5fdc780"
 dependencies = [
  "byteorder",
  "kvm-bindings",
  "kvm-ioctls",
+ "libc",
  "log",
  "mshv-bindings",
  "mshv-ioctls",
+ "thiserror",
  "vfio-bindings",
  "vm-memory",
  "vmm-sys-util",

@@ -21,11 +21,8 @@ log = "0.4.14"
 thiserror = "1.0.30"
 versionize = "0.1.6"
 versionize_derive = "0.1.4"
+vfio-bindings = { version = "0.3.0", features = ["fam-wrappers"] }
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
 vm-memory = "0.6.0"
 vm-migration = { path = "../vm-migration" }
-
-[dependencies.vfio-bindings]
-version = "0.2.0"
-features = ["fam-wrappers"]
