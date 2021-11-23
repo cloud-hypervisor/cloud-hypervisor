@@ -34,7 +34,7 @@ pub const EPOLL_HELPER_EVENT_KILL: u16 = 1;
 pub const EPOLL_HELPER_EVENT_LAST: u16 = 15;
 
 pub trait EpollHelperHandler {
-    // Return true if execution of the loop should be stopped
+    // Return true if the loop execution should be stopped
     fn handle_event(&mut self, helper: &mut EpollHelper, event: &epoll::Event) -> bool;
 }
 
@@ -151,7 +151,7 @@ impl EpollHelper {
 
                         // Drain pause event after the device has been resumed.
                         // This ensures the pause event has been seen by each
-                        // and every thread related to this virtio device.
+                        // thread related to this virtio device.
                         let _ = self.pause_evt.read();
                     }
                     _ => {
