@@ -142,10 +142,10 @@ pub enum ValidationError {
     HugePageSizeWithoutHugePages,
     /// Huge page size is not power of 2
     InvalidHugePageSize(u64),
-    /// CPU Hotplug not permitted with TDX
+    /// CPU Hotplug is not permitted with TDX
     #[cfg(feature = "tdx")]
     TdxNoCpuHotplug,
-    /// Specifying kernel not permitted with TDX
+    /// Specifying kernel is not permitted with TDX
     #[cfg(feature = "tdx")]
     TdxKernelSpecified,
     /// Insuffient vCPUs for queues
@@ -196,11 +196,11 @@ impl fmt::Display for ValidationError {
             }
             #[cfg(feature = "tdx")]
             TdxNoCpuHotplug => {
-                write!(f, "CPU hotplug not possible with TDX")
+                write!(f, "CPU hotplug is not permitted with TDX")
             }
             #[cfg(feature = "tdx")]
             TdxKernelSpecified => {
-                write!(f, "Direct kernel boot not possible with TDX")
+                write!(f, "Direct kernel boot is not permitted with TDX")
             }
             TooManyQueues => {
                 write!(f, "Number of vCPUs is insufficient for number of queues")
