@@ -28,8 +28,11 @@ const BLK_ALIGNMENTS: [usize; 2] = [512, 4096];
 
 fn is_valid_alignment(fd: RawFd, alignment: usize) -> bool {
     let layout = Layout::from_size_align(alignment, alignment).unwrap();
+    // SAFETY: layout has non-zero size
     let ptr = unsafe { alloc_zeroed(layout) };
+    assert!(!ptr.is_null());
 
+    // SAFETY: FFI call
     let ret = unsafe {
         ::libc::pread(
             fd,
@@ -39,6 +42,7 @@ fn is_valid_alignment(fd: RawFd, alignment: usize) -> bool {
         )
     };
 
+    // SAFETY: ptr was allocated by alloc_zeroed with layout
     unsafe { dealloc(ptr, layout) };
 
     ret >= 0
@@ -141,11 +145,18 @@ impl Read for RawFile {
                 .unwrap();
 
             let layout = Layout::from_size_align(rounded_len, self.alignment).unwrap();
+            // SAFETY: layout has non-zero size
             let tmp_ptr = unsafe { alloc_zeroed(layout) };
+            if tmp_ptr.is_null() {
+                return Err(io::Error::last_os_error());
+            }
+
+            // SAFETY: tmp_ptr is valid and at least rounded_len long
             let tmp_buf = unsafe { slice::from_raw_parts_mut(tmp_ptr, rounded_len) };
 
             // This can eventually replaced with read_at once its interface
             // has been stabilized.
+            // SAFETY: FFI call. All parameters are valid.
             let ret = unsafe {
                 ::libc::pread64(
                     self.file.as_raw_fd(),
@@ -155,12 +166,14 @@ impl Read for RawFile {
                 )
             };
             if ret < 0 {
+                // SAFETY: tmp_ptr was allocated by alloc_zeroed with layout
                 unsafe { dealloc(tmp_ptr, layout) };
                 return Err(io::Error::last_os_error());
             }
 
             let read: usize = ret.try_into().unwrap();
             if read < file_offset {
+                // SAFETY: tmp_ptr was allocated by alloc_zeroed with layout
                 unsafe { dealloc(tmp_ptr, layout) };
                 return Ok(0);
             }
@@ -171,6 +184,7 @@ impl Read for RawFile {
             }
 
             buf.copy_from_slice(&tmp_buf[file_offset..(file_offset + buf_len)]);
+            // SAFETY: tmp_ptr was allocated by alloc_zeroed with layout
             unsafe { dealloc(tmp_ptr, layout) };
 
             self.seek(SeekFrom::Current(to_copy.try_into().unwrap()))
@@ -211,11 +225,17 @@ impl Write for RawFile {
                 .unwrap();
 
             let layout = Layout::from_size_align(rounded_len, self.alignment).unwrap();
+            // SAFETY: layout has non-zero size
             let tmp_ptr = unsafe { alloc_zeroed(layout) };
+            if tmp_ptr.is_null() {
+                return Err(io::Error::last_os_error());
+            }
+
             let tmp_buf = unsafe { slice::from_raw_parts_mut(tmp_ptr, rounded_len) };
 
             // This can eventually replaced with read_at once its interface
             // has been stabilized.
+            // SAFETY: FFI call
             let ret = unsafe {
                 ::libc::pread64(
                     self.file.as_raw_fd(),
@@ -225,6 +245,7 @@ impl Write for RawFile {
                 )
             };
             if ret < 0 {
+                // SAFETY: tmp_ptr was allocated by alloc_zeroed with layout
                 unsafe { dealloc(tmp_ptr, layout) };
                 return Err(io::Error::last_os_error());
             };
@@ -233,6 +254,7 @@ impl Write for RawFile {
 
             // This can eventually replaced with write_at once its interface
             // has been stabilized.
+            // SAFETY: FFI call
             let ret = unsafe {
                 ::libc::pwrite64(
                     self.file.as_raw_fd(),
@@ -242,6 +264,7 @@ impl Write for RawFile {
                 )
             };
 
+            // SAFETY: tmp_ptr was allocated by alloc_zeroed with layout
             unsafe { dealloc(tmp_ptr, layout) };
 
             if ret < 0 {
