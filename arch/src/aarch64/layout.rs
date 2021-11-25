@@ -104,7 +104,7 @@ pub const RSDP_POINTER: GuestAddress = GuestAddress(ACPI_START);
 pub const KERNEL_START: u64 = ACPI_START + ACPI_MAX_SIZE as u64;
 
 /// Pci high memory base
-pub const PCI_HIGH_BASE: u64 = 0x80_0000_0000_u64;
+pub const PCI_HIGH_BASE: u64 = 0x2_0000_0000_u64;
 
 // As per virt/kvm/arm/vgic/vgic-kvm-device.c we need
 // the number of interrupts our GIC will support to be:
