@@ -80,27 +80,27 @@ pub enum Error {
     ParseDevice(OptionParserError),
     /// Missing path from device,
     ParseDevicePathMissing,
-    /// Failed to parse vsock parameters
+    /// Failed parsing vsock parameters
     ParseVsock(OptionParserError),
-    /// Failed to parse restore parameters
+    /// Failed parsing restore parameters
     ParseRestore(OptionParserError),
-    /// Failed to parse SGX EPC parameters
+    /// Failed parsing SGX EPC parameters
     #[cfg(target_arch = "x86_64")]
     ParseSgxEpc(OptionParserError),
     /// Missing 'id' from SGX EPC section
     #[cfg(target_arch = "x86_64")]
     ParseSgxEpcIdMissing,
-    /// Failed to parse NUMA parameters
+    /// Failed parsing NUMA parameters
     ParseNuma(OptionParserError),
-    /// Failed to validate configuration
+    /// Failed validating configuration
     Validation(ValidationError),
     #[cfg(feature = "tdx")]
-    /// Failed to parse TDX config
+    /// Failed parsing TDX config
     ParseTdx(OptionParserError),
     #[cfg(feature = "tdx")]
-    // No TDX firmware
+    /// No TDX firmware
     FirmwarePathMissing,
-    /// Failed to parse userspace device
+    /// Failed parsing userspace device
     ParseUserDevice(OptionParserError),
     /// Missing socket for userspace device
     ParseUserDeviceSocketMissing,
