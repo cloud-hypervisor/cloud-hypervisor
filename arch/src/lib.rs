@@ -162,6 +162,16 @@ pub struct MmioDeviceInfo {
     pub irq: u32,
 }
 
+/// Structure to describe PCI space information
+#[derive(Clone, Debug)]
+#[cfg(target_arch = "aarch64")]
+pub struct PciSpaceInfo {
+    pub pci_segment_id: u16,
+    pub mmio_config_address: u64,
+    pub pci_device_space_start: u64,
+    pub pci_device_space_size: u64,
+}
+
 #[cfg(target_arch = "aarch64")]
 impl DeviceInfoForFdt for MmioDeviceInfo {
     fn addr(&self) -> u64 {

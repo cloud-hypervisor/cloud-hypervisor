@@ -38,6 +38,8 @@ use arch::x86_64::tdx::TdVmmDataRegionType;
 #[cfg(feature = "tdx")]
 use arch::x86_64::tdx::{TdVmmDataRegion, TdvfSection};
 use arch::EntryPoint;
+#[cfg(target_arch = "aarch64")]
+use arch::PciSpaceInfo;
 #[cfg(any(target_arch = "aarch64", feature = "acpi"))]
 use arch::{NumaNode, NumaNodes};
 use devices::AcpiNotificationFlags;
@@ -72,7 +74,9 @@ use std::{result, str, thread};
 use vm_device::Bus;
 #[cfg(target_arch = "x86_64")]
 use vm_device::BusDevice;
-use vm_memory::{Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
+#[cfg(target_arch = "x86_64")]
+use vm_memory::Address;
+use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
 #[cfg(feature = "tdx")]
 use vm_memory::{GuestMemory, GuestMemoryRegion};
 use vm_migration::{
@@ -1109,6 +1113,7 @@ impl Vm {
         let vcpu_mpidrs = self.cpu_manager.lock().unwrap().get_mpidrs();
         let vcpu_topology = self.cpu_manager.lock().unwrap().get_vcpu_topology();
         let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
+        let mut pci_space_info: Vec<PciSpaceInfo> = Vec::new();
         let initramfs_config = match self.initramfs {
             Some(_) => Some(self.load_initramfs(&mem)?),
             None => None,
@@ -1121,26 +1126,17 @@ impl Vm {
             .get_device_info()
             .clone();
 
-        let pci_space_start: GuestAddress = self
-            .memory_manager
-            .lock()
-            .as_ref()
-            .unwrap()
-            .start_of_device_area();
-
-        let pci_space_end: GuestAddress = self
-            .memory_manager
-            .lock()
-            .as_ref()
-            .unwrap()
-            .end_of_device_area();
-
-        let pci_space_size = pci_space_end
-            .checked_offset_from(pci_space_start)
-            .ok_or(Error::MemOverflow)?
-            + 1;
-
-        let pci_space = (pci_space_start.0, pci_space_size);
+        for pci_segment in self.device_manager.lock().unwrap().pci_segments().iter() {
+            let pci_space = PciSpaceInfo {
+                pci_segment_id: pci_segment.id,
+                mmio_config_address: pci_segment.mmio_config_address,
+                pci_device_space_start: pci_segment.start_of_device_area,
+                pci_device_space_size: pci_segment.end_of_device_area
+                    - pci_segment.start_of_device_area
+                    + 1,
+            };
+            pci_space_info.push(pci_space);
+        }
 
         let virtio_iommu_bdf = self
             .device_manager
@@ -1165,7 +1161,7 @@ impl Vm {
             vcpu_topology,
             device_info,
             &initramfs_config,
-            &pci_space,
+            &pci_space_info,
             virtio_iommu_bdf.map(|bdf| bdf.into()),
             &*gic_device,
             &self.numa_nodes,
@@ -2765,7 +2761,7 @@ mod tests {
             &dev_info,
             &*gic,
             &None,
-            &(0x1_0000_0000, 0x1_0000),
+            &Vec::new(),
             &BTreeMap::new(),
             None,
         )

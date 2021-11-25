@@ -3407,7 +3407,7 @@ impl DeviceManager {
         Arc::clone(self.pci_segments[0].pci_config_io.as_ref().unwrap())
     }
 
-    #[cfg(feature = "acpi")]
+    #[cfg(any(target_arch = "aarch64", feature = "acpi"))]
     pub(crate) fn pci_segments(&self) -> &Vec<PciSegment> {
         &self.pci_segments
     }

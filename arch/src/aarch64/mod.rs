@@ -14,7 +14,7 @@ pub mod regs;
 pub mod uefi;
 
 pub use self::fdt::DeviceInfoForFdt;
-use crate::{DeviceType, GuestMemoryMmap, NumaNodes, RegionType};
+use crate::{DeviceType, GuestMemoryMmap, NumaNodes, PciSpaceInfo, RegionType};
 use gic::GicDevice;
 use log::{log_enabled, Level};
 use std::collections::HashMap;
@@ -140,7 +140,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Bui
     vcpu_topology: Option<(u8, u8, u8)>,
     device_info: &HashMap<(DeviceType, String), T, S>,
     initrd: &Option<super::InitramfsConfig>,
-    pci_space_address: &(u64, u64),
+    pci_space_info: &[PciSpaceInfo],
     virtio_iommu_bdf: Option<u32>,
     gic_device: &dyn GicDevice,
     numa_nodes: &NumaNodes,
@@ -153,7 +153,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Bui
         device_info,
         gic_device,
         initrd,
-        pci_space_address,
+        pci_space_info,
         numa_nodes,
         virtio_iommu_bdf,
     )
