@@ -5921,6 +5921,147 @@ mod tests {
 
             handle_child_output(r, &output);
         }
+
+        fn setup_spdk_nvme(nvme_dir: &std::path::Path) {
+            cleanup_spdk_nvme();
+
+            assert!(exec_host_command_status(&format!(
+                "mkdir -p {}",
+                nvme_dir.join("nvme-vfio-user").to_str().unwrap()
+            ))
+            .success());
+            assert!(exec_host_command_status(&format!(
+                "truncate {} -s 128M",
+                nvme_dir.join("test-disk.raw").to_str().unwrap()
+            ))
+            .success());
+            assert!(exec_host_command_status(&format!(
+                "mkfs.ext4 {}",
+                nvme_dir.join("test-disk.raw").to_str().unwrap()
+            ))
+            .success());
+
+            // Start the SPDK nvmf_tgt daemon to present NVMe device as a VFIO user device
+            Command::new("/usr/local/bin/spdk-nvme/nvmf_tgt")
+                .args(&["-i", "0", "-m", "0x1"])
+                .spawn()
+                .unwrap();
+            thread::sleep(std::time::Duration::new(2, 0));
+
+            assert!(exec_host_command_status(
+                "/usr/local/bin/spdk-nvme/rpc.py nvmf_create_transport -t VFIOUSER"
+            )
+            .success());
+            assert!(exec_host_command_status(&format!(
+                "/usr/local/bin/spdk-nvme/rpc.py bdev_aio_create {} test 512",
+                nvme_dir.join("test-disk.raw").to_str().unwrap()
+            ))
+            .success());
+            assert!(exec_host_command_status(
+                "/usr/local/bin/spdk-nvme/rpc.py nvmf_create_subsystem nqn.2019-07.io.spdk:cnode -a -s test"
+            )
+            .success());
+            assert!(exec_host_command_status(
+                "/usr/local/bin/spdk-nvme/rpc.py nvmf_subsystem_add_ns nqn.2019-07.io.spdk:cnode test"
+            )
+            .success());
+            assert!(exec_host_command_status(&format!(
+                "/usr/local/bin/spdk-nvme/rpc.py nvmf_subsystem_add_listener nqn.2019-07.io.spdk:cnode -t VFIOUSER -a {} -s 0",
+                nvme_dir.join("nvme-vfio-user").to_str().unwrap()
+            ))
+            .success());
+        }
+
+        fn cleanup_spdk_nvme() {
+            exec_host_command_status("pkill -f nvmf_tgt");
+        }
+
+        #[cfg(target_arch = "x86_64")]
+        #[test]
+        fn test_vfio_user() {
+            let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(Box::new(focal));
+
+            let spdk_nvme_dir = guest.tmp_dir.as_path().join("test-vfio-user");
+            setup_spdk_nvme(spdk_nvme_dir.as_path());
+
+            let kernel_path = direct_kernel_boot_path();
+            let api_socket = temp_api_path(&guest.tmp_dir);
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--api-socket", &api_socket])
+                .args(&["--cpus", "boot=1"])
+                .args(&["--memory", "size=512M,shared=on"])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+                .default_disks()
+                .default_net()
+                .capture_output()
+                .spawn()
+                .unwrap();
+
+            let r = std::panic::catch_unwind(|| {
+                guest.wait_vm_boot(None).unwrap();
+
+                // Hotplug the SPDK-NVMe device to the VM
+                let (cmd_success, cmd_output) = remote_command_w_output(
+                    &api_socket,
+                    "add-user-device",
+                    Some(&format!(
+                        "socket={},id=vfio_user0",
+                        spdk_nvme_dir
+                            .as_path()
+                            .join("nvme-vfio-user/cntrl")
+                            .to_str()
+                            .unwrap(),
+                    )),
+                );
+                assert!(cmd_success);
+                assert!(String::from_utf8_lossy(&cmd_output)
+                    .contains("{\"id\":\"vfio_user0\",\"bdf\":\"0000:00:06.0\"}"));
+
+                thread::sleep(std::time::Duration::new(1, 0));
+
+                // Check both if /dev/nvme exists and if the block size is 128M.
+                assert_eq!(
+                    guest
+                        .ssh_command("lsblk | grep nvme0n1 | grep -c 128M")
+                        .unwrap()
+                        .trim()
+                        .parse::<u32>()
+                        .unwrap_or_default(),
+                    1
+                );
+
+                // Check changes persist after reboot
+                assert_eq!(
+                    guest.ssh_command("sudo mount /dev/nvme0n1 /mnt").unwrap(),
+                    ""
+                );
+                assert_eq!(guest.ssh_command("ls /mnt").unwrap(), "lost+found\n");
+                guest
+                    .ssh_command("echo test123 | sudo tee /mnt/test")
+                    .unwrap();
+                assert_eq!(guest.ssh_command("sudo umount /mnt").unwrap(), "");
+                assert_eq!(guest.ssh_command("ls /mnt").unwrap(), "");
+
+                guest.reboot_linux(0, None);
+                assert_eq!(
+                    guest.ssh_command("sudo mount /dev/nvme0n1 /mnt").unwrap(),
+                    ""
+                );
+                assert_eq!(
+                    guest.ssh_command("sudo cat /mnt/test").unwrap().trim(),
+                    "test123"
+                );
+            });
+
+            cleanup_spdk_nvme();
+
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+
+            handle_child_output(r, &output);
+        }
     }
 
     mod sequential {
