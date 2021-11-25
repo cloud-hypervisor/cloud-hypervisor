@@ -8,4 +8,4 @@ edition = "2018"
 libc = "0.2.108"
 serde = { version = "1.0.130", features = ["rc"] }
 serde_derive = "1.0.130"
-serde_json = "1.0.71"
+serde_json = "1.0.72"
