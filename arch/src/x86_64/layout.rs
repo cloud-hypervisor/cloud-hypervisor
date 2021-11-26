@@ -93,6 +93,8 @@ pub const MEM_32BIT_DEVICES_SIZE: u64 = 640 << 20;
 pub const PCI_MMCONFIG_START: GuestAddress =
     GuestAddress(MEM_32BIT_DEVICES_START.0 + MEM_32BIT_DEVICES_SIZE);
 pub const PCI_MMCONFIG_SIZE: u64 = 256 << 20;
+// One bus with potentially 256 devices (32 slots x 8 functions).
+pub const PCI_MMIO_CONFIG_SIZE_PER_SEGMENT: u64 = 4096 * 256;
 
 // TSS is 3 pages after the PCI MMCONFIG space
 pub const KVM_TSS_START: GuestAddress = GuestAddress(PCI_MMCONFIG_START.0 + PCI_MMCONFIG_SIZE);
