@@ -298,7 +298,7 @@ impl Client {
             major: 0,
             minor: 1,
         };
-        info!("Command: {:?}", version);
+        debug!("Command: {:?}", version);
 
         let version_data = CString::new(version_data.as_bytes()).unwrap();
         let bufs = vec![
@@ -312,7 +312,7 @@ impl Client {
             .write_vectored(&bufs)
             .map_err(Error::StreamWrite)?;
 
-        info!(
+        debug!(
             "Sent client version information: major = {} minor = {} capabilities = {:?}",
             version.major, version.minor, &caps
         );
@@ -324,7 +324,7 @@ impl Client {
             .read_exact(server_version.as_mut_slice())
             .map_err(Error::StreamRead)?;
 
-        info!("Reply: {:?}", server_version);
+        debug!("Reply: {:?}", server_version);
 
         let mut server_version_data = Vec::new();
         server_version_data.resize(
@@ -339,7 +339,7 @@ impl Client {
             serde_json::from_slice(&server_version_data[0..server_version_data.len() - 1])
                 .map_err(Error::DeserializeCapabilites)?;
 
-        info!(
+        debug!(
             "Received server version information: major = {} minor = {} capabilities = {:?}",
             server_version.major, server_version.minor, &server_caps
         );
@@ -368,7 +368,7 @@ impl Client {
             address,
             size,
         };
-        info!("Command: {:?}", dma_map);
+        debug!("Command: {:?}", dma_map);
         self.next_message_id += Wrapping(1);
         self.stream
             .send_with_fd(dma_map.as_slice(), fd)
@@ -378,7 +378,7 @@ impl Client {
         self.stream
             .read_exact(reply.as_mut_slice())
             .map_err(Error::StreamRead)?;
-        info!("Reply: {:?}", reply);
+        debug!("Reply: {:?}", reply);
 
         Ok(())
     }
@@ -397,7 +397,7 @@ impl Client {
             address,
             size,
         };
-        info!("Command: {:?}", dma_unmap);
+        debug!("Command: {:?}", dma_unmap);
         self.next_message_id += Wrapping(1);
         self.stream
             .write_all(dma_unmap.as_slice())
@@ -407,7 +407,7 @@ impl Client {
         self.stream
             .read_exact(reply.as_mut_slice())
             .map_err(Error::StreamRead)?;
-        info!("Reply: {:?}", reply);
+        debug!("Reply: {:?}", reply);
 
         Ok(())
     }
@@ -422,7 +422,7 @@ impl Client {
                 ..Default::default()
             },
         };
-        info!("Command: {:?}", reset);
+        debug!("Command: {:?}", reset);
         self.next_message_id += Wrapping(1);
         self.stream
             .write_all(reset.as_slice())
@@ -432,7 +432,7 @@ impl Client {
         self.stream
             .read_exact(reply.as_mut_slice())
             .map_err(Error::StreamRead)?;
-        info!("Reply: {:?}", reply);
+        debug!("Reply: {:?}", reply);
 
         Ok(())
     }
@@ -449,7 +449,7 @@ impl Client {
             argsz: std::mem::size_of::<DeviceGetInfo>() as u32,
             ..Default::default()
         };
-        info!("Command: {:?}", get_info);
+        debug!("Command: {:?}", get_info);
         self.next_message_id += Wrapping(1);
 
         self.stream
@@ -460,7 +460,7 @@ impl Client {
         self.stream
             .read_exact(reply.as_mut_slice())
             .map_err(Error::StreamRead)?;
-        info!("Reply: {:?}", reply);
+        debug!("Reply: {:?}", reply);
         self.num_irqs = reply.num_irqs;
 
         if reply.flags & VFIO_DEVICE_FLAGS_PCI != VFIO_DEVICE_FLAGS_PCI {
@@ -486,7 +486,7 @@ impl Client {
                     ..Default::default()
                 },
             };
-            info!("Command: {:?}", get_region_info);
+            debug!("Command: {:?}", get_region_info);
             self.next_message_id += Wrapping(1);
 
             self.stream
@@ -498,7 +498,7 @@ impl Client {
                 .stream
                 .recv_with_fd(reply.as_mut_slice())
                 .map_err(Error::ReceiveWithFd)?;
-            info!("Reply: {:?}", reply);
+            debug!("Reply: {:?}", reply);
 
             regions.push(Region {
                 flags: reply.region_info.flags,
@@ -533,7 +533,7 @@ impl Client {
             count: data.len() as u32,
             region,
         };
-        info!("Command: {:?}", region_read);
+        debug!("Command: {:?}", region_read);
         self.next_message_id += Wrapping(1);
         self.stream
             .write_all(region_read.as_slice())
@@ -543,7 +543,7 @@ impl Client {
         self.stream
             .read_exact(reply.as_mut_slice())
             .map_err(Error::StreamRead)?;
-        info!("Reply: {:?}", reply);
+        debug!("Reply: {:?}", reply);
         self.stream.read_exact(data).map_err(Error::StreamRead)?;
         Ok(())
     }
@@ -561,7 +561,7 @@ impl Client {
             count: data.len() as u32,
             region,
         };
-        info!("Command: {:?}", region_write);
+        debug!("Command: {:?}", region_write);
         self.next_message_id += Wrapping(1);
 
         let bufs = vec![IoSlice::new(region_write.as_slice()), IoSlice::new(data)];
@@ -576,7 +576,7 @@ impl Client {
         self.stream
             .read_exact(reply.as_mut_slice())
             .map_err(Error::StreamRead)?;
-        info!("Reply: {:?}", reply);
+        debug!("Reply: {:?}", reply);
         Ok(())
     }
 
@@ -594,7 +594,7 @@ impl Client {
             index,
             count: 0,
         };
-        info!("Command: {:?}", get_irq_info);
+        debug!("Command: {:?}", get_irq_info);
         self.next_message_id += Wrapping(1);
 
         self.stream
@@ -605,7 +605,7 @@ impl Client {
         self.stream
             .read_exact(reply.as_mut_slice())
             .map_err(Error::StreamRead)?;
-        info!("Reply: {:?}", reply);
+        debug!("Reply: {:?}", reply);
 
         Ok(IrqInfo {
             index: reply.index,
@@ -636,7 +636,7 @@ impl Client {
             index,
             count,
         };
-        info!("Command: {:?}", set_irqs);
+        debug!("Command: {:?}", set_irqs);
         self.next_message_id += Wrapping(1);
 
         self.stream
@@ -647,7 +647,7 @@ impl Client {
         self.stream
             .read_exact(reply.as_mut_slice())
             .map_err(Error::StreamRead)?;
-        info!("Reply: {:?}", reply);
+        debug!("Reply: {:?}", reply);
 
         Ok(())
     }
