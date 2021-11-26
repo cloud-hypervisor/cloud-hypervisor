@@ -22,9 +22,6 @@ use uuid::Uuid;
 use vm_allocator::AddressAllocator;
 use vm_device::BusDevice;
 
-// One bus with potentially 256 devices (32 slots x 8 functions).
-const PCI_MMIO_CONFIG_SIZE: u64 = 4096 * 256;
-
 pub(crate) struct PciSegment {
     pub(crate) id: u16,
     pub(crate) pci_bus: Arc<Mutex<PciBus>>,
@@ -62,14 +59,15 @@ impl PciSegment {
         )));
 
         let pci_config_mmio = Arc::new(Mutex::new(PciConfigMmio::new(Arc::clone(&pci_bus))));
-        let mmio_config_address = layout::PCI_MMCONFIG_START.0 + PCI_MMIO_CONFIG_SIZE * id as u64;
+        let mmio_config_address =
+            layout::PCI_MMCONFIG_START.0 + layout::PCI_MMIO_CONFIG_SIZE_PER_SEGMENT * id as u64;
 
         address_manager
             .mmio_bus
             .insert(
                 Arc::clone(&pci_config_mmio) as Arc<Mutex<dyn BusDevice>>,
                 mmio_config_address,
-                PCI_MMIO_CONFIG_SIZE,
+                layout::PCI_MMIO_CONFIG_SIZE_PER_SEGMENT,
             )
             .map_err(DeviceManagerError::BusError)?;
 
@@ -363,7 +361,7 @@ impl Aml for PciSegment {
                     &aml::Memory32Fixed::new(
                         true,
                         self.mmio_config_address as u32,
-                        PCI_MMIO_CONFIG_SIZE as u32,
+                        layout::PCI_MMIO_CONFIG_SIZE_PER_SEGMENT as u32,
                     ),
                     &aml::AddressSpace::new_memory(
                         aml::AddressSpaceCachable::NotCacheable,
@@ -392,7 +390,7 @@ impl Aml for PciSegment {
                     &aml::Memory32Fixed::new(
                         true,
                         self.mmio_config_address as u32,
-                        PCI_MMIO_CONFIG_SIZE as u32,
+                        layout::PCI_MMIO_CONFIG_SIZE_PER_SEGMENT as u32,
                     ),
                     &aml::AddressSpace::new_memory(
                         aml::AddressSpaceCachable::NotCacheable,
