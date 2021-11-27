@@ -59,6 +59,8 @@ kvm = ["vmm/kvm"]
 mshv = ["vmm/mshv"]
 io_uring = ["vmm/io_uring"]
 tdx = ["vmm/tdx"]
+pci = ["vmm/pci_support"]
+mmio = ["vmm/mmio_support"]
 
 # Integration tests require a special environment to run in
 integration_tests = []
