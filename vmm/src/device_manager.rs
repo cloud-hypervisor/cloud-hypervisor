@@ -1527,6 +1527,7 @@ impl DeviceManager {
             (DeviceType::Rtc, "rtc".to_string()),
             MmioDeviceInfo {
                 addr: addr.0,
+                len: MMIO_LEN,
                 irq: rtc_irq,
             },
         );
@@ -1568,6 +1569,7 @@ impl DeviceManager {
             (DeviceType::Gpio, "gpio".to_string()),
             MmioDeviceInfo {
                 addr: addr.0,
+                len: MMIO_LEN,
                 irq: gpio_irq,
             },
         );
@@ -1671,6 +1673,7 @@ impl DeviceManager {
             (DeviceType::Serial, DeviceType::Serial.to_string()),
             MmioDeviceInfo {
                 addr: addr.0,
+                len: MMIO_LEN,
                 irq: serial_irq,
             },
         );
