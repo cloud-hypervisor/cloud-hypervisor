@@ -578,6 +578,7 @@ pub(crate) struct AddressManager {
     vm: Arc<dyn hypervisor::Vm>,
     #[cfg(feature = "pci_support")]
     device_tree: Arc<Mutex<DeviceTree>>,
+    #[cfg(feature = "pci_support")]
     pci_mmio_allocators: Vec<Arc<Mutex<AddressAllocator>>>,
 }
 
@@ -990,13 +991,16 @@ impl DeviceManager {
             / ((4 << 30) * num_pci_segments as u64)
             * (4 << 30);
 
-        let mut pci_mmio_allocators = vec![];
-        for i in 0..num_pci_segments as u64 {
-            let mmio_start = start_of_device_area + i * pci_segment_size;
-            let allocator = Arc::new(Mutex::new(
-                AddressAllocator::new(GuestAddress(mmio_start), pci_segment_size).unwrap(),
-            ));
-            pci_mmio_allocators.push(allocator)
+        #[cfg(feature = "pci_support")]
+        {
+            let mut pci_mmio_allocators = vec![];
+            for i in 0..num_pci_segments as u64 {
+                let mmio_start = start_of_device_area + i * pci_segment_size;
+                let allocator = Arc::new(Mutex::new(
+                    AddressAllocator::new(GuestAddress(mmio_start), pci_segment_size).unwrap(),
+                ));
+                pci_mmio_allocators.push(allocator)
+            }
         }
 
         let address_manager = Arc::new(AddressManager {
@@ -1007,6 +1011,7 @@ impl DeviceManager {
             vm: vm.clone(),
             #[cfg(feature = "pci_support")]
             device_tree: Arc::clone(&device_tree),
+            #[cfg(feature = "pci_support")]
             pci_mmio_allocators,
         });
 
