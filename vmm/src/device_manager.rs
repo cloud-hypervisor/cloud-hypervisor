@@ -130,7 +130,7 @@ use vm_migration::{
 use vm_virtio::VirtioDeviceType;
 use vmm_sys_util::eventfd::EventFd;
 
-#[cfg(feature = "mmio_support")]
+#[cfg(any(feature = "mmio_support", target_arch = "aarch64"))]
 const MMIO_LEN: u64 = 0x1000;
 
 #[cfg(feature = "pci_support")]
