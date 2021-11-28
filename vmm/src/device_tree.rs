@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+#[cfg(feature = "pci_support")]
 use crate::device_manager::PciDeviceHandle;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -16,8 +17,10 @@ pub struct DeviceNode {
     pub children: Vec<String>,
     #[serde(skip)]
     pub migratable: Option<Arc<Mutex<dyn Migratable>>>,
+    #[cfg(feature = "pci_support")]
     pub pci_bdf: Option<u32>,
     #[serde(skip)]
+    #[cfg(feature = "pci_support")]
     pub pci_device_handle: Option<PciDeviceHandle>,
 }
 
@@ -29,7 +32,9 @@ impl DeviceNode {
             parent: None,
             children: Vec::new(),
             migratable,
+            #[cfg(feature = "pci_support")]
             pci_bdf: None,
+            #[cfg(feature = "pci_support")]
             pci_device_handle: None,
         }
     }
@@ -76,6 +81,7 @@ impl DeviceTree {
     pub fn breadth_first_traversal(&self) -> BftIter {
         BftIter::new(&self.0)
     }
+    #[cfg(feature = "pci_support")]
     pub fn pci_devices(&self) -> Vec<&DeviceNode> {
         self.0
             .values()
@@ -83,6 +89,7 @@ impl DeviceTree {
             .collect()
     }
 
+    #[cfg(feature = "pci_support")]
     pub fn remove_node_by_pci_bdf(&mut self, pci_bdf: u32) -> Option<DeviceNode> {
         let mut id = None;
         for (k, v) in self.0.iter() {

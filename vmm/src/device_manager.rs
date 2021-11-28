@@ -9,12 +9,12 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-#[cfg(feature = "pci_support")]
-use crate::config::DeviceConfig;
 use crate::config::{
-    ConsoleOutputMode, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig, VhostMode,
-    VmConfig, VsockConfig,
+    ConsoleOutputMode, DiskConfig, FsConfig, NetConfig, PmemConfig, VhostMode, VmConfig,
+    VsockConfig,
 };
+#[cfg(feature = "pci_support")]
+use crate::config::{DeviceConfig, UserDeviceConfig};
 use crate::device_tree::{DeviceNode, DeviceTree};
 #[cfg(feature = "kvm")]
 use crate::interrupt::kvm::KvmMsiInterruptManager as MsiInterruptManager;
@@ -30,6 +30,7 @@ use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::serial_manager::{Error as SerialManagerError, SerialManager};
 use crate::sigwinch_listener::start_sigwinch_listener;
 use crate::GuestRegionMmap;
+#[cfg(feature = "pci_support")]
 use crate::PciDeviceInfo;
 use crate::{device_node, DEVICE_MANAGER_SNAPSHOT_ID};
 #[cfg(feature = "acpi")]
@@ -71,8 +72,9 @@ use libc::{
     cfmakeraw, isatty, tcgetattr, tcsetattr, termios, MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED,
     O_TMPFILE, PROT_READ, PROT_WRITE, TCSANOW,
 };
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "pci_support"))]
 use pci::PciConfigIo;
+#[cfg(feature = "pci_support")]
 use pci::{
     DeviceRelocation, PciBarRegionType, PciBdf, PciDevice, VfioPciDevice, VfioUserDmaMapping,
     VfioUserPciDevice, VfioUserPciDeviceError,
@@ -120,6 +122,7 @@ use vm_migration::{
     protocol::MemoryRangeTable, Migratable, MigratableError, Pausable, Snapshot,
     SnapshotDataSection, Snapshottable, Transportable,
 };
+#[cfg(feature = "pci_support")]
 use vm_virtio::VirtioDeviceType;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -129,6 +132,7 @@ const MMIO_LEN: u64 = 0x1000;
 #[cfg(feature = "pci_support")]
 const VFIO_DEVICE_NAME_PREFIX: &str = "_vfio";
 
+#[cfg(feature = "pci_support")]
 const VFIO_USER_DEVICE_NAME_PREFIX: &str = "_vfio_user";
 
 #[cfg(target_arch = "x86_64")]
@@ -467,18 +471,23 @@ pub enum DeviceManagerError {
     VfioUserCreateClient(vfio_user::Error),
 
     /// Failed to create VFIO user device
+    #[cfg(feature = "pci_support")]
     VfioUserCreate(VfioUserPciDeviceError),
 
     /// Failed to map region from VFIO user device into guest
+    #[cfg(feature = "pci_support")]
     VfioUserMapRegion(VfioUserPciDeviceError),
 
     /// Failed to DMA map VFIO user device.
+    #[cfg(feature = "pci_support")]
     VfioUserDmaMap(VfioUserPciDeviceError),
 
     /// Failed to DMA unmap VFIO user device.
+    #[cfg(feature = "pci_support")]
     VfioUserDmaUnmap(VfioUserPciDeviceError),
 
     /// Failed to update memory mappings for VFIO user device
+    #[cfg(feature = "pci_support")]
     UpdateMemoryForVfioUserPciDevice(VfioUserPciDeviceError),
 
     /// Cannot duplicate file descriptor
@@ -569,6 +578,7 @@ pub(crate) struct AddressManager {
     pci_mmio_allocators: Vec<Arc<Mutex<AddressAllocator>>>,
 }
 
+#[cfg(feature = "pci_support")]
 impl DeviceRelocation for AddressManager {
     fn move_bar(
         &self,
@@ -809,6 +819,7 @@ impl Clone for PtyPair {
     }
 }
 
+#[cfg(feature = "pci_support")]
 #[derive(Clone)]
 pub enum PciDeviceHandle {
     Vfio(Arc<Mutex<VfioPciDevice>>),
@@ -895,6 +906,7 @@ pub struct DeviceManager {
     // It contains the virtual IOMMU PCI BDF along with the list of PCI BDF
     // representing the devices attached to the virtual IOMMU. This is useful
     // information for filling the ACPI VIOT table.
+    #[cfg(feature = "pci_support")]
     iommu_attached_devices: Option<(PciBdf, Vec<PciBdf>)>,
 
     // Tree of devices, representing the dependencies between devices.
@@ -1058,6 +1070,7 @@ impl DeviceManager {
             vfio_container: None,
             #[cfg(feature = "pci_support")]
             iommu_device: None,
+            #[cfg(feature = "pci_support")]
             iommu_attached_devices: None,
             #[cfg(feature = "pci_support")]
             pci_segments,
@@ -3757,16 +3770,19 @@ impl DeviceManager {
     }
 
     pub fn activate_virtio_devices(&self) -> DeviceManagerResult<()> {
-        // Find virtio pci devices and activate any pending ones
-        let device_tree = self.device_tree.lock().unwrap();
-        for pci_device_node in device_tree.pci_devices() {
-            #[allow(irrefutable_let_patterns)]
-            if let PciDeviceHandle::Virtio(virtio_pci_device) = &pci_device_node
-                .pci_device_handle
-                .as_ref()
-                .ok_or(DeviceManagerError::MissingPciDevice)?
-            {
-                virtio_pci_device.lock().unwrap().maybe_activate();
+        #[cfg(feature = "pci_support")]
+        {
+            // Find virtio pci devices and activate any pending ones
+            let device_tree = self.device_tree.lock().unwrap();
+            for pci_device_node in device_tree.pci_devices() {
+                #[allow(irrefutable_let_patterns)]
+                if let PciDeviceHandle::Virtio(virtio_pci_device) = &pci_device_node
+                    .pci_device_handle
+                    .as_ref()
+                    .ok_or(DeviceManagerError::MissingPciDevice)?
+                {
+                    virtio_pci_device.lock().unwrap().maybe_activate();
+                }
             }
         }
         Ok(())
@@ -4214,6 +4230,7 @@ impl DeviceManager {
         }
     }
 
+    #[cfg(feature = "pci_support")]
     pub fn iommu_attached_devices(&self) -> &Option<(PciBdf, Vec<PciBdf>)> {
         &self.iommu_attached_devices
     }
