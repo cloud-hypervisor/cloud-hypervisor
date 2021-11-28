@@ -976,23 +976,23 @@ impl DeviceManager {
     ) -> DeviceManagerResult<Arc<Mutex<Self>>> {
         let device_tree = Arc::new(Mutex::new(DeviceTree::new()));
 
-        let num_pci_segments =
-            if let Some(platform_config) = config.lock().unwrap().platform.as_ref() {
-                platform_config.num_pci_segments
-            } else {
-                1
-            };
-
-        let start_of_device_area = memory_manager.lock().unwrap().start_of_device_area().0;
-        let end_of_device_area = memory_manager.lock().unwrap().end_of_device_area().0;
-
-        // Start each PCI segment range on a 4GiB boundary
-        let pci_segment_size = (end_of_device_area - start_of_device_area + 1)
-            / ((4 << 30) * num_pci_segments as u64)
-            * (4 << 30);
-
         #[cfg(feature = "pci_support")]
         {
+            let num_pci_segments =
+                if let Some(platform_config) = config.lock().unwrap().platform.as_ref() {
+                    platform_config.num_pci_segments
+                } else {
+                    1
+                };
+
+            let start_of_device_area = memory_manager.lock().unwrap().start_of_device_area().0;
+            let end_of_device_area = memory_manager.lock().unwrap().end_of_device_area().0;
+
+            // Start each PCI segment range on a 4GiB boundary
+            let pci_segment_size = (end_of_device_area - start_of_device_area + 1)
+                / ((4 << 30) * num_pci_segments as u64)
+                * (4 << 30);
+
             let mut pci_mmio_allocators = vec![];
             for i in 0..num_pci_segments as u64 {
                 let mmio_start = start_of_device_area + i * pci_segment_size;
