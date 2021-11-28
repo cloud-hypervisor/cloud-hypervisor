@@ -15,9 +15,9 @@ use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_queue::Error as QueueError;
 
-// #[cfg(feature = "mmio_support")]
+#[cfg(feature = "mmio_support")]
 mod mmio;
-// #[cfg(feature = "mmio_support")]
+#[cfg(feature = "mmio_support")]
 pub use mmio::VirtioMmioDevice;
 
 pub trait VirtioTransport {
