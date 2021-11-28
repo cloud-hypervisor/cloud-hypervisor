@@ -4569,22 +4569,19 @@ impl Migratable for DeviceManager {
     }
 }
 
-#[cfg(feature = "acpi")]
-const PCIU_FIELD_OFFSET: u64 = 0;
-#[cfg(feature = "acpi")]
-const PCID_FIELD_OFFSET: u64 = 4;
-#[cfg(feature = "acpi")]
-const B0EJ_FIELD_OFFSET: u64 = 8;
-#[cfg(feature = "acpi")]
-const PSEG_FIELD_OFFSET: u64 = 12;
-#[cfg(feature = "acpi")]
-const PCIU_FIELD_SIZE: usize = 4;
-#[cfg(feature = "acpi")]
-const PCID_FIELD_SIZE: usize = 4;
-#[cfg(feature = "acpi")]
-const B0EJ_FIELD_SIZE: usize = 4;
-#[cfg(feature = "acpi")]
-const PSEG_FIELD_SIZE: usize = 4;
+#[cfg(all(feature = "acpi", feature = "pci_support"))]
+mod pci_const {
+    pub const PCIU_FIELD_OFFSET: u64 = 0;
+    pub const PCID_FIELD_OFFSET: u64 = 4;
+    pub const B0EJ_FIELD_OFFSET: u64 = 8;
+    pub const PSEG_FIELD_OFFSET: u64 = 12;
+    pub const PCIU_FIELD_SIZE: usize = 4;
+    pub const PCID_FIELD_SIZE: usize = 4;
+    pub const B0EJ_FIELD_SIZE: usize = 4;
+    pub const PSEG_FIELD_SIZE: usize = 4;
+}
+#[cfg(all(feature = "acpi", feature = "pci_support"))]
+use pci_const::*;
 
 #[cfg(feature = "acpi")]
 impl BusDevice for DeviceManager {
