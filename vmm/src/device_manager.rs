@@ -72,11 +72,12 @@ use libc::{
     cfmakeraw, isatty, tcgetattr, tcsetattr, termios, MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED,
     O_TMPFILE, PROT_READ, PROT_WRITE, TCSANOW,
 };
+use pci::PciBdf;
 #[cfg(all(target_arch = "x86_64", feature = "pci_support"))]
 use pci::PciConfigIo;
 #[cfg(feature = "pci_support")]
 use pci::{
-    DeviceRelocation, PciBarRegionType, PciBdf, PciDevice, VfioPciDevice, VfioUserDmaMapping,
+    DeviceRelocation, PciBarRegionType, PciDevice, VfioPciDevice, VfioUserDmaMapping,
     VfioUserPciDevice, VfioUserPciDeviceError,
 };
 use seccompiler::SeccompAction;
@@ -3632,7 +3633,7 @@ impl DeviceManager {
             let device_type = virtio_device.lock().unwrap().device_type();
             self.id_to_dev_info.insert(
                 (DeviceType::Virtio(device_type), virtio_device_id),
-                MMIODeviceInfo {
+                MmioDeviceInfo {
                     addr: mmio_base,
                     len: mmio_size,
                     irq: irq_num,
@@ -4245,6 +4246,11 @@ impl DeviceManager {
                 .notify(AcpiNotificationFlags::POWER_BUTTON_CHANGED)
                 .map_err(DeviceManagerError::PowerButtonNotification);
         }
+    }
+
+    #[cfg(not(feature = "pci_support"))]
+    pub fn iommu_attached_devices(&self) -> &Option<(PciBdf, Vec<PciBdf>)> {
+        &None
     }
 
     #[cfg(feature = "pci_support")]

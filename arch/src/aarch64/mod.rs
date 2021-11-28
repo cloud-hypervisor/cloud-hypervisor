@@ -140,7 +140,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Bui
     vcpu_topology: Option<(u8, u8, u8)>,
     device_info: &HashMap<(DeviceType, String), T, S>,
     initrd: &Option<super::InitramfsConfig>,
-    pci_space_address: &(u64, u64),
+    pci_space_address: &Option<(u64, u64)>,
     virtio_iommu_bdf: Option<u32>,
     gic_device: &dyn GicDevice,
     numa_nodes: &NumaNodes,

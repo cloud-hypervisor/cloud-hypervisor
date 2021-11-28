@@ -1125,34 +1125,41 @@ impl Vm {
             .get_device_info()
             .clone();
 
-        let pci_space_start: GuestAddress = self
-            .memory_manager
-            .lock()
-            .as_ref()
-            .unwrap()
-            .start_of_device_area();
+        let pci_space: Option<(u64, u64)> = if cfg!(feature = "pci_support") {
+            let pci_space_start: GuestAddress = self
+                .memory_manager
+                .lock()
+                .as_ref()
+                .unwrap()
+                .start_of_device_area();
 
-        let pci_space_end: GuestAddress = self
-            .memory_manager
-            .lock()
-            .as_ref()
-            .unwrap()
-            .end_of_device_area();
+            let pci_space_end: GuestAddress = self
+                .memory_manager
+                .lock()
+                .as_ref()
+                .unwrap()
+                .end_of_device_area();
 
-        let pci_space_size = pci_space_end
-            .checked_offset_from(pci_space_start)
-            .ok_or(Error::MemOverflow)?
-            + 1;
+            let pci_space_size = pci_space_end
+                .checked_offset_from(pci_space_start)
+                .ok_or(Error::MemOverflow)?
+                + 1;
 
-        let pci_space = (pci_space_start.0, pci_space_size);
+            Some((pci_space_start.0, pci_space_size))
+        } else {
+            None
+        };
 
-        let virtio_iommu_bdf = self
-            .device_manager
-            .lock()
-            .unwrap()
-            .iommu_attached_devices()
-            .as_ref()
-            .map(|(v, _)| *v);
+        let virtio_iommu_bdf = if cfg!(feature = "pci_support") {
+            self.device_manager
+                .lock()
+                .unwrap()
+                .iommu_attached_devices()
+                .as_ref()
+                .map(|(v, _)| *v)
+        } else {
+            None
+        };
 
         let gic_device = create_gic(
             &self.memory_manager.lock().as_ref().unwrap().vm,

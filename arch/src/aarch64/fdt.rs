@@ -88,7 +88,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     device_info: &HashMap<(DeviceType, String), T, S>,
     gic_device: &dyn GicDevice,
     initrd: &Option<InitramfsConfig>,
-    pci_space_address: &(u64, u64),
+    pci_space_address: &Option<(u64, u64)>,
     numa_nodes: &NumaNodes,
     virtio_iommu_bdf: Option<u32>,
 ) -> FdtWriterResult<Vec<u8>> {
@@ -117,12 +117,14 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     create_clock_node(&mut fdt)?;
     create_psci_node(&mut fdt)?;
     create_devices_node(&mut fdt, device_info)?;
-    create_pci_nodes(
-        &mut fdt,
-        pci_space_address.0,
-        pci_space_address.1,
-        virtio_iommu_bdf,
-    )?;
+    if let Some(pci_space_address) = pci_space_address {
+        create_pci_nodes(
+            &mut fdt,
+            pci_space_address.0,
+            pci_space_address.1,
+            virtio_iommu_bdf,
+        )?;
+    }
     if numa_nodes.len() > 1 {
         create_distance_map_node(&mut fdt, numa_nodes)?;
     }
