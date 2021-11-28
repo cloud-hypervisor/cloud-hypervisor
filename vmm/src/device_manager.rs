@@ -38,7 +38,7 @@ use acpi_tables::{aml, aml::Aml};
 use anyhow::anyhow;
 #[cfg(target_arch = "aarch64")]
 use arch::aarch64::gic::gicv3_its::kvm::KvmGicV3Its;
-#[cfg(feature = "acpi")]
+#[cfg(all(feature = "acpi", feature = "pci_support"))]
 use arch::layout;
 #[cfg(target_arch = "x86_64")]
 use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
@@ -502,7 +502,7 @@ pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
 type VirtioDeviceArc = Arc<Mutex<dyn virtio_devices::VirtioDevice>>;
 
-#[cfg(feature = "acpi")]
+#[cfg(all(feature = "acpi", feature = "pci_support"))]
 const DEVICE_MANAGER_ACPI_SIZE: usize = 0x10;
 
 const TIOCSPTLCK: libc::c_int = 0x4004_5431;
@@ -941,9 +941,9 @@ pub struct DeviceManager {
     // activation and thus start the threads from the VMM thread
     activate_evt: EventFd,
 
-    #[cfg(feature = "acpi")]
+    #[cfg(all(feature = "acpi", feature = "pci_support"))]
     acpi_address: GuestAddress,
-    #[cfg(feature = "acpi")]
+    #[cfg(all(feature = "acpi", feature = "pci_support"))]
     selected_segment: usize,
 
     // Possible handle to the virtio-mem device
@@ -1036,7 +1036,7 @@ impl DeviceManager {
                 vm,
             ));
 
-        #[cfg(feature = "acpi")]
+        #[cfg(all(feature = "acpi", feature = "pci_support"))]
         let acpi_address = address_manager
             .allocator
             .lock()
@@ -1104,9 +1104,9 @@ impl DeviceManager {
             activate_evt: activate_evt
                 .try_clone()
                 .map_err(DeviceManagerError::EventFd)?,
-            #[cfg(feature = "acpi")]
+            #[cfg(all(feature = "acpi", feature = "pci_support"))]
             acpi_address,
-            #[cfg(feature = "acpi")]
+            #[cfg(all(feature = "acpi", feature = "pci_support"))]
             selected_segment: 0,
             serial_pty: None,
             serial_manager: None,
@@ -1122,7 +1122,7 @@ impl DeviceManager {
 
         let device_manager = Arc::new(Mutex::new(device_manager));
 
-        #[cfg(feature = "acpi")]
+        #[cfg(all(feature = "acpi", feature = "pci_support"))]
         address_manager
             .mmio_bus
             .insert(
