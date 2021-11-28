@@ -574,6 +574,7 @@ pub(crate) struct AddressManager {
     pub(crate) io_bus: Arc<Bus>,
     pub(crate) mmio_bus: Arc<Bus>,
     vm: Arc<dyn hypervisor::Vm>,
+    #[cfg(feature = "pci_support")]
     device_tree: Arc<Mutex<DeviceTree>>,
     pci_mmio_allocators: Vec<Arc<Mutex<AddressAllocator>>>,
 }
@@ -1002,6 +1003,7 @@ impl DeviceManager {
             io_bus: Arc::new(Bus::new()),
             mmio_bus: Arc::new(Bus::new()),
             vm: vm.clone(),
+            #[cfg(feature = "pci_support")]
             device_tree: Arc::clone(&device_tree),
             pci_mmio_allocators,
         });
