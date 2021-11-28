@@ -977,10 +977,16 @@ impl DeviceManager {
         restoring: bool,
     ) -> DeviceManagerResult<Arc<Mutex<Self>>> {
         let device_tree = Arc::new(Mutex::new(DeviceTree::new()));
+        #[cfg(feature = "pci_support")]
+        let mut pci_mmio_allocators;
+        #[cfg(feature = "pci_support")]
+        let mut pci_segments;
+        #[cfg(feature = "pci_support")]
+        let num_pci_segments;
 
         #[cfg(feature = "pci_support")]
         {
-            let num_pci_segments =
+            num_pci_segments =
                 if let Some(platform_config) = config.lock().unwrap().platform.as_ref() {
                     platform_config.num_pci_segments
                 } else {
@@ -995,7 +1001,7 @@ impl DeviceManager {
                 / ((4 << 30) * num_pci_segments as u64)
                 * (4 << 30);
 
-            let mut pci_mmio_allocators = vec![];
+            pci_mmio_allocators = vec![];
             for i in 0..num_pci_segments as u64 {
                 let mmio_start = start_of_device_area + i * pci_segment_size;
                 let allocator = Arc::new(Mutex::new(
@@ -1045,7 +1051,7 @@ impl DeviceManager {
                 &mut pci_irq_slots,
             )?;
 
-            let mut pci_segments = vec![PciSegment::new_default_segment(
+            pci_segments = vec![PciSegment::new_default_segment(
                 &address_manager,
                 Arc::clone(&address_manager.pci_mmio_allocators[0]),
                 &pci_irq_slots,
