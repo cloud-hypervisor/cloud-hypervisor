@@ -93,6 +93,7 @@ use std::result;
 use std::sync::{Arc, Mutex};
 #[cfg(feature = "pci_support")]
 use vfio_ioctls::{VfioContainer, VfioDevice};
+#[cfg(feature = "pci_support")]
 use virtio_devices::transport::VirtioPciDevice;
 use virtio_devices::transport::VirtioTransport;
 use virtio_devices::vhost_user::VhostUserConfig;
@@ -101,6 +102,7 @@ use virtio_devices::AccessPlatformMapping;
 use virtio_devices::Endpoint;
 #[cfg(feature = "pci_support")]
 use virtio_devices::IommuMapping;
+#[cfg(feature = "pci_support")]
 use virtio_devices::VirtioMemMappingSource;
 use virtio_devices::{VirtioSharedMemory, VirtioSharedMemoryList};
 #[cfg(feature = "pci_support")]
