@@ -107,7 +107,9 @@ use virtio_devices::VirtioMemMappingSource;
 use virtio_devices::{VirtioSharedMemory, VirtioSharedMemoryList};
 #[cfg(feature = "pci_support")]
 use virtio_queue::AccessPlatform;
-use vm_allocator::{AddressAllocator, SystemAllocator};
+#[cfg(feature = "pci_support")]
+use vm_allocator::AddressAllocator;
+use vm_allocator::SystemAllocator;
 #[cfg(feature = "pci_support")]
 use vm_device::dma_mapping::vfio::VfioDmaMapping;
 use vm_device::interrupt::{

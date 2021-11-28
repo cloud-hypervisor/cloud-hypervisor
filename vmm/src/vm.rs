@@ -70,7 +70,7 @@ use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Mutex, RwLock};
 use std::{result, str, thread};
 use vm_device::Bus;
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "pci_support"))]
 use vm_device::BusDevice;
 use vm_memory::{Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
 #[cfg(feature = "tdx")]
@@ -459,8 +459,6 @@ impl VmmOps for VmOps {
 
     #[cfg(target_arch = "x86_64")]
     fn pio_write(&self, port: u64, data: &[u8]) -> hypervisor::vm::Result<()> {
-        use pci::{PCI_CONFIG_IO_PORT, PCI_CONFIG_IO_PORT_SIZE};
-
         if port == DEBUG_IOPORT as u64 && data.len() == 1 {
             self.log_debug_ioport(data[0]);
             return Ok(());
@@ -468,6 +466,7 @@ impl VmmOps for VmOps {
 
         #[cfg(feature = "pci_support")]
         {
+            use pci::{PCI_CONFIG_IO_PORT, PCI_CONFIG_IO_PORT_SIZE};
             if (PCI_CONFIG_IO_PORT..(PCI_CONFIG_IO_PORT + PCI_CONFIG_IO_PORT_SIZE)).contains(&port)
             {
                 self.pci_config_io.lock().unwrap().write(
@@ -1381,6 +1380,7 @@ impl Vm {
         Err(Error::ResizeZone)
     }
 
+    #[cfg(feature = "pci_support")]
     fn add_to_config<T>(devices: &mut Option<Vec<T>>, device: T) {
         if let Some(devices) = devices {
             devices.push(device);
