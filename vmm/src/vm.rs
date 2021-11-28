@@ -2729,17 +2729,23 @@ mod tests {
                 (DeviceType::Serial, DeviceType::Serial.to_string()),
                 MmioDeviceInfo {
                     addr: 0x00,
+                    len: LEN,
                     irq: 33,
                 },
             ),
             (
                 (DeviceType::Virtio(1), "virtio".to_string()),
-                MmioDeviceInfo { addr: LEN, irq: 34 },
+                MmioDeviceInfo {
+                    addr: LEN,
+                    len: LEN,
+                    irq: 34,
+                },
             ),
             (
                 (DeviceType::Rtc, "rtc".to_string()),
                 MmioDeviceInfo {
                     addr: 2 * LEN,
+                    len: LEN,
                     irq: 35,
                 },
             ),

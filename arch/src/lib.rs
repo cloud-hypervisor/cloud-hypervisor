@@ -159,6 +159,7 @@ impl fmt::Display for DeviceType {
 #[cfg(target_arch = "aarch64")]
 pub struct MmioDeviceInfo {
     pub addr: u64,
+    pub len: u64,
     pub irq: u32,
 }
 
@@ -171,6 +172,6 @@ impl DeviceInfoForFdt for MmioDeviceInfo {
         self.irq
     }
     fn length(&self) -> u64 {
-        4096
+        self.len
     }
 }
