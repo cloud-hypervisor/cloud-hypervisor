@@ -9,9 +9,11 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
+#[cfg(feature = "pci_support")]
+use crate::config::DeviceConfig;
 use crate::config::{
-    ConsoleOutputMode, DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig,
-    VhostMode, VmConfig, VsockConfig,
+    ConsoleOutputMode, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig, VhostMode,
+    VmConfig, VsockConfig,
 };
 use crate::device_tree::{DeviceNode, DeviceTree};
 #[cfg(feature = "kvm")]
@@ -60,6 +62,7 @@ use devices::{
 };
 #[cfg(feature = "kvm")]
 use hypervisor::kvm_ioctls::*;
+#[cfg(feature = "pci_support")]
 use hypervisor::DeviceFd;
 #[cfg(feature = "mshv")]
 use hypervisor::IoEventAddress;
@@ -85,6 +88,7 @@ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
 use std::result;
 use std::sync::{Arc, Mutex};
+#[cfg(feature = "pci_support")]
 use vfio_ioctls::{VfioContainer, VfioDevice};
 use virtio_devices::transport::VirtioPciDevice;
 use virtio_devices::transport::VirtioTransport;
@@ -99,12 +103,14 @@ use virtio_devices::{VirtioSharedMemory, VirtioSharedMemoryList};
 #[cfg(feature = "pci_support")]
 use virtio_queue::AccessPlatform;
 use vm_allocator::{AddressAllocator, SystemAllocator};
+#[cfg(feature = "pci_support")]
 use vm_device::dma_mapping::vfio::VfioDmaMapping;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, LegacyIrqGroupConfig, MsiIrqGroupConfig,
 };
 use vm_device::{Bus, BusDevice, Resource};
 use vm_memory::guest_memory::FileOffset;
+#[cfg(feature = "pci_support")]
 use vm_memory::GuestMemoryRegion;
 use vm_memory::{Address, GuestAddress, GuestUsize, MmapRegion};
 #[cfg(all(target_arch = "x86_64", feature = "cmos"))]
@@ -119,6 +125,7 @@ use vmm_sys_util::eventfd::EventFd;
 #[cfg(feature = "mmio_support")]
 const MMIO_LEN: u64 = 0x1000;
 
+#[cfg(feature = "pci_support")]
 const VFIO_DEVICE_NAME_PREFIX: &str = "_vfio";
 
 const VFIO_USER_DEVICE_NAME_PREFIX: &str = "_vfio_user";
@@ -869,14 +876,17 @@ pub struct DeviceManager {
     legacy_interrupt_manager: Option<Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>>,
 
     // Passthrough device handle
+    #[cfg(feature = "pci_support")]
     passthrough_device: Option<Arc<dyn hypervisor::Device>>,
 
     // VFIO container
     // Only one container can be created, therefore it is stored as part of the
     // DeviceManager to be reused.
+    #[cfg(feature = "pci_support")]
     vfio_container: Option<Arc<VfioContainer>>,
 
     // Paravirtualized IOMMU
+    #[cfg(feature = "pci_support")]
     iommu_device: Option<Arc<Mutex<virtio_devices::Iommu>>>,
 
     // PCI information about devices attached to the paravirtualized IOMMU
@@ -1037,8 +1047,11 @@ impl DeviceManager {
             device_id_cnt: Wrapping(0),
             msi_interrupt_manager,
             legacy_interrupt_manager: None,
+            #[cfg(feature = "pci_support")]
             passthrough_device: None,
+            #[cfg(feature = "pci_support")]
             vfio_container: None,
+            #[cfg(feature = "pci_support")]
             iommu_device: None,
             iommu_attached_devices: None,
             pci_segments,
@@ -1190,6 +1203,7 @@ impl DeviceManager {
         self.device_id_cnt = state.device_id_cnt;
     }
 
+    #[cfg(feature = "pci_support")]
     fn get_msi_iova_space(&mut self) -> (u64, u64) {
         #[cfg(target_arch = "aarch64")]
         {
@@ -2931,6 +2945,7 @@ impl DeviceManager {
         self.add_vfio_device(device_cfg)
     }
 
+    #[cfg(feature = "pci_support")]
     fn create_vfio_container(&self) -> DeviceManagerResult<Arc<VfioContainer>> {
         let passthrough_device = self
             .passthrough_device
@@ -3645,18 +3660,22 @@ impl DeviceManager {
         }
 
         // Take care of updating the memory for VFIO PCI devices.
-        if let Some(vfio_container) = &self.vfio_container {
-            vfio_container
-                .vfio_dma_map(
-                    new_region.start_addr().raw_value(),
-                    new_region.len() as u64,
-                    new_region.as_ptr() as u64,
-                )
-                .map_err(DeviceManagerError::UpdateMemoryForVfioPciDevice)?;
+        #[cfg(feature = "pci_support")]
+        {
+            if let Some(vfio_container) = &self.vfio_container {
+                vfio_container
+                    .vfio_dma_map(
+                        new_region.start_addr().raw_value(),
+                        new_region.len() as u64,
+                        new_region.as_ptr() as u64,
+                    )
+                    .map_err(DeviceManagerError::UpdateMemoryForVfioPciDevice)?;
+            }
         }
 
         #[allow(clippy::single_match)]
         // Take care of updating the memory for vfio-user devices.
+        #[cfg(feature = "pci_support")]
         {
             let device_tree = self.device_tree.lock().unwrap();
             for pci_device_node in device_tree.pci_devices() {
