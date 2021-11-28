@@ -608,6 +608,19 @@ fn create_pci_nodes(
             pci_device_info_elem.mmio_config_address,
             PCI_MMIO_CONFIG_SIZE_PER_SEGMENT,
         ];
+        // See kernel document Documentation/devicetree/bindings/pci/pci-msi.txt
+        let msi_map = [
+            // rid-base: A single cell describing the first RID matched by the entry.
+            0x0,
+            // msi-controller: A single phandle to an MSI controller.
+            MSI_PHANDLE,
+            // msi-base: An msi-specifier describing the msi-specifier produced for the
+            // first RID matched by the entry.
+            (pci_device_info_elem.pci_segment_id as u32) << 8,
+            // length: A single cell describing how many consecutive RIDs are matched
+            // following the rid-base.
+            0x100,
+        ];
 
         let pci_node_name = format!("pci@{:x}", pci_device_info_elem.mmio_config_address);
         let pci_node = fdt.begin_node(&pci_node_name)?;
@@ -627,6 +640,7 @@ fn create_pci_nodes(
         fdt.property_null("interrupt-map")?;
         fdt.property_null("interrupt-map-mask")?;
         fdt.property_null("dma-coherent")?;
+        fdt.property_array_u32("msi-map", &msi_map)?;
         fdt.property_u32("msi-parent", MSI_PHANDLE)?;
 
         if pci_device_info_elem.pci_segment_id == 0 {
