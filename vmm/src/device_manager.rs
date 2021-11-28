@@ -24,6 +24,7 @@ use crate::interrupt::LegacyUserspaceInterruptManager;
 #[cfg(feature = "acpi")]
 use crate::memory_manager::MEMORY_MANAGER_ACPI_SIZE;
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
+#[cfg(feature = "pci_support")]
 use crate::pci_segment::PciSegment;
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::serial_manager::{Error as SerialManagerError, SerialManager};
@@ -865,6 +866,7 @@ pub struct DeviceManager {
     // Counter to keep track of the consumed device IDs.
     device_id_cnt: Wrapping<usize>,
 
+    #[cfg(feature = "pci_support")]
     pci_segments: Vec<PciSegment>,
 
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
@@ -1012,25 +1014,28 @@ impl DeviceManager {
             .allocate_platform_mmio_addresses(None, DEVICE_MANAGER_ACPI_SIZE as u64, None)
             .ok_or(DeviceManagerError::AllocateIoPort)?;
 
-        let mut pci_irq_slots = [0; 32];
-        PciSegment::reserve_legacy_interrupts_for_pci_devices(
-            &address_manager,
-            &mut pci_irq_slots,
-        )?;
-
-        let mut pci_segments = vec![PciSegment::new_default_segment(
-            &address_manager,
-            Arc::clone(&address_manager.pci_mmio_allocators[0]),
-            &pci_irq_slots,
-        )?];
-
-        for i in 1..num_pci_segments as usize {
-            pci_segments.push(PciSegment::new(
-                i as u16,
+        #[cfg(feature = "pci_support")]
+        {
+            let mut pci_irq_slots = [0; 32];
+            PciSegment::reserve_legacy_interrupts_for_pci_devices(
                 &address_manager,
-                Arc::clone(&address_manager.pci_mmio_allocators[i]),
+                &mut pci_irq_slots,
+            )?;
+
+            let mut pci_segments = vec![PciSegment::new_default_segment(
+                &address_manager,
+                Arc::clone(&address_manager.pci_mmio_allocators[0]),
                 &pci_irq_slots,
-            )?);
+            )?];
+
+            for i in 1..num_pci_segments as usize {
+                pci_segments.push(PciSegment::new(
+                    i as u16,
+                    &address_manager,
+                    Arc::clone(&address_manager.pci_mmio_allocators[i]),
+                    &pci_irq_slots,
+                )?);
+            }
         }
 
         let device_manager = DeviceManager {
@@ -1054,6 +1059,7 @@ impl DeviceManager {
             #[cfg(feature = "pci_support")]
             iommu_device: None,
             iommu_attached_devices: None,
+            #[cfg(feature = "pci_support")]
             pci_segments,
             device_tree,
             exit_evt: exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
@@ -2393,6 +2399,7 @@ impl DeviceManager {
                 let (cache_base, cache_size) = if let Some((base, size)) = cache_range {
                     // The memory needs to be 2MiB aligned in order to support
                     // hugepages.
+                    #[cfg(feature = "pci_support")]
                     self.pci_segments[fs_cfg.pci_segment as usize]
                         .allocator
                         .lock()
@@ -2404,16 +2411,42 @@ impl DeviceManager {
                         )
                         .ok_or(DeviceManagerError::FsRangeAllocation)?;
 
+                    #[cfg(not(feature = "pci_support"))]
+                    self.address_manager
+                        .allocator
+                        .lock()
+                        .unwrap()
+                        .allocate_platform_mmio_addresses(
+                            Some(GuestAddress(base)),
+                            size as GuestUsize,
+                            Some(0x0020_0000),
+                        )
+                        .ok_or(DeviceManagerError::FsRangeAllocation)?;
+
                     (base, size)
                 } else {
                     let size = fs_cfg.cache_size;
                     // The memory needs to be 2MiB aligned in order to support
                     // hugepages.
+                    #[cfg(feature = "pci_support")]
                     let base = self.pci_segments[fs_cfg.pci_segment as usize]
                         .allocator
                         .lock()
                         .unwrap()
                         .allocate(None, size as GuestUsize, Some(0x0020_0000))
+                        .ok_or(DeviceManagerError::FsRangeAllocation)?;
+
+                    #[cfg(not(feature = "pci_support"))]
+                    let base = self
+                        .address_manager
+                        .allocator
+                        .lock()
+                        .unwrap()
+                        .allocate_platform_mmio_addresses(
+                            None,
+                            size as GuestUsize,
+                            Some(0x0020_0000),
+                        )
                         .ok_or(DeviceManagerError::FsRangeAllocation)?;
 
                     (base.raw_value(), size)
@@ -2590,6 +2623,7 @@ impl DeviceManager {
         let (region_base, region_size) = if let Some((base, size)) = region_range {
             // The memory needs to be 2MiB aligned in order to support
             // hugepages.
+            #[cfg(feature = "pci_support")]
             self.pci_segments[pmem_cfg.pci_segment as usize]
                 .allocator
                 .lock()
@@ -2601,10 +2635,23 @@ impl DeviceManager {
                 )
                 .ok_or(DeviceManagerError::PmemRangeAllocation)?;
 
+            #[cfg(not(feature = "pci_support"))]
+            self.address_manager
+                .allocator
+                .lock()
+                .unwrap()
+                .allocate_platform_mmio_addresses(
+                    Some(GuestAddress(base)),
+                    size as GuestUsize,
+                    Some(0x0020_0000),
+                )
+                .ok_or(DeviceManagerError::PmemRangeAllocation)?;
+
             (base, size)
         } else {
             // The memory needs to be 2MiB aligned in order to support
             // hugepages.
+            #[cfg(feature = "pci_support")]
             let base = self.pci_segments[pmem_cfg.pci_segment as usize]
                 .allocator
                 .lock()
@@ -2612,6 +2659,14 @@ impl DeviceManager {
                 .allocate(None, size as GuestUsize, Some(0x0020_0000))
                 .ok_or(DeviceManagerError::PmemRangeAllocation)?;
 
+            #[cfg(not(feature = "pci_support"))]
+            let base = self
+                .address_manager
+                .allocator
+                .lock()
+                .unwrap()
+                .allocate_platform_mmio_addresses(None, size as GuestUsize, Some(0x0020_0000))
+                .ok_or(DeviceManagerError::PmemRangeAllocation)?;
             (base.raw_value(), size)
         };
 
@@ -3135,6 +3190,7 @@ impl DeviceManager {
         Ok((pci_device_bdf, vfio_name))
     }
 
+    #[cfg(feature = "pci_support")]
     fn add_pci_device(
         &mut self,
         bus_device: Arc<Mutex<dyn BusDevice>>,
@@ -3198,6 +3254,7 @@ impl DeviceManager {
         Ok(iommu_attached_device_ids)
     }
 
+    #[cfg(feature = "pci_support")]
     fn add_vfio_user_device(
         &mut self,
         device_cfg: &mut UserDeviceConfig,
@@ -3631,13 +3688,13 @@ impl DeviceManager {
             .map(|ic| ic.clone() as Arc<Mutex<dyn InterruptController>>)
     }
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_arch = "x86_64", feature = "pci_support"))]
     // Used to provide a fast path for handling PIO exits
     pub fn pci_config_io(&self) -> Arc<Mutex<PciConfigIo>> {
         Arc::clone(self.pci_segments[0].pci_config_io.as_ref().unwrap())
     }
 
-    #[cfg(feature = "acpi")]
+    #[cfg(all(feature = "acpi", feature = "pci_support"))]
     pub(crate) fn pci_segments(&self) -> &Vec<PciSegment> {
         &self.pci_segments
     }
@@ -3748,6 +3805,7 @@ impl DeviceManager {
         })
     }
 
+    #[cfg(feature = "pci_support")]
     pub fn add_user_device(
         &mut self,
         device_cfg: &mut UserDeviceConfig,
@@ -3763,6 +3821,7 @@ impl DeviceManager {
         })
     }
 
+    #[cfg(feature = "pci_support")]
     pub fn remove_device(&mut self, id: String) -> DeviceManagerResult<()> {
         // The node can be directly a PCI node in case the 'id' refers to a
         // VFIO device or a virtio-pci one.
@@ -3822,6 +3881,7 @@ impl DeviceManager {
         Ok(())
     }
 
+    #[cfg(feature = "pci_support")]
     pub fn eject_device(&mut self, pci_segment_id: u16, device_id: u8) -> DeviceManagerResult<()> {
         info!(
             "Ejecting device_id = {} on segment_id={}",

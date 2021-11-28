@@ -377,7 +377,7 @@ struct VmOps {
     mmio_bus: Arc<Bus>,
     #[cfg(target_arch = "x86_64")]
     timestamp: std::time::Instant,
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_arch = "x86_64", feature = "pci_support"))]
     pci_config_io: Arc<Mutex<dyn BusDevice>>,
 }
 
@@ -436,15 +436,19 @@ impl VmmOps for VmOps {
 
     #[cfg(target_arch = "x86_64")]
     fn pio_read(&self, port: u64, data: &mut [u8]) -> hypervisor::vm::Result<()> {
-        use pci::{PCI_CONFIG_IO_PORT, PCI_CONFIG_IO_PORT_SIZE};
+        #[cfg(feature = "pci_support")]
+        {
+            use pci::{PCI_CONFIG_IO_PORT, PCI_CONFIG_IO_PORT_SIZE};
 
-        if (PCI_CONFIG_IO_PORT..(PCI_CONFIG_IO_PORT + PCI_CONFIG_IO_PORT_SIZE)).contains(&port) {
-            self.pci_config_io.lock().unwrap().read(
-                PCI_CONFIG_IO_PORT,
-                port - PCI_CONFIG_IO_PORT,
-                data,
-            );
-            return Ok(());
+            if (PCI_CONFIG_IO_PORT..(PCI_CONFIG_IO_PORT + PCI_CONFIG_IO_PORT_SIZE)).contains(&port)
+            {
+                self.pci_config_io.lock().unwrap().read(
+                    PCI_CONFIG_IO_PORT,
+                    port - PCI_CONFIG_IO_PORT,
+                    data,
+                );
+                return Ok(());
+            }
         }
 
         if let Err(vm_device::BusError::MissingAddressRange) = self.io_bus.read(port, data) {
@@ -462,13 +466,17 @@ impl VmmOps for VmOps {
             return Ok(());
         }
 
-        if (PCI_CONFIG_IO_PORT..(PCI_CONFIG_IO_PORT + PCI_CONFIG_IO_PORT_SIZE)).contains(&port) {
-            self.pci_config_io.lock().unwrap().write(
-                PCI_CONFIG_IO_PORT,
-                port - PCI_CONFIG_IO_PORT,
-                data,
-            );
-            return Ok(());
+        #[cfg(feature = "pci_support")]
+        {
+            if (PCI_CONFIG_IO_PORT..(PCI_CONFIG_IO_PORT + PCI_CONFIG_IO_PORT_SIZE)).contains(&port)
+            {
+                self.pci_config_io.lock().unwrap().write(
+                    PCI_CONFIG_IO_PORT,
+                    port - PCI_CONFIG_IO_PORT,
+                    data,
+                );
+                return Ok(());
+            }
         }
 
         match self.io_bus.write(port, data) {
@@ -574,7 +582,7 @@ impl Vm {
         // Create the VmOps structure, which implements the VmmOps trait.
         // And send it to the hypervisor.
 
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(all(target_arch = "x86_64", feature = "pci_support"))]
         let pci_config_io =
             device_manager.lock().unwrap().pci_config_io() as Arc<Mutex<dyn BusDevice>>;
         let vm_ops: Arc<dyn VmmOps> = Arc::new(VmOps {
@@ -584,7 +592,7 @@ impl Vm {
             mmio_bus,
             #[cfg(target_arch = "x86_64")]
             timestamp: std::time::Instant::now(),
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(all(target_arch = "x86_64", feature = "pci_support"))]
             pci_config_io,
         });
 
@@ -1418,6 +1426,12 @@ impl Vm {
         Ok(pci_device_info)
     }
 
+    #[cfg(not(feature = "pci_support"))]
+    pub fn add_user_device(&mut self, mut _device_cfg: UserDeviceConfig) -> Result<PciDeviceInfo> {
+        Err(Error::NoPciSupport)
+    }
+
+    #[cfg(feature = "pci_support")]
     pub fn add_user_device(&mut self, mut device_cfg: UserDeviceConfig) -> Result<PciDeviceInfo> {
         {
             // Validate on a clone of the config
@@ -1448,7 +1462,12 @@ impl Vm {
 
         Ok(pci_device_info)
     }
+    #[cfg(not(feature = "pci_support"))]
+    pub fn remove_device(&mut self, _id: String) -> Result<()> {
+        Err(Error::NoPciSupport)
+    }
 
+    #[cfg(feature = "pci_support")]
     pub fn remove_device(&mut self, id: String) -> Result<()> {
         self.device_manager
             .lock()
