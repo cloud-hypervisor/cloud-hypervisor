@@ -56,6 +56,9 @@ const SNAPSHOT_FILENAME: &str = "memory-ranges";
 #[cfg(target_arch = "x86_64")]
 const X86_64_IRQ_BASE: u32 = 5;
 
+#[cfg(target_arch = "x86_64")]
+const SGX_PAGE_SIZE: u64 = 1 << 12;
+
 const HOTPLUG_COUNT: usize = 8;
 
 // Memory policy constants
@@ -1617,7 +1620,7 @@ impl MemoryManager {
             if epc_section.size == 0 {
                 return Err(Error::EpcSectionSizeInvalid);
             }
-            if epc_section.size & 0x0fff != 0 {
+            if epc_section.size & (SGX_PAGE_SIZE - 1) != 0 {
                 return Err(Error::EpcSectionSizeInvalid);
             }
 
@@ -1625,8 +1628,10 @@ impl MemoryManager {
         }
 
         // Place the SGX EPC region on a 4k boundary between the RAM and the device area
-        let epc_region_start =
-            GuestAddress(((self.start_of_device_area.0 + 0xfff) / 0x1000) * 0x1000);
+        let epc_region_start = GuestAddress(
+            ((self.start_of_device_area.0 + SGX_PAGE_SIZE - 1) / SGX_PAGE_SIZE) * SGX_PAGE_SIZE,
+        );
+
         self.start_of_device_area = epc_region_start
             .checked_add(epc_region_size)
             .ok_or(Error::GuestAddressOverFlow)?;
