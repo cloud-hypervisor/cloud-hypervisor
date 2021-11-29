@@ -70,9 +70,7 @@ use std::{result, str, thread};
 use vm_device::Bus;
 #[cfg(target_arch = "x86_64")]
 use vm_device::BusDevice;
-#[cfg(any(target_arch = "aarch64", feature = "tdx"))]
-use vm_memory::Address;
-use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
+use vm_memory::{Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
 #[cfg(feature = "tdx")]
 use vm_memory::{GuestMemory, GuestMemoryRegion};
 use vm_migration::{
@@ -237,6 +235,18 @@ pub enum Error {
 
     /// Kernel lacks PVH header
     KernelMissingPvhHeader,
+
+    /// Failed to allocate firmware RAM
+    AllocateFirmwareMemory(MemoryManagerError),
+
+    /// Error manipulating firmware file
+    FirmwareFile(std::io::Error),
+
+    /// Firmware too big
+    FirmwareTooLarge,
+
+    // Failed to copy to memory
+    FirmwareLoad(vm_memory::GuestMemoryError),
 
     /// Error doing I/O on TDX firmware file
     #[cfg(feature = "tdx")]
@@ -961,6 +971,7 @@ impl Vm {
 
     #[cfg(target_arch = "x86_64")]
     fn load_kernel(&mut self) -> Result<EntryPoint> {
+        use linux_loader::loader::{elf::Error::InvalidElfMagicNumber, Error::Elf};
         info!("Loading kernel");
         let cmdline = self.get_cmdline()?;
         let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
@@ -973,9 +984,41 @@ impl Vm {
             Some(arch::layout::HIGH_RAM_START),
         ) {
             Ok(entry_addr) => entry_addr,
-            Err(e) => {
-                return Err(Error::KernelLoad(e));
-            }
+            Err(e) => match e {
+                Elf(InvalidElfMagicNumber) => {
+                    // Not an ELF header - assume raw binary data / firmware
+                    let size = kernel.seek(SeekFrom::End(0)).map_err(Error::FirmwareFile)?;
+
+                    // The OVMF firmware is as big as you might expect and it's 4MiB so limit to that
+                    if size > 4 << 20 {
+                        return Err(Error::FirmwareTooLarge);
+                    }
+
+                    // Loaded at the end of the 4GiB
+                    let load_address = GuestAddress(4 << 30)
+                        .checked_sub(size)
+                        .ok_or(Error::FirmwareTooLarge)?;
+
+                    self.memory_manager
+                        .lock()
+                        .unwrap()
+                        .add_ram_region(load_address, size as usize)
+                        .map_err(Error::AllocateFirmwareMemory)?;
+
+                    kernel
+                        .seek(SeekFrom::Start(0))
+                        .map_err(Error::FirmwareFile)?;
+                    guest_memory
+                        .memory()
+                        .read_exact_from(load_address, &mut kernel, size as usize)
+                        .map_err(Error::FirmwareLoad)?;
+
+                    return Ok(EntryPoint { entry_addr: None });
+                }
+                _ => {
+                    return Err(Error::KernelLoad(e));
+                }
+            },
         };
 
         linux_loader::loader::load_cmdline(mem.deref(), arch::layout::CMDLINE_START, &cmdline)
@@ -984,7 +1027,9 @@ impl Vm {
         if let PvhEntryPresent(entry_addr) = entry_addr.pvh_boot_cap {
             // Use the PVH kernel entry point to boot the guest
             info!("Kernel loaded: entry_addr = 0x{:x}", entry_addr.0);
-            Ok(EntryPoint { entry_addr })
+            Ok(EntryPoint {
+                entry_addr: Some(entry_addr),
+            })
         } else {
             Err(Error::KernelMissingPvhHeader)
         }
