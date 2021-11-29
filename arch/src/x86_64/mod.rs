@@ -57,7 +57,7 @@ const KVM_FEATURE_STEAL_TIME_BIT: u8 = 5;
 /// is to be used to configure the guest initial state.
 pub struct EntryPoint {
     /// Address in guest memory where the guest must start execution
-    pub entry_addr: GuestAddress,
+    pub entry_addr: Option<GuestAddress>,
 }
 
 const E820_RAM: u32 = 1;
@@ -741,11 +741,12 @@ pub fn configure_vcpu(
 
     regs::setup_msrs(fd).map_err(Error::MsrsConfiguration)?;
     if let Some(kernel_entry_point) = kernel_entry_point {
-        // Safe to unwrap because this method is called after the VM is configured
-        regs::setup_regs(fd, kernel_entry_point.entry_addr.raw_value())
-            .map_err(Error::RegsConfiguration)?;
-        regs::setup_fpu(fd).map_err(Error::FpuConfiguration)?;
-        regs::setup_sregs(&vm_memory.memory(), fd).map_err(Error::SregsConfiguration)?;
+        if let Some(entry_addr) = kernel_entry_point.entry_addr {
+            // Safe to unwrap because this method is called after the VM is configured
+            regs::setup_regs(fd, entry_addr.raw_value()).map_err(Error::RegsConfiguration)?;
+            regs::setup_fpu(fd).map_err(Error::FpuConfiguration)?;
+            regs::setup_sregs(&vm_memory.memory(), fd).map_err(Error::SregsConfiguration)?;
+        }
     }
     interrupts::set_lint(fd).map_err(|e| Error::LocalIntConfiguration(e.into()))?;
     Ok(())
