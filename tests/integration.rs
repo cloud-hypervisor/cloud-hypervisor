@@ -2753,6 +2753,112 @@ mod tests {
         }
 
         #[test]
+        #[cfg(not(feature = "mshv"))]
+        fn test_pci_multiple_segments() {
+            let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(Box::new(focal));
+
+            // Prepare another disk file for the virtio-disk device
+            let test_disk_path = String::from(
+                guest
+                    .tmp_dir
+                    .as_path()
+                    .join("test-disk.raw")
+                    .to_str()
+                    .unwrap(),
+            );
+            assert!(exec_host_command_status(
+                format!("truncate {} -s 4M", test_disk_path).as_str()
+            )
+            .success());
+            assert!(
+                exec_host_command_status(format!("mkfs.ext4 {}", test_disk_path).as_str())
+                    .success()
+            );
+
+            let mut cmd = GuestCommand::new(&guest);
+            cmd.args(&["--cpus", "boot=1"])
+                .args(&["--memory", "size=512M"])
+                .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+                .args(&["--platform", "num_pci_segments=16"])
+                .args(&[
+                    "--disk",
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
+                    format!("path={},pci_segment=15", test_disk_path).as_str(),
+                ])
+                .capture_output()
+                .default_net();
+
+            let mut child = cmd.spawn().unwrap();
+
+            guest.wait_vm_boot(None).unwrap();
+
+            let grep_cmd = "lspci | grep \"Host bridge\" | wc -l";
+
+            let r = std::panic::catch_unwind(|| {
+                // There should be 16 PCI host bridges in the guest.
+                assert_eq!(
+                    guest
+                        .ssh_command(grep_cmd)
+                        .unwrap()
+                        .trim()
+                        .parse::<u32>()
+                        .unwrap_or_default(),
+                    16
+                );
+
+                // Check both if /dev/vdc exists and if the block size is 4M.
+                assert_eq!(
+                    guest
+                        .ssh_command("lsblk | grep vdc | grep -c 4M")
+                        .unwrap()
+                        .trim()
+                        .parse::<u32>()
+                        .unwrap_or_default(),
+                    1
+                );
+
+                // Mount the device.
+                guest.ssh_command("mkdir mount_image").unwrap();
+                guest
+                    .ssh_command("sudo mount -o rw -t ext4 /dev/vdc mount_image/")
+                    .unwrap();
+                // Grant all users with write permission.
+                guest.ssh_command("sudo chmod a+w mount_image/").unwrap();
+
+                // Write something to the device.
+                guest
+                    .ssh_command("sudo echo \"bar\" >> mount_image/foo")
+                    .unwrap();
+
+                // Check the content of the block device. The file "foo" should
+                // contain "bar".
+                assert_eq!(
+                    guest
+                        .ssh_command("sudo cat mount_image/foo")
+                        .unwrap()
+                        .trim(),
+                    "bar"
+                );
+            });
+
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+
+            handle_child_output(r, &output);
+        }
+
+        #[test]
         fn test_direct_kernel_boot() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
@@ -3268,7 +3374,7 @@ mod tests {
         }
 
         #[test]
-        #[cfg(all(not(feature = "mshv"), target_arch = "x86_64"))]
+        #[cfg(not(feature = "mshv"))]
         fn test_virtio_fs_multi_segment() {
             test_virtio_fs(
                 true,
