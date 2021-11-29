@@ -372,7 +372,7 @@ impl VmOps {
     fn log_debug_ioport(&self, code: u8) {
         let elapsed = self.timestamp.elapsed();
 
-        info!(
+        debug!(
             "[{} code 0x{:x}] {}.{:>06} seconds",
             DebugIoPortRange::from_u8(code),
             code,
@@ -410,9 +410,9 @@ impl VmmOps for VmOps {
                 warn!("Guest MMIO write to unregistered address 0x{:x}", gpa);
             }
             Ok(Some(barrier)) => {
-                info!("Waiting for barrier");
+                debug!("Waiting for barrier");
                 barrier.wait();
-                info!("Barrier released");
+                debug!("Barrier released");
             }
             _ => {}
         };
@@ -461,9 +461,9 @@ impl VmmOps for VmOps {
                 warn!("Guest PIO write to unregistered address 0x{:x}", port);
             }
             Ok(Some(barrier)) => {
-                info!("Waiting for barrier");
+                debug!("Waiting for barrier");
                 barrier.wait();
-                info!("Barrier released");
+                debug!("Barrier released");
             }
             _ => {}
         };
@@ -525,7 +525,7 @@ impl Vm {
             .validate()
             .map_err(Error::ConfigValidation)?;
 
-        info!("Booting VM from config: {:?}", &config);
+        debug!("Booting VM from config: {:?}", &config);
 
         // Create NUMA nodes based on NumaConfig.
         #[cfg(any(target_arch = "aarch64", feature = "acpi"))]
@@ -905,7 +905,7 @@ impl Vm {
             .read_from(address, &mut initramfs, size)
             .map_err(|_| Error::InitramfsLoad)?;
 
-        info!("Initramfs loaded: address = 0x{:x}", address.0);
+        debug!("Initramfs loaded: address = 0x{:x}", address.0);
         Ok(arch::InitramfsConfig { address, size })
     }
 
@@ -961,7 +961,7 @@ impl Vm {
 
     #[cfg(target_arch = "x86_64")]
     fn load_kernel(&mut self) -> Result<EntryPoint> {
-        info!("Loading kernel");
+        debug!("Loading kernel");
         let cmdline = self.get_cmdline()?;
         let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
         let mem = guest_memory.memory();
@@ -983,7 +983,7 @@ impl Vm {
 
         if let PvhEntryPresent(entry_addr) = entry_addr.pvh_boot_cap {
             // Use the PVH kernel entry point to boot the guest
-            info!("Kernel loaded: entry_addr = 0x{:x}", entry_addr.0);
+            debug!("Kernel loaded: entry_addr = 0x{:x}", entry_addr.0);
             Ok(EntryPoint { entry_addr })
         } else {
             Err(Error::KernelMissingPvhHeader)
@@ -992,7 +992,7 @@ impl Vm {
 
     #[cfg(target_arch = "x86_64")]
     fn configure_system(&mut self, #[cfg(feature = "acpi")] rsdp_addr: GuestAddress) -> Result<()> {
-        info!("Configuring system");
+        debug!("Configuring system");
         let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
 
         let initramfs_config = match self.initramfs {
@@ -1657,14 +1657,14 @@ impl Vm {
         for section in sections {
             // No need to allocate if the section falls within guest RAM ranges
             if boot_guest_memory.address_in_range(GuestAddress(section.address)) {
-                info!(
+                debug!(
                     "Not allocating TDVF Section: {:x?} since it is already part of guest RAM",
                     section
                 );
                 continue;
             }
 
-            info!("Allocating TDVF Section: {:x?}", section);
+            debug!("Allocating TDVF Section: {:x?}", section);
             self.memory_manager
                 .lock()
                 .unwrap()
@@ -1683,10 +1683,10 @@ impl Vm {
         let mem = guest_memory.memory();
         let mut hob_offset = None;
         for section in sections {
-            info!("Populating TDVF Section: {:x?}", section);
+            debug!("Populating TDVF Section: {:x?}", section);
             match section.r#type {
                 TdvfSectionType::Bfv | TdvfSectionType::Cfv => {
-                    info!("Copying section to guest memory");
+                    debug!("Copying section to guest memory");
                     firmware_file
                         .seek(SeekFrom::Start(section.data_offset as u64))
                         .map_err(Error::LoadTdvf)?;
@@ -1897,7 +1897,7 @@ impl Vm {
     }
 
     pub fn boot(&mut self) -> Result<()> {
-        info!("Booting VM");
+        debug!("Booting VM");
         event!("vm", "booting");
         let current_state = self.get_state()?;
         if current_state == VmState::Paused {
@@ -1942,7 +1942,7 @@ impl Vm {
                 &self.memory_manager,
                 &self.numa_nodes,
             );
-            info!("Created ACPI tables: rsdp_addr = 0x{:x}", rsdp_addr.0);
+            debug!("Created ACPI tables: rsdp_addr = 0x{:x}", rsdp_addr.0);
 
             rsdp_addr
         };
