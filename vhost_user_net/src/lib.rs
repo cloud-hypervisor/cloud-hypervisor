@@ -31,9 +31,9 @@ type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
 
 #[derive(Debug)]
 pub enum Error {
-    /// Failed to create kill eventfd
+    /// Failed to create kill eventfd.
     CreateKillEventFd(io::Error),
-    /// Failed to parse configuration string
+    /// Failed to parse configuration string.
     FailedConfigParse(OptionParserError),
     /// Failed to signal used queue.
     FailedSignalingUsedQueue(io::Error),
@@ -41,13 +41,13 @@ pub enum Error {
     HandleEventNotEpollIn,
     /// Failed to handle unknown event.
     HandleEventUnknownEvent,
-    /// Open tap device failed.
+    /// Failed to open tap device.
     OpenTap(OpenTapError),
-    /// No socket provided
+    /// No socket provided.
     SocketParameterMissing,
-    /// Underlying QueuePair error
+    /// Underlying QueuePair error.
     NetQueuePair(net_util::NetQueuePairError),
-    /// Failed registering the TAP listener
+    /// Failed to register the TAP listener.
     RegisterTapListener(io::Error),
 }
 
