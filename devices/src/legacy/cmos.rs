@@ -121,6 +121,9 @@ impl BusDevice for Cmos {
                     0x09 => to_bcd((year % 100) as u8),
                     // Bit 5 for 32kHz clock. Bit 7 for Update in Progress
                     0x0a => 1 << 5 | (update_in_progress as u8) << 7,
+                    // Bit 0-6 are reserved and must be 0.
+                    // Bit 7 must be 1 (CMOS has power)
+                    0x0d => 1 << 7,
                     0x32 => to_bcd(((year + 1900) / 100) as u8),
                     _ => {
                         // self.index is always guaranteed to be in range via INDEX_MASK.
