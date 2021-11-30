@@ -331,6 +331,7 @@ pub mod kvm {
     use super::*;
     use hypervisor::kvm::KVM_MSI_VALID_DEVID;
     use hypervisor::kvm::{kvm_irq_routing_entry, KVM_IRQ_ROUTING_IRQCHIP, KVM_IRQ_ROUTING_MSI};
+    use pci::PciBdf;
 
     type KvmRoutingEntry = RoutingEntry<kvm_irq_routing_entry>;
     pub type KvmMsiInterruptManager = MsiInterruptManager<kvm_irq_routing_entry>;
@@ -353,8 +354,26 @@ pub mod kvm {
                 kvm_route.u.msi.data = cfg.data;
 
                 if vm.check_extension(hypervisor::Cap::MsiDevid) {
+                    // On AArch64, there is limitation on the range of the 'devid',
+                    // it can not be greater than 65536 (the max of u16).
+                    //
+                    // BDF can not be used directly, because 'segment' is in high
+                    // 16 bits. The layout of the u32 BDF is:
+                    // |---- 16 bits ----|-- 8 bits --|-- 5 bits --|-- 3 bits --|
+                    // |      segment    |     bus    |   device   |  function  |
+                    //
+                    // Now that we support 1 bus only in a segment, we can build a
+                    // 'devid' by replacing the 'bus' bits with the low 8 bits of
+                    // 'segment' data.
+                    // This way we can resolve the range checking problem and give
+                    // different `devid` to all the devices. Limitation is that at
+                    // most 256 segments can be supported.
+                    //
+                    let bdf: PciBdf = PciBdf::from(cfg.devid);
+                    let modified_bdf: PciBdf =
+                        PciBdf::new(0, bdf.segment() as u8, bdf.device(), bdf.function());
                     kvm_route.flags = KVM_MSI_VALID_DEVID;
-                    kvm_route.u.msi.__bindgen_anon_1.devid = cfg.devid;
+                    kvm_route.u.msi.__bindgen_anon_1.devid = modified_bdf.into();
                 }
 
                 let kvm_entry = KvmRoutingEntry {
