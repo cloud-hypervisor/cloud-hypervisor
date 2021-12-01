@@ -201,7 +201,7 @@ pipeline{
 						stage ('Download assets') {
 							steps {
 								sh "mkdir ${env.HOME}/workloads"
-								sh 'az storage blob download --container-name private-images --file "$HOME/workloads/OVMF-4b47d0c6c8.fd" --name OVMF-4b47d0c6c8.fd --connection-string "$AZURE_CONNECTION_STRING"'
+								sh 'az storage blob download --container-name private-images --file "$HOME/workloads/OVMF-83041af43c.fd" --name OVMF-83041af43c.fd --connection-string "$AZURE_CONNECTION_STRING"'
 								sh 'az storage blob download --container-name private-images --file "$HOME/workloads/windows-server-2019.raw" --name windows-server-2019.raw --connection-string "$AZURE_CONNECTION_STRING"'
 							}
 						}
