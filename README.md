@@ -58,6 +58,12 @@ Cloud Hypervisor supports `64-bit Linux` and Windows 10/Windows Server 2019.
 
 # 2. Getting Started
 
+Below sections describe how to build and run Cloud Hypervisor on the `x86_64`
+platform. For getting started on the `AArch64` platform, please refer to the
+[Arm64 documentation](docs/arm64.md).
+
+## Preparation
+
 We create a folder to build and run `cloud-hypervisor` at `$HOME/cloud-hypervisor`
 
 ```shell

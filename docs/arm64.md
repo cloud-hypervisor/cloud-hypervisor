@@ -1,10 +1,16 @@
 # How to build and test Cloud Hypervisor on AArch64
 
-This document introduces how to build and test Cloud Hypervisor on AArch64 servers. Currently Cloud Hypervisor cannot be tested on Raspberry PI. Because on AArch64, Cloud Hypervisor requires GICv3-ITS device for PCIe MSI interrupt handling. But GICv3-ITS has not been equipped on any Raspberry PI product so far.
+This document introduces how to build and test Cloud Hypervisor on AArch64
+servers. Currently Cloud Hypervisor cannot be tested on Raspberry PI. Because
+on AArch64, Cloud Hypervisor requires GICv3-ITS device for PCIe MSI interrupt
+handling. But GICv3-ITS has not been equipped on any Raspberry PI product so
+far.
 
-Now Cloud Hypervisor supports 2 ways of booting on AArch64: UEFI booting and direct-kernel booting. The document covers both of the ways.
+Now Cloud Hypervisor supports 2 ways of booting on AArch64: UEFI booting and
+direct-kernel booting. The document covers both of the ways.
 
-All the steps are based on Ubuntu. We use the Ubuntu cloud image for guest VM disk.
+All the steps are based on Ubuntu. We use the Ubuntu cloud image for guest VM
+disk.
 
 ## Getting started
 
@@ -82,19 +88,29 @@ $ build -a AARCH64 -t GCC5 -p ArmVirtPkg/ArmVirtCloudHv.dsc -b RELEASE
 $ popd
 ```
 
-If the build goes well, the EDK2 binary is available at `edk2/Build/ArmVirtCloudHv-AARCH64/RELEASE_GCC5/FV/CLOUDHV_EFI.fd`.
+If the build goes well, the EDK2 binary is available at
+`edk2/Build/ArmVirtCloudHv-AARCH64/RELEASE_GCC5/FV/CLOUDHV_EFI.fd`.
 
 ### Booting the guest VM
 
 ```bash
 $ pushd $CLOUDH
-$ sudo RUST_BACKTRACE=1 $CLOUDH/cloud-hypervisor/target/debug/cloud-hypervisor --api-socket /tmp/cloud-hypervisor.sock --kernel $CLOUDH/edk2/Build/ArmVirtCloudHv-AARCH64/RELEASE_GCC5/FV/CLOUDHV_EFI.fd --disk path=$CLOUDH/focal-server-cloudimg-arm64.raw --cpus boot=4 --memory size=4096M --serial tty --console off --log-file log.log -vvv --net tap=,mac=12:34:56:78:90:01,ip=192.168.1.1,mask=255.255.255.0
+$ sudo RUST_BACKTRACE=1 $CLOUDH/cloud-hypervisor/target/debug/cloud-hypervisor \
+           --api-socket /tmp/cloud-hypervisor.sock \
+           --kernel $CLOUDH/edk2/Build/ArmVirtCloudHv-AARCH64/RELEASE_GCC5/FV/CLOUDHV_EFI.fd \
+           --disk path=$CLOUDH/focal-server-cloudimg-arm64.raw \
+           --cpus boot=4 \
+           --memory size=4096M \
+           --net tap=,mac=12:34:56:78:90:01,ip=192.168.1.1,mask=255.255.255.0 \
+           --serial tty \
+           --console off
 $ popd
 ```
 
 ## Direct-kernel booting
 
-Alternativelly, you can build your own kernel for guest VM. This way, UEFI is not involved and ACPI cannot be enabled.
+Alternativelly, you can build your own kernel for guest VM. This way, UEFI is
+not involved and ACPI cannot be enabled.
 
 ### Building kernel
 
@@ -111,6 +127,15 @@ $ popd
 
 ```bash
 $ pushd $CLOUDH
-$ sudo $CLOUDH/cloud-hypervisor/target/debug/cloud-hypervisor --api-socket /tmp/cloud-hypervisor.sock --kernel $CLOUDH/linux/arch/arm64/boot/Image --disk path=focal-server-cloudimg-arm64.raw --cmdline "keep_bootcon console=ttyAMA0 reboot=k panic=1 root=/dev/vda1 rw" --cpus boot=4 --memory size=4096M --serial tty --console off --log-file log.log -vvv --net "tap=,mac=,ip=,mask="
+$ sudo $CLOUDH/cloud-hypervisor/target/debug/cloud-hypervisor \
+           --api-socket /tmp/cloud-hypervisor.sock \
+           --kernel $CLOUDH/linux/arch/arm64/boot/Image \
+           --disk path=focal-server-cloudimg-arm64.raw \
+           --cmdline "keep_bootcon console=ttyAMA0 reboot=k panic=1 root=/dev/vda1 rw" \
+           --cpus boot=4 \
+           --memory size=4096M \
+           --net tap=,mac=12:34:56:78:90:01,ip=192.168.1.1,mask=255.255.255.0 \
+           --serial tty \
+           --console off
 $ popd
 ```
