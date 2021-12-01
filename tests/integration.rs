@@ -63,7 +63,7 @@ mod tests {
         pub const FOCAL_IMAGE_NAME_VHDX: &str =
             "focal-server-cloudimg-amd64-custom-20210609-0.vhdx";
         pub const WINDOWS_IMAGE_NAME: &str = "windows-server-2019.raw";
-        pub const OVMF_NAME: &str = "OVMF-4b47d0c6c8.fd";
+        pub const OVMF_NAME: &str = "OVMF-83041af43c.fd";
         pub const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'IO-APIC.*ttyS0' /proc/interrupts || true";
     }
 

@@ -17,7 +17,7 @@ cd edk2
 . edksetup.sh
 git submodule update --init
 
-echo "ACTIVE_PLATFORM=OvmfPkg/OvmfCh.dsc" >> Conf/target.txt
+echo "ACTIVE_PLATFORM=OvmfPkg/OvmfPkgX64.dsc" >> Conf/target.txt
 echo "TARGET_ARCH=X64" >> Conf/target.txt
 echo "TOOL_CHAIN_TAG=GCC5" >> Conf/target.txt
 
@@ -25,7 +25,7 @@ make -C ./BaseTools
 build
 ```
 
-After the successful build, the resulting firmware binaries are available under `Build/OvmfCh/DEBUG_GCC5/FV` underneath the edk2 checkout.
+After the successful build, the resulting firmware binaries are available under `Build/OvmfX64/DEBUG_GCC5/FV` underneath the edk2 checkout.
 
 ## Using OVMF Binaries
 
@@ -57,7 +57,7 @@ cd edk2
 git submodule update --init --recursive
 cp ../seabios/out/Csm16.bin OvmfPkg/Csm/Csm16/
 
-echo "ACTIVE_PLATFORM=OvmfPkg/OvmfCh.dsc" >> Conf/target.txt
+echo "ACTIVE_PLATFORM=OvmfPkg/OvmfPkgX64.dsc" >> Conf/target.txt
 echo "TARGET_ARCH=X64" >> Conf/target.txt
 echo "TOOL_CHAIN_TAG=GCC5" >> Conf/target.txt
 

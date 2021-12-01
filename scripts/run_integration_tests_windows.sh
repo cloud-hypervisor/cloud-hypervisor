@@ -14,7 +14,7 @@ if [ "$hypervisor" = "mshv" ] ;  then
     features_test="--no-default-features --features mshv,common,integration_tests"
 fi
 WIN_IMAGE_FILE="/root/workloads/windows-server-2019.raw"
-OVMF_FW_FILE="/root/workloads/OVMF-4b47d0c6c8.fd"
+OVMF_FW_FILE="/root/workloads/OVMF-83041af43c.fd"
 BUILD_TARGET="$(uname -m)-unknown-linux-${CH_LIBC}"
 CFLAGS=""
 TARGET_CC=""
