@@ -22,9 +22,9 @@ pipeline{
 			}
 		}
 		stage ('Build') {
-            		parallel {
+            parallel {
 				stage ('Worker build') {
-					agent { node { label 'hirsute' } }
+					agent { node { label 'impish' } }
 					stages {
 						stage ('Checkout') {
 							steps {
@@ -83,7 +83,7 @@ pipeline{
 					}
 				}
 				stage ('Worker build (musl)') {
-					agent { node { label 'hirsute' } }
+					agent { node { label 'impish' } }
 					stages {
 						stage ('Checkout') {
 							steps {
@@ -179,7 +179,7 @@ pipeline{
 					}
 				}
 				stage ('Worker build - Windows guest') {
-					agent { node { label 'hirsute' } }
+					agent { node { label 'impish' } }
 					environment {
         					AZURE_CONNECTION_STRING = credentials('46b4e7d6-315f-4cc1-8333-b58780863b9b')
 					}
@@ -189,9 +189,17 @@ pipeline{
 								checkout scm
 							}
 						}
+						stage ('Install azure-cli') {
+							steps {
+								sh "sudo apt install -y ca-certificates curl apt-transport-https lsb-release gnupg"
+								sh "curl -sL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null"
+								sh "echo \"deb [arch=amd64] https://packages.microsoft.com/repos/azure-cli/ hirsute main\" | sudo tee /etc/apt/sources.list.d/azure-cli.list"
+								sh "sudo apt update"
+								sh "sudo apt install -y azure-cli"
+							}
+						}
 						stage ('Download assets') {
 							steps {
-								sh "sudo apt install -y azure-cli"
 								sh "mkdir ${env.HOME}/workloads"
 								sh 'az storage blob download --container-name private-images --file "$HOME/workloads/OVMF-4b47d0c6c8.fd" --name OVMF-4b47d0c6c8.fd --connection-string "$AZURE_CONNECTION_STRING"'
 								sh 'az storage blob download --container-name private-images --file "$HOME/workloads/windows-server-2019.raw" --name windows-server-2019.raw --connection-string "$AZURE_CONNECTION_STRING"'
@@ -216,7 +224,7 @@ pipeline{
 					}
 				}
 				stage ('Worker build - Live Migration') {
-					agent { node { label 'hirsute-small' } }
+					agent { node { label 'impish-small' } }
 					stages {
 						stage ('Checkout') {
 							steps {
