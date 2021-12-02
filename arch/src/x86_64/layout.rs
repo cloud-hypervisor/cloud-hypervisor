@@ -79,9 +79,9 @@ pub const HIGH_RAM_START: GuestAddress = GuestAddress(0x100000);
 
 // == No fixed addresses in the "High RAM" range ==
 
-// ** 32-bit reserved area (start: 3GiB, length: 1GiB) **
+// ** 32-bit reserved area (start: 3GiB, length: 896MiB) **
 pub const MEM_32BIT_RESERVED_START: GuestAddress = GuestAddress(0xc000_0000);
-pub const MEM_32BIT_RESERVED_SIZE: u64 = 1024 << 20;
+pub const MEM_32BIT_RESERVED_SIZE: u64 = PCI_MMCONFIG_SIZE + MEM_32BIT_DEVICES_SIZE;
 
 // == Fixed constants within the "32-bit reserved" range ==
 
