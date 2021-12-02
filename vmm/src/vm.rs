@@ -1021,6 +1021,12 @@ impl Vm {
                         .checked_sub(size)
                         .ok_or(Error::FirmwareTooLarge)?;
 
+                    info!(
+                        "Loading RAW firmware at 0x{:x} (size: {})",
+                        load_address.raw_value(),
+                        size
+                    );
+
                     self.memory_manager
                         .lock()
                         .unwrap()
