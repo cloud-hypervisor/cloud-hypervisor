@@ -5975,6 +5975,7 @@ mod tests {
         }
 
         #[cfg(target_arch = "x86_64")]
+        #[ignore]
         #[test]
         fn test_vfio_user() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
