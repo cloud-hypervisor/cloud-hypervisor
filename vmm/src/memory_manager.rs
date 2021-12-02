@@ -1444,6 +1444,11 @@ impl MemoryManager {
             log_dirty,
         );
 
+        info!(
+            "Creating userspace mapping: {:x} -> {:x} {:x}, slot {}",
+            guest_phys_addr, userspace_addr, memory_size, slot
+        );
+
         self.vm
             .create_user_memory_region(mem_region)
             .map_err(Error::CreateUserMemoryRegion)?;
