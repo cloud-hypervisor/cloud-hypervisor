@@ -11,7 +11,6 @@
 use crate::arch::x86::{msr_index, SegmentRegisterOps, MTRR_ENABLE, MTRR_MEM_TYPE_WB};
 use crate::kvm::{Cap, Kvm, KvmError, KvmResult};
 use serde_derive::{Deserialize, Serialize};
-use vm_memory::GuestAddress;
 
 ///
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
@@ -92,8 +91,6 @@ impl SegmentRegisterOps for SegmentRegister {
     }
 }
 
-pub const KVM_TSS_ADDRESS: GuestAddress = GuestAddress(0xfffb_d000);
-
 pub fn boot_msr_entries() -> MsrEntries {
     MsrEntries::from_entries(&[
         msr!(msr_index::MSR_IA32_SYSENTER_CS),
@@ -126,6 +123,9 @@ pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
     }
     if !kvm.check_extension(Cap::SplitIrqchip) {
         return Err(KvmError::CapabilityMissing(Cap::SplitIrqchip));
+    }
+    if !kvm.check_extension(Cap::SetTssAddr) {
+        return Err(KvmError::CapabilityMissing(Cap::SetTssAddr));
     }
     Ok(())
 }
