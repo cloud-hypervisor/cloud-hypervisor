@@ -31,6 +31,8 @@ use crate::{
 };
 use anyhow::anyhow;
 use arch::get_host_cpu_phys_bits;
+#[cfg(target_arch = "x86_64")]
+use arch::layout::KVM_TSS_START;
 #[cfg(all(feature = "tdx", feature = "acpi"))]
 use arch::x86_64::tdx::TdVmmDataRegionType;
 #[cfg(feature = "tdx")]
@@ -753,7 +755,11 @@ impl Vm {
         let vm = hypervisor.create_vm().unwrap();
 
         #[cfg(target_arch = "x86_64")]
-        vm.enable_split_irq().unwrap();
+        {
+            vm.set_tss_address(KVM_TSS_START.0 as usize).unwrap();
+            vm.enable_split_irq().unwrap();
+        }
+
         let phys_bits = physical_bits(config.lock().unwrap().cpus.max_phys_bits);
 
         #[cfg(target_arch = "x86_64")]
@@ -810,8 +816,13 @@ impl Vm {
     ) -> Result<Self> {
         hypervisor.check_required_extensions().unwrap();
         let vm = hypervisor.create_vm().unwrap();
+
         #[cfg(target_arch = "x86_64")]
-        vm.enable_split_irq().unwrap();
+        {
+            vm.set_tss_address(KVM_TSS_START.0 as usize).unwrap();
+            vm.enable_split_irq().unwrap();
+        }
+
         let vm_snapshot = get_vm_snapshot(snapshot).map_err(Error::Restore)?;
         let config = vm_snapshot.config;
         if let Some(state) = vm_snapshot.state {
@@ -864,8 +875,13 @@ impl Vm {
     ) -> Result<Self> {
         hypervisor.check_required_extensions().unwrap();
         let vm = hypervisor.create_vm().unwrap();
+
         #[cfg(target_arch = "x86_64")]
-        vm.enable_split_irq().unwrap();
+        {
+            vm.set_tss_address(KVM_TSS_START.0 as usize).unwrap();
+            vm.enable_split_irq().unwrap();
+        }
+
         let phys_bits = physical_bits(config.lock().unwrap().cpus.max_phys_bits);
 
         let memory_manager = MemoryManager::new(
