@@ -32,8 +32,6 @@ use std::result;
 #[cfg(target_arch = "x86_64")]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
-#[cfg(target_arch = "x86_64")]
-use vm_memory::Address;
 use vmm_sys_util::eventfd::EventFd;
 // x86_64 dependencies
 #[cfg(target_arch = "x86_64")]
@@ -47,9 +45,7 @@ use kvm_bindings::{
     kvm_enable_cap, kvm_msr_entry, MsrList, KVM_CAP_HYPERV_SYNIC, KVM_CAP_SPLIT_IRQCHIP,
 };
 #[cfg(target_arch = "x86_64")]
-use x86_64::{
-    check_required_kvm_extensions, FpuState, SpecialRegisters, StandardRegisters, KVM_TSS_ADDRESS,
-};
+use x86_64::{check_required_kvm_extensions, FpuState, SpecialRegisters, StandardRegisters};
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
     CpuId, CpuIdEntry, ExtendedControlRegisters, LapicState, MsrEntries, VcpuKvmState as CpuState,
@@ -353,10 +349,6 @@ impl vm::Vm for KvmVm {
     }
     #[cfg(target_arch = "x86_64")]
     fn enable_split_irq(&self) -> vm::Result<()> {
-        // Set TSS
-        self.fd
-            .set_tss_address(KVM_TSS_ADDRESS.raw_value() as usize)
-            .map_err(|e| vm::HypervisorVmError::EnableSplitIrq(e.into()))?;
         // Create split irqchip
         // Only the local APIC is emulated in kernel, both PICs and IOAPIC
         // are not.
