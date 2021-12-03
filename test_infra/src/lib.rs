@@ -138,6 +138,7 @@ pub trait DiskConfig {
     fn disk(&self, disk_type: DiskType) -> Option<String>;
 }
 
+#[derive(Clone)]
 pub struct UbuntuDiskConfig {
     osdisk_path: String,
     cloudinit_path: String,

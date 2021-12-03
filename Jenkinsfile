@@ -25,10 +25,24 @@ pipeline{
             parallel {
 				stage ('Worker build') {
 					agent { node { label 'impish' } }
+					environment {
+        					AZURE_CONNECTION_STRING = credentials('46b4e7d6-315f-4cc1-8333-b58780863b9b')
+					}
 					stages {
 						stage ('Checkout') {
 							steps {
 								checkout scm
+							}
+						}
+						stage ('Install azure-cli') {
+							steps {
+								installAzureCli()
+							}
+						}
+						stage ('Download assets') {
+							steps {
+								sh "mkdir ${env.HOME}/workloads"
+								sh 'az storage blob download --container-name private-images --file "$HOME/workloads/OVMF-83041af43c.fd" --name OVMF-83041af43c.fd --connection-string "$AZURE_CONNECTION_STRING"'
 							}
 						}
 						stage ('Run OpenAPI tests') {
@@ -84,10 +98,24 @@ pipeline{
 				}
 				stage ('Worker build (musl)') {
 					agent { node { label 'impish' } }
+					environment {
+        					AZURE_CONNECTION_STRING = credentials('46b4e7d6-315f-4cc1-8333-b58780863b9b')
+					}
 					stages {
 						stage ('Checkout') {
 							steps {
 								checkout scm
+							}
+						}
+						stage ('Install azure-cli') {
+							steps {
+								installAzureCli()
+							}
+						}
+						stage ('Download assets') {
+							steps {
+								sh "mkdir ${env.HOME}/workloads"
+								sh 'az storage blob download --container-name private-images --file "$HOME/workloads/OVMF-83041af43c.fd" --name OVMF-83041af43c.fd --connection-string "$AZURE_CONNECTION_STRING"'
 							}
 						}
 						stage ('Run unit tests for musl') {
@@ -191,11 +219,7 @@ pipeline{
 						}
 						stage ('Install azure-cli') {
 							steps {
-								sh "sudo apt install -y ca-certificates curl apt-transport-https lsb-release gnupg"
-								sh "curl -sL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null"
-								sh "echo \"deb [arch=amd64] https://packages.microsoft.com/repos/azure-cli/ hirsute main\" | sudo tee /etc/apt/sources.list.d/azure-cli.list"
-								sh "sudo apt update"
-								sh "sudo apt install -y azure-cli"
+								installAzureCli()
 							}
 						}
 						stage ('Download assets') {
@@ -285,4 +309,12 @@ def cancelPreviousBuilds() {
 				build.doStop()
 			}
 		}
+}
+
+def installAzureCli() {
+	sh "sudo apt install -y ca-certificates curl apt-transport-https lsb-release gnupg"
+	sh "curl -sL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null"
+	sh "echo \"deb [arch=amd64] https://packages.microsoft.com/repos/azure-cli/ hirsute main\" | sudo tee /etc/apt/sources.list.d/azure-cli.list"
+	sh "sudo apt update"
+	sh "sudo apt install -y azure-cli"
 }
