@@ -1654,8 +1654,8 @@ impl Vm {
         on_tty: bool,
         exit_evt: &EventFd,
     ) {
-        for sig in HANDLED_SIGNALS {
-            unblock_signal(sig).unwrap();
+        for sig in &HANDLED_SIGNALS {
+            unblock_signal(*sig).unwrap();
         }
 
         for signal in signals.forever() {
