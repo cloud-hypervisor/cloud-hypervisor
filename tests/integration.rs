@@ -480,10 +480,13 @@ mod tests {
         }
     }
 
-    impl Guest {
-        fn new_from_ip_range(mut disk_config: Box<dyn DiskConfig>, class: &str, id: u8) -> Self {
-            let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
+    enum FwType {
+        Ovmf,
+        RustHypervisorFirmware,
+    }
 
+    impl Guest {
+        fn fw_path(fw_type: FwType) -> String {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
@@ -491,8 +494,19 @@ mod tests {
             #[cfg(target_arch = "aarch64")]
             fw_path.push("CLOUDHV_EFI.fd");
             #[cfg(target_arch = "x86_64")]
-            fw_path.push("hypervisor-fw");
-            let fw_path = String::from(fw_path.to_str().unwrap());
+            {
+                match fw_type {
+                    FwType::Ovmf => fw_path.push(OVMF_NAME),
+                    FwType::RustHypervisorFirmware => fw_path.push("hypervisor-fw"),
+                }
+            }
+
+            fw_path.to_str().unwrap().to_string()
+        }
+
+        fn new_from_ip_range(mut disk_config: Box<dyn DiskConfig>, class: &str, id: u8) -> Self {
+            let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
+
             let network = GuestNetworkConfig {
                 guest_ip: format!("{}.{}.2", class, id),
                 l2_guest_ip1: format!("{}.{}.3", class, id),
@@ -511,7 +525,7 @@ mod tests {
             Guest {
                 tmp_dir,
                 disk_config,
-                fw_path,
+                fw_path: Self::fw_path(FwType::RustHypervisorFirmware),
                 network,
             }
         }
@@ -2365,33 +2379,43 @@ mod tests {
             vec![Box::new(bionic), Box::new(focal)]
                 .drain(..)
                 .for_each(|disk_config| {
-                    let guest = Guest::new(disk_config);
+                    vec![
+                        Guest::fw_path(FwType::Ovmf),
+                        Guest::fw_path(FwType::RustHypervisorFirmware),
+                    ]
+                    .drain(..)
+                    .for_each(|fw_path| {
+                        let guest = Guest::new(disk_config.clone());
 
-                    let mut child = GuestCommand::new(&guest)
-                        .args(&["--cpus", "boot=1"])
-                        .args(&["--memory", "size=512M"])
-                        .args(&["--kernel", guest.fw_path.as_str()])
-                        .default_disks()
-                        .default_net()
-                        .args(&["--serial", "tty", "--console", "off"])
-                        .capture_output()
-                        .spawn()
-                        .unwrap();
+                        let mut child = GuestCommand::new(&guest)
+                            .args(&["--cpus", "boot=1"])
+                            .args(&["--memory", "size=512M"])
+                            .args(&["--kernel", fw_path.as_str()])
+                            .default_disks()
+                            .default_net()
+                            .args(&["--serial", "tty", "--console", "off"])
+                            .capture_output()
+                            .spawn()
+                            .unwrap();
 
-                    let r = std::panic::catch_unwind(|| {
-                        guest.wait_vm_boot(Some(120)).unwrap();
+                        let r = std::panic::catch_unwind(|| {
+                            guest.wait_vm_boot(Some(120)).unwrap();
 
-                        assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
-                        assert_eq!(guest.get_initial_apicid().unwrap_or(1), 0);
-                        assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
-                        assert!(guest.get_entropy().unwrap_or_default() >= 900);
-                        assert_eq!(guest.get_pci_bridge_class().unwrap_or_default(), "0x060000");
+                            assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
+                            assert_eq!(guest.get_initial_apicid().unwrap_or(1), 0);
+                            assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+                            assert!(guest.get_entropy().unwrap_or_default() >= 900);
+                            assert_eq!(
+                                guest.get_pci_bridge_class().unwrap_or_default(),
+                                "0x060000"
+                            );
+                        });
+
+                        let _ = child.kill();
+                        let output = child.wait_with_output().unwrap();
+
+                        handle_child_output(r, &output);
                     });
-
-                    let _ = child.kill();
-                    let output = child.wait_with_output().unwrap();
-
-                    handle_child_output(r, &output);
                 });
         }
 
