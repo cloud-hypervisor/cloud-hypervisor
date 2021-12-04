@@ -124,6 +124,9 @@ pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
     if !kvm.check_extension(Cap::SplitIrqchip) {
         return Err(KvmError::CapabilityMissing(Cap::SplitIrqchip));
     }
+    if !kvm.check_extension(Cap::SetIdentityMapAddr) {
+        return Err(KvmError::CapabilityMissing(Cap::SetIdentityMapAddr));
+    }
     if !kvm.check_extension(Cap::SetTssAddr) {
         return Err(KvmError::CapabilityMissing(Cap::SetTssAddr));
     }

@@ -137,6 +137,15 @@ pub struct KvmVm {
 impl vm::Vm for KvmVm {
     #[cfg(target_arch = "x86_64")]
     ///
+    /// Sets the address of the one-page region in the VM's address space.
+    ///
+    fn set_identity_map_address(&self, address: u64) -> vm::Result<()> {
+        self.fd
+            .set_identity_map_address(address)
+            .map_err(|e| vm::HypervisorVmError::SetIdentityMapAddress(e.into()))
+    }
+    #[cfg(target_arch = "x86_64")]
+    ///
     /// Sets the address of the three-page region in the VM's address space.
     ///
     fn set_tss_address(&self, offset: usize) -> vm::Result<()> {

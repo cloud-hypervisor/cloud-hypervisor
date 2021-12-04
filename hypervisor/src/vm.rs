@@ -58,6 +58,11 @@ pub enum HypervisorVmError {
     #[error("Failed to create Vcpu: {0}")]
     CreateVcpu(#[source] anyhow::Error),
     ///
+    /// Identity map address error
+    ///
+    #[error("Failed to set identity map address: {0}")]
+    SetIdentityMapAddress(#[source] anyhow::Error),
+    ///
     /// TSS address error
     ///
     #[error("Failed to set TSS address: {0}")]
@@ -217,6 +222,9 @@ pub type Result<T> = std::result::Result<T, HypervisorVmError>;
 /// This crate provides a hypervisor-agnostic interfaces for Vm
 ///
 pub trait Vm: Send + Sync {
+    #[cfg(target_arch = "x86_64")]
+    /// Sets the address of the one-page region in the VM's address space.
+    fn set_identity_map_address(&self, address: u64) -> Result<()>;
     #[cfg(target_arch = "x86_64")]
     /// Sets the address of the three-page region in the VM's address space.
     fn set_tss_address(&self, offset: usize) -> Result<()>;
