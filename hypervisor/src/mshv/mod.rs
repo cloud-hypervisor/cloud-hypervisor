@@ -766,6 +766,13 @@ fn hv_state_init() -> Arc<RwLock<HvState>> {
 impl vm::Vm for MshvVm {
     #[cfg(target_arch = "x86_64")]
     ///
+    /// Sets the address of the one-page region in the VM's address space.
+    ///
+    fn set_identity_map_address(&self, _address: u64) -> vm::Result<()> {
+        Ok(())
+    }
+    #[cfg(target_arch = "x86_64")]
+    ///
     /// Sets the address of the three-page region in the VM's address space.
     ///
     fn set_tss_address(&self, _offset: usize) -> vm::Result<()> {
