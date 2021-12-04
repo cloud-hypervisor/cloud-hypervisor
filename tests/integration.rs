@@ -141,7 +141,7 @@ mod tests {
         // Start the daemon
         let child = Command::new(virtiofsd_path.as_str())
             .args(&["--shared-dir", shared_dir])
-            .args(&["--socket", virtiofsd_socket_path.as_str()])
+            .args(&["--socket-path", virtiofsd_socket_path.as_str()])
             .args(&["--cache", cache])
             .spawn()
             .unwrap();
