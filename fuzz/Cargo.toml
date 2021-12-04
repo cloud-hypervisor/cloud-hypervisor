@@ -26,6 +26,7 @@ path = ".."
 
 [patch.crates-io]
 kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch-v0.5.0", features = ["with-serde", "fam-wrappers"] }
+kvm-ioctls = { git = "https://github.com/rust-vmm/kvm-ioctls", branch = "main" }
 versionize_derive = { git = "https://github.com/cloud-hypervisor/versionize_derive", branch = "ch" }
 
 # Prevent this from interfering with workspaces

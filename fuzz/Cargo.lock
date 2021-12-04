@@ -147,7 +147,7 @@ dependencies = [
 
 [[package]]
 name = "cloud-hypervisor"
-version = "19.0.0"
+version = "20.0.0"
 dependencies = [
  "anyhow",
  "api_client",
@@ -324,8 +324,7 @@ dependencies = [
 [[package]]
 name = "kvm-ioctls"
 version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97422ba48d7ffb66fd4d18130f72ab66f9bbbf791fb7a87b9291cdcfec437593"
+source = "git+https://github.com/rust-vmm/kvm-ioctls?branch=main#d22ef1f51852dfb055da38004e1a4fed81246f81"
 dependencies = [
  "kvm-bindings",
  "libc",
