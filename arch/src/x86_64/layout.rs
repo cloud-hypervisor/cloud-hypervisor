@@ -98,6 +98,10 @@ pub const PCI_MMCONFIG_SIZE: u64 = 256 << 20;
 pub const KVM_TSS_START: GuestAddress = GuestAddress(PCI_MMCONFIG_START.0 + PCI_MMCONFIG_SIZE);
 pub const KVM_TSS_SIZE: u64 = (3 * 4) << 10;
 
+// Identity map is a one page region after the TSS
+pub const KVM_IDENTITY_MAP_START: GuestAddress = GuestAddress(KVM_TSS_START.0 + KVM_TSS_SIZE);
+pub const KVM_IDENTITY_MAP_SIZE: u64 = 4 << 10;
+
 // IOAPIC
 pub const IOAPIC_START: GuestAddress = GuestAddress(0xfec0_0000);
 pub const IOAPIC_SIZE: u64 = 0x20;

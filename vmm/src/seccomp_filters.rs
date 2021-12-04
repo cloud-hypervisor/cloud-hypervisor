@@ -275,6 +275,7 @@ fn create_vmm_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, BackendError>
     const KVM_SET_CLOCK: u64 = 0x4030_ae7b;
     const KVM_SET_CPUID2: u64 = 0x4008_ae90;
     const KVM_SET_FPU: u64 = 0x41a0_ae8d;
+    const KVM_SET_IDENTITY_MAP_ADDR: u64 = 0x4008_ae48;
     const KVM_SET_LAPIC: u64 = 0x4400_ae8f;
     const KVM_SET_MSRS: u64 = 0x4008_ae89;
     const KVM_SET_SREGS: u64 = 0x4138_ae84;
@@ -298,6 +299,7 @@ fn create_vmm_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, BackendError>
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_CLOCK)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_CPUID2)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_FPU)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_IDENTITY_MAP_ADDR)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_LAPIC)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_SREGS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_TSS_ADDR,)?],
