@@ -32,7 +32,7 @@ use crate::{
 use anyhow::anyhow;
 use arch::get_host_cpu_phys_bits;
 #[cfg(target_arch = "x86_64")]
-use arch::layout::KVM_TSS_START;
+use arch::layout::{KVM_IDENTITY_MAP_START, KVM_TSS_START};
 #[cfg(all(feature = "tdx", feature = "acpi"))]
 use arch::x86_64::tdx::TdVmmDataRegionType;
 #[cfg(feature = "tdx")]
@@ -756,6 +756,8 @@ impl Vm {
 
         #[cfg(target_arch = "x86_64")]
         {
+            vm.set_identity_map_address(KVM_IDENTITY_MAP_START.0)
+                .unwrap();
             vm.set_tss_address(KVM_TSS_START.0 as usize).unwrap();
             vm.enable_split_irq().unwrap();
         }
@@ -819,6 +821,8 @@ impl Vm {
 
         #[cfg(target_arch = "x86_64")]
         {
+            vm.set_identity_map_address(KVM_IDENTITY_MAP_START.0)
+                .unwrap();
             vm.set_tss_address(KVM_TSS_START.0 as usize).unwrap();
             vm.enable_split_irq().unwrap();
         }
@@ -878,6 +882,8 @@ impl Vm {
 
         #[cfg(target_arch = "x86_64")]
         {
+            vm.set_identity_map_address(KVM_IDENTITY_MAP_START.0)
+                .unwrap();
             vm.set_tss_address(KVM_TSS_START.0 as usize).unwrap();
             vm.enable_split_irq().unwrap();
         }
