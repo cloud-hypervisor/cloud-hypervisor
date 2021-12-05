@@ -2,10 +2,11 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use crate::async_io::{AsyncIo, AsyncIoResult, DiskFile, DiskFileResult};
-use crate::{disk_size, fsync_sync, read_vectored_sync, write_vectored_sync};
+use crate::async_io::{AsyncIo, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult};
+use crate::{fsync_sync, read_vectored_sync, write_vectored_sync};
 use qcow::{QcowFile, RawFile, Result as QcowResult};
 use std::fs::File;
+use std::io::{Seek, SeekFrom};
 use std::sync::{Arc, Mutex};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -25,7 +26,14 @@ impl QcowDiskSync {
 
 impl DiskFile for QcowDiskSync {
     fn size(&mut self) -> DiskFileResult<u64> {
-        disk_size(&mut self.qcow_file, &mut self.semaphore)
+        // Take the semaphore to ensure other threads are not interacting with
+        // the underlying file.
+        let _lock = self.semaphore.lock().unwrap();
+
+        Ok(self
+            .qcow_file
+            .seek(SeekFrom::End(0))
+            .map_err(DiskFileError::Size)? as u64)
     }
 
     fn new_async_io(&self, _ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {

@@ -20,7 +20,7 @@ pub mod raw_sync;
 pub mod vhd;
 pub mod vhdx_sync;
 
-use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, DiskFileError, DiskFileResult};
+use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
 #[cfg(feature = "io_uring")]
 use io_uring::{opcode, IoUring, Probe};
 use std::cmp;
@@ -474,14 +474,6 @@ pub fn block_io_uring_is_supported() -> bool {
 #[cfg(not(feature = "io_uring"))]
 pub fn block_io_uring_is_supported() -> bool {
     false
-}
-
-pub fn disk_size(file: &mut dyn Seek, semaphore: &mut Arc<Mutex<()>>) -> DiskFileResult<u64> {
-    // Take the semaphore to ensure other threads are not interacting with
-    // the underlying file.
-    let _lock = semaphore.lock().unwrap();
-
-    Ok(file.seek(SeekFrom::End(0)).map_err(DiskFileError::Size)? as u64)
 }
 
 pub trait ReadSeekFile: Read + Seek {}
