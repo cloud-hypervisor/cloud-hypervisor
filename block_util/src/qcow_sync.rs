@@ -3,62 +3,50 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use crate::async_io::{AsyncIo, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult};
-use crate::{fsync_sync, read_vectored_sync, write_vectored_sync};
+use crate::{fsync_sync, read_vectored_sync, write_vectored_sync, ReadWriteSeekFile};
 use qcow::{QcowFile, RawFile, Result as QcowResult};
 use std::fs::File;
-use std::io::{Seek, SeekFrom};
+use std::io::SeekFrom;
 use std::sync::{Arc, Mutex};
 use vmm_sys_util::eventfd::EventFd;
 
 pub struct QcowDiskSync {
-    qcow_file: QcowFile,
-    semaphore: Arc<Mutex<()>>,
+    qcow_file: Arc<Mutex<dyn ReadWriteSeekFile + Send + Sync>>,
 }
 
 impl QcowDiskSync {
     pub fn new(file: File, direct_io: bool) -> QcowResult<Self> {
         Ok(QcowDiskSync {
-            qcow_file: QcowFile::from(RawFile::new(file, direct_io))?,
-            semaphore: Arc::new(Mutex::new(())),
+            qcow_file: Arc::new(Mutex::new(QcowFile::from(RawFile::new(file, direct_io))?)),
         })
     }
 }
 
 impl DiskFile for QcowDiskSync {
     fn size(&mut self) -> DiskFileResult<u64> {
-        // Take the semaphore to ensure other threads are not interacting with
-        // the underlying file.
-        let _lock = self.semaphore.lock().unwrap();
+        let mut file = self.qcow_file.lock().unwrap();
 
-        Ok(self
-            .qcow_file
-            .seek(SeekFrom::End(0))
-            .map_err(DiskFileError::Size)? as u64)
+        Ok(file.seek(SeekFrom::End(0)).map_err(DiskFileError::Size)? as u64)
     }
 
     fn new_async_io(&self, _ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
-        Ok(Box::new(QcowSync::new(
-            self.qcow_file.clone(),
-            self.semaphore.clone(),
-        )) as Box<dyn AsyncIo>)
+        Ok(Box::new(QcowSync::new(self.qcow_file.clone())) as Box<dyn AsyncIo>)
     }
 }
 
 pub struct QcowSync {
-    qcow_file: QcowFile,
+    qcow_file: Arc<Mutex<dyn ReadWriteSeekFile + Send + Sync>>,
     eventfd: EventFd,
     completion_list: Vec<(u64, i32)>,
-    semaphore: Arc<Mutex<()>>,
 }
 
 impl QcowSync {
-    pub fn new(qcow_file: QcowFile, semaphore: Arc<Mutex<()>>) -> Self {
+    pub fn new(qcow_file: Arc<Mutex<dyn ReadWriteSeekFile + Send + Sync>>) -> Self {
         QcowSync {
             qcow_file,
             eventfd: EventFd::new(libc::EFD_NONBLOCK)
                 .expect("Failed creating EventFd for QcowSync"),
             completion_list: Vec::new(),
-            semaphore,
         }
     }
 }
@@ -81,7 +69,6 @@ impl AsyncIo for QcowSync {
             &mut self.qcow_file,
             &self.eventfd,
             &mut self.completion_list,
-            &mut self.semaphore,
         )
     }
 
@@ -98,7 +85,6 @@ impl AsyncIo for QcowSync {
             &mut self.qcow_file,
             &self.eventfd,
             &mut self.completion_list,
-            &mut self.semaphore,
         )
     }
 
@@ -108,7 +94,6 @@ impl AsyncIo for QcowSync {
             &mut self.qcow_file,
             &self.eventfd,
             &mut self.completion_list,
-            &mut self.semaphore,
         )
     }
 
