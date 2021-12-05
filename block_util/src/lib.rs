@@ -23,6 +23,7 @@ pub mod vhdx_sync;
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
 #[cfg(feature = "io_uring")]
 use io_uring::{opcode, IoUring, Probe};
+use std::any::Any;
 use std::cmp;
 use std::convert::TryInto;
 use std::fs::File;
@@ -476,17 +477,25 @@ pub fn block_io_uring_is_supported() -> bool {
     false
 }
 
-pub trait ReadSeekFile: Read + Seek {}
-impl<F: Read + Seek> ReadSeekFile for F {}
+pub trait ReadWriteSeekFile: Read + Write + Seek {
+    // Provides a mutable reference to the Any trait. This is useful to let
+    // the caller have access to the underlying type behind the trait.
+    fn as_any(&mut self) -> &mut dyn Any;
+}
+
+impl<F: Read + Write + Seek + 'static> ReadWriteSeekFile for F {
+    fn as_any(&mut self) -> &mut dyn Any {
+        self
+    }
+}
 
 pub fn read_vectored_sync(
     offset: libc::off_t,
     iovecs: Vec<libc::iovec>,
     user_data: u64,
-    file: &mut dyn ReadSeekFile,
+    file: &mut Arc<Mutex<dyn ReadWriteSeekFile + Send + Sync>>,
     eventfd: &EventFd,
     completion_list: &mut Vec<(u64, i32)>,
-    semaphore: &mut Arc<Mutex<()>>,
 ) -> AsyncIoResult<()> {
     // Convert libc::iovec into IoSliceMut
     let mut slices = Vec::new();
@@ -495,9 +504,7 @@ pub fn read_vectored_sync(
     }
 
     let result = {
-        // Take the semaphore to ensure other threads are not interacting
-        // with the underlying file.
-        let _lock = semaphore.lock().unwrap();
+        let mut file = file.lock().unwrap();
 
         // Move the cursor to the right offset
         file.seek(SeekFrom::Start(offset as u64))
@@ -514,17 +521,13 @@ pub fn read_vectored_sync(
     Ok(())
 }
 
-pub trait WriteSeekFile: Write + Seek {}
-impl<F: Write + Seek> WriteSeekFile for F {}
-
 pub fn write_vectored_sync(
     offset: libc::off_t,
     iovecs: Vec<libc::iovec>,
     user_data: u64,
-    file: &mut dyn WriteSeekFile,
+    file: &mut Arc<Mutex<dyn ReadWriteSeekFile + Sync + Send>>,
     eventfd: &EventFd,
     completion_list: &mut Vec<(u64, i32)>,
-    semaphore: &mut Arc<Mutex<()>>,
 ) -> AsyncIoResult<()> {
     // Convert libc::iovec into IoSlice
     let mut slices = Vec::new();
@@ -533,9 +536,7 @@ pub fn write_vectored_sync(
     }
 
     let result = {
-        // Take the semaphore to ensure other threads are not interacting
-        // with the underlying file.
-        let _lock = semaphore.lock().unwrap();
+        let mut file = file.lock().unwrap();
 
         // Move the cursor to the right offset
         file.seek(SeekFrom::Start(offset as u64))
@@ -554,15 +555,12 @@ pub fn write_vectored_sync(
 
 pub fn fsync_sync(
     user_data: Option<u64>,
-    file: &mut dyn Write,
+    file: &mut Arc<Mutex<dyn ReadWriteSeekFile + Sync + Send>>,
     eventfd: &EventFd,
     completion_list: &mut Vec<(u64, i32)>,
-    semaphore: &mut Arc<Mutex<()>>,
 ) -> AsyncIoResult<()> {
     let result: i32 = {
-        // Take the semaphore to ensure other threads are not interacting
-        // with the underlying file.
-        let _lock = semaphore.lock().unwrap();
+        let mut file = file.lock().unwrap();
 
         // Flush
         file.flush().map_err(AsyncIoError::Fsync)?;

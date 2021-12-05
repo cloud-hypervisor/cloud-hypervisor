@@ -3,57 +3,58 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::async_io::{AsyncIo, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult};
-use crate::{fsync_sync, read_vectored_sync, write_vectored_sync};
+use crate::{fsync_sync, read_vectored_sync, write_vectored_sync, ReadWriteSeekFile};
 use std::fs::File;
-use std::ops::DerefMut;
 use std::sync::{Arc, Mutex};
 use vhdx::vhdx::{Result as VhdxResult, Vhdx};
 use vmm_sys_util::eventfd::EventFd;
 
 pub struct VhdxDiskSync {
-    vhdx_file: Arc<Mutex<Vhdx>>,
-    semaphore: Arc<Mutex<()>>,
+    vhdx_file: Arc<Mutex<dyn ReadWriteSeekFile + Sync + Send>>,
 }
 
 impl VhdxDiskSync {
     pub fn new(f: File) -> VhdxResult<Self> {
-        let vhdx = Vhdx::new(f)?;
-        let vhdx_file = Arc::new(Mutex::new(vhdx));
-
         Ok(VhdxDiskSync {
-            vhdx_file,
-            semaphore: Arc::new(Mutex::new(())),
+            vhdx_file: Arc::new(Mutex::new(Vhdx::new(f)?)),
         })
     }
 }
 
 impl DiskFile for VhdxDiskSync {
     fn size(&mut self) -> DiskFileResult<u64> {
-        Ok(self.vhdx_file.lock().unwrap().virtual_disk_size())
+        Ok(self
+            .vhdx_file
+            .lock()
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Vhdx>()
+            .unwrap()
+            .virtual_disk_size())
     }
 
     fn new_async_io(&self, _ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
-        Ok(Box::new(
-            VhdxSync::new(self.vhdx_file.clone(), self.semaphore.clone())
-                .map_err(DiskFileError::NewAsyncIo)?,
-        ) as Box<dyn AsyncIo>)
+        Ok(
+            Box::new(VhdxSync::new(self.vhdx_file.clone()).map_err(DiskFileError::NewAsyncIo)?)
+                as Box<dyn AsyncIo>,
+        )
     }
 }
 
 pub struct VhdxSync {
-    vhdx_file: Arc<Mutex<Vhdx>>,
+    vhdx_file: Arc<Mutex<dyn ReadWriteSeekFile + Sync + Send>>,
     eventfd: EventFd,
     completion_list: Vec<(u64, i32)>,
-    semaphore: Arc<Mutex<()>>,
 }
 
 impl VhdxSync {
-    pub fn new(vhdx_file: Arc<Mutex<Vhdx>>, semaphore: Arc<Mutex<()>>) -> std::io::Result<Self> {
+    pub fn new(
+        vhdx_file: Arc<Mutex<dyn ReadWriteSeekFile + Sync + Send>>,
+    ) -> std::io::Result<Self> {
         Ok(VhdxSync {
             vhdx_file,
             eventfd: EventFd::new(libc::EFD_NONBLOCK)?,
             completion_list: Vec::new(),
-            semaphore,
         })
     }
 }
@@ -73,10 +74,9 @@ impl AsyncIo for VhdxSync {
             offset,
             iovecs,
             user_data,
-            self.vhdx_file.lock().unwrap().deref_mut(),
+            &mut self.vhdx_file,
             &self.eventfd,
             &mut self.completion_list,
-            &mut self.semaphore,
         )
     }
 
@@ -90,20 +90,18 @@ impl AsyncIo for VhdxSync {
             offset,
             iovecs,
             user_data,
-            self.vhdx_file.lock().unwrap().deref_mut(),
+            &mut self.vhdx_file,
             &self.eventfd,
             &mut self.completion_list,
-            &mut self.semaphore,
         )
     }
 
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()> {
         fsync_sync(
             user_data,
-            self.vhdx_file.lock().unwrap().deref_mut(),
+            &mut self.vhdx_file,
             &self.eventfd,
             &mut self.completion_list,
-            &mut self.semaphore,
         )
     }
 
