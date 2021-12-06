@@ -34,17 +34,7 @@ pipeline{
 								checkout scm
 							}
 						}
-						stage ('Install azure-cli') {
-							steps {
-								installAzureCli()
-							}
-						}
-						stage ('Download assets') {
-							steps {
-								sh "mkdir ${env.HOME}/workloads"
-								sh 'az storage blob download --container-name private-images --file "$HOME/workloads/OVMF-83041af43c.fd" --name OVMF-83041af43c.fd --connection-string "$AZURE_CONNECTION_STRING"'
-							}
-						}
+
 						stage ('Run OpenAPI tests') {
 							steps {
 								sh "scripts/run_openapi_tests.sh"
@@ -107,17 +97,7 @@ pipeline{
 								checkout scm
 							}
 						}
-						stage ('Install azure-cli') {
-							steps {
-								installAzureCli()
-							}
-						}
-						stage ('Download assets') {
-							steps {
-								sh "mkdir ${env.HOME}/workloads"
-								sh 'az storage blob download --container-name private-images --file "$HOME/workloads/OVMF-83041af43c.fd" --name OVMF-83041af43c.fd --connection-string "$AZURE_CONNECTION_STRING"'
-							}
-						}
+
 						stage ('Run unit tests for musl') {
 							steps {
 								sh "scripts/dev_cli.sh tests --unit --libc musl"
@@ -225,7 +205,6 @@ pipeline{
 						stage ('Download assets') {
 							steps {
 								sh "mkdir ${env.HOME}/workloads"
-								sh 'az storage blob download --container-name private-images --file "$HOME/workloads/OVMF-83041af43c.fd" --name OVMF-83041af43c.fd --connection-string "$AZURE_CONNECTION_STRING"'
 								sh 'az storage blob download --container-name private-images --file "$HOME/workloads/windows-server-2019.raw" --name windows-server-2019.raw --connection-string "$AZURE_CONNECTION_STRING"'
 							}
 						}

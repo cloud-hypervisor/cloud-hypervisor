@@ -30,6 +30,14 @@ if [ ! -f "$FW" ]; then
     popd
 fi
 
+OVMF_FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/edk2/releases/latest | grep "browser_download_url" | grep -o 'https://.*[^ "]')
+OVMF_FW="$WORKLOADS_DIR/OVMF.fd"
+if [ ! -f "$OVMF_FW" ]; then
+    pushd $WORKLOADS_DIR
+    time wget --quiet $OVMF_FW_URL || exit 1
+    popd
+fi
+
 BIONIC_OS_IMAGE_NAME="bionic-server-cloudimg-amd64.qcow2"
 BIONIC_OS_IMAGE_URL="https://cloud-hypervisor.azureedge.net/$BIONIC_OS_IMAGE_NAME"
 BIONIC_OS_IMAGE="$WORKLOADS_DIR/$BIONIC_OS_IMAGE_NAME"
