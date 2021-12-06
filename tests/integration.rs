@@ -730,6 +730,30 @@ mod tests {
             }
         }
 
+        fn wait_for_present_cpus(&self, num_present: u8) {
+            let mut counter = 5;
+            loop {
+                let present = self
+                    .ssh_command("cat /sys/devices/system/cpu/present")
+                    .unwrap()
+                    .trim()
+                    .to_string();
+
+                if present == format!("0-{}", num_present - 1) {
+                    return;
+                } else {
+                    counter -= 1;
+                    if counter == 0 {
+                        panic!(
+                            "Waited too long for number of present CPUs to update (last reported: {})",
+                            present
+                        );
+                    }
+                    thread::sleep(std::time::Duration::new(5, 0));
+                }
+            }
+        }
+
         #[cfg(target_arch = "x86_64")]
         fn check_sgx_support(&self) -> Result<(), Error> {
             self.ssh_command(
@@ -1186,7 +1210,8 @@ mod tests {
                 // Resize to the maximum amount of CPUs and check each NUMA
                 // node has been assigned the right CPUs set.
                 resize_command(&api_socket, Some(12), None, None);
-                thread::sleep(std::time::Duration::new(5, 0));
+
+                guest.wait_for_present_cpus(12);
 
                 guest.check_numa_common(
                     Some(&[3_840_000, 3_840_000, 3_840_000]),
@@ -7679,7 +7704,8 @@ mod tests {
                         // Resize to the maximum amount of CPUs and check each NUMA
                         // node has been assigned the right CPUs set.
                         resize_command(&dest_api_socket, Some(12), None, None);
-                        thread::sleep(std::time::Duration::new(5, 0));
+
+                        guest.wait_for_present_cpus(12);
 
                         guest.check_numa_common(
                             Some(&[3_840_000, 3_840_000, 3_840_000]),
