@@ -529,9 +529,6 @@ impl Vm {
         reset_evt: EventFd,
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
-        #[cfg(all(feature = "kvm", target_arch = "x86_64"))] _saved_clock: Option<
-            hypervisor::ClockData,
-        >,
         activate_evt: EventFd,
         restoring: bool,
     ) -> Result<Self> {
@@ -641,7 +638,7 @@ impl Vm {
             memory_manager,
             vm,
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-            saved_clock: _saved_clock,
+            saved_clock: None,
             #[cfg(any(target_arch = "aarch64", feature = "acpi"))]
             numa_nodes,
             seccomp_action: seccomp_action.clone(),
@@ -792,8 +789,6 @@ impl Vm {
             reset_evt,
             seccomp_action,
             hypervisor,
-            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-            None,
             activate_evt,
             false,
         )?;
@@ -865,8 +860,6 @@ impl Vm {
             reset_evt,
             seccomp_action,
             hypervisor,
-            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-            vm_snapshot.clock,
             activate_evt,
             true,
         )
@@ -915,8 +908,6 @@ impl Vm {
             reset_evt,
             seccomp_action,
             hypervisor,
-            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-            None,
             activate_evt,
             true,
         )
@@ -2507,6 +2498,10 @@ impl Snapshottable for Vm {
         current_state.valid_transition(new_state).map_err(|e| {
             MigratableError::Restore(anyhow!("Could not restore VM state: {:#?}", e))
         })?;
+
+        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+        self.load_clock_from_snapshot(&snapshot)
+            .map_err(|e| MigratableError::Restore(anyhow!("Error restoring clock: {:?}", e)))?;
 
         if let Some(memory_manager_snapshot) = snapshot.snapshots.get(MEMORY_MANAGER_SNAPSHOT_ID) {
             self.memory_manager
