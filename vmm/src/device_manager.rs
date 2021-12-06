@@ -1167,7 +1167,7 @@ impl DeviceManager {
     }
 
     fn set_state(&mut self, state: &DeviceManagerState) {
-        self.device_tree = Arc::new(Mutex::new(state.device_tree.clone()));
+        *self.device_tree.lock().unwrap() = state.device_tree.clone();
         self.device_id_cnt = state.device_id_cnt;
     }
 
