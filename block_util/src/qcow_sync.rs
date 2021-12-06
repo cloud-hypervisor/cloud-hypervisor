@@ -3,15 +3,15 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use crate::async_io::{AsyncIo, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult};
-use crate::{fsync_sync, read_vectored_sync, write_vectored_sync, ReadWriteSeekFile};
+use crate::AsyncAdaptor;
 use qcow::{QcowFile, RawFile, Result as QcowResult};
 use std::fs::File;
-use std::io::SeekFrom;
-use std::sync::{Arc, Mutex};
+use std::io::{Seek, SeekFrom};
+use std::sync::{Arc, Mutex, MutexGuard};
 use vmm_sys_util::eventfd::EventFd;
 
 pub struct QcowDiskSync {
-    qcow_file: Arc<Mutex<dyn ReadWriteSeekFile + Send + Sync>>,
+    qcow_file: Arc<Mutex<QcowFile>>,
 }
 
 impl QcowDiskSync {
@@ -35,19 +35,25 @@ impl DiskFile for QcowDiskSync {
 }
 
 pub struct QcowSync {
-    qcow_file: Arc<Mutex<dyn ReadWriteSeekFile + Send + Sync>>,
+    qcow_file: Arc<Mutex<QcowFile>>,
     eventfd: EventFd,
     completion_list: Vec<(u64, i32)>,
 }
 
 impl QcowSync {
-    pub fn new(qcow_file: Arc<Mutex<dyn ReadWriteSeekFile + Send + Sync>>) -> Self {
+    pub fn new(qcow_file: Arc<Mutex<QcowFile>>) -> Self {
         QcowSync {
             qcow_file,
             eventfd: EventFd::new(libc::EFD_NONBLOCK)
                 .expect("Failed creating EventFd for QcowSync"),
             completion_list: Vec::new(),
         }
+    }
+}
+
+impl AsyncAdaptor<QcowFile> for Arc<Mutex<QcowFile>> {
+    fn file(&mut self) -> MutexGuard<QcowFile> {
+        self.lock().unwrap()
     }
 }
 
@@ -62,11 +68,10 @@ impl AsyncIo for QcowSync {
         iovecs: Vec<libc::iovec>,
         user_data: u64,
     ) -> AsyncIoResult<()> {
-        read_vectored_sync(
+        self.qcow_file.read_vectored_sync(
             offset,
             iovecs,
             user_data,
-            &mut self.qcow_file,
             &self.eventfd,
             &mut self.completion_list,
         )
@@ -78,23 +83,18 @@ impl AsyncIo for QcowSync {
         iovecs: Vec<libc::iovec>,
         user_data: u64,
     ) -> AsyncIoResult<()> {
-        write_vectored_sync(
+        self.qcow_file.write_vectored_sync(
             offset,
             iovecs,
             user_data,
-            &mut self.qcow_file,
             &self.eventfd,
             &mut self.completion_list,
         )
     }
 
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()> {
-        fsync_sync(
-            user_data,
-            &mut self.qcow_file,
-            &self.eventfd,
-            &mut self.completion_list,
-        )
+        self.qcow_file
+            .fsync_sync(user_data, &self.eventfd, &mut self.completion_list)
     }
 
     fn complete(&mut self) -> Vec<(u64, i32)> {
