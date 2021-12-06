@@ -14,7 +14,16 @@ if [ "$hypervisor" = "mshv" ] ;  then
     features_test="--no-default-features --features mshv,common,integration_tests"
 fi
 WIN_IMAGE_FILE="/root/workloads/windows-server-2019.raw"
-OVMF_FW_FILE="/root/workloads/OVMF-83041af43c.fd"
+
+WORKLOADS_DIR="/root/workloads"
+OVMF_FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/edk2/releases/latest | grep "browser_download_url" | grep -o 'https://.*[^ "]')
+OVMF_FW="$WORKLOADS_DIR/OVMF.fd"
+if [ ! -f "$OVMF_FW" ]; then
+    pushd $WORKLOADS_DIR
+    time wget --quiet $OVMF_FW_URL || exit 1
+    popd
+fi
+
 BUILD_TARGET="$(uname -m)-unknown-linux-${CH_LIBC}"
 CFLAGS=""
 TARGET_CC=""
@@ -24,7 +33,7 @@ CFLAGS="-I /usr/include/x86_64-linux-musl/ -idirafter /usr/include/"
 fi
 
 # Check if the images are present
-if [[ ! -f ${WIN_IMAGE_FILE} || ! -f ${OVMF_FW_FILE} ]]; then
+if [[ ! -f ${WIN_IMAGE_FILE} || ! -f ${OVMF_FW} ]]; then
     echo "Windows image/firmware not present in the host"
     exit 1
 fi
