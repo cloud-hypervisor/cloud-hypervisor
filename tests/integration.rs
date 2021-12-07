@@ -6105,7 +6105,6 @@ mod tests {
         }
 
         #[cfg(target_arch = "x86_64")]
-        #[ignore]
         #[test]
         fn test_vfio_user() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -6114,14 +6113,12 @@ mod tests {
             let spdk_nvme_dir = guest.tmp_dir.as_path().join("test-vfio-user");
             setup_spdk_nvme(spdk_nvme_dir.as_path());
 
-            let kernel_path = direct_kernel_boot_path();
             let api_socket = temp_api_path(&guest.tmp_dir);
             let mut child = GuestCommand::new(&guest)
                 .args(&["--api-socket", &api_socket])
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M,shared=on"])
-                .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+                .args(&["--kernel", guest.fw_path.as_str()])
                 .default_disks()
                 .default_net()
                 .capture_output()
