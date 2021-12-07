@@ -422,7 +422,9 @@ impl Block {
 
         let mut avail_features = (1u64 << VIRTIO_F_VERSION_1)
             | (1u64 << VIRTIO_BLK_F_FLUSH)
-            | (1u64 << VIRTIO_BLK_F_CONFIG_WCE);
+            | (1u64 << VIRTIO_BLK_F_CONFIG_WCE)
+            | (1u64 << VIRTIO_BLK_F_BLK_SIZE)
+            | (1u64 << VIRTIO_BLK_F_TOPOLOGY);
 
         if iommu {
             avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
@@ -432,10 +434,31 @@ impl Block {
             avail_features |= 1u64 << VIRTIO_BLK_F_RO;
         }
 
+        let topology = disk_image.topology();
+        info!("Disk topology: {:?}", topology);
+
+        let logical_block_size = if topology.logical_block_size > 512 {
+            topology.logical_block_size
+        } else {
+            512
+        };
+
+        // Calculate the exponent that maps physical block to logical block
+        let mut physical_block_exp = 0;
+        let mut size = logical_block_size;
+        while size < topology.physical_block_size {
+            physical_block_exp += 1;
+            size <<= 1;
+        }
+
         let disk_nsectors = disk_size / SECTOR_SIZE;
         let mut config = VirtioBlockConfig {
             capacity: disk_nsectors,
             writeback: 1,
+            blk_size: topology.logical_block_size as u32,
+            physical_block_exp,
+            min_io_size: (topology.minimum_io_size / logical_block_size) as u16,
+            opt_io_size: (topology.optimal_io_size / logical_block_size) as u32,
             ..Default::default()
         };
 
