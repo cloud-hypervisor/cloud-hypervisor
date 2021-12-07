@@ -99,6 +99,16 @@ jobs:
           asset_path: target/x86_64-unknown-linux-gnu/release/ch-remote
           asset_name: ch-remote
           asset_content_type: application/octet-stream
+      - name: Upload static-ch-remote
+        id: upload-release-static-ch-remote
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: target/x86_64-unknown-linux-musl/release/ch-remote
+          asset_name: ch-remote-static
+          asset_content_type: application/octet-stream
       - name: Upload static AArch64 cloud-hypervisor
         id: upload-release-static-aarch64-cloud-hypervisor
         uses: actions/upload-release-asset@v1
