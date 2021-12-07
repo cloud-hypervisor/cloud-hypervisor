@@ -15,11 +15,33 @@ pub enum DiskFileError {
     NewAsyncIo(#[source] std::io::Error),
 }
 
+#[derive(Debug)]
+pub struct DiskTopology {
+    pub logical_block_size: u64,
+    pub physical_block_size: u64,
+    pub minimum_io_size: u64,
+    pub optimal_io_size: u64,
+}
+
+impl Default for DiskTopology {
+    fn default() -> Self {
+        Self {
+            logical_block_size: 512,
+            physical_block_size: 512,
+            minimum_io_size: 512,
+            optimal_io_size: 0,
+        }
+    }
+}
+
 pub type DiskFileResult<T> = std::result::Result<T, DiskFileError>;
 
 pub trait DiskFile: Send + Sync {
     fn size(&mut self) -> DiskFileResult<u64>;
     fn new_async_io(&self, ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>>;
+    fn topology(&mut self) -> DiskTopology {
+        DiskTopology::default()
+    }
 }
 
 #[derive(Error, Debug)]
