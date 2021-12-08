@@ -349,6 +349,38 @@ paths:
         404:
           description: The VM instance could not be restored because it is already created.
 
+  /vm.receive-migration:
+    put:
+      summary: Receive a VM migration from URL
+      requestBody:
+        description: The URL for the reception of migration state
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReceiveMigrationData'
+        required: true
+      responses:
+        204:
+          description: The VM migration was successfully received.
+        500:
+          description: The VM migration could not be received.
+
+  /vm.send-migration:
+    put:
+      summary: Send a VM migration to URL
+      requestBody:
+        description: The URL for sending the migration state
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMigrationData'
+        required: true
+      responses:
+        204:
+          description: The VM migration was successfully sent.
+        500:
+          description: The VM migration could not be sent.
+
 components:
   schemas:
 
@@ -998,3 +1030,15 @@ components:
           type: string
         prefault:
           type: boolean
+
+    ReceiveMigrationData:
+      type: object
+      properties:
+        receiver_url:
+          type: string
+
+    SendMigrationData:
+      type: object
+      properties:
+        destination_url:
+          type: string
