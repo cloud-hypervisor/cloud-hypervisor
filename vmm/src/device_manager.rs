@@ -4008,19 +4008,27 @@ impl Aml for DeviceManager {
             segment.append_aml_bytes(bytes);
         }
 
+        let mut mbrd_memory = Vec::new();
+
+        for segment in &self.pci_segments {
+            mbrd_memory.push(aml::Memory32Fixed::new(
+                true,
+                segment.mmio_config_address as u32,
+                layout::PCI_MMIO_CONFIG_SIZE_PER_SEGMENT as u32,
+            ))
+        }
+
+        let mut mbrd_memory_refs = Vec::new();
+        for mbrd_memory_ref in &mbrd_memory {
+            mbrd_memory_refs.push(mbrd_memory_ref as &dyn Aml);
+        }
+
         aml::Device::new(
             "_SB_.MBRD".into(),
             vec![
                 &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0C02")),
                 &aml::Name::new("_UID".into(), &aml::ZERO),
-                &aml::Name::new(
-                    "_CRS".into(),
-                    &aml::ResourceTemplate::new(vec![&aml::Memory32Fixed::new(
-                        true,
-                        layout::PCI_MMCONFIG_START.0 as u32,
-                        layout::PCI_MMCONFIG_SIZE as u32,
-                    )]),
-                ),
+                &aml::Name::new("_CRS".into(), &aml::ResourceTemplate::new(mbrd_memory_refs)),
             ],
         )
         .append_aml_bytes(bytes);
