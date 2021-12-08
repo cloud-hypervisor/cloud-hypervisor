@@ -871,7 +871,7 @@ impl Vmm {
         &mut self,
         receive_data_migration: VmReceiveMigrationData,
     ) -> result::Result<(), MigratableError> {
-        info!(
+        debug!(
             "Receiving migration: receiver_url = {}",
             receive_data_migration.receiver_url
         );
@@ -893,15 +893,15 @@ impl Vmm {
         loop {
             let req = Request::read_from(&mut socket)?;
             match req.command() {
-                Command::Invalid => info!("Invalid Command Received"),
+                Command::Invalid => debug!("Invalid Command Received"),
                 Command::Start => {
-                    info!("Start Command Received");
+                    debug!("Start Command Received");
                     started = true;
 
                     Response::ok().write_to(&mut socket)?;
                 }
                 Command::Config => {
-                    info!("Config Command Received");
+                    debug!("Config Command Received");
 
                     if !started {
                         warn!("Migration not started yet");
@@ -911,7 +911,7 @@ impl Vmm {
                     vm = Some(self.vm_receive_config(&req, &mut socket)?);
                 }
                 Command::State => {
-                    info!("State Command Received");
+                    debug!("State Command Received");
 
                     if !started {
                         warn!("Migration not started yet");
@@ -926,7 +926,7 @@ impl Vmm {
                     }
                 }
                 Command::Memory => {
-                    info!("Memory Command Received");
+                    debug!("Memory Command Received");
 
                     if !started {
                         warn!("Migration not started yet");
@@ -941,7 +941,7 @@ impl Vmm {
                     }
                 }
                 Command::Complete => {
-                    info!("Complete Command Received");
+                    debug!("Complete Command Received");
                     if let Some(ref mut vm) = self.vm.as_mut() {
                         vm.resume()?;
                         Response::ok().write_to(&mut socket)?;
@@ -952,7 +952,7 @@ impl Vmm {
                     break;
                 }
                 Command::Abandon => {
-                    info!("Abandon Command Received");
+                    debug!("Abandon Command Received");
                     self.vm = None;
                     self.vm_config = None;
                     Response::ok().write_to(&mut socket).ok();
@@ -1087,7 +1087,7 @@ impl Vmm {
         // Try at most 5 passes of dirty memory sending
         const MAX_DIRTY_MIGRATIONS: usize = 5;
         for i in 0..MAX_DIRTY_MIGRATIONS {
-            info!("Dirty memory migration {} of {}", i, MAX_DIRTY_MIGRATIONS);
+            debug!("Dirty memory migration {} of {}", i, MAX_DIRTY_MIGRATIONS);
             if !Self::vm_maybe_send_dirty_pages(vm, &mut socket)? {
                 break;
             }
@@ -1127,7 +1127,7 @@ impl Vmm {
                 "Error completing migration"
             )));
         }
-        info!("Migration complete");
+        debug!("Migration complete");
 
         // Let every Migratable object know about the migration being complete
         vm.complete_migration()?;
@@ -1142,7 +1142,7 @@ impl Vmm {
         &mut self,
         send_data_migration: VmSendMigrationData,
     ) -> result::Result<(), MigratableError> {
-        info!(
+        debug!(
             "Sending migration: destination_url = {}",
             send_data_migration.destination_url
         );
@@ -1249,7 +1249,7 @@ impl Vmm {
                         warn!("Unknown VMM loop event: {}", event);
                     }
                     EpollDispatch::Exit => {
-                        info!("VM exit event");
+                        debug!("VM exit event");
                         // Consume the event.
                         self.exit_evt.read().map_err(Error::EventFdRead)?;
                         self.vmm_shutdown().map_err(Error::VmmShutdown)?;
@@ -1257,7 +1257,7 @@ impl Vmm {
                         break 'outer;
                     }
                     EpollDispatch::Reset => {
-                        info!("VM reset event");
+                        debug!("VM reset event");
                         // Consume the event.
                         self.reset_evt.read().map_err(Error::EventFdRead)?;
                         self.vm_reboot().map_err(Error::VmReboot)?;
@@ -1265,7 +1265,7 @@ impl Vmm {
                     EpollDispatch::ActivateVirtioDevices => {
                         if let Some(ref vm) = self.vm {
                             let count = self.activate_evt.read().map_err(Error::EventFdRead)?;
-                            info!(
+                            debug!(
                                 "Trying to activate pending virtio devices: count = {}",
                                 count
                             );
@@ -1280,7 +1280,7 @@ impl Vmm {
                         // Read from the API receiver channel
                         let api_request = api_receiver.recv().map_err(Error::ApiRequestRecv)?;
 
-                        info!("API request event: {:?}", api_request);
+                        debug!("API request event: {:?}", api_request);
                         match api_request {
                             ApiRequest::VmCreate(config, sender) => {
                                 let response = self
