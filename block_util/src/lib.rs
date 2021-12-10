@@ -23,6 +23,7 @@ pub mod vhdx_sync;
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
 #[cfg(feature = "io_uring")]
 use io_uring::{opcode, IoUring, Probe};
+use std::any::Any;
 use std::cmp;
 use std::convert::TryInto;
 use std::fs::File;
@@ -30,7 +31,7 @@ use std::io::{self, IoSlice, IoSliceMut, Read, Seek, SeekFrom, Write};
 use std::os::linux::fs::MetadataExt;
 use std::path::Path;
 use std::result;
-use std::sync::MutexGuard;
+use std::sync::{Arc, Mutex};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_bindings::bindings::virtio_blk::*;
@@ -476,98 +477,103 @@ pub fn block_io_uring_is_supported() -> bool {
     false
 }
 
-pub trait AsyncAdaptor<F>
-where
-    F: Read + Write + Seek,
-{
-    fn read_vectored_sync(
-        &mut self,
-        offset: libc::off_t,
-        iovecs: Vec<libc::iovec>,
-        user_data: u64,
-        eventfd: &EventFd,
-        completion_list: &mut Vec<(u64, i32)>,
-    ) -> AsyncIoResult<()> {
-        // Convert libc::iovec into IoSliceMut
-        let mut slices = Vec::new();
-        for iovec in iovecs.iter() {
-            slices.push(IoSliceMut::new(unsafe { std::mem::transmute(*iovec) }));
-        }
+pub trait ReadWriteSeekFile: Read + Write + Seek {
+    // Provides a mutable reference to the Any trait. This is useful to let
+    // the caller have access to the underlying type behind the trait.
+    fn as_any(&mut self) -> &mut dyn Any;
+}
 
-        let result = {
-            let mut file = self.file();
+impl<F: Read + Write + Seek + 'static> ReadWriteSeekFile for F {
+    fn as_any(&mut self) -> &mut dyn Any {
+        self
+    }
+}
 
-            // Move the cursor to the right offset
-            file.seek(SeekFrom::Start(offset as u64))
-                .map_err(AsyncIoError::ReadVectored)?;
+pub fn read_vectored_sync(
+    offset: libc::off_t,
+    iovecs: Vec<libc::iovec>,
+    user_data: u64,
+    file: &mut Arc<Mutex<dyn ReadWriteSeekFile + Send + Sync>>,
+    eventfd: &EventFd,
+    completion_list: &mut Vec<(u64, i32)>,
+) -> AsyncIoResult<()> {
+    // Convert libc::iovec into IoSliceMut
+    let mut slices = Vec::new();
+    for iovec in iovecs.iter() {
+        slices.push(IoSliceMut::new(unsafe { std::mem::transmute(*iovec) }));
+    }
 
-            // Read vectored
-            file.read_vectored(slices.as_mut_slice())
-                .map_err(AsyncIoError::ReadVectored)?
-        };
+    let result = {
+        let mut file = file.lock().unwrap();
 
-        completion_list.push((user_data, result as i32));
+        // Move the cursor to the right offset
+        file.seek(SeekFrom::Start(offset as u64))
+            .map_err(AsyncIoError::ReadVectored)?;
+
+        // Read vectored
+        file.read_vectored(slices.as_mut_slice())
+            .map_err(AsyncIoError::ReadVectored)?
+    };
+
+    completion_list.push((user_data, result as i32));
+    eventfd.write(1).unwrap();
+
+    Ok(())
+}
+
+pub fn write_vectored_sync(
+    offset: libc::off_t,
+    iovecs: Vec<libc::iovec>,
+    user_data: u64,
+    file: &mut Arc<Mutex<dyn ReadWriteSeekFile + Sync + Send>>,
+    eventfd: &EventFd,
+    completion_list: &mut Vec<(u64, i32)>,
+) -> AsyncIoResult<()> {
+    // Convert libc::iovec into IoSlice
+    let mut slices = Vec::new();
+    for iovec in iovecs.iter() {
+        slices.push(IoSlice::new(unsafe { std::mem::transmute(*iovec) }));
+    }
+
+    let result = {
+        let mut file = file.lock().unwrap();
+
+        // Move the cursor to the right offset
+        file.seek(SeekFrom::Start(offset as u64))
+            .map_err(AsyncIoError::WriteVectored)?;
+
+        // Write vectored
+        file.write_vectored(slices.as_slice())
+            .map_err(AsyncIoError::WriteVectored)?
+    };
+
+    completion_list.push((user_data, result as i32));
+    eventfd.write(1).unwrap();
+
+    Ok(())
+}
+
+pub fn fsync_sync(
+    user_data: Option<u64>,
+    file: &mut Arc<Mutex<dyn ReadWriteSeekFile + Sync + Send>>,
+    eventfd: &EventFd,
+    completion_list: &mut Vec<(u64, i32)>,
+) -> AsyncIoResult<()> {
+    let result: i32 = {
+        let mut file = file.lock().unwrap();
+
+        // Flush
+        file.flush().map_err(AsyncIoError::Fsync)?;
+
+        0
+    };
+
+    if let Some(user_data) = user_data {
+        completion_list.push((user_data, result));
         eventfd.write(1).unwrap();
-
-        Ok(())
     }
 
-    fn write_vectored_sync(
-        &mut self,
-        offset: libc::off_t,
-        iovecs: Vec<libc::iovec>,
-        user_data: u64,
-        eventfd: &EventFd,
-        completion_list: &mut Vec<(u64, i32)>,
-    ) -> AsyncIoResult<()> {
-        // Convert libc::iovec into IoSlice
-        let mut slices = Vec::new();
-        for iovec in iovecs.iter() {
-            slices.push(IoSlice::new(unsafe { std::mem::transmute(*iovec) }));
-        }
-
-        let result = {
-            let mut file = self.file();
-
-            // Move the cursor to the right offset
-            file.seek(SeekFrom::Start(offset as u64))
-                .map_err(AsyncIoError::WriteVectored)?;
-
-            // Write vectored
-            file.write_vectored(slices.as_slice())
-                .map_err(AsyncIoError::WriteVectored)?
-        };
-
-        completion_list.push((user_data, result as i32));
-        eventfd.write(1).unwrap();
-
-        Ok(())
-    }
-
-    fn fsync_sync(
-        &mut self,
-        user_data: Option<u64>,
-        eventfd: &EventFd,
-        completion_list: &mut Vec<(u64, i32)>,
-    ) -> AsyncIoResult<()> {
-        let result: i32 = {
-            let mut file = self.file();
-
-            // Flush
-            file.flush().map_err(AsyncIoError::Fsync)?;
-
-            0
-        };
-
-        if let Some(user_data) = user_data {
-            completion_list.push((user_data, result));
-            eventfd.write(1).unwrap();
-        }
-
-        Ok(())
-    }
-
-    fn file(&mut self) -> MutexGuard<F>;
+    Ok(())
 }
 
 pub enum ImageType {
