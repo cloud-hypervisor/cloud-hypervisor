@@ -24,7 +24,7 @@ pipeline{
 		stage ('Build') {
             parallel {
 				stage ('Worker build') {
-					agent { node { label 'impish' } }
+					agent { node { label 'hirsute' } }
 					environment {
         					AZURE_CONNECTION_STRING = credentials('46b4e7d6-315f-4cc1-8333-b58780863b9b')
 					}
@@ -87,7 +87,7 @@ pipeline{
 					}
 				}
 				stage ('Worker build (musl)') {
-					agent { node { label 'impish' } }
+					agent { node { label 'hirsute' } }
 					environment {
         					AZURE_CONNECTION_STRING = credentials('46b4e7d6-315f-4cc1-8333-b58780863b9b')
 					}
@@ -187,7 +187,7 @@ pipeline{
 					}
 				}
 				stage ('Worker build - Windows guest') {
-					agent { node { label 'impish' } }
+					agent { node { label 'hirsute' } }
 					environment {
         					AZURE_CONNECTION_STRING = credentials('46b4e7d6-315f-4cc1-8333-b58780863b9b')
 					}
@@ -227,7 +227,7 @@ pipeline{
 					}
 				}
 				stage ('Worker build - Live Migration') {
-					agent { node { label 'impish-small' } }
+					agent { node { label 'hirsute-small' } }
 					stages {
 						stage ('Checkout') {
 							steps {
