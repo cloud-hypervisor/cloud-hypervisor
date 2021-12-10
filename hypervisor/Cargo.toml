@@ -21,7 +21,7 @@ kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branc
 mshv-bindings = {git = "https://github.com/rust-vmm/mshv", branch = "main", features = ["with-serde", "fam-wrappers"], optional  = true }
 mshv-ioctls = { git = "https://github.com/rust-vmm/mshv", branch = "main", optional  = true}
 serde = { version = "1.0.131", features = ["rc"] }
-serde_derive = "1.0.130"
+serde_derive = "1.0.131"
 serde_json = "1.0.72"
 vm-memory = { version = "0.6.0", features = ["backend-mmap", "backend-atomic"] }
 vmm-sys-util = { version = "0.9.0", features = ["with-serde"] }

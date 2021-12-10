@@ -13,7 +13,7 @@ mshv = ["vfio-ioctls/mshv"]
 anyhow = "1.0.51"
 thiserror = "1.0.30"
 serde = { version = "1.0.131", features = ["rc"] }
-serde_derive = "1.0.130"
+serde_derive = "1.0.131"
 serde_json = "1.0.72"
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio-ioctls", branch = "main", default-features = false }
 vm-memory = { version = "0.6.0", features = ["backend-mmap"] }
