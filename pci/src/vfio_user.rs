@@ -326,17 +326,33 @@ impl Vfio for VfioUserClientWrapper {
         );
         let fds: Vec<i32> = event_fds.iter().map(|e| e.as_raw_fd()).collect();
 
-        self.client
-            .lock()
-            .unwrap()
-            .set_irqs(
-                irq_index,
-                VFIO_IRQ_SET_DATA_EVENTFD | VFIO_IRQ_SET_ACTION_TRIGGER,
-                0,
-                event_fds.len() as u32,
-                &fds,
-            )
-            .map_err(VfioError::VfioUser)
+        // Batch into blocks of 16 fds as sendmsg() has a size limit
+        let mut sent_fds = 0;
+        let num_fds = event_fds.len() as u32;
+        while sent_fds < num_fds {
+            let remaining_fds = num_fds - sent_fds;
+            let count = if remaining_fds > 16 {
+                16
+            } else {
+                remaining_fds
+            };
+
+            self.client
+                .lock()
+                .unwrap()
+                .set_irqs(
+                    irq_index,
+                    VFIO_IRQ_SET_DATA_EVENTFD | VFIO_IRQ_SET_ACTION_TRIGGER,
+                    sent_fds,
+                    count,
+                    &fds[sent_fds as usize..(sent_fds + count) as usize],
+                )
+                .map_err(VfioError::VfioUser)?;
+
+            sent_fds += count;
+        }
+
+        Ok(())
     }
 
     fn disable_irq(&self, irq_index: u32) -> Result<(), VfioError> {
