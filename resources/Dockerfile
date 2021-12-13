@@ -115,10 +115,8 @@ RUN git clone --depth 1 https://gitlab.com/virtio-fs/qemu.git -b qemu5.0-virtiof
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
        git clone https://github.com/spdk/spdk \
        && cd spdk \
-       && git checkout a827fd7eeca67209d4c0aaad9a3ed55692e7e36e \
+       && git checkout 59f3cdacb13bd2a19c4a86be04792b0ee4491172 \
        && git submodule update --init \
-       && sed -i 's/pip3 install meson/pip3 install meson==0.59.2/g'  scripts/pkgdep/ubuntu.sh \
-       && sed -i 's/meson/meson==0.59.2/g'  scripts/pkgdep/requirements.txt \
        && apt-get update \
        && ./scripts/pkgdep.sh \
        && ./configure --with-vfio-user \
