@@ -306,8 +306,9 @@ sudo bash -c "echo 1000000 > /sys/kernel/mm/ksm/pages_to_scan"
 sudo bash -c "echo 10 > /sys/kernel/mm/ksm/sleep_millisecs"
 sudo bash -c "echo 1 > /sys/kernel/mm/ksm/run"
 
-# Setup huge-pages for ovs-dpdk
-echo 2048 | sudo tee /proc/sys/vm/nr_hugepages
+# Both test_vfio and ovs-dpdk rely on hugepages
+echo 6144 | sudo tee /proc/sys/vm/nr_hugepages
+sudo chmod a+rwX /dev/hugepages
 
 # Run all direct kernel boot (Device Tree) test cases in mod `parallel`
 time cargo test $features "parallel::$test_filter"
