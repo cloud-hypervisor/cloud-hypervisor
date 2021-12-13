@@ -1,3 +1,4 @@
+- [v20.1](#v201)
 - [v20.0](#v200)
     - [Multiple PCI segments support](#multiple-pci-segments-support)
     - [CPU pinning](#cpu-pinning)
@@ -175,6 +176,16 @@
     - [Console over virtio](#console-over-virtio)
     - [Unit testing](#unit-testing)
     - [Integration tests parallelization](#integration-tests-parallelization)
+
+# v20.1
+
+This is a bug fix release. The following issues have been addressed:
+
+* Networking performance regression with `virtio-net` (#3450)
+* Limit file descriptors sent in `vfio-user` support (#3401)
+* Fully advertise PCI MMIO config regions in ACPI tables (#3432)
+* Set the TSS and KVM identity maps so they don't overlap with firmware RAM
+* Correctly update the `DeviceTree` on restore
 
 # v20.0
 
