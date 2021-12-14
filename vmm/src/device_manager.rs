@@ -1712,9 +1712,14 @@ impl DeviceManager {
         let seccomp_filter =
             get_seccomp_filter(&self.seccomp_action, Thread::PtyForeground).unwrap();
 
-        let pipe = start_sigwinch_listener(seccomp_filter, pty)?;
-
-        self.console_resize_pipe = Some(Arc::new(pipe));
+        match start_sigwinch_listener(seccomp_filter, pty) {
+            Ok(pipe) => {
+                self.console_resize_pipe = Some(Arc::new(pipe));
+            }
+            Err(e) => {
+                warn!("Ignoring error from setting up SIGWINCH listener: {}", e)
+            }
+        }
 
         Ok(())
     }
