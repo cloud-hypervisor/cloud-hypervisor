@@ -52,6 +52,9 @@ pub enum TdvfSectionType {
     Cfv,
     TdHob,
     TempMem,
+    PermMem,
+    Payload,
+    PayloadParam,
     Reserved = 0xffffffff,
 }
 
