@@ -183,11 +183,41 @@ struct HobGuidType {
     name: EfiGuid,
 }
 
+#[repr(u32)]
+#[derive(Clone, Copy, Debug)]
+pub enum PayloadImageType {
+    ExecutablePayload,
+    BzImage,
+    RawVmLinux,
+}
+
+impl Default for PayloadImageType {
+    fn default() -> Self {
+        PayloadImageType::ExecutablePayload
+    }
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Default, Debug)]
+pub struct PayloadInfo {
+    pub image_type: PayloadImageType,
+    pub entry_point: u64,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Default, Debug)]
+struct TdPayload {
+    guid_type: HobGuidType,
+    payload_info: PayloadInfo,
+}
+
 // SAFETY: These data structures only contain a series of integers
 unsafe impl ByteValued for HobHeader {}
 unsafe impl ByteValued for HobHandoffInfoTable {}
 unsafe impl ByteValued for HobResourceDescriptor {}
 unsafe impl ByteValued for HobGuidType {}
+unsafe impl ByteValued for PayloadInfo {}
+unsafe impl ByteValued for TdPayload {}
 
 pub struct TdHob {
     start_offset: u64,
@@ -368,6 +398,40 @@ impl TdHob {
             }
         }
         self.current_offset += length as u64;
+
+        Ok(())
+    }
+
+    pub fn add_payload(
+        &mut self,
+        mem: &GuestMemoryMmap,
+        payload_info: PayloadInfo,
+    ) -> Result<(), TdvfError> {
+        let payload = TdPayload {
+            guid_type: HobGuidType {
+                header: HobHeader {
+                    r#type: HobType::GuidExtension,
+                    length: std::mem::size_of::<TdPayload>() as u16,
+                    reserved: 0,
+                },
+                // HOB_PAYLOAD_INFO_GUID
+                // 0xb96fa412, 0x461f, 0x4be3, {0x8c, 0xd, 0xad, 0x80, 0x5a, 0x49, 0x7a, 0xc0
+                name: EfiGuid {
+                    data1: 0xb96f_a412,
+                    data2: 0x461f,
+                    data3: 0x4be3,
+                    data4: [0x8c, 0xd, 0xad, 0x80, 0x5a, 0x49, 0x7a, 0xc0],
+                },
+            },
+            payload_info,
+        };
+        info!(
+            "Writing HOB TD_PAYLOAD {:x} {:x?}",
+            self.current_offset, payload
+        );
+        mem.write_obj(payload, GuestAddress(self.current_offset))
+            .map_err(TdvfError::GuestMemoryWriteHob)?;
+        self.update_offset::<TdPayload>();
 
         Ok(())
     }
