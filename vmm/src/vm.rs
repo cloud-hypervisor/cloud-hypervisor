@@ -64,6 +64,8 @@ use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::io::{Seek, SeekFrom};
+#[cfg(feature = "tdx")]
+use std::mem;
 use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::net::UnixStream;
@@ -75,9 +77,9 @@ use vm_device::Bus;
 use vm_device::BusDevice;
 #[cfg(target_arch = "x86_64")]
 use vm_memory::Address;
-use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
 #[cfg(feature = "tdx")]
-use vm_memory::{GuestMemory, GuestMemoryRegion};
+use vm_memory::{ByteValued, GuestMemory, GuestMemoryRegion};
+use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::protocol::{Request, Response, Status};
 use vm_migration::{
     protocol::MemoryRangeTable, Migratable, MigratableError, Pausable, Snapshot,
@@ -255,9 +257,13 @@ pub enum Error {
     // Failed to copy to memory
     FirmwareLoad(vm_memory::GuestMemoryError),
 
-    /// Error doing I/O on TDX firmware file
+    /// Error performing I/O on TDX firmware file
     #[cfg(feature = "tdx")]
     LoadTdvf(std::io::Error),
+
+    /// Error performing I/O on the payload file
+    #[cfg(feature = "tdx")]
+    LoadPayload(std::io::Error),
 
     /// Error parsing TDVF
     #[cfg(feature = "tdx")]
@@ -282,6 +288,10 @@ pub enum Error {
     /// Error finalizing TDX setup
     #[cfg(feature = "tdx")]
     FinalizeTdx(hypervisor::HypervisorVmError),
+
+    /// Invalid payload type
+    #[cfg(feature = "tdx")]
+    InvalidPayloadType,
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -1773,6 +1783,54 @@ impl Vm {
                 TdvfSectionType::TdHob => {
                     hob_offset = Some(section.address);
                 }
+                TdvfSectionType::Payload => {
+                    info!("Copying payload to guest memory");
+                    if let Some(payload_file) = self.kernel.as_mut() {
+                        let payload_size = payload_file
+                            .seek(SeekFrom::End(0))
+                            .map_err(Error::LoadPayload)?;
+
+                        payload_file
+                            .seek(SeekFrom::Start(0x1f1))
+                            .map_err(Error::LoadPayload)?;
+
+                        let mut payload_header = linux_loader::bootparam::setup_header::default();
+                        payload_header
+                            .as_bytes()
+                            .read_from(
+                                0,
+                                payload_file,
+                                mem::size_of::<linux_loader::bootparam::setup_header>(),
+                            )
+                            .unwrap();
+
+                        if payload_header.header != 0x5372_6448 {
+                            return Err(Error::InvalidPayloadType);
+                        }
+
+                        if (payload_header.version < 0x0200)
+                            || ((payload_header.loadflags & 0x1) == 0x0)
+                        {
+                            return Err(Error::InvalidPayloadType);
+                        }
+
+                        payload_file
+                            .seek(SeekFrom::Start(0))
+                            .map_err(Error::LoadPayload)?;
+                        mem.read_from(
+                            GuestAddress(section.address),
+                            payload_file,
+                            payload_size as usize,
+                        )
+                        .unwrap();
+                    }
+                }
+                TdvfSectionType::PayloadParam => {
+                    info!("Copying payload parameters to guest memory");
+                    let cmdline = self.get_cmdline()?;
+                    mem.write_slice(cmdline.as_str().as_bytes(), GuestAddress(section.address))
+                        .unwrap();
+                }
                 _ => {}
             }
         }
@@ -1965,6 +2023,18 @@ impl Vm {
         Some(rsdp_addr)
     }
 
+    fn entry_point(&mut self) -> Result<Option<EntryPoint>> {
+        Ok(if self.kernel.as_ref().is_some() {
+            #[cfg(feature = "tdx")]
+            if self.config.lock().unwrap().tdx.is_some() {
+                return Ok(None);
+            }
+            Some(self.load_kernel()?)
+        } else {
+            None
+        })
+    }
+
     pub fn boot(&mut self) -> Result<()> {
         info!("Booting VM");
         event!("vm", "booting");
@@ -1977,11 +2047,7 @@ impl Vm {
         current_state.valid_transition(new_state)?;
 
         // Load kernel if configured
-        let entry_point = if self.kernel.as_ref().is_some() {
-            Some(self.load_kernel()?)
-        } else {
-            None
-        };
+        let entry_point = self.entry_point()?;
 
         // The initial TDX configuration must be done before the vCPUs are
         // created
