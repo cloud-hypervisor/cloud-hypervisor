@@ -48,6 +48,12 @@ const TIOCGTPEER: u64 = 0x5441;
 const FIOCLEX: u64 = 0x5451;
 const FIONBIO: u64 = 0x5421;
 
+// See include/uapi/linux/fs.h in the kernel code.
+const BLKSSZGET: u64 = 0x1268;
+const BLKPBSZGET: u64 = 0x127b;
+const BLKIOMIN: u64 = 0x1278;
+const BLKIOOPT: u64 = 0x1279;
+
 // See include/uapi/linux/if_tun.h in the kernel code.
 const TUNGETIFF: u64 = 0x8004_54d2;
 const TUNSETIFF: u64 = 0x4004_54ca;
@@ -210,6 +216,10 @@ fn create_vmm_ioctl_seccomp_rule_hypervisor() -> Result<Vec<SeccompRule>, Backen
 
 fn create_vmm_ioctl_seccomp_rule_common() -> Result<Vec<SeccompRule>, BackendError> {
     let mut common_rules = or![
+        and![Cond::new(1, ArgLen::Dword, Eq, BLKSSZGET)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, BLKPBSZGET)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, BLKIOMIN)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, BLKIOOPT)?],
         and![Cond::new(1, ArgLen::Dword, Eq, FIOCLEX)?],
         and![Cond::new(1, ArgLen::Dword, Eq, FIONBIO)?],
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCGIFFLAGS)?],
