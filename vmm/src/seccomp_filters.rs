@@ -427,14 +427,11 @@ fn vmm_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
         #[cfg(target_arch = "x86_64")]
         (libc::SYS_epoll_wait, vec![]),
         (libc::SYS_eventfd2, vec![]),
-        (libc::SYS_execve, vec![]),
         (libc::SYS_exit, vec![]),
         (libc::SYS_exit_group, vec![]),
         (libc::SYS_fallocate, vec![]),
         (libc::SYS_fcntl, vec![]),
         (libc::SYS_fdatasync, vec![]),
-        #[cfg(target_arch = "x86_64")]
-        (libc::SYS_fork, vec![]),
         (libc::SYS_fstat, vec![]),
         (libc::SYS_fsync, vec![]),
         (libc::SYS_ftruncate, vec![]),
