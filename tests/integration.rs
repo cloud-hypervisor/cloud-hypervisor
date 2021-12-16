@@ -4997,6 +4997,107 @@ mod tests {
         }
 
         #[test]
+        fn test_virtio_block_topology() {
+            let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(Box::new(focal));
+
+            let kernel_path = direct_kernel_boot_path();
+            let test_disk_path = guest.tmp_dir.as_path().join("test.img");
+
+            Command::new("qemu-img")
+                .args(&[
+                    "create",
+                    "-f",
+                    "raw",
+                    test_disk_path.to_str().unwrap(),
+                    "16M",
+                ])
+                .output()
+                .expect("qemu-img command failed");
+            let out = Command::new("losetup")
+                .args(&[
+                    "--show",
+                    "--find",
+                    "--sector-size=4096",
+                    test_disk_path.to_str().unwrap(),
+                ])
+                .output()
+                .expect("failed to create loop device")
+                .stdout;
+            let _tmp = String::from_utf8_lossy(&out);
+            let loop_dev = _tmp.trim();
+
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--cpus", "boot=1"])
+                .args(&["--memory", "size=512M"])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+                .args(&[
+                    "--disk",
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
+                    format!("path={}", loop_dev).as_str(),
+                ])
+                .default_net()
+                .capture_output()
+                .spawn()
+                .unwrap();
+
+            let r = std::panic::catch_unwind(|| {
+                guest.wait_vm_boot(None).unwrap();
+
+                // MIN-IO column
+                assert_eq!(
+                    guest
+                        .ssh_command("lsblk -t| grep vdc | awk '{print $3}'")
+                        .unwrap()
+                        .trim()
+                        .parse::<u32>()
+                        .unwrap_or_default(),
+                    4096
+                );
+                // PHY-SEC column
+                assert_eq!(
+                    guest
+                        .ssh_command("lsblk -t| grep vdc | awk '{print $5}'")
+                        .unwrap()
+                        .trim()
+                        .parse::<u32>()
+                        .unwrap_or_default(),
+                    4096
+                );
+                // LOG-SEC column
+                assert_eq!(
+                    guest
+                        .ssh_command("lsblk -t| grep vdc | awk '{print $6}'")
+                        .unwrap()
+                        .trim()
+                        .parse::<u32>()
+                        .unwrap_or_default(),
+                    4096
+                );
+            });
+
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+
+            handle_child_output(r, &output);
+
+            Command::new("losetup")
+                .args(&["-d", loop_dev])
+                .output()
+                .expect("loop device not found");
+        }
+
+        #[test]
         fn test_virtio_balloon() {
             let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(focal));
