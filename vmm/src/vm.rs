@@ -33,10 +33,8 @@ use anyhow::anyhow;
 use arch::get_host_cpu_phys_bits;
 #[cfg(target_arch = "x86_64")]
 use arch::layout::{KVM_IDENTITY_MAP_START, KVM_TSS_START};
-#[cfg(all(feature = "tdx", feature = "acpi"))]
-use arch::x86_64::tdx::TdVmmDataRegionType;
 #[cfg(feature = "tdx")]
-use arch::x86_64::tdx::{TdVmmDataRegion, TdvfSection};
+use arch::x86_64::tdx::TdvfSection;
 use arch::EntryPoint;
 #[cfg(target_arch = "aarch64")]
 use arch::PciSpaceInfo;
@@ -1709,11 +1707,7 @@ impl Vm {
     }
 
     #[cfg(feature = "tdx")]
-    fn populate_tdx_sections(
-        &mut self,
-        sections: &[TdvfSection],
-        vmm_data_regions: &[TdVmmDataRegion],
-    ) -> Result<Option<u64>> {
+    fn populate_tdx_sections(&mut self, sections: &[TdvfSection]) -> Result<Option<u64>> {
         use arch::x86_64::tdx::*;
         // Get the memory end *before* we start adding TDVF ram regions
         let boot_guest_memory = self
@@ -1779,19 +1773,6 @@ impl Vm {
         sorted_sections.retain(|section| {
             !matches!(section.r#type, TdvfSectionType::Bfv | TdvfSectionType::Cfv)
         });
-
-        // Add VMM specific data memory region to TdvfSections as TdHob type
-        // to ensure the firmware won't ignore/reject the ranges.
-        for region in vmm_data_regions {
-            sorted_sections.push(TdvfSection {
-                data_offset: 0,
-                data_size: 0,
-                address: region.start_address,
-                size: region.length,
-                r#type: TdvfSectionType::TdHob,
-                attributes: 0,
-            });
-        }
 
         sorted_sections.sort_by_key(|section| section.address);
         sorted_sections.reverse();
@@ -1860,25 +1841,13 @@ impl Vm {
         )
         .map_err(Error::PopulateHob)?;
 
-        // Add VMM specific data to the TdHob. The content of the data is
-        // is written as part of the HOB, which will be retrieved from the
-        // firmware, and processed accordingly to the type.
-        for region in vmm_data_regions {
-            hob.add_td_vmm_data(&mem, *region)
-                .map_err(Error::PopulateHob)?;
-        }
-
         hob.finish(&mem).map_err(Error::PopulateHob)?;
 
         Ok(hob_offset)
     }
 
     #[cfg(feature = "tdx")]
-    fn init_tdx_memory(
-        &mut self,
-        sections: &[TdvfSection],
-        regions: &[TdVmmDataRegion],
-    ) -> Result<()> {
+    fn init_tdx_memory(&mut self, sections: &[TdvfSection]) -> Result<()> {
         let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
         let mem = guest_memory.memory();
 
@@ -1890,21 +1859,6 @@ impl Vm {
                     section.size,
                     /* TDVF_SECTION_ATTRIBUTES_EXTENDMR */
                     section.attributes == 1,
-                )
-                .map_err(Error::InitializeTdxMemoryRegion)?;
-        }
-
-        // The same way we let the hypervisor know about the TDVF sections, we
-        // must declare the VMM specific regions shared with the guest so that
-        // they won't be discarded.
-        for region in regions {
-            self.vm
-                .tdx_init_memory_region(
-                    mem.get_host_address(GuestAddress(region.start_address))
-                        .unwrap() as u64,
-                    region.start_address,
-                    region.length,
-                    false,
                 )
                 .map_err(Error::InitializeTdxMemoryRegion)?;
         }
@@ -2019,23 +1973,11 @@ impl Vm {
             rsdp_addr
         };
 
-        #[cfg(all(feature = "tdx", not(feature = "acpi")))]
-        let vmm_data_regions: Vec<TdVmmDataRegion> = Vec::new();
-
-        // Create a VMM specific data region to share the ACPI tables with
-        // the guest. Reserving 64kiB to ensure the ACPI tables will fit.
-        #[cfg(all(feature = "tdx", feature = "acpi"))]
-        let vmm_data_regions = vec![TdVmmDataRegion {
-            start_address: rsdp_addr.0,
-            length: 0x10000,
-            region_type: TdVmmDataRegionType::AcpiTables,
-        }];
-
         // Configuring the TDX regions requires that the vCPUs are created.
         #[cfg(feature = "tdx")]
         let hob_address = if self.config.lock().unwrap().tdx.is_some() {
             // TDX sections are written to memory.
-            self.populate_tdx_sections(&sections, &vmm_data_regions)?
+            self.populate_tdx_sections(&sections)?
         } else {
             None
         };
@@ -2062,7 +2004,7 @@ impl Vm {
             // Let the hypervisor know which memory ranges are shared with the
             // guest. This prevents the guest from ignoring/discarding memory
             // regions provided by the host.
-            self.init_tdx_memory(&sections, &vmm_data_regions)?;
+            self.init_tdx_memory(&sections)?;
             // With TDX memory and CPU state configured TDX setup is complete
             self.vm.tdx_finalize().map_err(Error::FinalizeTdx)?;
         }
