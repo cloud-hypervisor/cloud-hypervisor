@@ -1918,6 +1918,30 @@ impl Vm {
         Ok(())
     }
 
+    // Creates ACPI tables
+    // In case of TDX being used, this is a no-op since the tables will be
+    // created and passed when populating the HOB.
+    #[cfg(feature = "acpi")]
+    fn create_acpi_tables(&self) -> Option<GuestAddress> {
+        #[cfg(feature = "tdx")]
+        if self.config.lock().unwrap().tdx.is_some() {
+            return None;
+        }
+
+        let mem = self.memory_manager.lock().unwrap().guest_memory().memory();
+
+        let rsdp_addr = crate::acpi::create_acpi_tables(
+            &mem,
+            &self.device_manager,
+            &self.cpu_manager,
+            &self.memory_manager,
+            &self.numa_nodes,
+        );
+        info!("Created ACPI tables: rsdp_addr = 0x{:x}", rsdp_addr.0);
+
+        Some(rsdp_addr)
+    }
+
     pub fn boot(&mut self) -> Result<()> {
         info!("Booting VM");
         event!("vm", "booting");
@@ -1958,20 +1982,7 @@ impl Vm {
         };
 
         #[cfg(feature = "acpi")]
-        let rsdp_addr = {
-            let mem = self.memory_manager.lock().unwrap().guest_memory().memory();
-
-            let rsdp_addr = crate::acpi::create_acpi_tables(
-                &mem,
-                &self.device_manager,
-                &self.cpu_manager,
-                &self.memory_manager,
-                &self.numa_nodes,
-            );
-            info!("Created ACPI tables: rsdp_addr = 0x{:x}", rsdp_addr.0);
-
-            rsdp_addr
-        };
+        let rsdp_addr = self.create_acpi_tables();
 
         // Configuring the TDX regions requires that the vCPUs are created.
         #[cfg(feature = "tdx")]
@@ -1985,9 +1996,11 @@ impl Vm {
         // Configure shared state based on loaded kernel
         entry_point
             .map(|_| {
+                // Safe to unwrap rsdp_addr as we know it can't be None when
+                // the entry_point is Some.
                 self.configure_system(
                     #[cfg(feature = "acpi")]
-                    rsdp_addr,
+                    rsdp_addr.unwrap(),
                 )
             })
             .transpose()?;
