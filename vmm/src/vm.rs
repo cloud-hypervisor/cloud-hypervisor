@@ -1841,6 +1841,18 @@ impl Vm {
         )
         .map_err(Error::PopulateHob)?;
 
+        // Loop over the ACPI tables and copy them to the HOB.
+        #[cfg(feature = "acpi")]
+        for acpi_table in crate::acpi::create_acpi_tables_tdx(
+            &self.device_manager,
+            &self.cpu_manager,
+            &self.memory_manager,
+            &self.numa_nodes,
+        ) {
+            hob.add_acpi_table(&mem, acpi_table.as_slice())
+                .map_err(Error::PopulateHob)?;
+        }
+
         hob.finish(&mem).map_err(Error::PopulateHob)?;
 
         Ok(hob_offset)

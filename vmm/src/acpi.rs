@@ -778,7 +778,6 @@ pub fn create_acpi_tables(
 }
 
 #[cfg(feature = "tdx")]
-#[allow(unused)]
 pub fn create_acpi_tables_tdx(
     device_manager: &Arc<Mutex<DeviceManager>>,
     cpu_manager: &Arc<Mutex<CpuManager>>,
