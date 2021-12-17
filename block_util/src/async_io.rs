@@ -44,9 +44,39 @@ ioctl_io_nr!(BLKPBSZGET, 0x12, 123);
 ioctl_io_nr!(BLKIOMIN, 0x12, 120);
 ioctl_io_nr!(BLKIOOPT, 0x12, 121);
 
+enum BlockSize {
+    LogicalBlock,
+    PhysicalBlock,
+    MinimumIo,
+    OptimalIo,
+}
+
 impl DiskTopology {
     // libc::ioctl() takes different types on different architectures
     #[allow(clippy::useless_conversion)]
+    fn query_block_size(f: &mut File, block_size_type: BlockSize) -> std::io::Result<u64> {
+        let mut block_size = 0;
+        let ret = unsafe {
+            ioctl(
+                f.as_raw_fd(),
+                match block_size_type {
+                    BlockSize::LogicalBlock => BLKSSZGET(),
+                    BlockSize::PhysicalBlock => BLKPBSZGET(),
+                    BlockSize::MinimumIo => BLKIOMIN(),
+                    BlockSize::OptimalIo => BLKIOOPT(),
+                }
+                .try_into()
+                .unwrap(),
+                &mut block_size,
+            )
+        };
+        if ret != 0 {
+            return Err(std::io::Error::last_os_error());
+        };
+
+        Ok(block_size)
+    }
+
     pub fn probe(f: &mut File) -> std::io::Result<Self> {
         let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
         let ret = unsafe { libc::fstat(f.as_raw_fd(), stat.as_mut_ptr()) };
@@ -59,60 +89,11 @@ impl DiskTopology {
             return Ok(DiskTopology::default());
         }
 
-        let mut logical_block_size = 0;
-        let mut physical_block_size = 0;
-        let mut minimum_io_size = 0;
-        let mut optimal_io_size = 0;
-
-        let ret = unsafe {
-            ioctl(
-                f.as_raw_fd(),
-                BLKSSZGET().try_into().unwrap(),
-                &mut logical_block_size,
-            )
-        };
-        if ret != 0 {
-            return Err(std::io::Error::last_os_error());
-        };
-
-        let ret = unsafe {
-            ioctl(
-                f.as_raw_fd(),
-                BLKPBSZGET().try_into().unwrap(),
-                &mut physical_block_size,
-            )
-        };
-        if ret != 0 {
-            return Err(std::io::Error::last_os_error());
-        };
-
-        let ret = unsafe {
-            ioctl(
-                f.as_raw_fd(),
-                BLKIOMIN().try_into().unwrap(),
-                &mut minimum_io_size,
-            )
-        };
-        if ret != 0 {
-            return Err(std::io::Error::last_os_error());
-        };
-
-        let ret = unsafe {
-            ioctl(
-                f.as_raw_fd(),
-                BLKIOOPT().try_into().unwrap(),
-                &mut optimal_io_size,
-            )
-        };
-        if ret != 0 {
-            return Err(std::io::Error::last_os_error());
-        };
-
         Ok(DiskTopology {
-            logical_block_size,
-            physical_block_size,
-            minimum_io_size,
-            optimal_io_size,
+            logical_block_size: Self::query_block_size(f, BlockSize::LogicalBlock)?,
+            physical_block_size: Self::query_block_size(f, BlockSize::PhysicalBlock)?,
+            minimum_io_size: Self::query_block_size(f, BlockSize::MinimumIo)?,
+            optimal_io_size: Self::query_block_size(f, BlockSize::OptimalIo)?,
         })
     }
 }
