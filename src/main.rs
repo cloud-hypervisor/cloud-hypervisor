@@ -125,6 +125,7 @@ fn prepare_default_values() -> (String, String, String) {
     (default_vcpus, default_memory, default_rng)
 }
 
+#[allow(clippy::needless_late_init)]
 fn create_app<'a, 'b>(
     default_vcpus: &'a str,
     default_memory: &'a str,

@@ -315,21 +315,12 @@ impl CpuidPatch {
 
         for entry in entries.iter() {
             if entry.function == function && entry.index == index {
-                let reg_val: u32;
-                match reg {
-                    CpuidReg::EAX => {
-                        reg_val = entry.eax;
-                    }
-                    CpuidReg::EBX => {
-                        reg_val = entry.ebx;
-                    }
-                    CpuidReg::ECX => {
-                        reg_val = entry.ecx;
-                    }
-                    CpuidReg::EDX => {
-                        reg_val = entry.edx;
-                    }
-                }
+                let reg_val = match reg {
+                    CpuidReg::EAX => entry.eax,
+                    CpuidReg::EBX => entry.ebx,
+                    CpuidReg::ECX => entry.ecx,
+                    CpuidReg::EDX => entry.edx,
+                };
 
                 return (reg_val & mask) == mask;
             }
@@ -522,19 +513,14 @@ impl CpuidFeatureEntry {
             .enumerate()
         {
             let entry = &feature_entry_list[i];
-            let entry_compatible;
-            match entry.compatible_check {
+            let entry_compatible = match entry.compatible_check {
                 CpuidCompatibleCheck::BitwiseSubset => {
                     let different_feature_bits = src_vm_feature ^ dest_vm_feature;
                     let src_vm_feature_bits_only = different_feature_bits & src_vm_feature;
-                    entry_compatible = src_vm_feature_bits_only == 0;
+                    src_vm_feature_bits_only == 0
                 }
-                CpuidCompatibleCheck::Equal => {
-                    entry_compatible = src_vm_feature == dest_vm_feature;
-                }
-                CpuidCompatibleCheck::NumNotGreater => {
-                    entry_compatible = src_vm_feature <= dest_vm_feature;
-                }
+                CpuidCompatibleCheck::Equal => src_vm_feature == dest_vm_feature,
+                CpuidCompatibleCheck::NumNotGreater => src_vm_feature <= dest_vm_feature,
             };
             if !entry_compatible {
                 error!(
