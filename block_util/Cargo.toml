@@ -6,7 +6,6 @@ edition = "2018"
 
 [features]
 default = []
-io_uring = []
 
 [dependencies]
 io-uring = "0.5.2"

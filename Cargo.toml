@@ -51,13 +51,12 @@ wait-timeout = "0.2.0"
 [features]
 default = ["common", "kvm"]
 # Common features for all hypervisors
-common = ["acpi", "cmos", "fwdebug", "io_uring"]
+common = ["acpi", "cmos", "fwdebug"]
 acpi = ["vmm/acpi"]
 cmos = ["vmm/cmos"]
 fwdebug = ["vmm/fwdebug"]
 kvm = ["vmm/kvm"]
 mshv = ["vmm/mshv"]
-io_uring = ["vmm/io_uring"]
 tdx = ["vmm/tdx"]
 
 # Integration tests require a special environment to run in
