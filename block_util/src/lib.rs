@@ -21,7 +21,6 @@ pub mod vhd;
 pub mod vhdx_sync;
 
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
-#[cfg(feature = "io_uring")]
 use io_uring::{opcode, IoUring, Probe};
 use std::cmp;
 use std::convert::TryInto;
@@ -423,7 +422,6 @@ unsafe impl ByteValued for VirtioBlockGeometry {}
 
 /// Check if io_uring for block device can be used on the current system, as
 /// it correctly supports the expected io_uring features.
-#[cfg(feature = "io_uring")]
 pub fn block_io_uring_is_supported() -> bool {
     let error_msg = "io_uring not supported:";
 
@@ -469,11 +467,6 @@ pub fn block_io_uring_is_supported() -> bool {
     }
 
     true
-}
-
-#[cfg(not(feature = "io_uring"))]
-pub fn block_io_uring_is_supported() -> bool {
-    false
 }
 
 pub trait AsyncAdaptor<F>
