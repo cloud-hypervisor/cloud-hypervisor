@@ -1989,7 +1989,11 @@ impl Vm {
             .map_err(Error::CpuManager)?;
 
         #[cfg(feature = "tdx")]
-        let sections = self.extract_tdvf_sections()?;
+        let sections = if self.config.lock().unwrap().tdx.is_some() {
+            self.extract_tdvf_sections()?
+        } else {
+            Vec::new()
+        };
 
         #[cfg(feature = "acpi")]
         let rsdp_addr = {
