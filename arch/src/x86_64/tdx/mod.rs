@@ -315,6 +315,59 @@ impl TdHob {
             0x403,
         )
     }
+
+    pub fn add_acpi_table(
+        &mut self,
+        mem: &GuestMemoryMmap,
+        table_content: &[u8],
+    ) -> Result<(), TdvfError> {
+        // We already know the HobGuidType size is 8 bytes multiple, but we
+        // need the total size to be 8 bytes multiple. That is why the ACPI
+        // table size must be 8 bytes multiple as well.
+        let length = std::mem::size_of::<HobGuidType>() as u16
+            + align_hob(table_content.len() as u64) as u16;
+        let hob_guid_type = HobGuidType {
+            header: HobHeader {
+                r#type: HobType::GuidExtension,
+                length,
+                reserved: 0,
+            },
+            // ACPI_TABLE_HOB_GUID
+            // 0x6a0c5870, 0xd4ed, 0x44f4, {0xa1, 0x35, 0xdd, 0x23, 0x8b, 0x6f, 0xc, 0x8d }
+            name: EfiGuid {
+                data1: 0x6a0c_5870,
+                data2: 0xd4ed,
+                data3: 0x44f4,
+                data4: [0xa1, 0x35, 0xdd, 0x23, 0x8b, 0x6f, 0xc, 0x8d],
+            },
+        };
+        info!(
+            "Writing HOB ACPI table {:x} {:x?} {:x?}",
+            self.current_offset, hob_guid_type, table_content
+        );
+        mem.write_obj(hob_guid_type, GuestAddress(self.current_offset))
+            .map_err(TdvfError::GuestMemoryWriteHob)?;
+        let current_offset = self.current_offset + std::mem::size_of::<HobGuidType>() as u64;
+
+        // In case the table is quite large, let's make sure we can handle
+        // retrying until everything has been correctly copied.
+        let mut offset: usize = 0;
+        loop {
+            let bytes_written = mem
+                .write(
+                    &table_content[offset..],
+                    GuestAddress(current_offset + offset as u64),
+                )
+                .map_err(TdvfError::GuestMemoryWriteHob)?;
+            offset += bytes_written;
+            if offset >= table_content.len() {
+                break;
+            }
+        }
+        self.current_offset += length as u64;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
