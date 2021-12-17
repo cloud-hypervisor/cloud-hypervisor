@@ -776,3 +776,48 @@ pub fn create_acpi_tables(
     );
     rsdp_offset
 }
+
+#[cfg(feature = "tdx")]
+#[allow(unused)]
+pub fn create_acpi_tables_tdx(
+    device_manager: &Arc<Mutex<DeviceManager>>,
+    cpu_manager: &Arc<Mutex<CpuManager>>,
+    memory_manager: &Arc<Mutex<MemoryManager>>,
+    numa_nodes: &NumaNodes,
+) -> Vec<Sdt> {
+    // DSDT
+    let mut tables = vec![create_dsdt_table(
+        device_manager,
+        cpu_manager,
+        memory_manager,
+    )];
+
+    // FACP aka FADT
+    tables.push(create_facp_table(GuestAddress(0)));
+
+    // MADT
+    tables.push(cpu_manager.lock().unwrap().create_madt());
+
+    // MCFG
+    tables.push(create_mcfg_table(
+        device_manager.lock().unwrap().pci_segments(),
+    ));
+
+    // SRAT and SLIT
+    // Only created if the NUMA nodes list is not empty.
+    if !numa_nodes.is_empty() {
+        // SRAT
+        tables.push(create_srat_table(numa_nodes));
+
+        // SLIT
+        tables.push(create_slit_table(numa_nodes));
+    };
+
+    // VIOT
+    if let Some((iommu_bdf, devices_bdf)) = device_manager.lock().unwrap().iommu_attached_devices()
+    {
+        tables.push(create_viot_table(iommu_bdf, devices_bdf));
+    }
+
+    tables
+}
