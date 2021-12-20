@@ -27,5 +27,5 @@ vm-memory = "0.6.0"
 vm-migration = { path = "../vm-migration" }
 
 [dependencies.vfio-bindings]
-version = "0.2.0"
+version = "0.3.1"
 features = ["fam-wrappers"]
