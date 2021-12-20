@@ -16,5 +16,5 @@ vm-memory = { version = "0.6.0", features = ["backend-mmap", "backend-atomic"] }
 vmm-sys-util = ">=0.3.1"
 
 [dependencies.vfio-bindings]
-version = "0.2.0"
+version = "0.3.1"
 features = ["fam-wrappers"]
