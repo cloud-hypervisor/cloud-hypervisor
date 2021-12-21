@@ -28,7 +28,10 @@ use std::sync::{Arc, Barrier};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_queue::{DescriptorChain, Queue};
-use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryError};
+use vm_memory::{
+    Address, ByteValued, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryError,
+    GuestMemoryLoadGuard,
+};
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
@@ -114,7 +117,7 @@ struct Request {
 
 impl Request {
     fn parse(
-        desc_chain: &mut DescriptorChain<GuestMemoryAtomic<GuestMemoryMmap>>,
+        desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap>>,
     ) -> result::Result<Request, Error> {
         let desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
         // The descriptor contains the request type which MUST be readable.

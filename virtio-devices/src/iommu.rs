@@ -25,7 +25,10 @@ use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_queue::{AccessPlatform, DescriptorChain, Queue};
 use vm_device::dma_mapping::ExternalDmaMapping;
-use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryError};
+use vm_memory::{
+    Address, ByteValued, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryError,
+    GuestMemoryLoadGuard,
+};
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
@@ -339,7 +342,7 @@ impl Request {
     // is created based on the information provided from the guest driver for
     // virtio-iommu (giving the link device_id <=> domain).
     fn parse(
-        desc_chain: &mut DescriptorChain<GuestMemoryAtomic<GuestMemoryMmap>>,
+        desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap>>,
         mapping: &Arc<IommuMapping>,
         ext_mapping: &BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
         ext_domain_mapping: &mut BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,

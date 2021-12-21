@@ -38,7 +38,7 @@ use virtio_queue::{DescriptorChain, Queue};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryError,
-    GuestMemoryRegion,
+    GuestMemoryLoadGuard, GuestMemoryRegion,
 };
 use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{
@@ -277,7 +277,7 @@ struct Request {
 
 impl Request {
     fn parse(
-        desc_chain: &mut DescriptorChain<GuestMemoryAtomic<GuestMemoryMmap>>,
+        desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap>>,
     ) -> result::Result<Request, Error> {
         let desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
         // The descriptor contains the request type which MUST be readable.

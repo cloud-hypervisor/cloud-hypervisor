@@ -362,10 +362,11 @@ impl VirtioPciDevice {
             .queue_max_sizes()
             .iter()
             .map(|&s| {
-                let mut queue = Queue::<
-                    GuestMemoryAtomic<GuestMemoryMmap>,
-                    virtio_queue::QueueState<GuestMemoryAtomic<GuestMemoryMmap>>,
-                >::new(memory.clone(), s);
+                let mut queue =
+                    Queue::<GuestMemoryAtomic<GuestMemoryMmap>, virtio_queue::QueueState>::new(
+                        memory.clone(),
+                        s,
+                    );
                 queue.state.access_platform = access_platform.clone();
                 queue
             })

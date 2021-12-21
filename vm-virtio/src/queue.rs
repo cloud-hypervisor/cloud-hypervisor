@@ -227,10 +227,8 @@ pub mod testing {
         // Creates a new Queue, using the underlying memory regions represented by the VirtQueue.
         pub fn create_queue(&self) -> Queue<GuestMemoryAtomic<GuestMemoryMmap>> {
             let mem = GuestMemoryAtomic::new(self.mem.clone());
-            let mut q = Queue::<
-                GuestMemoryAtomic<GuestMemoryMmap>,
-                QueueState<GuestMemoryAtomic<GuestMemoryMmap>>,
-            >::new(mem, self.size());
+            let mut q =
+                Queue::<GuestMemoryAtomic<GuestMemoryMmap>, QueueState>::new(mem, self.size());
 
             q.state.size = self.size();
             q.state.ready = true;

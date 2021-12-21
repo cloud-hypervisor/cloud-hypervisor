@@ -21,7 +21,7 @@ use super::defs;
 use super::{Result, VsockError};
 use crate::{get_host_address_range, GuestMemoryMmap};
 use virtio_queue::DescriptorChain;
-use vm_memory::GuestMemoryAtomic;
+use vm_memory::GuestMemoryLoadGuard;
 
 // The vsock packet header is defined by the C struct:
 //
@@ -106,7 +106,7 @@ impl VsockPacket {
     /// creating the wrapper.
     ///
     pub fn from_tx_virtq_head(
-        desc_chain: &mut DescriptorChain<GuestMemoryAtomic<GuestMemoryMmap>>,
+        desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap>>,
     ) -> Result<Self> {
         let head = desc_chain.next().ok_or(VsockError::HdrDescMissing)?;
 
@@ -168,7 +168,7 @@ impl VsockPacket {
     /// descriptor. Bounds and pointer checks are performed when creating the wrapper.
     ///
     pub fn from_rx_virtq_head(
-        desc_chain: &mut DescriptorChain<GuestMemoryAtomic<GuestMemoryMmap>>,
+        desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap>>,
     ) -> Result<Self> {
         let head = desc_chain.next().ok_or(VsockError::HdrDescMissing)?;
 
