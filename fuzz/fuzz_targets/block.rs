@@ -79,7 +79,7 @@ fuzz_target!(|bytes| {
 
     let mut q = Queue::<
         GuestMemoryAtomic<GuestMemoryMmap>,
-        QueueState<GuestMemoryAtomic<GuestMemoryMmap>>,
+        QueueState,
     >::new(guest_memory.clone(), QUEUE_SIZE);
     q.state.ready = true;
     q.state.size = QUEUE_SIZE / 2;

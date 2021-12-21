@@ -36,7 +36,7 @@ use virtio_bindings::bindings::virtio_blk::*;
 use virtio_queue::DescriptorChain;
 use vm_memory::{
     bitmap::AtomicBitmap, bitmap::Bitmap, ByteValued, Bytes, GuestAddress, GuestMemory,
-    GuestMemoryAtomic, GuestMemoryError,
+    GuestMemoryError, GuestMemoryLoadGuard,
 };
 use vmm_sys_util::eventfd::EventFd;
 
@@ -176,7 +176,7 @@ pub struct Request {
 
 impl Request {
     pub fn parse(
-        desc_chain: &mut DescriptorChain<GuestMemoryAtomic<GuestMemoryMmap>>,
+        desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap>>,
     ) -> result::Result<Request, Error> {
         let hdr_desc = desc_chain
             .next()
