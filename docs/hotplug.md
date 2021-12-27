@@ -1,6 +1,6 @@
 # Cloud Hypervisor Hot Plug
 
-Currently Cloud Hypervisor only supports hot plugging of CPU devices.
+Currently Cloud Hypervisor supports hot plugging of CPUs devices (x86 only), PCI devices and memory resizing.
 
 ## Kernel support
 
