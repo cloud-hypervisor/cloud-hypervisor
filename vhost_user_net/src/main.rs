@@ -20,7 +20,7 @@ fn main() {
         .author(crate_authors!())
         .about("Launch a vhost-user-net backend.")
         .arg(
-            Arg::with_name("net-backend")
+            Arg::new("net-backend")
                 .long("net-backend")
                 .help(vhost_user_net::SYNTAX)
                 .takes_value(true)
