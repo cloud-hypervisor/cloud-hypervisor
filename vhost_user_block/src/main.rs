@@ -23,7 +23,7 @@ fn main() {
         .author(crate_authors!())
         .about("Launch a vhost-user-blk backend.")
         .arg(
-            Arg::with_name("block-backend")
+            Arg::new("block-backend")
                 .long("block-backend")
                 .help(vhost_user_block::SYNTAX)
                 .takes_value(true)

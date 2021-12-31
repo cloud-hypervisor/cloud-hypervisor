@@ -9,7 +9,7 @@ extern crate clap;
 use api_client::simple_api_command;
 use api_client::simple_api_command_with_fds;
 use api_client::Error as ApiClientError;
-use clap::{App, AppSettings, Arg, ArgMatches, SubCommand};
+use clap::{App, AppSettings, Arg, ArgMatches};
 use option_parser::{ByteSized, ByteSizedParseError};
 use std::fmt;
 use std::os::unix::net::UnixStream;
@@ -422,7 +422,7 @@ fn main() {
         .setting(AppSettings::SubcommandRequired)
         .about("Remotely control a cloud-hypervisor VMM.")
         .arg(
-            Arg::with_name("api-socket")
+            Arg::new("api-socket")
                 .long("api-socket")
                 .help("HTTP API socket path (UNIX domain socket).")
                 .takes_value(true)
@@ -430,97 +430,89 @@ fn main() {
                 .required(true),
         )
         .subcommand(
-            SubCommand::with_name("add-device")
-                .about("Add VFIO device")
-                .arg(
-                    Arg::with_name("device_config")
-                        .index(1)
-                        .help(vmm::config::DeviceConfig::SYNTAX),
-                ),
+            App::new("add-device").about("Add VFIO device").arg(
+                Arg::new("device_config")
+                    .index(1)
+                    .help(vmm::config::DeviceConfig::SYNTAX),
+            ),
         )
         .subcommand(
-            SubCommand::with_name("add-disk")
-                .about("Add block device")
-                .arg(
-                    Arg::with_name("disk_config")
-                        .index(1)
-                        .help(vmm::config::DiskConfig::SYNTAX),
-                ),
+            App::new("add-disk").about("Add block device").arg(
+                Arg::new("disk_config")
+                    .index(1)
+                    .help(vmm::config::DiskConfig::SYNTAX),
+            ),
         )
         .subcommand(
-            SubCommand::with_name("add-fs")
+            App::new("add-fs")
                 .about("Add virtio-fs backed fs device")
                 .arg(
-                    Arg::with_name("fs_config")
+                    Arg::new("fs_config")
                         .index(1)
                         .help(vmm::config::FsConfig::SYNTAX),
                 ),
         )
         .subcommand(
-            SubCommand::with_name("add-pmem")
+            App::new("add-pmem")
                 .about("Add persistent memory device")
                 .arg(
-                    Arg::with_name("pmem_config")
+                    Arg::new("pmem_config")
                         .index(1)
                         .help(vmm::config::PmemConfig::SYNTAX),
                 ),
         )
         .subcommand(
-            SubCommand::with_name("add-net")
-                .about("Add network device")
-                .arg(
-                    Arg::with_name("net_config")
-                        .index(1)
-                        .help(vmm::config::NetConfig::SYNTAX),
-                ),
+            App::new("add-net").about("Add network device").arg(
+                Arg::new("net_config")
+                    .index(1)
+                    .help(vmm::config::NetConfig::SYNTAX),
+            ),
         )
         .subcommand(
-            SubCommand::with_name("add-user-device")
+            App::new("add-user-device")
                 .about("Add userspace device")
                 .arg(
-                    Arg::with_name("device_config")
+                    Arg::new("device_config")
                         .index(1)
                         .help(vmm::config::UserDeviceConfig::SYNTAX),
                 ),
         )
         .subcommand(
-            SubCommand::with_name("add-vsock")
-                .about("Add vsock device")
-                .arg(
-                    Arg::with_name("vsock_config")
-                        .index(1)
-                        .help(vmm::config::VsockConfig::SYNTAX),
-                ),
+            App::new("add-vsock").about("Add vsock device").arg(
+                Arg::new("vsock_config")
+                    .index(1)
+                    .help(vmm::config::VsockConfig::SYNTAX),
+            ),
         )
         .subcommand(
-            SubCommand::with_name("remove-device")
+            App::new("remove-device")
                 .about("Remove VFIO device")
-                .arg(Arg::with_name("id").index(1).help("<device_id>")),
+                .arg(Arg::new("id").index(1).help("<device_id>")),
         )
-        .subcommand(SubCommand::with_name("info").about("Info on the VM"))
-        .subcommand(SubCommand::with_name("counters").about("Counters from the VM"))
-        .subcommand(SubCommand::with_name("pause").about("Pause the VM"))
-        .subcommand(SubCommand::with_name("reboot").about("Reboot the VM"))
-        .subcommand(SubCommand::with_name("power-button").about("Trigger a power button in the VM"))
+        .subcommand(App::new("info").about("Info on the VM"))
+        .subcommand(App::new("counters").about("Counters from the VM"))
+        .subcommand(App::new("pause").about("Pause the VM"))
+        .subcommand(App::new("reboot").about("Reboot the VM"))
+        .subcommand(App::new("power-button").about("Trigger a power button in the VM"))
         .subcommand(
-            SubCommand::with_name("resize")
+            App::new("resize")
                 .about("Resize the VM")
                 .arg(
-                    Arg::with_name("cpus")
+                    Arg::new("cpus")
                         .long("cpus")
                         .help("New vCPUs count")
                         .takes_value(true)
                         .number_of_values(1),
                 )
                 .arg(
-                    Arg::with_name("memory")
+                    Arg::new("memory")
                         .long("memory")
                         .help("New memory size in bytes (supports K/M/G suffix)")
                         .takes_value(true)
                         .number_of_values(1),
                 )
                 .arg(
-                    Arg::with_name("balloon")
+                    Arg::new("balloon")
                         .long("balloon")
                         .help("New balloon size in bytes (supports K/M/G suffix)")
                         .takes_value(true)
@@ -528,57 +520,53 @@ fn main() {
                 ),
         )
         .subcommand(
-            SubCommand::with_name("resize-zone")
+            App::new("resize-zone")
                 .about("Resize a memory zone")
                 .arg(
-                    Arg::with_name("id")
+                    Arg::new("id")
                         .long("id")
                         .help("Memory zone identifier")
                         .takes_value(true)
                         .number_of_values(1),
                 )
                 .arg(
-                    Arg::with_name("size")
+                    Arg::new("size")
                         .long("size")
                         .help("New memory zone size in bytes (supports K/M/G suffix)")
                         .takes_value(true)
                         .number_of_values(1),
                 ),
         )
-        .subcommand(SubCommand::with_name("resume").about("Resume the VM"))
-        .subcommand(SubCommand::with_name("shutdown").about("Shutdown the VM"))
+        .subcommand(App::new("resume").about("Resume the VM"))
+        .subcommand(App::new("shutdown").about("Shutdown the VM"))
         .subcommand(
-            SubCommand::with_name("snapshot")
-                .about("Create a snapshot from VM")
-                .arg(
-                    Arg::with_name("snapshot_config")
-                        .index(1)
-                        .help("<destination_url>"),
-                ),
+            App::new("snapshot").about("Create a snapshot from VM").arg(
+                Arg::new("snapshot_config")
+                    .index(1)
+                    .help("<destination_url>"),
+            ),
         )
         .subcommand(
-            SubCommand::with_name("restore")
-                .about("Restore VM from a snapshot")
-                .arg(
-                    Arg::with_name("restore_config")
-                        .index(1)
-                        .help(vmm::config::RestoreConfig::SYNTAX),
-                ),
+            App::new("restore").about("Restore VM from a snapshot").arg(
+                Arg::new("restore_config")
+                    .index(1)
+                    .help(vmm::config::RestoreConfig::SYNTAX),
+            ),
         )
         .subcommand(
-            SubCommand::with_name("send-migration")
+            App::new("send-migration")
                 .about("Initiate a VM migration")
                 .arg(
-                    Arg::with_name("send_migration_config")
+                    Arg::new("send_migration_config")
                         .index(1)
                         .help("<destination_url>"),
                 ),
         )
         .subcommand(
-            SubCommand::with_name("receive-migration")
+            App::new("receive-migration")
                 .about("Receive a VM migration")
                 .arg(
-                    Arg::with_name("receive_migration_config")
+                    Arg::new("receive_migration_config")
                         .index(1)
                         .help("<receiver_url>"),
                 ),

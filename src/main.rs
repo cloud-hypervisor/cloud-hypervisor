@@ -125,11 +125,11 @@ fn prepare_default_values() -> (String, String, String) {
     (default_vcpus, default_memory, default_rng)
 }
 
-fn create_app<'a, 'b>(
+fn create_app<'a>(
     default_vcpus: &'a str,
     default_memory: &'a str,
     default_rng: &'a str,
-) -> App<'a, 'b> {
+) -> App<'a> {
     #[cfg(target_arch = "x86_64")]
     let mut app: App;
     #[cfg(target_arch = "aarch64")]
@@ -141,11 +141,11 @@ fn create_app<'a, 'b>(
         .version(env!("BUILT_VERSION"))
         .author(crate_authors!())
         .about("Launch a cloud-hypervisor VMM.")
-        .group(ArgGroup::with_name("vm-config").multiple(true))
-        .group(ArgGroup::with_name("vmm-config").multiple(true))
-        .group(ArgGroup::with_name("logging").multiple(true))
+        .group(ArgGroup::new("vm-config").multiple(true))
+        .group(ArgGroup::new("vmm-config").multiple(true))
+        .group(ArgGroup::new("logging").multiple(true))
         .arg(
-            Arg::with_name("cpus")
+            Arg::new("cpus")
                 .long("cpus")
                 .help(
                     "boot=<boot_vcpus>,max=<max_vcpus>,\
@@ -157,7 +157,7 @@ fn create_app<'a, 'b>(
                 .group("vm-config"),
         )
         .arg(
-            Arg::with_name("platform")
+            Arg::new("platform")
                 .long("platform")
                 .help(
                     "num_pci_segments=<num pci segments>",
@@ -166,7 +166,7 @@ fn create_app<'a, 'b>(
                 .group("vm-config"),
         )
         .arg(
-            Arg::with_name("memory")
+            Arg::new("memory")
                 .long("memory")
                 .help(
                     "Memory parameters \
@@ -181,7 +181,7 @@ fn create_app<'a, 'b>(
                 .group("vm-config"),
         )
         .arg(
-            Arg::with_name("memory-zone")
+            Arg::new("memory-zone")
                 .long("memory-zone")
                 .help(
                     "User defined memory zone parameters \
@@ -198,7 +198,7 @@ fn create_app<'a, 'b>(
                 .group("vm-config"),
         )
         .arg(
-            Arg::with_name("kernel")
+            Arg::new("kernel")
                 .long("kernel")
                 .help(
                     "Path to loaded kernel. This may be a kernel or firmware that supports a PVH \
@@ -208,21 +208,21 @@ fn create_app<'a, 'b>(
                 .group("vm-config"),
         )
         .arg(
-            Arg::with_name("initramfs")
+            Arg::new("initramfs")
                 .long("initramfs")
                 .help("Path to initramfs image")
                 .takes_value(true)
                 .group("vm-config"),
         )
         .arg(
-            Arg::with_name("cmdline")
+            Arg::new("cmdline")
                 .long("cmdline")
                 .help("Kernel command line")
                 .takes_value(true)
                 .group("vm-config"),
         )
         .arg(
-            Arg::with_name("disk")
+            Arg::new("disk")
                 .long("disk")
                 .help(config::DiskConfig::SYNTAX)
                 .takes_value(true)
@@ -230,7 +230,7 @@ fn create_app<'a, 'b>(
                 .group("vm-config"),
         )
         .arg(
-            Arg::with_name("net")
+            Arg::new("net")
                 .long("net")
                 .help(config::NetConfig::SYNTAX)
                 .takes_value(true)
@@ -238,7 +238,7 @@ fn create_app<'a, 'b>(
                 .group("vm-config"),
         )
         .arg(
-            Arg::with_name("rng")
+            Arg::new("rng")
                 .long("rng")
                 .help(
                     "Random number generator parameters \"src=<entropy_source_path>,iommu=on|off\"",
@@ -247,14 +247,14 @@ fn create_app<'a, 'b>(
                 .group("vm-config"),
         )
         .arg(
-            Arg::with_name("balloon")
+            Arg::new("balloon")
                 .long("balloon")
                 .help(config::BalloonConfig::SYNTAX)
                 .takes_value(true)
                 .group("vm-config"),
         )
         .arg(
-            Arg::with_name("fs")
+            Arg::new("fs")
                 .long("fs")
                 .help(config::FsConfig::SYNTAX)
                 .takes_value(true)
@@ -262,7 +262,7 @@ fn create_app<'a, 'b>(
                 .group("vm-config"),
         )
         .arg(
-            Arg::with_name("pmem")
+            Arg::new("pmem")
                 .long("pmem")
                 .help(config::PmemConfig::SYNTAX)
                 .takes_value(true)
@@ -270,14 +270,14 @@ fn create_app<'a, 'b>(
                 .group("vm-config"),
         )
         .arg(
-            Arg::with_name("serial")
+            Arg::new("serial")
                 .long("serial")
                 .help("Control serial port: off|null|pty|tty|file=/path/to/a/file")
                 .default_value("null")
                 .group("vm-config"),
         )
         .arg(
-            Arg::with_name("console")
+            Arg::new("console")
                 .long("console")
                 .help(
                     "Control (virtio) console: \"off|null|pty|tty|file=/path/to/a/file,iommu=on|off\"",
@@ -286,7 +286,7 @@ fn create_app<'a, 'b>(
                 .group("vm-config"),
         )
         .arg(
-            Arg::with_name("device")
+            Arg::new("device")
                 .long("device")
                 .help(config::DeviceConfig::SYNTAX)
                 .takes_value(true)
@@ -294,7 +294,7 @@ fn create_app<'a, 'b>(
                 .group("vm-config"),
         )
         .arg(
-            Arg::with_name("user-device")
+            Arg::new("user-device")
                 .long("user-device")
                 .help(config::UserDeviceConfig::SYNTAX)
                 .takes_value(true)
@@ -302,7 +302,7 @@ fn create_app<'a, 'b>(
                 .group("vm-config"),
         )
         .arg(
-            Arg::with_name("vsock")
+            Arg::new("vsock")
                 .long("vsock")
                 .help(config::VsockConfig::SYNTAX)
                 .takes_value(true)
@@ -310,7 +310,7 @@ fn create_app<'a, 'b>(
                 .group("vm-config"),
         )
         .arg(
-            Arg::with_name("numa")
+            Arg::new("numa")
                 .long("numa")
                 .help(config::NumaConfig::SYNTAX)
                 .takes_value(true)
@@ -318,21 +318,21 @@ fn create_app<'a, 'b>(
                 .group("vm-config"),
         )
         .arg(
-            Arg::with_name("watchdog")
+            Arg::new("watchdog")
                 .long("watchdog")
                 .help("Enable virtio-watchdog")
                 .takes_value(false)
                 .group("vm-config"),
         )
         .arg(
-            Arg::with_name("v")
-                .short("v")
-                .multiple(true)
+            Arg::new("v")
+                .short('v')
+                .multiple_occurrences(true)
                 .help("Sets the level of debugging output")
                 .group("logging"),
         )
         .arg(
-            Arg::with_name("log-file")
+            Arg::new("log-file")
                 .long("log-file")
                 .help("Log file. Standard error is used if not specified")
                 .takes_value(true)
@@ -340,7 +340,7 @@ fn create_app<'a, 'b>(
                 .group("logging"),
         )
         .arg(
-            Arg::with_name("api-socket")
+            Arg::new("api-socket")
                 .long("api-socket")
                 .help("HTTP API socket (UNIX domain socket): path=</path/to/a/file> or fd=<fd>.")
                 .takes_value(true)
@@ -348,7 +348,7 @@ fn create_app<'a, 'b>(
                 .group("vmm-config"),
         )
         .arg(
-            Arg::with_name("event-monitor")
+            Arg::new("event-monitor")
                 .long("event-monitor")
                 .help("File to report events on: path=</path/to/a/file> or fd=<fd>")
                 .takes_value(true)
@@ -356,7 +356,7 @@ fn create_app<'a, 'b>(
                 .group("vmm-config"),
         )
         .arg(
-            Arg::with_name("restore")
+            Arg::new("restore")
                 .long("restore")
                 .help(config::RestoreConfig::SYNTAX)
                 .takes_value(true)
@@ -364,7 +364,7 @@ fn create_app<'a, 'b>(
                 .group("vmm-config"),
         )
         .arg(
-            Arg::with_name("seccomp")
+            Arg::new("seccomp")
                 .long("seccomp")
                 .takes_value(true)
                 .possible_values(&["true", "false", "log"])
@@ -374,7 +374,7 @@ fn create_app<'a, 'b>(
     #[cfg(target_arch = "x86_64")]
     {
         app = app.arg(
-            Arg::with_name("sgx-epc")
+            Arg::new("sgx-epc")
                 .long("sgx-epc")
                 .help(config::SgxEpcConfig::SYNTAX)
                 .takes_value(true)
@@ -386,7 +386,7 @@ fn create_app<'a, 'b>(
     #[cfg(feature = "tdx")]
     {
         app = app.arg(
-            Arg::with_name("tdx")
+            Arg::new("tdx")
                 .long("tdx")
                 .help("TDX Support: firmware=<tdvf path>")
                 .takes_value(true)
