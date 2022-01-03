@@ -6206,6 +6206,7 @@ mod tests {
             exec_host_command_status("pkill -f nvmf_tgt");
         }
 
+        #[ignore]
         #[cfg(target_arch = "x86_64")]
         #[test]
         fn test_vfio_user() {
