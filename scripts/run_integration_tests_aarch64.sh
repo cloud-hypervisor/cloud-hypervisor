@@ -54,7 +54,7 @@ checkout_repo() {
 build_custom_linux() {
     SRCDIR=$PWD
     LINUX_CUSTOM_DIR="$WORKLOADS_DIR/linux-custom"
-    LINUX_CUSTOM_BRANCH="ch-5.14"
+    LINUX_CUSTOM_BRANCH="ch-5.15.12"
     LINUX_CUSTOM_URL="https://github.com/cloud-hypervisor/linux.git"
 
     checkout_repo "$LINUX_CUSTOM_DIR" "$LINUX_CUSTOM_URL" "$LINUX_CUSTOM_BRANCH"

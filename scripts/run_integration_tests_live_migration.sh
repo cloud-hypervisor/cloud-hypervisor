@@ -55,7 +55,7 @@ LINUX_CUSTOM_DIR="$WORKLOADS_DIR/linux-custom"
 if [ ! -f "$VMLINUX_IMAGE" ]; then
     SRCDIR=$PWD
     pushd $WORKLOADS_DIR
-    time git clone --depth 1 "https://github.com/cloud-hypervisor/linux.git" -b "ch-5.14" $LINUX_CUSTOM_DIR
+    time git clone --depth 1 "https://github.com/cloud-hypervisor/linux.git" -b "ch-5.15.12" $LINUX_CUSTOM_DIR
     cp $SRCDIR/resources/linux-config-x86_64 $LINUX_CUSTOM_DIR/.config
     popd
 fi
