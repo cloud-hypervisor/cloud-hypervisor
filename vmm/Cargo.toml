@@ -37,7 +37,7 @@ qcow = { path = "../qcow" }
 seccompiler = "0.2.0"
 serde = { version = "1.0.132", features = ["rc"] }
 serde_derive = "1.0.132"
-serde_json = "1.0.73"
+serde_json = "1.0.74"
 signal-hook = "0.3.13"
 thiserror = "1.0.30"
 uuid = "0.8.2"
