@@ -1,3 +1,4 @@
+- [v20.2](#v202)
 - [v20.1](#v201)
 - [v20.0](#v200)
     - [Multiple PCI segments support](#multiple-pci-segments-support)
@@ -176,6 +177,18 @@
     - [Console over virtio](#console-over-virtio)
     - [Unit testing](#unit-testing)
     - [Integration tests parallelization](#integration-tests-parallelization)
+
+
+# v20.2
+
+This is a bug fix release. The following issues have been addressed:
+
+* Don't error out when setting up the SIGWINCH handler (for console resize)
+  when this fails due to older kernel (#3456)
+* Seccomp rules were refined to remove syscalls that are now unused
+* Fix reboot on older host kernels when SIGWINCH handler was not initialised
+  (#3496)
+* Fix virtio-vsock blocking issue (#3497)
 
 # v20.1
 
