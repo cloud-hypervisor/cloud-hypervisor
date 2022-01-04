@@ -1742,7 +1742,7 @@ impl DeviceManager {
                     self.config.lock().unwrap().console.file = Some(pty.path.clone());
                     let file = pty.main.try_clone().unwrap();
                     self.console_pty = Some(Arc::new(Mutex::new(pty)));
-                    self.console_resize_pipe = Some(Arc::new(resize_pipe.unwrap()));
+                    self.console_resize_pipe = resize_pipe.map(Arc::new);
                     Endpoint::FilePair(file.try_clone().unwrap(), file)
                 } else {
                     let (main, mut sub, path) =
