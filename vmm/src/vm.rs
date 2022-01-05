@@ -589,8 +589,9 @@ impl Vm {
         let exit_evt_clone = exit_evt.try_clone().map_err(Error::EventFdClone)?;
         #[cfg(feature = "tdx")]
         let tdx_enabled = config.lock().unwrap().tdx.is_some();
+        let cpus_config = { &config.lock().unwrap().cpus.clone() };
         let cpu_manager = cpu::CpuManager::new(
-            &config.lock().unwrap().cpus.clone(),
+            cpus_config,
             &device_manager,
             &memory_manager,
             vm.clone(),
