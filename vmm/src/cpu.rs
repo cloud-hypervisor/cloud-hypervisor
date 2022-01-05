@@ -704,24 +704,24 @@ impl CpuManager {
     fn start_vcpu(
         &mut self,
         vcpu: Arc<Mutex<Vcpu>>,
+        vcpu_id: u8,
         vcpu_thread_barrier: Arc<Barrier>,
         inserting: bool,
     ) -> Result<()> {
-        let cpu_id = vcpu.lock().unwrap().id;
         let reset_evt = self.reset_evt.try_clone().unwrap();
         let exit_evt = self.exit_evt.try_clone().unwrap();
         let panic_exit_evt = self.exit_evt.try_clone().unwrap();
         let vcpu_kill_signalled = self.vcpus_kill_signalled.clone();
         let vcpu_pause_signalled = self.vcpus_pause_signalled.clone();
 
-        let vcpu_kill = self.vcpu_states[usize::from(cpu_id)].kill.clone();
-        let vcpu_run_interrupted = self.vcpu_states[usize::from(cpu_id)]
+        let vcpu_kill = self.vcpu_states[usize::from(vcpu_id)].kill.clone();
+        let vcpu_run_interrupted = self.vcpu_states[usize::from(vcpu_id)]
             .vcpu_run_interrupted
             .clone();
         let panic_vcpu_run_interrupted = vcpu_run_interrupted.clone();
 
         // Prepare the CPU set the current vCPU is expected to run onto.
-        let cpuset = self.affinity.get(&cpu_id).map(|host_cpus| {
+        let cpuset = self.affinity.get(&vcpu_id).map(|host_cpus| {
             let mut cpuset: libc::cpu_set_t = unsafe { std::mem::zeroed() };
             unsafe { libc::CPU_ZERO(&mut cpuset) };
             for host_cpu in host_cpus {
@@ -737,11 +737,11 @@ impl CpuManager {
         #[cfg(target_arch = "x86_64")]
         let interrupt_controller_clone = self.interrupt_controller.as_ref().cloned();
 
-        info!("Starting vCPU: cpu_id = {}", cpu_id);
+        info!("Starting vCPU: cpu_id = {}", vcpu_id);
 
         let handle = Some(
             thread::Builder::new()
-                .name(format!("vcpu{}", cpu_id))
+                .name(format!("vcpu{}", vcpu_id))
                 .spawn(move || {
                     // Schedule the thread to run on the expected CPU set
                     if let Some(cpuset) = cpuset.as_ref() {
@@ -756,7 +756,7 @@ impl CpuManager {
                         if ret != 0 {
                             error!(
                                 "Failed scheduling the vCPU {} on the expected CPU set: {}",
-                                cpu_id,
+                                vcpu_id,
                                 io::Error::last_os_error()
                             );
                             return;
@@ -873,8 +873,8 @@ impl CpuManager {
 
         // On hot plug calls into this function entry_point is None. It is for
         // those hotplug CPU additions that we need to set the inserting flag.
-        self.vcpu_states[usize::from(cpu_id)].handle = handle;
-        self.vcpu_states[usize::from(cpu_id)].inserting = inserting;
+        self.vcpu_states[usize::from(vcpu_id)].handle = handle;
+        self.vcpu_states[usize::from(vcpu_id)].inserting = inserting;
 
         Ok(())
     }
@@ -897,9 +897,9 @@ impl CpuManager {
         );
 
         // This reuses any inactive vCPUs as well as any that were newly created
-        for cpu_id in self.present_vcpus()..desired_vcpus {
-            let vcpu = Arc::clone(&self.vcpus[cpu_id as usize]);
-            self.start_vcpu(vcpu, vcpu_thread_barrier.clone(), inserting)?;
+        for vcpu_id in self.present_vcpus()..desired_vcpus {
+            let vcpu = Arc::clone(&self.vcpus[vcpu_id as usize]);
+            self.start_vcpu(vcpu, vcpu_id, vcpu_thread_barrier.clone(), inserting)?;
         }
 
         // Unblock all CPU threads.
@@ -938,15 +938,15 @@ impl CpuManager {
     }
 
     pub fn start_restored_vcpus(&mut self) -> Result<()> {
-        let vcpu_numbers = self.vcpus.len();
+        let vcpu_numbers = self.vcpus.len() as u8;
         let vcpu_thread_barrier = Arc::new(Barrier::new((vcpu_numbers + 1) as usize));
         // Restore the vCPUs in "paused" state.
         self.vcpus_pause_signalled.store(true, Ordering::SeqCst);
 
-        for vcpu_index in 0..vcpu_numbers {
-            let vcpu = Arc::clone(&self.vcpus[vcpu_index as usize]);
+        for vcpu_id in 0..vcpu_numbers {
+            let vcpu = Arc::clone(&self.vcpus[vcpu_id as usize]);
 
-            self.start_vcpu(vcpu, vcpu_thread_barrier.clone(), false)
+            self.start_vcpu(vcpu, vcpu_id, vcpu_thread_barrier.clone(), false)
                 .map_err(|e| {
                     Error::StartRestoreVcpu(anyhow!("Failed to start restored vCPUs: {:#?}", e))
                 })?;
