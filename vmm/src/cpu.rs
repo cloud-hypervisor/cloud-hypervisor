@@ -240,18 +240,18 @@ impl Vcpu {
         id: u8,
         vm: &Arc<dyn hypervisor::Vm>,
         vmmops: Option<Arc<dyn VmmOps>>,
-    ) -> Result<Arc<Mutex<Self>>> {
+    ) -> Result<Self> {
         let vcpu = vm
             .create_vcpu(id, vmmops)
             .map_err(|e| Error::VcpuCreate(e.into()))?;
         // Initially the cpuid per vCPU is the one supported by this VM.
-        Ok(Arc::new(Mutex::new(Vcpu {
+        Ok(Vcpu {
             vcpu,
             id,
             #[cfg(target_arch = "aarch64")]
             mpidr: 0,
             saved_state: None,
-        })))
+        })
     }
 
     /// Configures a vcpu and should be called once per vcpu when created.
@@ -647,39 +647,33 @@ impl CpuManager {
     ) -> Result<Arc<Mutex<Vcpu>>> {
         info!("Creating vCPU: cpu_id = {}", cpu_id);
 
-        let vcpu = Vcpu::new(cpu_id, &self.vm, Some(self.vmmops.clone()))?;
+        let mut vcpu = Vcpu::new(cpu_id, &self.vm, Some(self.vmmops.clone()))?;
 
         if let Some(snapshot) = snapshot {
             // AArch64 vCPUs should be initialized after created.
             #[cfg(target_arch = "aarch64")]
-            vcpu.lock().unwrap().init(&self.vm)?;
+            vcpu.init(&self.vm)?;
 
-            vcpu.lock()
-                .unwrap()
-                .restore(snapshot)
-                .expect("Failed to restore vCPU");
+            vcpu.restore(snapshot).expect("Failed to restore vCPU");
         } else {
             let vm_memory = self.vm_memory.clone();
 
             #[cfg(target_arch = "x86_64")]
-            vcpu.lock()
-                .unwrap()
-                .configure(
-                    entry_point,
-                    &vm_memory,
-                    self.cpuid.clone(),
-                    self.config.kvm_hyperv,
-                )
-                .expect("Failed to configure vCPU");
+            vcpu.configure(
+                entry_point,
+                &vm_memory,
+                self.cpuid.clone(),
+                self.config.kvm_hyperv,
+            )
+            .expect("Failed to configure vCPU");
 
             #[cfg(target_arch = "aarch64")]
-            vcpu.lock()
-                .unwrap()
-                .configure(&self.vm, entry_point, &vm_memory)
+            vcpu.configure(&self.vm, entry_point, &vm_memory)
                 .expect("Failed to configure vCPU");
         }
 
         // Adding vCPU to the CpuManager's vCPU list.
+        let vcpu = Arc::new(Mutex::new(vcpu));
         self.vcpus.push(Arc::clone(&vcpu));
 
         Ok(vcpu)
