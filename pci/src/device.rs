@@ -5,7 +5,7 @@
 use crate::configuration::{self, PciBarRegionType};
 use std::any::Any;
 use std::fmt::{self, Display};
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, Mutex};
 use std::{self, io, result};
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::BusDevice;
@@ -51,7 +51,7 @@ pub trait PciDevice: BusDevice {
     /// returns an address. Returns a Vec of (GuestAddress, GuestUsize) tuples.
     fn allocate_bars(
         &mut self,
-        _allocator: &mut SystemAllocator,
+        _allocator: &Arc<Mutex<SystemAllocator>>,
         _mmio_allocator: &mut AddressAllocator,
     ) -> Result<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>> {
         Ok(Vec::new())

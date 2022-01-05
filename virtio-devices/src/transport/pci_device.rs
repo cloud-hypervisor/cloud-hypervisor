@@ -841,7 +841,7 @@ impl PciDevice for VirtioPciDevice {
 
     fn allocate_bars(
         &mut self,
-        allocator: &mut SystemAllocator,
+        allocator: &Arc<Mutex<SystemAllocator>>,
         mmio_allocator: &mut AddressAllocator,
     ) -> std::result::Result<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>, PciDeviceError>
     {
@@ -865,6 +865,8 @@ impl PciDevice for VirtioPciDevice {
         } else {
             let region_type = PciBarRegionType::Memory32BitRegion;
             let addr = allocator
+                .lock()
+                .unwrap()
                 .allocate_mmio_hole_addresses(
                     self.settings_bar_addr,
                     CAPABILITY_BAR_SIZE,

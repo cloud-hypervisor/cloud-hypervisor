@@ -3088,7 +3088,7 @@ impl DeviceManager {
             .lock()
             .unwrap()
             .allocate_bars(
-                &mut self.address_manager.allocator.lock().unwrap(),
+                &self.address_manager.allocator,
                 &mut self.pci_segments[segment_id as usize]
                     .allocator
                     .lock()

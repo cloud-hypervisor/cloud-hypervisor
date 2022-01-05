@@ -389,7 +389,7 @@ impl Vfio for VfioUserClientWrapper {
 impl PciDevice for VfioUserPciDevice {
     fn allocate_bars(
         &mut self,
-        allocator: &mut SystemAllocator,
+        allocator: &Arc<Mutex<SystemAllocator>>,
         mmio_allocator: &mut AddressAllocator,
     ) -> Result<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>, PciDeviceError> {
         self.common
