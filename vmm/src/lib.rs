@@ -11,9 +11,6 @@ extern crate lazy_static;
 extern crate log;
 #[macro_use]
 extern crate serde_derive;
-#[cfg(test)]
-#[macro_use]
-extern crate credibility;
 
 use crate::api::{
     ApiError, ApiRequest, ApiResponse, ApiResponsePayload, VmInfo, VmReceiveMigrationData,

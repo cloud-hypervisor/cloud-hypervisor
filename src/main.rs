@@ -587,10 +587,6 @@ fn main() {
 }
 
 #[cfg(test)]
-#[macro_use]
-extern crate credibility;
-
-#[cfg(test)]
 mod unit_tests {
     use crate::config::HotplugMethod;
     use crate::{create_app, prepare_default_values};
@@ -618,15 +614,11 @@ mod unit_tests {
         let cli_vm_config = get_vm_config_from_vec(cli);
         let openapi_vm_config: VmConfig = serde_json::from_str(openapi).unwrap();
 
-        test_block!(tb, "", {
-            if equal {
-                aver_eq!(tb, cli_vm_config, openapi_vm_config);
-            } else {
-                aver_ne!(tb, cli_vm_config, openapi_vm_config);
-            }
-
-            Ok(())
-        });
+        if equal {
+            assert_eq!(cli_vm_config, openapi_vm_config);
+        } else {
+            assert_ne!(cli_vm_config, openapi_vm_config);
+        }
 
         (cli_vm_config, openapi_vm_config)
     }
@@ -640,70 +632,67 @@ mod unit_tests {
         let (result_vm_config, _) = compare_vm_config_cli_vs_json(&cli, openapi, true);
 
         // As a second step, we validate all the default values.
-        test_block!(tb, "", {
-            let expected_vm_config = VmConfig {
-                cpus: CpusConfig {
-                    boot_vcpus: 1,
-                    max_vcpus: 1,
-                    topology: None,
-                    kvm_hyperv: false,
-                    max_phys_bits: 46,
-                    affinity: None,
-                },
-                memory: MemoryConfig {
-                    size: 536_870_912,
-                    mergeable: false,
-                    hotplug_method: HotplugMethod::Acpi,
-                    hotplug_size: None,
-                    hotplugged_size: None,
-                    shared: false,
-                    hugepages: false,
-                    hugepage_size: None,
-                    prefault: false,
-                    zones: None,
-                },
-                kernel: Some(KernelConfig {
-                    path: PathBuf::from("/path/to/kernel"),
-                }),
-                initramfs: None,
-                cmdline: CmdlineConfig {
-                    args: String::from(""),
-                },
-                disks: None,
-                net: None,
-                rng: RngConfig {
-                    src: PathBuf::from("/dev/urandom"),
-                    iommu: false,
-                },
-                balloon: None,
-                fs: None,
-                pmem: None,
-                serial: ConsoleConfig {
-                    file: None,
-                    mode: ConsoleOutputMode::Null,
-                    iommu: false,
-                },
-                console: ConsoleConfig {
-                    file: None,
-                    mode: ConsoleOutputMode::Tty,
-                    iommu: false,
-                },
-                devices: None,
-                user_devices: None,
-                vsock: None,
+        let expected_vm_config = VmConfig {
+            cpus: CpusConfig {
+                boot_vcpus: 1,
+                max_vcpus: 1,
+                topology: None,
+                kvm_hyperv: false,
+                max_phys_bits: 46,
+                affinity: None,
+            },
+            memory: MemoryConfig {
+                size: 536_870_912,
+                mergeable: false,
+                hotplug_method: HotplugMethod::Acpi,
+                hotplug_size: None,
+                hotplugged_size: None,
+                shared: false,
+                hugepages: false,
+                hugepage_size: None,
+                prefault: false,
+                zones: None,
+            },
+            kernel: Some(KernelConfig {
+                path: PathBuf::from("/path/to/kernel"),
+            }),
+            initramfs: None,
+            cmdline: CmdlineConfig {
+                args: String::from(""),
+            },
+            disks: None,
+            net: None,
+            rng: RngConfig {
+                src: PathBuf::from("/dev/urandom"),
                 iommu: false,
-                #[cfg(target_arch = "x86_64")]
-                sgx_epc: None,
-                numa: None,
-                watchdog: false,
-                #[cfg(feature = "tdx")]
-                tdx: None,
-                platform: None,
-            };
+            },
+            balloon: None,
+            fs: None,
+            pmem: None,
+            serial: ConsoleConfig {
+                file: None,
+                mode: ConsoleOutputMode::Null,
+                iommu: false,
+            },
+            console: ConsoleConfig {
+                file: None,
+                mode: ConsoleOutputMode::Tty,
+                iommu: false,
+            },
+            devices: None,
+            user_devices: None,
+            vsock: None,
+            iommu: false,
+            #[cfg(target_arch = "x86_64")]
+            sgx_epc: None,
+            numa: None,
+            watchdog: false,
+            #[cfg(feature = "tdx")]
+            tdx: None,
+            platform: None,
+        };
 
-            aver_eq!(tb, expected_vm_config, result_vm_config);
-            Ok(())
-        })
+        assert_eq!(expected_vm_config, result_vm_config);
     }
 
     #[test]

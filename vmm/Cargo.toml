@@ -54,6 +54,3 @@ vm-memory = { version = "0.7.0", features = ["backend-mmap", "backend-atomic", "
 vm-migration = { path = "../vm-migration" }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = { version = "0.9.0", features = ["with-serde"] }
-
-[dev-dependencies]
-credibility = "0.1.3"
