@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use std::io;
 use std::os::unix::io::AsRawFd;
 use std::ptr::null_mut;
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, Mutex};
 use thiserror::Error;
 use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::{VfioContainer, VfioDevice, VfioIrq, VfioRegionInfoCap};
@@ -360,7 +360,7 @@ pub(crate) struct VfioCommon {
 impl VfioCommon {
     pub(crate) fn allocate_bars(
         &mut self,
-        allocator: &mut SystemAllocator,
+        allocator: &Arc<Mutex<SystemAllocator>>,
         mmio_allocator: &mut AddressAllocator,
         vfio_wrapper: &dyn Vfio,
     ) -> Result<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>, PciDeviceError> {
@@ -430,6 +430,8 @@ impl VfioCommon {
 
                     // The address needs to be 4 bytes aligned.
                     bar_addr = allocator
+                        .lock()
+                        .unwrap()
                         .allocate_io_addresses(None, region_size, Some(0x4))
                         .ok_or(PciDeviceError::IoAllocationFailed(region_size))?;
                 }
@@ -476,6 +478,8 @@ impl VfioCommon {
 
                 // BAR allocation must be naturally aligned
                 bar_addr = allocator
+                    .lock()
+                    .unwrap()
                     .allocate_mmio_hole_addresses(None, region_size, Some(region_size))
                     .ok_or(PciDeviceError::IoAllocationFailed(region_size))?;
             }
@@ -1308,7 +1312,7 @@ const PCI_ROM_EXP_BAR_INDEX: usize = 12;
 impl PciDevice for VfioPciDevice {
     fn allocate_bars(
         &mut self,
-        allocator: &mut SystemAllocator,
+        allocator: &Arc<Mutex<SystemAllocator>>,
         mmio_allocator: &mut AddressAllocator,
     ) -> Result<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>, PciDeviceError> {
         self.common
