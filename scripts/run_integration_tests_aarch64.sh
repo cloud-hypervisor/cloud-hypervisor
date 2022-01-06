@@ -245,8 +245,8 @@ if [[ "$hypervisor" = "mshv" ]]; then
     exit 1
 fi
 
-features_build=""
-features_test="--features integration_tests"
+# For now these values are deafult for kvm
+features=""
 
 # lock the workloads folder to avoid parallel updating by different containers
 (
@@ -273,7 +273,7 @@ fi
 export RUST_BACKTRACE=1
 
 # Test without ACPI
-cargo build --all --release $features_build --target $BUILD_TARGET
+cargo build --all --release $features --target $BUILD_TARGET
 strip target/$BUILD_TARGET/release/cloud-hypervisor
 strip target/$BUILD_TARGET/release/vhost_user_net
 strip target/$BUILD_TARGET/release/ch-remote
@@ -288,13 +288,13 @@ sudo bash -c "echo 1 > /sys/kernel/mm/ksm/run"
 echo 2048 | sudo tee /proc/sys/vm/nr_hugepages
 
 # Run all direct kernel boot (Device Tree) test cases in mod `parallel`
-time cargo test $features_test "tests::parallel::$test_filter"
+time cargo test $features "parallel::$test_filter"
 RES=$?
 
 # Run some tests in sequence since the result could be affected by other tests
 # running in parallel.
 if [ $RES -eq 0 ]; then
-    time cargo test $features_test "tests::sequential::$test_filter" -- --test-threads=1
+    time cargo test $features "sequential::$test_filter" -- --test-threads=1
     RES=$?
 else
     exit $RES
@@ -302,7 +302,7 @@ fi
 
 # Run all ACPI test cases
 if [ $RES -eq 0 ]; then
-    time cargo test $features_test "tests::aarch64_acpi::$test_filter"
+    time cargo test $features "aarch64_acpi::$test_filter"
     RES=$?
 else
     exit $RES
@@ -310,7 +310,7 @@ fi
 
 # Run all test cases related to live migration
 if [ $RES -eq 0 ]; then
-    time cargo test $features_test "tests::live_migration::$test_filter" -- --test-threads=1
+    time cargo test $features "live_migration::$test_filter" -- --test-threads=1
     RES=$?
 else
     exit $RES
