@@ -13,4 +13,4 @@ if [[ $(uname -m) = "aarch64" || $hypervisor = "mshv" ]]; then
     cargo_args+=("--features $hypervisor")
 fi
 export RUST_BACKTRACE=1
-cargo test --target $BUILD_TARGET --workspace ${cargo_args[@]} || exit 1;
+cargo test --lib --bins --target $BUILD_TARGET --workspace ${cargo_args[@]} || exit 1;
