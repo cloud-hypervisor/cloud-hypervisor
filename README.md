@@ -167,8 +167,7 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 	--disk path=focal-server-cloudimg-amd64.raw \
 	--cpus boot=4 \
 	--memory size=1024M \
-	--net "tap=,mac=,ip=,mask=" \
-	--rng
+	--net "tap=,mac=,ip=,mask="
 $ popd
 ```
 
@@ -222,8 +221,7 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 	--cmdline "console=hvc0 root=/dev/vda1 rw" \
 	--cpus boot=4 \
 	--memory size=1024M \
-	--net "tap=,mac=,ip=,mask=" \
-	--rng
+	--net "tap=,mac=,ip=,mask="
 ```
 
 The above example use the `virtio-console` device as the guest console, and this
@@ -242,8 +240,7 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 	--cmdline "console=ttyS0 root=/dev/vda1 rw" \
 	--cpus boot=4 \
 	--memory size=1024M \
-	--net "tap=,mac=,ip=,mask=" \
-	--rng
+	--net "tap=,mac=,ip=,mask="
 ```
 
 # 3. Status
