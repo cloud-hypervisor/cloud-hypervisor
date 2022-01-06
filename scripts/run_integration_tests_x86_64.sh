@@ -11,13 +11,11 @@ mkdir -p "$WORKLOADS_DIR"
 
 process_common_args "$@"
 
-# For now these values are deafult for kvm
-features_build=""
-features_test="--features integration_tests"
+# For now these values are default for kvm
+features=""
 
 if [ "$hypervisor" = "mshv" ] ;  then
-    features_build="--no-default-features --features mshv,common"
-    features_test="--no-default-features --features mshv,common,integration_tests"
+    features="--no-default-features --features mshv,common"
 fi
 
 cp scripts/sha1sums-x86_64 $WORKLOADS_DIR
@@ -183,7 +181,7 @@ TARGET_CC="musl-gcc"
 CFLAGS="-I /usr/include/x86_64-linux-musl/ -idirafter /usr/include/"
 fi
 
-cargo build --all  --release $features_build --target $BUILD_TARGET
+cargo build --all  --release $features --target $BUILD_TARGET
 strip target/$BUILD_TARGET/release/cloud-hypervisor
 strip target/$BUILD_TARGET/release/vhost_user_net
 strip target/$BUILD_TARGET/release/ch-remote
@@ -203,14 +201,14 @@ echo 6144 | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
 export RUST_BACKTRACE=1
-time cargo test $features_test "tests::parallel::$test_filter"
+time cargo test $features "parallel::$test_filter"
 RES=$?
 
 # Run some tests in sequence since the result could be affected by other tests
 # running in parallel.
 if [ $RES -eq 0 ]; then
     export RUST_BACKTRACE=1
-    time cargo test $features_test "tests::sequential::$test_filter" -- --test-threads=1
+    time cargo test $features "sequential::$test_filter" -- --test-threads=1
     RES=$?
 fi
 
