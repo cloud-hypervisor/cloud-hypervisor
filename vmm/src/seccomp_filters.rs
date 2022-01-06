@@ -505,7 +505,6 @@ fn vmm_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
         (libc::SYS_sendmsg, vec![]),
         (libc::SYS_sendto, vec![]),
         (libc::SYS_set_robust_list, vec![]),
-        (libc::SYS_set_tid_address, vec![]),
         (libc::SYS_setsid, vec![]),
         (libc::SYS_sigaltstack, vec![]),
         (
