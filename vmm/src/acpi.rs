@@ -522,8 +522,6 @@ pub fn create_acpi_tables(
     numa_nodes: &NumaNodes,
 ) -> GuestAddress {
     let start_time = Instant::now();
-    let mut prev_tbl_len: u64;
-    let mut prev_tbl_off: GuestAddress;
     let rsdp_offset = arch::layout::RSDP_POINTER;
     let mut tables: Vec<u64> = Vec::new();
 
@@ -549,8 +547,8 @@ pub fn create_acpi_tables(
         .write_slice(madt.as_slice(), madt_offset)
         .expect("Error writing MADT table");
     tables.push(madt_offset.0);
-    prev_tbl_len = madt.len() as u64;
-    prev_tbl_off = madt_offset;
+    let mut prev_tbl_len = madt.len() as u64;
+    let mut prev_tbl_off = madt_offset;
 
     // PPTT
     #[cfg(target_arch = "aarch64")]
