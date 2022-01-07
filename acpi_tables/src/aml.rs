@@ -1392,13 +1392,13 @@ mod tests {
 
     #[test]
     fn test_pkg_length() {
-        assert_eq!(create_pkg_length(&[0u8; 62].to_vec(), true), vec![63]);
+        assert_eq!(create_pkg_length(&[0u8; 62], true), vec![63]);
         assert_eq!(
-            create_pkg_length(&[0u8; 64].to_vec(), true),
+            create_pkg_length(&[0u8; 64], true),
             vec![1 << 6 | (66 & 0xf), 66 >> 4]
         );
         assert_eq!(
-            create_pkg_length(&[0u8; 4096].to_vec(), true),
+            create_pkg_length(&[0u8; 4096], true),
             vec![
                 2 << 6 | (4099 & 0xf) as u8,
                 (4099 >> 4) as u8,
