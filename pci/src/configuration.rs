@@ -922,16 +922,19 @@ impl PciBarConfiguration {
         }
     }
 
+    #[must_use]
     pub fn set_register_index(mut self, reg_idx: usize) -> Self {
         self.reg_idx = reg_idx;
         self
     }
 
+    #[must_use]
     pub fn set_address(mut self, addr: u64) -> Self {
         self.addr = addr;
         self
     }
 
+    #[must_use]
     pub fn set_size(mut self, size: u64) -> Self {
         self.size = size;
         self
@@ -941,6 +944,7 @@ impl PciBarConfiguration {
         self.size
     }
 
+    #[must_use]
     pub fn set_region_type(mut self, region_type: PciBarRegionType) -> Self {
         self.region_type = region_type;
         self
