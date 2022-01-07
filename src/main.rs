@@ -130,12 +130,7 @@ fn create_app<'a>(
     default_memory: &'a str,
     default_rng: &'a str,
 ) -> App<'a> {
-    #[cfg(target_arch = "x86_64")]
-    let mut app: App;
-    #[cfg(target_arch = "aarch64")]
-    let app: App;
-
-    app = App::new("cloud-hypervisor")
+    let app = App::new("cloud-hypervisor")
         // 'BUILT_VERSION' is set by the build script 'build.rs' at
         // compile time
         .version(env!("BUILT_VERSION"))
@@ -372,27 +367,23 @@ fn create_app<'a>(
         );
 
     #[cfg(target_arch = "x86_64")]
-    {
-        app = app.arg(
-            Arg::new("sgx-epc")
-                .long("sgx-epc")
-                .help(config::SgxEpcConfig::SYNTAX)
-                .takes_value(true)
-                .min_values(1)
-                .group("vm-config"),
-        );
-    }
+    let app = app.arg(
+        Arg::new("sgx-epc")
+            .long("sgx-epc")
+            .help(config::SgxEpcConfig::SYNTAX)
+            .takes_value(true)
+            .min_values(1)
+            .group("vm-config"),
+    );
 
     #[cfg(feature = "tdx")]
-    {
-        app = app.arg(
-            Arg::new("tdx")
-                .long("tdx")
-                .help("TDX Support: firmware=<tdvf path>")
-                .takes_value(true)
-                .group("vm-config"),
-        );
-    }
+    let app = app.arg(
+        Arg::new("tdx")
+            .long("tdx")
+            .help("TDX Support: firmware=<tdvf path>")
+            .takes_value(true)
+            .group("vm-config"),
+    );
 
     app
 }
