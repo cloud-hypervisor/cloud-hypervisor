@@ -69,6 +69,14 @@ impl TxVirtio {
                             iov_len: desc.len() as libc::size_t,
                         };
                         iovecs.push(iovec);
+                    } else {
+                        error!(
+                            "Invalid descriptor chain: address = 0x{:x} length = {} write_only = {}",
+                            desc.addr().0,
+                            desc.len(),
+                            desc.is_write_only()
+                        );
+                        return Err(NetQueuePairError::DescriptorChainInvalid);
                     }
                     next_desc = desc_chain.next();
                 }
@@ -189,6 +197,14 @@ impl RxVirtio {
                             iov_len: desc.len() as libc::size_t,
                         };
                         iovecs.push(iovec);
+                    } else {
+                        error!(
+                            "Invalid descriptor chain: address = 0x{:x} length = {} write_only = {}",
+                            desc.addr().0,
+                            desc.len(),
+                            desc.is_write_only()
+                        );
+                        return Err(NetQueuePairError::DescriptorChainInvalid);
                     }
                     next_desc = desc_chain.next();
                 }
@@ -282,6 +298,8 @@ pub enum NetQueuePairError {
     QueueIteratorFailed(virtio_queue::Error),
     /// Descriptor chain is too short
     DescriptorChainTooShort,
+    /// Descriptor chain does not contain valid descriptors
+    DescriptorChainInvalid,
     /// Failed to determine if queue needed notification
     QueueNeedsNotification(virtio_queue::Error),
     /// Failed to enable notification on the queue
