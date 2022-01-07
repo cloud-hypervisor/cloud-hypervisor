@@ -378,12 +378,11 @@ mod tests {
         // create an indirect table with 4 chained descriptors
         let idtable = DescriptorTable::new(m, GuestAddress(0x7000), 4);
         for i in 0..4u16 {
-            let desc: Descriptor;
-            if i < 3 {
-                desc = Descriptor::new(0x1000 * i as u64, 0x1000, VIRTQ_DESC_F_NEXT, i + 1);
+            let desc = if i < 3 {
+                Descriptor::new(0x1000 * i as u64, 0x1000, VIRTQ_DESC_F_NEXT, i + 1)
             } else {
-                desc = Descriptor::new(0x1000 * i as u64, 0x1000, 0, 0);
-            }
+                Descriptor::new(0x1000 * i as u64, 0x1000, 0, 0)
+            };
             idtable.store(i, desc);
         }
 
