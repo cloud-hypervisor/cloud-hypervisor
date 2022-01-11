@@ -72,6 +72,7 @@ members = [
     "net_util",
     "option_parser",
     "pci",
+    "performance-metrics",
     "qcow",
     "rate_limiter",
     "vfio_user",
