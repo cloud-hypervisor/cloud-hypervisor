@@ -525,9 +525,16 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
     )
     .map_err(Error::StartVmmThread)?;
 
-    // Can't test for "vm-config" group as some have default values. The kernel
+    // Can't test for "vm-config" group as some have default values. The kernel (or tdx if enabled)
     // is the only required option for booting the VM.
-    if cmd_arguments.is_present("kernel") || cmd_arguments.is_present("tdx") {
+    #[cfg(feature = "tdx")]
+    let tdx_or_kernel_present =
+        cmd_arguments.is_present("kernel") || cmd_arguments.is_present("tdx");
+
+    #[cfg(not(feature = "tdx"))]
+    let tdx_or_kernel_present = cmd_arguments.is_present("kernel");
+
+    if tdx_or_kernel_present {
         let vm_params = config::VmParams::from_arg_matches(&cmd_arguments);
         let vm_config = config::VmConfig::parse(vm_params).map_err(Error::ParsingConfig)?;
 
