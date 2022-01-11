@@ -1140,8 +1140,8 @@ impl Vmm {
         send_data_migration: VmSendMigrationData,
     ) -> result::Result<(), MigratableError> {
         info!(
-            "Sending migration: destination_url = {}",
-            send_data_migration.destination_url
+            "Sending migration: destination_url = {}, local = {}",
+            send_data_migration.destination_url, send_data_migration.local
         );
         if let Some(vm) = self.vm.as_mut() {
             Self::send_migration(

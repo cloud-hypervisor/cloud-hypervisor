@@ -263,9 +263,14 @@ fn receive_migration_api_command(socket: &mut UnixStream, url: &str) -> Result<(
     .map_err(Error::ApiClient)
 }
 
-fn send_migration_api_command(socket: &mut UnixStream, url: &str) -> Result<(), Error> {
+fn send_migration_api_command(
+    socket: &mut UnixStream,
+    url: &str,
+    local: bool,
+) -> Result<(), Error> {
     let send_migration_data = vmm::api::VmSendMigrationData {
         destination_url: url.to_owned(),
+        local,
     };
     simple_api_command(
         socket,
@@ -402,6 +407,10 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
                 .unwrap()
                 .value_of("send_migration_config")
                 .unwrap(),
+            matches
+                .subcommand_matches("send-migration")
+                .unwrap()
+                .is_present("send_migration_local"),
         ),
         Some("receive-migration") => receive_migration_api_command(
             &mut socket,
@@ -560,6 +569,11 @@ fn main() {
                     Arg::new("send_migration_config")
                         .index(1)
                         .help("<destination_url>"),
+                )
+                .arg(
+                    Arg::new("send_migration_local")
+                        .long("local")
+                        .takes_value(false),
                 ),
         )
         .subcommand(
