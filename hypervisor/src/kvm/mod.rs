@@ -777,6 +777,27 @@ impl cpu::Vcpu for KvmVcpu {
             .set_regs(regs)
             .map_err(|e| cpu::HypervisorCpuError::SetStandardRegs(e.into()))
     }
+
+    #[cfg(target_arch = "aarch64")]
+    ///
+    /// Set attribute for vcpu.
+    ///
+    fn set_vcpu_attr(&self, attr: &DeviceAttr) -> cpu::Result<()> {
+        self.fd
+            .set_device_attr(attr)
+            .map_err(|e| cpu::HypervisorCpuError::SetVcpuAttribute(e.into()))
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    ///
+    /// Check if vcpu has a certain attribute.
+    ///
+    fn has_vcpu_attr(&self, attr: &DeviceAttr) -> cpu::Result<()> {
+        self.fd
+            .has_device_attr(attr)
+            .map_err(|e| cpu::HypervisorCpuError::HasVcpuAttribute(e.into()))
+    }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// Returns the vCPU special registers.

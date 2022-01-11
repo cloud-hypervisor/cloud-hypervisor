@@ -19,6 +19,8 @@ use crate::x86_64::{
     ExtendedControlRegisters, FpuState, MsrEntries, SpecialRegisters, StandardRegisters, VcpuEvents,
 };
 use crate::CpuState;
+#[cfg(target_arch = "aarch64")]
+use crate::DeviceAttr;
 #[cfg(feature = "kvm")]
 use crate::MpState;
 #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
@@ -223,6 +225,16 @@ pub enum HypervisorCpuError {
     #[error("Failed to translate GVA: {0}")]
     TranslateVirtualAddress(#[source] anyhow::Error),
     ///
+    /// Set cpu attribute error
+    ///
+    #[error("Failed to set vcpu attribute: {0}")]
+    SetVcpuAttribute(#[source] anyhow::Error),
+    ///
+    /// Check if cpu has a certain attribute error
+    ///
+    #[error("Failed to check if vcpu has attribute: {0}")]
+    HasVcpuAttribute(#[source] anyhow::Error),
+    ///
     /// Failed to initialize TDX on CPU
     ///
     #[cfg(feature = "tdx")]
@@ -259,7 +271,16 @@ pub trait Vcpu: Send + Sync {
     /// Returns the vCPU general purpose registers.
     ///
     fn get_regs(&self) -> Result<StandardRegisters>;
-
+    #[cfg(target_arch = "aarch64")]
+    ///
+    /// Sets vcpu attribute
+    ///
+    fn set_vcpu_attr(&self, attr: &DeviceAttr) -> Result<()>;
+    #[cfg(target_arch = "aarch64")]
+    ///
+    /// Check if vcpu has attribute.
+    ///
+    fn has_vcpu_attr(&self, attr: &DeviceAttr) -> Result<()>;
     #[cfg(target_arch = "x86_64")]
     ///
     /// Sets the vCPU general purpose registers.
