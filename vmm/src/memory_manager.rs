@@ -480,6 +480,7 @@ impl MemoryManager {
                     zone.hugepages,
                     zone.hugepage_size,
                     zone.host_numa_node,
+                    None,
                 )?;
 
                 // Add region to the list of regions associated with the
@@ -555,6 +556,7 @@ impl MemoryManager {
                         zone_config.hugepages,
                         zone_config.hugepage_size,
                         zone_config.host_numa_node,
+                        None,
                     )?;
                     memory_regions.push(Arc::clone(&region));
                     if let Some(memory_zone) = memory_zones.get_mut(&guest_ram_mapping.zone_id) {
@@ -939,6 +941,7 @@ impl MemoryManager {
                                 zone.hugepages,
                                 zone.hugepage_size,
                                 zone.host_numa_node,
+                                None,
                             )?;
 
                             guest_memory = guest_memory
@@ -1227,9 +1230,13 @@ impl MemoryManager {
         hugepages: bool,
         hugepage_size: Option<u64>,
         host_numa_node: Option<u32>,
+        existing_memory_file: Option<File>,
     ) -> Result<Arc<GuestRegionMmap>, Error> {
-        let (f, f_off) =
-            Self::open_memory_file(backing_file, file_offset, size, hugepages, hugepage_size)?;
+        let (f, f_off) = if let Some(f) = existing_memory_file {
+            (f, file_offset)
+        } else {
+            Self::open_memory_file(backing_file, file_offset, size, hugepages, hugepage_size)?
+        };
 
         let mut mmap_flags = libc::MAP_NORESERVE
             | if shared {
@@ -1342,6 +1349,7 @@ impl MemoryManager {
             self.shared,
             self.hugepages,
             self.hugepage_size,
+            None,
             None,
         )?;
 
