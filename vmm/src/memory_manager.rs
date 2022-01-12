@@ -532,6 +532,7 @@ impl MemoryManager {
         guest_ram_mappings: &[GuestRamMapping],
         zones_config: &[MemoryZoneConfig],
         prefault: Option<bool>,
+        mut existing_memory_files: HashMap<u32, File>,
     ) -> Result<(Vec<Arc<GuestRegionMmap>>, MemoryZones), Error> {
         let mut memory_regions = Vec::new();
         let mut memory_zones = HashMap::new();
@@ -556,7 +557,7 @@ impl MemoryManager {
                         zone_config.hugepages,
                         zone_config.hugepage_size,
                         zone_config.host_numa_node,
-                        None,
+                        existing_memory_files.remove(&guest_ram_mapping.slot),
                     )?;
                     memory_regions.push(Arc::clone(&region));
                     if let Some(memory_zone) = memory_zones.get_mut(&guest_ram_mapping.zone_id) {
@@ -819,6 +820,7 @@ impl MemoryManager {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         vm: Arc<dyn hypervisor::Vm>,
         config: &MemoryConfig,
@@ -826,6 +828,7 @@ impl MemoryManager {
         phys_bits: u8,
         #[cfg(feature = "tdx")] tdx_enabled: bool,
         restore_data: Option<&MemoryManagerSnapshotData>,
+        existing_memory_files: Option<HashMap<u32, File>>,
         #[cfg(target_arch = "x86_64")] sgx_epc_config: Option<Vec<SgxEpcConfig>>,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         let user_provided_zones = config.size == 0;
@@ -855,8 +858,12 @@ impl MemoryManager {
             selected_slot,
             next_hotplug_slot,
         ) = if let Some(data) = restore_data {
-            let (regions, memory_zones) =
-                Self::restore_memory_regions_and_zones(&data.guest_ram_mappings, &zones, prefault)?;
+            let (regions, memory_zones) = Self::restore_memory_regions_and_zones(
+                &data.guest_ram_mappings,
+                &zones,
+                prefault,
+                existing_memory_files.unwrap_or_default(),
+            )?;
             let guest_memory =
                 GuestMemoryMmap::from_arc_regions(regions).map_err(Error::GuestMemory)?;
             let boot_guest_memory = guest_memory.clone();
@@ -1096,6 +1103,7 @@ impl MemoryManager {
                 #[cfg(feature = "tdx")]
                 false,
                 Some(&mem_snapshot),
+                None,
                 #[cfg(target_arch = "x86_64")]
                 None,
             )?;

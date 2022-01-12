@@ -777,6 +777,7 @@ impl Vm {
             #[cfg(feature = "tdx")]
             tdx_enabled,
             None,
+            None,
             #[cfg(target_arch = "x86_64")]
             sgx_epc_config,
         )
@@ -896,6 +897,7 @@ impl Vm {
             #[cfg(feature = "tdx")]
             false,
             Some(memory_manager_data),
+            None,
             #[cfg(target_arch = "x86_64")]
             None,
         )
