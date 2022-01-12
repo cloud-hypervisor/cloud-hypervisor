@@ -1144,18 +1144,13 @@ impl MemoryManager {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn create_ram_region(
+    fn open_memory_file(
         backing_file: &Option<PathBuf>,
         file_offset: u64,
-        start_addr: GuestAddress,
         size: usize,
-        prefault: bool,
-        shared: bool,
         hugepages: bool,
         hugepage_size: Option<u64>,
-        host_numa_node: Option<u32>,
-    ) -> Result<Arc<GuestRegionMmap>, Error> {
+    ) -> Result<(File, u64), Error> {
         let (f, f_off) = match backing_file {
             Some(ref file) => {
                 if file.is_dir() {
@@ -1217,6 +1212,24 @@ impl MemoryManager {
                 (f, 0)
             }
         };
+
+        Ok((f, f_off))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn create_ram_region(
+        backing_file: &Option<PathBuf>,
+        file_offset: u64,
+        start_addr: GuestAddress,
+        size: usize,
+        prefault: bool,
+        shared: bool,
+        hugepages: bool,
+        hugepage_size: Option<u64>,
+        host_numa_node: Option<u32>,
+    ) -> Result<Arc<GuestRegionMmap>, Error> {
+        let (f, f_off) =
+            Self::open_memory_file(backing_file, file_offset, size, hugepages, hugepage_size)?;
 
         let mut mmap_flags = libc::MAP_NORESERVE
             | if shared {
