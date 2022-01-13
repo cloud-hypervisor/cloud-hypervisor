@@ -139,6 +139,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Bui
     virtio_iommu_bdf: Option<u32>,
     gic_device: &dyn GicDevice,
     numa_nodes: &NumaNodes,
+    pmu_supported: bool,
 ) -> super::Result<()> {
     let fdt_final = fdt::create_fdt(
         guest_mem,
@@ -151,6 +152,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Bui
         pci_space_info,
         numa_nodes,
         virtio_iommu_bdf,
+        pmu_supported,
     )
     .map_err(|_| Error::SetupFdt)?;
 

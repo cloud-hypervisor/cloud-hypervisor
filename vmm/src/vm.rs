@@ -1174,6 +1174,7 @@ impl Vm {
             virtio_iommu_bdf.map(|bdf| bdf.into()),
             &*gic_device,
             &self.numa_nodes,
+            pmu_supported,
         )
         .map_err(Error::ConfigureSystem)?;
 
@@ -2824,6 +2825,7 @@ mod tests {
             &Vec::new(),
             &BTreeMap::new(),
             None,
+            true,
         )
         .is_ok())
     }
