@@ -1813,6 +1813,22 @@ impl MemoryManager {
             next_hotplug_slot: self.next_hotplug_slot,
         }
     }
+
+    pub fn memory_slot_fds(&self) -> HashMap<u32, RawFd> {
+        let mut memory_slot_fds = HashMap::new();
+        for guest_ram_mapping in &self.guest_ram_mappings {
+            let slot = guest_ram_mapping.slot;
+            let guest_memory = self.guest_memory.memory();
+            let file = guest_memory
+                .find_region(GuestAddress(guest_ram_mapping.gpa))
+                .unwrap()
+                .file_offset()
+                .unwrap()
+                .file();
+            memory_slot_fds.insert(slot, file.as_raw_fd());
+        }
+        memory_slot_fds
+    }
 }
 
 #[cfg(feature = "acpi")]
