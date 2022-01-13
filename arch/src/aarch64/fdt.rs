@@ -51,10 +51,15 @@ const SIZE_CELLS: u32 = 0x2;
 // Look for "The 1st cell..."
 const GIC_FDT_IRQ_TYPE_SPI: u32 = 0;
 const GIC_FDT_IRQ_TYPE_PPI: u32 = 1;
+const GIC_FDT_IRQ_PPI_CPU_SHIFT: u32 = 8;
+const GIC_FDT_IRQ_PPI_CPU_MASK: u32 = 0xff << GIC_FDT_IRQ_PPI_CPU_SHIFT;
 
 // From https://elixir.bootlin.com/linux/v4.9.62/source/include/dt-bindings/interrupt-controller/irq.h#L17
 const IRQ_TYPE_EDGE_RISING: u32 = 1;
 const IRQ_TYPE_LEVEL_HI: u32 = 4;
+
+// PMU PPI interrupt number
+pub const AARCH64_PMU_IRQ: u32 = 7;
 
 // Keys and Buttons
 // System Power Down
@@ -91,6 +96,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     pci_space_info: &[PciSpaceInfo],
     numa_nodes: &NumaNodes,
     virtio_iommu_bdf: Option<u32>,
+    pmu_supported: bool,
 ) -> FdtWriterResult<Vec<u8>> {
     // Allocate stuff necessary for the holding the blob.
     let mut fdt = FdtWriter::new().unwrap();
@@ -114,6 +120,9 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     create_chosen_node(&mut fdt, cmdline, initrd)?;
     create_gic_node(&mut fdt, gic_device)?;
     create_timer_node(&mut fdt)?;
+    if pmu_supported {
+        create_pmu_node(&mut fdt, vcpu_mpidr.len())?;
+    }
     create_clock_node(&mut fdt)?;
     create_psci_node(&mut fdt)?;
     create_devices_node(&mut fdt, device_info)?;
@@ -537,6 +546,24 @@ fn create_devices_node<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Buil
         create_virtio_node(fdt, ordered_device_info)?;
     }
 
+    Ok(())
+}
+
+fn create_pmu_node(fdt: &mut FdtWriter, cpu_nums: usize) -> FdtWriterResult<()> {
+    let num_cpus = cpu_nums as u64 as u32;
+    let compatible = "arm,armv8-pmuv3";
+    let cpu_mask: u32 =
+        (((1 << num_cpus) - 1) << GIC_FDT_IRQ_PPI_CPU_SHIFT) & GIC_FDT_IRQ_PPI_CPU_MASK;
+    let irq = [
+        GIC_FDT_IRQ_TYPE_PPI,
+        AARCH64_PMU_IRQ,
+        cpu_mask | IRQ_TYPE_LEVEL_HI,
+    ];
+
+    let pmu_node = fdt.begin_node("pmu")?;
+    fdt.property_string("compatible", compatible)?;
+    fdt.property_array_u32("interrupts", &irq)?;
+    fdt.end_node(pmu_node)?;
     Ok(())
 }
 
