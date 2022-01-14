@@ -68,6 +68,7 @@ use std::io::{self, Read, Write};
 use std::io::{Seek, SeekFrom};
 use std::num::Wrapping;
 use std::ops::Deref;
+use std::os::unix::net::UnixStream;
 use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Mutex, RwLock};
 use std::{result, str, thread};
@@ -79,12 +80,14 @@ use vm_memory::Address;
 use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
 #[cfg(feature = "tdx")]
 use vm_memory::{GuestMemory, GuestMemoryRegion};
+use vm_migration::protocol::{Request, Response, Status};
 use vm_migration::{
     protocol::MemoryRangeTable, Migratable, MigratableError, Pausable, Snapshot,
     SnapshotDataSection, Snapshottable, Transportable,
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::unblock_signal;
+use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 use vmm_sys_util::terminal::Terminal;
 
 #[cfg(target_arch = "aarch64")]
@@ -2255,6 +2258,42 @@ impl Vm {
                 if offset == range.length {
                     break;
                 }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn send_memory_fds(
+        &mut self,
+        socket: &mut UnixStream,
+    ) -> std::result::Result<(), MigratableError> {
+        for (slot, fd) in self
+            .memory_manager
+            .lock()
+            .unwrap()
+            .memory_slot_fds()
+            .drain()
+        {
+            Request::memory_fd(std::mem::size_of_val(&slot) as u64)
+                .write_to(socket)
+                .map_err(|e| {
+                    MigratableError::MigrateSend(anyhow!("Error sending memory fd request: {}", e))
+                })?;
+            socket
+                .send_with_fd(&slot.to_le_bytes()[..], fd)
+                .map_err(|e| {
+                    MigratableError::MigrateSend(anyhow!("Error sending memory fd: {}", e))
+                })?;
+
+            let res = Response::read_from(socket)?;
+            if res.status() != Status::Ok {
+                warn!("Error during memory fd migration");
+                Request::abandon().write_to(socket)?;
+                Response::read_from(socket).ok();
+                return Err(MigratableError::MigrateSend(anyhow!(
+                    "Error during memory fd migration"
+                )));
             }
         }
 
