@@ -3752,7 +3752,7 @@ mod parallel {
                     }
                     Err(mpsc::TryRecvError::Empty) => {
                         empty += 1;
-                        assert!(!(empty > 5), "No login on pty");
+                        assert!(empty <= 5, "No login on pty");
                     }
                     _ => panic!("No login on pty"),
                 }
@@ -7616,31 +7616,33 @@ mod live_migration {
                 .spawn()
                 .unwrap();
 
-            let mut success;
             // The 'send-migration' command should be executed successfully within the given timeout
-            if let Some(status) = send_migration
+            let success = if let Some(status) = send_migration
                 .wait_timeout(std::time::Duration::from_secs(30))
                 .unwrap()
             {
-                success = status.success();
+                status.success()
             } else {
-                success = false;
-            }
+                false
+            };
+
             if !success {
                 let _ = send_migration.kill();
                 let output = send_migration.wait_with_output().unwrap();
                 eprintln!("\n\n==== Start 'send_migration' output ====\n\n---stdout---\n{}\n\n---stderr---\n{}\n\n==== End 'send_migration' output ====\n\n",
                     String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
             }
+
             // The 'receive-migration' command should be executed successfully within the given timeout
-            if let Some(status) = receive_migration
+            let success = if let Some(status) = receive_migration
                 .wait_timeout(std::time::Duration::from_secs(30))
                 .unwrap()
             {
-                success = status.success();
+                status.success()
             } else {
-                success = false;
-            }
+                false
+            };
+
             if !success {
                 let _ = receive_migration.kill();
                 let output = receive_migration.wait_with_output().unwrap();
@@ -7835,31 +7837,33 @@ mod live_migration {
                 .spawn()
                 .unwrap();
 
-            let mut success;
             // The 'send-migration' command should be executed successfully within the given timeout
-            if let Some(status) = send_migration
+            let success = if let Some(status) = send_migration
                 .wait_timeout(std::time::Duration::from_secs(30))
                 .unwrap()
             {
-                success = status.success();
+                status.success()
             } else {
-                success = false;
-            }
+                false
+            };
+
             if !success {
                 let _ = send_migration.kill();
                 let output = send_migration.wait_with_output().unwrap();
                 eprintln!("\n\n==== Start 'send_migration' output ====\n\n---stdout---\n{}\n\n---stderr---\n{}\n\n==== End 'send_migration' output ====\n\n",
                     String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
             }
+
             // The 'receive-migration' command should be executed successfully within the given timeout
-            if let Some(status) = receive_migration
+            let success = if let Some(status) = receive_migration
                 .wait_timeout(std::time::Duration::from_secs(30))
                 .unwrap()
             {
-                success = status.success();
+                status.success()
             } else {
-                success = false;
-            }
+                false
+            };
+
             if !success {
                 let _ = receive_migration.kill();
                 let output = receive_migration.wait_with_output().unwrap();
