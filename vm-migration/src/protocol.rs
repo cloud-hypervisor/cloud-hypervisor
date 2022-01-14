@@ -41,6 +41,7 @@ pub enum Command {
     Memory,
     Complete,
     Abandon,
+    MemoryFd,
 }
 
 impl Default for Command {
@@ -83,6 +84,10 @@ impl Request {
 
     pub fn memory(length: u64) -> Self {
         Self::new(Command::Memory, length)
+    }
+
+    pub fn memory_fd(length: u64) -> Self {
+        Self::new(Command::MemoryFd, length)
     }
 
     pub fn complete() -> Self {

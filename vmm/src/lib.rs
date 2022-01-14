@@ -937,6 +937,9 @@ impl Vmm {
                         Response::error().write_to(&mut socket)?;
                     }
                 }
+                Command::MemoryFd => {
+                    unimplemented!()
+                }
                 Command::Complete => {
                     info!("Complete Command Received");
                     if let Some(ref mut vm) = self.vm.as_mut() {
