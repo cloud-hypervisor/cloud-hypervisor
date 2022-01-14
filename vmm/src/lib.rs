@@ -45,6 +45,7 @@ use vm_memory::bitmap::AtomicBitmap;
 use vm_migration::{protocol::*, Migratable};
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
+use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
 #[cfg(feature = "acpi")]
 mod acpi;
@@ -945,7 +946,32 @@ impl Vmm {
                     }
                 }
                 Command::MemoryFd => {
-                    unimplemented!()
+                    info!("MemoryFd Command Received");
+
+                    if !started {
+                        warn!("Migration not started yet");
+                        Response::error().write_to(&mut socket)?;
+                        continue;
+                    }
+
+                    let mut buf = [0u8; 4];
+                    let (_, file) = socket.recv_with_fd(&mut buf).map_err(|e| {
+                        MigratableError::MigrateReceive(anyhow!(
+                            "Error receiving slot from socket: {}",
+                            e
+                        ))
+                    })?;
+
+                    if existing_memory_files.is_none() {
+                        existing_memory_files = Some(HashMap::default())
+                    }
+
+                    if let Some(ref mut existing_memory_files) = existing_memory_files {
+                        let slot = u32::from_le_bytes(buf);
+                        existing_memory_files.insert(slot, file.unwrap());
+                    }
+
+                    Response::ok().write_to(&mut socket)?;
                 }
                 Command::Complete => {
                     info!("Complete Command Received");
@@ -1049,6 +1075,10 @@ impl Vmm {
             })?
         };
 
+        if send_data_migration.local {
+            vm.send_memory_fds(&mut socket)?;
+        }
+
         let vm_migration_config = VmMigrationConfig {
             vm_config,
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
@@ -1070,42 +1100,46 @@ impl Vmm {
             )));
         }
 
-        // Start logging dirty pages
-        vm.start_dirty_log()?;
+        if send_data_migration.local {
+            // Now pause VM
+            vm.pause()?;
+        } else {
+            // Start logging dirty pages
+            vm.start_dirty_log()?;
 
-        // Send memory table
-        let table = vm.memory_range_table()?;
-        Request::memory(table.length())
-            .write_to(&mut socket)
-            .unwrap();
-        table.write_to(&mut socket)?;
-        // And then the memory itself
-        vm.send_memory_regions(&table, &mut socket)?;
-        let res = Response::read_from(&mut socket)?;
-        if res.status() != Status::Ok {
-            warn!("Error during memory migration");
-            Request::abandon().write_to(&mut socket)?;
-            Response::read_from(&mut socket).ok();
-            return Err(MigratableError::MigrateSend(anyhow!(
-                "Error during memory migration"
-            )));
-        }
-
-        // Try at most 5 passes of dirty memory sending
-        const MAX_DIRTY_MIGRATIONS: usize = 5;
-        for i in 0..MAX_DIRTY_MIGRATIONS {
-            info!("Dirty memory migration {} of {}", i, MAX_DIRTY_MIGRATIONS);
-            if !Self::vm_maybe_send_dirty_pages(vm, &mut socket)? {
-                break;
+            // Send memory table
+            let table = vm.memory_range_table()?;
+            Request::memory(table.length())
+                .write_to(&mut socket)
+                .unwrap();
+            table.write_to(&mut socket)?;
+            // And then the memory itself
+            vm.send_memory_regions(&table, &mut socket)?;
+            let res = Response::read_from(&mut socket)?;
+            if res.status() != Status::Ok {
+                warn!("Error during memory migration");
+                Request::abandon().write_to(&mut socket)?;
+                Response::read_from(&mut socket).ok();
+                return Err(MigratableError::MigrateSend(anyhow!(
+                    "Error during memory migration"
+                )));
             }
+
+            // Try at most 5 passes of dirty memory sending
+            const MAX_DIRTY_MIGRATIONS: usize = 5;
+            for i in 0..MAX_DIRTY_MIGRATIONS {
+                info!("Dirty memory migration {} of {}", i, MAX_DIRTY_MIGRATIONS);
+                if !Self::vm_maybe_send_dirty_pages(vm, &mut socket)? {
+                    break;
+                }
+            }
+
+            // Now pause VM
+            vm.pause()?;
+
+            // Send last batch of dirty pages
+            Self::vm_maybe_send_dirty_pages(vm, &mut socket)?;
         }
-
-        // Now pause VM
-        vm.pause()?;
-
-        // Send last batch of dirty pages
-        Self::vm_maybe_send_dirty_pages(vm, &mut socket)?;
-
         // Capture snapshot and send it
         let vm_snapshot = vm.snapshot()?;
         let snapshot_data = serde_json::to_vec(&vm_snapshot).unwrap();
