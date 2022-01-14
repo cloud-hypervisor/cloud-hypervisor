@@ -345,11 +345,11 @@ impl cpu::Vcpu for MshvVcpu {
 
                     // SAFETY: access_info is valid, otherwise we won't be here
                     assert!(
-                        !(unsafe { access_info.__bindgen_anon_1.string_op() } == 1),
+                        (unsafe { access_info.__bindgen_anon_1.string_op() } != 1),
                         "String IN/OUT not supported"
                     );
                     assert!(
-                        !(unsafe { access_info.__bindgen_anon_1.rep_prefix() } == 1),
+                        (unsafe { access_info.__bindgen_anon_1.rep_prefix() } != 1),
                         "Rep IN/OUT not supported"
                     );
 
