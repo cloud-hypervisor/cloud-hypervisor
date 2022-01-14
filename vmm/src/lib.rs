@@ -1153,6 +1153,22 @@ impl Vmm {
             "Sending migration: destination_url = {}, local = {}",
             send_data_migration.destination_url, send_data_migration.local
         );
+
+        if !self
+            .vm_config
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .memory
+            .shared
+            && send_data_migration.local
+        {
+            return Err(MigratableError::MigrateSend(anyhow!(
+                "Local migration requires shared memory enabled"
+            )));
+        }
+
         if let Some(vm) = self.vm.as_mut() {
             Self::send_migration(
                 vm,
