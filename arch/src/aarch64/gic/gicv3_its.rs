@@ -124,12 +124,11 @@ pub mod kvm {
         its_device: &Arc<dyn hypervisor::Device>,
         save: bool,
     ) -> crate::aarch64::gic::Result<()> {
-        let attr: u64;
-        if save {
-            attr = u64::from(kvm_bindings::KVM_DEV_ARM_ITS_SAVE_TABLES);
+        let attr = if save {
+            u64::from(kvm_bindings::KVM_DEV_ARM_ITS_SAVE_TABLES)
         } else {
-            attr = u64::from(kvm_bindings::KVM_DEV_ARM_ITS_RESTORE_TABLES);
-        }
+            u64::from(kvm_bindings::KVM_DEV_ARM_ITS_RESTORE_TABLES)
+        };
 
         let init_gic_attr = kvm_bindings::kvm_device_attr {
             group: kvm_bindings::KVM_DEV_ARM_VGIC_GRP_CTRL,
