@@ -29,6 +29,7 @@ use memory_manager::MemoryManagerSnapshotData;
 use pci::PciBdf;
 use seccompiler::{apply_filter, SeccompAction};
 use serde::ser::{Serialize, SerializeStruct, Serializer};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io;
 use std::io::{Read, Write};
@@ -753,6 +754,7 @@ impl Vmm {
         &mut self,
         req: &Request,
         socket: &mut T,
+        existing_memory_files: Option<HashMap<u32, File>>,
     ) -> std::result::Result<Vm, MigratableError>
     where
         T: Read + Write,
@@ -794,6 +796,7 @@ impl Vmm {
             self.hypervisor.clone(),
             activate_evt,
             &vm_migration_config.memory_manager_data,
+            existing_memory_files,
         )
         .map_err(|e| {
             MigratableError::MigrateReceive(anyhow!("Error creating VM from snapshot: {:?}", e))
@@ -886,7 +889,7 @@ impl Vmm {
 
         let mut started = false;
         let mut vm: Option<Vm> = None;
-
+        let mut existing_memory_files = None;
         loop {
             let req = Request::read_from(&mut socket)?;
             match req.command() {
@@ -905,7 +908,11 @@ impl Vmm {
                         Response::error().write_to(&mut socket)?;
                         continue;
                     }
-                    vm = Some(self.vm_receive_config(&req, &mut socket)?);
+                    vm = Some(self.vm_receive_config(
+                        &req,
+                        &mut socket,
+                        existing_memory_files.take(),
+                    )?);
                 }
                 Command::State => {
                     info!("State Command Received");
