@@ -867,6 +867,7 @@ impl Vm {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new_from_migration(
         config: Arc<Mutex<VmConfig>>,
         exit_evt: EventFd,
@@ -875,6 +876,7 @@ impl Vm {
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         activate_evt: EventFd,
         memory_manager_data: &MemoryManagerSnapshotData,
+        existing_memory_files: Option<HashMap<u32, File>>,
     ) -> Result<Self> {
         hypervisor.check_required_extensions().unwrap();
         let vm = hypervisor.create_vm().unwrap();
@@ -897,7 +899,7 @@ impl Vm {
             #[cfg(feature = "tdx")]
             false,
             Some(memory_manager_data),
-            None,
+            existing_memory_files,
             #[cfg(target_arch = "x86_64")]
             None,
         )
