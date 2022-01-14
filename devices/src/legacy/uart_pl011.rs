@@ -294,19 +294,15 @@ impl Pl011 {
 
 impl BusDevice for Pl011 {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
-        let v;
         let mut read_ok = true;
-        if (AMBA_ID_LOW..AMBA_ID_HIGH).contains(&(offset >> 2)) {
+        let v = if (AMBA_ID_LOW..AMBA_ID_HIGH).contains(&(offset >> 2)) {
             let index = ((offset - 0xfe0) >> 2) as usize;
-            v = u32::from(PL011_ID[index]);
+            u32::from(PL011_ID[index])
         } else {
-            v = match offset >> 2 {
+            match offset >> 2 {
                 UARTDR => {
-                    let c: u32;
-                    let r: u32;
-
                     self.flags &= !PL011_FLAG_RXFF;
-                    c = self.read_fifo.pop_front().unwrap_or_default().into();
+                    let c: u32 = self.read_fifo.pop_front().unwrap_or_default().into();
                     if self.read_count > 0 {
                         self.read_count -= 1;
                     }
@@ -317,8 +313,7 @@ impl BusDevice for Pl011 {
                         self.int_level &= !PL011_INT_RX;
                     }
                     self.rsr = c >> 8;
-                    r = c;
-                    r
+                    c
                 }
                 UARTRSR_UARTECR => self.rsr,
                 UARTFR => self.flags,
@@ -337,7 +332,7 @@ impl BusDevice for Pl011 {
                     0
                 }
             }
-        }
+        };
 
         if read_ok && data.len() <= 4 {
             write_le_u32(data, v);

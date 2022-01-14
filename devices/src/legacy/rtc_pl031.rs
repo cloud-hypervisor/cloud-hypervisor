@@ -291,14 +291,13 @@ impl Rtc {
 
 impl BusDevice for Rtc {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
-        let v;
         let mut read_ok = true;
 
-        if (AMBA_ID_LOW..AMBA_ID_HIGH).contains(&offset) {
+        let v = if (AMBA_ID_LOW..AMBA_ID_HIGH).contains(&offset) {
             let index = ((offset - AMBA_ID_LOW) >> 2) as usize;
-            v = u32::from(PL031_ID[index]);
+            u32::from(PL031_ID[index])
         } else {
-            v = match offset {
+            match offset {
                 RTCDR => self.get_time(),
                 RTCMR => {
                     // Even though we are not implementing RTC alarm we return the last value
@@ -313,8 +312,8 @@ impl BusDevice for Rtc {
                     read_ok = false;
                     0
                 }
-            };
-        }
+            }
+        };
         if read_ok && data.len() <= 4 {
             write_le_u32(data, v);
         } else {
