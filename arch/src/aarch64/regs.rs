@@ -6,7 +6,6 @@
 // found in the THIRD-PARTY file.
 
 use super::get_fdt_addr;
-use crate::GuestMemoryMmap;
 use hypervisor::kvm::kvm_bindings::{
     kvm_regs, user_pt_regs, KVM_REG_ARM64, KVM_REG_ARM_CORE, KVM_REG_SIZE_U64,
 };
@@ -43,12 +42,7 @@ const PSTATE_FAULT_BITS_64: u64 = PSR_MODE_EL1h | PSR_A_BIT | PSR_F_BIT | PSR_I_
 /// * `cpu_id` - Index of current vcpu.
 /// * `boot_ip` - Starting instruction pointer.
 /// * `mem` - Reserved DRAM for current VM.
-pub fn setup_regs(
-    vcpu: &Arc<dyn hypervisor::Vcpu>,
-    cpu_id: u8,
-    boot_ip: u64,
-    _mem: &GuestMemoryMmap,
-) -> Result<()> {
+pub fn setup_regs(vcpu: &Arc<dyn hypervisor::Vcpu>, cpu_id: u8, boot_ip: u64) -> Result<()> {
     let kreg_off = offset__of!(kvm_regs, regs);
 
     // Get the register index of the PSTATE (Processor State) register.

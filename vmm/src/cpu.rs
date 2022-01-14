@@ -265,14 +265,14 @@ impl Vcpu {
         &mut self,
         #[cfg(target_arch = "aarch64")] vm: &Arc<dyn hypervisor::Vm>,
         kernel_entry_point: Option<EntryPoint>,
-        vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+        #[cfg(target_arch = "x86_64")] vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         #[cfg(target_arch = "x86_64")] cpuid: CpuId,
         #[cfg(target_arch = "x86_64")] kvm_hyperv: bool,
     ) -> Result<()> {
         #[cfg(target_arch = "aarch64")]
         {
             self.init(vm)?;
-            self.mpidr = arch::configure_vcpu(&self.vcpu, self.id, kernel_entry_point, vm_memory)
+            self.mpidr = arch::configure_vcpu(&self.vcpu, self.id, kernel_entry_point)
                 .map_err(Error::VcpuConfiguration)?;
         }
         info!("Configuring vCPU: cpu_id = {}", self.id);
@@ -656,19 +656,17 @@ impl CpuManager {
 
             vcpu.restore(snapshot).expect("Failed to restore vCPU");
         } else {
-            let vm_memory = self.vm_memory.clone();
-
             #[cfg(target_arch = "x86_64")]
             vcpu.configure(
                 entry_point,
-                &vm_memory,
+                &self.vm_memory,
                 self.cpuid.clone(),
                 self.config.kvm_hyperv,
             )
             .expect("Failed to configure vCPU");
 
             #[cfg(target_arch = "aarch64")]
-            vcpu.configure(&self.vm, entry_point, &vm_memory)
+            vcpu.configure(&self.vm, entry_point)
                 .expect("Failed to configure vCPU");
         }
 
@@ -1757,13 +1755,8 @@ mod tests {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0, None).unwrap();
-        let regions = vec![(
-            GuestAddress(layout::RAM_64BIT_START),
-            (layout::FDT_MAX_SIZE + 0x1000) as usize,
-        )];
-        let mem = GuestMemoryMmap::from_ranges(&regions).expect("Cannot initialize memory");
 
-        let res = setup_regs(&vcpu, 0, 0x0, &mem);
+        let res = setup_regs(&vcpu, 0, 0x0);
         // Must fail when vcpu is not initialized yet.
         assert!(res.is_err());
 
@@ -1771,7 +1764,7 @@ mod tests {
         vm.get_preferred_target(&mut kvi).unwrap();
         vcpu.vcpu_init(&kvi).unwrap();
 
-        assert!(setup_regs(&vcpu, 0, 0x0, &mem).is_ok());
+        assert!(setup_regs(&vcpu, 0, 0x0).is_ok());
     }
 
     #[test]

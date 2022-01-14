@@ -21,9 +21,7 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt::Debug;
 use std::sync::Arc;
-use vm_memory::{
-    Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic, GuestUsize,
-};
+use vm_memory::{Address, GuestAddress, GuestMemory, GuestUsize};
 
 /// Errors thrown while configuring aarch64 system.
 #[derive(Debug)]
@@ -66,16 +64,10 @@ pub fn configure_vcpu(
     fd: &Arc<dyn hypervisor::Vcpu>,
     id: u8,
     kernel_entry_point: Option<EntryPoint>,
-    vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
 ) -> super::Result<u64> {
     if let Some(kernel_entry_point) = kernel_entry_point {
-        regs::setup_regs(
-            fd,
-            id,
-            kernel_entry_point.entry_addr.raw_value(),
-            &vm_memory.memory(),
-        )
-        .map_err(Error::RegsConfiguration)?;
+        regs::setup_regs(fd, id, kernel_entry_point.entry_addr.raw_value())
+            .map_err(Error::RegsConfiguration)?;
     }
 
     let mpidr = fd.read_mpidr().map_err(Error::VcpuRegMpidr)?;
