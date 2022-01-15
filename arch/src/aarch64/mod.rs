@@ -43,6 +43,9 @@ pub enum Error {
 
     /// Error configuring the MPIDR register
     VcpuRegMpidr(hypervisor::HypervisorCpuError),
+
+    /// Error initializing PMU for vcpu
+    VcpuInitPmu,
 }
 
 impl From<Error> for super::Error {

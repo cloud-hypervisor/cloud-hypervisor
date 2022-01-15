@@ -1153,6 +1153,16 @@ impl Vm {
             Error::ConfigureSystem(arch::Error::AArch64Setup(arch::aarch64::Error::SetupGic(e)))
         })?;
 
+        // PMU interrupt sticks to PPI, so need to be added by 16 to get real irq number.
+        let pmu_supported = self
+            .cpu_manager
+            .lock()
+            .unwrap()
+            .init_pmu(arch::aarch64::fdt::AARCH64_PMU_IRQ + 16)
+            .map_err(|_| {
+                Error::ConfigureSystem(arch::Error::AArch64Setup(arch::aarch64::Error::VcpuInitPmu))
+            })?;
+
         arch::configure_system(
             &mem,
             cmdline.as_str(),
