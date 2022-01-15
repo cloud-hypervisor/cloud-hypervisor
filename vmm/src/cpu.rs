@@ -104,6 +104,9 @@ pub enum Error {
     #[cfg(feature = "tdx")]
     InitializeTdx(hypervisor::HypervisorCpuError),
 
+    #[cfg(target_arch = "aarch64")]
+    InitPmu(hypervisor::HypervisorCpuError),
+
     /// Failed scheduling the thread on the expected CPU set.
     ScheduleCpuSet,
 }
@@ -312,6 +315,7 @@ impl Vcpu {
             .map_err(Error::VcpuArmPreferredTarget)?;
         // We already checked that the capability is supported.
         kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_PSCI_0_2;
+        kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_PMU_V3;
         // Non-boot cpus are powered off initially.
         if self.id > 0 {
             kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_POWER_OFF;
@@ -697,6 +701,51 @@ impl CpuManager {
         }
 
         Ok(())
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    pub fn init_pmu(&self, irq: u32) -> Result<bool> {
+        let cpu_attr = kvm_bindings::kvm_device_attr {
+            group: kvm_bindings::KVM_ARM_VCPU_PMU_V3_CTRL,
+            attr: u64::from(kvm_bindings::KVM_ARM_VCPU_PMU_V3_INIT),
+            addr: 0x0,
+            flags: 0,
+        };
+
+        for cpu in self.vcpus.iter() {
+            let tmp = irq;
+            let cpu_attr_irq = kvm_bindings::kvm_device_attr {
+                group: kvm_bindings::KVM_ARM_VCPU_PMU_V3_CTRL,
+                attr: u64::from(kvm_bindings::KVM_ARM_VCPU_PMU_V3_IRQ),
+                addr: &tmp as *const u32 as u64,
+                flags: 0,
+            };
+
+            // Check if PMU attr is available, if not, log the information.
+            if cpu.lock().unwrap().vcpu.has_vcpu_attr(&cpu_attr).is_ok() {
+                // Set irq for PMU
+                cpu.lock()
+                    .unwrap()
+                    .vcpu
+                    .set_vcpu_attr(&cpu_attr_irq)
+                    .map_err(Error::InitPmu)?;
+
+                // Init PMU
+                cpu.lock()
+                    .unwrap()
+                    .vcpu
+                    .set_vcpu_attr(&cpu_attr)
+                    .map_err(Error::InitPmu)?;
+            } else {
+                debug!(
+                    "PMU attribute is not supported in vCPU{}, skip PMU init!",
+                    cpu.lock().unwrap().id
+                );
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
     }
 
     fn start_vcpu(
