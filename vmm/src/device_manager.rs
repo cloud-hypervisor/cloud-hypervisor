@@ -4065,6 +4065,7 @@ impl Aml for DeviceManager {
                         &"ARMH0011",
                     ),
                     &aml::Name::new("_UID".into(), &aml::ZERO),
+                    &aml::Name::new("_DDN".into(), &"COM1"),
                     &aml::Name::new(
                         "_CRS".into(),
                         &aml::ResourceTemplate::new(vec![

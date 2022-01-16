@@ -403,6 +403,78 @@ fn create_spcr_table(base_address: u64, gsi: u32) -> Sdt {
 }
 
 #[cfg(target_arch = "aarch64")]
+fn create_dbg2_table(base_address: u64) -> Sdt {
+    let namespace = "_SB_.COM1";
+    let debug_device_info_offset = 44usize;
+    let debug_device_info_len: u16 = 22 /* BaseAddressRegisterOffset */ +
+                       12 /* BaseAddressRegister */ +
+                       4 /* AddressSize */ +
+                       namespace.len() as u16 + 1 /* zero-terminated */;
+    let tbl_len: u32 = debug_device_info_offset as u32 + debug_device_info_len as u32;
+    let mut dbg2 = Sdt::new(*b"DBG2", tbl_len, 0, *b"CLOUDH", *b"CHDBG2  ", 1);
+
+    /* OffsetDbgDeviceInfo */
+    dbg2.write_u32(36, 44);
+    /* NumberDbgDeviceInfo */
+    dbg2.write_u32(40, 1);
+
+    /* Debug Device Information structure */
+    /* Offsets are calculated from the start of this structure. */
+    let namespace_offset = 38u16;
+    let base_address_register_offset = 22u16;
+    let address_size_offset = 34u16;
+    /* Revision */
+    dbg2.write_u8(debug_device_info_offset, 0);
+    /* Length */
+    dbg2.write_u16(debug_device_info_offset + 1, debug_device_info_len);
+    /* NumberofGenericAddressRegisters */
+    dbg2.write_u8(debug_device_info_offset + 3, 1);
+    /* NameSpaceStringLength */
+    dbg2.write_u16(debug_device_info_offset + 4, namespace.len() as u16 + 1);
+    /* NameSpaceStringOffset */
+    dbg2.write_u16(debug_device_info_offset + 6, namespace_offset);
+    /* OemDataLength */
+    dbg2.write_u16(debug_device_info_offset + 8, 0);
+    /* OemDataOffset */
+    dbg2.write_u16(debug_device_info_offset + 10, 0);
+    /* Port Type */
+    dbg2.write_u16(debug_device_info_offset + 12, 0x8000);
+    /* Port Subtype */
+    dbg2.write_u16(debug_device_info_offset + 14, 0x0003);
+    /* Reserved */
+    dbg2.write_u16(debug_device_info_offset + 16, 0);
+    /* BaseAddressRegisterOffset */
+    dbg2.write_u16(debug_device_info_offset + 18, base_address_register_offset);
+    /* AddressSizeOffset */
+    dbg2.write_u16(debug_device_info_offset + 20, address_size_offset);
+    /* BaseAddressRegister */
+    dbg2.write(
+        debug_device_info_offset + base_address_register_offset as usize,
+        GenericAddress::mmio_address::<u8>(base_address),
+    );
+    /* AddressSize */
+    dbg2.write_u32(
+        debug_device_info_offset + address_size_offset as usize,
+        0x1000,
+    );
+    /* NamespaceString, zero-terminated ASCII */
+    for (k, c) in namespace.chars().enumerate() {
+        dbg2.write_u8(
+            debug_device_info_offset + namespace_offset as usize + k,
+            c as u8,
+        );
+    }
+    dbg2.write_u8(
+        debug_device_info_offset + namespace_offset as usize + namespace.len(),
+        0,
+    );
+
+    dbg2.update_checksum();
+
+    dbg2
+}
+
+#[cfg(target_arch = "aarch64")]
 fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
     const ACPI_IORT_NODE_ITS_GROUP: u8 = 0x00;
     const ACPI_IORT_NODE_PCI_ROOT_COMPLEX: u8 = 0x02;
@@ -586,7 +658,7 @@ pub fn create_acpi_tables(
     prev_tbl_len = mcfg.len() as u64;
     prev_tbl_off = mcfg_offset;
 
-    // SPCR
+    // SPCR and DBG2
     #[cfg(target_arch = "aarch64")]
     {
         let is_serial_on = device_manager
@@ -610,6 +682,8 @@ pub fn create_acpi_tables(
             // If serial is turned off, add a fake device with invalid irq.
             31
         };
+
+        // SPCR
         let spcr = create_spcr_table(serial_device_addr, serial_device_irq);
         let spcr_offset = prev_tbl_off.checked_add(prev_tbl_len).unwrap();
         guest_mem
@@ -618,6 +692,16 @@ pub fn create_acpi_tables(
         tables.push(spcr_offset.0);
         prev_tbl_len = spcr.len() as u64;
         prev_tbl_off = spcr_offset;
+
+        // DBG2
+        let dbg2 = create_dbg2_table(serial_device_addr);
+        let dbg2_offset = prev_tbl_off.checked_add(prev_tbl_len).unwrap();
+        guest_mem
+            .write_slice(dbg2.as_slice(), dbg2_offset)
+            .expect("Error writing DBG2 table");
+        tables.push(dbg2_offset.0);
+        prev_tbl_len = dbg2.len() as u64;
+        prev_tbl_off = dbg2_offset;
     }
 
     // SRAT and SLIT
