@@ -14,7 +14,7 @@ fi
 WIN_IMAGE_FILE="/root/workloads/windows-server-2019.raw"
 
 WORKLOADS_DIR="/root/workloads"
-OVMF_FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/edk2/releases/latest | grep "browser_download_url" | grep -o 'https://.*[^ "]')
+OVMF_FW_URL="https://github.com/cloud-hypervisor/edk2/releases/download/ch-e6d6251eb6/OVMF.fd"
 OVMF_FW="$WORKLOADS_DIR/OVMF.fd"
 if [ ! -f "$OVMF_FW" ]; then
     pushd $WORKLOADS_DIR
