@@ -8,13 +8,13 @@ support in Cloud Hypervisor:
 1. nested-vm migration - migrating between two nested VMs whose host VMs
    are running on the same machine.
 
-## Local Migration
+## Local Migration (Suitable for Live Upgrade of VMM)
 Launch the source VM (on the host machine):
 ```bash
 $ target/release/cloud-hypervisor
     --kernel ~/workloads/vmlinux \
     --disk path=~/workloads/focal.raw \
-    --cpus boot=1 --memory size=1G \
+    --cpus boot=1 --memory size=1G,shared=on \
     --cmdline "root=/dev/vda1 console=ttyS0"  \
     --serial tty --console off --api-socket=/tmp/api1
 ```
@@ -31,7 +31,7 @@ $ target/release/ch-remote --api-socket=/tmp/api2 receive-migration unix:/tmp/so
 
 Start to send migration for the source VM (on the host machine):
 ```bash
-$ target/release/ch-remote --api-socket=/tmp/api1 send-migration unix:/tmp/sock
+$ target/release/ch-remote --api-socket=/tmp/api1 send-migration --local unix:/tmp/sock
 ```
 
 When the above commands completed, the source VM should be successfully
