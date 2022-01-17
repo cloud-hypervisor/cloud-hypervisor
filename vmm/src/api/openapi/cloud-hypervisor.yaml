@@ -1041,3 +1041,5 @@ components:
       properties:
         destination_url:
           type: string
+        local:
+          type: boolean
