@@ -7472,7 +7472,7 @@ mod live_migration {
     // 4. The destination VM is functional (including various virtio-devices are working properly) after
     //    live migration;
     // Note: This test does not use vsock as we can't create two identical vsock on the same host.
-    fn _test_live_migration(numa: bool) {
+    fn _test_live_migration(numa: bool, local: bool) {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
         let kernel_path = direct_kernel_boot_path();
@@ -7496,6 +7496,8 @@ mod live_migration {
                 "guest_numa_id=1,cpus=[3-4,6-8],distances=[0@20,2@25],memory_zones=mem1",
                 "guest_numa_id=2,cpus=[5,10-11],distances=[0@25,1@30],memory_zones=mem2",
             ]
+        } else if local {
+            &["--memory", "size=4G,shared=on"]
         } else {
             &["--memory", "size=4G"]
         };
@@ -7605,12 +7607,20 @@ mod live_migration {
             // Give it '1s' to make sure the 'migration_socket' file is properly created
             thread::sleep(std::time::Duration::new(1, 0));
             // Start to send migration from the source VM
+
+            let mut args = [
+                format!("--api-socket={}", &src_api_socket),
+                "send-migration".to_string(),
+                format! {"unix:{}", migration_socket},
+            ]
+            .to_vec();
+
+            if local {
+                args.insert(2, "--local".to_string());
+            }
+
             let mut send_migration = Command::new(clh_command("ch-remote"))
-                .args(&[
-                    &format!("--api-socket={}", &src_api_socket),
-                    "send-migration",
-                    &format! {"unix:{}", migration_socket},
-                ])
+                .args(&args)
                 .stderr(Stdio::piped())
                 .stdout(Stdio::piped())
                 .spawn()
@@ -7768,13 +7778,18 @@ mod live_migration {
 
     #[test]
     fn test_live_migration_basic() {
-        _test_live_migration(false)
+        _test_live_migration(false, false)
+    }
+
+    #[test]
+    fn test_live_migration_local() {
+        _test_live_migration(false, true)
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_numa() {
-        _test_live_migration(true)
+        _test_live_migration(true, false)
     }
     #[test]
     #[cfg(not(feature = "mshv"))]
