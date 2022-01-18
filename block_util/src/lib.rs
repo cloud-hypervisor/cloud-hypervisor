@@ -252,13 +252,12 @@ impl Request {
         Ok(req)
     }
 
-    #[allow(clippy::ptr_arg)]
     pub fn execute<T: Seek + Read + Write>(
         &self,
         disk: &mut T,
         disk_nsectors: u64,
         mem: &GuestMemoryMmap,
-        disk_id: &Vec<u8>,
+        disk_id: &[u8],
     ) -> result::Result<u32, ExecuteError> {
         disk.seek(SeekFrom::Start(self.sector << SECTOR_SHIFT))
             .map_err(ExecuteError::Seek)?;
@@ -293,7 +292,7 @@ impl Request {
                     if (*data_len as usize) < disk_id.len() {
                         return Err(ExecuteError::BadRequest(Error::InvalidOffset));
                     }
-                    mem.write_slice(disk_id.as_slice(), *data_addr)
+                    mem.write_slice(disk_id, *data_addr)
                         .map_err(ExecuteError::Write)?;
                 }
                 RequestType::Unsupported(t) => return Err(ExecuteError::Unsupported(t)),
