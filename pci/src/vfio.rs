@@ -5,7 +5,7 @@
 
 use crate::{
     msi_num_enabled_vectors, BarReprogrammingParams, MsiConfig, MsixCap, MsixConfig,
-    PciBarConfiguration, PciBarRegionType, PciCapabilityId, PciClassCode, PciConfiguration,
+    PciBarConfiguration, PciBarRegionType, PciBdf, PciCapabilityId, PciClassCode, PciConfiguration,
     PciDevice, PciDeviceError, PciHeaderType, PciSubclass, MSIX_TABLE_ENTRY_SIZE,
 };
 use byteorder::{ByteOrder, LittleEndian};
@@ -557,6 +557,7 @@ impl VfioCommon {
         cap: u8,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         vfio_wrapper: &dyn Vfio,
+        bdf: PciBdf,
     ) {
         let msg_ctl = vfio_wrapper.read_config_word((cap + 2).into());
 
@@ -577,7 +578,11 @@ impl VfioCommon {
             })
             .unwrap();
 
-        let msix_config = MsixConfig::new(msix_cap.table_size(), interrupt_source_group.clone(), 0);
+        let msix_config = MsixConfig::new(
+            msix_cap.table_size(),
+            interrupt_source_group.clone(),
+            bdf.into(),
+        );
 
         self.interrupt.msix = Some(VfioMsix {
             bar: msix_config,
@@ -615,6 +620,7 @@ impl VfioCommon {
         &mut self,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         vfio_wrapper: &dyn Vfio,
+        bdf: PciBdf,
     ) {
         let mut cap_next = vfio_wrapper.read_config_byte(PCI_CONFIG_CAPABILITY_OFFSET);
 
@@ -636,7 +642,12 @@ impl VfioCommon {
                         if irq_info.count > 0 {
                             // Parse capability only if the VFIO device
                             // supports MSI-X.
-                            self.parse_msix_capabilities(cap_next, interrupt_manager, vfio_wrapper);
+                            self.parse_msix_capabilities(
+                                cap_next,
+                                interrupt_manager,
+                                vfio_wrapper,
+                                bdf,
+                            );
                         }
                     }
                 }
@@ -968,6 +979,7 @@ impl VfioPciDevice {
         msi_interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
         iommu_attached: bool,
+        bdf: PciBdf,
     ) -> Result<Self, VfioPciError> {
         let device = Arc::new(device);
         device.reset();
@@ -997,7 +1009,7 @@ impl VfioPciDevice {
             },
         };
 
-        common.parse_capabilities(msi_interrupt_manager, &vfio_wrapper);
+        common.parse_capabilities(msi_interrupt_manager, &vfio_wrapper, bdf);
         common.initialize_legacy_interrupt(legacy_interrupt_group, &vfio_wrapper)?;
 
         let vfio_pci_device = VfioPciDevice {
