@@ -63,7 +63,7 @@ macro_rules! VGIC_DIST_REG {
 
 // List with relevant distributor registers that we will be restoring.
 // Order is taken from qemu.
-static VGIC_DIST_REGS: &'static [DistReg] = &[
+static VGIC_DIST_REGS: &[DistReg] = &[
     VGIC_DIST_REG!(GICD_STATUSR, 0, 4),
     VGIC_DIST_REG!(GICD_ICENABLER, 1, 0),
     VGIC_DIST_REG!(GICD_ISENABLER, 1, 0),
