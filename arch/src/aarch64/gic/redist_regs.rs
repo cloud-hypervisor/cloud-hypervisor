@@ -61,7 +61,7 @@ macro_rules! VGIC_RDIST_REG {
 }
 
 // List with relevant distributor registers that we will be restoring.
-static VGIC_RDIST_REGS: &'static [RdistReg] = &[
+static VGIC_RDIST_REGS: &[RdistReg] = &[
     VGIC_RDIST_REG!(GICR_STATUSR, 4),
     VGIC_RDIST_REG!(GICR_WAKER, 4),
     VGIC_RDIST_REG!(GICR_PROPBASER, 8),
@@ -70,7 +70,7 @@ static VGIC_RDIST_REGS: &'static [RdistReg] = &[
 ];
 
 // List with relevant distributor registers that we will be restoring.
-static VGIC_SGI_REGS: &'static [RdistReg] = &[
+static VGIC_SGI_REGS: &[RdistReg] = &[
     VGIC_RDIST_REG!(GICR_IGROUPR0, 4),
     VGIC_RDIST_REG!(GICR_ICENABLER0, 4),
     VGIC_RDIST_REG!(GICR_ISENABLER0, 4),
@@ -109,7 +109,7 @@ fn access_redists_aux(
     gic: &Arc<dyn hypervisor::Device>,
     gicr_typer: &[u64],
     state: &mut Vec<u32>,
-    reg_list: &'static [RdistReg],
+    reg_list: &[RdistReg],
     idx: &mut usize,
     set: bool,
 ) -> Result<()> {

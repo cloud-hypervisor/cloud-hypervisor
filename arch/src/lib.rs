@@ -6,7 +6,7 @@
 
 //! Implements platform specific functionality.
 //! Supported platforms: x86_64, aarch64.
-#![allow(clippy::transmute_ptr_to_ptr, clippy::redundant_static_lifetimes)]
+#![allow(clippy::transmute_ptr_to_ptr)]
 
 #[macro_use]
 extern crate log;
