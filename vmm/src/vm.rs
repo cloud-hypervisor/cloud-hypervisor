@@ -2411,6 +2411,13 @@ impl Pausable for Vm {
             clock.flags = 0;
             self.saved_clock = Some(clock);
         }
+
+        // Before pausing the vCPUs activate any pending virtio devices that might
+        // need activation between starting the pause (or e.g. a migration it's part of)
+        self.activate_virtio_devices().map_err(|e| {
+            MigratableError::Pause(anyhow!("Error activating pending virtio devices: {:?}", e))
+        })?;
+
         self.cpu_manager.lock().unwrap().pause()?;
         self.device_manager.lock().unwrap().pause()?;
 
