@@ -1051,9 +1051,16 @@ impl cpu::Vcpu for KvmVcpu {
     /// potential soft lockups when being resumed.
     ///
     fn notify_guest_clock_paused(&self) -> cpu::Result<()> {
-        self.fd
-            .kvmclock_ctrl()
-            .map_err(|e| cpu::HypervisorCpuError::NotifyGuestClockPaused(e.into()))
+        if let Err(e) = self.fd.kvmclock_ctrl() {
+            // Linux kernel returns -EINVAL if the PV clock isn't yet initialised
+            // which could be because we're still in firmware or the guest doesn't
+            // use KVM clock.
+            if e.errno() != libc::EINVAL {
+                return Err(cpu::HypervisorCpuError::NotifyGuestClockPaused(e.into()));
+            }
+        }
+
+        Ok(())
     }
     #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
     fn vcpu_init(&self, kvi: &VcpuInit) -> cpu::Result<()> {
