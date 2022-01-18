@@ -1322,7 +1322,6 @@ impl MemoryManager {
     // (rounded-up) to 128MiB boundary.
     // If memory hotplug is not allowed, there is no alignment required.
     // On x86_64, it must also start at the 64bit start.
-    #[allow(clippy::let_and_return)]
     fn start_addr(mem_end: GuestAddress, allow_mem_hotplug: bool) -> Result<GuestAddress, Error> {
         let mut start_addr = if allow_mem_hotplug {
             GuestAddress(mem_end.0 | ((128 << 20) - 1))
