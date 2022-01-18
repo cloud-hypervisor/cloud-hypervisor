@@ -295,14 +295,13 @@ impl VsockEpollListener for VsockMuxer {
         'epoll: loop {
             match epoll::wait(self.epoll_file.as_raw_fd(), 0, epoll_events.as_mut_slice()) {
                 Ok(ev_cnt) => {
-                    #[allow(clippy::needless_range_loop)]
-                    for i in 0..ev_cnt {
+                    for evt in epoll_events.iter().take(ev_cnt) {
                         self.handle_event(
-                            epoll_events[i].data as RawFd,
-                            // It's ok to unwrap here, since the `epoll_events[i].events` is filled
+                            evt.data as RawFd,
+                            // It's ok to unwrap here, since the `evt.events` is filled
                             // in by `epoll::wait()`, and therefore contains only valid epoll
                             // flags.
-                            epoll::Events::from_bits(epoll_events[i].events).unwrap(),
+                            epoll::Events::from_bits(evt.events).unwrap(),
                         );
                     }
                 }
