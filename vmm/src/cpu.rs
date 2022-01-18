@@ -1738,8 +1738,6 @@ mod tests {
 #[cfg(target_arch = "aarch64")]
 #[cfg(test)]
 mod tests {
-    use crate::GuestMemoryMmap;
-    use arch::aarch64::layout;
     use arch::aarch64::regs::*;
     use hypervisor::kvm::aarch64::{is_system_register, MPIDR_EL1};
     use hypervisor::kvm::kvm_bindings::{
@@ -1748,7 +1746,6 @@ mod tests {
     };
     use hypervisor::{arm64_core_reg_id, offset__of};
     use std::mem;
-    use vm_memory::GuestAddress;
 
     #[test]
     fn test_setup_regs() {
