@@ -6172,11 +6172,14 @@ mod parallel {
         exec_host_command_status("pkill -f nvmf_tgt");
     }
 
-    #[ignore]
-    #[cfg(target_arch = "x86_64")]
     #[test]
+    #[cfg(target_arch = "aarch64")]
     fn test_vfio_user() {
-        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        #[cfg(target_arch = "aarch64")]
+        let focal_image = FOCAL_IMAGE_UPDATE_KERNEL_NAME.to_string();
+        #[cfg(target_arch = "x86_64")]
+        let focal_image = FOCAL_IMAGE_NAME.to_string();
+        let focal = UbuntuDiskConfig::new(focal_image);
         let guest = Guest::new(Box::new(focal));
 
         let spdk_nvme_dir = guest.tmp_dir.as_path().join("test-vfio-user");
