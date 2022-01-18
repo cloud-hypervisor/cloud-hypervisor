@@ -3025,6 +3025,7 @@ impl DeviceManager {
             &self.msi_interrupt_manager,
             legacy_interrupt_group,
             device_cfg.iommu,
+            pci_device_bdf,
         )
         .map_err(DeviceManagerError::VfioPciCreate)?;
 
@@ -3171,6 +3172,7 @@ impl DeviceManager {
             client.clone(),
             &self.msi_interrupt_manager,
             legacy_interrupt_group,
+            pci_device_bdf,
         )
         .map_err(DeviceManagerError::VfioUserCreate)?;
 

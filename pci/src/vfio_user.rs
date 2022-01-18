@@ -6,7 +6,7 @@
 use crate::vfio::{Interrupt, Vfio, VfioCommon, VfioError};
 use crate::{BarReprogrammingParams, PciBarRegionType, VfioPciError};
 use crate::{
-    PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciSubclass,
+    PciBdf, PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciSubclass,
 };
 use hypervisor::HypervisorVmError;
 use std::any::Any;
@@ -67,6 +67,7 @@ impl VfioUserPciDevice {
         client: Arc<Mutex<Client>>,
         msi_interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
+        bdf: PciBdf,
     ) -> Result<Self, VfioUserPciDeviceError> {
         // This is used for the BAR and capabilities only
         let configuration = PciConfiguration::new(
@@ -104,7 +105,7 @@ impl VfioUserPciDevice {
             },
         };
 
-        common.parse_capabilities(msi_interrupt_manager, &vfio_wrapper);
+        common.parse_capabilities(msi_interrupt_manager, &vfio_wrapper, bdf);
         common
             .initialize_legacy_interrupt(legacy_interrupt_group, &vfio_wrapper)
             .map_err(VfioUserPciDeviceError::InitializeLegacyInterrupts)?;
