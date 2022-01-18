@@ -411,19 +411,19 @@ impl VfioCommon {
             let mut lower = vfio_wrapper.read_config_dword(bar_offset);
 
             if io_bar {
+                // Mask flag bits (lowest 2 for I/O bars)
+                lower &= !0b11;
+
+                // BAR is not enabled
+                if lower == 0 {
+                    bar_id += 1;
+                    continue;
+                }
+
                 #[cfg(target_arch = "x86_64")]
                 {
                     // IO BAR
                     region_type = PciBarRegionType::IoRegion;
-
-                    // Mask flag bits (lowest 2 for I/O bars)
-                    lower &= !0b11;
-
-                    // BAR is not enabled
-                    if lower == 0 {
-                        bar_id += 1;
-                        continue;
-                    }
 
                     // Invert bits and add 1 to calculate size
                     region_size = (!lower + 1) as u64;
