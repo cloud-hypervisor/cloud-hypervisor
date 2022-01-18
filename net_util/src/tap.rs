@@ -204,7 +204,6 @@ impl Tap {
         ifreq.ifr_ifru.ifru_addr = addr;
 
         // ioctl is safe. Called with a valid sock fd, and we check the return.
-        #[allow(clippy::cast_lossless)]
         let ret =
             unsafe { ioctl_with_ref(&sock, net_gen::sockios::SIOCSIFADDR as c_ulong, &ifreq) };
         if ret < 0 {
@@ -230,7 +229,6 @@ impl Tap {
         let mut ifreq = self.get_ifreq();
 
         // ioctl is safe. Called with a valid sock fd, and we check the return.
-        #[allow(clippy::cast_lossless)]
         let ret =
             unsafe { ioctl_with_ref(&sock, net_gen::sockios::SIOCGIFHWADDR as c_ulong, &ifreq) };
         if ret < 0 {
@@ -245,7 +243,6 @@ impl Tap {
         }
 
         // ioctl is safe. Called with a valid sock fd, and we check the return.
-        #[allow(clippy::cast_lossless)]
         let ret =
             unsafe { ioctl_with_ref(&sock, net_gen::sockios::SIOCSIFHWADDR as c_ulong, &ifreq) };
         if ret < 0 {
@@ -262,7 +259,6 @@ impl Tap {
         let ifreq = self.get_ifreq();
 
         // ioctl is safe. Called with a valid sock fd, and we check the return.
-        #[allow(clippy::cast_lossless)]
         let ret =
             unsafe { ioctl_with_ref(&sock, net_gen::sockios::SIOCGIFHWADDR as c_ulong, &ifreq) };
         if ret < 0 {
@@ -287,7 +283,6 @@ impl Tap {
         ifreq.ifr_ifru.ifru_addr = addr;
 
         // ioctl is safe. Called with a valid sock fd, and we check the return.
-        #[allow(clippy::cast_lossless)]
         let ret =
             unsafe { ioctl_with_ref(&sock, net_gen::sockios::SIOCSIFNETMASK as c_ulong, &ifreq) };
         if ret < 0 {
@@ -300,7 +295,6 @@ impl Tap {
     /// Set the offload flags for the tap interface.
     pub fn set_offload(&self, flags: c_uint) -> Result<()> {
         // ioctl is safe. Called with a valid tap fd, and we check the return.
-        #[allow(clippy::cast_lossless)]
         let ret =
             unsafe { ioctl_with_val(&self.tap_file, net_gen::TUNSETOFFLOAD(), flags as c_ulong) };
         if ret < 0 {
@@ -316,7 +310,6 @@ impl Tap {
 
         let mut ifreq = self.get_ifreq();
 
-        #[allow(clippy::cast_lossless)]
         let ret =
             unsafe { ioctl_with_ref(&sock, net_gen::sockios::SIOCGIFFLAGS as c_ulong, &ifreq) };
         if ret < 0 {
@@ -336,7 +329,6 @@ impl Tap {
             (net_gen::net_device_flags_IFF_UP | net_gen::net_device_flags_IFF_RUNNING) as i16;
 
         // ioctl is safe. Called with a valid sock fd, and we check the return.
-        #[allow(clippy::cast_lossless)]
         let ret =
             unsafe { ioctl_with_ref(&sock, net_gen::sockios::SIOCSIFFLAGS as c_ulong, &ifreq) };
         if ret < 0 {
