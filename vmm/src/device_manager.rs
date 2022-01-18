@@ -3445,24 +3445,20 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::UpdateMemoryForVfioPciDevice)?;
         }
 
-        #[allow(clippy::single_match)]
         // Take care of updating the memory for vfio-user devices.
         {
             let device_tree = self.device_tree.lock().unwrap();
             for pci_device_node in device_tree.pci_devices() {
-                match pci_device_node
+                if let PciDeviceHandle::VfioUser(vfio_user_pci_device) = pci_device_node
                     .pci_device_handle
                     .as_ref()
                     .ok_or(DeviceManagerError::MissingPciDevice)?
                 {
-                    PciDeviceHandle::VfioUser(vfio_user_pci_device) => {
-                        vfio_user_pci_device
-                            .lock()
-                            .unwrap()
-                            .dma_map(new_region)
-                            .map_err(DeviceManagerError::UpdateMemoryForVfioUserPciDevice)?;
-                    }
-                    _ => {}
+                    vfio_user_pci_device
+                        .lock()
+                        .unwrap()
+                        .dma_map(new_region)
+                        .map_err(DeviceManagerError::UpdateMemoryForVfioUserPciDevice)?;
                 }
             }
         }
