@@ -96,8 +96,7 @@ fn redist_attr_access(
         flags: 0,
     };
     if set {
-        #[allow(clippy::unnecessary_mut_passed)]
-        gic.set_device_attr(&mut gic_dist_attr)
+        gic.set_device_attr(&gic_dist_attr)
             .map_err(Error::SetDeviceAttribute)?;
     } else {
         gic.get_device_attr(&mut gic_dist_attr)
