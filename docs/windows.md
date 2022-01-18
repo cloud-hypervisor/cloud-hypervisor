@@ -67,7 +67,7 @@ The basic command to boot a Windows image. The configuration section should be c
 
 ```shell
 cloud-hypervisor \
-	--kernel ./$OVMF_DIR/OVMF.fd \
+	--kernel ./$OVMF_DIR/CLOUDHV.fd \
 	--disk path=./$IMG_FILE \
 	--cpus boot=1,kvm_hyperv=on \
 	--memory size=4G \
