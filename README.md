@@ -4,6 +4,7 @@
     - [Architectures](#architectures)
     - [Guest OS](#guest-os)
 - [2. Getting Started](#2-getting-started)
+  - [Preparation](#preparation)
   - [Install prerequisites](#install-prerequisites)
   - [Clone and build](#clone-and-build)
     - [Containerized builds and tests](#containerized-builds-and-tests)
@@ -190,7 +191,7 @@ $ pushd linux-cloud-hypervisor
 
 # Use the cloud-hypervisor kernel config to build your kernel
 $ cp $CLOUDH/cloud-hypervisor/resources/linux-config-x86_64 .config
-$ make bzImage -j `nproc`
+$ KCFLAGS="-Wa,-mx86-used-note=no" make bzImage -j `nproc`
 $ popd
 ```
 
