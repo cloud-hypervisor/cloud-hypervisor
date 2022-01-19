@@ -22,6 +22,7 @@ pub mod vhdx_sync;
 
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
 use io_uring::{opcode, IoUring, Probe};
+use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::cmp;
 use std::convert::TryInto;
 use std::fs::File;
@@ -112,6 +113,8 @@ pub enum ExecuteError {
     AsyncRead(AsyncIoError),
     AsyncWrite(AsyncIoError),
     AsyncFlush(AsyncIoError),
+    /// Failed allocating a temporary buffer.
+    TemporaryBufferAllocation(io::Error),
 }
 
 impl ExecuteError {
@@ -128,6 +131,7 @@ impl ExecuteError {
             ExecuteError::AsyncRead(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::AsyncWrite(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::AsyncFlush(_) => VIRTIO_BLK_S_IOERR,
+            ExecuteError::TemporaryBufferAllocation(_) => VIRTIO_BLK_S_IOERR,
         }
     }
 }
@@ -166,12 +170,21 @@ fn sector(mem: &GuestMemoryMmap, desc_addr: GuestAddress) -> result::Result<u64,
 }
 
 #[derive(Debug)]
+pub struct AlignedOperation {
+    origin_ptr: u64,
+    aligned_ptr: u64,
+    size: usize,
+    layout: Layout,
+}
+
+#[derive(Debug)]
 pub struct Request {
     pub request_type: RequestType,
     pub sector: u64,
     pub data_descriptors: Vec<(GuestAddress, u32)>,
     pub status_addr: GuestAddress,
     pub writeback: bool,
+    pub aligned_operations: Vec<AlignedOperation>,
 }
 
 impl Request {
@@ -197,6 +210,7 @@ impl Request {
             data_descriptors: Vec::new(),
             status_addr: GuestAddress(0),
             writeback: true,
+            aligned_operations: Vec::new(),
         };
 
         let status_desc;
@@ -302,7 +316,7 @@ impl Request {
     }
 
     pub fn execute_async(
-        &self,
+        &mut self,
         mem: &GuestMemoryMmap,
         disk_nsectors: u64,
         disk_image: &mut dyn AsyncIo,
@@ -315,6 +329,9 @@ impl Request {
 
         let mut iovecs = Vec::new();
         for (data_addr, data_len) in &self.data_descriptors {
+            if *data_len == 0 {
+                continue;
+            }
             let mut top: u64 = u64::from(*data_len) / SECTOR_SIZE;
             if u64::from(*data_len) % SECTOR_SIZE != 0 {
                 top += 1;
@@ -326,12 +343,52 @@ impl Request {
                 return Err(ExecuteError::BadRequest(Error::InvalidOffset));
             }
 
-            let buf = mem
+            let origin_ptr = mem
                 .get_slice(*data_addr, *data_len as usize)
                 .map_err(ExecuteError::GetHostAddress)?
                 .as_ptr();
+
+            // Verify the buffer alignment.
+            // In case it's not properly aligned, an intermediate buffer is
+            // created with the correct alignment, and a copy from/to the
+            // origin buffer is performed, depending on the type of operation.
+            let iov_base = if (origin_ptr as u64) % SECTOR_SIZE != 0 {
+                let layout =
+                    Layout::from_size_align(*data_len as usize, SECTOR_SIZE as usize).unwrap();
+                // Safe because layout has non-zero size
+                let aligned_ptr = unsafe { alloc_zeroed(layout) };
+                if aligned_ptr.is_null() {
+                    return Err(ExecuteError::TemporaryBufferAllocation(
+                        io::Error::last_os_error(),
+                    ));
+                }
+
+                // We need to perform the copy beforehand in case we're writing
+                // data out.
+                if request_type == RequestType::Out {
+                    // Safe because destination buffer has been allocated with
+                    // the proper size.
+                    unsafe {
+                        std::ptr::copy(origin_ptr as *const u8, aligned_ptr, *data_len as usize)
+                    };
+                }
+
+                // Store both origin and aligned pointers for complete_async()
+                // to process them.
+                self.aligned_operations.push(AlignedOperation {
+                    origin_ptr: origin_ptr as u64,
+                    aligned_ptr: aligned_ptr as u64,
+                    size: *data_len as usize,
+                    layout,
+                });
+
+                aligned_ptr as *mut libc::c_void
+            } else {
+                origin_ptr as *mut libc::c_void
+            };
+
             let iovec = libc::iovec {
-                iov_base: buf as *mut libc::c_void,
+                iov_base,
                 iov_len: *data_len as libc::size_t,
             };
             iovecs.push(iovec);
@@ -377,6 +434,36 @@ impl Request {
         }
 
         Ok(true)
+    }
+
+    pub fn complete_async(&mut self) -> result::Result<(), Error> {
+        for aligned_operation in self.aligned_operations.drain(..) {
+            // We need to perform the copy after the data has been read inside
+            // the aligned buffer in case we're reading data in.
+            if self.request_type == RequestType::In {
+                // Safe because origin buffer has been allocated with the
+                // proper size.
+                unsafe {
+                    std::ptr::copy(
+                        aligned_operation.aligned_ptr as *const u8,
+                        aligned_operation.origin_ptr as *mut u8,
+                        aligned_operation.size,
+                    )
+                };
+            }
+
+            // Free the temporary aligned buffer.
+            // Safe because aligned_ptr was allocated by alloc_zeroed with the same
+            // layout
+            unsafe {
+                dealloc(
+                    aligned_operation.aligned_ptr as *mut u8,
+                    aligned_operation.layout,
+                )
+            };
+        }
+
+        Ok(())
     }
 
     pub fn set_writeback(&mut self, writeback: bool) {

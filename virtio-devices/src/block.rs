@@ -57,6 +57,8 @@ pub enum Error {
     RequestParsing(block_util::Error),
     /// Failed to execute the request.
     RequestExecuting(block_util::ExecuteError),
+    /// Failed to complete the request.
+    RequestCompleting(block_util::Error),
     /// Missing the expected entry in the list of requests.
     MissingEntryRequestList,
     /// The asynchronous request returned with failure.
@@ -188,10 +190,11 @@ impl BlockEpollHandler {
         let completion_list = self.disk_image.complete();
         for (user_data, result) in completion_list {
             let desc_index = user_data as u16;
-            let request = self
+            let mut request = self
                 .request_list
                 .remove(&desc_index)
                 .ok_or(Error::MissingEntryRequestList)?;
+            request.complete_async().map_err(Error::RequestCompleting)?;
 
             let (status, len) = if result >= 0 {
                 match request.request_type {
