@@ -3110,6 +3110,53 @@ mod parallel {
     }
 
     #[test]
+    fn test_virtio_block_direct_and_firmware() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+
+        // The OS disk must be copied to a location that is not backed by
+        // tmpfs, otherwise the syscall openat(2) with O_DIRECT simply fails
+        // with EINVAL because tmpfs doesn't support this flag.
+        let mut workloads_path = dirs::home_dir().unwrap();
+        workloads_path.push("workloads");
+        let os_dir = TempDir::new_in(workloads_path.as_path()).unwrap();
+        let mut os_path = os_dir.as_path().to_path_buf();
+        os_path.push("osdisk.img");
+        rate_limited_copy(
+            &guest.disk_config.disk(DiskType::OperatingSystem).unwrap(),
+            os_path.as_path(),
+        )
+        .expect("copying of OS disk failed");
+
+        let mut child = GuestCommand::new(&guest)
+            .args(&["--cpus", "boot=1"])
+            .args(&["--memory", "size=512M"])
+            .args(&["--kernel", guest.fw_path.as_str()])
+            .args(&[
+                "--disk",
+                format!("path={},direct=on", os_path.as_path().to_str().unwrap()).as_str(),
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                )
+                .as_str(),
+            ])
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
     fn test_vhost_user_net_default() {
         test_vhost_user_net(None, 2, &prepare_vhost_user_net_daemon, false, false)
     }
