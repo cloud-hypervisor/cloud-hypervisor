@@ -14,6 +14,7 @@ use std::io;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::net::TcpStream;
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
@@ -525,6 +526,100 @@ pub enum SshCommandError {
     Command(ssh2::Error),
     ExitStatus(ssh2::Error),
     NonZeroExitStatus(i32),
+    FileRead(std::io::Error),
+    FileMetadata(std::io::Error),
+    ScpSend(ssh2::Error),
+    WriteAll(std::io::Error),
+    SendEof(ssh2::Error),
+    WaitEof(ssh2::Error),
+}
+
+fn scp_to_guest_with_auth(
+    path: &Path,
+    remote_path: &Path,
+    auth: &PasswordAuth,
+    ip: &str,
+    retries: u8,
+    timeout: u8,
+) -> Result<(), SshCommandError> {
+    let mut counter = 0;
+    loop {
+        match (|| -> Result<(), SshCommandError> {
+            let tcp =
+                TcpStream::connect(format!("{}:22", ip)).map_err(SshCommandError::Connection)?;
+            let mut sess = Session::new().unwrap();
+            sess.set_tcp_stream(tcp);
+            sess.handshake().map_err(SshCommandError::Handshake)?;
+
+            sess.userauth_password(&auth.username, &auth.password)
+                .map_err(SshCommandError::Authentication)?;
+            assert!(sess.authenticated());
+
+            let content = fs::read(path).map_err(SshCommandError::FileRead)?;
+            let mode = fs::metadata(path)
+                .map_err(SshCommandError::FileMetadata)?
+                .permissions()
+                .mode()
+                & 0o777;
+
+            let mut channel = sess
+                .scp_send(remote_path, mode as i32, content.len() as u64, None)
+                .map_err(SshCommandError::ScpSend)?;
+            channel
+                .write_all(&content)
+                .map_err(SshCommandError::WriteAll)?;
+            channel.send_eof().map_err(SshCommandError::SendEof)?;
+            channel.wait_eof().map_err(SshCommandError::WaitEof)?;
+
+            // Intentionally ignore these results here as their failure
+            // does not precipitate a repeat
+            let _ = channel.close();
+            let _ = channel.wait_close();
+
+            Ok(())
+        })() {
+            Ok(_) => break,
+            Err(e) => {
+                counter += 1;
+                if counter >= retries {
+                    eprintln!(
+                        "\n\n==== Start scp command output (FAILED) ====\n\n\
+                         path =\"{:?}\"\n\
+                         remote_path =\"{:?}\"\n\
+                         auth=\"{:#?}\"\n\
+                         ip=\"{}\"\n\
+                         error=\"{:?}\"\n\
+                         \n==== End scp command outout ====\n\n",
+                        path, remote_path, auth, ip, e
+                    );
+
+                    return Err(e);
+                }
+            }
+        };
+        thread::sleep(std::time::Duration::new((timeout * counter).into(), 0));
+    }
+    Ok(())
+}
+
+pub fn scp_to_guest(
+    path: &Path,
+    remote_path: &Path,
+    ip: &str,
+    retries: u8,
+    timeout: u8,
+) -> Result<(), SshCommandError> {
+    scp_to_guest_with_auth(
+        path,
+        remote_path,
+        &PasswordAuth {
+            username: String::from("cloud"),
+            password: String::from("cloud123"),
+        },
+        ip,
+        retries,
+        timeout,
+    )
 }
 
 pub fn ssh_command_ip_with_auth(
