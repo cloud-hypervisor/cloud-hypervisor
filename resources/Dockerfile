@@ -44,6 +44,8 @@ RUN apt-get update \
 	openvswitch-switch-dpdk \
 	python3-distutils \
 	uuid-dev \
+	iperf3 \
+	zip \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -126,3 +128,9 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
        && cp ./scripts/rpc.py /usr/local/bin/spdk-nvme \
        && cp -r ./scripts/rpc /usr/local/bin/spdk-nvme \
        && cd .. && rm -rf spdk; fi
+
+# install ethr tool for performance tests
+RUN wget https://github.com/microsoft/ethr/releases/latest/download/ethr_linux.zip \
+    && unzip ethr_linux.zip \
+    && cp ethr /usr/local/bin \
+    && rm ethr_linux.zip
