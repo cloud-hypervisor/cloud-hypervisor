@@ -148,7 +148,7 @@ dependencies = [
 
 [[package]]
 name = "cloud-hypervisor"
-version = "20.0.0"
+version = "21.0.0"
 dependencies = [
  "anyhow",
  "api_client",
