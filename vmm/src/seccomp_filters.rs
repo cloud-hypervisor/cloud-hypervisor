@@ -99,6 +99,7 @@ mod kvm {
     pub const KVM_SET_MP_STATE: u64 = 0x4004_ae99;
     pub const KVM_SET_GSI_ROUTING: u64 = 0x4008_ae6a;
     pub const KVM_SET_DEVICE_ATTR: u64 = 0x4018_aee1;
+    pub const KVM_HAS_DEVICE_ATTR: u64 = 0x4018_aee3;
     pub const KVM_SET_ONE_REG: u64 = 0x4010_aeac;
     pub const KVM_SET_USER_MEMORY_REGION: u64 = 0x4020_ae46;
     pub const KVM_IRQFD: u64 = 0x4020_ae76;
@@ -195,6 +196,7 @@ fn create_vmm_ioctl_seccomp_rule_common_kvm() -> Result<Vec<SeccompRule>, Backen
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_RUN)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_MEMORY_ENCRYPT_OP)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_DEVICE_ATTR,)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, KVM_HAS_DEVICE_ATTR,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_GSI_ROUTING)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_MP_STATE)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_ONE_REG)?],
