@@ -6172,6 +6172,7 @@ mod parallel {
         exec_host_command_status("pkill -f nvmf_tgt");
     }
 
+    #[ignore]
     #[test]
     #[cfg(target_arch = "aarch64")]
     fn test_vfio_user() {
