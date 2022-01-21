@@ -5993,8 +5993,10 @@ mod parallel {
         );
 
         let cstr_tap_device = std::ffi::CString::new(tap_device).unwrap();
-        let tap_fd = unsafe { libc::open(cstr_tap_device.as_ptr(), libc::O_RDWR) };
-        assert!(tap_fd > 0);
+        let tap_fd1 = unsafe { libc::open(cstr_tap_device.as_ptr(), libc::O_RDWR) };
+        assert!(tap_fd1 > 0);
+        let tap_fd2 = unsafe { libc::open(cstr_tap_device.as_ptr(), libc::O_RDWR) };
+        assert!(tap_fd2 > 0);
 
         // Create a macvtap on the same physical net interface for
         // the host machine to use
@@ -6017,14 +6019,17 @@ mod parallel {
 
         let mut guest_command = GuestCommand::new(&guest);
         guest_command
-            .args(&["--cpus", "boot=1"])
+            .args(&["--cpus", "boot=2"])
             .args(&["--memory", "size=512M"])
             .args(&["--kernel", kernel_path.to_str().unwrap()])
             .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .args(&["--api-socket", &api_socket]);
 
-        let net_params = format!("fd={},mac={}", tap_fd, guest.network.guest_mac);
+        let net_params = format!(
+            "fd=[{},{}],mac={},num_queues=4",
+            tap_fd1, tap_fd2, guest.network.guest_mac
+        );
 
         if !hotplug {
             guest_command.args(&["--net", &net_params]);
