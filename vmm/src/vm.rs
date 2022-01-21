@@ -2175,6 +2175,13 @@ impl Vm {
         let mut gic_device = create_gic(&self.vm, vcpu_numbers.try_into().unwrap())
             .map_err(|e| MigratableError::Restore(anyhow!("Could not create GIC: {:#?}", e)))?;
 
+        // PMU interrupt sticks to PPI, so need to be added by 16 to get real irq number.
+        self.cpu_manager
+            .lock()
+            .unwrap()
+            .init_pmu(arch::aarch64::fdt::AARCH64_PMU_IRQ + 16)
+            .map_err(|e| MigratableError::Restore(anyhow!("Error init PMU: {:?}", e)))?;
+
         // Here we prepare the GICR_TYPER registers from the restored vCPU states.
         gic_device.set_gicr_typers(&saved_vcpu_states);
 
