@@ -146,9 +146,13 @@ pub trait EndpointHandler: Sync + Send {
         api_notifier: EventFd,
         api_sender: Sender<ApiRequest>,
     ) -> Response {
-        let file = req.file.as_ref().map(|f| f.try_clone().unwrap());
+        // Cloning the files here is very important as it dup() the file
+        // descriptors, leaving open the one that was received. This way,
+        // rebooting the VM will work since the VM will be created from the
+        // original file descriptors.
+        let files = req.files.iter().map(|f| f.try_clone().unwrap()).collect();
         let res = match req.method() {
-            Method::Put => self.put_handler(api_notifier, api_sender, &req.body, file),
+            Method::Put => self.put_handler(api_notifier, api_sender, &req.body, files),
             Method::Get => self.get_handler(api_notifier, api_sender, &req.body),
             _ => return Response::new(Version::Http11, StatusCode::BadRequest),
         };
@@ -176,7 +180,7 @@ pub trait EndpointHandler: Sync + Send {
         _api_notifier: EventFd,
         _api_sender: Sender<ApiRequest>,
         _body: &Option<Body>,
-        _file: Option<File>,
+        _files: Vec<File>,
     ) -> std::result::Result<Option<Body>, HttpError> {
         Err(HttpError::BadRequest)
     }
