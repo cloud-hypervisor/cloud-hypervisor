@@ -76,7 +76,7 @@ impl EndpointHandler for VmActionHandler {
         api_notifier: EventFd,
         api_sender: Sender<ApiRequest>,
         body: &Option<Body>,
-        file: Option<File>,
+        mut files: Vec<File>,
     ) -> std::result::Result<Option<Body>, HttpError> {
         use VmAction::*;
         if let Some(body) = body {
@@ -111,10 +111,11 @@ impl EndpointHandler for VmActionHandler {
 
                 AddNet(_) => {
                     let mut net_cfg: NetConfig = serde_json::from_slice(body.raw())?;
-                    // Update network config with optional file that might have
+                    // Update network config with optional files that might have
                     // been sent through control message.
-                    if let Some(file) = file {
-                        net_cfg.fds = Some(vec![file.into_raw_fd()]);
+                    if !files.is_empty() {
+                        let fds = files.drain(..).map(|f| f.into_raw_fd()).collect();
+                        net_cfg.fds = Some(fds);
                     }
                     vm_add_net(api_notifier, api_sender, Arc::new(net_cfg))
                         .map_err(HttpError::VmAddNet)
