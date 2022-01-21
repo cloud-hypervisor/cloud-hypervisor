@@ -3147,7 +3147,7 @@ mod parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot(Some(120)).unwrap();
         });
 
         let _ = child.kill();
