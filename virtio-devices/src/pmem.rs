@@ -213,7 +213,7 @@ impl PmemEpollHandler {
 
     fn signal_used_queue(&self) -> result::Result<(), DeviceError> {
         self.interrupt_cb
-            .trigger(&VirtioInterruptType::Queue, Some(&self.queue))
+            .trigger(VirtioInterruptType::Queue(0))
             .map_err(|e| {
                 error!("Failed to signal used queue: {:?}", e);
                 DeviceError::FailedSignalingUsedQueue(e)
