@@ -644,13 +644,11 @@ impl MemEpollHandler {
         (resp_type, resp_state)
     }
 
-    fn signal(&self, int_type: &VirtioInterruptType) -> result::Result<(), DeviceError> {
-        self.interrupt_cb
-            .trigger(int_type, Some(&self.queue))
-            .map_err(|e| {
-                error!("Failed to signal used queue: {:?}", e);
-                DeviceError::FailedSignalingUsedQueue(e)
-            })
+    fn signal(&self, int_type: VirtioInterruptType) -> result::Result<(), DeviceError> {
+        self.interrupt_cb.trigger(int_type).map_err(|e| {
+            error!("Failed to signal used queue: {:?}", e);
+            DeviceError::FailedSignalingUsedQueue(e)
+        })
     }
 
     fn process_queue(&mut self) -> bool {
@@ -734,7 +732,7 @@ impl EpollHelperHandler for MemEpollHandler {
                     let mut r = config.resize(size);
                     r = match r {
                         Err(e) => Err(e),
-                        _ => match self.signal(&VirtioInterruptType::Config) {
+                        _ => match self.signal(VirtioInterruptType::Config) {
                             Err(e) => {
                                 signal_error = true;
                                 Err(Error::ResizeTriggerFail(e))
@@ -756,7 +754,7 @@ impl EpollHelperHandler for MemEpollHandler {
                     error!("Failed to get queue event: {:?}", e);
                     return true;
                 } else if self.process_queue() {
-                    if let Err(e) = self.signal(&VirtioInterruptType::Queue) {
+                    if let Err(e) = self.signal(VirtioInterruptType::Queue(0)) {
                         error!("Failed to signal used queue: {:?}", e);
                         return true;
                     }

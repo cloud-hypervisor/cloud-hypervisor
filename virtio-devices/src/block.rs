@@ -82,6 +82,7 @@ pub struct BlockCounters {
 }
 
 struct BlockEpollHandler {
+    queue_index: u16,
     queue: Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
     mem: GuestMemoryAtomic<GuestMemoryMmap>,
     disk_image: Box<dyn AsyncIo>,
@@ -258,7 +259,7 @@ impl BlockEpollHandler {
 
     fn signal_used_queue(&self) -> result::Result<(), DeviceError> {
         self.interrupt_cb
-            .trigger(&VirtioInterruptType::Queue, Some(&self.queue))
+            .trigger(VirtioInterruptType::Queue(self.queue_index))
             .map_err(|e| {
                 error!("Failed to signal used queue: {:?}", e);
                 DeviceError::FailedSignalingUsedQueue(e)
@@ -605,6 +606,7 @@ impl VirtioDevice for Block {
                 .map_err(ActivateError::CreateRateLimiter)?;
 
             let mut handler = BlockEpollHandler {
+                queue_index: i as u16,
                 queue,
                 mem: mem.clone(),
                 disk_image: self

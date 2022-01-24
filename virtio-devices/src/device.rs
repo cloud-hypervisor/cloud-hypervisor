@@ -25,20 +25,12 @@ use vmm_sys_util::eventfd::EventFd;
 
 pub enum VirtioInterruptType {
     Config,
-    Queue,
+    Queue(u16),
 }
 
 pub trait VirtioInterrupt: Send + Sync {
-    fn trigger(
-        &self,
-        int_type: &VirtioInterruptType,
-        queue: Option<&Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
-    ) -> std::result::Result<(), std::io::Error>;
-    fn notifier(
-        &self,
-        _int_type: &VirtioInterruptType,
-        _queue: Option<&Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
-    ) -> Option<EventFd> {
+    fn trigger(&self, int_type: VirtioInterruptType) -> std::result::Result<(), std::io::Error>;
+    fn notifier(&self, _int_type: VirtioInterruptType) -> Option<EventFd> {
         None
     }
 }

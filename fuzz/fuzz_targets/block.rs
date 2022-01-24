@@ -139,8 +139,7 @@ pub struct NoopVirtioInterrupt {}
 impl VirtioInterrupt for NoopVirtioInterrupt {
     fn trigger(
         &self,
-        _int_type: &VirtioInterruptType,
-        _queue: Option<&Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
+        _int_type: VirtioInterruptType,
     ) -> std::result::Result<(), std::io::Error> {
         Ok(())
     }

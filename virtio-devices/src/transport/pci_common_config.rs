@@ -24,6 +24,7 @@ pub struct VirtioPciCommonConfigState {
     pub driver_feature_select: u32,
     pub queue_select: u16,
     pub msix_config: u16,
+    pub msix_queues: Vec<u16>,
 }
 
 impl VersionMapped for VirtioPciCommonConfigState {}
@@ -57,6 +58,7 @@ pub struct VirtioPciCommonConfig {
     pub driver_feature_select: u32,
     pub queue_select: u16,
     pub msix_config: Arc<AtomicU16>,
+    pub msix_queues: Arc<Mutex<Vec<u16>>>,
 }
 
 impl VirtioPciCommonConfig {
@@ -68,6 +70,7 @@ impl VirtioPciCommonConfig {
             driver_feature_select: self.driver_feature_select,
             queue_select: self.queue_select,
             msix_config: self.msix_config.load(Ordering::Acquire),
+            msix_queues: self.msix_queues.lock().unwrap().clone(),
         }
     }
 
@@ -78,6 +81,7 @@ impl VirtioPciCommonConfig {
         self.driver_feature_select = state.driver_feature_select;
         self.queue_select = state.queue_select;
         self.msix_config.store(state.msix_config, Ordering::Release);
+        *(self.msix_queues.lock().unwrap()) = state.msix_queues.clone();
     }
 
     pub fn read(
@@ -164,7 +168,7 @@ impl VirtioPciCommonConfig {
             0x12 => queues.len() as u16, // num_queues
             0x16 => self.queue_select,
             0x18 => self.with_queue(queues, |q| q.state.size).unwrap_or(0),
-            0x1a => self.with_queue(queues, |q| q.state.vector).unwrap_or(0),
+            0x1a => self.msix_queues.lock().unwrap()[self.queue_select as usize],
             0x1c => {
                 if self.with_queue(queues, |q| q.state.ready).unwrap_or(false) {
                     1
@@ -191,7 +195,7 @@ impl VirtioPciCommonConfig {
             0x10 => self.msix_config.store(value, Ordering::Release),
             0x16 => self.queue_select = value,
             0x18 => self.with_queue_mut(queues, |q| q.state.size = value),
-            0x1a => self.with_queue_mut(queues, |q| q.state.vector = value),
+            0x1a => self.msix_queues.lock().unwrap()[self.queue_select as usize] = value,
             0x1c => self.with_queue_mut(queues, |q| q.enable(value == 1)),
             _ => {
                 warn!("invalid virtio register word write: 0x{:x}", offset);
@@ -376,6 +380,7 @@ mod tests {
             driver_feature_select: 0x0,
             queue_select: 0xff,
             msix_config: Arc::new(AtomicU16::new(0)),
+            msix_queues: Arc::new(Mutex::new(vec![0; 3])),
         };
 
         let dev = Arc::new(Mutex::new(DummyDevice(0)));

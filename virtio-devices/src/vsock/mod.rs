@@ -170,7 +170,7 @@ mod tests {
     use std::os::unix::io::AsRawFd;
     use std::path::PathBuf;
     use std::sync::{Arc, RwLock};
-    use virtio_queue::{defs::VIRTQ_DESC_F_NEXT, defs::VIRTQ_DESC_F_WRITE, Queue};
+    use virtio_queue::{defs::VIRTQ_DESC_F_NEXT, defs::VIRTQ_DESC_F_WRITE};
     use vm_memory::{GuestAddress, GuestMemoryAtomic};
     use vm_virtio::queue::testing::VirtQueue as GuestQ;
     use vmm_sys_util::eventfd::EventFd;
@@ -180,8 +180,7 @@ mod tests {
     impl VirtioInterrupt for NoopVirtioInterrupt {
         fn trigger(
             &self,
-            _int_type: &VirtioInterruptType,
-            _queue: Option<&Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
+            _int_type: VirtioInterruptType,
         ) -> std::result::Result<(), std::io::Error> {
             Ok(())
         }

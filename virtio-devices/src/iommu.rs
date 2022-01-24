@@ -609,12 +609,9 @@ impl IommuEpollHandler {
         false
     }
 
-    fn signal_used_queue(
-        &self,
-        queue: &Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
-    ) -> result::Result<(), DeviceError> {
+    fn signal_used_queue(&self, queue_index: u16) -> result::Result<(), DeviceError> {
         self.interrupt_cb
-            .trigger(&VirtioInterruptType::Queue, Some(queue))
+            .trigger(VirtioInterruptType::Queue(queue_index))
             .map_err(|e| {
                 error!("Failed to signal used queue: {:?}", e);
                 DeviceError::FailedSignalingUsedQueue(e)
@@ -644,7 +641,7 @@ impl EpollHelperHandler for IommuEpollHandler {
                     error!("Failed to get queue event: {:?}", e);
                     return true;
                 } else if self.request_queue() {
-                    if let Err(e) = self.signal_used_queue(&self.queues[0]) {
+                    if let Err(e) = self.signal_used_queue(0) {
                         error!("Failed to signal used queue: {:?}", e);
                         return true;
                     }
@@ -655,7 +652,7 @@ impl EpollHelperHandler for IommuEpollHandler {
                     error!("Failed to get queue event: {:?}", e);
                     return true;
                 } else if self.event_queue() {
-                    if let Err(e) = self.signal_used_queue(&self.queues[1]) {
+                    if let Err(e) = self.signal_used_queue(1) {
                         error!("Failed to signal used queue: {:?}", e);
                         return true;
                     }

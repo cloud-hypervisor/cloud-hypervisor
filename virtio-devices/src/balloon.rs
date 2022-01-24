@@ -165,12 +165,8 @@ struct BalloonEpollHandler {
 }
 
 impl BalloonEpollHandler {
-    fn signal(
-        &self,
-        int_type: &VirtioInterruptType,
-        queue: Option<&Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
-    ) -> result::Result<(), Error> {
-        self.interrupt_cb.trigger(int_type, queue).map_err(|e| {
+    fn signal(&self, int_type: VirtioInterruptType) -> result::Result<(), Error> {
+        self.interrupt_cb.trigger(int_type).map_err(|e| {
             error!("Failed to signal used queue: {:?}", e);
             Error::FailedSignal(e)
         })
@@ -268,7 +264,7 @@ impl BalloonEpollHandler {
                 .map_err(Error::QueueAddUsed)?;
         }
         if used_count > 0 {
-            self.signal(&VirtioInterruptType::Queue, Some(&self.queues[queue_index]))?;
+            self.signal(VirtioInterruptType::Queue(queue_index as u16))?;
         }
 
         Ok(())
@@ -303,7 +299,7 @@ impl EpollHelperHandler for BalloonEpollHandler {
                     let mut config = self.config.lock().unwrap();
                     config.num_pages =
                         (self.resize_receiver.get_size() >> VIRTIO_BALLOON_PFN_SHIFT) as u32;
-                    if let Err(e) = self.signal(&VirtioInterruptType::Config, None) {
+                    if let Err(e) = self.signal(VirtioInterruptType::Config) {
                         signal_error = true;
                         Err(e)
                     } else {

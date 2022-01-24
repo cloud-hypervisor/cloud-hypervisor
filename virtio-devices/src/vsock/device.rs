@@ -102,14 +102,11 @@ where
     /// Signal the guest driver that we've used some virtio buffers that it had previously made
     /// available.
     ///
-    fn signal_used_queue(
-        &self,
-        queue: &Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
-    ) -> result::Result<(), DeviceError> {
+    fn signal_used_queue(&self, queue_index: u16) -> result::Result<(), DeviceError> {
         debug!("vsock: raising IRQ");
 
         self.interrupt_cb
-            .trigger(&VirtioInterruptType::Queue, Some(queue))
+            .trigger(VirtioInterruptType::Queue(queue_index))
             .map_err(|e| {
                 error!("Failed to signal used queue: {:?}", e);
                 DeviceError::FailedSignalingUsedQueue(e)
@@ -155,7 +152,7 @@ where
         }
 
         if used_count > 0 {
-            self.signal_used_queue(&self.queues[0])
+            self.signal_used_queue(0)
         } else {
             Ok(())
         }
@@ -198,7 +195,7 @@ where
         }
 
         if used_count > 0 {
-            self.signal_used_queue(&self.queues[1])
+            self.signal_used_queue(1)
         } else {
             Ok(())
         }
@@ -617,8 +614,8 @@ mod tests {
             let ctx = test_ctx.create_epoll_handler_context();
             let memory = GuestMemoryAtomic::new(test_ctx.mem.clone());
 
-            let queue = Queue::new(memory, 256);
-            assert!(ctx.handler.signal_used_queue(&queue).is_ok());
+            let _queue: Queue<GuestMemoryAtomic<GuestMemoryMmap>> = Queue::new(memory, 256);
+            assert!(ctx.handler.signal_used_queue(0).is_ok());
         }
     }
 
