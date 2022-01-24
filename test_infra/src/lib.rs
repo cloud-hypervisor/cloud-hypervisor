@@ -706,10 +706,16 @@ pub fn ssh_command_ip(
 }
 
 pub fn exec_host_command_status(command: &str) -> ExitStatus {
-    std::process::Command::new("bash")
-        .args(&["-c", command])
-        .status()
-        .unwrap_or_else(|_| panic!("Expected '{}' to run", command))
+    let output = exec_host_command_output(command);
+
+    if !output.status.success() {
+        eprintln!(
+            "Non-zero exit status for command: {}\n\n{:?}",
+            command, output
+        );
+    }
+
+    output.status
 }
 
 pub fn exec_host_command_output(command: &str) -> Output {
