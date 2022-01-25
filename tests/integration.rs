@@ -6287,7 +6287,7 @@ mod parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot(Some(120)).unwrap();
 
             // Hotplug the SPDK-NVMe device to the VM
             let (cmd_success, cmd_output) = remote_command_w_output(
@@ -6331,7 +6331,7 @@ mod parallel {
             assert_eq!(guest.ssh_command("sudo umount /mnt").unwrap(), "");
             assert_eq!(guest.ssh_command("ls /mnt").unwrap(), "");
 
-            guest.reboot_linux(0, None);
+            guest.reboot_linux(0, Some(160));
             assert_eq!(
                 guest.ssh_command("sudo mount /dev/nvme0n1 /mnt").unwrap(),
                 ""
