@@ -6232,7 +6232,7 @@ mod parallel {
             .args(&["-i", "0", "-m", "0x1"])
             .spawn()
             .unwrap();
-        thread::sleep(std::time::Duration::new(2, 0));
+        thread::sleep(std::time::Duration::new(10, 0));
 
         assert!(exec_host_command_status(
             "/usr/local/bin/spdk-nvme/rpc.py nvmf_create_transport -t VFIOUSER"
