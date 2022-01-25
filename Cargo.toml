@@ -23,7 +23,7 @@ libc = "0.2.113"
 log = { version = "0.4.14", features = ["std"] }
 option_parser = { path = "option_parser" }
 seccompiler = "0.2.0"
-serde_json = "1.0.75"
+serde_json = "1.0.78"
 signal-hook = "0.3.13"
 thiserror = "1.0.30"
 vmm = { path = "vmm" }
@@ -43,7 +43,7 @@ versionize_derive = { git = "https://github.com/cloud-hypervisor/versionize_deri
 dirs = "4.0.0"
 lazy_static= "1.4.0"
 net_util = { path = "net_util" }
-serde_json = "1.0.75"
+serde_json = "1.0.78"
 test_infra = { path = "test_infra" }
 wait-timeout = "0.2.0"
 
