@@ -199,9 +199,9 @@ impl ConsoleEpollHandler {
         used_count > 0
     }
 
-    fn signal_used_queue(&self, queue_index: u16) -> result::Result<(), DeviceError> {
+    fn signal_used_queue(&self) -> result::Result<(), DeviceError> {
         self.interrupt_cb
-            .trigger(VirtioInterruptType::Queue(queue_index))
+            .trigger(&VirtioInterruptType::Queue, Some(&self.queues[0]))
             .map_err(|e| {
                 error!("Failed to signal used queue: {:?}", e);
                 DeviceError::FailedSignalingUsedQueue(e)
@@ -239,7 +239,7 @@ impl EpollHelperHandler for ConsoleEpollHandler {
                     error!("Failed to get queue event: {:?}", e);
                     return true;
                 } else if self.process_input_queue() {
-                    if let Err(e) = self.signal_used_queue(0) {
+                    if let Err(e) = self.signal_used_queue() {
                         error!("Failed to signal used queue: {:?}", e);
                         return true;
                     }
@@ -249,11 +249,8 @@ impl EpollHelperHandler for ConsoleEpollHandler {
                 if let Err(e) = self.output_queue_evt.read() {
                     error!("Failed to get queue event: {:?}", e);
                     return true;
-                } else if self.process_output_queue() {
-                    if let Err(e) = self.signal_used_queue(1) {
-                        error!("Failed to signal used queue: {:?}", e);
-                        return true;
-                    }
+                } else {
+                    self.process_output_queue();
                 }
             }
             INPUT_EVENT => {
@@ -261,7 +258,7 @@ impl EpollHelperHandler for ConsoleEpollHandler {
                     error!("Failed to get input event: {:?}", e);
                     return true;
                 } else if self.process_input_queue() {
-                    if let Err(e) = self.signal_used_queue(0) {
+                    if let Err(e) = self.signal_used_queue() {
                         error!("Failed to signal used queue: {:?}", e);
                         return true;
                     }
@@ -271,7 +268,10 @@ impl EpollHelperHandler for ConsoleEpollHandler {
                 if let Err(e) = self.config_evt.read() {
                     error!("Failed to get config event: {:?}", e);
                     return true;
-                } else if let Err(e) = self.interrupt_cb.trigger(VirtioInterruptType::Config) {
+                } else if let Err(e) = self
+                    .interrupt_cb
+                    .trigger(&VirtioInterruptType::Config, None)
+                {
                     error!("Failed to signal console driver: {:?}", e);
                     return true;
                 }
@@ -293,7 +293,7 @@ impl EpollHelperHandler for ConsoleEpollHandler {
                     }
 
                     if self.process_input_queue() {
-                        if let Err(e) = self.signal_used_queue(0) {
+                        if let Err(e) = self.signal_used_queue() {
                             error!("Failed to signal used queue: {:?}", e);
                             return true;
                         }
@@ -492,7 +492,7 @@ impl VirtioDevice for Console {
             .store(self.common.acked_features, Ordering::Relaxed);
 
         if self.common.feature_acked(VIRTIO_CONSOLE_F_SIZE) {
-            if let Err(e) = interrupt_cb.trigger(VirtioInterruptType::Config) {
+            if let Err(e) = interrupt_cb.trigger(&VirtioInterruptType::Config, None) {
                 error!("Failed to signal console driver: {:?}", e);
             }
         }

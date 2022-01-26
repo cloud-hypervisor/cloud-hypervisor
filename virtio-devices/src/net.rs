@@ -124,7 +124,6 @@ struct NetEpollHandler {
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     kill_evt: EventFd,
     pause_evt: EventFd,
-    queue_index_base: u16,
     queue_pair: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
     queue_evt_pair: Vec<EventFd>,
     // Always generate interrupts until the driver has signalled to the device.
@@ -135,9 +134,12 @@ struct NetEpollHandler {
 }
 
 impl NetEpollHandler {
-    fn signal_used_queue(&self, queue_index: u16) -> result::Result<(), DeviceError> {
+    fn signal_used_queue(
+        &self,
+        queue: &Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
+    ) -> result::Result<(), DeviceError> {
         self.interrupt_cb
-            .trigger(VirtioInterruptType::Queue(queue_index))
+            .trigger(&VirtioInterruptType::Queue, Some(queue))
             .map_err(|e| {
                 error!("Failed to signal used queue: {:?}", e);
                 DeviceError::FailedSignalingUsedQueue(e)
@@ -180,7 +182,7 @@ impl NetEpollHandler {
             .map_err(DeviceError::NetQueuePair)?
             || !self.driver_awake
         {
-            self.signal_used_queue(self.queue_index_base + 1)?;
+            self.signal_used_queue(&self.queue_pair[1])?;
             debug!("Signalling TX queue");
         } else {
             debug!("Not signalling TX queue");
@@ -209,7 +211,7 @@ impl NetEpollHandler {
             .map_err(DeviceError::NetQueuePair)?
             || !self.driver_awake
         {
-            self.signal_used_queue(self.queue_index_base)?;
+            self.signal_used_queue(&self.queue_pair[0])?;
             debug!("Signalling RX queue");
         } else {
             debug!("Not signalling RX queue");
@@ -649,7 +651,6 @@ impl VirtioDevice for Net {
                     rx_rate_limiter,
                     tx_rate_limiter,
                 },
-                queue_index_base: (i * 2) as u16,
                 queue_pair,
                 queue_evt_pair,
                 interrupt_cb: interrupt_cb.clone(),

@@ -253,7 +253,7 @@ impl VhostUserHandle {
                 .map_err(Error::VhostUserSetVringBase)?;
 
             if let Some(eventfd) =
-                virtio_interrupt.notifier(VirtioInterruptType::Queue(queue_index as u16))
+                virtio_interrupt.notifier(&VirtioInterruptType::Queue, Some(&queue))
             {
                 self.vu
                     .set_vring_call(queue_index, &eventfd)
