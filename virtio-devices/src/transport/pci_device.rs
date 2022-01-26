@@ -423,6 +423,7 @@ impl VirtioPciDevice {
             id,
             configuration,
             common_config: VirtioPciCommonConfig {
+                access_platform,
                 driver_status: 0,
                 config_generation: 0,
                 device_feature_select: 0,
