@@ -127,10 +127,6 @@ pub trait VirtioDevice: Send {
         std::unimplemented!()
     }
 
-    fn iommu_translate(&self, addr: u64) -> u64 {
-        addr
-    }
-
     /// Some devices may need to do some explicit shutdown work. This method
     /// may be implemented to do this. The VMM should call shutdown() on
     /// every device as part of shutting down the VM. Acting on the device
