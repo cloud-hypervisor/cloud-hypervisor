@@ -271,12 +271,6 @@ impl<M: GuestAddressSpace> Queue<M, QueueState> {
     pub fn iter(&mut self) -> Result<AvailIter<'_, M::T>, Error> {
         self.state.iter(self.mem.memory())
     }
-
-    /// Set the queue to "ready", and update desc_table, avail_ring and
-    /// used_ring addresses based on the AccessPlatform handler.
-    pub fn enable(&mut self, set: bool) {
-        self.state.enable(set)
-    }
 }
 
 #[cfg(test)]
