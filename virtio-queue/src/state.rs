@@ -156,28 +156,6 @@ impl QueueState {
             .map(Wrapping)
             .map_err(Error::GuestMemory)
     }
-
-    /// Set the queue to "ready", and update desc_table, avail_ring and
-    /// used_ring addresses based on the AccessPlatform handler.
-    pub fn enable(&mut self, set: bool) {
-        self.ready = set;
-
-        if set {
-            // Translate address of descriptor table and vrings.
-            if let Some(access_platform) = &self.access_platform {
-                self.desc_table =
-                    GuestAddress(access_platform.translate(self.desc_table.0, 0).unwrap());
-                self.avail_ring =
-                    GuestAddress(access_platform.translate(self.avail_ring.0, 0).unwrap());
-                self.used_ring =
-                    GuestAddress(access_platform.translate(self.used_ring.0, 0).unwrap());
-            }
-        } else {
-            self.desc_table = GuestAddress(0);
-            self.avail_ring = GuestAddress(0);
-            self.used_ring = GuestAddress(0);
-        }
-    }
 }
 
 impl<'a> QueueStateGuard<'a> for QueueState {
