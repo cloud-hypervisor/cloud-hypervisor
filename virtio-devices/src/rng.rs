@@ -21,8 +21,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use virtio_queue::Queue;
-use vm_memory::{Bytes, GuestMemoryAtomic};
+use virtio_queue::{AccessPlatform, Queue};
+use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
@@ -40,6 +40,7 @@ struct RngEpollHandler {
     queue_evt: EventFd,
     kill_evt: EventFd,
     pause_evt: EventFd,
+    access_platform: Option<Arc<dyn AccessPlatform>>,
 }
 
 impl RngEpollHandler {
@@ -54,10 +55,20 @@ impl RngEpollHandler {
 
             // Drivers can only read from the random device.
             if desc.is_write_only() {
+                let desc_addr = if let Some(access_platform) = &self.access_platform {
+                    GuestAddress(
+                        access_platform
+                            .translate(desc.addr().0, u64::from(desc.len()))
+                            .unwrap(),
+                    )
+                } else {
+                    desc.addr()
+                };
+
                 // Fill the read with data from the random device on the host.
                 if desc_chain
                     .memory()
-                    .read_from(desc.addr(), &mut self.random_file, desc.len() as usize)
+                    .read_from(desc_addr, &mut self.random_file, desc.len() as usize)
                     .is_ok()
                 {
                     len = desc.len();
@@ -230,6 +241,7 @@ impl VirtioDevice for Rng {
                 queue_evt: queue_evts.remove(0),
                 kill_evt,
                 pause_evt,
+                access_platform: self.common.access_platform.clone(),
             };
 
             let paused = self.common.paused.clone();
@@ -260,6 +272,10 @@ impl VirtioDevice for Rng {
         let result = self.common.reset();
         event!("virtio-device", "reset", "id", &self.id);
         result
+    }
+
+    fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {
+        self.common.set_access_platform(access_platform)
     }
 }
 
