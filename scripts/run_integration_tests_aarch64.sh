@@ -57,7 +57,7 @@ build_custom_linux() {
     LINUX_CUSTOM_BRANCH="ch-5.15.12"
     LINUX_CUSTOM_URL="https://github.com/cloud-hypervisor/linux.git"
 
-    checkout_repo "$LINUX_CUSTOM_DIR" "$LINUX_CUSTOM_URL" "$LINUX_CUSTOM_BRANCH"
+    checkout_repo "$LINUX_CUSTOM_DIR" "$LINUX_CUSTOM_URL" "$LINUX_CUSTOM_BRANCH" ba77d94c03da989e33ccba9c22ef55451056499b
 
     cp $SRCDIR/resources/linux-config-aarch64 $LINUX_CUSTOM_DIR/.config
 
