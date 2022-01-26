@@ -352,23 +352,25 @@ impl VirtioPciDevice {
         use_64bit_bar: bool,
     ) -> Result<Self> {
         let device_clone = device.clone();
-        let locked_device = device_clone.lock().unwrap();
+        let mut locked_device = device_clone.lock().unwrap();
         let mut queue_evts = Vec::new();
         for _ in locked_device.queue_max_sizes().iter() {
             queue_evts.push(EventFd::new(EFD_NONBLOCK)?)
         }
         let num_queues = locked_device.queue_max_sizes().len();
+
+        if let Some(access_platform) = &access_platform {
+            locked_device.set_access_platform(access_platform.clone());
+        }
+
         let queues = locked_device
             .queue_max_sizes()
             .iter()
             .map(|&s| {
-                let mut queue =
-                    Queue::<GuestMemoryAtomic<GuestMemoryMmap>, virtio_queue::QueueState>::new(
-                        memory.clone(),
-                        s,
-                    );
-                queue.state.access_platform = access_platform.clone();
-                queue
+                Queue::<GuestMemoryAtomic<GuestMemoryMmap>, virtio_queue::QueueState>::new(
+                    memory.clone(),
+                    s,
+                )
             })
             .collect();
 
