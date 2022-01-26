@@ -6,8 +6,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use crate::{ActivateError, ActivateResult, Error};
-use crate::{GuestMemoryMmap, GuestRegionMmap};
+use crate::{
+    ActivateError, ActivateResult, Error, GuestMemoryMmap, GuestRegionMmap,
+    VIRTIO_F_RING_INDIRECT_DESC,
+};
 use libc::EFD_NONBLOCK;
 use std::collections::HashMap;
 use std::io::Write;
@@ -17,7 +19,7 @@ use std::sync::{
     Arc, Barrier,
 };
 use std::thread;
-use virtio_queue::Queue;
+use virtio_queue::{AccessPlatform, Queue};
 use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestUsize};
 use vm_migration::{MigratableError, Pausable};
 use vm_virtio::VirtioDeviceType;
@@ -191,6 +193,10 @@ pub trait VirtioDevice: Send {
             offset_config.write_all(data).unwrap();
         }
     }
+
+    /// Set the access platform trait to let the device perform address
+    /// translations if needed.
+    fn set_access_platform(&mut self, _access_platform: Arc<dyn AccessPlatform>) {}
 }
 
 /// Trait providing address translation the same way a physical DMA remapping
@@ -218,6 +224,7 @@ pub struct VirtioCommon {
     pub queue_sizes: Vec<u16>,
     pub device_type: u32,
     pub min_queues: u16,
+    pub access_platform: Option<Arc<dyn AccessPlatform>>,
 }
 
 impl VirtioCommon {
@@ -319,6 +326,13 @@ impl VirtioCommon {
             self.kill_evt.as_ref().unwrap().try_clone().unwrap(),
             self.pause_evt.as_ref().unwrap().try_clone().unwrap(),
         )
+    }
+
+    pub fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {
+        self.access_platform = Some(access_platform);
+        // Indirect descriptors feature is not supported when the device
+        // requires the addresses held by the descriptors to be translated.
+        self.avail_features &= !(1 << VIRTIO_F_RING_INDIRECT_DESC);
     }
 }
 
