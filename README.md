@@ -27,7 +27,7 @@
 
 # 1. What is Cloud Hypervisor?
 
-Cloud Hypervisor is an open source Virtual Machine Monitor (VMM) that runs on top of [KVM](https://www.kernel.org/doc/Documentation/virtual/kvm/api.txt) and the MSHV hypervisors .
+HI Cloud Hypervisor is an open source Virtual Machine Monitor (VMM) that runs on top of [KVM](https://www.kernel.org/doc/Documentation/virtual/kvm/api.txt) and the MSHV hypervisors .
 
 The project focuses on exclusively running modern, cloud workloads, on top of a limited set of hardware architectures and platforms.
 Cloud workloads refers to those that are usually run by customers inside a cloud provider. For our purposes this means modern operating systems with most I/O handled by paravirtualised devices (i.e. virtio), no requirement for legacy devices, and 64-bit CPUs.
