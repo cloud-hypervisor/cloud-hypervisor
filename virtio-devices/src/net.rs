@@ -35,7 +35,7 @@ use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_bindings::bindings::virtio_net::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
-use virtio_queue::Queue;
+use virtio_queue::{AccessPlatform, Queue};
 use vm_memory::{ByteValued, GuestMemoryAtomic};
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -51,6 +51,7 @@ pub struct NetCtrlEpollHandler {
     pub ctrl_q: CtrlQueue,
     pub queue_evt: EventFd,
     pub queue: Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
+    pub access_platform: Option<Arc<dyn AccessPlatform>>,
 }
 
 impl NetCtrlEpollHandler {
@@ -76,7 +77,10 @@ impl EpollHelperHandler for NetCtrlEpollHandler {
                     error!("failed to get ctl queue event: {:?}", e);
                     return true;
                 }
-                if let Err(e) = self.ctrl_q.process(&mut self.queue) {
+                if let Err(e) = self
+                    .ctrl_q
+                    .process(&mut self.queue, self.access_platform.as_ref())
+                {
                     error!("failed to process ctrl queue: {:?}", e);
                     return true;
                 }
@@ -572,6 +576,7 @@ impl VirtioDevice for Net {
                 ctrl_q: CtrlQueue::new(self.taps.clone()),
                 queue: cvq_queue,
                 queue_evt: cvq_queue_evt,
+                access_platform: self.common.access_platform.clone(),
             };
 
             let paused = self.common.paused.clone();
@@ -648,6 +653,7 @@ impl VirtioDevice for Net {
                     rx_desc_avail: false,
                     rx_rate_limiter,
                     tx_rate_limiter,
+                    access_platform: self.common.access_platform.clone(),
                 },
                 queue_index_base: (i * 2) as u16,
                 queue_pair,
@@ -708,6 +714,10 @@ impl VirtioDevice for Net {
         );
 
         Some(counters)
+    }
+
+    fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {
+        self.common.set_access_platform(access_platform)
     }
 }
 

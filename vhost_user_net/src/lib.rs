@@ -93,6 +93,7 @@ impl VhostUserNetThread {
                 rx_desc_avail: false,
                 rx_rate_limiter: None,
                 tx_rate_limiter: None,
+                access_platform: None,
             },
         })
     }
