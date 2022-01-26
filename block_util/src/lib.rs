@@ -30,11 +30,12 @@ use std::io::{self, IoSlice, IoSliceMut, Read, Seek, SeekFrom, Write};
 use std::os::linux::fs::MetadataExt;
 use std::path::Path;
 use std::result;
+use std::sync::Arc;
 use std::sync::MutexGuard;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_bindings::bindings::virtio_blk::*;
-use virtio_queue::DescriptorChain;
+use virtio_queue::{AccessPlatform, DescriptorChain};
 use vm_memory::{
     bitmap::AtomicBitmap, bitmap::Bitmap, ByteValued, Bytes, GuestAddress, GuestMemory,
     GuestMemoryError, GuestMemoryLoadGuard,
@@ -190,6 +191,7 @@ pub struct Request {
 impl Request {
     pub fn parse(
         desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap>>,
+        access_platform: Option<&Arc<dyn AccessPlatform>>,
     ) -> result::Result<Request, Error> {
         let hdr_desc = desc_chain
             .next()
@@ -204,9 +206,19 @@ impl Request {
             return Err(Error::UnexpectedWriteOnlyDescriptor);
         }
 
+        let hdr_desc_addr = if let Some(access_platform) = access_platform {
+            GuestAddress(
+                access_platform
+                    .translate(hdr_desc.addr().0, u64::from(hdr_desc.len()))
+                    .unwrap(),
+            )
+        } else {
+            hdr_desc.addr()
+        };
+
         let mut req = Request {
-            request_type: request_type(desc_chain.memory(), hdr_desc.addr())?,
-            sector: sector(desc_chain.memory(), hdr_desc.addr())?,
+            request_type: request_type(desc_chain.memory(), hdr_desc_addr)?,
+            sector: sector(desc_chain.memory(), hdr_desc_addr)?,
             data_descriptors: Vec::new(),
             status_addr: GuestAddress(0),
             writeback: true,
@@ -240,7 +252,18 @@ impl Request {
                 if !desc.is_write_only() && req.request_type == RequestType::GetDeviceId {
                     return Err(Error::UnexpectedReadOnlyDescriptor);
                 }
-                req.data_descriptors.push((desc.addr(), desc.len()));
+
+                let desc_addr = if let Some(access_platform) = access_platform {
+                    GuestAddress(
+                        access_platform
+                            .translate(desc.addr().0, u64::from(desc.len()))
+                            .unwrap(),
+                    )
+                } else {
+                    desc.addr()
+                };
+
+                req.data_descriptors.push((desc_addr, desc.len()));
                 desc = desc_chain
                     .next()
                     .ok_or(Error::DescriptorChainTooShort)
@@ -261,7 +284,15 @@ impl Request {
             return Err(Error::DescriptorLengthTooSmall);
         }
 
-        req.status_addr = status_desc.addr();
+        req.status_addr = if let Some(access_platform) = access_platform {
+            GuestAddress(
+                access_platform
+                    .translate(status_desc.addr().0, u64::from(status_desc.len()))
+                    .unwrap(),
+            )
+        } else {
+            status_desc.addr()
+        };
 
         Ok(req)
     }

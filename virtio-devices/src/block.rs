@@ -35,7 +35,7 @@ use std::{collections::HashMap, convert::TryInto};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_bindings::bindings::virtio_blk::*;
-use virtio_queue::Queue;
+use virtio_queue::{AccessPlatform, Queue};
 use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -96,6 +96,7 @@ struct BlockEpollHandler {
     queue_evt: EventFd,
     request_list: HashMap<u16, Request>,
     rate_limiter: Option<RateLimiter>,
+    access_platform: Option<Arc<dyn AccessPlatform>>,
 }
 
 impl BlockEpollHandler {
@@ -107,7 +108,8 @@ impl BlockEpollHandler {
 
         let mut avail_iter = queue.iter().map_err(Error::QueueIterator)?;
         for mut desc_chain in &mut avail_iter {
-            let mut request = Request::parse(&mut desc_chain).map_err(Error::RequestParsing)?;
+            let mut request = Request::parse(&mut desc_chain, self.access_platform.as_ref())
+                .map_err(Error::RequestParsing)?;
 
             if let Some(rate_limiter) = &mut self.rate_limiter {
                 // If limiter.consume() fails it means there is no more TokenType::Ops
@@ -626,6 +628,7 @@ impl VirtioDevice for Block {
                 queue_evt,
                 request_list: HashMap::with_capacity(queue_size.into()),
                 rate_limiter,
+                access_platform: self.common.access_platform.clone(),
             };
 
             let paused = self.common.paused.clone();
@@ -678,6 +681,10 @@ impl VirtioDevice for Block {
         );
 
         Some(counters)
+    }
+
+    fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {
+        self.common.set_access_platform(access_platform)
     }
 }
 
