@@ -11,8 +11,8 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use virtio_queue::Queue;
-use vm_memory::{Bytes, GuestAddress, GuestMemory, GuestMemoryAtomic};
-use vm_virtio::AccessPlatform;
+use vm_memory::{Bytes, GuestMemory, GuestMemoryAtomic};
+use vm_virtio::{AccessPlatform, Translatable};
 
 #[derive(Clone)]
 pub struct TxVirtio {
@@ -60,16 +60,7 @@ impl TxVirtio {
 
                 let mut iovecs = Vec::new();
                 while let Some(desc) = next_desc {
-                    let desc_addr = if let Some(access_platform) = access_platform {
-                        GuestAddress(
-                            access_platform
-                                .translate(desc.addr().0, u64::from(desc.len()))
-                                .unwrap(),
-                        )
-                    } else {
-                        desc.addr()
-                    };
-
+                    let desc_addr = desc.addr().translate(access_platform, desc.len() as usize);
                     if !desc.is_write_only() && desc.len() > 0 {
                         let buf = desc_chain
                             .memory()
@@ -195,31 +186,18 @@ impl RxVirtio {
                     .next()
                     .ok_or(NetQueuePairError::DescriptorChainTooShort)?;
 
-                let desc_addr = if let Some(access_platform) = access_platform {
-                    GuestAddress(
-                        access_platform
-                            .translate(desc.addr().0, u64::from(desc.len()))
-                            .unwrap(),
+                let num_buffers_addr = desc_chain
+                    .memory()
+                    .checked_offset(
+                        desc.addr().translate(access_platform, desc.len() as usize),
+                        10,
                     )
-                } else {
-                    desc.addr()
-                };
-
-                let num_buffers_addr = desc_chain.memory().checked_offset(desc_addr, 10).unwrap();
+                    .unwrap();
                 let mut next_desc = Some(desc);
 
                 let mut iovecs = Vec::new();
                 while let Some(desc) = next_desc {
-                    let desc_addr = if let Some(access_platform) = access_platform {
-                        GuestAddress(
-                            access_platform
-                                .translate(desc.addr().0, u64::from(desc.len()))
-                                .unwrap(),
-                        )
-                    } else {
-                        desc.addr()
-                    };
-
+                    let desc_addr = desc.addr().translate(access_platform, desc.len() as usize);
                     if desc.is_write_only() && desc.len() > 0 {
                         let buf = desc_chain
                             .memory()

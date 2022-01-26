@@ -11,6 +11,9 @@
 //! Implements virtio queues
 
 use std::fmt::{self, Debug};
+use std::sync::Arc;
+
+use vm_memory::GuestAddress;
 
 pub mod queue;
 pub use queue::*;
@@ -93,4 +96,19 @@ impl fmt::Display for VirtioDeviceType {
 pub trait AccessPlatform: Send + Sync + Debug {
     /// Provide a way to translate address ranges.
     fn translate(&self, base: u64, size: u64) -> std::result::Result<u64, std::io::Error>;
+}
+
+pub trait Translatable {
+    #[must_use]
+    fn translate(&self, access_platform: Option<&Arc<dyn AccessPlatform>>, len: usize) -> Self;
+}
+
+impl Translatable for GuestAddress {
+    fn translate(&self, access_platform: Option<&Arc<dyn AccessPlatform>>, len: usize) -> Self {
+        if let Some(access_platform) = access_platform {
+            GuestAddress(access_platform.translate(self.0, len as u64).unwrap())
+        } else {
+            *self
+        }
+    }
 }
