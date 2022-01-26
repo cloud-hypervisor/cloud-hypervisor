@@ -10,7 +10,6 @@ use std::mem::size_of;
 use std::num::Wrapping;
 use std::ops::Deref;
 use std::sync::atomic::{fence, Ordering};
-use std::sync::Arc;
 
 use vm_memory::{Address, Bytes, GuestAddress, GuestMemory};
 
@@ -20,10 +19,7 @@ use crate::defs::{
     VIRTQ_USED_ELEMENT_SIZE, VIRTQ_USED_F_NO_NOTIFY, VIRTQ_USED_RING_HEADER_SIZE,
     VIRTQ_USED_RING_META_SIZE,
 };
-use crate::{
-    error, AccessPlatform, AvailIter, Descriptor, Error, QueueStateGuard, QueueStateT,
-    VirtqUsedElem,
-};
+use crate::{error, AvailIter, Descriptor, Error, QueueStateGuard, QueueStateT, VirtqUsedElem};
 
 /// Struct to maintain information and manipulate state of a virtio queue.
 #[derive(Clone, Debug)]
@@ -57,9 +53,6 @@ pub struct QueueState {
 
     /// Guest physical address of the used ring.
     pub used_ring: GuestAddress,
-
-    /// Access platform handler
-    pub access_platform: Option<Arc<dyn AccessPlatform>>,
 }
 
 impl QueueState {
@@ -175,7 +168,6 @@ impl QueueStateT for QueueState {
             next_used: Wrapping(0),
             event_idx_enabled: false,
             signalled_used: None,
-            access_platform: None,
         }
     }
 
