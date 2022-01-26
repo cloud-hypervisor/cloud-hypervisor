@@ -328,6 +328,7 @@ mod tests {
                     pause_evt: EventFd::new(EFD_NONBLOCK).unwrap(),
                     interrupt_cb,
                     backend: Arc::new(RwLock::new(TestBackend::new())),
+                    access_platform: None,
                 },
             }
         }

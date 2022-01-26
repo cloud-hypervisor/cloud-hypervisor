@@ -823,6 +823,7 @@ mod tests {
                     .unwrap()
                     .next()
                     .unwrap(),
+                None,
             )
             .unwrap();
             let conn = match conn_state {

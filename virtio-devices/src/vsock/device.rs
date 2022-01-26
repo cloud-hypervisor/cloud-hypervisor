@@ -47,7 +47,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, RwLock};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use virtio_queue::Queue;
+use virtio_queue::{AccessPlatform, Queue};
 use vm_memory::GuestMemoryAtomic;
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
@@ -93,6 +93,7 @@ pub struct VsockEpollHandler<B: VsockBackend> {
     pub pause_evt: EventFd,
     pub interrupt_cb: Arc<dyn VirtioInterrupt>,
     pub backend: Arc<RwLock<B>>,
+    pub access_platform: Option<Arc<dyn AccessPlatform>>,
 }
 
 impl<B> VsockEpollHandler<B>
@@ -124,7 +125,10 @@ where
 
         let mut avail_iter = self.queues[0].iter().map_err(DeviceError::QueueIterator)?;
         for mut desc_chain in &mut avail_iter {
-            let used_len = match VsockPacket::from_rx_virtq_head(&mut desc_chain) {
+            let used_len = match VsockPacket::from_rx_virtq_head(
+                &mut desc_chain,
+                self.access_platform.as_ref(),
+            ) {
                 Ok(mut pkt) => {
                     if self.backend.write().unwrap().recv_pkt(&mut pkt).is_ok() {
                         pkt.hdr().len() as u32 + pkt.len()
@@ -169,7 +173,10 @@ where
 
         let mut avail_iter = self.queues[1].iter().map_err(DeviceError::QueueIterator)?;
         for mut desc_chain in &mut avail_iter {
-            let pkt = match VsockPacket::from_tx_virtq_head(&mut desc_chain) {
+            let pkt = match VsockPacket::from_tx_virtq_head(
+                &mut desc_chain,
+                self.access_platform.as_ref(),
+            ) {
                 Ok(pkt) => pkt,
                 Err(e) => {
                     error!("vsock: error reading TX packet: {:?}", e);
@@ -438,6 +445,7 @@ where
             pause_evt,
             interrupt_cb,
             backend: self.backend.clone(),
+            access_platform: self.common.access_platform.clone(),
         };
 
         let paused = self.common.paused.clone();
@@ -471,6 +479,10 @@ where
 
     fn shutdown(&mut self) {
         std::fs::remove_file(&self.path).ok();
+    }
+
+    fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {
+        self.common.set_access_platform(access_platform)
     }
 }
 

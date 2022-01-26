@@ -846,6 +846,7 @@ mod tests {
                     .unwrap()
                     .next()
                     .unwrap(),
+                None,
             )
             .unwrap();
             let uds_path = format!("test_vsock_{}.sock", name);
