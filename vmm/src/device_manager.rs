@@ -92,7 +92,6 @@ use virtio_devices::vhost_user::VhostUserConfig;
 use virtio_devices::{AccessPlatformMapping, VirtioMemMappingSource};
 use virtio_devices::{Endpoint, IommuMapping};
 use virtio_devices::{VirtioSharedMemory, VirtioSharedMemoryList};
-use virtio_queue::AccessPlatform;
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::dma_mapping::vfio::VfioDmaMapping;
 use vm_device::interrupt::{
@@ -108,6 +107,7 @@ use vm_migration::{
     protocol::MemoryRangeTable, Migratable, MigratableError, Pausable, Snapshot,
     SnapshotDataSection, Snapshottable, Transportable,
 };
+use vm_virtio::AccessPlatform;
 use vm_virtio::VirtioDeviceType;
 use vmm_sys_util::eventfd::EventFd;
 

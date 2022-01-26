@@ -29,7 +29,6 @@ use std::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use virtio_queue::AccessPlatform;
 use virtio_queue::{defs::VIRTQ_MSI_NO_VECTOR, Error as QueueError, Queue};
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::interrupt::{
@@ -40,6 +39,7 @@ use vm_memory::{Address, ByteValued, GuestAddress, GuestMemoryAtomic, GuestUsize
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
 };
+use vm_virtio::AccessPlatform;
 use vmm_sys_util::{errno::Result, eventfd::EventFd};
 
 #[derive(Debug)]

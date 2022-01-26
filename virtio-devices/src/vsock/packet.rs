@@ -21,8 +21,9 @@ use std::sync::Arc;
 use super::defs;
 use super::{Result, VsockError};
 use crate::{get_host_address_range, GuestMemoryMmap};
-use virtio_queue::{AccessPlatform, DescriptorChain};
+use virtio_queue::DescriptorChain;
 use vm_memory::{GuestAddress, GuestMemoryLoadGuard};
+use vm_virtio::AccessPlatform;
 
 // The vsock packet header is defined by the C struct:
 //
