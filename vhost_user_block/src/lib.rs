@@ -117,7 +117,7 @@ impl VhostUserBlkThread {
         while let Some(mut desc_chain) = vring.mut_queue().iter().unwrap().next() {
             debug!("got an element in the queue");
             let len;
-            match Request::parse(&mut desc_chain) {
+            match Request::parse(&mut desc_chain, None) {
                 Ok(mut request) => {
                     debug!("element is a valid request");
                     request.set_writeback(self.writeback.load(Ordering::Acquire));
