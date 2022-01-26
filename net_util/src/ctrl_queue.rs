@@ -5,6 +5,7 @@
 use crate::GuestMemoryMmap;
 use crate::Tap;
 use libc::c_uint;
+use std::sync::Arc;
 use virtio_bindings::bindings::virtio_net::{
     VIRTIO_NET_CTRL_GUEST_OFFLOADS, VIRTIO_NET_CTRL_GUEST_OFFLOADS_SET, VIRTIO_NET_CTRL_MQ,
     VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX, VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN,
@@ -12,8 +13,8 @@ use virtio_bindings::bindings::virtio_net::{
     VIRTIO_NET_F_GUEST_ECN, VIRTIO_NET_F_GUEST_TSO4, VIRTIO_NET_F_GUEST_TSO6,
     VIRTIO_NET_F_GUEST_UFO, VIRTIO_NET_OK,
 };
-use virtio_queue::Queue;
-use vm_memory::{ByteValued, Bytes, GuestMemoryAtomic, GuestMemoryError};
+use virtio_queue::{AccessPlatform, Queue};
+use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryError};
 
 #[derive(Debug)]
 pub enum Error {
@@ -57,23 +58,55 @@ impl CtrlQueue {
     pub fn process(
         &mut self,
         queue: &mut Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
+        access_platform: Option<&Arc<dyn AccessPlatform>>,
     ) -> Result<bool> {
         let mut used_desc_heads = Vec::new();
         for mut desc_chain in queue.iter().map_err(Error::QueueIterator)? {
             let ctrl_desc = desc_chain.next().ok_or(Error::NoControlHeaderDescriptor)?;
 
+            let ctrl_desc_addr = if let Some(access_platform) = access_platform {
+                GuestAddress(
+                    access_platform
+                        .translate(ctrl_desc.addr().0, u64::from(ctrl_desc.len()))
+                        .unwrap(),
+                )
+            } else {
+                ctrl_desc.addr()
+            };
+
             let ctrl_hdr: ControlHeader = desc_chain
                 .memory()
-                .read_obj(ctrl_desc.addr())
+                .read_obj(ctrl_desc_addr)
                 .map_err(Error::GuestMemory)?;
             let data_desc = desc_chain.next().ok_or(Error::NoDataDescriptor)?;
+
+            let data_desc_addr = if let Some(access_platform) = access_platform {
+                GuestAddress(
+                    access_platform
+                        .translate(data_desc.addr().0, u64::from(data_desc.len()))
+                        .unwrap(),
+                )
+            } else {
+                data_desc.addr()
+            };
+
             let status_desc = desc_chain.next().ok_or(Error::NoStatusDescriptor)?;
+
+            let status_desc_addr = if let Some(access_platform) = access_platform {
+                GuestAddress(
+                    access_platform
+                        .translate(status_desc.addr().0, u64::from(status_desc.len()))
+                        .unwrap(),
+                )
+            } else {
+                status_desc.addr()
+            };
 
             let ok = match u32::from(ctrl_hdr.class) {
                 VIRTIO_NET_CTRL_MQ => {
                     let queue_pairs = desc_chain
                         .memory()
-                        .read_obj::<u16>(data_desc.addr())
+                        .read_obj::<u16>(data_desc_addr)
                         .map_err(Error::GuestMemory)?;
                     if u32::from(ctrl_hdr.cmd) != VIRTIO_NET_CTRL_MQ_VQ_PAIRS_SET {
                         warn!("Unsupported command: {}", ctrl_hdr.cmd);
@@ -91,7 +124,7 @@ impl CtrlQueue {
                 VIRTIO_NET_CTRL_GUEST_OFFLOADS => {
                     let features = desc_chain
                         .memory()
-                        .read_obj::<u64>(data_desc.addr())
+                        .read_obj::<u64>(data_desc_addr)
                         .map_err(Error::GuestMemory)?;
                     if u32::from(ctrl_hdr.cmd) != VIRTIO_NET_CTRL_GUEST_OFFLOADS_SET {
                         warn!("Unsupported command: {}", ctrl_hdr.cmd);
@@ -120,7 +153,7 @@ impl CtrlQueue {
                 .memory()
                 .write_obj(
                     if ok { VIRTIO_NET_OK } else { VIRTIO_NET_ERR } as u8,
-                    status_desc.addr(),
+                    status_desc_addr,
                 )
                 .map_err(Error::GuestMemory)?;
             let len = ctrl_desc.len() + data_desc.len() + status_desc.len();

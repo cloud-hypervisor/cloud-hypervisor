@@ -89,7 +89,7 @@ impl EpollHelperHandler for NetCtrlEpollHandler {
                     error!("failed to get ctl queue event: {:?}", e);
                     return true;
                 }
-                if let Err(e) = self.ctrl_q.process(&mut self.queue) {
+                if let Err(e) = self.ctrl_q.process(&mut self.queue, None) {
                     error!("failed to process ctrl queue: {:?}", e);
                     return true;
                 }
