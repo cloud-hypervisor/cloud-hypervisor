@@ -24,8 +24,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use virtio_queue::Queue;
-use vm_memory::{ByteValued, Bytes, GuestMemoryAtomic};
+use virtio_queue::{AccessPlatform, Queue};
+use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemoryAtomic};
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
@@ -85,6 +85,7 @@ struct ConsoleEpollHandler {
     resize_pipe: Option<File>,
     kill_evt: EventFd,
     pause_evt: EventFd,
+    access_platform: Option<Arc<dyn AccessPlatform>>,
 }
 
 pub enum Endpoint {
@@ -145,9 +146,20 @@ impl ConsoleEpollHandler {
             let desc = desc_chain.next().unwrap();
             let len = cmp::min(desc.len() as u32, in_buffer.len() as u32);
             let source_slice = in_buffer.drain(..len as usize).collect::<Vec<u8>>();
+
+            let desc_addr = if let Some(access_platform) = &self.access_platform {
+                GuestAddress(
+                    access_platform
+                        .translate(desc.addr().0, u64::from(desc.len()))
+                        .unwrap(),
+                )
+            } else {
+                desc.addr()
+            };
+
             if let Err(e) = desc_chain
                 .memory()
-                .write_slice(&source_slice[..], desc.addr())
+                .write_slice(&source_slice[..], desc_addr)
             {
                 error!("Failed to write slice: {:?}", e);
                 avail_iter.go_to_previous_position();
@@ -184,9 +196,19 @@ impl ConsoleEpollHandler {
         for mut desc_chain in trans_queue.iter().unwrap() {
             let desc = desc_chain.next().unwrap();
             if let Some(ref mut out) = self.endpoint.out_file() {
+                let desc_addr = if let Some(access_platform) = &self.access_platform {
+                    GuestAddress(
+                        access_platform
+                            .translate(desc.addr().0, u64::from(desc.len()))
+                            .unwrap(),
+                    )
+                } else {
+                    desc.addr()
+                };
+
                 let _ = desc_chain
                     .memory()
-                    .write_to(desc.addr(), out, desc.len() as usize);
+                    .write_to(desc_addr, out, desc.len() as usize);
                 let _ = out.flush();
             }
             used_desc_heads[used_count] = (desc_chain.head_index(), desc.len());
@@ -513,6 +535,7 @@ impl VirtioDevice for Console {
             resizer: Arc::clone(&self.resizer),
             kill_evt,
             pause_evt,
+            access_platform: self.common.access_platform.clone(),
         };
 
         let paused = self.common.paused.clone();
@@ -542,6 +565,10 @@ impl VirtioDevice for Console {
         let result = self.common.reset();
         event!("virtio-device", "reset", "id", &self.id);
         result
+    }
+
+    fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {
+        self.common.set_access_platform(access_platform)
     }
 }
 
