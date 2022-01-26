@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use virtio_queue::Queue;
+use virtio_queue::{AccessPlatform, Queue};
 use vm_memory::{GuestAddress, GuestMemoryAtomic};
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, VersionMapped};
 
@@ -52,6 +52,7 @@ impl VersionMapped for VirtioPciCommonConfigState {}
 /// le64 queue_avail;               // 0x28 // read-write
 /// le64 queue_used;                // 0x30 // read-write
 pub struct VirtioPciCommonConfig {
+    pub access_platform: Option<Arc<dyn AccessPlatform>>,
     pub driver_status: u8,
     pub config_generation: u8,
     pub device_feature_select: u32,
@@ -196,7 +197,32 @@ impl VirtioPciCommonConfig {
             0x16 => self.queue_select = value,
             0x18 => self.with_queue_mut(queues, |q| q.state.size = value),
             0x1a => self.msix_queues.lock().unwrap()[self.queue_select as usize] = value,
-            0x1c => self.with_queue_mut(queues, |q| q.enable(value == 1)),
+            0x1c => self.with_queue_mut(queues, |q| {
+                let ready = value == 1;
+                q.set_ready(ready);
+                // Translate address of descriptor table and vrings.
+                if let Some(access_platform) = &self.access_platform {
+                    if ready {
+                        let desc_table =
+                            access_platform.translate(q.state.desc_table.0, 0).unwrap();
+                        let avail_ring =
+                            access_platform.translate(q.state.avail_ring.0, 0).unwrap();
+                        let used_ring = access_platform.translate(q.state.used_ring.0, 0).unwrap();
+                        q.set_desc_table_address(
+                            Some((desc_table & 0xffff_ffff) as u32),
+                            Some((desc_table >> 32) as u32),
+                        );
+                        q.set_avail_ring_address(
+                            Some((avail_ring & 0xffff_ffff) as u32),
+                            Some((avail_ring >> 32) as u32),
+                        );
+                        q.set_used_ring_address(
+                            Some((used_ring & 0xffff_ffff) as u32),
+                            Some((used_ring >> 32) as u32),
+                        );
+                    }
+                }
+            }),
             _ => {
                 warn!("invalid virtio register word write: 0x{:x}", offset);
             }
@@ -374,6 +400,7 @@ mod tests {
     #[test]
     fn write_base_regs() {
         let mut regs = VirtioPciCommonConfig {
+            access_platform: None,
             driver_status: 0xaa,
             config_generation: 0x55,
             device_feature_select: 0x0,
