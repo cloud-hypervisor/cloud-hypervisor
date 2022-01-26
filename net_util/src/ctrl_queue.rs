@@ -13,8 +13,9 @@ use virtio_bindings::bindings::virtio_net::{
     VIRTIO_NET_F_GUEST_ECN, VIRTIO_NET_F_GUEST_TSO4, VIRTIO_NET_F_GUEST_TSO6,
     VIRTIO_NET_F_GUEST_UFO, VIRTIO_NET_OK,
 };
-use virtio_queue::{AccessPlatform, Queue};
+use virtio_queue::Queue;
 use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryError};
+use vm_virtio::AccessPlatform;
 
 #[derive(Debug)]
 pub enum Error {

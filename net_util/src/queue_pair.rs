@@ -10,8 +10,9 @@ use std::num::Wrapping;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use virtio_queue::{AccessPlatform, Queue};
+use virtio_queue::Queue;
 use vm_memory::{Bytes, GuestAddress, GuestMemory, GuestMemoryAtomic};
+use vm_virtio::AccessPlatform;
 
 #[derive(Clone)]
 pub struct TxVirtio {

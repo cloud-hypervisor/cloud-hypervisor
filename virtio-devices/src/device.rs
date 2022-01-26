@@ -19,9 +19,10 @@ use std::sync::{
     Arc, Barrier,
 };
 use std::thread;
-use virtio_queue::{AccessPlatform, Queue};
+use virtio_queue::Queue;
 use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestUsize};
 use vm_migration::{MigratableError, Pausable};
+use vm_virtio::AccessPlatform;
 use vm_virtio::VirtioDeviceType;
 use vmm_sys_util::eventfd::EventFd;
 

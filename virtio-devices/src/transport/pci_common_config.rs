@@ -12,9 +12,10 @@ use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use virtio_queue::{AccessPlatform, Queue};
+use virtio_queue::Queue;
 use vm_memory::{GuestAddress, GuestMemoryAtomic};
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, VersionMapped};
+use vm_virtio::AccessPlatform;
 
 #[derive(Clone, Versionize)]
 pub struct VirtioPciCommonConfigState {

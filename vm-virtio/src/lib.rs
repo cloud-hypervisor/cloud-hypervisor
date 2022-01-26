@@ -10,7 +10,7 @@
 
 //! Implements virtio queues
 
-use std::fmt;
+use std::fmt::{self, Debug};
 
 pub mod queue;
 pub use queue::*;
@@ -86,4 +86,11 @@ impl fmt::Display for VirtioDeviceType {
         };
         write!(f, "{}", output)
     }
+}
+
+/// Trait for devices with access to data in memory being limited and/or
+/// translated.
+pub trait AccessPlatform: Send + Sync + Debug {
+    /// Provide a way to translate address ranges.
+    fn translate(&self, base: u64, size: u64) -> std::result::Result<u64, std::io::Error>;
 }

@@ -23,7 +23,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, RwLock};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use virtio_queue::{AccessPlatform, DescriptorChain, Queue};
+use virtio_queue::{DescriptorChain, Queue};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryError,
@@ -31,6 +31,7 @@ use vm_memory::{
 };
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
+use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
 
 /// Queues sizes

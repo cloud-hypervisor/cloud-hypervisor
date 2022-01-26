@@ -27,13 +27,14 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use virtio_queue::{AccessPlatform, DescriptorChain, Queue};
+use virtio_queue::{DescriptorChain, Queue};
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryError,
     GuestMemoryLoadGuard,
 };
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
+use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: u16 = 256;
