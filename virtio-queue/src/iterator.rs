@@ -13,12 +13,11 @@
 use std::num::Wrapping;
 use std::ops::Deref;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 
 use vm_memory::{Address, Bytes, GuestAddress, GuestMemory};
 
 use crate::defs::{VIRTQ_AVAIL_ELEMENT_SIZE, VIRTQ_AVAIL_RING_HEADER_SIZE};
-use crate::{error, AccessPlatform, DescriptorChain, QueueState};
+use crate::{error, DescriptorChain, QueueState};
 
 /// Consuming iterator over all available descriptor chain heads in the queue.
 ///
@@ -98,7 +97,6 @@ pub struct AvailIter<'b, M> {
     queue_size: u16,
     last_index: Wrapping<u16>,
     next_avail: &'b mut Wrapping<u16>,
-    access_platform: &'b Option<Arc<dyn AccessPlatform>>,
 }
 
 impl<'b, M> AvailIter<'b, M>
@@ -122,7 +120,6 @@ where
             queue_size: state.size,
             last_index: idx,
             next_avail: &mut state.next_avail,
-            access_platform: &state.access_platform,
         }
     }
 
@@ -170,7 +167,6 @@ where
             self.desc_table,
             self.queue_size,
             head_index,
-            self.access_platform.clone(),
         ))
     }
 }
