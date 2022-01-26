@@ -22,8 +22,8 @@ use super::defs;
 use super::{Result, VsockError};
 use crate::{get_host_address_range, GuestMemoryMmap};
 use virtio_queue::DescriptorChain;
-use vm_memory::{GuestAddress, GuestMemoryLoadGuard};
-use vm_virtio::AccessPlatform;
+use vm_memory::GuestMemoryLoadGuard;
+use vm_virtio::{AccessPlatform, Translatable};
 
 // The vsock packet header is defined by the C struct:
 //
@@ -124,19 +124,13 @@ impl VsockPacket {
             return Err(VsockError::HdrDescTooSmall(head.len()));
         }
 
-        let head_addr = if let Some(access_platform) = access_platform {
-            GuestAddress(
-                access_platform
-                    .translate(head.addr().0, u64::from(head.len()))
-                    .unwrap(),
-            )
-        } else {
-            head.addr()
-        };
-
         let mut pkt = Self {
-            hdr: get_host_address_range(desc_chain.memory(), head_addr, VSOCK_PKT_HDR_SIZE)
-                .ok_or(VsockError::GuestMemory)? as *mut u8,
+            hdr: get_host_address_range(
+                desc_chain.memory(),
+                head.addr().translate(access_platform, head.len() as usize),
+                VSOCK_PKT_HDR_SIZE,
+            )
+            .ok_or(VsockError::GuestMemory)? as *mut u8,
             buf: None,
             buf_size: 0,
         };
@@ -166,20 +160,16 @@ impl VsockPacket {
             return Err(VsockError::BufDescTooSmall);
         }
 
-        let buf_desc_addr = if let Some(access_platform) = access_platform {
-            GuestAddress(
-                access_platform
-                    .translate(buf_desc.addr().0, u64::from(buf_desc.len()))
-                    .unwrap(),
-            )
-        } else {
-            buf_desc.addr()
-        };
-
         pkt.buf_size = buf_desc.len() as usize;
         pkt.buf = Some(
-            get_host_address_range(desc_chain.memory(), buf_desc_addr, pkt.buf_size)
-                .ok_or(VsockError::GuestMemory)? as *mut u8,
+            get_host_address_range(
+                desc_chain.memory(),
+                buf_desc
+                    .addr()
+                    .translate(access_platform, buf_desc.len() as usize),
+                pkt.buf_size,
+            )
+            .ok_or(VsockError::GuestMemory)? as *mut u8,
         );
 
         Ok(pkt)
@@ -214,29 +204,22 @@ impl VsockPacket {
         let buf_desc = desc_chain.next().ok_or(VsockError::BufDescMissing)?;
         let buf_size = buf_desc.len() as usize;
 
-        let (head_addr, buf_desc_addr) = if let Some(access_platform) = access_platform {
-            (
-                GuestAddress(
-                    access_platform
-                        .translate(head.addr().0, u64::from(head.len()))
-                        .unwrap(),
-                ),
-                GuestAddress(
-                    access_platform
-                        .translate(buf_desc.addr().0, u64::from(buf_desc.len()))
-                        .unwrap(),
-                ),
-            )
-        } else {
-            (head.addr(), buf_desc.addr())
-        };
-
         Ok(Self {
-            hdr: get_host_address_range(desc_chain.memory(), head_addr, VSOCK_PKT_HDR_SIZE)
-                .ok_or(VsockError::GuestMemory)? as *mut u8,
+            hdr: get_host_address_range(
+                desc_chain.memory(),
+                head.addr().translate(access_platform, head.len() as usize),
+                VSOCK_PKT_HDR_SIZE,
+            )
+            .ok_or(VsockError::GuestMemory)? as *mut u8,
             buf: Some(
-                get_host_address_range(desc_chain.memory(), buf_desc_addr, buf_size)
-                    .ok_or(VsockError::GuestMemory)? as *mut u8,
+                get_host_address_range(
+                    desc_chain.memory(),
+                    buf_desc
+                        .addr()
+                        .translate(access_platform, buf_desc.len() as usize),
+                    buf_size,
+                )
+                .ok_or(VsockError::GuestMemory)? as *mut u8,
             ),
             buf_size,
         })

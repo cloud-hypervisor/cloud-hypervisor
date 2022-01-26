@@ -34,7 +34,7 @@ use vm_memory::{
 };
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
-use vm_virtio::AccessPlatform;
+use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: u16 = 256;
@@ -131,19 +131,9 @@ impl Request {
             return Err(Error::InvalidRequest);
         }
 
-        let desc_addr = if let Some(access_platform) = access_platform {
-            GuestAddress(
-                access_platform
-                    .translate(desc.addr().0, u64::from(desc.len()))
-                    .unwrap(),
-            )
-        } else {
-            desc.addr()
-        };
-
         let request: VirtioPmemReq = desc_chain
             .memory()
-            .read_obj(desc_addr)
+            .read_obj(desc.addr().translate(access_platform, desc.len() as usize))
             .map_err(Error::GuestMemory)?;
 
         let request_type = match request.type_ {
@@ -162,19 +152,11 @@ impl Request {
             return Err(Error::BufferLengthTooSmall);
         }
 
-        let status_desc_addr = if let Some(access_platform) = access_platform {
-            GuestAddress(
-                access_platform
-                    .translate(status_desc.addr().0, u64::from(status_desc.len()))
-                    .unwrap(),
-            )
-        } else {
-            status_desc.addr()
-        };
-
         Ok(Request {
             type_: request_type,
-            status_addr: status_desc_addr,
+            status_addr: status_desc
+                .addr()
+                .translate(access_platform, status_desc.len() as usize),
         })
     }
 }

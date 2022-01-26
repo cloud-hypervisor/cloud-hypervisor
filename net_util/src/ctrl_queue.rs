@@ -14,8 +14,8 @@ use virtio_bindings::bindings::virtio_net::{
     VIRTIO_NET_F_GUEST_UFO, VIRTIO_NET_OK,
 };
 use virtio_queue::Queue;
-use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryError};
-use vm_virtio::AccessPlatform;
+use vm_memory::{ByteValued, Bytes, GuestMemoryAtomic, GuestMemoryError};
+use vm_virtio::{AccessPlatform, Translatable};
 
 #[derive(Debug)]
 pub enum Error {
@@ -65,43 +65,21 @@ impl CtrlQueue {
         for mut desc_chain in queue.iter().map_err(Error::QueueIterator)? {
             let ctrl_desc = desc_chain.next().ok_or(Error::NoControlHeaderDescriptor)?;
 
-            let ctrl_desc_addr = if let Some(access_platform) = access_platform {
-                GuestAddress(
-                    access_platform
-                        .translate(ctrl_desc.addr().0, u64::from(ctrl_desc.len()))
-                        .unwrap(),
-                )
-            } else {
-                ctrl_desc.addr()
-            };
-
             let ctrl_hdr: ControlHeader = desc_chain
                 .memory()
-                .read_obj(ctrl_desc_addr)
+                .read_obj(
+                    ctrl_desc
+                        .addr()
+                        .translate(access_platform, ctrl_desc.len() as usize),
+                )
                 .map_err(Error::GuestMemory)?;
             let data_desc = desc_chain.next().ok_or(Error::NoDataDescriptor)?;
 
-            let data_desc_addr = if let Some(access_platform) = access_platform {
-                GuestAddress(
-                    access_platform
-                        .translate(data_desc.addr().0, u64::from(data_desc.len()))
-                        .unwrap(),
-                )
-            } else {
-                data_desc.addr()
-            };
+            let data_desc_addr = data_desc
+                .addr()
+                .translate(access_platform, data_desc.len() as usize);
 
             let status_desc = desc_chain.next().ok_or(Error::NoStatusDescriptor)?;
-
-            let status_desc_addr = if let Some(access_platform) = access_platform {
-                GuestAddress(
-                    access_platform
-                        .translate(status_desc.addr().0, u64::from(status_desc.len()))
-                        .unwrap(),
-                )
-            } else {
-                status_desc.addr()
-            };
 
             let ok = match u32::from(ctrl_hdr.class) {
                 VIRTIO_NET_CTRL_MQ => {
@@ -154,7 +132,9 @@ impl CtrlQueue {
                 .memory()
                 .write_obj(
                     if ok { VIRTIO_NET_OK } else { VIRTIO_NET_ERR } as u8,
-                    status_desc_addr,
+                    status_desc
+                        .addr()
+                        .translate(access_platform, status_desc.len() as usize),
                 )
                 .map_err(Error::GuestMemory)?;
             let len = ctrl_desc.len() + data_desc.len() + status_desc.len();

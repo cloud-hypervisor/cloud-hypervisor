@@ -25,10 +25,10 @@ use std::sync::{Arc, Barrier, Mutex};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_queue::Queue;
-use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemoryAtomic};
+use vm_memory::{ByteValued, Bytes, GuestMemoryAtomic};
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
-use vm_virtio::AccessPlatform;
+use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: u16 = 256;
@@ -148,20 +148,11 @@ impl ConsoleEpollHandler {
             let len = cmp::min(desc.len() as u32, in_buffer.len() as u32);
             let source_slice = in_buffer.drain(..len as usize).collect::<Vec<u8>>();
 
-            let desc_addr = if let Some(access_platform) = &self.access_platform {
-                GuestAddress(
-                    access_platform
-                        .translate(desc.addr().0, u64::from(desc.len()))
-                        .unwrap(),
-                )
-            } else {
+            if let Err(e) = desc_chain.memory().write_slice(
+                &source_slice[..],
                 desc.addr()
-            };
-
-            if let Err(e) = desc_chain
-                .memory()
-                .write_slice(&source_slice[..], desc_addr)
-            {
+                    .translate(self.access_platform.as_ref(), desc.len() as usize),
+            ) {
                 error!("Failed to write slice: {:?}", e);
                 avail_iter.go_to_previous_position();
                 break;
@@ -197,19 +188,12 @@ impl ConsoleEpollHandler {
         for mut desc_chain in trans_queue.iter().unwrap() {
             let desc = desc_chain.next().unwrap();
             if let Some(ref mut out) = self.endpoint.out_file() {
-                let desc_addr = if let Some(access_platform) = &self.access_platform {
-                    GuestAddress(
-                        access_platform
-                            .translate(desc.addr().0, u64::from(desc.len()))
-                            .unwrap(),
-                    )
-                } else {
+                let _ = desc_chain.memory().write_to(
                     desc.addr()
-                };
-
-                let _ = desc_chain
-                    .memory()
-                    .write_to(desc_addr, out, desc.len() as usize);
+                        .translate(self.access_platform.as_ref(), desc.len() as usize),
+                    out,
+                    desc.len() as usize,
+                );
                 let _ = out.flush();
             }
             used_desc_heads[used_count] = (desc_chain.head_index(), desc.len());

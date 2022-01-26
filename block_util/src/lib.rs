@@ -40,7 +40,7 @@ use vm_memory::{
     bitmap::AtomicBitmap, bitmap::Bitmap, ByteValued, Bytes, GuestAddress, GuestMemory,
     GuestMemoryError, GuestMemoryLoadGuard,
 };
-use vm_virtio::AccessPlatform;
+use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
@@ -207,15 +207,9 @@ impl Request {
             return Err(Error::UnexpectedWriteOnlyDescriptor);
         }
 
-        let hdr_desc_addr = if let Some(access_platform) = access_platform {
-            GuestAddress(
-                access_platform
-                    .translate(hdr_desc.addr().0, u64::from(hdr_desc.len()))
-                    .unwrap(),
-            )
-        } else {
-            hdr_desc.addr()
-        };
+        let hdr_desc_addr = hdr_desc
+            .addr()
+            .translate(access_platform, hdr_desc.len() as usize);
 
         let mut req = Request {
             request_type: request_type(desc_chain.memory(), hdr_desc_addr)?,
@@ -254,17 +248,10 @@ impl Request {
                     return Err(Error::UnexpectedReadOnlyDescriptor);
                 }
 
-                let desc_addr = if let Some(access_platform) = access_platform {
-                    GuestAddress(
-                        access_platform
-                            .translate(desc.addr().0, u64::from(desc.len()))
-                            .unwrap(),
-                    )
-                } else {
-                    desc.addr()
-                };
-
-                req.data_descriptors.push((desc_addr, desc.len()));
+                req.data_descriptors.push((
+                    desc.addr().translate(access_platform, desc.len() as usize),
+                    desc.len(),
+                ));
                 desc = desc_chain
                     .next()
                     .ok_or(Error::DescriptorChainTooShort)
@@ -285,15 +272,9 @@ impl Request {
             return Err(Error::DescriptorLengthTooSmall);
         }
 
-        req.status_addr = if let Some(access_platform) = access_platform {
-            GuestAddress(
-                access_platform
-                    .translate(status_desc.addr().0, u64::from(status_desc.len()))
-                    .unwrap(),
-            )
-        } else {
-            status_desc.addr()
-        };
+        req.status_addr = status_desc
+            .addr()
+            .translate(access_platform, status_desc.len() as usize);
 
         Ok(req)
     }

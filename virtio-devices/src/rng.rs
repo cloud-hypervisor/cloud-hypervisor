@@ -22,10 +22,10 @@ use std::sync::{Arc, Barrier};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_queue::Queue;
-use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
+use vm_memory::{Bytes, GuestMemoryAtomic};
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
-use vm_virtio::AccessPlatform;
+use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: u16 = 256;
@@ -56,20 +56,15 @@ impl RngEpollHandler {
 
             // Drivers can only read from the random device.
             if desc.is_write_only() {
-                let desc_addr = if let Some(access_platform) = &self.access_platform {
-                    GuestAddress(
-                        access_platform
-                            .translate(desc.addr().0, u64::from(desc.len()))
-                            .unwrap(),
-                    )
-                } else {
-                    desc.addr()
-                };
-
                 // Fill the read with data from the random device on the host.
                 if desc_chain
                     .memory()
-                    .read_from(desc_addr, &mut self.random_file, desc.len() as usize)
+                    .read_from(
+                        desc.addr()
+                            .translate(self.access_platform.as_ref(), desc.len() as usize),
+                        &mut self.random_file,
+                        desc.len() as usize,
+                    )
                     .is_ok()
                 {
                     len = desc.len();
