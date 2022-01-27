@@ -17,8 +17,8 @@ use crate::api::{
     VmSendMigrationData, VmmPingResponse,
 };
 use crate::config::{
-    DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, RestoreConfig, UserDeviceConfig,
-    VmConfig, VsockConfig,
+    add_to_config, DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, RestoreConfig,
+    UserDeviceConfig, VmConfig, VsockConfig,
 };
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use crate::migration::get_vm_snapshot;
@@ -639,6 +639,15 @@ impl Vmm {
     }
 
     fn vm_add_device(&mut self, device_cfg: DeviceConfig) -> result::Result<Vec<u8>, VmError> {
+        self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
+
+        {
+            // Validate the configuration change in a cloned configuration
+            let mut config = self.vm_config.as_ref().unwrap().lock().unwrap().clone();
+            add_to_config(&mut config.devices, device_cfg.clone());
+            config.validate().map_err(VmError::ConfigValidation)?;
+        }
+
         if let Some(ref mut vm) = self.vm {
             let info = vm.add_device(device_cfg).map_err(|e| {
                 error!("Error when adding new device to the VM: {:?}", e);
@@ -654,6 +663,15 @@ impl Vmm {
         &mut self,
         device_cfg: UserDeviceConfig,
     ) -> result::Result<Vec<u8>, VmError> {
+        self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
+
+        {
+            // Validate the configuration change in a cloned configuration
+            let mut config = self.vm_config.as_ref().unwrap().lock().unwrap().clone();
+            add_to_config(&mut config.user_devices, device_cfg.clone());
+            config.validate().map_err(VmError::ConfigValidation)?;
+        }
+
         if let Some(ref mut vm) = self.vm {
             let info = vm.add_user_device(device_cfg).map_err(|e| {
                 error!("Error when adding new user device to the VM: {:?}", e);
@@ -679,6 +697,15 @@ impl Vmm {
     }
 
     fn vm_add_disk(&mut self, disk_cfg: DiskConfig) -> result::Result<Vec<u8>, VmError> {
+        self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
+
+        {
+            // Validate the configuration change in a cloned configuration
+            let mut config = self.vm_config.as_ref().unwrap().lock().unwrap().clone();
+            add_to_config(&mut config.disks, disk_cfg.clone());
+            config.validate().map_err(VmError::ConfigValidation)?;
+        }
+
         if let Some(ref mut vm) = self.vm {
             let info = vm.add_disk(disk_cfg).map_err(|e| {
                 error!("Error when adding new disk to the VM: {:?}", e);
@@ -691,6 +718,15 @@ impl Vmm {
     }
 
     fn vm_add_fs(&mut self, fs_cfg: FsConfig) -> result::Result<Vec<u8>, VmError> {
+        self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
+
+        {
+            // Validate the configuration change in a cloned configuration
+            let mut config = self.vm_config.as_ref().unwrap().lock().unwrap().clone();
+            add_to_config(&mut config.fs, fs_cfg.clone());
+            config.validate().map_err(VmError::ConfigValidation)?;
+        }
+
         if let Some(ref mut vm) = self.vm {
             let info = vm.add_fs(fs_cfg).map_err(|e| {
                 error!("Error when adding new fs to the VM: {:?}", e);
@@ -703,6 +739,15 @@ impl Vmm {
     }
 
     fn vm_add_pmem(&mut self, pmem_cfg: PmemConfig) -> result::Result<Vec<u8>, VmError> {
+        self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
+
+        {
+            // Validate the configuration change in a cloned configuration
+            let mut config = self.vm_config.as_ref().unwrap().lock().unwrap().clone();
+            add_to_config(&mut config.pmem, pmem_cfg.clone());
+            config.validate().map_err(VmError::ConfigValidation)?;
+        }
+
         if let Some(ref mut vm) = self.vm {
             let info = vm.add_pmem(pmem_cfg).map_err(|e| {
                 error!("Error when adding new pmem device to the VM: {:?}", e);
@@ -715,6 +760,15 @@ impl Vmm {
     }
 
     fn vm_add_net(&mut self, net_cfg: NetConfig) -> result::Result<Vec<u8>, VmError> {
+        self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
+
+        {
+            // Validate the configuration change in a cloned configuration
+            let mut config = self.vm_config.as_ref().unwrap().lock().unwrap().clone();
+            add_to_config(&mut config.net, net_cfg.clone());
+            config.validate().map_err(VmError::ConfigValidation)?;
+        }
+
         if let Some(ref mut vm) = self.vm {
             let info = vm.add_net(net_cfg).map_err(|e| {
                 error!("Error when adding new network device to the VM: {:?}", e);
@@ -727,6 +781,20 @@ impl Vmm {
     }
 
     fn vm_add_vsock(&mut self, vsock_cfg: VsockConfig) -> result::Result<Vec<u8>, VmError> {
+        self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
+
+        {
+            // Validate the configuration change in a cloned configuration
+            let mut config = self.vm_config.as_ref().unwrap().lock().unwrap().clone();
+
+            if config.vsock.is_some() {
+                return Err(VmError::TooManyVsockDevices);
+            }
+
+            config.vsock = Some(vsock_cfg.clone());
+            config.validate().map_err(VmError::ConfigValidation)?;
+        }
+
         if let Some(ref mut vm) = self.vm {
             let info = vm.add_vsock(vsock_cfg).map_err(|e| {
                 error!("Error when adding new vsock device to the VM: {:?}", e);
