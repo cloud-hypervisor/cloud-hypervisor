@@ -284,6 +284,14 @@ impl fmt::Display for Error {
     }
 }
 
+pub fn add_to_config<T>(items: &mut Option<Vec<T>>, item: T) {
+    if let Some(items) = items {
+        items.push(item);
+    } else {
+        *items = Some(vec![item]);
+    }
+}
+
 pub type Result<T> = result::Result<T, Error>;
 
 pub struct VmParams<'a> {

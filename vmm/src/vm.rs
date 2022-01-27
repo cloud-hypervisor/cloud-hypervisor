@@ -14,8 +14,8 @@
 #[cfg(any(target_arch = "aarch64", feature = "acpi"))]
 use crate::config::NumaConfig;
 use crate::config::{
-    DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, PmemConfig, UserDeviceConfig,
-    ValidationError, VmConfig, VsockConfig,
+    add_to_config, DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, PmemConfig,
+    UserDeviceConfig, ValidationError, VmConfig, VsockConfig,
 };
 use crate::cpu;
 use crate::device_manager::{self, Console, DeviceManager, DeviceManagerError, PtyPair};
@@ -1390,19 +1390,11 @@ impl Vm {
         Err(Error::ResizeZone)
     }
 
-    fn add_to_config<T>(devices: &mut Option<Vec<T>>, device: T) {
-        if let Some(devices) = devices {
-            devices.push(device);
-        } else {
-            *devices = Some(vec![device]);
-        }
-    }
-
     pub fn add_device(&mut self, mut device_cfg: DeviceConfig) -> Result<PciDeviceInfo> {
         {
             // Validate on a clone of the config
             let mut config = self.config.lock().unwrap().clone();
-            Self::add_to_config(&mut config.devices, device_cfg.clone());
+            add_to_config(&mut config.devices, device_cfg.clone());
             config.validate().map_err(Error::ConfigValidation)?;
         }
 
@@ -1417,7 +1409,7 @@ impl Vm {
         // ensure the device would be created in case of a reboot.
         {
             let mut config = self.config.lock().unwrap();
-            Self::add_to_config(&mut config.devices, device_cfg);
+            add_to_config(&mut config.devices, device_cfg);
         }
 
         self.device_manager
@@ -1433,7 +1425,7 @@ impl Vm {
         {
             // Validate on a clone of the config
             let mut config = self.config.lock().unwrap().clone();
-            Self::add_to_config(&mut config.user_devices, device_cfg.clone());
+            add_to_config(&mut config.user_devices, device_cfg.clone());
             config.validate().map_err(Error::ConfigValidation)?;
         }
 
@@ -1448,7 +1440,7 @@ impl Vm {
         // ensure the device would be created in case of a reboot.
         {
             let mut config = self.config.lock().unwrap();
-            Self::add_to_config(&mut config.user_devices, device_cfg);
+            add_to_config(&mut config.user_devices, device_cfg);
         }
 
         self.device_manager
@@ -1515,7 +1507,7 @@ impl Vm {
         {
             // Validate on a clone of the config
             let mut config = self.config.lock().unwrap().clone();
-            Self::add_to_config(&mut config.disks, disk_cfg.clone());
+            add_to_config(&mut config.disks, disk_cfg.clone());
             config.validate().map_err(Error::ConfigValidation)?;
         }
 
@@ -1530,7 +1522,7 @@ impl Vm {
         // ensure the device would be created in case of a reboot.
         {
             let mut config = self.config.lock().unwrap();
-            Self::add_to_config(&mut config.disks, disk_cfg);
+            add_to_config(&mut config.disks, disk_cfg);
         }
 
         self.device_manager
@@ -1546,7 +1538,7 @@ impl Vm {
         {
             // Validate on a clone of the config
             let mut config = self.config.lock().unwrap().clone();
-            Self::add_to_config(&mut config.fs, fs_cfg.clone());
+            add_to_config(&mut config.fs, fs_cfg.clone());
             config.validate().map_err(Error::ConfigValidation)?;
         }
 
@@ -1561,7 +1553,7 @@ impl Vm {
         // ensure the device would be created in case of a reboot.
         {
             let mut config = self.config.lock().unwrap();
-            Self::add_to_config(&mut config.fs, fs_cfg);
+            add_to_config(&mut config.fs, fs_cfg);
         }
 
         self.device_manager
@@ -1577,7 +1569,7 @@ impl Vm {
         {
             // Validate on a clone of the config
             let mut config = self.config.lock().unwrap().clone();
-            Self::add_to_config(&mut config.pmem, pmem_cfg.clone());
+            add_to_config(&mut config.pmem, pmem_cfg.clone());
             config.validate().map_err(Error::ConfigValidation)?;
         }
 
@@ -1592,7 +1584,7 @@ impl Vm {
         // ensure the device would be created in case of a reboot.
         {
             let mut config = self.config.lock().unwrap();
-            Self::add_to_config(&mut config.pmem, pmem_cfg);
+            add_to_config(&mut config.pmem, pmem_cfg);
         }
 
         self.device_manager
@@ -1608,7 +1600,7 @@ impl Vm {
         {
             // Validate on a clone of the config
             let mut config = self.config.lock().unwrap().clone();
-            Self::add_to_config(&mut config.net, net_cfg.clone());
+            add_to_config(&mut config.net, net_cfg.clone());
             config.validate().map_err(Error::ConfigValidation)?;
         }
 
@@ -1623,7 +1615,7 @@ impl Vm {
         // ensure the device would be created in case of a reboot.
         {
             let mut config = self.config.lock().unwrap();
-            Self::add_to_config(&mut config.net, net_cfg);
+            add_to_config(&mut config.net, net_cfg);
         }
 
         self.device_manager
