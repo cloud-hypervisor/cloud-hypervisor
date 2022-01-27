@@ -771,11 +771,6 @@ components:
           default: "Client"
         id:
           type: string
-        fds:
-          type: array
-          items:
-            type: integer
-            format: int32
         pci_segment:
           type: integer
           format: int16
