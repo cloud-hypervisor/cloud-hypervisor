@@ -210,7 +210,7 @@ pub enum ApiResponsePayload {
     VmmPing(VmmPingResponse),
 
     /// Vm action response
-    VmAction(Vec<u8>),
+    VmAction(Option<Vec<u8>>),
 }
 
 /// This is the response sent by the VMM API server through the mpsc channel.
@@ -439,7 +439,7 @@ fn vm_action(
     api_evt.write(1).map_err(ApiError::EventFdWrite)?;
 
     let body = match response_receiver.recv().map_err(ApiError::ResponseRecv)?? {
-        ApiResponsePayload::VmAction(response) => Some(Body::new(response)),
+        ApiResponsePayload::VmAction(response) => response.map(Body::new),
         ApiResponsePayload::Empty => None,
         _ => return Err(ApiError::ResponsePayloadType),
     };

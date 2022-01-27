@@ -613,6 +613,8 @@ impl Vmm {
         desired_ram: Option<u64>,
         desired_balloon: Option<u64>,
     ) -> result::Result<(), VmError> {
+        self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
+
         if let Some(ref mut vm) = self.vm {
             if let Err(e) = vm.resize(desired_vcpus, desired_ram, desired_balloon) {
                 error!("Error when resizing VM: {:?}", e);
@@ -621,11 +623,25 @@ impl Vmm {
                 Ok(())
             }
         } else {
-            Err(VmError::VmNotRunning)
+            let mut config = self.vm_config.as_ref().unwrap().lock().unwrap();
+            if let Some(desired_vcpus) = desired_vcpus {
+                config.cpus.boot_vcpus = desired_vcpus;
+            }
+            if let Some(desired_ram) = desired_ram {
+                config.memory.size = desired_ram;
+            }
+            if let Some(desired_balloon) = desired_balloon {
+                if let Some(balloon_config) = &mut config.balloon {
+                    balloon_config.size = desired_balloon;
+                }
+            }
+            Ok(())
         }
     }
 
     fn vm_resize_zone(&mut self, id: String, desired_ram: u64) -> result::Result<(), VmError> {
+        self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
+
         if let Some(ref mut vm) = self.vm {
             if let Err(e) = vm.resize_zone(id, desired_ram) {
                 error!("Error when resizing VM: {:?}", e);
@@ -634,11 +650,27 @@ impl Vmm {
                 Ok(())
             }
         } else {
-            Err(VmError::VmNotRunning)
+            // Update VmConfig by setting the new desired ram.
+            let memory_config = &mut self.vm_config.as_ref().unwrap().lock().unwrap().memory;
+
+            if let Some(zones) = &mut memory_config.zones {
+                for zone in zones.iter_mut() {
+                    if zone.id == id {
+                        zone.size = desired_ram;
+                        return Ok(());
+                    }
+                }
+            }
+
+            error!("Could not find the memory zone {} for the resize", id);
+            Err(VmError::ResizeZone)
         }
     }
 
-    fn vm_add_device(&mut self, device_cfg: DeviceConfig) -> result::Result<Vec<u8>, VmError> {
+    fn vm_add_device(
+        &mut self,
+        device_cfg: DeviceConfig,
+    ) -> result::Result<Option<Vec<u8>>, VmError> {
         self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
 
         {
@@ -653,16 +685,21 @@ impl Vmm {
                 error!("Error when adding new device to the VM: {:?}", e);
                 e
             })?;
-            serde_json::to_vec(&info).map_err(VmError::SerializeJson)
+            serde_json::to_vec(&info)
+                .map(Some)
+                .map_err(VmError::SerializeJson)
         } else {
-            Err(VmError::VmNotRunning)
+            // Update VmConfig by adding the new device.
+            let mut config = self.vm_config.as_ref().unwrap().lock().unwrap();
+            add_to_config(&mut config.devices, device_cfg);
+            Ok(None)
         }
     }
 
     fn vm_add_user_device(
         &mut self,
         device_cfg: UserDeviceConfig,
-    ) -> result::Result<Vec<u8>, VmError> {
+    ) -> result::Result<Option<Vec<u8>>, VmError> {
         self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
 
         {
@@ -677,9 +714,14 @@ impl Vmm {
                 error!("Error when adding new user device to the VM: {:?}", e);
                 e
             })?;
-            serde_json::to_vec(&info).map_err(VmError::SerializeJson)
+            serde_json::to_vec(&info)
+                .map(Some)
+                .map_err(VmError::SerializeJson)
         } else {
-            Err(VmError::VmNotRunning)
+            // Update VmConfig by adding the new device.
+            let mut config = self.vm_config.as_ref().unwrap().lock().unwrap();
+            add_to_config(&mut config.user_devices, device_cfg);
+            Ok(None)
         }
     }
 
@@ -696,7 +738,7 @@ impl Vmm {
         }
     }
 
-    fn vm_add_disk(&mut self, disk_cfg: DiskConfig) -> result::Result<Vec<u8>, VmError> {
+    fn vm_add_disk(&mut self, disk_cfg: DiskConfig) -> result::Result<Option<Vec<u8>>, VmError> {
         self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
 
         {
@@ -711,13 +753,18 @@ impl Vmm {
                 error!("Error when adding new disk to the VM: {:?}", e);
                 e
             })?;
-            serde_json::to_vec(&info).map_err(VmError::SerializeJson)
+            serde_json::to_vec(&info)
+                .map(Some)
+                .map_err(VmError::SerializeJson)
         } else {
-            Err(VmError::VmNotRunning)
+            // Update VmConfig by adding the new device.
+            let mut config = self.vm_config.as_ref().unwrap().lock().unwrap();
+            add_to_config(&mut config.disks, disk_cfg);
+            Ok(None)
         }
     }
 
-    fn vm_add_fs(&mut self, fs_cfg: FsConfig) -> result::Result<Vec<u8>, VmError> {
+    fn vm_add_fs(&mut self, fs_cfg: FsConfig) -> result::Result<Option<Vec<u8>>, VmError> {
         self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
 
         {
@@ -732,13 +779,18 @@ impl Vmm {
                 error!("Error when adding new fs to the VM: {:?}", e);
                 e
             })?;
-            serde_json::to_vec(&info).map_err(VmError::SerializeJson)
+            serde_json::to_vec(&info)
+                .map(Some)
+                .map_err(VmError::SerializeJson)
         } else {
-            Err(VmError::VmNotRunning)
+            // Update VmConfig by adding the new device.
+            let mut config = self.vm_config.as_ref().unwrap().lock().unwrap();
+            add_to_config(&mut config.fs, fs_cfg);
+            Ok(None)
         }
     }
 
-    fn vm_add_pmem(&mut self, pmem_cfg: PmemConfig) -> result::Result<Vec<u8>, VmError> {
+    fn vm_add_pmem(&mut self, pmem_cfg: PmemConfig) -> result::Result<Option<Vec<u8>>, VmError> {
         self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
 
         {
@@ -753,13 +805,18 @@ impl Vmm {
                 error!("Error when adding new pmem device to the VM: {:?}", e);
                 e
             })?;
-            serde_json::to_vec(&info).map_err(VmError::SerializeJson)
+            serde_json::to_vec(&info)
+                .map(Some)
+                .map_err(VmError::SerializeJson)
         } else {
-            Err(VmError::VmNotRunning)
+            // Update VmConfig by adding the new device.
+            let mut config = self.vm_config.as_ref().unwrap().lock().unwrap();
+            add_to_config(&mut config.pmem, pmem_cfg);
+            Ok(None)
         }
     }
 
-    fn vm_add_net(&mut self, net_cfg: NetConfig) -> result::Result<Vec<u8>, VmError> {
+    fn vm_add_net(&mut self, net_cfg: NetConfig) -> result::Result<Option<Vec<u8>>, VmError> {
         self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
 
         {
@@ -774,13 +831,18 @@ impl Vmm {
                 error!("Error when adding new network device to the VM: {:?}", e);
                 e
             })?;
-            serde_json::to_vec(&info).map_err(VmError::SerializeJson)
+            serde_json::to_vec(&info)
+                .map(Some)
+                .map_err(VmError::SerializeJson)
         } else {
-            Err(VmError::VmNotRunning)
+            // Update VmConfig by adding the new device.
+            let mut config = self.vm_config.as_ref().unwrap().lock().unwrap();
+            add_to_config(&mut config.net, net_cfg);
+            Ok(None)
         }
     }
 
-    fn vm_add_vsock(&mut self, vsock_cfg: VsockConfig) -> result::Result<Vec<u8>, VmError> {
+    fn vm_add_vsock(&mut self, vsock_cfg: VsockConfig) -> result::Result<Option<Vec<u8>>, VmError> {
         self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
 
         {
@@ -800,19 +862,26 @@ impl Vmm {
                 error!("Error when adding new vsock device to the VM: {:?}", e);
                 e
             })?;
-            serde_json::to_vec(&info).map_err(VmError::SerializeJson)
+            serde_json::to_vec(&info)
+                .map(Some)
+                .map_err(VmError::SerializeJson)
         } else {
-            Err(VmError::VmNotRunning)
+            // Update VmConfig by adding the new device.
+            let mut config = self.vm_config.as_ref().unwrap().lock().unwrap();
+            config.vsock = Some(vsock_cfg);
+            Ok(None)
         }
     }
 
-    fn vm_counters(&mut self) -> result::Result<Vec<u8>, VmError> {
+    fn vm_counters(&mut self) -> result::Result<Option<Vec<u8>>, VmError> {
         if let Some(ref mut vm) = self.vm {
             let info = vm.counters().map_err(|e| {
                 error!("Error when getting counters from the VM: {:?}", e);
                 e
             })?;
-            serde_json::to_vec(&info).map_err(VmError::SerializeJson)
+            serde_json::to_vec(&info)
+                .map(Some)
+                .map_err(VmError::SerializeJson)
         } else {
             Err(VmError::VmNotRunning)
         }
@@ -1592,7 +1661,6 @@ impl Vmm {
                                     .vm_counters()
                                     .map_err(ApiError::VmInfo)
                                     .map(ApiResponsePayload::VmAction);
-
                                 sender.send(response).map_err(Error::ApiResponseSend)?;
                             }
                             ApiRequest::VmReceiveMigration(receive_migration_data, sender) => {
@@ -1735,11 +1803,41 @@ mod unit_tests {
         ));
 
         let _ = vmm.vm_create(create_dummy_vm_config());
+        assert!(vmm
+            .vm_config
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .devices
+            .is_none());
 
-        assert!(matches!(
-            vmm.vm_add_device(device_config),
-            Err(VmError::VmNotRunning)
-        ));
+        let result = vmm.vm_add_device(device_config.clone());
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+        assert_eq!(
+            vmm.vm_config
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .devices
+                .clone()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            vmm.vm_config
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .devices
+                .clone()
+                .unwrap()[0],
+            device_config
+        );
     }
 
     #[test]
@@ -1754,11 +1852,41 @@ mod unit_tests {
         ));
 
         let _ = vmm.vm_create(create_dummy_vm_config());
+        assert!(vmm
+            .vm_config
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .user_devices
+            .is_none());
 
-        assert!(matches!(
-            vmm.vm_add_user_device(user_device_config),
-            Err(VmError::VmNotRunning)
-        ));
+        let result = vmm.vm_add_user_device(user_device_config.clone());
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+        assert_eq!(
+            vmm.vm_config
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .user_devices
+                .clone()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            vmm.vm_config
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .user_devices
+                .clone()
+                .unwrap()[0],
+            user_device_config
+        );
     }
 
     #[test]
@@ -1772,11 +1900,41 @@ mod unit_tests {
         ));
 
         let _ = vmm.vm_create(create_dummy_vm_config());
+        assert!(vmm
+            .vm_config
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .disks
+            .is_none());
 
-        assert!(matches!(
-            vmm.vm_add_disk(disk_config),
-            Err(VmError::VmNotRunning)
-        ));
+        let result = vmm.vm_add_disk(disk_config.clone());
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+        assert_eq!(
+            vmm.vm_config
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .disks
+                .clone()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            vmm.vm_config
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .disks
+                .clone()
+                .unwrap()[0],
+            disk_config
+        );
     }
 
     #[test]
@@ -1790,11 +1948,34 @@ mod unit_tests {
         ));
 
         let _ = vmm.vm_create(create_dummy_vm_config());
+        assert!(vmm.vm_config.as_ref().unwrap().lock().unwrap().fs.is_none());
 
-        assert!(matches!(
-            vmm.vm_add_fs(fs_config),
-            Err(VmError::VmNotRunning)
-        ));
+        let result = vmm.vm_add_fs(fs_config.clone());
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+        assert_eq!(
+            vmm.vm_config
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .fs
+                .clone()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            vmm.vm_config
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .fs
+                .clone()
+                .unwrap()[0],
+            fs_config
+        );
     }
 
     #[test]
@@ -1808,11 +1989,41 @@ mod unit_tests {
         ));
 
         let _ = vmm.vm_create(create_dummy_vm_config());
+        assert!(vmm
+            .vm_config
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .pmem
+            .is_none());
 
-        assert!(matches!(
-            vmm.vm_add_pmem(pmem_config),
-            Err(VmError::VmNotRunning)
-        ));
+        let result = vmm.vm_add_pmem(pmem_config.clone());
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+        assert_eq!(
+            vmm.vm_config
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .pmem
+                .clone()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            vmm.vm_config
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .pmem
+                .clone()
+                .unwrap()[0],
+            pmem_config
+        );
     }
 
     #[test]
@@ -1829,11 +2040,41 @@ mod unit_tests {
         ));
 
         let _ = vmm.vm_create(create_dummy_vm_config());
+        assert!(vmm
+            .vm_config
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .net
+            .is_none());
 
-        assert!(matches!(
-            vmm.vm_add_net(net_config),
-            Err(VmError::VmNotRunning)
-        ));
+        let result = vmm.vm_add_net(net_config.clone());
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+        assert_eq!(
+            vmm.vm_config
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .net
+                .clone()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            vmm.vm_config
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .net
+                .clone()
+                .unwrap()[0],
+            net_config
+        );
     }
 
     #[test]
@@ -1847,10 +2088,28 @@ mod unit_tests {
         ));
 
         let _ = vmm.vm_create(create_dummy_vm_config());
+        assert!(vmm
+            .vm_config
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .vsock
+            .is_none());
 
-        assert!(matches!(
-            vmm.vm_add_vsock(vsock_config),
-            Err(VmError::VmNotRunning)
-        ));
+        let result = vmm.vm_add_vsock(vsock_config.clone());
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+        assert_eq!(
+            vmm.vm_config
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .vsock
+                .clone()
+                .unwrap(),
+            vsock_config
+        );
     }
 }
