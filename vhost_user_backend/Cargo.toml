@@ -12,7 +12,7 @@ epoll = "4.3.1"
 libc = "0.2.116"
 log = "0.4.14"
 virtio-bindings = "0.1.0"
-virtio-queue = { path = "../virtio-queue" }
+virtio-queue = { git = "https://github.com/rust-vmm/vm-virtio", branch = "main" }
 vm-memory = { version = "0.7.0", features = ["backend-bitmap"] }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = "0.9.0"
