@@ -29,7 +29,7 @@ use std::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use virtio_queue::{defs::VIRTQ_MSI_NO_VECTOR, Error as QueueError, Queue};
+use virtio_queue::{Error as QueueError, Queue};
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
@@ -41,6 +41,9 @@ use vm_migration::{
 };
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::{errno::Result, eventfd::EventFd};
+
+/// Vector value used to disable MSI for a queue.
+const VIRTQ_MSI_NO_VECTOR: u16 = 0xffff;
 
 #[derive(Debug)]
 enum Error {

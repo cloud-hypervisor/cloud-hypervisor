@@ -482,15 +482,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "308cc39be01b73d0d18f82a0e7b2a3df85245f84af96fdddc5d202d27e47b86a"
 
 [[package]]
-name = "memoffset"
-version = "0.6.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5aa361d4faea93603064a027415f07bd8e1d5c88c9fbf68bf56a285428fd79ce"
-dependencies = [
- "autocfg",
-]
-
-[[package]]
 name = "micro_http"
 version = "0.1.0"
 source = "git+https://github.com/firecracker-microvm/micro-http?branch=main#0a58eb1ece68e326e68365c4297d0a7c08ecd9bc"
@@ -1211,9 +1202,9 @@ dependencies = [
 [[package]]
 name = "virtio-queue"
 version = "0.1.0"
+source = "git+https://github.com/rust-vmm/vm-virtio?branch=main#2ca74a6d776c1b61989aae8c05d2dee4ab3c47a6"
 dependencies = [
  "log",
- "memoffset",
  "vm-memory",
  "vmm-sys-util",
 ]
