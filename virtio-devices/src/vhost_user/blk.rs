@@ -417,6 +417,10 @@ impl Migratable for Blk {
         self.vu_common.dirty_log(&self.guest_memory)
     }
 
+    fn start_migration(&mut self) -> std::result::Result<(), MigratableError> {
+        self.vu_common.start_migration()
+    }
+
     fn complete_migration(&mut self) -> std::result::Result<(), MigratableError> {
         self.vu_common
             .complete_migration(self.common.kill_evt.take())

@@ -1100,6 +1100,9 @@ impl Vmm {
             )));
         }
 
+        // Let every Migratable object know about the migration being started.
+        vm.start_migration()?;
+
         if send_data_migration.local {
             // Now pause VM
             vm.pause()?;

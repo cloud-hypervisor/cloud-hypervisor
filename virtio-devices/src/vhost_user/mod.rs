@@ -451,7 +451,6 @@ impl VhostUserCommon {
         &mut self,
         guest_memory: &Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     ) -> std::result::Result<(), MigratableError> {
-        self.migration_started = true;
         if let Some(vu) = &self.vu {
             if let Some(guest_memory) = guest_memory {
                 let last_ram_addr = guest_memory.memory().last_addr().raw_value();
@@ -475,7 +474,6 @@ impl VhostUserCommon {
     }
 
     pub fn stop_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
-        self.migration_started = false;
         if let Some(vu) = &self.vu {
             vu.lock().unwrap().stop_dirty_log().map_err(|e| {
                 MigratableError::StopDirtyLog(anyhow!(
@@ -509,10 +507,17 @@ impl VhostUserCommon {
         }
     }
 
+    pub fn start_migration(&mut self) -> std::result::Result<(), MigratableError> {
+        self.migration_started = true;
+        Ok(())
+    }
+
     pub fn complete_migration(
         &mut self,
         kill_evt: Option<EventFd>,
     ) -> std::result::Result<(), MigratableError> {
+        self.migration_started = false;
+
         // Make sure the device thread is killed in order to prevent from
         // reconnections to the socket.
         if let Some(kill_evt) = kill_evt {
