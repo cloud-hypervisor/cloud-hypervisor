@@ -4221,6 +4221,15 @@ impl Migratable for DeviceManager {
         Ok(MemoryRangeTable::new_from_tables(tables))
     }
 
+    fn start_migration(&mut self) -> std::result::Result<(), MigratableError> {
+        for (_, device_node) in self.device_tree.lock().unwrap().iter() {
+            if let Some(migratable) = &device_node.migratable {
+                migratable.lock().unwrap().start_migration()?;
+            }
+        }
+        Ok(())
+    }
+
     fn complete_migration(&mut self) -> std::result::Result<(), MigratableError> {
         for (_, device_node) in self.device_tree.lock().unwrap().iter() {
             if let Some(migratable) = &device_node.migratable {

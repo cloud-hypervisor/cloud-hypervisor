@@ -305,6 +305,10 @@ pub trait Migratable: Send + Pausable + Snapshottable + Transportable {
         Ok(MemoryRangeTable::default())
     }
 
+    fn start_migration(&mut self) -> std::result::Result<(), MigratableError> {
+        Ok(())
+    }
+
     fn complete_migration(&mut self) -> std::result::Result<(), MigratableError> {
         Ok(())
     }
