@@ -301,6 +301,7 @@ pub enum VmState {
     Running,
     Shutdown,
     Paused,
+    BreakPoint,
 }
 
 impl VmState {
@@ -310,28 +311,32 @@ impl VmState {
                 VmState::Created | VmState::Shutdown => {
                     Err(Error::InvalidStateTransition(self, new_state))
                 }
-                VmState::Running | VmState::Paused => Ok(()),
+                VmState::Running | VmState::Paused | VmState::BreakPoint => Ok(()),
             },
 
             VmState::Running => match new_state {
                 VmState::Created | VmState::Running => {
                     Err(Error::InvalidStateTransition(self, new_state))
                 }
-                VmState::Paused | VmState::Shutdown => Ok(()),
+                VmState::Paused | VmState::Shutdown | VmState::BreakPoint => Ok(()),
             },
 
             VmState::Shutdown => match new_state {
-                VmState::Paused | VmState::Created | VmState::Shutdown => {
+                VmState::Paused | VmState::Created | VmState::Shutdown | VmState::BreakPoint => {
                     Err(Error::InvalidStateTransition(self, new_state))
                 }
                 VmState::Running => Ok(()),
             },
 
             VmState::Paused => match new_state {
-                VmState::Created | VmState::Paused => {
+                VmState::Created | VmState::Paused | VmState::BreakPoint => {
                     Err(Error::InvalidStateTransition(self, new_state))
                 }
                 VmState::Running | VmState::Shutdown => Ok(()),
+            },
+            VmState::BreakPoint => match new_state {
+                VmState::Created | VmState::Running => Ok(()),
+                _ => Err(Error::InvalidStateTransition(self, new_state)),
             },
         }
     }
@@ -2735,6 +2740,7 @@ mod tests {
                 assert!(state.valid_transition(VmState::Running).is_ok());
                 assert!(state.valid_transition(VmState::Shutdown).is_err());
                 assert!(state.valid_transition(VmState::Paused).is_ok());
+                assert!(state.valid_transition(VmState::BreakPoint).is_ok());
             }
             VmState::Running => {
                 // Check the transitions from Running
@@ -2742,6 +2748,7 @@ mod tests {
                 assert!(state.valid_transition(VmState::Running).is_err());
                 assert!(state.valid_transition(VmState::Shutdown).is_ok());
                 assert!(state.valid_transition(VmState::Paused).is_ok());
+                assert!(state.valid_transition(VmState::BreakPoint).is_ok());
             }
             VmState::Shutdown => {
                 // Check the transitions from Shutdown
@@ -2749,6 +2756,7 @@ mod tests {
                 assert!(state.valid_transition(VmState::Running).is_ok());
                 assert!(state.valid_transition(VmState::Shutdown).is_err());
                 assert!(state.valid_transition(VmState::Paused).is_err());
+                assert!(state.valid_transition(VmState::BreakPoint).is_err());
             }
             VmState::Paused => {
                 // Check the transitions from Paused
@@ -2756,6 +2764,15 @@ mod tests {
                 assert!(state.valid_transition(VmState::Running).is_ok());
                 assert!(state.valid_transition(VmState::Shutdown).is_ok());
                 assert!(state.valid_transition(VmState::Paused).is_err());
+                assert!(state.valid_transition(VmState::BreakPoint).is_err());
+            }
+            VmState::BreakPoint => {
+                // Check the transitions from Breakpoint
+                assert!(state.valid_transition(VmState::Created).is_ok());
+                assert!(state.valid_transition(VmState::Running).is_ok());
+                assert!(state.valid_transition(VmState::Shutdown).is_err());
+                assert!(state.valid_transition(VmState::Paused).is_err());
+                assert!(state.valid_transition(VmState::BreakPoint).is_err());
             }
         }
     }
