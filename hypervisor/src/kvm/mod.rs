@@ -1074,6 +1074,8 @@ impl cpu::Vcpu for KvmVcpu {
                 VcpuExit::Hyperv => Ok(cpu::VmExit::Hyperv),
                 #[cfg(feature = "tdx")]
                 VcpuExit::Unsupported(KVM_EXIT_TDX) => Ok(cpu::VmExit::Tdx),
+                VcpuExit::Debug(_) => Ok(cpu::VmExit::Debug),
+
                 r => Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
                     "Unexpected exit reason on vcpu run: {:?}",
                     r
