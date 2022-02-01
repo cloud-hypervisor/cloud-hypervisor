@@ -6279,6 +6279,7 @@ mod parallel {
             .args(&["--api-socket", &api_socket])
             .args(&["--cpus", "boot=1"])
             .args(&["--memory", "size=512M,shared=on"])
+            .args(&["--seccomp", "false"])
             .args(&["--kernel", guest.fw_path.as_str()])
             .default_disks()
             .default_net()
