@@ -1,5 +1,4 @@
 // Custom harness to run performance tests
-
 #[macro_use]
 extern crate lazy_static;
 extern crate test_infra;
@@ -7,8 +6,28 @@ extern crate test_infra;
 mod performance_tests;
 
 use performance_tests::*;
-use std::collections::HashSet;
-use std::hash::{Hash, Hasher};
+use serde_derive::{Deserialize, Serialize};
+use std::{
+    collections::HashSet,
+    env, fmt,
+    hash::{Hash, Hasher},
+    sync::mpsc::channel,
+    thread,
+    time::Duration,
+};
+
+#[derive(Debug)]
+enum Error {
+    TestTimeout,
+    TestFailed,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct PerformanceTestResult {
+    name: String,
+    mean: f64,
+    std_dev: f64,
+}
 
 pub struct PerformanceTestControl {
     test_time: u32,
@@ -17,6 +36,29 @@ pub struct PerformanceTestControl {
     queue_size: Option<u32>,
     net_rx: Option<bool>,
     fio_ops: Option<FioOps>,
+}
+
+impl fmt::Display for PerformanceTestControl {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut output = format!(
+            "test_time = {}s, test_iterations = {}",
+            self.test_time, self.test_iterations
+        );
+        if let Some(o) = self.queue_num {
+            output = format!("{}, queue_num = {}", output, o);
+        }
+        if let Some(o) = self.queue_size {
+            output = format!("{}, queue_size = {}", output, o);
+        }
+        if let Some(o) = self.net_rx {
+            output = format!("{}, net_rx = {}", output, o);
+        }
+        if let Some(o) = &self.fio_ops {
+            output = format!("{}, fio_ops = {}", output, o);
+        }
+
+        write!(f, "{}", output)
+    }
 }
 
 impl Default for PerformanceTestControl {
@@ -56,9 +98,7 @@ impl PartialEq for PerformanceTest {
 impl Eq for PerformanceTest {}
 
 impl PerformanceTest {
-    pub fn run(&self) -> (f64, f64) {
-        println!("Running test: '{}' ...", self.name);
-
+    pub fn run(&self) -> PerformanceTestResult {
         let mut metrics = Vec::new();
         for _ in 0..self.control.test_iterations {
             metrics.push((self.func_ptr)(&self.control));
@@ -67,12 +107,17 @@ impl PerformanceTest {
         let mean = mean(&metrics).unwrap();
         let std_dev = std_deviation(&metrics).unwrap();
 
-        println!(
-            "{} ... ok: mean = {}, std_dev = {}",
-            self.name, mean, std_dev
-        );
+        PerformanceTestResult {
+            name: self.name.to_string(),
+            mean,
+            std_dev,
+        }
+    }
 
-        (mean, std_dev)
+    // Calculate the timeout for each test
+    // Note: To cover the setup/cleanup time, 20s is added for each iteration of the test
+    pub fn calc_timeout(&self) -> u64 {
+        ((self.control.test_time + 20) * self.control.test_iterations) as u64
     }
 }
 
@@ -256,10 +301,57 @@ lazy_static! {
     };
 }
 
+fn run_test_with_timetout(test: &'static PerformanceTest) -> Result<String, Error> {
+    let (sender, receiver) = channel::<Result<String, Error>>();
+    thread::spawn(move || {
+        println!("Test '{}' running .. ({})", test.name, test.control);
+
+        let output = match std::panic::catch_unwind(|| test.run()) {
+            Ok(test_result) => {
+                println!(
+                    "Test '{}' .. ok: mean = {}, std_dev = {}",
+                    test_result.name, test_result.mean, test_result.std_dev
+                );
+                Ok(serde_json::to_string(&test_result).unwrap())
+            }
+            Err(_) => Err(Error::TestFailed),
+        };
+
+        let _ = sender.send(output);
+    });
+
+    // Todo: Need to cleanup/kill all hanging child processes
+    let test_timeout = test.calc_timeout();
+    receiver
+        .recv_timeout(Duration::from_secs(test_timeout))
+        .map_err(|_| {
+            eprintln!(
+                "[Error] Test '{}' time-out after {} seconds",
+                test.name, test_timeout
+            );
+            Error::TestTimeout
+        })?
+}
+
 fn main() {
+    let test_filter = env::var("TEST_FILTER").map_or("".to_string(), |o| o);
+
     // Run performance tests sequentially and report results (in both readable/json format)
-    // Todo: test filter, report in readable/json format, capture test output unless failed;
+    let mut json_output = String::new();
     for test in TEST_LIST.iter() {
-        test.run();
+        if test.name.contains(&test_filter) {
+            match run_test_with_timetout(test) {
+                Ok(r) => {
+                    json_output.push_str(&r);
+                }
+                Err(e) => {
+                    eprintln!("Aborting test due to error: '{:?}'", e);
+                    break;
+                }
+            };
+        }
     }
+
+    // Todo: Report/upload to the metrics database
+    println!("\n\nTests result in json format: \n {}", json_output);
 }
