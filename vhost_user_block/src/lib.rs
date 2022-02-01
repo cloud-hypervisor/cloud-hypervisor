@@ -23,18 +23,19 @@ use std::path::PathBuf;
 use std::process;
 use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
 use std::time::Instant;
 use std::vec::Vec;
 use std::{convert, error, fmt, io};
 use vhost::vhost_user::message::*;
 use vhost::vhost_user::Listener;
-use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring};
+use vhost_user_backend::{VhostUserBackendMut, VhostUserDaemon, VringRwLock, VringState, VringT};
 use virtio_bindings::bindings::virtio_blk::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
-use vm_memory::ByteValued;
-use vm_memory::Bytes;
-use vmm_sys_util::eventfd::EventFd;
+use vm_memory::{bitmap::AtomicBitmap, ByteValued, Bytes, GuestMemoryAtomic};
+use vmm_sys_util::{epoll::EventSet, eventfd::EventFd};
+
+type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
 const SECTOR_SHIFT: u8 = 9;
 const SECTOR_SIZE: u64 = 0x01 << SECTOR_SHIFT;
@@ -111,10 +112,13 @@ impl VhostUserBlkThread {
         })
     }
 
-    fn process_queue(&mut self, vring: &mut Vring) -> bool {
-        let mut used_any = false;
+    fn process_queue(
+        &mut self,
+        vring: &mut RwLockWriteGuard<VringState<GuestMemoryAtomic<GuestMemoryMmap>>>,
+    ) -> bool {
+        let mut used_desc_heads = Vec::new();
 
-        while let Some(mut desc_chain) = vring.mut_queue().iter().unwrap().next() {
+        for mut desc_chain in vring.get_queue_mut().iter().unwrap() {
             debug!("got an element in the queue");
             let len;
             match Request::parse(&mut desc_chain, None) {
@@ -147,29 +151,33 @@ impl VhostUserBlkThread {
                 }
             }
 
+            used_desc_heads.push((desc_chain.head_index(), len));
+        }
+
+        let mut needs_signalling = false;
+        for (desc_head, len) in used_desc_heads.iter() {
             if self.event_idx {
-                let queue = vring.mut_queue();
-                if queue.add_used(desc_chain.head_index(), len).is_ok() {
+                let queue = vring.get_queue_mut();
+                if queue.add_used(*desc_head, *len).is_ok() {
                     if queue.needs_notification().unwrap() {
                         debug!("signalling queue");
-                        vring.signal_used_queue().unwrap();
+                        needs_signalling = true;
                     } else {
                         debug!("omitting signal (event_idx)");
                     }
-                    used_any = true;
                 }
             } else {
                 debug!("signalling queue");
-                vring
-                    .mut_queue()
-                    .add_used(desc_chain.head_index(), len)
-                    .unwrap();
-                vring.signal_used_queue().unwrap();
-                used_any = true;
+                vring.get_queue_mut().add_used(*desc_head, *len).unwrap();
+                needs_signalling = true;
             }
         }
 
-        used_any
+        if needs_signalling {
+            vring.signal_used_queue().unwrap();
+        }
+
+        !used_desc_heads.is_empty()
     }
 }
 
@@ -272,7 +280,9 @@ impl VhostUserBlkBackend {
     }
 }
 
-impl VhostUserBackend for VhostUserBlkBackend {
+impl VhostUserBackendMut<VringRwLock<GuestMemoryAtomic<GuestMemoryMmap>>, AtomicBitmap>
+    for VhostUserBlkBackend
+{
     fn num_queues(&self) -> usize {
         self.config.num_queues as usize
     }
@@ -316,13 +326,13 @@ impl VhostUserBackend for VhostUserBlkBackend {
     }
 
     fn handle_event(
-        &self,
+        &mut self,
         device_event: u16,
-        evset: epoll::Events,
-        vrings: &[Arc<RwLock<Vring>>],
+        evset: EventSet,
+        vrings: &[VringRwLock<GuestMemoryAtomic<GuestMemoryMmap>>],
         thread_id: usize,
     ) -> VhostUserBackendResult<bool> {
-        if evset != epoll::Events::EPOLLIN {
+        if evset != EventSet::IN {
             return Err(Error::HandleEventNotEpollIn.into());
         }
 
@@ -331,7 +341,7 @@ impl VhostUserBackend for VhostUserBlkBackend {
         let mut thread = self.threads[thread_id].lock().unwrap();
         match device_event {
             0 => {
-                let mut vring = vrings[0].write().unwrap();
+                let mut vring = vrings[0].get_mut();
 
                 if self.poll_queue {
                     // Actively poll the queue until POLL_QUEUE_US has passed
@@ -352,7 +362,7 @@ impl VhostUserBackend for VhostUserBlkBackend {
                     // calling process_queue() until it stops finding new
                     // requests on the queue.
                     loop {
-                        vring.mut_queue().enable_notification().unwrap();
+                        vring.get_queue_mut().enable_notification().unwrap();
                         if !thread.process_queue(&mut vring) {
                             break;
                         }
@@ -386,21 +396,26 @@ impl VhostUserBackend for VhostUserBlkBackend {
         Ok(())
     }
 
-    fn exit_event(&self, thread_index: usize) -> Option<(EventFd, Option<u16>)> {
-        // The exit event is placed after the queue, which is event index 1.
-        Some((
+    fn exit_event(&self, thread_index: usize) -> Option<EventFd> {
+        Some(
             self.threads[thread_index]
                 .lock()
                 .unwrap()
                 .kill_evt
                 .try_clone()
                 .unwrap(),
-            Some(1),
-        ))
+        )
     }
 
     fn queues_per_thread(&self) -> Vec<u64> {
         self.queues_per_thread.clone()
+    }
+
+    fn update_memory(
+        &mut self,
+        _mem: GuestMemoryAtomic<GuestMemoryMmap>,
+    ) -> VhostUserBackendResult<()> {
+        Ok(())
     }
 }
 
@@ -491,11 +506,16 @@ pub fn start_block_backend(backend_command: &str) {
     let listener = Listener::new(&backend_config.socket, true).unwrap();
 
     let name = "vhost-user-blk-backend";
-    let mut blk_daemon = VhostUserDaemon::new(name.to_string(), blk_backend.clone()).unwrap();
+    let mut blk_daemon = VhostUserDaemon::new(
+        name.to_string(),
+        blk_backend.clone(),
+        GuestMemoryAtomic::new(GuestMemoryMmap::new()),
+    )
+    .unwrap();
 
     debug!("blk_daemon is created!\n");
 
-    if let Err(e) = blk_daemon.start_server(listener) {
+    if let Err(e) = blk_daemon.start(listener) {
         error!(
             "Failed to start daemon for vhost-user-block with error: {:?}\n",
             e

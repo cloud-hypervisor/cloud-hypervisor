@@ -1108,6 +1108,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "vhost-user-backend"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a8db00e93514caa8987bb8b536fe962c9b66b4068583abc4c531eb97988477cd"
+dependencies = [
+ "libc",
+ "log",
+ "vhost",
+ "virtio-bindings",
+ "virtio-queue",
+ "vm-memory",
+ "vmm-sys-util",
+]
+
+[[package]]
 name = "vhost_user_backend"
 version = "0.1.0"
 dependencies = [
@@ -1135,7 +1150,7 @@ dependencies = [
  "option_parser",
  "qcow",
  "vhost",
- "vhost_user_backend",
+ "vhost-user-backend",
  "virtio-bindings",
  "vm-memory",
  "vmm-sys-util",
