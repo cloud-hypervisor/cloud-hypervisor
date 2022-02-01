@@ -191,7 +191,7 @@ Multiple arguments can be given to the `--disk` parameter.
 #### Building your kernel
 
 Cloud Hypervisor also supports direct kernel boot into a `vmlinux` ELF kernel.
-In order to support virtio-iommu we have our own development branch. You are
+In order to support virtio-watchdog we have our own development branch. You are
 of course able to use your own kernel but these instructions will continue with
 the version that we develop and test against.
 
