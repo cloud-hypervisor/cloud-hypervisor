@@ -33,11 +33,7 @@ Any UEFI capable image can be booted using the Cloud Hypervisor specific firmwar
 
 To make Cloud Hypervisor use UEFI boot, pass the `CLOUDHV.fd` file path as an argument to the `--kernel` option. The firmware file will be opened in read only mode.
 
-The same firmware can be used with Cloud Hypervisor or with QEMU. This is particularly useful if using QEMU for the preparation phase.
-
 # Links
 
 - [OVMF wiki](https://github.com/tianocore/tianocore.github.io/wiki/OVMF) 
 - [Cloud Hypervisor specific tree](https://github.com/cloud-hypervisor/edk2/tree/ch)
-- [Redhat OVMF Status Report](https://access.redhat.com/sites/default/files/attachments/ovmf-whtepaper-031815.pdf)
-- [SeaBIOS Build Overview](https://www.seabios.org/Build_overview#Build_as_a_UEFI_Compatibility_Support_Module_.28CSM.29)
