@@ -6228,34 +6228,48 @@ mod parallel {
         .success());
 
         // Start the SPDK nvmf_tgt daemon to present NVMe device as a VFIO user device
-        Command::new("/usr/local/bin/spdk-nvme/nvmf_tgt")
+        let mut nvmf_child = Command::new("/usr/local/bin/spdk-nvme/nvmf_tgt")
             .args(&["-i", "0", "-m", "0x1"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()
             .unwrap();
         thread::sleep(std::time::Duration::new(10, 0));
 
-        assert!(exec_host_command_status(
-            "/usr/local/bin/spdk-nvme/rpc.py nvmf_create_transport -t VFIOUSER"
-        )
-        .success());
-        assert!(exec_host_command_status(&format!(
-            "/usr/local/bin/spdk-nvme/rpc.py bdev_aio_create {} test 512",
-            nvme_dir.join("test-disk.raw").to_str().unwrap()
-        ))
-        .success());
-        assert!(exec_host_command_status(
+        let r = std::panic::catch_unwind(|| {
+            assert!(exec_host_command_status(
+                "/usr/local/bin/spdk-nvme/rpc.py nvmf_create_transport -t VFIOUSER"
+            )
+            .success());
+            assert!(exec_host_command_status(&format!(
+                "/usr/local/bin/spdk-nvme/rpc.py bdev_aio_create {} test 512",
+                nvme_dir.join("test-disk.raw").to_str().unwrap()
+            ))
+            .success());
+            assert!(exec_host_command_status(
                 "/usr/local/bin/spdk-nvme/rpc.py nvmf_create_subsystem nqn.2019-07.io.spdk:cnode -a -s test"
             )
             .success());
-        assert!(exec_host_command_status(
+            assert!(exec_host_command_status(
             "/usr/local/bin/spdk-nvme/rpc.py nvmf_subsystem_add_ns nqn.2019-07.io.spdk:cnode test"
         )
         .success());
-        assert!(exec_host_command_status(&format!(
+            assert!(exec_host_command_status(&format!(
                 "/usr/local/bin/spdk-nvme/rpc.py nvmf_subsystem_add_listener nqn.2019-07.io.spdk:cnode -t VFIOUSER -a {} -s 0",
                 nvme_dir.join("nvme-vfio-user").to_str().unwrap()
             ))
             .success());
+        });
+
+        if let Err(e) = r {
+            eprintln!("Panic during NVME host config: {:?}", e);
+            if let Some(_exit) = nvmf_child.try_wait().unwrap() {
+                let o = nvmf_child.wait_with_output().unwrap();
+                eprintln!("Daemon stdout:\n{}", String::from_utf8_lossy(&o.stdout));
+                eprintln!("Daemon stderr:\n{}", String::from_utf8_lossy(&o.stderr));
+            }
+            panic!("NVMF configuration failed")
+        }
     }
 
     fn cleanup_spdk_nvme() {
