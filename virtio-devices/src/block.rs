@@ -287,6 +287,34 @@ impl BlockEpollHandler {
 }
 
 impl EpollHelperHandler for BlockEpollHandler {
+    fn resume(&mut self) {
+        match self.process_queue_submit() {
+            Ok(needs_notification) => {
+                if needs_notification {
+                    if let Err(e) = self.signal_used_queue() {
+                        error!("Failed to signal used queue: {:?}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Failed to process queue (submit): {:?}", e);
+            }
+        }
+
+        match self.process_queue_complete() {
+            Ok(needs_notification) => {
+                if needs_notification {
+                    if let Err(e) = self.signal_used_queue() {
+                        error!("Failed to signal used queue: {:?}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Failed to process queue (complete): {:?}", e);
+            }
+        }
+    }
+
     fn handle_event(&mut self, _helper: &mut EpollHelper, event: &epoll::Event) -> bool {
         let ev_type = event.data as u16;
         match ev_type {

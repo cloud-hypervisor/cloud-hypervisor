@@ -36,6 +36,9 @@ pub const EPOLL_HELPER_EVENT_LAST: u16 = 15;
 pub trait EpollHelperHandler {
     // Return true if the loop execution should be stopped
     fn handle_event(&mut self, helper: &mut EpollHelper, event: &epoll::Event) -> bool;
+
+    // Called when the epoll loop is resumed after a pause
+    fn resume(&mut self) {}
 }
 
 impl EpollHelper {
@@ -153,6 +156,8 @@ impl EpollHelper {
                         // This ensures the pause event has been seen by each
                         // thread related to this virtio device.
                         let _ = self.pause_evt.read();
+
+                        handler.resume();
                     }
                     _ => {
                         if handler.handle_event(self, event) {
