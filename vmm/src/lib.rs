@@ -1630,3 +1630,227 @@ impl Vmm {
 const CPU_MANAGER_SNAPSHOT_ID: &str = "cpu-manager";
 const MEMORY_MANAGER_SNAPSHOT_ID: &str = "memory-manager";
 const DEVICE_MANAGER_SNAPSHOT_ID: &str = "device-manager";
+
+#[cfg(test)]
+mod unit_tests {
+    use super::*;
+    use config::{
+        CmdlineConfig, ConsoleConfig, ConsoleOutputMode, CpusConfig, HotplugMethod, KernelConfig,
+        MemoryConfig, RngConfig, VmConfig,
+    };
+
+    fn create_dummy_vmm() -> Vmm {
+        Vmm::new(
+            "dummy".to_string(),
+            EventFd::new(EFD_NONBLOCK).unwrap(),
+            SeccompAction::Allow,
+            hypervisor::new().unwrap(),
+            EventFd::new(EFD_NONBLOCK).unwrap(),
+        )
+        .unwrap()
+    }
+
+    fn create_dummy_vm_config() -> Arc<Mutex<VmConfig>> {
+        Arc::new(Mutex::new(VmConfig {
+            cpus: CpusConfig {
+                boot_vcpus: 1,
+                max_vcpus: 1,
+                topology: None,
+                kvm_hyperv: false,
+                max_phys_bits: 46,
+                affinity: None,
+            },
+            memory: MemoryConfig {
+                size: 536_870_912,
+                mergeable: false,
+                hotplug_method: HotplugMethod::Acpi,
+                hotplug_size: None,
+                hotplugged_size: None,
+                shared: true,
+                hugepages: false,
+                hugepage_size: None,
+                prefault: false,
+                zones: None,
+            },
+            kernel: Some(KernelConfig {
+                path: PathBuf::from("/path/to/kernel"),
+            }),
+            initramfs: None,
+            cmdline: CmdlineConfig {
+                args: String::from(""),
+            },
+            disks: None,
+            net: None,
+            rng: RngConfig {
+                src: PathBuf::from("/dev/urandom"),
+                iommu: false,
+            },
+            balloon: None,
+            fs: None,
+            pmem: None,
+            serial: ConsoleConfig {
+                file: None,
+                mode: ConsoleOutputMode::Null,
+                iommu: false,
+            },
+            console: ConsoleConfig {
+                file: None,
+                mode: ConsoleOutputMode::Tty,
+                iommu: false,
+            },
+            devices: None,
+            user_devices: None,
+            vsock: None,
+            iommu: false,
+            #[cfg(target_arch = "x86_64")]
+            sgx_epc: None,
+            numa: None,
+            watchdog: false,
+            #[cfg(feature = "tdx")]
+            tdx: None,
+            platform: None,
+        }))
+    }
+
+    #[test]
+    fn test_vmm_vm_create() {
+        let mut vmm = create_dummy_vmm();
+        let config = create_dummy_vm_config();
+
+        assert!(matches!(vmm.vm_create(config.clone()), Ok(())));
+        assert!(matches!(
+            vmm.vm_create(config),
+            Err(VmError::VmAlreadyCreated)
+        ));
+    }
+
+    #[test]
+    fn test_vmm_vm_cold_add_device() {
+        let mut vmm = create_dummy_vmm();
+        let device_config = DeviceConfig::parse("path=/path/to/device").unwrap();
+
+        assert!(matches!(
+            vmm.vm_add_device(device_config.clone()),
+            Err(VmError::VmNotCreated)
+        ));
+
+        let _ = vmm.vm_create(create_dummy_vm_config());
+
+        assert!(matches!(
+            vmm.vm_add_device(device_config),
+            Err(VmError::VmNotRunning)
+        ));
+    }
+
+    #[test]
+    fn test_vmm_vm_cold_add_user_device() {
+        let mut vmm = create_dummy_vmm();
+        let user_device_config =
+            UserDeviceConfig::parse("socket=/path/to/socket,id=8,pci_segment=2").unwrap();
+
+        assert!(matches!(
+            vmm.vm_add_user_device(user_device_config.clone()),
+            Err(VmError::VmNotCreated)
+        ));
+
+        let _ = vmm.vm_create(create_dummy_vm_config());
+
+        assert!(matches!(
+            vmm.vm_add_user_device(user_device_config),
+            Err(VmError::VmNotRunning)
+        ));
+    }
+
+    #[test]
+    fn test_vmm_vm_cold_add_disk() {
+        let mut vmm = create_dummy_vmm();
+        let disk_config = DiskConfig::parse("path=/path/to_file").unwrap();
+
+        assert!(matches!(
+            vmm.vm_add_disk(disk_config.clone()),
+            Err(VmError::VmNotCreated)
+        ));
+
+        let _ = vmm.vm_create(create_dummy_vm_config());
+
+        assert!(matches!(
+            vmm.vm_add_disk(disk_config),
+            Err(VmError::VmNotRunning)
+        ));
+    }
+
+    #[test]
+    fn test_vmm_vm_cold_add_fs() {
+        let mut vmm = create_dummy_vmm();
+        let fs_config = FsConfig::parse("tag=mytag,socket=/tmp/sock").unwrap();
+
+        assert!(matches!(
+            vmm.vm_add_fs(fs_config.clone()),
+            Err(VmError::VmNotCreated)
+        ));
+
+        let _ = vmm.vm_create(create_dummy_vm_config());
+
+        assert!(matches!(
+            vmm.vm_add_fs(fs_config),
+            Err(VmError::VmNotRunning)
+        ));
+    }
+
+    #[test]
+    fn test_vmm_vm_cold_add_pmem() {
+        let mut vmm = create_dummy_vmm();
+        let pmem_config = PmemConfig::parse("file=/tmp/pmem,size=128M").unwrap();
+
+        assert!(matches!(
+            vmm.vm_add_pmem(pmem_config.clone()),
+            Err(VmError::VmNotCreated)
+        ));
+
+        let _ = vmm.vm_create(create_dummy_vm_config());
+
+        assert!(matches!(
+            vmm.vm_add_pmem(pmem_config),
+            Err(VmError::VmNotRunning)
+        ));
+    }
+
+    #[test]
+    fn test_vmm_vm_cold_add_net() {
+        let mut vmm = create_dummy_vmm();
+        let net_config = NetConfig::parse(
+            "mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,vhost_user=true,socket=/tmp/sock",
+        )
+        .unwrap();
+
+        assert!(matches!(
+            vmm.vm_add_net(net_config.clone()),
+            Err(VmError::VmNotCreated)
+        ));
+
+        let _ = vmm.vm_create(create_dummy_vm_config());
+
+        assert!(matches!(
+            vmm.vm_add_net(net_config),
+            Err(VmError::VmNotRunning)
+        ));
+    }
+
+    #[test]
+    fn test_vmm_vm_cold_add_vsock() {
+        let mut vmm = create_dummy_vmm();
+        let vsock_config = VsockConfig::parse("socket=/tmp/sock,cid=1,iommu=on").unwrap();
+
+        assert!(matches!(
+            vmm.vm_add_vsock(vsock_config.clone()),
+            Err(VmError::VmNotCreated)
+        ));
+
+        let _ = vmm.vm_create(create_dummy_vm_config());
+
+        assert!(matches!(
+            vmm.vm_add_vsock(vsock_config),
+            Err(VmError::VmNotRunning)
+        ));
+    }
+}
