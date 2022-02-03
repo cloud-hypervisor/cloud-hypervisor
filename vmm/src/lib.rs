@@ -1142,6 +1142,9 @@ impl Vmm {
 
             // Send last batch of dirty pages
             Self::vm_maybe_send_dirty_pages(vm, &mut socket)?;
+
+            // Stop logging dirty pages
+            vm.stop_dirty_log()?;
         }
         // Capture snapshot and send it
         let vm_snapshot = vm.snapshot()?;
@@ -1174,12 +1177,7 @@ impl Vmm {
         info!("Migration complete");
 
         // Let every Migratable object know about the migration being complete
-        vm.complete_migration()?;
-
-        // Stop logging dirty pages
-        vm.stop_dirty_log()?;
-
-        Ok(())
+        vm.complete_migration()
     }
 
     fn vm_send_migration(
