@@ -1137,21 +1137,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vhost_user_backend"
-version = "0.1.0"
-dependencies = [
- "epoll",
- "libc",
- "log",
- "vhost",
- "virtio-bindings",
- "virtio-queue",
- "vm-memory",
- "vm-virtio",
- "vmm-sys-util",
-]
-
-[[package]]
 name = "vhost_user_block"
 version = "0.1.0"
 dependencies = [

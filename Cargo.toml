@@ -76,7 +76,6 @@ members = [
     "rate_limiter",
     "vfio_user",
     "vhdx",
-    "vhost_user_backend",
     "vhost_user_block",
     "vhost_user_net",
     "virtio-devices",
