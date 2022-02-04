@@ -587,7 +587,13 @@ impl Guest {
         )
     }
 
-    fn api_create_body(&self, cpu_count: u8, fw_path: &str) -> String {
+    fn api_create_body(
+        &self,
+        cpu_count: u8,
+        fw_path: &str,
+        _kernel_path: &str,
+        _kernel_cmd: &str,
+    ) -> String {
         #[cfg(all(target_arch = "x86_64", not(feature = "mshv")))]
         format! {"{{\"cpus\":{{\"boot_vcpus\":{},\"max_vcpus\":{}}},\"kernel\":{{\"path\":\"{}\"}},\"cmdline\":{{\"args\": \"\"}},\"net\":[{{\"ip\":\"{}\", \"mask\":\"255.255.255.0\", \"mac\":\"{}\"}}], \"disks\":[{{\"path\":\"{}\"}}, {{\"path\":\"{}\"}}]}}",
                  cpu_count,
@@ -603,8 +609,8 @@ impl Guest {
         format! {"{{\"cpus\":{{\"boot_vcpus\":{},\"max_vcpus\":{}}},\"kernel\":{{\"path\":\"{}\"}},\"cmdline\":{{\"args\": \"{}\"}},\"net\":[{{\"ip\":\"{}\", \"mask\":\"255.255.255.0\", \"mac\":\"{}\"}}], \"disks\":[{{\"path\":\"{}\"}}, {{\"path\":\"{}\"}}]}}",
                  cpu_count,
                  cpu_count,
-                 direct_kernel_boot_path().to_str().unwrap(),
-                 DIRECT_KERNEL_BOOT_CMDLINE,
+                 _kernel_path,
+                 _kernel_cmd,
                  self.network.host_ip,
                  self.network.guest_mac,
                  self.disk_config.disk(DiskType::OperatingSystem).unwrap().as_str(),
@@ -4331,8 +4337,13 @@ mod parallel {
 
         // Create the VM first
         let cpu_count: u8 = 4;
-        let http_body =
-            guest.api_create_body(cpu_count, fw_path(FwType::RustHypervisorFirmware).as_str());
+        let http_body = guest.api_create_body(
+            cpu_count,
+            fw_path(FwType::RustHypervisorFirmware).as_str(),
+            direct_kernel_boot_path().to_str().unwrap(),
+            DIRECT_KERNEL_BOOT_CMDLINE,
+        );
+
         curl_command(
             &api_socket,
             "PUT",
@@ -4381,8 +4392,12 @@ mod parallel {
 
         // Create the VM first
         let cpu_count: u8 = 4;
-        let http_body =
-            guest.api_create_body(cpu_count, fw_path(FwType::RustHypervisorFirmware).as_str());
+        let http_body = guest.api_create_body(
+            cpu_count,
+            fw_path(FwType::RustHypervisorFirmware).as_str(),
+            direct_kernel_boot_path().to_str().unwrap(),
+            DIRECT_KERNEL_BOOT_CMDLINE,
+        );
         curl_command(
             &api_socket,
             "PUT",
