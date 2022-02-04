@@ -42,7 +42,6 @@ lazy_static! {
 struct Guest {
     tmp_dir: TempDir,
     disk_config: Box<dyn DiskConfig>,
-    fw_path: String,
     network: GuestNetworkConfig,
 }
 
@@ -473,25 +472,25 @@ enum FwType {
     RustHypervisorFirmware,
 }
 
-impl Guest {
-    fn fw_path(fw_type: FwType) -> String {
-        let mut workload_path = dirs::home_dir().unwrap();
-        workload_path.push("workloads");
+fn fw_path(fw_type: FwType) -> String {
+    let mut workload_path = dirs::home_dir().unwrap();
+    workload_path.push("workloads");
 
-        let mut fw_path = workload_path;
-        #[cfg(target_arch = "aarch64")]
-        fw_path.push("CLOUDHV_EFI.fd");
-        #[cfg(target_arch = "x86_64")]
-        {
-            match fw_type {
-                FwType::Ovmf => fw_path.push(OVMF_NAME),
-                FwType::RustHypervisorFirmware => fw_path.push("hypervisor-fw"),
-            }
+    let mut fw_path = workload_path;
+    #[cfg(target_arch = "aarch64")]
+    fw_path.push("CLOUDHV_EFI.fd");
+    #[cfg(target_arch = "x86_64")]
+    {
+        match fw_type {
+            FwType::Ovmf => fw_path.push(OVMF_NAME),
+            FwType::RustHypervisorFirmware => fw_path.push("hypervisor-fw"),
         }
-
-        fw_path.to_str().unwrap().to_string()
     }
 
+    fw_path.to_str().unwrap().to_string()
+}
+
+impl Guest {
     fn new_from_ip_range(mut disk_config: Box<dyn DiskConfig>, class: &str, id: u8) -> Self {
         let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
 
@@ -513,7 +512,6 @@ impl Guest {
         Guest {
             tmp_dir,
             disk_config,
-            fw_path: Self::fw_path(FwType::RustHypervisorFirmware),
             network,
         }
     }
@@ -589,12 +587,12 @@ impl Guest {
         )
     }
 
-    fn api_create_body(&self, cpu_count: u8) -> String {
+    fn api_create_body(&self, cpu_count: u8, fw_path: &str) -> String {
         #[cfg(all(target_arch = "x86_64", not(feature = "mshv")))]
         format! {"{{\"cpus\":{{\"boot_vcpus\":{},\"max_vcpus\":{}}},\"kernel\":{{\"path\":\"{}\"}},\"cmdline\":{{\"args\": \"\"}},\"net\":[{{\"ip\":\"{}\", \"mask\":\"255.255.255.0\", \"mac\":\"{}\"}}], \"disks\":[{{\"path\":\"{}\"}}, {{\"path\":\"{}\"}}]}}",
                  cpu_count,
                  cpu_count,
-                 self.fw_path.as_str(),
+                 fw_path,
                  self.network.host_ip,
                  self.network.guest_mac,
                  self.disk_config.disk(DiskType::OperatingSystem).unwrap().as_str(),
@@ -1041,8 +1039,9 @@ fn test_cpu_topology(threads_per_core: u8, cores_per_package: u8, packages: u8, 
     let total_vcpus = threads_per_core * cores_per_package * packages;
     let direct_kernel_boot_path = direct_kernel_boot_path();
     let mut kernel_path = direct_kernel_boot_path.to_str().unwrap();
+    let fw_path = fw_path(FwType::RustHypervisorFirmware);
     if use_fw {
-        kernel_path = guest.fw_path.as_str();
+        kernel_path = fw_path.as_str();
     }
 
     let mut child = GuestCommand::new(&guest)
@@ -2357,8 +2356,8 @@ mod parallel {
             .drain(..)
             .for_each(|disk_config| {
                 vec![
-                    Guest::fw_path(FwType::Ovmf),
-                    Guest::fw_path(FwType::RustHypervisorFirmware),
+                    fw_path(FwType::Ovmf),
+                    fw_path(FwType::RustHypervisorFirmware),
                 ]
                 .drain(..)
                 .for_each(|fw_path| {
@@ -3132,7 +3131,7 @@ mod parallel {
         let mut child = GuestCommand::new(&guest)
             .args(&["--cpus", "boot=1"])
             .args(&["--memory", "size=512M"])
-            .args(&["--kernel", guest.fw_path.as_str()])
+            .args(&["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
             .args(&[
                 "--disk",
                 format!("path={},direct=on", os_path.as_path().to_str().unwrap()).as_str(),
@@ -4332,7 +4331,8 @@ mod parallel {
 
         // Create the VM first
         let cpu_count: u8 = 4;
-        let http_body = guest.api_create_body(cpu_count);
+        let http_body =
+            guest.api_create_body(cpu_count, fw_path(FwType::RustHypervisorFirmware).as_str());
         curl_command(
             &api_socket,
             "PUT",
@@ -4381,7 +4381,8 @@ mod parallel {
 
         // Create the VM first
         let cpu_count: u8 = 4;
-        let http_body = guest.api_create_body(cpu_count);
+        let http_body =
+            guest.api_create_body(cpu_count, fw_path(FwType::RustHypervisorFirmware).as_str());
         curl_command(
             &api_socket,
             "PUT",
@@ -6281,7 +6282,7 @@ mod parallel {
             .args(&["--api-socket", &api_socket])
             .args(&["--cpus", "boot=1"])
             .args(&["--memory", "size=512M,shared=on"])
-            .args(&["--kernel", guest.fw_path.as_str()])
+            .args(&["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
             .default_disks()
             .default_net()
             .capture_output()
@@ -7434,7 +7435,7 @@ mod vfio {
                 "--memory",
                 format!("size=4G,hotplug_size=4G,hotplug_method={}", hotplug_method).as_str(),
             ])
-            .args(&["--kernel", guest.fw_path.as_str()])
+            .args(&["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
             .args(&["--device", "path=/sys/bus/pci/devices/0000:31:00.0/"])
             .args(&["--api-socket", &api_socket])
             .default_disks()
@@ -7485,7 +7486,7 @@ mod vfio {
         let mut child = GuestCommand::new(&guest)
             .args(&["--cpus", "boot=4"])
             .args(&["--memory", "size=4G"])
-            .args(&["--kernel", guest.fw_path.as_str()])
+            .args(&["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
             .args(&["--api-socket", &api_socket])
             .default_disks()
             .default_net()
@@ -7527,7 +7528,7 @@ mod vfio {
         let mut child = GuestCommand::new(&guest)
             .args(&["--cpus", "boot=4"])
             .args(&["--memory", "size=4G"])
-            .args(&["--kernel", guest.fw_path.as_str()])
+            .args(&["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
             .args(&["--device", "path=/sys/bus/pci/devices/0000:31:00.0/"])
             .args(&["--api-socket", &api_socket])
             .default_disks()
