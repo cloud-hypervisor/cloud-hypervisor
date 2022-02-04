@@ -541,6 +541,7 @@ pub struct Vm {
     exit_evt: EventFd,
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
+    stop_on_boot: bool,
 }
 
 impl Vm {
@@ -573,6 +574,8 @@ impl Vm {
         let force_iommu = config.lock().unwrap().tdx.is_some();
         #[cfg(not(feature = "tdx"))]
         let force_iommu = false;
+
+        let stop_on_boot = false;
 
         let device_manager = DeviceManager::new(
             vm.clone(),
@@ -670,6 +673,7 @@ impl Vm {
             exit_evt,
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             hypervisor,
+            stop_on_boot,
         })
     }
 
@@ -2009,7 +2013,11 @@ impl Vm {
             return self.resume().map_err(Error::Resume);
         }
 
-        let new_state = VmState::Running;
+        let new_state = if self.stop_on_boot {
+            VmState::BreakPoint
+        } else {
+            VmState::Running
+        };
         current_state.valid_transition(new_state)?;
 
         // Load kernel if configured
@@ -2077,11 +2085,13 @@ impl Vm {
             self.vm.tdx_finalize().map_err(Error::FinalizeTdx)?;
         }
 
-        self.cpu_manager
-            .lock()
-            .unwrap()
-            .start_boot_vcpus()
-            .map_err(Error::CpuManager)?;
+        if new_state == VmState::Running {
+            self.cpu_manager
+                .lock()
+                .unwrap()
+                .start_boot_vcpus()
+                .map_err(Error::CpuManager)?;
+        }
 
         self.setup_signal_handler()?;
         self.setup_tty()?;
