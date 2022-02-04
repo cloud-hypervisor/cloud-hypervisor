@@ -955,6 +955,7 @@ version = "0.1.0"
 dependencies = [
  "dirs 3.0.2",
  "epoll",
+ "lazy_static",
  "libc",
  "ssh2",
  "vmm-sys-util",
