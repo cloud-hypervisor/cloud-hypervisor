@@ -186,6 +186,7 @@ cmd_help() {
     echo "        --integration-windows        Run the Windows guest integration tests."
     echo "        --integration-live-migration Run the live-migration integration tests."
     echo "        --libc                       Select the C library Cloud Hypervisor will be built against. Default is gnu"
+    echo "        --metrics                    Generate performance metrics"
     echo "        --volumes                    Hash separated volumes to be exported. Example --volumes /mnt:/mnt#/myvol:/myvol"
     echo "        --hypervisor                 Underlying hypervisor. Options kvm, mshv"
     echo "        --all                        Run all tests."
@@ -300,6 +301,7 @@ cmd_tests() {
     integration_vfio=false
     integration_windows=false
     integration_live_migration=false
+    metrics=false
     libc="gnu"
     arg_vols=""
     hypervisor="kvm"
@@ -314,6 +316,7 @@ cmd_tests() {
             "--integration-vfio")           { integration_vfio=true; } ;;
             "--integration-windows")        { integration_windows=true; } ;;
             "--integration-live-migration") { integration_live_migration=true; } ;;
+            "--metrics")                    { metrics=true; } ;;
             "--libc")
                 shift
                 [[ "$1" =~ ^(musl|gnu)$ ]] || \
@@ -478,6 +481,26 @@ cmd_tests() {
 	       "$CTR_IMAGE" \
 	       ./scripts/run_integration_tests_live_migration.sh "$@" || fix_dir_perms $? || exit $?
     fi
+
+    if [ "$metrics" = true ] ;  then
+	say "Generating performance metrics for $target..."
+	$DOCKER_RUNTIME run \
+	       --workdir "$CTR_CLH_ROOT_DIR" \
+	       --rm \
+	       --privileged \
+	       --security-opt seccomp=unconfined \
+	       --ipc=host \
+	       --net="$CTR_CLH_NET" \
+	       --mount type=tmpfs,destination=/tmp \
+	       --volume /dev:/dev \
+	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR"  $exported_volumes \
+	       --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
+	       --env USER="root" \
+	       --env CH_LIBC="${libc}" \
+	       "$CTR_IMAGE" \
+	       ./scripts/run_metrics.sh "$@" || fix_dir_perms $? || exit $?
+    fi
+
     fix_dir_perms $?
 }
 
