@@ -130,6 +130,9 @@ pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
     if !kvm.check_extension(Cap::SetTssAddr) {
         return Err(KvmError::CapabilityMissing(Cap::SetTssAddr));
     }
+    if !kvm.check_extension(Cap::ImmediateExit) {
+        return Err(KvmError::CapabilityMissing(Cap::ImmediateExit));
+    }
     Ok(())
 }
 #[derive(Clone, Serialize, Deserialize)]
