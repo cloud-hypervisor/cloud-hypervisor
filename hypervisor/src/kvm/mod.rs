@@ -1574,6 +1574,13 @@ impl cpu::Vcpu for KvmVcpu {
         tdx_command(&self.fd.as_raw_fd(), TdxCommand::InitVcpu, 0, hob_address)
             .map_err(cpu::HypervisorCpuError::InitializeTdx)
     }
+
+    ///
+    /// Set the "immediate_exit" state
+    ///
+    fn set_immediate_exit(&self, exit: bool) {
+        self.fd.set_kvm_immediate_exit(exit.into());
+    }
 }
 
 /// Device struct for KVM
