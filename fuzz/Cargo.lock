@@ -720,12 +720,14 @@ dependencies = [
 [[package]]
 name = "vfio-ioctls"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vfio-ioctls?branch=main#8f7f2210ebe71660938b05b2ed7eec9253478bc5"
+source = "git+https://github.com/rust-vmm/vfio?branch=main#4630612f2ff300e78b6d55be324fb5481aa84661"
 dependencies = [
  "byteorder",
  "kvm-bindings",
  "kvm-ioctls",
+ "libc",
  "log",
+ "thiserror",
  "vfio-bindings",
  "vm-memory",
  "vmm-sys-util",
@@ -816,7 +818,7 @@ dependencies = [
 [[package]]
 name = "virtio-queue"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vm-virtio?branch=main#2ca74a6d776c1b61989aae8c05d2dee4ab3c47a6"
+source = "git+https://github.com/rust-vmm/vm-virtio?branch=main#1ec72eb067715532b20cce3bceea73674259fc79"
 dependencies = [
  "log",
  "vm-memory",
