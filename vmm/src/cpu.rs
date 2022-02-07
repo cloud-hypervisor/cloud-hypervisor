@@ -792,6 +792,31 @@ impl CpuManager {
                             // to see them in a consistent order in all threads
 
                             if vcpu_pause_signalled.load(Ordering::SeqCst) {
+                                // As a pause can be caused by PIO & MMIO exits then we need to ensure they are
+                                // completed by returning to KVM_RUN. From the kernel docs:
+                                //
+                                // For KVM_EXIT_IO, KVM_EXIT_MMIO, KVM_EXIT_OSI, KVM_EXIT_PAPR, KVM_EXIT_XEN,
+                                // KVM_EXIT_EPR, KVM_EXIT_X86_RDMSR and KVM_EXIT_X86_WRMSR the corresponding
+                                // operations are complete (and guest state is consistent) only after userspace
+                                // has re-entered the kernel with KVM_RUN.  The kernel side will first finish
+                                // incomplete operations and then check for pending signals.
+                                // The pending state of the operation is not preserved in state which is
+                                // visible to userspace, thus userspace should ensure that the operation is
+                                // completed before performing a live migration.  Userspace can re-enter the
+                                // guest with an unmasked signal pending or with the immediate_exit field set
+                                // to complete pending operations without allowing any further instructions
+                                // to be executed.
+
+                                #[cfg(feature = "kvm")]
+                                {
+                                    vcpu.lock().as_ref().unwrap().vcpu.set_immediate_exit(true);
+                                    if !matches!(vcpu.lock().unwrap().run(), Ok(VmExit::Ignore)) {
+                                        error!("Unexpected VM exit on \"immediate_exit\" run");
+                                        break;
+                                    }
+                                    vcpu.lock().as_ref().unwrap().vcpu.set_immediate_exit(false);
+                                }
+
                                 vcpu_run_interrupted.store(true, Ordering::SeqCst);
                                 while vcpu_pause_signalled.load(Ordering::SeqCst) {
                                     thread::park();
