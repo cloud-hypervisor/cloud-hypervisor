@@ -58,6 +58,15 @@ pub fn cleanup_tests() {
         .unwrap_or_else(|_| panic!("Failed to remove file '{}'.", BLK_IO_TEST_IMG));
 }
 
+// Performance tests are expected to be executed sequentially, so we can
+// start VM guests with the same IP while putting them on a different
+// private network. The default constructor "Guest::new()" does not work
+// well, as we can easily create more than 256 VMs from repeating various
+// performance tests dozens times in a single run.
+fn performance_test_new_guest(disk_config: Box<dyn DiskConfig>) -> Guest {
+    Guest::new_from_ip_range(disk_config, "172.19", 0)
+}
+
 const DIRECT_KERNEL_BOOT_CMDLINE: &str =
     "root=/dev/vda1 console=hvc0 rw systemd.journald.forward_to_console=1";
 
@@ -206,7 +215,7 @@ pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
     let rx = control.net_rx.unwrap();
 
     let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-    let guest = Guest::new(Box::new(focal));
+    let guest = performance_test_new_guest(Box::new(focal));
 
     let net_params = format!(
         "tap=,mac={},ip={},mask=255.255.255.0,num_queues={},queue_size={}",
@@ -335,7 +344,7 @@ fn measure_virtio_net_latency(guest: &Guest, test_time: u32) -> Result<Vec<f64>,
 
 pub fn performance_net_latency(control: &PerformanceTestControl) -> f64 {
     let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-    let guest = Guest::new(Box::new(focal));
+    let guest = performance_test_new_guest(Box::new(focal));
     let mut child = GuestCommand::new(&guest)
         .args(&["--cpus", "boot=2"])
         .args(&["--memory", "size=4G"])
@@ -472,7 +481,7 @@ fn measure_boot_time(cmd: &mut GuestCommand, test_time: u32) -> Result<f64, Erro
 pub fn performance_boot_time(control: &PerformanceTestControl) -> f64 {
     let r = std::panic::catch_unwind(|| {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(focal));
+        let guest = performance_test_new_guest(Box::new(focal));
         let mut cmd = GuestCommand::new(&guest);
 
         let c = cmd
@@ -496,7 +505,7 @@ pub fn performance_boot_time(control: &PerformanceTestControl) -> f64 {
 pub fn performance_boot_time_pmem(control: &PerformanceTestControl) -> f64 {
     let r = std::panic::catch_unwind(|| {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(focal));
+        let guest = performance_test_new_guest(Box::new(focal));
         let mut cmd = GuestCommand::new(&guest);
         let c = cmd
             .args(&["--memory", "size=1G,hugepages=on"])
@@ -602,7 +611,7 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
     let fio_ops = control.fio_ops.as_ref().unwrap();
 
     let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-    let guest = Guest::new(Box::new(focal));
+    let guest = performance_test_new_guest(Box::new(focal));
     let api_socket = guest
         .tmp_dir
         .as_path()
