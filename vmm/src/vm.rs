@@ -23,7 +23,7 @@ use crate::device_tree::DeviceTree;
 use crate::memory_manager::{
     Error as MemoryManagerError, MemoryManager, MemoryManagerSnapshotData,
 };
-use crate::migration::{get_vm_snapshot, url_to_path, VM_SNAPSHOT_FILE};
+use crate::migration::{get_vm_snapshot, url_to_path, SNAPSHOT_CONFIG_FILE, SNAPSHOT_STATE_FILE};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::GuestMemoryMmap;
 use crate::{
@@ -820,6 +820,7 @@ impl Vm {
     #[allow(clippy::too_many_arguments)]
     pub fn new_from_snapshot(
         snapshot: &Snapshot,
+        vm_config: Arc<Mutex<VmConfig>>,
         exit_evt: EventFd,
         reset_evt: EventFd,
         source_url: Option<&str>,
@@ -840,7 +841,6 @@ impl Vm {
         }
 
         let vm_snapshot = get_vm_snapshot(snapshot).map_err(Error::Restore)?;
-        let config = vm_snapshot.config;
         if let Some(state) = vm_snapshot.state {
             vm.set_state(state)
                 .map_err(|e| Error::Restore(MigratableError::Restore(e.into())))?;
@@ -849,11 +849,11 @@ impl Vm {
         let memory_manager = if let Some(memory_manager_snapshot) =
             snapshot.snapshots.get(MEMORY_MANAGER_SNAPSHOT_ID)
         {
-            let phys_bits = physical_bits(config.lock().unwrap().cpus.max_phys_bits);
+            let phys_bits = physical_bits(vm_config.lock().unwrap().cpus.max_phys_bits);
             MemoryManager::new_from_snapshot(
                 memory_manager_snapshot,
                 vm.clone(),
-                &config.lock().unwrap().memory.clone(),
+                &vm_config.lock().unwrap().memory.clone(),
                 source_url,
                 prefault,
                 phys_bits,
@@ -866,7 +866,7 @@ impl Vm {
         };
 
         Vm::new_from_memory_manager(
-            config,
+            vm_config,
             memory_manager,
             vm,
             exit_evt,
@@ -2524,7 +2524,6 @@ impl Pausable for Vm {
 
 #[derive(Serialize, Deserialize)]
 pub struct VmSnapshot {
-    pub config: Arc<Mutex<VmConfig>>,
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     pub clock: Option<hypervisor::ClockData>,
     pub state: Option<hypervisor::VmState>,
@@ -2582,7 +2581,6 @@ impl Snapshottable for Vm {
             .state()
             .map_err(|e| MigratableError::Snapshot(e.into()))?;
         let vm_snapshot_data = serde_json::to_vec(&VmSnapshot {
-            config: self.get_config(),
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             clock: self.saved_clock,
             state: Some(vm_state),
@@ -2702,23 +2700,42 @@ impl Transportable for Vm {
         snapshot: &Snapshot,
         destination_url: &str,
     ) -> std::result::Result<(), MigratableError> {
-        let mut vm_snapshot_path = url_to_path(destination_url)?;
-        vm_snapshot_path.push(VM_SNAPSHOT_FILE);
+        let mut snapshot_config_path = url_to_path(destination_url)?;
+        snapshot_config_path.push(SNAPSHOT_CONFIG_FILE);
 
-        // Create the snapshot file
-        let mut vm_snapshot_file = OpenOptions::new()
+        // Create the snapshot config file
+        let mut snapshot_config_file = OpenOptions::new()
             .read(true)
             .write(true)
             .create_new(true)
-            .open(vm_snapshot_path)
+            .open(snapshot_config_path)
             .map_err(|e| MigratableError::MigrateSend(e.into()))?;
 
-        // Serialize and write the snapshot
-        let vm_snapshot =
+        // Serialize and write the snapshot config
+        let vm_config = serde_json::to_string(self.config.lock().unwrap().deref())
+            .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+
+        snapshot_config_file
+            .write(vm_config.as_bytes())
+            .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+
+        let mut snapshot_state_path = url_to_path(destination_url)?;
+        snapshot_state_path.push(SNAPSHOT_STATE_FILE);
+
+        // Create the snapshot state file
+        let mut snapshot_state_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(snapshot_state_path)
+            .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+
+        // Serialize and write the snapshot state
+        let vm_state =
             serde_json::to_vec(snapshot).map_err(|e| MigratableError::MigrateSend(e.into()))?;
 
-        vm_snapshot_file
-            .write(&vm_snapshot)
+        snapshot_state_file
+            .write(&vm_state)
             .map_err(|e| MigratableError::MigrateSend(e.into()))?;
 
         // Tell the memory manager to also send/write its own snapshot.
