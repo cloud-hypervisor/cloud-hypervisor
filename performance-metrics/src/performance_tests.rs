@@ -674,3 +674,143 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_iperf3_output() {
+        let output = r#"
+{
+	"end":	{
+		"sum_sent":	{
+			"start":	0,
+			"end":	5.000196,
+			"seconds":	5.000196,
+			"bytes":	14973836248,
+			"bits_per_second":	23957198874.604115,
+			"retransmits":	0,
+			"sender":	false
+		}
+	}
+}
+       "#;
+        assert_eq!(
+            parse_iperf3_output(output.as_bytes(), true).unwrap(),
+            23957198874.604115
+        );
+
+        let output = r#"
+{
+	"end":	{
+		"sum_received":	{
+			"start":	0,
+			"end":	5.000626,
+			"seconds":	5.000626,
+			"bytes":	24703557800,
+			"bits_per_second":	39520744482.79,
+			"sender":	true
+		}
+	}
+}
+              "#;
+        assert_eq!(
+            parse_iperf3_output(output.as_bytes(), false).unwrap(),
+            39520744482.79
+        );
+    }
+
+    #[test]
+    fn test_parse_ethr_latency_output() {
+        let output = r#"{"Time":"2022-02-08T03:52:50Z","Title":"","Type":"INFO","Message":"Using destination: 192.168.249.2, ip: 192.168.249.2, port: 8888"}
+{"Time":"2022-02-08T03:52:51Z","Title":"","Type":"INFO","Message":"Running latency test: 1000, 1"}
+{"Time":"2022-02-08T03:52:51Z","Title":"","Type":"LatencyResult","RemoteAddr":"192.168.249.2","Protocol":"TCP","Avg":"80.712us","Min":"61.677us","P50":"257.014us","P90":"74.418us","P95":"107.283us","P99":"119.309us","P999":"142.100us","P9999":"216.341us","Max":"216.341us"}
+{"Time":"2022-02-08T03:52:52Z","Title":"","Type":"LatencyResult","RemoteAddr":"192.168.249.2","Protocol":"TCP","Avg":"79.826us","Min":"55.129us","P50":"598.996us","P90":"73.849us","P95":"106.552us","P99":"122.152us","P999":"142.459us","P9999":"474.280us","Max":"474.280us"}
+{"Time":"2022-02-08T03:52:53Z","Title":"","Type":"LatencyResult","RemoteAddr":"192.168.249.2","Protocol":"TCP","Avg":"78.239us","Min":"56.999us","P50":"396.820us","P90":"69.469us","P95":"115.421us","P99":"119.404us","P999":"130.158us","P9999":"258.686us","Max":"258.686us"}"#;
+
+        let ret = parse_ethr_latency_output(output.as_bytes()).unwrap();
+        let reference = vec![80.712_f64, 79.826_f64, 78.239_f64];
+        assert_eq!(ret, reference);
+    }
+
+    #[test]
+    fn test_parse_boot_time_output() {
+        let output = r#"
+cloud-hypervisor: 161.167103ms: <vcpu0> INFO:vmm/src/vm.rs:392 -- [Debug I/O port: Kernel code 0x40] 0.132 seconds
+cloud-hypervisor: 613.57361ms: <vcpu0> INFO:vmm/src/vm.rs:392 -- [Debug I/O port: Kernel code 0x41] 0.5845 seconds
+        "#;
+
+        assert_eq!(parse_boot_time_output(output.as_bytes()).unwrap(), 0.4525);
+    }
+
+    #[test]
+    fn test_parse_fio_output() {
+        let output = r#"
+{
+  "jobs" : [
+    {
+      "read" : {
+        "io_bytes" : 1965273088,
+        "io_kbytes" : 1919212,
+        "bw_bytes" : 392976022,
+        "bw" : 383765,
+        "iops" : 95941.411718,
+        "runtime" : 5001,
+        "total_ios" : 479803,
+        "short_ios" : 0,
+        "drop_ios" : 0
+      }
+    }
+  ]
+}
+"#;
+
+        let bps = 1965273088_f64 / (5001_f64 / 1000_f64);
+        assert_eq!(
+            parse_fio_output(output, &FioOps::RandomRead, 1).unwrap(),
+            bps
+        );
+        assert_eq!(parse_fio_output(output, &FioOps::Read, 1).unwrap(), bps);
+
+        let output = r#"
+{
+  "jobs" : [
+    {
+      "write" : {
+        "io_bytes" : 1172783104,
+        "io_kbytes" : 1145296,
+        "bw_bytes" : 234462835,
+        "bw" : 228967,
+        "iops" : 57241.903239,
+        "runtime" : 5002,
+        "total_ios" : 286324,
+        "short_ios" : 0,
+        "drop_ios" : 0
+      }
+    },
+    {
+      "write" : {
+        "io_bytes" : 1172234240,
+        "io_kbytes" : 1144760,
+        "bw_bytes" : 234353106,
+        "bw" : 228860,
+        "iops" : 57215.113954,
+        "runtime" : 5002,
+        "total_ios" : 286190,
+        "short_ios" : 0,
+        "drop_ios" : 0
+      }
+    }
+  ]
+}
+"#;
+
+        let bps = 1172783104_f64 / (5002_f64 / 1000_f64) + 1172234240_f64 / (5002_f64 / 1000_f64);
+        assert_eq!(
+            parse_fio_output(output, &FioOps::RandomWrite, 2).unwrap(),
+            bps
+        );
+        assert_eq!(parse_fio_output(output, &FioOps::Write, 2).unwrap(), bps);
+    }
+}
