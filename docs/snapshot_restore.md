@@ -43,17 +43,22 @@ ll /home/foo/snapshot/
 total 4194536
 drwxrwxr-x  2 foo bar       4096 Jul 22 11:50 ./
 drwxr-xr-x 47 foo bar       4096 Jul 22 11:47 ../
+-rw-------  1 foo bar       1084 Jul 22 11:19 config.json
 -rw-------  1 foo bar 4294967296 Jul 22 11:19 memory-ranges
--rw-------  1 foo bar     217853 Jul 22 11:19 vm.json
+-rw-------  1 foo bar     217853 Jul 22 11:19 state.json
 ```
+
+`config.json` contains the virtual machine configuration. It is used to create
+a similar virtual machine with the correct amount of CPUs, RAM, and other
+expected devices. It is stored in a human readable format so that it could be
+modified between the snapshot and restore phases to achieve some very special
+use cases. But for most cases, manually modifying the configuration should not
+be needed.
 
 `memory-ranges` stores the content of the guest RAM.
 
-`vm.json` gathers all information related to the virtual machine configuration
-and state. The configuration bits are used to create a similar virtual machine
-with the correct amount of CPUs, RAM, and other expected devices. The state
-bits are used to restore each component in the state it was left before the
-snapshot occurred.
+`state.json` contains the virtual machine state. It is used to restore each
+component in the state it was left before the snapshot occurred.
 
 ## Restore a Cloud Hypervisor VM
 

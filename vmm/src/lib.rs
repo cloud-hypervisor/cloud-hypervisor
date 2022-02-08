@@ -20,7 +20,9 @@ use crate::config::{
     DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, RestoreConfig, UserDeviceConfig,
     VmConfig, VsockConfig,
 };
-use crate::migration::{get_vm_snapshot, recv_vm_snapshot};
+#[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+use crate::migration::get_vm_snapshot;
+use crate::migration::{recv_vm_config, recv_vm_state};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::vm::{Error as VmError, Vm, VmState};
 use anyhow::anyhow;
@@ -443,14 +445,18 @@ impl Vmm {
         // Safe to unwrap as we checked it was Some(&str).
         let source_url = source_url.unwrap();
 
-        let snapshot = recv_vm_snapshot(source_url).map_err(VmError::Restore)?;
+        let vm_config = Arc::new(Mutex::new(
+            recv_vm_config(source_url).map_err(VmError::Restore)?,
+        ));
+        let snapshot = recv_vm_state(source_url).map_err(VmError::Restore)?;
+        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         let vm_snapshot = get_vm_snapshot(&snapshot).map_err(VmError::Restore)?;
 
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-        self.vm_check_cpuid_compatibility(&vm_snapshot.config, &vm_snapshot.common_cpuid)
+        self.vm_check_cpuid_compatibility(&vm_config, &vm_snapshot.common_cpuid)
             .map_err(VmError::Restore)?;
 
-        self.vm_config = Some(Arc::clone(&vm_snapshot.config));
+        self.vm_config = Some(Arc::clone(&vm_config));
 
         let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
         let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
@@ -461,6 +467,7 @@ impl Vmm {
 
         let vm = Vm::new_from_snapshot(
             &snapshot,
+            vm_config,
             exit_evt,
             reset_evt,
             Some(source_url),
