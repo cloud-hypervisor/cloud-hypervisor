@@ -818,7 +818,7 @@ dependencies = [
 [[package]]
 name = "virtio-queue"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vm-virtio?branch=main#1ec72eb067715532b20cce3bceea73674259fc79"
+source = "git+https://github.com/rust-vmm/vm-virtio?branch=main#f2a46b3f428ef1c26bd83defd5d3984eb9420619"
 dependencies = [
  "log",
  "vm-memory",
