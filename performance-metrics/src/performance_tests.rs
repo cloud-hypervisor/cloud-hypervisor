@@ -10,7 +10,6 @@ use std::time::Duration;
 use std::{fmt, fs};
 use test_infra::Error as InfraError;
 use test_infra::*;
-use vmm_sys_util::tempdir::TempDir;
 use wait_timeout::ChildExt;
 
 pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-0.raw";
@@ -39,6 +38,24 @@ impl From<InfraError> for Error {
     fn from(e: InfraError) -> Self {
         Self::Infra(e)
     }
+}
+
+const BLK_IO_TEST_IMG: &str = "/var/tmp/ch-blk-io-test.img";
+
+pub fn init_tests() {
+    // The test image can not be created on tmpfs (e.g. /tmp) filesystem,
+    // as tmpfs does not support O_DIRECT
+    assert!(exec_host_command_output(&format!(
+        "dd if=/dev/zero of={} bs=1M count=4096",
+        BLK_IO_TEST_IMG
+    ))
+    .status
+    .success());
+}
+
+pub fn cleanup_tests() {
+    fs::remove_file(BLK_IO_TEST_IMG)
+        .unwrap_or_else(|_| panic!("Failed to remove file '{}'.", BLK_IO_TEST_IMG));
 }
 
 const DIRECT_KERNEL_BOOT_CMDLINE: &str =
@@ -593,15 +610,6 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
         .to_str()
         .unwrap()
         .to_string();
-    // The test image can not be created on tmpfs (e.g. /tmp) filesystem,
-    // as tmpfs does not support O_DIRECT
-    let test_dir = TempDir::new_with_prefix("/home/ch").unwrap();
-    let test_img = test_dir
-        .as_path()
-        .join("tmp.img")
-        .to_str()
-        .unwrap()
-        .to_string();
 
     let mut child = GuestCommand::new(&guest)
         .args(&["--cpus", &format!("boot={}", queue_num * 2)])
@@ -617,14 +625,6 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
         .unwrap();
 
     let r = std::panic::catch_unwind(|| {
-        // Generate a image file for testing
-        assert!(exec_host_command_output(&format!(
-            "dd if=/dev/zero of={} bs=1M count=4096",
-            test_img
-        ))
-        .status
-        .success());
-
         guest.wait_vm_boot(None).unwrap();
 
         // Hotplug test disk
@@ -634,7 +634,7 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
                 "add-disk",
                 &format!(
                     "path={},num_queues={},queue_size={},direct=on",
-                    test_img, queue_num, queue_size
+                    BLK_IO_TEST_IMG, queue_num, queue_size
                 )
             ])
             .stderr(Stdio::piped())
@@ -660,8 +660,6 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
         // Parse fio output
         parse_fio_output(&output, fio_ops, queue_num).unwrap()
     });
-
-    test_dir.remove().unwrap();
 
     let _ = child.kill();
     let output = child.wait_with_output().unwrap();

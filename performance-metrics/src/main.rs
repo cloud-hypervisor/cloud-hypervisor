@@ -336,6 +336,8 @@ fn run_test_with_timetout(test: &'static PerformanceTest) -> Result<String, Erro
 fn main() {
     let test_filter = env::var("TEST_FILTER").map_or("".to_string(), |o| o);
 
+    init_tests();
+
     // Run performance tests sequentially and report results (in both readable/json format)
     let mut json_output = String::new();
     for test in TEST_LIST.iter() {
@@ -351,6 +353,8 @@ fn main() {
             };
         }
     }
+
+    cleanup_tests();
 
     // Todo: Report/upload to the metrics database
     println!("\n\nTests result in json format: \n {}", json_output);

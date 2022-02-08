@@ -637,7 +637,6 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "test_infra",
- "vmm-sys-util",
  "wait-timeout",
 ]
 
