@@ -35,7 +35,7 @@ The project focuses on exclusively running modern, cloud workloads, on top of
 a limited set of hardware architectures and platforms. Cloud workloads refers
 to those that are usually run by customers inside a cloud provider. For our
 purposes this means modern operating systems with most I/O handled by
-paravirtualised devices (i.e. virtio), no requirement for legacy devices, and
+paravirtualised devices (i.e. virio), no requirement for legacy devices, and
 64-bit CPUs.
 
 Cloud Hypervisor is implemented in [Rust](https://www.rust-lang.org/) and is
