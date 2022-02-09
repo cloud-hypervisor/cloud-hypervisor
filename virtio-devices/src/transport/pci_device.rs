@@ -974,6 +974,7 @@ impl PciDevice for VirtioPciDevice {
                 && o < NOTIFICATION_BAR_OFFSET + NOTIFICATION_SIZE =>
             {
                 // Handled with ioeventfds.
+                error!("Unexpected read from notification BAR: offset = 0x{:x}", o);
             }
             o if MSIX_TABLE_BAR_OFFSET <= o && o < MSIX_TABLE_BAR_OFFSET + MSIX_TABLE_SIZE => {
                 if let Some(msix_config) = &self.msix_config {
@@ -1019,6 +1020,7 @@ impl PciDevice for VirtioPciDevice {
                 && o < NOTIFICATION_BAR_OFFSET + NOTIFICATION_SIZE =>
             {
                 // Handled with ioeventfds.
+                error!("Unexpected write to notification BAR: offset = 0x{:x}", o);
             }
             o if MSIX_TABLE_BAR_OFFSET <= o && o < MSIX_TABLE_BAR_OFFSET + MSIX_TABLE_SIZE => {
                 if let Some(msix_config) = &self.msix_config {
