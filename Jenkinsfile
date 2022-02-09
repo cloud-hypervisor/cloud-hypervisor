@@ -25,9 +25,6 @@ pipeline{
             parallel {
 				stage ('Worker build') {
 					agent { node { label 'hirsute' } }
-					environment {
-        					AZURE_CONNECTION_STRING = credentials('46b4e7d6-315f-4cc1-8333-b58780863b9b')
-					}
 					stages {
 						stage ('Checkout') {
 							steps {
@@ -88,9 +85,6 @@ pipeline{
 				}
 				stage ('Worker build (musl)') {
 					agent { node { label 'hirsute' } }
-					environment {
-        					AZURE_CONNECTION_STRING = credentials('46b4e7d6-315f-4cc1-8333-b58780863b9b')
-					}
 					stages {
 						stage ('Checkout') {
 							steps {
