@@ -1,9 +1,28 @@
+def runWorkers = true
 pipeline{
 	agent none
 	stages {
 		stage ('Early checks') {
 			agent { node { label 'built-in' } }
 			stages {
+				stage ('Checkout') {
+					steps {
+						checkout scm
+					}
+				}
+				stage ('Check for documentation only changes') {
+					when {
+						expression {
+							return docsFileOnly()
+						}
+					}
+					steps {
+						script {
+							runWorkers = false
+							echo "Documentation only changes, no need to run the CI"
+						}
+					}
+				}
 				stage ('Check for RFC/WIP builds') {
 					when {
   						changeRequest comparator: 'REGEXP', title: '.*(rfc|RFC|wip|WIP).*'
@@ -25,6 +44,12 @@ pipeline{
             parallel {
 				stage ('Worker build') {
 					agent { node { label 'hirsute' } }
+					when {
+						beforeAgent true
+						expression {
+							return runWorkers
+						}
+					}
 					stages {
 						stage ('Checkout') {
 							steps {
@@ -55,6 +80,12 @@ pipeline{
 				}
 				stage ('AArch64 worker build') {
 					agent { node { label 'bionic-arm64' } }
+					when {
+						beforeAgent true
+						expression {
+							return runWorkers
+						}
+					}
 					stages {
 						stage ('Checkout') {
 							steps {
@@ -85,6 +116,12 @@ pipeline{
 				}
 				stage ('Worker build (musl)') {
 					agent { node { label 'hirsute' } }
+					when {
+						beforeAgent true
+						expression {
+							return runWorkers
+						}
+					}
 					stages {
 						stage ('Checkout') {
 							steps {
@@ -112,7 +149,12 @@ pipeline{
 					agent { node { label 'bionic-sgx' } }
 					when {
 						beforeAgent true
-						branch 'main'
+						allOf {
+							branch 'main'
+							expression {
+								return runWorkers
+							}
+						}
 					}
 					stages {
 						stage ('Checkout') {
@@ -148,7 +190,12 @@ pipeline{
 					agent { node { label 'bionic-vfio' } }
 					when {
 						beforeAgent true
-						branch 'main'
+						allOf {
+							branch 'main'
+							expression {
+								return runWorkers
+							}
+						}
 					}
 					stages {
 						stage ('Checkout') {
@@ -182,6 +229,12 @@ pipeline{
 				}
 				stage ('Worker build - Windows guest') {
 					agent { node { label 'hirsute' } }
+					when {
+						beforeAgent true
+						expression {
+							return runWorkers
+						}
+					}
 					environment {
         					AZURE_CONNECTION_STRING = credentials('46b4e7d6-315f-4cc1-8333-b58780863b9b')
 					}
@@ -222,6 +275,12 @@ pipeline{
 				}
 				stage ('Worker build - Live Migration') {
 					agent { node { label 'hirsute-small' } }
+					when {
+						beforeAgent true
+						expression {
+							return runWorkers
+						}
+					}
 					stages {
 						stage ('Checkout') {
 							steps {
@@ -290,4 +349,15 @@ def installAzureCli() {
 	sh "echo \"deb [arch=amd64] https://packages.microsoft.com/repos/azure-cli/ hirsute main\" | sudo tee /etc/apt/sources.list.d/azure-cli.list"
 	sh "sudo apt update"
 	sh "sudo apt install -y azure-cli"
+}
+
+def boolean docsFileOnly() {
+    if (env.CHANGE_TARGET == null) {
+        return false;
+    }
+
+    return sh(
+        returnStatus: true,
+        script: "git diff --name-only origin/${env.CHANGE_TARGET}... | grep -v '\\.md'"
+    ) != 0
 }
