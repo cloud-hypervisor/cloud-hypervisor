@@ -155,6 +155,8 @@ pub enum ValidationError {
     InvalidNumPciSegments(u16),
     /// Invalid PCI segment id
     InvalidPciSegment(u16),
+    /// Balloon too big
+    BalloonLargerThanRam(u64, u64),
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -217,6 +219,13 @@ impl fmt::Display for ValidationError {
             }
             InvalidPciSegment(pci_segment) => {
                 write!(f, "Invalid PCI segment id{}", pci_segment)
+            }
+            BalloonLargerThanRam(balloon_size, ram_size) => {
+                write!(
+                    f,
+                    "Ballon size ({}) greater than RAM ({})",
+                    balloon_size, ram_size
+                )
             }
         }
     }
@@ -2162,6 +2171,23 @@ impl VmConfig {
 
             for user_device in user_devices {
                 user_device.validate(self)?;
+            }
+        }
+
+        if let Some(balloon) = &self.balloon {
+            let mut ram_size = self.memory.size;
+
+            if let Some(zones) = &self.memory.zones {
+                for zone in zones {
+                    ram_size += zone.size;
+                }
+            }
+
+            if balloon.size >= ram_size {
+                return Err(ValidationError::BalloonLargerThanRam(
+                    balloon.size,
+                    ram_size,
+                ));
             }
         }
 
