@@ -15,14 +15,20 @@ the guest side can be found in the [Guest TDX tree](https://github.com/intel/tdx
 The TDVF firmware can be found in the
 [EDK2 staging project](https://github.com/tianocore/edk2-staging/tree/TDVF).
 
+The TDShim firmware can be found in the
+[Confidential Containers project](https://github.com/confidential-containers/td-shim).
+
 ## Cloud Hypervisor support
 
 First, you must be running on a machine with TDX enabled in hardware, and
 with the host OS compiled from the [KVM TDX tree](https://github.com/intel/tdx/tree/kvm).
 
-Cloud Hypervisor can run TDX VM (Trust Domain) by loading the TDVF firmware,
+Cloud Hypervisor can run TDX VM (Trust Domain) by loading a TD firmware,
 which will then load the guest kernel from the image. The image must be custom
 as it must include a kernel built from the [Guest TDX tree](https://github.com/intel/tdx/tree/guest).
+
+### TDVF
+
 The firmware can be built as follows:
 
 ```bash
@@ -72,4 +78,27 @@ guest kernel command line contains `console=ttyS0`):
     --disk path=tdx_guest_img \
     --serial tty \
     --console off
+```
+
+### TDShim
+
+This is a lightweight version of the TDVF, written in Rust and designed for
+direct kernel boot, which is useful for containers use cases.
+
+You can find the instructions for building the firmware directly from the
+project [documentation](https://github.com/confidential-containers/td-shim/tree/staging#how-to-build).
+
+And run a TDX VM by providing the firmware previously built, along with a guest
+kernel built from the [Guest TDX tree](https://github.com/intel/tdx/tree/guest).
+The appropriate kernel boot options must be provided through the `--cmdline`
+option as well.
+
+```bash
+./cloud-hypervisor \
+    --tdx firmware=tdshim \
+    --kernel bzImage \
+    --cmdline "root=/dev/vda1 console=hvc0 rw tdx_allow_acpi=MCFG"
+    --cpus boot=1 \
+    --memory size=1G \
+    --disk path=tdx_guest_img
 ```
