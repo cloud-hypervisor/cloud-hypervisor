@@ -218,7 +218,7 @@ impl fmt::Display for ValidationError {
                 )
             }
             InvalidPciSegment(pci_segment) => {
-                write!(f, "Invalid PCI segment id{}", pci_segment)
+                write!(f, "Invalid PCI segment id: {}", pci_segment)
             }
             BalloonLargerThanRam(balloon_size, ram_size) => {
                 write!(
