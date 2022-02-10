@@ -1383,16 +1383,21 @@ pub struct BalloonConfig {
     /// Option to deflate the balloon in case the guest is out of memory.
     #[serde(default)]
     pub deflate_on_oom: bool,
+    /// Option to enable free page reporting from the guest.
+    #[serde(default)]
+    pub free_page_reporting: bool,
 }
 
 impl BalloonConfig {
     pub const SYNTAX: &'static str =
-        "Balloon parameters \"size=<balloon_size>,deflate_on_oom=on|off\"";
+        "Balloon parameters \"size=<balloon_size>,deflate_on_oom=on|off,\
+        free_page_reporting=on|off\"";
 
     pub fn parse(balloon: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser.add("size");
         parser.add("deflate_on_oom");
+        parser.add("free_page_reporting");
         parser.parse(balloon).map_err(Error::ParseBalloon)?;
 
         let size = parser
@@ -1407,9 +1412,16 @@ impl BalloonConfig {
             .unwrap_or(Toggle(false))
             .0;
 
+        let free_page_reporting = parser
+            .convert::<Toggle>("free_page_reporting")
+            .map_err(Error::ParseBalloon)?
+            .unwrap_or(Toggle(false))
+            .0;
+
         Ok(BalloonConfig {
             size,
             deflate_on_oom,
+            free_page_reporting,
         })
     }
 }

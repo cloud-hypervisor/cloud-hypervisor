@@ -2786,6 +2786,7 @@ impl DeviceManager {
                     id.clone(),
                     balloon_config.size,
                     balloon_config.deflate_on_oom,
+                    balloon_config.free_page_reporting,
                     self.seccomp_action.clone(),
                     self.exit_evt
                         .try_clone()

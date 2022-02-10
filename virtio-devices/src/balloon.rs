@@ -392,6 +392,7 @@ impl Balloon {
         id: String,
         size: u64,
         deflate_on_oom: bool,
+        _free_page_reporting: bool,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
     ) -> io::Result<Self> {

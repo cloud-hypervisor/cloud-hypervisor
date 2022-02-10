@@ -800,7 +800,11 @@ components:
         deflate_on_oom:
           type: boolean
           default: false
-          description: Whether the balloon should deflate when the guest is under memory pressure.
+          description: Deflate balloon when the guest is under memory pressure.
+        free_page_reporting:
+          type: boolean
+          default: false
+          description: Enable guest to report free pages.
 
     FsConfig:
       required:
