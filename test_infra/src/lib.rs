@@ -1185,6 +1185,7 @@ pub struct GuestCommand<'a> {
     command: Command,
     guest: &'a Guest,
     capture_output: bool,
+    print_cmd: bool,
 }
 
 impl<'a> GuestCommand<'a> {
@@ -1197,6 +1198,7 @@ impl<'a> GuestCommand<'a> {
             command: Command::new(clh_command(binary_name)),
             guest,
             capture_output: false,
+            print_cmd: true,
         }
     }
 
@@ -1205,13 +1207,20 @@ impl<'a> GuestCommand<'a> {
         self
     }
 
+    pub fn set_print_cmd(&mut self, print_cmd: bool) -> &mut Self {
+        self.print_cmd = print_cmd;
+        self
+    }
+
     pub fn spawn(&mut self) -> io::Result<Child> {
-        println!(
-            "\n\n==== Start cloud-hypervisor command-line ====\n\n\
-                 {:?}\n\
-                 \n==== End cloud-hypervisor command-line ====\n\n",
-            self.command
-        );
+        if self.print_cmd {
+            println!(
+                "\n\n==== Start cloud-hypervisor command-line ====\n\n\
+                     {:?}\n\
+                     \n==== End cloud-hypervisor command-line ====\n\n",
+                self.command
+            );
+        }
 
         if self.capture_output {
             let child = self
