@@ -41,8 +41,8 @@ use vm_migration::{
 use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: u16 = 128;
-const NUM_QUEUES: usize = 2;
-const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE; NUM_QUEUES];
+const REPORTING_QUEUE_SIZE: u16 = 32;
+const MIN_NUM_QUEUES: usize = 2;
 
 // Resize event.
 const RESIZE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
@@ -50,12 +50,17 @@ const RESIZE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 const INFLATE_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
 // Deflate virtio queue event.
 const DEFLATE_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
+// Reporting virtio queue event.
+const REPORTING_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 4;
 
 // Size of a PFN in the balloon interface.
 const VIRTIO_BALLOON_PFN_SHIFT: u64 = 12;
 
 // Deflate balloon on OOM
 const VIRTIO_BALLOON_F_DEFLATE_ON_OOM: u64 = 2;
+// Enable an additional virtqueue to let the guest notify the host about free
+// pages.
+const VIRTIO_BALLOON_F_REPORTING: u64 = 5;
 
 #[derive(Debug)]
 pub enum Error {
@@ -162,6 +167,7 @@ struct BalloonEpollHandler {
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     inflate_queue_evt: EventFd,
     deflate_queue_evt: EventFd,
+    reporting_queue_evt: Option<EventFd>,
     kill_evt: EventFd,
     pause_evt: EventFd,
 }
@@ -291,6 +297,25 @@ impl BalloonEpollHandler {
         self.notify_queue(queue_index, used_descs)
     }
 
+    fn process_reporting_queue(&mut self, queue_index: usize) -> result::Result<(), Error> {
+        let mut used_descs = Vec::new();
+
+        for mut desc_chain in self.queues[queue_index]
+            .iter()
+            .map_err(Error::QueueIterator)?
+        {
+            let mut descs_len = 0;
+            while let Some(desc) = desc_chain.next() {
+                descs_len += desc.len();
+                Self::release_memory_range(desc_chain.memory(), desc.addr(), desc.len() as usize)?;
+            }
+
+            used_descs.push((desc_chain.head_index(), descs_len));
+        }
+
+        self.notify_queue(queue_index, used_descs)
+    }
+
     fn run(
         &mut self,
         paused: Arc<AtomicBool>,
@@ -300,6 +325,9 @@ impl BalloonEpollHandler {
         helper.add_event(self.resize_receiver.evt.as_raw_fd(), RESIZE_EVENT)?;
         helper.add_event(self.inflate_queue_evt.as_raw_fd(), INFLATE_QUEUE_EVENT)?;
         helper.add_event(self.deflate_queue_evt.as_raw_fd(), DEFLATE_QUEUE_EVENT)?;
+        if let Some(reporting_queue_evt) = self.reporting_queue_evt.as_ref() {
+            helper.add_event(reporting_queue_evt.as_raw_fd(), REPORTING_QUEUE_EVENT)?;
+        }
         helper.run(paused, paused_sync, self)?;
 
         Ok(())
@@ -357,6 +385,20 @@ impl EpollHelperHandler for BalloonEpollHandler {
                     return true;
                 }
             }
+            REPORTING_QUEUE_EVENT => {
+                if let Some(reporting_queue_evt) = self.reporting_queue_evt.as_ref() {
+                    if let Err(e) = reporting_queue_evt.read() {
+                        error!("Failed to get reporting queue event: {:?}", e);
+                        return true;
+                    } else if let Err(e) = self.process_reporting_queue(2) {
+                        error!("Failed to signal used inflate queue: {:?}", e);
+                        return true;
+                    }
+                } else {
+                    error!("Invalid reporting queue event as no eventfd registered");
+                    return true;
+                }
+            }
             _ => {
                 error!("Unknown event for virtio-balloon");
                 return true;
@@ -392,13 +434,18 @@ impl Balloon {
         id: String,
         size: u64,
         deflate_on_oom: bool,
-        _free_page_reporting: bool,
+        free_page_reporting: bool,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
     ) -> io::Result<Self> {
+        let mut queue_sizes = vec![QUEUE_SIZE; MIN_NUM_QUEUES];
         let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
         if deflate_on_oom {
             avail_features |= 1u64 << VIRTIO_BALLOON_F_DEFLATE_ON_OOM;
+        }
+        if free_page_reporting {
+            avail_features |= 1u64 << VIRTIO_BALLOON_F_REPORTING;
+            queue_sizes.push(REPORTING_QUEUE_SIZE);
         }
 
         let config = VirtioBalloonConfig {
@@ -411,8 +458,8 @@ impl Balloon {
                 device_type: VirtioDeviceType::Balloon as u32,
                 avail_features,
                 paused_sync: Some(Arc::new(Barrier::new(2))),
-                queue_sizes: QUEUE_SIZES.to_vec(),
-                min_queues: NUM_QUEUES as u16,
+                queue_sizes,
+                min_queues: MIN_NUM_QUEUES as u16,
                 ..Default::default()
             },
             id,
@@ -503,6 +550,12 @@ impl VirtioDevice for Balloon {
 
         let inflate_queue_evt = queue_evts.remove(0);
         let deflate_queue_evt = queue_evts.remove(0);
+        let reporting_queue_evt =
+            if self.common.feature_acked(VIRTIO_BALLOON_F_REPORTING) && !queue_evts.is_empty() {
+                Some(queue_evts.remove(0))
+            } else {
+                None
+            };
 
         let mut handler = BalloonEpollHandler {
             config: self.config.clone(),
@@ -514,6 +567,7 @@ impl VirtioDevice for Balloon {
             interrupt_cb,
             inflate_queue_evt,
             deflate_queue_evt,
+            reporting_queue_evt,
             kill_evt,
             pause_evt,
         };
