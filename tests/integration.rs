@@ -1523,6 +1523,12 @@ fn get_vmm_overhead(pid: u32, guest_memory_size: u32) -> u32 {
     total
 }
 
+fn process_rss_kib(pid: u32) -> usize {
+    let command = format!("ps -q {} -o rss=", pid);
+    let rss = exec_host_command_output(&command);
+    String::from_utf8_lossy(&rss.stdout).trim().parse().unwrap()
+}
+
 // 10MB is our maximum accepted overhead.
 const MAXIMUM_VMM_OVERHEAD_KB: u32 = 10 * 1024;
 
@@ -4584,7 +4590,7 @@ mod parallel {
     }
 
     #[test]
-    fn test_virtio_balloon() {
+    fn test_virtio_balloon_deflate_on_oom() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
 
@@ -4623,7 +4629,7 @@ mod parallel {
             // will consume much more memory than $(total_mem - balloon_size)
             // to trigger an oom.
             guest
-                .ssh_command("sudo stress --vm 25 --vm-keep --vm-bytes 1G --timeout 20")
+                .ssh_command("stress --vm 25 --vm-keep --vm-bytes 1G --timeout 20")
                 .unwrap();
 
             // 2nd: check balloon_mem's value to verify balloon has been automatically deflated
@@ -4634,6 +4640,69 @@ mod parallel {
             );
             // Verify the balloon size deflated
             assert!(deflated_balloon < 2147483648);
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_virtio_balloon_free_page_reporting() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+
+        //Let's start a 4G guest with balloon occupied 2G memory
+        let mut child = GuestCommand::new(&guest)
+            .args(&["--cpus", "boot=1"])
+            .args(&["--memory", "size=4G"])
+            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(&["--balloon", "size=0,free_page_reporting=on"])
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let pid = child.id();
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            // Check the initial RSS is less than 1GiB
+            let rss = process_rss_kib(pid);
+            println!("RSS {} < 1048576", rss);
+            assert!(rss < 1048576);
+
+            // Spawn a command inside the guest to consume 2GiB of RAM for 60
+            // seconds
+            let guest_ip = guest.network.guest_ip.clone();
+            thread::spawn(move || {
+                ssh_command_ip(
+                    "stress --vm 1 --vm-bytes 2G --vm-keep --timeout 60",
+                    &guest_ip,
+                    DEFAULT_SSH_RETRIES,
+                    DEFAULT_SSH_TIMEOUT,
+                )
+                .unwrap();
+            });
+
+            // Wait for 50 seconds to make sure the stress command is consuming
+            // the expected amount of memory.
+            thread::sleep(std::time::Duration::new(50, 0));
+            let rss = process_rss_kib(pid);
+            println!("RSS {} >= 2097152", rss);
+            assert!(rss >= 2097152);
+
+            // Wait for an extra minute to make sure the stress command has
+            // completed and that the guest reported the free pages to the VMM
+            // through the virtio-balloon device. We expect the RSS to be under
+            // 2GiB.
+            thread::sleep(std::time::Duration::new(60, 0));
+            let rss = process_rss_kib(pid);
+            println!("RSS {} < 2097152", rss);
+            assert!(rss < 2097152);
         });
 
         let _ = child.kill();
