@@ -1246,6 +1246,20 @@ impl DeviceManager {
             let mut vfio_user_iommu_device_ids = self.add_user_devices()?;
             iommu_attached_devices.append(&mut vfio_user_iommu_device_ids);
 
+            // Add all devices from forced iommu segments
+            if let Some(platform_config) = self.config.lock().unwrap().platform.as_ref() {
+                if let Some(iommu_segments) = platform_config.iommu_segments.as_ref() {
+                    for segment in iommu_segments {
+                        for device in 0..32 {
+                            let bdf = PciBdf::new(*segment, 0, device, 0);
+                            if !iommu_attached_devices.contains(&bdf) {
+                                iommu_attached_devices.push(bdf);
+                            }
+                        }
+                    }
+                }
+            }
+
             if let Some(iommu_device) = iommu_device {
                 let dev_id = self.add_virtio_pci_device(iommu_device, &None, iommu_id, 0)?;
                 self.iommu_attached_devices = Some((dev_id, iommu_attached_devices));
