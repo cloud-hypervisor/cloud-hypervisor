@@ -2101,6 +2101,76 @@ mod parallel {
     }
 
     #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_iommu_segments() {
+        let focal_image = FOCAL_IMAGE_NAME.to_string();
+        let focal = UbuntuDiskConfig::new(focal_image);
+        let guest = Guest::new(Box::new(focal));
+
+        // Prepare another disk file for the virtio-disk device
+        let test_disk_path = String::from(
+            guest
+                .tmp_dir
+                .as_path()
+                .join("test-disk.raw")
+                .to_str()
+                .unwrap(),
+        );
+        assert!(
+            exec_host_command_status(format!("truncate {} -s 4M", test_disk_path).as_str())
+                .success()
+        );
+        assert!(
+            exec_host_command_status(format!("mkfs.ext4 {}", test_disk_path).as_str()).success()
+        );
+
+        let api_socket = temp_api_path(&guest.tmp_dir);
+        let mut cmd = GuestCommand::new(&guest);
+
+        cmd.args(&["--cpus", "boot=1"])
+            .args(&["--api-socket", &api_socket])
+            .args(&["--memory", "size=512M"])
+            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(&["--platform", "num_pci_segments=16,iommu_segments=[1]"])
+            .default_disks()
+            .capture_output()
+            .default_net();
+
+        let mut child = cmd.spawn().unwrap();
+
+        guest.wait_vm_boot(None).unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            let (cmd_success, cmd_output) = remote_command_w_output(
+                &api_socket,
+                "add-disk",
+                Some(format!("path={},id=test0,pci_segment=1", test_disk_path.as_str()).as_str()),
+            );
+            assert!(cmd_success);
+            assert!(String::from_utf8_lossy(&cmd_output)
+                .contains("{\"id\":\"test0\",\"bdf\":\"0001:00:01.0\"}"));
+
+            // Check IOMMU setup
+            assert!(guest
+                .does_device_vendor_pair_match("0x1057", "0x1af4")
+                .unwrap_or_default());
+            assert_eq!(
+                guest
+                    .ssh_command("ls /sys/kernel/iommu_groups/0/devices")
+                    .unwrap()
+                    .trim(),
+                "0001:00:01.0"
+            );
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
     fn test_pci_msi() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
