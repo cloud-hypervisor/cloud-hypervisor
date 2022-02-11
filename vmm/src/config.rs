@@ -539,19 +539,29 @@ fn default_platformconfig_num_pci_segments() -> u16 {
 pub struct PlatformConfig {
     #[serde(default = "default_platformconfig_num_pci_segments")]
     pub num_pci_segments: u16,
+    #[serde(default)]
+    pub iommu_segments: Option<Vec<u16>>,
 }
 
 impl PlatformConfig {
     pub fn parse(platform: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser.add("num_pci_segments");
-        parser.parse(platform).map_err(Error::ParseCpus)?;
+        parser.add("iommu_segments");
+        parser.parse(platform).map_err(Error::ParsePlatform)?;
 
         let num_pci_segments: u16 = parser
             .convert("num_pci_segments")
             .map_err(Error::ParsePlatform)?
             .unwrap_or(DEFAULT_NUM_PCI_SEGMENTS);
-        Ok(PlatformConfig { num_pci_segments })
+        let iommu_segments = parser
+            .convert::<IntegerList>("iommu_segments")
+            .map_err(Error::ParsePlatform)?
+            .map(|v| v.0.iter().map(|e| *e as u16).collect());
+        Ok(PlatformConfig {
+            num_pci_segments,
+            iommu_segments,
+        })
     }
 
     pub fn validate(&self) -> ValidationResult<()> {
@@ -559,6 +569,14 @@ impl PlatformConfig {
             return Err(ValidationError::InvalidNumPciSegments(
                 self.num_pci_segments,
             ));
+        }
+
+        if let Some(iommu_segments) = &self.iommu_segments {
+            for segment in iommu_segments {
+                if *segment >= self.num_pci_segments {
+                    return Err(ValidationError::InvalidPciSegment(*segment));
+                }
+            }
         }
 
         Ok(())
@@ -569,6 +587,7 @@ impl Default for PlatformConfig {
     fn default() -> Self {
         PlatformConfig {
             num_pci_segments: DEFAULT_NUM_PCI_SEGMENTS,
+            iommu_segments: None,
         }
     }
 }
@@ -2324,6 +2343,11 @@ impl VmConfig {
         }
 
         let platform = vm_params.platform.map(PlatformConfig::parse).transpose()?;
+        if let Some(platform_config) = platform.as_ref() {
+            if platform_config.iommu_segments.is_some() {
+                iommu = true;
+            }
+        }
 
         #[cfg(target_arch = "x86_64")]
         let mut sgx_epc: Option<Vec<SgxEpcConfig>> = None;
@@ -3128,12 +3152,28 @@ mod tests {
         let mut still_valid_config = valid_config.clone();
         still_valid_config.platform = Some(PlatformConfig {
             num_pci_segments: 16,
+            ..Default::default()
+        });
+        assert!(still_valid_config.validate().is_ok());
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.platform = Some(PlatformConfig {
+            num_pci_segments: 17,
+            ..Default::default()
+        });
+        assert!(invalid_config.validate().is_err());
+
+        let mut still_valid_config = valid_config.clone();
+        still_valid_config.platform = Some(PlatformConfig {
+            num_pci_segments: 16,
+            iommu_segments: Some(vec![1, 2, 3]),
         });
         assert!(still_valid_config.validate().is_ok());
 
         let mut invalid_config = valid_config;
         invalid_config.platform = Some(PlatformConfig {
-            num_pci_segments: 17,
+            num_pci_segments: 16,
+            iommu_segments: Some(vec![17, 18]),
         });
         assert!(invalid_config.validate().is_err());
     }
