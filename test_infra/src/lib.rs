@@ -834,7 +834,7 @@ impl Guest {
     pub fn api_create_body(
         &self,
         cpu_count: u8,
-        fw_path: &str,
+        _fw_path: &str,
         _kernel_path: &str,
         _kernel_cmd: &str,
     ) -> String {
@@ -842,7 +842,7 @@ impl Guest {
         format! {"{{\"cpus\":{{\"boot_vcpus\":{},\"max_vcpus\":{}}},\"kernel\":{{\"path\":\"{}\"}},\"cmdline\":{{\"args\": \"\"}},\"net\":[{{\"ip\":\"{}\", \"mask\":\"255.255.255.0\", \"mac\":\"{}\"}}], \"disks\":[{{\"path\":\"{}\"}}, {{\"path\":\"{}\"}}]}}",
                  cpu_count,
                  cpu_count,
-                 fw_path,
+                 _fw_path,
                  self.network.host_ip,
                  self.network.guest_mac,
                  self.disk_config.disk(DiskType::OperatingSystem).unwrap().as_str(),
