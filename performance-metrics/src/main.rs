@@ -2,9 +2,12 @@
 #[macro_use]
 extern crate lazy_static;
 extern crate test_infra;
+#[macro_use(crate_authors)]
+extern crate clap;
 
 mod performance_tests;
 
+use clap::{Arg, Command as ClapCommand};
 use performance_tests::*;
 use serde_derive::{Deserialize, Serialize};
 use std::{
@@ -353,7 +356,41 @@ fn date() -> String {
 }
 
 fn main() {
-    let test_filter = env::var("TEST_FILTER").map_or("".to_string(), |o| o);
+    let cmd_arguments = ClapCommand::new("performance-metrics")
+        .version(env!("GIT_HUMAN_READABLE"))
+        .author(crate_authors!())
+        .about("Generate the performance metrics data for Cloud Hypervisor")
+        .arg(
+            Arg::new("test-filter")
+                .long("test-filter")
+                .help("Filter metrics tests to run based on provided keywords")
+                .multiple_occurrences(true)
+                .takes_value(true)
+                .required(false),
+        )
+        .arg(
+            Arg::new("list-tests")
+                .long("list-tests")
+                .help("Print the list of availale metrics tests")
+                .multiple_occurrences(true)
+                .takes_value(false)
+                .required(false),
+        )
+        .get_matches();
+
+    if cmd_arguments.is_present("list-tests") {
+        println!("List of available metrics tests:\n");
+        for test in TEST_LIST.iter() {
+            println!("\"{}\" ({})", test.name, test.control);
+        }
+
+        return;
+    }
+
+    let test_filter = match cmd_arguments.values_of("test-filter") {
+        Some(s) => s.collect(),
+        None => Vec::new(),
+    };
 
     // Run performance tests sequentially and report results (in both readable/json format)
     let mut metrics_report = MetricsReport {
@@ -366,7 +403,7 @@ fn main() {
     init_tests();
 
     for test in TEST_LIST.iter() {
-        if test.name.contains(&test_filter) {
+        if test_filter.is_empty() || test_filter.iter().any(|&s| test.name.contains(s)) {
             match run_test_with_timetout(test) {
                 Ok(r) => {
                     metrics_report.results.push(r);
