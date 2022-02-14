@@ -256,6 +256,8 @@ pub enum VmExit<'a> {
     Reset,
     Shutdown,
     Hyperv,
+    #[cfg(feature = "tdx")]
+    Tdx,
 }
 
 ///

@@ -897,6 +897,8 @@ impl CpuManager {
                                     }
                                     VmExit::Ignore => {}
                                     VmExit::Hyperv => {}
+                                    #[cfg(feature = "tdx")]
+                                    VmExit::Tdx => {}
                                     VmExit::Reset => {
                                         info!("VmExit::Reset");
                                         vcpu_run_interrupted.store(true, Ordering::SeqCst);
