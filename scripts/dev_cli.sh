@@ -354,12 +354,6 @@ cmd_tests() {
 
     process_volumes_args
     target="$(uname -m)-unknown-linux-${libc}"
-    cflags=""
-    target_cc=""
-    if [[ "$target" == "x86_64-unknown-linux-musl" ]]; then
-	target_cc="musl-gcc"
-	cflags="-I /usr/include/x86_64-linux-musl/ -idirafter /usr/include/"
-    fi
 
     if [[ "$unit" = true  ]] ;  then
 	say "Running unit tests for $target..."
@@ -371,8 +365,6 @@ cmd_tests() {
 	       --cap-add net_admin \
 	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
 	       --env BUILD_TARGET="$target" \
-	       --env CFLAGS="$cflags" \
-	       --env TARGET_CC="$target_cc" \
 	       "$CTR_IMAGE" \
 	       ./scripts/run_unit_tests.sh "$@" || fix_dir_perms $? || exit $?
     fi
