@@ -38,6 +38,7 @@ pub struct PerformanceTestResult {
 pub struct MetricsReport {
     pub git_human_readable: String,
     pub git_revision: String,
+    pub git_committer_date: String,
     pub date: String,
     pub results: Vec<PerformanceTestResult>,
 }
@@ -396,6 +397,7 @@ fn main() {
     let mut metrics_report = MetricsReport {
         git_human_readable: env!("GIT_HUMAN_READABLE").to_string(),
         git_revision: env!("GIT_REVISION").to_string(),
+        git_committer_date: env!("GIT_COMMITER_DATE").to_string(),
         date: date(),
         results: Vec::new(),
     };
