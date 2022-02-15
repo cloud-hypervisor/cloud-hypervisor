@@ -377,5 +377,4 @@ and [join us on Slack](https://cloud-hypervisor.slack.com/).
 
 ## Security issues
 
-Please use the GitHub security advisories feature for reporting issues:
-https://github.com/cloud-hypervisor/cloud-hypervisor/security/advisories/new
+Please contact the maintainers listed in the MAINTAINERS.md file with security issues.
