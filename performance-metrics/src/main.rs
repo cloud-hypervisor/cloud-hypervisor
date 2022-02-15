@@ -18,11 +18,18 @@ use std::{
     thread,
     time::Duration,
 };
+use thiserror::Error;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 enum Error {
+    #[error("Error: test timed-out")]
     TestTimeout,
+    #[error("Error: test failed")]
     TestFailed,
+    #[error("Error creating log file: {0}")]
+    ReportFileCreation(std::io::Error),
+    #[error("Error writing log file: {0}")]
+    ReportFileWrite(std::io::Error),
 }
 
 #[derive(Deserialize, Serialize)]
@@ -377,6 +384,12 @@ fn main() {
                 .takes_value(false)
                 .required(false),
         )
+        .arg(
+            Arg::new("report-file")
+                .long("report-file")
+                .help("Report file. Standard error is used if not specified")
+                .takes_value(true),
+        )
         .get_matches();
 
     if cmd_arguments.is_present("list-tests") {
@@ -392,6 +405,17 @@ fn main() {
         Some(s) => s.collect(),
         None => Vec::new(),
     };
+
+    let mut report_file: Box<dyn std::io::Write + Send> =
+        if let Some(file) = cmd_arguments.value_of("report-file") {
+            Box::new(
+                std::fs::File::create(std::path::Path::new(file))
+                    .map_err(Error::ReportFileCreation)
+                    .unwrap(),
+            )
+        } else {
+            Box::new(std::io::stderr())
+        };
 
     // Run performance tests sequentially and report results (in both readable/json format)
     let mut metrics_report = MetricsReport {
@@ -421,8 +445,12 @@ fn main() {
     cleanup_tests();
 
     // Todo: Report/upload to the metrics database
-    println!(
-        "\n\nTests result in json format: \n {}",
-        serde_json::to_string_pretty(&metrics_report).unwrap()
-    );
+    report_file
+        .write(
+            serde_json::to_string_pretty(&metrics_report)
+                .unwrap()
+                .as_bytes(),
+        )
+        .map_err(Error::ReportFileWrite)
+        .unwrap();
 }
