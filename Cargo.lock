@@ -602,6 +602,8 @@ dependencies = [
  "hypervisor",
  "libc",
  "log",
+ "serde",
+ "serde_derive",
  "thiserror",
  "versionize",
  "versionize_derive",
