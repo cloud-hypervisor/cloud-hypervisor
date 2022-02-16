@@ -25,7 +25,7 @@ vm-memory = "0.7.0"
 path = ".."
 
 [patch.crates-io]
-kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch-v0.5.0", features = ["with-serde", "fam-wrappers"] }
+kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch-v0.5.0-tdx" }
 kvm-ioctls = { git = "https://github.com/rust-vmm/kvm-ioctls", branch = "main" }
 versionize_derive = { git = "https://github.com/cloud-hypervisor/versionize_derive", branch = "ch" }
 

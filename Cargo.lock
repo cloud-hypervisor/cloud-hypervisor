@@ -393,7 +393,7 @@ checksum = "1aab8fc367588b89dcee83ab0fd66b72b50b72fa1904d7095045ace2b0c81c35"
 [[package]]
 name = "kvm-bindings"
 version = "0.5.0"
-source = "git+https://github.com/cloud-hypervisor/kvm-bindings?branch=ch-v0.5.0#9c497710ba9968d8efe15dbae03991b16cf82e23"
+source = "git+https://github.com/cloud-hypervisor/kvm-bindings?branch=ch-v0.5.0-tdx#52e56d0e8ef0f6ea32fc0492e6a175b73617a49f"
 dependencies = [
  "serde",
  "serde_derive",
