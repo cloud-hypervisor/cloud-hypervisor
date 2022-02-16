@@ -81,13 +81,24 @@ pub use {
     kvm_bindings::kvm_clock_data as ClockData, kvm_bindings::kvm_create_device as CreateDevice,
     kvm_bindings::kvm_device_attr as DeviceAttr,
     kvm_bindings::kvm_irq_routing_entry as IrqRoutingEntry, kvm_bindings::kvm_mp_state as MpState,
-    kvm_bindings::kvm_userspace_memory_region as MemoryRegion,
+    kvm_bindings::kvm_run, kvm_bindings::kvm_userspace_memory_region as MemoryRegion,
     kvm_bindings::kvm_vcpu_events as VcpuEvents, kvm_ioctls::DeviceFd, kvm_ioctls::IoEventAddress,
     kvm_ioctls::VcpuExit,
 };
 
 #[cfg(target_arch = "x86_64")]
 const KVM_CAP_SGX_ATTRIBUTE: u32 = 196;
+
+#[cfg(feature = "tdx")]
+const KVM_EXIT_TDX: u32 = 35;
+#[cfg(feature = "tdx")]
+const TDG_VP_VMCALL_GET_QUOTE: u64 = 0x10002;
+#[cfg(feature = "tdx")]
+const TDG_VP_VMCALL_SETUP_EVENT_NOTIFY_INTERRUPT: u64 = 0x10004;
+#[cfg(feature = "tdx")]
+const TDG_VP_VMCALL_SUCCESS: u64 = 0;
+#[cfg(feature = "tdx")]
+const TDG_VP_VMCALL_INVALID_OPERAND: u64 = 0x8000000000000000;
 
 #[cfg(feature = "tdx")]
 ioctl_iowr_nr!(KVM_MEMORY_ENCRYPT_OP, KVMIO, 0xba, std::os::raw::c_ulong);
@@ -101,6 +112,18 @@ enum TdxCommand {
     InitVcpu,
     InitMemRegion,
     Finalize,
+}
+
+#[cfg(feature = "tdx")]
+pub enum TdxExitDetails {
+    GetQuote,
+    SetupEventNotifyInterrupt,
+}
+
+#[cfg(feature = "tdx")]
+pub enum TdxExitStatus {
+    Success,
+    InvalidOperand,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
@@ -1030,7 +1053,8 @@ impl cpu::Vcpu for KvmVcpu {
                     Ok(cpu::VmExit::MmioWrite(addr, data))
                 }
                 VcpuExit::Hyperv => Ok(cpu::VmExit::Hyperv),
-
+                #[cfg(feature = "tdx")]
+                VcpuExit::Unsupported(KVM_EXIT_TDX) => Ok(cpu::VmExit::Tdx),
                 r => Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
                     "Unexpected exit reason on vcpu run: {:?}",
                     r
@@ -1601,6 +1625,43 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     fn set_immediate_exit(&self, exit: bool) {
         self.fd.set_kvm_immediate_exit(exit.into());
+    }
+
+    ///
+    /// Returns the details about TDX exit reason
+    ///
+    #[cfg(feature = "tdx")]
+    fn get_tdx_exit_details(&mut self) -> cpu::Result<TdxExitDetails> {
+        let kvm_run = self.fd.get_kvm_run();
+        let tdx_vmcall = unsafe { &mut kvm_run.__bindgen_anon_1.tdx.u.vmcall };
+
+        tdx_vmcall.status_code = TDG_VP_VMCALL_INVALID_OPERAND;
+
+        if tdx_vmcall.type_ != 0 {
+            return Err(cpu::HypervisorCpuError::UnknownTdxVmCall);
+        }
+
+        match tdx_vmcall.subfunction {
+            TDG_VP_VMCALL_GET_QUOTE => Ok(TdxExitDetails::GetQuote),
+            TDG_VP_VMCALL_SETUP_EVENT_NOTIFY_INTERRUPT => {
+                Ok(TdxExitDetails::SetupEventNotifyInterrupt)
+            }
+            _ => Err(cpu::HypervisorCpuError::UnknownTdxVmCall),
+        }
+    }
+
+    ///
+    /// Set the status code for TDX exit
+    ///
+    #[cfg(feature = "tdx")]
+    fn set_tdx_status(&mut self, status: TdxExitStatus) {
+        let kvm_run = self.fd.get_kvm_run();
+        let tdx_vmcall = unsafe { &mut kvm_run.__bindgen_anon_1.tdx.u.vmcall };
+
+        tdx_vmcall.status_code = match status {
+            TdxExitStatus::Success => TDG_VP_VMCALL_SUCCESS,
+            TdxExitStatus::InvalidOperand => TDG_VP_VMCALL_INVALID_OPERAND,
+        };
     }
 }
 
