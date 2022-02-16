@@ -27,6 +27,8 @@ use crate::MpState;
 use crate::SuspendRegisters;
 #[cfg(target_arch = "x86_64")]
 use crate::Xsave;
+#[cfg(feature = "tdx")]
+use crate::{TdxExitDetails, TdxExitStatus};
 #[cfg(feature = "mshv")]
 use mshv_bindings::*;
 use thiserror::Error;
@@ -240,6 +242,12 @@ pub enum HypervisorCpuError {
     #[cfg(feature = "tdx")]
     #[error("Failed to initialize TDX: {0}")]
     InitializeTdx(#[source] std::io::Error),
+    ///
+    /// Unknown TDX VM call
+    ///
+    #[cfg(feature = "tdx")]
+    #[error("Unknown TDX VM call")]
+    UnknownTdxVmCall,
 }
 
 #[derive(Debug)]
@@ -256,6 +264,8 @@ pub enum VmExit<'a> {
     Reset,
     Shutdown,
     Hyperv,
+    #[cfg(feature = "tdx")]
+    Tdx,
 }
 
 ///
@@ -469,4 +479,14 @@ pub trait Vcpu: Send + Sync {
     /// Set the "immediate_exit" state
     ///
     fn set_immediate_exit(&self, exit: bool);
+    #[cfg(feature = "tdx")]
+    ///
+    /// Returns the details about TDX exit reason
+    ///
+    fn get_tdx_exit_details(&mut self) -> Result<TdxExitDetails>;
+    #[cfg(feature = "tdx")]
+    ///
+    /// Set the status code for TDX exit
+    ///
+    fn set_tdx_status(&mut self, status: TdxExitStatus);
 }
