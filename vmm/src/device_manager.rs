@@ -3082,7 +3082,7 @@ impl DeviceManager {
             });
         }
 
-        node.pci_bdf = Some(pci_device_bdf.into());
+        node.pci_bdf = Some(pci_device_bdf);
         node.pci_device_handle = Some(PciDeviceHandle::Vfio(vfio_pci_device));
 
         self.device_tree
@@ -3241,7 +3241,7 @@ impl DeviceManager {
 
         let mut node = device_node!(vfio_user_name);
 
-        node.pci_bdf = Some(pci_device_bdf.into());
+        node.pci_bdf = Some(pci_device_bdf);
         node.pci_device_handle = Some(PciDeviceHandle::VfioUser(vfio_user_pci_device));
 
         self.device_tree
@@ -3288,8 +3288,7 @@ impl DeviceManager {
             info!("Restoring virtio-pci {} resources", id);
             let pci_device_bdf: PciBdf = node
                 .pci_bdf
-                .ok_or(DeviceManagerError::MissingDeviceNodePciBdf)?
-                .into();
+                .ok_or(DeviceManagerError::MissingDeviceNodePciBdf)?;
             let pci_segment_id = pci_device_bdf.segment();
 
             self.pci_segments[pci_segment_id as usize]
@@ -3397,7 +3396,7 @@ impl DeviceManager {
             });
         }
         node.migratable = Some(Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn Migratable>>);
-        node.pci_bdf = Some(pci_device_bdf.into());
+        node.pci_bdf = Some(pci_device_bdf);
         node.pci_device_handle = Some(PciDeviceHandle::Virtio(virtio_pci_device));
         self.device_tree.lock().unwrap().insert(id, node);
 
@@ -3570,8 +3569,7 @@ impl DeviceManager {
 
         let pci_device_bdf: PciBdf = pci_device_node
             .pci_bdf
-            .ok_or(DeviceManagerError::MissingDeviceNodePciBdf)?
-            .into();
+            .ok_or(DeviceManagerError::MissingDeviceNodePciBdf)?;
         let pci_segment_id = pci_device_bdf.segment();
 
         let pci_device_handle = pci_device_node
@@ -3625,7 +3623,7 @@ impl DeviceManager {
         // Remove the device from the device tree along with its children.
         let mut device_tree = self.device_tree.lock().unwrap();
         let pci_device_node = device_tree
-            .remove_node_by_pci_bdf(pci_device_bdf.into())
+            .remove_node_by_pci_bdf(pci_device_bdf)
             .ok_or(DeviceManagerError::MissingPciDevice)?;
         for child in pci_device_node.children.iter() {
             device_tree.remove(child);

@@ -27,7 +27,10 @@ pub use self::msi::{msi_num_enabled_vectors, MsiCap, MsiConfig};
 pub use self::msix::{MsixCap, MsixConfig, MsixTableEntry, MSIX_TABLE_ENTRY_SIZE};
 pub use self::vfio::{VfioPciDevice, VfioPciError};
 pub use self::vfio_user::{VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError};
-use std::fmt::Display;
+use serde::de::Visitor;
+use std::fmt::{self, Display};
+use std::num::ParseIntError;
+use std::str::FromStr;
 
 /// PCI has four interrupt pins A->D.
 #[derive(Copy, Clone)]
@@ -51,6 +54,41 @@ pub const PCI_CONFIG_IO_PORT_SIZE: u64 = 0x8;
 
 #[derive(Clone, Copy, PartialEq, PartialOrd)]
 pub struct PciBdf(u32);
+
+struct PciBdfVisitor;
+
+impl<'de> Visitor<'de> for PciBdfVisitor {
+    type Value = PciBdf;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("struct PciBdf")
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(v.into())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for PciBdf {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_str(PciBdfVisitor)
+    }
+}
+
+impl serde::Serialize for PciBdf {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_str(&self.to_string())
+    }
+}
 
 impl PciBdf {
     pub fn segment(&self) -> u16 {
@@ -119,5 +157,27 @@ impl Display for PciBdf {
             self.device(),
             self.function()
         )
+    }
+}
+
+impl FromStr for PciBdf {
+    type Err = ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let items: Vec<&str> = s.split('.').collect();
+        assert_eq!(items.len(), 2);
+        let function = u8::from_str_radix(items[1], 16)?;
+        let items: Vec<&str> = items[0].split(':').collect();
+        assert_eq!(items.len(), 3);
+        let segment = u16::from_str_radix(items[0], 16)?;
+        let bus = u8::from_str_radix(items[1], 16)?;
+        let device = u8::from_str_radix(items[2], 16)?;
+        Ok(PciBdf::new(segment, bus, device, function))
+    }
+}
+
+impl From<&str> for PciBdf {
+    fn from(bdf: &str) -> Self {
+        Self::from_str(bdf).unwrap()
     }
 }
