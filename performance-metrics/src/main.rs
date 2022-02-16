@@ -14,6 +14,7 @@ use std::{
     collections::HashSet,
     env, fmt,
     hash::{Hash, Hasher},
+    process::Command,
     sync::mpsc::channel,
     thread,
     time::Duration,
@@ -48,6 +49,48 @@ pub struct MetricsReport {
     pub git_committer_date: String,
     pub date: String,
     pub results: Vec<PerformanceTestResult>,
+}
+
+impl Default for MetricsReport {
+    fn default() -> Self {
+        let mut git_human_readable = "".to_string();
+        if let Ok(git_out) = Command::new("git").args(&["describe", "--dirty"]).output() {
+            if git_out.status.success() {
+                if let Ok(git_out_str) = String::from_utf8(git_out.stdout) {
+                    git_human_readable = git_out_str;
+                }
+            }
+        }
+
+        let mut git_revision = "".to_string();
+        if let Ok(git_out) = Command::new("git").args(&["rev-parse", "HEAD"]).output() {
+            if git_out.status.success() {
+                if let Ok(git_out_str) = String::from_utf8(git_out.stdout) {
+                    git_revision = git_out_str;
+                }
+            }
+        }
+
+        let mut git_committer_date = "".to_string();
+        if let Ok(git_out) = Command::new("git")
+            .args(&["show", "-s", "--format=%cd"])
+            .output()
+        {
+            if git_out.status.success() {
+                if let Ok(git_out_str) = String::from_utf8(git_out.stdout) {
+                    git_committer_date = git_out_str;
+                }
+            }
+        }
+
+        MetricsReport {
+            git_human_readable,
+            git_revision,
+            git_committer_date,
+            date: date(),
+            results: Vec::new(),
+        }
+    }
 }
 
 pub struct PerformanceTestControl {
@@ -418,13 +461,7 @@ fn main() {
         };
 
     // Run performance tests sequentially and report results (in both readable/json format)
-    let mut metrics_report = MetricsReport {
-        git_human_readable: env!("GIT_HUMAN_READABLE").to_string(),
-        git_revision: env!("GIT_REVISION").to_string(),
-        git_committer_date: env!("GIT_COMMITER_DATE").to_string(),
-        date: date(),
-        results: Vec::new(),
-    };
+    let mut metrics_report: MetricsReport = Default::default();
 
     init_tests();
 

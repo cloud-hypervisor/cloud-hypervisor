@@ -18,32 +18,9 @@ fn main() {
         }
     }
 
-    let mut git_revision = "".to_string();
-    if let Ok(git_out) = Command::new("git").args(&["rev-parse", "HEAD"]).output() {
-        if git_out.status.success() {
-            if let Ok(git_out_str) = String::from_utf8(git_out.stdout) {
-                git_revision = git_out_str;
-            }
-        }
-    }
-
-    let mut git_committer_date = "".to_string();
-    if let Ok(git_out) = Command::new("git")
-        .args(&["show", "-s", "--format=%cd"])
-        .output()
-    {
-        if git_out.status.success() {
-            if let Ok(git_out_str) = String::from_utf8(git_out.stdout) {
-                git_committer_date = git_out_str;
-            }
-        }
-    }
-
     // This println!() has a special behavior, as it will set the environment
-    // variable GIT_human_readable, so that it can be reused from the binary.
+    // variable GIT_HUMAN_READABLE, so that it can be reused from the binary.
     // Particularly, this is used from the main.rs to display the exact
     // version information.
     println!("cargo:rustc-env=GIT_HUMAN_READABLE={}", git_human_readable);
-    println!("cargo:rustc-env=GIT_REVISION={}", git_revision);
-    println!("cargo:rustc-env=GIT_COMMITER_DATE={}", git_committer_date);
 }
