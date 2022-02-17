@@ -742,6 +742,11 @@ impl PciConfiguration {
                         .lock()
                         .unwrap()
                         .set_msg_ctl(LittleEndian::read_u16(data));
+                } else if msix_cap_reg_idx == reg_idx && offset == 0 && data.len() == 4 {
+                    msix_config
+                        .lock()
+                        .unwrap()
+                        .set_msg_ctl((LittleEndian::read_u32(data) >> 16) as u16);
                 }
             }
         }
