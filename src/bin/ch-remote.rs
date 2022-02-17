@@ -9,7 +9,7 @@ extern crate clap;
 use api_client::simple_api_command;
 use api_client::simple_api_command_with_fds;
 use api_client::Error as ApiClientError;
-use clap::{App, AppSettings, Arg, ArgMatches};
+use clap::{Arg, ArgMatches, Command};
 use option_parser::{ByteSized, ByteSizedParseError};
 use std::fmt;
 use std::os::unix::net::UnixStream;
@@ -426,9 +426,9 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
 }
 
 fn main() {
-    let app = App::new("ch-remote")
+    let app = Command::new("ch-remote")
         .author(crate_authors!())
-        .setting(AppSettings::SubcommandRequired)
+        .subcommand_required(true)
         .about("Remotely control a cloud-hypervisor VMM.")
         .arg(
             Arg::new("api-socket")
@@ -439,21 +439,21 @@ fn main() {
                 .required(true),
         )
         .subcommand(
-            App::new("add-device").about("Add VFIO device").arg(
+            Command::new("add-device").about("Add VFIO device").arg(
                 Arg::new("device_config")
                     .index(1)
                     .help(vmm::config::DeviceConfig::SYNTAX),
             ),
         )
         .subcommand(
-            App::new("add-disk").about("Add block device").arg(
+            Command::new("add-disk").about("Add block device").arg(
                 Arg::new("disk_config")
                     .index(1)
                     .help(vmm::config::DiskConfig::SYNTAX),
             ),
         )
         .subcommand(
-            App::new("add-fs")
+            Command::new("add-fs")
                 .about("Add virtio-fs backed fs device")
                 .arg(
                     Arg::new("fs_config")
@@ -462,7 +462,7 @@ fn main() {
                 ),
         )
         .subcommand(
-            App::new("add-pmem")
+            Command::new("add-pmem")
                 .about("Add persistent memory device")
                 .arg(
                     Arg::new("pmem_config")
@@ -471,14 +471,14 @@ fn main() {
                 ),
         )
         .subcommand(
-            App::new("add-net").about("Add network device").arg(
+            Command::new("add-net").about("Add network device").arg(
                 Arg::new("net_config")
                     .index(1)
                     .help(vmm::config::NetConfig::SYNTAX),
             ),
         )
         .subcommand(
-            App::new("add-user-device")
+            Command::new("add-user-device")
                 .about("Add userspace device")
                 .arg(
                     Arg::new("device_config")
@@ -487,24 +487,24 @@ fn main() {
                 ),
         )
         .subcommand(
-            App::new("add-vsock").about("Add vsock device").arg(
+            Command::new("add-vsock").about("Add vsock device").arg(
                 Arg::new("vsock_config")
                     .index(1)
                     .help(vmm::config::VsockConfig::SYNTAX),
             ),
         )
         .subcommand(
-            App::new("remove-device")
+            Command::new("remove-device")
                 .about("Remove VFIO device")
                 .arg(Arg::new("id").index(1).help("<device_id>")),
         )
-        .subcommand(App::new("info").about("Info on the VM"))
-        .subcommand(App::new("counters").about("Counters from the VM"))
-        .subcommand(App::new("pause").about("Pause the VM"))
-        .subcommand(App::new("reboot").about("Reboot the VM"))
-        .subcommand(App::new("power-button").about("Trigger a power button in the VM"))
+        .subcommand(Command::new("info").about("Info on the VM"))
+        .subcommand(Command::new("counters").about("Counters from the VM"))
+        .subcommand(Command::new("pause").about("Pause the VM"))
+        .subcommand(Command::new("reboot").about("Reboot the VM"))
+        .subcommand(Command::new("power-button").about("Trigger a power button in the VM"))
         .subcommand(
-            App::new("resize")
+            Command::new("resize")
                 .about("Resize the VM")
                 .arg(
                     Arg::new("cpus")
@@ -529,7 +529,7 @@ fn main() {
                 ),
         )
         .subcommand(
-            App::new("resize-zone")
+            Command::new("resize-zone")
                 .about("Resize a memory zone")
                 .arg(
                     Arg::new("id")
@@ -546,24 +546,28 @@ fn main() {
                         .number_of_values(1),
                 ),
         )
-        .subcommand(App::new("resume").about("Resume the VM"))
-        .subcommand(App::new("shutdown").about("Shutdown the VM"))
+        .subcommand(Command::new("resume").about("Resume the VM"))
+        .subcommand(Command::new("shutdown").about("Shutdown the VM"))
         .subcommand(
-            App::new("snapshot").about("Create a snapshot from VM").arg(
-                Arg::new("snapshot_config")
-                    .index(1)
-                    .help("<destination_url>"),
-            ),
+            Command::new("snapshot")
+                .about("Create a snapshot from VM")
+                .arg(
+                    Arg::new("snapshot_config")
+                        .index(1)
+                        .help("<destination_url>"),
+                ),
         )
         .subcommand(
-            App::new("restore").about("Restore VM from a snapshot").arg(
-                Arg::new("restore_config")
-                    .index(1)
-                    .help(vmm::config::RestoreConfig::SYNTAX),
-            ),
+            Command::new("restore")
+                .about("Restore VM from a snapshot")
+                .arg(
+                    Arg::new("restore_config")
+                        .index(1)
+                        .help(vmm::config::RestoreConfig::SYNTAX),
+                ),
         )
         .subcommand(
-            App::new("send-migration")
+            Command::new("send-migration")
                 .about("Initiate a VM migration")
                 .arg(
                     Arg::new("send_migration_config")
@@ -577,7 +581,7 @@ fn main() {
                 ),
         )
         .subcommand(
-            App::new("receive-migration")
+            Command::new("receive-migration")
                 .about("Receive a VM migration")
                 .arg(
                     Arg::new("receive_migration_config")

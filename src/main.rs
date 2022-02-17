@@ -8,7 +8,7 @@ extern crate clap;
 #[macro_use]
 extern crate event_monitor;
 
-use clap::{App, Arg, ArgGroup, ArgMatches};
+use clap::{Arg, ArgGroup, ArgMatches, Command};
 use libc::EFD_NONBLOCK;
 use log::LevelFilter;
 use option_parser::OptionParser;
@@ -129,8 +129,8 @@ fn create_app<'a>(
     default_vcpus: &'a str,
     default_memory: &'a str,
     default_rng: &'a str,
-) -> App<'a> {
-    let app = App::new("cloud-hypervisor")
+) -> Command<'a> {
+    let app = Command::new("cloud-hypervisor")
         // 'BUILT_VERSION' is set by the build script 'build.rs' at
         // compile time
         .version(env!("BUILT_VERSION"))
