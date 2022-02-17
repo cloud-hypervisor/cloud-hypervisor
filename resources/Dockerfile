@@ -67,7 +67,7 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
         && DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends --no-install-suggests \
         libcap2-bin \
         libguestfs-tools \
-        linux-image-5.8.0-63-generic \
+        linux-image-generic \
         autotools-dev \
         autoconf \
         automake \
