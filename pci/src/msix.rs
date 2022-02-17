@@ -162,6 +162,7 @@ impl MsixConfig {
         // Update interrupt routing
         if old_masked != self.masked || old_enabled != self.enabled {
             if self.enabled && !self.masked {
+                debug!("MSI-X enabled for device 0x{:x}", self.devid);
                 for (idx, table_entry) in self.table_entries.iter().enumerate() {
                     let config = MsiIrqSourceConfig {
                         high_addr: table_entry.msg_addr_hi,
@@ -187,6 +188,7 @@ impl MsixConfig {
                     }
                 }
             } else if old_enabled || !old_masked {
+                debug!("MSI-X disabled for device 0x{:x}", self.devid);
                 if let Err(e) = self.interrupt_source_group.disable() {
                     error!("Failed disabling irq_fd: {:?}", e);
                 }
