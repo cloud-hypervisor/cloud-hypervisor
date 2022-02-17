@@ -14,37 +14,38 @@ ENV PATH="$PATH:$CARGO_HOME/bin"
 # Install all CI dependencies
 RUN apt-get update \
 	&& apt-get -yq upgrade \
-	&& DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends --no-install-suggests -yq \
-	bc \
-	bison \
+	&& DEBIAN_FRONTEND=noninteractive apt-get install -yq \
 	build-essential \
-	ca-certificates \
-	cpio \
+	bc \
+	docker.io \
 	curl \
-	dosfstools \
-	flex \
-	git-core \
-	iperf3 \
-	libcap-ng-dev \
-	libelf-dev \
-	libseccomp-dev \
-	libssl-dev \
+	wget \
+	sudo \
 	mtools \
 	musl-tools \
-	ntfs-3g \
-	openvswitch-switch-dpdk \
+	libssl-dev \
 	pkg-config \
+	flex \
+	bison \
+	libelf-dev \
+	qemu-utils \
+	qemu-system \
+	libglib2.0-dev \
+	libpixman-1-dev \
+	libseccomp-dev \
+	libcap-ng-dev \
+	socat \
+	dosfstools \
+	cpio \
 	python \
 	python3 \
-	python3-distutils \
 	python3-setuptools \
-	qemu-system-common \
-	qemu-utils \
-	socat \
-	sudo \
-	unzip \
+	ntfs-3g \
+	openvswitch-switch-dpdk \
+	python3-distutils \
 	uuid-dev \
-	wget \
+	iperf3 \
+	zip \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -53,7 +54,7 @@ RUN update-alternatives --set ovs-vswitchd /usr/lib/openvswitch-switch-dpdk/ovs-
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
 	apt-get update \
 	&& apt-get -yq upgrade \
-	&& DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends --no-install-suggests gcc-multilib \
+	&& DEBIAN_FRONTEND=noninteractive apt-get install -yq gcc-multilib \
 	&& apt-get clean \
     && rm -rf /var/lib/apt/lists/*;	fi
 
@@ -64,7 +65,7 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
         # kernel (any version) image in `/boot` and modules in `/lib/modules`.
         apt-get update \
         && apt-get -yq upgrade \
-        && DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends --no-install-suggests \
+        && DEBIAN_FRONTEND=noninteractive apt-get install -yq \
         libcap2-bin \
         libguestfs-tools \
         linux-image-generic \
@@ -102,6 +103,13 @@ RUN echo 'source $CARGO_HOME/env' >> $HOME/.bashrc \
     && mkdir $HOME/.cargo \
     && ln -s $CARGO_HOME/env $HOME/.cargo/env
 
+# install virtiofsd
+RUN git clone --depth 1 https://gitlab.com/virtio-fs/qemu.git -b qemu5.0-virtiofs-dax \
+    && cd qemu \
+    && ./configure --prefix=$PWD --target-list=x86_64-softmmu \
+    && make virtiofsd -j `nproc` \
+    && cp virtiofsd /usr/local/bin \
+    && cd .. && rm -rf qemu
 
 # install SPDK NVMe
 # only for 'x86_64' platform images as 'docker buildx' can't build 'spdk'
