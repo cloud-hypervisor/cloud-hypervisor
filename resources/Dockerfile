@@ -1,4 +1,4 @@
-FROM ubuntu:21.10 as dev
+FROM ubuntu:20.04 as dev
 
 ARG TARGETARCH
 ARG RUST_TOOLCHAIN="1.58.1"
