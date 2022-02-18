@@ -648,7 +648,7 @@ impl CpuManager {
         cpu_id: u8,
         entry_point: Option<EntryPoint>,
         snapshot: Option<Snapshot>,
-    ) -> Result<Arc<Mutex<Vcpu>>> {
+    ) -> Result<()> {
         info!("Creating vCPU: cpu_id = {}", cpu_id);
 
         let mut vcpu = Vcpu::new(cpu_id, &self.vm, Some(self.vmmops.clone()))?;
@@ -676,9 +676,9 @@ impl CpuManager {
 
         // Adding vCPU to the CpuManager's vCPU list.
         let vcpu = Arc::new(Mutex::new(vcpu));
-        self.vcpus.push(Arc::clone(&vcpu));
+        self.vcpus.push(vcpu);
 
-        Ok(vcpu)
+        Ok(())
     }
 
     /// Only create new vCPUs if there aren't any inactive ones to reuse
