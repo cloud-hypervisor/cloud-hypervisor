@@ -27,6 +27,17 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v3
+        with:
+          # list of Docker images to use as base name for tags
+          images: cloudhypervisor/dev
+          # generate Docker tags based on the following events/attributes
+          tags: |
+            type=raw,value={{date 'YYYYMMDD'}}-0
+            type=sha
+
       - name: Build and push
         if: ${{ github.event_name == 'push' }}
         uses: docker/build-push-action@v2
@@ -34,7 +45,7 @@ jobs:
           file: ./resources/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: cloudhypervisor/dev:latest
+          tags: ${{ steps.meta.outputs.tags }}
 
       - name: Build only
         if: ${{ github.event_name == 'pull_request' }}
@@ -42,7 +53,7 @@ jobs:
         with:
           file: ./resources/Dockerfile
           platforms: linux/amd64,linux/arm64
-          tags: cloudhypervisor/dev:latest
+          tags: ${{ steps.meta.outputs.tags }}
 
       - name: Image digest
         run: echo ${{ steps.docker_build.outputs.digest }}
