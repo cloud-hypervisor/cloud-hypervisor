@@ -72,27 +72,6 @@ const DIRECT_KERNEL_BOOT_CMDLINE: &str =
 
 const CONSOLE_TEST_STRING: &str = "Started OpenBSD Secure Shell server";
 
-fn prepare_virtiofsd(
-    tmp_dir: &TempDir,
-    shared_dir: &str,
-    cache: &str,
-) -> (std::process::Child, String) {
-    let virtiofsd_socket_path =
-        String::from(tmp_dir.as_path().join("virtiofs.sock").to_str().unwrap());
-
-    // Start the daemon
-    let child = Command::new("virtiofsd")
-        .args(&[format!("--socket-path={}", virtiofsd_socket_path).as_str()])
-        .args(&["-o", format!("source={}", shared_dir).as_str()])
-        .args(&["-o", format!("cache={}", cache).as_str()])
-        .spawn()
-        .unwrap();
-
-    thread::sleep(std::time::Duration::new(10, 0));
-
-    (child, virtiofsd_socket_path)
-}
-
 fn prepare_virtiofsd_rs_daemon(
     tmp_dir: &TempDir,
     shared_dir: &str,
@@ -2775,7 +2754,14 @@ mod parallel {
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_virtio_fs_dax_on_default_cache_size() {
-        test_virtio_fs(true, None, "none", &prepare_virtiofsd, false, None)
+        test_virtio_fs(
+            true,
+            None,
+            "never",
+            &prepare_virtiofsd_rs_daemon,
+            false,
+            None,
+        )
     }
 
     #[test]
@@ -2784,8 +2770,8 @@ mod parallel {
         test_virtio_fs(
             true,
             Some(0x4000_0000),
-            "none",
-            &prepare_virtiofsd,
+            "never",
+            &prepare_virtiofsd_rs_daemon,
             false,
             None,
         )
@@ -2793,37 +2779,6 @@ mod parallel {
 
     #[test]
     fn test_virtio_fs_dax_off() {
-        test_virtio_fs(false, None, "none", &prepare_virtiofsd, false, None)
-    }
-
-    #[test]
-    #[cfg(not(feature = "mshv"))]
-    fn test_virtio_fs_dax_on_default_cache_size_w_virtiofsd_rs_daemon() {
-        test_virtio_fs(
-            true,
-            None,
-            "never",
-            &prepare_virtiofsd_rs_daemon,
-            false,
-            None,
-        )
-    }
-
-    #[test]
-    #[cfg(not(feature = "mshv"))]
-    fn test_virtio_fs_dax_on_cache_size_1_gib_w_virtiofsd_rs_daemon() {
-        test_virtio_fs(
-            true,
-            Some(0x4000_0000),
-            "never",
-            &prepare_virtiofsd_rs_daemon,
-            false,
-            None,
-        )
-    }
-
-    #[test]
-    fn test_virtio_fs_dax_off_w_virtiofsd_rs_daemon() {
         test_virtio_fs(
             false,
             None,
@@ -2837,17 +2792,6 @@ mod parallel {
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_virtio_fs_hotplug_dax_on() {
-        test_virtio_fs(true, None, "none", &prepare_virtiofsd, true, None)
-    }
-
-    #[test]
-    fn test_virtio_fs_hotplug_dax_off() {
-        test_virtio_fs(false, None, "none", &prepare_virtiofsd, true, None)
-    }
-
-    #[test]
-    #[cfg(not(feature = "mshv"))]
-    fn test_virtio_fs_hotplug_dax_on_w_virtiofsd_rs_daemon() {
         test_virtio_fs(
             true,
             None,
@@ -2859,7 +2803,7 @@ mod parallel {
     }
 
     #[test]
-    fn test_virtio_fs_hotplug_dax_off_w_virtiofsd_rs_daemon() {
+    fn test_virtio_fs_hotplug_dax_off() {
         test_virtio_fs(
             false,
             None,
@@ -2876,8 +2820,8 @@ mod parallel {
         test_virtio_fs(
             true,
             Some(0x4000_0000),
-            "none",
-            &prepare_virtiofsd,
+            "never",
+            &prepare_virtiofsd_rs_daemon,
             true,
             Some(15),
         )
@@ -2889,8 +2833,8 @@ mod parallel {
         test_virtio_fs(
             true,
             Some(0x4000_0000),
-            "none",
-            &prepare_virtiofsd,
+            "never",
+            &prepare_virtiofsd_rs_daemon,
             false,
             Some(15),
         )
