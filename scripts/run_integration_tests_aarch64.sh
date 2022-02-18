@@ -221,7 +221,7 @@ update_workloads() {
     VIRTIOFSD_RS_DIR="virtiofsd_rs_build"
     if [ ! -f "$VIRTIOFSD_RS" ]; then
         pushd $WORKLOADS_DIR
-        git clone "https://gitlab.com/virtio-fs/virtiofsd-rs.git" $VIRTIOFSD_RS_DIR
+        git clone "https://gitlab.com/virtio-fs/virtiofsd.git" $VIRTIOFSD_RS_DIR
         pushd $VIRTIOFSD_RS_DIR
         git checkout v1.1.0
         time cargo build --release
