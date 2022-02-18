@@ -7455,9 +7455,8 @@ mod live_migration {
     fn test_live_migration_numa() {
         _test_live_migration(true, false)
     }
-    #[test]
-    #[cfg(not(feature = "mshv"))]
-    fn test_live_migration_ovs_dpdk() {
+
+    fn _test_live_migration_ovs_dpdk(local: bool) {
         let ovs_focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let ovs_guest = Guest::new(Box::new(ovs_focal));
 
@@ -7505,12 +7504,19 @@ mod live_migration {
             // Give it '1s' to make sure the 'migration_socket' file is properly created
             thread::sleep(std::time::Duration::new(1, 0));
             // Start to send migration from the source VM
+            let mut args = [
+                format!("--api-socket={}", &src_api_socket),
+                "send-migration".to_string(),
+                format! {"unix:{}", migration_socket},
+            ]
+            .to_vec();
+
+            if local {
+                args.insert(2, "--local".to_string());
+            }
+
             let mut send_migration = Command::new(clh_command("ch-remote"))
-                .args(&[
-                    &format!("--api-socket={}", &src_api_socket),
-                    "send-migration",
-                    &format! {"unix:{}", migration_socket},
-                ])
+                .args(&args)
                 .stderr(Stdio::piped())
                 .stdout(Stdio::piped())
                 .spawn()
@@ -7650,6 +7656,18 @@ mod live_migration {
         handle_child_output(r, &dest_output);
         let ovs_output = ovs_child.wait_with_output().unwrap();
         handle_child_output(Ok(()), &ovs_output);
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_live_migration_ovs_dpdk() {
+        _test_live_migration_ovs_dpdk(false);
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_live_migration_ovs_dpdk_local() {
+        _test_live_migration_ovs_dpdk(true);
     }
 }
 
