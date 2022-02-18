@@ -31,6 +31,8 @@ use hypervisor::kvm::kvm_bindings;
 #[cfg(target_arch = "x86_64")]
 use hypervisor::CpuId;
 use hypervisor::{vm::VmmOps, CpuState, HypervisorCpuError, VmExit};
+#[cfg(feature = "tdx")]
+use hypervisor::{TdxExitDetails, TdxExitStatus};
 use libc::{c_void, siginfo_t};
 use seccompiler::{apply_filter, SeccompAction};
 use std::collections::BTreeMap;
@@ -881,8 +883,12 @@ impl CpuManager {
                                 break;
                             }
 
+                            #[cfg(feature = "tdx")]
+                            let mut vcpu = vcpu.lock().unwrap();
+                            #[cfg(not(feature = "tdx"))]
+                            let vcpu = vcpu.lock().unwrap();
                             // vcpu.run() returns false on a triple-fault so trigger a reset
-                            match vcpu.lock().unwrap().run() {
+                            match vcpu.run() {
                                 Ok(run) => match run {
                                     #[cfg(target_arch = "x86_64")]
                                     VmExit::IoapicEoi(vector) => {
@@ -908,6 +914,26 @@ impl CpuManager {
                                         vcpu_run_interrupted.store(true, Ordering::SeqCst);
                                         exit_evt.write(1).unwrap();
                                         break;
+                                    }
+                                    #[cfg(feature = "tdx")]
+                                    VmExit::Tdx => {
+                                        if let Some(vcpu_fd) = Arc::get_mut(&mut vcpu.vcpu) {
+                                            match vcpu_fd.get_tdx_exit_details() {
+                                                Ok(details) => match details {
+                                                    TdxExitDetails::GetQuote => warn!("TDG_VP_VMCALL_GET_QUOTE not supported"),
+                                                    TdxExitDetails::SetupEventNotifyInterrupt => {
+                                                        warn!("TDG_VP_VMCALL_SETUP_EVENT_NOTIFY_INTERRUPT not supported")
+                                                    }
+                                                },
+                                                Err(e) => error!("Unexpected TDX VMCALL: {}", e),
+                                            }
+                                            vcpu_fd.set_tdx_status(TdxExitStatus::InvalidOperand);
+                                        } else {
+                                            // We should never reach this code as
+                                            // this means the design from the code
+                                            // is wrong.
+                                            unreachable!("Couldn't get a mutable reference from Arc<dyn Vcpu> as there are multiple instances");
+                                        }
                                     }
                                     _ => {
                                         error!(
