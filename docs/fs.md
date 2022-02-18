@@ -12,12 +12,12 @@ This virtual device relies on the _vhost-user_ protocol, which assumes the backe
 
 _Build virtiofsd_
 ```bash
-git clone --depth 1 "https://gitlab.com/virtio-fs/qemu.git" -b "qemu5.0-virtiofs-dax" $VIRTIOFSD_DIR
-cd $VIRTIOFSD_DIR
-./configure --prefix=$PWD --target-list=x86_64-softmmu
-make virtiofsd -j `nproc`
-sudo setcap cap_sys_admin+epi "virtiofsd"
+git clone https://gitlab.com/virtio-fs/virtiofsd
+pushd virtiofsd
+cargo build --release
+sudo setcap cap_sys_admin+epi target/release/virtiofsd
 ```
+
 _Create shared directory_
 ```bash
 mkdir /tmp/shared_dir
@@ -27,11 +27,11 @@ _Run virtiofsd_
 ./virtiofsd \
     -d \
     --socket-path=/tmp/virtiofs \
-    -o source=/tmp/shared_dir \
-    -o cache=none
+    --shared-dir=/tmp/shared_dir \
+    --cache=never
 ```
 
-The `cache=none` option should be the default when using `virtiofsd` with the __cloud-hypervisor__ VMM. This prevents from using the guest page cache, which reduces the memory footprint of the guest. When running multiple virtual machines on the same host, this will let the host deal with page cache, which will increase the density of virtual machines which can be launched.
+The `cache=never` option should be the default when using `virtiofsd` with the __cloud-hypervisor__ VMM. This prevents from using the guest page cache, which reduces the memory footprint of the guest. When running multiple virtual machines on the same host, this will let the host deal with page cache, which will increase the density of virtual machines which can be launched.
 
 The `cache=always` option will allow for the guest page cache to be used, which will increase the memory footprint of the guest. This option should be used only for specific use cases where a single VM is going to be running on a host.
 
