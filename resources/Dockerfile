@@ -1,3 +1,6 @@
+# When changing this file don't forget to update the tag name in the
+# .github/workflows/docker-image.yaml file if doing multiple per day
+
 FROM ubuntu:20.04 as dev
 
 ARG TARGETARCH
