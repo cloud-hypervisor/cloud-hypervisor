@@ -65,7 +65,7 @@ iface eth0 inet dhcp
 
 ```bash
 # starting in the directory above rootfs
-sudo virtiofsd --socket-path=$PWD/virtiofs-rootfs.sock -o source=$PWD/rootfs -o cache=none &
+sudo virtiofsd --socket-path=$PWD/virtiofs-rootfs.sock --shared-dir=$PWD/rootfs --cache=never &
 sudo cloud-hypervisor \
     --cpus boot=1,max=1 \
     --kernel vmlinux \
