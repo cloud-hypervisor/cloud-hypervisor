@@ -29,8 +29,6 @@ use crate::SuspendRegisters;
 use crate::Xsave;
 #[cfg(feature = "tdx")]
 use crate::{TdxExitDetails, TdxExitStatus};
-#[cfg(feature = "mshv")]
-use mshv_bindings::*;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -463,7 +461,7 @@ pub trait Vcpu: Send + Sync {
     ///
     /// Translate guest virtual address to guest physical address
     ///
-    fn translate_gva(&self, gva: u64, flags: u64) -> Result<(u64, hv_translate_gva_result)>;
+    fn translate_gva(&self, gva: u64, flags: u64) -> Result<(u64, u32)>;
     ///
     /// Initialize TDX support on the vCPU
     ///
