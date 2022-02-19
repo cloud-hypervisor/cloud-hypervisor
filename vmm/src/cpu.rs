@@ -1286,9 +1286,11 @@ impl CpuManager {
         let pptt_start = 0;
         let mut cpus = 0;
         let mut uid = 0;
-        let threads_per_core = self.get_vcpu_topology().unwrap_or_default().0 as u8;
-        let cores_per_package = self.get_vcpu_topology().unwrap_or_default().1 as u8;
-        let packages = self.get_vcpu_topology().unwrap_or_default().2 as u8;
+        // If topology is not specified, the default setting is:
+        // 1 package, multiple cores, 1 thread per core
+        // This is also the behavior when PPTT is missing.
+        let (threads_per_core, cores_per_package, packages) =
+            self.get_vcpu_topology().unwrap_or((1, self.max_vcpus(), 1));
 
         let mut pptt = Sdt::new(*b"PPTT", 36, 2, *b"CLOUDH", *b"CHPPTT  ", 1);
 
