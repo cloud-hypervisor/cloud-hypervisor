@@ -161,9 +161,6 @@ fn create_cpu_nodes(
     fdt.property_u32("#size-cells", 0x0)?;
 
     let num_cpus = vcpu_mpidr.len();
-    let threads_per_core = vcpu_topology.unwrap_or_default().0 as u8;
-    let cores_per_package = vcpu_topology.unwrap_or_default().1 as u8;
-    let packages = vcpu_topology.unwrap_or_default().2 as u8;
 
     for (cpu_id, mpidr) in vcpu_mpidr.iter().enumerate().take(num_cpus) {
         let cpu_name = format!("cpu@{:x}", cpu_id);
@@ -192,31 +189,20 @@ fn create_cpu_nodes(
         fdt.end_node(cpu_node)?;
     }
 
-    // If there is a valid cpu topology config, create the cpu-map node.
-    if (threads_per_core > 0)
-        && (cores_per_package > 0)
-        && (packages > 0)
-        && (num_cpus as u8 == threads_per_core * cores_per_package * packages)
-    {
+    if let Some(topology) = vcpu_topology {
+        let (threads_per_core, cores_per_package, packages) = topology;
         let cpu_map_node = fdt.begin_node("cpu-map")?;
         // Create mappings between CPU index and cluster,core, and thread.
         let mut cluster_core_thread_to_cpuidx = HashMap::new();
         for cpu_idx in 0..num_cpus as u8 {
-            if threads_per_core > 1 {
-                cluster_core_thread_to_cpuidx.insert(
-                    (
-                        cpu_idx / (cores_per_package * threads_per_core),
-                        (cpu_idx / threads_per_core) % cores_per_package,
-                        cpu_idx % threads_per_core,
-                    ),
-                    cpu_idx,
-                );
-            } else {
-                cluster_core_thread_to_cpuidx.insert(
-                    (cpu_idx / cores_per_package, cpu_idx % cores_per_package, 0),
-                    cpu_idx,
-                );
-            }
+            cluster_core_thread_to_cpuidx.insert(
+                (
+                    cpu_idx / (cores_per_package * threads_per_core),
+                    (cpu_idx / threads_per_core) % cores_per_package,
+                    cpu_idx % threads_per_core,
+                ),
+                cpu_idx,
+            );
         }
 
         // Create device tree nodes with regard of above mapping.
@@ -228,24 +214,16 @@ fn create_cpu_nodes(
                 let core_name = format!("core{:x}", core_idx);
                 let core_node = fdt.begin_node(&core_name)?;
 
-                if threads_per_core > 1 {
-                    for thread_idx in 0..threads_per_core {
-                        let thread_name = format!("thread{:x}", thread_idx);
-                        let thread_node = fdt.begin_node(&thread_name)?;
-                        let cpu_idx = cluster_core_thread_to_cpuidx
-                            .get(&(cluster_idx, core_idx, thread_idx))
-                            .unwrap();
-
-                        fdt.property_u32("cpu", *cpu_idx as u32 + FIRST_VCPU_PHANDLE)?;
-                        fdt.end_node(thread_node)?;
-                    }
-                } else {
+                for thread_idx in 0..threads_per_core {
+                    let thread_name = format!("thread{:x}", thread_idx);
+                    let thread_node = fdt.begin_node(&thread_name)?;
                     let cpu_idx = cluster_core_thread_to_cpuidx
-                        .get(&(cluster_idx, core_idx, 0))
+                        .get(&(cluster_idx, core_idx, thread_idx))
                         .unwrap();
-
                     fdt.property_u32("cpu", *cpu_idx as u32 + FIRST_VCPU_PHANDLE)?;
+                    fdt.end_node(thread_node)?;
                 }
+
                 fdt.end_node(core_node)?;
             }
             fdt.end_node(cluster_node)?;
