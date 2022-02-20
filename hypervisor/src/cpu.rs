@@ -30,6 +30,8 @@ use crate::Xsave;
 #[cfg(feature = "tdx")]
 use crate::{TdxExitDetails, TdxExitStatus};
 use thiserror::Error;
+#[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+use vm_memory::GuestAddress;
 
 #[derive(Error, Debug)]
 ///
@@ -397,6 +399,11 @@ pub trait Vcpu: Send + Sync {
     /// potential soft lockups when being resumed.
     ///
     fn notify_guest_clock_paused(&self) -> Result<()>;
+    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+    ///
+    /// Sets debug registers to set hardware breakpoints and/or enable single step.
+    ///
+    fn set_guest_debug(&self, addrs: &[GuestAddress], singlestep: bool) -> Result<()>;
     ///
     /// Sets the type of CPU to be exposed to the guest and optional features.
     ///

@@ -42,7 +42,8 @@ use crate::arch::x86::NUM_IOAPIC_PINS;
 use aarch64::{RegList, Register, StandardRegisters};
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{
-    kvm_enable_cap, kvm_msr_entry, MsrList, KVM_CAP_HYPERV_SYNIC, KVM_CAP_SPLIT_IRQCHIP,
+    kvm_enable_cap, kvm_guest_debug, kvm_msr_entry, MsrList, KVM_CAP_HYPERV_SYNIC,
+    KVM_CAP_SPLIT_IRQCHIP, KVM_GUESTDBG_ENABLE, KVM_GUESTDBG_SINGLESTEP, KVM_GUESTDBG_USE_HW_BP,
 };
 #[cfg(target_arch = "x86_64")]
 use x86_64::{check_required_kvm_extensions, FpuState, SpecialRegisters, StandardRegisters};
@@ -1124,6 +1125,45 @@ impl cpu::Vcpu for KvmVcpu {
         }
 
         Ok(())
+    }
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Sets debug registers to set hardware breakpoints and/or enable single step.
+    ///
+    fn set_guest_debug(
+        &self,
+        addrs: &[vm_memory::GuestAddress],
+        singlestep: bool,
+    ) -> cpu::Result<()> {
+        if addrs.len() > 4 {
+            return Err(cpu::HypervisorCpuError::SetDebugRegs(anyhow!(
+                "Support 4 breakpoints at most but {} addresses are passed",
+                addrs.len()
+            )));
+        }
+
+        let mut dbg = kvm_guest_debug {
+            control: KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_HW_BP,
+            ..Default::default()
+        };
+        if singlestep {
+            dbg.control |= KVM_GUESTDBG_SINGLESTEP;
+        }
+
+        // Set bits 9 and 10.
+        // bit 9: GE (global exact breakpoint enable) flag.
+        // bit 10: always 1.
+        dbg.arch.debugreg[7] = 0x0600;
+
+        for (i, addr) in addrs.iter().enumerate() {
+            dbg.arch.debugreg[i] = addr.0;
+            // Set global breakpoint enable flag
+            dbg.arch.debugreg[7] |= 2 << (i * 2);
+        }
+
+        self.fd
+            .set_guest_debug(&dbg)
+            .map_err(|e| cpu::HypervisorCpuError::SetDebugRegs(e.into()))
     }
     #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
     fn vcpu_init(&self, kvi: &VcpuInit) -> cpu::Result<()> {
