@@ -457,7 +457,7 @@ pub trait Vcpu: Send + Sync {
     /// Triggers the running of the current virtual CPU returning an exit reason.
     ///
     fn run(&self) -> std::result::Result<VmExit, HypervisorCpuError>;
-    #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     ///
     /// Translate guest virtual address to guest physical address
     ///
