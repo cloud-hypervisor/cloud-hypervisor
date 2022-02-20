@@ -21,7 +21,7 @@ use crate::cpu;
 use crate::device_manager::{self, Console, DeviceManager, DeviceManagerError, PtyPair};
 use crate::device_tree::DeviceTree;
 #[cfg(feature = "gdb")]
-use crate::gdb::{Debuggable, DebuggableError};
+use crate::gdb::{Debuggable, DebuggableError, GdbRequestPayload, GdbResponsePayload};
 use crate::memory_manager::{
     Error as MemoryManagerError, MemoryManager, MemoryManagerSnapshotData,
 };
@@ -296,6 +296,10 @@ pub enum Error {
     /// Invalid payload type
     #[cfg(feature = "tdx")]
     InvalidPayloadType,
+
+    /// Error debugging VM
+    #[cfg(feature = "gdb")]
+    Debug(DebuggableError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -2398,6 +2402,50 @@ impl Vm {
 
     pub fn memory_manager_data(&self) -> MemoryManagerSnapshotData {
         self.memory_manager.lock().unwrap().snapshot_data()
+    }
+
+    #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
+    pub fn debug_request(
+        &mut self,
+        gdb_request: &GdbRequestPayload,
+        cpu_id: usize,
+    ) -> Result<GdbResponsePayload> {
+        use GdbRequestPayload::*;
+        match gdb_request {
+            SetSingleStep(single_step) => {
+                self.set_guest_debug(cpu_id, &[], *single_step)
+                    .map_err(Error::Debug)?;
+            }
+            SetHwBreakPoint(addrs) => {
+                self.set_guest_debug(cpu_id, addrs, false)
+                    .map_err(Error::Debug)?;
+            }
+            Pause => {
+                self.debug_pause().map_err(Error::Debug)?;
+            }
+            Resume => {
+                self.debug_resume().map_err(Error::Debug)?;
+            }
+            ReadRegs => {
+                let regs = self.read_regs(cpu_id).map_err(Error::Debug)?;
+                return Ok(GdbResponsePayload::RegValues(Box::new(regs)));
+            }
+            WriteRegs(regs) => {
+                self.write_regs(cpu_id, regs).map_err(Error::Debug)?;
+            }
+            ReadMem(vaddr, len) => {
+                let mem = self.read_mem(cpu_id, *vaddr, *len).map_err(Error::Debug)?;
+                return Ok(GdbResponsePayload::MemoryRegion(mem));
+            }
+            WriteMem(vaddr, data) => {
+                self.write_mem(cpu_id, vaddr, data).map_err(Error::Debug)?;
+            }
+            ActiveVcpus => {
+                let active_vcpus = self.active_vcpus();
+                return Ok(GdbResponsePayload::ActiveVcpus(active_vcpus));
+            }
+        }
+        Ok(GdbResponsePayload::CommandComplete)
     }
 }
 
