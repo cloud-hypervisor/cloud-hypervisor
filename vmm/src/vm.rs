@@ -20,6 +20,8 @@ use crate::config::{
 use crate::cpu;
 use crate::device_manager::{self, Console, DeviceManager, DeviceManagerError, PtyPair};
 use crate::device_tree::DeviceTree;
+#[cfg(feature = "gdb")]
+use crate::gdb::{Debuggable, DebuggableError};
 use crate::memory_manager::{
     Error as MemoryManagerError, MemoryManager, MemoryManagerSnapshotData,
 };
@@ -41,6 +43,8 @@ use arch::PciSpaceInfo;
 #[cfg(any(target_arch = "aarch64", feature = "acpi"))]
 use arch::{NumaNode, NumaNodes};
 use devices::AcpiNotificationFlags;
+#[cfg(all(target_arch = "x86_64", feature = "gdb"))]
+use gdbstub_arch::x86::reg::X86_64CoreRegs;
 use hypervisor::vm::{HypervisorVmError, VmmOps};
 use linux_loader::cmdline::Cmdline;
 #[cfg(target_arch = "x86_64")]
@@ -2724,6 +2728,102 @@ impl Migratable for Vm {
     fn complete_migration(&mut self) -> std::result::Result<(), MigratableError> {
         self.memory_manager.lock().unwrap().complete_migration()?;
         self.device_manager.lock().unwrap().complete_migration()
+    }
+}
+
+#[cfg(feature = "gdb")]
+impl Debuggable for Vm {
+    fn set_guest_debug(
+        &self,
+        cpu_id: usize,
+        addrs: &[GuestAddress],
+        singlestep: bool,
+    ) -> std::result::Result<(), DebuggableError> {
+        self.cpu_manager
+            .lock()
+            .unwrap()
+            .set_guest_debug(cpu_id, addrs, singlestep)
+    }
+
+    fn debug_pause(&mut self) -> std::result::Result<(), DebuggableError> {
+        if !self.cpu_manager.lock().unwrap().vcpus_paused() {
+            self.pause().map_err(DebuggableError::Pause)?;
+        }
+        let mut state = self
+            .state
+            .try_write()
+            .map_err(|_| DebuggableError::PoisonedState)?;
+        *state = VmState::BreakPoint;
+        Ok(())
+    }
+
+    fn debug_resume(&mut self) -> std::result::Result<(), DebuggableError> {
+        if !self.cpu_manager.lock().unwrap().vcpus_paused() {
+            self.cpu_manager
+                .lock()
+                .unwrap()
+                .start_boot_vcpus()
+                .map_err(|e| {
+                    DebuggableError::Resume(MigratableError::Resume(anyhow!(
+                        "Could not start boot vCPUs: {:?}",
+                        e
+                    )))
+                })?;
+        } else {
+            self.resume().map_err(DebuggableError::Resume)?;
+        }
+        let mut state = self
+            .state
+            .try_write()
+            .map_err(|_| DebuggableError::PoisonedState)?;
+        *state = VmState::Running;
+        Ok(())
+    }
+
+    fn read_regs(&self, cpu_id: usize) -> std::result::Result<X86_64CoreRegs, DebuggableError> {
+        self.cpu_manager.lock().unwrap().read_regs(cpu_id)
+    }
+
+    fn write_regs(
+        &self,
+        cpu_id: usize,
+        regs: &X86_64CoreRegs,
+    ) -> std::result::Result<(), DebuggableError> {
+        self.cpu_manager.lock().unwrap().write_regs(cpu_id, regs)
+    }
+
+    fn read_mem(
+        &self,
+        cpu_id: usize,
+        vaddr: GuestAddress,
+        len: usize,
+    ) -> std::result::Result<Vec<u8>, DebuggableError> {
+        self.cpu_manager
+            .lock()
+            .unwrap()
+            .read_mem(cpu_id, vaddr, len)
+    }
+
+    fn write_mem(
+        &self,
+        cpu_id: usize,
+        vaddr: &GuestAddress,
+        data: &[u8],
+    ) -> std::result::Result<(), DebuggableError> {
+        self.cpu_manager
+            .lock()
+            .unwrap()
+            .write_mem(cpu_id, vaddr, data)
+    }
+
+    fn active_vcpus(&self) -> usize {
+        let active_vcpus = self.cpu_manager.lock().unwrap().active_vcpus();
+        if active_vcpus > 0 {
+            active_vcpus
+        } else {
+            // The VM is not booted yet. Report boot_vcpus() instead.
+            self.cpu_manager.lock().unwrap().boot_vcpus() as usize
+        }
     }
 }
 
