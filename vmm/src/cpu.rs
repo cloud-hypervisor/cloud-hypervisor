@@ -13,6 +13,8 @@
 
 use crate::config::CpusConfig;
 use crate::device_manager::DeviceManager;
+#[cfg(feature = "gdb")]
+use crate::gdb::{Debuggable, DebuggableError};
 use crate::memory_manager::MemoryManager;
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 #[cfg(target_arch = "x86_64")]
@@ -26,8 +28,12 @@ use arch::EntryPoint;
 #[cfg(any(target_arch = "aarch64", feature = "acpi"))]
 use arch::NumaNodes;
 use devices::interrupt_controller::InterruptController;
+#[cfg(all(target_arch = "x86_64", feature = "gdb"))]
+use gdbstub_arch::x86::reg::{X86SegmentRegs, X86_64CoreRegs};
 #[cfg(target_arch = "aarch64")]
 use hypervisor::kvm::kvm_bindings;
+#[cfg(all(target_arch = "x86_64", feature = "gdb"))]
+use hypervisor::x86_64::{SpecialRegisters, StandardRegisters};
 #[cfg(target_arch = "x86_64")]
 use hypervisor::CpuId;
 use hypervisor::{vm::VmmOps, CpuState, HypervisorCpuError, VmExit};
@@ -111,6 +117,14 @@ pub enum Error {
 
     /// Failed scheduling the thread on the expected CPU set.
     ScheduleCpuSet,
+
+    #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
+    /// Error on debug related CPU ops.
+    CpuDebug(hypervisor::HypervisorCpuError),
+
+    #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
+    /// Failed to translate guest virtual address.
+    TranslateVirtualAddress(hypervisor::HypervisorCpuError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -1357,6 +1371,61 @@ impl CpuManager {
         pptt.update_checksum();
         pptt
     }
+
+    #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
+    fn get_regs(&self, cpu_id: u8) -> Result<StandardRegisters> {
+        self.vcpus[usize::from(cpu_id)]
+            .lock()
+            .unwrap()
+            .vcpu
+            .get_regs()
+            .map_err(Error::CpuDebug)
+    }
+
+    #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
+    fn set_regs(&self, cpu_id: u8, regs: &StandardRegisters) -> Result<()> {
+        self.vcpus[usize::from(cpu_id)]
+            .lock()
+            .unwrap()
+            .vcpu
+            .set_regs(regs)
+            .map_err(Error::CpuDebug)
+    }
+
+    #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
+    fn get_sregs(&self, cpu_id: u8) -> Result<SpecialRegisters> {
+        self.vcpus[usize::from(cpu_id)]
+            .lock()
+            .unwrap()
+            .vcpu
+            .get_sregs()
+            .map_err(Error::CpuDebug)
+    }
+
+    #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
+    fn set_sregs(&self, cpu_id: u8, sregs: &SpecialRegisters) -> Result<()> {
+        self.vcpus[usize::from(cpu_id)]
+            .lock()
+            .unwrap()
+            .vcpu
+            .set_sregs(sregs)
+            .map_err(Error::CpuDebug)
+    }
+
+    #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
+    fn translate_gva(&self, cpu_id: u8, gva: u64) -> Result<u64> {
+        let (gpa, _) = self.vcpus[usize::from(cpu_id)]
+            .lock()
+            .unwrap()
+            .vcpu
+            .translate_gva(gva, /* flags: unused */ 0)
+            .map_err(Error::TranslateVirtualAddress)?;
+        Ok(gpa)
+    }
+
+    pub fn vcpus_paused(&self) -> bool {
+        self.vcpus_pause_signalled.load(Ordering::SeqCst)
+    }
 }
 
 #[cfg(feature = "acpi")]
@@ -1731,6 +1800,192 @@ impl Snapshottable for CpuManager {
 
 impl Transportable for CpuManager {}
 impl Migratable for CpuManager {}
+
+#[cfg(feature = "gdb")]
+impl Debuggable for CpuManager {
+    #[cfg(feature = "kvm")]
+    fn set_guest_debug(
+        &self,
+        cpu_id: usize,
+        addrs: &[GuestAddress],
+        singlestep: bool,
+    ) -> std::result::Result<(), DebuggableError> {
+        self.vcpus[cpu_id]
+            .lock()
+            .unwrap()
+            .vcpu
+            .set_guest_debug(addrs, singlestep)
+            .map_err(DebuggableError::SetDebug)
+    }
+
+    fn debug_pause(&mut self) -> std::result::Result<(), DebuggableError> {
+        Ok(())
+    }
+
+    fn debug_resume(&mut self) -> std::result::Result<(), DebuggableError> {
+        Ok(())
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn read_regs(&self, cpu_id: usize) -> std::result::Result<X86_64CoreRegs, DebuggableError> {
+        // General registers: RAX, RBX, RCX, RDX, RSI, RDI, RBP, RSP, r8-r15
+        let gregs = self
+            .get_regs(cpu_id as u8)
+            .map_err(DebuggableError::ReadRegs)?;
+        let regs = [
+            gregs.rax, gregs.rbx, gregs.rcx, gregs.rdx, gregs.rsi, gregs.rdi, gregs.rbp, gregs.rsp,
+            gregs.r8, gregs.r9, gregs.r10, gregs.r11, gregs.r12, gregs.r13, gregs.r14, gregs.r15,
+        ];
+
+        // GDB exposes 32-bit eflags instead of 64-bit rflags.
+        // https://github.com/bminor/binutils-gdb/blob/master/gdb/features/i386/64bit-core.xml
+        let eflags = gregs.rflags as u32;
+        let rip = gregs.rip;
+
+        // Segment registers: CS, SS, DS, ES, FS, GS
+        let sregs = self
+            .get_sregs(cpu_id as u8)
+            .map_err(DebuggableError::ReadRegs)?;
+        let segments = X86SegmentRegs {
+            cs: sregs.cs.selector as u32,
+            ss: sregs.ss.selector as u32,
+            ds: sregs.ds.selector as u32,
+            es: sregs.es.selector as u32,
+            fs: sregs.fs.selector as u32,
+            gs: sregs.gs.selector as u32,
+        };
+
+        // TODO: Add other registers
+
+        Ok(X86_64CoreRegs {
+            regs,
+            eflags,
+            rip,
+            segments,
+            ..Default::default()
+        })
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn write_regs(
+        &self,
+        cpu_id: usize,
+        regs: &X86_64CoreRegs,
+    ) -> std::result::Result<(), DebuggableError> {
+        let orig_gregs = self
+            .get_regs(cpu_id as u8)
+            .map_err(DebuggableError::ReadRegs)?;
+        let gregs = StandardRegisters {
+            rax: regs.regs[0],
+            rbx: regs.regs[1],
+            rcx: regs.regs[2],
+            rdx: regs.regs[3],
+            rsi: regs.regs[4],
+            rdi: regs.regs[5],
+            rbp: regs.regs[6],
+            rsp: regs.regs[7],
+            r8: regs.regs[8],
+            r9: regs.regs[9],
+            r10: regs.regs[10],
+            r11: regs.regs[11],
+            r12: regs.regs[12],
+            r13: regs.regs[13],
+            r14: regs.regs[14],
+            r15: regs.regs[15],
+            rip: regs.rip,
+            // Update the lower 32-bit of rflags.
+            rflags: (orig_gregs.rflags & !(u32::MAX as u64)) | (regs.eflags as u64),
+        };
+
+        self.set_regs(cpu_id as u8, &gregs)
+            .map_err(DebuggableError::WriteRegs)?;
+
+        // Segment registers: CS, SS, DS, ES, FS, GS
+        // Since GDB care only selectors, we call get_sregs() first.
+        let mut sregs = self
+            .get_sregs(cpu_id as u8)
+            .map_err(DebuggableError::ReadRegs)?;
+        sregs.cs.selector = regs.segments.cs as u16;
+        sregs.ss.selector = regs.segments.ss as u16;
+        sregs.ds.selector = regs.segments.ds as u16;
+        sregs.es.selector = regs.segments.es as u16;
+        sregs.fs.selector = regs.segments.fs as u16;
+        sregs.gs.selector = regs.segments.gs as u16;
+
+        self.set_sregs(cpu_id as u8, &sregs)
+            .map_err(DebuggableError::WriteRegs)?;
+
+        // TODO: Add other registers
+
+        Ok(())
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn read_mem(
+        &self,
+        cpu_id: usize,
+        vaddr: GuestAddress,
+        len: usize,
+    ) -> std::result::Result<Vec<u8>, DebuggableError> {
+        let mut buf = vec![0; len];
+        let mut total_read = 0_u64;
+
+        while total_read < len as u64 {
+            let gaddr = vaddr.0 + total_read;
+            let paddr = match self.translate_gva(cpu_id as u8, gaddr) {
+                Ok(paddr) => paddr,
+                Err(_) if gaddr == u64::MIN => gaddr, // Silently return GVA as GPA if GVA == 0.
+                Err(e) => return Err(DebuggableError::TranslateGva(e)),
+            };
+            let psize = arch::PAGE_SIZE as u64;
+            let read_len = std::cmp::min(len as u64 - total_read, psize - (paddr & (psize - 1)));
+            self.vmmops
+                .guest_mem_read(
+                    paddr,
+                    &mut buf[total_read as usize..total_read as usize + read_len as usize],
+                )
+                .map_err(DebuggableError::ReadMem)?;
+            total_read += read_len;
+        }
+        Ok(buf)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn write_mem(
+        &self,
+        cpu_id: usize,
+        vaddr: &GuestAddress,
+        data: &[u8],
+    ) -> std::result::Result<(), DebuggableError> {
+        let mut total_written = 0_u64;
+
+        while total_written < data.len() as u64 {
+            let gaddr = vaddr.0 + total_written;
+            let paddr = match self.translate_gva(cpu_id as u8, gaddr) {
+                Ok(paddr) => paddr,
+                Err(_) if gaddr == u64::MIN => gaddr, // Silently return GVA as GPA if GVA == 0.
+                Err(e) => return Err(DebuggableError::TranslateGva(e)),
+            };
+            let psize = arch::PAGE_SIZE as u64;
+            let write_len = std::cmp::min(
+                data.len() as u64 - total_written,
+                psize - (paddr & (psize - 1)),
+            );
+            self.vmmops
+                .guest_mem_write(
+                    paddr,
+                    &data[total_written as usize..total_written as usize + write_len as usize],
+                )
+                .map_err(DebuggableError::WriteMem)?;
+            total_written += write_len;
+        }
+        Ok(())
+    }
+
+    fn active_vcpus(&self) -> usize {
+        self.present_vcpus() as usize
+    }
+}
 
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 #[cfg(test)]

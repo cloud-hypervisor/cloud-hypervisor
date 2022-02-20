@@ -57,6 +57,8 @@ pub mod config;
 pub mod cpu;
 pub mod device_manager;
 pub mod device_tree;
+#[cfg(feature = "gdb")]
+mod gdb;
 pub mod interrupt;
 pub mod memory_manager;
 pub mod migration;
