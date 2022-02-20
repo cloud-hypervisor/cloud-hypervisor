@@ -323,6 +323,8 @@ pub struct VmParams<'a> {
     pub watchdog: bool,
     #[cfg(feature = "tdx")]
     pub tdx: Option<&'a str>,
+    #[cfg(feature = "gdb")]
+    pub gdb: bool,
     pub platform: Option<&'a str>,
 }
 
@@ -355,6 +357,8 @@ impl<'a> VmParams<'a> {
         let platform = args.value_of("platform");
         #[cfg(feature = "tdx")]
         let tdx = args.value_of("tdx");
+        #[cfg(feature = "gdb")]
+        let gdb = args.is_present("gdb");
         VmParams {
             cpus,
             memory,
@@ -379,6 +383,8 @@ impl<'a> VmParams<'a> {
             watchdog,
             #[cfg(feature = "tdx")]
             tdx,
+            #[cfg(feature = "gdb")]
+            gdb,
             platform,
         }
     }
@@ -2109,6 +2115,8 @@ pub struct VmConfig {
     pub watchdog: bool,
     #[cfg(feature = "tdx")]
     pub tdx: Option<TdxConfig>,
+    #[cfg(feature = "gdb")]
+    pub gdb: bool,
     pub platform: Option<PlatformConfig>,
 }
 
@@ -2423,6 +2431,9 @@ impl VmConfig {
         #[cfg(feature = "tdx")]
         let tdx = vm_params.tdx.map(TdxConfig::parse).transpose()?;
 
+        #[cfg(feature = "gdb")]
+        let gdb = vm_params.gdb;
+
         let config = VmConfig {
             cpus: CpusConfig::parse(vm_params.cpus)?,
             memory: MemoryConfig::parse(vm_params.memory, vm_params.memory_zones)?,
@@ -2447,6 +2458,8 @@ impl VmConfig {
             watchdog: vm_params.watchdog,
             #[cfg(feature = "tdx")]
             tdx,
+            #[cfg(feature = "gdb")]
+            gdb,
             platform,
         };
         config.validate().map_err(Error::Validation)?;
@@ -3063,6 +3076,8 @@ mod tests {
             watchdog: false,
             #[cfg(feature = "tdx")]
             tdx: None,
+            #[cfg(feature = "gdb")]
+            gdb: false,
             platform: None,
         };
 

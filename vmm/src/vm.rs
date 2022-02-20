@@ -552,6 +552,7 @@ impl Vm {
         vm: Arc<dyn hypervisor::Vm>,
         exit_evt: EventFd,
         reset_evt: EventFd,
+        #[cfg(feature = "gdb")] vm_debug_evt: EventFd,
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         activate_evt: EventFd,
@@ -575,6 +576,9 @@ impl Vm {
         #[cfg(not(feature = "tdx"))]
         let force_iommu = false;
 
+        #[cfg(feature = "gdb")]
+        let stop_on_boot = config.lock().unwrap().gdb;
+        #[cfg(not(feature = "gdb"))]
         let stop_on_boot = false;
 
         let device_manager = DeviceManager::new(
@@ -624,6 +628,8 @@ impl Vm {
             vm.clone(),
             exit_evt_clone,
             reset_evt,
+            #[cfg(feature = "gdb")]
+            vm_debug_evt,
             hypervisor.clone(),
             seccomp_action.clone(),
             vm_ops,
@@ -763,6 +769,7 @@ impl Vm {
         config: Arc<Mutex<VmConfig>>,
         exit_evt: EventFd,
         reset_evt: EventFd,
+        #[cfg(feature = "gdb")] vm_debug_evt: EventFd,
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         activate_evt: EventFd,
@@ -817,6 +824,8 @@ impl Vm {
             vm,
             exit_evt,
             reset_evt,
+            #[cfg(feature = "gdb")]
+            vm_debug_evt,
             seccomp_action,
             hypervisor,
             activate_evt,
@@ -840,6 +849,7 @@ impl Vm {
         vm_config: Arc<Mutex<VmConfig>>,
         exit_evt: EventFd,
         reset_evt: EventFd,
+        #[cfg(feature = "gdb")] vm_debug_evt: EventFd,
         source_url: Option<&str>,
         prefault: bool,
         seccomp_action: &SeccompAction,
@@ -888,6 +898,8 @@ impl Vm {
             vm,
             exit_evt,
             reset_evt,
+            #[cfg(feature = "gdb")]
+            vm_debug_evt,
             seccomp_action,
             hypervisor,
             activate_evt,
@@ -900,6 +912,7 @@ impl Vm {
         config: Arc<Mutex<VmConfig>>,
         exit_evt: EventFd,
         reset_evt: EventFd,
+        #[cfg(feature = "gdb")] vm_debug_evt: EventFd,
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         activate_evt: EventFd,
@@ -939,6 +952,8 @@ impl Vm {
             vm,
             exit_evt,
             reset_evt,
+            #[cfg(feature = "gdb")]
+            vm_debug_evt,
             seccomp_action,
             hypervisor,
             activate_evt,

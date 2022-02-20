@@ -32,6 +32,9 @@ use vmm_sys_util::signal::block_signal;
 enum Error {
     #[error("Failed to create API EventFd: {0}")]
     CreateApiEventFd(#[source] std::io::Error),
+    #[cfg(feature = "gdb")]
+    #[error("Failed to create Debug EventFd: {0}")]
+    CreateDebugEventFd(#[source] std::io::Error),
     #[cfg_attr(
         feature = "kvm",
         error("Failed to open hypervisor interface (is /dev/kvm available?): {0}")
@@ -65,6 +68,12 @@ enum Error {
     BareEventMonitor,
     #[error("Error doing event monitor I/O: {0}")]
     EventMonitorIo(std::io::Error),
+    #[cfg(feature = "gdb")]
+    #[error("Error parsing --gdb: {0}")]
+    ParsingGdb(option_parser::OptionParserError),
+    #[cfg(feature = "gdb")]
+    #[error("Error parsing --gdb: path required")]
+    BareGdb,
     #[error("Error creating log file: {0}")]
     LogFileCreation(std::io::Error),
     #[error("Error setting up logger: {0}")]
@@ -376,6 +385,15 @@ fn create_app<'a>(
             .group("vm-config"),
     );
 
+    #[cfg(feature = "gdb")]
+    let app = app.arg(
+        Arg::new("gdb")
+            .long("gdb")
+            .help("GDB socket (UNIX domain socket): path=</path/to/a/file>")
+            .takes_value(true)
+            .group("vmm-config"),
+    );
+
     #[cfg(feature = "tdx")]
     let app = app.arg(
         Arg::new("tdx")
@@ -513,6 +531,26 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
     event!("vmm", "starting");
 
     let hypervisor = hypervisor::new().map_err(Error::CreateHypervisor)?;
+
+    #[cfg(feature = "gdb")]
+    let gdb_socket_path = if let Some(gdb_config) = cmd_arguments.value_of("gdb") {
+        let mut parser = OptionParser::new();
+        parser.add("path");
+        parser.parse(gdb_config).map_err(Error::ParsingGdb)?;
+
+        if parser.is_set("path") {
+            Some(std::path::PathBuf::from(parser.get("path").unwrap()))
+        } else {
+            return Err(Error::BareGdb);
+        }
+    } else {
+        None
+    };
+    #[cfg(feature = "gdb")]
+    let debug_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateDebugEventFd)?;
+    #[cfg(feature = "gdb")]
+    let vm_debug_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateDebugEventFd)?;
+
     let vmm_thread = vmm::start_vmm_thread(
         env!("CARGO_PKG_VERSION").to_string(),
         &api_socket_path,
@@ -520,6 +558,12 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         api_evt.try_clone().unwrap(),
         http_sender,
         api_request_receiver,
+        #[cfg(feature = "gdb")]
+        gdb_socket_path,
+        #[cfg(feature = "gdb")]
+        debug_evt.try_clone().unwrap(),
+        #[cfg(feature = "gdb")]
+        vm_debug_evt.try_clone().unwrap(),
         &seccomp_action,
         hypervisor,
     )
@@ -687,6 +731,8 @@ mod unit_tests {
             watchdog: false,
             #[cfg(feature = "tdx")]
             tdx: None,
+            #[cfg(feature = "gdb")]
+            gdb: false,
             platform: None,
         };
 

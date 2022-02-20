@@ -488,7 +488,7 @@ impl run_blocking::BlockingEventLoop for GdbEventLoop {
     }
 }
 
-pub fn gdb_thread(mut gdbstub: GdbStub, path: &str) {
+pub fn gdb_thread(mut gdbstub: GdbStub, path: &std::path::Path) {
     let listener = match UnixListener::bind(path) {
         Ok(s) => s,
         Err(e) => {
@@ -496,7 +496,7 @@ pub fn gdb_thread(mut gdbstub: GdbStub, path: &str) {
             return;
         }
     };
-    info!("Waiting for a GDB connection on {}...", path);
+    info!("Waiting for a GDB connection on {}...", path.display());
 
     let (stream, addr) = match listener.accept() {
         Ok(v) => v,
