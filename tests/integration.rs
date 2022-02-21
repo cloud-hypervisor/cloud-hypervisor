@@ -81,7 +81,7 @@ fn prepare_virtiofsd(
     workload_path.push("workloads");
 
     let mut virtiofsd_path = workload_path;
-    virtiofsd_path.push("virtiofsd-rs");
+    virtiofsd_path.push("virtiofsd");
     let virtiofsd_path = String::from(virtiofsd_path.to_str().unwrap());
 
     let virtiofsd_socket_path =
