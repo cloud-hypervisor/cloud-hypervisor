@@ -132,6 +132,9 @@ pub enum ValidationError {
     CpuTopologyCount,
     /// One part of the CPU topology was zero
     CpuTopologyZeroPart,
+    #[cfg(target_arch = "aarch64")]
+    /// Dies per package must be 1
+    CpuTopologyDiesPerPackage,
     /// Virtio needs a min of 2 queues
     VnetQueueLowerThan2,
     /// The input queue number for virtio_net must match the number of input fds
@@ -181,6 +184,8 @@ impl fmt::Display for ValidationError {
                 f,
                 "Product of CPU topology parts does not match maximum vCPUs"
             ),
+            #[cfg(target_arch = "aarch64")]
+            CpuTopologyDiesPerPackage => write!(f, "Dies per package must be 1"),
             VnetQueueLowerThan2 => write!(f, "Number of queues to virtio_net less than 2"),
             VnetQueueFdMismatch => write!(
                 f,
@@ -2186,6 +2191,14 @@ impl VmConfig {
                 || t.packages == 0
             {
                 return Err(ValidationError::CpuTopologyZeroPart);
+            }
+
+            // The setting of dies doesen't apply on AArch64.
+            // Only '1' value is accepted, so its impact on the vcpu topology
+            // setting can be ignored.
+            #[cfg(target_arch = "aarch64")]
+            if t.dies_per_package != 1 {
+                return Err(ValidationError::CpuTopologyDiesPerPackage);
             }
 
             let total = t.threads_per_core * t.cores_per_die * t.dies_per_package * t.packages;
