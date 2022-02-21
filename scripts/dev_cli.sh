@@ -135,7 +135,7 @@ fix_dir_perms() {
         --workdir "$CTR_CLH_ROOT_DIR" \
         --rm \
         --volume /dev:/dev \
-        --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" "$exported_volumes" \
+        --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
         "$CTR_IMAGE" \
         chown -R "$(id -u):$(id -g)" "$CTR_CLH_ROOT_DIR"
 
@@ -273,7 +273,7 @@ cmd_build() {
         --workdir "$CTR_CLH_ROOT_DIR" \
         --rm \
         --volume $exported_device \
-        --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" "$exported_volumes" \
+        --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
         --env RUSTFLAGS="$rustflags" \
         "$CTR_IMAGE" \
         cargo build --all "$features_build" \
@@ -291,7 +291,7 @@ cmd_clean() {
         --user "$(id -u):$(id -g)" \
         --workdir "$CTR_CLH_ROOT_DIR" \
         --rm \
-        --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" "$exported_volumes" \
+        --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
         "$CTR_IMAGE" \
         cargo clean \
         --target-dir "$CTR_CLH_CARGO_TARGET" \
@@ -378,7 +378,7 @@ cmd_tests() {
             --device $exported_device \
             --device /dev/net/tun \
             --cap-add net_admin \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" "$exported_volumes" \
+            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
             --env BUILD_TARGET="$target" \
             "$CTR_IMAGE" \
             ./scripts/run_unit_tests.sh "$@" || fix_dir_perms $? || exit $?
@@ -389,7 +389,7 @@ cmd_tests() {
         $DOCKER_RUNTIME run \
             --workdir "$CTR_CLH_ROOT_DIR" \
             --rm \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" "$exported_volumes" \
+            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
             "$CTR_IMAGE" \
             ./scripts/run_cargo_tests.sh "$@" || fix_dir_perms $? || exit $?
     fi
@@ -405,7 +405,7 @@ cmd_tests() {
             --net="$CTR_CLH_NET" \
             --mount type=tmpfs,destination=/tmp \
             --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" "$exported_volumes" \
+            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
             --env USER="root" \
             --env CH_LIBC="${libc}" \
@@ -424,7 +424,7 @@ cmd_tests() {
             --net="$CTR_CLH_NET" \
             --mount type=tmpfs,destination=/tmp \
             --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" "$exported_volumes" \
+            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
             --env USER="root" \
             --env CH_LIBC="${libc}" \
@@ -443,7 +443,7 @@ cmd_tests() {
             --net="$CTR_CLH_NET" \
             --mount type=tmpfs,destination=/tmp \
             --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" "$exported_volumes" \
+            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
             --env USER="root" \
             --env CH_LIBC="${libc}" \
@@ -462,7 +462,7 @@ cmd_tests() {
             --net="$CTR_CLH_NET" \
             --mount type=tmpfs,destination=/tmp \
             --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" "$exported_volumes" \
+            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
             --env USER="root" \
             --env CH_LIBC="${libc}" \
@@ -481,7 +481,7 @@ cmd_tests() {
             --net="$CTR_CLH_NET" \
             --mount type=tmpfs,destination=/tmp \
             --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" "$exported_volumes" \
+            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
             --env USER="root" \
             --env CH_LIBC="${libc}" \
@@ -500,7 +500,7 @@ cmd_tests() {
             --net="$CTR_CLH_NET" \
             --mount type=tmpfs,destination=/tmp \
             --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" "$exported_volumes" \
+            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
             --env USER="root" \
             --env CH_LIBC="${libc}" \
@@ -586,7 +586,7 @@ cmd_shell() {
         --net="$CTR_CLH_NET" \
         --tmpfs /tmp:exec \
         --volume /dev:/dev \
-        --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" "$exported_volumes" \
+        --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
         --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
         --env USER="root" \
         --entrypoint bash \
