@@ -13,7 +13,7 @@ homepage = "https://github.com/cloud-hypervisor/cloud-hypervisor"
 lto = true
 
 [dependencies]
-anyhow = "1.0.53"
+anyhow = "1.0.55"
 api_client = { path = "api_client" }
 clap = { version = "3.1.0", features = ["wrap_help","cargo"] }
 epoll = "4.3.1"
