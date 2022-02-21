@@ -118,9 +118,17 @@ ensure_build_dir() {
 
 # Make sure we're using the latest dev container, by just pulling it.
 ensure_latest_ctr() {
-    $DOCKER_RUNTIME pull "$CTR_IMAGE"
+    if [ "$CTR_IMAGE_VERSION" = "local" ]; then
+        build_container
+    else
+        $DOCKER_RUNTIME pull "$CTR_IMAGE"
 
-    ok_or_die "Error pulling container image. Aborting."
+        if [ $? -ne 0 ]; then
+            build_container
+        fi
+
+        ok_or_die "Error pulling/building container image. Aborting."
+    fi
 }
 
 # Fix main directory permissions after a container ran as root.
@@ -192,7 +200,6 @@ cmd_help() {
     echo ""
     echo "    build-container [--type]"
     echo "        Build the Cloud Hypervisor container."
-    echo "        --dev                Build dev container. This is the default."
     echo ""
     echo "    clean [<cargo args>]]"
     echo "        Remove the Cloud Hypervisor artifacts."
@@ -511,27 +518,7 @@ cmd_tests() {
     fix_dir_perms $?
 }
 
-cmd_build-container() {
-    container_type="dev"
-
-    while [ $# -gt 0 ]; do
-        case "$1" in
-        "-h" | "--help") {
-            cmd_help
-            exit 1
-        } ;;
-        "--dev") { container_type="dev"; } ;;
-        "--") {
-            shift
-            break
-        } ;;
-        *)
-            die "Unknown build-container argument: $1. Please use --help for help."
-            ;;
-        esac
-        shift
-    done
-
+build_container() {
     ensure_build_dir
 
     BUILD_DIR=/tmp/cloud-hypervisor/container/
@@ -543,11 +530,32 @@ cmd_build-container() {
     [ "$(uname -m)" = "x86_64" ] && TARGETARCH="amd64"
 
     $DOCKER_RUNTIME build \
-        --target $container_type \
+        --target dev \
         -t $CTR_IMAGE \
         -f $BUILD_DIR/Dockerfile \
         --build-arg TARGETARCH=$TARGETARCH \
         $BUILD_DIR
+}
+
+cmd_build-container() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+        "-h" | "--help") {
+            cmd_help
+            exit 1
+        } ;;
+        "--") {
+            shift
+            break
+        } ;;
+        *)
+            die "Unknown build-container argument: $1. Please use --help for help."
+            ;;
+        esac
+        shift
+    done
+
+    build_container
 }
 
 cmd_shell() {
@@ -601,6 +609,10 @@ while [ $# -gt 0 ]; do
     -h | --help) {
         cmd_help
         exit 1
+    } ;;
+    --local) {
+        CTR_IMAGE_VERSION="local"
+        CTR_IMAGE="${CTR_IMAGE_TAG}:${CTR_IMAGE_VERSION}"
     } ;;
     -*)
         die "Unknown arg: $1. Please use \`$0 help\` for help."
