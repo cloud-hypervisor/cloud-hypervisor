@@ -217,17 +217,17 @@ update_workloads() {
     guestunmount "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR"
 
     # Build virtiofsd
-    VIRTIOFSD_RS="$WORKLOADS_DIR/virtiofsd"
-    VIRTIOFSD_RS_DIR="virtiofsd_rs_build"
-    if [ ! -f "$VIRTIOFSD_RS" ]; then
+    VIRTIOFSD="$WORKLOADS_DIR/virtiofsd"
+    VIRTIOFSD_DIR="virtiofsd_build"
+    if [ ! -f "$VIRTIOFSD" ]; then
         pushd $WORKLOADS_DIR
-        git clone "https://gitlab.com/virtio-fs/virtiofsd.git" $VIRTIOFSD_RS_DIR
-        pushd $VIRTIOFSD_RS_DIR
+        git clone "https://gitlab.com/virtio-fs/virtiofsd.git" $VIRTIOFSD_DIR
+        pushd $VIRTIOFSD_DIR
         git checkout v1.1.0
         time cargo build --release
-        cp target/release/virtiofsd $VIRTIOFSD_RS || exit 1
+        cp target/release/virtiofsd $VIRTIOFSD || exit 1
         popd
-        rm -rf $VIRTIOFSD_RS_DIR
+        rm -rf $VIRTIOFSD_DIR
         popd
     fi
 
