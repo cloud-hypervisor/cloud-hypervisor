@@ -533,7 +533,6 @@ cmd_build-container() {
     done
 
     ensure_build_dir
-    ensure_latest_ctr
 
     BUILD_DIR=/tmp/cloud-hypervisor/container/
 
