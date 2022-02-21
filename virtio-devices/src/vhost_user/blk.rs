@@ -205,10 +205,9 @@ impl Blk {
         self.vu_common.acked_protocol_features = state.acked_protocol_features;
         self.vu_common.vu_num_queues = state.vu_num_queues;
 
-        if let Err(e) = self
-            .vu_common
-            .restore_backend_connection(self.common.acked_features)
-        {
+        if let Err(e) = self.vu_common.restore_backend_connection(
+            self.common.acked_features | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits(),
+        ) {
             error!(
                 "Failed restoring connection with vhost-user backend: {:?}",
                 e
