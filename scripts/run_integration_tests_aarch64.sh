@@ -217,7 +217,7 @@ update_workloads() {
     guestunmount "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR"
 
     # Build virtiofsd
-    VIRTIOFSD_RS="$WORKLOADS_DIR/virtiofsd-rs"
+    VIRTIOFSD_RS="$WORKLOADS_DIR/virtiofsd"
     VIRTIOFSD_RS_DIR="virtiofsd_rs_build"
     if [ ! -f "$VIRTIOFSD_RS" ]; then
         pushd $WORKLOADS_DIR
