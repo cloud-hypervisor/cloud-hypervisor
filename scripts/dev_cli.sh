@@ -603,7 +603,6 @@ while [ $# -gt 0 ]; do
         cmd_help
         exit 1
     } ;;
-    -y | --unattended) { OPT_UNATTENDED=true; } ;;
     -*)
         die "Unknown arg: $1. Please use \`$0 help\` for help."
         ;;
