@@ -222,7 +222,11 @@ impl Net {
                 device_type: VirtioDeviceType::Net as u32,
                 queue_sizes: vec![vu_cfg.queue_size; num_queues],
                 avail_features: acked_features,
-                acked_features: 0,
+                // If part of the available features that have been acked, the
+                // PROTOCOL_FEATURES bit must be already set through the VIRTIO
+                // acked features as we know the guest would never ack it, thus
+                // the feature would be lost.
+                acked_features: acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits(),
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 min_queues: DEFAULT_QUEUE_NUMBER as u16,
                 ..Default::default()
@@ -261,9 +265,13 @@ impl Net {
         self.vu_common.acked_protocol_features = state.acked_protocol_features;
         self.vu_common.vu_num_queues = state.vu_num_queues;
 
+        // The backend acknowledged features must not contain VIRTIO_NET_F_MAC
+        // since we don't expect the backend to handle it.
+        let backend_acked_features = self.common.acked_features & !(1 << VIRTIO_NET_F_MAC);
+
         if let Err(e) = self
             .vu_common
-            .restore_backend_connection(self.common.acked_features)
+            .restore_backend_connection(backend_acked_features)
         {
             error!(
                 "Failed restoring connection with vhost-user backend: {:?}",
@@ -355,12 +363,9 @@ impl VirtioDevice for Net {
 
         let slave_req_handler: Option<MasterReqHandler<SlaveReqHandler>> = None;
 
-        // The backend acknowledged features must contain the protocol feature
-        // bit in case it was initially set but lost through the features
-        // negotiation with the guest. Additionally, it must not contain
-        // VIRTIO_NET_F_MAC since we don't expect the backend to handle it.
-        let backend_acked_features = self.common.acked_features & !(1 << VIRTIO_NET_F_MAC)
-            | (self.common.avail_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits());
+        // The backend acknowledged features must not contain VIRTIO_NET_F_MAC
+        // since we don't expect the backend to handle it.
+        let backend_acked_features = self.common.acked_features & !(1 << VIRTIO_NET_F_MAC);
 
         // Run a dedicated thread for handling potential reconnections with
         // the backend.
