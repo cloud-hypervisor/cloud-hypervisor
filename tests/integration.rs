@@ -72,7 +72,7 @@ const DIRECT_KERNEL_BOOT_CMDLINE: &str =
 
 const CONSOLE_TEST_STRING: &str = "Started OpenBSD Secure Shell server";
 
-fn prepare_virtiofsd_rs_daemon(
+fn prepare_virtiofsd(
     tmp_dir: &TempDir,
     shared_dir: &str,
     cache: &str,
@@ -2754,14 +2754,7 @@ mod parallel {
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_virtio_fs_dax_on_default_cache_size() {
-        test_virtio_fs(
-            true,
-            None,
-            "never",
-            &prepare_virtiofsd_rs_daemon,
-            false,
-            None,
-        )
+        test_virtio_fs(true, None, "never", &prepare_virtiofsd, false, None)
     }
 
     #[test]
@@ -2771,7 +2764,7 @@ mod parallel {
             true,
             Some(0x4000_0000),
             "never",
-            &prepare_virtiofsd_rs_daemon,
+            &prepare_virtiofsd,
             false,
             None,
         )
@@ -2779,39 +2772,18 @@ mod parallel {
 
     #[test]
     fn test_virtio_fs_dax_off() {
-        test_virtio_fs(
-            false,
-            None,
-            "never",
-            &prepare_virtiofsd_rs_daemon,
-            false,
-            None,
-        )
+        test_virtio_fs(false, None, "never", &prepare_virtiofsd, false, None)
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_virtio_fs_hotplug_dax_on() {
-        test_virtio_fs(
-            true,
-            None,
-            "never",
-            &prepare_virtiofsd_rs_daemon,
-            true,
-            None,
-        )
+        test_virtio_fs(true, None, "never", &prepare_virtiofsd, true, None)
     }
 
     #[test]
     fn test_virtio_fs_hotplug_dax_off() {
-        test_virtio_fs(
-            false,
-            None,
-            "never",
-            &prepare_virtiofsd_rs_daemon,
-            true,
-            None,
-        )
+        test_virtio_fs(false, None, "never", &prepare_virtiofsd, true, None)
     }
 
     #[test]
@@ -2821,7 +2793,7 @@ mod parallel {
             true,
             Some(0x4000_0000),
             "never",
-            &prepare_virtiofsd_rs_daemon,
+            &prepare_virtiofsd,
             true,
             Some(15),
         )
@@ -2834,7 +2806,7 @@ mod parallel {
             true,
             Some(0x4000_0000),
             "never",
-            &prepare_virtiofsd_rs_daemon,
+            &prepare_virtiofsd,
             false,
             Some(15),
         )
