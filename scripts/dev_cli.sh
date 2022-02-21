@@ -86,7 +86,7 @@ die() {
         shift 2
     }
     say_err "$@"
-    exit $code
+    exit "$code"
 }
 
 # Exit with an error message if the last exit code is not 0
@@ -135,11 +135,11 @@ fix_dir_perms() {
 	--workdir "$CTR_CLH_ROOT_DIR" \
 	   --rm \
 	   --volume /dev:/dev \
-	   --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
+	   --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" "$exported_volumes" \
 	   "$CTR_IMAGE" \
            chown -R "$(id -u):$(id -g)" "$CTR_CLH_ROOT_DIR"
 
-    return $1
+    return "$1"
 }
 # Process exported volumes argument, separate the volumes and make docker compatible
 # Sample input: --volumes /a:/a#/b:/b
@@ -163,8 +163,8 @@ process_volumes_args() {
 }
 cmd_help() {
     echo ""
-    echo "Cloud Hypervisor $(basename $0)"
-    echo "Usage: $(basename $0) <command> [<command args>]"
+    echo "Cloud Hypervisor $(basename "$0")"
+    echo "Usage: $(basename "$0") <command> [<command args>]"
     echo ""
     echo "Available commands:"
     echo ""
@@ -255,11 +255,11 @@ cmd_build() {
     cargo_args=("$@")
     [ $build = "release" ] && cargo_args+=("--release")
     cargo_args+=(--target "$target")
-    [ $(uname -m) = "aarch64" ] && cargo_args+=("--no-default-features")
-    [ $(uname -m) = "aarch64" ] && cargo_args+=(--features $hypervisor)
+    [ "$(uname -m)" = "aarch64" ] && cargo_args+=("--no-default-features")
+    [ "$(uname -m)" = "aarch64" ] && cargo_args+=(--features "$hypervisor")
 
     rustflags=""
-    if [ $(uname -m) = "aarch64" ] && [ $libc = "musl" ] ; then
+    if [ "$(uname -m)" = "aarch64" ] && [ "$libc" = "musl" ] ; then
         rustflags="-C link-arg=-lgcc -C link_arg=-specs -C link_arg=/usr/lib/aarch64-linux-musl/musl-gcc.specs"
     fi
 
@@ -268,10 +268,10 @@ cmd_build() {
 	   --workdir "$CTR_CLH_ROOT_DIR" \
 	   --rm \
 	   --volume $exported_device \
-	   --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
+	   --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" "$exported_volumes" \
 	   --env RUSTFLAGS="$rustflags" \
 	   "$CTR_IMAGE" \
-	   cargo build --all $features_build \
+	   cargo build --all "$features_build" \
 	         --target-dir "$CTR_CLH_CARGO_TARGET" \
 	         "${cargo_args[@]}" && say "Binaries placed under $CLH_CARGO_TARGET/$target/$build"
 }
@@ -286,7 +286,7 @@ cmd_clean() {
 	   --user "$(id -u):$(id -g)" \
 	   --workdir "$CTR_CLH_ROOT_DIR" \
 	   --rm \
-	   --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
+	   --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" "$exported_volumes" \
 	   "$CTR_IMAGE" \
 	   cargo clean \
 	         --target-dir "$CTR_CLH_CARGO_TARGET" \
@@ -347,7 +347,7 @@ cmd_tests() {
         exported_device="/dev/mshv"
     fi
 
-    set -- "$@" '--hypervisor' $hypervisor
+    set -- "$@" '--hypervisor' "$hypervisor"
 
     ensure_build_dir
     ensure_latest_ctr
@@ -363,7 +363,7 @@ cmd_tests() {
 	       --device $exported_device \
 	       --device /dev/net/tun \
 	       --cap-add net_admin \
-	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
+	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" "$exported_volumes" \
 	       --env BUILD_TARGET="$target" \
 	       "$CTR_IMAGE" \
 	       ./scripts/run_unit_tests.sh "$@" || fix_dir_perms $? || exit $?
@@ -374,7 +374,7 @@ cmd_tests() {
 	$DOCKER_RUNTIME run \
 	       --workdir "$CTR_CLH_ROOT_DIR" \
 	       --rm \
-	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
+	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" "$exported_volumes" \
 	       "$CTR_IMAGE" \
 	       ./scripts/run_cargo_tests.sh "$@"  || fix_dir_perms $? || exit $?
     fi
@@ -390,12 +390,12 @@ cmd_tests() {
 	       --net="$CTR_CLH_NET" \
 	       --mount type=tmpfs,destination=/tmp \
 	       --volume /dev:/dev \
-	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
+	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" "$exported_volumes" \
 	       --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
 	       --env USER="root" \
 	       --env CH_LIBC="${libc}" \
 	       "$CTR_IMAGE" \
-	       ./scripts/run_integration_tests_$(uname -m).sh "$@" || fix_dir_perms $? || exit $?
+	       ./scripts/run_integration_tests_"$(uname -m)".sh "$@" || fix_dir_perms $? || exit $?
     fi
 
     if [ "$integration_sgx" = true ] ;  then
@@ -409,7 +409,7 @@ cmd_tests() {
 	       --net="$CTR_CLH_NET" \
 	       --mount type=tmpfs,destination=/tmp \
 	       --volume /dev:/dev \
-	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
+	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" "$exported_volumes" \
 	       --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
 	       --env USER="root" \
 	       --env CH_LIBC="${libc}" \
@@ -428,7 +428,7 @@ cmd_tests() {
 	       --net="$CTR_CLH_NET" \
 	       --mount type=tmpfs,destination=/tmp \
 	       --volume /dev:/dev \
-	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
+	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" "$exported_volumes" \
 	       --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
 	       --env USER="root" \
 	       --env CH_LIBC="${libc}" \
@@ -447,7 +447,7 @@ cmd_tests() {
 	       --net="$CTR_CLH_NET" \
 	       --mount type=tmpfs,destination=/tmp \
 	       --volume /dev:/dev \
-	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR"  $exported_volumes \
+	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR"  "$exported_volumes" \
 	       --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
 	       --env USER="root" \
 	       --env CH_LIBC="${libc}" \
@@ -466,7 +466,7 @@ cmd_tests() {
 	       --net="$CTR_CLH_NET" \
 	       --mount type=tmpfs,destination=/tmp \
 	       --volume /dev:/dev \
-	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR"  $exported_volumes \
+	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR"  "$exported_volumes" \
 	       --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
 	       --env USER="root" \
 	       --env CH_LIBC="${libc}" \
@@ -485,7 +485,7 @@ cmd_tests() {
 	       --net="$CTR_CLH_NET" \
 	       --mount type=tmpfs,destination=/tmp \
 	       --volume /dev:/dev \
-	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR"  $exported_volumes \
+	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR"  "$exported_volumes" \
 	       --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
 	       --env USER="root" \
 	       --env CH_LIBC="${libc}" \
@@ -517,10 +517,10 @@ cmd_build-container() {
     BUILD_DIR=/tmp/cloud-hypervisor/container/
 
     mkdir -p $BUILD_DIR
-    cp $CLH_DOCKERFILE $BUILD_DIR
+    cp "$CLH_DOCKERFILE" $BUILD_DIR
 
-    [ $(uname -m) = "aarch64" ] && TARGETARCH="arm64"
-    [ $(uname -m) = "x86_64" ] && TARGETARCH="amd64"
+    [ "$(uname -m)" = "aarch64" ] && TARGETARCH="arm64"
+    [ "$(uname -m)" = "x86_64" ] && TARGETARCH="amd64"
 
     $DOCKER_RUNTIME build \
 	   --target $container_type \
@@ -559,7 +559,7 @@ cmd_shell() {
 	   --net="$CTR_CLH_NET" \
 	   --tmpfs /tmp:exec \
 	   --volume /dev:/dev \
-	   --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
+	   --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" "$exported_volumes" \
 	   --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
 	   --env USER="root" \
 	   --entrypoint bash \
