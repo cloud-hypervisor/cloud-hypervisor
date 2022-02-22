@@ -440,8 +440,7 @@ components:
           items:
             type: string
         pci_bdf:
-          type: integer
-          format: int32
+          type: string
 
     VmCounters:
       type: object
