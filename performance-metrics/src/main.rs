@@ -1,6 +1,4 @@
 // Custom harness to run performance tests
-#[macro_use]
-extern crate lazy_static;
 extern crate test_infra;
 #[macro_use(crate_authors)]
 extern crate clap;
@@ -10,15 +8,7 @@ mod performance_tests;
 use clap::{Arg, Command as ClapCommand};
 use performance_tests::*;
 use serde_derive::{Deserialize, Serialize};
-use std::{
-    collections::HashSet,
-    env, fmt,
-    hash::{Hash, Hasher},
-    process::Command,
-    sync::mpsc::channel,
-    thread,
-    time::Duration,
-};
+use std::{env, fmt, process::Command, sync::mpsc::channel, thread, time::Duration};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -125,15 +115,15 @@ impl fmt::Display for PerformanceTestControl {
     }
 }
 
-impl Default for PerformanceTestControl {
-    fn default() -> Self {
+impl PerformanceTestControl {
+    const fn default() -> Self {
         Self {
             test_time: 10,
             test_iterations: 30,
-            queue_num: Default::default(),
-            queue_size: Default::default(),
-            net_rx: Default::default(),
-            fio_ops: Default::default(),
+            queue_num: None,
+            queue_size: None,
+            net_rx: None,
+            fio_ops: None,
         }
     }
 }
@@ -146,20 +136,6 @@ struct PerformanceTest {
     pub func_ptr: fn(&PerformanceTestControl) -> f64,
     pub control: PerformanceTestControl,
 }
-
-impl Hash for PerformanceTest {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.name.hash(state);
-    }
-}
-
-impl PartialEq for PerformanceTest {
-    fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
-    }
-}
-
-impl Eq for PerformanceTest {}
 
 impl PerformanceTest {
     pub fn run(&self) -> PerformanceTestResult {
@@ -219,155 +195,151 @@ fn std_deviation(data: &[f64]) -> Option<f64> {
     }
 }
 
-lazy_static! {
-    static ref TEST_LIST: HashSet<PerformanceTest> = {
-        let mut m = HashSet::new();
-        m.insert(PerformanceTest {
-            name: "performance_boot_time",
-            func_ptr: performance_boot_time,
-            control: PerformanceTestControl {
-                test_time: 2,
-                test_iterations: 10,
-                ..Default::default()
-            }
-        });
-        m.insert(PerformanceTest {
-            name: "performance_boot_time_pmem",
-            func_ptr: performance_boot_time_pmem,
-            control: PerformanceTestControl {
-                test_time: 2,
-                test_iterations: 10,
-                ..Default::default()
-            }
-        });
-        m.insert(PerformanceTest {
-            name: "performance_virtio_net_latency",
-            func_ptr: performance_net_latency,
-            control: Default::default(),
-        });
-        m.insert(PerformanceTest {
-            name: "performance_virtio_net_throughput_bps_single_queue_rx",
-            func_ptr: performance_net_throughput,
-            control: PerformanceTestControl {
-                queue_num: Some(1), // used as 'queue_pairs'
-                queue_size: Some(256),
-                net_rx: Some(true),
-                ..Default::default()
-            }
-        });
-        m.insert(PerformanceTest {
-            name: "performance_virtio_net_throughput_bps_single_queue_tx",
-            func_ptr: performance_net_throughput,
-            control: PerformanceTestControl {
-                queue_num: Some(1), // used as 'queue_pairs'
-                queue_size: Some(256),
-                net_rx: Some(false),
-                ..Default::default()
-            }
-        });
-        m.insert(PerformanceTest {
-            name: "performance_virtio_net_throughput_bps_multi_queue_rx",
-            func_ptr: performance_net_throughput,
-            control: PerformanceTestControl {
-                queue_num: Some(2), // used as 'queue_pairs'
-                queue_size: Some(1024),
-                net_rx: Some(true),
-                ..Default::default()
-            }
-        });
-        m.insert(PerformanceTest {
-            name: "performance_virtio_net_throughput_bps_multi_queue_tx",
-            func_ptr: performance_net_throughput,
-            control: PerformanceTestControl {
-                queue_num: Some(2), // used as 'queue_pairs'
-                queue_size: Some(1024),
-                net_rx: Some(false),
-                ..Default::default()
-            }
-        });
-        m.insert(PerformanceTest {
-            name: "performance_block_io_bps_read",
-            func_ptr: performance_block_io,
-            control: PerformanceTestControl {
-                queue_num: Some(1),
-                queue_size: Some(1024),
-                fio_ops: Some(FioOps::Read),
-                ..Default::default()
-            }
-        });
-        m.insert(PerformanceTest {
-            name: "performance_block_io_bps_write",
-            func_ptr: performance_block_io,
-            control: PerformanceTestControl {
-                queue_num: Some(1),
-                queue_size: Some(1024),
-                fio_ops: Some(FioOps::Write),
-                ..Default::default()
-            }
-        });
-        m.insert(PerformanceTest {
-            name: "performance_block_io_bps_random_read",
-            func_ptr: performance_block_io,
-            control: PerformanceTestControl {
-                queue_num: Some(1),
-                queue_size: Some(1024),
-                fio_ops: Some(FioOps::RandomRead),
-                ..Default::default()
-            }
-        });
-        m.insert(PerformanceTest {
-            name: "performance_block_io_bps_random_write",
-            func_ptr: performance_block_io,
-            control: PerformanceTestControl {
-                queue_num: Some(1),
-                queue_size: Some(1024),
-                fio_ops: Some(FioOps::RandomWrite),
-                ..Default::default()
-            }
-        });
-        m.insert(PerformanceTest {
-            name: "performance_block_io_bps_multi_queue_read",
-            func_ptr: performance_block_io,
-            control: PerformanceTestControl {
-                queue_num: Some(2),
-                queue_size: Some(1024),
-                fio_ops: Some(FioOps::Read),
-                ..Default::default()
-            }
-        });
-        m.insert(PerformanceTest {
-            name: "performance_block_io_bps_multi_queue_write",
-            func_ptr: performance_block_io,
-            control: PerformanceTestControl {
-                queue_num: Some(2),
-                queue_size: Some(1024),
-                fio_ops: Some(FioOps::Write),
-                ..Default::default()
-            }
-        });
-        m.insert(PerformanceTest {
-            name: "performance_block_io_bps_multi_queue_random_read",
-            func_ptr: performance_block_io,
-            control: PerformanceTestControl {
-                queue_num: Some(2),
-                queue_size: Some(1024),
-                fio_ops: Some(FioOps::RandomRead),
-                ..Default::default()
-            }
-        });
-        m.insert(PerformanceTest {
-            name: "performance_block_io_bps_multi_queue_random_write",
-            func_ptr: performance_block_io,
-            control: PerformanceTestControl {
-                queue_num: Some(2),
-                queue_size: Some(1024),
-                fio_ops: Some(FioOps::RandomWrite),
-                ..Default::default()
-            }
-        });
-        m
-    };
-}
+const TEST_LIST: [PerformanceTest; 15] = [
+    PerformanceTest {
+        name: "performance_boot_time",
+        func_ptr: performance_boot_time,
+        control: PerformanceTestControl {
+            test_time: 2,
+            test_iterations: 10,
+            ..PerformanceTestControl::default()
+        },
+    },
+    PerformanceTest {
+        name: "performance_boot_time_pmem",
+        func_ptr: performance_boot_time_pmem,
+        control: PerformanceTestControl {
+            test_time: 2,
+            test_iterations: 10,
+            ..PerformanceTestControl::default()
+        },
+    },
+    PerformanceTest {
+        name: "performance_virtio_net_latency",
+        func_ptr: performance_net_latency,
+        control: PerformanceTestControl::default(),
+    },
+    PerformanceTest {
+        name: "performance_virtio_net_throughput_bps_single_queue_rx",
+        func_ptr: performance_net_throughput,
+        control: PerformanceTestControl {
+            queue_num: Some(1), // used as 'queue_pairs'
+            queue_size: Some(256),
+            net_rx: Some(true),
+            ..PerformanceTestControl::default()
+        },
+    },
+    PerformanceTest {
+        name: "performance_virtio_net_throughput_bps_single_queue_tx",
+        func_ptr: performance_net_throughput,
+        control: PerformanceTestControl {
+            queue_num: Some(1), // used as 'queue_pairs'
+            queue_size: Some(256),
+            net_rx: Some(false),
+            ..PerformanceTestControl::default()
+        },
+    },
+    PerformanceTest {
+        name: "performance_virtio_net_throughput_bps_multi_queue_rx",
+        func_ptr: performance_net_throughput,
+        control: PerformanceTestControl {
+            queue_num: Some(2), // used as 'queue_pairs'
+            queue_size: Some(1024),
+            net_rx: Some(true),
+            ..PerformanceTestControl::default()
+        },
+    },
+    PerformanceTest {
+        name: "performance_virtio_net_throughput_bps_multi_queue_tx",
+        func_ptr: performance_net_throughput,
+        control: PerformanceTestControl {
+            queue_num: Some(2), // used as 'queue_pairs'
+            queue_size: Some(1024),
+            net_rx: Some(false),
+            ..PerformanceTestControl::default()
+        },
+    },
+    PerformanceTest {
+        name: "performance_block_io_bps_read",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            queue_num: Some(1),
+            queue_size: Some(1024),
+            fio_ops: Some(FioOps::Read),
+            ..PerformanceTestControl::default()
+        },
+    },
+    PerformanceTest {
+        name: "performance_block_io_bps_write",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            queue_num: Some(1),
+            queue_size: Some(1024),
+            fio_ops: Some(FioOps::Write),
+            ..PerformanceTestControl::default()
+        },
+    },
+    PerformanceTest {
+        name: "performance_block_io_bps_random_read",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            queue_num: Some(1),
+            queue_size: Some(1024),
+            fio_ops: Some(FioOps::RandomRead),
+            ..PerformanceTestControl::default()
+        },
+    },
+    PerformanceTest {
+        name: "performance_block_io_bps_random_write",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            queue_num: Some(1),
+            queue_size: Some(1024),
+            fio_ops: Some(FioOps::RandomWrite),
+            ..PerformanceTestControl::default()
+        },
+    },
+    PerformanceTest {
+        name: "performance_block_io_bps_multi_queue_read",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            queue_num: Some(2),
+            queue_size: Some(1024),
+            fio_ops: Some(FioOps::Read),
+            ..PerformanceTestControl::default()
+        },
+    },
+    PerformanceTest {
+        name: "performance_block_io_bps_multi_queue_write",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            queue_num: Some(2),
+            queue_size: Some(1024),
+            fio_ops: Some(FioOps::Write),
+            ..PerformanceTestControl::default()
+        },
+    },
+    PerformanceTest {
+        name: "performance_block_io_bps_multi_queue_random_read",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            queue_num: Some(2),
+            queue_size: Some(1024),
+            fio_ops: Some(FioOps::RandomRead),
+            ..PerformanceTestControl::default()
+        },
+    },
+    PerformanceTest {
+        name: "performance_block_io_bps_multi_queue_random_write",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            queue_num: Some(2),
+            queue_size: Some(1024),
+            fio_ops: Some(FioOps::RandomWrite),
+            ..PerformanceTestControl::default()
+        },
+    },
+];
 
 fn run_test_with_timetout(test: &'static PerformanceTest) -> Result<PerformanceTestResult, Error> {
     let (sender, receiver) = channel::<Result<PerformanceTestResult, Error>>();

@@ -678,7 +678,6 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "dirs 4.0.0",
- "lazy_static",
  "serde",
  "serde_derive",
  "serde_json",
