@@ -21,7 +21,7 @@ strip target/$BUILD_TARGET/release/cloud-hypervisor
 
 export RUST_BACKTRACE=1
 
-time cargo test $features "vfio::$test_filter" -- --test-threads=1
+time cargo test $features "vfio::$test_filter" -- --test-threads=1 ${test_binary_args[*]}
 RES=$?
 
 exit $RES

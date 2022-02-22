@@ -27,7 +27,7 @@ strip target/$BUILD_TARGET/release/cloud-hypervisor
 
 export RUST_BACKTRACE=1
 
-time cargo test $features "sgx::$test_filter"
+time cargo test $features "sgx::$test_filter" -- ${test_binary_args[*]}
 RES=$?
 
 exit $RES

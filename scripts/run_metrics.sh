@@ -88,7 +88,7 @@ echo 6144 | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
 export RUST_BACKTRACE=1
-time target/$BUILD_TARGET/release/performance-metrics
+time target/$BUILD_TARGET/release/performance-metrics ${test_binary_args[*]}
 RES=$?
 
 exit $RES

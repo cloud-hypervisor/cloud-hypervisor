@@ -87,7 +87,7 @@ echo 6144 | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
 export RUST_BACKTRACE=1
-time cargo test $features "live_migration::$test_filter" -- --test-threads=1
+time cargo test $features "live_migration::$test_filter" -- --test-threads=1 ${test_binary_args[*]}
 RES=$?
 
 exit $RES
