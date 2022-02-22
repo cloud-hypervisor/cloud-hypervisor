@@ -307,6 +307,39 @@ pipeline{
 						}
 					}
 				}
+				stage ('Worker build - Metrics') {
+					agent { node { label 'focal-metrics' } }
+					when {
+						branch 'main'
+						beforeAgent true
+						expression {
+							return runWorkers
+						}
+					}
+					environment {
+						METRICS_PUBLISH_KEY = credentials('52e0945f-ce7a-43d1-87af-67d1d87cc40f')
+					}
+					stages {
+						stage ('Checkout') {
+							steps {
+								checkout scm
+							}
+						}
+						stage ('Run metrics tests') {
+							options {
+								timeout(time: 1, unit: 'HOURS')
+							}
+							steps {
+								sh 'scripts/dev_cli.sh tests --metrics -- -- --report-file /root/workloads/metrics.json --test-filter boot_time'
+							}
+						}
+						stage ('Upload metrics report') {
+							steps {
+								sh 'curl -X PUT https://cloud-hypervisor-metrics.azurewebsites.net/api/publishmetrics -H "x-functions-key: $METRICS_PUBLISH_KEY" -T ~/workloads/metrics.json'
+							}
+						}
+					}
+				}
 			}
 		}
 	}
