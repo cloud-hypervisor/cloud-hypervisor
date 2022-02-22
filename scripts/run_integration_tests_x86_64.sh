@@ -201,14 +201,14 @@ echo 6144 | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
 export RUST_BACKTRACE=1
-time cargo test $features "parallel::$test_filter"
+time cargo test $features "parallel::$test_filter" -- ${test_binary_args[*]}
 RES=$?
 
 # Run some tests in sequence since the result could be affected by other tests
 # running in parallel.
 if [ $RES -eq 0 ]; then
     export RUST_BACKTRACE=1
-    time cargo test $features "sequential::$test_filter" -- --test-threads=1
+    time cargo test $features "sequential::$test_filter" -- --test-threads=1 ${test_binary_args[*]}
     RES=$?
 fi
 

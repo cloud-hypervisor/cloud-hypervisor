@@ -183,7 +183,7 @@ cmd_help() {
     echo "        --volumes             Hash separated volumes to be exported. Example --volumes /mnt:/mnt#/myvol:/myvol"
     echo "        --hypervisor          Underlying hypervisor. Options kvm, mshv"
     echo ""
-    echo "    tests [--unit|--cargo|--all] [--libc musl|gnu] [-- [<cargo test args>]]"
+    echo "    tests [--unit|--cargo|--all] [--libc musl|gnu] [-- [<test scripts args>] [-- [<test binary args>]]] "
     echo "        Run the Cloud Hypervisor tests."
     echo "        --unit                       Run the unit tests."
     echo "        --cargo                      Run the cargo tests."
@@ -369,7 +369,7 @@ cmd_tests() {
         exported_device="/dev/mshv"
     fi
 
-    set -- "$@" '--hypervisor' "$hypervisor"
+    set -- '--hypervisor' "$hypervisor" "$@"
 
     ensure_build_dir
     ensure_latest_ctr

@@ -1,6 +1,7 @@
 #!/bin/bash
 hypervisor="kvm"
 test_filter=""
+test_binary_args=()
 
 cmd_help() {
     echo ""
@@ -28,12 +29,20 @@ process_common_args() {
                 shift
                 test_filter="$1"
                 ;;
+            "--") {
+                shift
+                break
+            } ;;
             *)
-		;;
+                echo "Unknown test scripts argument: $1. Please use '-- --help' for help."
+                exit
+                ;;
 	esac
 	shift
     done
     if [[ ! ("$hypervisor" = "kvm" ||  "$hypervisor" = "mshv") ]]; then
         die "Hypervisor value must be kvm or mshv"
     fi
+
+    test_binary_args="$@"
 }

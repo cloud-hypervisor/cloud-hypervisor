@@ -311,13 +311,13 @@ echo 6144 | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
 # Run all direct kernel boot (Device Tree) test cases in mod `parallel`
-time cargo test $features "parallel::$test_filter"
+time cargo test $features "parallel::$test_filter" -- ${test_binary_args[*]}
 RES=$?
 
 # Run some tests in sequence since the result could be affected by other tests
 # running in parallel.
 if [ $RES -eq 0 ]; then
-    time cargo test $features "sequential::$test_filter" -- --test-threads=1
+    time cargo test $features "sequential::$test_filter" -- --test-threads=1 ${test_binary_args[*]}
     RES=$?
 else
     exit $RES
@@ -325,7 +325,7 @@ fi
 
 # Run all ACPI test cases
 if [ $RES -eq 0 ]; then
-    time cargo test $features "aarch64_acpi::$test_filter"
+    time cargo test $features "aarch64_acpi::$test_filter" -- ${test_binary_args[*]}
     RES=$?
 else
     exit $RES
@@ -333,7 +333,7 @@ fi
 
 # Run all test cases related to live migration
 if [ $RES -eq 0 ]; then
-    time cargo test $features "live_migration::$test_filter" -- --test-threads=1
+    time cargo test $features "live_migration::$test_filter" -- --test-threads=1 ${test_binary_args[*]}
     RES=$?
 else
     exit $RES

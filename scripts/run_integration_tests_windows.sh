@@ -51,7 +51,7 @@ export RUST_BACKTRACE=1
 
 # Only run with 1 thread to avoid tests interfering with one another because
 # Windows has a static IP configured
-time cargo test $features "windows::$test_filter"
+time cargo test $features "windows::$test_filter" -- ${test_binary_args[*]}
 RES=$?
 
 dmsetup remove_all -f
