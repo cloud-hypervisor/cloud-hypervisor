@@ -31,7 +31,6 @@ RUN apt-get update \
 	bison \
 	libelf-dev \
 	qemu-utils \
-	qemu-system \
 	libglib2.0-dev \
 	libpixman-1-dev \
 	libseccomp-dev \
@@ -50,6 +49,7 @@ RUN apt-get update \
 	zip \
 	git-core \
 	dnsmasq \
+	dmsetup \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
