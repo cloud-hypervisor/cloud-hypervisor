@@ -116,6 +116,7 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
        && git submodule update --init \
        && apt-get update \
        && ./scripts/pkgdep.sh \
+       && apt-get clean \
        && ./configure --with-vfio-user \
        && make -j `nproc` \
        && mkdir /usr/local/bin/spdk-nvme \
