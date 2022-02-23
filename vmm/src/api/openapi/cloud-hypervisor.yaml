@@ -1072,6 +1072,8 @@ components:
           type: string
 
     SendMigrationData:
+      required:
+      - destination_url
       type: object
       properties:
         destination_url:
