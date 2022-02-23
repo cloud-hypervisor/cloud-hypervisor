@@ -196,6 +196,7 @@ pub struct VmSendMigrationData {
     /// URL to migrate the VM to
     pub destination_url: String,
     /// Send memory across socket without copying
+    #[serde(default)]
     pub local: bool,
 }
 
