@@ -20,7 +20,6 @@ RUN apt-get update \
 	&& DEBIAN_FRONTEND=noninteractive apt-get install -yq \
 	build-essential \
 	bc \
-	docker.io \
 	curl \
 	wget \
 	sudo \
@@ -49,6 +48,8 @@ RUN apt-get update \
 	uuid-dev \
 	iperf3 \
 	zip \
+	git-core \
+	dnsmasq \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
