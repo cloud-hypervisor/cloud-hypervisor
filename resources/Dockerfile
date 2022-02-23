@@ -92,9 +92,9 @@ ENV OPENSSL_INCLUDE_DIR=/usr/include/
 
 # Install the rust toolchain
 RUN export ARCH="$(uname -m)" \
-    && nohup curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain "$RUST_TOOLCHAIN" \
+    && nohup curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain "$RUST_TOOLCHAIN" \
     && rustup target add $ARCH-unknown-linux-musl --toolchain "$RUST_TOOLCHAIN" \
-    && if [ "$TARGETARCH" = "amd64" ]; then rustup toolchain add $RUST_TOOLCHAIN-x86_64-unknown-linux-musl; fi \
+    && if [ "$TARGETARCH" = "amd64" ]; then rustup toolchain add --profile minimal $RUST_TOOLCHAIN-x86_64-unknown-linux-musl; fi \
     && if [ "$TARGETARCH" = "amd64" ]; then rustup component add rustfmt; fi \
     && if [ "$TARGETARCH" = "amd64" ]; then rustup component add clippy; fi \
     && rm -rf "$CARGO_HOME/registry" \
