@@ -21,6 +21,7 @@ const ROM_BAR_REG: usize = 12;
 const BAR_IO_ADDR_MASK: u32 = 0xffff_fffc;
 const BAR_MEM_ADDR_MASK: u32 = 0xffff_fff0;
 const ROM_BAR_ADDR_MASK: u32 = 0xffff_f800;
+const MSI_CAPABILITY_REGISTER_MASK: u32 = 0x0071_0000;
 const MSIX_CAPABILITY_REGISTER_MASK: u32 = 0xc000_0000;
 const NUM_BAR_REGS: usize = 6;
 const CAPABILITY_LIST_HEAD_OFFSET: usize = 0x34;
@@ -715,9 +716,15 @@ impl PciConfiguration {
         }
         self.last_capability = Some((cap_offset, total_len));
 
-        if cap_data.id() == PciCapabilityId::MsiX {
-            self.msix_cap_reg_idx = Some(cap_offset / 4);
-            self.writable_bits[self.msix_cap_reg_idx.unwrap()] = MSIX_CAPABILITY_REGISTER_MASK;
+        match cap_data.id() {
+            PciCapabilityId::MessageSignalledInterrupts => {
+                self.writable_bits[cap_offset / 4] = MSI_CAPABILITY_REGISTER_MASK;
+            }
+            PciCapabilityId::MsiX => {
+                self.msix_cap_reg_idx = Some(cap_offset / 4);
+                self.writable_bits[self.msix_cap_reg_idx.unwrap()] = MSIX_CAPABILITY_REGISTER_MASK;
+            }
+            _ => {}
         }
 
         Ok(cap_offset)
