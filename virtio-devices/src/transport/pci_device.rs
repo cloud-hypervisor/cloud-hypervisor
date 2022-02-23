@@ -958,25 +958,25 @@ impl PciDevice for VirtioPciDevice {
                 &mut self.queues,
                 self.device.clone(),
             ),
-            o if ISR_CONFIG_BAR_OFFSET <= o && o < ISR_CONFIG_BAR_OFFSET + ISR_CONFIG_SIZE => {
+            o if (ISR_CONFIG_BAR_OFFSET..ISR_CONFIG_BAR_OFFSET + ISR_CONFIG_SIZE).contains(&o) => {
                 if let Some(v) = data.get_mut(0) {
                     // Reading this register resets it to 0.
                     *v = self.interrupt_status.swap(0, Ordering::AcqRel) as u8;
                 }
             }
-            o if DEVICE_CONFIG_BAR_OFFSET <= o
-                && o < DEVICE_CONFIG_BAR_OFFSET + DEVICE_CONFIG_SIZE =>
+            o if (DEVICE_CONFIG_BAR_OFFSET..DEVICE_CONFIG_BAR_OFFSET + DEVICE_CONFIG_SIZE)
+                .contains(&o) =>
             {
                 let device = self.device.lock().unwrap();
                 device.read_config(o - DEVICE_CONFIG_BAR_OFFSET, data);
             }
-            o if NOTIFICATION_BAR_OFFSET <= o
-                && o < NOTIFICATION_BAR_OFFSET + NOTIFICATION_SIZE =>
+            o if (NOTIFICATION_BAR_OFFSET..NOTIFICATION_BAR_OFFSET + NOTIFICATION_SIZE)
+                .contains(&o) =>
             {
                 // Handled with ioeventfds.
                 error!("Unexpected read from notification BAR: offset = 0x{:x}", o);
             }
-            o if MSIX_TABLE_BAR_OFFSET <= o && o < MSIX_TABLE_BAR_OFFSET + MSIX_TABLE_SIZE => {
+            o if (MSIX_TABLE_BAR_OFFSET..MSIX_TABLE_BAR_OFFSET + MSIX_TABLE_SIZE).contains(&o) => {
                 if let Some(msix_config) = &self.msix_config {
                     msix_config
                         .lock()
@@ -984,7 +984,7 @@ impl PciDevice for VirtioPciDevice {
                         .read_table(o - MSIX_TABLE_BAR_OFFSET, data);
                 }
             }
-            o if MSIX_PBA_BAR_OFFSET <= o && o < MSIX_PBA_BAR_OFFSET + MSIX_PBA_SIZE => {
+            o if (MSIX_PBA_BAR_OFFSET..MSIX_PBA_BAR_OFFSET + MSIX_PBA_SIZE).contains(&o) => {
                 if let Some(msix_config) = &self.msix_config {
                     msix_config
                         .lock()
@@ -1004,25 +1004,25 @@ impl PciDevice for VirtioPciDevice {
                 &mut self.queues,
                 self.device.clone(),
             ),
-            o if ISR_CONFIG_BAR_OFFSET <= o && o < ISR_CONFIG_BAR_OFFSET + ISR_CONFIG_SIZE => {
+            o if (ISR_CONFIG_BAR_OFFSET..ISR_CONFIG_BAR_OFFSET + ISR_CONFIG_SIZE).contains(&o) => {
                 if let Some(v) = data.get(0) {
                     self.interrupt_status
                         .fetch_and(!(*v as usize), Ordering::AcqRel);
                 }
             }
-            o if DEVICE_CONFIG_BAR_OFFSET <= o
-                && o < DEVICE_CONFIG_BAR_OFFSET + DEVICE_CONFIG_SIZE =>
+            o if (DEVICE_CONFIG_BAR_OFFSET..DEVICE_CONFIG_BAR_OFFSET + DEVICE_CONFIG_SIZE)
+                .contains(&o) =>
             {
                 let mut device = self.device.lock().unwrap();
                 device.write_config(o - DEVICE_CONFIG_BAR_OFFSET, data);
             }
-            o if NOTIFICATION_BAR_OFFSET <= o
-                && o < NOTIFICATION_BAR_OFFSET + NOTIFICATION_SIZE =>
+            o if (NOTIFICATION_BAR_OFFSET..NOTIFICATION_BAR_OFFSET + NOTIFICATION_SIZE)
+                .contains(&o) =>
             {
                 // Handled with ioeventfds.
                 error!("Unexpected write to notification BAR: offset = 0x{:x}", o);
             }
-            o if MSIX_TABLE_BAR_OFFSET <= o && o < MSIX_TABLE_BAR_OFFSET + MSIX_TABLE_SIZE => {
+            o if (MSIX_TABLE_BAR_OFFSET..MSIX_TABLE_BAR_OFFSET + MSIX_TABLE_SIZE).contains(&o) => {
                 if let Some(msix_config) = &self.msix_config {
                     msix_config
                         .lock()
@@ -1030,7 +1030,7 @@ impl PciDevice for VirtioPciDevice {
                         .write_table(o - MSIX_TABLE_BAR_OFFSET, data);
                 }
             }
-            o if MSIX_PBA_BAR_OFFSET <= o && o < MSIX_PBA_BAR_OFFSET + MSIX_PBA_SIZE => {
+            o if (MSIX_PBA_BAR_OFFSET..MSIX_PBA_BAR_OFFSET + MSIX_PBA_SIZE).contains(&o) => {
                 if let Some(msix_config) = &self.msix_config {
                     msix_config
                         .lock()
