@@ -8,6 +8,8 @@ build = "build.rs"
 license = "LICENSE-APACHE & LICENSE-BSD-3-Clause"
 description = "Open source Virtual Machine Monitor (VMM) that runs on top of KVM"
 homepage = "https://github.com/cloud-hypervisor/cloud-hypervisor"
+# Minimum buildable version:
+# Keep in sync with version in .github/workflows/build.yaml
 rust-version = "1.54"
 
 [profile.release]
