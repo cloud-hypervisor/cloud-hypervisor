@@ -25,7 +25,7 @@ clap = "3.1.2"
 devices = { path = "../devices" }
 epoll = "4.3.1"
 event_monitor = { path = "../event_monitor" }
-gdbstub = "0.6.0"
+gdbstub = "0.6.1"
 gdbstub_arch = "0.2.0"
 hypervisor = { path = "../hypervisor" }
 lazy_static = "1.4.0"
