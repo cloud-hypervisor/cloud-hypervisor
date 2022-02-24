@@ -1066,6 +1066,8 @@ components:
           type: boolean
 
     ReceiveMigrationData:
+      required:
+      - receiver_url
       type: object
       properties:
         receiver_url:
