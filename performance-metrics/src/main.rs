@@ -222,7 +222,11 @@ const TEST_LIST: [PerformanceTest; 15] = [
     PerformanceTest {
         name: "performance_virtio_net_latency_ns",
         func_ptr: performance_net_latency,
-        control: PerformanceTestControl::default(),
+        control: PerformanceTestControl {
+            num_queues: Some(2),
+            queue_size: Some(256),
+            ..PerformanceTestControl::default()
+        },
     },
     PerformanceTest {
         name: "performance_virtio_net_throughput_bps_single_queue_rx_bps",
