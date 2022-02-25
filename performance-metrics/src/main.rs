@@ -253,7 +253,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         func_ptr: performance_net_throughput,
         control: PerformanceTestControl {
             num_queues: Some(4),
-            queue_size: Some(1024),
+            queue_size: Some(256),
             net_rx: Some(true),
             ..PerformanceTestControl::default()
         },
@@ -263,7 +263,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         func_ptr: performance_net_throughput,
         control: PerformanceTestControl {
             num_queues: Some(4),
-            queue_size: Some(1024),
+            queue_size: Some(256),
             net_rx: Some(false),
             ..PerformanceTestControl::default()
         },
@@ -273,7 +273,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
             num_queues: Some(1),
-            queue_size: Some(1024),
+            queue_size: Some(128),
             fio_ops: Some(FioOps::Read),
             ..PerformanceTestControl::default()
         },
@@ -283,7 +283,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
             num_queues: Some(1),
-            queue_size: Some(1024),
+            queue_size: Some(128),
             fio_ops: Some(FioOps::Write),
             ..PerformanceTestControl::default()
         },
@@ -293,7 +293,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
             num_queues: Some(1),
-            queue_size: Some(1024),
+            queue_size: Some(128),
             fio_ops: Some(FioOps::RandomRead),
             ..PerformanceTestControl::default()
         },
@@ -303,7 +303,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
             num_queues: Some(1),
-            queue_size: Some(1024),
+            queue_size: Some(128),
             fio_ops: Some(FioOps::RandomWrite),
             ..PerformanceTestControl::default()
         },
@@ -313,7 +313,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
             num_queues: Some(2),
-            queue_size: Some(1024),
+            queue_size: Some(128),
             fio_ops: Some(FioOps::Read),
             ..PerformanceTestControl::default()
         },
@@ -323,7 +323,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
             num_queues: Some(2),
-            queue_size: Some(1024),
+            queue_size: Some(128),
             fio_ops: Some(FioOps::Write),
             ..PerformanceTestControl::default()
         },
@@ -333,7 +333,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
             num_queues: Some(2),
-            queue_size: Some(1024),
+            queue_size: Some(128),
             fio_ops: Some(FioOps::RandomRead),
             ..PerformanceTestControl::default()
         },
@@ -343,7 +343,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
             num_queues: Some(2),
-            queue_size: Some(1024),
+            queue_size: Some(128),
             fio_ops: Some(FioOps::RandomWrite),
             ..PerformanceTestControl::default()
         },
