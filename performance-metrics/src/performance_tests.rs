@@ -215,7 +215,7 @@ fn measure_virtio_net_throughput(
 
 pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
     let test_time = control.test_timeout;
-    let queue_pairs = control.num_queues.unwrap();
+    let num_queues = control.num_queues.unwrap();
     let queue_size = control.queue_size.unwrap();
     let rx = control.net_rx.unwrap();
 
@@ -224,14 +224,11 @@ pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
 
     let net_params = format!(
         "tap=,mac={},ip={},mask=255.255.255.0,num_queues={},queue_size={}",
-        guest.network.guest_mac,
-        guest.network.host_ip,
-        queue_pairs * 2,
-        queue_size,
+        guest.network.guest_mac, guest.network.host_ip, num_queues, queue_size,
     );
 
     let mut child = GuestCommand::new(&guest)
-        .args(&["--cpus", &format!("boot={}", queue_pairs * 2)])
+        .args(&["--cpus", &format!("boot={}", num_queues)])
         .args(&["--memory", "size=4G"])
         .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
         .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
@@ -244,7 +241,7 @@ pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
 
     let r = std::panic::catch_unwind(|| {
         guest.wait_vm_boot(None).unwrap();
-        measure_virtio_net_throughput(test_time, queue_pairs, &guest, rx).unwrap()
+        measure_virtio_net_throughput(test_time, num_queues / 2, &guest, rx).unwrap()
     });
 
     let _ = child.kill();
