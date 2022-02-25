@@ -241,6 +241,10 @@ cmd_build() {
             shift
             hypervisor="$1"
             ;;
+        "--features")
+            shift
+            features_build="--features $1"
+            ;;
         "--") {
             shift
             break
