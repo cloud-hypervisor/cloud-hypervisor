@@ -617,7 +617,7 @@ fn parse_fio_output(output: &str, fio_ops: &FioOps, num_jobs: u32) -> Result<f64
 
 pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
     let test_timeout = control.test_timeout;
-    let queue_num = control.num_queues.unwrap();
+    let num_queues = control.num_queues.unwrap();
     let queue_size = control.queue_size.unwrap();
     let fio_ops = control.fio_ops.as_ref().unwrap();
 
@@ -632,7 +632,7 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
         .to_string();
 
     let mut child = GuestCommand::new(&guest)
-        .args(&["--cpus", &format!("boot={}", queue_num * 2)])
+        .args(&["--cpus", &format!("boot={}", num_queues * 2)])
         .args(&["--memory", "size=4G"])
         .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
         .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
@@ -654,7 +654,7 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
                 "add-disk",
                 &format!(
                     "path={},num_queues={},queue_size={},direct=on",
-                    BLK_IO_TEST_IMG, queue_num, queue_size
+                    BLK_IO_TEST_IMG, num_queues, queue_size
                 )
             ])
             .stderr(Stdio::piped())
@@ -670,7 +670,7 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
             "sudo fio --filename=/dev/vdc --name=test --output-format=json \
             --direct=1 --bs=4k --ioengine=io_uring --iodepth=64 \
             --rw={} --runtime={} --numjobs={}",
-            fio_ops, test_timeout, queue_num
+            fio_ops, test_timeout, num_queues
         );
         let output = guest
             .ssh_command(&fio_command)
@@ -678,7 +678,7 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
             .unwrap();
 
         // Parse fio output
-        parse_fio_output(&output, fio_ops, queue_num).unwrap()
+        parse_fio_output(&output, fio_ops, num_queues).unwrap()
     });
 
     let _ = child.kill();
