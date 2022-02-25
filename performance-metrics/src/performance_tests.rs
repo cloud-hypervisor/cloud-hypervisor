@@ -357,7 +357,7 @@ pub fn performance_net_latency(control: &PerformanceTestControl) -> f64 {
     );
 
     let mut child = GuestCommand::new(&guest)
-        .args(&["--cpus", "boot=2"])
+        .args(&["--cpus", &format!("boot={}", num_queues)])
         .args(&["--memory", "size=4G"])
         .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
         .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
