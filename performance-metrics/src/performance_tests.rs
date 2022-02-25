@@ -1,3 +1,8 @@
+// Copyright © 2022 Intel Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+//
+
 // Performance tests
 
 use crate::{mean, PerformanceTestControl};
