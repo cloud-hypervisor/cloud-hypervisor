@@ -52,7 +52,7 @@ impl Default for MetricsReport {
         if let Ok(git_out) = Command::new("git").args(&["describe", "--dirty"]).output() {
             if git_out.status.success() {
                 if let Ok(git_out_str) = String::from_utf8(git_out.stdout) {
-                    git_human_readable = git_out_str;
+                    git_human_readable = git_out_str.trim().to_string();
                 }
             }
         }
@@ -61,7 +61,7 @@ impl Default for MetricsReport {
         if let Ok(git_out) = Command::new("git").args(&["rev-parse", "HEAD"]).output() {
             if git_out.status.success() {
                 if let Ok(git_out_str) = String::from_utf8(git_out.stdout) {
-                    git_revision = git_out_str;
+                    git_revision = git_out_str.trim().to_string();
                 }
             }
         }
@@ -73,7 +73,7 @@ impl Default for MetricsReport {
         {
             if git_out.status.success() {
                 if let Ok(git_out_str) = String::from_utf8(git_out.stdout) {
-                    git_committer_date = git_out_str;
+                    git_committer_date = git_out_str.trim().to_string();
                 }
             }
         }
