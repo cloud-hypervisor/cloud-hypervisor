@@ -202,7 +202,7 @@ fn std_deviation(data: &[f64]) -> Option<f64> {
 
 const TEST_LIST: [PerformanceTest; 15] = [
     PerformanceTest {
-        name: "performance_boot_time_s",
+        name: "boot_time_s",
         func_ptr: performance_boot_time,
         control: PerformanceTestControl {
             test_timeout: 2,
@@ -211,7 +211,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         },
     },
     PerformanceTest {
-        name: "performance_boot_time_pmem_s",
+        name: "boot_time_pmem_s",
         func_ptr: performance_boot_time_pmem,
         control: PerformanceTestControl {
             test_timeout: 2,
@@ -220,7 +220,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         },
     },
     PerformanceTest {
-        name: "performance_virtio_net_latency_ns",
+        name: "virtio_net_latency_ns",
         func_ptr: performance_net_latency,
         control: PerformanceTestControl {
             num_queues: Some(2),
@@ -229,7 +229,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         },
     },
     PerformanceTest {
-        name: "performance_virtio_net_throughput_bps_single_queue_rx_bps",
+        name: "virtio_net_throughput_bps_single_queue_rx_bps",
         func_ptr: performance_net_throughput,
         control: PerformanceTestControl {
             num_queues: Some(2),
@@ -239,7 +239,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         },
     },
     PerformanceTest {
-        name: "performance_virtio_net_throughput_single_queue_tx_bps",
+        name: "virtio_net_throughput_single_queue_tx_bps",
         func_ptr: performance_net_throughput,
         control: PerformanceTestControl {
             num_queues: Some(2),
@@ -249,7 +249,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         },
     },
     PerformanceTest {
-        name: "performance_virtio_net_throughput_multi_queue_rx_bps",
+        name: "virtio_net_throughput_multi_queue_rx_bps",
         func_ptr: performance_net_throughput,
         control: PerformanceTestControl {
             num_queues: Some(4),
@@ -259,7 +259,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         },
     },
     PerformanceTest {
-        name: "performance_virtio_net_throughput_multi_queue_tx_bps",
+        name: "virtio_net_throughput_multi_queue_tx_bps",
         func_ptr: performance_net_throughput,
         control: PerformanceTestControl {
             num_queues: Some(4),
@@ -269,7 +269,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         },
     },
     PerformanceTest {
-        name: "performance_block_read_Bps",
+        name: "block_read_Bps",
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
             num_queues: Some(1),
@@ -279,7 +279,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         },
     },
     PerformanceTest {
-        name: "performance_block_write_Bps",
+        name: "block_write_Bps",
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
             num_queues: Some(1),
@@ -289,7 +289,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         },
     },
     PerformanceTest {
-        name: "performance_block_random_read_Bps",
+        name: "block_random_read_Bps",
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
             num_queues: Some(1),
@@ -299,7 +299,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         },
     },
     PerformanceTest {
-        name: "performance_block_random_write_Bps",
+        name: "block_random_write_Bps",
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
             num_queues: Some(1),
@@ -309,7 +309,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         },
     },
     PerformanceTest {
-        name: "performance_block_multi_queue_read_Bps",
+        name: "block_multi_queue_read_Bps",
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
             num_queues: Some(2),
@@ -319,7 +319,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         },
     },
     PerformanceTest {
-        name: "performance_block_multi_queue_write_Bps",
+        name: "block_multi_queue_write_Bps",
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
             num_queues: Some(2),
@@ -329,7 +329,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         },
     },
     PerformanceTest {
-        name: "performance_block_multi_queue_random_read_Bps",
+        name: "block_multi_queue_random_read_Bps",
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
             num_queues: Some(2),
@@ -339,7 +339,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         },
     },
     PerformanceTest {
-        name: "performance_block_multi_queue_random_write_Bps",
+        name: "block_multi_queue_random_write_Bps",
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
             num_queues: Some(2),
