@@ -119,7 +119,7 @@ impl PerformanceTestControl {
     const fn default() -> Self {
         Self {
             test_time: 10,
-            test_iterations: 30,
+            test_iterations: 5,
             queue_num: None,
             queue_size: None,
             net_rx: None,
