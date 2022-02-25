@@ -209,7 +209,7 @@ fn measure_virtio_net_throughput(
 }
 
 pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
-    let test_time = control.test_time;
+    let test_time = control.test_timeout;
     let queue_pairs = control.queue_num.unwrap();
     let queue_size = control.queue_size.unwrap();
     let rx = control.net_rx.unwrap();
@@ -361,7 +361,7 @@ pub fn performance_net_latency(control: &PerformanceTestControl) -> f64 {
         guest.wait_vm_boot(None).unwrap();
 
         // 'ethr' tool will measure the latency multiple times with provided test time
-        let latency = measure_virtio_net_latency(&guest, control.test_time).unwrap();
+        let latency = measure_virtio_net_latency(&guest, control.test_timeout).unwrap();
         mean(&latency).unwrap()
     });
 
@@ -491,7 +491,7 @@ pub fn performance_boot_time(control: &PerformanceTestControl) -> f64 {
             .args(&["--console", "off"])
             .default_disks();
 
-        measure_boot_time(c, control.test_time).unwrap()
+        measure_boot_time(c, control.test_timeout).unwrap()
     });
 
     match r {
@@ -521,7 +521,7 @@ pub fn performance_boot_time_pmem(control: &PerformanceTestControl) -> f64 {
                 .as_str(),
             ]);
 
-        measure_boot_time(c, control.test_time).unwrap()
+        measure_boot_time(c, control.test_timeout).unwrap()
     });
 
     match r {
@@ -605,7 +605,7 @@ fn parse_fio_output(output: &str, fio_ops: &FioOps, num_jobs: u32) -> Result<f64
 }
 
 pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
-    let test_time = control.test_time;
+    let test_time = control.test_timeout;
     let queue_num = control.queue_num.unwrap();
     let queue_size = control.queue_size.unwrap();
     let fio_ops = control.fio_ops.as_ref().unwrap();

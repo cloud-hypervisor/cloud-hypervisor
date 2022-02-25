@@ -84,7 +84,7 @@ impl Default for MetricsReport {
 }
 
 pub struct PerformanceTestControl {
-    test_time: u32,
+    test_timeout: u32,
     test_iterations: u32,
     queue_num: Option<u32>,
     queue_size: Option<u32>,
@@ -96,7 +96,7 @@ impl fmt::Display for PerformanceTestControl {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut output = format!(
             "test_time = {}s, test_iterations = {}",
-            self.test_time, self.test_iterations
+            self.test_timeout, self.test_iterations
         );
         if let Some(o) = self.queue_num {
             output = format!("{}, queue_num = {}", output, o);
@@ -118,7 +118,7 @@ impl fmt::Display for PerformanceTestControl {
 impl PerformanceTestControl {
     const fn default() -> Self {
         Self {
-            test_time: 10,
+            test_timeout: 10,
             test_iterations: 5,
             queue_num: None,
             queue_size: None,
@@ -161,7 +161,7 @@ impl PerformanceTest {
     // Calculate the timeout for each test
     // Note: To cover the setup/cleanup time, 20s is added for each iteration of the test
     pub fn calc_timeout(&self) -> u64 {
-        ((self.control.test_time + 20) * self.control.test_iterations) as u64
+        ((self.control.test_timeout + 20) * self.control.test_iterations) as u64
     }
 }
 
@@ -200,7 +200,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         name: "performance_boot_time",
         func_ptr: performance_boot_time,
         control: PerformanceTestControl {
-            test_time: 2,
+            test_timeout: 2,
             test_iterations: 10,
             ..PerformanceTestControl::default()
         },
@@ -209,7 +209,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         name: "performance_boot_time_pmem",
         func_ptr: performance_boot_time_pmem,
         control: PerformanceTestControl {
-            test_time: 2,
+            test_timeout: 2,
             test_iterations: 10,
             ..PerformanceTestControl::default()
         },
