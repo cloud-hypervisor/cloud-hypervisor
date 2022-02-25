@@ -1,3 +1,8 @@
+// Copyright © 2022 Intel Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+//
+
 // Custom harness to run performance tests
 extern crate test_infra;
 #[macro_use(crate_authors)]
