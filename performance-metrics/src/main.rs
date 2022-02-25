@@ -104,7 +104,7 @@ impl fmt::Display for PerformanceTestControl {
             self.test_timeout, self.test_iterations
         );
         if let Some(o) = self.num_queues {
-            output = format!("{}, queue_num = {}", output, o);
+            output = format!("{}, num_queues = {}", output, o);
         }
         if let Some(o) = self.queue_size {
             output = format!("{}, queue_size = {}", output, o);
