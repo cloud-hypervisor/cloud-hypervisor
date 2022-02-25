@@ -41,7 +41,7 @@ pipeline{
 			}
 		}
 		stage ('Build') {
-            parallel {
+			parallel {
 				stage ('Worker build') {
 					agent { node { label 'hirsute' } }
 					when {
