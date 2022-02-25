@@ -210,7 +210,7 @@ fn measure_virtio_net_throughput(
 
 pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
     let test_time = control.test_timeout;
-    let queue_pairs = control.queue_num.unwrap();
+    let queue_pairs = control.num_queues.unwrap();
     let queue_size = control.queue_size.unwrap();
     let rx = control.net_rx.unwrap();
 
@@ -606,7 +606,7 @@ fn parse_fio_output(output: &str, fio_ops: &FioOps, num_jobs: u32) -> Result<f64
 
 pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
     let test_time = control.test_timeout;
-    let queue_num = control.queue_num.unwrap();
+    let queue_num = control.num_queues.unwrap();
     let queue_size = control.queue_size.unwrap();
     let fio_ops = control.fio_ops.as_ref().unwrap();
 

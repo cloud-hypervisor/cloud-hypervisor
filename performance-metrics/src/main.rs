@@ -86,7 +86,7 @@ impl Default for MetricsReport {
 pub struct PerformanceTestControl {
     test_timeout: u32,
     test_iterations: u32,
-    queue_num: Option<u32>,
+    num_queues: Option<u32>,
     queue_size: Option<u32>,
     net_rx: Option<bool>,
     fio_ops: Option<FioOps>,
@@ -98,7 +98,7 @@ impl fmt::Display for PerformanceTestControl {
             "test_time = {}s, test_iterations = {}",
             self.test_timeout, self.test_iterations
         );
-        if let Some(o) = self.queue_num {
+        if let Some(o) = self.num_queues {
             output = format!("{}, queue_num = {}", output, o);
         }
         if let Some(o) = self.queue_size {
@@ -120,7 +120,7 @@ impl PerformanceTestControl {
         Self {
             test_timeout: 10,
             test_iterations: 5,
-            queue_num: None,
+            num_queues: None,
             queue_size: None,
             net_rx: None,
             fio_ops: None,
@@ -223,7 +223,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         name: "performance_virtio_net_throughput_bps_single_queue_rx",
         func_ptr: performance_net_throughput,
         control: PerformanceTestControl {
-            queue_num: Some(1), // used as 'queue_pairs'
+            num_queues: Some(1), // used as 'queue_pairs'
             queue_size: Some(256),
             net_rx: Some(true),
             ..PerformanceTestControl::default()
@@ -233,7 +233,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         name: "performance_virtio_net_throughput_bps_single_queue_tx",
         func_ptr: performance_net_throughput,
         control: PerformanceTestControl {
-            queue_num: Some(1), // used as 'queue_pairs'
+            num_queues: Some(1), // used as 'queue_pairs'
             queue_size: Some(256),
             net_rx: Some(false),
             ..PerformanceTestControl::default()
@@ -243,7 +243,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         name: "performance_virtio_net_throughput_bps_multi_queue_rx",
         func_ptr: performance_net_throughput,
         control: PerformanceTestControl {
-            queue_num: Some(2), // used as 'queue_pairs'
+            num_queues: Some(2), // used as 'queue_pairs'
             queue_size: Some(1024),
             net_rx: Some(true),
             ..PerformanceTestControl::default()
@@ -253,7 +253,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         name: "performance_virtio_net_throughput_bps_multi_queue_tx",
         func_ptr: performance_net_throughput,
         control: PerformanceTestControl {
-            queue_num: Some(2), // used as 'queue_pairs'
+            num_queues: Some(2), // used as 'queue_pairs'
             queue_size: Some(1024),
             net_rx: Some(false),
             ..PerformanceTestControl::default()
@@ -263,7 +263,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         name: "performance_block_io_bps_read",
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
-            queue_num: Some(1),
+            num_queues: Some(1),
             queue_size: Some(1024),
             fio_ops: Some(FioOps::Read),
             ..PerformanceTestControl::default()
@@ -273,7 +273,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         name: "performance_block_io_bps_write",
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
-            queue_num: Some(1),
+            num_queues: Some(1),
             queue_size: Some(1024),
             fio_ops: Some(FioOps::Write),
             ..PerformanceTestControl::default()
@@ -283,7 +283,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         name: "performance_block_io_bps_random_read",
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
-            queue_num: Some(1),
+            num_queues: Some(1),
             queue_size: Some(1024),
             fio_ops: Some(FioOps::RandomRead),
             ..PerformanceTestControl::default()
@@ -293,7 +293,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         name: "performance_block_io_bps_random_write",
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
-            queue_num: Some(1),
+            num_queues: Some(1),
             queue_size: Some(1024),
             fio_ops: Some(FioOps::RandomWrite),
             ..PerformanceTestControl::default()
@@ -303,7 +303,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         name: "performance_block_io_bps_multi_queue_read",
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
-            queue_num: Some(2),
+            num_queues: Some(2),
             queue_size: Some(1024),
             fio_ops: Some(FioOps::Read),
             ..PerformanceTestControl::default()
@@ -313,7 +313,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         name: "performance_block_io_bps_multi_queue_write",
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
-            queue_num: Some(2),
+            num_queues: Some(2),
             queue_size: Some(1024),
             fio_ops: Some(FioOps::Write),
             ..PerformanceTestControl::default()
@@ -323,7 +323,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         name: "performance_block_io_bps_multi_queue_random_read",
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
-            queue_num: Some(2),
+            num_queues: Some(2),
             queue_size: Some(1024),
             fio_ops: Some(FioOps::RandomRead),
             ..PerformanceTestControl::default()
@@ -333,7 +333,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         name: "performance_block_io_bps_multi_queue_random_write",
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
-            queue_num: Some(2),
+            num_queues: Some(2),
             queue_size: Some(1024),
             fio_ops: Some(FioOps::RandomWrite),
             ..PerformanceTestControl::default()
