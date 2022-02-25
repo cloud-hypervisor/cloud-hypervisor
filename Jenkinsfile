@@ -330,7 +330,7 @@ pipeline{
 								timeout(time: 1, unit: 'HOURS')
 							}
 							steps {
-								sh 'scripts/dev_cli.sh tests --metrics -- -- --report-file /root/workloads/metrics.json --test-filter boot_time'
+								sh 'scripts/dev_cli.sh tests --metrics -- -- --report-file /root/workloads/metrics.json'
 							}
 						}
 						stage ('Upload metrics report') {
