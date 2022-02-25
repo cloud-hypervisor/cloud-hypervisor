@@ -229,7 +229,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         },
     },
     PerformanceTest {
-        name: "virtio_net_throughput_bps_single_queue_rx_bps",
+        name: "virtio_net_throughput_single_queue_rx_bps",
         func_ptr: performance_net_throughput,
         control: PerformanceTestControl {
             num_queues: Some(2),
