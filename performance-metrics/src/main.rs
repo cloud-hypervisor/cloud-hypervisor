@@ -41,7 +41,7 @@ pub struct PerformanceTestResult {
 pub struct MetricsReport {
     pub git_human_readable: String,
     pub git_revision: String,
-    pub git_committer_date: String,
+    pub git_commit_date: String,
     pub date: String,
     pub results: Vec<PerformanceTestResult>,
 }
@@ -66,14 +66,14 @@ impl Default for MetricsReport {
             }
         }
 
-        let mut git_committer_date = "".to_string();
+        let mut git_commit_date = "".to_string();
         if let Ok(git_out) = Command::new("git")
             .args(&["show", "-s", "--format=%cd"])
             .output()
         {
             if git_out.status.success() {
                 if let Ok(git_out_str) = String::from_utf8(git_out.stdout) {
-                    git_committer_date = git_out_str.trim().to_string();
+                    git_commit_date = git_out_str.trim().to_string();
                 }
             }
         }
@@ -81,7 +81,7 @@ impl Default for MetricsReport {
         MetricsReport {
             git_human_readable,
             git_revision,
-            git_committer_date,
+            git_commit_date,
             date: date(),
             results: Vec::new(),
         }
