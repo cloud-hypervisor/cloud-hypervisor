@@ -100,7 +100,7 @@ pub struct PerformanceTestControl {
 impl fmt::Display for PerformanceTestControl {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut output = format!(
-            "test_time = {}s, test_iterations = {}",
+            "test_timeout = {}s, test_iterations = {}",
             self.test_timeout, self.test_iterations
         );
         if let Some(o) = self.num_queues {
