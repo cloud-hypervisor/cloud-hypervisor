@@ -228,7 +228,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         name: "performance_virtio_net_throughput_bps_single_queue_rx_bps",
         func_ptr: performance_net_throughput,
         control: PerformanceTestControl {
-            num_queues: Some(1), // used as 'queue_pairs'
+            num_queues: Some(2),
             queue_size: Some(256),
             net_rx: Some(true),
             ..PerformanceTestControl::default()
@@ -238,7 +238,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         name: "performance_virtio_net_throughput_single_queue_tx_bps",
         func_ptr: performance_net_throughput,
         control: PerformanceTestControl {
-            num_queues: Some(1), // used as 'queue_pairs'
+            num_queues: Some(2),
             queue_size: Some(256),
             net_rx: Some(false),
             ..PerformanceTestControl::default()
@@ -248,7 +248,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         name: "performance_virtio_net_throughput_multi_queue_rx_bps",
         func_ptr: performance_net_throughput,
         control: PerformanceTestControl {
-            num_queues: Some(2), // used as 'queue_pairs'
+            num_queues: Some(4),
             queue_size: Some(1024),
             net_rx: Some(true),
             ..PerformanceTestControl::default()
@@ -258,7 +258,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         name: "performance_virtio_net_throughput_multi_queue_tx_bps",
         func_ptr: performance_net_throughput,
         control: PerformanceTestControl {
-            num_queues: Some(2), // used as 'queue_pairs'
+            num_queues: Some(4),
             queue_size: Some(1024),
             net_rx: Some(false),
             ..PerformanceTestControl::default()
