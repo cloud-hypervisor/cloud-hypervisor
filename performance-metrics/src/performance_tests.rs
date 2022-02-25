@@ -139,7 +139,7 @@ fn parse_iperf3_output(output: &[u8], sender: bool) -> Result<f64, Error> {
 }
 
 fn measure_virtio_net_throughput(
-    test_time: u32,
+    test_timeout: u32,
     queue_pairs: u32,
     guest: &Guest,
     receive: bool,
@@ -166,7 +166,7 @@ fn measure_virtio_net_throughput(
             "-p",
             &format!("{}", default_port + n),
             "-t",
-            &format!("{}", test_time),
+            &format!("{}", test_timeout),
         ]);
         // For measuring the guest transmit throughput (as a sender),
         // use reverse mode of the iperf3 client on the host
@@ -187,7 +187,7 @@ fn measure_virtio_net_throughput(
     let mut failed = false;
     for c in clients {
         let mut c = c;
-        if let Err(e) = child_wait_timeout(&mut c, test_time as u64 + 5) {
+        if let Err(e) = child_wait_timeout(&mut c, test_timeout as u64 + 5) {
             err = Some(Error::WaitTimeout(e));
             failed = true;
         }
@@ -214,7 +214,7 @@ fn measure_virtio_net_throughput(
 }
 
 pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
-    let test_time = control.test_timeout;
+    let test_timeout = control.test_timeout;
     let rx = control.net_rx.unwrap();
 
     let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -241,7 +241,7 @@ pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
 
     let r = std::panic::catch_unwind(|| {
         guest.wait_vm_boot(None).unwrap();
-        measure_virtio_net_throughput(test_time, num_queues / 2, &guest, rx).unwrap()
+        measure_virtio_net_throughput(test_timeout, num_queues / 2, &guest, rx).unwrap()
     });
 
     let _ = child.kill();
@@ -289,7 +289,7 @@ fn parse_ethr_latency_output(output: &[u8]) -> Result<Vec<f64>, Error> {
     })
 }
 
-fn measure_virtio_net_latency(guest: &Guest, test_time: u32) -> Result<Vec<f64>, Error> {
+fn measure_virtio_net_latency(guest: &Guest, test_timeout: u32) -> Result<Vec<f64>, Error> {
     // copy the 'ethr' tool to the guest image
     let ethr_path = "/usr/local/bin/ethr";
     let ethr_remote_path = "/tmp/ethr";
@@ -327,14 +327,15 @@ fn measure_virtio_net_latency(guest: &Guest, test_time: u32) -> Result<Vec<f64>,
             "-o",
             &log_file, // file output is JSON format
             "-d",
-            &format!("{}s", test_time),
+            &format!("{}s", test_timeout),
         ])
         .stderr(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
         .map_err(Error::Spawn)?;
 
-    if let Err(e) = child_wait_timeout(&mut c, test_time as u64 + 5).map_err(Error::WaitTimeout) {
+    if let Err(e) = child_wait_timeout(&mut c, test_timeout as u64 + 5).map_err(Error::WaitTimeout)
+    {
         let _ = c.kill();
         return Err(e);
     }
@@ -467,10 +468,10 @@ fn parse_boot_time_output(output: &[u8]) -> Result<f64, Error> {
     })
 }
 
-fn measure_boot_time(cmd: &mut GuestCommand, test_time: u32) -> Result<f64, Error> {
+fn measure_boot_time(cmd: &mut GuestCommand, test_timeout: u32) -> Result<f64, Error> {
     let mut child = cmd.capture_output().set_print_cmd(false).spawn().unwrap();
 
-    thread::sleep(Duration::new(test_time as u64, 0));
+    thread::sleep(Duration::new(test_timeout as u64, 0));
     let _ = child.kill();
     let output = child.wait_with_output().unwrap();
 
@@ -615,7 +616,7 @@ fn parse_fio_output(output: &str, fio_ops: &FioOps, num_jobs: u32) -> Result<f64
 }
 
 pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
-    let test_time = control.test_timeout;
+    let test_timeout = control.test_timeout;
     let queue_num = control.num_queues.unwrap();
     let queue_size = control.queue_size.unwrap();
     let fio_ops = control.fio_ops.as_ref().unwrap();
@@ -669,7 +670,7 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
             "sudo fio --filename=/dev/vdc --name=test --output-format=json \
             --direct=1 --bs=4k --ioengine=io_uring --iodepth=64 \
             --rw={} --runtime={} --numjobs={}",
-            fio_ops, test_time, queue_num
+            fio_ops, test_timeout, queue_num
         );
         let output = guest
             .ssh_command(&fio_command)
