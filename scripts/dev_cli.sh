@@ -275,8 +275,10 @@ cmd_build() {
     [ "$(uname -m)" = "aarch64" ] && cargo_args+=(--features "$hypervisor")
 
     rustflags=""
+    target_cc=""
     if [ "$(uname -m)" = "aarch64" ] && [ "$libc" = "musl" ]; then
         rustflags="-C link-arg=-lgcc -C link_arg=-specs -C link_arg=/usr/lib/aarch64-linux-musl/musl-gcc.specs"
+        target_cc="musl-gcc"
     fi
 
     $DOCKER_RUNTIME run \
@@ -286,6 +288,7 @@ cmd_build() {
         --volume $exported_device \
         --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
         --env RUSTFLAGS="$rustflags" \
+        --env TARGET_CC="$target_cc" \
         "$CTR_IMAGE" \
         cargo build --all $features_build \
         --target-dir "$CTR_CLH_CARGO_TARGET" \
