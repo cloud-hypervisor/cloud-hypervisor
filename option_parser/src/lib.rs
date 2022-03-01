@@ -313,6 +313,7 @@ impl<S: FromStr, T: TupleValue> FromStr for Tuple<S, T> {
     }
 }
 
+#[derive(Default)]
 pub struct StringList(pub Vec<String>);
 
 pub enum StringListParseError {

@@ -7,6 +7,7 @@ edition = "2018"
 [features]
 default = []
 acpi = ["acpi_tables","devices/acpi", "arch/acpi"]
+amx = []
 cmos = ["devices/cmos"]
 fwdebug = ["devices/fwdebug"]
 gdb = ["kvm"]

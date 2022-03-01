@@ -128,6 +128,10 @@ pub enum Error {
 
     /// CPU hotplug/unplug not supported
     ResizingNotSupported,
+
+    #[cfg(all(feature = "amx", target_arch = "x86_64"))]
+    /// "Failed to setup AMX.
+    AmxEnable(anyhow::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -598,6 +602,37 @@ impl CpuManager {
             )
             .map_err(Error::CommonCpuId)?
         };
+        #[cfg(all(feature = "amx", target_arch = "x86_64"))]
+        if config.features.amx {
+            const ARCH_GET_XCOMP_GUEST_PERM: usize = 0x1024;
+            const ARCH_REQ_XCOMP_GUEST_PERM: usize = 0x1025;
+            const XFEATURE_XTILEDATA: usize = 18;
+            const XFEATURE_XTILEDATA_MASK: usize = 1 << XFEATURE_XTILEDATA;
+
+            // This is safe as the syscall is only modifing kernel internal
+            // data structures that the kernel is itself expected to safeguard.
+            let amx_tile = unsafe {
+                libc::syscall(
+                    libc::SYS_arch_prctl,
+                    ARCH_REQ_XCOMP_GUEST_PERM,
+                    XFEATURE_XTILEDATA,
+                )
+            };
+
+            if amx_tile != 0 {
+                return Err(Error::AmxEnable(anyhow!("Guest AMX usage not supported")));
+            } else {
+                // This is safe as the mask being modified (not marked mutable as it is
+                // modified in unsafe only which is permitted) isn't in use elsewhere.
+                let mask: usize = 0;
+                let result = unsafe {
+                    libc::syscall(libc::SYS_arch_prctl, ARCH_GET_XCOMP_GUEST_PERM, &mask)
+                };
+                if result != 0 || (mask & XFEATURE_XTILEDATA_MASK) != XFEATURE_XTILEDATA_MASK {
+                    return Err(Error::AmxEnable(anyhow!("Guest AMX usage not supported")));
+                }
+            }
+        }
 
         let device_manager = device_manager.lock().unwrap();
 

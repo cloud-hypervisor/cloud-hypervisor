@@ -1885,6 +1885,7 @@ mod unit_tests {
                 kvm_hyperv: false,
                 max_phys_bits: 46,
                 affinity: None,
+                features: config::CpuFeatures::default(),
             },
             memory: MemoryConfig {
                 size: 536_870_912,
