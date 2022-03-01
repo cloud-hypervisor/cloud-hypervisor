@@ -220,7 +220,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
         },
     },
     PerformanceTest {
-        name: "virtio_net_latency_ns",
+        name: "virtio_net_latency_us",
         func_ptr: performance_net_latency,
         control: PerformanceTestControl {
             num_queues: Some(2),
