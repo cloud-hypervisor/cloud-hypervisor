@@ -562,6 +562,12 @@ components:
           items:
             type: integer
 
+    CpuFeatures:
+      type: object
+      properties:
+        amx:
+          type: boolean
+
     CpuTopology:
       type: object
       properties:
@@ -596,6 +602,8 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CpuAffinity'
+        features:
+          $ref: '#/components/schemas/CpuFeatures'
 
     PlatformConfig:
       type: object

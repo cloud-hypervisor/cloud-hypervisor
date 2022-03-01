@@ -54,6 +54,8 @@ pub enum Error {
     ParseRestoreSourceUrlMissing,
     /// Error parsing CPU options
     ParseCpus(OptionParserError),
+    /// Invalid CPU features
+    InvalidCpuFeatures(String),
     /// Error parsing memory options
     ParseMemory(OptionParserError),
     /// Error parsing memory zone options
@@ -267,7 +269,7 @@ impl fmt::Display for Error {
                 write!(f, "Error parsing --console: invalid console mode given")
             }
             ParseCpus(o) => write!(f, "Error parsing --cpus: {}", o),
-
+            InvalidCpuFeatures(o) => write!(f, "Invalid feature in --cpus features list: {}", o),
             ParseDevice(o) => write!(f, "Error parsing --device: {}", o),
             ParseDevicePathMissing => write!(f, "Error parsing --device: path missing"),
             ParseFileSystem(o) => write!(f, "Error parsing --fs: {}", o),
@@ -452,6 +454,12 @@ pub struct CpuAffinity {
     pub host_cpus: Vec<u8>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct CpuFeatures {
+    #[cfg(all(feature = "amx", target_arch = "x86_64"))]
+    pub amx: bool,
+}
+
 pub enum CpuTopologyParseError {
     InvalidValue(String),
 }
@@ -509,6 +517,8 @@ pub struct CpusConfig {
     pub max_phys_bits: u8,
     #[serde(default)]
     pub affinity: Option<Vec<CpuAffinity>>,
+    #[serde(default)]
+    pub features: CpuFeatures,
 }
 
 impl CpusConfig {
@@ -520,7 +530,8 @@ impl CpusConfig {
             .add("topology")
             .add("kvm_hyperv")
             .add("max_phys_bits")
-            .add("affinity");
+            .add("affinity")
+            .add("features");
         parser.parse(cpus).map_err(Error::ParseCpus)?;
 
         let boot_vcpus: u8 = parser
@@ -552,6 +563,27 @@ impl CpusConfig {
                     })
                     .collect()
             });
+        let features_list = parser
+            .convert::<StringList>("features")
+            .map_err(Error::ParseCpus)?
+            .unwrap_or_default();
+        // Some ugliness here as the features being checked might be disabled
+        // at compile time causing the below allow and the need to specify the
+        // ref type in the match.
+        // The issue will go away once kvm_hyperv is moved under the features
+        // list as it will always be checked for.
+        #[allow(unused_mut)]
+        let mut features = CpuFeatures::default();
+        for s in features_list.0 {
+            match <std::string::String as AsRef<str>>::as_ref(&s) {
+                #[cfg(all(feature = "amx", target_arch = "x86_64"))]
+                "amx" => {
+                    features.amx = true;
+                    Ok(())
+                }
+                _ => Err(Error::InvalidCpuFeatures(s)),
+            }?;
+        }
 
         Ok(CpusConfig {
             boot_vcpus,
@@ -560,6 +592,7 @@ impl CpusConfig {
             kvm_hyperv,
             max_phys_bits,
             affinity,
+            features,
         })
     }
 }
@@ -573,6 +606,7 @@ impl Default for CpusConfig {
             kvm_hyperv: false,
             max_phys_bits: DEFAULT_MAX_PHYS_BITS,
             affinity: None,
+            features: CpuFeatures::default(),
         }
     }
 }

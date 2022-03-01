@@ -17,11 +17,12 @@ struct CpusConfig {
     kvm_hyperv: bool,
     max_phys_bits: u8,
     affinity: Option<Vec<CpuAffinity>>,
+    features: CpuFeatures,
 }
 ```
 
 ```
---cpus boot=<boot_vcpus>,max=<max_vcpus>,topology=<threads_per_core>:<cores_per_die>:<dies_per_package>:<packages>,kvm_hyperv=on|off,max_phys_bits=<maximum_number_of_physical_bits>,affinity=<list_of_vcpus_with_their_associated_cpuset>
+--cpus boot=<boot_vcpus>,max=<max_vcpus>,topology=<threads_per_core>:<cores_per_die>:<dies_per_package>:<packages>,kvm_hyperv=on|off,max_phys_bits=<maximum_number_of_physical_bits>,affinity=<list_of_vcpus_with_their_associated_cpuset>,features=<list_of_features_to_enable>
 ```
 
 ### `boot`
@@ -187,3 +188,24 @@ _Example_
 In this example, assuming the host has 4 CPUs, vCPU 0 will run exclusively on
 host CPUs 2 and 3, while vCPU 1 will run exclusively on host CPUs 0 and 1.
 Because nothing is defined for vCPU 2, it can run on any of the 4 host CPUs.
+
+### `features`
+
+Set of CPU features to enable.
+
+This option allows the user to enable a set of CPU features that are disabled
+by default otherwise.
+
+The currently available feature set is: `amx`.
+
+The `amx` feature will enable the x86 extension adding hardware units for
+matrix operations (int and float dot products). The goal of the extension is to
+provide performance enhancements for these common operations.
+
+_Example_
+
+```
+--cpus features=amx
+```
+
+In this example the amx CPU feature will be enabled for the VMM.
