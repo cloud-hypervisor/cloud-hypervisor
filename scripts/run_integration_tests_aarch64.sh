@@ -285,11 +285,9 @@ if [ $RES -ne 0 ]; then
 fi
 
 BUILD_TARGET="aarch64-unknown-linux-${CH_LIBC}"
-CFLAGS=""
-TARGET_CC=""
 if [[ "${BUILD_TARGET}" == "aarch64-unknown-linux-musl" ]]; then
-TARGET_CC="musl-gcc"
-CFLAGS="-I /usr/include/aarch64-linux-musl/ -idirafter /usr/include/"
+export TARGET_CC="musl-gcc"
+export RUSTFLAGS="-C link-arg=-lgcc -C link_arg=-specs -C link_arg=/usr/lib/aarch64-linux-musl/musl-gcc.specs"
 fi
 
 export RUST_BACKTRACE=1
@@ -311,13 +309,13 @@ echo 6144 | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
 # Run all direct kernel boot (Device Tree) test cases in mod `parallel`
-time cargo test $features "parallel::$test_filter" -- ${test_binary_args[*]}
+time cargo test $features "parallel::$test_filter" --target $BUILD_TARGET -- ${test_binary_args[*]}
 RES=$?
 
 # Run some tests in sequence since the result could be affected by other tests
 # running in parallel.
 if [ $RES -eq 0 ]; then
-    time cargo test $features "sequential::$test_filter" -- --test-threads=1 ${test_binary_args[*]}
+    time cargo test $features "sequential::$test_filter" --target $BUILD_TARGET -- --test-threads=1 ${test_binary_args[*]}
     RES=$?
 else
     exit $RES
@@ -325,7 +323,7 @@ fi
 
 # Run all ACPI test cases
 if [ $RES -eq 0 ]; then
-    time cargo test $features "aarch64_acpi::$test_filter" -- ${test_binary_args[*]}
+    time cargo test $features "aarch64_acpi::$test_filter" --target $BUILD_TARGET -- ${test_binary_args[*]}
     RES=$?
 else
     exit $RES
@@ -333,7 +331,7 @@ fi
 
 # Run all test cases related to live migration
 if [ $RES -eq 0 ]; then
-    time cargo test $features "live_migration::$test_filter" -- --test-threads=1 ${test_binary_args[*]}
+    time cargo test $features "live_migration::$test_filter" --target $BUILD_TARGET -- --test-threads=1 ${test_binary_args[*]}
     RES=$?
 else
     exit $RES
