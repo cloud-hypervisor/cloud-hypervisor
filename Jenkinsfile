@@ -94,7 +94,7 @@ pipeline{
 						}
 						stage ('Run unit tests') {
 							steps {
-								sh "scripts/dev_cli.sh tests --unit"
+								sh "scripts/dev_cli.sh tests --unit --libc musl"
 							}
 						}
 						stage ('Run integration tests') {
@@ -103,7 +103,7 @@ pipeline{
 							}
 							steps {
 								sh "sudo modprobe openvswitch"
-								sh "scripts/dev_cli.sh tests --integration"
+								sh "scripts/dev_cli.sh tests --integration --libc musl"
 							}
 						}
 					}
