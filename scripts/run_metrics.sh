@@ -37,6 +37,9 @@ if [ ! -f "$FOCAL_OS_RAW_IMAGE" ]; then
     popd
 fi
 
+dd if=/dev/zero of=/var/tmp/ch-blk-io-test.raw bs=1M count=4096 || exit 1
+qemu-img convert -p -f raw -O qcow2 /var/tmp/ch-blk-io-test.raw /var/tmp/ch-blk-io-test.qcow2 || exit 1
+
 pushd $WORKLOADS_DIR
 grep focal sha1sums-x86_64 | sha1sum --check
 if [ $? -ne 0 ]; then

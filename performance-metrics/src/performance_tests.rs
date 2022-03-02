@@ -45,9 +45,10 @@ impl From<InfraError> for Error {
     }
 }
 
-const BLK_IO_TEST_IMG: &str = "/var/tmp/ch-blk-io-test.img";
+const BLK_IO_TEST_IMG: &str = "/var/tmp/ch-blk-io-test.qcow2";
 
 pub fn init_tests() {
+    /*
     // The test image can not be created on tmpfs (e.g. /tmp) filesystem,
     // as tmpfs does not support O_DIRECT
     assert!(exec_host_command_output(&format!(
@@ -56,6 +57,7 @@ pub fn init_tests() {
     ))
     .status
     .success());
+    */
 }
 
 pub fn cleanup_tests() {
