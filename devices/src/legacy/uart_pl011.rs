@@ -34,6 +34,7 @@ const UARTRIS: u64 = 15;
 const UARTMIS: u64 = 16;
 const UARTICR: u64 = 17;
 const UARTDMACR: u64 = 18;
+const UARTDEBUG: u64 = 0x3c0;
 
 const PL011_INT_TX: u32 = 0x20;
 const PL011_INT_RX: u32 = 0x10;
@@ -77,6 +78,7 @@ pub struct Pl011 {
     rsr: u32,
     cr: u32,
     dmacr: u32,
+    debug: u32,
     int_enabled: u32,
     int_level: u32,
     read_fifo: VecDeque<u8>,
@@ -88,6 +90,7 @@ pub struct Pl011 {
     read_trigger: u32,
     irq: Arc<dyn InterruptSourceGroup>,
     out: Option<Box<dyn io::Write + Send>>,
+    timestamp: std::time::Instant,
 }
 
 #[derive(Versionize)]
@@ -97,6 +100,7 @@ pub struct Pl011State {
     rsr: u32,
     cr: u32,
     dmacr: u32,
+    debug: u32,
     int_enabled: u32,
     int_level: u32,
     read_fifo: Vec<u8>,
@@ -124,6 +128,7 @@ impl Pl011 {
             rsr: 0u32,
             cr: 0x300u32,
             dmacr: 0u32,
+            debug: 0u32,
             int_enabled: 0u32,
             int_level: 0u32,
             read_fifo: VecDeque::new(),
@@ -135,6 +140,7 @@ impl Pl011 {
             read_trigger: 1u32,
             irq,
             out,
+            timestamp: std::time::Instant::now(),
         }
     }
 
@@ -149,6 +155,7 @@ impl Pl011 {
             rsr: self.rsr,
             cr: self.cr,
             dmacr: self.dmacr,
+            debug: self.debug,
             int_enabled: self.int_enabled,
             int_level: self.int_level,
             read_fifo: self.read_fifo.clone().into(),
@@ -167,6 +174,7 @@ impl Pl011 {
         self.rsr = state.rsr;
         self.cr = state.cr;
         self.dmacr = state.dmacr;
+        self.debug = state.debug;
         self.int_enabled = state.int_enabled;
         self.int_level = state.int_level;
         self.read_fifo = state.read_fifo.clone().into();
@@ -280,11 +288,48 @@ impl Pl011 {
                     return Err(Error::DmaNotImplemented);
                 }
             }
+            UARTDEBUG => {
+                self.debug = val;
+                self.handle_debug();
+            }
             off => {
+                debug!("PL011: Bad write offset, offset: {}", off);
                 return Err(Error::BadWriteOffset(off));
             }
         }
         Ok(())
+    }
+
+    fn handle_debug(&self) {
+        let elapsed = self.timestamp.elapsed();
+
+        match self.debug {
+            0x00..=0x1f => info!(
+                "[Debug I/O port: Firmware code: 0x{:x}] {}.{:>06} seconds",
+                self.debug,
+                elapsed.as_secs(),
+                elapsed.as_micros()
+            ),
+            0x20..=0x3f => info!(
+                "[Debug I/O port: Bootloader code: 0x{:x}] {}.{:>06} seconds",
+                self.debug,
+                elapsed.as_secs(),
+                elapsed.as_micros()
+            ),
+            0x40..=0x5f => info!(
+                "[Debug I/O port: Kernel code: 0x{:x}] {}.{:>06} seconds",
+                self.debug,
+                elapsed.as_secs(),
+                elapsed.as_micros()
+            ),
+            0x60..=0x7f => info!(
+                "[Debug I/O port: Userspace code: 0x{:x}] {}.{:>06} seconds",
+                self.debug,
+                elapsed.as_secs(),
+                elapsed.as_micros()
+            ),
+            _ => {}
+        }
     }
 
     fn trigger_interrupt(&mut self) -> result::Result<(), io::Error> {
@@ -327,6 +372,7 @@ impl BusDevice for Pl011 {
                 UARTRIS => self.int_level,
                 UARTMIS => (self.int_level & self.int_enabled),
                 UARTDMACR => self.dmacr,
+                UARTDEBUG => self.debug,
                 _ => {
                     read_ok = false;
                     0
