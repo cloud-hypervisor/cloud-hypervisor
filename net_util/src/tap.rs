@@ -5,7 +5,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
-use super::{create_sockaddr, create_socket, vnet_hdr_len, Error as NetUtilError, MacAddr};
+use super::{
+    create_inet_socket, create_sockaddr, create_unix_socket, vnet_hdr_len, Error as NetUtilError,
+    MacAddr,
+};
 use crate::mac::MAC_ADDR_LEN;
 use std::fs::File;
 use std::io::{Error as IoError, Read, Result as IoResult, Write};
@@ -196,7 +199,7 @@ impl Tap {
 
     /// Set the host-side IP address for the tap interface.
     pub fn set_ip_addr(&self, ip_addr: net::Ipv4Addr) -> Result<()> {
-        let sock = create_socket().map_err(Error::NetUtil)?;
+        let sock = create_inet_socket().map_err(Error::NetUtil)?;
         let addr = create_sockaddr(ip_addr);
 
         let mut ifreq = self.get_ifreq();
@@ -224,7 +227,7 @@ impl Tap {
             return Ok(());
         }
 
-        let sock = create_socket().map_err(Error::NetUtil)?;
+        let sock = create_unix_socket().map_err(Error::NetUtil)?;
 
         let mut ifreq = self.get_ifreq();
 
@@ -254,7 +257,7 @@ impl Tap {
 
     /// Get mac addr for tap interface.
     pub fn get_mac_addr(&self) -> Result<MacAddr> {
-        let sock = create_socket().map_err(Error::NetUtil)?;
+        let sock = create_unix_socket().map_err(Error::NetUtil)?;
 
         let ifreq = self.get_ifreq();
 
@@ -275,7 +278,7 @@ impl Tap {
 
     /// Set the netmask for the subnet that the tap interface will exist on.
     pub fn set_netmask(&self, netmask: net::Ipv4Addr) -> Result<()> {
-        let sock = create_socket().map_err(Error::NetUtil)?;
+        let sock = create_inet_socket().map_err(Error::NetUtil)?;
         let addr = create_sockaddr(netmask);
 
         let mut ifreq = self.get_ifreq();
@@ -306,7 +309,7 @@ impl Tap {
 
     /// Enable the tap interface.
     pub fn enable(&self) -> Result<()> {
-        let sock = create_socket().map_err(Error::NetUtil)?;
+        let sock = create_unix_socket().map_err(Error::NetUtil)?;
 
         let mut ifreq = self.get_ifreq();
 
