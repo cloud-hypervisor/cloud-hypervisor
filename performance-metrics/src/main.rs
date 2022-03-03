@@ -140,6 +140,7 @@ struct PerformanceTest {
     pub name: &'static str,
     pub func_ptr: fn(&PerformanceTestControl) -> f64,
     pub control: PerformanceTestControl,
+    unit_adjuster: fn(f64) -> f64,
 }
 
 impl PerformanceTest {
@@ -149,10 +150,10 @@ impl PerformanceTest {
             metrics.push((self.func_ptr)(&self.control));
         }
 
-        let mean = mean(&metrics).unwrap();
-        let std_dev = std_deviation(&metrics).unwrap();
-        let max = metrics.clone().into_iter().reduce(f64::max).unwrap();
-        let min = metrics.clone().into_iter().reduce(f64::min).unwrap();
+        let mean = (self.unit_adjuster)(mean(&metrics).unwrap());
+        let std_dev = (self.unit_adjuster)(std_deviation(&metrics).unwrap());
+        let max = (self.unit_adjuster)(metrics.clone().into_iter().reduce(f64::max).unwrap());
+        let min = (self.unit_adjuster)(metrics.clone().into_iter().reduce(f64::min).unwrap());
 
         PerformanceTestResult {
             name: self.name.to_string(),
@@ -200,24 +201,45 @@ fn std_deviation(data: &[f64]) -> Option<f64> {
     }
 }
 
+mod adjuster {
+    pub fn identity(v: f64) -> f64 {
+        v
+    }
+
+    pub fn s_to_ms(v: f64) -> f64 {
+        v * 1000.0
+    }
+
+    pub fn bps_to_gbps(v: f64) -> f64 {
+        v / (1_000_000_000_f64)
+    }
+
+    #[allow(non_snake_case)]
+    pub fn Bps_to_MiBps(v: f64) -> f64 {
+        v / (1 << 20) as f64
+    }
+}
+
 const TEST_LIST: [PerformanceTest; 15] = [
     PerformanceTest {
-        name: "boot_time_s",
+        name: "boot_time_ms",
         func_ptr: performance_boot_time,
         control: PerformanceTestControl {
             test_timeout: 2,
             test_iterations: 10,
             ..PerformanceTestControl::default()
         },
+        unit_adjuster: adjuster::s_to_ms,
     },
     PerformanceTest {
-        name: "boot_time_pmem_s",
+        name: "boot_time_pmem_ms",
         func_ptr: performance_boot_time_pmem,
         control: PerformanceTestControl {
             test_timeout: 2,
             test_iterations: 10,
             ..PerformanceTestControl::default()
         },
+        unit_adjuster: adjuster::s_to_ms,
     },
     PerformanceTest {
         name: "virtio_net_latency_us",
@@ -227,9 +249,10 @@ const TEST_LIST: [PerformanceTest; 15] = [
             queue_size: Some(256),
             ..PerformanceTestControl::default()
         },
+        unit_adjuster: adjuster::identity,
     },
     PerformanceTest {
-        name: "virtio_net_throughput_single_queue_rx_bps",
+        name: "virtio_net_throughput_single_queue_rx_gbps",
         func_ptr: performance_net_throughput,
         control: PerformanceTestControl {
             num_queues: Some(2),
@@ -237,9 +260,10 @@ const TEST_LIST: [PerformanceTest; 15] = [
             net_rx: Some(true),
             ..PerformanceTestControl::default()
         },
+        unit_adjuster: adjuster::bps_to_gbps,
     },
     PerformanceTest {
-        name: "virtio_net_throughput_single_queue_tx_bps",
+        name: "virtio_net_throughput_single_queue_tx_gbps",
         func_ptr: performance_net_throughput,
         control: PerformanceTestControl {
             num_queues: Some(2),
@@ -247,9 +271,10 @@ const TEST_LIST: [PerformanceTest; 15] = [
             net_rx: Some(false),
             ..PerformanceTestControl::default()
         },
+        unit_adjuster: adjuster::bps_to_gbps,
     },
     PerformanceTest {
-        name: "virtio_net_throughput_multi_queue_rx_bps",
+        name: "virtio_net_throughput_multi_queue_rx_gbps",
         func_ptr: performance_net_throughput,
         control: PerformanceTestControl {
             num_queues: Some(4),
@@ -257,9 +282,10 @@ const TEST_LIST: [PerformanceTest; 15] = [
             net_rx: Some(true),
             ..PerformanceTestControl::default()
         },
+        unit_adjuster: adjuster::bps_to_gbps,
     },
     PerformanceTest {
-        name: "virtio_net_throughput_multi_queue_tx_bps",
+        name: "virtio_net_throughput_multi_queue_tx_gbps",
         func_ptr: performance_net_throughput,
         control: PerformanceTestControl {
             num_queues: Some(4),
@@ -267,9 +293,10 @@ const TEST_LIST: [PerformanceTest; 15] = [
             net_rx: Some(false),
             ..PerformanceTestControl::default()
         },
+        unit_adjuster: adjuster::bps_to_gbps,
     },
     PerformanceTest {
-        name: "block_read_Bps",
+        name: "block_read_MiBps",
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
             num_queues: Some(1),
@@ -277,9 +304,10 @@ const TEST_LIST: [PerformanceTest; 15] = [
             fio_ops: Some(FioOps::Read),
             ..PerformanceTestControl::default()
         },
+        unit_adjuster: adjuster::Bps_to_MiBps,
     },
     PerformanceTest {
-        name: "block_write_Bps",
+        name: "block_write_MiBps",
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
             num_queues: Some(1),
@@ -287,9 +315,10 @@ const TEST_LIST: [PerformanceTest; 15] = [
             fio_ops: Some(FioOps::Write),
             ..PerformanceTestControl::default()
         },
+        unit_adjuster: adjuster::Bps_to_MiBps,
     },
     PerformanceTest {
-        name: "block_random_read_Bps",
+        name: "block_random_read_MiBps",
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
             num_queues: Some(1),
@@ -297,9 +326,10 @@ const TEST_LIST: [PerformanceTest; 15] = [
             fio_ops: Some(FioOps::RandomRead),
             ..PerformanceTestControl::default()
         },
+        unit_adjuster: adjuster::Bps_to_MiBps,
     },
     PerformanceTest {
-        name: "block_random_write_Bps",
+        name: "block_random_write_MiBps",
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
             num_queues: Some(1),
@@ -307,9 +337,10 @@ const TEST_LIST: [PerformanceTest; 15] = [
             fio_ops: Some(FioOps::RandomWrite),
             ..PerformanceTestControl::default()
         },
+        unit_adjuster: adjuster::Bps_to_MiBps,
     },
     PerformanceTest {
-        name: "block_multi_queue_read_Bps",
+        name: "block_multi_queue_read_MiBps",
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
             num_queues: Some(2),
@@ -317,9 +348,10 @@ const TEST_LIST: [PerformanceTest; 15] = [
             fio_ops: Some(FioOps::Read),
             ..PerformanceTestControl::default()
         },
+        unit_adjuster: adjuster::Bps_to_MiBps,
     },
     PerformanceTest {
-        name: "block_multi_queue_write_Bps",
+        name: "block_multi_queue_write_MiBps",
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
             num_queues: Some(2),
@@ -327,9 +359,10 @@ const TEST_LIST: [PerformanceTest; 15] = [
             fio_ops: Some(FioOps::Write),
             ..PerformanceTestControl::default()
         },
+        unit_adjuster: adjuster::Bps_to_MiBps,
     },
     PerformanceTest {
-        name: "block_multi_queue_random_read_Bps",
+        name: "block_multi_queue_random_read_MiBps",
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
             num_queues: Some(2),
@@ -337,9 +370,10 @@ const TEST_LIST: [PerformanceTest; 15] = [
             fio_ops: Some(FioOps::RandomRead),
             ..PerformanceTestControl::default()
         },
+        unit_adjuster: adjuster::Bps_to_MiBps,
     },
     PerformanceTest {
-        name: "block_multi_queue_random_write_Bps",
+        name: "block_multi_queue_random_write_MiBps",
         func_ptr: performance_block_io,
         control: PerformanceTestControl {
             num_queues: Some(2),
@@ -347,6 +381,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
             fio_ops: Some(FioOps::RandomWrite),
             ..PerformanceTestControl::default()
         },
+        unit_adjuster: adjuster::Bps_to_MiBps,
     },
 ];
 
