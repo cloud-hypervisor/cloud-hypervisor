@@ -153,7 +153,7 @@ dependencies = [
  "anyhow",
  "api_client",
  "clap",
- "dirs 4.0.0",
+ "dirs",
  "epoll",
  "event_monitor",
  "hypervisor",
@@ -206,15 +206,6 @@ dependencies = [
  "vm-memory",
  "vm-migration",
  "vmm-sys-util",
-]
-
-[[package]]
-name = "dirs"
-version = "3.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30baa043103c9d0c2a57cf537cc2f35623889dc0d405e6c3cccfadbc81c71309"
-dependencies = [
- "dirs-sys",
 ]
 
 [[package]]
@@ -677,7 +668,7 @@ name = "performance-metrics"
 version = "0.1.0"
 dependencies = [
  "clap",
- "dirs 4.0.0",
+ "dirs",
  "serde",
  "serde_derive",
  "serde_json",
@@ -1024,7 +1015,7 @@ dependencies = [
 name = "test_infra"
 version = "0.1.0"
 dependencies = [
- "dirs 3.0.2",
+ "dirs",
  "epoll",
  "lazy_static",
  "libc",
