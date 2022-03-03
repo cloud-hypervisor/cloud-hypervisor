@@ -9,6 +9,8 @@ jobs:
     steps:
       - name: Code checkout
         uses: actions/checkout@v2
+      - name: Install musl-gcc
+        run: sudo apt install -y musl-tools      
       - name: Create release directory
         run: rsync -rv --exclude=.git . ../cloud-hypervisor-${{ github.event.ref }}
       - name: Install Rust toolchain (x86_64-unknown-linux-gnu)
