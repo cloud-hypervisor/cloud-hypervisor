@@ -1173,7 +1173,7 @@ dependencies = [
 [[package]]
 name = "vhost-user-backend"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vhost-user-backend?branch=main#bbc892ba4526bdf8101252f7aa51832d1f2eeabd"
+source = "git+https://github.com/rust-vmm/vhost-user-backend?branch=main#6e66d2c1a4c460fa7306bd890e7a99e64a0254d6"
 dependencies = [
  "libc",
  "log",
