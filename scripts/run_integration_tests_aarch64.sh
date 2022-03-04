@@ -111,7 +111,7 @@ build_spdk_nvme() {
     git submodule update --init
     apt-get update
     ./scripts/pkgdep.sh
-    ./configure --with-vfio-user
+    ./configure --with-vfio-user --enable-debug
     chmod +x /usr/local/lib/python3.8/dist-packages/ninja/data/bin/ninja
     make -j `nproc`
     mkdir /usr/local/bin/spdk-nvme

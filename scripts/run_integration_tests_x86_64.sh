@@ -143,6 +143,24 @@ if [ ! -f "$VIRTIOFSD" ]; then
     popd
 fi
 
+# Build spdk-nvme with debug enabled
+SPDK_DIR="$WORKLOADS_DIR/spdk"
+SPDK_REPO="https://github.com/spdk/spdk.git"
+git clone "https://github.com/spdk/spdk.git" "$SPDK_DIR"
+pushd $SPDK_DIR
+git checkout "59f3cdacb13bd2a19c4a86be04792b0ee4491172"
+git submodule update --init
+apt-get update
+./scripts/pkgdep.sh
+./configure --with-vfio-user --enable-debug
+make -j `nproc`
+
+rm -rf /usr/local/bin/spdk-nvme
+mkdir /usr/local/bin/spdk-nvme
+cp ./build/bin/nvmf_tgt /usr/local/bin/spdk-nvme
+cp ./scripts/rpc.py /usr/local/bin/spdk-nvme
+cp -r ./scripts/rpc /usr/local/bin/spdk-nvme
+popd
 
 BLK_IMAGE="$WORKLOADS_DIR/blk.img"
 MNT_DIR="mount_image"
