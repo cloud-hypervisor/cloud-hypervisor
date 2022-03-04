@@ -105,7 +105,7 @@ build_edk2() {
 build_spdk_nvme() {
     SPDK_DIR="$WORKLOADS_DIR/spdk"
     SPDK_REPO="https://github.com/spdk/spdk.git"
-    checkout_repo "$SPDK_DIR" "$SPDK_REPO" master "f9c496b8e21a8f499df268818bf8b5d8e2b19f04"
+    checkout_repo "$SPDK_DIR" "$SPDK_REPO" master "59f3cdacb13bd2a19c4a86be04792b0ee4491172"
 
     pushd $SPDK_DIR
     git submodule update --init
