@@ -5766,6 +5766,7 @@ mod parallel {
             .args(&["--cpus", "boot=1"])
             .args(&["--memory", "size=512M,shared=on"])
             .args(&["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .args(&["--seccomp", "false"])
             .default_disks()
             .default_net()
             .capture_output()
