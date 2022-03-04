@@ -79,6 +79,7 @@ members = [
     "performance-metrics",
     "qcow",
     "rate_limiter",
+    "test_infra",
     "vfio_user",
     "vhdx",
     "vhost_user_block",
