@@ -17,7 +17,10 @@ use test_infra::Error as InfraError;
 use test_infra::*;
 use wait_timeout::ChildExt;
 
+#[cfg(target_arch = "x86_64")]
 pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-0.raw";
+#[cfg(target_arch = "aarch64")]
+pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64-custom-20210929-0-update-tool.raw";
 
 #[derive(Debug)]
 enum WaitTimeoutError {
@@ -618,7 +621,6 @@ fn parse_fio_output(output: &str, fio_ops: &FioOps, num_jobs: u32) -> Result<f64
 pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
     let test_timeout = control.test_timeout;
     let num_queues = control.num_queues.unwrap();
-    let queue_size = control.queue_size.unwrap();
     let fio_ops = control.fio_ops.as_ref().unwrap();
 
     let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -636,7 +638,20 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
         .args(&["--memory", "size=4G"])
         .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
         .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-        .default_disks()
+        .args(&[
+            "--disk",
+            format!(
+                "path={}",
+                guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+            )
+            .as_str(),
+            format!(
+                "path={}",
+                guest.disk_config.disk(DiskType::CloudInit).unwrap()
+            )
+            .as_str(),
+            format!("path={}", BLK_IO_TEST_IMG).as_str(),
+        ])
         .default_net()
         .args(&["--api-socket", &api_socket])
         .capture_output()
@@ -646,25 +661,6 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
 
     let r = std::panic::catch_unwind(|| {
         guest.wait_vm_boot(None).unwrap();
-
-        // Hotplug test disk
-        assert!(Command::new(clh_command("ch-remote"))
-            .args(&[&format!("--api-socket={}", api_socket)])
-            .args(&[
-                "add-disk",
-                &format!(
-                    "path={},num_queues={},queue_size={},direct=on",
-                    BLK_IO_TEST_IMG, num_queues, queue_size
-                )
-            ])
-            .stderr(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap()
-            .wait_timeout(Duration::from_secs(5))
-            .unwrap()
-            .expect("Failed to hotplug test disk image")
-            .success());
 
         let fio_command = format!(
             "sudo fio --filename=/dev/vdc --name=test --output-format=json \
