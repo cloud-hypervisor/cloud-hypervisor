@@ -1,7 +1,6 @@
 #!/bin/bash
 hypervisor="kvm"
 test_filter=""
-test_binary_args=()
 
 cmd_help() {
     echo ""
@@ -44,5 +43,5 @@ process_common_args() {
         die "Hypervisor value must be kvm or mshv"
     fi
 
-    test_binary_args="$@"
+    test_binary_args=($@)
 }
