@@ -14,7 +14,7 @@ process_common_args "$@"
 # For now these values are default for kvm
 features=""
 
-if [ "$hypervisor" = "mshv" ] ;  then
+if [ "$hypervisor" = "mshv" ]; then
     features="--no-default-features --features mshv,common"
 fi
 
@@ -60,7 +60,7 @@ fi
 
 if [ ! -f "$VMLINUX_IMAGE" ]; then
     pushd $LINUX_CUSTOM_DIR
-    time make bzImage -j `nproc`
+    time make bzImage -j $(nproc)
     cp vmlinux $VMLINUX_IMAGE || exit 1
     popd
 fi
@@ -86,6 +86,10 @@ strip target/$BUILD_TARGET/release/performance-metrics
 # setup hugepages
 echo 6144 | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
+
+if [ -n "$test_filter" ]; then
+    test_binary_args+=("--test-filter $test_filter")
+fi
 
 export RUST_BACKTRACE=1
 time target/$BUILD_TARGET/release/performance-metrics ${test_binary_args[*]}
