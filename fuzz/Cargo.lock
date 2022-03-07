@@ -865,7 +865,8 @@ dependencies = [
 [[package]]
 name = "virtio-queue"
 version = "0.2.0"
-source = "git+https://github.com/rust-vmm/vm-virtio?branch=main#c1c4c0397809991e2149d8bc3591bca65082e53b"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3785325315e6496fa88673842ee6cd198b9658e88e8b0e1ad48a5dc818b221dc"
 dependencies = [
  "log",
  "vm-memory",
