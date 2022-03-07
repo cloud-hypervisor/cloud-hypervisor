@@ -13,16 +13,12 @@ use libc::EFD_NONBLOCK;
 use log::LevelFilter;
 use option_parser::OptionParser;
 use seccompiler::SeccompAction;
-use signal_hook::{
-    consts::SIGSYS,
-    iterator::{exfiltrator::WithRawSiginfo, SignalsInfo},
-};
+use signal_hook::consts::SIGSYS;
 use std::env;
 use std::fs::File;
 use std::os::unix::io::{FromRawFd, RawFd};
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
-use std::thread;
 use thiserror::Error;
 use vmm::config;
 use vmm_sys_util::eventfd::EventFd;
@@ -495,28 +491,21 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         SeccompAction::Trap
     };
 
-    // See https://github.com/rust-lang/libc/issues/716 why we can't get the details from siginfo_t
     if seccomp_action == SeccompAction::Trap {
-        thread::Builder::new()
-            .name("seccomp_signal_handler".to_string())
-            .spawn(move || {
-                for si in SignalsInfo::<WithRawSiginfo>::new(&[SIGSYS])
-                    .unwrap()
-                    .forever()
-                {
-                    /* SYS_SECCOMP */
-                    if si.si_code == 1 {
-                        eprint!(
-                            "\n==== seccomp violation ====\n\
-                            Try running with `strace -ff` to identify the cause and open an issue: \
-                            https://github.com/cloud-hypervisor/cloud-hypervisor/issues/new\n"
-                        );
-
-                        signal_hook::low_level::emulate_default_handler(SIGSYS).unwrap();
-                    }
-                }
+        // SAFETY: We only using signal_hook for managing signals and only execute signal
+        // handler safe functions (writing to stderr) and manipulating signals.
+        unsafe {
+            signal_hook::low_level::register(signal_hook::consts::SIGSYS, || {
+                eprint!(
+                    "\n==== Possible seccomp violation ====\n\
+                Try running with `strace -ff` to identify the cause and open an issue: \
+                https://github.com/cloud-hypervisor/cloud-hypervisor/issues/new\n"
+                );
+                signal_hook::low_level::emulate_default_handler(SIGSYS).unwrap();
             })
-            .unwrap();
+        }
+        .map_err(|e| eprintln!("Error adding SIGSYS signal handler: {}", e))
+        .ok();
     }
 
     // Before we start any threads, mask the signals we'll be
