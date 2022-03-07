@@ -41,7 +41,6 @@ clap = { version = "3.1.5", features = ["wrap_help"] }
 kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch-v0.5.0-tdx" }
 kvm-ioctls = { git = "https://github.com/rust-vmm/kvm-ioctls", branch = "main" }
 versionize_derive = { git = "https://github.com/cloud-hypervisor/versionize_derive", branch = "ch" }
-virtio-queue = { git = "https://github.com/rust-vmm/vm-virtio", branch = "main" }
 
 [dev-dependencies]
 dirs = "4.0.0"
