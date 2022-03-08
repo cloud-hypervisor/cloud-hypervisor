@@ -211,8 +211,8 @@ impl InterruptSourceGroup for MsiInterruptGroup<IrqRoutingEntry> {
                     format!("mask: No existing route for interrupt index {}", index),
                 ));
             }
-            self.set_gsi_routes(&routes)?;
-            return route.enable(&self.vm);
+            route.enable(&self.vm)?;
+            return self.set_gsi_routes(&routes);
         }
 
         Err(io::Error::new(
