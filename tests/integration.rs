@@ -5716,6 +5716,17 @@ mod parallel {
         // Start the SPDK nvmf_tgt daemon to present NVMe device as a VFIO user device
         Command::new("/usr/local/bin/spdk-nvme/nvmf_tgt")
             .args(&["-i", "0", "-m", "0x1"])
+            .args(&["--logflag", "vfio_user"])
+            .args(&["--logflag", "thread"])
+            .args(&["--logflag", "bdev"])
+            .args(&["--logflag", "bdev_nvme"])
+            .args(&["--logflag", "nvmf"])
+            .args(&["--logflag", "nvmf_tcp"])
+            .args(&["--logflag", "nvmf_vfio"])
+            .args(&["--logflag", "nvme"])
+            .args(&["--logflag", "nvme_vfio"])
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
             .spawn()
             .unwrap();
         thread::sleep(std::time::Duration::new(2, 0));
