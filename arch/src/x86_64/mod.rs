@@ -186,6 +186,9 @@ pub enum Error {
 
     /// Error checking CPUID compatibility
     CpuidCheckCompatibility,
+
+    // Error writing EBDA address
+    EbdaSetup(vm_memory::GuestMemoryError),
 }
 
 impl From<Error> for super::Error {
@@ -802,6 +805,11 @@ pub fn configure_system(
     rsdp_addr: Option<GuestAddress>,
     sgx_epc_region: Option<SgxEpcRegion>,
 ) -> super::Result<()> {
+    // Write EBDA address to location where ACPICA expects to find it
+    guest_mem
+        .write_obj((layout::EBDA_START.0 >> 4) as u16, layout::EBDA_POINTER)
+        .map_err(Error::EbdaSetup)?;
+
     let size = smbios::setup_smbios(guest_mem).map_err(Error::SmbiosSetup)?;
 
     // Place the MP table after the SMIOS table aligned to 16 bytes

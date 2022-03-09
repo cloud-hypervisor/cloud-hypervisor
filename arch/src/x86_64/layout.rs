@@ -24,6 +24,9 @@ pub const LOW_RAM_START: GuestAddress = GuestAddress(0x0);
 
 // == Fixed addresses within the "Low RAM" range: ==
 
+// Location of EBDA address
+pub const EBDA_POINTER: GuestAddress = GuestAddress(0x40e);
+
 // Initial GDT/IDT needed to boot kernel
 pub const BOOT_GDT_START: GuestAddress = GuestAddress(0x500);
 pub const BOOT_IDT_START: GuestAddress = GuestAddress(0x520);
