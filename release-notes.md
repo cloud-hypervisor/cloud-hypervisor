@@ -1,3 +1,4 @@
+- [v22.1](#v221)
 - [v22.0](#v220)
     - [GDB Debug Stub Support](#gdb-debug-stub-support)
     - [`virtio-iommu` Backed Segments](#virtio-iommu-backed-segments)
@@ -5,7 +6,7 @@
     - [`virtio-balloon` Free Page Reporting](#virtio-balloon-free-page-reporting)
     - [Support for Direct Kernel Booting with TDX](#support-for-direct-kernel-booting-with-tdx)
     - [PMU Support for AArch64](#pmu-support-for-aarch64)
-    - [Documentation Under CC-BY-4.0 Licese](#documentation-under-cc-by-40-licese)
+    - [Documentation Under CC-BY-4.0 License](#documentation-under-cc-by-40-license)
     - [Deprecation of "Classic" `virtiofsd`](#deprecation-of-classic-virtiofsd)
     - [Notable Bug Fixes](#notable-bug-fixes)
     - [Contributors](#contributors)
@@ -194,10 +195,17 @@
     - [Unit testing](#unit-testing)
     - [Integration tests parallelization](#integration-tests-parallelization)
 
+# v22.1
+
+This is a bug fix release. The following issues have been addressed:
+
+* VFIO ioctl reordering to fix MSI on AMD platforms (#3827)
+* Fix `virtio-net` control queue (#3829)
+
 # v22.0
 
-This release has been tracked through the [v21.0
-project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/24).
+This release has been tracked through the [v22.0
+project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/25).
 
 ### GDB Debug Stub Support
 
@@ -238,7 +246,7 @@ has been updated for this usage.
 A PMU is now available on AArch64 for guest performance profiling. This will be
 exposed automatically if available from the host.
 
-### Documentation Under CC-BY-4.0 Licese
+### Documentation Under CC-BY-4.0 License
 
 The documentation is now licensed under the "Creative Commons Attribution 4.0
 International" license which is aligned with the project charter under the
