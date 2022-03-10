@@ -31,6 +31,7 @@ use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_queue::{Error as QueueError, Queue};
 use vm_allocator::{AddressAllocator, SystemAllocator};
+use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
 };
@@ -338,6 +339,9 @@ pub struct VirtioPciDevice {
 
     // Barrier that is used to wait on for activation
     activate_barrier: Arc<Barrier>,
+
+    // Optional DMA handler
+    dma_handler: Option<Arc<dyn ExternalDmaMapping>>,
 }
 
 impl VirtioPciDevice {
@@ -353,6 +357,7 @@ impl VirtioPciDevice {
         pci_device_bdf: u32,
         activate_evt: EventFd,
         use_64bit_bar: bool,
+        dma_handler: Option<Arc<dyn ExternalDmaMapping>>,
     ) -> Result<Self> {
         let device_clone = device.clone();
         let mut locked_device = device_clone.lock().unwrap();
@@ -454,6 +459,7 @@ impl VirtioPciDevice {
             bar_regions: vec![],
             activate_evt,
             activate_barrier: Arc::new(Barrier::new(2)),
+            dma_handler,
         };
 
         if let Some(msix_config) = &virtio_pci_device.msix_config {
@@ -700,6 +706,10 @@ impl VirtioPciDevice {
 
     fn needs_activation(&self) -> bool {
         !self.device_activated.load(Ordering::SeqCst) && self.is_driver_ready()
+    }
+
+    pub fn dma_handler(&self) -> Option<&Arc<dyn ExternalDmaMapping>> {
+        self.dma_handler.as_ref()
     }
 }
 

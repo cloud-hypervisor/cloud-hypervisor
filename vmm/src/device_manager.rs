@@ -3295,7 +3295,7 @@ impl DeviceManager {
         iommu_mapping: &Option<Arc<IommuMapping>>,
         virtio_device_id: String,
         pci_segment_id: u16,
-        _dma_handler: Option<Arc<dyn ExternalDmaMapping>>,
+        dma_handler: Option<Arc<dyn ExternalDmaMapping>>,
     ) -> DeviceManagerResult<PciBdf> {
         let id = format!("{}-{}", VIRTIO_PCI_DEVICE_NAME_PREFIX, virtio_device_id);
 
@@ -3385,6 +3385,7 @@ impl DeviceManager {
             // to firmware without requiring excessive identity mapping.
             // The exception being if not on the default PCI segment.
             pci_segment_id > 0 || device_type != VirtioDeviceType::Block as u32,
+            dma_handler,
         )
         .map_err(DeviceManagerError::VirtioDevice)?;
 
