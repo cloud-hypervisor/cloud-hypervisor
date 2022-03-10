@@ -2196,6 +2196,46 @@ mod parallel {
     }
 
     #[test]
+    fn test_virtio_net_ctrl_queue() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(&["--cpus", "boot=1"])
+            .args(&["--memory", "size=512M"])
+            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .capture_output()
+            .default_disks()
+            .default_net();
+
+        let mut child = cmd.spawn().unwrap();
+
+        guest.wait_vm_boot(None).unwrap();
+
+        #[cfg(target_arch = "aarch64")]
+        let iface = "enp0s4";
+        #[cfg(target_arch = "x86_64")]
+        let iface = "ens4";
+
+        let r = std::panic::catch_unwind(|| {
+            assert_eq!(
+                guest
+                    .ssh_command(
+                        format!("sudo ethtool -K {} rx-gro-hw off && echo success", iface).as_str()
+                    )
+                    .unwrap()
+                    .trim(),
+                "success"
+            );
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_pci_multiple_segments() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
