@@ -3375,30 +3375,42 @@ impl DeviceManager {
 
         let memory = self.memory_manager.lock().unwrap().guest_memory();
 
-        // Map DMA ranges if a DMA handler is available
+        // Map DMA ranges if a DMA handler is available and if the device is
+        // not attached to a virtual IOMMU.
         if let Some(dma_handler) = &dma_handler {
-            // Let every virtio-mem device handle the DMA map/unmap through the
-            // DMA handler provided.
-            for virtio_mem_device in self.virtio_mem_devices.iter() {
-                virtio_mem_device
-                    .lock()
-                    .unwrap()
-                    .add_dma_mapping_handler(
-                        VirtioMemMappingSource::Device(pci_device_bdf.into()),
-                        dma_handler.clone(),
-                    )
-                    .map_err(DeviceManagerError::AddDmaMappingHandlerVirtioMem)?;
-            }
+            if iommu_mapping.is_some() {
+                if let Some(iommu) = &self.iommu_device {
+                    iommu
+                        .lock()
+                        .unwrap()
+                        .add_external_mapping(pci_device_bdf.into(), dma_handler.clone());
+                } else {
+                    return Err(DeviceManagerError::MissingVirtualIommu);
+                }
+            } else {
+                // Let every virtio-mem device handle the DMA map/unmap through the
+                // DMA handler provided.
+                for virtio_mem_device in self.virtio_mem_devices.iter() {
+                    virtio_mem_device
+                        .lock()
+                        .unwrap()
+                        .add_dma_mapping_handler(
+                            VirtioMemMappingSource::Device(pci_device_bdf.into()),
+                            dma_handler.clone(),
+                        )
+                        .map_err(DeviceManagerError::AddDmaMappingHandlerVirtioMem)?;
+                }
 
-            // Do not register virtio-mem regions, as they are handled directly by
-            // virtio-mem devices.
-            for (_, zone) in self.memory_manager.lock().unwrap().memory_zones().iter() {
-                for region in zone.regions() {
-                    let gpa = region.start_addr().0;
-                    let size = region.len();
-                    dma_handler
-                        .map(gpa, gpa, size)
-                        .map_err(DeviceManagerError::VirtioDmaMap)?;
+                // Do not register virtio-mem regions, as they are handled directly by
+                // virtio-mem devices.
+                for (_, zone) in self.memory_manager.lock().unwrap().memory_zones().iter() {
+                    for region in zone.regions() {
+                        let gpa = region.start_addr().0;
+                        let size = region.len();
+                        dma_handler
+                            .map(gpa, gpa, size)
+                            .map_err(DeviceManagerError::VirtioDmaMap)?;
+                    }
                 }
             }
         }
@@ -3510,11 +3522,13 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::UpdateMemoryForVirtioDevice)?;
 
             if let Some(dma_handler) = &handle.dma_handler {
-                let gpa = new_region.start_addr().0;
-                let size = new_region.len();
-                dma_handler
-                    .map(gpa, gpa, size)
-                    .map_err(DeviceManagerError::VirtioDmaMap)?;
+                if !handle.iommu {
+                    let gpa = new_region.start_addr().0;
+                    let size = new_region.len();
+                    dma_handler
+                        .map(gpa, gpa, size)
+                        .map_err(DeviceManagerError::VirtioDmaMap)?;
+                }
             }
         }
 
@@ -3697,6 +3711,13 @@ impl DeviceManager {
             device_tree.remove(child);
         }
 
+        let mut iommu_attached = false;
+        if let Some((_, iommu_attached_devices)) = &self.iommu_attached_devices {
+            if iommu_attached_devices.contains(&pci_device_bdf) {
+                iommu_attached = true;
+            }
+        }
+
         let pci_device_handle = pci_device_node
             .pci_device_handle
             .ok_or(DeviceManagerError::MissingPciDevice)?;
@@ -3720,13 +3741,15 @@ impl DeviceManager {
                 }
 
                 if let Some(dma_handler) = dev.dma_handler() {
-                    for (_, zone) in self.memory_manager.lock().unwrap().memory_zones().iter() {
-                        for region in zone.regions() {
-                            let iova = region.start_addr().0;
-                            let size = region.len();
-                            dma_handler
-                                .unmap(iova, size)
-                                .map_err(DeviceManagerError::VirtioDmaUnmap)?;
+                    if !iommu_attached {
+                        for (_, zone) in self.memory_manager.lock().unwrap().memory_zones().iter() {
+                            for region in zone.regions() {
+                                let iova = region.start_addr().0;
+                                let size = region.len();
+                                dma_handler
+                                    .unmap(iova, size)
+                                    .map_err(DeviceManagerError::VirtioDmaUnmap)?;
+                            }
                         }
                     }
                 }
@@ -3735,7 +3758,7 @@ impl DeviceManager {
                     Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn PciDevice>>,
                     Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn BusDevice>>,
                     Some(dev.virtio_device()),
-                    dev.dma_handler().is_some(),
+                    dev.dma_handler().is_some() && !iommu_attached,
                 )
             }
             PciDeviceHandle::VfioUser(vfio_user_pci_device) => {
