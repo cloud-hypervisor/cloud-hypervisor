@@ -369,6 +369,12 @@ fn create_app<'a, 'b>(
                 .takes_value(true)
                 .possible_values(&["true", "false", "log"])
                 .default_value("true"),
+        )
+        .arg(
+            Arg::with_name("craton")
+                .long("craton")
+                .takes_value(false)
+                .group("vm-config"),
         );
 
     #[cfg(target_arch = "x86_64")]

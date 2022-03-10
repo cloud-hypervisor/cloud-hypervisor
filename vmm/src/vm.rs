@@ -751,6 +751,20 @@ impl Vm {
         console_pty: Option<PtyPair>,
         console_resize_pipe: Option<File>,
     ) -> Result<Self> {
+        #[cfg(all(feature = "kvm", target_arch = "aarch64"))]
+        let craton_enabled = config.lock().unwrap().craton;
+        if craton_enabled {
+            return Vm::new_craton(
+                    config,
+                    exit_evt,
+                    reset_evt,
+                    seccomp_action,
+                    hypervisor,
+                    activate_evt,
+                    serial_pty,
+                    console_pty,
+                    console_resize_pipe);
+        }
         #[cfg(feature = "tdx")]
         let tdx_enabled = config.lock().unwrap().tdx.is_some();
         hypervisor.check_required_extensions().unwrap();

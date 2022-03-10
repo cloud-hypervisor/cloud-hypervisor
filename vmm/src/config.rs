@@ -309,6 +309,7 @@ pub struct VmParams<'a> {
     #[cfg(feature = "tdx")]
     pub tdx: Option<&'a str>,
     pub platform: Option<&'a str>,
+    pub craton: bool,
 }
 
 impl<'a> VmParams<'a> {
@@ -340,6 +341,7 @@ impl<'a> VmParams<'a> {
         let platform = args.value_of("platform");
         #[cfg(feature = "tdx")]
         let tdx = args.value_of("tdx");
+        let craton = args.is_present("craton");
         VmParams {
             cpus,
             memory,
@@ -365,6 +367,7 @@ impl<'a> VmParams<'a> {
             #[cfg(feature = "tdx")]
             tdx,
             platform,
+            craton,
         }
     }
 }
@@ -2064,6 +2067,7 @@ pub struct VmConfig {
     #[cfg(feature = "tdx")]
     pub tdx: Option<TdxConfig>,
     pub platform: Option<PlatformConfig>,
+    pub craton: bool,
 }
 
 impl VmConfig {
@@ -2377,6 +2381,7 @@ impl VmConfig {
             #[cfg(feature = "tdx")]
             tdx,
             platform,
+            craton: vm_params.craton,
         };
         config.validate().map_err(Error::Validation)?;
         Ok(config)
