@@ -563,9 +563,12 @@ impl VirtioDevice for Net {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
 
         let queue_num = queues.len();
+        let event_idx = self.common.feature_acked(VIRTIO_RING_F_EVENT_IDX.into());
         if self.common.feature_acked(VIRTIO_NET_F_CTRL_VQ.into()) && queue_num % 2 != 0 {
-            let cvq_queue = queues.remove(queue_num - 1);
+            let mut cvq_queue = queues.remove(queue_num - 1);
             let cvq_queue_evt = queue_evts.remove(queue_num - 1);
+
+            cvq_queue.set_event_idx(event_idx);
 
             let (kill_evt, pause_evt) = self.common.dup_eventfds();
             let mut ctrl_handler = NetCtrlEpollHandler {
@@ -598,8 +601,6 @@ impl VirtioDevice for Net {
             )?;
             self.ctrl_queue_epoll_thread = Some(epoll_threads.remove(0));
         }
-
-        let event_idx = self.common.feature_acked(VIRTIO_RING_F_EVENT_IDX.into());
 
         let mut epoll_threads = Vec::new();
         let mut taps = self.taps.clone();
