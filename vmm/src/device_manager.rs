@@ -94,6 +94,7 @@ use virtio_devices::{Endpoint, IommuMapping};
 use virtio_devices::{VirtioSharedMemory, VirtioSharedMemoryList};
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::dma_mapping::vfio::VfioDmaMapping;
+use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, LegacyIrqGroupConfig, MsiIrqGroupConfig,
 };
@@ -797,6 +798,7 @@ struct MetaVirtioDevice {
     iommu: bool,
     id: String,
     pci_segment: u16,
+    dma_handler: Option<Arc<dyn ExternalDmaMapping>>,
 }
 
 pub struct DeviceManager {
@@ -1241,6 +1243,7 @@ impl DeviceManager {
                     mapping,
                     handle.id,
                     handle.pci_segment,
+                    handle.dma_handler,
                 )?;
 
                 if handle.iommu {
@@ -1269,7 +1272,7 @@ impl DeviceManager {
             }
 
             if let Some(iommu_device) = iommu_device {
-                let dev_id = self.add_virtio_pci_device(iommu_device, &None, iommu_id, 0)?;
+                let dev_id = self.add_virtio_pci_device(iommu_device, &None, iommu_id, 0, None)?;
                 self.iommu_attached_devices = Some((dev_id, iommu_attached_devices));
             }
         }
@@ -1836,6 +1839,7 @@ impl DeviceManager {
             iommu: console_config.iommu,
             id: id.clone(),
             pci_segment: 0,
+            dma_handler: None,
         });
 
         // Fill the device tree with a new node. In case of restore, we
@@ -2006,6 +2010,7 @@ impl DeviceManager {
                 iommu: false,
                 id,
                 pci_segment: disk_cfg.pci_segment,
+                dma_handler: None,
             })
         } else {
             let mut options = OpenOptions::new();
@@ -2110,6 +2115,7 @@ impl DeviceManager {
                 iommu: disk_cfg.iommu,
                 id,
                 pci_segment: disk_cfg.pci_segment,
+                dma_handler: None,
             })
         }
     }
@@ -2185,6 +2191,7 @@ impl DeviceManager {
                 iommu: net_cfg.iommu,
                 id,
                 pci_segment: net_cfg.pci_segment,
+                dma_handler: None,
             })
         } else {
             let virtio_net_device = if let Some(ref tap_if_name) = net_cfg.tap {
@@ -2259,6 +2266,7 @@ impl DeviceManager {
                 iommu: net_cfg.iommu,
                 id,
                 pci_segment: net_cfg.pci_segment,
+                dma_handler: None,
             })
         }
     }
@@ -2304,6 +2312,7 @@ impl DeviceManager {
                 iommu: rng_config.iommu,
                 id: id.clone(),
                 pci_segment: 0,
+                dma_handler: None,
             });
 
             // Fill the device tree with a new node. In case of restore, we
@@ -2461,6 +2470,7 @@ impl DeviceManager {
                 iommu: false,
                 id,
                 pci_segment: fs_cfg.pci_segment,
+                dma_handler: None,
             })
         } else {
             Err(DeviceManagerError::NoVirtioFsSock)
@@ -2654,6 +2664,7 @@ impl DeviceManager {
             iommu: pmem_cfg.iommu,
             id,
             pci_segment: pmem_cfg.pci_segment,
+            dma_handler: None,
         })
     }
 
@@ -2722,6 +2733,7 @@ impl DeviceManager {
             iommu: vsock_cfg.iommu,
             id,
             pci_segment: vsock_cfg.pci_segment,
+            dma_handler: None,
         })
     }
 
@@ -2780,6 +2792,7 @@ impl DeviceManager {
                     iommu: false,
                     id: memory_zone_id.clone(),
                     pci_segment: 0,
+                    dma_handler: None,
                 });
 
                 // Fill the device tree with a new node. In case of restore, we
@@ -2824,6 +2837,7 @@ impl DeviceManager {
                 iommu: false,
                 id: id.clone(),
                 pci_segment: 0,
+                dma_handler: None,
             });
 
             self.device_tree
@@ -2862,6 +2876,7 @@ impl DeviceManager {
             iommu: false,
             id: id.clone(),
             pci_segment: 0,
+            dma_handler: None,
         });
 
         self.device_tree
@@ -3280,6 +3295,7 @@ impl DeviceManager {
         iommu_mapping: &Option<Arc<IommuMapping>>,
         virtio_device_id: String,
         pci_segment_id: u16,
+        _dma_handler: Option<Arc<dyn ExternalDmaMapping>>,
     ) -> DeviceManagerResult<PciBdf> {
         let id = format!("{}-{}", VIRTIO_PCI_DEVICE_NAME_PREFIX, virtio_device_id);
 
@@ -3774,6 +3790,7 @@ impl DeviceManager {
             &None,
             handle.id.clone(),
             handle.pci_segment,
+            handle.dma_handler,
         )?;
 
         // Update the PCIU bitmap
