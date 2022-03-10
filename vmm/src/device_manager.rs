@@ -461,6 +461,12 @@ pub enum DeviceManagerError {
 
     /// Cannot duplicate file descriptor
     DupFd(vmm_sys_util::errno::Error),
+
+    /// Failed to DMA map virtio device.
+    VirtioDmaMap(std::io::Error),
+
+    /// Failed to DMA unmap virtio device.
+    VirtioDmaUnmap(std::io::Error),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -3368,6 +3374,35 @@ impl DeviceManager {
         };
 
         let memory = self.memory_manager.lock().unwrap().guest_memory();
+
+        // Map DMA ranges if a DMA handler is available
+        if let Some(dma_handler) = &dma_handler {
+            // Let every virtio-mem device handle the DMA map/unmap through the
+            // DMA handler provided.
+            for virtio_mem_device in self.virtio_mem_devices.iter() {
+                virtio_mem_device
+                    .lock()
+                    .unwrap()
+                    .add_dma_mapping_handler(
+                        VirtioMemMappingSource::Device(pci_device_bdf.into()),
+                        dma_handler.clone(),
+                    )
+                    .map_err(DeviceManagerError::AddDmaMappingHandlerVirtioMem)?;
+            }
+
+            // Do not register virtio-mem regions, as they are handled directly by
+            // virtio-mem devices.
+            for (_, zone) in self.memory_manager.lock().unwrap().memory_zones().iter() {
+                for region in zone.regions() {
+                    let gpa = region.start_addr().0;
+                    let size = region.len();
+                    dma_handler
+                        .map(gpa, gpa, size)
+                        .map_err(DeviceManagerError::VirtioDmaMap)?;
+                }
+            }
+        }
+
         let device_type = virtio_device.lock().unwrap().device_type();
         let mut virtio_pci_device = VirtioPciDevice::new(
             id.clone(),
@@ -3473,6 +3508,14 @@ impl DeviceManager {
                 .unwrap()
                 .add_memory_region(new_region)
                 .map_err(DeviceManagerError::UpdateMemoryForVirtioDevice)?;
+
+            if let Some(dma_handler) = &handle.dma_handler {
+                let gpa = new_region.start_addr().0;
+                let size = new_region.len();
+                dma_handler
+                    .map(gpa, gpa, size)
+                    .map_err(DeviceManagerError::VirtioDmaMap)?;
+            }
         }
 
         // Take care of updating the memory for VFIO PCI devices.
@@ -3657,16 +3700,18 @@ impl DeviceManager {
         let pci_device_handle = pci_device_node
             .pci_device_handle
             .ok_or(DeviceManagerError::MissingPciDevice)?;
-        let (pci_device, bus_device, virtio_device) = match pci_device_handle {
+        let (pci_device, bus_device, virtio_device, remove_dma_handler) = match pci_device_handle {
             // No need to remove any virtio-mem mapping here as the container outlives all devices
             PciDeviceHandle::Vfio(vfio_pci_device) => (
                 Arc::clone(&vfio_pci_device) as Arc<Mutex<dyn PciDevice>>,
                 Arc::clone(&vfio_pci_device) as Arc<Mutex<dyn BusDevice>>,
                 None as Option<Arc<Mutex<dyn virtio_devices::VirtioDevice>>>,
+                false,
             ),
             PciDeviceHandle::Virtio(virtio_pci_device) => {
-                let bar_addr = virtio_pci_device.lock().unwrap().config_bar_addr();
-                for (event, addr) in virtio_pci_device.lock().unwrap().ioeventfds(bar_addr) {
+                let dev = virtio_pci_device.lock().unwrap();
+                let bar_addr = dev.config_bar_addr();
+                for (event, addr) in dev.ioeventfds(bar_addr) {
                     let io_addr = IoEventAddress::Mmio(addr);
                     self.address_manager
                         .vm
@@ -3674,10 +3719,23 @@ impl DeviceManager {
                         .map_err(|e| DeviceManagerError::UnRegisterIoevent(e.into()))?;
                 }
 
+                if let Some(dma_handler) = dev.dma_handler() {
+                    for (_, zone) in self.memory_manager.lock().unwrap().memory_zones().iter() {
+                        for region in zone.regions() {
+                            let iova = region.start_addr().0;
+                            let size = region.len();
+                            dma_handler
+                                .unmap(iova, size)
+                                .map_err(DeviceManagerError::VirtioDmaUnmap)?;
+                        }
+                    }
+                }
+
                 (
                     Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn PciDevice>>,
                     Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn BusDevice>>,
-                    Some(virtio_pci_device.lock().unwrap().virtio_device()),
+                    Some(dev.virtio_device()),
+                    dev.dma_handler().is_some(),
                 )
             }
             PciDeviceHandle::VfioUser(vfio_user_pci_device) => {
@@ -3689,23 +3747,26 @@ impl DeviceManager {
                     }
                 }
 
-                for virtio_mem_device in self.virtio_mem_devices.iter() {
-                    virtio_mem_device
-                        .lock()
-                        .unwrap()
-                        .remove_dma_mapping_handler(VirtioMemMappingSource::Device(
-                            pci_device_bdf.into(),
-                        ))
-                        .map_err(DeviceManagerError::RemoveDmaMappingHandlerVirtioMem)?;
-                }
-
                 (
                     Arc::clone(&vfio_user_pci_device) as Arc<Mutex<dyn PciDevice>>,
                     Arc::clone(&vfio_user_pci_device) as Arc<Mutex<dyn BusDevice>>,
                     None as Option<Arc<Mutex<dyn virtio_devices::VirtioDevice>>>,
+                    true,
                 )
             }
         };
+
+        if remove_dma_handler {
+            for virtio_mem_device in self.virtio_mem_devices.iter() {
+                virtio_mem_device
+                    .lock()
+                    .unwrap()
+                    .remove_dma_mapping_handler(VirtioMemMappingSource::Device(
+                        pci_device_bdf.into(),
+                    ))
+                    .map_err(DeviceManagerError::RemoveDmaMappingHandlerVirtioMem)?;
+            }
+        }
 
         // Free the allocated BARs
         pci_device
