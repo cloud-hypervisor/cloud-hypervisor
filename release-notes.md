@@ -1,3 +1,4 @@
+- [v21.1](#v211)
 - [v21.0](#v210)
     - [Efficient Local Live Migration (for Live Upgrade)](#efficient-local-live-migration-for-live-upgrade)
     - [Recommended Kernel is Now 5.15](#recommended-kernel-is-now-515)
@@ -182,6 +183,16 @@
     - [Console over virtio](#console-over-virtio)
     - [Unit testing](#unit-testing)
     - [Integration tests parallelization](#integration-tests-parallelization)
+
+# v21.1
+
+This is a bug fix release. The following issues have been addressed:
+
+* Missing `openat()` syscall from seccomp filter (#3609)
+* Ensure MMIO/PIO exits complete before pausing (#3658)
+* Support DWORD writes to MSI-X control register (#3714)
+* VFIO ioctl reordering to fix MSI on AMD platforms (#3827)
+* Fix `virtio-net` control queue (#3829)
 
 # v21.0
 
