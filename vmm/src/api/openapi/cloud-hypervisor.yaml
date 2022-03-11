@@ -325,7 +325,28 @@ paths:
           description: The new device was successfully (cold) added to the VM instance.
         500:
           description: The new device could not be added to the VM instance.
-
+  
+  /vm.add-vdpa:
+    put:
+      summary: Add a new vDPA device to the VM
+      requestBody:
+        description: The details of the new vDPA device
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VdpaConfig'
+        required: true
+      responses:
+        200:
+          description: The new vDPA device was successfully added to the VM instance.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PciDeviceInfo'
+        204:
+          description: The new vDPA device was successfully (cold) added to the VM instance.
+        500:
+          description: The new vDPA device could not be added to the VM instance.
 
   /vm.snapshot:
     put:

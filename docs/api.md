@@ -100,6 +100,7 @@ Add fs device to the VM            | `/vm.add-fs`         | `/schemas/FsConfig` 
 Add pmem device to the VM          | `/vm.add-pmem`       | `/schemas/PmemConfig`     | `/schemas/PciDeviceInfo` | The VM is booted
 Add network device to the VM       | `/vm.add-net`        | `/schemas/NetConfig`      | `/schemas/PciDeviceInfo` | The VM is booted
 Add userspace PCI device to the VM | `/vm.add-user-device`| `/schemas/VmAddUserDevice`| `/schemas/PciDeviceInfo` | The VM is booted
+Add vdpa device to the VM          | `/vm.add-vdpa`       | `/schemas/VdpaConfig`     | `/schemas/PciDeviceInfo` | The VM is booted
 Add vsock device to the VM         | `/vm.add-vsock`      | `/schemas/VsockConfig`    | `/schemas/PciDeviceInfo` | The VM is booted
 Remove device from the VM          | `/vm.remove-device`  | `/schemas/VmRemoveDevice` | N/A                      | The VM is booted
 Dump the VM counters               | `/vm.counters`       | N/A                       | `/schemas/VmCounters`    | The VM is booted
