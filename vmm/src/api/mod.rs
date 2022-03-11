@@ -34,9 +34,9 @@ pub use self::http::start_http_path_thread;
 pub mod http;
 pub mod http_endpoint;
 
-use crate::config::UserDeviceConfig;
 use crate::config::{
-    DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, RestoreConfig, VmConfig, VsockConfig,
+    DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, RestoreConfig, UserDeviceConfig,
+    VdpaConfig, VmConfig, VsockConfig,
 };
 use crate::device_tree::DeviceTree;
 use crate::vm::{Error as VmError, VmState};
@@ -133,6 +133,9 @@ pub enum ApiError {
 
     /// The network device could not be added to the VM.
     VmAddNet(VmError),
+
+    /// The vDPA device could not be added to the VM.
+    VmAddVdpa(VmError),
 
     /// The vsock device could not be added to the VM.
     VmAddVsock(VmError),
@@ -294,6 +297,9 @@ pub enum ApiRequest {
     /// Add a network device to the VM.
     VmAddNet(Arc<NetConfig>, Sender<ApiResponse>),
 
+    /// Add a vDPA device to the VM.
+    VmAddVdpa(Arc<VdpaConfig>, Sender<ApiResponse>),
+
     /// Add a vsock device to the VM.
     VmAddVsock(Arc<VsockConfig>, Sender<ApiResponse>),
 
@@ -371,6 +377,9 @@ pub enum VmAction {
     /// Add network
     AddNet(Arc<NetConfig>),
 
+    /// Add vdpa
+    AddVdpa(Arc<VdpaConfig>),
+
     /// Add vsock
     AddVsock(Arc<VsockConfig>),
 
@@ -423,6 +432,7 @@ fn vm_action(
         AddFs(v) => ApiRequest::VmAddFs(v, response_sender),
         AddPmem(v) => ApiRequest::VmAddPmem(v, response_sender),
         AddNet(v) => ApiRequest::VmAddNet(v, response_sender),
+        AddVdpa(v) => ApiRequest::VmAddVdpa(v, response_sender),
         AddVsock(v) => ApiRequest::VmAddVsock(v, response_sender),
         AddUserDevice(v) => ApiRequest::VmAddUserDevice(v, response_sender),
         RemoveDevice(v) => ApiRequest::VmRemoveDevice(v, response_sender),
@@ -632,6 +642,14 @@ pub fn vm_add_net(
     data: Arc<NetConfig>,
 ) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::AddNet(data))
+}
+
+pub fn vm_add_vdpa(
+    api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
+    data: Arc<VdpaConfig>,
+) -> ApiResult<Option<Body>> {
+    vm_action(api_evt, api_sender, VmAction::AddVdpa(data))
 }
 
 pub fn vm_add_vsock(

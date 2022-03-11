@@ -15,7 +15,7 @@
 use crate::config::NumaConfig;
 use crate::config::{
     add_to_config, DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, PmemConfig,
-    UserDeviceConfig, ValidationError, VmConfig, VsockConfig,
+    UserDeviceConfig, ValidationError, VdpaConfig, VmConfig, VsockConfig,
 };
 use crate::cpu;
 use crate::device_manager::{self, Console, DeviceManager, DeviceManagerError, PtyPair};
@@ -1506,6 +1506,11 @@ impl Vm {
             pmem.retain(|dev| dev.id.as_ref() != Some(&id));
         }
 
+        // Remove if vDPA device
+        if let Some(vdpa) = config.vdpa.as_mut() {
+            vdpa.retain(|dev| dev.id.as_ref() != Some(&id));
+        }
+
         // Remove if vsock device
         if let Some(vsock) = config.vsock.as_ref() {
             if vsock.id.as_ref() == Some(&id) {
@@ -1606,6 +1611,30 @@ impl Vm {
         {
             let mut config = self.config.lock().unwrap();
             add_to_config(&mut config.net, net_cfg);
+        }
+
+        self.device_manager
+            .lock()
+            .unwrap()
+            .notify_hotplug(AcpiNotificationFlags::PCI_DEVICES_CHANGED)
+            .map_err(Error::DeviceManager)?;
+
+        Ok(pci_device_info)
+    }
+
+    pub fn add_vdpa(&mut self, mut vdpa_cfg: VdpaConfig) -> Result<PciDeviceInfo> {
+        let pci_device_info = self
+            .device_manager
+            .lock()
+            .unwrap()
+            .add_vdpa(&mut vdpa_cfg)
+            .map_err(Error::DeviceManager)?;
+
+        // Update VmConfig by adding the new device. This is important to
+        // ensure the device would be created in case of a reboot.
+        {
+            let mut config = self.config.lock().unwrap();
+            add_to_config(&mut config.vdpa, vdpa_cfg);
         }
 
         self.device_manager
