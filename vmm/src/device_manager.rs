@@ -11,7 +11,7 @@
 
 use crate::config::{
     ConsoleOutputMode, DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig,
-    VhostMode, VmConfig, VsockConfig,
+    VdpaConfig, VhostMode, VmConfig, VsockConfig,
 };
 use crate::device_tree::{DeviceNode, DeviceTree};
 #[cfg(feature = "kvm")]
@@ -89,7 +89,7 @@ use vfio_ioctls::{VfioContainer, VfioDevice};
 use virtio_devices::transport::VirtioPciDevice;
 use virtio_devices::transport::VirtioTransport;
 use virtio_devices::vhost_user::VhostUserConfig;
-use virtio_devices::{AccessPlatformMapping, VirtioMemMappingSource};
+use virtio_devices::{AccessPlatformMapping, VdpaDmaMapping, VirtioMemMappingSource};
 use virtio_devices::{Endpoint, IommuMapping};
 use virtio_devices::{VirtioSharedMemory, VirtioSharedMemoryList};
 use vm_allocator::{AddressAllocator, SystemAllocator};
@@ -133,6 +133,7 @@ const BALLOON_DEVICE_NAME: &str = "_balloon";
 const NET_DEVICE_NAME_PREFIX: &str = "_net";
 const PMEM_DEVICE_NAME_PREFIX: &str = "_pmem";
 const RNG_DEVICE_NAME: &str = "_rng";
+const VDPA_DEVICE_NAME_PREFIX: &str = "_vdpa";
 const VSOCK_DEVICE_NAME_PREFIX: &str = "_vsock";
 const WATCHDOG_DEVICE_NAME: &str = "_watchdog";
 
@@ -176,8 +177,14 @@ pub enum DeviceManagerError {
     /// Cannot create virtio-pmem device
     CreateVirtioPmem(io::Error),
 
+    /// Cannot create vDPA device
+    CreateVdpa(virtio_devices::vdpa::Error),
+
     /// Cannot create virtio-vsock device
     CreateVirtioVsock(io::Error),
+
+    /// Failed to convert Path to &str for the vDPA device.
+    CreateVdpaConvertPath,
 
     /// Failed to convert Path to &str for the virtio-vsock device.
     CreateVsockConvertPath,
@@ -1950,6 +1957,9 @@ impl DeviceManager {
         // Add virtio-watchdog device
         devices.append(&mut self.make_virtio_watchdog_devices()?);
 
+        // Add vDPA devices if required
+        devices.append(&mut self.make_vdpa_devices()?);
+
         Ok(devices)
     }
 
@@ -2889,6 +2899,69 @@ impl DeviceManager {
             .lock()
             .unwrap()
             .insert(id.clone(), device_node!(id, virtio_watchdog_device));
+
+        Ok(devices)
+    }
+
+    fn make_vdpa_device(
+        &mut self,
+        vdpa_cfg: &mut VdpaConfig,
+    ) -> DeviceManagerResult<MetaVirtioDevice> {
+        let id = if let Some(id) = &vdpa_cfg.id {
+            id.clone()
+        } else {
+            let id = self.next_device_name(VDPA_DEVICE_NAME_PREFIX)?;
+            vdpa_cfg.id = Some(id.clone());
+            id
+        };
+
+        info!("Creating vDPA device: {:?}", vdpa_cfg);
+
+        let device_path = vdpa_cfg
+            .path
+            .to_str()
+            .ok_or(DeviceManagerError::CreateVdpaConvertPath)?;
+
+        let vdpa_device = Arc::new(Mutex::new(
+            virtio_devices::Vdpa::new(
+                id.clone(),
+                device_path,
+                self.memory_manager.lock().unwrap().guest_memory(),
+                vdpa_cfg.num_queues as u16,
+            )
+            .map_err(DeviceManagerError::CreateVdpa)?,
+        ));
+
+        // Create the DMA handler that is required by the vDPA device
+        let vdpa_mapping = Arc::new(VdpaDmaMapping::new(
+            Arc::clone(&vdpa_device),
+            Arc::new(self.memory_manager.lock().unwrap().guest_memory()),
+        ));
+
+        self.device_tree
+            .lock()
+            .unwrap()
+            .insert(id.clone(), device_node!(id));
+
+        Ok(MetaVirtioDevice {
+            virtio_device: vdpa_device as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
+            iommu: false,
+            id,
+            pci_segment: vdpa_cfg.pci_segment,
+            dma_handler: Some(vdpa_mapping),
+        })
+    }
+
+    fn make_vdpa_devices(&mut self) -> DeviceManagerResult<Vec<MetaVirtioDevice>> {
+        let mut devices = Vec::new();
+        // Add vdpa if required
+        let mut vdpa_devices = self.config.lock().unwrap().vdpa.clone();
+        if let Some(vdpa_list_cfg) = &mut vdpa_devices {
+            for vdpa_cfg in vdpa_list_cfg.iter_mut() {
+                devices.push(self.make_vdpa_device(vdpa_cfg)?);
+            }
+        }
+        self.config.lock().unwrap().vdpa = vdpa_devices;
 
         Ok(devices)
     }

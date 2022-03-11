@@ -86,6 +86,27 @@ const VFIO_IOMMU_MAP_DMA: u64 = 0x3b71;
 const VFIO_IOMMU_UNMAP_DMA: u64 = 0x3b72;
 const VFIO_DEVICE_IOEVENTFD: u64 = 0x3b74;
 
+// See include/uapi/linux/vhost.h in the kernel code
+const VHOST_GET_FEATURES: u64 = 0x8008af00;
+const VHOST_SET_FEATURES: u64 = 0x4008af00;
+const VHOST_SET_OWNER: u64 = 0xaf01;
+const VHOST_SET_VRING_NUM: u64 = 0x4008af10;
+const VHOST_SET_VRING_ADDR: u64 = 0x4028af11;
+const VHOST_SET_VRING_BASE: u64 = 0x4008af12;
+const VHOST_SET_VRING_KICK: u64 = 0x4008af20;
+const VHOST_SET_VRING_CALL: u64 = 0x4008af21;
+const VHOST_SET_BACKEND_FEATURES: u64 = 0x4008af25;
+const VHOST_GET_BACKEND_FEATURES: u64 = 0x8008af26;
+const VHOST_VDPA_GET_DEVICE_ID: u64 = 0x8004af70;
+const VHOST_VDPA_GET_STATUS: u64 = 0x8001af71;
+const VHOST_VDPA_SET_STATUS: u64 = 0x4001af72;
+const VHOST_VDPA_GET_CONFIG: u64 = 0x8008af73;
+const VHOST_VDPA_SET_CONFIG: u64 = 0x4008af74;
+const VHOST_VDPA_SET_VRING_ENABLE: u64 = 0x4008af75;
+const VHOST_VDPA_GET_VRING_NUM: u64 = 0x8002af76;
+const VHOST_VDPA_SET_CONFIG_CALL: u64 = 0x4004af77;
+const VHOST_VDPA_GET_IOVA_RANGE: u64 = 0x8010af78;
+
 // See include/uapi/linux/kvm.h in the kernel code.
 #[cfg(feature = "kvm")]
 mod kvm {
@@ -262,6 +283,30 @@ fn create_vmm_ioctl_seccomp_rule_common() -> Result<Vec<SeccompRule>, BackendErr
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_IOMMU_MAP_DMA)?],
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_IOMMU_UNMAP_DMA)?],
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_DEVICE_IOEVENTFD)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_GET_FEATURES)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_SET_FEATURES)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_SET_OWNER)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_SET_VRING_NUM)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_SET_VRING_ADDR)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_SET_VRING_BASE)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_SET_VRING_KICK)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_SET_VRING_CALL)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_SET_BACKEND_FEATURES)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_GET_BACKEND_FEATURES)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_GET_DEVICE_ID)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_GET_STATUS)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_SET_STATUS)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_GET_CONFIG)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_SET_CONFIG)?],
+        and![Cond::new(
+            1,
+            ArgLen::Dword,
+            Eq,
+            VHOST_VDPA_SET_VRING_ENABLE
+        )?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_GET_VRING_NUM)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_SET_CONFIG_CALL)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_GET_IOVA_RANGE)?],
     ];
 
     let hypervisor_rules = create_vmm_ioctl_seccomp_rule_hypervisor()?;
@@ -583,6 +628,15 @@ fn create_vcpu_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, BackendError> {
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_DEVICE_SET_IRQS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_GROUP_UNSET_CONTAINER)?],
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_IOMMU_UNMAP_DMA)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_SET_STATUS)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_GET_CONFIG)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_SET_CONFIG)?],
+        and![Cond::new(
+            1,
+            ArgLen::Dword,
+            Eq,
+            VHOST_VDPA_SET_VRING_ENABLE
+        )?],
     ];
 
     let hypervisor_rules = create_vcpu_ioctl_seccomp_rule_hypervisor()?;
