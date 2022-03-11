@@ -1887,6 +1887,7 @@ mod unit_tests {
             },
             devices: None,
             user_devices: None,
+            vdpa: None,
             vsock: None,
             iommu: false,
             #[cfg(target_arch = "x86_64")]

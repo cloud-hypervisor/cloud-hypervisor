@@ -106,6 +106,10 @@ pub enum Error {
     ParseUserDeviceSocketMissing,
     /// Failed parsing platform parameters
     ParsePlatform(OptionParserError),
+    /// Failed parsing vDPA device
+    ParseVdpa(OptionParserError),
+    /// Missing path for vDPA device
+    ParseVdpaPathMissing,
 }
 
 #[derive(Debug)]
@@ -285,6 +289,8 @@ impl fmt::Display for Error {
             #[cfg(feature = "tdx")]
             FirmwarePathMissing => write!(f, "TDX firmware missing"),
             ParsePlatform(o) => write!(f, "Error parsing --platform: {}", o),
+            ParseVdpa(o) => write!(f, "Error parsing --vdpa: {}", o),
+            ParseVdpaPathMissing => write!(f, "Error parsing --vdpa: path missing"),
         }
     }
 }
@@ -316,6 +322,7 @@ pub struct VmParams<'a> {
     pub console: &'a str,
     pub devices: Option<Vec<&'a str>>,
     pub user_devices: Option<Vec<&'a str>>,
+    pub vdpa: Option<Vec<&'a str>>,
     pub vsock: Option<&'a str>,
     #[cfg(target_arch = "x86_64")]
     pub sgx_epc: Option<Vec<&'a str>>,
@@ -349,6 +356,7 @@ impl<'a> VmParams<'a> {
         let pmem: Option<Vec<&str>> = args.values_of("pmem").map(|x| x.collect());
         let devices: Option<Vec<&str>> = args.values_of("device").map(|x| x.collect());
         let user_devices: Option<Vec<&str>> = args.values_of("user-device").map(|x| x.collect());
+        let vdpa: Option<Vec<&str>> = args.values_of("vdpa").map(|x| x.collect());
         let vsock: Option<&str> = args.value_of("vsock");
         #[cfg(target_arch = "x86_64")]
         let sgx_epc: Option<Vec<&str>> = args.values_of("sgx-epc").map(|x| x.collect());
@@ -376,6 +384,7 @@ impl<'a> VmParams<'a> {
             console,
             devices,
             user_devices,
+            vdpa,
             vsock,
             #[cfg(target_arch = "x86_64")]
             sgx_epc,
@@ -1851,6 +1860,68 @@ impl UserDeviceConfig {
         Ok(())
     }
 }
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
+pub struct VdpaConfig {
+    pub path: PathBuf,
+    #[serde(default = "default_vdpaconfig_num_queues")]
+    pub num_queues: usize,
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub pci_segment: u16,
+}
+
+fn default_vdpaconfig_num_queues() -> usize {
+    1
+}
+
+impl VdpaConfig {
+    pub const SYNTAX: &'static str = "vDPA device \
+        \"path=<device_path>,num_queues=<number_of_queues>,iommu=on|off,\
+        id=<device_id>,pci_segment=<segment_id>\"";
+    pub fn parse(vdpa: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        parser
+            .add("path")
+            .add("num_queues")
+            .add("id")
+            .add("pci_segment");
+        parser.parse(vdpa).map_err(Error::ParseVdpa)?;
+
+        let path = parser
+            .get("path")
+            .map(PathBuf::from)
+            .ok_or(Error::ParseVdpaPathMissing)?;
+        let num_queues = parser
+            .convert("num_queues")
+            .map_err(Error::ParseVdpa)?
+            .unwrap_or_else(default_vdpaconfig_num_queues);
+        let id = parser.get("id");
+        let pci_segment = parser
+            .convert("pci_segment")
+            .map_err(Error::ParseVdpa)?
+            .unwrap_or_default();
+
+        Ok(VdpaConfig {
+            path,
+            num_queues,
+            id,
+            pci_segment,
+        })
+    }
+
+    pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        if let Some(platform_config) = vm_config.platform.as_ref() {
+            if self.pci_segment >= platform_config.num_pci_segments {
+                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
+            }
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
 pub struct VsockConfig {
     pub cid: u64,
@@ -2105,6 +2176,7 @@ pub struct VmConfig {
     pub console: ConsoleConfig,
     pub devices: Option<Vec<DeviceConfig>>,
     pub user_devices: Option<Vec<UserDeviceConfig>>,
+    pub vdpa: Option<Vec<VdpaConfig>>,
     pub vsock: Option<VsockConfig>,
     #[serde(default)]
     pub iommu: bool,
@@ -2374,6 +2446,16 @@ impl VmConfig {
             user_devices = Some(user_device_config_list);
         }
 
+        let mut vdpa: Option<Vec<VdpaConfig>> = None;
+        if let Some(vdpa_list) = &vm_params.vdpa {
+            let mut vdpa_config_list = Vec::new();
+            for item in vdpa_list.iter() {
+                let vdpa_config = VdpaConfig::parse(item)?;
+                vdpa_config_list.push(vdpa_config);
+            }
+            vdpa = Some(vdpa_config_list);
+        }
+
         let mut vsock: Option<VsockConfig> = None;
         if let Some(vs) = &vm_params.vsock {
             let vsock_config = VsockConfig::parse(vs)?;
@@ -2450,6 +2532,7 @@ impl VmConfig {
             console,
             devices,
             user_devices,
+            vdpa,
             vsock,
             iommu,
             #[cfg(target_arch = "x86_64")]
@@ -2994,6 +3077,31 @@ mod tests {
     }
 
     #[test]
+    fn test_vdpa_parsing() -> Result<()> {
+        // path is required
+        assert!(VdpaConfig::parse("").is_err());
+        assert_eq!(
+            VdpaConfig::parse("path=/dev/vhost-vdpa")?,
+            VdpaConfig {
+                path: PathBuf::from("/dev/vhost-vdpa"),
+                num_queues: 1,
+                id: None,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            VdpaConfig::parse("path=/dev/vhost-vdpa,num_queues=2,id=my_vdpa")?,
+            VdpaConfig {
+                path: PathBuf::from("/dev/vhost-vdpa"),
+                num_queues: 2,
+                id: Some("my_vdpa".to_owned()),
+                ..Default::default()
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
     fn test_vsock_parsing() -> Result<()> {
         // socket and cid is required
         assert!(VsockConfig::parse("").is_err());
@@ -3068,6 +3176,7 @@ mod tests {
             },
             devices: None,
             user_devices: None,
+            vdpa: None,
             vsock: None,
             iommu: false,
             #[cfg(target_arch = "x86_64")]
