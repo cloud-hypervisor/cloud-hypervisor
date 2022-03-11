@@ -28,6 +28,7 @@ enum Error {
     AddPmemConfig(vmm::config::Error),
     AddNetConfig(vmm::config::Error),
     AddUserDeviceConfig(vmm::config::Error),
+    AddVdpaConfig(vmm::config::Error),
     AddVsockConfig(vmm::config::Error),
     Restore(vmm::config::Error),
 }
@@ -47,6 +48,7 @@ impl fmt::Display for Error {
             AddPmemConfig(e) => write!(f, "Error parsing persistent memory syntax: {}", e),
             AddNetConfig(e) => write!(f, "Error parsing network syntax: {}", e),
             AddUserDeviceConfig(e) => write!(f, "Error parsing user device syntax: {}", e),
+            AddVdpaConfig(e) => write!(f, "Error parsing vDPA device syntax: {}", e),
             AddVsockConfig(e) => write!(f, "Error parsing vsock syntax: {}", e),
             Restore(e) => write!(f, "Error parsing restore syntax: {}", e),
         }
@@ -208,6 +210,18 @@ fn add_net_api_command(socket: &mut UnixStream, config: &str) -> Result<(), Erro
         "add-net",
         Some(&serde_json::to_string(&net_config).unwrap()),
         fds,
+    )
+    .map_err(Error::ApiClient)
+}
+
+fn add_vdpa_api_command(socket: &mut UnixStream, config: &str) -> Result<(), Error> {
+    let vdpa_config = vmm::config::VdpaConfig::parse(config).map_err(Error::AddVdpaConfig)?;
+
+    simple_api_command(
+        socket,
+        "PUT",
+        "add-vdpa",
+        Some(&serde_json::to_string(&vdpa_config).unwrap()),
     )
     .map_err(Error::ApiClient)
 }
@@ -376,6 +390,14 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
                 .value_of("device_config")
                 .unwrap(),
         ),
+        Some("add-vdpa") => add_vdpa_api_command(
+            &mut socket,
+            matches
+                .subcommand_matches("add-vdpa")
+                .unwrap()
+                .value_of("vdpa_config")
+                .unwrap(),
+        ),
         Some("add-vsock") => add_vsock_api_command(
             &mut socket,
             matches
@@ -485,6 +507,13 @@ fn main() {
                         .index(1)
                         .help(vmm::config::UserDeviceConfig::SYNTAX),
                 ),
+        )
+        .subcommand(
+            Command::new("add-vdpa").about("Add vDPA device").arg(
+                Arg::new("vdpa_config")
+                    .index(1)
+                    .help(vmm::config::VdpaConfig::SYNTAX),
+            ),
         )
         .subcommand(
             Command::new("add-vsock").about("Add vsock device").arg(
