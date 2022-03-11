@@ -54,7 +54,7 @@ impl EndpointHandler for VmCreate {
                 }
             }
 
-            _ => Response::new(Version::Http11, StatusCode::BadRequest),
+            _ => error_response(HttpError::BadRequest, StatusCode::BadRequest),
         }
     }
 }
@@ -237,7 +237,7 @@ impl EndpointHandler for VmInfo {
                 }
                 Err(e) => error_response(e, StatusCode::InternalServerError),
             },
-            _ => Response::new(Version::Http11, StatusCode::BadRequest),
+            _ => error_response(HttpError::BadRequest, StatusCode::BadRequest),
         }
     }
 }
@@ -263,7 +263,8 @@ impl EndpointHandler for VmmPing {
                 }
                 Err(e) => error_response(e, StatusCode::InternalServerError),
             },
-            _ => Response::new(Version::Http11, StatusCode::BadRequest),
+
+            _ => error_response(HttpError::BadRequest, StatusCode::BadRequest),
         }
     }
 }
@@ -285,7 +286,7 @@ impl EndpointHandler for VmmShutdown {
                     Err(e) => error_response(e, StatusCode::InternalServerError),
                 }
             }
-            _ => Response::new(Version::Http11, StatusCode::BadRequest),
+            _ => error_response(HttpError::BadRequest, StatusCode::BadRequest),
         }
     }
 }
