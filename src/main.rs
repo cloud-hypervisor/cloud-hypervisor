@@ -302,6 +302,14 @@ fn create_app<'a>(
                 .group("vm-config"),
         )
         .arg(
+            Arg::new("vdpa")
+                .long("vdpa")
+                .help(config::VdpaConfig::SYNTAX)
+                .takes_value(true)
+                .min_values(1)
+                .group("vm-config"),
+        )
+        .arg(
             Arg::new("vsock")
                 .long("vsock")
                 .help(config::VsockConfig::SYNTAX)
@@ -712,6 +720,7 @@ mod unit_tests {
             },
             devices: None,
             user_devices: None,
+            vdpa: None,
             vsock: None,
             iommu: false,
             #[cfg(target_arch = "x86_64")]
@@ -1661,6 +1670,51 @@ mod unit_tests {
                     ]
                 }"#,
                 true,
+            ),
+        ]
+        .iter()
+        .for_each(|(cli, openapi, equal)| {
+            compare_vm_config_cli_vs_json(cli, openapi, *equal);
+        });
+    }
+
+    #[test]
+    fn test_valid_vm_config_vdpa() {
+        vec![
+            (
+                vec![
+                    "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
+                    "--vdpa",
+                    "path=/path/to/device/1",
+                    "path=/path/to/device/2,num_queues=2",
+                ],
+                r#"{
+                    "kernel": {"path": "/path/to/kernel"},
+                    "vdpa": [
+                        {"path": "/path/to/device/1", "num_queues": 1},
+                        {"path": "/path/to/device/2", "num_queues": 2}
+                    ]
+                }"#,
+                true,
+            ),
+            (
+                vec![
+                    "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
+                    "--vdpa",
+                    "path=/path/to/device/1",
+                    "path=/path/to/device/2",
+                ],
+                r#"{
+                    "kernel": {"path": "/path/to/kernel"},
+                    "vdpa": [
+                        {"path": "/path/to/device/1"}
+                    ]
+                }"#,
+                false,
             ),
         ]
         .iter()

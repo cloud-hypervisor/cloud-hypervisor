@@ -505,6 +505,10 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DeviceConfig'
+        vdpa:
+          type: array
+          items:
+            $ref: '#/components/schemas/VdpaConfig'
         vsock:
             $ref: '#/components/schemas/VsockConfig'
         sgx_epc:
@@ -915,6 +919,23 @@ components:
         iommu:
           type: boolean
           default: false
+        pci_segment:
+          type: integer
+          format: int16
+        id:
+          type: string
+
+    VdpaConfig:
+      required:
+      - path
+      - num_queues
+      type: object
+      properties:
+        path:
+          type: string
+        num_queues:
+          type: integer
+          default: 1
         pci_segment:
           type: integer
           format: int16
