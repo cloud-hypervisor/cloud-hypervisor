@@ -497,7 +497,7 @@ fn main() {
         };
 
     report_file
-        .write(
+        .write_all(
             serde_json::to_string_pretty(&metrics_report)
                 .unwrap()
                 .as_bytes(),
