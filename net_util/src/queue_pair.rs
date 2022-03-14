@@ -130,9 +130,12 @@ impl TxVirtio {
             queue
                 .add_used(used_desc_head.0, used_desc_head.1)
                 .map_err(NetQueuePairError::QueueAddUsed)?;
-            queue
+            if !queue
                 .enable_notification()
-                .map_err(NetQueuePairError::QueueEnableNotification)?;
+                .map_err(NetQueuePairError::QueueEnableNotification)?
+            {
+                break;
+            }
         }
 
         Ok(retry_write)
@@ -275,9 +278,12 @@ impl RxVirtio {
             queue
                 .add_used(used_desc_head.0, used_desc_head.1)
                 .map_err(NetQueuePairError::QueueAddUsed)?;
-            queue
+            if !queue
                 .enable_notification()
-                .map_err(NetQueuePairError::QueueEnableNotification)?;
+                .map_err(NetQueuePairError::QueueEnableNotification)?
+            {
+                break;
+            }
         }
 
         Ok(exhausted_descs)

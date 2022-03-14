@@ -62,92 +62,98 @@ impl CtrlQueue {
         access_platform: Option<&Arc<dyn AccessPlatform>>,
     ) -> Result<bool> {
         let mut used_desc_heads = Vec::new();
-        for mut desc_chain in queue.iter().map_err(Error::QueueIterator)? {
-            let ctrl_desc = desc_chain.next().ok_or(Error::NoControlHeaderDescriptor)?;
+        loop {
+            for mut desc_chain in queue.iter().map_err(Error::QueueIterator)? {
+                let ctrl_desc = desc_chain.next().ok_or(Error::NoControlHeaderDescriptor)?;
 
-            let ctrl_hdr: ControlHeader = desc_chain
-                .memory()
-                .read_obj(
-                    ctrl_desc
-                        .addr()
-                        .translate(access_platform, ctrl_desc.len() as usize),
-                )
-                .map_err(Error::GuestMemory)?;
-            let data_desc = desc_chain.next().ok_or(Error::NoDataDescriptor)?;
+                let ctrl_hdr: ControlHeader = desc_chain
+                    .memory()
+                    .read_obj(
+                        ctrl_desc
+                            .addr()
+                            .translate(access_platform, ctrl_desc.len() as usize),
+                    )
+                    .map_err(Error::GuestMemory)?;
+                let data_desc = desc_chain.next().ok_or(Error::NoDataDescriptor)?;
 
-            let data_desc_addr = data_desc
-                .addr()
-                .translate(access_platform, data_desc.len() as usize);
+                let data_desc_addr = data_desc
+                    .addr()
+                    .translate(access_platform, data_desc.len() as usize);
 
-            let status_desc = desc_chain.next().ok_or(Error::NoStatusDescriptor)?;
+                let status_desc = desc_chain.next().ok_or(Error::NoStatusDescriptor)?;
 
-            let ok = match u32::from(ctrl_hdr.class) {
-                VIRTIO_NET_CTRL_MQ => {
-                    let queue_pairs = desc_chain
-                        .memory()
-                        .read_obj::<u16>(data_desc_addr)
-                        .map_err(Error::GuestMemory)?;
-                    if u32::from(ctrl_hdr.cmd) != VIRTIO_NET_CTRL_MQ_VQ_PAIRS_SET {
-                        warn!("Unsupported command: {}", ctrl_hdr.cmd);
-                        false
-                    } else if (queue_pairs < VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN as u16)
-                        || (queue_pairs > VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX as u16)
-                    {
-                        warn!("Number of MQ pairs out of range: {}", queue_pairs);
-                        false
-                    } else {
-                        info!("Number of MQ pairs requested: {}", queue_pairs);
-                        true
-                    }
-                }
-                VIRTIO_NET_CTRL_GUEST_OFFLOADS => {
-                    let features = desc_chain
-                        .memory()
-                        .read_obj::<u64>(data_desc_addr)
-                        .map_err(Error::GuestMemory)?;
-                    if u32::from(ctrl_hdr.cmd) != VIRTIO_NET_CTRL_GUEST_OFFLOADS_SET {
-                        warn!("Unsupported command: {}", ctrl_hdr.cmd);
-                        false
-                    } else {
-                        let mut ok = true;
-                        for tap in self.taps.iter_mut() {
-                            info!("Reprogramming tap offload with features: {}", features);
-                            tap.set_offload(virtio_features_to_tap_offload(features))
-                                .map_err(|e| {
-                                    error!("Error programming tap offload: {:?}", e);
-                                    ok = false
-                                })
-                                .ok();
+                let ok = match u32::from(ctrl_hdr.class) {
+                    VIRTIO_NET_CTRL_MQ => {
+                        let queue_pairs = desc_chain
+                            .memory()
+                            .read_obj::<u16>(data_desc_addr)
+                            .map_err(Error::GuestMemory)?;
+                        if u32::from(ctrl_hdr.cmd) != VIRTIO_NET_CTRL_MQ_VQ_PAIRS_SET {
+                            warn!("Unsupported command: {}", ctrl_hdr.cmd);
+                            false
+                        } else if (queue_pairs < VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN as u16)
+                            || (queue_pairs > VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX as u16)
+                        {
+                            warn!("Number of MQ pairs out of range: {}", queue_pairs);
+                            false
+                        } else {
+                            info!("Number of MQ pairs requested: {}", queue_pairs);
+                            true
                         }
-                        ok
                     }
-                }
-                _ => {
-                    warn!("Unsupported command {:?}", ctrl_hdr);
-                    false
-                }
-            };
+                    VIRTIO_NET_CTRL_GUEST_OFFLOADS => {
+                        let features = desc_chain
+                            .memory()
+                            .read_obj::<u64>(data_desc_addr)
+                            .map_err(Error::GuestMemory)?;
+                        if u32::from(ctrl_hdr.cmd) != VIRTIO_NET_CTRL_GUEST_OFFLOADS_SET {
+                            warn!("Unsupported command: {}", ctrl_hdr.cmd);
+                            false
+                        } else {
+                            let mut ok = true;
+                            for tap in self.taps.iter_mut() {
+                                info!("Reprogramming tap offload with features: {}", features);
+                                tap.set_offload(virtio_features_to_tap_offload(features))
+                                    .map_err(|e| {
+                                        error!("Error programming tap offload: {:?}", e);
+                                        ok = false
+                                    })
+                                    .ok();
+                            }
+                            ok
+                        }
+                    }
+                    _ => {
+                        warn!("Unsupported command {:?}", ctrl_hdr);
+                        false
+                    }
+                };
 
-            desc_chain
-                .memory()
-                .write_obj(
-                    if ok { VIRTIO_NET_OK } else { VIRTIO_NET_ERR } as u8,
-                    status_desc
-                        .addr()
-                        .translate(access_platform, status_desc.len() as usize),
-                )
-                .map_err(Error::GuestMemory)?;
-            let len = ctrl_desc.len() + data_desc.len() + status_desc.len();
-            used_desc_heads.push((desc_chain.head_index(), len));
-        }
+                desc_chain
+                    .memory()
+                    .write_obj(
+                        if ok { VIRTIO_NET_OK } else { VIRTIO_NET_ERR } as u8,
+                        status_desc
+                            .addr()
+                            .translate(access_platform, status_desc.len() as usize),
+                    )
+                    .map_err(Error::GuestMemory)?;
+                let len = ctrl_desc.len() + data_desc.len() + status_desc.len();
+                used_desc_heads.push((desc_chain.head_index(), len));
+            }
 
-        for (desc_index, len) in used_desc_heads.iter() {
-            queue
-                .add_used(*desc_index, *len)
-                .map_err(Error::QueueAddUsed)?;
-            queue
+            for (desc_index, len) in used_desc_heads.iter() {
+                queue
+                    .add_used(*desc_index, *len)
+                    .map_err(Error::QueueAddUsed)?;
+            }
+
+            if !queue
                 .enable_notification()
-                .map_err(Error::QueueEnableNotification)?;
+                .map_err(Error::QueueEnableNotification)?
+            {
+                break;
+            }
         }
 
         Ok(!used_desc_heads.is_empty())
