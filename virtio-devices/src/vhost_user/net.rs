@@ -6,16 +6,13 @@ use crate::thread_helper::spawn_virtio_thread;
 use crate::vhost_user::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
 use crate::vhost_user::{Error, Result, VhostUserCommon};
 use crate::{
-    ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, VirtioCommon, VirtioDevice,
-    VirtioDeviceType, VirtioInterrupt, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_RING_EVENT_IDX,
-    VIRTIO_F_VERSION_1,
+    ActivateResult, NetCtrlEpollHandler, VirtioCommon, VirtioDevice, VirtioDeviceType,
+    VirtioInterrupt, VIRTIO_F_RING_EVENT_IDX, VIRTIO_F_VERSION_1,
 };
 use crate::{GuestMemoryMmap, GuestRegionMmap};
 use net_util::{build_net_config_space, CtrlQueue, MacAddr, VirtioNetConfig};
 use seccompiler::SeccompAction;
-use std::os::unix::io::AsRawFd;
 use std::result;
-use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::vec::Vec;
@@ -29,6 +26,7 @@ use virtio_bindings::bindings::virtio_net::{
     VIRTIO_NET_F_HOST_ECN, VIRTIO_NET_F_HOST_TSO4, VIRTIO_NET_F_HOST_TSO6, VIRTIO_NET_F_HOST_UFO,
     VIRTIO_NET_F_MAC, VIRTIO_NET_F_MRG_RXBUF,
 };
+use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use virtio_queue::Queue;
 use vm_memory::{ByteValued, GuestMemoryAtomic};
 use vm_migration::{
@@ -52,57 +50,6 @@ impl VersionMapped for State {}
 
 struct SlaveReqHandler {}
 impl VhostUserMasterReqHandler for SlaveReqHandler {}
-
-/// Control queue
-// Event available on the control queue.
-const CTRL_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
-
-pub struct NetCtrlEpollHandler {
-    pub mem: GuestMemoryAtomic<GuestMemoryMmap>,
-    pub kill_evt: EventFd,
-    pub pause_evt: EventFd,
-    pub ctrl_q: CtrlQueue,
-    pub queue_evt: EventFd,
-    pub queue: Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
-}
-
-impl NetCtrlEpollHandler {
-    pub fn run_ctrl(
-        &mut self,
-        paused: Arc<AtomicBool>,
-        paused_sync: Arc<Barrier>,
-    ) -> std::result::Result<(), EpollHelperError> {
-        let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
-        helper.add_event(self.queue_evt.as_raw_fd(), CTRL_QUEUE_EVENT)?;
-        helper.run(paused, paused_sync, self)?;
-
-        Ok(())
-    }
-}
-
-impl EpollHelperHandler for NetCtrlEpollHandler {
-    fn handle_event(&mut self, _helper: &mut EpollHelper, event: &epoll::Event) -> bool {
-        let ev_type = event.data as u16;
-        match ev_type {
-            CTRL_QUEUE_EVENT => {
-                if let Err(e) = self.queue_evt.read() {
-                    error!("failed to get ctl queue event: {:?}", e);
-                    return true;
-                }
-                if let Err(e) = self.ctrl_q.process(&mut self.queue, None) {
-                    error!("failed to process ctrl queue: {:?}", e);
-                    return true;
-                }
-            }
-            _ => {
-                error!("Unknown event for virtio-net");
-                return true;
-            }
-        }
-
-        false
-    }
-}
 
 pub struct Net {
     common: VirtioCommon,
@@ -323,19 +270,25 @@ impl VirtioDevice for Net {
         self.guest_memory = Some(mem.clone());
 
         let num_queues = queues.len();
+        let event_idx = self.common.feature_acked(VIRTIO_RING_F_EVENT_IDX.into());
         if self.common.feature_acked(VIRTIO_NET_F_CTRL_VQ.into()) && num_queues % 2 != 0 {
-            let cvq_queue = queues.remove(num_queues - 1);
-            let cvq_queue_evt = queue_evts.remove(num_queues - 1);
+            let ctrl_queue_index = num_queues - 1;
+            let mut ctrl_queue = queues.remove(ctrl_queue_index);
+            let ctrl_queue_evt = queue_evts.remove(ctrl_queue_index);
+
+            ctrl_queue.set_event_idx(event_idx);
 
             let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
             let mut ctrl_handler = NetCtrlEpollHandler {
-                mem: mem.clone(),
                 kill_evt,
                 pause_evt,
                 ctrl_q: CtrlQueue::new(Vec::new()),
-                queue: cvq_queue,
-                queue_evt: cvq_queue_evt,
+                queue: ctrl_queue,
+                queue_evt: ctrl_queue_evt,
+                access_platform: None,
+                interrupt_cb: interrupt_cb.clone(),
+                queue_index: ctrl_queue_index as u16,
             };
 
             let paused = self.common.paused.clone();

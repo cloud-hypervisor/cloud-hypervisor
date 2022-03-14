@@ -53,8 +53,8 @@ pub struct NetCtrlEpollHandler {
     pub queue_evt: EventFd,
     pub queue: Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
     pub access_platform: Option<Arc<dyn AccessPlatform>>,
-    interrupt_cb: Arc<dyn VirtioInterrupt>,
-    queue_index: u16,
+    pub interrupt_cb: Arc<dyn VirtioInterrupt>,
+    pub queue_index: u16,
 }
 
 impl NetCtrlEpollHandler {
