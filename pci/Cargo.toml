@@ -16,7 +16,7 @@ hypervisor = { path = "../hypervisor" }
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
 vfio_user = { path = "../vfio_user" }
 vmm-sys-util = "0.9.0"
-libc = "0.2.119"
+libc = "0.2.120"
 log = "0.4.14"
 serde = "1.0.136"
 serde_derive = "1.0.136"
