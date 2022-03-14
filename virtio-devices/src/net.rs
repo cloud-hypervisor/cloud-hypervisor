@@ -568,18 +568,18 @@ impl VirtioDevice for Net {
         let num_queues = queues.len();
         let event_idx = self.common.feature_acked(VIRTIO_RING_F_EVENT_IDX.into());
         if self.common.feature_acked(VIRTIO_NET_F_CTRL_VQ.into()) && num_queues % 2 != 0 {
-            let mut cvq_queue = queues.remove(num_queues - 1);
-            let cvq_queue_evt = queue_evts.remove(num_queues - 1);
+            let mut ctrl_queue = queues.remove(num_queues - 1);
+            let ctrl_queue_evt = queue_evts.remove(num_queues - 1);
 
-            cvq_queue.set_event_idx(event_idx);
+            ctrl_queue.set_event_idx(event_idx);
 
             let (kill_evt, pause_evt) = self.common.dup_eventfds();
             let mut ctrl_handler = NetCtrlEpollHandler {
                 kill_evt,
                 pause_evt,
                 ctrl_q: CtrlQueue::new(self.taps.clone()),
-                queue: cvq_queue,
-                queue_evt: cvq_queue_evt,
+                queue: ctrl_queue,
+                queue_evt: ctrl_queue_evt,
                 access_platform: self.common.access_platform.clone(),
             };
 
