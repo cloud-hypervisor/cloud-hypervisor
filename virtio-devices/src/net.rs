@@ -565,11 +565,11 @@ impl VirtioDevice for Net {
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
 
-        let queue_num = queues.len();
+        let num_queues = queues.len();
         let event_idx = self.common.feature_acked(VIRTIO_RING_F_EVENT_IDX.into());
-        if self.common.feature_acked(VIRTIO_NET_F_CTRL_VQ.into()) && queue_num % 2 != 0 {
-            let mut cvq_queue = queues.remove(queue_num - 1);
-            let cvq_queue_evt = queue_evts.remove(queue_num - 1);
+        if self.common.feature_acked(VIRTIO_NET_F_CTRL_VQ.into()) && num_queues % 2 != 0 {
+            let mut cvq_queue = queues.remove(num_queues - 1);
+            let cvq_queue_evt = queue_evts.remove(num_queues - 1);
 
             cvq_queue.set_event_idx(event_idx);
 
