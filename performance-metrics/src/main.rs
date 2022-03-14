@@ -22,10 +22,6 @@ enum Error {
     TestTimeout,
     #[error("Error: test failed")]
     TestFailed,
-    #[error("Error creating log file: {0}")]
-    ReportFileCreation(std::io::Error),
-    #[error("Error writing log file: {0}")]
-    ReportFileWrite(std::io::Error),
 }
 
 #[derive(Deserialize, Serialize)]
@@ -489,7 +485,10 @@ fn main() {
         if let Some(file) = cmd_arguments.value_of("report-file") {
             Box::new(
                 std::fs::File::create(std::path::Path::new(file))
-                    .map_err(Error::ReportFileCreation)
+                    .map_err(|e| {
+                        eprintln!("Error opening report file: {}: {}", file, e);
+                        std::process::exit(1);
+                    })
                     .unwrap(),
             )
         } else {
@@ -502,6 +501,9 @@ fn main() {
                 .unwrap()
                 .as_bytes(),
         )
-        .map_err(Error::ReportFileWrite)
+        .map_err(|e| {
+            eprintln!("Error writing report file: {}", e);
+            std::process::exit(1);
+        })
         .unwrap();
 }
