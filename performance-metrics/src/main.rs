@@ -385,7 +385,7 @@ const TEST_LIST: [PerformanceTest; 15] = [
     },
 ];
 
-fn run_test_with_timetout(test: &'static PerformanceTest) -> Result<PerformanceTestResult, Error> {
+fn run_test_with_timeout(test: &'static PerformanceTest) -> Result<PerformanceTestResult, Error> {
     let (sender, receiver) = channel::<Result<PerformanceTestResult, Error>>();
     thread::spawn(move || {
         println!("Test '{}' running .. ({})", test.name, test.control);
@@ -483,7 +483,7 @@ fn main() {
 
     for test in TEST_LIST.iter() {
         if test_filter.is_empty() || test_filter.iter().any(|&s| test.name.contains(s)) {
-            match run_test_with_timetout(test) {
+            match run_test_with_timeout(test) {
                 Ok(r) => {
                     metrics_report.results.push(r);
                 }
