@@ -464,17 +464,6 @@ fn main() {
         None => Vec::new(),
     };
 
-    let mut report_file: Box<dyn std::io::Write + Send> =
-        if let Some(file) = cmd_arguments.value_of("report-file") {
-            Box::new(
-                std::fs::File::create(std::path::Path::new(file))
-                    .map_err(Error::ReportFileCreation)
-                    .unwrap(),
-            )
-        } else {
-            Box::new(std::io::stderr())
-        };
-
     // Run performance tests sequentially and report results (in both readable/json format)
     let mut metrics_report: MetricsReport = Default::default();
 
@@ -495,6 +484,17 @@ fn main() {
     }
 
     cleanup_tests();
+
+    let mut report_file: Box<dyn std::io::Write + Send> =
+        if let Some(file) = cmd_arguments.value_of("report-file") {
+            Box::new(
+                std::fs::File::create(std::path::Path::new(file))
+                    .map_err(Error::ReportFileCreation)
+                    .unwrap(),
+            )
+        } else {
+            Box::new(std::io::stderr())
+        };
 
     report_file
         .write(
