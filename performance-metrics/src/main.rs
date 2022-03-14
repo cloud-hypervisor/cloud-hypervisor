@@ -488,7 +488,7 @@ fn main() {
                 }
                 Err(e) => {
                     eprintln!("Aborting test due to error: '{:?}'", e);
-                    break;
+                    std::process::exit(1);
                 }
             };
         }
