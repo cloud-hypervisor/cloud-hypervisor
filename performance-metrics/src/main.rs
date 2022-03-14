@@ -497,7 +497,6 @@ fn main() {
 
     cleanup_tests();
 
-    // Todo: Report/upload to the metrics database
     report_file
         .write(
             serde_json::to_string_pretty(&metrics_report)
