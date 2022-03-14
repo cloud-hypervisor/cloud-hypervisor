@@ -53,9 +53,20 @@ pub struct NetCtrlEpollHandler {
     pub queue_evt: EventFd,
     pub queue: Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
     pub access_platform: Option<Arc<dyn AccessPlatform>>,
+    interrupt_cb: Arc<dyn VirtioInterrupt>,
+    queue_index: u16,
 }
 
 impl NetCtrlEpollHandler {
+    fn signal_used_queue(&self, queue_index: u16) -> result::Result<(), DeviceError> {
+        self.interrupt_cb
+            .trigger(VirtioInterruptType::Queue(queue_index))
+            .map_err(|e| {
+                error!("Failed to signal used queue: {:?}", e);
+                DeviceError::FailedSignalingUsedQueue(e)
+            })
+    }
+
     pub fn run_ctrl(
         &mut self,
         paused: Arc<AtomicBool>,
@@ -84,6 +95,20 @@ impl EpollHelperHandler for NetCtrlEpollHandler {
                 {
                     error!("Failed to process control queue: {:?}", e);
                     return true;
+                } else {
+                    match self.queue.needs_notification() {
+                        Ok(true) => {
+                            if let Err(e) = self.signal_used_queue(self.queue_index) {
+                                error!("Error signalling that control queue was used: {:?}", e);
+                                return true;
+                            }
+                        }
+                        Ok(false) => {}
+                        Err(e) => {
+                            error!("Error getting notification state of control queue: {}", e);
+                            return true;
+                        }
+                    }
                 }
             }
             _ => {
@@ -568,8 +593,9 @@ impl VirtioDevice for Net {
         let num_queues = queues.len();
         let event_idx = self.common.feature_acked(VIRTIO_RING_F_EVENT_IDX.into());
         if self.common.feature_acked(VIRTIO_NET_F_CTRL_VQ.into()) && num_queues % 2 != 0 {
-            let mut ctrl_queue = queues.remove(num_queues - 1);
-            let ctrl_queue_evt = queue_evts.remove(num_queues - 1);
+            let ctrl_queue_index = num_queues - 1;
+            let mut ctrl_queue = queues.remove(ctrl_queue_index);
+            let ctrl_queue_evt = queue_evts.remove(ctrl_queue_index);
 
             ctrl_queue.set_event_idx(event_idx);
 
@@ -581,6 +607,8 @@ impl VirtioDevice for Net {
                 queue: ctrl_queue,
                 queue_evt: ctrl_queue_evt,
                 access_platform: self.common.access_platform.clone(),
+                queue_index: ctrl_queue_index as u16,
+                interrupt_cb: interrupt_cb.clone(),
             };
 
             let paused = self.common.paused.clone();
