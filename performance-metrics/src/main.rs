@@ -493,7 +493,7 @@ fn main() {
                     .unwrap(),
             )
         } else {
-            Box::new(std::io::stderr())
+            Box::new(std::io::stdout())
         };
 
     report_file
