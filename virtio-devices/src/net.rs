@@ -75,19 +75,19 @@ impl EpollHelperHandler for NetCtrlEpollHandler {
         match ev_type {
             CTRL_QUEUE_EVENT => {
                 if let Err(e) = self.queue_evt.read() {
-                    error!("failed to get ctl queue event: {:?}", e);
+                    error!("Failed to get control queue event: {:?}", e);
                     return true;
                 }
                 if let Err(e) = self
                     .ctrl_q
                     .process(&mut self.queue, self.access_platform.as_ref())
                 {
-                    error!("failed to process ctrl queue: {:?}", e);
+                    error!("Failed to process control queue: {:?}", e);
                     return true;
                 }
             }
             _ => {
-                error!("Unknown event for virtio-net");
+                error!("Unknown event for virtio-net control queue");
                 return true;
             }
         }
