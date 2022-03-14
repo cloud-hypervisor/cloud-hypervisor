@@ -452,7 +452,6 @@ fn main() {
         .get_matches();
 
     if cmd_arguments.is_present("list-tests") {
-        println!("List of available metrics tests:\n");
         for test in TEST_LIST.iter() {
             println!("\"{}\" ({})", test.name, test.control);
         }
