@@ -56,7 +56,11 @@ pipeline{
 								checkout scm
 							}
 						}
-
+						stage ('Prepare environment') {
+							steps {
+								sh "scripts/prepare_vdpa.sh"
+							}
+						}
 						stage ('Run OpenAPI tests') {
 							steps {
 								sh "scripts/run_openapi_tests.sh"
@@ -128,7 +132,11 @@ pipeline{
 								checkout scm
 							}
 						}
-
+						stage ('Prepare environment') {
+							steps {
+								sh "scripts/prepare_vdpa.sh"
+							}
+						}
 						stage ('Run unit tests for musl') {
 							steps {
 								sh "scripts/dev_cli.sh tests --unit --libc musl"
