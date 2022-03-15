@@ -5877,6 +5877,206 @@ mod parallel {
 
         handle_child_output(r, &output);
     }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_vdpa_block() {
+        // Before trying to run the test, verify the vdpa_sim_blk module is correctly loaded.
+        if !exec_host_command_status("lsmod | grep vdpa_sim_blk").success() {
+            return;
+        }
+
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+        let api_socket = temp_api_path(&guest.tmp_dir);
+
+        let kernel_path = direct_kernel_boot_path();
+
+        let mut child = GuestCommand::new(&guest)
+            .args(&["--cpus", "boot=2"])
+            .args(&["--memory", "size=512M,hugepages=on"])
+            .args(&["--kernel", kernel_path.to_str().unwrap()])
+            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .default_net()
+            .args(&["--vdpa", "path=/dev/vhost-vdpa-0,num_queues=1"])
+            .args(&["--api-socket", &api_socket])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            // Check both if /dev/vdc exists and if the block size is 128M.
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk | grep vdc | grep -c 128M")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+
+            // Check the content of the block device after we wrote to it.
+            // The vpda-sim-blk should let us read what we previously wrote.
+            guest
+                .ssh_command("sudo bash -c 'echo foobar > /dev/vdc'")
+                .unwrap();
+            assert_eq!(
+                guest.ssh_command("sudo head -1 /dev/vdc").unwrap().trim(),
+                "foobar"
+            );
+
+            // Hotplug an extra vDPA block device
+            // Add a new vDPA device to the VM
+            let (cmd_success, cmd_output) = remote_command_w_output(
+                &api_socket,
+                "add-vdpa",
+                Some("id=myvdpa0,path=/dev/vhost-vdpa-1,num_queues=1"),
+            );
+            assert!(cmd_success);
+            assert!(String::from_utf8_lossy(&cmd_output)
+                .contains("{\"id\":\"myvdpa0\",\"bdf\":\"0000:00:07.0\"}"));
+
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            // Check both if /dev/vdd exists and if the block size is 128M.
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk | grep vdd | grep -c 128M")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+
+            // Write some content to the block device we've just plugged.
+            guest
+                .ssh_command("sudo bash -c 'echo foobar > /dev/vdd'")
+                .unwrap();
+
+            // Unplug the device
+            let cmd_success = remote_command(&api_socket, "remove-device", Some("myvdpa0"));
+            assert!(cmd_success);
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            // Check /dev/vdd doesn't exist anymore
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk | grep -c vdd || true")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or(1),
+                0
+            );
+
+            // Now let's plug it back
+            let (cmd_success, cmd_output) = remote_command_w_output(
+                &api_socket,
+                "add-vdpa",
+                Some("id=myvdpa0,path=/dev/vhost-vdpa-1,num_queues=1"),
+            );
+            assert!(cmd_success);
+            assert!(String::from_utf8_lossy(&cmd_output)
+                .contains("{\"id\":\"myvdpa0\",\"bdf\":\"0000:00:07.0\"}"));
+
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            // And finally check the content
+            assert_eq!(
+                guest.ssh_command("sudo head -1 /dev/vdd").unwrap().trim(),
+                "foobar"
+            );
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_vdpa_net() {
+        // Before trying to run the test, verify the vdpa_sim_net module is correctly loaded.
+        if !exec_host_command_status("lsmod | grep vdpa_sim_net").success() {
+            return;
+        }
+
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+
+        let kernel_path = direct_kernel_boot_path();
+
+        let mut child = GuestCommand::new(&guest)
+            .args(&["--cpus", "boot=2"])
+            .args(&["--memory", "size=512M,hugepages=on"])
+            .args(&["--kernel", kernel_path.to_str().unwrap()])
+            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .default_net()
+            .args(&["--vdpa", "path=/dev/vhost-vdpa-2,num_queues=2"])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            // Check we can find network interface related to vDPA device
+            assert_eq!(
+                guest
+                    .ssh_command("ip -o link | grep -c ens6")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or(0),
+                1
+            );
+
+            guest
+                .ssh_command("sudo ip addr add 172.16.1.2/24 dev ens6")
+                .unwrap();
+            guest.ssh_command("sudo ip link set up dev ens6").unwrap();
+
+            // Check there is no packet yet on both TX/RX of the network interface
+            assert_eq!(
+                guest
+                    .ssh_command("ip -j -p -s link show ens6 | grep -c '\"packets\": 0'")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or(0),
+                2
+            );
+
+            // Send 6 packets with ping command
+            guest.ssh_command("ping 172.16.1.10 -c 6 || true").unwrap();
+
+            // Check we can find 6 packets on both TX/RX of the network interface
+            assert_eq!(
+                guest
+                    .ssh_command("ip -j -p -s link show ens6 | grep -c '\"packets\": 6'")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or(0),
+                2
+            );
+
+            // No need to check for hotplug as we already tested it through
+            // test_vdpa_block()
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
 }
 
 mod sequential {
