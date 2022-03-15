@@ -60,7 +60,7 @@ impl CtrlQueue {
         &mut self,
         queue: &mut Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
         access_platform: Option<&Arc<dyn AccessPlatform>>,
-    ) -> Result<bool> {
+    ) -> Result<()> {
         let mut used_desc_heads = Vec::new();
         loop {
             for mut desc_chain in queue.iter().map_err(Error::QueueIterator)? {
@@ -156,7 +156,7 @@ impl CtrlQueue {
             }
         }
 
-        Ok(!used_desc_heads.is_empty())
+        Ok(())
     }
 }
 
