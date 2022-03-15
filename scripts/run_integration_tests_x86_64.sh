@@ -190,9 +190,12 @@ sudo bash -c "echo 1000000 > /sys/kernel/mm/ksm/pages_to_scan"
 sudo bash -c "echo 10 > /sys/kernel/mm/ksm/sleep_millisecs"
 sudo bash -c "echo 1 > /sys/kernel/mm/ksm/run"
 
-# Both test_vfio and ovs-dpdk rely on hugepages
+# Both test_vfio, ovs-dpdk and vDPA tests rely on hugepages
 echo 6144 | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
+
+# Update max locked memory to 'unlimited' to avoid issues with vDPA
+ulimit -l unlimited
 
 export RUST_BACKTRACE=1
 time cargo test $features "parallel::$test_filter" -- ${test_binary_args[*]}
