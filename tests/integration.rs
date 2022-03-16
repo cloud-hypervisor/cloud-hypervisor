@@ -5772,7 +5772,7 @@ mod parallel {
         let mut child = GuestCommand::new(&guest)
             .args(&["--api-socket", &api_socket])
             .args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M,shared=on"])
+            .args(&["--memory", "size=512M,shared=on,hugepages=on"])
             .args(&["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
             .default_disks()
             .default_net()
