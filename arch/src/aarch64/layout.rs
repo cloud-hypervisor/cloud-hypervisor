@@ -86,7 +86,8 @@ pub const PCI_MMCONFIG_SIZE: u64 = 256 << 20;
 pub const PCI_MMIO_CONFIG_SIZE_PER_SEGMENT: u64 = 4096 * 256;
 
 /// Start of RAM on 64 bit ARM.
-pub const RAM_64BIT_START: u64 = 0x4000_0000;
+pub const CRATON_RAM_START: u64 = 0x5000_0000;
+pub const RAM_64BIT_START: u64 = CRATON_RAM_START; //0x4000_0000;
 
 /// Kernel command line maximum size.
 /// As per `arch/arm64/include/uapi/asm/setup.h`.
@@ -102,8 +103,10 @@ pub const ACPI_START: u64 = RAM_64BIT_START + FDT_MAX_SIZE as u64;
 pub const ACPI_MAX_SIZE: usize = 0x20_0000;
 pub const RSDP_POINTER: GuestAddress = GuestAddress(ACPI_START);
 
+
 /// Kernel start after FDT and ACPI
-pub const KERNEL_START: u64 = ACPI_START + ACPI_MAX_SIZE as u64;
+pub const CRATON_KERNEL_START: u64 = CRATON_RAM_START + FDT_MAX_SIZE as u64;
+pub const KERNEL_START: u64 = CRATON_KERNEL_START;//ACPI_START + ACPI_MAX_SIZE as u64;
 
 /// Pci high memory base
 pub const PCI_HIGH_BASE: u64 = 0x80_0000_0000_u64;

@@ -1027,20 +1027,93 @@ impl Vm {
 
         println!("created MemoryManager");
 
-        /* TODO the rest */
-        return Err(Error::Console(vmm_sys_util::errno::Error::new(1)));
+        /* Nuno: rest of this code is from new_from_memory_manager */
 
-        let new_vm = Vm::new_from_memory_manager(
+        /* Nuno: no iommu please */
+        let force_iommu = false;
+        /* Nuno: numa_nodes will just be an empty BTree */
+        let numa_nodes =
+            Self::create_numa_nodes(config.lock().unwrap().numa.clone(), &memory_manager)?;
+
+        let device_manager = DeviceManager::new(
+            vm.clone(),
+            config.clone(),
+            memory_manager.clone(),
+            &exit_evt,
+            &reset_evt,
+            seccomp_action.clone(),
+            numa_nodes.clone(),
+            &activate_evt,
+            force_iommu,
+            false,
+        )
+        .map_err(Error::DeviceManager)?;
+
+        println!("created DeviceManager");
+
+        let memory = memory_manager.lock().unwrap().guest_memory();
+        let mmio_bus = Arc::clone(device_manager.lock().unwrap().mmio_bus());
+        // Create the VmOps structure, which implements the VmmOps trait.
+        // And send it to the hypervisor.
+
+        let vm_ops: Arc<dyn VmmOps> = Arc::new(VmOps {
+            memory,
+            mmio_bus,
+        });
+
+        let exit_evt_clone = exit_evt.try_clone().map_err(Error::EventFdClone)?;
+        let cpu_manager = cpu::CpuManager::new(
+            &config.lock().unwrap().cpus.clone(),
+            &device_manager,
+            &memory_manager,
+            vm.clone(),
+            exit_evt_clone,
+            reset_evt,
+            hypervisor.clone(),
+            seccomp_action.clone(),
+            vm_ops,
+            &numa_nodes,
+        )
+        .map_err(Error::CpuManager)?;
+
+        println!("created CpuManager");
+
+        let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO as i32) } != 0;
+        let kernel = config
+            .lock()
+            .unwrap()
+            .kernel
+            .as_ref()
+            .map(|k| File::open(&k.path))
+            .transpose()
+            .map_err(Error::KernelFile)?;
+
+        let initramfs = config
+            .lock()
+            .unwrap()
+            .initramfs
+            .as_ref()
+            .map(|i| File::open(&i.path))
+            .transpose()
+            .map_err(Error::InitramfsFile)?;
+
+        let new_vm = Vm {
+            kernel,
+            initramfs,
+            device_manager,
             config,
+            on_tty,
+            threads: Vec::with_capacity(1),
+            signals: None,
+            state: RwLock::new(VmState::Created),
+            cpu_manager,
             memory_manager,
             vm,
+            #[cfg(any(target_arch = "aarch64", feature = "acpi"))]
+            numa_nodes,
+            seccomp_action: seccomp_action.clone(),
             exit_evt,
-            reset_evt,
-            seccomp_action,
-            hypervisor,
-            activate_evt,
-            false,
-        )?;
+        };
 
         // The device manager must create the devices from here as it is part
         // of the regular code path creating everything from scratch.
@@ -1050,6 +1123,7 @@ impl Vm {
             .unwrap()
             .create_devices(serial_pty, console_pty, console_resize_pipe)
             .map_err(Error::DeviceManager)?;
+
         Ok(new_vm)
     }
 
