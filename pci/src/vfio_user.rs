@@ -506,6 +506,10 @@ impl Drop for VfioUserPciDevice {
         if self.common.interrupt.intx_in_use() {
             self.common.disable_intx(&self.vfio_wrapper);
         }
+
+        if let Err(e) = self.client.lock().unwrap().shutdown() {
+            error!("Failed shutting down vfio-user client: {}", e);
+        }
     }
 }
 
