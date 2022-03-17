@@ -418,6 +418,7 @@ pub struct CpuManager {
     #[cfg(feature = "acpi")]
     proximity_domain_per_cpu: BTreeMap<u8, u32>,
     affinity: BTreeMap<u8, Vec<u8>>,
+    dynamic: bool,
 }
 
 const CPU_ENABLE_FLAG: usize = 0;
@@ -626,6 +627,11 @@ impl CpuManager {
             BTreeMap::new()
         };
 
+        #[cfg(feature = "tdx")]
+        let dynamic = !tdx_enabled;
+        #[cfg(not(feature = "tdx"))]
+        let dynamic = true;
+
         let cpu_manager = Arc::new(Mutex::new(CpuManager {
             config: config.clone(),
             interrupt_controller: device_manager.interrupt_controller().clone(),
@@ -649,6 +655,7 @@ impl CpuManager {
             #[cfg(feature = "acpi")]
             proximity_domain_per_cpu,
             affinity,
+            dynamic,
         }));
 
         #[cfg(feature = "acpi")]
