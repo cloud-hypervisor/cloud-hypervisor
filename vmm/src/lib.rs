@@ -581,56 +581,62 @@ impl Vmm {
             }
         }
 
-        // First we stop the current VM and create a new one.
-        if let Some(ref mut vm) = self.vm {
-            let config = vm.get_config();
-            let serial_pty = vm.serial_pty();
-            let console_pty = vm.console_pty();
-            let console_resize_pipe = vm
-                .console_resize_pipe()
-                .as_ref()
-                .map(|pipe| pipe.try_clone().unwrap());
-            self.vm_shutdown()?;
+        // First we stop the current VM
+        let (config, serial_pty, console_pty, console_resize_pipe) =
+            if let Some(mut vm) = self.vm.take() {
+                let config = vm.get_config();
+                let serial_pty = vm.serial_pty();
+                let console_pty = vm.console_pty();
+                let console_resize_pipe = vm
+                    .console_resize_pipe()
+                    .as_ref()
+                    .map(|pipe| pipe.try_clone().unwrap());
+                vm.shutdown()?;
+                (config, serial_pty, console_pty, console_resize_pipe)
+            } else {
+                return Err(VmError::VmNotCreated);
+            };
 
-            let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
-            let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
+        let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
+        let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
+        #[cfg(feature = "gdb")]
+        let debug_evt = self
+            .vm_debug_evt
+            .try_clone()
+            .map_err(VmError::EventFdClone)?;
+        let activate_evt = self
+            .activate_evt
+            .try_clone()
+            .map_err(VmError::EventFdClone)?;
+
+        // The Linux kernel fires off an i8042 reset after doing the ACPI reset so there may be
+        // an event sitting in the shared reset_evt. Without doing this we get very early reboots
+        // during the boot process.
+        if self.reset_evt.read().is_ok() {
+            warn!("Spurious second reset event received. Ignoring.");
+        }
+
+        // Then we create the new VM
+        let mut vm = Vm::new(
+            config,
+            exit_evt,
+            reset_evt,
             #[cfg(feature = "gdb")]
-            let debug_evt = self
-                .vm_debug_evt
-                .try_clone()
-                .map_err(VmError::EventFdClone)?;
-            let activate_evt = self
-                .activate_evt
-                .try_clone()
-                .map_err(VmError::EventFdClone)?;
+            debug_evt,
+            &self.seccomp_action,
+            self.hypervisor.clone(),
+            activate_evt,
+            serial_pty,
+            console_pty,
+            console_resize_pipe,
+        )?;
 
-            // The Linux kernel fires off an i8042 reset after doing the ACPI reset so there may be
-            // an event sitting in the shared reset_evt. Without doing this we get very early reboots
-            // during the boot process.
-            if self.reset_evt.read().is_ok() {
-                warn!("Spurious second reset event received. Ignoring.");
-            }
-            self.vm = Some(Vm::new(
-                config,
-                exit_evt,
-                reset_evt,
-                #[cfg(feature = "gdb")]
-                debug_evt,
-                &self.seccomp_action,
-                self.hypervisor.clone(),
-                activate_evt,
-                serial_pty,
-                console_pty,
-                console_resize_pipe,
-            )?);
-        }
+        // And we boot it
+        vm.boot()?;
 
-        // Then we start the new VM.
-        if let Some(ref mut vm) = self.vm {
-            vm.boot()
-        } else {
-            Err(VmError::VmNotCreated)
-        }
+        self.vm = Some(vm);
+
+        Ok(())
     }
 
     fn vm_info(&self) -> result::Result<VmInfo, VmError> {
