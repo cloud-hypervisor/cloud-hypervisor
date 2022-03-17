@@ -255,6 +255,8 @@ pub enum Error {
     StreamWrite(#[source] std::io::Error),
     #[error("Error reading from stream: {0}")]
     StreamRead(#[source] std::io::Error),
+    #[error("Error shutting down stream: {0}")]
+    StreamShutdown(#[source] std::io::Error),
     #[error("Error writing with file descriptors: {0}")]
     SendWithFd(#[source] vmm_sys_util::errno::Error),
     #[error("Error reading with file descriptors: {0}")]
@@ -664,5 +666,11 @@ impl Client {
 
     pub fn resettable(&self) -> bool {
         self.resettable
+    }
+
+    pub fn shutdown(&self) -> Result<(), Error> {
+        self.stream
+            .shutdown(std::net::Shutdown::Both)
+            .map_err(Error::StreamShutdown)
     }
 }
