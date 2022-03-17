@@ -125,6 +125,9 @@ pub enum Error {
     #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
     /// Failed to translate guest virtual address.
     TranslateVirtualAddress(hypervisor::HypervisorCpuError),
+
+    /// CPU hotplug/unplug not supported
+    ResizingNotSupported,
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -1093,6 +1096,10 @@ impl CpuManager {
     }
 
     pub fn resize(&mut self, desired_vcpus: u8) -> Result<bool> {
+        if !self.dynamic {
+            return Err(Error::ResizingNotSupported);
+        }
+
         match desired_vcpus.cmp(&self.present_vcpus()) {
             cmp::Ordering::Greater => {
                 self.create_vcpus(desired_vcpus, None)?;
