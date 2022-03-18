@@ -2306,6 +2306,12 @@ impl VmConfig {
             }
         }
 
+        if let Some(vdpa_devices) = &self.vdpa {
+            for vdpa_device in vdpa_devices {
+                vdpa_device.validate(self)?;
+            }
+        }
+
         if let Some(balloon) = &self.balloon {
             let mut ram_size = self.memory.size;
 
