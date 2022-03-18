@@ -447,8 +447,16 @@ fn main() {
         )
         .get_matches();
 
+    // It seems that the tool (ethr) used for testing the virtio-net latency
+    // is not stable on AArch64, and therefore the latency test is currently
+    // skipped on AArch64.
+    let test_list: Vec<&PerformanceTest> = TEST_LIST
+        .iter()
+        .filter(|t| !(cfg!(target_arch = "aarch64") && t.name == "virtio_net_latency_us"))
+        .collect();
+
     if cmd_arguments.is_present("list-tests") {
-        for test in TEST_LIST.iter() {
+        for test in test_list.iter() {
             println!("\"{}\" ({})", test.name, test.control);
         }
 
@@ -465,7 +473,7 @@ fn main() {
 
     init_tests();
 
-    for test in TEST_LIST.iter() {
+    for test in test_list.iter() {
         if test_filter.is_empty() || test_filter.iter().any(|&s| test.name.contains(s)) {
             match run_test_with_timeout(test) {
                 Ok(r) => {
