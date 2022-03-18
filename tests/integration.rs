@@ -2130,7 +2130,13 @@ mod parallel {
             let (cmd_success, cmd_output) = remote_command_w_output(
                 &api_socket,
                 "add-disk",
-                Some(format!("path={},id=test0,pci_segment=1", test_disk_path.as_str()).as_str()),
+                Some(
+                    format!(
+                        "path={},id=test0,pci_segment=1,iommu=on",
+                        test_disk_path.as_str()
+                    )
+                    .as_str(),
+                ),
             );
             assert!(cmd_success);
             assert!(String::from_utf8_lossy(&cmd_output)
