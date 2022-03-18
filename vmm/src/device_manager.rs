@@ -884,6 +884,7 @@ pub struct DeviceManager {
 
     // Paravirtualized IOMMU
     iommu_device: Option<Arc<Mutex<virtio_devices::Iommu>>>,
+    iommu_mapping: Option<Arc<IommuMapping>>,
 
     // PCI information about devices attached to the paravirtualized IOMMU
     // It contains the virtual IOMMU PCI BDF along with the list of PCI BDF
@@ -1046,6 +1047,7 @@ impl DeviceManager {
             passthrough_device: None,
             vfio_container: None,
             iommu_device: None,
+            iommu_mapping: None,
             iommu_attached_devices: None,
             pci_segments,
             device_tree,
@@ -1219,7 +1221,7 @@ impl DeviceManager {
     ) -> DeviceManagerResult<()> {
         let iommu_id = String::from(IOMMU_DEVICE_NAME);
 
-        let (iommu_device, iommu_mapping) = if self.config.lock().unwrap().iommu {
+        let iommu_device = if self.config.lock().unwrap().iommu {
             let (device, mapping) = virtio_devices::Iommu::new(
                 iommu_id.clone(),
                 self.seccomp_action.clone(),
@@ -1231,6 +1233,7 @@ impl DeviceManager {
             .map_err(DeviceManagerError::CreateVirtioIommu)?;
             let device = Arc::new(Mutex::new(device));
             self.iommu_device = Some(Arc::clone(&device));
+            self.iommu_mapping = Some(mapping);
 
             // Fill the device tree with a new node. In case of restore, we
             // know there is nothing to do, so we can simply override the
@@ -1240,20 +1243,23 @@ impl DeviceManager {
                 .unwrap()
                 .insert(iommu_id.clone(), device_node!(iommu_id, device));
 
-            (Some(device), Some(mapping))
+            Some(device)
         } else {
-            (None, None)
+            None
         };
 
         let mut iommu_attached_devices = Vec::new();
         {
             for handle in virtio_devices {
-                let mapping: &Option<Arc<IommuMapping>> =
-                    if handle.iommu { &iommu_mapping } else { &None };
+                let mapping: Option<Arc<IommuMapping>> = if handle.iommu {
+                    self.iommu_mapping.clone()
+                } else {
+                    None
+                };
 
                 let dev_id = self.add_virtio_pci_device(
                     handle.virtio_device,
-                    mapping,
+                    &mapping,
                     handle.id,
                     handle.pci_segment,
                     handle.dma_handler,
@@ -3943,9 +3949,15 @@ impl DeviceManager {
         // for instance.
         self.virtio_devices.push(handle.clone());
 
+        let mapping: Option<Arc<IommuMapping>> = if handle.iommu {
+            self.iommu_mapping.clone()
+        } else {
+            None
+        };
+
         let bdf = self.add_virtio_pci_device(
             handle.virtio_device,
-            &None,
+            &mapping,
             handle.id.clone(),
             handle.pci_segment,
             handle.dma_handler,
