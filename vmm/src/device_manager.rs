@@ -474,6 +474,9 @@ pub enum DeviceManagerError {
 
     /// Failed to DMA unmap virtio device.
     VirtioDmaUnmap(std::io::Error),
+
+    /// Cannot hotplug device behind vIOMMU
+    InvalidIommuHotplug,
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -3680,6 +3683,10 @@ impl DeviceManager {
         &mut self,
         device_cfg: &mut DeviceConfig,
     ) -> DeviceManagerResult<PciDeviceInfo> {
+        if device_cfg.iommu && !self.is_iommu_segment(device_cfg.pci_segment) {
+            return Err(DeviceManagerError::InvalidIommuHotplug);
+        }
+
         let (bdf, device_name) = self.add_passthrough_device(device_cfg)?;
 
         // Update the PCIU bitmap
@@ -3940,10 +3947,6 @@ impl DeviceManager {
         &mut self,
         handle: MetaVirtioDevice,
     ) -> DeviceManagerResult<PciDeviceInfo> {
-        if handle.iommu {
-            warn!("Placing device behind vIOMMU is not available for hotplugged devices");
-        }
-
         // Add the virtio device to the device manager list. This is important
         // as the list is used to notify virtio devices about memory updates
         // for instance.
@@ -3969,7 +3972,27 @@ impl DeviceManager {
         Ok(PciDeviceInfo { id: handle.id, bdf })
     }
 
+    fn is_iommu_segment(&self, pci_segment_id: u16) -> bool {
+        self.config
+            .lock()
+            .as_ref()
+            .unwrap()
+            .platform
+            .as_ref()
+            .map(|pc| {
+                pc.iommu_segments
+                    .as_ref()
+                    .map(|v| v.contains(&pci_segment_id))
+                    .unwrap_or_default()
+            })
+            .unwrap_or_default()
+    }
+
     pub fn add_disk(&mut self, disk_cfg: &mut DiskConfig) -> DeviceManagerResult<PciDeviceInfo> {
+        if disk_cfg.iommu && !self.is_iommu_segment(disk_cfg.pci_segment) {
+            return Err(DeviceManagerError::InvalidIommuHotplug);
+        }
+
         let device = self.make_virtio_block_device(disk_cfg)?;
         self.hotplug_virtio_pci_device(device)
     }
@@ -3980,11 +4003,19 @@ impl DeviceManager {
     }
 
     pub fn add_pmem(&mut self, pmem_cfg: &mut PmemConfig) -> DeviceManagerResult<PciDeviceInfo> {
+        if pmem_cfg.iommu && !self.is_iommu_segment(pmem_cfg.pci_segment) {
+            return Err(DeviceManagerError::InvalidIommuHotplug);
+        }
+
         let device = self.make_virtio_pmem_device(pmem_cfg)?;
         self.hotplug_virtio_pci_device(device)
     }
 
     pub fn add_net(&mut self, net_cfg: &mut NetConfig) -> DeviceManagerResult<PciDeviceInfo> {
+        if net_cfg.iommu && !self.is_iommu_segment(net_cfg.pci_segment) {
+            return Err(DeviceManagerError::InvalidIommuHotplug);
+        }
+
         let device = self.make_virtio_net_device(net_cfg)?;
         self.hotplug_virtio_pci_device(device)
     }
@@ -3995,6 +4026,10 @@ impl DeviceManager {
     }
 
     pub fn add_vsock(&mut self, vsock_cfg: &mut VsockConfig) -> DeviceManagerResult<PciDeviceInfo> {
+        if vsock_cfg.iommu && !self.is_iommu_segment(vsock_cfg.pci_segment) {
+            return Err(DeviceManagerError::InvalidIommuHotplug);
+        }
+
         let device = self.make_virtio_vsock_device(vsock_cfg)?;
         self.hotplug_virtio_pci_device(device)
     }
