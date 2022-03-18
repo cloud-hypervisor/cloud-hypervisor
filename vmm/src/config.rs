@@ -164,6 +164,10 @@ pub enum ValidationError {
     InvalidPciSegment(u16),
     /// Balloon too big
     BalloonLargerThanRam(u64, u64),
+    /// On a IOMMU segment but not behind IOMMU
+    OnIommuSegment(u16),
+    // On a IOMMU segment but IOMMU not suported
+    IommuNotSupported(u16),
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -234,6 +238,20 @@ impl fmt::Display for ValidationError {
                     f,
                     "Ballon size ({}) greater than RAM ({})",
                     balloon_size, ram_size
+                )
+            }
+            OnIommuSegment(pci_segment) => {
+                write!(
+                    f,
+                    "Device is on an IOMMU PCI segment ({}) but not placed behind IOMMU",
+                    pci_segment
+                )
+            }
+            IommuNotSupported(pci_segment) => {
+                write!(
+                    f,
+                    "Device is on an IOMMU PCI segment ({}) but does support being placed behind IOMMU",
+                    pci_segment
                 )
             }
         }
@@ -1091,6 +1109,12 @@ impl DiskConfig {
             if self.pci_segment >= platform_config.num_pci_segments {
                 return Err(ValidationError::InvalidPciSegment(self.pci_segment));
             }
+
+            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref() {
+                if iommu_segments.contains(&self.pci_segment) && !self.iommu {
+                    return Err(ValidationError::OnIommuSegment(self.pci_segment));
+                }
+            }
         }
 
         Ok(())
@@ -1381,6 +1405,12 @@ impl NetConfig {
             if self.pci_segment >= platform_config.num_pci_segments {
                 return Err(ValidationError::InvalidPciSegment(self.pci_segment));
             }
+
+            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref() {
+                if iommu_segments.contains(&self.pci_segment) && !self.iommu {
+                    return Err(ValidationError::OnIommuSegment(self.pci_segment));
+                }
+            }
         }
 
         Ok(())
@@ -1597,6 +1627,12 @@ impl FsConfig {
             if self.pci_segment >= platform_config.num_pci_segments {
                 return Err(ValidationError::InvalidPciSegment(self.pci_segment));
             }
+
+            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref() {
+                if iommu_segments.contains(&self.pci_segment) {
+                    return Err(ValidationError::IommuNotSupported(self.pci_segment));
+                }
+            }
         }
 
         Ok(())
@@ -1677,6 +1713,12 @@ impl PmemConfig {
         if let Some(platform_config) = vm_config.platform.as_ref() {
             if self.pci_segment >= platform_config.num_pci_segments {
                 return Err(ValidationError::InvalidPciSegment(self.pci_segment));
+            }
+
+            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref() {
+                if iommu_segments.contains(&self.pci_segment) && !self.iommu {
+                    return Err(ValidationError::OnIommuSegment(self.pci_segment));
+                }
             }
         }
 
@@ -1810,6 +1852,12 @@ impl DeviceConfig {
             if self.pci_segment >= platform_config.num_pci_segments {
                 return Err(ValidationError::InvalidPciSegment(self.pci_segment));
             }
+
+            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref() {
+                if iommu_segments.contains(&self.pci_segment) && !self.iommu {
+                    return Err(ValidationError::OnIommuSegment(self.pci_segment));
+                }
+            }
         }
 
         Ok(())
@@ -1854,6 +1902,12 @@ impl UserDeviceConfig {
         if let Some(platform_config) = vm_config.platform.as_ref() {
             if self.pci_segment >= platform_config.num_pci_segments {
                 return Err(ValidationError::InvalidPciSegment(self.pci_segment));
+            }
+
+            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref() {
+                if iommu_segments.contains(&self.pci_segment) {
+                    return Err(ValidationError::IommuNotSupported(self.pci_segment));
+                }
             }
         }
 
@@ -1915,6 +1969,12 @@ impl VdpaConfig {
         if let Some(platform_config) = vm_config.platform.as_ref() {
             if self.pci_segment >= platform_config.num_pci_segments {
                 return Err(ValidationError::InvalidPciSegment(self.pci_segment));
+            }
+
+            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref() {
+                if iommu_segments.contains(&self.pci_segment) {
+                    return Err(ValidationError::IommuNotSupported(self.pci_segment));
+                }
             }
         }
 
@@ -1979,6 +2039,12 @@ impl VsockConfig {
         if let Some(platform_config) = vm_config.platform.as_ref() {
             if self.pci_segment >= platform_config.num_pci_segments {
                 return Err(ValidationError::InvalidPciSegment(self.pci_segment));
+            }
+
+            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref() {
+                if iommu_segments.contains(&self.pci_segment) && !self.iommu {
+                    return Err(ValidationError::OnIommuSegment(self.pci_segment));
+                }
             }
         }
 
@@ -3333,11 +3399,165 @@ mod tests {
         });
         assert!(still_valid_config.validate().is_ok());
 
-        let mut invalid_config = valid_config;
+        let mut invalid_config = valid_config.clone();
         invalid_config.platform = Some(PlatformConfig {
             num_pci_segments: 16,
             iommu_segments: Some(vec![17, 18]),
         });
+        assert!(invalid_config.validate().is_err());
+
+        let mut still_valid_config = valid_config.clone();
+        still_valid_config.platform = Some(PlatformConfig {
+            num_pci_segments: 16,
+            iommu_segments: Some(vec![1, 2, 3]),
+        });
+        still_valid_config.disks = Some(vec![DiskConfig {
+            iommu: true,
+            pci_segment: 1,
+            ..Default::default()
+        }]);
+        assert!(still_valid_config.validate().is_ok());
+
+        let mut still_valid_config = valid_config.clone();
+        still_valid_config.platform = Some(PlatformConfig {
+            num_pci_segments: 16,
+            iommu_segments: Some(vec![1, 2, 3]),
+        });
+        still_valid_config.net = Some(vec![NetConfig {
+            iommu: true,
+            pci_segment: 1,
+            ..Default::default()
+        }]);
+        assert!(still_valid_config.validate().is_ok());
+
+        let mut still_valid_config = valid_config.clone();
+        still_valid_config.platform = Some(PlatformConfig {
+            num_pci_segments: 16,
+            iommu_segments: Some(vec![1, 2, 3]),
+        });
+        still_valid_config.pmem = Some(vec![PmemConfig {
+            iommu: true,
+            pci_segment: 1,
+            ..Default::default()
+        }]);
+        assert!(still_valid_config.validate().is_ok());
+
+        let mut still_valid_config = valid_config.clone();
+        still_valid_config.platform = Some(PlatformConfig {
+            num_pci_segments: 16,
+            iommu_segments: Some(vec![1, 2, 3]),
+        });
+        still_valid_config.devices = Some(vec![DeviceConfig {
+            iommu: true,
+            pci_segment: 1,
+            ..Default::default()
+        }]);
+        assert!(still_valid_config.validate().is_ok());
+
+        let mut still_valid_config = valid_config.clone();
+        still_valid_config.platform = Some(PlatformConfig {
+            num_pci_segments: 16,
+            iommu_segments: Some(vec![1, 2, 3]),
+        });
+        still_valid_config.vsock = Some(VsockConfig {
+            iommu: true,
+            pci_segment: 1,
+            ..Default::default()
+        });
+        assert!(still_valid_config.validate().is_ok());
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.platform = Some(PlatformConfig {
+            num_pci_segments: 16,
+            iommu_segments: Some(vec![1, 2, 3]),
+        });
+        invalid_config.disks = Some(vec![DiskConfig {
+            iommu: false,
+            pci_segment: 1,
+            ..Default::default()
+        }]);
+        assert!(invalid_config.validate().is_err());
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.platform = Some(PlatformConfig {
+            num_pci_segments: 16,
+            iommu_segments: Some(vec![1, 2, 3]),
+        });
+        invalid_config.net = Some(vec![NetConfig {
+            iommu: false,
+            pci_segment: 1,
+            ..Default::default()
+        }]);
+        assert!(invalid_config.validate().is_err());
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.platform = Some(PlatformConfig {
+            num_pci_segments: 16,
+            iommu_segments: Some(vec![1, 2, 3]),
+        });
+        invalid_config.pmem = Some(vec![PmemConfig {
+            iommu: false,
+            pci_segment: 1,
+            ..Default::default()
+        }]);
+        assert!(invalid_config.validate().is_err());
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.platform = Some(PlatformConfig {
+            num_pci_segments: 16,
+            iommu_segments: Some(vec![1, 2, 3]),
+        });
+        invalid_config.devices = Some(vec![DeviceConfig {
+            iommu: false,
+            pci_segment: 1,
+            ..Default::default()
+        }]);
+        assert!(invalid_config.validate().is_err());
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.platform = Some(PlatformConfig {
+            num_pci_segments: 16,
+            iommu_segments: Some(vec![1, 2, 3]),
+        });
+        invalid_config.vsock = Some(VsockConfig {
+            iommu: false,
+            pci_segment: 1,
+            ..Default::default()
+        });
+        assert!(invalid_config.validate().is_err());
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.memory.shared = true;
+        invalid_config.platform = Some(PlatformConfig {
+            num_pci_segments: 16,
+            iommu_segments: Some(vec![1, 2, 3]),
+        });
+        invalid_config.user_devices = Some(vec![UserDeviceConfig {
+            pci_segment: 1,
+            ..Default::default()
+        }]);
+        assert!(invalid_config.validate().is_err());
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.platform = Some(PlatformConfig {
+            num_pci_segments: 16,
+            iommu_segments: Some(vec![1, 2, 3]),
+        });
+        invalid_config.vdpa = Some(vec![VdpaConfig {
+            pci_segment: 1,
+            ..Default::default()
+        }]);
+        assert!(invalid_config.validate().is_err());
+
+        let mut invalid_config = valid_config;
+        invalid_config.platform = Some(PlatformConfig {
+            num_pci_segments: 16,
+            iommu_segments: Some(vec![1, 2, 3]),
+        });
+        invalid_config.fs = Some(vec![FsConfig {
+            pci_segment: 1,
+            ..Default::default()
+        }]);
         assert!(invalid_config.validate().is_err());
     }
 }
