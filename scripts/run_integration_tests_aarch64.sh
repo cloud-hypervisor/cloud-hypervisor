@@ -59,13 +59,16 @@ build_custom_linux() {
 
     checkout_repo "$LINUX_CUSTOM_DIR" "$LINUX_CUSTOM_URL" "$LINUX_CUSTOM_BRANCH"
 
-    cp $SRCDIR/resources/linux-config-aarch64 $LINUX_CUSTOM_DIR/.config
+    if [ ! -f "$LINUX_CUSTOM_DIR/.built" ]; then
+        cp $SRCDIR/resources/linux-config-aarch64 $LINUX_CUSTOM_DIR/.config
 
-    pushd $LINUX_CUSTOM_DIR
-    time make -j `nproc`
-    cp arch/arm64/boot/Image "$WORKLOADS_DIR/" || exit 1
-    cp arch/arm64/boot/Image.gz "$WORKLOADS_DIR/" || exit 1
-    popd
+        pushd $LINUX_CUSTOM_DIR
+        time make -j `nproc`
+        cp arch/arm64/boot/Image "$WORKLOADS_DIR/" || exit 1
+        cp arch/arm64/boot/Image.gz "$WORKLOADS_DIR/" || exit 1
+        touch .built
+        popd
+    fi
 }
 
 build_edk2() {
@@ -92,33 +95,61 @@ build_edk2() {
     checkout_repo "$EDK2_PLAT_DIR" "$EDK2_PLAT_REPO" master "8227e9e9f6a8aefbd772b40138f835121ccb2307"
     checkout_repo "$ACPICA_DIR" "$ACPICA_REPO" master "b9c69f81a05c45611c91ea9cbce8756078d76233"
 
-    pushd "$EDK2_BUILD_DIR"
-    # Build
-    make -C acpica -j `nproc`
-    source edk2/edksetup.sh
-    make -C edk2/BaseTools -j `nproc`
-    build -a AARCH64 -t GCC5 -p ArmVirtPkg/ArmVirtCloudHv.dsc -b RELEASE -n 0
-    cp Build/ArmVirtCloudHv-AARCH64/RELEASE_GCC5/FV/CLOUDHV_EFI.fd "$WORKLOADS_DIR"
-    popd
+    if [[ ! -f "$EDK2_DIR/.built" || \
+          ! -f "$EDK2_PLAT_DIR/.built" || \
+          ! -f "$ACPICA_DIR/.built" ]]; then
+        pushd "$EDK2_BUILD_DIR"
+        # Build
+        make -C acpica -j `nproc`
+        source edk2/edksetup.sh
+        make -C edk2/BaseTools -j `nproc`
+        build -a AARCH64 -t GCC5 -p ArmVirtPkg/ArmVirtCloudHv.dsc -b RELEASE -n 0
+        cp Build/ArmVirtCloudHv-AARCH64/RELEASE_GCC5/FV/CLOUDHV_EFI.fd "$WORKLOADS_DIR"
+        touch "$EDK2_DIR"/.built
+        touch "$EDK2_PLAT_DIR"/.built
+        touch "$ACPICA_DIR"/.built
+        popd
+    fi
 }
 
 build_spdk_nvme() {
     SPDK_DIR="$WORKLOADS_DIR/spdk"
     SPDK_REPO="https://github.com/spdk/spdk.git"
+    SPDK_DEPLOY_DIR="/usr/local/bin/spdk-nvme"
     checkout_repo "$SPDK_DIR" "$SPDK_REPO" master "f9c496b8e21a8f499df268818bf8b5d8e2b19f04"
 
-    pushd $SPDK_DIR
-    git submodule update --init
-    apt-get update
-    ./scripts/pkgdep.sh
-    ./configure --with-vfio-user
-    chmod +x /usr/local/lib/python3.8/dist-packages/ninja/data/bin/ninja
-    make -j `nproc`
-    mkdir /usr/local/bin/spdk-nvme
-    cp ./build/bin/nvmf_tgt /usr/local/bin/spdk-nvme
-    cp ./scripts/rpc.py /usr/local/bin/spdk-nvme
-    cp -r ./scripts/rpc /usr/local/bin/spdk-nvme
-    popd
+    if [ ! -f "$SPDK_DIR/.built" ]; then
+        pushd $SPDK_DIR
+        git submodule update --init
+        apt-get update
+        ./scripts/pkgdep.sh
+        ./configure --with-vfio-user
+        chmod +x /usr/local/lib/python3.8/dist-packages/ninja/data/bin/ninja
+        make -j `nproc` || exit 1
+        touch .built
+        popd
+    fi
+    if [ ! -d "/usr/local/bin/spdk-nvme" ]; then
+        mkdir -p $SPDK_DEPLOY_DIR
+    fi
+    cp "$WORKLOADS_DIR/spdk/build/bin/nvmf_tgt" $SPDK_DEPLOY_DIR/nvmf_tgt
+    cp "$WORKLOADS_DIR/spdk/scripts/rpc.py" $SPDK_DEPLOY_DIR/rpc.py
+    cp -r "$WORKLOADS_DIR/spdk/scripts/rpc" $SPDK_DEPLOY_DIR/rpc
+}
+
+build_virtiofsd() {
+    VIRTIOFSD_DIR="$WORKLOADS_DIR/virtiofsd_build"
+    VIRTIOFSD_REPO="https://gitlab.com/virtio-fs/virtiofsd.git"
+
+    checkout_repo "$VIRTIOFSD_DIR" "$VIRTIOFSD_REPO" v1.1.0 "220405d7a2606c92636d31992b5cb3036a41047b"
+
+    if [ ! -f "$VIRTIOFSD_DIR/.built" ]; then
+        pushd $VIRTIOFSD_DIR
+        time cargo build --release
+        cp target/release/virtiofsd "$WORKLOADS_DIR/" || exit 1
+        touch .built
+        popd
+    fi
 }
 
 update_workloads() {
@@ -217,19 +248,7 @@ update_workloads() {
     guestunmount "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR"
 
     # Build virtiofsd
-    VIRTIOFSD="$WORKLOADS_DIR/virtiofsd"
-    VIRTIOFSD_DIR="virtiofsd_build"
-    if [ ! -f "$VIRTIOFSD" ]; then
-        pushd $WORKLOADS_DIR
-        git clone "https://gitlab.com/virtio-fs/virtiofsd.git" $VIRTIOFSD_DIR
-        pushd $VIRTIOFSD_DIR
-        git checkout v1.1.0
-        time cargo build --release
-        cp target/release/virtiofsd $VIRTIOFSD || exit 1
-        popd
-        rm -rf $VIRTIOFSD_DIR
-        popd
-    fi
+    build_virtiofsd
 
     BLK_IMAGE="$WORKLOADS_DIR/blk.img"
     MNT_DIR="mount_image"
@@ -252,10 +271,10 @@ update_workloads() {
         echo "bar" > "$SHARED_DIR/file3" || exit 1
     fi
 
-    # checkout and build SPDK NVMe
+    # Checkout and build SPDK NVMe
     build_spdk_nvme
 
-    # Check and build EDK2 binary
+    # Checkout and build EDK2
     build_edk2
 }
 
