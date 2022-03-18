@@ -11,6 +11,21 @@ export BUILD_TARGET=${BUILD_TARGET-${TEST_ARCH}-unknown-linux-gnu}
 WORKLOADS_DIR="$HOME/workloads"
 mkdir -p "$WORKLOADS_DIR"
 
+build_fio() {
+    FIO_DIR="$WORKLOADS_DIR/fio_build"
+    FIO_REPO="https://github.com/axboe/fio.git"
+
+    checkout_repo "$FIO_DIR" "$FIO_REPO" master "1953e1adb5a28ed21370e85991d7f5c3cdc699f3"
+    if [ ! -f "$FIO_DIR/.built" ]; then
+        pushd $FIO_DIR
+        ./configure
+        make -j `nproc`
+        cp fio "$WORKLOADS_DIR/fio"
+        touch .built
+        popd
+    fi
+}
+
 process_common_args "$@"
 
 # For now these values are default for kvm
@@ -56,6 +71,22 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 popd
+
+if [ ${TEST_ARCH} == "aarch64" ]; then
+    build_fio
+
+    # Update the fio in the cloud image to use io_uring on AArch64
+    FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_NAME="focal-server-cloudimg-arm64-custom-20210929-0-update-tool.raw"
+    cp "$FOCAL_OS_RAW_IMAGE" "$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_NAME"
+    FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_ROOT_DIR="$WORKLOADS_DIR/focal-server-cloudimg-root"
+    if [ ! -d "$FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_ROOT_DIR" ]; then
+        mkdir -p "$FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_ROOT_DIR"
+    fi
+    # Mount the 'raw' image, replace the fio and umount the working folder
+    guestmount -a "$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_NAME" -m /dev/sda1 "$FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_ROOT_DIR" || exit 1
+    cp "$WORKLOADS_DIR"/fio "$FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_ROOT_DIR"/usr/bin/fio
+    guestunmount "$FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_ROOT_DIR"
+fi
 
 # Build custom kernel based on virtio-pmem and virtio-fs upstream patches
 if [ ${TEST_ARCH} == "aarch64" ]; then
