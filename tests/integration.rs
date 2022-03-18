@@ -5781,6 +5781,7 @@ mod parallel {
             .args(&["--cpus", "boot=1"])
             .args(&["--memory", "size=512M,shared=on,hugepages=on"])
             .args(&["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .args(&["--serial", "tty", "--console", "off"])
             .default_disks()
             .default_net()
             .capture_output()
@@ -5805,7 +5806,7 @@ mod parallel {
             );
             assert!(cmd_success);
             assert!(String::from_utf8_lossy(&cmd_output)
-                .contains("{\"id\":\"vfio_user0\",\"bdf\":\"0000:00:06.0\"}"));
+                .contains("{\"id\":\"vfio_user0\",\"bdf\":\"0000:00:05.0\"}"));
 
             thread::sleep(std::time::Duration::new(10, 0));
 
