@@ -134,7 +134,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
     }
     #[cfg(target_arch = "x86_64")]
     ///
-    /// Retrieve the list of MSRs supported by KVM.
+    /// Retrieve the list of MSRs supported by MSHV.
     ///
     fn get_msr_list(&self) -> hypervisor::Result<MsrList> {
         self.mshv
