@@ -1203,6 +1203,8 @@ impl Vm {
                 Error::ConfigureSystem(arch::Error::AArch64Setup(arch::aarch64::Error::VcpuInitPmu))
             })?;
 
+        let pci_irqs = self.device_manager.lock().unwrap().get_pci_irqs().clone();
+
         arch::configure_system(
             &mem,
             cmdline.as_str(),
@@ -1211,6 +1213,7 @@ impl Vm {
             device_info,
             &initramfs_config,
             &pci_space_info,
+            pci_irqs,
             virtio_iommu_bdf.map(|bdf| bdf.into()),
             &*gic_device,
             &self.numa_nodes,

@@ -94,6 +94,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     gic_device: &dyn GicDevice,
     initrd: &Option<InitramfsConfig>,
     pci_space_info: &[PciSpaceInfo],
+    pci_irqs: Vec<(u32, u32)>,
     numa_nodes: &NumaNodes,
     virtio_iommu_bdf: Option<u32>,
     pmu_supported: bool,
@@ -126,7 +127,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     create_clock_node(&mut fdt)?;
     create_psci_node(&mut fdt)?;
     create_devices_node(&mut fdt, device_info)?;
-    create_pci_nodes(&mut fdt, pci_space_info, virtio_iommu_bdf)?;
+    create_pci_nodes(&mut fdt, pci_space_info, virtio_iommu_bdf, pci_irqs)?;
     if numa_nodes.len() > 1 {
         create_distance_map_node(&mut fdt, numa_nodes)?;
     }
@@ -537,6 +538,7 @@ fn create_pci_nodes(
     fdt: &mut FdtWriter,
     pci_device_info: &[PciSpaceInfo],
     virtio_iommu_bdf: Option<u32>,
+    pci_irqs: Vec<(u32, u32)>,
 ) -> FdtWriterResult<()> {
     // Add node for PCIe controller.
     // See Documentation/devicetree/bindings/pci/host-generic-pci.txt in the kernel
@@ -615,6 +617,29 @@ fn create_pci_nodes(
             0x100,
         ];
 
+        // interrupt-map-map includes:
+        // - A mask for PCI device number, 3 cells
+        // - A mask for pin (1 ~ 4), 1 cell
+        let interrupt_map_mask: Vec<u32> = vec![0xf800, 0, 0, 0x7];
+
+        let mut interrupt_map: Vec<u32> = Vec::new();
+        for (device_id, irq_num) in pci_irqs.iter() {
+            // PCI_DEVICE(3)
+            interrupt_map.push((*device_id) << 8);
+            interrupt_map.push(0);
+            interrupt_map.push(0);
+            // Each device uses only 1 IRQ, hardcode the pin to INT#A
+            interrupt_map.push(1);
+            // CONTROLLER(PHANDLE)
+            interrupt_map.push(GIC_PHANDLE);
+            interrupt_map.push(0);
+            interrupt_map.push(0);
+            // CONTROLLER_DATA(3)
+            interrupt_map.push(GIC_FDT_IRQ_TYPE_SPI);
+            interrupt_map.push(*irq_num);
+            interrupt_map.push(IRQ_TYPE_LEVEL_HI);
+        }
+
         let pci_node_name = format!("pci@{:x}", pci_device_info_elem.mmio_config_address);
         let pci_node = fdt.begin_node(&pci_node_name)?;
 
@@ -630,8 +655,8 @@ fn create_pci_nodes(
         fdt.property_u32("#size-cells", 2)?;
         fdt.property_array_u64("reg", &reg)?;
         fdt.property_u32("#interrupt-cells", 1)?;
-        fdt.property_null("interrupt-map")?;
-        fdt.property_null("interrupt-map-mask")?;
+        fdt.property_array_u32("interrupt-map", &interrupt_map)?;
+        fdt.property_array_u32("interrupt-map-mask", &interrupt_map_mask)?;
         fdt.property_null("dma-coherent")?;
         fdt.property_array_u32("msi-map", &msi_map)?;
         fdt.property_u32("msi-parent", MSI_PHANDLE)?;
