@@ -19,7 +19,8 @@ use libc::EFD_NONBLOCK;
 use pci::{
     BarReprogrammingParams, MsixCap, MsixConfig, PciBarConfiguration, PciBarRegionType,
     PciCapability, PciCapabilityId, PciClassCode, PciConfiguration, PciDevice, PciDeviceError,
-    PciHeaderType, PciMassStorageSubclass, PciNetworkControllerSubclass, PciSubclass,
+    PciHeaderType, PciInterruptPin, PciMassStorageSubclass, PciNetworkControllerSubclass,
+    PciSubclass,
 };
 use std::any::Any;
 use std::cmp;
@@ -311,8 +312,13 @@ pub struct VirtioPciDevice {
 
     // PCI interrupts.
     interrupt_status: Arc<AtomicUsize>,
-    virtio_interrupt: Option<Arc<dyn VirtioInterrupt>>,
-    interrupt_source_group: Arc<dyn InterruptSourceGroup>,
+    msix_virtio_interrupt: Option<Arc<dyn VirtioInterrupt>>,
+    legacy_virtio_interrupt: Option<Arc<dyn VirtioInterrupt>>,
+    msix_interrupt_source_group: Arc<dyn InterruptSourceGroup>,
+    legacy_interrupt_source_group: Arc<dyn InterruptSourceGroup>,
+
+    // Whether the guest choose to use MSI-X or not
+    msix_enabled: bool,
 
     // virtio queues
     queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
@@ -358,7 +364,8 @@ impl VirtioPciDevice {
         device: Arc<Mutex<dyn VirtioDevice>>,
         msix_num: u16,
         access_platform: Option<Arc<dyn AccessPlatform>>,
-        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+        msi_interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+        gsi: u32,
         pci_device_bdf: u32,
         activate_evt: EventFd,
         use_64bit_bar: bool,
@@ -389,15 +396,22 @@ impl VirtioPciDevice {
 
         let pci_device_id = VIRTIO_PCI_DEVICE_ID_BASE + locked_device.device_type() as u16;
 
-        let interrupt_source_group = interrupt_manager.create_group(MsiIrqGroupConfig {
-            base: 0,
-            count: msix_num as InterruptIndex,
-        })?;
+        let msix_interrupt_source_group =
+            msi_interrupt_manager.create_group(MsiIrqGroupConfig {
+                base: 0,
+                count: msix_num as InterruptIndex,
+            })?;
+
+        let legacy_interrupt_source_group =
+            msi_interrupt_manager.create_group(MsiIrqGroupConfig {
+                base: 0,
+                count: 1 as InterruptIndex,
+            })?;
 
         let (msix_config, msix_config_clone) = if msix_num > 0 {
             let msix_config = Arc::new(Mutex::new(MsixConfig::new(
                 msix_num,
-                interrupt_source_group.clone(),
+                msix_interrupt_source_group.clone(),
                 pci_device_bdf,
             )));
             let msix_config_clone = msix_config.clone();
@@ -421,7 +435,7 @@ impl VirtioPciDevice {
             ),
         };
 
-        let configuration = PciConfiguration::new(
+        let mut configuration = PciConfiguration::new(
             VIRTIO_PCI_VENDOR_ID,
             pci_device_id,
             0x1, // For modern virtio-PCI devices
@@ -433,6 +447,7 @@ impl VirtioPciDevice {
             pci_device_id,
             msix_config_clone,
         );
+        configuration.set_irq(gsi as u8, PciInterruptPin::IntA);
 
         let mut virtio_pci_device = VirtioPciDevice {
             id,
@@ -452,14 +467,17 @@ impl VirtioPciDevice {
             device,
             device_activated: Arc::new(AtomicBool::new(false)),
             interrupt_status: Arc::new(AtomicUsize::new(0)),
-            virtio_interrupt: None,
+            msix_virtio_interrupt: None,
+            legacy_virtio_interrupt: None,
             queues,
             queue_evts,
             memory: Some(memory),
             settings_bar: 0,
             settings_bar_addr: None,
             use_64bit_bar,
-            interrupt_source_group,
+            msix_interrupt_source_group,
+            legacy_interrupt_source_group,
+            msix_enabled: false,
             cap_pci_cfg_info: VirtioPciCfgCapInfo::default(),
             bar_regions: vec![],
             activate_evt,
@@ -468,13 +486,19 @@ impl VirtioPciDevice {
         };
 
         if let Some(msix_config) = &virtio_pci_device.msix_config {
-            virtio_pci_device.virtio_interrupt = Some(Arc::new(VirtioInterruptMsix::new(
+            virtio_pci_device.msix_virtio_interrupt = Some(Arc::new(VirtioInterruptMsix::new(
                 msix_config.clone(),
                 virtio_pci_device.common_config.msix_config.clone(),
                 virtio_pci_device.common_config.msix_queues.clone(),
-                virtio_pci_device.interrupt_source_group.clone(),
+                virtio_pci_device.msix_interrupt_source_group.clone(),
             )));
         }
+
+        virtio_pci_device.legacy_virtio_interrupt = Some(Arc::new(VirtioInterruptLegacy::new(
+            gsi,
+            virtio_pci_device.interrupt_status.clone(),
+            virtio_pci_device.legacy_interrupt_source_group.clone(),
+        )));
 
         Ok(virtio_pci_device)
     }
@@ -678,7 +702,7 @@ impl VirtioPciDevice {
     }
 
     fn activate(&mut self) -> ActivateResult {
-        if let Some(virtio_interrupt) = self.virtio_interrupt.take() {
+        if let Some(virtio_interrupt) = self.msix_virtio_interrupt.take() {
             if self.memory.is_some() {
                 let mem = self.memory.as_ref().unwrap().clone();
                 let mut device = self.device.lock().unwrap();
@@ -1141,7 +1165,7 @@ impl PciDevice for VirtioPciDevice {
             let mut device = self.device.lock().unwrap();
             if let Some(virtio_interrupt) = device.reset() {
                 // Upon reset the device returns its interrupt EventFD
-                self.virtio_interrupt = Some(virtio_interrupt);
+                self.msix_virtio_interrupt = Some(virtio_interrupt);
                 self.device_activated.store(false, Ordering::SeqCst);
 
                 // Reset queue readiness (changes queue_enable), queue sizes

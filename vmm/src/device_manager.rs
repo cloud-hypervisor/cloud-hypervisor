@@ -909,6 +909,11 @@ pub struct DeviceManager {
     #[cfg(any(target_arch = "aarch64", feature = "acpi"))]
     numa_nodes: NumaNodes,
 
+    #[cfg(target_arch = "aarch64")]
+    // Collection of GSI interrupt mapping data which is useful in FDT.
+    // Each member is a tuple of (device_id, irq_number).
+    pci_irqs: Vec<(u32, u32)>,
+
     // Possible handle to the virtio-balloon device
     balloon: Option<Arc<Mutex<virtio_devices::Balloon>>>,
 
@@ -1056,6 +1061,8 @@ impl DeviceManager {
             seccomp_action,
             #[cfg(any(target_arch = "aarch64", feature = "acpi"))]
             numa_nodes,
+            #[cfg(target_arch = "aarch64")]
+            pci_irqs: Vec::new(),
             balloon: None,
             activate_evt: activate_evt
                 .try_clone()
@@ -1210,6 +1217,11 @@ impl DeviceManager {
     /// Gets the information of the devices registered up to some point in time.
     pub fn get_device_info(&self) -> &HashMap<(DeviceType, String), MmioDeviceInfo> {
         &self.id_to_dev_info
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    pub fn get_pci_irqs(&self) -> &Vec<(u32, u32)> {
+        &self.pci_irqs
     }
 
     #[allow(unused_variables)]
@@ -3433,6 +3445,15 @@ impl DeviceManager {
         // about a virtio config change.
         let msix_num = (virtio_device.lock().unwrap().queue_max_sizes().len() + 1) as u16;
 
+        // Allocate a GSI for the case of using legacy interrupt.
+        let gsi = self
+            .address_manager
+            .allocator
+            .lock()
+            .unwrap()
+            .allocate_gsi()
+            .unwrap();
+
         // Create the AccessPlatform trait from the implementation IommuMapping.
         // This will provide address translation for any virtio device sitting
         // behind a vIOMMU.
@@ -3496,6 +3517,7 @@ impl DeviceManager {
             msix_num,
             access_platform,
             &self.msi_interrupt_manager,
+            gsi,
             pci_device_bdf.into(),
             self.activate_evt
                 .try_clone()
@@ -3508,6 +3530,9 @@ impl DeviceManager {
             dma_handler,
         )
         .map_err(DeviceManagerError::VirtioDevice)?;
+
+        #[cfg(target_arch = "aarch64")]
+        self.pci_irqs.push((pci_device_bdf.into(), gsi));
 
         // This is important as this will set the BAR address if it exists,
         // which is mandatory on the restore path.
