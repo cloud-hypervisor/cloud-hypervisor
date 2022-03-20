@@ -6,14 +6,20 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+use super::{EpollHelper, EpollHelperError, EpollHelperHandler, EPOLL_HELPER_EVENT_LAST};
+use crate::seccomp_filters::Thread;
+use crate::thread_helper::spawn_virtio_thread;
 use crate::{
     ActivateError, ActivateResult, Error, GuestMemoryMmap, GuestRegionMmap,
     VIRTIO_F_RING_INDIRECT_DESC,
 };
 use libc::EFD_NONBLOCK;
+use seccompiler::SeccompAction;
 use std::collections::HashMap;
 use std::io::Write;
 use std::num::Wrapping;
+use std::os::unix::io::AsRawFd;
+use std::result;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Barrier,
@@ -213,6 +219,51 @@ pub trait DmaRemapping: Send + Sync {
     fn translate(&self, id: u32, addr: u64) -> std::result::Result<u64, std::io::Error>;
 }
 
+const IRQ_RESAMPLE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
+
+/// CommonEpollHandler handles the common events for all types of virtio devices.
+/// Now it covers `resampling` event only.
+/// This handler is not mandatory for all devices. If it is needed, the device should
+/// call `start_common_epoll()` as well when creating its own epoll threads.
+struct CommonEpollHandler {
+    kill_evt: EventFd,
+    pause_evt: EventFd,
+    interrupt_cb: Arc<dyn VirtioInterrupt>,
+}
+
+impl CommonEpollHandler {
+    fn run(
+        &mut self,
+        paused: Arc<AtomicBool>,
+        paused_sync: Arc<Barrier>,
+        resample_evt: EventFd,
+    ) -> result::Result<(), EpollHelperError> {
+        let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
+        helper.add_event(resample_evt.as_raw_fd(), IRQ_RESAMPLE_EVENT)?;
+        helper.run(paused, paused_sync, self)?;
+
+        Ok(())
+    }
+}
+
+impl EpollHelperHandler for CommonEpollHandler {
+    fn handle_event(&mut self, _helper: &mut EpollHelper, event: &epoll::Event) -> bool {
+        let ev_type = event.data as u16;
+        match ev_type {
+            IRQ_RESAMPLE_EVENT => {
+                self.interrupt_cb
+                    .trigger(VirtioInterruptType::Config)
+                    .unwrap();
+                return true;
+            }
+            _ => {
+                error!("Unexpected event: {}", ev_type);
+                return true;
+            }
+        }
+    }
+}
+
 /// Structure to handle device state common to all devices
 #[derive(Default)]
 pub struct VirtioCommon {
@@ -247,6 +298,37 @@ impl VirtioCommon {
             v &= !unrequested_features;
         }
         self.acked_features |= v;
+    }
+
+    pub fn start_common_epoll(
+        &mut self,
+        id: String,
+        interrupt_cb: &Arc<dyn VirtioInterrupt>,
+        resample_evt: EventFd,
+        exit_evt: &EventFd,
+        epoll_threads: &mut Vec<thread::JoinHandle<()>>,
+        seccomp_action: &SeccompAction,
+    ) -> ActivateResult {
+        let (kill_evt, pause_evt) = self.dup_eventfds();
+        let mut handler = CommonEpollHandler {
+            kill_evt,
+            pause_evt,
+            interrupt_cb: interrupt_cb.clone(),
+        };
+        let paused = self.paused.clone();
+        let paused_sync = self.paused_sync.clone();
+        spawn_virtio_thread(
+            &format!("{}_common", id),
+            seccomp_action,
+            Thread::VirtioCommon,
+            epoll_threads,
+            exit_evt,
+            move || {
+                if let Err(e) = handler.run(paused, paused_sync.unwrap(), resample_evt) {
+                    error!("Error running worker: {:?}", e);
+                }
+            },
+        )
     }
 
     pub fn activate(

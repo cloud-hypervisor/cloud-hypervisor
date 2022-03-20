@@ -11,6 +11,7 @@ use seccompiler::{
 use std::convert::TryInto;
 
 pub enum Thread {
+    VirtioCommon,
     VirtioBalloon,
     VirtioBlock,
     VirtioConsole,
@@ -99,6 +100,10 @@ fn virtio_block_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_set_robust_list, vec![]),
         (libc::SYS_timerfd_settime, vec![]),
     ]
+}
+
+fn virtio_common_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
+    vec![]
 }
 
 fn virtio_console_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
@@ -223,6 +228,7 @@ fn get_seccomp_rules(thread_type: Thread) -> Vec<(i64, Vec<SeccompRule>)> {
     let mut rules = match thread_type {
         Thread::VirtioBalloon => virtio_balloon_thread_rules(),
         Thread::VirtioBlock => virtio_block_thread_rules(),
+        Thread::VirtioCommon => virtio_common_thread_rules(),
         Thread::VirtioConsole => virtio_console_thread_rules(),
         Thread::VirtioIommu => virtio_iommu_thread_rules(),
         Thread::VirtioMem => virtio_mem_thread_rules(),
