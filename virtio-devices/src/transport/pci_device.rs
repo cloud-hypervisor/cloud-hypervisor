@@ -702,7 +702,14 @@ impl VirtioPciDevice {
     }
 
     fn activate(&mut self) -> ActivateResult {
-        if let Some(virtio_interrupt) = self.msix_virtio_interrupt.take() {
+        // Select a VirtioInterrupt (MSI-X or GSI) according to the MSI-X preference
+        let virtio_interrupt = if self.msix_enabled {
+            self.msix_virtio_interrupt.take()
+        } else {
+            self.legacy_virtio_interrupt.take()
+        };
+        if let Some(virtio_interrupt) = virtio_interrupt {
+            virtio_interrupt.enable().unwrap();
             if self.memory.is_some() {
                 let mem = self.memory.as_ref().unwrap().clone();
                 let mut device = self.device.lock().unwrap();
@@ -715,7 +722,8 @@ impl VirtioPciDevice {
                         error!("Queue {} is not valid", i);
                     }
                 }
-                return device.activate(mem, virtio_interrupt, queues, queue_evts);
+                let resample_fd = virtio_interrupt.resample_fd(VirtioInterruptType::Config);
+                return device.activate(mem, virtio_interrupt, queues, queue_evts, resample_fd);
             }
         }
         Ok(())
@@ -821,6 +829,10 @@ impl VirtioInterrupt for VirtioInterruptMsix {
         self.interrupt_source_group
             .notifier(vector as InterruptIndex)
     }
+
+    fn resample_fd(&self, _int_type: VirtioInterruptType) -> Option<EventFd> {
+        None
+    }
 }
 
 pub struct VirtioInterruptLegacy {
@@ -890,6 +902,10 @@ impl VirtioInterrupt for VirtioInterruptLegacy {
 
     fn notifier(&self, _int_type: VirtioInterruptType) -> Option<EventFd> {
         self.legacy_interrupt_source_group.notifier(0)
+    }
+
+    fn resample_fd(&self, _index: VirtioInterruptType) -> Option<EventFd> {
+        self.legacy_interrupt_source_group.resample_fd(0)
     }
 }
 
@@ -1085,6 +1101,8 @@ impl PciDevice for VirtioPciDevice {
                 // Handled with ioeventfds.
             }
             o if (MSIX_TABLE_BAR_OFFSET..MSIX_TABLE_BAR_OFFSET + MSIX_TABLE_SIZE).contains(&o) => {
+                // If guest reads this area, it means MSI-X is enabled.
+                self.msix_enabled = true;
                 if let Some(msix_config) = &self.msix_config {
                     msix_config
                         .lock()
@@ -1165,7 +1183,11 @@ impl PciDevice for VirtioPciDevice {
             let mut device = self.device.lock().unwrap();
             if let Some(virtio_interrupt) = device.reset() {
                 // Upon reset the device returns its interrupt EventFD
-                self.msix_virtio_interrupt = Some(virtio_interrupt);
+                if self.msix_enabled {
+                    self.msix_virtio_interrupt = Some(virtio_interrupt);
+                } else {
+                    self.legacy_virtio_interrupt = Some(virtio_interrupt);
+                }
                 self.device_activated.store(false, Ordering::SeqCst);
 
                 // Reset queue readiness (changes queue_enable), queue sizes

@@ -492,6 +492,7 @@ impl VirtioDevice for Console {
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
         mut queue_evts: Vec<EventFd>,
+        _resample_evt: Option<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
         self.resizer

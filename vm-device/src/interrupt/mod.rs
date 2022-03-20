@@ -173,6 +173,9 @@ pub trait InterruptSourceGroup: Send + Sync {
     #[allow(unused_variables)]
     fn notifier(&self, index: InterruptIndex) -> Option<EventFd>;
 
+    /// Returns an eventfd to receive the `de-assertion` notification from the irqchip.
+    fn resample_fd(&self, index: InterruptIndex) -> Option<EventFd>;
+
     /// Update the interrupt source group configuration.
     ///
     /// # Arguments

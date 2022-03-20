@@ -421,6 +421,11 @@ impl InterruptController for Ioapic {
     fn notifier(&self, irq: usize) -> Option<EventFd> {
         self.interrupt_source_group.notifier(irq as InterruptIndex)
     }
+
+    fn resample_fd(&self, irq: usize) -> Option<EventFd> {
+        self.interrupt_source_group
+            .resample_fd(irq as InterruptIndex)
+    }
 }
 
 impl Snapshottable for Ioapic {

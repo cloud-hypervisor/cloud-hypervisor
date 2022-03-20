@@ -58,4 +58,5 @@ pub trait InterruptController: Send {
     #[cfg(target_arch = "x86_64")]
     fn end_of_interrupt(&mut self, vec: u8);
     fn notifier(&self, irq: usize) -> Option<EventFd>;
+    fn resample_fd(&self, irq: usize) -> Option<EventFd>;
 }

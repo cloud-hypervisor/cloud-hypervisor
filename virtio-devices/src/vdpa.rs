@@ -286,6 +286,7 @@ impl VirtioDevice for Vdpa {
         virtio_interrupt: Arc<dyn VirtioInterrupt>,
         queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
         queue_evts: Vec<EventFd>,
+        _resample_evt: Option<EventFd>,
     ) -> ActivateResult {
         self.activate_vdpa(&mem.memory(), &virtio_interrupt, queues, queue_evts)
             .map_err(ActivateError::ActivateVdpa)?;

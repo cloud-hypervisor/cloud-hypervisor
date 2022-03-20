@@ -45,6 +45,9 @@ pub trait VirtioInterrupt: Send + Sync {
     fn notifier(&self, _int_type: VirtioInterruptType) -> Option<EventFd> {
         None
     }
+    fn resample_fd(&self, _int_type: VirtioInterruptType) -> Option<EventFd> {
+        None
+    }
 }
 
 #[derive(Clone)]
@@ -118,6 +121,7 @@ pub trait VirtioDevice: Send {
         interrupt_evt: Arc<dyn VirtioInterrupt>,
         queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
         queue_evts: Vec<EventFd>,
+        resample_evt: Option<EventFd>,
     ) -> ActivateResult;
 
     /// Optionally deactivates this device and returns ownership of the guest memory map, interrupt

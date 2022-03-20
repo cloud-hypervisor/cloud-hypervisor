@@ -221,6 +221,7 @@ impl VirtioDevice for Rng {
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
         mut queue_evts: Vec<EventFd>,
+        _resample_evt: Option<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
