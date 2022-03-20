@@ -33,7 +33,8 @@ use virtio_queue::{Error as QueueError, Queue};
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{
-    InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
+    InterruptIndex, InterruptManager, InterruptSourceConfig, InterruptSourceGroup,
+    LegacyIrqSourceConfig, MsiIrqGroupConfig,
 };
 use vm_device::BusDevice;
 use vm_memory::{Address, ByteValued, GuestAddress, GuestMemoryAtomic, GuestUsize, Le32};
@@ -45,6 +46,10 @@ use vmm_sys_util::{errno::Result, eventfd::EventFd};
 
 /// Vector value used to disable MSI for a queue.
 const VIRTQ_MSI_NO_VECTOR: u16 = 0xffff;
+
+/// Legacy interrupt status
+const INTERRUPT_STATUS_USED_RING: usize = 0x1;
+const INTERRUPT_STATUS_CONFIG_CHANGED: usize = 0x2;
 
 #[derive(Debug)]
 enum Error {
@@ -791,6 +796,76 @@ impl VirtioInterrupt for VirtioInterruptMsix {
 
         self.interrupt_source_group
             .notifier(vector as InterruptIndex)
+    }
+}
+
+pub struct VirtioInterruptLegacy {
+    gsi: u32,
+    interrupt_status: Arc<AtomicUsize>,
+    legacy_interrupt_source_group: Arc<dyn InterruptSourceGroup>,
+}
+
+impl VirtioInterruptLegacy {
+    pub fn new(
+        gsi: u32,
+        interrupt_status: Arc<AtomicUsize>,
+        legacy_interrupt_source_group: Arc<dyn InterruptSourceGroup>,
+    ) -> Self {
+        VirtioInterruptLegacy {
+            gsi,
+            interrupt_status,
+            legacy_interrupt_source_group,
+        }
+    }
+}
+
+impl VirtioInterrupt for VirtioInterruptLegacy {
+    fn enable(&self) -> std::result::Result<(), std::io::Error> {
+        self.legacy_interrupt_source_group.enable().unwrap();
+        let config = LegacyIrqSourceConfig {
+            irqchip: 0,
+            pin: (self.gsi) as u32,
+        };
+        self.legacy_interrupt_source_group
+            .update(
+                0 as InterruptIndex,
+                InterruptSourceConfig::LegacyIrq(config),
+            )
+            .unwrap();
+        Ok(())
+    }
+
+    fn trigger(&self, int_type: VirtioInterruptType) -> std::result::Result<(), std::io::Error> {
+        match int_type {
+            VirtioInterruptType::Config => {
+                // Set bit in ISR and inject the interrupt if it was not already pending.
+                // Don't need to inject the interrupt if the guest hasn't processed it.
+                if self
+                    .interrupt_status
+                    .fetch_or(INTERRUPT_STATUS_CONFIG_CHANGED, Ordering::SeqCst)
+                    == 0
+                {
+                    self.legacy_interrupt_source_group.trigger(0)
+                } else {
+                    Ok(())
+                }
+            }
+            VirtioInterruptType::Queue(_queue_index) => {
+                if self
+                    .interrupt_status
+                    .fetch_or(INTERRUPT_STATUS_USED_RING, Ordering::SeqCst)
+                    == 0
+                {
+                    self.legacy_interrupt_source_group.trigger(0)
+                } else {
+                    Ok(())
+                }
+            }
+        }
+    }
+
+    fn notifier(&self, _int_type: VirtioInterruptType) -> Option<EventFd> {
+        self.legacy_interrupt_source_group.notifier(0)
     }
 }
 
