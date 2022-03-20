@@ -41,12 +41,13 @@ impl InterruptRoute {
 
     pub fn enable(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
         if !self.registered.load(Ordering::Acquire) {
-            vm.register_irqfd(&self.irq_fd, self.gsi).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("Failed registering irq_fd: {}", e),
-                )
-            })?;
+            vm.register_irqfd(&self.irq_fd, self.gsi, None)
+                .map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("Failed registering irq_fd: {}", e),
+                    )
+                })?;
 
             // Update internals to track the irq_fd as "registered".
             self.registered.store(true, Ordering::Release);

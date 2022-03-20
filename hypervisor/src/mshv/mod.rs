@@ -786,14 +786,18 @@ impl vm::Vm for MshvVm {
     fn create_irq_chip(&self) -> vm::Result<()> {
         Ok(())
     }
-    ///
-    /// Registers an event that will, when signaled, trigger the `gsi` IRQ.
-    ///
-    fn register_irqfd(&self, fd: &EventFd, gsi: u32) -> vm::Result<()> {
-        debug!("register_irqfd fd {} gsi {}", fd.as_raw_fd(), gsi);
+    /// Registers an event that will trigger the `gsi` IRQ and an event which
+    /// can receive the `de-assertion` notification from the irqchip.
+    fn register_irqfd(
+        &self,
+        irq_fd: &EventFd,
+        gsi: u32,
+        _resample_fd: Option<&EventFd>,
+    ) -> vm::Result<()> {
+        debug!("register_irqfd irq_fd {} gsi {}", irq_fd.as_raw_fd(), gsi);
 
         self.fd
-            .register_irqfd(fd, gsi)
+            .register_irqfd(irq_fd, gsi)
             .map_err(|e| vm::HypervisorVmError::RegisterIrqFd(e.into()))?;
 
         Ok(())

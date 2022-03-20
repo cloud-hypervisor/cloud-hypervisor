@@ -185,13 +185,23 @@ impl vm::Vm for KvmVm {
             .create_irq_chip()
             .map_err(|e| vm::HypervisorVmError::CreateIrq(e.into()))
     }
-    ///
-    /// Registers an event that will, when signaled, trigger the `gsi` IRQ.
-    ///
-    fn register_irqfd(&self, fd: &EventFd, gsi: u32) -> vm::Result<()> {
-        self.fd
-            .register_irqfd(fd, gsi)
-            .map_err(|e| vm::HypervisorVmError::RegisterIrqFd(e.into()))
+    /// Registers an event that will trigger the `gsi` IRQ and an event which
+    /// can receive the `de-assertion` notification from the irqchip.
+    fn register_irqfd(
+        &self,
+        irq_fd: &EventFd,
+        gsi: u32,
+        resample_fd: Option<&EventFd>,
+    ) -> vm::Result<()> {
+        if let Some(resample_fd) = resample_fd {
+            self.fd
+                .register_irqfd_resamplefd(irq_fd, gsi, resample_fd)
+                .map_err(|e| vm::HypervisorVmError::RegisterIrqFd(e.into()))
+        } else {
+            self.fd
+                .register_irqfd(irq_fd, gsi)
+                .map_err(|e| vm::HypervisorVmError::RegisterIrqFd(e.into()))
+        }
     }
     ///
     /// Unregisters an event that will, when signaled, trigger the `gsi` IRQ.

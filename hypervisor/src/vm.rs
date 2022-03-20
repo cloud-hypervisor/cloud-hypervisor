@@ -230,8 +230,14 @@ pub trait Vm: Send + Sync {
     fn set_tss_address(&self, offset: usize) -> Result<()>;
     /// Creates an in-kernel interrupt controller.
     fn create_irq_chip(&self) -> Result<()>;
-    /// Registers an event that will, when signaled, trigger the `gsi` IRQ.
-    fn register_irqfd(&self, fd: &EventFd, gsi: u32) -> Result<()>;
+    /// Registers an event that will trigger the `gsi` IRQ and an event which
+    /// can receive the `de-assertion` notification from the irqchip.
+    fn register_irqfd(
+        &self,
+        irq_fd: &EventFd,
+        gsi: u32,
+        resample_fd: Option<&EventFd>,
+    ) -> Result<()>;
     /// Unregister an event that will, when signaled, trigger the `gsi` IRQ.
     fn unregister_irqfd(&self, fd: &EventFd, gsi: u32) -> Result<()>;
     /// Creates a new KVM vCPU file descriptor and maps the memory corresponding
