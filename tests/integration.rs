@@ -70,6 +70,9 @@ use aarch64::*;
 const DIRECT_KERNEL_BOOT_CMDLINE: &str =
     "root=/dev/vda1 console=hvc0 rw systemd.journald.forward_to_console=1";
 
+const DIRECT_KERNEL_BOOT_CMDLINE_NOMSI: &str =
+    "root=/dev/vda1 console=hvc0 rw systemd.journald.forward_to_console=1 pci=nomsi";
+
 const CONSOLE_TEST_STRING: &str = "Started OpenBSD Secure Shell server";
 
 fn prepare_virtiofsd(
@@ -2186,6 +2189,46 @@ mod parallel {
                     .parse::<u32>()
                     .unwrap_or_default(),
                 12
+            );
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_pci_nomsi() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(&["--cpus", "boot=1"])
+            .args(&["--memory", "size=512M"])
+            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE_NOMSI])
+            .capture_output()
+            .default_disks()
+            .default_net();
+
+        let mut child = cmd.spawn().unwrap();
+
+        guest.wait_vm_boot(None).unwrap();
+
+        #[cfg(target_arch = "x86_64")]
+        let grep_cmd = "grep -c 'IO-APIC.*virtio' /proc/interrupts";
+        #[cfg(target_arch = "aarch64")]
+        let grep_cmd = "grep -c 'GICv3.*virtio' /proc/interrupts";
+
+        let r = std::panic::catch_unwind(|| {
+            assert_eq!(
+                guest
+                    .ssh_command(grep_cmd)
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                5
             );
         });
 
