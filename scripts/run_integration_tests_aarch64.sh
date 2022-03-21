@@ -59,16 +59,13 @@ build_custom_linux() {
 
     checkout_repo "$LINUX_CUSTOM_DIR" "$LINUX_CUSTOM_URL" "$LINUX_CUSTOM_BRANCH"
 
-    if [ ! -f "$LINUX_CUSTOM_DIR/.built" ]; then
-        cp $SRCDIR/resources/linux-config-aarch64 $LINUX_CUSTOM_DIR/.config
+    cp $SRCDIR/resources/linux-config-aarch64 $LINUX_CUSTOM_DIR/.config
 
-        pushd $LINUX_CUSTOM_DIR
-        time make -j `nproc`
-        cp arch/arm64/boot/Image "$WORKLOADS_DIR/" || exit 1
-        cp arch/arm64/boot/Image.gz "$WORKLOADS_DIR/" || exit 1
-        touch .built
-        popd
-    fi
+    pushd $LINUX_CUSTOM_DIR
+    time make -j `nproc`
+    cp arch/arm64/boot/Image "$WORKLOADS_DIR/" || exit 1
+    cp arch/arm64/boot/Image.gz "$WORKLOADS_DIR/" || exit 1
+    popd
 }
 
 build_edk2() {
