@@ -771,8 +771,9 @@ pub fn create_acpi_tables(
         .expect("Error writing RSDP");
 
     info!(
-        "Generated ACPI tables: took {}µs",
-        Instant::now().duration_since(start_time).as_micros()
+        "Generated ACPI tables: took {}µs size = {}",
+        Instant::now().duration_since(start_time).as_micros(),
+        xsdt_offset.0 + xsdt.len() as u64 - rsdp_offset.0
     );
     rsdp_offset
 }
