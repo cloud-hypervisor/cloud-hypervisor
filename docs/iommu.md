@@ -231,3 +231,38 @@ Last thing is to start the L2 guest with the huge pages memory backend.
     --cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw" \
     --device path=/sys/bus/pci/devices/0000:00:04.0
 ```
+
+### Dedicated IOMMU PCI segments
+
+To facilitate hotplug of devices that require being behind an IOMMU it is
+possible to mark entire PCI segments as behind the IOMMU.
+
+This is accomplished through `--platform
+num_pci_segments=<number_of_segments>,iommu_segments=<range of segments>` or
+via the equivalents in `PlatformConfig` for the API.
+
+e.g.
+
+```bash
+./cloud-hypervisor \
+    --api-socket=/tmp/api \
+    --cpus boot=1 \
+    --memory size=4G,hugepages=on \
+    --disk path=focal-server-cloudimg-amd64.raw \
+    --kernel custom-vmlinux \
+    --cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw" \
+    --platform num_pci_segments=2,iommu_segments=1
+```
+
+This adds a second PCI segment to the platform behind the IOMMU. A VFIO device
+requiring the IOMMU then may be hotplugged:
+
+e.g.
+
+```bash
+./ch-remote --api-socket=/tmp/api add-device path=/sys/bus/pci/devices/0000:00:04.0,iommu=on,pci_segment=1
+```
+
+Devices that cannot be placed behind an IOMMU (e.g. lacking an `iommu=` option)
+cannot be placed on the IOMMU segments.
+
