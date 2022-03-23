@@ -172,6 +172,7 @@ pub struct MemoryManager {
     log_dirty: bool, // Enable dirty logging for created RAM regions
     arch_mem_regions: Vec<ArchMemRegion>,
     ram_allocator: AddressAllocator,
+    dynamic: bool,
 
     // Keep track of calls to create_userspace_mapping() for guest RAM.
     // This is useful for getting the dirty pages as we need to know the
@@ -309,6 +310,9 @@ pub enum Error {
 
     /// Failed to allocate MMIO address
     AllocateMmioAddress,
+
+    /// Memory resizing not supported
+    ResizingNotSupported,
 }
 
 const ENABLE_FLAG: usize = 0;
@@ -1028,9 +1032,9 @@ impl MemoryManager {
             .ok_or(Error::AllocateMmioAddress)?;
 
         #[cfg(not(feature = "tdx"))]
-        let log_dirty = true;
+        let dynamic = true;
         #[cfg(feature = "tdx")]
-        let log_dirty = !tdx_enabled; // Cannot log dirty pages on a TD
+        let dynamic = !tdx_enabled;
 
         // If running on SGX the start of device area and RAM area may diverge but
         // at this point they are next to each other.
@@ -1065,9 +1069,10 @@ impl MemoryManager {
             guest_ram_mappings: Vec::new(),
             #[cfg(feature = "acpi")]
             acpi_address,
-            log_dirty,
+            log_dirty: dynamic, // Cannot log dirty pages on a TD
             arch_mem_regions,
             ram_allocator,
+            dynamic,
         };
 
         memory_manager.allocate_address_space()?;
@@ -1596,6 +1601,10 @@ impl MemoryManager {
     /// use case never adds a new region as the whole hotpluggable memory has
     /// already been allocated at boot time.
     pub fn resize(&mut self, desired_ram: u64) -> Result<Option<Arc<GuestRegionMmap>>, Error> {
+        if !self.dynamic {
+            return Err(Error::ResizingNotSupported);
+        }
+
         if self.user_provided_zones {
             error!(
                 "Not allowed to resize guest memory when backed with user \
