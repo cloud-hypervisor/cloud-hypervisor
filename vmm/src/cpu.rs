@@ -417,7 +417,7 @@ pub struct CpuManager {
     vmmops: Arc<dyn VmmOps>,
     #[cfg(feature = "acpi")]
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
-    acpi_address: GuestAddress,
+    acpi_address: Option<GuestAddress>,
     #[cfg(feature = "acpi")]
     proximity_domain_per_cpu: BTreeMap<u8, u32>,
     affinity: BTreeMap<u8, Vec<u8>>,
@@ -600,13 +600,6 @@ impl CpuManager {
         };
 
         let device_manager = device_manager.lock().unwrap();
-        #[cfg(feature = "acpi")]
-        let acpi_address = device_manager
-            .allocator()
-            .lock()
-            .unwrap()
-            .allocate_platform_mmio_addresses(None, CPU_MANAGER_ACPI_SIZE as u64, None)
-            .ok_or(Error::AllocateMmmioAddress)?;
 
         #[cfg(feature = "acpi")]
         let proximity_domain_per_cpu: BTreeMap<u8, u32> = {
@@ -635,6 +628,20 @@ impl CpuManager {
         #[cfg(not(feature = "tdx"))]
         let dynamic = true;
 
+        #[cfg(feature = "acpi")]
+        let acpi_address = if dynamic {
+            Some(
+                device_manager
+                    .allocator()
+                    .lock()
+                    .unwrap()
+                    .allocate_platform_mmio_addresses(None, CPU_MANAGER_ACPI_SIZE as u64, None)
+                    .ok_or(Error::AllocateMmmioAddress)?,
+            )
+        } else {
+            None
+        };
+
         let cpu_manager = Arc::new(Mutex::new(CpuManager {
             config: config.clone(),
             interrupt_controller: device_manager.interrupt_controller().clone(),
@@ -662,14 +669,16 @@ impl CpuManager {
         }));
 
         #[cfg(feature = "acpi")]
-        device_manager
-            .mmio_bus()
-            .insert(
-                cpu_manager.clone(),
-                acpi_address.0,
-                CPU_MANAGER_ACPI_SIZE as u64,
-            )
-            .map_err(Error::BusError)?;
+        if let Some(acpi_address) = acpi_address {
+            device_manager
+                .mmio_bus()
+                .insert(
+                    cpu_manager.clone(),
+                    acpi_address.0,
+                    CPU_MANAGER_ACPI_SIZE as u64,
+                )
+                .map_err(Error::BusError)?;
+        }
 
         Ok(cpu_manager)
     }
@@ -1717,9 +1726,9 @@ impl Aml for CpuMethods {
 #[cfg(feature = "acpi")]
 impl Aml for CpuManager {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
-        if self.dynamic {
+        #[cfg(target_arch = "x86_64")]
+        if let Some(acpi_address) = self.acpi_address {
             // CPU hotplug controller
-            #[cfg(target_arch = "x86_64")]
             aml::Device::new(
                 "_SB_.PRES".into(),
                 vec![
@@ -1732,15 +1741,15 @@ impl Aml for CpuManager {
                         &aml::ResourceTemplate::new(vec![&aml::AddressSpace::new_memory(
                             aml::AddressSpaceCachable::NotCacheable,
                             true,
-                            self.acpi_address.0 as u64,
-                            self.acpi_address.0 + CPU_MANAGER_ACPI_SIZE as u64 - 1,
+                            acpi_address.0 as u64,
+                            acpi_address.0 + CPU_MANAGER_ACPI_SIZE as u64 - 1,
                         )]),
                     ),
                     // OpRegion and Fields map MMIO range into individual field values
                     &aml::OpRegion::new(
                         "PRST".into(),
                         aml::OpRegionSpace::SystemMemory,
-                        self.acpi_address.0 as usize,
+                        acpi_address.0 as usize,
                         CPU_MANAGER_ACPI_SIZE,
                     ),
                     &aml::Field::new(
