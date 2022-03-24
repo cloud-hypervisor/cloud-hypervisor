@@ -108,11 +108,6 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
             if ret == libc::MAP_FAILED {
                 return Err(io::Error::last_os_error());
             }
-
-            let ret = unsafe { libc::close(fd.as_raw_fd()) };
-            if ret == -1 {
-                return Err(io::Error::last_os_error());
-            }
         }
 
         Ok(0)
@@ -269,11 +264,6 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
                 ptr += ret as u64;
                 done += ret as u64;
             }
-        }
-
-        let ret = unsafe { libc::close(fd.as_raw_fd()) };
-        if ret == -1 {
-            return Err(io::Error::last_os_error());
         }
 
         Ok(done)
