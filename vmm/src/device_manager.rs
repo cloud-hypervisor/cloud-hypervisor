@@ -1132,15 +1132,16 @@ impl DeviceManager {
 
         #[cfg(feature = "acpi")]
         {
-            let memory_manager_acpi_address = self.memory_manager.lock().unwrap().acpi_address;
-            self.address_manager
-                .mmio_bus
-                .insert(
-                    Arc::clone(&self.memory_manager) as Arc<Mutex<dyn BusDevice>>,
-                    memory_manager_acpi_address.0,
-                    MEMORY_MANAGER_ACPI_SIZE as u64,
-                )
-                .map_err(DeviceManagerError::BusError)?;
+            if let Some(acpi_address) = self.memory_manager.lock().unwrap().acpi_address() {
+                self.address_manager
+                    .mmio_bus
+                    .insert(
+                        Arc::clone(&self.memory_manager) as Arc<Mutex<dyn BusDevice>>,
+                        acpi_address.0,
+                        MEMORY_MANAGER_ACPI_SIZE as u64,
+                    )
+                    .map_err(DeviceManagerError::BusError)?;
+            }
         }
 
         #[cfg(target_arch = "x86_64")]
