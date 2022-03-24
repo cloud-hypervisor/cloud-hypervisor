@@ -5967,7 +5967,7 @@ mod parallel {
             // Unplug the device
             let cmd_success = remote_command(&api_socket, "remove-device", Some("myvdpa0"));
             assert!(cmd_success);
-            thread::sleep(std::time::Duration::new(10, 0));
+            thread::sleep(std::time::Duration::new(30, 0));
 
             // Check /dev/vdd doesn't exist anymore
             assert_eq!(
