@@ -180,7 +180,7 @@ pub struct MemoryManager {
     guest_ram_mappings: Vec<GuestRamMapping>,
 
     #[cfg(feature = "acpi")]
-    pub acpi_address: GuestAddress,
+    pub acpi_address: Option<GuestAddress>,
 }
 
 #[derive(Debug)]
@@ -1024,17 +1024,25 @@ impl MemoryManager {
             .ok_or(Error::CreateSystemAllocator)?,
         ));
 
-        #[cfg(feature = "acpi")]
-        let acpi_address = allocator
-            .lock()
-            .unwrap()
-            .allocate_platform_mmio_addresses(None, MEMORY_MANAGER_ACPI_SIZE as u64, None)
-            .ok_or(Error::AllocateMmioAddress)?;
-
         #[cfg(not(feature = "tdx"))]
         let dynamic = true;
         #[cfg(feature = "tdx")]
         let dynamic = !tdx_enabled;
+
+        let hotplug_method = config.hotplug_method.clone();
+
+        #[cfg(feature = "acpi")]
+        let acpi_address = if dynamic && hotplug_method == HotplugMethod::Acpi {
+            Some(
+                allocator
+                    .lock()
+                    .unwrap()
+                    .allocate_platform_mmio_addresses(None, MEMORY_MANAGER_ACPI_SIZE as u64, None)
+                    .ok_or(Error::AllocateMmioAddress)?,
+            )
+        } else {
+            None
+        };
 
         // If running on SGX the start of device area and RAM area may diverge but
         // at this point they are next to each other.
@@ -1053,7 +1061,7 @@ impl MemoryManager {
             selected_slot,
             mergeable: config.mergeable,
             allocator,
-            hotplug_method: config.hotplug_method.clone(),
+            hotplug_method,
             boot_ram,
             current_ram,
             next_hotplug_slot,
@@ -1837,6 +1845,11 @@ impl MemoryManager {
         }
         memory_slot_fds
     }
+
+    #[cfg(feature = "acpi")]
+    pub fn acpi_address(&self) -> Option<GuestAddress> {
+        self.acpi_address
+    }
 }
 
 #[cfg(feature = "acpi")]
@@ -2070,81 +2083,94 @@ impl Aml for MemoryMethods {
 #[cfg(feature = "acpi")]
 impl Aml for MemoryManager {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
-        // Memory Hotplug Controller
-        aml::Device::new(
-            "_SB_.MHPC".into(),
-            vec![
-                &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0A06")),
-                &aml::Name::new("_UID".into(), &"Memory Hotplug Controller"),
-                // Mutex to protect concurrent access as we write to choose slot and then read back status
-                &aml::Mutex::new("MLCK".into(), 0),
-                &aml::Name::new(
-                    "_CRS".into(),
-                    &aml::ResourceTemplate::new(vec![&aml::AddressSpace::new_memory(
-                        aml::AddressSpaceCachable::NotCacheable,
-                        true,
-                        self.acpi_address.0 as u64,
-                        self.acpi_address.0 + MEMORY_MANAGER_ACPI_SIZE as u64 - 1,
-                    )]),
-                ),
-                // OpRegion and Fields map MMIO range into individual field values
-                &aml::OpRegion::new(
-                    "MHPR".into(),
-                    aml::OpRegionSpace::SystemMemory,
-                    self.acpi_address.0 as usize,
-                    MEMORY_MANAGER_ACPI_SIZE,
-                ),
-                &aml::Field::new(
-                    "MHPR".into(),
-                    aml::FieldAccessType::DWord,
-                    aml::FieldUpdateRule::Preserve,
-                    vec![
-                        aml::FieldEntry::Named(*b"MHBL", 32), // Base (low 4 bytes)
-                        aml::FieldEntry::Named(*b"MHBH", 32), // Base (high 4 bytes)
-                        aml::FieldEntry::Named(*b"MHLL", 32), // Length (low 4 bytes)
-                        aml::FieldEntry::Named(*b"MHLH", 32), // Length (high 4 bytes)
-                    ],
-                ),
-                &aml::Field::new(
-                    "MHPR".into(),
-                    aml::FieldAccessType::DWord,
-                    aml::FieldUpdateRule::Preserve,
-                    vec![
-                        aml::FieldEntry::Reserved(128),
-                        aml::FieldEntry::Named(*b"MHPX", 32), // PXM
-                    ],
-                ),
-                &aml::Field::new(
-                    "MHPR".into(),
-                    aml::FieldAccessType::Byte,
-                    aml::FieldUpdateRule::WriteAsZeroes,
-                    vec![
-                        aml::FieldEntry::Reserved(160),
-                        aml::FieldEntry::Named(*b"MEN_", 1), // Enabled
-                        aml::FieldEntry::Named(*b"MINS", 1), // Inserting
-                        aml::FieldEntry::Named(*b"MRMV", 1), // Removing
-                        aml::FieldEntry::Named(*b"MEJ0", 1), // Ejecting
-                    ],
-                ),
-                &aml::Field::new(
-                    "MHPR".into(),
-                    aml::FieldAccessType::DWord,
-                    aml::FieldUpdateRule::Preserve,
-                    vec![
-                        aml::FieldEntry::Named(*b"MSEL", 32), // Selector
-                        aml::FieldEntry::Named(*b"MOEV", 32), // Event
-                        aml::FieldEntry::Named(*b"MOSC", 32), // OSC
-                    ],
-                ),
-                &MemoryMethods {
-                    slots: self.hotplug_slots.len(),
-                },
-                &MemorySlots {
-                    slots: self.hotplug_slots.len(),
-                },
-            ],
-        )
-        .append_aml_bytes(bytes);
+        if let Some(acpi_address) = self.acpi_address {
+            // Memory Hotplug Controller
+            aml::Device::new(
+                "_SB_.MHPC".into(),
+                vec![
+                    &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0A06")),
+                    &aml::Name::new("_UID".into(), &"Memory Hotplug Controller"),
+                    // Mutex to protect concurrent access as we write to choose slot and then read back status
+                    &aml::Mutex::new("MLCK".into(), 0),
+                    &aml::Name::new(
+                        "_CRS".into(),
+                        &aml::ResourceTemplate::new(vec![&aml::AddressSpace::new_memory(
+                            aml::AddressSpaceCachable::NotCacheable,
+                            true,
+                            acpi_address.0 as u64,
+                            acpi_address.0 + MEMORY_MANAGER_ACPI_SIZE as u64 - 1,
+                        )]),
+                    ),
+                    // OpRegion and Fields map MMIO range into individual field values
+                    &aml::OpRegion::new(
+                        "MHPR".into(),
+                        aml::OpRegionSpace::SystemMemory,
+                        acpi_address.0 as usize,
+                        MEMORY_MANAGER_ACPI_SIZE,
+                    ),
+                    &aml::Field::new(
+                        "MHPR".into(),
+                        aml::FieldAccessType::DWord,
+                        aml::FieldUpdateRule::Preserve,
+                        vec![
+                            aml::FieldEntry::Named(*b"MHBL", 32), // Base (low 4 bytes)
+                            aml::FieldEntry::Named(*b"MHBH", 32), // Base (high 4 bytes)
+                            aml::FieldEntry::Named(*b"MHLL", 32), // Length (low 4 bytes)
+                            aml::FieldEntry::Named(*b"MHLH", 32), // Length (high 4 bytes)
+                        ],
+                    ),
+                    &aml::Field::new(
+                        "MHPR".into(),
+                        aml::FieldAccessType::DWord,
+                        aml::FieldUpdateRule::Preserve,
+                        vec![
+                            aml::FieldEntry::Reserved(128),
+                            aml::FieldEntry::Named(*b"MHPX", 32), // PXM
+                        ],
+                    ),
+                    &aml::Field::new(
+                        "MHPR".into(),
+                        aml::FieldAccessType::Byte,
+                        aml::FieldUpdateRule::WriteAsZeroes,
+                        vec![
+                            aml::FieldEntry::Reserved(160),
+                            aml::FieldEntry::Named(*b"MEN_", 1), // Enabled
+                            aml::FieldEntry::Named(*b"MINS", 1), // Inserting
+                            aml::FieldEntry::Named(*b"MRMV", 1), // Removing
+                            aml::FieldEntry::Named(*b"MEJ0", 1), // Ejecting
+                        ],
+                    ),
+                    &aml::Field::new(
+                        "MHPR".into(),
+                        aml::FieldAccessType::DWord,
+                        aml::FieldUpdateRule::Preserve,
+                        vec![
+                            aml::FieldEntry::Named(*b"MSEL", 32), // Selector
+                            aml::FieldEntry::Named(*b"MOEV", 32), // Event
+                            aml::FieldEntry::Named(*b"MOSC", 32), // OSC
+                        ],
+                    ),
+                    &MemoryMethods {
+                        slots: self.hotplug_slots.len(),
+                    },
+                    &MemorySlots {
+                        slots: self.hotplug_slots.len(),
+                    },
+                ],
+            )
+            .append_aml_bytes(bytes);
+        } else {
+            aml::Device::new(
+                "_SB_.MHPC".into(),
+                vec![
+                    &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0A06")),
+                    &aml::Name::new("_UID".into(), &"Memory Hotplug Controller"),
+                    // Empty MSCN for GED
+                    &aml::Method::new("MSCN".into(), 0, true, vec![]),
+                ],
+            )
+            .append_aml_bytes(bytes);
+        }
 
         #[cfg(target_arch = "x86_64")]
         {
