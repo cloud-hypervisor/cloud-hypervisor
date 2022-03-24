@@ -2798,33 +2798,8 @@ mod parallel {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
-    fn test_virtio_fs_dax_on_default_cache_size() {
-        test_virtio_fs(true, None, "never", &prepare_virtiofsd, false, None)
-    }
-
-    #[test]
-    #[cfg(not(feature = "mshv"))]
-    fn test_virtio_fs_dax_on_cache_size_1_gib() {
-        test_virtio_fs(
-            true,
-            Some(0x4000_0000),
-            "never",
-            &prepare_virtiofsd,
-            false,
-            None,
-        )
-    }
-
-    #[test]
     fn test_virtio_fs_dax_off() {
         test_virtio_fs(false, None, "never", &prepare_virtiofsd, false, None)
-    }
-
-    #[test]
-    #[cfg(not(feature = "mshv"))]
-    fn test_virtio_fs_hotplug_dax_on() {
-        test_virtio_fs(true, None, "never", &prepare_virtiofsd, true, None)
     }
 
     #[test]
@@ -2835,27 +2810,13 @@ mod parallel {
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_virtio_fs_multi_segment_hotplug() {
-        test_virtio_fs(
-            true,
-            Some(0x4000_0000),
-            "never",
-            &prepare_virtiofsd,
-            true,
-            Some(15),
-        )
+        test_virtio_fs(false, None, "never", &prepare_virtiofsd, true, Some(15))
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_virtio_fs_multi_segment() {
-        test_virtio_fs(
-            true,
-            Some(0x4000_0000),
-            "never",
-            &prepare_virtiofsd,
-            false,
-            Some(15),
-        )
+        test_virtio_fs(false, None, "never", &prepare_virtiofsd, false, Some(15))
     }
 
     #[test]

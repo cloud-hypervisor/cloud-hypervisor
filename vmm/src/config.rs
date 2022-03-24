@@ -1530,7 +1530,7 @@ fn default_fsconfig_queue_size() -> u16 {
 }
 
 fn default_fsconfig_dax() -> bool {
-    true
+    false
 }
 
 fn default_fsconfig_cache_size() -> u64 {
@@ -1633,6 +1633,15 @@ impl FsConfig {
                     return Err(ValidationError::IommuNotSupported(self.pci_segment));
                 }
             }
+        }
+
+        if self.dax {
+            // TODO: Remove the dax parameter.
+            // Tracked by https://github.com/cloud-hypervisor/cloud-hypervisor/issues/3889
+            warn!(
+                "The experimental DAX feature is deprecated and will be \
+                removed in a future release. A request to enable it is ignored."
+            );
         }
 
         Ok(())

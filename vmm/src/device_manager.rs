@@ -2395,6 +2395,9 @@ impl DeviceManager {
             None
         };
 
+        // DAX is not supported, we override the config by disabling the option.
+        fs_cfg.dax = false;
+
         if let Some(fs_socket) = fs_cfg.socket.to_str() {
             let cache = if fs_cfg.dax {
                 let (cache_base, cache_size) = if let Some((base, size)) = cache_range {
