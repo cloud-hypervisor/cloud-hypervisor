@@ -74,24 +74,6 @@ system, here is the Cloud Hypervisor command you need to run:
     --fs tag=myfs,socket=/tmp/virtiofs,num_queues=1,queue_size=512
 ```
 
-By default, DAX is enabled with a cache window of 8GiB. You can specify a custom
-size (let's say 4GiB for this example) for the cache by explicitly setting DAX
-and the cache size:
-
-```bash
---fs tag=myfs,socket=/tmp/virtiofs,num_queues=1,queue_size=512,dax=on,cache_size=4G
-
-```
-
-In case you don't want to use a shared window of cache to pass the shared files
-content, this means you will have to explicitly disable DAX with `dax=off`.
-Note that in this case, the `cache_size` parameter will be ignored.
-
-```bash
---fs tag=myfs,socket=/tmp/virtiofs,num_queues=1,queue_size=512,dax=off
-
-```
-
 ### Mount the shared directory
 
 The last step is to mount the shared directory inside the guest, using the
@@ -99,20 +81,13 @@ The last step is to mount the shared directory inside the guest, using the
 
 ```bash
 mkdir mount_dir
-mount -t virtiofs -o dax myfs mount_dir/
+mount -t virtiofs myfs mount_dir/
 ```
 
 The `tag` needs to be consistent with what has been provided through the
 Cloud Hypervisor command line, which happens to be `myfs` in this example.
 
-The `-o dax` option must be removed in case the shared cache region is not
-enabled from the VMM.
+## DAX feature
 
-The filesystem should be mounted with `dax` by default as it bypasses the guest
-page cache, reducing the footprint on host memory. When running multiple virtual
-machines on the same host, this will let the host deal with page cache, which
-will increase the density of virtual machines which can be launched.
-
-When the filesystem is not mounted with the `dax` option, the guest page cache
-is used, which can result in better performance for the guest's workload at the
-cost of increasing the footprint on host memory.
+Given the DAX feature is not stable yet from a daemon standpoint, it is not
+available in Cloud Hypervisor.
