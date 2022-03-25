@@ -10,7 +10,7 @@ default = []
 [dependencies]
 io-uring = "0.5.2"
 libc = "0.2.121"
-log = "0.4.14"
+log = "0.4.16"
 qcow = { path = "../qcow" }
 thiserror = "1.0.30"
 versionize = "0.1.6"
