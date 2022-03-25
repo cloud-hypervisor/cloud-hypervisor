@@ -107,15 +107,7 @@ impl Vdpa {
             .map_err(Error::GetBackendFeatures)?;
         vhost.set_backend_features_acked(backend_features);
 
-        // TODO: https://github.com/cloud-hypervisor/cloud-hypervisor/issues/3861
-        // There's a bug in rust-vmm/vhost crate. Let's wait for next release
-        // to fix it. Below is the correct code once the bug will be fixed:
-        //
-        // let iova_range = vhost.get_iova_range().map_err(Error::GetIovaRange)?;
-        let iova_range = VhostVdpaIovaRange {
-            first: 0,
-            last: 0xffff_ffff_ffff_ffff,
-        };
+        let iova_range = vhost.get_iova_range().map_err(Error::GetIovaRange)?;
 
         if avail_features & (1u64 << VIRTIO_F_IOMMU_PLATFORM) == 0 {
             return Err(Error::MissingAccessPlatformVirtioFeature);
