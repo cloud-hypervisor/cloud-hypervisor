@@ -5754,9 +5754,7 @@ mod parallel {
         exec_host_command_status("pkill -f nvmf_tgt");
     }
 
-    #[ignore]
     #[test]
-    #[cfg(target_arch = "aarch64")]
     fn test_vfio_user() {
         #[cfg(target_arch = "aarch64")]
         let focal_image = FOCAL_IMAGE_UPDATE_KERNEL_NAME.to_string();
@@ -5813,7 +5811,7 @@ mod parallel {
                 1
             );
 
-            // Check changes persist after reboot
+            // Check changes persist after umount
             assert_eq!(
                 guest.ssh_command("sudo mount /dev/nvme0n1 /mnt").unwrap(),
                 ""
@@ -5825,7 +5823,6 @@ mod parallel {
             assert_eq!(guest.ssh_command("sudo umount /mnt").unwrap(), "");
             assert_eq!(guest.ssh_command("ls /mnt").unwrap(), "");
 
-            guest.reboot_linux(0, None);
             assert_eq!(
                 guest.ssh_command("sudo mount /dev/nvme0n1 /mnt").unwrap(),
                 ""
