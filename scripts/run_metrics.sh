@@ -11,6 +11,30 @@ export BUILD_TARGET=${BUILD_TARGET-${TEST_ARCH}-unknown-linux-gnu}
 WORKLOADS_DIR="$HOME/workloads"
 mkdir -p "$WORKLOADS_DIR"
 
+build_custom_linux() {
+    SRCDIR=$PWD
+    LINUX_CUSTOM_DIR="$WORKLOADS_DIR/linux-custom"
+    LINUX_CUSTOM_BRANCH="ch-5.15.12"
+    LINUX_CUSTOM_URL="https://github.com/cloud-hypervisor/linux.git"
+
+    checkout_repo "$LINUX_CUSTOM_DIR" "$LINUX_CUSTOM_URL" "$LINUX_CUSTOM_BRANCH"
+
+    cp $SRCDIR/resources/linux-config-${TEST_ARCH} $LINUX_CUSTOM_DIR/.config
+
+    pushd $LINUX_CUSTOM_DIR
+    make -j `nproc`
+    if [ ${TEST_ARCH} == "x86_64" ]; then
+       cp vmlinux "$WORKLOADS_DIR/" || exit 1
+    elif [ ${TEST_ARCH} == "aarch64" ]; then
+       cp arch/arm64/boot/Image "$WORKLOADS_DIR/" || exit 1
+    fi
+    popd
+
+    if [ -d "$LINUX_CUSTOM_DIR" ]; then
+        rm -rf $LINUX_CUSTOM_DIR
+    fi
+}
+
 build_fio() {
     FIO_DIR="$WORKLOADS_DIR/fio_build"
     FIO_REPO="https://github.com/axboe/fio.git"
@@ -89,37 +113,7 @@ if [ ${TEST_ARCH} == "aarch64" ]; then
 fi
 
 # Build custom kernel based on virtio-pmem and virtio-fs upstream patches
-if [ ${TEST_ARCH} == "aarch64" ]; then
-       VMLINUX_IMAGE="$WORKLOADS_DIR/Image"
-else
-       VMLINUX_IMAGE="$WORKLOADS_DIR/vmlinux"
-fi
-
-LINUX_CUSTOM_DIR="$WORKLOADS_DIR/linux-custom"
-
-if [ ! -f "$VMLINUX_IMAGE" ]; then
-    SRCDIR=$PWD
-    pushd $WORKLOADS_DIR
-    time git clone --depth 1 "https://github.com/cloud-hypervisor/linux.git" -b "ch-5.15.12" $LINUX_CUSTOM_DIR
-    cp $SRCDIR/resources/linux-config-${TEST_ARCH} $LINUX_CUSTOM_DIR/.config
-    popd
-fi
-
-if [ ! -f "$VMLINUX_IMAGE" ]; then
-    pushd $LINUX_CUSTOM_DIR
-    if [ ${TEST_ARCH} == "x86_64" ]; then
-       make bzImage -j `nproc`
-       cp vmlinux $VMLINUX_IMAGE || exit 1
-    elif [ ${TEST_ARCH} == "aarch64" ]; then
-       make Image -j `nproc`
-       cp arch/arm64/boot/Image $VMLINUX_IMAGE || exit 1
-    fi
-    popd
-fi
-
-if [ -d "$LINUX_CUSTOM_DIR" ]; then
-    rm -rf $LINUX_CUSTOM_DIR
-fi
+build_custom_linux
 
 BUILD_TARGET="${TEST_ARCH}-unknown-linux-${CH_LIBC}"
 CFLAGS=""
