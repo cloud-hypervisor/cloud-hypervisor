@@ -180,7 +180,6 @@ fn virtio_vhost_net_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_getcwd, vec![]),
         (libc::SYS_listen, vec![]),
         (libc::SYS_recvmsg, vec![]),
-        (libc::SYS_rt_sigreturn, vec![]),
         (libc::SYS_sendmsg, vec![]),
         (libc::SYS_sendto, vec![]),
         (libc::SYS_socket, vec![]),
@@ -244,7 +243,6 @@ fn get_seccomp_rules(thread_type: Thread) -> Vec<(i64, Vec<SeccompRule>)> {
 fn virtio_thread_common() -> Vec<(i64, Vec<SeccompRule>)> {
     vec![
         (libc::SYS_brk, vec![]),
-        #[cfg(feature = "mshv")]
         (libc::SYS_clock_gettime, vec![]),
         (libc::SYS_close, vec![]),
         (libc::SYS_dup, vec![]),
@@ -261,6 +259,7 @@ fn virtio_thread_common() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_openat, vec![]),
         (libc::SYS_read, vec![]),
         (libc::SYS_rt_sigprocmask, vec![]),
+        (libc::SYS_rt_sigreturn, vec![]),
         (libc::SYS_sigaltstack, vec![]),
         (libc::SYS_write, vec![]),
     ]
