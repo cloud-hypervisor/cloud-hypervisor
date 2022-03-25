@@ -52,7 +52,10 @@ jobs:
 
       - name: Build (mshv)
         run: cargo rustc --bin cloud-hypervisor --no-default-features --features "mshv"  -- -D warnings
-        
+
+      - name: Build (default + amx)
+        run: cargo rustc --bin cloud-hypervisor --features "amx" -- -D warnings
+
       - name: Release Build (default features)
         run: cargo build --all --release --target=${{ matrix.target }}
 
