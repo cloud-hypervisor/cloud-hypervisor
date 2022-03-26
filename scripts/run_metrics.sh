@@ -11,30 +11,6 @@ export BUILD_TARGET=${BUILD_TARGET-${TEST_ARCH}-unknown-linux-gnu}
 WORKLOADS_DIR="$HOME/workloads"
 mkdir -p "$WORKLOADS_DIR"
 
-build_custom_linux() {
-    SRCDIR=$PWD
-    LINUX_CUSTOM_DIR="$WORKLOADS_DIR/linux-custom"
-    LINUX_CUSTOM_BRANCH="ch-5.15.12"
-    LINUX_CUSTOM_URL="https://github.com/cloud-hypervisor/linux.git"
-
-    checkout_repo "$LINUX_CUSTOM_DIR" "$LINUX_CUSTOM_URL" "$LINUX_CUSTOM_BRANCH"
-
-    cp $SRCDIR/resources/linux-config-${TEST_ARCH} $LINUX_CUSTOM_DIR/.config
-
-    pushd $LINUX_CUSTOM_DIR
-    make -j `nproc`
-    if [ ${TEST_ARCH} == "x86_64" ]; then
-       cp vmlinux "$WORKLOADS_DIR/" || exit 1
-    elif [ ${TEST_ARCH} == "aarch64" ]; then
-       cp arch/arm64/boot/Image "$WORKLOADS_DIR/" || exit 1
-    fi
-    popd
-
-    if [ -d "$LINUX_CUSTOM_DIR" ]; then
-        rm -rf $LINUX_CUSTOM_DIR
-    fi
-}
-
 build_fio() {
     FIO_DIR="$WORKLOADS_DIR/fio_build"
     FIO_REPO="https://github.com/axboe/fio.git"
