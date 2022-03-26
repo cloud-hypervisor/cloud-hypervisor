@@ -11,23 +11,6 @@ WORKLOADS_LOCK="$WORKLOADS_DIR/integration_test.lock"
 
 mkdir -p "$WORKLOADS_DIR"
 
-build_custom_linux() {
-    SRCDIR=$PWD
-    LINUX_CUSTOM_DIR="$WORKLOADS_DIR/linux-custom"
-    LINUX_CUSTOM_BRANCH="ch-5.15.12"
-    LINUX_CUSTOM_URL="https://github.com/cloud-hypervisor/linux.git"
-
-    checkout_repo "$LINUX_CUSTOM_DIR" "$LINUX_CUSTOM_URL" "$LINUX_CUSTOM_BRANCH"
-
-    cp $SRCDIR/resources/linux-config-aarch64 $LINUX_CUSTOM_DIR/.config
-
-    pushd $LINUX_CUSTOM_DIR
-    time make -j `nproc`
-    cp arch/arm64/boot/Image "$WORKLOADS_DIR/" || exit 1
-    cp arch/arm64/boot/Image.gz "$WORKLOADS_DIR/" || exit 1
-    popd
-}
-
 build_edk2() {
     EDK2_BUILD_DIR="$WORKLOADS_DIR/edk2_build"
     EDK2_REPO="https://github.com/tianocore/edk2.git"
