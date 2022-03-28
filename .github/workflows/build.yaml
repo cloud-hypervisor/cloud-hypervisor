@@ -50,6 +50,9 @@ jobs:
       - name: Build (default features + amx)
         run: cargo rustc --bin cloud-hypervisor --features "amx" -- -D warnings
 
+      - name: Build (default features + gdb)
+        run: cargo rustc --bin cloud-hypervisor --features "gdb" -- -D warnings
+
       - name: Build (common + mshv)
         run: cargo rustc --bin cloud-hypervisor --no-default-features --features "common,mshv"  -- -D warnings
 
