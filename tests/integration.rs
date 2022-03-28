@@ -43,6 +43,7 @@ mod x86_64 {
     pub const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-amd64-custom-20210609-0.qcow2";
     pub const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-amd64-custom-20210609-0.vhd";
     pub const FOCAL_IMAGE_NAME_VHDX: &str = "focal-server-cloudimg-amd64-custom-20210609-0.vhdx";
+    pub const JAMMY_IMAGE_NAME: &str = "jammy-server-cloudimg-amd64-custom-20220329-0.raw";
     pub const WINDOWS_IMAGE_NAME: &str = "windows-server-2019.raw";
     pub const OVMF_NAME: &str = "CLOUDHV.fd";
     pub const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'IO-APIC.*ttyS0' /proc/interrupts || true";
@@ -5764,16 +5765,12 @@ mod parallel {
         exec_host_command_status("pkill -f nvmf_tgt");
     }
 
-    #[ignore]
     #[test]
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(target_arch = "x86_64")]
     fn test_vfio_user() {
-        #[cfg(target_arch = "aarch64")]
-        let focal_image = FOCAL_IMAGE_UPDATE_KERNEL_NAME.to_string();
-        #[cfg(target_arch = "x86_64")]
-        let focal_image = FOCAL_IMAGE_NAME.to_string();
-        let focal = UbuntuDiskConfig::new(focal_image);
-        let guest = Guest::new(Box::new(focal));
+        let jammy_image = JAMMY_IMAGE_NAME.to_string();
+        let jammy = UbuntuDiskConfig::new(jammy_image);
+        let guest = Guest::new(Box::new(jammy));
 
         let spdk_nvme_dir = guest.tmp_dir.as_path().join("test-vfio-user");
         setup_spdk_nvme(spdk_nvme_dir.as_path());
