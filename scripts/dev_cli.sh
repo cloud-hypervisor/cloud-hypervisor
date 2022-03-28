@@ -183,10 +183,9 @@ cmd_help() {
     echo "        --volumes             Hash separated volumes to be exported. Example --volumes /mnt:/mnt#/myvol:/myvol"
     echo "        --hypervisor          Underlying hypervisor. Options kvm, mshv"
     echo ""
-    echo "    tests [--unit|--cargo|--all] [--libc musl|gnu] [-- [<test scripts args>] [-- [<test binary args>]]] "
+    echo "    tests [<test type (see below)>] [--libc musl|gnu] [-- [<test scripts args>] [-- [<test binary args>]]] "
     echo "        Run the Cloud Hypervisor tests."
     echo "        --unit                       Run the unit tests."
-    echo "        --cargo                      Run the cargo tests."
     echo "        --integration                Run the integration tests."
     echo "        --integration-sgx            Run the SGX integration tests."
     echo "        --integration-vfio           Run the VFIO integration tests."
@@ -314,7 +313,6 @@ cmd_clean() {
 
 cmd_tests() {
     unit=false
-    cargo=false
     integration=false
     integration_sgx=false
     integration_vfio=false
@@ -332,7 +330,6 @@ cmd_tests() {
             exit 1
         } ;;
         "--unit") { unit=true; } ;;
-        "--cargo") { cargo=true; } ;;
         "--integration") { integration=true; } ;;
         "--integration-sgx") { integration_sgx=true; } ;;
         "--integration-vfio") { integration_vfio=true; } ;;
@@ -396,16 +393,6 @@ cmd_tests() {
             --env BUILD_TARGET="$target" \
             "$CTR_IMAGE" \
             ./scripts/run_unit_tests.sh "$@" || fix_dir_perms $? || exit $?
-    fi
-
-    if [ "$cargo" = true ]; then
-        say "Running cargo tests..."
-        $DOCKER_RUNTIME run \
-            --workdir "$CTR_CLH_ROOT_DIR" \
-            --rm \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
-            "$CTR_IMAGE" \
-            ./scripts/run_cargo_tests.sh "$@" || fix_dir_perms $? || exit $?
     fi
 
     if [ "$integration" = true ]; then
