@@ -49,7 +49,6 @@ use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, Transport
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
-#[cfg(feature = "acpi")]
 mod acpi;
 pub mod api;
 mod clone3;
@@ -571,16 +570,6 @@ impl Vmm {
     }
 
     fn vm_reboot(&mut self) -> result::Result<(), VmError> {
-        // Without ACPI, a reset is equivalent to a shutdown
-        // On AArch64, before ACPI is supported, we simply jump over this check and continue to reset.
-        #[cfg(all(target_arch = "x86_64", not(feature = "acpi")))]
-        {
-            if self.vm.is_some() {
-                self.exit_evt.write(1).unwrap();
-                return Ok(());
-            }
-        }
-
         // First we stop the current VM
         let (config, serial_pty, console_pty, console_resize_pipe) =
             if let Some(mut vm) = self.vm.take() {

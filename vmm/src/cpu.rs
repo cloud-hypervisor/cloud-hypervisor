@@ -21,11 +21,9 @@ use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::vm::physical_bits;
 use crate::GuestMemoryMmap;
 use crate::CPU_MANAGER_SNAPSHOT_ID;
-#[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml, sdt::Sdt};
 use anyhow::anyhow;
 use arch::EntryPoint;
-#[cfg(any(target_arch = "aarch64", feature = "acpi"))]
 use arch::NumaNodes;
 use devices::interrupt_controller::InterruptController;
 #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
@@ -47,7 +45,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, io, result, thread};
 use vm_device::BusDevice;
-#[cfg(feature = "acpi")]
 use vm_memory::GuestAddress;
 use vm_memory::GuestMemoryAtomic;
 use vm_migration::{
@@ -57,7 +54,6 @@ use vm_migration::{
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::{register_signal_handler, SIGRTMIN};
 
-#[cfg(feature = "acpi")]
 pub const CPU_MANAGER_ACPI_SIZE: usize = 0xc;
 
 #[derive(Debug)]
@@ -135,7 +131,7 @@ pub enum Error {
 }
 pub type Result<T> = result::Result<T, Error>;
 
-#[cfg(all(target_arch = "x86_64", feature = "acpi"))]
+#[cfg(target_arch = "x86_64")]
 #[allow(dead_code)]
 #[repr(packed)]
 struct LocalApic {
@@ -158,7 +154,7 @@ struct Ioapic {
     pub gsi_base: u32,
 }
 
-#[cfg(all(target_arch = "aarch64", feature = "acpi"))]
+#[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
 #[repr(packed)]
 struct GicC {
@@ -182,7 +178,7 @@ struct GicC {
     pub spe_overflow_interrupt: u16,
 }
 
-#[cfg(all(target_arch = "aarch64", feature = "acpi"))]
+#[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
 #[repr(packed)]
 struct GicD {
@@ -196,7 +192,7 @@ struct GicD {
     pub reserved1: [u8; 3],
 }
 
-#[cfg(all(target_arch = "aarch64", feature = "acpi"))]
+#[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
 #[repr(packed)]
 struct GicR {
@@ -207,7 +203,7 @@ struct GicR {
     pub range_length: u32,
 }
 
-#[cfg(all(target_arch = "aarch64", feature = "acpi"))]
+#[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
 #[repr(packed)]
 struct GicIts {
@@ -219,7 +215,7 @@ struct GicIts {
     pub reserved1: u32,
 }
 
-#[cfg(all(target_arch = "aarch64", feature = "acpi"))]
+#[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
 #[repr(packed)]
 struct ProcessorHierarchyNode {
@@ -419,10 +415,8 @@ pub struct CpuManager {
     vcpus: Vec<Arc<Mutex<Vcpu>>>,
     seccomp_action: SeccompAction,
     vmmops: Arc<dyn VmmOps>,
-    #[cfg(feature = "acpi")]
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     acpi_address: Option<GuestAddress>,
-    #[cfg(feature = "acpi")]
     proximity_domain_per_cpu: BTreeMap<u8, u32>,
     affinity: BTreeMap<u8, Vec<u8>>,
     dynamic: bool,
@@ -572,7 +566,7 @@ impl CpuManager {
         seccomp_action: SeccompAction,
         vmmops: Arc<dyn VmmOps>,
         #[cfg(feature = "tdx")] tdx_enabled: bool,
-        #[cfg(any(target_arch = "aarch64", feature = "acpi"))] numa_nodes: &NumaNodes,
+        numa_nodes: &NumaNodes,
     ) -> Result<Arc<Mutex<CpuManager>>> {
         let guest_memory = memory_manager.lock().unwrap().guest_memory();
         let mut vcpu_states = Vec::with_capacity(usize::from(config.max_vcpus));
@@ -636,7 +630,6 @@ impl CpuManager {
 
         let device_manager = device_manager.lock().unwrap();
 
-        #[cfg(feature = "acpi")]
         let proximity_domain_per_cpu: BTreeMap<u8, u32> = {
             let mut cpu_list = Vec::new();
             for (proximity_domain, numa_node) in numa_nodes.iter() {
@@ -663,7 +656,6 @@ impl CpuManager {
         #[cfg(not(feature = "tdx"))]
         let dynamic = true;
 
-        #[cfg(feature = "acpi")]
         let acpi_address = if dynamic {
             Some(
                 device_manager
@@ -695,15 +687,12 @@ impl CpuManager {
             vcpus: Vec::with_capacity(usize::from(config.max_vcpus)),
             seccomp_action,
             vmmops,
-            #[cfg(feature = "acpi")]
             acpi_address,
-            #[cfg(feature = "acpi")]
             proximity_domain_per_cpu,
             affinity,
             dynamic,
         }));
 
-        #[cfg(feature = "acpi")]
         if let Some(acpi_address) = acpi_address {
             device_manager
                 .mmio_bus()
@@ -1240,7 +1229,6 @@ impl CpuManager {
             .map(|t| (t.threads_per_core, t.cores_per_die, t.packages))
     }
 
-    #[cfg(feature = "acpi")]
     pub fn create_madt(&self) -> Sdt {
         use crate::acpi;
         // This is also checked in the commandline parsing.
@@ -1370,7 +1358,7 @@ impl CpuManager {
         madt
     }
 
-    #[cfg(all(target_arch = "aarch64", feature = "acpi"))]
+    #[cfg(target_arch = "aarch64")]
     pub fn create_pptt(&self) -> Sdt {
         let pptt_start = 0;
         let mut cpus = 0;
@@ -1503,17 +1491,15 @@ impl CpuManager {
     }
 }
 
-#[cfg(feature = "acpi")]
 struct Cpu {
     cpu_id: u8,
     proximity_domain: u32,
     dynamic: bool,
 }
 
-#[cfg(all(target_arch = "x86_64", feature = "acpi"))]
+#[cfg(target_arch = "x86_64")]
 const MADT_CPU_ENABLE_FLAG: usize = 0;
 
-#[cfg(feature = "acpi")]
 impl Cpu {
     #[cfg(target_arch = "x86_64")]
     fn generate_mat(&self) -> Vec<u8> {
@@ -1533,7 +1519,6 @@ impl Cpu {
     }
 }
 
-#[cfg(feature = "acpi")]
 impl Aml for Cpu {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         #[cfg(target_arch = "x86_64")]
@@ -1621,12 +1606,10 @@ impl Aml for Cpu {
     }
 }
 
-#[cfg(feature = "acpi")]
 struct CpuNotify {
     cpu_id: u8,
 }
 
-#[cfg(feature = "acpi")]
 impl Aml for CpuNotify {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         let object = aml::Path::new(&format!("C{:03}", self.cpu_id));
@@ -1638,13 +1621,11 @@ impl Aml for CpuNotify {
     }
 }
 
-#[cfg(feature = "acpi")]
 struct CpuMethods {
     max_vcpus: u8,
     dynamic: bool,
 }
 
-#[cfg(feature = "acpi")]
 impl Aml for CpuMethods {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         if self.dynamic {
@@ -1758,7 +1739,6 @@ impl Aml for CpuMethods {
     }
 }
 
-#[cfg(feature = "acpi")]
 impl Aml for CpuManager {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         #[cfg(target_arch = "x86_64")]

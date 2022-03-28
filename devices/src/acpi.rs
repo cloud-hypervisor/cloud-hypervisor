@@ -102,7 +102,6 @@ impl BusDevice for AcpiGedDevice {
     }
 }
 
-#[cfg(feature = "acpi")]
 impl Aml for AcpiGedDevice {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         aml::Device::new(

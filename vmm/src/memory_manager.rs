@@ -8,7 +8,6 @@ use crate::config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
 use crate::migration::url_to_path;
 use crate::MEMORY_MANAGER_SNAPSHOT_ID;
 use crate::{GuestMemoryMmap, GuestRegionMmap};
-#[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml};
 use anyhow::anyhow;
 #[cfg(target_arch = "x86_64")]
@@ -46,7 +45,6 @@ use vm_migration::{
     Snapshot, SnapshotDataSection, Snapshottable, Transportable, VersionMapped,
 };
 
-#[cfg(feature = "acpi")]
 pub const MEMORY_MANAGER_ACPI_SIZE: usize = 0x18;
 
 const DEFAULT_MEMORY_ZONE: &str = "mem0";
@@ -179,7 +177,6 @@ pub struct MemoryManager {
     // slots that the mapping is created in.
     guest_ram_mappings: Vec<GuestRamMapping>,
 
-    #[cfg(feature = "acpi")]
     pub acpi_address: Option<GuestAddress>,
 }
 
@@ -1031,7 +1028,6 @@ impl MemoryManager {
 
         let hotplug_method = config.hotplug_method.clone();
 
-        #[cfg(feature = "acpi")]
         let acpi_address = if dynamic && hotplug_method == HotplugMethod::Acpi {
             Some(
                 allocator
@@ -1075,7 +1071,7 @@ impl MemoryManager {
             snapshot_memory_ranges: MemoryRangeTable::default(),
             memory_zones,
             guest_ram_mappings: Vec::new(),
-            #[cfg(feature = "acpi")]
+
             acpi_address,
             log_dirty: dynamic, // Cannot log dirty pages on a TD
             arch_mem_regions,
@@ -1846,18 +1842,15 @@ impl MemoryManager {
         memory_slot_fds
     }
 
-    #[cfg(feature = "acpi")]
     pub fn acpi_address(&self) -> Option<GuestAddress> {
         self.acpi_address
     }
 }
 
-#[cfg(feature = "acpi")]
 struct MemoryNotify {
     slot_id: usize,
 }
 
-#[cfg(feature = "acpi")]
 impl Aml for MemoryNotify {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         let object = aml::Path::new(&format!("M{:03}", self.slot_id));
@@ -1869,12 +1862,10 @@ impl Aml for MemoryNotify {
     }
 }
 
-#[cfg(feature = "acpi")]
 struct MemorySlot {
     slot_id: usize,
 }
 
-#[cfg(feature = "acpi")]
 impl Aml for MemorySlot {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         aml::Device::new(
@@ -1918,12 +1909,10 @@ impl Aml for MemorySlot {
     }
 }
 
-#[cfg(feature = "acpi")]
 struct MemorySlots {
     slots: usize,
 }
 
-#[cfg(feature = "acpi")]
 impl Aml for MemorySlots {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         for slot_id in 0..self.slots {
@@ -1932,12 +1921,10 @@ impl Aml for MemorySlots {
     }
 }
 
-#[cfg(feature = "acpi")]
 struct MemoryMethods {
     slots: usize,
 }
 
-#[cfg(feature = "acpi")]
 impl Aml for MemoryMethods {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         // Add "MTFY" notification method
@@ -2080,7 +2067,6 @@ impl Aml for MemoryMethods {
     }
 }
 
-#[cfg(feature = "acpi")]
 impl Aml for MemoryManager {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         if let Some(acpi_address) = self.acpi_address {
