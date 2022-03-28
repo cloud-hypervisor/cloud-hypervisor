@@ -5925,10 +5925,16 @@ mod parallel {
                 .ssh_command("sudo bash -c 'echo foobar > /dev/vdd'")
                 .unwrap();
 
+            // Check we can read the content back.
+            assert_eq!(
+                guest.ssh_command("sudo head -1 /dev/vdd").unwrap().trim(),
+                "foobar"
+            );
+
             // Unplug the device
             let cmd_success = remote_command(&api_socket, "remove-device", Some("myvdpa0"));
             assert!(cmd_success);
-            thread::sleep(std::time::Duration::new(30, 0));
+            thread::sleep(std::time::Duration::new(10, 0));
 
             // Check /dev/vdd doesn't exist anymore
             assert_eq!(
@@ -5939,24 +5945,6 @@ mod parallel {
                     .parse::<u32>()
                     .unwrap_or(1),
                 0
-            );
-
-            // Now let's plug it back
-            let (cmd_success, cmd_output) = remote_command_w_output(
-                &api_socket,
-                "add-vdpa",
-                Some("id=myvdpa0,path=/dev/vhost-vdpa-1,num_queues=1"),
-            );
-            assert!(cmd_success);
-            assert!(String::from_utf8_lossy(&cmd_output)
-                .contains("{\"id\":\"myvdpa0\",\"bdf\":\"0000:00:07.0\"}"));
-
-            thread::sleep(std::time::Duration::new(10, 0));
-
-            // And finally check the content
-            assert_eq!(
-                guest.ssh_command("sudo head -1 /dev/vdd").unwrap().trim(),
-                "foobar"
             );
         });
 
