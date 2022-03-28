@@ -32,28 +32,14 @@ jobs:
       - name: Formatting (rustfmt)
         run: cargo fmt -- --check
 
-      - name: Clippy (kvm)
-        uses: actions-rs/cargo@v1
-        with:
-          use-cross: true
-          command: clippy
-          args: --target=${{ matrix.target }} --all --no-default-features --features "kvm" -- -D warnings
-
-      - name: Clippy (kvm,acpi)
-        uses: actions-rs/cargo@v1
-        with:
-          use-cross: true
-          command: clippy
-          args: --target=${{ matrix.target }} --all --no-default-features --features "kvm,acpi" -- -D warnings
-
-      - name: Clippy (all features,kvm)
+      - name: Clippy (common + kvm)
         uses: actions-rs/cargo@v1
         with:
           use-cross: true
           command: clippy
           args: --target=${{ matrix.target }} --all --no-default-features --features "common,kvm" -- -D warnings
 
-      - name: Clippy (default)
+      - name: Clippy (default features)
         uses: actions-rs/cargo@v1
         with:
           use-cross: true

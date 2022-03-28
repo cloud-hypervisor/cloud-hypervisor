@@ -33,32 +33,17 @@ jobs:
       - name: Formatting (rustfmt)
         run: cargo fmt -- --check
 
-      - name: Clippy (all features,kvm)
+      - name: Clippy (common + kvm)
         run: cargo clippy --all --all-targets --no-default-features --tests --features "common,kvm" -- -D warnings
 
-      - name: Clippy (all features,mshv)
-        run: cargo clippy --all --all-targets --no-default-features --tests --features "common,mshv" -- -D warnings
+      - name: Clippy (default features)
+        run: cargo clippy --all --all-targets --tests -- -D warnings
 
-      - name: Clippy (acpi,kvm)
-        run: cargo clippy --all --all-targets --no-default-features --tests --features "acpi,kvm" -- -D warnings
-
-      - name: Clippy (acpi,kvm,tdx)
-        run: cargo clippy --all --all-targets --no-default-features --tests --features "acpi,kvm,tdx" -- -D warnings
-
-      - name: Clippy (kvm)
-        run: cargo clippy --all --all-targets --no-default-features --tests --features "kvm" -- -D warnings
-
-      - name: Clippy (acpi,mshv)
-        run: cargo clippy --all --all-targets --no-default-features --tests --features "acpi,mshv" -- -D warnings
-
-      - name: Clippy (mshv)
-        run: cargo clippy --all --all-targets --no-default-features --tests --features "mshv" -- -D warnings
-
-      - name: Clippy (default + amx)
+      - name: Clippy (default features + amx)
         run: cargo clippy --all --all-targets --tests --features "amx" -- -D warnings
 
-      - name: Clippy (integration tests)
-        run: cargo clippy --all --all-targets --tests -- -D warnings
+      - name: Clippy (common + mshv)
+        run: cargo clippy --all --all-targets --no-default-features --tests --features "common,mshv" -- -D warnings
 
       - name: Check build did not modify any files
         run: test -z "$(git status --porcelain)"
