@@ -744,7 +744,7 @@ fn test_vhost_user_net(
         );
 
         // ACPI feature is needed.
-        #[cfg(all(target_arch = "x86_64", feature = "acpi"))]
+        #[cfg(target_arch = "x86_64")]
         {
             guest.enable_memory_hotplug();
 
@@ -883,7 +883,7 @@ fn test_vhost_user_blk(
         );
 
         // ACPI feature is needed.
-        #[cfg(all(target_arch = "x86_64", feature = "acpi"))]
+        #[cfg(target_arch = "x86_64")]
         {
             guest.enable_memory_hotplug();
 
@@ -1121,7 +1121,7 @@ fn test_virtio_fs(
         );
 
         // ACPI feature is needed.
-        #[cfg(all(target_arch = "x86_64", feature = "acpi"))]
+        #[cfg(target_arch = "x86_64")]
         {
             guest.enable_memory_hotplug();
 
@@ -3303,7 +3303,6 @@ mod parallel {
         let r = std::panic::catch_unwind(|| {
             guest.wait_vm_boot(None).unwrap();
 
-            #[cfg(feature = "acpi")]
             assert!(guest
                 .does_device_vendor_pair_match("0x1043", "0x1af4")
                 .unwrap_or_default());
@@ -4305,7 +4304,7 @@ mod parallel {
             // On AArch64 when acpi is enabled, there is a 4 MiB gap between the RAM
             // that the VMM gives and the guest can see.
             // This is a temporary solution, will be fixed in future.
-            #[cfg(all(target_arch = "aarch64", feature = "acpi"))]
+            #[cfg(target_arch = "aarch64")]
             let guest_memory_size_kb = guest_memory_size_kb - 4 * 1024;
 
             let overhead = get_vmm_overhead(child.id(), guest_memory_size_kb);
@@ -7794,7 +7793,7 @@ mod live_migration {
     }
 }
 
-#[cfg(all(target_arch = "aarch64", feature = "acpi"))]
+#[cfg(target_arch = "aarch64")]
 mod aarch64_acpi {
     use crate::*;
 

@@ -242,7 +242,6 @@ fn create_memory_node(
                 let mem_reg_prop = [memory_region_start_addr, memory_region_size];
                 // With feature `acpi` enabled, RAM at 0-4M is for edk2 only
                 // and should be hidden to the guest.
-                #[cfg(feature = "acpi")]
                 if memory_region_start_addr == 0 {
                     continue;
                 }
@@ -548,20 +547,19 @@ fn create_pci_nodes(
         // could fall bellow 4G.
         // Here we cut off PCI device space below 8G in FDT to workaround the EDK2 check.
         // But the address written in ACPI is not impacted.
-        let (pci_device_base_64bit, pci_device_size_64bit) = if cfg!(feature = "acpi")
-            && (pci_device_info_elem.pci_device_space_start < PCI_HIGH_BASE)
-        {
-            (
-                PCI_HIGH_BASE,
-                pci_device_info_elem.pci_device_space_size
-                    - (PCI_HIGH_BASE - pci_device_info_elem.pci_device_space_start),
-            )
-        } else {
-            (
-                pci_device_info_elem.pci_device_space_start,
-                pci_device_info_elem.pci_device_space_size,
-            )
-        };
+        let (pci_device_base_64bit, pci_device_size_64bit) =
+            if pci_device_info_elem.pci_device_space_start < PCI_HIGH_BASE {
+                (
+                    PCI_HIGH_BASE,
+                    pci_device_info_elem.pci_device_space_size
+                        - (PCI_HIGH_BASE - pci_device_info_elem.pci_device_space_start),
+                )
+            } else {
+                (
+                    pci_device_info_elem.pci_device_space_start,
+                    pci_device_info_elem.pci_device_space_size,
+                )
+            };
         // There is no specific requirement of the 32bit MMIO range, and
         // therefore at least we can make these ranges 4K aligned.
         let pci_device_size_32bit: u64 =

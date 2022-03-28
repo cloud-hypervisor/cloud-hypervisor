@@ -6,7 +6,6 @@ edition = "2018"
 
 [features]
 default = []
-acpi = ["acpi_tables","devices/acpi", "arch/acpi"]
 amx = []
 cmos = ["devices/cmos"]
 fwdebug = ["devices/fwdebug"]
@@ -16,7 +15,7 @@ mshv = ["hypervisor/mshv", "virtio-devices/mshv", "vfio-ioctls/mshv", "vm-device
 tdx = ["arch/tdx", "hypervisor/tdx"]
 
 [dependencies]
-acpi_tables = { path = "../acpi_tables", optional = true }
+acpi_tables = { path = "../acpi_tables" }
 anyhow = "1.0.56"
 arc-swap = "1.5.0"
 arch = { path = "../arch" }

@@ -10,14 +10,12 @@
 //
 
 use crate::device_manager::{AddressManager, DeviceManagerError, DeviceManagerResult};
-#[cfg(feature = "acpi")]
 use acpi_tables::aml::{self, Aml};
 use arch::layout;
 use pci::{DeviceRelocation, PciBdf, PciBus, PciConfigMmio, PciRoot};
 #[cfg(target_arch = "x86_64")]
 use pci::{PciConfigIo, PCI_CONFIG_IO_PORT, PCI_CONFIG_IO_PORT_SIZE};
 use std::sync::{Arc, Mutex};
-#[cfg(feature = "acpi")]
 use uuid::Uuid;
 use vm_allocator::AddressAllocator;
 use vm_device::BusDevice;
@@ -168,12 +166,10 @@ impl PciSegment {
     }
 }
 
-#[cfg(feature = "acpi")]
 struct PciDevSlot {
     device_id: u8,
 }
 
-#[cfg(feature = "acpi")]
 impl Aml for PciDevSlot {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         let sun = self.device_id;
@@ -198,12 +194,10 @@ impl Aml for PciDevSlot {
     }
 }
 
-#[cfg(feature = "acpi")]
 struct PciDevSlotNotify {
     device_id: u8,
 }
 
-#[cfg(feature = "acpi")]
 impl Aml for PciDevSlotNotify {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         let device_id_mask: u32 = 1 << self.device_id;
@@ -217,10 +211,8 @@ impl Aml for PciDevSlotNotify {
     }
 }
 
-#[cfg(feature = "acpi")]
 struct PciDevSlotMethods {}
 
-#[cfg(feature = "acpi")]
 impl Aml for PciDevSlotMethods {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         let mut device_notifies = Vec::new();
@@ -256,10 +248,8 @@ impl Aml for PciDevSlotMethods {
     }
 }
 
-#[cfg(feature = "acpi")]
 struct PciDsmMethod {}
 
-#[cfg(feature = "acpi")]
 impl Aml for PciDsmMethod {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         // Refer to ACPI spec v6.3 Ch 9.1.1 and PCI Firmware spec v3.3 Ch 4.6.1
@@ -321,7 +311,6 @@ impl Aml for PciDsmMethod {
     }
 }
 
-#[cfg(feature = "acpi")]
 impl Aml for PciSegment {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         let mut pci_dsdt_inner_data: Vec<&dyn aml::Aml> = Vec::new();
