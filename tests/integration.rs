@@ -5798,7 +5798,7 @@ mod parallel {
             assert!(String::from_utf8_lossy(&cmd_output)
                 .contains("{\"id\":\"vfio_user0\",\"bdf\":\"0000:00:06.0\"}"));
 
-            thread::sleep(std::time::Duration::new(1, 0));
+            thread::sleep(std::time::Duration::new(10, 0));
 
             // Check both if /dev/nvme exists and if the block size is 128M.
             assert_eq!(
