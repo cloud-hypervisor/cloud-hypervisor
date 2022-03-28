@@ -1,16 +1,16 @@
 #!/bin/bash
 
 source $HOME/.cargo/env
-source  $(dirname "$0")/test-util.sh
+source $(dirname "$0")/test-util.sh
 
 process_common_args "$@"
 
 BUILD_TARGET=${BUILD_TARGET-x86_64-unknown-linux-gnu}
 cargo_args=("")
 
-if [[ $(uname -m) = "aarch64" || $hypervisor = "mshv" ]]; then
+if [[ $hypervisor = "mshv" ]]; then
     cargo_args+=("--no-default-features")
-    cargo_args+=("--features $hypervisor")
+    cargo_args+=("--features common,$hypervisor")
 fi
 
 if [[ "${BUILD_TARGET}" == "aarch64-unknown-linux-musl" ]]; then
@@ -19,4 +19,4 @@ if [[ "${BUILD_TARGET}" == "aarch64-unknown-linux-musl" ]]; then
 fi
 
 export RUST_BACKTRACE=1
-cargo test --lib --bins --target $BUILD_TARGET --workspace ${cargo_args[@]} || exit 1;
+cargo test --lib --bins --target $BUILD_TARGET --workspace ${cargo_args[@]} || exit 1
