@@ -270,8 +270,6 @@ cmd_build() {
     cargo_args=("$@")
     [ $build = "release" ] && cargo_args+=("--release")
     cargo_args+=(--target "$target")
-    [ "$(uname -m)" = "aarch64" ] && cargo_args+=("--no-default-features")
-    [ "$(uname -m)" = "aarch64" ] && cargo_args+=(--features "$hypervisor")
 
     rustflags=""
     target_cc=""
