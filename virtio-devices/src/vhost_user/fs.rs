@@ -8,7 +8,7 @@ use crate::thread_helper::spawn_virtio_thread;
 use crate::vhost_user::VhostUserCommon;
 use crate::{
     ActivateError, ActivateResult, UserspaceMapping, VirtioCommon, VirtioDevice, VirtioDeviceType,
-    VirtioInterrupt, VirtioSharedMemoryList,
+    VirtioInterrupt, VirtioSharedMemoryList, VIRTIO_F_IOMMU_PLATFORM,
 };
 use crate::{GuestMemoryMmap, GuestRegionMmap, MmapRegion};
 use libc::{self, c_void, off64_t, pread64, pwrite64};
@@ -301,6 +301,7 @@ pub struct Fs {
     guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     epoll_thread: Option<thread::JoinHandle<()>>,
     exit_evt: EventFd,
+    iommu: bool,
 }
 
 impl Fs {
@@ -316,6 +317,7 @@ impl Fs {
         seccomp_action: SeccompAction,
         restoring: bool,
         exit_evt: EventFd,
+        iommu: bool,
     ) -> Result<Fs> {
         let mut slave_req_support = false;
 
@@ -347,6 +349,7 @@ impl Fs {
                 guest_memory: None,
                 epoll_thread: None,
                 exit_evt,
+                iommu,
             });
         }
 
@@ -428,6 +431,7 @@ impl Fs {
             guest_memory: None,
             epoll_thread: None,
             exit_evt,
+            iommu,
         })
     }
 
@@ -481,7 +485,11 @@ impl VirtioDevice for Fs {
     }
 
     fn features(&self) -> u64 {
-        self.common.avail_features
+        let mut features = self.common.avail_features;
+        if self.iommu {
+            features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
+        }
+        features
     }
 
     fn ack_features(&mut self, value: u64) {

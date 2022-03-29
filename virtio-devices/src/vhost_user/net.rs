@@ -7,7 +7,7 @@ use crate::vhost_user::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
 use crate::vhost_user::{Error, Result, VhostUserCommon};
 use crate::{
     ActivateResult, NetCtrlEpollHandler, VirtioCommon, VirtioDevice, VirtioDeviceType,
-    VirtioInterrupt, VIRTIO_F_RING_EVENT_IDX, VIRTIO_F_VERSION_1,
+    VirtioInterrupt, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_RING_EVENT_IDX, VIRTIO_F_VERSION_1,
 };
 use crate::{GuestMemoryMmap, GuestRegionMmap};
 use net_util::{build_net_config_space, CtrlQueue, MacAddr, VirtioNetConfig};
@@ -61,10 +61,12 @@ pub struct Net {
     epoll_thread: Option<thread::JoinHandle<()>>,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
+    iommu: bool,
 }
 
 impl Net {
     /// Create a new vhost-user-net device
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         mac_addr: MacAddr,
@@ -73,6 +75,7 @@ impl Net {
         seccomp_action: SeccompAction,
         restoring: bool,
         exit_evt: EventFd,
+        iommu: bool,
     ) -> Result<Net> {
         let mut num_queues = vu_cfg.num_queues;
 
@@ -102,6 +105,7 @@ impl Net {
                 epoll_thread: None,
                 seccomp_action,
                 exit_evt,
+                iommu,
             });
         }
 
@@ -192,6 +196,7 @@ impl Net {
             epoll_thread: None,
             seccomp_action,
             exit_evt,
+            iommu,
         })
     }
 
@@ -248,7 +253,11 @@ impl VirtioDevice for Net {
     }
 
     fn features(&self) -> u64 {
-        self.common.avail_features
+        let mut features = self.common.avail_features;
+        if self.iommu {
+            features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
+        }
+        features
     }
 
     fn ack_features(&mut self, value: u64) {
