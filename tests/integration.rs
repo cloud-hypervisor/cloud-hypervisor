@@ -1754,48 +1754,58 @@ mod parallel {
 
     #[test]
     #[cfg(target_arch = "x86_64")]
-    fn test_simple_launch() {
-        let bionic = UbuntuDiskConfig::new(BIONIC_IMAGE_NAME.to_string());
-        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+    fn test_bionic_hypervisor_fw() {
+        test_simple_launch(fw_path(FwType::RustHypervisorFirmware), BIONIC_IMAGE_NAME)
+    }
 
-        vec![Box::new(bionic), Box::new(focal)]
-            .drain(..)
-            .for_each(|disk_config| {
-                vec![
-                    fw_path(FwType::Ovmf),
-                    fw_path(FwType::RustHypervisorFirmware),
-                ]
-                .drain(..)
-                .for_each(|fw_path| {
-                    let guest = Guest::new(disk_config.clone());
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_focal_hypervisor_fw() {
+        test_simple_launch(fw_path(FwType::RustHypervisorFirmware), FOCAL_IMAGE_NAME)
+    }
 
-                    let mut child = GuestCommand::new(&guest)
-                        .args(&["--cpus", "boot=1"])
-                        .args(&["--memory", "size=512M"])
-                        .args(&["--kernel", fw_path.as_str()])
-                        .default_disks()
-                        .default_net()
-                        .args(&["--serial", "tty", "--console", "off"])
-                        .capture_output()
-                        .spawn()
-                        .unwrap();
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_bionic_ovmf() {
+        test_simple_launch(fw_path(FwType::Ovmf), BIONIC_IMAGE_NAME)
+    }
 
-                    let r = std::panic::catch_unwind(|| {
-                        guest.wait_vm_boot(Some(120)).unwrap();
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_focal_ovmf() {
+        test_simple_launch(fw_path(FwType::Ovmf), FOCAL_IMAGE_NAME)
+    }
 
-                        assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
-                        assert_eq!(guest.get_initial_apicid().unwrap_or(1), 0);
-                        assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
-                        assert!(guest.get_entropy().unwrap_or_default() >= 900);
-                        assert_eq!(guest.get_pci_bridge_class().unwrap_or_default(), "0x060000");
-                    });
+    #[cfg(target_arch = "x86_64")]
+    fn test_simple_launch(fw_path: String, disk_path: &str) {
+        let disk_config = Box::new(UbuntuDiskConfig::new(disk_path.to_string()));
+        let guest = Guest::new(disk_config);
 
-                    let _ = child.kill();
-                    let output = child.wait_with_output().unwrap();
+        let mut child = GuestCommand::new(&guest)
+            .args(&["--cpus", "boot=1"])
+            .args(&["--memory", "size=512M"])
+            .args(&["--kernel", fw_path.as_str()])
+            .default_disks()
+            .default_net()
+            .args(&["--serial", "tty", "--console", "off"])
+            .capture_output()
+            .spawn()
+            .unwrap();
 
-                    handle_child_output(r, &output);
-                });
-            });
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(Some(120)).unwrap();
+
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
+            assert_eq!(guest.get_initial_apicid().unwrap_or(1), 0);
+            assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+            assert!(guest.get_entropy().unwrap_or_default() >= 900);
+            assert_eq!(guest.get_pci_bridge_class().unwrap_or_default(), "0x060000");
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
     }
 
     #[test]
