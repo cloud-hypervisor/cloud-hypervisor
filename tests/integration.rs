@@ -61,6 +61,7 @@ mod aarch64 {
     pub const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-arm64-custom-20210929-0.qcow2";
     pub const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-arm64-custom-20210929-0.vhd";
     pub const FOCAL_IMAGE_NAME_VHDX: &str = "focal-server-cloudimg-arm64-custom-20210929-0.vhdx";
+    pub const JAMMY_IMAGE_NAME: &str = "jammy-server-cloudimg-arm64-custom-20220329-0.raw";
     pub const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'GICv3.*uart-pl011' /proc/interrupts || true";
     pub const GREP_PMU_IRQ_CMD: &str = "grep -c 'GICv3.*arm-pmu' /proc/interrupts || true";
 }
@@ -5766,7 +5767,6 @@ mod parallel {
     }
 
     #[test]
-    #[cfg(target_arch = "x86_64")]
     fn test_vfio_user() {
         let jammy_image = JAMMY_IMAGE_NAME.to_string();
         let jammy = UbuntuDiskConfig::new(jammy_image);
