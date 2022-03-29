@@ -7,8 +7,8 @@ use super::{Error, Result, DEFAULT_VIRTIO_FEATURES};
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::vhost_user::VhostUserCommon;
-use crate::VirtioInterrupt;
 use crate::{GuestMemoryMmap, GuestRegionMmap};
+use crate::{VirtioInterrupt, VIRTIO_F_IOMMU_PLATFORM};
 use block_util::VirtioBlockConfig;
 use seccompiler::SeccompAction;
 use std::mem;
@@ -61,6 +61,7 @@ pub struct Blk {
     epoll_thread: Option<thread::JoinHandle<()>>,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
+    iommu: bool,
 }
 
 impl Blk {
@@ -71,6 +72,7 @@ impl Blk {
         restoring: bool,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
+        iommu: bool,
     ) -> Result<Blk> {
         let num_queues = vu_cfg.num_queues;
 
@@ -97,6 +99,7 @@ impl Blk {
                 epoll_thread: None,
                 seccomp_action,
                 exit_evt,
+                iommu,
             });
         }
 
@@ -189,6 +192,7 @@ impl Blk {
             epoll_thread: None,
             seccomp_action,
             exit_evt,
+            iommu,
         })
     }
 
@@ -241,7 +245,11 @@ impl VirtioDevice for Blk {
     }
 
     fn features(&self) -> u64 {
-        self.common.avail_features
+        let mut features = self.common.avail_features;
+        if self.iommu {
+            features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
+        }
+        features
     }
 
     fn ack_features(&mut self, value: u64) {

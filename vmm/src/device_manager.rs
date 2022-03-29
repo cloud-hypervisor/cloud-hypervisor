@@ -2003,6 +2003,7 @@ impl DeviceManager {
                     self.exit_evt
                         .try_clone()
                         .map_err(DeviceManagerError::EventFd)?,
+                    self.force_iommu,
                 ) {
                     Ok(vub_device) => vub_device,
                     Err(e) => {
@@ -2184,6 +2185,7 @@ impl DeviceManager {
                     self.exit_evt
                         .try_clone()
                         .map_err(DeviceManagerError::EventFd)?,
+                    self.force_iommu,
                 ) {
                     Ok(vun_device) => vun_device,
                     Err(e) => {
@@ -2474,6 +2476,7 @@ impl DeviceManager {
                     self.exit_evt
                         .try_clone()
                         .map_err(DeviceManagerError::EventFd)?,
+                    self.force_iommu,
                 )
                 .map_err(DeviceManagerError::CreateVirtioFs)?,
             ));
