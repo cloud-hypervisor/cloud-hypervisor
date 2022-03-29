@@ -1459,7 +1459,9 @@ impl DeviceManager {
     #[cfg(target_arch = "x86_64")]
     fn add_legacy_devices(&mut self, reset_evt: EventFd) -> DeviceManagerResult<()> {
         // Add a shutdown device (i8042)
-        let i8042 = Arc::new(Mutex::new(devices::legacy::I8042Device::new(reset_evt)));
+        let i8042 = Arc::new(Mutex::new(devices::legacy::I8042Device::new(
+            reset_evt.try_clone().unwrap(),
+        )));
 
         self.bus_devices
             .push(Arc::clone(&i8042) as Arc<Mutex<dyn BusDevice>>);
@@ -1486,6 +1488,7 @@ impl DeviceManager {
             let cmos = Arc::new(Mutex::new(devices::legacy::Cmos::new(
                 mem_below_4g,
                 mem_above_4g,
+                reset_evt,
             )));
 
             self.bus_devices

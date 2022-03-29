@@ -7,6 +7,7 @@ use std::cmp::min;
 use std::mem;
 use std::sync::{Arc, Barrier};
 use vm_device::BusDevice;
+use vmm_sys_util::eventfd::EventFd;
 
 // https://github.com/rust-lang/libc/issues/1848
 #[cfg_attr(target_env = "musl", allow(deprecated))]
@@ -21,13 +22,14 @@ const DATA_LEN: usize = 128;
 pub struct Cmos {
     index: u8,
     data: [u8; DATA_LEN],
+    reset_evt: EventFd,
 }
 
 impl Cmos {
     /// Constructs a CMOS/RTC device with initial data.
     /// `mem_below_4g` is the size of memory in bytes below the 32-bit gap.
     /// `mem_above_4g` is the size of memory in bytes above the 32-bit gap.
-    pub fn new(mem_below_4g: u64, mem_above_4g: u64) -> Cmos {
+    pub fn new(mem_below_4g: u64, mem_above_4g: u64, reset_evt: EventFd) -> Cmos {
         let mut data = [0u8; DATA_LEN];
 
         // Extended memory from 16 MB to 4 GB in units of 64 KB
@@ -44,7 +46,11 @@ impl Cmos {
         data[0x5c] = (high_mem >> 8) as u8;
         data[0x5d] = (high_mem >> 16) as u8;
 
-        Cmos { index: 0, data }
+        Cmos {
+            index: 0,
+            data,
+            reset_evt,
+        }
     }
 }
 
@@ -56,8 +62,15 @@ impl BusDevice for Cmos {
         }
 
         match offset {
-            INDEX_OFFSET => self.index = data[0] & INDEX_MASK,
-            DATA_OFFSET => self.data[self.index as usize] = data[0],
+            INDEX_OFFSET => self.index = data[0],
+            DATA_OFFSET => {
+                if self.index == 0x8f && data[0] == 0 {
+                    info!("CMOS reset");
+                    self.reset_evt.write(1).unwrap();
+                } else {
+                    self.data[(self.index & INDEX_MASK) as usize] = data[0]
+                }
+            }
             o => warn!("bad write offset on CMOS device: {}", o),
         };
         None
