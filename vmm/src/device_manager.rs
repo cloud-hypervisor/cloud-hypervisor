@@ -98,7 +98,7 @@ use vm_device::{Bus, BusDevice, Resource};
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::GuestMemoryRegion;
 use vm_memory::{Address, GuestAddress, GuestUsize, MmapRegion};
-#[cfg(all(target_arch = "x86_64", feature = "cmos"))]
+#[cfg(target_arch = "x86_64")]
 use vm_memory::{GuestAddressSpace, GuestMemory};
 use vm_migration::{
     protocol::MemoryRangeTable, Migratable, MigratableError, Pausable, Snapshot,
@@ -1470,7 +1470,6 @@ impl DeviceManager {
             .io_bus
             .insert(i8042, 0x61, 0x4)
             .map_err(DeviceManagerError::BusError)?;
-        #[cfg(feature = "cmos")]
         {
             // Add a CMOS emulated device
             let mem_size = self
