@@ -1129,6 +1129,10 @@ impl CpuManager {
     }
 
     pub fn resize(&mut self, desired_vcpus: u8) -> Result<bool> {
+        if desired_vcpus.cmp(&self.present_vcpus()) == cmp::Ordering::Equal {
+            return Ok(false);
+        }
+
         if !self.dynamic {
             return Err(Error::ResizingNotSupported);
         }
