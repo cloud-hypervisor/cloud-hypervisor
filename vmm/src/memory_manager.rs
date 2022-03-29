@@ -1605,10 +1605,6 @@ impl MemoryManager {
     /// use case never adds a new region as the whole hotpluggable memory has
     /// already been allocated at boot time.
     pub fn resize(&mut self, desired_ram: u64) -> Result<Option<Arc<GuestRegionMmap>>, Error> {
-        if !self.dynamic {
-            return Err(Error::ResizingNotSupported);
-        }
-
         if self.user_provided_zones {
             error!(
                 "Not allowed to resize guest memory when backed with user \
@@ -1621,12 +1617,20 @@ impl MemoryManager {
         match self.hotplug_method {
             HotplugMethod::VirtioMem => {
                 if desired_ram >= self.boot_ram {
+                    if !self.dynamic {
+                        return Err(Error::ResizingNotSupported);
+                    }
+
                     self.virtio_mem_resize(DEFAULT_MEMORY_ZONE, desired_ram - self.boot_ram)?;
                     self.current_ram = desired_ram;
                 }
             }
             HotplugMethod::Acpi => {
                 if desired_ram > self.current_ram {
+                    if !self.dynamic {
+                        return Err(Error::ResizingNotSupported);
+                    }
+
                     region =
                         Some(self.hotplug_ram_region((desired_ram - self.current_ram) as usize)?);
                     self.current_ram = desired_ram;
