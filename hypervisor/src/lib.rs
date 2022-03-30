@@ -51,6 +51,8 @@ mod device;
 pub use crate::hypervisor::{Hypervisor, HypervisorError};
 pub use cpu::{HypervisorCpuError, Vcpu, VmExit};
 pub use device::{Device, HypervisorDeviceError};
+#[cfg(feature = "tdx")]
+pub use kvm::TdxCapabilities;
 #[cfg(feature = "kvm")]
 pub use kvm::*;
 #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
