@@ -78,14 +78,7 @@ pub fn configure_vcpu(
 }
 
 pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, RegionType)> {
-    // Normally UEFI should be loaded to a flash area at the beginning of memory.
-    // But now flash memory type is not supported.
-    // As a workaround, we take 4 MiB memory from the main RAM for UEFI.
-    // As a result, the RAM that the guest can see is less than what has been
-    // assigned in command line, when ACPI and UEFI is enabled.
-    let ram_deduction = layout::UEFI_SIZE;
-
-    vec![
+    let mut regions = vec![
         // 0 ~ 4 MiB: Reserved for UEFI space
         (GuestAddress(0), layout::UEFI_SIZE as usize, RegionType::Ram),
         // 4 MiB ~ 256 MiB: Gic and legacy devices
@@ -106,13 +99,45 @@ pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, Region
             layout::PCI_MMCONFIG_SIZE as usize,
             RegionType::Reserved,
         ),
-        // 1 GiB ~ : Ram
-        (
+    ];
+
+    // Normally UEFI should be loaded to a flash area at the beginning of memory.
+    // But now flash memory type is not supported.
+    // As a workaround, we take 4 MiB memory from the main RAM for UEFI.
+    // As a result, the RAM that the guest can see is less than what has been
+    // assigned in command line, when ACPI and UEFI is enabled.
+    let ram_size = size - layout::UEFI_SIZE;
+    let ram_32bit_space_size =
+        layout::MEM_32BIT_RESERVED_START.unchecked_offset_from(layout::RAM_START);
+
+    // RAM space
+    // Case1: guest memory fits before the gap
+    if ram_size as u64 <= ram_32bit_space_size {
+        regions.push((layout::RAM_START, ram_size as usize, RegionType::Ram));
+    // Case2: guest memory extends beyond the gap
+    } else {
+        // Push memory before the gap
+        regions.push((
             layout::RAM_START,
-            (size - ram_deduction) as usize,
+            ram_32bit_space_size as usize,
             RegionType::Ram,
-        ),
-    ]
+        ));
+        // Other memory is placed after 4GiB
+        regions.push((
+            layout::RAM_64BIT_START,
+            (ram_size - ram_32bit_space_size) as usize,
+            RegionType::Ram,
+        ));
+    }
+
+    // Add the 32-bit reserved memory hole as a reserved region
+    regions.push((
+        layout::MEM_32BIT_RESERVED_START,
+        layout::MEM_32BIT_RESERVED_SIZE as usize,
+        RegionType::Reserved,
+    ));
+
+    regions
 }
 
 /// Configures the system and should be called once per vm before starting vcpu threads.
