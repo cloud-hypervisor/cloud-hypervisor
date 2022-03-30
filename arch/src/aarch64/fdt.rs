@@ -231,6 +231,9 @@ fn create_memory_node(
     guest_mem: &GuestMemoryMmap,
     numa_nodes: &NumaNodes,
 ) -> FdtWriterResult<()> {
+    // See https://github.com/torvalds/linux/blob/master/Documentation/devicetree/booting-without-of.txt#L960
+    // for an explanation of memory nodes.
+
     if numa_nodes.len() > 1 {
         for numa_node_idx in 0..numa_nodes.len() {
             let numa_node = numa_nodes.get(&(numa_node_idx as u32));
@@ -255,15 +258,41 @@ fn create_memory_node(
             }
         }
     } else {
-        let mem_size = guest_mem.last_addr().raw_value() - super::layout::RAM_START.raw_value() + 1;
-        // See https://github.com/torvalds/linux/blob/master/Documentation/devicetree/booting-without-of.txt#L960
-        // for an explanation of this.
-        let mem_reg_prop = [super::layout::RAM_START.raw_value() as u64, mem_size as u64];
-        let memory_node = fdt.begin_node("memory")?;
+        let last_addr = guest_mem.last_addr().raw_value();
+        if last_addr < super::layout::MEM_32BIT_RESERVED_START.raw_value() {
+            // Case 1: all RAM is under the hole
+            let mem_size = last_addr - super::layout::RAM_START.raw_value() + 1;
+            let mem_reg_prop = [super::layout::RAM_START.raw_value() as u64, mem_size as u64];
+            let memory_node = fdt.begin_node("memory")?;
+            fdt.property_string("device_type", "memory")?;
+            fdt.property_array_u64("reg", &mem_reg_prop)?;
+            fdt.end_node(memory_node)?;
+        } else {
+            // Case 2: RAM is split by the hole
 
-        fdt.property_string("device_type", "memory")?;
-        fdt.property_array_u64("reg", &mem_reg_prop)?;
-        fdt.end_node(memory_node)?;
+            // Region 1: RAM before the hole
+            let mem_size = super::layout::MEM_32BIT_RESERVED_START.raw_value()
+                - super::layout::RAM_START.raw_value();
+            let mem_reg_prop = [super::layout::RAM_START.raw_value() as u64, mem_size as u64];
+            let memory_node_name = format!("memory@{:x}", super::layout::RAM_START.raw_value());
+            let memory_node = fdt.begin_node(&memory_node_name)?;
+            fdt.property_string("device_type", "memory")?;
+            fdt.property_array_u64("reg", &mem_reg_prop)?;
+            fdt.end_node(memory_node)?;
+
+            // Region 2: RAM after the hole
+            let mem_size = last_addr - super::layout::RAM_64BIT_START.raw_value() + 1;
+            let mem_reg_prop = [
+                super::layout::RAM_64BIT_START.raw_value() as u64,
+                mem_size as u64,
+            ];
+            let memory_node_name =
+                format!("memory@{:x}", super::layout::RAM_64BIT_START.raw_value());
+            let memory_node = fdt.begin_node(&memory_node_name)?;
+            fdt.property_string("device_type", "memory")?;
+            fdt.property_array_u64("reg", &mem_reg_prop)?;
+            fdt.end_node(memory_node)?;
+        }
     }
 
     Ok(())
