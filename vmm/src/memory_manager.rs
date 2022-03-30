@@ -1327,7 +1327,7 @@ impl MemoryManager {
     // If memory hotplug is allowed, the start address needs to be aligned
     // (rounded-up) to 128MiB boundary.
     // If memory hotplug is not allowed, there is no alignment required.
-    // On x86_64, it must also start at the 64bit start.
+    // And it must also start at the 64bit start.
     fn start_addr(mem_end: GuestAddress, allow_mem_hotplug: bool) -> Result<GuestAddress, Error> {
         let mut start_addr = if allow_mem_hotplug {
             GuestAddress(mem_end.0 | ((128 << 20) - 1))
@@ -1339,7 +1339,6 @@ impl MemoryManager {
             .checked_add(1)
             .ok_or(Error::GuestAddressOverFlow)?;
 
-        #[cfg(target_arch = "x86_64")]
         if mem_end < arch::layout::MEM_32BIT_RESERVED_START {
             return Ok(arch::layout::RAM_64BIT_START);
         }
