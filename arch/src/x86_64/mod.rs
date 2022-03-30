@@ -189,6 +189,10 @@ pub enum Error {
 
     // Error writing EBDA address
     EbdaSetup(vm_memory::GuestMemoryError),
+
+    /// Error retrieving TDX capabilities through the hypervisor (kvm/mshv) API
+    #[cfg(feature = "tdx")]
+    TdxCapabilities(HypervisorError),
 }
 
 impl From<Error> for super::Error {
@@ -600,9 +604,39 @@ pub fn generate_common_cpuid(
         update_cpuid_sgx(&mut cpuid, sgx_epc_sections)?;
     }
 
+    #[cfg(feature = "tdx")]
+    let tdx_capabilities = if tdx_enabled {
+        let caps = hypervisor
+            .tdx_capabilities()
+            .map_err(Error::TdxCapabilities)?;
+        info!("TDX capabilities {:#?}", caps);
+        Some(caps)
+    } else {
+        None
+    };
+
     // Update some existing CPUID
     for entry in cpuid.as_mut_slice().iter_mut() {
         match entry.function {
+            0xd =>
+            {
+                #[cfg(feature = "tdx")]
+                if let Some(caps) = &tdx_capabilities {
+                    let xcr0_mask: u64 = 0x82ff;
+                    let xss_mask: u64 = !xcr0_mask;
+                    if entry.index == 0 {
+                        entry.eax &= (caps.xfam_fixed0 as u32) & (xcr0_mask as u32);
+                        entry.eax |= (caps.xfam_fixed1 as u32) & (xcr0_mask as u32);
+                        entry.edx &= ((caps.xfam_fixed0 & xcr0_mask) >> 32) as u32;
+                        entry.edx |= ((caps.xfam_fixed1 & xcr0_mask) >> 32) as u32;
+                    } else if entry.index == 1 {
+                        entry.ecx &= (caps.xfam_fixed0 as u32) & (xss_mask as u32);
+                        entry.ecx |= (caps.xfam_fixed1 as u32) & (xss_mask as u32);
+                        entry.edx &= ((caps.xfam_fixed0 & xss_mask) >> 32) as u32;
+                        entry.edx |= ((caps.xfam_fixed1 & xss_mask) >> 32) as u32;
+                    }
+                }
+            }
             // Set CPU physical bits
             0x8000_0008 => {
                 entry.eax = (entry.eax & 0xffff_ff00) | (phys_bits as u32 & 0xff);
