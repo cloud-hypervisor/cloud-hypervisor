@@ -108,7 +108,7 @@ pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, Region
         ),
         // 1 GiB ~ : Ram
         (
-            GuestAddress(layout::RAM_START),
+            layout::RAM_START,
             (size - ram_deduction) as usize,
             RegionType::Ram,
         ),
@@ -212,7 +212,7 @@ mod tests {
     fn test_arch_memory_regions_dram() {
         let regions = arch_memory_regions((1usize << 32) as u64); //4GB
         assert_eq!(5, regions.len());
-        assert_eq!(GuestAddress(layout::RAM_START), regions[4].0);
+        assert_eq!(layout::RAM_START, regions[4].0);
         assert_eq!(((1 << 32) - layout::UEFI_SIZE) as usize, regions[4].1);
         assert_eq!(RegionType::Ram, regions[4].2);
     }
