@@ -2986,16 +2986,12 @@ mod tests {
     use arch::aarch64::gic::kvm::create_gic;
     use arch::aarch64::layout;
     use arch::{DeviceType, MmioDeviceInfo};
-    use vm_memory::GuestAddress;
 
     const LEN: u64 = 4096;
 
     #[test]
     fn test_create_fdt_with_devices() {
-        let regions = vec![(
-            GuestAddress(layout::RAM_START),
-            (layout::FDT_MAX_SIZE + 0x1000) as usize,
-        )];
+        let regions = vec![(layout::RAM_START, (layout::FDT_MAX_SIZE + 0x1000) as usize)];
         let mem = GuestMemoryMmap::from_ranges(&regions).expect("Cannot initialize memory");
 
         let dev_info: HashMap<(DeviceType, std::string::String), MmioDeviceInfo> = [
