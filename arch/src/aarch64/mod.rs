@@ -234,11 +234,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_arch_memory_regions_dram() {
-        let regions = arch_memory_regions((1usize << 32) as u64); //4GB
-        assert_eq!(5, regions.len());
+    fn test_arch_memory_regions_dram_2gb() {
+        let regions = arch_memory_regions((1usize << 31) as u64); //2GB
+        assert_eq!(6, regions.len());
         assert_eq!(layout::RAM_START, regions[4].0);
-        assert_eq!(((1 << 32) - layout::UEFI_SIZE) as usize, regions[4].1);
+        assert_eq!(((1 << 31) - layout::UEFI_SIZE) as usize, regions[4].1);
         assert_eq!(RegionType::Ram, regions[4].2);
+        assert_eq!(RegionType::Reserved, regions[5].2);
+    }
+
+    #[test]
+    fn test_arch_memory_regions_dram_4gb() {
+        let regions = arch_memory_regions((1usize << 32) as u64); //4GB
+        let ram_32bit_space_size =
+            layout::MEM_32BIT_RESERVED_START.unchecked_offset_from(layout::RAM_START);
+        assert_eq!(7, regions.len());
+        assert_eq!(layout::RAM_START, regions[4].0);
+        assert_eq!(ram_32bit_space_size as usize, regions[4].1);
+        assert_eq!(RegionType::Ram, regions[4].2);
+        assert_eq!(RegionType::Reserved, regions[6].2);
+        assert_eq!(RegionType::Ram, regions[5].2);
+        assert_eq!(
+            ((1 << 32) - layout::UEFI_SIZE - ram_32bit_space_size) as usize,
+            regions[5].1
+        );
     }
 }
