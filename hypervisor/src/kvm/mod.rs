@@ -107,7 +107,6 @@ ioctl_iowr_nr!(KVM_MEMORY_ENCRYPT_OP, KVMIO, 0xba, std::os::raw::c_ulong);
 #[cfg(feature = "tdx")]
 #[repr(u32)]
 enum TdxCommand {
-    #[allow(dead_code)]
     Capabilities = 0,
     InitVm,
     InitVcpu,
@@ -125,6 +124,34 @@ pub enum TdxExitDetails {
 pub enum TdxExitStatus {
     Success,
     InvalidOperand,
+}
+
+#[cfg(feature = "tdx")]
+const TDX_MAX_NR_CPUID_CONFIGS: usize = 6;
+
+#[cfg(feature = "tdx")]
+#[repr(C)]
+#[derive(Debug, Default)]
+pub struct TdxCpuidConfig {
+    pub leaf: u32,
+    pub sub_leaf: u32,
+    pub eax: u32,
+    pub ebx: u32,
+    pub ecx: u32,
+    pub edx: u32,
+}
+
+#[cfg(feature = "tdx")]
+#[repr(C)]
+#[derive(Debug, Default)]
+pub struct TdxCapabilities {
+    pub attrs_fixed0: u64,
+    pub attrs_fixed1: u64,
+    pub xfam_fixed0: u64,
+    pub xfam_fixed1: u64,
+    pub nr_cpuid_configs: u32,
+    pub padding: u32,
+    pub cpuid_configs: [TdxCpuidConfig; TDX_MAX_NR_CPUID_CONFIGS],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
@@ -761,6 +788,27 @@ impl hypervisor::Hypervisor for KvmHypervisor {
     ///
     fn get_host_ipa_limit(&self) -> i32 {
         self.kvm.get_host_ipa_limit()
+    }
+
+    ///
+    /// Retrieve TDX capabilities
+    ///
+    #[cfg(feature = "tdx")]
+    fn tdx_capabilities(&self) -> hypervisor::Result<TdxCapabilities> {
+        let data = TdxCapabilities {
+            nr_cpuid_configs: TDX_MAX_NR_CPUID_CONFIGS as u32,
+            ..Default::default()
+        };
+
+        tdx_command(
+            &self.kvm.as_raw_fd(),
+            TdxCommand::Capabilities,
+            0,
+            &data as *const _ as u64,
+        )
+        .map_err(|e| hypervisor::HypervisorError::TdxCapabilities(e.into()))?;
+
+        Ok(data)
     }
 }
 /// Vcpu struct for KVM
