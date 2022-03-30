@@ -5,6 +5,7 @@
 use crate::cpu::CpuManager;
 use crate::device_manager::DeviceManager;
 use crate::memory_manager::MemoryManager;
+#[cfg(feature = "pci_support")]
 use crate::pci_segment::PciSegment;
 use crate::{GuestMemoryMmap, GuestRegionMmap};
 use acpi_tables::sdt::GenericAddress;
@@ -17,6 +18,7 @@ use arch::DeviceType;
 use arch::NumaNodes;
 
 use bitflags::bitflags;
+#[cfg(feature = "pci_support")]
 use pci::PciBdf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -227,7 +229,7 @@ fn create_facp_table(dsdt_offset: GuestAddress) -> Sdt {
 
     facp
 }
-
+#[cfg(feature = "pci_support")]
 fn create_mcfg_table(pci_segments: &[PciSegment]) -> Sdt {
     let mut mcfg = Sdt::new(*b"MCFG", 36, 1, *b"CLOUDH", *b"CHMCFG  ", 1);
 
@@ -477,7 +479,7 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
 
     iort
 }
-
+#[cfg(feature = "pci_support")]
 fn create_viot_table(iommu_bdf: &PciBdf, devices_bdf: &[PciBdf]) -> Sdt {
     // VIOT
     let mut viot = Sdt::new(*b"VIOT", 36, 0, *b"CLOUDH", *b"CHVIOT  ", 0);
@@ -579,14 +581,18 @@ pub fn create_acpi_tables(
     }
 
     // MCFG
-    let mcfg = create_mcfg_table(device_manager.lock().unwrap().pci_segments());
-    let mcfg_offset = prev_tbl_off.checked_add(prev_tbl_len).unwrap();
-    guest_mem
-        .write_slice(mcfg.as_slice(), mcfg_offset)
-        .expect("Error writing MCFG table");
-    tables.push(mcfg_offset.0);
-    prev_tbl_len = mcfg.len() as u64;
-    prev_tbl_off = mcfg_offset;
+    #[cfg(feature = "pci_support")]
+    {
+        let mcfg = create_mcfg_table(device_manager.lock().unwrap().pci_segments());
+        let mcfg_offset = prev_tbl_off.checked_add(prev_tbl_len).unwrap();
+        guest_mem
+            .write_slice(mcfg.as_slice(), mcfg_offset)
+            .expect("Error writing MCFG table");
+        tables.push(mcfg_offset.0);
+        prev_tbl_len = mcfg.len() as u64;
+        prev_tbl_off = mcfg_offset;
+    }
+
 
     // SPCR
     #[cfg(target_arch = "aarch64")]
@@ -658,17 +664,20 @@ pub fn create_acpi_tables(
     }
 
     // VIOT
-    if let Some((iommu_bdf, devices_bdf)) = device_manager.lock().unwrap().iommu_attached_devices()
+    #[cfg(feature = "pci_support")]
     {
-        let viot = create_viot_table(iommu_bdf, devices_bdf);
+        if let Some((iommu_bdf, devices_bdf)) = device_manager.lock().unwrap().iommu_attached_devices()
+        {
+            let viot = create_viot_table(iommu_bdf, devices_bdf);
 
-        let viot_offset = prev_tbl_off.checked_add(prev_tbl_len).unwrap();
-        guest_mem
-            .write_slice(viot.as_slice(), viot_offset)
-            .expect("Error writing VIOT table");
-        tables.push(viot_offset.0);
-        prev_tbl_len = viot.len() as u64;
-        prev_tbl_off = viot_offset;
+            let viot_offset = prev_tbl_off.checked_add(prev_tbl_len).unwrap();
+            guest_mem
+                .write_slice(viot.as_slice(), viot_offset)
+                .expect("Error writing VIOT table");
+            tables.push(viot_offset.0);
+            prev_tbl_len = viot.len() as u64;
+            prev_tbl_off = viot_offset;
+        }
     }
 
     // XSDT

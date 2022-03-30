@@ -4275,105 +4275,106 @@ impl Aml for DeviceManager {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         #[cfg(target_arch = "aarch64")]
         use arch::aarch64::DeviceInfoForFdt;
+        #[cfg(feature = "pci_support")]
+        {
+            let mut pci_scan_methods = Vec::new();
+            for i in 0..self.pci_segments.len() {
+                pci_scan_methods.push(aml::MethodCall::new(
+                    format!("\\_SB_.PCI{:X}.PCNT", i).as_str().into(),
+                    vec![],
+                ));
+            }
+            let mut pci_scan_inner: Vec<&dyn Aml> = Vec::new();
+            for method in &pci_scan_methods {
+                pci_scan_inner.push(method)
+            }
 
-        let mut pci_scan_methods = Vec::new();
-        for i in 0..self.pci_segments.len() {
-            pci_scan_methods.push(aml::MethodCall::new(
-                format!("\\_SB_.PCI{:X}.PCNT", i).as_str().into(),
-                vec![],
-            ));
-        }
-        let mut pci_scan_inner: Vec<&dyn Aml> = Vec::new();
-        for method in &pci_scan_methods {
-            pci_scan_inner.push(method)
-        }
-
-        // PCI hotplug controller
-        aml::Device::new(
-            "_SB_.PHPR".into(),
-            vec![
-                &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0A06")),
-                &aml::Name::new("_STA".into(), &0x0bu8),
-                &aml::Name::new("_UID".into(), &"PCI Hotplug Controller"),
-                &aml::Mutex::new("BLCK".into(), 0),
-                &aml::Name::new(
-                    "_CRS".into(),
-                    &aml::ResourceTemplate::new(vec![&aml::AddressSpace::new_memory(
-                        aml::AddressSpaceCachable::NotCacheable,
+            // PCI hotplug controller
+            aml::Device::new(
+                "_SB_.PHPR".into(),
+                vec![
+                    &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0A06")),
+                    &aml::Name::new("_STA".into(), &0x0bu8),
+                    &aml::Name::new("_UID".into(), &"PCI Hotplug Controller"),
+                    &aml::Mutex::new("BLCK".into(), 0),
+                    &aml::Name::new(
+                        "_CRS".into(),
+                        &aml::ResourceTemplate::new(vec![&aml::AddressSpace::new_memory(
+                            aml::AddressSpaceCachable::NotCacheable,
+                            true,
+                            self.acpi_address.0 as u64,
+                            self.acpi_address.0 + DEVICE_MANAGER_ACPI_SIZE as u64 - 1,
+                        )]),
+                    ),
+                    // OpRegion and Fields map MMIO range into individual field values
+                    &aml::OpRegion::new(
+                        "PCST".into(),
+                        aml::OpRegionSpace::SystemMemory,
+                        self.acpi_address.0 as usize,
+                        DEVICE_MANAGER_ACPI_SIZE,
+                    ),
+                    &aml::Field::new(
+                        "PCST".into(),
+                        aml::FieldAccessType::DWord,
+                        aml::FieldUpdateRule::WriteAsZeroes,
+                        vec![
+                            aml::FieldEntry::Named(*b"PCIU", 32),
+                            aml::FieldEntry::Named(*b"PCID", 32),
+                            aml::FieldEntry::Named(*b"B0EJ", 32),
+                            aml::FieldEntry::Named(*b"PSEG", 32),
+                        ],
+                    ),
+                    &aml::Method::new(
+                        "PCEJ".into(),
+                        2,
                         true,
-                        self.acpi_address.0 as u64,
-                        self.acpi_address.0 + DEVICE_MANAGER_ACPI_SIZE as u64 - 1,
-                    )]),
-                ),
-                // OpRegion and Fields map MMIO range into individual field values
-                &aml::OpRegion::new(
-                    "PCST".into(),
-                    aml::OpRegionSpace::SystemMemory,
-                    self.acpi_address.0 as usize,
-                    DEVICE_MANAGER_ACPI_SIZE,
-                ),
-                &aml::Field::new(
-                    "PCST".into(),
-                    aml::FieldAccessType::DWord,
-                    aml::FieldUpdateRule::WriteAsZeroes,
-                    vec![
-                        aml::FieldEntry::Named(*b"PCIU", 32),
-                        aml::FieldEntry::Named(*b"PCID", 32),
-                        aml::FieldEntry::Named(*b"B0EJ", 32),
-                        aml::FieldEntry::Named(*b"PSEG", 32),
-                    ],
-                ),
-                &aml::Method::new(
-                    "PCEJ".into(),
-                    2,
+                        vec![
+                            // Take lock defined above
+                            &aml::Acquire::new("BLCK".into(), 0xffff),
+                            // Choose the current segment
+                            &aml::Store::new(&aml::Path::new("PSEG"), &aml::Arg(1)),
+                            // Write PCI bus number (in first argument) to I/O port via field
+                            &aml::ShiftLeft::new(&aml::Path::new("B0EJ"), &aml::ONE, &aml::Arg(0)),
+                            // Release lock
+                            &aml::Release::new("BLCK".into()),
+                            // Return 0
+                            &aml::Return::new(&aml::ZERO),
+                        ],
+                    ),
+                    &aml::Method::new("PSCN".into(), 0, true, pci_scan_inner),
+                ],
+            )
+            .append_aml_bytes(bytes);
+
+            for segment in &self.pci_segments {
+                segment.append_aml_bytes(bytes);
+            }
+
+            let mut mbrd_memory = Vec::new();
+
+            for segment in &self.pci_segments {
+                mbrd_memory.push(aml::Memory32Fixed::new(
                     true,
-                    vec![
-                        // Take lock defined above
-                        &aml::Acquire::new("BLCK".into(), 0xffff),
-                        // Choose the current segment
-                        &aml::Store::new(&aml::Path::new("PSEG"), &aml::Arg(1)),
-                        // Write PCI bus number (in first argument) to I/O port via field
-                        &aml::ShiftLeft::new(&aml::Path::new("B0EJ"), &aml::ONE, &aml::Arg(0)),
-                        // Release lock
-                        &aml::Release::new("BLCK".into()),
-                        // Return 0
-                        &aml::Return::new(&aml::ZERO),
-                    ],
-                ),
-                &aml::Method::new("PSCN".into(), 0, true, pci_scan_inner),
-            ],
-        )
-        .append_aml_bytes(bytes);
+                    segment.mmio_config_address as u32,
+                    layout::PCI_MMIO_CONFIG_SIZE_PER_SEGMENT as u32,
+                ))
+            }
 
-        for segment in &self.pci_segments {
-            segment.append_aml_bytes(bytes);
+            let mut mbrd_memory_refs = Vec::new();
+            for mbrd_memory_ref in &mbrd_memory {
+                mbrd_memory_refs.push(mbrd_memory_ref as &dyn Aml);
+            }
+
+            aml::Device::new(
+                "_SB_.MBRD".into(),
+                vec![
+                    &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0C02")),
+                    &aml::Name::new("_UID".into(), &aml::ZERO),
+                    &aml::Name::new("_CRS".into(), &aml::ResourceTemplate::new(mbrd_memory_refs)),
+                ],
+            )
+            .append_aml_bytes(bytes);
         }
-
-        let mut mbrd_memory = Vec::new();
-
-        for segment in &self.pci_segments {
-            mbrd_memory.push(aml::Memory32Fixed::new(
-                true,
-                segment.mmio_config_address as u32,
-                layout::PCI_MMIO_CONFIG_SIZE_PER_SEGMENT as u32,
-            ))
-        }
-
-        let mut mbrd_memory_refs = Vec::new();
-        for mbrd_memory_ref in &mbrd_memory {
-            mbrd_memory_refs.push(mbrd_memory_ref as &dyn Aml);
-        }
-
-        aml::Device::new(
-            "_SB_.MBRD".into(),
-            vec![
-                &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0C02")),
-                &aml::Name::new("_UID".into(), &aml::ZERO),
-                &aml::Name::new("_CRS".into(), &aml::ResourceTemplate::new(mbrd_memory_refs)),
-            ],
-        )
-        .append_aml_bytes(bytes);
-
         // Serial device
         #[cfg(target_arch = "x86_64")]
         let serial_irq = 4;
@@ -4588,6 +4589,7 @@ const PSEG_FIELD_SIZE: usize = 4;
 #[cfg(feature = "acpi")]
 impl BusDevice for DeviceManager {
     fn read(&mut self, base: u64, offset: u64, data: &mut [u8]) {
+        #[cfg(feature = "pci_support")]
         match offset {
             PCIU_FIELD_OFFSET => {
                 assert!(data.len() == PCIU_FIELD_SIZE);
@@ -4632,6 +4634,7 @@ impl BusDevice for DeviceManager {
     }
 
     fn write(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<std::sync::Barrier>> {
+        #[cfg(feature = "pci_support")]
         match offset {
             B0EJ_FIELD_OFFSET => {
                 assert!(data.len() == B0EJ_FIELD_SIZE);
