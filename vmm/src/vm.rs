@@ -2378,6 +2378,7 @@ impl Vm {
     }
 
     pub fn activate_virtio_devices(&self) -> Result<()> {
+        debug!("MMIO: activate_virtio_devices");
         self.device_manager
             .lock()
             .unwrap()

@@ -59,6 +59,7 @@ impl VirtioInterrupt for VirtioInterruptIntx {
         int_type: &VirtioInterruptType,
         _queue: Option<&Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
     ) -> std::result::Result<(), std::io::Error> {
+        debug!("MMIO: trigger interrupt");
         let status = match int_type {
             VirtioInterruptType::Config => INTERRUPT_STATUS_CONFIG_CHANGED,
             VirtioInterruptType::Queue => INTERRUPT_STATUS_USED_RING,
@@ -271,6 +272,7 @@ impl VirtioMmioDevice {
     }
 
     pub fn assign_interrupt(&mut self, interrupt: Arc<dyn InterruptSourceGroup>) {
+        debug!("MMIO: assign_interrupt 0");
         self.virtio_interrupt = Some(Arc::new(VirtioInterruptIntx::new(
             self.interrupt_status.clone(),
             interrupt,
@@ -278,8 +280,11 @@ impl VirtioMmioDevice {
     }
 
     fn activate(&mut self) -> ActivateResult {
+        debug!("MMIO: activate 0");
         if let Some(virtio_interrupt) = self.virtio_interrupt.take() {
+            debug!("MMIO: activate 1");
             if self.memory.is_some() {
+                debug!("MMIO: activate 2");
                 let mem = self.memory.as_ref().unwrap().clone();
                 let mut device = self.device.lock().unwrap();
                 let mut queue_evts = Vec::new();
@@ -304,6 +309,7 @@ impl VirtioMmioDevice {
 
 impl VirtioTransport for VirtioMmioDevice {
     fn ioeventfds(&self, base_addr: u64) -> Vec<(&EventFd, u64)> {
+        debug!("MMIO: ioeventfds");
         let notify_base = base_addr + u64::from(NOTIFY_REG_OFFSET);
         self.queue_evts()
             .iter()
@@ -314,6 +320,7 @@ impl VirtioTransport for VirtioMmioDevice {
 
 impl BusDevice for VirtioMmioDevice {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
+        debug!("MMIO: read");
         match offset {
             0x00..=0xff if data.len() == 4 => {
                 let v = match offset {
@@ -389,6 +396,7 @@ impl BusDevice for VirtioMmioDevice {
     }
 
     fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
+        debug!("MMIO: write");
         fn hi(v: &mut GuestAddress, x: u32) {
             *v = (*v & 0xffff_ffff) | (u64::from(x) << 32)
         }

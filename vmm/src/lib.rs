@@ -1276,6 +1276,7 @@ impl Vmm {
                             );
                             vm.activate_virtio_devices()
                                 .map_err(Error::ActivateVirtioDevices)?;
+                            debug!("EpollDispatch::ActivateVirtioDevices: DDDDDDDDDDDDDDDDDDDDDD");
                         }
                     }
                     EpollDispatch::Api => {
