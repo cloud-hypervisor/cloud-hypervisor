@@ -231,31 +231,35 @@ fn create_memory_node(
     guest_mem: &GuestMemoryMmap,
     numa_nodes: &NumaNodes,
 ) -> FdtWriterResult<()> {
-    // See https://github.com/torvalds/linux/blob/master/Documentation/devicetree/booting-without-of.txt#L960
-    // for an explanation of memory nodes.
-
+    // See https://github.com/torvalds/linux/blob/58ae0b51506802713aa0e9956d1853ba4c722c98/Documentation/devicetree/bindings/numa.txt
+    // for NUMA setting in memory node.
     if numa_nodes.len() > 1 {
         for numa_node_idx in 0..numa_nodes.len() {
             let numa_node = numa_nodes.get(&(numa_node_idx as u32));
+            let mut mem_reg_prop: Vec<u64> = Vec::new();
+            let mut node_memory_addr: u64 = 0;
             // Each memory zone of numa will have its own memory node, but
             // different numa nodes should not share same memory zones.
             for memory_region in numa_node.unwrap().memory_regions.iter() {
                 let memory_region_start_addr: u64 = memory_region.start_addr().raw_value();
                 let memory_region_size: u64 = memory_region.size() as u64;
-                let mem_reg_prop = [memory_region_start_addr, memory_region_size];
-                // With feature `acpi` enabled, RAM at 0-4M is for edk2 only
-                // and should be hidden to the guest.
+                // RAM at 0-4M is hidden to the guest for edk2
                 if memory_region_start_addr == 0 {
                     continue;
                 }
-
-                let memory_node_name = format!("memory@{:x}", memory_region_start_addr);
-                let memory_node = fdt.begin_node(&memory_node_name)?;
-                fdt.property_string("device_type", "memory")?;
-                fdt.property_array_u64("reg", &mem_reg_prop)?;
-                fdt.property_u32("numa-node-id", numa_node_idx as u32)?;
-                fdt.end_node(memory_node)?;
+                mem_reg_prop.push(memory_region_start_addr);
+                mem_reg_prop.push(memory_region_size);
+                // Set the node address the first non-zero regison address
+                if node_memory_addr == 0 {
+                    node_memory_addr = memory_region_start_addr;
+                }
             }
+            let memory_node_name = format!("memory@{:x}", node_memory_addr);
+            let memory_node = fdt.begin_node(&memory_node_name)?;
+            fdt.property_string("device_type", "memory")?;
+            fdt.property_array_u64("reg", &mem_reg_prop)?;
+            fdt.property_u32("numa-node-id", numa_node_idx as u32)?;
+            fdt.end_node(memory_node)?;
         }
     } else {
         let last_addr = guest_mem.last_addr().raw_value();
@@ -269,7 +273,6 @@ fn create_memory_node(
             fdt.end_node(memory_node)?;
         } else {
             // Case 2: RAM is split by the hole
-
             // Region 1: RAM before the hole
             let mem_size = super::layout::MEM_32BIT_RESERVED_START.raw_value()
                 - super::layout::RAM_START.raw_value();
