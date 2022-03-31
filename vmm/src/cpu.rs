@@ -122,9 +122,6 @@ pub enum Error {
     /// Failed to translate guest virtual address.
     TranslateVirtualAddress(hypervisor::HypervisorCpuError),
 
-    /// CPU hotplug/unplug not supported
-    ResizingNotSupported,
-
     #[cfg(all(feature = "amx", target_arch = "x86_64"))]
     /// "Failed to setup AMX.
     AmxEnable(anyhow::Error),
@@ -1134,7 +1131,7 @@ impl CpuManager {
         }
 
         if !self.dynamic {
-            return Err(Error::ResizingNotSupported);
+            return Ok(false);
         }
 
         match desired_vcpus.cmp(&self.present_vcpus()) {

@@ -307,9 +307,6 @@ pub enum Error {
 
     /// Failed to allocate MMIO address
     AllocateMmioAddress,
-
-    /// Memory resizing not supported
-    ResizingNotSupported,
 }
 
 const ENABLE_FLAG: usize = 0;
@@ -1618,7 +1615,7 @@ impl MemoryManager {
             HotplugMethod::VirtioMem => {
                 if desired_ram >= self.boot_ram {
                     if !self.dynamic {
-                        return Err(Error::ResizingNotSupported);
+                        return Ok(region);
                     }
 
                     self.virtio_mem_resize(DEFAULT_MEMORY_ZONE, desired_ram - self.boot_ram)?;
@@ -1628,7 +1625,7 @@ impl MemoryManager {
             HotplugMethod::Acpi => {
                 if desired_ram > self.current_ram {
                     if !self.dynamic {
-                        return Err(Error::ResizingNotSupported);
+                        return Ok(region);
                     }
 
                     region =
