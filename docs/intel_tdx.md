@@ -55,9 +55,9 @@ cargo build --features tdx
 ```
 
 And run a TDX VM by providing the firmware previously built, along with the
-guest image containing the TDX enlightened kernel. Assuming the guest kernel
-command line contains `console=hvc0` (printing to the `virtio-console` device),
-run Cloud Hypervisor as follows:
+guest image containing the TDX enlightened kernel. The latest image
+`td-guest-rhel8.5.raw` contains `console=hvc0` on the kernel boot parameters,
+meaning it will be printing guest kernel logs to the `virtio-console` device.
 
 ```bash
 ./cloud-hypervisor \
@@ -67,8 +67,8 @@ run Cloud Hypervisor as follows:
     --disk path=tdx_guest_img
 ```
 
-And here is the alternative command when looking for debug logs (assuming the
-guest kernel command line contains `console=ttyS0`):
+And here is the alternative command when looking for debug logs from the
+firmware:
 
 ```bash
 ./cloud-hypervisor \
@@ -76,8 +76,8 @@ guest kernel command line contains `console=ttyS0`):
     --cpus boot=1 \
     --memory size=1G \
     --disk path=tdx_guest_img \
-    --serial tty \
-    --console off
+    --serial file=/tmp/ch_serial \
+    --console tty
 ```
 
 ### TDShim
@@ -97,8 +97,14 @@ option as well.
 ./cloud-hypervisor \
     --tdx firmware=tdshim \
     --kernel bzImage \
-    --cmdline "root=/dev/vda1 console=hvc0 rw tdx_allow_acpi=MCFG"
+    --cmdline "root=/dev/vda3 console=hvc0 rw"
     --cpus boot=1 \
     --memory size=1G \
     --disk path=tdx_guest_img
 ```
+
+### Guest kernel disables serial ports
+
+The latest guest kernel that can be found in the latest image
+`td-guest-rhel8.5.raw` disabled the support for serial ports. This means adding
+`console=ttyS0` will have no effect and will not print any log from the guest.
