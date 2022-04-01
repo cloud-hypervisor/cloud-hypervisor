@@ -1829,9 +1829,7 @@ impl Vm {
         let mut hob = TdHob::start(hob_offset.unwrap());
 
         let mut sorted_sections = sections.to_vec();
-        sorted_sections.retain(|section| {
-            !matches!(section.r#type, TdvfSectionType::Bfv | TdvfSectionType::Cfv)
-        });
+        sorted_sections.retain(|section| matches!(section.r#type, TdvfSectionType::TempMem));
 
         sorted_sections.sort_by_key(|section| section.address);
         sorted_sections.reverse();
