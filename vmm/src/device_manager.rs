@@ -3695,6 +3695,7 @@ impl DeviceManager {
         });
         node.resources.push(Resource::LegacyIrq(irq_num));
         node.migratable = Some(Arc::clone(&mmio_device_arc) as Arc<Mutex<dyn Migratable>>);
+        node.mmio_device_handle =  Some(Arc::clone(&mmio_device_arc));
         self.device_tree.lock().unwrap().insert(id, node);
 
         Ok(())

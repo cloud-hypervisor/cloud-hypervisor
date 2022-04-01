@@ -22,6 +22,10 @@ pub struct DeviceNode {
     #[serde(skip)]
     #[cfg(feature = "pci_support")]
     pub pci_device_handle: Option<PciDeviceHandle>,
+    #[serde(skip)]
+    #[cfg(feature = "mmio_support")]
+    pub mmio_device_handle: Option<Arc<Mutex<virtio_devices::transport::VirtioMmioDevice>>>,
+
 }
 
 impl DeviceNode {
@@ -36,6 +40,8 @@ impl DeviceNode {
             pci_bdf: None,
             #[cfg(feature = "pci_support")]
             pci_device_handle: None,
+            #[cfg(feature = "mmio_support")]
+            mmio_device_handle: None,
         }
     }
 }
