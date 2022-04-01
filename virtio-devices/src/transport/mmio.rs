@@ -301,6 +301,17 @@ impl VirtioMmioDevice {
         }
         Ok(())
     }
+    pub fn maybe_activate(&mut self) {
+        if self.needs_activation() {
+            self.activate().expect("Failed to activate device");
+            self.device_activated.store(true, Ordering::SeqCst);
+            info!("{}: Waiting for barrier", self.id);
+            self.activate_barrier.wait();
+            info!("{}: Barrier released", self.id);
+        } else {
+            info!("{}: Device does not need activation", self.id)
+        }
+    }
 
     fn needs_activation(&self) -> bool {
         !self.device_activated.load(Ordering::SeqCst) && self.is_driver_ready()
