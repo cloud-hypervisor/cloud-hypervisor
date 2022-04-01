@@ -112,7 +112,7 @@ RUN echo 'source $CARGO_HOME/env' >> $HOME/.bashrc \
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
        git clone https://github.com/spdk/spdk \
        && cd spdk \
-       && git checkout 59f3cdacb13bd2a19c4a86be04792b0ee4491172 \
+       && git checkout 6301f8915de32baed10dba1eebed556a6749211a \
        && git submodule update --init \
        && apt-get update \
        && ./scripts/pkgdep.sh \
