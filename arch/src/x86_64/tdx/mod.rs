@@ -324,10 +324,10 @@ impl TdHob {
             },
             /* TODO:
              * QEMU currently fills it in like this:
-             * EFI_RESOURCE_ATTRIBUTE_PRESENT | EFI_RESOURCE_ATTRIBUTE_INITIALIZED | EFI_RESOURCE_ATTRIBUTE_ENCRYPTED | EFI_RESOURCE_ATTRIBUTE_TESTED
+             * EFI_RESOURCE_ATTRIBUTE_PRESENT | EFI_RESOURCE_ATTRIBUTE_INITIALIZED | EFI_RESOURCE_ATTRIBUTE_TESTED
              * which differs from the spec (due to TDVF implementation issue?)
              */
-            0x04000007,
+            0x7,
         )
     }
 
