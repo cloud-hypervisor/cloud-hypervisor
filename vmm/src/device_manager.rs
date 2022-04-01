@@ -3789,10 +3789,10 @@ impl DeviceManager {
     }
 
     pub fn activate_virtio_devices(&self) -> DeviceManagerResult<()> {
+        let device_tree = self.device_tree.lock().unwrap();
         #[cfg(feature = "pci_support")]
         {
             // Find virtio pci devices and activate any pending ones
-            let device_tree = self.device_tree.lock().unwrap();
             for pci_device_node in device_tree.pci_devices() {
                 #[allow(irrefutable_let_patterns)]
                 if let PciDeviceHandle::Virtio(virtio_pci_device) = &pci_device_node
@@ -3801,6 +3801,15 @@ impl DeviceManager {
                     .ok_or(DeviceManagerError::MissingPciDevice)?
                 {
                     virtio_pci_device.lock().unwrap().maybe_activate();
+                }
+            }
+        }
+        #[cfg(feature = "mmio_support")]
+        {
+            // Find virtio mmio devices and activate any pending ones
+            for mmio_device_node in device_tree.mmio_devices() {
+                if let Some(mmio_device) = &mmio_device_node.mmio_device_handle {
+                    mmio_device.lock().unwrap().maybe_activate();
                 }
             }
         }
