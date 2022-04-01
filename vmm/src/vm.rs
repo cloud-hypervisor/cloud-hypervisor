@@ -1865,6 +1865,10 @@ impl Vm {
 
                 next_start_addr = start + size;
 
+                if region_start > next_start_addr {
+                    next_start_addr = region_start;
+                }
+
                 if next_start_addr > region_end {
                     break;
                 }
