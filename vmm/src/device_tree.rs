@@ -94,7 +94,13 @@ impl DeviceTree {
             .filter(|v| v.pci_bdf.is_some() && v.pci_device_handle.is_some())
             .collect()
     }
-
+    #[cfg(feature = "mmio_support")]
+    pub fn mmio_devices(&self) -> Vec<&DeviceNode> {
+        self.0
+            .values()
+            .filter(|v| v.mmio_device_handle.is_some())
+            .collect()
+    }
     #[cfg(feature = "pci_support")]
     pub fn remove_node_by_pci_bdf(&mut self, pci_bdf: u32) -> Option<DeviceNode> {
         let mut id = None;
