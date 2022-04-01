@@ -7285,7 +7285,7 @@ mod live_migration {
                 "--memory-zone",
                 "id=mem0,size=1G,hotplug_size=32G",
                 "id=mem1,size=1G,hotplug_size=32G",
-                "id=mem2,size=1G,hotplug_size=32G",
+                "id=mem2,size=2G,hotplug_size=32G",
                 "--numa",
                 "guest_numa_id=0,cpus=[0-2,9],distances=[1@15,2@20],memory_zones=mem0",
                 "guest_numa_id=1,cpus=[3-4,6-8],distances=[0@20,2@25],memory_zones=mem1",
@@ -7336,7 +7336,7 @@ mod live_migration {
             // virtio-mem regions being used.
             if numa {
                 guest.check_numa_common(
-                    Some(&[960_000, 960_000, 960_000]),
+                    Some(&[960_000, 960_000, 1_920_000]),
                     Some(&[vec![0, 1, 2], vec![3, 4], vec![5]]),
                     Some(&["10 15 20", "20 10 25", "25 30 10"]),
                 );
@@ -7351,7 +7351,7 @@ mod live_migration {
                     // has been assigned the right amount of memory.
                     resize_zone_command(&src_api_socket, "mem0", "2G");
                     resize_zone_command(&src_api_socket, "mem1", "2G");
-                    resize_zone_command(&src_api_socket, "mem2", "2G");
+                    resize_zone_command(&src_api_socket, "mem2", "3G");
                     thread::sleep(std::time::Duration::new(5, 0));
 
                     guest.check_numa_common(Some(&[1_920_000, 1_920_000, 1_920_000]), None, None);
@@ -7509,9 +7509,9 @@ mod live_migration {
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 6);
             if numa {
                 #[cfg(target_arch = "x86_64")]
-                assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
+                assert!(guest.get_total_memory().unwrap_or_default() > 6_720_000);
                 #[cfg(target_arch = "aarch64")]
-                assert!(guest.get_total_memory().unwrap_or_default() > 2_880_000);
+                assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
             } else {
                 assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
             }
@@ -7522,7 +7522,7 @@ mod live_migration {
                 #[cfg(target_arch = "aarch64")]
                 {
                     guest.check_numa_common(
-                        Some(&[960_000, 960_000, 960_000]),
+                        Some(&[960_000, 960_000, 1_920_000]),
                         Some(&[vec![0, 1, 2], vec![3, 4], vec![5]]),
                         Some(&["10 15 20", "20 10 25", "25 30 10"]),
                     );
@@ -7533,7 +7533,7 @@ mod live_migration {
                 #[cfg(target_arch = "x86_64")]
                 {
                     guest.check_numa_common(
-                        Some(&[1_920_000, 1_920_000, 1_920_000]),
+                        Some(&[1_920_000, 1_920_000, 2_880_000]),
                         Some(&[vec![0, 1, 2], vec![3, 4], vec![5]]),
                         Some(&["10 15 20", "20 10 25", "25 30 10"]),
                     );
