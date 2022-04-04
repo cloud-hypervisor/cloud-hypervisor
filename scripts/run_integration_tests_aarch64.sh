@@ -56,7 +56,7 @@ build_spdk_nvme() {
     SPDK_DIR="$WORKLOADS_DIR/spdk"
     SPDK_REPO="https://github.com/spdk/spdk.git"
     SPDK_DEPLOY_DIR="/usr/local/bin/spdk-nvme"
-    checkout_repo "$SPDK_DIR" "$SPDK_REPO" master "59f3cdacb13bd2a19c4a86be04792b0ee4491172"
+    checkout_repo "$SPDK_DIR" "$SPDK_REPO" master "6301f8915de32baed10dba1eebed556a6749211a"
 
     if [ ! -f "$SPDK_DIR/.built" ]; then
         pushd $SPDK_DIR
