@@ -151,7 +151,7 @@ impl ConsoleEpollHandler {
             if let Err(e) = desc_chain.memory().write_slice(
                 &source_slice[..],
                 desc.addr()
-                    .translate(self.access_platform.as_ref(), desc.len() as usize),
+                    .translate_gva(self.access_platform.as_ref(), desc.len() as usize),
             ) {
                 error!("Failed to write slice: {:?}", e);
                 avail_iter.go_to_previous_position();
@@ -190,7 +190,7 @@ impl ConsoleEpollHandler {
             if let Some(ref mut out) = self.endpoint.out_file() {
                 let _ = desc_chain.memory().write_to(
                     desc.addr()
-                        .translate(self.access_platform.as_ref(), desc.len() as usize),
+                        .translate_gva(self.access_platform.as_ref(), desc.len() as usize),
                     out,
                     desc.len() as usize,
                 );

@@ -683,7 +683,7 @@ pub struct IommuMapping {
 }
 
 impl DmaRemapping for IommuMapping {
-    fn translate(&self, id: u32, addr: u64) -> std::result::Result<u64, std::io::Error> {
+    fn translate_gva(&self, id: u32, addr: u64) -> std::result::Result<u64, std::io::Error> {
         debug!("Translate addr 0x{:x}", addr);
         if let Some(domain) = self.endpoints.read().unwrap().get(&id) {
             if let Some(mapping) = self.mappings.read().unwrap().get(domain) {
@@ -720,8 +720,8 @@ impl AccessPlatformMapping {
 }
 
 impl AccessPlatform for AccessPlatformMapping {
-    fn translate(&self, base: u64, _size: u64) -> std::result::Result<u64, std::io::Error> {
-        self.mapping.translate(self.id, base)
+    fn translate_gva(&self, base: u64, _size: u64) -> std::result::Result<u64, std::io::Error> {
+        self.mapping.translate_gva(self.id, base)
     }
 }
 

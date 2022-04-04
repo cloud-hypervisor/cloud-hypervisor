@@ -127,7 +127,8 @@ impl VsockPacket {
         let mut pkt = Self {
             hdr: get_host_address_range(
                 desc_chain.memory(),
-                head.addr().translate(access_platform, head.len() as usize),
+                head.addr()
+                    .translate_gva(access_platform, head.len() as usize),
                 VSOCK_PKT_HDR_SIZE,
             )
             .ok_or(VsockError::GuestMemory)? as *mut u8,
@@ -166,7 +167,7 @@ impl VsockPacket {
                 desc_chain.memory(),
                 buf_desc
                     .addr()
-                    .translate(access_platform, buf_desc.len() as usize),
+                    .translate_gva(access_platform, buf_desc.len() as usize),
                 pkt.buf_size,
             )
             .ok_or(VsockError::GuestMemory)? as *mut u8,
@@ -207,7 +208,8 @@ impl VsockPacket {
         Ok(Self {
             hdr: get_host_address_range(
                 desc_chain.memory(),
-                head.addr().translate(access_platform, head.len() as usize),
+                head.addr()
+                    .translate_gva(access_platform, head.len() as usize),
                 VSOCK_PKT_HDR_SIZE,
             )
             .ok_or(VsockError::GuestMemory)? as *mut u8,
@@ -216,7 +218,7 @@ impl VsockPacket {
                     desc_chain.memory(),
                     buf_desc
                         .addr()
-                        .translate(access_platform, buf_desc.len() as usize),
+                        .translate_gva(access_platform, buf_desc.len() as usize),
                     buf_size,
                 )
                 .ok_or(VsockError::GuestMemory)? as *mut u8,

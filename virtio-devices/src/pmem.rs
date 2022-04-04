@@ -133,7 +133,10 @@ impl Request {
 
         let request: VirtioPmemReq = desc_chain
             .memory()
-            .read_obj(desc.addr().translate(access_platform, desc.len() as usize))
+            .read_obj(
+                desc.addr()
+                    .translate_gva(access_platform, desc.len() as usize),
+            )
             .map_err(Error::GuestMemory)?;
 
         let request_type = match request.type_ {
@@ -156,7 +159,7 @@ impl Request {
             type_: request_type,
             status_addr: status_desc
                 .addr()
-                .translate(access_platform, status_desc.len() as usize),
+                .translate_gva(access_platform, status_desc.len() as usize),
         })
     }
 }

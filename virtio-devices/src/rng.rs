@@ -61,7 +61,7 @@ impl RngEpollHandler {
                     .memory()
                     .read_from(
                         desc.addr()
-                            .translate(self.access_platform.as_ref(), desc.len() as usize),
+                            .translate_gva(self.access_platform.as_ref(), desc.len() as usize),
                         &mut self.random_file,
                         desc.len() as usize,
                     )

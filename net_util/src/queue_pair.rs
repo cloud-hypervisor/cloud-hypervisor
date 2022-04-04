@@ -60,7 +60,9 @@ impl TxVirtio {
 
                 let mut iovecs = Vec::new();
                 while let Some(desc) = next_desc {
-                    let desc_addr = desc.addr().translate(access_platform, desc.len() as usize);
+                    let desc_addr = desc
+                        .addr()
+                        .translate_gva(access_platform, desc.len() as usize);
                     if !desc.is_write_only() && desc.len() > 0 {
                         let buf = desc_chain
                             .memory()
@@ -192,7 +194,8 @@ impl RxVirtio {
                 let num_buffers_addr = desc_chain
                     .memory()
                     .checked_offset(
-                        desc.addr().translate(access_platform, desc.len() as usize),
+                        desc.addr()
+                            .translate_gva(access_platform, desc.len() as usize),
                         10,
                     )
                     .unwrap();
@@ -200,7 +203,9 @@ impl RxVirtio {
 
                 let mut iovecs = Vec::new();
                 while let Some(desc) = next_desc {
-                    let desc_addr = desc.addr().translate(access_platform, desc.len() as usize);
+                    let desc_addr = desc
+                        .addr()
+                        .translate_gva(access_platform, desc.len() as usize);
                     if desc.is_write_only() && desc.len() > 0 {
                         let buf = desc_chain
                             .memory()

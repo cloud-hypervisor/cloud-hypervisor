@@ -207,7 +207,8 @@ pub trait VirtioDevice: Send {
 /// On the other side, the implementation itself should be provided by the code
 /// emulating the IOMMU for the guest.
 pub trait DmaRemapping: Send + Sync {
-    fn translate(&self, id: u32, addr: u64) -> std::result::Result<u64, std::io::Error>;
+    /// Provide a way to translate GVA address ranges into GPAs.
+    fn translate_gva(&self, id: u32, addr: u64) -> std::result::Result<u64, std::io::Error>;
 }
 
 /// Structure to handle device state common to all devices
