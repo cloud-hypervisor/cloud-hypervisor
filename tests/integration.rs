@@ -5874,6 +5874,7 @@ mod parallel {
             .default_disks()
             .default_net()
             .args(&["--vdpa", "path=/dev/vhost-vdpa-0,num_queues=1"])
+            .args(&["--platform", "num_pci_segments=2,iommu_segments=1"])
             .args(&["--api-socket", &api_socket])
             .capture_output()
             .spawn()
@@ -5903,18 +5904,30 @@ mod parallel {
                 "foobar"
             );
 
-            // Hotplug an extra vDPA block device
+            // Hotplug an extra vDPA block device behind the vIOMMU
             // Add a new vDPA device to the VM
             let (cmd_success, cmd_output) = remote_command_w_output(
                 &api_socket,
                 "add-vdpa",
-                Some("id=myvdpa0,path=/dev/vhost-vdpa-1,num_queues=1"),
+                Some("id=myvdpa0,path=/dev/vhost-vdpa-1,num_queues=1,pci_segment=1,iommu=on"),
             );
             assert!(cmd_success);
             assert!(String::from_utf8_lossy(&cmd_output)
-                .contains("{\"id\":\"myvdpa0\",\"bdf\":\"0000:00:07.0\"}"));
+                .contains("{\"id\":\"myvdpa0\",\"bdf\":\"0001:00:01.0\"}"));
 
             thread::sleep(std::time::Duration::new(10, 0));
+
+            // Check IOMMU setup
+            assert!(guest
+                .does_device_vendor_pair_match("0x1057", "0x1af4")
+                .unwrap_or_default());
+            assert_eq!(
+                guest
+                    .ssh_command("ls /sys/kernel/iommu_groups/0/devices")
+                    .unwrap()
+                    .trim(),
+                "0001:00:01.0"
+            );
 
             // Check both if /dev/vdd exists and if the block size is 128M.
             assert_eq!(
