@@ -702,8 +702,10 @@ impl DmaRemapping for IommuMapping {
             }
         }
 
-        debug!("Into same addr...");
-        Ok(addr)
+        Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("failed to translate GVA addr 0x{:x}", addr),
+        ))
     }
 
     fn translate_gpa(&self, id: u32, addr: u64) -> std::result::Result<u64, std::io::Error> {
@@ -720,8 +722,10 @@ impl DmaRemapping for IommuMapping {
             }
         }
 
-        debug!("Into same addr...");
-        Ok(addr)
+        Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("failed to translate GPA addr 0x{:x}", addr),
+        ))
     }
 }
 
