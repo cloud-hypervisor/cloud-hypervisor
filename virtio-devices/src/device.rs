@@ -209,6 +209,8 @@ pub trait VirtioDevice: Send {
 pub trait DmaRemapping: Send + Sync {
     /// Provide a way to translate GVA address ranges into GPAs.
     fn translate_gva(&self, id: u32, addr: u64) -> std::result::Result<u64, std::io::Error>;
+    /// Provide a way to translate GPA address ranges into GVAs.
+    fn translate_gpa(&self, id: u32, addr: u64) -> std::result::Result<u64, std::io::Error>;
 }
 
 /// Structure to handle device state common to all devices
