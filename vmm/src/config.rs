@@ -1964,6 +1964,8 @@ pub struct VdpaConfig {
     #[serde(default = "default_vdpaconfig_num_queues")]
     pub num_queues: usize,
     #[serde(default)]
+    pub iommu: bool,
+    #[serde(default)]
     pub id: Option<String>,
     #[serde(default)]
     pub pci_segment: u16,
@@ -1982,6 +1984,7 @@ impl VdpaConfig {
         parser
             .add("path")
             .add("num_queues")
+            .add("iommu")
             .add("id")
             .add("pci_segment");
         parser.parse(vdpa).map_err(Error::ParseVdpa)?;
@@ -1994,6 +1997,11 @@ impl VdpaConfig {
             .convert("num_queues")
             .map_err(Error::ParseVdpa)?
             .unwrap_or_else(default_vdpaconfig_num_queues);
+        let iommu = parser
+            .convert::<Toggle>("iommu")
+            .map_err(Error::ParseVdpa)?
+            .unwrap_or(Toggle(false))
+            .0;
         let id = parser.get("id");
         let pci_segment = parser
             .convert("pci_segment")
@@ -2003,6 +2011,7 @@ impl VdpaConfig {
         Ok(VdpaConfig {
             path,
             num_queues,
+            iommu,
             id,
             pci_segment,
         })
@@ -2015,8 +2024,8 @@ impl VdpaConfig {
             }
 
             if let Some(iommu_segments) = platform_config.iommu_segments.as_ref() {
-                if iommu_segments.contains(&self.pci_segment) {
-                    return Err(ValidationError::IommuNotSupported(self.pci_segment));
+                if iommu_segments.contains(&self.pci_segment) && !self.iommu {
+                    return Err(ValidationError::OnIommuSegment(self.pci_segment));
                 }
             }
         }
@@ -2566,6 +2575,9 @@ impl VmConfig {
             let mut vdpa_config_list = Vec::new();
             for item in vdpa_list.iter() {
                 let vdpa_config = VdpaConfig::parse(item)?;
+                if vdpa_config.iommu {
+                    iommu = true;
+                }
                 vdpa_config_list.push(vdpa_config);
             }
             vdpa = Some(vdpa_config_list);
@@ -3656,7 +3668,7 @@ mod tests {
         }]);
         assert_eq!(
             invalid_config.validate(),
-            Err(ValidationError::IommuNotSupported(1))
+            Err(ValidationError::OnIommuSegment(1))
         );
 
         let mut invalid_config = valid_config;
