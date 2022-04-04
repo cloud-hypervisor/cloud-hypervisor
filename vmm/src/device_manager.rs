@@ -2947,7 +2947,7 @@ impl DeviceManager {
 
         Ok(MetaVirtioDevice {
             virtio_device: vdpa_device as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
-            iommu: false,
+            iommu: vdpa_cfg.iommu,
             id,
             pci_segment: vdpa_cfg.pci_segment,
             dma_handler: Some(vdpa_mapping),
@@ -4010,6 +4010,10 @@ impl DeviceManager {
     }
 
     pub fn add_vdpa(&mut self, vdpa_cfg: &mut VdpaConfig) -> DeviceManagerResult<PciDeviceInfo> {
+        if vdpa_cfg.iommu && !self.is_iommu_segment(vdpa_cfg.pci_segment) {
+            return Err(DeviceManagerError::InvalidIommuHotplug);
+        }
+
         let device = self.make_vdpa_device(vdpa_cfg)?;
         self.hotplug_virtio_pci_device(device)
     }

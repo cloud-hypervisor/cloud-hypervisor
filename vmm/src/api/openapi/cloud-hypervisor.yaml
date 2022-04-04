@@ -965,6 +965,9 @@ components:
         num_queues:
           type: integer
           default: 1
+        iommu:
+          type: boolean
+          default: false
         pci_segment:
           type: integer
           format: int16
