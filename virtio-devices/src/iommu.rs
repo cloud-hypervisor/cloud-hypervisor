@@ -684,7 +684,7 @@ pub struct IommuMapping {
 
 impl DmaRemapping for IommuMapping {
     fn translate_gva(&self, id: u32, addr: u64) -> std::result::Result<u64, std::io::Error> {
-        debug!("Translate addr 0x{:x}", addr);
+        debug!("Translate GVA addr 0x{:x}", addr);
         if let Some(domain) = self.endpoints.read().unwrap().get(&id) {
             if let Some(mapping) = self.mappings.read().unwrap().get(domain) {
                 let range_start = if VIRTIO_IOMMU_PAGE_SIZE_MASK > addr {
@@ -695,7 +695,25 @@ impl DmaRemapping for IommuMapping {
                 for (&key, &value) in mapping.range((Included(&range_start), Included(&addr))) {
                     if addr >= key && addr < key + value.size {
                         let new_addr = addr - key + value.gpa;
-                        debug!("Into new_addr 0x{:x}", new_addr);
+                        debug!("Into GPA addr 0x{:x}", new_addr);
+                        return Ok(new_addr);
+                    }
+                }
+            }
+        }
+
+        debug!("Into same addr...");
+        Ok(addr)
+    }
+
+    fn translate_gpa(&self, id: u32, addr: u64) -> std::result::Result<u64, std::io::Error> {
+        debug!("Translate GPA addr 0x{:x}", addr);
+        if let Some(domain) = self.endpoints.read().unwrap().get(&id) {
+            if let Some(mapping) = self.mappings.read().unwrap().get(domain) {
+                for (&key, &value) in mapping.iter() {
+                    if addr >= value.gpa && addr < value.gpa + value.size {
+                        let new_addr = addr - value.gpa + key;
+                        debug!("Into GVA addr 0x{:x}", new_addr);
                         return Ok(new_addr);
                     }
                 }
@@ -722,6 +740,9 @@ impl AccessPlatformMapping {
 impl AccessPlatform for AccessPlatformMapping {
     fn translate_gva(&self, base: u64, _size: u64) -> std::result::Result<u64, std::io::Error> {
         self.mapping.translate_gva(self.id, base)
+    }
+    fn translate_gpa(&self, base: u64, _size: u64) -> std::result::Result<u64, std::io::Error> {
+        self.mapping.translate_gpa(self.id, base)
     }
 }
 

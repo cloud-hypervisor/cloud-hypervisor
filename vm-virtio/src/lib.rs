@@ -96,16 +96,26 @@ impl fmt::Display for VirtioDeviceType {
 pub trait AccessPlatform: Send + Sync + Debug {
     /// Provide a way to translate GVA address ranges into GPAs.
     fn translate_gva(&self, base: u64, size: u64) -> std::result::Result<u64, std::io::Error>;
+    /// Provide a way to translate GPA address ranges into GVAs.
+    fn translate_gpa(&self, base: u64, size: u64) -> std::result::Result<u64, std::io::Error>;
 }
 
 pub trait Translatable {
     fn translate_gva(&self, access_platform: Option<&Arc<dyn AccessPlatform>>, len: usize) -> Self;
+    fn translate_gpa(&self, access_platform: Option<&Arc<dyn AccessPlatform>>, len: usize) -> Self;
 }
 
 impl Translatable for GuestAddress {
     fn translate_gva(&self, access_platform: Option<&Arc<dyn AccessPlatform>>, len: usize) -> Self {
         if let Some(access_platform) = access_platform {
             GuestAddress(access_platform.translate_gva(self.0, len as u64).unwrap())
+        } else {
+            *self
+        }
+    }
+    fn translate_gpa(&self, access_platform: Option<&Arc<dyn AccessPlatform>>, len: usize) -> Self {
+        if let Some(access_platform) = access_platform {
+            GuestAddress(access_platform.translate_gpa(self.0, len as u64).unwrap())
         } else {
             *self
         }
