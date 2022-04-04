@@ -19,10 +19,10 @@ use vhost::{
     vhost_kern::VhostKernFeatures,
     VhostBackend, VringConfigData,
 };
-use virtio_queue::Queue;
+use virtio_queue::{Descriptor, Queue};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic};
-use vm_virtio::AccessPlatform;
+use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
 
 #[derive(Error, Debug)]
@@ -166,9 +166,30 @@ impl Vdpa {
                 queue_max_size,
                 queue_size,
                 flags: 0u32,
-                desc_table_addr: queue.state.desc_table.0,
-                used_ring_addr: queue.state.used_ring.0,
-                avail_ring_addr: queue.state.avail_ring.0,
+                desc_table_addr: queue
+                    .state
+                    .desc_table
+                    .translate_gpa(
+                        self.common.access_platform.as_ref(),
+                        queue_size as usize * std::mem::size_of::<Descriptor>(),
+                    )
+                    .0,
+                used_ring_addr: queue
+                    .state
+                    .used_ring
+                    .translate_gpa(
+                        self.common.access_platform.as_ref(),
+                        4 + queue_size as usize * 8,
+                    )
+                    .0,
+                avail_ring_addr: queue
+                    .state
+                    .avail_ring
+                    .translate_gpa(
+                        self.common.access_platform.as_ref(),
+                        4 + queue_size as usize * 2,
+                    )
+                    .0,
                 log_addr: None,
             };
 
