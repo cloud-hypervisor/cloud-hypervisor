@@ -204,11 +204,15 @@ impl VirtioPciCommonConfig {
                 // Translate address of descriptor table and vrings.
                 if let Some(access_platform) = &self.access_platform {
                     if ready {
-                        let desc_table =
-                            access_platform.translate(q.state.desc_table.0, 0).unwrap();
-                        let avail_ring =
-                            access_platform.translate(q.state.avail_ring.0, 0).unwrap();
-                        let used_ring = access_platform.translate(q.state.used_ring.0, 0).unwrap();
+                        let desc_table = access_platform
+                            .translate_gva(q.state.desc_table.0, 0)
+                            .unwrap();
+                        let avail_ring = access_platform
+                            .translate_gva(q.state.avail_ring.0, 0)
+                            .unwrap();
+                        let used_ring = access_platform
+                            .translate_gva(q.state.used_ring.0, 0)
+                            .unwrap();
                         q.set_desc_table_address(
                             Some((desc_table & 0xffff_ffff) as u32),
                             Some((desc_table >> 32) as u32),
