@@ -20,7 +20,7 @@ use std::ops::Bound::Included;
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Barrier, RwLock};
+use std::sync::{Arc, Barrier, Mutex, RwLock};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_queue::{DescriptorChain, Queue};
@@ -572,7 +572,7 @@ struct IommuEpollHandler {
     kill_evt: EventFd,
     pause_evt: EventFd,
     mapping: Arc<IommuMapping>,
-    ext_mapping: BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
+    ext_mapping: Arc<Mutex<BTreeMap<u32, Arc<dyn ExternalDmaMapping>>>>,
     ext_domain_mapping: BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
     msi_iova_space: (u64, u64),
 }
@@ -585,7 +585,7 @@ impl IommuEpollHandler {
             let len = match Request::parse(
                 &mut desc_chain,
                 &self.mapping,
-                &self.ext_mapping,
+                &self.ext_mapping.lock().unwrap(),
                 &mut self.ext_domain_mapping,
                 self.msi_iova_space,
             ) {
@@ -751,7 +751,7 @@ pub struct Iommu {
     id: String,
     config: VirtioIommuConfig,
     mapping: Arc<IommuMapping>,
-    ext_mapping: BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
+    ext_mapping: Arc<Mutex<BTreeMap<u32, Arc<dyn ExternalDmaMapping>>>>,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
     msi_iova_space: (u64, u64),
@@ -799,7 +799,7 @@ impl Iommu {
                 },
                 config,
                 mapping: mapping.clone(),
-                ext_mapping: BTreeMap::new(),
+                ext_mapping: Arc::new(Mutex::new(BTreeMap::new())),
                 seccomp_action,
                 exit_evt,
                 msi_iova_space,
@@ -845,7 +845,7 @@ impl Iommu {
     }
 
     pub fn add_external_mapping(&mut self, device_id: u32, mapping: Arc<dyn ExternalDmaMapping>) {
-        self.ext_mapping.insert(device_id, mapping);
+        self.ext_mapping.lock().unwrap().insert(device_id, mapping);
     }
 }
 
