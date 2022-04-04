@@ -334,6 +334,10 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VdpaDmaMapping<M
             ));
         };
 
+        debug!(
+            "DMA map iova 0x{:x}, gpa 0x{:x}, size 0x{:x}, host_addr 0x{:x}",
+            iova, gpa, size, user_addr as u64
+        );
         self.device
             .lock()
             .unwrap()
@@ -351,6 +355,7 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VdpaDmaMapping<M
     }
 
     fn unmap(&self, iova: u64, size: u64) -> std::result::Result<(), std::io::Error> {
+        debug!("DMA unmap iova 0x{:x} size 0x{:x}", iova, size);
         self.device
             .lock()
             .unwrap()
