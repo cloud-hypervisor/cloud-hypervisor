@@ -22,6 +22,7 @@ pub mod kvm {
     use std::{boxed::Box, result};
     use versionize::{VersionMap, Versionize, VersionizeResult};
     use versionize_derive::Versionize;
+    use vm_memory::Address;
     use vm_migration::{
         Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable,
         VersionMapped,
@@ -83,7 +84,7 @@ pub mod kvm {
 
         /// Get the address of the GIC distributor.
         pub fn get_dist_addr() -> u64 {
-            layout::GIC_V3_DIST_START
+            layout::GIC_V3_DIST_START.raw_value()
         }
 
         /// Get the size of the GIC distributor.
