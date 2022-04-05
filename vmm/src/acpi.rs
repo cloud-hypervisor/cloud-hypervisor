@@ -667,7 +667,7 @@ pub fn create_acpi_tables(
             .clone()
             .get(&(DeviceType::Serial, DeviceType::Serial.to_string()))
             .is_some();
-        let serial_device_addr = arch::layout::LEGACY_SERIAL_MAPPED_IO_START;
+        let serial_device_addr = arch::layout::LEGACY_SERIAL_MAPPED_IO_START.raw_value();
         let serial_device_irq = if is_serial_on {
             device_manager
                 .lock()

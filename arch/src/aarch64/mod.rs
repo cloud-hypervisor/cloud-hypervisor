@@ -202,17 +202,17 @@ pub fn initramfs_load_addr(
 
 /// Returns the memory address where the kernel could be loaded.
 pub fn get_kernel_start() -> u64 {
-    layout::KERNEL_START
+    layout::KERNEL_START.raw_value()
 }
 
 ///Return guest memory address where the uefi should be loaded.
 pub fn get_uefi_start() -> u64 {
-    layout::UEFI_START
+    layout::UEFI_START.raw_value()
 }
 
 // Auxiliary function to get the address where the device tree blob is loaded.
 fn get_fdt_addr() -> u64 {
-    layout::FDT_START
+    layout::FDT_START.raw_value()
 }
 
 pub fn get_host_cpu_phys_bits() -> u8 {

@@ -580,11 +580,11 @@ fn create_pci_nodes(
         // Here we cut off PCI device space below 8G in FDT to workaround the EDK2 check.
         // But the address written in ACPI is not impacted.
         let (pci_device_base_64bit, pci_device_size_64bit) =
-            if pci_device_info_elem.pci_device_space_start < PCI_HIGH_BASE {
+            if pci_device_info_elem.pci_device_space_start < PCI_HIGH_BASE.raw_value() {
                 (
-                    PCI_HIGH_BASE,
+                    PCI_HIGH_BASE.raw_value(),
                     pci_device_info_elem.pci_device_space_size
-                        - (PCI_HIGH_BASE - pci_device_info_elem.pci_device_space_start),
+                        - (PCI_HIGH_BASE.raw_value() - pci_device_info_elem.pci_device_space_start),
                 )
             } else {
                 (

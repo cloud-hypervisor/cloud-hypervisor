@@ -1276,6 +1276,7 @@ impl CpuManager {
 
         #[cfg(target_arch = "aarch64")]
         {
+            use vm_memory::Address;
             /* Notes:
              * Ignore Local Interrupt Controller Address at byte offset 36 of MADT table.
              */
@@ -1323,7 +1324,7 @@ impl CpuManager {
                 length: 24,
                 reserved0: 0,
                 gic_id: 0,
-                base_address: arch::layout::MAPPED_IO_START - 0x0001_0000,
+                base_address: arch::layout::MAPPED_IO_START.raw_value() - 0x0001_0000,
                 global_irq_base: 0,
                 version: 3,
                 reserved1: [0; 3],
@@ -1332,7 +1333,8 @@ impl CpuManager {
 
             // See 5.2.12.17 GIC Redistributor (GICR) Structure in ACPI spec.
             let gicr_size: u32 = 0x0001_0000 * 2 * (self.config.boot_vcpus as u32);
-            let gicr_base: u64 = arch::layout::MAPPED_IO_START - 0x0001_0000 - gicr_size as u64;
+            let gicr_base: u64 =
+                arch::layout::MAPPED_IO_START.raw_value() - 0x0001_0000 - gicr_size as u64;
             let gicr = GicR {
                 r#type: acpi::ACPI_APIC_GENERIC_REDISTRIBUTOR,
                 length: 16,

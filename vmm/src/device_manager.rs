@@ -1190,7 +1190,7 @@ impl DeviceManager {
         #[cfg(target_arch = "aarch64")]
         {
             let vcpus = self.config.lock().unwrap().cpus.boot_vcpus;
-            let msi_start = arch::layout::GIC_V3_DIST_START
+            let msi_start = arch::layout::GIC_V3_DIST_START.raw_value()
                 - arch::layout::GIC_V3_REDIST_SIZE * (vcpus as u64)
                 - arch::layout::GIC_V3_ITS_SIZE;
             let msi_end = msi_start + arch::layout::GIC_V3_ITS_SIZE - 1;
@@ -1539,7 +1539,7 @@ impl DeviceManager {
         self.bus_devices
             .push(Arc::clone(&rtc_device) as Arc<Mutex<dyn BusDevice>>);
 
-        let addr = GuestAddress(arch::layout::LEGACY_RTC_MAPPED_IO_START);
+        let addr = arch::layout::LEGACY_RTC_MAPPED_IO_START;
 
         self.address_manager
             .mmio_bus
@@ -1579,7 +1579,7 @@ impl DeviceManager {
         self.bus_devices
             .push(Arc::clone(&gpio_device) as Arc<Mutex<dyn BusDevice>>);
 
-        let addr = GuestAddress(arch::layout::LEGACY_GPIO_MAPPED_IO_START);
+        let addr = arch::layout::LEGACY_GPIO_MAPPED_IO_START;
 
         self.address_manager
             .mmio_bus
@@ -1685,7 +1685,7 @@ impl DeviceManager {
         self.bus_devices
             .push(Arc::clone(&serial) as Arc<Mutex<dyn BusDevice>>);
 
-        let addr = GuestAddress(arch::layout::LEGACY_SERIAL_MAPPED_IO_START);
+        let addr = arch::layout::LEGACY_SERIAL_MAPPED_IO_START;
 
         self.address_manager
             .mmio_bus
@@ -4293,7 +4293,7 @@ impl Aml for DeviceManager {
                             #[cfg(target_arch = "aarch64")]
                             &aml::Memory32Fixed::new(
                                 true,
-                                arch::layout::LEGACY_SERIAL_MAPPED_IO_START as u32,
+                                arch::layout::LEGACY_SERIAL_MAPPED_IO_START.raw_value() as u32,
                                 MMIO_LEN as u32,
                             ),
                         ]),
