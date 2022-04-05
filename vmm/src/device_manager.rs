@@ -25,6 +25,8 @@ use crate::pci_segment::PciSegment;
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::serial_manager::{Error as SerialManagerError, SerialManager};
 use crate::sigwinch_listener::start_sigwinch_listener;
+#[cfg(target_arch = "aarch64")]
+use crate::GuestMemoryMmap;
 use crate::GuestRegionMmap;
 use crate::PciDeviceInfo;
 use crate::{device_node, DEVICE_MANAGER_SNAPSHOT_ID};
@@ -96,6 +98,8 @@ use vm_device::interrupt::{
 };
 use vm_device::{Bus, BusDevice, Resource};
 use vm_memory::guest_memory::FileOffset;
+#[cfg(target_arch = "aarch64")]
+use vm_memory::GuestMemoryAtomic;
 use vm_memory::GuestMemoryRegion;
 use vm_memory::{Address, GuestAddress, GuestUsize, MmapRegion};
 #[cfg(target_arch = "x86_64")]
@@ -473,6 +477,9 @@ pub enum DeviceManagerError {
 
     /// Cannot hotplug device behind vIOMMU
     InvalidIommuHotplug,
+
+    /// Failed to create UEFI flash
+    CreateUefiFlash(hypervisor::vm::HypervisorVmError),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -924,6 +931,10 @@ pub struct DeviceManager {
     // GPIO device for AArch64
     gpio_device: Option<Arc<Mutex<devices::legacy::Gpio>>>,
 
+    #[cfg(target_arch = "aarch64")]
+    // Flash device for UEFI on AArch64
+    uefi_flash: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
+
     // Flag to force setting the iommu on virtio devices
     force_iommu: bool,
 
@@ -1067,6 +1078,8 @@ impl DeviceManager {
             virtio_mem_devices: Vec::new(),
             #[cfg(target_arch = "aarch64")]
             gpio_device: None,
+            #[cfg(target_arch = "aarch64")]
+            uefi_flash: None,
             force_iommu,
             restoring,
             io_uring_supported: None,
@@ -1601,6 +1614,38 @@ impl DeviceManager {
             .lock()
             .unwrap()
             .insert(id.clone(), device_node!(id, gpio_device));
+
+        // On AArch64, the UEFI binary requires a flash device at address 0.
+        // 4 MiB memory is mapped to simulate the flash.
+        let uefi_mem_slot = self.memory_manager.lock().unwrap().allocate_memory_slot();
+        let uefi_region = GuestRegionMmap::new(
+            MmapRegion::new(arch::layout::UEFI_SIZE as usize).unwrap(),
+            arch::layout::UEFI_START,
+        )
+        .unwrap();
+        let uefi_mem_region = self
+            .memory_manager
+            .lock()
+            .unwrap()
+            .vm
+            .make_user_memory_region(
+                uefi_mem_slot,
+                uefi_region.start_addr().raw_value(),
+                uefi_region.len() as u64,
+                uefi_region.as_ptr() as u64,
+                false,
+                false,
+            );
+        self.memory_manager
+            .lock()
+            .unwrap()
+            .vm
+            .create_user_memory_region(uefi_mem_region)
+            .map_err(DeviceManagerError::CreateUefiFlash)?;
+
+        let uefi_flash =
+            GuestMemoryAtomic::new(GuestMemoryMmap::from_regions(vec![uefi_region]).unwrap());
+        self.uefi_flash = Some(uefi_flash);
 
         Ok(())
     }
@@ -4140,6 +4185,11 @@ impl DeviceManager {
 
     pub fn iommu_attached_devices(&self) -> &Option<(PciBdf, Vec<PciBdf>)> {
         &self.iommu_attached_devices
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    pub fn uefi_flash(&self) -> GuestMemoryAtomic<GuestMemoryMmap> {
+        self.uefi_flash.as_ref().unwrap().clone()
     }
 }
 

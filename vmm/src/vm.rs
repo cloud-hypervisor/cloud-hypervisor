@@ -1001,8 +1001,11 @@ impl Vm {
             // If failed, retry to load it as UEFI binary.
             // As the UEFI binary is formatless, it must be the last option to try.
             Err(linux_loader::loader::Error::Pe(InvalidImageMagicNumber)) => {
+                let uefi_flash = self.device_manager.lock().as_ref().unwrap().uefi_flash();
+                let mem = uefi_flash.memory();
                 arch::aarch64::uefi::load_uefi(mem.deref(), arch::layout::UEFI_START, &mut kernel)
                     .map_err(Error::UefiLoad)?;
+
                 // The entry point offset in UEFI image is always 0.
                 return Ok(EntryPoint {
                     entry_addr: arch::layout::UEFI_START,
