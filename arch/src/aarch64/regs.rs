@@ -5,13 +5,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
-use super::get_fdt_addr;
 use hypervisor::kvm::kvm_bindings::{
     kvm_regs, user_pt_regs, KVM_REG_ARM64, KVM_REG_ARM_CORE, KVM_REG_SIZE_U64,
 };
 use hypervisor::{arm64_core_reg_id, offset__of};
 use std::sync::Arc;
 use std::{mem, result};
+use vm_memory::Address;
 
 /// Errors thrown while setting aarch64 registers.
 #[derive(Debug)]
@@ -67,7 +67,7 @@ pub fn setup_regs(vcpu: &Arc<dyn hypervisor::Vcpu>, cpu_id: u8, boot_ip: u64) ->
         let regs0 = offset__of!(user_pt_regs, regs) + kreg_off;
         vcpu.set_reg(
             arm64_core_reg_id!(KVM_REG_SIZE_U64, regs0),
-            get_fdt_addr() as u64,
+            super::layout::FDT_START.raw_value(),
         )
         .map_err(Error::SetCoreRegister)?;
     }
