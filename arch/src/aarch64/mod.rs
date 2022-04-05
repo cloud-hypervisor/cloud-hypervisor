@@ -79,12 +79,10 @@ pub fn configure_vcpu(
 
 pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, RegionType)> {
     let mut regions = vec![
-        // 0 ~ 4 MiB: Reserved for UEFI space
-        (GuestAddress(0), layout::UEFI_SIZE as usize, RegionType::Ram),
-        // 4 MiB ~ 256 MiB: Gic and legacy devices
+        // 0 MiB ~ 256 MiB: UEFI, GIC and legacy devices
         (
-            GuestAddress(layout::UEFI_SIZE),
-            (layout::MEM_32BIT_DEVICES_START.0 - layout::UEFI_SIZE) as usize,
+            GuestAddress(0),
+            layout::MEM_32BIT_DEVICES_START.0 as usize,
             RegionType::Reserved,
         ),
         // 256 MiB ~ 768 MiB: MMIO space
@@ -101,19 +99,13 @@ pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, Region
         ),
     ];
 
-    // Normally UEFI should be loaded to a flash area at the beginning of memory.
-    // But now flash memory type is not supported.
-    // As a workaround, we take 4 MiB memory from the main RAM for UEFI.
-    // As a result, the RAM that the guest can see is less than what has been
-    // assigned in command line, when ACPI and UEFI is enabled.
-    let ram_size = size - layout::UEFI_SIZE;
     let ram_32bit_space_size =
         layout::MEM_32BIT_RESERVED_START.unchecked_offset_from(layout::RAM_START);
 
     // RAM space
     // Case1: guest memory fits before the gap
-    if ram_size as u64 <= ram_32bit_space_size {
-        regions.push((layout::RAM_START, ram_size as usize, RegionType::Ram));
+    if size as u64 <= ram_32bit_space_size {
+        regions.push((layout::RAM_START, size as usize, RegionType::Ram));
     // Case2: guest memory extends beyond the gap
     } else {
         // Push memory before the gap
@@ -125,7 +117,7 @@ pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, Region
         // Other memory is placed after 4GiB
         regions.push((
             layout::RAM_64BIT_START,
-            (ram_size - ram_32bit_space_size) as usize,
+            (size - ram_32bit_space_size) as usize,
             RegionType::Ram,
         ));
     }
@@ -221,27 +213,24 @@ mod tests {
     #[test]
     fn test_arch_memory_regions_dram_2gb() {
         let regions = arch_memory_regions((1usize << 31) as u64); //2GB
-        assert_eq!(6, regions.len());
-        assert_eq!(layout::RAM_START, regions[4].0);
-        assert_eq!(((1 << 31) - layout::UEFI_SIZE) as usize, regions[4].1);
-        assert_eq!(RegionType::Ram, regions[4].2);
-        assert_eq!(RegionType::Reserved, regions[5].2);
+        assert_eq!(5, regions.len());
+        assert_eq!(layout::RAM_START, regions[3].0);
+        assert_eq!((1usize << 31), regions[3].1);
+        assert_eq!(RegionType::Ram, regions[3].2);
+        assert_eq!(RegionType::Reserved, regions[4].2);
     }
 
     #[test]
     fn test_arch_memory_regions_dram_4gb() {
         let regions = arch_memory_regions((1usize << 32) as u64); //4GB
         let ram_32bit_space_size =
-            layout::MEM_32BIT_RESERVED_START.unchecked_offset_from(layout::RAM_START);
-        assert_eq!(7, regions.len());
-        assert_eq!(layout::RAM_START, regions[4].0);
-        assert_eq!(ram_32bit_space_size as usize, regions[4].1);
+            layout::MEM_32BIT_RESERVED_START.unchecked_offset_from(layout::RAM_START) as usize;
+        assert_eq!(6, regions.len());
+        assert_eq!(layout::RAM_START, regions[3].0);
+        assert_eq!(ram_32bit_space_size as usize, regions[3].1);
+        assert_eq!(RegionType::Ram, regions[3].2);
+        assert_eq!(RegionType::Reserved, regions[5].2);
         assert_eq!(RegionType::Ram, regions[4].2);
-        assert_eq!(RegionType::Reserved, regions[6].2);
-        assert_eq!(RegionType::Ram, regions[5].2);
-        assert_eq!(
-            ((1 << 32) - layout::UEFI_SIZE - ram_32bit_space_size) as usize,
-            regions[5].1
-        );
+        assert_eq!(((1usize << 32) - ram_32bit_space_size), regions[4].1);
     }
 }

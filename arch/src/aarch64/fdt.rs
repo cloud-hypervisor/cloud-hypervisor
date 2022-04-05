@@ -241,10 +241,6 @@ fn create_memory_node(
             for memory_region in numa_node.unwrap().memory_regions.iter() {
                 let memory_region_start_addr: u64 = memory_region.start_addr().raw_value();
                 let memory_region_size: u64 = memory_region.size() as u64;
-                // RAM at 0-4M is hidden to the guest for edk2
-                if memory_region_start_addr == 0 {
-                    continue;
-                }
                 mem_reg_prop.push(memory_region_start_addr);
                 mem_reg_prop.push(memory_region_size);
                 // Set the node address the first non-zero regison address
