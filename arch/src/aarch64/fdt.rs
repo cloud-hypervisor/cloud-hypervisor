@@ -18,14 +18,13 @@ use std::str;
 use super::super::DeviceType;
 use super::super::GuestMemoryMmap;
 use super::super::InitramfsConfig;
-use super::get_fdt_addr;
 use super::gic::GicDevice;
 use super::layout::{
     IRQ_BASE, MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START, MEM_PCI_IO_SIZE, MEM_PCI_IO_START,
     PCI_HIGH_BASE, PCI_MMIO_CONFIG_SIZE_PER_SEGMENT,
 };
 use vm_fdt::{FdtWriter, FdtWriterResult};
-use vm_memory::{Address, Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryRegion};
+use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError, GuestMemoryRegion};
 
 // This is a value for uniquely identifying the FDT node declaring the interrupt controller.
 const GIC_PHANDLE: u32 = 1;
@@ -141,9 +140,8 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
 
 pub fn write_fdt_to_memory(fdt_final: Vec<u8>, guest_mem: &GuestMemoryMmap) -> Result<()> {
     // Write FDT to memory.
-    let fdt_address = GuestAddress(get_fdt_addr());
     guest_mem
-        .write_slice(fdt_final.as_slice(), fdt_address)
+        .write_slice(fdt_final.as_slice(), super::layout::FDT_START)
         .map_err(Error::WriteFdtToMemory)?;
     Ok(())
 }

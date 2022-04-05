@@ -992,7 +992,7 @@ impl Vm {
         let mut kernel = self.kernel.as_ref().unwrap();
         let entry_addr = match linux_loader::loader::pe::PE::load(
             mem.deref(),
-            Some(GuestAddress(arch::get_kernel_start())),
+            Some(arch::layout::KERNEL_START),
             &mut kernel,
             None,
         ) {
@@ -1001,15 +1001,11 @@ impl Vm {
             // If failed, retry to load it as UEFI binary.
             // As the UEFI binary is formatless, it must be the last option to try.
             Err(linux_loader::loader::Error::Pe(InvalidImageMagicNumber)) => {
-                arch::aarch64::uefi::load_uefi(
-                    mem.deref(),
-                    GuestAddress(arch::get_uefi_start()),
-                    &mut kernel,
-                )
-                .map_err(Error::UefiLoad)?;
+                arch::aarch64::uefi::load_uefi(mem.deref(), arch::layout::UEFI_START, &mut kernel)
+                    .map_err(Error::UefiLoad)?;
                 // The entry point offset in UEFI image is always 0.
                 return Ok(EntryPoint {
-                    entry_addr: GuestAddress(arch::get_uefi_start()),
+                    entry_addr: arch::layout::UEFI_START,
                 });
             }
             Err(e) => {
