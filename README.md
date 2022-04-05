@@ -267,26 +267,26 @@ Cloud Hypervisor is under active development. The following stability guarantees
 are currently made:
 
 * The API (including command line options) will not be removed or changed in a
-  breaking way without a minimum of 2 releases notice. Where possible warnings
-  will be given about the use of deprecated functionality and the deprecations
-  will be documented in the release notes.
+  breaking way without a minimum of 2 major releases notice. Where possible
+  warnings will be given about the use of deprecated functionality and the
+  deprecations will be documented in the release notes.
+
 * Point releases will be made between individual releases where there are
-  substantial bug fixes or security issues that need to be fixed.
+  substantial bug fixes or security issues that need to be fixed. These point
+  releases will only include bug fixes.
 
 Currently the following items are **not** guaranteed across updates:
 
 * Snapshot/restore is not supported across different versions
 * Live migration is not supported across different versions
 * The following features are considered experimental and may change
-  substantially between releases: TDX, SGX.
+  substantially between releases: TDX, vfio-user, vDPA.
 
-
-As of 2021-04-29, the following cloud images are supported:
+As of 2022-04-05, the following cloud images are supported:
 
 - [Ubuntu Bionic](https://cloud-images.ubuntu.com/bionic/current/) (cloudimg)
 - [Ubuntu Focal](https://cloud-images.ubuntu.com/focal/current/) (cloudimg)
-- [Ubuntu Groovy](https://cloud-images.ubuntu.com/groovy/current/) (cloudimg)
-- [Ubuntu Hirsute](https://cloud-images.ubuntu.com/hirsute/current/) (cloudimg)
+- [Ubuntu Jammy](https://cloud-images.ubuntu.com/jammy/current/) (cloudimg)
 
 Direct kernel boot to userspace should work with a rootfs from most
 distributions.
