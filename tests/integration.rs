@@ -4313,12 +4313,6 @@ mod parallel {
         thread::sleep(std::time::Duration::new(20, 0));
 
         let r = std::panic::catch_unwind(|| {
-            // On AArch64 when acpi is enabled, there is a 4 MiB gap between the RAM
-            // that the VMM gives and the guest can see.
-            // This is a temporary solution, will be fixed in future.
-            #[cfg(target_arch = "aarch64")]
-            let guest_memory_size_kb = guest_memory_size_kb - 4 * 1024;
-
             let overhead = get_vmm_overhead(child.id(), guest_memory_size_kb);
             eprintln!(
                 "Guest memory overhead: {} vs {}",
