@@ -7865,7 +7865,9 @@ mod aarch64_acpi {
         _test_power_button(true);
     }
 
+    // https://github.com/cloud-hypervisor/cloud-hypervisor/issues/3941
     #[test]
+    #[ignore]
     fn test_virtio_iommu() {
         _test_virtio_iommu(true)
     }
