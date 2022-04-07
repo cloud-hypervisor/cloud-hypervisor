@@ -3423,30 +3423,8 @@ impl DeviceManager {
         let mut node = device_node!(id);
         node.children = vec![virtio_device_id.clone()];
 
-        // Look for the id in the device tree. If it can be found, that means
-        // the device is being restored, otherwise it's created from scratch.
-        let (pci_segment_id, pci_device_bdf, resources) = if let Some(node) =
-            self.device_tree.lock().unwrap().get(&id)
-        {
-            info!("Restoring virtio-pci {} resources", id);
-            let pci_device_bdf: PciBdf = node
-                .pci_bdf
-                .ok_or(DeviceManagerError::MissingDeviceNodePciBdf)?;
-            let pci_segment_id = pci_device_bdf.segment();
-
-            self.pci_segments[pci_segment_id as usize]
-                .pci_bus
-                .lock()
-                .unwrap()
-                .get_device_id(pci_device_bdf.device() as usize)
-                .map_err(DeviceManagerError::GetPciDeviceId)?;
-
-            (pci_segment_id, pci_device_bdf, Some(node.resources.clone()))
-        } else {
-            let pci_device_bdf = self.pci_segments[pci_segment_id as usize].next_device_bdf()?;
-
-            (pci_segment_id, pci_device_bdf, None)
-        };
+        let (pci_segment_id, pci_device_bdf, resources) =
+            self.pci_resources(&id, pci_segment_id)?;
 
         // Update the existing virtio node by setting the parent.
         if let Some(node) = self.device_tree.lock().unwrap().get_mut(&virtio_device_id) {
@@ -3570,6 +3548,38 @@ impl DeviceManager {
         self.device_tree.lock().unwrap().insert(id, node);
 
         Ok(pci_device_bdf)
+    }
+
+    fn pci_resources(
+        &self,
+        id: &str,
+        pci_segment_id: u16,
+    ) -> DeviceManagerResult<(u16, PciBdf, Option<Vec<Resource>>)> {
+        // Look for the id in the device tree. If it can be found, that means
+        // the device is being restored, otherwise it's created from scratch.
+        Ok(
+            if let Some(node) = self.device_tree.lock().unwrap().get(id) {
+                info!("Restoring virtio-pci {} resources", id);
+                let pci_device_bdf: PciBdf = node
+                    .pci_bdf
+                    .ok_or(DeviceManagerError::MissingDeviceNodePciBdf)?;
+                let pci_segment_id = pci_device_bdf.segment();
+
+                self.pci_segments[pci_segment_id as usize]
+                    .pci_bus
+                    .lock()
+                    .unwrap()
+                    .get_device_id(pci_device_bdf.device() as usize)
+                    .map_err(DeviceManagerError::GetPciDeviceId)?;
+
+                (pci_segment_id, pci_device_bdf, Some(node.resources.clone()))
+            } else {
+                let pci_device_bdf =
+                    self.pci_segments[pci_segment_id as usize].next_device_bdf()?;
+
+                (pci_segment_id, pci_device_bdf, None)
+            },
+        )
     }
 
     #[cfg(target_arch = "x86_64")]
