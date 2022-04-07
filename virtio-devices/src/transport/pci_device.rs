@@ -1089,6 +1089,10 @@ impl PciDevice for VirtioPciDevice {
     fn as_any(&mut self) -> &mut dyn Any {
         self
     }
+
+    fn id(&self) -> Option<String> {
+        Some(self.id.clone())
+    }
 }
 
 impl BusDevice for VirtioPciDevice {

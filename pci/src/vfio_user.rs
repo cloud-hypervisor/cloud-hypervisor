@@ -30,6 +30,7 @@ use vm_memory::{
 use vmm_sys_util::eventfd::EventFd;
 
 pub struct VfioUserPciDevice {
+    id: String,
     vm: Arc<dyn hypervisor::Vm>,
     client: Arc<Mutex<Client>>,
     vfio_wrapper: VfioUserClientWrapper,
@@ -63,6 +64,7 @@ impl PciSubclass for PciVfioUserSubclass {
 
 impl VfioUserPciDevice {
     pub fn new(
+        id: String,
         vm: &Arc<dyn hypervisor::Vm>,
         client: Arc<Mutex<Client>>,
         msi_interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
@@ -111,6 +113,7 @@ impl VfioUserPciDevice {
             .map_err(VfioUserPciDeviceError::InitializeLegacyInterrupts)?;
 
         Ok(Self {
+            id,
             vm: vm.clone(),
             client,
             vfio_wrapper,
@@ -485,6 +488,10 @@ impl PciDevice for VfioUserPciDevice {
         }
 
         Ok(())
+    }
+
+    fn id(&self) -> Option<String> {
+        Some(self.id.clone())
     }
 }
 
