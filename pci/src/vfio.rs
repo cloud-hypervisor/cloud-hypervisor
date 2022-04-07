@@ -363,7 +363,7 @@ impl VfioCommon {
         allocator: &Arc<Mutex<SystemAllocator>>,
         mmio_allocator: &mut AddressAllocator,
         vfio_wrapper: &dyn Vfio,
-        _resources: Option<Vec<Resource>>,
+        resources: Option<Vec<Resource>>,
     ) -> Result<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>, PciDeviceError> {
         let mut ranges = Vec::new();
         let mut bar_id = VFIO_PCI_BAR0_REGION_INDEX as u32;
@@ -375,6 +375,19 @@ impl VfioCommon {
         while bar_id < VFIO_PCI_CONFIG_REGION_INDEX {
             let region_size: u64;
             let bar_addr: GuestAddress;
+
+            let restored_bar_addr = if let Some(resources) = &resources {
+                match resources
+                    .get(ranges.len())
+                    .ok_or(PciDeviceError::MissingResource)?
+                {
+                    Resource::MmioAddressRange { base, .. } => Some(GuestAddress(*base)),
+                    Resource::PioAddressRange { base, .. } => Some(GuestAddress(*base as u64)),
+                    _ => return Err(PciDeviceError::InvalidResourceType),
+                }
+            } else {
+                None
+            };
 
             let bar_offset = if bar_id == VFIO_PCI_ROM_REGION_INDEX {
                 (PCI_ROM_EXP_BAR_INDEX * 4) as u32
@@ -433,7 +446,7 @@ impl VfioCommon {
                     bar_addr = allocator
                         .lock()
                         .unwrap()
-                        .allocate_io_addresses(None, region_size, Some(0x4))
+                        .allocate_io_addresses(restored_bar_addr, region_size, Some(0x4))
                         .ok_or(PciDeviceError::IoAllocationFailed(region_size))?;
                 }
                 #[cfg(target_arch = "aarch64")]
@@ -463,7 +476,7 @@ impl VfioCommon {
 
                 // BAR allocation must be naturally aligned
                 bar_addr = mmio_allocator
-                    .allocate(None, region_size, Some(region_size))
+                    .allocate(restored_bar_addr, region_size, Some(region_size))
                     .ok_or(PciDeviceError::IoAllocationFailed(region_size))?;
             } else {
                 // Mask out flag bits (lowest 4 for memory bars)
@@ -481,7 +494,7 @@ impl VfioCommon {
                 bar_addr = allocator
                     .lock()
                     .unwrap()
-                    .allocate_mmio_hole_addresses(None, region_size, Some(region_size))
+                    .allocate_mmio_hole_addresses(restored_bar_addr, region_size, Some(region_size))
                     .ok_or(PciDeviceError::IoAllocationFailed(region_size))?;
             }
 
