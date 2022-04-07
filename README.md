@@ -291,6 +291,8 @@ As of 2022-04-05, the following cloud images are supported:
 Direct kernel boot to userspace should work with a rootfs from most
 distributions.
 
+Further details can be found in the [release documentation](docs/releases.md).
+
 ## Hot Plug
 
 Cloud Hypervisor supports hotplug of CPUs, passthrough devices (VFIO),
