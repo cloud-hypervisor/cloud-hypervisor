@@ -3079,8 +3079,20 @@ impl DeviceManager {
         &mut self,
         device_cfg: &mut DeviceConfig,
     ) -> DeviceManagerResult<(PciBdf, String)> {
-        let pci_segment_id = device_cfg.pci_segment;
-        let pci_device_bdf = self.pci_segments[pci_segment_id as usize].next_device_bdf()?;
+        let vfio_name = if let Some(id) = &device_cfg.id {
+            if self.device_tree.lock().unwrap().contains_key(id) {
+                return Err(DeviceManagerError::DeviceIdAlreadyInUse);
+            }
+
+            id.clone()
+        } else {
+            let id = self.next_device_name(VFIO_DEVICE_NAME_PREFIX)?;
+            device_cfg.id = Some(id.clone());
+            id
+        };
+
+        let (pci_segment_id, pci_device_bdf, resources) =
+            self.pci_resources(&vfio_name, device_cfg.pci_segment)?;
 
         let mut needs_dma_mapping = false;
 
@@ -3182,18 +3194,6 @@ impl DeviceManager {
         )
         .map_err(DeviceManagerError::VfioPciCreate)?;
 
-        let vfio_name = if let Some(id) = &device_cfg.id {
-            if self.device_tree.lock().unwrap().contains_key(id) {
-                return Err(DeviceManagerError::DeviceIdAlreadyInUse);
-            }
-
-            id.clone()
-        } else {
-            let id = self.next_device_name(VFIO_DEVICE_NAME_PREFIX)?;
-            device_cfg.id = Some(id.clone());
-            id
-        };
-
         let vfio_pci_device = Arc::new(Mutex::new(vfio_pci_device));
 
         self.add_pci_device(
@@ -3201,7 +3201,7 @@ impl DeviceManager {
             vfio_pci_device.clone(),
             pci_segment_id,
             pci_device_bdf,
-            None,
+            resources,
         )?;
 
         vfio_pci_device
@@ -3300,8 +3300,20 @@ impl DeviceManager {
         &mut self,
         device_cfg: &mut UserDeviceConfig,
     ) -> DeviceManagerResult<(PciBdf, String)> {
-        let pci_segment_id = device_cfg.pci_segment;
-        let pci_device_bdf = self.pci_segments[pci_segment_id as usize].next_device_bdf()?;
+        let vfio_user_name = if let Some(id) = &device_cfg.id {
+            if self.device_tree.lock().unwrap().contains_key(id) {
+                return Err(DeviceManagerError::DeviceIdAlreadyInUse);
+            }
+
+            id.clone()
+        } else {
+            let id = self.next_device_name(VFIO_USER_DEVICE_NAME_PREFIX)?;
+            device_cfg.id = Some(id.clone());
+            id
+        };
+
+        let (pci_segment_id, pci_device_bdf, resources) =
+            self.pci_resources(&vfio_user_name, device_cfg.pci_segment)?;
 
         let legacy_interrupt_group =
             if let Some(legacy_interrupt_manager) = &self.legacy_interrupt_manager {
@@ -3361,24 +3373,12 @@ impl DeviceManager {
 
         let vfio_user_pci_device = Arc::new(Mutex::new(vfio_user_pci_device));
 
-        let vfio_user_name = if let Some(id) = &device_cfg.id {
-            if self.device_tree.lock().unwrap().contains_key(id) {
-                return Err(DeviceManagerError::DeviceIdAlreadyInUse);
-            }
-
-            id.clone()
-        } else {
-            let id = self.next_device_name(VFIO_USER_DEVICE_NAME_PREFIX)?;
-            device_cfg.id = Some(id.clone());
-            id
-        };
-
         self.add_pci_device(
             vfio_user_pci_device.clone(),
             vfio_user_pci_device.clone(),
             pci_segment_id,
             pci_device_bdf,
-            None,
+            resources,
         )?;
 
         let mut node = device_node!(vfio_user_name);
