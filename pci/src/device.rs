@@ -110,6 +110,9 @@ pub trait PciDevice: BusDevice {
     /// Provides a mutable reference to the Any trait. This is useful to let
     /// the caller have access to the underlying type behind the trait.
     fn as_any(&mut self) -> &mut dyn Any;
+
+    /// Optionally returns a unique identifier.
+    fn id(&self) -> Option<String>;
 }
 
 /// This trait defines a set of functions which can be triggered whenever a

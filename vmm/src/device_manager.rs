@@ -660,22 +660,30 @@ impl DeviceRelocation for AddressManager {
             }
         }
 
-        let any_dev = pci_dev.as_any();
-        if let Some(virtio_pci_dev) = any_dev.downcast_ref::<VirtioPciDevice>() {
-            // Update the device_tree resources associated with the device
-            if let Some(node) = self
-                .device_tree
-                .lock()
-                .unwrap()
-                .get_mut(&virtio_pci_dev.id())
-            {
+        // Update the device_tree resources associated with the device
+        if let Some(id) = pci_dev.id() {
+            if let Some(node) = self.device_tree.lock().unwrap().get_mut(&id) {
                 let mut resource_updated = false;
                 for resource in node.resources.iter_mut() {
-                    if let Resource::MmioAddressRange { base, .. } = resource {
-                        if *base == old_base {
-                            *base = new_base;
-                            resource_updated = true;
-                            break;
+                    match region_type {
+                        PciBarRegionType::IoRegion => {
+                            if let Resource::PioAddressRange { base, .. } = resource {
+                                if *base as u64 == old_base {
+                                    *base = new_base as u16;
+                                    resource_updated = true;
+                                    break;
+                                }
+                            }
+                        }
+                        PciBarRegionType::Memory32BitRegion
+                        | PciBarRegionType::Memory64BitRegion => {
+                            if let Resource::MmioAddressRange { base, .. } = resource {
+                                if *base == old_base {
+                                    *base = new_base;
+                                    resource_updated = true;
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
@@ -685,21 +693,20 @@ impl DeviceRelocation for AddressManager {
                         io::ErrorKind::Other,
                         format!(
                             "Couldn't find a resource with base 0x{:x} for device {}",
-                            old_base,
-                            virtio_pci_dev.id()
+                            old_base, id
                         ),
                     ));
                 }
             } else {
                 return Err(io::Error::new(
                     io::ErrorKind::Other,
-                    format!(
-                        "Couldn't find device {} from device tree",
-                        virtio_pci_dev.id()
-                    ),
+                    format!("Couldn't find device {} from device tree", id),
                 ));
             }
+        }
 
+        let any_dev = pci_dev.as_any();
+        if let Some(virtio_pci_dev) = any_dev.downcast_ref::<VirtioPciDevice>() {
             let bar_addr = virtio_pci_dev.config_bar_addr();
             if bar_addr == new_base {
                 for (event, addr) in virtio_pci_dev.ioeventfds(old_base) {
@@ -3184,6 +3191,7 @@ impl DeviceManager {
             };
 
         let vfio_pci_device = VfioPciDevice::new(
+            vfio_name.clone(),
             &self.address_manager.vm,
             vfio_device,
             vfio_container,
@@ -3354,6 +3362,7 @@ impl DeviceManager {
         ));
 
         let mut vfio_user_pci_device = VfioUserPciDevice::new(
+            vfio_user_name.clone(),
             &self.address_manager.vm,
             client.clone(),
             &self.msi_interrupt_manager,

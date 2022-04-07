@@ -976,6 +976,7 @@ impl VfioCommon {
 /// The VMM creates a VfioDevice, then assigns it to a VfioPciDevice,
 /// which then gets added to the PCI bus.
 pub struct VfioPciDevice {
+    id: String,
     vm: Arc<dyn hypervisor::Vm>,
     device: Arc<VfioDevice>,
     container: Arc<VfioContainer>,
@@ -986,7 +987,9 @@ pub struct VfioPciDevice {
 
 impl VfioPciDevice {
     /// Constructs a new Vfio Pci device for the given Vfio device
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
+        id: String,
         vm: &Arc<dyn hypervisor::Vm>,
         device: VfioDevice,
         container: Arc<VfioContainer>,
@@ -1027,6 +1030,7 @@ impl VfioPciDevice {
         common.initialize_legacy_interrupt(legacy_interrupt_group, &vfio_wrapper)?;
 
         let vfio_pci_device = VfioPciDevice {
+            id,
             vm: vm.clone(),
             device,
             container,
@@ -1437,5 +1441,9 @@ impl PciDevice for VfioPciDevice {
 
     fn as_any(&mut self) -> &mut dyn Any {
         self
+    }
+
+    fn id(&self) -> Option<String> {
+        Some(self.id.clone())
     }
 }

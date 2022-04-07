@@ -88,6 +88,10 @@ impl PciDevice for PciRoot {
     fn as_any(&mut self) -> &mut dyn Any {
         self
     }
+
+    fn id(&self) -> Option<String> {
+        None
+    }
 }
 
 pub struct PciBus {
