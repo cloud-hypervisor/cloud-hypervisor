@@ -35,7 +35,7 @@ use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
 };
-use vm_device::BusDevice;
+use vm_device::{BusDevice, Resource};
 use vm_memory::{Address, ByteValued, GuestAddress, GuestMemoryAtomic, GuestUsize, Le32};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
@@ -318,7 +318,6 @@ pub struct VirtioPciDevice {
 
     // Settings PCI BAR
     settings_bar: u8,
-    settings_bar_addr: Option<GuestAddress>,
 
     // Whether to use 64-bit bar location or 32-bit
     use_64bit_bar: bool,
@@ -452,7 +451,6 @@ impl VirtioPciDevice {
             queue_evts,
             memory: Some(memory),
             settings_bar: 0,
-            settings_bar_addr: None,
             use_64bit_bar,
             interrupt_source_group,
             cap_pci_cfg_info: VirtioPciCfgCapInfo::default(),
@@ -540,12 +538,6 @@ impl VirtioPciDevice {
     /// Determines if the driver has requested the device (re)init / reset itself
     fn is_driver_init(&self) -> bool {
         self.common_config.driver_status == DEVICE_INIT as u8
-    }
-
-    // This function is used by the caller to provide the expected base address
-    // for the virtio-pci configuration BAR.
-    pub fn set_config_bar_addr(&mut self, bar_addr: u64) {
-        self.settings_bar_addr = Some(GuestAddress(bar_addr));
     }
 
     pub fn config_bar_addr(&self) -> u64 {
@@ -847,11 +839,23 @@ impl PciDevice for VirtioPciDevice {
         &mut self,
         allocator: &Arc<Mutex<SystemAllocator>>,
         mmio_allocator: &mut AddressAllocator,
+        resources: Option<Vec<Resource>>,
     ) -> std::result::Result<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>, PciDeviceError>
     {
         let mut ranges = Vec::new();
         let device_clone = self.device.clone();
         let device = device_clone.lock().unwrap();
+        let settings_bar_addr = if let Some(resources) = &resources {
+            if resources.is_empty() {
+                return Err(PciDeviceError::MissingResource);
+            }
+            match resources[0] {
+                Resource::MmioAddressRange { base, .. } => Some(GuestAddress(base)),
+                _ => return Err(PciDeviceError::InvalidResourceType),
+            }
+        } else {
+            None
+        };
 
         // Allocate the virtio-pci capability BAR.
         // See http://docs.oasis-open.org/virtio/virtio/v1.0/cs04/virtio-v1.0-cs04.html#x1-740004
@@ -859,7 +863,7 @@ impl PciDevice for VirtioPciDevice {
             let region_type = PciBarRegionType::Memory64BitRegion;
             let addr = mmio_allocator
                 .allocate(
-                    self.settings_bar_addr,
+                    settings_bar_addr,
                     CAPABILITY_BAR_SIZE,
                     Some(CAPABILITY_BAR_SIZE),
                 )
@@ -872,7 +876,7 @@ impl PciDevice for VirtioPciDevice {
                 .lock()
                 .unwrap()
                 .allocate_mmio_hole_addresses(
-                    self.settings_bar_addr,
+                    settings_bar_addr,
                     CAPABILITY_BAR_SIZE,
                     Some(CAPABILITY_BAR_SIZE),
                 )

@@ -399,9 +399,6 @@ pub enum DeviceManagerError {
     /// Resource was already found.
     ResourceAlreadyExists,
 
-    /// Expected resources for virtio-pci could not be found.
-    MissingVirtioPciResources,
-
     /// Expected resources for virtio-pmem could not be found.
     MissingVirtioPmemResources,
 
@@ -3204,6 +3201,7 @@ impl DeviceManager {
             vfio_pci_device.clone(),
             pci_segment_id,
             pci_device_bdf,
+            None,
         )?;
 
         vfio_pci_device
@@ -3240,6 +3238,7 @@ impl DeviceManager {
         pci_device: Arc<Mutex<dyn PciDevice>>,
         segment_id: u16,
         bdf: PciBdf,
+        resources: Option<Vec<Resource>>,
     ) -> DeviceManagerResult<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>> {
         let bars = pci_device
             .lock()
@@ -3250,6 +3249,7 @@ impl DeviceManager {
                     .allocator
                     .lock()
                     .unwrap(),
+                resources,
             )
             .map_err(DeviceManagerError::AllocateBars)?;
 
@@ -3378,6 +3378,7 @@ impl DeviceManager {
             vfio_user_pci_device.clone(),
             pci_segment_id,
             pci_device_bdf,
+            None,
         )?;
 
         let mut node = device_node!(vfio_user_name);
@@ -3424,7 +3425,7 @@ impl DeviceManager {
 
         // Look for the id in the device tree. If it can be found, that means
         // the device is being restored, otherwise it's created from scratch.
-        let (pci_segment_id, pci_device_bdf, config_bar_addr) = if let Some(node) =
+        let (pci_segment_id, pci_device_bdf, resources) = if let Some(node) =
             self.device_tree.lock().unwrap().get(&id)
         {
             info!("Restoring virtio-pci {} resources", id);
@@ -3440,21 +3441,7 @@ impl DeviceManager {
                 .get_device_id(pci_device_bdf.device() as usize)
                 .map_err(DeviceManagerError::GetPciDeviceId)?;
 
-            if node.resources.is_empty() {
-                return Err(DeviceManagerError::MissingVirtioPciResources);
-            }
-
-            // We know the configuration BAR address is stored on the first
-            // resource in the list.
-            let config_bar_addr = match node.resources[0] {
-                Resource::MmioAddressRange { base, .. } => Some(base),
-                _ => {
-                    error!("Unexpected resource {:?} for {}", node.resources[0], id);
-                    return Err(DeviceManagerError::MissingVirtioPciResources);
-                }
-            };
-
-            (pci_segment_id, pci_device_bdf, config_bar_addr)
+            (pci_segment_id, pci_device_bdf, Some(node.resources.clone()))
         } else {
             let pci_device_bdf = self.pci_segments[pci_segment_id as usize].next_device_bdf()?;
 
@@ -3529,38 +3516,34 @@ impl DeviceManager {
         }
 
         let device_type = virtio_device.lock().unwrap().device_type();
-        let mut virtio_pci_device = VirtioPciDevice::new(
-            id.clone(),
-            memory,
-            virtio_device,
-            msix_num,
-            access_platform,
-            &self.msi_interrupt_manager,
-            pci_device_bdf.into(),
-            self.activate_evt
-                .try_clone()
-                .map_err(DeviceManagerError::EventFd)?,
-            // All device types *except* virtio block devices should be allocated a 64-bit bar
-            // The block devices should be given a 32-bit BAR so that they are easily accessible
-            // to firmware without requiring excessive identity mapping.
-            // The exception being if not on the default PCI segment.
-            pci_segment_id > 0 || device_type != VirtioDeviceType::Block as u32,
-            dma_handler,
-        )
-        .map_err(DeviceManagerError::VirtioDevice)?;
+        let virtio_pci_device = Arc::new(Mutex::new(
+            VirtioPciDevice::new(
+                id.clone(),
+                memory,
+                virtio_device,
+                msix_num,
+                access_platform,
+                &self.msi_interrupt_manager,
+                pci_device_bdf.into(),
+                self.activate_evt
+                    .try_clone()
+                    .map_err(DeviceManagerError::EventFd)?,
+                // All device types *except* virtio block devices should be allocated a 64-bit bar
+                // The block devices should be given a 32-bit BAR so that they are easily accessible
+                // to firmware without requiring excessive identity mapping.
+                // The exception being if not on the default PCI segment.
+                pci_segment_id > 0 || device_type != VirtioDeviceType::Block as u32,
+                dma_handler,
+            )
+            .map_err(DeviceManagerError::VirtioDevice)?,
+        ));
 
-        // This is important as this will set the BAR address if it exists,
-        // which is mandatory on the restore path.
-        if let Some(addr) = config_bar_addr {
-            virtio_pci_device.set_config_bar_addr(addr);
-        }
-
-        let virtio_pci_device = Arc::new(Mutex::new(virtio_pci_device));
         let bars = self.add_pci_device(
             virtio_pci_device.clone(),
             virtio_pci_device.clone(),
             pci_segment_id,
             pci_device_bdf,
+            resources,
         )?;
 
         let bar_addr = virtio_pci_device.lock().unwrap().config_bar_addr();
@@ -3573,12 +3556,14 @@ impl DeviceManager {
         }
 
         // Update the device tree with correct resource information.
+        let mut new_resources = Vec::new();
         for pci_bar in bars.iter() {
-            node.resources.push(Resource::MmioAddressRange {
+            new_resources.push(Resource::MmioAddressRange {
                 base: pci_bar.0.raw_value(),
                 size: pci_bar.1 as u64,
             });
         }
+        node.resources = new_resources;
         node.migratable = Some(Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn Migratable>>);
         node.pci_bdf = Some(pci_device_bdf);
         node.pci_device_handle = Some(PciDeviceHandle::Virtio(virtio_pci_device));

@@ -23,7 +23,7 @@ use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
 };
-use vm_device::BusDevice;
+use vm_device::{BusDevice, Resource};
 use vm_memory::{Address, GuestAddress, GuestUsize};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -363,6 +363,7 @@ impl VfioCommon {
         allocator: &Arc<Mutex<SystemAllocator>>,
         mmio_allocator: &mut AddressAllocator,
         vfio_wrapper: &dyn Vfio,
+        _resources: Option<Vec<Resource>>,
     ) -> Result<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>, PciDeviceError> {
         let mut ranges = Vec::new();
         let mut bar_id = VFIO_PCI_BAR0_REGION_INDEX as u32;
@@ -1326,9 +1327,10 @@ impl PciDevice for VfioPciDevice {
         &mut self,
         allocator: &Arc<Mutex<SystemAllocator>>,
         mmio_allocator: &mut AddressAllocator,
+        resources: Option<Vec<Resource>>,
     ) -> Result<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>, PciDeviceError> {
         self.common
-            .allocate_bars(allocator, mmio_allocator, &self.vfio_wrapper)
+            .allocate_bars(allocator, mmio_allocator, &self.vfio_wrapper, resources)
     }
 
     fn free_bars(

@@ -8,7 +8,7 @@ use std::fmt::{self, Display};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{self, io, result};
 use vm_allocator::{AddressAllocator, SystemAllocator};
-use vm_device::BusDevice;
+use vm_device::{BusDevice, Resource};
 use vm_memory::{GuestAddress, GuestUsize};
 
 #[derive(Debug)]
@@ -19,6 +19,10 @@ pub enum Error {
     IoAllocationFailed(u64),
     /// Registering an IO BAR failed.
     IoRegistrationFailed(u64, configuration::Error),
+    /// Not enough resources
+    MissingResource,
+    /// Invalid type of resource
+    InvalidResourceType,
 }
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -34,6 +38,8 @@ impl Display for Error {
             IoRegistrationFailed(addr, e) => {
                 write!(f, "failed to register an IO BAR, addr={} err={}", addr, e)
             }
+            MissingResource => write!(f, "Missing resource"),
+            InvalidResourceType => write!(f, "Invalid type of resource"),
         }
     }
 }
@@ -53,6 +59,7 @@ pub trait PciDevice: BusDevice {
         &mut self,
         _allocator: &Arc<Mutex<SystemAllocator>>,
         _mmio_allocator: &mut AddressAllocator,
+        _resources: Option<Vec<Resource>>,
     ) -> Result<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>> {
         Ok(Vec::new())
     }
