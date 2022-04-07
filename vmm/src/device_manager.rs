@@ -3196,7 +3196,7 @@ impl DeviceManager {
 
         let vfio_pci_device = Arc::new(Mutex::new(vfio_pci_device));
 
-        self.add_pci_device(
+        let new_resources = self.add_pci_device(
             vfio_pci_device.clone(),
             vfio_pci_device.clone(),
             pci_segment_id,
@@ -3221,6 +3221,8 @@ impl DeviceManager {
             });
         }
 
+        // Update the device tree with correct resource information.
+        node.resources = new_resources;
         node.pci_bdf = Some(pci_device_bdf);
         node.pci_device_handle = Some(PciDeviceHandle::Vfio(vfio_pci_device));
 
@@ -3239,7 +3241,7 @@ impl DeviceManager {
         segment_id: u16,
         bdf: PciBdf,
         resources: Option<Vec<Resource>>,
-    ) -> DeviceManagerResult<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>> {
+    ) -> DeviceManagerResult<Vec<Resource>> {
         let bars = pci_device
             .lock()
             .unwrap()
@@ -3274,7 +3276,23 @@ impl DeviceManager {
             )
             .map_err(DeviceManagerError::AddPciDevice)?;
 
-        Ok(bars)
+        let mut new_resources = Vec::new();
+        for pci_bar in bars.iter() {
+            match pci_bar.2 {
+                PciBarRegionType::IoRegion => new_resources.push(Resource::PioAddressRange {
+                    base: pci_bar.0.raw_value() as u16,
+                    size: pci_bar.1 as u16,
+                }),
+                PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
+                    new_resources.push(Resource::MmioAddressRange {
+                        base: pci_bar.0.raw_value(),
+                        size: pci_bar.1 as u64,
+                    })
+                }
+            }
+        }
+
+        Ok(new_resources)
     }
 
     fn add_vfio_devices(&mut self) -> DeviceManagerResult<Vec<PciBdf>> {
@@ -3373,7 +3391,7 @@ impl DeviceManager {
 
         let vfio_user_pci_device = Arc::new(Mutex::new(vfio_user_pci_device));
 
-        self.add_pci_device(
+        let new_resources = self.add_pci_device(
             vfio_user_pci_device.clone(),
             vfio_user_pci_device.clone(),
             pci_segment_id,
@@ -3383,6 +3401,8 @@ impl DeviceManager {
 
         let mut node = device_node!(vfio_user_name);
 
+        // Update the device tree with correct resource information.
+        node.resources = new_resources;
         node.pci_bdf = Some(pci_device_bdf);
         node.pci_device_handle = Some(PciDeviceHandle::VfioUser(vfio_user_pci_device));
 
@@ -3516,7 +3536,7 @@ impl DeviceManager {
             .map_err(DeviceManagerError::VirtioDevice)?,
         ));
 
-        let bars = self.add_pci_device(
+        let new_resources = self.add_pci_device(
             virtio_pci_device.clone(),
             virtio_pci_device.clone(),
             pci_segment_id,
@@ -3534,13 +3554,6 @@ impl DeviceManager {
         }
 
         // Update the device tree with correct resource information.
-        let mut new_resources = Vec::new();
-        for pci_bar in bars.iter() {
-            new_resources.push(Resource::MmioAddressRange {
-                base: pci_bar.0.raw_value(),
-                size: pci_bar.1 as u64,
-            });
-        }
         node.resources = new_resources;
         node.migratable = Some(Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn Migratable>>);
         node.pci_bdf = Some(pci_device_bdf);
