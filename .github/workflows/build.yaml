@@ -13,7 +13,7 @@ jobs:
           - stable
           - beta
           - nightly
-          - 1.54
+          - 1.56
         target:
           - x86_64-unknown-linux-gnu
           - x86_64-unknown-linux-musl

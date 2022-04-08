@@ -2,7 +2,7 @@
 name = "pci"
 version = "0.1.0"
 authors = ["Samuel Ortiz <sameo@linux.intel.com>"]
-edition = "2018"
+edition = "2021"
 
 [features]
 default = []
