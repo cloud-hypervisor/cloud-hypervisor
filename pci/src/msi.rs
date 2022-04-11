@@ -201,19 +201,12 @@ impl MsiConfig {
                     devid: 0,
                 };
 
-                if let Err(e) = self
-                    .interrupt_source_group
-                    .update(idx as InterruptIndex, InterruptSourceConfig::MsiIrq(config))
-                {
+                if let Err(e) = self.interrupt_source_group.update(
+                    idx as InterruptIndex,
+                    InterruptSourceConfig::MsiIrq(config),
+                    self.cap.vector_masked(idx),
+                ) {
                     error!("Failed updating vector: {:?}", e);
-                }
-
-                if self.cap.vector_masked(idx) {
-                    if let Err(e) = self.interrupt_source_group.mask(idx as InterruptIndex) {
-                        error!("Failed masking vector: {:?}", e);
-                    }
-                } else if let Err(e) = self.interrupt_source_group.unmask(idx as InterruptIndex) {
-                    error!("Failed unmasking vector: {:?}", e);
                 }
             }
 

@@ -76,6 +76,7 @@ impl InterruptController for Gic {
                 .update(
                     i as InterruptIndex,
                     InterruptSourceConfig::LegacyIrq(config),
+                    false,
                 )
                 .map_err(Error::EnableInterrupt)?;
         }
