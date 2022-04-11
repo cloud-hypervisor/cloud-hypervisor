@@ -16,12 +16,12 @@ jobs:
       - name: Install Rust toolchain (x86_64-unknown-linux-gnu)
         uses: actions-rs/toolchain@v1
         with:
-            toolchain: stable
+            toolchain: 1.58
             target: x86_64-unknown-linux-gnu
       - name: Install Rust toolchain (x86_64-unknown-linux-musl)
         uses: actions-rs/toolchain@v1
         with:
-            toolchain: stable
+            toolchain: 1.58
             target: x86_64-unknown-linux-musl
       - name: Build
         run: cargo build --all --release --target=x86_64-unknown-linux-gnu
@@ -32,7 +32,7 @@ jobs:
       - name: Install Rust toolchain (aarch64-unknown-linux-musl)
         uses: actions-rs/toolchain@v1
         with:
-            toolchain: stable
+            toolchain: 1.58
             target: aarch64-unknown-linux-musl
             override: true
       - name: Static Build (AArch64)
