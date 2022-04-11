@@ -132,7 +132,11 @@ impl MsixConfig {
                 };
 
                 self.interrupt_source_group
-                    .update(idx as InterruptIndex, InterruptSourceConfig::MsiIrq(config))
+                    .update(
+                        idx as InterruptIndex,
+                        InterruptSourceConfig::MsiIrq(config),
+                        self.masked,
+                    )
                     .map_err(Error::UpdateInterruptRoute)?;
 
                 self.interrupt_source_group
@@ -171,20 +175,12 @@ impl MsixConfig {
                         devid: self.devid,
                     };
 
-                    if let Err(e) = self
-                        .interrupt_source_group
-                        .update(idx as InterruptIndex, InterruptSourceConfig::MsiIrq(config))
-                    {
+                    if let Err(e) = self.interrupt_source_group.update(
+                        idx as InterruptIndex,
+                        InterruptSourceConfig::MsiIrq(config),
+                        table_entry.masked(),
+                    ) {
                         error!("Failed updating vector: {:?}", e);
-                    }
-
-                    if table_entry.masked() {
-                        if let Err(e) = self.interrupt_source_group.mask(idx as InterruptIndex) {
-                            error!("Failed masking vector: {:?}", e);
-                        }
-                    } else if let Err(e) = self.interrupt_source_group.unmask(idx as InterruptIndex)
-                    {
-                        error!("Failed unmasking vector: {:?}", e);
                     }
                 }
             } else if old_enabled || !old_masked {
@@ -314,16 +310,9 @@ impl MsixConfig {
             if let Err(e) = self.interrupt_source_group.update(
                 index as InterruptIndex,
                 InterruptSourceConfig::MsiIrq(config),
+                table_entry.masked(),
             ) {
                 error!("Failed updating vector: {:?}", e);
-            }
-
-            if table_entry.masked() {
-                if let Err(e) = self.interrupt_source_group.mask(index as InterruptIndex) {
-                    error!("Failed masking vector: {:?}", e);
-                }
-            } else if let Err(e) = self.interrupt_source_group.unmask(index as InterruptIndex) {
-                error!("Failed unmasking vector: {:?}", e);
             }
         }
 

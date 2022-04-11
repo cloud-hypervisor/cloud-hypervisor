@@ -165,9 +165,20 @@ impl InterruptSourceGroup for MsiInterruptGroup<IrqRoutingEntry> {
         None
     }
 
-    fn update(&self, index: InterruptIndex, config: InterruptSourceConfig) -> Result<()> {
+    fn update(
+        &self,
+        index: InterruptIndex,
+        config: InterruptSourceConfig,
+        masked: bool,
+    ) -> Result<()> {
         if let Some(route) = self.irq_routes.get(&index) {
-            let entry = RoutingEntry::<_>::make_entry(&self.vm, route.gsi, &config)?;
+            let mut entry = RoutingEntry::<_>::make_entry(&self.vm, route.gsi, &config)?;
+            entry.masked = masked;
+            if masked {
+                route.disable(&self.vm)?;
+            } else {
+                route.enable(&self.vm)?;
+            }
             let mut routes = self.gsi_msi_routes.lock().unwrap();
             routes.insert(route.gsi, *entry);
             return self.set_gsi_routes(&routes);
@@ -176,48 +187,6 @@ impl InterruptSourceGroup for MsiInterruptGroup<IrqRoutingEntry> {
         Err(io::Error::new(
             io::ErrorKind::Other,
             format!("update: Invalid interrupt index {}", index),
-        ))
-    }
-
-    fn mask(&self, index: InterruptIndex) -> Result<()> {
-        if let Some(route) = self.irq_routes.get(&index) {
-            let mut routes = self.gsi_msi_routes.lock().unwrap();
-            if let Some(entry) = routes.get_mut(&route.gsi) {
-                entry.masked = true;
-            } else {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("mask: No existing route for interrupt index {}", index),
-                ));
-            }
-            route.disable(&self.vm)?;
-            return self.set_gsi_routes(&routes);
-        }
-
-        Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!("mask: Invalid interrupt index {}", index),
-        ))
-    }
-
-    fn unmask(&self, index: InterruptIndex) -> Result<()> {
-        if let Some(route) = self.irq_routes.get(&index) {
-            let mut routes = self.gsi_msi_routes.lock().unwrap();
-            if let Some(entry) = routes.get_mut(&route.gsi) {
-                entry.masked = false;
-            } else {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("mask: No existing route for interrupt index {}", index),
-                ));
-            }
-            route.enable(&self.vm)?;
-            return self.set_gsi_routes(&routes);
-        }
-
-        Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!("unmask: Invalid interrupt index {}", index),
         ))
     }
 }
@@ -247,7 +216,12 @@ impl InterruptSourceGroup for LegacyUserspaceInterruptGroup {
             })
     }
 
-    fn update(&self, _index: InterruptIndex, _config: InterruptSourceConfig) -> Result<()> {
+    fn update(
+        &self,
+        _index: InterruptIndex,
+        _config: InterruptSourceConfig,
+        _masked: bool,
+    ) -> Result<()> {
         Ok(())
     }
 

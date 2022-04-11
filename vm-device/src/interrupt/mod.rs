@@ -178,19 +178,11 @@ pub trait InterruptSourceGroup: Send + Sync {
     /// # Arguments
     /// * index: sub-index into the group.
     /// * config: configuration data for the interrupt source.
-    fn update(&self, index: InterruptIndex, config: InterruptSourceConfig) -> Result<()>;
-
-    /// Mask an interrupt from this interrupt source.
-    fn mask(&self, _index: InterruptIndex) -> Result<()> {
-        // Not all interrupt sources can be disabled.
-        // To accommodate this, we can have a no-op here.
-        Ok(())
-    }
-
-    /// Unmask an interrupt from this interrupt source.
-    fn unmask(&self, _index: InterruptIndex) -> Result<()> {
-        // Not all interrupt sources can be disabled.
-        // To accommodate this, we can have a no-op here.
-        Ok(())
-    }
+    /// * masked: if the interrupt is masked
+    fn update(
+        &self,
+        index: InterruptIndex,
+        config: InterruptSourceConfig,
+        masked: bool,
+    ) -> Result<()>;
 }
