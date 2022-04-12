@@ -3632,7 +3632,7 @@ impl DeviceManager {
         {
             let device_type = virtio_device.lock().unwrap().device_type();
             self.id_to_dev_info.insert(
-                (DeviceType::Virtio(device_type), virtio_device_id),
+                (DeviceType::VirtioMmio(device_type), virtio_device_id),
                 MmioDeviceInfo {
                     addr: mmio_base,
                     len: mmio_size,

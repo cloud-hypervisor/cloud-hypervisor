@@ -129,25 +129,24 @@ pub struct InitramfsConfig {
     pub size: usize,
 }
 
-/// Types of devices that can get attached to this platform.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Copy)]
-pub enum DeviceType {
-    /// Device Type: Virtio.
-    Virtio(u32),
-    /// Device Type: Serial.
-    #[cfg(target_arch = "aarch64")]
-    Serial,
-    /// Device Type: RTC.
-    #[cfg(target_arch = "aarch64")]
-    Rtc,
-    /// Device Type: GPIO.
-    #[cfg(target_arch = "aarch64")]
-    Gpio,
-}
-
 /// Default (smallest) memory page size for the supported architectures.
 pub const PAGE_SIZE: usize = 4096;
 
+/// Types of devices that can get attached to this platform.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Copy)]
+#[cfg(target_arch = "aarch64")]
+pub enum DeviceType {
+    /// Device Type: VirtioMmio.
+    VirtioMmio(u32),
+    /// Device Type: Serial.
+    Serial,
+    /// Device Type: RTC.
+    Rtc,
+    /// Device Type: GPIO.
+    Gpio,
+}
+
+#[cfg(target_arch = "aarch64")]
 impl fmt::Display for DeviceType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:?}", self)
