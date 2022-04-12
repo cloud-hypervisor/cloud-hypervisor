@@ -1190,12 +1190,12 @@ pub struct GuestCommand<'a> {
 
 impl<'a> GuestCommand<'a> {
     pub fn new(guest: &'a Guest) -> Self {
-        Self::new_with_binary_name(guest, "cloud-hypervisor")
+        Self::new_with_binary_path(guest, &clh_command("cloud-hypervisor"))
     }
 
-    pub fn new_with_binary_name(guest: &'a Guest, binary_name: &str) -> Self {
+    pub fn new_with_binary_path(guest: &'a Guest, binary_path: &str) -> Self {
         Self {
-            command: Command::new(clh_command(binary_name)),
+            command: Command::new(binary_path),
             guest,
             capture_output: false,
             print_cmd: true,
