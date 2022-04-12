@@ -2681,14 +2681,7 @@ impl DeviceManager {
             .memory_manager
             .lock()
             .unwrap()
-            .create_userspace_mapping(
-                region_base,
-                region_size,
-                host_addr,
-                pmem_cfg.mergeable,
-                false,
-                false,
-            )
+            .create_userspace_mapping(region_base, region_size, host_addr, false, false, false)
             .map_err(DeviceManagerError::MemoryManager)?;
 
         let mapping = virtio_devices::UserspaceMapping {
@@ -2696,7 +2689,7 @@ impl DeviceManager {
             mem_slot,
             addr: GuestAddress(region_base),
             len: region_size,
-            mergeable: pmem_cfg.mergeable,
+            mergeable: false,
         };
 
         let virtio_pmem_device = Arc::new(Mutex::new(

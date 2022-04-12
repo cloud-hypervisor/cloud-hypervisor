@@ -1702,7 +1702,7 @@ pub struct PmemConfig {
 impl PmemConfig {
     pub const SYNTAX: &'static str = "Persistent memory parameters \
     \"file=<backing_file_path>,size=<persistent_memory_size>,iommu=on|off,\
-    mergeable=on|off,discard_writes=on|off,id=<device_id>,pci_segment=<segment_id>\"";
+    discard_writes=on|off,id=<device_id>,pci_segment=<segment_id>\"";
     pub fn parse(pmem: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
@@ -1753,6 +1753,10 @@ impl PmemConfig {
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        if self.mergeable {
+            warn!("Enabling mergable pages for PMEM devices is ineffectual. This option is deprecated and will be removed in a later release");
+        }
+
         if let Some(platform_config) = vm_config.platform.as_ref() {
             if self.pci_segment >= platform_config.num_pci_segments {
                 return Err(ValidationError::InvalidPciSegment(self.pci_segment));
