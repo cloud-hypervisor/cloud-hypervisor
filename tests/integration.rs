@@ -8,6 +8,7 @@
 // related warnings for our quality workflow to pass.
 #![allow(dead_code)]
 
+#[cfg(target_arch = "x86_64")]
 #[macro_use]
 extern crate lazy_static;
 
@@ -417,7 +418,7 @@ enum FwType {
     RustHypervisorFirmware,
 }
 
-fn fw_path(fw_type: FwType) -> String {
+fn fw_path(_fw_type: FwType) -> String {
     let mut workload_path = dirs::home_dir().unwrap();
     workload_path.push("workloads");
 
@@ -426,7 +427,7 @@ fn fw_path(fw_type: FwType) -> String {
     fw_path.push("CLOUDHV_EFI.fd");
     #[cfg(target_arch = "x86_64")]
     {
-        match fw_type {
+        match _fw_type {
             FwType::Ovmf => fw_path.push(OVMF_NAME),
             FwType::RustHypervisorFirmware => fw_path.push("hypervisor-fw"),
         }
@@ -7501,14 +7502,15 @@ mod live_migration {
         let r = std::panic::catch_unwind(|| {
             // Perform same checks to validate VM has been properly migrated
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 6);
+            #[cfg(target_arch = "x86_64")]
             if numa {
-                #[cfg(target_arch = "x86_64")]
                 assert!(guest.get_total_memory().unwrap_or_default() > 6_720_000);
-                #[cfg(target_arch = "aarch64")]
-                assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
             } else {
                 assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
             }
+            #[cfg(target_arch = "aarch64")]
+            assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+
             guest.check_devices_common(None, Some(&console_text));
 
             // Perform NUMA related checks
