@@ -7273,8 +7273,9 @@ mod live_migration {
             net_id, guest.network.guest_mac, guest.network.host_ip
         );
 
-        let memory_param: &[&str] = if numa {
-            &[
+        let memory_param: &[&str] = match (local, numa) {
+            (false, false) => &["--memory", "size=4G"],
+            (false, true) => &[
                 "--memory",
                 "size=0,hotplug_method=virtio-mem",
                 "--memory-zone",
@@ -7285,11 +7286,20 @@ mod live_migration {
                 "guest_numa_id=0,cpus=[0-2,9],distances=[1@15,2@20],memory_zones=mem0",
                 "guest_numa_id=1,cpus=[3-4,6-8],distances=[0@20,2@25],memory_zones=mem1",
                 "guest_numa_id=2,cpus=[5,10-11],distances=[0@25,1@30],memory_zones=mem2",
-            ]
-        } else if local {
-            &["--memory", "size=4G,shared=on"]
-        } else {
-            &["--memory", "size=4G"]
+            ],
+            (true, false) => &["--memory", "size=4G,shared=on"],
+            (true, true) => &[
+                "--memory",
+                "size=0,hotplug_method=virtio-mem,shared=on",
+                "--memory-zone",
+                "id=mem0,size=1G,hotplug_size=32G,shared=on",
+                "id=mem1,size=1G,hotplug_size=32G,shared=on",
+                "id=mem2,size=2G,hotplug_size=32G,shared=on",
+                "--numa",
+                "guest_numa_id=0,cpus=[0-2,9],distances=[1@15,2@20],memory_zones=mem0",
+                "guest_numa_id=1,cpus=[3-4,6-8],distances=[0@20,2@25],memory_zones=mem1",
+                "guest_numa_id=2,cpus=[5,10-11],distances=[0@25,1@30],memory_zones=mem2",
+            ],
         };
 
         // Start the source VM
@@ -7581,6 +7591,12 @@ mod live_migration {
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_numa() {
         _test_live_migration(true, false)
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_live_migration_numa_local() {
+        _test_live_migration(true, true)
     }
 
     fn _test_live_migration_ovs_dpdk(local: bool) {
