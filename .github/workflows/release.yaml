@@ -24,9 +24,17 @@ jobs:
             toolchain: 1.58
             target: x86_64-unknown-linux-musl
       - name: Build
-        run: cargo build --all --release --target=x86_64-unknown-linux-gnu
+        uses: actions-rs/cargo@v1
+        with:
+            toolchain: 1.58
+            command: build
+            args: --all --release --target=x86_64-unknown-linux-gnu
       - name: Static Build
-        run: cargo build --all --release --target=x86_64-unknown-linux-musl
+        uses: actions-rs/cargo@v1
+        with:
+            toolchain: 1.58
+            command: build
+            args: --all --release --target=x86_64-unknown-linux-musl
       - name: Strip cloud-hypervisor binaries
         run: strip target/*/release/cloud-hypervisor
       - name: Install Rust toolchain (aarch64-unknown-linux-musl)
