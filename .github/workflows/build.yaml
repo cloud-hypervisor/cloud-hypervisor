@@ -35,7 +35,7 @@ jobs:
 
       - name: Debug Check (default features)
         run: |
-          git rev-list origin/main..$GITHUB_SHA | xargs -t -I % sh -c 'git checkout %; cargo check --all --target=${{ matrix.target }}'
+          git rev-list origin/main..$GITHUB_SHA | xargs -t -I % sh -c 'git checkout %; cargo check --tests --all --target=${{ matrix.target }}'
           git checkout $GITHUB_SHA
 
       - name: Build (default features)
