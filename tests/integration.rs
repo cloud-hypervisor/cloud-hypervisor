@@ -184,6 +184,19 @@ fn edk2_path() -> PathBuf {
     edk2_path
 }
 
+fn cloud_hypervisor_release_path() -> String {
+    let mut workload_path = dirs::home_dir().unwrap();
+    workload_path.push("workloads");
+
+    let mut ch_release_path = workload_path;
+    #[cfg(target_arch = "x86_64")]
+    ch_release_path.push("cloud-hypervisor-static");
+    #[cfg(target_arch = "aarch64")]
+    ch_release_path.push("cloud-hypervisor-static-aarch64");
+
+    ch_release_path.into_os_string().into_string().unwrap()
+}
+
 fn prepare_vhost_user_net_daemon(
     tmp_dir: &TempDir,
     ip: &str,
@@ -318,10 +331,21 @@ fn cleanup_ovs_dpdk() {
     exec_host_command_status("rm -f ovs-vsctl /tmp/dpdkvhostclient1 /tmp/dpdkvhostclient2");
 }
 // Setup two guests and ensure they are connected through ovs-dpdk
-fn setup_ovs_dpdk_guests(guest1: &Guest, guest2: &Guest, api_socket: &str) -> (Child, Child) {
+fn setup_ovs_dpdk_guests(
+    guest1: &Guest,
+    guest2: &Guest,
+    api_socket: &str,
+    release_binary: bool,
+) -> (Child, Child) {
     setup_ovs_dpdk();
 
-    let mut child1 = GuestCommand::new(guest1)
+    let clh_path = if !release_binary {
+        clh_command("cloud-hypervisor")
+    } else {
+        cloud_hypervisor_release_path()
+    };
+
+    let mut child1 = GuestCommand::new_with_binary_path(guest1, &clh_path)
                     .args(&["--cpus", "boot=2"])
                     .args(&["--memory", "size=0,shared=on"])
                     .args(&["--memory-zone", "id=mem0,size=1G,shared=on,host_numa_node=0"])
@@ -371,7 +395,7 @@ fn setup_ovs_dpdk_guests(guest1: &Guest, guest2: &Guest, api_socket: &str) -> (C
         panic!("Test should already be failed/panicked"); // To explicitly mark this block never return
     }
 
-    let mut child2 = GuestCommand::new(guest2)
+    let mut child2 = GuestCommand::new_with_binary_path(guest2, &clh_path)
                     .args(&["--api-socket", api_socket])
                     .args(&["--cpus", "boot=2"])
                     .args(&["--memory", "size=0,shared=on"])
@@ -5600,7 +5624,7 @@ mod parallel {
         let guest2 = Guest::new(Box::new(focal2));
         let api_socket = temp_api_path(&guest2.tmp_dir);
 
-        let (mut child1, mut child2) = setup_ovs_dpdk_guests(&guest1, &guest2, &api_socket);
+        let (mut child1, mut child2) = setup_ovs_dpdk_guests(&guest1, &guest2, &api_socket, false);
 
         // Create the snapshot directory
         let snapshot_dir = temp_snapshot_dir_path(&guest2.tmp_dir);
@@ -7262,7 +7286,7 @@ mod live_migration {
     // 4. The destination VM is functional (including various virtio-devices are working properly) after
     //    live migration;
     // Note: This test does not use vsock as we can't create two identical vsock on the same host.
-    fn _test_live_migration(numa: bool, local: bool) {
+    fn _test_live_migration(upgrade_test: bool, numa: bool, local: bool) {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
         let kernel_path = direct_kernel_boot_path();
@@ -7303,8 +7327,13 @@ mod live_migration {
         };
 
         // Start the source VM
+        let src_vm_path = if !upgrade_test {
+            clh_command("cloud-hypervisor")
+        } else {
+            cloud_hypervisor_release_path()
+        };
         let src_api_socket = temp_api_path(&guest.tmp_dir);
-        let mut src_child = GuestCommand::new(&guest)
+        let mut src_child = GuestCommand::new_with_binary_path(&guest, &src_vm_path)
             .args(&["--cpus", "boot=6,max=12"])
             .args(memory_param)
             .args(&["--kernel", kernel_path.to_str().unwrap()])
@@ -7579,27 +7608,49 @@ mod live_migration {
 
     #[test]
     fn test_live_migration_basic() {
-        _test_live_migration(false, false)
+        _test_live_migration(false, false, false)
     }
 
     #[test]
     fn test_live_migration_local() {
-        _test_live_migration(false, true)
+        _test_live_migration(false, false, true)
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_numa() {
-        _test_live_migration(true, false)
+        _test_live_migration(false, true, false)
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_numa_local() {
-        _test_live_migration(true, true)
+        _test_live_migration(false, true, true)
     }
 
-    fn _test_live_migration_ovs_dpdk(local: bool) {
+    #[test]
+    fn test_live_upgrade_basic() {
+        _test_live_migration(true, false, false)
+    }
+
+    #[test]
+    fn test_live_upgrade_local() {
+        _test_live_migration(true, false, true)
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_live_upgrade_numa() {
+        _test_live_migration(true, true, false)
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_live_upgrade_numa_local() {
+        _test_live_migration(true, true, true)
+    }
+
+    fn _test_live_migration_ovs_dpdk(upgrade_test: bool, local: bool) {
         let ovs_focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let ovs_guest = Guest::new(Box::new(ovs_focal));
 
@@ -7609,7 +7660,7 @@ mod live_migration {
 
         // Start two VMs that are connected through ovs-dpdk and one of the VMs is the source VM for live-migration
         let (mut ovs_child, mut src_child) =
-            setup_ovs_dpdk_guests(&ovs_guest, &migration_guest, &src_api_socket);
+            setup_ovs_dpdk_guests(&ovs_guest, &migration_guest, &src_api_socket, upgrade_test);
 
         // Start the destination VM
         let mut dest_api_socket = temp_api_path(&migration_guest.tmp_dir);
@@ -7804,13 +7855,25 @@ mod live_migration {
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_ovs_dpdk() {
-        _test_live_migration_ovs_dpdk(false);
+        _test_live_migration_ovs_dpdk(false, false);
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_ovs_dpdk_local() {
-        _test_live_migration_ovs_dpdk(true);
+        _test_live_migration_ovs_dpdk(false, true);
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_live_upgrade_ovs_dpdk() {
+        _test_live_migration_ovs_dpdk(true, false);
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_live_upgrade_ovs_dpdk_local() {
+        _test_live_migration_ovs_dpdk(true, true);
     }
 }
 
