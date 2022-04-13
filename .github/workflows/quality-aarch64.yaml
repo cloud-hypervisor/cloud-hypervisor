@@ -37,11 +37,11 @@ jobs:
         with:
           use-cross: true
           command: clippy
-          args: --target=${{ matrix.target }} --all --no-default-features --features "common,kvm" -- -D warnings
+          args: --target=${{ matrix.target }} --tests --all --no-default-features --features "common,kvm" -- -D warnings
 
       - name: Clippy (default features)
         uses: actions-rs/cargo@v1
         with:
           use-cross: true
           command: clippy
-          args: --target=${{ matrix.target }} --all -- -D warnings
+          args: --target=${{ matrix.target }} --tests --all -- -D warnings
