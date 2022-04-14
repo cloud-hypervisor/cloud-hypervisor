@@ -1066,6 +1066,7 @@ impl MemoryManager {
         Ok(Arc::new(Mutex::new(memory_manager)))
     }
 
+    #[cfg(all(feature = "kvm", target_arch = "aarch64"))]
     pub fn new_craton(
         vm: Arc<dyn hypervisor::Vm>,
         ram_start: GuestAddress,

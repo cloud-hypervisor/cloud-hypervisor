@@ -16,6 +16,7 @@ extern crate serde_derive;
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::SgxEpcSection;
 use std::collections::BTreeMap;
+#[cfg(target_arch = "aarch64")]
 use std::fmt;
 use std::result;
 use std::sync::Arc;

@@ -30,6 +30,7 @@ use crate::{
     PciDeviceInfo, CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_SNAPSHOT_ID,
 };
 use anyhow::anyhow;
+#[cfg(all(feature = "kvm", target_arch = "aarch64"))]
 use arch::PAGE_SIZE;
 use arch::get_host_cpu_phys_bits;
 #[cfg(target_arch = "x86_64")]
@@ -752,18 +753,20 @@ impl Vm {
         console_resize_pipe: Option<File>,
     ) -> Result<Self> {
         #[cfg(all(feature = "kvm", target_arch = "aarch64"))]
-        let craton_enabled = config.lock().unwrap().craton;
-        if craton_enabled {
-            return Vm::new_craton(
-                    config,
-                    exit_evt,
-                    reset_evt,
-                    seccomp_action,
-                    hypervisor,
-                    activate_evt,
-                    serial_pty,
-                    console_pty,
-                    console_resize_pipe);
+        {
+            let craton_enabled = config.lock().unwrap().craton;
+            if craton_enabled {
+                return Vm::new_craton(
+                        config,
+                        exit_evt,
+                        reset_evt,
+                        seccomp_action,
+                        hypervisor,
+                        activate_evt,
+                        serial_pty,
+                        console_pty,
+                        console_resize_pipe);
+            }
         }
         #[cfg(feature = "tdx")]
         let tdx_enabled = config.lock().unwrap().tdx.is_some();
