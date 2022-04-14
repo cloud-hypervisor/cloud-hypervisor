@@ -364,8 +364,8 @@ impl VfioCommon {
         mmio_allocator: &mut AddressAllocator,
         vfio_wrapper: &dyn Vfio,
         resources: Option<Vec<Resource>>,
-    ) -> Result<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>, PciDeviceError> {
-        let mut ranges = Vec::new();
+    ) -> Result<Vec<PciBarConfiguration>, PciDeviceError> {
+        let mut bars = Vec::new();
         let mut bar_id = VFIO_PCI_BAR0_REGION_INDEX as u32;
 
         // Going through all regular regions to compute the BAR size.
@@ -378,7 +378,7 @@ impl VfioCommon {
 
             let restored_bar_addr = if let Some(resources) = &resources {
                 match resources
-                    .get(ranges.len())
+                    .get(bars.len())
                     .ok_or(PciDeviceError::MissingResource)?
                 {
                     Resource::MmioAddressRange { base, .. } => Some(GuestAddress(*base)),
@@ -499,7 +499,7 @@ impl VfioCommon {
             }
 
             // We can now build our BAR configuration block.
-            let config = PciBarConfiguration::default()
+            let bar = PciBarConfiguration::default()
                 .set_index(bar_id as usize)
                 .set_address(bar_addr.raw_value())
                 .set_size(region_size)
@@ -507,15 +507,15 @@ impl VfioCommon {
 
             if bar_id == VFIO_PCI_ROM_REGION_INDEX {
                 self.configuration
-                    .add_pci_rom_bar(&config, flags & 0x1)
+                    .add_pci_rom_bar(&bar, flags & 0x1)
                     .map_err(|e| PciDeviceError::IoRegistrationFailed(bar_addr.raw_value(), e))?;
             } else {
                 self.configuration
-                    .add_pci_bar(&config)
+                    .add_pci_bar(&bar)
                     .map_err(|e| PciDeviceError::IoRegistrationFailed(bar_addr.raw_value(), e))?;
             }
 
-            ranges.push((bar_addr, region_size, region_type));
+            bars.push(bar);
             self.mmio_regions.push(MmioRegion {
                 start: bar_addr,
                 length: region_size,
@@ -533,7 +533,7 @@ impl VfioCommon {
             }
         }
 
-        Ok(ranges)
+        Ok(bars)
     }
 
     pub(crate) fn free_bars(
@@ -1339,7 +1339,7 @@ impl PciDevice for VfioPciDevice {
         allocator: &Arc<Mutex<SystemAllocator>>,
         mmio_allocator: &mut AddressAllocator,
         resources: Option<Vec<Resource>>,
-    ) -> Result<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>, PciDeviceError> {
+    ) -> Result<Vec<PciBarConfiguration>, PciDeviceError> {
         self.common
             .allocate_bars(allocator, mmio_allocator, &self.vfio_wrapper, resources)
     }

@@ -4,7 +4,7 @@
 //
 
 use crate::vfio::{Interrupt, Vfio, VfioCommon, VfioError};
-use crate::{BarReprogrammingParams, PciBarRegionType, VfioPciError};
+use crate::{BarReprogrammingParams, PciBarConfiguration, VfioPciError};
 use crate::{
     PciBdf, PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciSubclass,
 };
@@ -25,7 +25,6 @@ use vm_device::{BusDevice, Resource};
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{
     Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryRegion, GuestRegionMmap,
-    GuestUsize,
 };
 use vmm_sys_util::eventfd::EventFd;
 
@@ -396,7 +395,7 @@ impl PciDevice for VfioUserPciDevice {
         allocator: &Arc<Mutex<SystemAllocator>>,
         mmio_allocator: &mut AddressAllocator,
         resources: Option<Vec<Resource>>,
-    ) -> Result<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>, PciDeviceError> {
+    ) -> Result<Vec<PciBarConfiguration>, PciDeviceError> {
         self.common
             .allocate_bars(allocator, mmio_allocator, &self.vfio_wrapper, resources)
     }
