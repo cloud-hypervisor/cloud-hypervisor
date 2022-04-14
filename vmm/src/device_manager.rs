@@ -3285,16 +3285,16 @@ impl DeviceManager {
             .map_err(DeviceManagerError::AddPciDevice)?;
 
         let mut new_resources = Vec::new();
-        for pci_bar in bars.iter() {
-            match pci_bar.2 {
+        for bar in bars {
+            match bar.region_type() {
                 PciBarRegionType::IoRegion => new_resources.push(Resource::PioAddressRange {
-                    base: pci_bar.0.raw_value() as u16,
-                    size: pci_bar.1 as u16,
+                    base: bar.addr() as u16,
+                    size: bar.size() as u16,
                 }),
                 PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
                     new_resources.push(Resource::MmioAddressRange {
-                        base: pci_bar.0.raw_value(),
-                        size: pci_bar.1 as u64,
+                        base: bar.addr(),
+                        size: bar.size() as u64,
                     })
                 }
             }

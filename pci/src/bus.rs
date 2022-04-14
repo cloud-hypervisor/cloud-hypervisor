@@ -6,13 +6,13 @@ use crate::configuration::{
     PciBarRegionType, PciBridgeSubclass, PciClassCode, PciConfiguration, PciHeaderType,
 };
 use crate::device::{DeviceRelocation, Error as PciDeviceError, PciDevice};
+use crate::PciBarConfiguration;
 use byteorder::{ByteOrder, LittleEndian};
 use std::any::Any;
 use std::collections::HashMap;
 use std::ops::DerefMut;
 use std::sync::{Arc, Barrier, Mutex};
 use vm_device::{Bus, BusDevice};
-use vm_memory::{Address, GuestAddress, GuestUsize};
 
 const VENDOR_ID_INTEL: u16 = 0x8086;
 const DEVICE_ID_INTEL_VIRT_PCIE_HOST: u16 = 0x0d57;
@@ -122,21 +122,21 @@ impl PciBus {
         dev: Arc<Mutex<dyn BusDevice>>,
         #[cfg(target_arch = "x86_64")] io_bus: &Bus,
         mmio_bus: &Bus,
-        bars: Vec<(GuestAddress, GuestUsize, PciBarRegionType)>,
+        bars: Vec<PciBarConfiguration>,
     ) -> Result<()> {
-        for (address, size, type_) in bars {
-            match type_ {
+        for bar in bars {
+            match bar.region_type() {
                 PciBarRegionType::IoRegion => {
                     #[cfg(target_arch = "x86_64")]
                     io_bus
-                        .insert(dev.clone(), address.raw_value(), size)
+                        .insert(dev.clone(), bar.addr(), bar.size())
                         .map_err(PciRootError::PioInsert)?;
                     #[cfg(target_arch = "aarch64")]
                     error!("I/O region is not supported");
                 }
                 PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
                     mmio_bus
-                        .insert(dev.clone(), address.raw_value(), size)
+                        .insert(dev.clone(), bar.addr(), bar.size())
                         .map_err(PciRootError::MmioInsert)?;
                 }
             }

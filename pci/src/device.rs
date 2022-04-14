@@ -3,13 +3,13 @@
 // found in the LICENSE-BSD-3-Clause file.
 
 use crate::configuration::{self, PciBarRegionType};
+use crate::PciBarConfiguration;
 use std::any::Any;
 use std::fmt::{self, Display};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{self, io, result};
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::{BusDevice, Resource};
-use vm_memory::{GuestAddress, GuestUsize};
 
 #[derive(Debug)]
 pub enum Error {
@@ -60,7 +60,7 @@ pub trait PciDevice: BusDevice {
         _allocator: &Arc<Mutex<SystemAllocator>>,
         _mmio_allocator: &mut AddressAllocator,
         _resources: Option<Vec<Resource>>,
-    ) -> Result<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>> {
+    ) -> Result<Vec<PciBarConfiguration>> {
         Ok(Vec::new())
     }
 
