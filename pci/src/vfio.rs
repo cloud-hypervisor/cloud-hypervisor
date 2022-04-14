@@ -498,15 +498,9 @@ impl VfioCommon {
                     .ok_or(PciDeviceError::IoAllocationFailed(region_size))?;
             }
 
-            let reg_idx = if bar_id == VFIO_PCI_ROM_REGION_INDEX {
-                PCI_ROM_EXP_BAR_INDEX
-            } else {
-                bar_id as usize
-            };
-
             // We can now build our BAR configuration block.
             let config = PciBarConfiguration::default()
-                .set_register_index(reg_idx)
+                .set_index(bar_id as usize)
                 .set_address(bar_addr.raw_value())
                 .set_size(region_size)
                 .set_region_type(region_type);
