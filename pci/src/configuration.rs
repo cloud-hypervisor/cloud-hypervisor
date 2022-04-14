@@ -18,6 +18,7 @@ const STATUS_REG: usize = 1;
 const STATUS_REG_CAPABILITIES_USED_MASK: u32 = 0x0010_0000;
 const BAR0_REG: usize = 4;
 const ROM_BAR_REG: usize = 12;
+const ROM_BAR_IDX: usize = 6;
 const BAR_IO_ADDR_MASK: u32 = 0xffff_fffc;
 const BAR_MEM_ADDR_MASK: u32 = 0xffff_fff0;
 const ROM_BAR_ADDR_MASK: u32 = 0xffff_f800;
@@ -336,7 +337,7 @@ pub enum PciBarPrefetchable {
 pub struct PciBarConfiguration {
     addr: u64,
     size: u64,
-    reg_idx: usize,
+    idx: usize,
     region_type: PciBarRegionType,
     prefetchable: PciBarPrefetchable,
 }
@@ -556,22 +557,23 @@ impl PciConfiguration {
 
     /// Adds a region specified by `config`.  Configures the specified BAR(s) to
     /// report this region and size to the guest kernel.  Enforces a few constraints
-    /// (i.e, region size must be power of two, register not already used). Returns 'None' on
-    /// failure all, `Some(BarIndex)` on success.
-    pub fn add_pci_bar(&mut self, config: &PciBarConfiguration) -> Result<usize> {
-        if self.bars[config.reg_idx].used {
-            return Err(Error::BarInUse(config.reg_idx));
+    /// (i.e, region size must be power of two, register not already used).
+    pub fn add_pci_bar(&mut self, config: &PciBarConfiguration) -> Result<()> {
+        let bar_idx = config.idx;
+        let reg_idx = BAR0_REG + bar_idx;
+
+        if self.bars[bar_idx].used {
+            return Err(Error::BarInUse(bar_idx));
         }
 
         if config.size.count_ones() != 1 {
             return Err(Error::BarSizeInvalid(config.size));
         }
 
-        if config.reg_idx >= NUM_BAR_REGS {
-            return Err(Error::BarInvalid(config.reg_idx));
+        if bar_idx >= NUM_BAR_REGS {
+            return Err(Error::BarInvalid(bar_idx));
         }
 
-        let bar_idx = BAR0_REG + config.reg_idx;
         let end_addr = config
             .addr
             .checked_add(config.size - 1)
@@ -584,20 +586,20 @@ impl PciConfiguration {
 
                 // Encode the BAR size as expected by the software running in
                 // the guest.
-                self.bars[config.reg_idx].size =
+                self.bars[bar_idx].size =
                     encode_32_bits_bar_size(config.size as u32).ok_or(Error::Encode32BarSize)?;
             }
             PciBarRegionType::Memory64BitRegion => {
-                if config.reg_idx + 1 >= NUM_BAR_REGS {
-                    return Err(Error::BarInvalid64(config.reg_idx));
+                if bar_idx + 1 >= NUM_BAR_REGS {
+                    return Err(Error::BarInvalid64(bar_idx));
                 }
 
                 if end_addr > u64::max_value() {
                     return Err(Error::BarAddressInvalid(config.addr, config.size));
                 }
 
-                if self.bars[config.reg_idx + 1].used {
-                    return Err(Error::BarInUse64(config.reg_idx));
+                if self.bars[bar_idx + 1].used {
+                    return Err(Error::BarInUse64(bar_idx));
                 }
 
                 // Encode the BAR size as expected by the software running in
@@ -605,12 +607,12 @@ impl PciConfiguration {
                 let (bar_size_hi, bar_size_lo) =
                     encode_64_bits_bar_size(config.size).ok_or(Error::Encode64BarSize)?;
 
-                self.registers[bar_idx + 1] = (config.addr >> 32) as u32;
-                self.writable_bits[bar_idx + 1] = 0xffff_ffff;
-                self.bars[config.reg_idx + 1].addr = self.registers[bar_idx + 1];
-                self.bars[config.reg_idx].size = bar_size_lo;
-                self.bars[config.reg_idx + 1].size = bar_size_hi;
-                self.bars[config.reg_idx + 1].used = true;
+                self.registers[reg_idx + 1] = (config.addr >> 32) as u32;
+                self.writable_bits[reg_idx + 1] = 0xffff_ffff;
+                self.bars[bar_idx + 1].addr = self.registers[reg_idx + 1];
+                self.bars[bar_idx].size = bar_size_lo;
+                self.bars[bar_idx + 1].size = bar_size_hi;
+                self.bars[bar_idx + 1].used = true;
             }
         }
 
@@ -622,26 +624,30 @@ impl PciConfiguration {
             PciBarRegionType::IoRegion => (BAR_IO_ADDR_MASK, config.region_type as u32),
         };
 
-        self.registers[bar_idx] = ((config.addr as u32) & mask) | lower_bits;
-        self.writable_bits[bar_idx] = mask;
-        self.bars[config.reg_idx].addr = self.registers[bar_idx];
-        self.bars[config.reg_idx].used = true;
-        self.bars[config.reg_idx].r#type = Some(config.region_type);
-        Ok(config.reg_idx)
+        self.registers[reg_idx] = ((config.addr as u32) & mask) | lower_bits;
+        self.writable_bits[reg_idx] = mask;
+        self.bars[bar_idx].addr = self.registers[reg_idx];
+        self.bars[bar_idx].used = true;
+        self.bars[bar_idx].r#type = Some(config.region_type);
+
+        Ok(())
     }
 
     /// Adds rom expansion BAR.
-    pub fn add_pci_rom_bar(&mut self, config: &PciBarConfiguration, active: u32) -> Result<usize> {
+    pub fn add_pci_rom_bar(&mut self, config: &PciBarConfiguration, active: u32) -> Result<()> {
+        let bar_idx = config.idx;
+        let reg_idx = ROM_BAR_REG;
+
         if self.rom_bar_used {
-            return Err(Error::RomBarInUse(config.reg_idx));
+            return Err(Error::RomBarInUse(bar_idx));
         }
 
         if config.size.count_ones() != 1 {
             return Err(Error::RomBarSizeInvalid(config.size));
         }
 
-        if config.reg_idx != ROM_BAR_REG {
-            return Err(Error::RomBarInvalid(config.reg_idx));
+        if bar_idx != ROM_BAR_IDX {
+            return Err(Error::RomBarInvalid(bar_idx));
         }
 
         let end_addr = config
@@ -653,13 +659,14 @@ impl PciConfiguration {
             return Err(Error::RomBarAddressInvalid(config.addr, config.size));
         }
 
-        self.registers[config.reg_idx] = (config.addr as u32) | active;
-        self.writable_bits[config.reg_idx] = ROM_BAR_ADDR_MASK;
-        self.rom_bar_addr = self.registers[config.reg_idx];
+        self.registers[reg_idx] = (config.addr as u32) | active;
+        self.writable_bits[reg_idx] = ROM_BAR_ADDR_MASK;
+        self.rom_bar_addr = self.registers[reg_idx];
         self.rom_bar_size =
             encode_32_bits_bar_size(config.size as u32).ok_or(Error::Encode32BarSize)?;
         self.rom_bar_used = true;
-        Ok(config.reg_idx)
+
+        Ok(())
     }
 
     /// Returns the address of the given BAR region.
@@ -911,7 +918,7 @@ impl Snapshottable for PciConfiguration {
 impl Default for PciBarConfiguration {
     fn default() -> Self {
         PciBarConfiguration {
-            reg_idx: 0,
+            idx: 0,
             addr: 0,
             size: 0,
             region_type: PciBarRegionType::Memory64BitRegion,
@@ -922,13 +929,13 @@ impl Default for PciBarConfiguration {
 
 impl PciBarConfiguration {
     pub fn new(
-        reg_idx: usize,
+        idx: usize,
         size: u64,
         region_type: PciBarRegionType,
         prefetchable: PciBarPrefetchable,
     ) -> Self {
         PciBarConfiguration {
-            reg_idx,
+            idx,
             addr: 0,
             size,
             region_type,
@@ -937,8 +944,8 @@ impl PciBarConfiguration {
     }
 
     #[must_use]
-    pub fn set_register_index(mut self, reg_idx: usize) -> Self {
-        self.reg_idx = reg_idx;
+    pub fn set_index(mut self, idx: usize) -> Self {
+        self.idx = idx;
         self
     }
 

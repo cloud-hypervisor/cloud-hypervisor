@@ -260,6 +260,8 @@ const MSIX_PBA_BAR_OFFSET: u64 = 0x48000;
 const MSIX_PBA_SIZE: u64 = 0x800;
 // The BAR size must be a power of 2.
 const CAPABILITY_BAR_SIZE: u64 = 0x80000;
+const VIRTIO_COMMON_BAR_INDEX: usize = 0;
+const VIRTIO_SHM_BAR_INDEX: usize = 2;
 
 const NOTIFY_OFF_MULTIPLIER: u32 = 4; // A dword per notification address.
 
@@ -849,7 +851,7 @@ impl PciDevice for VirtioPciDevice {
             if resources.is_empty() {
                 return Err(PciDeviceError::MissingResource);
             }
-            match resources[0] {
+            match resources[VIRTIO_COMMON_BAR_INDEX] {
                 Resource::MmioAddressRange { base, .. } => Some(GuestAddress(base)),
                 _ => return Err(PciDeviceError::InvalidResourceType),
             }
@@ -888,28 +890,26 @@ impl PciDevice for VirtioPciDevice {
             .push((virtio_pci_bar_addr, CAPABILITY_BAR_SIZE, region_type));
 
         let config = PciBarConfiguration::default()
-            .set_register_index(0)
+            .set_index(VIRTIO_COMMON_BAR_INDEX)
             .set_address(virtio_pci_bar_addr.raw_value())
             .set_size(CAPABILITY_BAR_SIZE)
             .set_region_type(region_type);
-        let virtio_pci_bar =
-            self.configuration.add_pci_bar(&config).map_err(|e| {
-                PciDeviceError::IoRegistrationFailed(virtio_pci_bar_addr.raw_value(), e)
-            })? as u8;
+        self.configuration.add_pci_bar(&config).map_err(|e| {
+            PciDeviceError::IoRegistrationFailed(virtio_pci_bar_addr.raw_value(), e)
+        })?;
 
         // Once the BARs are allocated, the capabilities can be added to the PCI configuration.
-        self.add_pci_capabilities(virtio_pci_bar)?;
+        self.add_pci_capabilities(VIRTIO_COMMON_BAR_INDEX as u8)?;
 
         // Allocate a dedicated BAR if there are some shared memory regions.
         if let Some(shm_list) = device.get_shm_regions() {
             let config = PciBarConfiguration::default()
-                .set_register_index(2)
+                .set_index(VIRTIO_SHM_BAR_INDEX)
                 .set_address(shm_list.addr.raw_value())
                 .set_size(shm_list.len);
-            let virtio_pci_shm_bar =
-                self.configuration.add_pci_bar(&config).map_err(|e| {
-                    PciDeviceError::IoRegistrationFailed(shm_list.addr.raw_value(), e)
-                })? as u8;
+            self.configuration
+                .add_pci_bar(&config)
+                .map_err(|e| PciDeviceError::IoRegistrationFailed(shm_list.addr.raw_value(), e))?;
 
             let region_type = PciBarRegionType::Memory64BitRegion;
             ranges.push((shm_list.addr, shm_list.len, region_type));
@@ -919,7 +919,7 @@ impl PciDevice for VirtioPciDevice {
             for (idx, shm) in shm_list.region_list.iter().enumerate() {
                 let shm_cap = VirtioPciCap64::new(
                     PciCapabilityType::SharedMemoryConfig,
-                    virtio_pci_shm_bar,
+                    VIRTIO_SHM_BAR_INDEX as u8,
                     idx as u8,
                     shm.offset,
                     shm.len,
