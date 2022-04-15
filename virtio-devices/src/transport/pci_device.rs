@@ -846,17 +846,22 @@ impl PciDevice for VirtioPciDevice {
         let mut bars = Vec::new();
         let device_clone = self.device.clone();
         let device = device_clone.lock().unwrap();
-        let settings_bar_addr = if let Some(resources) = &resources {
-            if resources.is_empty() {
+
+        let mut settings_bar_addr = None;
+        if let Some(resources) = &resources {
+            for resource in resources {
+                if let Resource::PciBar { index, base, .. } = resource {
+                    if *index == VIRTIO_COMMON_BAR_INDEX {
+                        settings_bar_addr = Some(GuestAddress(*base));
+                        break;
+                    }
+                }
+            }
+            // Error out if no resource was matching the BAR id.
+            if settings_bar_addr.is_none() {
                 return Err(PciDeviceError::MissingResource);
             }
-            match resources[VIRTIO_COMMON_BAR_INDEX] {
-                Resource::MmioAddressRange { base, .. } => Some(GuestAddress(base)),
-                _ => return Err(PciDeviceError::InvalidResourceType),
-            }
-        } else {
-            None
-        };
+        }
 
         // Allocate the virtio-pci capability BAR.
         // See http://docs.oasis-open.org/virtio/virtio/v1.0/cs04/virtio-v1.0-cs04.html#x1-740004

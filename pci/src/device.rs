@@ -19,10 +19,8 @@ pub enum Error {
     IoAllocationFailed(u64),
     /// Registering an IO BAR failed.
     IoRegistrationFailed(u64, configuration::Error),
-    /// Not enough resources
+    /// Expected resource not found.
     MissingResource,
-    /// Invalid type of resource
-    InvalidResourceType,
 }
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -38,8 +36,7 @@ impl Display for Error {
             IoRegistrationFailed(addr, e) => {
                 write!(f, "failed to register an IO BAR, addr={} err={}", addr, e)
             }
-            MissingResource => write!(f, "Missing resource"),
-            InvalidResourceType => write!(f, "Invalid type of resource"),
+            MissingResource => write!(f, "failed to find expected resource"),
         }
     }
 }

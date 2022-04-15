@@ -23,6 +23,13 @@ pub enum MsiIrqType {
     GenericMsi,
 }
 
+#[derive(Copy, Clone, PartialEq, Serialize, Deserialize, Debug)]
+pub enum PciBarType {
+    Io,
+    Mmio32,
+    Mmio64,
+}
+
 /// Enumeration for device resources.
 #[allow(missing_docs)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -31,6 +38,14 @@ pub enum Resource {
     PioAddressRange { base: u16, size: u16 },
     /// Memory Mapped IO address range.
     MmioAddressRange { base: u64, size: u64 },
+    /// PCI BAR
+    PciBar {
+        index: usize,
+        base: u64,
+        size: u64,
+        type_: PciBarType,
+        prefetchable: bool,
+    },
     /// Legacy IRQ number.
     LegacyIrq(u32),
     /// Message Signaled Interrupt

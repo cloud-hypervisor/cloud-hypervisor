@@ -665,25 +665,11 @@ impl DeviceRelocation for AddressManager {
             if let Some(node) = self.device_tree.lock().unwrap().get_mut(&id) {
                 let mut resource_updated = false;
                 for resource in node.resources.iter_mut() {
-                    match region_type {
-                        PciBarRegionType::IoRegion => {
-                            if let Resource::PioAddressRange { base, .. } = resource {
-                                if *base as u64 == old_base {
-                                    *base = new_base as u16;
-                                    resource_updated = true;
-                                    break;
-                                }
-                            }
-                        }
-                        PciBarRegionType::Memory32BitRegion
-                        | PciBarRegionType::Memory64BitRegion => {
-                            if let Resource::MmioAddressRange { base, .. } = resource {
-                                if *base == old_base {
-                                    *base = new_base;
-                                    resource_updated = true;
-                                    break;
-                                }
-                            }
+                    if let Resource::PciBar { base, type_, .. } = resource {
+                        if PciBarRegionType::from(*type_) == region_type && *base == old_base {
+                            *base = new_base;
+                            resource_updated = true;
+                            break;
                         }
                     }
                 }
@@ -3222,13 +3208,6 @@ impl DeviceManager {
 
         let mut node = device_node!(vfio_name);
 
-        for region in vfio_pci_device.lock().unwrap().mmio_regions() {
-            node.resources.push(Resource::MmioAddressRange {
-                base: region.start.0,
-                size: region.length as u64,
-            });
-        }
-
         // Update the device tree with correct resource information.
         node.resources = new_resources;
         node.pci_bdf = Some(pci_device_bdf);
@@ -3286,18 +3265,13 @@ impl DeviceManager {
 
         let mut new_resources = Vec::new();
         for bar in bars {
-            match bar.region_type() {
-                PciBarRegionType::IoRegion => new_resources.push(Resource::PioAddressRange {
-                    base: bar.addr() as u16,
-                    size: bar.size() as u16,
-                }),
-                PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
-                    new_resources.push(Resource::MmioAddressRange {
-                        base: bar.addr(),
-                        size: bar.size() as u64,
-                    })
-                }
-            }
+            new_resources.push(Resource::PciBar {
+                index: bar.idx(),
+                base: bar.addr(),
+                size: bar.size(),
+                type_: bar.region_type().into(),
+                prefetchable: bar.prefetchable().into(),
+            });
         }
 
         Ok(new_resources)

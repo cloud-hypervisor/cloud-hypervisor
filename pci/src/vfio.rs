@@ -376,18 +376,17 @@ impl VfioCommon {
             let region_size: u64;
             let bar_addr: GuestAddress;
 
-            let restored_bar_addr = if let Some(resources) = &resources {
-                match resources
-                    .get(bars.len())
-                    .ok_or(PciDeviceError::MissingResource)?
-                {
-                    Resource::MmioAddressRange { base, .. } => Some(GuestAddress(*base)),
-                    Resource::PioAddressRange { base, .. } => Some(GuestAddress(*base as u64)),
-                    _ => return Err(PciDeviceError::InvalidResourceType),
+            let mut restored_bar_addr = None;
+            if let Some(resources) = &resources {
+                for resource in resources {
+                    if let Resource::PciBar { index, base, .. } = resource {
+                        if *index == bar_id as usize {
+                            restored_bar_addr = Some(GuestAddress(*base));
+                            break;
+                        }
+                    }
                 }
-            } else {
-                None
-            };
+            }
 
             let bar_offset = if bar_id == VFIO_PCI_ROM_REGION_INDEX {
                 (PCI_ROM_EXP_BAR_INDEX * 4) as u32
