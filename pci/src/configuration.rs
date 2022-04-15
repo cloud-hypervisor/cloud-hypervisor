@@ -9,6 +9,7 @@ use std::fmt::{self, Display};
 use std::sync::{Arc, Mutex};
 use versionize::{VersionMap, Versionize, VersionizeError, VersionizeResult};
 use versionize_derive::Versionize;
+use vm_device::PciBarType;
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, VersionMapped};
 
 // The number of 32bit registers in the config space, 4096 bytes.
@@ -327,10 +328,41 @@ pub enum PciBarRegionType {
     Memory64BitRegion = 0x04,
 }
 
+impl From<PciBarType> for PciBarRegionType {
+    fn from(type_: PciBarType) -> Self {
+        match type_ {
+            PciBarType::Io => PciBarRegionType::IoRegion,
+            PciBarType::Mmio32 => PciBarRegionType::Memory32BitRegion,
+            PciBarType::Mmio64 => PciBarRegionType::Memory64BitRegion,
+        }
+    }
+}
+
+#[allow(clippy::from_over_into)]
+impl Into<PciBarType> for PciBarRegionType {
+    fn into(self) -> PciBarType {
+        match self {
+            PciBarRegionType::IoRegion => PciBarType::Io,
+            PciBarRegionType::Memory32BitRegion => PciBarType::Mmio32,
+            PciBarRegionType::Memory64BitRegion => PciBarType::Mmio64,
+        }
+    }
+}
+
 #[derive(Copy, Clone)]
 pub enum PciBarPrefetchable {
     NotPrefetchable = 0,
     Prefetchable = 0x08,
+}
+
+#[allow(clippy::from_over_into)]
+impl Into<bool> for PciBarPrefetchable {
+    fn into(self) -> bool {
+        match self {
+            PciBarPrefetchable::NotPrefetchable => false,
+            PciBarPrefetchable::Prefetchable => true,
+        }
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -981,6 +1013,10 @@ impl PciBarConfiguration {
 
     pub fn region_type(&self) -> PciBarRegionType {
         self.region_type
+    }
+
+    pub fn prefetchable(&self) -> PciBarPrefetchable {
+        self.prefetchable
     }
 }
 
