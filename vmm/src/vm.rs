@@ -1709,6 +1709,66 @@ impl Vm {
     }
 
     #[cfg(feature = "tdx")]
+    fn hob_memory_resources(
+        mut sorted_sections: Vec<TdvfSection>,
+        guest_memory: &GuestMemoryMmap,
+    ) -> Vec<(u64, u64, bool)> {
+        let mut list = Vec::new();
+
+        let mut current_section = sorted_sections.pop();
+
+        // RAM regions interleaved with TDVF sections
+        let mut next_start_addr = 0;
+        for region in guest_memory.iter() {
+            let region_start = region.start_addr().0;
+            let region_end = region.last_addr().0;
+            if region_start > next_start_addr {
+                next_start_addr = region_start;
+            }
+
+            loop {
+                let (start, size, ram) = if let Some(section) = &current_section {
+                    if section.address <= next_start_addr {
+                        (section.address, section.size, false)
+                    } else {
+                        let last_addr = std::cmp::min(section.address - 1, region_end);
+                        (next_start_addr, last_addr - next_start_addr + 1, true)
+                    }
+                } else {
+                    (next_start_addr, region_end - next_start_addr + 1, true)
+                };
+
+                list.push((start, size, ram));
+
+                if !ram {
+                    current_section = sorted_sections.pop();
+                }
+
+                next_start_addr = start + size;
+
+                if region_start > next_start_addr {
+                    next_start_addr = region_start;
+                }
+
+                if next_start_addr > region_end {
+                    break;
+                }
+            }
+        }
+
+        // Once all the interleaved sections have been processed, let's simply
+        // pull the remaining ones.
+        if let Some(section) = current_section {
+            list.push((section.address, section.size, false));
+        }
+        while let Some(section) = sorted_sections.pop() {
+            list.push((section.address, section.size, false));
+        }
+
+        list
+    }
+
+    #[cfg(feature = "tdx")]
     fn populate_tdx_sections(&mut self, sections: &[TdvfSection]) -> Result<Option<u64>> {
         use arch::x86_64::tdx::*;
         // Get the memory end *before* we start adding TDVF ram regions
@@ -1832,46 +1892,10 @@ impl Vm {
 
         sorted_sections.sort_by_key(|section| section.address);
         sorted_sections.reverse();
-        let mut current_section = sorted_sections.pop();
 
-        // RAM regions interleaved with TDVF sections
-        let mut next_start_addr = 0;
-        for region in boot_guest_memory.iter() {
-            let region_start = region.start_addr().0;
-            let region_end = region.last_addr().0;
-            if region_start > next_start_addr {
-                next_start_addr = region_start;
-            }
-
-            loop {
-                let (start, size, ram) = if let Some(section) = &current_section {
-                    if section.address <= next_start_addr {
-                        (section.address, section.size, false)
-                    } else {
-                        let last_addr = std::cmp::min(section.address - 1, region_end);
-                        (next_start_addr, last_addr - next_start_addr + 1, true)
-                    }
-                } else {
-                    (next_start_addr, region_end - next_start_addr + 1, true)
-                };
-
-                hob.add_memory_resource(&mem, start, size, ram)
-                    .map_err(Error::PopulateHob)?;
-
-                if !ram {
-                    current_section = sorted_sections.pop();
-                }
-
-                next_start_addr = start + size;
-
-                if region_start > next_start_addr {
-                    next_start_addr = region_start;
-                }
-
-                if next_start_addr > region_end {
-                    break;
-                }
-            }
+        for (start, size, ram) in Vm::hob_memory_resources(sorted_sections, &boot_guest_memory) {
+            hob.add_memory_resource(&mem, start, size, ram)
+                .map_err(Error::PopulateHob)?;
         }
 
         // MMIO regions
@@ -2973,6 +2997,211 @@ mod tests {
     #[test]
     fn test_vm_paused_transitions() {
         test_vm_state_transitions(VmState::Paused);
+    }
+
+    #[cfg(feature = "tdx")]
+    #[test]
+    fn test_hob_memory_resources() {
+        // Case 1: Two TDVF sections in the middle of the RAM
+        let sections = vec![
+            TdvfSection {
+                address: 0xc000,
+                size: 0x1000,
+                ..Default::default()
+            },
+            TdvfSection {
+                address: 0x1000,
+                size: 0x4000,
+                ..Default::default()
+            },
+        ];
+        let guest_ranges: Vec<(GuestAddress, usize)> = vec![(GuestAddress(0), 0x1000_0000)];
+        let expected = vec![
+            (0, 0x1000, true),
+            (0x1000, 0x4000, false),
+            (0x5000, 0x7000, true),
+            (0xc000, 0x1000, false),
+            (0xd000, 0x0fff_3000, true),
+        ];
+        assert_eq!(
+            expected,
+            Vm::hob_memory_resources(
+                sections,
+                &GuestMemoryMmap::from_ranges(&guest_ranges).unwrap()
+            )
+        );
+
+        // Case 2: Two TDVF sections with no conflict with the RAM
+        let sections = vec![
+            TdvfSection {
+                address: 0x1000_1000,
+                size: 0x1000,
+                ..Default::default()
+            },
+            TdvfSection {
+                address: 0,
+                size: 0x1000,
+                ..Default::default()
+            },
+        ];
+        let guest_ranges: Vec<(GuestAddress, usize)> = vec![(GuestAddress(0x1000), 0x1000_0000)];
+        let expected = vec![
+            (0, 0x1000, false),
+            (0x1000, 0x1000_0000, true),
+            (0x1000_1000, 0x1000, false),
+        ];
+        assert_eq!(
+            expected,
+            Vm::hob_memory_resources(
+                sections,
+                &GuestMemoryMmap::from_ranges(&guest_ranges).unwrap()
+            )
+        );
+
+        // Case 3: Two TDVF sections with partial conflicts with the RAM
+        let sections = vec![
+            TdvfSection {
+                address: 0x1000_0000,
+                size: 0x2000,
+                ..Default::default()
+            },
+            TdvfSection {
+                address: 0,
+                size: 0x2000,
+                ..Default::default()
+            },
+        ];
+        let guest_ranges: Vec<(GuestAddress, usize)> = vec![(GuestAddress(0x1000), 0x1000_0000)];
+        let expected = vec![
+            (0, 0x2000, false),
+            (0x2000, 0x0fff_e000, true),
+            (0x1000_0000, 0x2000, false),
+        ];
+        assert_eq!(
+            expected,
+            Vm::hob_memory_resources(
+                sections,
+                &GuestMemoryMmap::from_ranges(&guest_ranges).unwrap()
+            )
+        );
+
+        // Case 4: Two TDVF sections with no conflict before the RAM and two
+        // more additional sections with no conflict after the RAM.
+        let sections = vec![
+            TdvfSection {
+                address: 0x2000_1000,
+                size: 0x1000,
+                ..Default::default()
+            },
+            TdvfSection {
+                address: 0x2000_0000,
+                size: 0x1000,
+                ..Default::default()
+            },
+            TdvfSection {
+                address: 0x1000,
+                size: 0x1000,
+                ..Default::default()
+            },
+            TdvfSection {
+                address: 0,
+                size: 0x1000,
+                ..Default::default()
+            },
+        ];
+        let guest_ranges: Vec<(GuestAddress, usize)> = vec![(GuestAddress(0x4000), 0x1000_0000)];
+        let expected = vec![
+            (0, 0x1000, false),
+            (0x1000, 0x1000, false),
+            (0x4000, 0x1000_0000, true),
+            (0x2000_0000, 0x1000, false),
+            (0x2000_1000, 0x1000, false),
+        ];
+        assert_eq!(
+            expected,
+            Vm::hob_memory_resources(
+                sections,
+                &GuestMemoryMmap::from_ranges(&guest_ranges).unwrap()
+            )
+        );
+
+        // Case 5: One TDVF section overriding the entire RAM
+        let sections = vec![TdvfSection {
+            address: 0,
+            size: 0x2000_0000,
+            ..Default::default()
+        }];
+        let guest_ranges: Vec<(GuestAddress, usize)> = vec![(GuestAddress(0x1000), 0x1000_0000)];
+        let expected = vec![(0, 0x2000_0000, false)];
+        assert_eq!(
+            expected,
+            Vm::hob_memory_resources(
+                sections,
+                &GuestMemoryMmap::from_ranges(&guest_ranges).unwrap()
+            )
+        );
+
+        // Case 6: Two TDVF sections with no conflict with 2 RAM regions
+        let sections = vec![
+            TdvfSection {
+                address: 0x1000_2000,
+                size: 0x2000,
+                ..Default::default()
+            },
+            TdvfSection {
+                address: 0,
+                size: 0x2000,
+                ..Default::default()
+            },
+        ];
+        let guest_ranges: Vec<(GuestAddress, usize)> = vec![
+            (GuestAddress(0x2000), 0x1000_0000),
+            (GuestAddress(0x1000_4000), 0x1000_0000),
+        ];
+        let expected = vec![
+            (0, 0x2000, false),
+            (0x2000, 0x1000_0000, true),
+            (0x1000_2000, 0x2000, false),
+            (0x1000_4000, 0x1000_0000, true),
+        ];
+        assert_eq!(
+            expected,
+            Vm::hob_memory_resources(
+                sections,
+                &GuestMemoryMmap::from_ranges(&guest_ranges).unwrap()
+            )
+        );
+
+        // Case 7: Two TDVF sections with partial conflicts with 2 RAM regions
+        let sections = vec![
+            TdvfSection {
+                address: 0x1000_0000,
+                size: 0x4000,
+                ..Default::default()
+            },
+            TdvfSection {
+                address: 0,
+                size: 0x4000,
+                ..Default::default()
+            },
+        ];
+        let guest_ranges: Vec<(GuestAddress, usize)> = vec![
+            (GuestAddress(0x1000), 0x1000_0000),
+            (GuestAddress(0x1000_3000), 0x1000_0000),
+        ];
+        let expected = vec![
+            (0, 0x4000, false),
+            (0x4000, 0x0fff_c000, true),
+            (0x1000_0000, 0x4000, false),
+            (0x1000_4000, 0x0fff_f000, true),
+        ];
+        assert_eq!(
+            expected,
+            Vm::hob_memory_resources(
+                sections,
+                &GuestMemoryMmap::from_ranges(&guest_ranges).unwrap()
+            )
+        );
     }
 }
 
