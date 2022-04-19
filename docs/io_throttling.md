@@ -24,8 +24,8 @@ bucket is unbounded in speed which allows for bursts bound in size by
 the amount of tokens available. Once the token bucket is empty,
 consumption speed is bound by the "refill-rate". Similarly, Cloud
 Hypervisor provides another three options for limiting I/O operations,
-i.e., `ops_size` (I/O operations), `bw_one_time_burst` (I/O operations),
-and `bw_refill_time` (ms).
+i.e., `ops_size` (I/O operations), `ops_one_time_burst` (I/O operations),
+and `ops_refill_time` (ms).
 
 One caveat in the I/O throttling is that every-time the bucket gets
 empty, it will stop I/O operations for a fixed amount of time
