@@ -226,6 +226,11 @@ cmd_build() {
         } ;;
         "--debug") { build="debug"; } ;;
         "--release") { build="release"; } ;;
+        "--runtime") 
+	    shift
+	    DOCKER_RUNTIME="$1"
+	    export DOCKER_RUNTIME
+	    ;;
         "--libc")
             shift
             [[ "$1" =~ ^(musl|gnu)$ ]] ||
