@@ -39,25 +39,25 @@ jobs:
           git checkout $GITHUB_SHA
 
       - name: Build (default features)
-        run: cargo rustc --bin cloud-hypervisor -- -D warnings
+        run: cargo rustc --locked --bin cloud-hypervisor -- -D warnings
 
       - name: Build (common + kvm)
-        run: cargo rustc --bin cloud-hypervisor --no-default-features --features "common,kvm"  -- -D warnings
+        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "common,kvm"  -- -D warnings
 
       - name: Build (default features + tdx)
-        run: cargo rustc --bin cloud-hypervisor --features "tdx" -- -D warnings
+        run: cargo rustc --locked --bin cloud-hypervisor --features "tdx" -- -D warnings
 
       - name: Build (default features + amx)
-        run: cargo rustc --bin cloud-hypervisor --features "amx" -- -D warnings
+        run: cargo rustc --locked --bin cloud-hypervisor --features "amx" -- -D warnings
 
       - name: Build (default features + gdb)
-        run: cargo rustc --bin cloud-hypervisor --features "gdb" -- -D warnings
+        run: cargo rustc --locked --bin cloud-hypervisor --features "gdb" -- -D warnings
 
       - name: Build (common + mshv)
-        run: cargo rustc --bin cloud-hypervisor --no-default-features --features "common,mshv"  -- -D warnings
+        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "common,mshv"  -- -D warnings
 
       - name: Release Build (default features)
-        run: cargo build --all --release --target=${{ matrix.target }}
+        run: cargo build --locked --all --release --target=${{ matrix.target }}
 
       - name: Check build did not modify any files
         run: test -z "$(git status --porcelain)"
