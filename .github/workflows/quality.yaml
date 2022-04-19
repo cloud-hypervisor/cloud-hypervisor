@@ -34,19 +34,19 @@ jobs:
         run: cargo fmt -- --check
 
       - name: Clippy (common + kvm)
-        run: cargo clippy --all --all-targets --no-default-features --tests --features "common,kvm" -- -D warnings
+        run: cargo clippy --locked --all --all-targets --no-default-features --tests --features "common,kvm" -- -D warnings
 
       - name: Clippy (default features)
-        run: cargo clippy --all --all-targets --tests -- -D warnings
+        run: cargo clippy --locked --all --all-targets --tests -- -D warnings
 
       - name: Clippy (default features + amx)
-        run: cargo clippy --all --all-targets --tests --features "amx" -- -D warnings
+        run: cargo clippy --locked --all --all-targets --tests --features "amx" -- -D warnings
 
       - name: Clippy (default features + gdb)
-        run: cargo clippy --all --all-targets --tests --features "gdb" -- -D warnings
+        run: cargo clippy --locked --all --all-targets --tests --features "gdb" -- -D warnings
 
       - name: Clippy (common + mshv)
-        run: cargo clippy --all --all-targets --no-default-features --tests --features "common,mshv" -- -D warnings
+        run: cargo clippy --locked --all --all-targets --no-default-features --tests --features "common,mshv" -- -D warnings
 
       - name: Check build did not modify any files
         run: test -z "$(git status --porcelain)"
