@@ -508,7 +508,7 @@ impl Vmm {
 
         let source_url = restore_cfg.source_url.as_path().to_str();
         if source_url.is_none() {
-            return Err(VmError::RestoreSourceUrlPathToStr);
+            return Err(VmError::InvalidRestoreSourceUrl);
         }
         // Safe to unwrap as we checked it was Some(&str).
         let source_url = source_url.unwrap();
