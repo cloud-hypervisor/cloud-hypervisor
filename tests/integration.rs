@@ -7629,22 +7629,26 @@ mod live_migration {
     }
 
     #[test]
+    #[ignore]
     fn test_live_upgrade_basic() {
         _test_live_migration(true, false, false)
     }
 
     #[test]
+    #[ignore]
     fn test_live_upgrade_local() {
         _test_live_migration(true, false, true)
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_numa() {
         _test_live_migration(true, true, false)
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_numa_local() {
         _test_live_migration(true, true, true)
@@ -7865,12 +7869,14 @@ mod live_migration {
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_ovs_dpdk() {
         _test_live_migration_ovs_dpdk(true, false);
     }
 
     #[test]
+    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_ovs_dpdk_local() {
         _test_live_migration_ovs_dpdk(true, true);
