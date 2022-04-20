@@ -1180,7 +1180,9 @@ impl Vm {
             self.cpu_manager.lock().unwrap().boot_vcpus() as u64,
         )
         .map_err(|e| {
-            Error::ConfigureSystem(arch::Error::AArch64Setup(arch::aarch64::Error::SetupGic(e)))
+            Error::ConfigureSystem(arch::Error::PlatformSpecific(
+                arch::aarch64::Error::SetupGic(e),
+            ))
         })?;
 
         // PMU interrupt sticks to PPI, so need to be added by 16 to get real irq number.
@@ -1190,7 +1192,9 @@ impl Vm {
             .unwrap()
             .init_pmu(arch::aarch64::fdt::AARCH64_PMU_IRQ + 16)
             .map_err(|_| {
-                Error::ConfigureSystem(arch::Error::AArch64Setup(arch::aarch64::Error::VcpuInitPmu))
+                Error::ConfigureSystem(arch::Error::PlatformSpecific(
+                    arch::aarch64::Error::VcpuInitPmu,
+                ))
             })?;
 
         arch::configure_system(
