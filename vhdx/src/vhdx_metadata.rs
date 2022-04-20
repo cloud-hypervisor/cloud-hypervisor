@@ -303,7 +303,7 @@ impl MetadataTableEntry {
     fn new(buffer: &[u8]) -> Result<MetadataTableEntry> {
         let mut metadata_table_entry = unsafe { *(buffer.as_ptr() as *mut MetadataTableEntry) };
 
-        let uuid = crate::uuid_from_guid(buffer).map_err(VhdxMetadataError::InvalidUuid)?;
+        let uuid = crate::uuid_from_guid(buffer);
         metadata_table_entry.item_id = uuid;
 
         if metadata_table_entry.length > METADATA_LENGTH_MAX {

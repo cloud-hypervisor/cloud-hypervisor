@@ -12,5 +12,5 @@ libc = "0.2.123"
 log = "0.4.16"
 remain = "0.2.2"
 thiserror = "1.0"
-uuid = { version = "0.8.2", features = ["v4"] }
+uuid = { version = "1.0.0", features = ["v4"] }
 vmm-sys-util = ">=0.3.1"
