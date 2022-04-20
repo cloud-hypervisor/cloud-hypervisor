@@ -50,7 +50,7 @@ pub enum Error {
 
 impl From<Error> for super::Error {
     fn from(e: Error) -> super::Error {
-        super::Error::AArch64Setup(e)
+        super::Error::PlatformSpecific(e)
     }
 }
 
@@ -185,10 +185,10 @@ pub fn initramfs_load_addr(
             if guest_mem.address_in_range(offset) {
                 Ok(offset.raw_value())
             } else {
-                Err(super::Error::AArch64Setup(Error::InitramfsAddress))
+                Err(super::Error::PlatformSpecific(Error::InitramfsAddress))
             }
         }
-        None => Err(super::Error::AArch64Setup(Error::InitramfsAddress)),
+        None => Err(super::Error::PlatformSpecific(Error::InitramfsAddress)),
     }
 }
 

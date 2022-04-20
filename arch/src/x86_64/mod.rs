@@ -197,7 +197,7 @@ pub enum Error {
 
 impl From<Error> for super::Error {
     fn from(e: Error) -> super::Error {
-        super::Error::X86_64Setup(e)
+        super::Error::PlatformSpecific(e)
     }
 }
 

@@ -18,6 +18,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::result;
 use std::sync::Arc;
+use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeError, VersionizeResult};
 use versionize_derive::Versionize;
 use vm_migration::VersionMapped;
@@ -26,31 +27,27 @@ type GuestMemoryMmap = vm_memory::GuestMemoryMmap<vm_memory::bitmap::AtomicBitma
 type GuestRegionMmap = vm_memory::GuestRegionMmap<vm_memory::bitmap::AtomicBitmap>;
 
 /// Type for returning error code.
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
     #[cfg(target_arch = "x86_64")]
-    /// X86_64 specific error triggered during system configuration.
-    X86_64Setup(x86_64::Error),
+    #[error("Platform specific error (x86_64): {0:?}")]
+    PlatformSpecific(x86_64::Error),
     #[cfg(target_arch = "aarch64")]
-    /// AArch64 specific error triggered during system configuration.
-    AArch64Setup(aarch64::Error),
-    /// The zero page extends past the end of guest_mem.
-    ZeroPagePastRamEnd,
-    /// Error writing the zero page of guest memory.
-    ZeroPageSetup(vm_memory::GuestMemoryError),
-    /// The memory map table extends past the end of guest memory.
+    #[error("Platform specific error (aarch64): {0:?}")]
+    PlatformSpecific(aarch64::Error),
+    #[error("The memory map table extends past the end of guest memory")]
     MemmapTablePastRamEnd,
-    /// Error writing memory map table to guest memory.
+    #[error("Error writing memory map table to guest memory")]
     MemmapTableSetup,
-    /// The hvm_start_info structure extends past the end of guest memory.
+    #[error("The hvm_start_info structure extends past the end of guest memory")]
     StartInfoPastRamEnd,
-    /// Error writing hvm_start_info to guest memory.
+    #[error("Error writing hvm_start_info to guest memory")]
     StartInfoSetup,
-    /// Failed to compute initramfs address.
+    #[error("Failed to compute initramfs address")]
     InitramfsAddress,
-    /// Error writing module entry to guest memory.
-    ModlistSetup(vm_memory::GuestMemoryError),
-    /// RSDP Beyond Guest Memory
+    #[error("Error writing module entry to guest memory: {0}")]
+    ModlistSetup(#[source] vm_memory::GuestMemoryError),
+    #[error("RSDP extends past the end of guest memory")]
     RsdpPastRamEnd,
 }
 
