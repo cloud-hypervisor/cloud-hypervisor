@@ -44,6 +44,7 @@ use std::os::unix::thread::JoinHandleExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, io, result, thread};
+use thiserror::Error;
 use vm_device::BusDevice;
 use vm_memory::GuestAddress;
 use vm_memory::GuestMemoryAtomic;
@@ -56,75 +57,74 @@ use vmm_sys_util::signal::{register_signal_handler, SIGRTMIN};
 
 pub const CPU_MANAGER_ACPI_SIZE: usize = 0xc;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
-    /// Cannot create the vCPU.
-    VcpuCreate(anyhow::Error),
+    #[error("Error creating vCPU: {0}")]
+    VcpuCreate(#[source] anyhow::Error),
 
-    /// Cannot run the VCPUs.
-    VcpuRun(anyhow::Error),
+    #[error("Error running bCPU: {0}")]
+    VcpuRun(#[source] anyhow::Error),
 
-    /// Cannot spawn a new vCPU thread.
-    VcpuSpawn(io::Error),
+    #[error("Error spawning vCPU thread: {0}")]
+    VcpuSpawn(#[source] io::Error),
 
-    /// Cannot generate common CPUID
-    CommonCpuId(arch::Error),
+    #[error("Error generating common CPUID: {0}")]
+    CommonCpuId(#[source] arch::Error),
 
-    /// Error configuring VCPU
-    VcpuConfiguration(arch::Error),
-
-    #[cfg(target_arch = "aarch64")]
-    /// Error fetching prefered target
-    VcpuArmPreferredTarget(hypervisor::HypervisorVmError),
+    #[error("Error configuring vCPU: {0}")]
+    VcpuConfiguration(#[source] arch::Error),
 
     #[cfg(target_arch = "aarch64")]
-    /// Error doing vCPU init on Arm.
-    VcpuArmInit(hypervisor::HypervisorCpuError),
+    #[error("Error fetching preferred target: {0}")]
+    VcpuArmPreferredTarget(#[source] hypervisor::HypervisorVmError),
 
-    /// Failed to join on vCPU threads
+    #[cfg(target_arch = "aarch64")]
+    #[error("Error initialising vCPU: {0}")]
+    VcpuArmInit(#[source] hypervisor::HypervisorCpuError),
+
+    #[error("Failed to join on vCPU threads: {0:?}")]
     ThreadCleanup(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
 
-    /// Cannot add legacy device to Bus.
-    BusError(vm_device::BusError),
+    #[error("Error adding CpuManager to MMIO bus: {0}")]
+    BusError(#[source] vm_device::BusError),
 
-    /// Asking for more vCPUs that we can have
+    #[error("Requested vCPUs exceed maximum")]
     DesiredVCpuCountExceedsMax,
 
-    /// Cannot create seccomp filter
-    CreateSeccompFilter(seccompiler::Error),
+    #[error("Cannot create seccomp filter: {0}")]
+    CreateSeccompFilter(#[source] seccompiler::Error),
 
-    /// Cannot apply seccomp filter
-    ApplySeccompFilter(seccompiler::Error),
+    #[error("Cannot apply seccomp filter: {0}")]
+    ApplySeccompFilter(#[source] seccompiler::Error),
 
-    /// Error starting vCPU after restore
-    StartRestoreVcpu(anyhow::Error),
+    #[error("Error starting vCPU after restore: {0}")]
+    StartRestoreVcpu(#[source] anyhow::Error),
 
-    /// Error because an unexpected VmExit type was received.
+    #[error("Unexpected VmExit")]
     UnexpectedVmExit,
 
-    /// Failed to allocate MMIO address
+    #[error("Failed to allocate MMIO address for CpuManager")]
     AllocateMmmioAddress,
 
     #[cfg(feature = "tdx")]
-    InitializeTdx(hypervisor::HypervisorCpuError),
+    #[error("Error initializing TDX: {0}")]
+    InitializeTdx(#[source] hypervisor::HypervisorCpuError),
 
     #[cfg(target_arch = "aarch64")]
-    InitPmu(hypervisor::HypervisorCpuError),
-
-    /// Failed scheduling the thread on the expected CPU set.
-    ScheduleCpuSet,
+    #[error("Error initializing PMU: {0}")]
+    InitPmu(#[source] hypervisor::HypervisorCpuError),
 
     #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
-    /// Error on debug related CPU ops.
-    CpuDebug(hypervisor::HypervisorCpuError),
+    #[error("Error during CPU debug: {0}")]
+    CpuDebug(#[source] hypervisor::HypervisorCpuError),
 
     #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
-    /// Failed to translate guest virtual address.
-    TranslateVirtualAddress(hypervisor::HypervisorCpuError),
+    #[error("Error translating virtual address: {0}")]
+    TranslateVirtualAddress(#[source] hypervisor::HypervisorCpuError),
 
     #[cfg(all(feature = "amx", target_arch = "x86_64"))]
-    /// "Failed to setup AMX.
-    AmxEnable(anyhow::Error),
+    #[error("Error setting up AMX: {0}")]
+    AmxEnable(#[source] anyhow::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
