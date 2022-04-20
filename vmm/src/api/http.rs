@@ -6,7 +6,7 @@
 use crate::api::http_endpoint::{VmActionHandler, VmCreate, VmInfo, VmmPing, VmmShutdown};
 use crate::api::{ApiError, ApiRequest, VmAction};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
-use crate::{Error, Result};
+use crate::{Error as VmmError, Result};
 use micro_http::{Body, HttpServer, MediaType, Method, Request, Response, StatusCode, Version};
 use seccompiler::{apply_filter, SeccompAction};
 use serde_json::Error as SerdeError;
@@ -199,7 +199,7 @@ fn start_http_thread(
 ) -> Result<thread::JoinHandle<Result<()>>> {
     // Retrieve seccomp filter for API thread
     let api_seccomp_filter =
-        get_seccomp_filter(seccomp_action, Thread::Api).map_err(Error::CreateSeccompFilter)?;
+        get_seccomp_filter(seccomp_action, Thread::Api).map_err(VmmError::CreateSeccompFilter)?;
 
     thread::Builder::new()
         .name("http-server".to_string())
@@ -207,7 +207,7 @@ fn start_http_thread(
             // Apply seccomp filter for API thread.
             if !api_seccomp_filter.is_empty() {
                 apply_filter(&api_seccomp_filter)
-                    .map_err(Error::ApplySeccompFilter)
+                    .map_err(VmmError::ApplySeccompFilter)
                     .map_err(|e| {
                         error!("Error applying seccomp filter: {:?}", e);
                         exit_evt.write(1).ok();
@@ -245,7 +245,7 @@ fn start_http_thread(
 
             Ok(())
         })
-        .map_err(Error::HttpThreadSpawn)
+        .map_err(VmmError::HttpThreadSpawn)
 }
 
 pub fn start_http_path_thread(
@@ -257,9 +257,9 @@ pub fn start_http_path_thread(
 ) -> Result<thread::JoinHandle<Result<()>>> {
     std::fs::remove_file(path).unwrap_or_default();
     let socket_path = PathBuf::from(path);
-    let socket_fd = UnixListener::bind(socket_path).map_err(Error::CreateApiServerSocket)?;
+    let socket_fd = UnixListener::bind(socket_path).map_err(VmmError::CreateApiServerSocket)?;
     let server =
-        HttpServer::new_from_fd(socket_fd.into_raw_fd()).map_err(Error::CreateApiServer)?;
+        HttpServer::new_from_fd(socket_fd.into_raw_fd()).map_err(VmmError::CreateApiServer)?;
     start_http_thread(server, api_notifier, api_sender, seccomp_action, exit_evt)
 }
 
@@ -270,6 +270,6 @@ pub fn start_http_fd_thread(
     seccomp_action: &SeccompAction,
     exit_evt: EventFd,
 ) -> Result<thread::JoinHandle<Result<()>>> {
-    let server = HttpServer::new_from_fd(fd).map_err(Error::CreateApiServer)?;
+    let server = HttpServer::new_from_fd(fd).map_err(VmmError::CreateApiServer)?;
     start_http_thread(server, api_notifier, api_sender, seccomp_action, exit_evt)
 }
