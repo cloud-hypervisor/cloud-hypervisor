@@ -43,7 +43,7 @@ impl EndpointHandler for VmCreate {
 
                         // Call vm_create()
                         match vm_create(api_notifier, api_sender, Arc::new(Mutex::new(vm_config)))
-                            .map_err(HttpError::VmCreate)
+                            .map_err(HttpError::ApiError)
                         {
                             Ok(_) => Response::new(Version::Http11, StatusCode::NoContent),
                             Err(e) => error_response(e, StatusCode::InternalServerError),
@@ -85,30 +85,22 @@ impl EndpointHandler for VmActionHandler {
                     api_notifier,
                     api_sender,
                     Arc::new(serde_json::from_slice(body.raw())?),
-                )
-                .map_err(HttpError::VmAddDevice),
-
+                ),
                 AddDisk(_) => vm_add_disk(
                     api_notifier,
                     api_sender,
                     Arc::new(serde_json::from_slice(body.raw())?),
-                )
-                .map_err(HttpError::VmAddDisk),
-
+                ),
                 AddFs(_) => vm_add_fs(
                     api_notifier,
                     api_sender,
                     Arc::new(serde_json::from_slice(body.raw())?),
-                )
-                .map_err(HttpError::VmAddFs),
-
+                ),
                 AddPmem(_) => vm_add_pmem(
                     api_notifier,
                     api_sender,
                     Arc::new(serde_json::from_slice(body.raw())?),
-                )
-                .map_err(HttpError::VmAddPmem),
-
+                ),
                 AddNet(_) => {
                     let mut net_cfg: NetConfig = serde_json::from_slice(body.raw())?;
                     // Update network config with optional files that might have
@@ -118,95 +110,73 @@ impl EndpointHandler for VmActionHandler {
                         net_cfg.fds = Some(fds);
                     }
                     vm_add_net(api_notifier, api_sender, Arc::new(net_cfg))
-                        .map_err(HttpError::VmAddNet)
                 }
-
                 AddVdpa(_) => vm_add_vdpa(
                     api_notifier,
                     api_sender,
                     Arc::new(serde_json::from_slice(body.raw())?),
-                )
-                .map_err(HttpError::VmAddVdpa),
-
+                ),
                 AddVsock(_) => vm_add_vsock(
                     api_notifier,
                     api_sender,
                     Arc::new(serde_json::from_slice(body.raw())?),
-                )
-                .map_err(HttpError::VmAddVsock),
-
+                ),
                 AddUserDevice(_) => vm_add_user_device(
                     api_notifier,
                     api_sender,
                     Arc::new(serde_json::from_slice(body.raw())?),
-                )
-                .map_err(HttpError::VmAddUserDevice),
-
+                ),
                 RemoveDevice(_) => vm_remove_device(
                     api_notifier,
                     api_sender,
                     Arc::new(serde_json::from_slice(body.raw())?),
-                )
-                .map_err(HttpError::VmRemoveDevice),
-
+                ),
                 Resize(_) => vm_resize(
                     api_notifier,
                     api_sender,
                     Arc::new(serde_json::from_slice(body.raw())?),
-                )
-                .map_err(HttpError::VmResize),
-
+                ),
                 ResizeZone(_) => vm_resize_zone(
                     api_notifier,
                     api_sender,
                     Arc::new(serde_json::from_slice(body.raw())?),
-                )
-                .map_err(HttpError::VmResizeZone),
-
+                ),
                 Restore(_) => vm_restore(
                     api_notifier,
                     api_sender,
                     Arc::new(serde_json::from_slice(body.raw())?),
-                )
-                .map_err(HttpError::VmRestore),
-
+                ),
                 Snapshot(_) => vm_snapshot(
                     api_notifier,
                     api_sender,
                     Arc::new(serde_json::from_slice(body.raw())?),
-                )
-                .map_err(HttpError::VmSnapshot),
-
+                ),
                 ReceiveMigration(_) => vm_receive_migration(
                     api_notifier,
                     api_sender,
                     Arc::new(serde_json::from_slice(body.raw())?),
-                )
-                .map_err(HttpError::VmReceiveMigration),
-
+                ),
                 SendMigration(_) => vm_send_migration(
                     api_notifier,
                     api_sender,
                     Arc::new(serde_json::from_slice(body.raw())?),
-                )
-                .map_err(HttpError::VmSendMigration),
+                ),
 
-                _ => Err(HttpError::BadRequest),
+                _ => return Err(HttpError::BadRequest),
             }
         } else {
             match self.action {
-                Boot => vm_boot(api_notifier, api_sender).map_err(HttpError::VmBoot),
-                Delete => vm_delete(api_notifier, api_sender).map_err(HttpError::VmDelete),
-                Shutdown => vm_shutdown(api_notifier, api_sender).map_err(HttpError::VmShutdown),
-                Reboot => vm_reboot(api_notifier, api_sender).map_err(HttpError::VmReboot),
-                Pause => vm_pause(api_notifier, api_sender).map_err(HttpError::VmPause),
-                Resume => vm_resume(api_notifier, api_sender).map_err(HttpError::VmResume),
-                PowerButton => {
-                    vm_power_button(api_notifier, api_sender).map_err(HttpError::VmPowerButton)
-                }
-                _ => Err(HttpError::BadRequest),
+                Boot => vm_boot(api_notifier, api_sender),
+                Delete => vm_delete(api_notifier, api_sender),
+                Shutdown => vm_shutdown(api_notifier, api_sender),
+                Reboot => vm_reboot(api_notifier, api_sender),
+                Pause => vm_pause(api_notifier, api_sender),
+                Resume => vm_resume(api_notifier, api_sender),
+                PowerButton => vm_power_button(api_notifier, api_sender),
+                _ => return Err(HttpError::BadRequest),
             }
         }
+        .map_err(HttpError::ApiError)
     }
 
     fn get_handler(
@@ -217,7 +187,7 @@ impl EndpointHandler for VmActionHandler {
     ) -> std::result::Result<Option<Body>, HttpError> {
         use VmAction::*;
         match self.action {
-            Counters => vm_counters(api_notifier, api_sender).map_err(HttpError::VmCounters),
+            Counters => vm_counters(api_notifier, api_sender).map_err(HttpError::ApiError),
             _ => Err(HttpError::BadRequest),
         }
     }
@@ -234,7 +204,7 @@ impl EndpointHandler for VmInfo {
         api_sender: Sender<ApiRequest>,
     ) -> Response {
         match req.method() {
-            Method::Get => match vm_info(api_notifier, api_sender).map_err(HttpError::VmInfo) {
+            Method::Get => match vm_info(api_notifier, api_sender).map_err(HttpError::ApiError) {
                 Ok(info) => {
                     let mut response = Response::new(Version::Http11, StatusCode::OK);
                     let info_serialized = serde_json::to_string(&info).unwrap();
@@ -260,7 +230,7 @@ impl EndpointHandler for VmmPing {
         api_sender: Sender<ApiRequest>,
     ) -> Response {
         match req.method() {
-            Method::Get => match vmm_ping(api_notifier, api_sender).map_err(HttpError::VmmPing) {
+            Method::Get => match vmm_ping(api_notifier, api_sender).map_err(HttpError::ApiError) {
                 Ok(pong) => {
                     let mut response = Response::new(Version::Http11, StatusCode::OK);
                     let info_serialized = serde_json::to_string(&pong).unwrap();
@@ -288,7 +258,7 @@ impl EndpointHandler for VmmShutdown {
     ) -> Response {
         match req.method() {
             Method::Put => {
-                match vmm_shutdown(api_notifier, api_sender).map_err(HttpError::VmmShutdown) {
+                match vmm_shutdown(api_notifier, api_sender).map_err(HttpError::ApiError) {
                     Ok(_) => Response::new(Version::Http11, StatusCode::OK),
                     Err(e) => error_response(e, StatusCode::InternalServerError),
                 }
