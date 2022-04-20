@@ -339,7 +339,7 @@ impl RegionTableEntry {
     pub fn new(buffer: &[u8]) -> Result<RegionTableEntry> {
         let mut region_table_entry = unsafe { *(buffer.as_ptr() as *mut RegionTableEntry) };
 
-        let uuid = crate::uuid_from_guid(buffer).map_err(VhdxHeaderError::InvalidUuid)?;
+        let uuid = crate::uuid_from_guid(buffer);
         region_table_entry.guid = uuid;
 
         Ok(region_table_entry)
