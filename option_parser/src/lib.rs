@@ -77,7 +77,7 @@ impl OptionParser {
         }
 
         for option in split_commas_outside_brackets(input)?.iter() {
-            let parts: Vec<&str> = option.split('=').collect();
+            let parts: Vec<&str> = option.splitn(2, '=').collect();
 
             match self.options.get_mut(parts[0]) {
                 None => return Err(OptionParserError::UnknownOption(parts[0].to_owned())),
