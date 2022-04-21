@@ -621,6 +621,8 @@ pub struct PlatformConfig {
     pub num_pci_segments: u16,
     #[serde(default)]
     pub iommu_segments: Option<Vec<u16>>,
+    #[serde(default)]
+    pub serial_number: Option<String>,
 }
 
 impl PlatformConfig {
@@ -628,6 +630,7 @@ impl PlatformConfig {
         let mut parser = OptionParser::new();
         parser.add("num_pci_segments");
         parser.add("iommu_segments");
+        parser.add("serial_number");
         parser.parse(platform).map_err(Error::ParsePlatform)?;
 
         let num_pci_segments: u16 = parser
@@ -638,9 +641,13 @@ impl PlatformConfig {
             .convert::<IntegerList>("iommu_segments")
             .map_err(Error::ParsePlatform)?
             .map(|v| v.0.iter().map(|e| *e as u16).collect());
+        let serial_number = parser
+            .convert("serial_number")
+            .map_err(Error::ParsePlatform)?;
         Ok(PlatformConfig {
             num_pci_segments,
             iommu_segments,
+            serial_number,
         })
     }
 
@@ -668,6 +675,7 @@ impl Default for PlatformConfig {
         PlatformConfig {
             num_pci_segments: DEFAULT_NUM_PCI_SEGMENTS,
             iommu_segments: None,
+            serial_number: None,
         }
     }
 }
@@ -3498,6 +3506,7 @@ mod tests {
         still_valid_config.platform = Some(PlatformConfig {
             num_pci_segments: 16,
             iommu_segments: Some(vec![1, 2, 3]),
+            ..Default::default()
         });
         assert!(still_valid_config.validate().is_ok());
 
@@ -3505,6 +3514,7 @@ mod tests {
         invalid_config.platform = Some(PlatformConfig {
             num_pci_segments: 16,
             iommu_segments: Some(vec![17, 18]),
+            ..Default::default()
         });
         assert_eq!(
             invalid_config.validate(),
@@ -3515,6 +3525,7 @@ mod tests {
         still_valid_config.platform = Some(PlatformConfig {
             num_pci_segments: 16,
             iommu_segments: Some(vec![1, 2, 3]),
+            ..Default::default()
         });
         still_valid_config.disks = Some(vec![DiskConfig {
             iommu: true,
@@ -3527,6 +3538,7 @@ mod tests {
         still_valid_config.platform = Some(PlatformConfig {
             num_pci_segments: 16,
             iommu_segments: Some(vec![1, 2, 3]),
+            ..Default::default()
         });
         still_valid_config.net = Some(vec![NetConfig {
             iommu: true,
@@ -3539,6 +3551,7 @@ mod tests {
         still_valid_config.platform = Some(PlatformConfig {
             num_pci_segments: 16,
             iommu_segments: Some(vec![1, 2, 3]),
+            ..Default::default()
         });
         still_valid_config.pmem = Some(vec![PmemConfig {
             iommu: true,
@@ -3551,6 +3564,7 @@ mod tests {
         still_valid_config.platform = Some(PlatformConfig {
             num_pci_segments: 16,
             iommu_segments: Some(vec![1, 2, 3]),
+            ..Default::default()
         });
         still_valid_config.devices = Some(vec![DeviceConfig {
             iommu: true,
@@ -3563,6 +3577,7 @@ mod tests {
         still_valid_config.platform = Some(PlatformConfig {
             num_pci_segments: 16,
             iommu_segments: Some(vec![1, 2, 3]),
+            ..Default::default()
         });
         still_valid_config.vsock = Some(VsockConfig {
             iommu: true,
@@ -3575,6 +3590,7 @@ mod tests {
         invalid_config.platform = Some(PlatformConfig {
             num_pci_segments: 16,
             iommu_segments: Some(vec![1, 2, 3]),
+            ..Default::default()
         });
         invalid_config.disks = Some(vec![DiskConfig {
             iommu: false,
@@ -3590,6 +3606,7 @@ mod tests {
         invalid_config.platform = Some(PlatformConfig {
             num_pci_segments: 16,
             iommu_segments: Some(vec![1, 2, 3]),
+            ..Default::default()
         });
         invalid_config.net = Some(vec![NetConfig {
             iommu: false,
@@ -3605,6 +3622,7 @@ mod tests {
         invalid_config.platform = Some(PlatformConfig {
             num_pci_segments: 16,
             iommu_segments: Some(vec![1, 2, 3]),
+            ..Default::default()
         });
         invalid_config.pmem = Some(vec![PmemConfig {
             iommu: false,
@@ -3620,6 +3638,7 @@ mod tests {
         invalid_config.platform = Some(PlatformConfig {
             num_pci_segments: 16,
             iommu_segments: Some(vec![1, 2, 3]),
+            ..Default::default()
         });
         invalid_config.devices = Some(vec![DeviceConfig {
             iommu: false,
@@ -3635,6 +3654,7 @@ mod tests {
         invalid_config.platform = Some(PlatformConfig {
             num_pci_segments: 16,
             iommu_segments: Some(vec![1, 2, 3]),
+            ..Default::default()
         });
         invalid_config.vsock = Some(VsockConfig {
             iommu: false,
@@ -3651,6 +3671,7 @@ mod tests {
         invalid_config.platform = Some(PlatformConfig {
             num_pci_segments: 16,
             iommu_segments: Some(vec![1, 2, 3]),
+            ..Default::default()
         });
         invalid_config.user_devices = Some(vec![UserDeviceConfig {
             pci_segment: 1,
@@ -3665,6 +3686,7 @@ mod tests {
         invalid_config.platform = Some(PlatformConfig {
             num_pci_segments: 16,
             iommu_segments: Some(vec![1, 2, 3]),
+            ..Default::default()
         });
         invalid_config.vdpa = Some(vec![VdpaConfig {
             pci_segment: 1,
@@ -3680,6 +3702,7 @@ mod tests {
         invalid_config.platform = Some(PlatformConfig {
             num_pci_segments: 16,
             iommu_segments: Some(vec![1, 2, 3]),
+            ..Default::default()
         });
         invalid_config.fs = Some(vec![FsConfig {
             pci_segment: 1,
