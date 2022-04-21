@@ -9,7 +9,7 @@ default = []
 mshv = []
 
 [dependencies]
-anyhow = "1.0.56"
+anyhow = "1.0.57"
 arc-swap = "1.5.0"
 block_util = { path = "../block_util" }
 byteorder = "1.4.3"
