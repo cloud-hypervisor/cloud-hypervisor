@@ -161,7 +161,7 @@ fn create_app<'a>(
             Arg::new("platform")
                 .long("platform")
                 .help(
-                    "num_pci_segments=<num pci segments>,iommu_segments=<list_of_segments>",
+                    "num_pci_segments=<num pci segments>,iommu_segments=<list_of_segments>,serial_number=<(DMI) device serial number>",
                 )
                 .takes_value(true)
                 .group("vm-config"),
