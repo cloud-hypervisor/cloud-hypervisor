@@ -2811,6 +2811,42 @@ mod parallel {
     }
 
     #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_dmi_serial_number() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+
+        let mut child = GuestCommand::new(&guest)
+            .args(&["--cpus", "boot=1"])
+            .args(&["--memory", "size=512M"])
+            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(&["--platform", "serial_number=a=b;c=d"])
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            assert_eq!(
+                guest
+                    .ssh_command("sudo cat /sys/class/dmi/id/product_serial")
+                    .unwrap()
+                    .trim(),
+                "a=b;c=d"
+            );
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
     fn test_virtio_fs_dax_off() {
         test_virtio_fs(false, None, "never", &prepare_virtiofsd, false, None)
     }
