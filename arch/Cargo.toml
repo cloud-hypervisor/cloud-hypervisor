@@ -10,7 +10,7 @@ tdx = []
 
 [dependencies]
 acpi_tables = { path = "../acpi_tables" }
-anyhow = "1.0.56"
+anyhow = "1.0.57"
 byteorder = "1.4.3"
 hypervisor = { path = "../hypervisor" }
 libc = "0.2.124"
