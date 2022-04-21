@@ -1115,6 +1115,14 @@ impl Vm {
             .as_ref()
             .cloned();
 
+        let serial_number = self
+            .config
+            .lock()
+            .unwrap()
+            .platform
+            .as_ref()
+            .and_then(|p| p.serial_number.clone());
+
         arch::configure_system(
             &mem,
             arch::layout::CMDLINE_START,
@@ -1122,6 +1130,7 @@ impl Vm {
             boot_vcpus,
             rsdp_addr,
             sgx_epc_region,
+            serial_number.as_deref(),
         )
         .map_err(Error::ConfigureSystem)?;
         Ok(())

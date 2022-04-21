@@ -162,7 +162,7 @@ fn write_string(
     Ok(curptr)
 }
 
-pub fn setup_smbios(mem: &GuestMemoryMmap) -> Result<u64> {
+pub fn setup_smbios(mem: &GuestMemoryMmap, serial_number: Option<&str>) -> Result<u64> {
     let physptr = GuestAddress(SMBIOS_START)
         .checked_add(mem::size_of::<Smbios30Entrypoint>() as u64)
         .ok_or(Error::NotEnoughMemory)?;
@@ -195,11 +195,15 @@ pub fn setup_smbios(mem: &GuestMemoryMmap) -> Result<u64> {
             handle,
             manufacturer: 1, // First string written in this section
             product_name: 2, // Second string written in this section
+            serial_number: serial_number.map(|_| 3).unwrap_or_default(), // 3rd string
             ..Default::default()
         };
         curptr = write_and_incr(mem, smbios_sysinfo, curptr)?;
         curptr = write_string(mem, "Cloud Hypervisor", curptr)?;
         curptr = write_string(mem, "cloud-hypervisor", curptr)?;
+        if let Some(serial_number) = serial_number {
+            curptr = write_string(mem, serial_number, curptr)?;
+        }
         curptr = write_and_incr(mem, 0u8, curptr)?;
     }
 
@@ -263,7 +267,7 @@ mod tests {
     fn entrypoint_checksum() {
         let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(SMBIOS_START), 4096)]).unwrap();
 
-        setup_smbios(&mem).unwrap();
+        setup_smbios(&mem, None).unwrap();
 
         let smbios_ep: Smbios30Entrypoint = mem.read_obj(GuestAddress(SMBIOS_START)).unwrap();
 
