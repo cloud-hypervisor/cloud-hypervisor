@@ -15,7 +15,7 @@ use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use std::result;
 use std::str::FromStr;
-
+use thiserror::Error;
 use virtio_devices::{RateLimiterConfig, TokenBucketConfig};
 
 pub const DEFAULT_VCPUS: u8 = 1;
@@ -36,7 +36,7 @@ pub const DEFAULT_NUM_PCI_SEGMENTS: u16 = 1;
 const MAX_NUM_PCI_SEGMENTS: u16 = 16;
 
 /// Errors associated with VM configuration parameters.
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
     /// Filesystem tag is missing
     ParseFsTagMissing,
@@ -114,7 +114,7 @@ pub enum Error {
     ParseVdpaPathMissing,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Error)]
 pub enum ValidationError {
     /// Both console and serial are tty.
     DoubleTtyMode,
