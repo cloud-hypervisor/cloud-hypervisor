@@ -32,7 +32,6 @@ pub struct VfioUserPciDevice {
     id: String,
     vm: Arc<dyn hypervisor::Vm>,
     client: Arc<Mutex<Client>>,
-    vfio_wrapper: VfioUserClientWrapper,
     common: VfioCommon,
 }
 
@@ -106,18 +105,18 @@ impl VfioUserPciDevice {
             },
             msi_interrupt_manager,
             legacy_interrupt_group,
+            vfio_wrapper: Arc::new(vfio_wrapper) as Arc<dyn Vfio>,
         };
 
-        common.parse_capabilities(&vfio_wrapper, bdf);
+        common.parse_capabilities(bdf);
         common
-            .initialize_legacy_interrupt(&vfio_wrapper)
+            .initialize_legacy_interrupt()
             .map_err(VfioUserPciDeviceError::InitializeLegacyInterrupts)?;
 
         Ok(Self {
             id,
             vm: vm.clone(),
             client,
-            vfio_wrapper,
             common,
         })
     }
@@ -399,7 +398,7 @@ impl PciDevice for VfioUserPciDevice {
         resources: Option<Vec<Resource>>,
     ) -> Result<Vec<PciBarConfiguration>, PciDeviceError> {
         self.common
-            .allocate_bars(allocator, mmio_allocator, &self.vfio_wrapper, resources)
+            .allocate_bars(allocator, mmio_allocator, resources)
     }
 
     fn free_bars(
@@ -430,22 +429,19 @@ impl PciDevice for VfioUserPciDevice {
         offset: u64,
         data: &[u8],
     ) -> Option<Arc<Barrier>> {
-        self.common
-            .write_config_register(reg_idx, offset, data, &self.vfio_wrapper)
+        self.common.write_config_register(reg_idx, offset, data)
     }
 
     fn read_config_register(&mut self, reg_idx: usize) -> u32 {
-        self.common
-            .read_config_register(reg_idx, &self.vfio_wrapper)
+        self.common.read_config_register(reg_idx)
     }
 
     fn read_bar(&mut self, base: u64, offset: u64, data: &mut [u8]) {
-        self.common.read_bar(base, offset, data, &self.vfio_wrapper)
+        self.common.read_bar(base, offset, data)
     }
 
     fn write_bar(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
-        self.common
-            .write_bar(base, offset, data, &self.vfio_wrapper)
+        self.common.write_bar(base, offset, data)
     }
 
     fn move_bar(&mut self, old_base: u64, new_base: u64) -> Result<(), std::io::Error> {
@@ -502,18 +498,18 @@ impl Drop for VfioUserPciDevice {
 
         if let Some(msix) = &self.common.interrupt.msix {
             if msix.bar.enabled() {
-                self.common.disable_msix(&self.vfio_wrapper);
+                self.common.disable_msix();
             }
         }
 
         if let Some(msi) = &self.common.interrupt.msi {
             if msi.cfg.enabled() {
-                self.common.disable_msi(&self.vfio_wrapper)
+                self.common.disable_msi()
             }
         }
 
         if self.common.interrupt.intx_in_use() {
-            self.common.disable_intx(&self.vfio_wrapper);
+            self.common.disable_intx();
         }
 
         if let Err(e) = self.client.lock().unwrap().shutdown() {

@@ -236,7 +236,7 @@ pub enum VfioError {
     VfioUser(#[source] vfio_user::Error),
 }
 
-pub(crate) trait Vfio {
+pub(crate) trait Vfio: Send + Sync {
     fn read_config_byte(&self, offset: u32) -> u8 {
         let mut data: [u8; 1] = [0];
         self.read_config(offset, &mut data);
@@ -357,6 +357,7 @@ pub(crate) struct VfioCommon {
     pub(crate) interrupt: Interrupt,
     pub(crate) msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
     pub(crate) legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
+    pub(crate) vfio_wrapper: Arc<dyn Vfio>,
 }
 
 impl VfioCommon {
@@ -364,7 +365,6 @@ impl VfioCommon {
         &mut self,
         allocator: &Arc<Mutex<SystemAllocator>>,
         mmio_allocator: &mut AddressAllocator,
-        vfio_wrapper: &dyn Vfio,
         resources: Option<Vec<Resource>>,
     ) -> Result<Vec<PciBarConfiguration>, PciDeviceError> {
         let mut bars = Vec::new();
@@ -410,7 +410,7 @@ impl VfioCommon {
                 };
 
                 // First read flags
-                flags = vfio_wrapper.read_config_dword(bar_offset);
+                flags = self.vfio_wrapper.read_config_dword(bar_offset);
 
                 // Is this an IO BAR?
                 let io_bar = if bar_id != VFIO_PCI_ROM_REGION_INDEX {
@@ -430,10 +430,11 @@ impl VfioCommon {
                 };
 
                 // To get size write all 1s
-                vfio_wrapper.write_config_dword(bar_offset, 0xffff_ffff);
+                self.vfio_wrapper
+                    .write_config_dword(bar_offset, 0xffff_ffff);
 
                 // And read back BAR value. The device will write zeros for bits it doesn't care about
-                let mut lower = vfio_wrapper.read_config_dword(bar_offset);
+                let mut lower = self.vfio_wrapper.read_config_dword(bar_offset);
 
                 if io_bar {
                     // Mask flag bits (lowest 2 for I/O bars)
@@ -456,8 +457,9 @@ impl VfioCommon {
 
                     // Query size of upper BAR of 64-bit BAR
                     let upper_offset: u32 = PCI_CONFIG_BAR_OFFSET + (bar_id + 1) * 4;
-                    vfio_wrapper.write_config_dword(upper_offset, 0xffff_ffff);
-                    let upper = vfio_wrapper.read_config_dword(upper_offset);
+                    self.vfio_wrapper
+                        .write_config_dword(upper_offset, 0xffff_ffff);
+                    let upper = self.vfio_wrapper.read_config_dword(upper_offset);
 
                     let mut combined_size = u64::from(upper) << 32 | u64::from(lower);
 
@@ -583,12 +585,12 @@ impl VfioCommon {
         Ok(())
     }
 
-    pub(crate) fn parse_msix_capabilities(&mut self, cap: u8, vfio_wrapper: &dyn Vfio) -> MsixCap {
-        let msg_ctl = vfio_wrapper.read_config_word((cap + 2).into());
+    pub(crate) fn parse_msix_capabilities(&mut self, cap: u8) -> MsixCap {
+        let msg_ctl = self.vfio_wrapper.read_config_word((cap + 2).into());
 
-        let table = vfio_wrapper.read_config_dword((cap + 4).into());
+        let table = self.vfio_wrapper.read_config_dword((cap + 4).into());
 
-        let pba = vfio_wrapper.read_config_dword((cap + 8).into());
+        let pba = self.vfio_wrapper.read_config_dword((cap + 8).into());
 
         MsixCap {
             msg_ctl,
@@ -620,8 +622,8 @@ impl VfioCommon {
         });
     }
 
-    pub(crate) fn parse_msi_capabilities(&mut self, cap: u8, vfio_wrapper: &dyn Vfio) -> u16 {
-        vfio_wrapper.read_config_word((cap + 2).into())
+    pub(crate) fn parse_msi_capabilities(&mut self, cap: u8) -> u16 {
+        self.vfio_wrapper.read_config_word((cap + 2).into())
     }
 
     pub(crate) fn initialize_msi(&mut self, msg_ctl: u16, cap_offset: u32) {
@@ -642,29 +644,32 @@ impl VfioCommon {
         });
     }
 
-    pub(crate) fn parse_capabilities(&mut self, vfio_wrapper: &dyn Vfio, bdf: PciBdf) {
-        let mut cap_next = vfio_wrapper.read_config_byte(PCI_CONFIG_CAPABILITY_OFFSET);
+    pub(crate) fn parse_capabilities(&mut self, bdf: PciBdf) {
+        let mut cap_next = self
+            .vfio_wrapper
+            .read_config_byte(PCI_CONFIG_CAPABILITY_OFFSET);
 
         while cap_next != 0 {
-            let cap_id = vfio_wrapper.read_config_byte(cap_next.into());
+            let cap_id = self.vfio_wrapper.read_config_byte(cap_next.into());
 
             match PciCapabilityId::from(cap_id) {
                 PciCapabilityId::MessageSignalledInterrupts => {
-                    if let Some(irq_info) = vfio_wrapper.get_irq_info(VFIO_PCI_MSI_IRQ_INDEX) {
+                    if let Some(irq_info) = self.vfio_wrapper.get_irq_info(VFIO_PCI_MSI_IRQ_INDEX) {
                         if irq_info.count > 0 {
                             // Parse capability only if the VFIO device
                             // supports MSI.
-                            let msg_ctl = self.parse_msi_capabilities(cap_next, vfio_wrapper);
+                            let msg_ctl = self.parse_msi_capabilities(cap_next);
                             self.initialize_msi(msg_ctl, cap_next as u32);
                         }
                     }
                 }
                 PciCapabilityId::MsiX => {
-                    if let Some(irq_info) = vfio_wrapper.get_irq_info(VFIO_PCI_MSIX_IRQ_INDEX) {
+                    if let Some(irq_info) = self.vfio_wrapper.get_irq_info(VFIO_PCI_MSIX_IRQ_INDEX)
+                    {
                         if irq_info.count > 0 {
                             // Parse capability only if the VFIO device
                             // supports MSI-X.
-                            let msix_cap = self.parse_msix_capabilities(cap_next, vfio_wrapper);
+                            let msix_cap = self.parse_msix_capabilities(cap_next);
                             self.initialize_msix(msix_cap, cap_next as u32, bdf);
                         }
                     }
@@ -672,15 +677,15 @@ impl VfioCommon {
                 _ => {}
             };
 
-            cap_next = vfio_wrapper.read_config_byte((cap_next + 1).into());
+            cap_next = self.vfio_wrapper.read_config_byte((cap_next + 1).into());
         }
     }
 
-    pub(crate) fn enable_intx(&mut self, wrapper: &dyn Vfio) -> Result<(), VfioPciError> {
+    pub(crate) fn enable_intx(&mut self) -> Result<(), VfioPciError> {
         if let Some(intx) = &mut self.interrupt.intx {
             if !intx.enabled {
                 if let Some(eventfd) = intx.interrupt_source_group.notifier(0) {
-                    wrapper
+                    self.vfio_wrapper
                         .enable_irq(VFIO_PCI_INTX_IRQ_INDEX, vec![&eventfd])
                         .map_err(VfioPciError::EnableIntx)?;
 
@@ -694,10 +699,10 @@ impl VfioCommon {
         Ok(())
     }
 
-    pub(crate) fn disable_intx(&mut self, wrapper: &dyn Vfio) {
+    pub(crate) fn disable_intx(&mut self) {
         if let Some(intx) = &mut self.interrupt.intx {
             if intx.enabled {
-                if let Err(e) = wrapper.disable_irq(VFIO_PCI_INTX_IRQ_INDEX) {
+                if let Err(e) = self.vfio_wrapper.disable_irq(VFIO_PCI_INTX_IRQ_INDEX) {
                     error!("Could not disable INTx: {}", e);
                 } else {
                     intx.enabled = false;
@@ -706,7 +711,7 @@ impl VfioCommon {
         }
     }
 
-    pub(crate) fn enable_msi(&self, wrapper: &dyn Vfio) -> Result<(), VfioPciError> {
+    pub(crate) fn enable_msi(&self) -> Result<(), VfioPciError> {
         if let Some(msi) = &self.interrupt.msi {
             let mut irq_fds: Vec<EventFd> = Vec::new();
             for i in 0..msi.cfg.num_enabled_vectors() {
@@ -717,7 +722,7 @@ impl VfioCommon {
                 }
             }
 
-            wrapper
+            self.vfio_wrapper
                 .enable_msi(irq_fds.iter().collect())
                 .map_err(VfioPciError::EnableMsi)?;
         }
@@ -725,13 +730,13 @@ impl VfioCommon {
         Ok(())
     }
 
-    pub(crate) fn disable_msi(&self, wrapper: &dyn Vfio) {
-        if let Err(e) = wrapper.disable_msi() {
+    pub(crate) fn disable_msi(&self) {
+        if let Err(e) = self.vfio_wrapper.disable_msi() {
             error!("Could not disable MSI: {}", e);
         }
     }
 
-    pub(crate) fn enable_msix(&self, wrapper: &dyn Vfio) -> Result<(), VfioPciError> {
+    pub(crate) fn enable_msix(&self) -> Result<(), VfioPciError> {
         if let Some(msix) = &self.interrupt.msix {
             let mut irq_fds: Vec<EventFd> = Vec::new();
             for i in 0..msix.bar.table_entries.len() {
@@ -742,7 +747,7 @@ impl VfioCommon {
                 }
             }
 
-            wrapper
+            self.vfio_wrapper
                 .enable_msix(irq_fds.iter().collect())
                 .map_err(VfioPciError::EnableMsix)?;
         }
@@ -750,17 +755,14 @@ impl VfioCommon {
         Ok(())
     }
 
-    pub(crate) fn disable_msix(&self, wrapper: &dyn Vfio) {
-        if let Err(e) = wrapper.disable_msix() {
+    pub(crate) fn disable_msix(&self) {
+        if let Err(e) = self.vfio_wrapper.disable_msix() {
             error!("Could not disable MSI-X: {}", e);
         }
     }
 
-    pub(crate) fn initialize_legacy_interrupt(
-        &mut self,
-        wrapper: &dyn Vfio,
-    ) -> Result<(), VfioPciError> {
-        if let Some(irq_info) = wrapper.get_irq_info(VFIO_PCI_INTX_IRQ_INDEX) {
+    pub(crate) fn initialize_legacy_interrupt(&mut self) -> Result<(), VfioPciError> {
+        if let Some(irq_info) = self.vfio_wrapper.get_irq_info(VFIO_PCI_INTX_IRQ_INDEX) {
             if irq_info.count == 0 {
                 // A count of 0 means the INTx IRQ is not supported, therefore
                 // it shouldn't be initialized.
@@ -774,7 +776,7 @@ impl VfioCommon {
                 enabled: false,
             });
 
-            self.enable_intx(wrapper)?;
+            self.enable_intx()?;
         }
 
         Ok(())
@@ -784,18 +786,17 @@ impl VfioCommon {
         &mut self,
         offset: u64,
         data: &[u8],
-        wrapper: &dyn Vfio,
     ) -> Result<(), VfioPciError> {
         match self.interrupt.update_msi(offset, data) {
             Some(InterruptUpdateAction::EnableMsi) => {
                 // Disable INTx before we can enable MSI
-                self.disable_intx(wrapper);
-                self.enable_msi(wrapper)?;
+                self.disable_intx();
+                self.enable_msi()?;
             }
             Some(InterruptUpdateAction::DisableMsi) => {
                 // Fallback onto INTx when disabling MSI
-                self.disable_msi(wrapper);
-                self.enable_intx(wrapper)?;
+                self.disable_msi();
+                self.enable_intx()?;
             }
             _ => {}
         }
@@ -807,18 +808,17 @@ impl VfioCommon {
         &mut self,
         offset: u64,
         data: &[u8],
-        wrapper: &dyn Vfio,
     ) -> Result<(), VfioPciError> {
         match self.interrupt.update_msix(offset, data) {
             Some(InterruptUpdateAction::EnableMsix) => {
                 // Disable INTx before we can enable MSI-X
-                self.disable_intx(wrapper);
-                self.enable_msix(wrapper)?;
+                self.disable_intx();
+                self.enable_msix()?;
             }
             Some(InterruptUpdateAction::DisableMsix) => {
                 // Fallback onto INTx when disabling MSI-X
-                self.disable_msix(wrapper);
-                self.enable_intx(wrapper)?;
+                self.disable_msix();
+                self.enable_intx()?;
             }
             _ => {}
         }
@@ -837,7 +837,7 @@ impl VfioCommon {
         None
     }
 
-    pub(crate) fn read_bar(&mut self, base: u64, offset: u64, data: &mut [u8], wrapper: &dyn Vfio) {
+    pub(crate) fn read_bar(&mut self, base: u64, offset: u64, data: &mut [u8]) {
         let addr = base + offset;
         if let Some(region) = self.find_region(addr) {
             let offset = addr - region.start.raw_value();
@@ -845,7 +845,7 @@ impl VfioCommon {
             if self.interrupt.msix_table_accessed(region.index, offset) {
                 self.interrupt.msix_read_table(offset, data);
             } else {
-                wrapper.region_read(region.index, offset, data);
+                self.vfio_wrapper.region_read(region.index, offset, data);
             }
         }
 
@@ -853,7 +853,7 @@ impl VfioCommon {
         // The guest reading from the BAR potentially means the interrupt has
         // been received and can be acknowledged.
         if self.interrupt.intx_in_use() {
-            if let Err(e) = wrapper.unmask_irq(VFIO_PCI_INTX_IRQ_INDEX) {
+            if let Err(e) = self.vfio_wrapper.unmask_irq(VFIO_PCI_INTX_IRQ_INDEX) {
                 error!("Failed unmasking INTx IRQ: {}", e);
             }
         }
@@ -864,7 +864,6 @@ impl VfioCommon {
         base: u64,
         offset: u64,
         data: &[u8],
-        wrapper: &dyn Vfio,
     ) -> Option<Arc<Barrier>> {
         let addr = base + offset;
         if let Some(region) = self.find_region(addr) {
@@ -874,7 +873,7 @@ impl VfioCommon {
             if self.interrupt.msix_table_accessed(region.index, offset) {
                 self.interrupt.msix_write_table(offset, data);
             } else {
-                wrapper.region_write(region.index, offset, data);
+                self.vfio_wrapper.region_write(region.index, offset, data);
             }
         }
 
@@ -882,7 +881,7 @@ impl VfioCommon {
         // The guest writing to the BAR potentially means the interrupt has
         // been received and can be acknowledged.
         if self.interrupt.intx_in_use() {
-            if let Err(e) = wrapper.unmask_irq(VFIO_PCI_INTX_IRQ_INDEX) {
+            if let Err(e) = self.vfio_wrapper.unmask_irq(VFIO_PCI_INTX_IRQ_INDEX) {
                 error!("Failed unmasking INTx IRQ: {}", e);
             }
         }
@@ -895,7 +894,6 @@ impl VfioCommon {
         reg_idx: usize,
         offset: u64,
         data: &[u8],
-        wrapper: &dyn Vfio,
     ) -> Option<Arc<Barrier>> {
         // When the guest wants to write to a BAR, we trap it into
         // our local configuration space. We're not reprogramming
@@ -921,12 +919,12 @@ impl VfioCommon {
             let cap_offset: u64 = reg - cap_base + offset;
             match cap_id {
                 PciCapabilityId::MessageSignalledInterrupts => {
-                    if let Err(e) = self.update_msi_capabilities(cap_offset, data, wrapper) {
+                    if let Err(e) = self.update_msi_capabilities(cap_offset, data) {
                         error!("Could not update MSI capabilities: {}", e);
                     }
                 }
                 PciCapabilityId::MsiX => {
-                    if let Err(e) = self.update_msix_capabilities(cap_offset, data, wrapper) {
+                    if let Err(e) = self.update_msix_capabilities(cap_offset, data) {
                         error!("Could not update MSI-X capabilities: {}", e);
                     }
                 }
@@ -942,12 +940,12 @@ impl VfioCommon {
         // enabling this bit, we first need to enable the MSI interrupts with
         // VFIO through VFIO_DEVICE_SET_IRQS ioctl, and only after we can write
         // to the device region to update the MSI Enable bit.
-        wrapper.write_config((reg + offset) as u32, data);
+        self.vfio_wrapper.write_config((reg + offset) as u32, data);
 
         None
     }
 
-    pub(crate) fn read_config_register(&mut self, reg_idx: usize, wrapper: &dyn Vfio) -> u32 {
+    pub(crate) fn read_config_register(&mut self, reg_idx: usize) -> u32 {
         // When reading the BARs, we trap it and return what comes
         // from our local configuration space. We want the guest to
         // use that and not the VFIO device BARs as it does not map
@@ -968,7 +966,7 @@ impl VfioCommon {
         };
 
         // The config register read comes from the VFIO device itself.
-        wrapper.read_config_dword((reg_idx * 4) as u32) & mask
+        self.vfio_wrapper.read_config_dword((reg_idx * 4) as u32) & mask
     }
 }
 
@@ -983,7 +981,6 @@ pub struct VfioPciDevice {
     vm: Arc<dyn hypervisor::Vm>,
     device: Arc<VfioDevice>,
     container: Arc<VfioContainer>,
-    vfio_wrapper: VfioDeviceWrapper,
     common: VfioCommon,
     iommu_attached: bool,
 }
@@ -1029,17 +1026,17 @@ impl VfioPciDevice {
             },
             msi_interrupt_manager,
             legacy_interrupt_group,
+            vfio_wrapper: Arc::new(vfio_wrapper) as Arc<dyn Vfio>,
         };
 
-        common.parse_capabilities(&vfio_wrapper, bdf);
-        common.initialize_legacy_interrupt(&vfio_wrapper)?;
+        common.parse_capabilities(bdf);
+        common.initialize_legacy_interrupt()?;
 
         let vfio_pci_device = VfioPciDevice {
             id,
             vm: vm.clone(),
             device,
             container,
-            vfio_wrapper,
             common,
             iommu_attached,
         };
@@ -1299,18 +1296,18 @@ impl Drop for VfioPciDevice {
 
         if let Some(msix) = &self.common.interrupt.msix {
             if msix.bar.enabled() {
-                self.common.disable_msix(&self.vfio_wrapper);
+                self.common.disable_msix();
             }
         }
 
         if let Some(msi) = &self.common.interrupt.msi {
             if msi.cfg.enabled() {
-                self.common.disable_msi(&self.vfio_wrapper)
+                self.common.disable_msi()
             }
         }
 
         if self.common.interrupt.intx_in_use() {
-            self.common.disable_intx(&self.vfio_wrapper);
+            self.common.disable_intx();
         }
     }
 }
@@ -1352,7 +1349,7 @@ impl PciDevice for VfioPciDevice {
         resources: Option<Vec<Resource>>,
     ) -> Result<Vec<PciBarConfiguration>, PciDeviceError> {
         self.common
-            .allocate_bars(allocator, mmio_allocator, &self.vfio_wrapper, resources)
+            .allocate_bars(allocator, mmio_allocator, resources)
     }
 
     fn free_bars(
@@ -1369,13 +1366,11 @@ impl PciDevice for VfioPciDevice {
         offset: u64,
         data: &[u8],
     ) -> Option<Arc<Barrier>> {
-        self.common
-            .write_config_register(reg_idx, offset, data, &self.vfio_wrapper)
+        self.common.write_config_register(reg_idx, offset, data)
     }
 
     fn read_config_register(&mut self, reg_idx: usize) -> u32 {
-        self.common
-            .read_config_register(reg_idx, &self.vfio_wrapper)
+        self.common.read_config_register(reg_idx)
     }
 
     fn detect_bar_reprogramming(
@@ -1389,12 +1384,11 @@ impl PciDevice for VfioPciDevice {
     }
 
     fn read_bar(&mut self, base: u64, offset: u64, data: &mut [u8]) {
-        self.common.read_bar(base, offset, data, &self.vfio_wrapper)
+        self.common.read_bar(base, offset, data)
     }
 
     fn write_bar(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
-        self.common
-            .write_bar(base, offset, data, &self.vfio_wrapper)
+        self.common.write_bar(base, offset, data)
     }
 
     fn move_bar(&mut self, old_base: u64, new_base: u64) -> Result<(), io::Error> {
