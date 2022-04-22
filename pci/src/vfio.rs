@@ -355,6 +355,7 @@ pub(crate) struct VfioCommon {
     pub(crate) configuration: PciConfiguration,
     pub(crate) mmio_regions: Vec<MmioRegion>,
     pub(crate) interrupt: Interrupt,
+    pub(crate) msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
 }
 
 impl VfioCommon {
@@ -595,14 +596,9 @@ impl VfioCommon {
         }
     }
 
-    pub(crate) fn initialize_msix(
-        &mut self,
-        msix_cap: MsixCap,
-        cap_offset: u32,
-        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
-        bdf: PciBdf,
-    ) {
-        let interrupt_source_group = interrupt_manager
+    pub(crate) fn initialize_msix(&mut self, msix_cap: MsixCap, cap_offset: u32, bdf: PciBdf) {
+        let interrupt_source_group = self
+            .msi_interrupt_manager
             .create_group(MsiIrqGroupConfig {
                 base: 0,
                 count: msix_cap.table_size() as InterruptIndex,
@@ -627,13 +623,9 @@ impl VfioCommon {
         vfio_wrapper.read_config_word((cap + 2).into())
     }
 
-    pub(crate) fn initialize_msi(
-        &mut self,
-        msg_ctl: u16,
-        cap_offset: u32,
-        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
-    ) {
-        let interrupt_source_group = interrupt_manager
+    pub(crate) fn initialize_msi(&mut self, msg_ctl: u16, cap_offset: u32) {
+        let interrupt_source_group = self
+            .msi_interrupt_manager
             .create_group(MsiIrqGroupConfig {
                 base: 0,
                 count: msi_num_enabled_vectors(msg_ctl) as InterruptIndex,
@@ -649,12 +641,7 @@ impl VfioCommon {
         });
     }
 
-    pub(crate) fn parse_capabilities(
-        &mut self,
-        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
-        vfio_wrapper: &dyn Vfio,
-        bdf: PciBdf,
-    ) {
+    pub(crate) fn parse_capabilities(&mut self, vfio_wrapper: &dyn Vfio, bdf: PciBdf) {
         let mut cap_next = vfio_wrapper.read_config_byte(PCI_CONFIG_CAPABILITY_OFFSET);
 
         while cap_next != 0 {
@@ -667,7 +654,7 @@ impl VfioCommon {
                             // Parse capability only if the VFIO device
                             // supports MSI.
                             let msg_ctl = self.parse_msi_capabilities(cap_next, vfio_wrapper);
-                            self.initialize_msi(msg_ctl, cap_next as u32, interrupt_manager);
+                            self.initialize_msi(msg_ctl, cap_next as u32);
                         }
                     }
                 }
@@ -677,7 +664,7 @@ impl VfioCommon {
                             // Parse capability only if the VFIO device
                             // supports MSI-X.
                             let msix_cap = self.parse_msix_capabilities(cap_next, vfio_wrapper);
-                            self.initialize_msix(msix_cap, cap_next as u32, interrupt_manager, bdf);
+                            self.initialize_msix(msix_cap, cap_next as u32, bdf);
                         }
                     }
                 }
@@ -1009,7 +996,7 @@ impl VfioPciDevice {
         vm: &Arc<dyn hypervisor::Vm>,
         device: VfioDevice,
         container: Arc<VfioContainer>,
-        msi_interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+        msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
         iommu_attached: bool,
         bdf: PciBdf,
@@ -1040,9 +1027,10 @@ impl VfioPciDevice {
                 msi: None,
                 msix: None,
             },
+            msi_interrupt_manager,
         };
 
-        common.parse_capabilities(msi_interrupt_manager, &vfio_wrapper, bdf);
+        common.parse_capabilities(&vfio_wrapper, bdf);
         common.initialize_legacy_interrupt(legacy_interrupt_group, &vfio_wrapper)?;
 
         let vfio_pci_device = VfioPciDevice {

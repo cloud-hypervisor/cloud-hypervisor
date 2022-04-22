@@ -3181,7 +3181,7 @@ impl DeviceManager {
             &self.address_manager.vm,
             vfio_device,
             vfio_container,
-            &self.msi_interrupt_manager,
+            self.msi_interrupt_manager.clone(),
             legacy_interrupt_group,
             device_cfg.iommu,
             pci_device_bdf,
@@ -3339,7 +3339,7 @@ impl DeviceManager {
             vfio_user_name.clone(),
             &self.address_manager.vm,
             client.clone(),
-            &self.msi_interrupt_manager,
+            self.msi_interrupt_manager.clone(),
             legacy_interrupt_group,
             pci_device_bdf,
         )
