@@ -356,6 +356,7 @@ pub(crate) struct VfioCommon {
     pub(crate) mmio_regions: Vec<MmioRegion>,
     pub(crate) interrupt: Interrupt,
     pub(crate) msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+    pub(crate) legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
 }
 
 impl VfioCommon {
@@ -757,7 +758,6 @@ impl VfioCommon {
 
     pub(crate) fn initialize_legacy_interrupt(
         &mut self,
-        legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
         wrapper: &dyn Vfio,
     ) -> Result<(), VfioPciError> {
         if let Some(irq_info) = wrapper.get_irq_info(VFIO_PCI_INTX_IRQ_INDEX) {
@@ -768,7 +768,7 @@ impl VfioCommon {
             }
         }
 
-        if let Some(interrupt_source_group) = legacy_interrupt_group {
+        if let Some(interrupt_source_group) = self.legacy_interrupt_group.clone() {
             self.interrupt.intx = Some(VfioIntx {
                 interrupt_source_group,
                 enabled: false,
@@ -1028,10 +1028,11 @@ impl VfioPciDevice {
                 msix: None,
             },
             msi_interrupt_manager,
+            legacy_interrupt_group,
         };
 
         common.parse_capabilities(&vfio_wrapper, bdf);
-        common.initialize_legacy_interrupt(legacy_interrupt_group, &vfio_wrapper)?;
+        common.initialize_legacy_interrupt(&vfio_wrapper)?;
 
         let vfio_pci_device = VfioPciDevice {
             id,
