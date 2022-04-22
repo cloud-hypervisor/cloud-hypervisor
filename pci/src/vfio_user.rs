@@ -66,7 +66,7 @@ impl VfioUserPciDevice {
         id: String,
         vm: &Arc<dyn hypervisor::Vm>,
         client: Arc<Mutex<Client>>,
-        msi_interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+        msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
         bdf: PciBdf,
     ) -> Result<Self, VfioUserPciDeviceError> {
@@ -104,9 +104,10 @@ impl VfioUserPciDevice {
                 msi: None,
                 msix: None,
             },
+            msi_interrupt_manager,
         };
 
-        common.parse_capabilities(msi_interrupt_manager, &vfio_wrapper, bdf);
+        common.parse_capabilities(&vfio_wrapper, bdf);
         common
             .initialize_legacy_interrupt(legacy_interrupt_group, &vfio_wrapper)
             .map_err(VfioUserPciDeviceError::InitializeLegacyInterrupts)?;
