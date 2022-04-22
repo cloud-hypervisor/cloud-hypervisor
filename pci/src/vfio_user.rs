@@ -105,11 +105,12 @@ impl VfioUserPciDevice {
                 msix: None,
             },
             msi_interrupt_manager,
+            legacy_interrupt_group,
         };
 
         common.parse_capabilities(&vfio_wrapper, bdf);
         common
-            .initialize_legacy_interrupt(legacy_interrupt_group, &vfio_wrapper)
+            .initialize_legacy_interrupt(&vfio_wrapper)
             .map_err(VfioUserPciDeviceError::InitializeLegacyInterrupts)?;
 
         Ok(Self {
