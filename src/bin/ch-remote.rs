@@ -264,6 +264,20 @@ fn restore_api_command(socket: &mut UnixStream, config: &str) -> Result<(), Erro
     .map_err(Error::ApiClient)
 }
 
+fn coredump_api_command(socket: &mut UnixStream, destination_url: &str) -> Result<(), Error> {
+    let coredump_config = vmm::api::VmCoredumpData {
+        destination_url: String::from(destination_url),
+    };
+
+    simple_api_command(
+        socket,
+        "PUT",
+        "coredump",
+        Some(&serde_json::to_string(&coredump_config).unwrap()),
+    )
+    .map_err(Error::ApiClient)
+}
+
 fn receive_migration_api_command(socket: &mut UnixStream, url: &str) -> Result<(), Error> {
     let receive_migration_data = vmm::api::VmReceiveMigrationData {
         receiver_url: url.to_owned(),
@@ -420,6 +434,14 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
                 .subcommand_matches("restore")
                 .unwrap()
                 .value_of("restore_config")
+                .unwrap(),
+        ),
+        Some("coredump") => coredump_api_command(
+            &mut socket,
+            matches
+                .subcommand_matches("coredump")
+                .unwrap()
+                .value_of("coredump_config")
                 .unwrap(),
         ),
         Some("send-migration") => send_migration_api_command(
@@ -594,6 +616,11 @@ fn main() {
                         .index(1)
                         .help(vmm::config::RestoreConfig::SYNTAX),
                 ),
+        )
+        .subcommand(
+            Command::new("coredump")
+                .about("Create a coredump from VM")
+                .arg(Arg::new("coredump_config").index(1).help("<file_path>")),
         )
         .subcommand(
             Command::new("send-migration")
