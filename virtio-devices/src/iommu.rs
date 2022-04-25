@@ -401,8 +401,8 @@ impl Request {
                 mapping.endpoints.write().unwrap().insert(endpoint, domain);
 
                 // Add new domain with no mapping if the entry didn't exist yet
-                let mut mappings = mapping.mappings.write().unwrap();
-                mappings.entry(domain).or_insert_with(BTreeMap::new);
+                let mut domains = mapping.domains.write().unwrap();
+                domains.entry(domain).or_insert_with(Domain::default);
 
                 0
             }
@@ -436,7 +436,7 @@ impl Request {
                     .count()
                     == 0
                 {
-                    mapping.mappings.write().unwrap().remove(&domain);
+                    mapping.domains.write().unwrap().remove(&domain);
                 }
 
                 0
@@ -475,8 +475,8 @@ impl Request {
                 }
 
                 // Add new mapping associated with the domain
-                if let Some(entry) = mapping.mappings.write().unwrap().get_mut(&domain) {
-                    entry.insert(
+                if let Some(entry) = mapping.domains.write().unwrap().get_mut(&domain) {
+                    entry.mappings.insert(
                         req.virt_start,
                         Mapping {
                             gpa: req.phys_start,
@@ -524,8 +524,8 @@ impl Request {
                 }
 
                 // Remove mapping associated with the domain
-                if let Some(entry) = mapping.mappings.write().unwrap().get_mut(&domain) {
-                    entry.remove(&virt_start);
+                if let Some(entry) = mapping.domains.write().unwrap().get_mut(&domain) {
+                    entry.mappings.remove(&virt_start);
                 }
 
                 0
@@ -693,12 +693,17 @@ struct Mapping {
     size: u64,
 }
 
+#[derive(Clone, Debug, Default)]
+struct Domain {
+    mappings: BTreeMap<u64, Mapping>,
+}
+
 #[derive(Debug)]
 pub struct IommuMapping {
     // Domain related to an endpoint.
     endpoints: Arc<RwLock<BTreeMap<u32, u32>>>,
-    // List of mappings per domain.
-    mappings: Arc<RwLock<BTreeMap<u32, BTreeMap<u64, Mapping>>>>,
+    // Information related to each domain.
+    domains: Arc<RwLock<BTreeMap<u32, Domain>>>,
     // Global flag indicating if endpoints that are not attached to any domain
     // are in bypass mode.
     bypass: AtomicBool,
@@ -707,14 +712,17 @@ pub struct IommuMapping {
 impl DmaRemapping for IommuMapping {
     fn translate_gva(&self, id: u32, addr: u64) -> std::result::Result<u64, std::io::Error> {
         debug!("Translate GVA addr 0x{:x}", addr);
-        if let Some(domain) = self.endpoints.read().unwrap().get(&id) {
-            if let Some(mapping) = self.mappings.read().unwrap().get(domain) {
+        if let Some(domain_id) = self.endpoints.read().unwrap().get(&id) {
+            if let Some(domain) = self.domains.read().unwrap().get(domain_id) {
                 let range_start = if VIRTIO_IOMMU_PAGE_SIZE_MASK > addr {
                     0
                 } else {
                     addr - VIRTIO_IOMMU_PAGE_SIZE_MASK
                 };
-                for (&key, &value) in mapping.range((Included(&range_start), Included(&addr))) {
+                for (&key, &value) in domain
+                    .mappings
+                    .range((Included(&range_start), Included(&addr)))
+                {
                     if addr >= key && addr < key + value.size {
                         let new_addr = addr - key + value.gpa;
                         debug!("Into GPA addr 0x{:x}", new_addr);
@@ -734,9 +742,9 @@ impl DmaRemapping for IommuMapping {
 
     fn translate_gpa(&self, id: u32, addr: u64) -> std::result::Result<u64, std::io::Error> {
         debug!("Translate GPA addr 0x{:x}", addr);
-        if let Some(domain) = self.endpoints.read().unwrap().get(&id) {
-            if let Some(mapping) = self.mappings.read().unwrap().get(domain) {
-                for (&key, &value) in mapping.iter() {
+        if let Some(domain_id) = self.endpoints.read().unwrap().get(&id) {
+            if let Some(domain) = self.domains.read().unwrap().get(domain_id) {
+                for (&key, &value) in domain.mappings.iter() {
                     if addr >= value.gpa && addr < value.gpa + value.size {
                         let new_addr = addr - value.gpa + key;
                         debug!("Into GVA addr 0x{:x}", new_addr);
@@ -792,7 +800,7 @@ struct IommuState {
     avail_features: u64,
     acked_features: u64,
     endpoints: Vec<(u32, u32)>,
-    mappings: Vec<(u32, Vec<(u64, Mapping)>)>,
+    domains: Vec<(u32, Vec<(u64, Mapping)>)>,
 }
 
 impl VersionMapped for IommuState {}
@@ -812,7 +820,7 @@ impl Iommu {
 
         let mapping = Arc::new(IommuMapping {
             endpoints: Arc::new(RwLock::new(BTreeMap::new())),
-            mappings: Arc::new(RwLock::new(BTreeMap::new())),
+            domains: Arc::new(RwLock::new(BTreeMap::new())),
             bypass: AtomicBool::new(true),
         });
 
@@ -852,14 +860,14 @@ impl Iommu {
                 .clone()
                 .into_iter()
                 .collect(),
-            mappings: self
+            domains: self
                 .mapping
-                .mappings
+                .domains
                 .read()
                 .unwrap()
                 .clone()
                 .into_iter()
-                .map(|(k, v)| (k, v.into_iter().collect()))
+                .map(|(k, v)| (k, v.mappings.into_iter().collect()))
                 .collect(),
         }
     }
@@ -868,11 +876,18 @@ impl Iommu {
         self.common.avail_features = state.avail_features;
         self.common.acked_features = state.acked_features;
         *(self.mapping.endpoints.write().unwrap()) = state.endpoints.clone().into_iter().collect();
-        *(self.mapping.mappings.write().unwrap()) = state
-            .mappings
+        *(self.mapping.domains.write().unwrap()) = state
+            .domains
             .clone()
             .into_iter()
-            .map(|(k, v)| (k, v.into_iter().collect()))
+            .map(|(k, v)| {
+                (
+                    k,
+                    Domain {
+                        mappings: v.into_iter().collect(),
+                    },
+                )
+            })
             .collect();
     }
 
