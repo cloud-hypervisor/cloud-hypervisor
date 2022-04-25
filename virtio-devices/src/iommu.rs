@@ -346,7 +346,6 @@ impl Request {
         desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap>>,
         mapping: &Arc<IommuMapping>,
         ext_mapping: &BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
-        ext_domain_mapping: &mut BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
         msi_iova_space: (u64, u64),
     ) -> result::Result<usize, Error> {
         let desc = desc_chain
@@ -402,13 +401,6 @@ impl Request {
                 // Add endpoint associated with specific domain
                 mapping.endpoints.write().unwrap().insert(endpoint, domain);
 
-                // If the endpoint is part of the list of devices with an
-                // external mapping, insert a new entry for the corresponding
-                // domain, with the same reference to the trait.
-                if let Some(map) = ext_mapping.get(&endpoint) {
-                    ext_domain_mapping.insert(domain, map.clone());
-                }
-
                 // Add new domain with no mapping if the entry didn't exist yet
                 let mut mappings = mapping.mappings.write().unwrap();
                 mappings.entry(domain).or_insert_with(BTreeMap::new);
@@ -430,15 +422,23 @@ impl Request {
                 let domain = req.domain;
                 let endpoint = req.endpoint;
 
-                // If the endpoint is part of the list of devices with an
-                // external mapping, remove the entry for the corresponding
-                // domain.
-                if ext_mapping.contains_key(&endpoint) {
-                    ext_domain_mapping.remove(&domain);
-                }
-
                 // Remove endpoint associated with specific domain
                 mapping.endpoints.write().unwrap().remove(&endpoint);
+
+                // After all endpoints have been successfully detached from a
+                // domain, the domain can be removed. This means we must remove
+                // the mappings associated with this domain.
+                if mapping
+                    .endpoints
+                    .write()
+                    .unwrap()
+                    .iter()
+                    .filter(|(_, &d)| d == domain)
+                    .count()
+                    == 0
+                {
+                    mapping.mappings.write().unwrap().remove(&domain);
+                }
 
                 0
             }
@@ -455,13 +455,24 @@ impl Request {
 
                 // Copy the value to use it as a proper reference.
                 let domain = req.domain;
+                // Find the list of endpoints attached to the given domain.
+                let endpoints: Vec<u32> = mapping
+                    .endpoints
+                    .write()
+                    .unwrap()
+                    .iter()
+                    .filter(|(_, &d)| d == domain)
+                    .map(|(&e, _)| e)
+                    .collect();
 
                 // Trigger external mapping if necessary.
-                if let Some(ext_map) = ext_domain_mapping.get(&domain) {
-                    let size = req.virt_end - req.virt_start + 1;
-                    ext_map
-                        .map(req.virt_start, req.phys_start, size)
-                        .map_err(Error::ExternalMapping)?;
+                for endpoint in endpoints {
+                    if let Some(ext_map) = ext_mapping.get(&endpoint) {
+                        let size = req.virt_end - req.virt_start + 1;
+                        ext_map
+                            .map(req.virt_start, req.phys_start, size)
+                            .map_err(Error::ExternalMapping)?;
+                    }
                 }
 
                 // Add new mapping associated with the domain
@@ -493,16 +504,27 @@ impl Request {
                 // Copy the value to use it as a proper reference.
                 let domain = req.domain;
                 let virt_start = req.virt_start;
+                // Find the list of endpoints attached to the given domain.
+                let endpoints: Vec<u32> = mapping
+                    .endpoints
+                    .write()
+                    .unwrap()
+                    .iter()
+                    .filter(|(_, &d)| d == domain)
+                    .map(|(&e, _)| e)
+                    .collect();
 
                 // Trigger external unmapping if necessary.
-                if let Some(ext_map) = ext_domain_mapping.get(&domain) {
-                    let size = req.virt_end - virt_start + 1;
-                    ext_map
-                        .unmap(virt_start, size)
-                        .map_err(Error::ExternalUnmapping)?;
+                for endpoint in endpoints {
+                    if let Some(ext_map) = ext_mapping.get(&endpoint) {
+                        let size = req.virt_end - virt_start + 1;
+                        ext_map
+                            .unmap(virt_start, size)
+                            .map_err(Error::ExternalUnmapping)?;
+                    }
                 }
 
-                // Add new mapping associated with the domain
+                // Remove mapping associated with the domain
                 if let Some(entry) = mapping.mappings.write().unwrap().get_mut(&domain) {
                     entry.remove(&virt_start);
                 }
@@ -573,7 +595,6 @@ struct IommuEpollHandler {
     pause_evt: EventFd,
     mapping: Arc<IommuMapping>,
     ext_mapping: Arc<Mutex<BTreeMap<u32, Arc<dyn ExternalDmaMapping>>>>,
-    ext_domain_mapping: BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
     msi_iova_space: (u64, u64),
 }
 
@@ -586,7 +607,6 @@ impl IommuEpollHandler {
                 &mut desc_chain,
                 &self.mapping,
                 &self.ext_mapping.lock().unwrap(),
-                &mut self.ext_domain_mapping,
                 self.msi_iova_space,
             ) {
                 Ok(len) => len as u32,
@@ -900,7 +920,6 @@ impl VirtioDevice for Iommu {
             pause_evt,
             mapping: self.mapping.clone(),
             ext_mapping: self.ext_mapping.clone(),
-            ext_domain_mapping: BTreeMap::new(),
             msi_iova_space: self.msi_iova_space,
         };
 
