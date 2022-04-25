@@ -1023,9 +1023,10 @@ impl MemoryManager {
         #[cfg(feature = "tdx")]
         let dynamic = !tdx_enabled;
 
-        let hotplug_method = config.hotplug_method.clone();
-
-        let acpi_address = if dynamic && hotplug_method == HotplugMethod::Acpi {
+        let acpi_address = if dynamic
+            && config.hotplug_method == HotplugMethod::Acpi
+            && (config.hotplug_size.unwrap_or_default() > 0)
+        {
             Some(
                 allocator
                     .lock()
@@ -1054,7 +1055,7 @@ impl MemoryManager {
             selected_slot,
             mergeable: config.mergeable,
             allocator,
-            hotplug_method,
+            hotplug_method: config.hotplug_method,
             boot_ram,
             current_ram,
             next_hotplug_slot,
@@ -1068,7 +1069,6 @@ impl MemoryManager {
             snapshot_memory_ranges: MemoryRangeTable::default(),
             memory_zones,
             guest_ram_mappings: Vec::new(),
-
             acpi_address,
             log_dirty: dynamic, // Cannot log dirty pages on a TD
             arch_mem_regions,
