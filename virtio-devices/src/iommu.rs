@@ -19,7 +19,7 @@ use std::mem::size_of;
 use std::ops::Bound::Included;
 use std::os::unix::io::AsRawFd;
 use std::result;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex, RwLock};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
@@ -69,7 +69,6 @@ const VIRTIO_IOMMU_F_BYPASS: u32 = 3;
 const VIRTIO_IOMMU_F_PROBE: u32 = 4;
 #[allow(unused)]
 const VIRTIO_IOMMU_F_MMIO: u32 = 5;
-#[allow(unused)]
 const VIRTIO_IOMMU_F_BYPASS_CONFIG: u32 = 6;
 
 // Support 2MiB and 4KiB page sizes.
@@ -700,6 +699,9 @@ pub struct IommuMapping {
     endpoints: Arc<RwLock<BTreeMap<u32, u32>>>,
     // List of mappings per domain.
     mappings: Arc<RwLock<BTreeMap<u32, BTreeMap<u64, Mapping>>>>,
+    // Global flag indicating if endpoints that are not attached to any domain
+    // are in bypass mode.
+    bypass: AtomicBool,
 }
 
 impl DmaRemapping for IommuMapping {
@@ -720,6 +722,8 @@ impl DmaRemapping for IommuMapping {
                     }
                 }
             }
+        } else if self.bypass.load(Ordering::Acquire) {
+            return Ok(addr);
         }
 
         Err(io::Error::new(
@@ -740,6 +744,8 @@ impl DmaRemapping for IommuMapping {
                     }
                 }
             }
+        } else if self.bypass.load(Ordering::Acquire) {
+            return Ok(addr);
         }
 
         Err(io::Error::new(
@@ -807,6 +813,7 @@ impl Iommu {
         let mapping = Arc::new(IommuMapping {
             endpoints: Arc::new(RwLock::new(BTreeMap::new())),
             mappings: Arc::new(RwLock::new(BTreeMap::new())),
+            bypass: AtomicBool::new(true),
         });
 
         Ok((
@@ -817,7 +824,8 @@ impl Iommu {
                     queue_sizes: QUEUE_SIZES.to_vec(),
                     avail_features: 1u64 << VIRTIO_F_VERSION_1
                         | 1u64 << VIRTIO_IOMMU_F_MAP_UNMAP
-                        | 1u64 << VIRTIO_IOMMU_F_PROBE,
+                        | 1u64 << VIRTIO_IOMMU_F_PROBE
+                        | 1u64 << VIRTIO_IOMMU_F_BYPASS_CONFIG,
                     paused_sync: Some(Arc::new(Barrier::new(2))),
                     ..Default::default()
                 },
@@ -868,6 +876,20 @@ impl Iommu {
             .collect();
     }
 
+    fn update_bypass(&mut self) {
+        // Use bypass from config if VIRTIO_IOMMU_F_BYPASS_CONFIG has been negotiated
+        if !self
+            .common
+            .feature_acked(VIRTIO_IOMMU_F_BYPASS_CONFIG.into())
+        {
+            return;
+        }
+
+        let bypass = self.config.bypass == 1;
+        info!("Updating bypass mode to {}", bypass);
+        self.mapping.bypass.store(bypass, Ordering::Release);
+    }
+
     pub fn add_external_mapping(&mut self, device_id: u32, mapping: Arc<dyn ExternalDmaMapping>) {
         self.ext_mapping.lock().unwrap().insert(device_id, mapping);
     }
@@ -901,6 +923,24 @@ impl VirtioDevice for Iommu {
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
         self.read_config_from_slice(self.config.as_slice(), offset, data);
+    }
+
+    fn write_config(&mut self, offset: u64, data: &[u8]) {
+        // The "bypass" field is the only mutable field
+        let bypass_offset =
+            (&self.config.bypass as *const _ as u64) - (&self.config as *const _ as u64);
+        if offset != bypass_offset || data.len() != std::mem::size_of_val(&self.config.bypass) {
+            error!(
+                "Attempt to write to read-only field: offset {:x} length {}",
+                offset,
+                data.len()
+            );
+            return;
+        }
+
+        self.config.bypass = data[0];
+
+        self.update_bypass();
     }
 
     fn activate(
