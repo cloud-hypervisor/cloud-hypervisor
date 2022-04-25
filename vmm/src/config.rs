@@ -419,7 +419,7 @@ impl<'a> VmParams<'a> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 pub enum HotplugMethod {
     Acpi,
     VirtioMem,
