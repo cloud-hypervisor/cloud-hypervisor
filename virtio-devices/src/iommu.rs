@@ -149,8 +149,11 @@ struct VirtioIommuReqTail {
 struct VirtioIommuReqAttach {
     domain: u32,
     endpoint: u32,
-    _reserved: [u8; 8],
+    flags: u32,
+    _reserved: [u8; 4],
 }
+
+const VIRTIO_IOMMU_ATTACH_F_BYPASS: u32 = 1;
 
 /// DETACH request
 #[derive(Copy, Clone, Debug, Default)]
@@ -298,8 +301,16 @@ enum Error {
     InvalidDetachRequest,
     /// Guest sent us invalid MAP request.
     InvalidMapRequest,
+    /// Invalid to map because the domain is in bypass mode.
+    InvalidMapRequestBypassDomain,
+    /// Invalid to map because the domain is missing.
+    InvalidMapRequestMissingDomain,
     /// Guest sent us invalid UNMAP request.
     InvalidUnmapRequest,
+    /// Invalid to unmap because the domain is in bypass mode.
+    InvalidUnmapRequestBypassDomain,
+    /// Invalid to unmap because the domain is missing.
+    InvalidUnmapRequestMissingDomain,
     /// Guest sent us invalid PROBE request.
     InvalidProbeRequest,
     /// Failed to performing external mapping.
@@ -320,7 +331,19 @@ impl Display for Error {
             InvalidAttachRequest => write!(f, "invalid attach request"),
             InvalidDetachRequest => write!(f, "invalid detach request"),
             InvalidMapRequest => write!(f, "invalid map request"),
+            InvalidMapRequestBypassDomain => {
+                write!(f, "invalid map request because domain in bypass mode")
+            }
+            InvalidMapRequestMissingDomain => {
+                write!(f, "invalid map request because missing domain")
+            }
             InvalidUnmapRequest => write!(f, "invalid unmap request"),
+            InvalidUnmapRequestBypassDomain => {
+                write!(f, "invalid unmap request because domain in bypass mode")
+            }
+            InvalidUnmapRequestMissingDomain => {
+                write!(f, "invalid unmap request because missing domain")
+            }
             InvalidProbeRequest => write!(f, "invalid probe request"),
             UnexpectedReadOnlyDescriptor => write!(f, "unexpected read-only descriptor"),
             UnexpectedWriteOnlyDescriptor => write!(f, "unexpected write-only descriptor"),
@@ -394,15 +417,25 @@ impl Request {
                 debug!("Attach request {:?}", req);
 
                 // Copy the value to use it as a proper reference.
-                let domain = req.domain;
+                let domain_id = req.domain;
                 let endpoint = req.endpoint;
+                let bypass =
+                    (req.flags & VIRTIO_IOMMU_ATTACH_F_BYPASS) == VIRTIO_IOMMU_ATTACH_F_BYPASS;
 
                 // Add endpoint associated with specific domain
-                mapping.endpoints.write().unwrap().insert(endpoint, domain);
+                mapping
+                    .endpoints
+                    .write()
+                    .unwrap()
+                    .insert(endpoint, domain_id);
 
                 // Add new domain with no mapping if the entry didn't exist yet
                 let mut domains = mapping.domains.write().unwrap();
-                domains.entry(domain).or_insert_with(Domain::default);
+                let domain = Domain {
+                    mappings: BTreeMap::new(),
+                    bypass,
+                };
+                domains.entry(domain_id).or_insert_with(|| domain);
 
                 0
             }
@@ -418,7 +451,7 @@ impl Request {
                 debug!("Detach request {:?}", req);
 
                 // Copy the value to use it as a proper reference.
-                let domain = req.domain;
+                let domain_id = req.domain;
                 let endpoint = req.endpoint;
 
                 // Remove endpoint associated with specific domain
@@ -432,11 +465,11 @@ impl Request {
                     .write()
                     .unwrap()
                     .iter()
-                    .filter(|(_, &d)| d == domain)
+                    .filter(|(_, &d)| d == domain_id)
                     .count()
                     == 0
                 {
-                    mapping.domains.write().unwrap().remove(&domain);
+                    mapping.domains.write().unwrap().remove(&domain_id);
                 }
 
                 0
@@ -453,14 +486,23 @@ impl Request {
                 debug!("Map request {:?}", req);
 
                 // Copy the value to use it as a proper reference.
-                let domain = req.domain;
+                let domain_id = req.domain;
+
+                if let Some(domain) = mapping.domains.read().unwrap().get(&domain_id) {
+                    if domain.bypass {
+                        return Err(Error::InvalidMapRequestBypassDomain);
+                    }
+                } else {
+                    return Err(Error::InvalidMapRequestMissingDomain);
+                }
+
                 // Find the list of endpoints attached to the given domain.
                 let endpoints: Vec<u32> = mapping
                     .endpoints
                     .write()
                     .unwrap()
                     .iter()
-                    .filter(|(_, &d)| d == domain)
+                    .filter(|(_, &d)| d == domain_id)
                     .map(|(&e, _)| e)
                     .collect();
 
@@ -475,17 +517,20 @@ impl Request {
                 }
 
                 // Add new mapping associated with the domain
-                if let Some(entry) = mapping.domains.write().unwrap().get_mut(&domain) {
-                    entry.mappings.insert(
+                mapping
+                    .domains
+                    .write()
+                    .unwrap()
+                    .get_mut(&domain_id)
+                    .unwrap()
+                    .mappings
+                    .insert(
                         req.virt_start,
                         Mapping {
                             gpa: req.phys_start,
                             size: req.virt_end - req.virt_start + 1,
                         },
                     );
-                } else {
-                    return Err(Error::InvalidMapRequest);
-                }
 
                 0
             }
@@ -501,15 +546,24 @@ impl Request {
                 debug!("Unmap request {:?}", req);
 
                 // Copy the value to use it as a proper reference.
-                let domain = req.domain;
+                let domain_id = req.domain;
                 let virt_start = req.virt_start;
+
+                if let Some(domain) = mapping.domains.read().unwrap().get(&domain_id) {
+                    if domain.bypass {
+                        return Err(Error::InvalidUnmapRequestBypassDomain);
+                    }
+                } else {
+                    return Err(Error::InvalidUnmapRequestMissingDomain);
+                }
+
                 // Find the list of endpoints attached to the given domain.
                 let endpoints: Vec<u32> = mapping
                     .endpoints
                     .write()
                     .unwrap()
                     .iter()
-                    .filter(|(_, &d)| d == domain)
+                    .filter(|(_, &d)| d == domain_id)
                     .map(|(&e, _)| e)
                     .collect();
 
@@ -524,9 +578,14 @@ impl Request {
                 }
 
                 // Remove mapping associated with the domain
-                if let Some(entry) = mapping.domains.write().unwrap().get_mut(&domain) {
-                    entry.mappings.remove(&virt_start);
-                }
+                mapping
+                    .domains
+                    .write()
+                    .unwrap()
+                    .get_mut(&domain_id)
+                    .unwrap()
+                    .mappings
+                    .remove(&virt_start);
 
                 0
             }
@@ -693,9 +752,10 @@ struct Mapping {
     size: u64,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 struct Domain {
     mappings: BTreeMap<u64, Mapping>,
+    bypass: bool,
 }
 
 #[derive(Debug)]
@@ -714,6 +774,12 @@ impl DmaRemapping for IommuMapping {
         debug!("Translate GVA addr 0x{:x}", addr);
         if let Some(domain_id) = self.endpoints.read().unwrap().get(&id) {
             if let Some(domain) = self.domains.read().unwrap().get(domain_id) {
+                // Directly return identity mapping in case the domain is in
+                // bypass mode.
+                if domain.bypass {
+                    return Ok(addr);
+                }
+
                 let range_start = if VIRTIO_IOMMU_PAGE_SIZE_MASK > addr {
                     0
                 } else {
@@ -744,6 +810,12 @@ impl DmaRemapping for IommuMapping {
         debug!("Translate GPA addr 0x{:x}", addr);
         if let Some(domain_id) = self.endpoints.read().unwrap().get(&id) {
             if let Some(domain) = self.domains.read().unwrap().get(domain_id) {
+                // Directly return identity mapping in case the domain is in
+                // bypass mode.
+                if domain.bypass {
+                    return Ok(addr);
+                }
+
                 for (&key, &value) in domain.mappings.iter() {
                     if addr >= value.gpa && addr < value.gpa + value.size {
                         let new_addr = addr - value.gpa + key;
@@ -795,12 +867,15 @@ pub struct Iommu {
     msi_iova_space: (u64, u64),
 }
 
+type EndpointsState = Vec<(u32, u32)>;
+type DomainsState = Vec<(u32, (Vec<(u64, Mapping)>, bool))>;
+
 #[derive(Versionize)]
 struct IommuState {
     avail_features: u64,
     acked_features: u64,
-    endpoints: Vec<(u32, u32)>,
-    domains: Vec<(u32, Vec<(u64, Mapping)>)>,
+    endpoints: EndpointsState,
+    domains: DomainsState,
 }
 
 impl VersionMapped for IommuState {}
@@ -867,7 +942,7 @@ impl Iommu {
                 .unwrap()
                 .clone()
                 .into_iter()
-                .map(|(k, v)| (k, v.mappings.into_iter().collect()))
+                .map(|(k, v)| (k, (v.mappings.into_iter().collect(), v.bypass)))
                 .collect(),
         }
     }
@@ -884,7 +959,8 @@ impl Iommu {
                 (
                     k,
                     Domain {
-                        mappings: v.into_iter().collect(),
+                        mappings: v.0.into_iter().collect(),
+                        bypass: v.1,
                     },
                 )
             })
