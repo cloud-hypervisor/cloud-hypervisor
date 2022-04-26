@@ -1159,7 +1159,12 @@ impl Guest {
             .unwrap();
     }
 
-    pub fn check_devices_common(&self, socket: Option<&String>, console_text: Option<&String>) {
+    pub fn check_devices_common(
+        &self,
+        socket: Option<&String>,
+        console_text: Option<&String>,
+        pmem_path: Option<&String>,
+    ) {
         // Check block devices are readable
         self.ssh_command("sudo dd if=/dev/vda of=/dev/null bs=1M iflag=direct count=1024")
             .unwrap();
@@ -1178,6 +1183,40 @@ impl Guest {
             self.ssh_command(&console_cmd).unwrap();
         }
         // The net device is 'automatically' exercised through the above 'ssh' commands
+
+        // Check if the pmem device is usable
+        if let Some(pmem_path) = pmem_path {
+            assert_eq!(
+                self.ssh_command(&format!("ls {}", pmem_path))
+                    .unwrap()
+                    .trim(),
+                pmem_path
+            );
+            assert_eq!(
+                self.ssh_command(&format!("sudo mount {} /mnt", pmem_path))
+                    .unwrap(),
+                ""
+            );
+            assert_eq!(self.ssh_command("ls /mnt").unwrap(), "lost+found\n");
+            self.ssh_command("echo test123 | sudo tee /mnt/test")
+                .unwrap();
+            assert_eq!(self.ssh_command("sudo umount /mnt").unwrap(), "");
+            assert_eq!(self.ssh_command("ls /mnt").unwrap(), "");
+
+            assert_eq!(
+                self.ssh_command(&format!("sudo mount {} /mnt", pmem_path))
+                    .unwrap(),
+                ""
+            );
+            assert_eq!(
+                self.ssh_command("sudo cat /mnt/test || true")
+                    .unwrap()
+                    .trim(),
+                "test123"
+            );
+            self.ssh_command("sudo rm /mnt/test").unwrap();
+            assert_eq!(self.ssh_command("sudo umount /mnt").unwrap(), "");
+        }
     }
 }
 
