@@ -1774,6 +1774,99 @@ fn _test_virtio_iommu(acpi: bool) {
     handle_child_output(r, &output);
 }
 
+fn enable_guest_watchdog(guest: &Guest, current_reboot_count: &mut u32) {
+    // Check for PCI device
+    assert!(guest
+        .does_device_vendor_pair_match("0x1063", "0x1af4")
+        .unwrap_or_default());
+
+    // Enable systemd watchdog
+    guest
+        .ssh_command("echo RuntimeWatchdogSec=15s | sudo tee -a /etc/systemd/system.conf")
+        .unwrap();
+
+    guest.ssh_command("sudo reboot").unwrap();
+
+    guest.wait_vm_boot(None).unwrap();
+
+    // Check that systemd has activated the watchdog
+    assert_eq!(
+        guest
+            .ssh_command("sudo journalctl | grep -c -- \"Watchdog started\"")
+            .unwrap()
+            .trim()
+            .parse::<u32>()
+            .unwrap_or_default(),
+        2
+    );
+
+    // Ensure that the current boot journal is written so reboot counts are valid
+    guest.ssh_command("sudo journalctl --sync").unwrap();
+
+    *current_reboot_count += 1;
+
+    let boot_count = guest
+        .ssh_command("sudo journalctl --list-boots | wc -l")
+        .unwrap()
+        .trim()
+        .parse::<u32>()
+        .unwrap_or_default();
+    assert_eq!(boot_count, *current_reboot_count);
+}
+
+fn check_guest_watchdog_no_reboot(guest: &Guest, current_reboot_count: &u32) {
+    // Allow some normal time to elapse to check we don't get spurious reboots
+    thread::sleep(std::time::Duration::new(40, 0));
+
+    // Check no reboot
+    let boot_count = guest
+        .ssh_command("sudo journalctl --list-boots | wc -l")
+        .unwrap()
+        .trim()
+        .parse::<u32>()
+        .unwrap_or_default();
+    assert_eq!(boot_count, *current_reboot_count);
+}
+
+fn check_guest_watchdog_one_reboot(
+    guest: &Guest,
+    _api_socket: &str,
+    current_reboot_count: &mut u32,
+) {
+    // Trigger a panic (sync first). We need to do this inside a screen with a delay so the SSH command returns.
+    guest.ssh_command("screen -dmS reboot sh -c \"sleep 5; echo s | tee /proc/sysrq-trigger; echo c | sudo tee /proc/sysrq-trigger\"").unwrap();
+
+    // Allow some time for the watchdog to trigger (max 30s) and reboot to happen
+    guest.wait_vm_boot(Some(50)).unwrap();
+
+    // Check that watchdog triggered reboot
+    *current_reboot_count += 1;
+    let boot_count = guest
+        .ssh_command("sudo journalctl --list-boots | wc -l")
+        .unwrap()
+        .trim()
+        .parse::<u32>()
+        .unwrap_or_default();
+    assert_eq!(boot_count, *current_reboot_count);
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        // Now pause the VM and remain offline for 30s
+        assert!(remote_command(_api_socket, "pause", None));
+        thread::sleep(std::time::Duration::new(30, 0));
+        assert!(remote_command(_api_socket, "resume", None));
+
+        // Check no reboot
+        let boot_count = guest
+            .ssh_command("sudo journalctl --list-boots | wc -l")
+            .unwrap()
+            .trim()
+            .parse::<u32>()
+            .unwrap_or_default();
+        assert_eq!(boot_count, *current_reboot_count);
+    }
+}
+
 mod parallel {
     use std::io::SeekFrom;
 
@@ -5344,88 +5437,10 @@ mod parallel {
 
         let r = std::panic::catch_unwind(|| {
             guest.wait_vm_boot(None).unwrap();
-
-            // Check for PCI device
-            assert!(guest
-                .does_device_vendor_pair_match("0x1063", "0x1af4")
-                .unwrap_or_default());
-
-            // Enable systemd watchdog
-            guest
-                .ssh_command("echo RuntimeWatchdogSec=15s | sudo tee -a /etc/systemd/system.conf")
-                .unwrap();
-
-            guest.ssh_command("sudo reboot").unwrap();
-
-            guest.wait_vm_boot(None).unwrap();
-
-            // Check that systemd has activated the watchdog
-            assert_eq!(
-                guest
-                    .ssh_command("sudo journalctl | grep -c -- \"Watchdog started\"")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                2
-            );
-
-            // Ensure that the current boot journal is written so reboot counts are valid
-            guest.ssh_command("sudo journalctl --sync").unwrap();
-
-            let boot_count = guest
-                .ssh_command("sudo journalctl --list-boots | wc -l")
-                .unwrap()
-                .trim()
-                .parse::<u32>()
-                .unwrap_or_default();
-            assert_eq!(boot_count, 2);
-            // Allow some normal time to elapse to check we don't get spurious reboots
-            thread::sleep(std::time::Duration::new(40, 0));
-
-            // Check no reboot
-            let boot_count = guest
-                .ssh_command("sudo journalctl --list-boots | wc -l")
-                .unwrap()
-                .trim()
-                .parse::<u32>()
-                .unwrap_or_default();
-            assert_eq!(boot_count, 2);
-
-            // Ensure that the current boot journal is written so reboot counts are valid
-            guest.ssh_command("sudo journalctl --sync").unwrap();
-
-            // Trigger a panic (sync first). We need to do this inside a screen with a delay so the SSH command returns.
-            guest.ssh_command("screen -dmS reboot sh -c \"sleep 5; echo s | tee /proc/sysrq-trigger; echo c | sudo tee /proc/sysrq-trigger\"").unwrap();
-
-            // Allow some time for the watchdog to trigger (max 30s) and reboot to happen
-            guest.wait_vm_boot(Some(50)).unwrap();
-
-            // Check that watchdog triggered reboot
-            let boot_count = guest
-                .ssh_command("sudo journalctl --list-boots | wc -l")
-                .unwrap()
-                .trim()
-                .parse::<u32>()
-                .unwrap_or_default();
-            assert_eq!(boot_count, 3);
-
-            #[cfg(target_arch = "x86_64")]
-            {
-                // Now pause the VM and remain offline for 30s
-                assert!(remote_command(&api_socket, "pause", None));
-                thread::sleep(std::time::Duration::new(30, 0));
-                assert!(remote_command(&api_socket, "resume", None));
-
-                // Check no reboot
-                let boot_count = guest
-                    .ssh_command("sudo journalctl --list-boots | wc -l")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default();
-                assert_eq!(boot_count, 3);
-            }
+            let mut current_reboot_count = 1;
+            enable_guest_watchdog(&guest, &mut current_reboot_count);
+            check_guest_watchdog_no_reboot(&guest, &current_reboot_count);
+            check_guest_watchdog_one_reboot(&guest, &api_socket, &mut current_reboot_count);
         });
 
         let _ = child.kill();
