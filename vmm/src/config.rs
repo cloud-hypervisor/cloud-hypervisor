@@ -2323,7 +2323,8 @@ pub struct VmConfig {
 }
 
 impl VmConfig {
-    pub fn validate(&self) -> ValidationResult<()> {
+    // Also enables virtio-iommu if the config needs it
+    pub fn validate(&mut self) -> ValidationResult<()> {
         #[cfg(not(feature = "tdx"))]
         self.kernel.as_ref().ok_or(ValidationError::KernelMissing)?;
 
@@ -2367,6 +2368,7 @@ impl VmConfig {
                     return Err(ValidationError::VhostUserMissingSocket);
                 }
                 disk.validate(self)?;
+                self.iommu |= disk.iommu;
             }
         }
 
@@ -2376,6 +2378,7 @@ impl VmConfig {
                     return Err(ValidationError::VhostUserRequiresSharedMemory);
                 }
                 net.validate(self)?;
+                self.iommu |= net.iommu;
             }
         }
 
@@ -2391,8 +2394,12 @@ impl VmConfig {
         if let Some(pmems) = &self.pmem {
             for pmem in pmems {
                 pmem.validate(self)?;
+                self.iommu |= pmem.iommu;
             }
         }
+
+        self.iommu |= self.rng.iommu;
+        self.iommu |= self.console.iommu;
 
         if let Some(t) = &self.cpus.topology {
             if t.threads_per_core == 0
@@ -2439,6 +2446,7 @@ impl VmConfig {
         if let Some(vdpa_devices) = &self.vdpa {
             for vdpa_device in vdpa_devices {
                 vdpa_device.validate(self)?;
+                self.iommu |= vdpa_device.iommu;
             }
         }
 
@@ -2462,11 +2470,13 @@ impl VmConfig {
         if let Some(devices) = &self.devices {
             for device in devices {
                 device.validate(self)?;
+                self.iommu |= device.iommu;
             }
         }
 
         if let Some(vsock) = &self.vsock {
             vsock.validate(self)?;
+            self.iommu |= vsock.iommu;
         }
 
         if let Some(numa) = &self.numa {
@@ -2488,21 +2498,21 @@ impl VmConfig {
         }
 
         self.platform.as_ref().map(|p| p.validate()).transpose()?;
+        self.iommu |= self
+            .platform
+            .as_ref()
+            .map(|p| p.iommu_segments.is_some())
+            .unwrap_or_default();
 
         Ok(())
     }
 
     pub fn parse(vm_params: VmParams) -> Result<Self> {
-        let mut iommu = false;
-
         let mut disks: Option<Vec<DiskConfig>> = None;
         if let Some(disk_list) = &vm_params.disks {
             let mut disk_config_list = Vec::new();
             for item in disk_list.iter() {
                 let disk_config = DiskConfig::parse(item)?;
-                if disk_config.iommu {
-                    iommu = true;
-                }
                 disk_config_list.push(disk_config);
             }
             disks = Some(disk_config_list);
@@ -2513,18 +2523,12 @@ impl VmConfig {
             let mut net_config_list = Vec::new();
             for item in net_list.iter() {
                 let net_config = NetConfig::parse(item)?;
-                if net_config.iommu {
-                    iommu = true;
-                }
                 net_config_list.push(net_config);
             }
             net = Some(net_config_list);
         }
 
         let rng = RngConfig::parse(vm_params.rng)?;
-        if rng.iommu {
-            iommu = true;
-        }
 
         let mut balloon: Option<BalloonConfig> = None;
         if let Some(balloon_params) = &vm_params.balloon {
@@ -2545,18 +2549,12 @@ impl VmConfig {
             let mut pmem_config_list = Vec::new();
             for item in pmem_list.iter() {
                 let pmem_config = PmemConfig::parse(item)?;
-                if pmem_config.iommu {
-                    iommu = true;
-                }
                 pmem_config_list.push(pmem_config);
             }
             pmem = Some(pmem_config_list);
         }
 
         let console = ConsoleConfig::parse(vm_params.console)?;
-        if console.iommu {
-            iommu = true;
-        }
         let serial = ConsoleConfig::parse(vm_params.serial)?;
 
         let mut devices: Option<Vec<DeviceConfig>> = None;
@@ -2564,9 +2562,6 @@ impl VmConfig {
             let mut device_config_list = Vec::new();
             for item in device_list.iter() {
                 let device_config = DeviceConfig::parse(item)?;
-                if device_config.iommu {
-                    iommu = true;
-                }
                 device_config_list.push(device_config);
             }
             devices = Some(device_config_list);
@@ -2587,9 +2582,6 @@ impl VmConfig {
             let mut vdpa_config_list = Vec::new();
             for item in vdpa_list.iter() {
                 let vdpa_config = VdpaConfig::parse(item)?;
-                if vdpa_config.iommu {
-                    iommu = true;
-                }
                 vdpa_config_list.push(vdpa_config);
             }
             vdpa = Some(vdpa_config_list);
@@ -2598,18 +2590,10 @@ impl VmConfig {
         let mut vsock: Option<VsockConfig> = None;
         if let Some(vs) = &vm_params.vsock {
             let vsock_config = VsockConfig::parse(vs)?;
-            if vsock_config.iommu {
-                iommu = true;
-            }
             vsock = Some(vsock_config);
         }
 
         let platform = vm_params.platform.map(PlatformConfig::parse).transpose()?;
-        if let Some(platform_config) = platform.as_ref() {
-            if platform_config.iommu_segments.is_some() {
-                iommu = true;
-            }
-        }
 
         #[cfg(target_arch = "x86_64")]
         let mut sgx_epc: Option<Vec<SgxEpcConfig>> = None;
@@ -2655,7 +2639,7 @@ impl VmConfig {
         #[cfg(feature = "gdb")]
         let gdb = vm_params.gdb;
 
-        let config = VmConfig {
+        let mut config = VmConfig {
             cpus: CpusConfig::parse(vm_params.cpus)?,
             memory: MemoryConfig::parse(vm_params.memory, vm_params.memory_zones)?,
             kernel,
@@ -2673,7 +2657,7 @@ impl VmConfig {
             user_devices,
             vdpa,
             vsock,
-            iommu,
+            iommu: false, // updated in VmConfig::validate()
             #[cfg(target_arch = "x86_64")]
             sgx_epc,
             numa,
@@ -3269,7 +3253,7 @@ mod tests {
 
     #[test]
     fn test_config_validation() {
-        let valid_config = VmConfig {
+        let mut valid_config = VmConfig {
             cpus: CpusConfig {
                 boot_vcpus: 1,
                 max_vcpus: 1,
