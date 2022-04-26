@@ -5180,7 +5180,7 @@ mod parallel {
             assert!(total_memory > 4_800_000);
             assert!(total_memory < 5_760_000);
             // Check the guest virtio-devices, e.g. block, rng, vsock, console, and net
-            guest.check_devices_common(Some(&socket), Some(&console_text));
+            guest.check_devices_common(Some(&socket), Some(&console_text), None);
 
             // x86_64: We check that removing and adding back the virtio-net device
             // does not break the snapshot/restore support for virtio-pci.
@@ -5269,7 +5269,7 @@ mod parallel {
             assert!(total_memory > 4_800_000);
             assert!(total_memory < 5_760_000);
 
-            guest.check_devices_common(Some(&socket), Some(&console_text));
+            guest.check_devices_common(Some(&socket), Some(&console_text), None);
         });
         // Shutdown the target VM and check console output
         let _ = child.kill();
@@ -7362,6 +7362,14 @@ mod live_migration {
             ],
         };
 
+        let pmem_temp_file = TempFile::new().unwrap();
+        pmem_temp_file.as_file().set_len(128 << 20).unwrap();
+        std::process::Command::new("mkfs.ext4")
+            .arg(pmem_temp_file.as_path())
+            .output()
+            .expect("Expect creating disk image to succeed");
+        let pmem_path = String::from("/dev/pmem0");
+
         // Start the source VM
         let src_vm_path = if !upgrade_test {
             clh_command("cloud-hypervisor")
@@ -7377,6 +7385,10 @@ mod live_migration {
             .default_disks()
             .args(&["--net", net_params.as_str()])
             .args(&["--api-socket", &src_api_socket])
+            .args(&[
+                "--pmem",
+                format!("file={}", pmem_temp_file.as_path().to_str().unwrap(),).as_str(),
+            ])
             .capture_output()
             .spawn()
             .unwrap();
@@ -7399,7 +7411,7 @@ mod live_migration {
             // Check the guest RAM
             assert!(guest.get_total_memory().unwrap_or_default() > 2_880_000);
             // Check the guest virtio-devices, e.g. block, rng, console, and net
-            guest.check_devices_common(None, Some(&console_text));
+            guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
 
             // Check the NUMA parameters are applied correctly and resize
             // each zone to test the case where we migrate a VM with the
@@ -7586,7 +7598,7 @@ mod live_migration {
             #[cfg(target_arch = "aarch64")]
             assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
 
-            guest.check_devices_common(None, Some(&console_text));
+            guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
 
             // Perform NUMA related checks
             if numa {
