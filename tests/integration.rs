@@ -7337,7 +7337,7 @@ mod live_migration {
     // 4. The destination VM is functional (including various virtio-devices are working properly) after
     //    live migration;
     // Note: This test does not use vsock as we can't create two identical vsock on the same host.
-    fn _test_live_migration(upgrade_test: bool, numa: bool, local: bool) {
+    fn _test_live_migration(upgrade_test: bool, numa: bool, local: bool, watchdog: bool) {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
         let kernel_path = direct_kernel_boot_path();
@@ -7392,7 +7392,8 @@ mod live_migration {
             cloud_hypervisor_release_path()
         };
         let src_api_socket = temp_api_path(&guest.tmp_dir);
-        let mut src_child = GuestCommand::new_with_binary_path(&guest, &src_vm_path)
+        let mut src_vm_cmd = GuestCommand::new_with_binary_path(&guest, &src_vm_path);
+        src_vm_cmd
             .args(&["--cpus", "boot=6,max=12"])
             .args(memory_param)
             .args(&["--kernel", kernel_path.to_str().unwrap()])
@@ -7403,10 +7404,11 @@ mod live_migration {
             .args(&[
                 "--pmem",
                 format!("file={}", pmem_temp_file.as_path().to_str().unwrap(),).as_str(),
-            ])
-            .capture_output()
-            .spawn()
-            .unwrap();
+            ]);
+        if watchdog {
+            src_vm_cmd.args(&["--watchdog"]);
+        }
+        let mut src_child = src_vm_cmd.capture_output().spawn().unwrap();
 
         // Start the destination VM
         let mut dest_api_socket = temp_api_path(&guest.tmp_dir);
@@ -7474,6 +7476,12 @@ mod live_migration {
                     Some(net_params.as_str()),
                 ));
                 thread::sleep(std::time::Duration::new(10, 0));
+            }
+
+            if watchdog {
+                let mut current_reboot_count = 1;
+                enable_guest_watchdog(&guest, &mut current_reboot_count);
+                check_guest_watchdog_no_reboot(&guest, &current_reboot_count);
             }
 
             // Start the live-migration
@@ -7655,6 +7663,16 @@ mod live_migration {
                     );
                 }
             }
+
+            if watchdog {
+                let mut current_reboot_count = 2;
+                check_guest_watchdog_no_reboot(&guest, &current_reboot_count);
+                check_guest_watchdog_one_reboot(
+                    &guest,
+                    &dest_api_socket,
+                    &mut current_reboot_count,
+                );
+            }
         });
 
         // Clean-up the destination VM and make sure it terminated correctly
@@ -7671,50 +7689,72 @@ mod live_migration {
 
     #[test]
     fn test_live_migration_basic() {
-        _test_live_migration(false, false, false)
+        _test_live_migration(false, false, false, false)
     }
 
     #[test]
     fn test_live_migration_local() {
-        _test_live_migration(false, false, true)
+        _test_live_migration(false, false, true, false)
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_numa() {
-        _test_live_migration(false, true, false)
+        _test_live_migration(false, true, false, false)
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_numa_local() {
-        _test_live_migration(false, true, true)
+        _test_live_migration(false, true, true, false)
+    }
+
+    #[test]
+    fn test_live_migration_watchdog() {
+        _test_live_migration(false, false, false, true)
+    }
+
+    #[test]
+    fn test_live_migration_watchdog_local() {
+        _test_live_migration(false, false, true, true)
     }
 
     #[test]
     #[ignore]
     fn test_live_upgrade_basic() {
-        _test_live_migration(true, false, false)
+        _test_live_migration(true, false, false, false)
     }
 
     #[test]
     #[ignore]
     fn test_live_upgrade_local() {
-        _test_live_migration(true, false, true)
+        _test_live_migration(true, false, true, false)
     }
 
     #[test]
     #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_numa() {
-        _test_live_migration(true, true, false)
+        _test_live_migration(true, true, false, false)
     }
 
     #[test]
     #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_numa_local() {
-        _test_live_migration(true, true, true)
+        _test_live_migration(true, true, true, false)
+    }
+
+    #[test]
+    #[ignore]
+    fn test_live_upgrade_watchdog() {
+        _test_live_migration(true, false, false, true)
+    }
+
+    #[test]
+    #[ignore]
+    fn test_live_upgrade_watchdog_local() {
+        _test_live_migration(true, false, true, true)
     }
 
     fn _test_live_migration_ovs_dpdk(upgrade_test: bool, local: bool) {
