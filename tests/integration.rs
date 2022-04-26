@@ -7337,7 +7337,18 @@ mod live_migration {
     // 4. The destination VM is functional (including various virtio-devices are working properly) after
     //    live migration;
     // Note: This test does not use vsock as we can't create two identical vsock on the same host.
-    fn _test_live_migration(upgrade_test: bool, numa: bool, local: bool, watchdog: bool) {
+    fn _test_live_migration(
+        upgrade_test: bool,
+        numa: bool,
+        local: bool,
+        watchdog: bool,
+        balloon: bool,
+    ) {
+        assert!(
+            !(numa && balloon),
+            "Invalid inputs: 'numa' and 'balloon' cannot be tested at the same time."
+        );
+
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
         let kernel_path = direct_kernel_boot_path();
@@ -7348,9 +7359,9 @@ mod live_migration {
             net_id, guest.network.guest_mac, guest.network.host_ip
         );
 
-        let memory_param: &[&str] = match (local, numa) {
-            (false, false) => &["--memory", "size=4G"],
-            (false, true) => &[
+        let memory_param: &[&str] = match (balloon, local, numa) {
+            (false, false, false) => &["--memory", "size=4G"],
+            (false, false, true) => &[
                 "--memory",
                 "size=0,hotplug_method=virtio-mem",
                 "--memory-zone",
@@ -7362,8 +7373,8 @@ mod live_migration {
                 "guest_numa_id=1,cpus=[3-4,6-8],distances=[0@20,2@25],memory_zones=mem1",
                 "guest_numa_id=2,cpus=[5,10-11],distances=[0@25,1@30],memory_zones=mem2",
             ],
-            (true, false) => &["--memory", "size=4G,shared=on"],
-            (true, true) => &[
+            (false, true, false) => &["--memory", "size=4G,shared=on"],
+            (false, true, true) => &[
                 "--memory",
                 "size=0,hotplug_method=virtio-mem,shared=on",
                 "--memory-zone",
@@ -7374,6 +7385,18 @@ mod live_migration {
                 "guest_numa_id=0,cpus=[0-2,9],distances=[1@15,2@20],memory_zones=mem0",
                 "guest_numa_id=1,cpus=[3-4,6-8],distances=[0@20,2@25],memory_zones=mem1",
                 "guest_numa_id=2,cpus=[5,10-11],distances=[0@25,1@30],memory_zones=mem2",
+            ],
+            (true, false, _) => &[
+                "--memory",
+                "size=4G,hotplug_method=virtio-mem,hotplug_size=8G",
+                "--balloon",
+                "size=0",
+            ],
+            (true, true, _) => &[
+                "--memory",
+                "size=4G,hotplug_method=virtio-mem,hotplug_size=8G,shared=on",
+                "--balloon",
+                "size=0",
             ],
         };
 
@@ -7425,8 +7448,26 @@ mod live_migration {
             // Make sure the source VM is functaionl
             // Check the number of vCPUs
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 6);
+
             // Check the guest RAM
-            assert!(guest.get_total_memory().unwrap_or_default() > 2_880_000);
+            if balloon {
+                assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+                // Increase the guest RAM
+                resize_command(&src_api_socket, None, Some(6 << 30), None);
+                thread::sleep(std::time::Duration::new(5, 0));
+                assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
+                // Use balloon to remove RAM from the VM
+                resize_command(&src_api_socket, None, None, Some(1 << 30));
+                thread::sleep(std::time::Duration::new(5, 0));
+                let total_memory = guest.get_total_memory().unwrap_or_default();
+                assert!(total_memory > 4_800_000);
+                assert!(total_memory < 5_760_000);
+            } else if numa {
+                assert!(guest.get_total_memory().unwrap_or_default() > 2_880_000);
+            } else {
+                assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+            }
+
             // Check the guest virtio-devices, e.g. block, rng, console, and net
             guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
 
@@ -7673,6 +7714,22 @@ mod live_migration {
                     &mut current_reboot_count,
                 );
             }
+
+            if balloon {
+                let total_memory = guest.get_total_memory().unwrap_or_default();
+                assert!(total_memory > 4_800_000);
+                assert!(total_memory < 5_760_000);
+                // Deflate balloon to restore entire RAM to the VM
+                resize_command(&dest_api_socket, None, None, Some(0));
+                thread::sleep(std::time::Duration::new(5, 0));
+                assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
+                // Decrease guest RAM with virtio-mem
+                resize_command(&dest_api_socket, None, Some(5 << 30), None);
+                thread::sleep(std::time::Duration::new(5, 0));
+                let total_memory = guest.get_total_memory().unwrap_or_default();
+                assert!(total_memory > 4_800_000);
+                assert!(total_memory < 5_760_000);
+            }
         });
 
         // Clean-up the destination VM and make sure it terminated correctly
@@ -7689,72 +7746,94 @@ mod live_migration {
 
     #[test]
     fn test_live_migration_basic() {
-        _test_live_migration(false, false, false, false)
+        _test_live_migration(false, false, false, false, false)
     }
 
     #[test]
     fn test_live_migration_local() {
-        _test_live_migration(false, false, true, false)
+        _test_live_migration(false, false, true, false, false)
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_numa() {
-        _test_live_migration(false, true, false, false)
+        _test_live_migration(false, true, false, false, false)
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_numa_local() {
-        _test_live_migration(false, true, true, false)
+        _test_live_migration(false, true, true, false, false)
     }
 
     #[test]
     fn test_live_migration_watchdog() {
-        _test_live_migration(false, false, false, true)
+        _test_live_migration(false, false, false, true, false)
     }
 
     #[test]
     fn test_live_migration_watchdog_local() {
-        _test_live_migration(false, false, true, true)
+        _test_live_migration(false, false, true, true, false)
+    }
+
+    #[test]
+    fn test_live_migration_balloon() {
+        _test_live_migration(false, false, false, false, true)
+    }
+
+    #[test]
+    fn test_live_migration_balloon_local() {
+        _test_live_migration(false, false, true, false, true)
     }
 
     #[test]
     #[ignore]
     fn test_live_upgrade_basic() {
-        _test_live_migration(true, false, false, false)
+        _test_live_migration(true, false, false, false, false)
     }
 
     #[test]
     #[ignore]
     fn test_live_upgrade_local() {
-        _test_live_migration(true, false, true, false)
+        _test_live_migration(true, false, true, false, false)
     }
 
     #[test]
     #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_numa() {
-        _test_live_migration(true, true, false, false)
+        _test_live_migration(true, true, false, false, false)
     }
 
     #[test]
     #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_numa_local() {
-        _test_live_migration(true, true, true, false)
+        _test_live_migration(true, true, true, false, false)
     }
 
     #[test]
     #[ignore]
     fn test_live_upgrade_watchdog() {
-        _test_live_migration(true, false, false, true)
+        _test_live_migration(true, false, false, true, false)
     }
 
     #[test]
     #[ignore]
     fn test_live_upgrade_watchdog_local() {
-        _test_live_migration(true, false, true, true)
+        _test_live_migration(true, false, true, true, false)
+    }
+
+    #[test]
+    #[ignore]
+    fn test_live_upgrade_balloon() {
+        _test_live_migration(true, false, false, false, true)
+    }
+
+    #[test]
+    #[ignore]
+    fn test_live_upgrade_balloon_local() {
+        _test_live_migration(true, false, true, false, true)
     }
 
     fn _test_live_migration_ovs_dpdk(upgrade_test: bool, local: bool) {
