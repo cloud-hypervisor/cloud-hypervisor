@@ -729,17 +729,17 @@ components:
       properties:
         size:
           type: integer
-          format: uint64
+          format: int64
           minimum: 0
           description: The total number of tokens this bucket can hold.
         one_time_burst:
           type: integer
-          format: uint64
+          format: int64
           minimum: 0
           description: The initial size of a token bucket.
         refill_time:
           type: integer
-          format: uint64
+          format: int64
           minimum: 0
           description: The amount of milliseconds it takes for the bucket to refill.
       description:
