@@ -2055,12 +2055,23 @@ impl Vm {
         Some(rsdp_addr)
     }
 
+    #[cfg(target_arch = "x86_64")]
+    fn entry_point(&mut self) -> Result<Option<EntryPoint>> {
+        #[cfg(feature = "tdx")]
+        if self.config.lock().unwrap().tdx.is_some() {
+            return Ok(None);
+        }
+
+        Ok(if self.kernel.as_ref().is_some() {
+            Some(self.load_kernel()?)
+        } else {
+            None
+        })
+    }
+
+    #[cfg(target_arch = "aarch64")]
     fn entry_point(&mut self) -> Result<Option<EntryPoint>> {
         Ok(if self.kernel.as_ref().is_some() {
-            #[cfg(feature = "tdx")]
-            if self.config.lock().unwrap().tdx.is_some() {
-                return Ok(None);
-            }
             Some(self.load_kernel()?)
         } else {
             None
