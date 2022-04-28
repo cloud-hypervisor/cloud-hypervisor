@@ -5,6 +5,7 @@
 
 use std::ffi::CString;
 use std::io::{IoSlice, Read, Write};
+use std::mem::size_of;
 use std::num::Wrapping;
 use std::os::unix::net::UnixStream;
 use std::os::unix::prelude::RawFd;
@@ -294,7 +295,7 @@ impl Client {
                 message_id: self.next_message_id.0,
                 command: Command::Version,
                 flags: HeaderFlags::Command as u32,
-                message_size: (std::mem::size_of::<Version>() + version_data.len() + 1) as u32,
+                message_size: (size_of::<Version>() + version_data.len() + 1) as u32,
                 ..Default::default()
             },
             major: 0,
@@ -330,7 +331,7 @@ impl Client {
 
         let mut server_version_data = Vec::new();
         server_version_data.resize(
-            server_version.header.message_size as usize - std::mem::size_of::<Version>(),
+            server_version.header.message_size as usize - size_of::<Version>(),
             0,
         );
         self.stream
@@ -361,10 +362,10 @@ impl Client {
                 message_id: self.next_message_id.0,
                 command: Command::DmaMap,
                 flags: HeaderFlags::Command as u32,
-                message_size: std::mem::size_of::<DmaMap>() as u32,
+                message_size: size_of::<DmaMap>() as u32,
                 ..Default::default()
             },
-            argsz: (std::mem::size_of::<DmaMap>() - std::mem::size_of::<Header>()) as u32,
+            argsz: (size_of::<DmaMap>() - size_of::<Header>()) as u32,
             flags: DmaMapFlags::ReadWrite,
             offset,
             address,
@@ -391,10 +392,10 @@ impl Client {
                 message_id: self.next_message_id.0,
                 command: Command::DmaUnmap,
                 flags: HeaderFlags::Command as u32,
-                message_size: std::mem::size_of::<DmaUnmap>() as u32,
+                message_size: size_of::<DmaUnmap>() as u32,
                 ..Default::default()
             },
-            argsz: (std::mem::size_of::<DmaUnmap>() - std::mem::size_of::<Header>()) as u32,
+            argsz: (size_of::<DmaUnmap>() - size_of::<Header>()) as u32,
             flags: 0,
             address,
             size,
@@ -420,7 +421,7 @@ impl Client {
                 message_id: self.next_message_id.0,
                 command: Command::DeviceReset,
                 flags: HeaderFlags::Command as u32,
-                message_size: std::mem::size_of::<DeviceReset>() as u32,
+                message_size: size_of::<DeviceReset>() as u32,
                 ..Default::default()
             },
         };
@@ -445,10 +446,10 @@ impl Client {
                 message_id: self.next_message_id.0,
                 command: Command::DeviceGetInfo,
                 flags: HeaderFlags::Command as u32,
-                message_size: std::mem::size_of::<DeviceGetInfo>() as u32,
+                message_size: size_of::<DeviceGetInfo>() as u32,
                 ..Default::default()
             },
-            argsz: std::mem::size_of::<DeviceGetInfo>() as u32,
+            argsz: size_of::<DeviceGetInfo>() as u32,
             ..Default::default()
         };
         debug!("Command: {:?}", get_info);
@@ -528,7 +529,7 @@ impl Client {
                 message_id: self.next_message_id.0,
                 command: Command::RegionRead,
                 flags: HeaderFlags::Command as u32,
-                message_size: std::mem::size_of::<RegionAccess>() as u32,
+                message_size: size_of::<RegionAccess>() as u32,
                 ..Default::default()
             },
             offset,
@@ -556,7 +557,7 @@ impl Client {
                 message_id: self.next_message_id.0,
                 command: Command::RegionWrite,
                 flags: HeaderFlags::Command as u32,
-                message_size: (std::mem::size_of::<RegionAccess>() + data.len()) as u32,
+                message_size: (size_of::<RegionAccess>() + data.len()) as u32,
                 ..Default::default()
             },
             offset,
@@ -588,10 +589,10 @@ impl Client {
                 message_id: self.next_message_id.0,
                 command: Command::GetIrqInfo,
                 flags: HeaderFlags::Command as u32,
-                message_size: std::mem::size_of::<GetIrqInfo>() as u32,
+                message_size: size_of::<GetIrqInfo>() as u32,
                 ..Default::default()
             },
-            argsz: (std::mem::size_of::<GetIrqInfo>() - std::mem::size_of::<Header>()) as u32,
+            argsz: (size_of::<GetIrqInfo>() - size_of::<Header>()) as u32,
             flags: 0,
             index,
             count: 0,
@@ -629,10 +630,10 @@ impl Client {
                 message_id: self.next_message_id.0,
                 command: Command::SetIrqs,
                 flags: HeaderFlags::Command as u32,
-                message_size: std::mem::size_of::<SetIrqs>() as u32,
+                message_size: size_of::<SetIrqs>() as u32,
                 ..Default::default()
             },
-            argsz: (std::mem::size_of::<SetIrqs>() - std::mem::size_of::<Header>()) as u32,
+            argsz: (size_of::<SetIrqs>() - size_of::<Header>()) as u32,
             flags,
             start,
             index,
