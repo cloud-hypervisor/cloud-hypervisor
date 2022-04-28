@@ -146,6 +146,15 @@ impl VfioUserPciDevice {
                 .file_offset
                 .clone();
 
+            let sparse_areas = self
+                .client
+                .lock()
+                .unwrap()
+                .region(mmio_region.index)
+                .unwrap()
+                .sparse_areas
+                .clone();
+
             if region_flags & VFIO_REGION_INFO_FLAG_MMAP != 0 {
                 let mut prot = 0;
                 if region_flags & VFIO_REGION_INFO_FLAG_READ != 0 {
@@ -174,12 +183,24 @@ impl VfioUserPciDevice {
                     continue;
                 }
 
-                let user_memory_regions = vec![UserMemoryRegion {
-                    slot: mem_slot(),
-                    start: mmio_region.start.0,
-                    size: mmio_region.length as u64,
-                    host_addr: host_addr as u64,
-                }];
+                let mut user_memory_regions = Vec::new();
+                if sparse_areas.is_empty() {
+                    user_memory_regions.push(UserMemoryRegion {
+                        slot: mem_slot(),
+                        start: mmio_region.start.0,
+                        size: mmio_region.length as u64,
+                        host_addr: host_addr as u64,
+                    })
+                } else {
+                    for s in sparse_areas.iter() {
+                        user_memory_regions.push(UserMemoryRegion {
+                            slot: mem_slot(),
+                            start: mmio_region.start.0 + s.offset,
+                            size: s.size,
+                            host_addr: host_addr as u64 + s.offset,
+                        });
+                    }
+                };
 
                 for user_memory_region in user_memory_regions.iter() {
                     let mem_region = vm.make_user_memory_region(
