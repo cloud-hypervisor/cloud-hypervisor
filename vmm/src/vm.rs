@@ -967,14 +967,17 @@ impl Vm {
         Ok(arch::InitramfsConfig { address, size })
     }
 
-    fn get_cmdline(&mut self) -> Result<Cmdline> {
+    fn generate_cmdline(
+        config: &Arc<Mutex<VmConfig>>,
+        #[cfg(target_arch = "aarch64")] device_manager: &Arc<Mutex<DeviceManager>>,
+    ) -> Result<Cmdline> {
         let mut cmdline = Cmdline::new(arch::CMDLINE_MAX_SIZE);
         cmdline
-            .insert_str(self.config.lock().unwrap().cmdline.args.clone())
+            .insert_str(&config.lock().unwrap().cmdline.args)
             .map_err(Error::CmdLineInsertStr)?;
 
         #[cfg(target_arch = "aarch64")]
-        for entry in self.device_manager.lock().unwrap().cmdline_additions() {
+        for entry in device_manager.lock().unwrap().cmdline_additions() {
             cmdline.insert_str(entry).map_err(Error::CmdLineInsertStr)?;
         }
         Ok(cmdline)
@@ -1022,7 +1025,7 @@ impl Vm {
     fn load_kernel(&mut self) -> Result<EntryPoint> {
         use linux_loader::loader::{elf::Error::InvalidElfMagicNumber, Error::Elf};
         info!("Loading kernel");
-        let cmdline = self.get_cmdline()?;
+        let cmdline = Self::generate_cmdline(&self.config)?;
         let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
         let mem = guest_memory.memory();
         let mut kernel = self.kernel.as_ref().unwrap();
@@ -1133,7 +1136,7 @@ impl Vm {
 
     #[cfg(target_arch = "aarch64")]
     fn configure_system(&mut self, _rsdp_addr: GuestAddress) -> Result<()> {
-        let cmdline = self.get_cmdline()?;
+        let cmdline = Self::generate_cmdline(&self.config, &self.device_manager)?;
         let vcpu_mpidrs = self.cpu_manager.lock().unwrap().get_mpidrs();
         let vcpu_topology = self.cpu_manager.lock().unwrap().get_vcpu_topology();
         let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
@@ -1884,7 +1887,7 @@ impl Vm {
                 }
                 TdvfSectionType::PayloadParam => {
                     info!("Copying payload parameters to guest memory");
-                    let cmdline = self.get_cmdline()?;
+                    let cmdline = Self::generate_cmdline(&self.config)?;
                     mem.write_slice(cmdline.as_str().as_bytes(), GuestAddress(section.address))
                         .unwrap();
                 }
