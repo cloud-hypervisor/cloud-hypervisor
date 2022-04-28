@@ -286,6 +286,14 @@ pub enum Error {
     #[cfg(feature = "gdb")]
     #[error("Error debugging VM: {0:?}")]
     Debug(DebuggableError),
+
+    #[cfg(target_arch = "x86_64")]
+    #[error("Error spawning kernel loading thread")]
+    KernelLoadThreadSpawn(std::io::Error),
+
+    #[cfg(target_arch = "x86_64")]
+    #[error("Error joining kernel loading thread")]
+    KernelLoadThreadJoin(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -506,6 +514,7 @@ pub fn physical_bits(max_phys_bits: u8) -> u8 {
 pub const HANDLED_SIGNALS: [i32; 3] = [SIGWINCH, SIGTERM, SIGINT];
 
 pub struct Vm {
+    #[cfg(any(target_arch = "aarch64", feature = "tdx"))]
     kernel: Option<File>,
     initramfs: Option<File>,
     threads: Vec<thread::JoinHandle<()>>,
@@ -521,13 +530,14 @@ pub struct Vm {
     vm: Arc<dyn hypervisor::Vm>,
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     saved_clock: Option<hypervisor::ClockData>,
-
     numa_nodes: NumaNodes,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
     stop_on_boot: bool,
+    #[cfg(target_arch = "x86_64")]
+    load_kernel_handle: Option<thread::JoinHandle<Result<EntryPoint>>>,
 }
 
 impl Vm {
@@ -544,6 +554,22 @@ impl Vm {
         activate_evt: EventFd,
         restoring: bool,
     ) -> Result<Self> {
+        let kernel = config
+            .lock()
+            .unwrap()
+            .kernel
+            .as_ref()
+            .map(|k| File::open(&k.path))
+            .transpose()
+            .map_err(Error::KernelFile)?;
+
+        #[cfg(target_arch = "x86_64")]
+        let load_kernel_handle = if !restoring {
+            Self::load_kernel_async(&kernel, &memory_manager, &config)?
+        } else {
+            None
+        };
+
         config
             .lock()
             .unwrap()
@@ -624,14 +650,6 @@ impl Vm {
         .map_err(Error::CpuManager)?;
 
         let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO as i32) } != 0;
-        let kernel = config
-            .lock()
-            .unwrap()
-            .kernel
-            .as_ref()
-            .map(|k| File::open(&k.path))
-            .transpose()
-            .map_err(Error::KernelFile)?;
 
         let initramfs = config
             .lock()
@@ -643,6 +661,7 @@ impl Vm {
             .map_err(Error::InitramfsFile)?;
 
         Ok(Vm {
+            #[cfg(any(target_arch = "aarch64", feature = "tdx"))]
             kernel,
             initramfs,
             device_manager,
@@ -656,13 +675,14 @@ impl Vm {
             vm,
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             saved_clock: None,
-
             numa_nodes,
             seccomp_action: seccomp_action.clone(),
             exit_evt,
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             hypervisor,
             stop_on_boot,
+            #[cfg(target_arch = "x86_64")]
+            load_kernel_handle,
         })
     }
 
@@ -1093,6 +1113,36 @@ impl Vm {
         } else {
             Err(Error::KernelMissingPvhHeader)
         }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn load_kernel_async(
+        kernel: &Option<File>,
+        memory_manager: &Arc<Mutex<MemoryManager>>,
+        config: &Arc<Mutex<VmConfig>>,
+    ) -> Result<Option<thread::JoinHandle<Result<EntryPoint>>>> {
+        // Kernel with TDX is loaded in a different manner
+        #[cfg(feature = "tdx")]
+        if config.lock().unwrap().tdx.is_some() {
+            return Ok(None);
+        }
+
+        kernel
+            .as_ref()
+            .map(|kernel| {
+                let kernel = kernel.try_clone().unwrap();
+                let config = config.clone();
+                let memory_manager = memory_manager.clone();
+
+                std::thread::Builder::new()
+                    .name("kernel_loader".into())
+                    .spawn(move || {
+                        let cmdline = Self::generate_cmdline(&config)?;
+                        Self::load_kernel(kernel, cmdline, memory_manager)
+                    })
+                    .map_err(Error::KernelLoadThreadSpawn)
+            })
+            .transpose()
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -2059,22 +2109,10 @@ impl Vm {
 
     #[cfg(target_arch = "x86_64")]
     fn entry_point(&mut self) -> Result<Option<EntryPoint>> {
-        #[cfg(feature = "tdx")]
-        if self.config.lock().unwrap().tdx.is_some() {
-            return Ok(None);
-        }
-
-        Ok(if let Some(kernel) = self.kernel.as_ref() {
-            let cmdline = Self::generate_cmdline(&self.config)?;
-            let entry_point = Self::load_kernel(
-                kernel.try_clone().unwrap(),
-                cmdline,
-                self.memory_manager.clone(),
-            )?;
-            Some(entry_point)
-        } else {
-            None
-        })
+        self.load_kernel_handle
+            .take()
+            .map(|handle| handle.join().map_err(Error::KernelLoadThreadJoin)?)
+            .transpose()
     }
 
     #[cfg(target_arch = "aarch64")]
