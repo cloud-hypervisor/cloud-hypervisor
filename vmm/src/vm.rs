@@ -2139,6 +2139,13 @@ impl Vm {
         };
         current_state.valid_transition(new_state)?;
 
+        // Do earlier to parallelise with loading kernel
+        #[cfg(target_arch = "x86_64")]
+        let rsdp_addr = self.create_acpi_tables();
+
+        self.setup_signal_handler()?;
+        self.setup_tty()?;
+
         // Load kernel if configured
         let entry_point = self.entry_point()?;
 
@@ -2163,8 +2170,6 @@ impl Vm {
             Vec::new()
         };
 
-        let rsdp_addr = self.create_acpi_tables();
-
         // Configuring the TDX regions requires that the vCPUs are created.
         #[cfg(feature = "tdx")]
         let hob_address = if self.config.lock().unwrap().tdx.is_some() {
@@ -2173,6 +2178,11 @@ impl Vm {
         } else {
             None
         };
+
+        // On aarch64 the ACPI tables depend on the vCPU mpidr which is only
+        // available after they are configured
+        #[cfg(target_arch = "aarch64")]
+        let rsdp_addr = self.create_acpi_tables();
 
         // Configure shared state based on loaded kernel
         entry_point
@@ -2207,9 +2217,6 @@ impl Vm {
                 .start_boot_vcpus()
                 .map_err(Error::CpuManager)?;
         }
-
-        self.setup_signal_handler()?;
-        self.setup_tty()?;
 
         let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
         *state = new_state;
