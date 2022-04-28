@@ -8,7 +8,7 @@ use net_util::MacAddr;
 use option_parser::{
     ByteSized, IntegerList, OptionParser, OptionParserError, StringList, Toggle, Tuple,
 };
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::convert::From;
 use std::fmt;
 use std::net::Ipv4Addr;
@@ -170,6 +170,8 @@ pub enum ValidationError {
     OnIommuSegment(u16),
     // On a IOMMU segment but IOMMU not suported
     IommuNotSupported(u16),
+    // Identifier is not unique
+    IdentifierNotUnique(String),
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -255,6 +257,9 @@ impl fmt::Display for ValidationError {
                     "Device is on an IOMMU PCI segment ({}) but does support being placed behind IOMMU",
                     pci_segment
                 )
+            }
+            IdentifierNotUnique(s) => {
+                write!(f, "Identifier {} is not unique", s)
             }
         }
     }
@@ -2325,6 +2330,8 @@ pub struct VmConfig {
 impl VmConfig {
     // Also enables virtio-iommu if the config needs it
     pub fn validate(&mut self) -> ValidationResult<()> {
+        let mut id_list = BTreeSet::new();
+
         #[cfg(not(feature = "tdx"))]
         self.kernel.as_ref().ok_or(ValidationError::KernelMissing)?;
 
@@ -2369,6 +2376,12 @@ impl VmConfig {
                 }
                 disk.validate(self)?;
                 self.iommu |= disk.iommu;
+
+                if let Some(id) = disk.id.clone() {
+                    if !id_list.insert(id.clone()) {
+                        return Err(ValidationError::IdentifierNotUnique(id));
+                    }
+                }
             }
         }
 
@@ -2379,6 +2392,12 @@ impl VmConfig {
                 }
                 net.validate(self)?;
                 self.iommu |= net.iommu;
+
+                if let Some(id) = net.id.clone() {
+                    if !id_list.insert(id.clone()) {
+                        return Err(ValidationError::IdentifierNotUnique(id));
+                    }
+                }
             }
         }
 
@@ -2388,6 +2407,12 @@ impl VmConfig {
             }
             for fs in fses {
                 fs.validate(self)?;
+
+                if let Some(id) = fs.id.clone() {
+                    if !id_list.insert(id.clone()) {
+                        return Err(ValidationError::IdentifierNotUnique(id));
+                    }
+                }
             }
         }
 
@@ -2395,6 +2420,12 @@ impl VmConfig {
             for pmem in pmems {
                 pmem.validate(self)?;
                 self.iommu |= pmem.iommu;
+
+                if let Some(id) = pmem.id.clone() {
+                    if !id_list.insert(id.clone()) {
+                        return Err(ValidationError::IdentifierNotUnique(id));
+                    }
+                }
             }
         }
 
@@ -2440,6 +2471,12 @@ impl VmConfig {
 
             for user_device in user_devices {
                 user_device.validate(self)?;
+
+                if let Some(id) = user_device.id.clone() {
+                    if !id_list.insert(id.clone()) {
+                        return Err(ValidationError::IdentifierNotUnique(id));
+                    }
+                }
             }
         }
 
@@ -2447,6 +2484,12 @@ impl VmConfig {
             for vdpa_device in vdpa_devices {
                 vdpa_device.validate(self)?;
                 self.iommu |= vdpa_device.iommu;
+
+                if let Some(id) = vdpa_device.id.clone() {
+                    if !id_list.insert(id.clone()) {
+                        return Err(ValidationError::IdentifierNotUnique(id));
+                    }
+                }
             }
         }
 
@@ -2471,12 +2514,24 @@ impl VmConfig {
             for device in devices {
                 device.validate(self)?;
                 self.iommu |= device.iommu;
+
+                if let Some(id) = device.id.clone() {
+                    if !id_list.insert(id.clone()) {
+                        return Err(ValidationError::IdentifierNotUnique(id));
+                    }
+                }
             }
         }
 
         if let Some(vsock) = &self.vsock {
             vsock.validate(self)?;
             self.iommu |= vsock.iommu;
+
+            if let Some(id) = vsock.id.clone() {
+                if !id_list.insert(id.clone()) {
+                    return Err(ValidationError::IdentifierNotUnique(id));
+                }
+            }
         }
 
         if let Some(numa) = &self.numa {
@@ -2493,6 +2548,25 @@ impl VmConfig {
                             numa_node.guest_numa_id,
                         ));
                     }
+                }
+            }
+        }
+
+        if let Some(zones) = &self.memory.zones {
+            for zone in zones.iter() {
+                let id = zone.id.clone();
+                if !id_list.insert(id.clone()) {
+                    return Err(ValidationError::IdentifierNotUnique(id));
+                }
+            }
+        }
+
+        #[cfg(target_arch = "x86_64")]
+        if let Some(sgx_epcs) = &self.sgx_epc {
+            for sgx_epc in sgx_epcs.iter() {
+                let id = sgx_epc.id.clone();
+                if !id_list.insert(id.clone()) {
+                    return Err(ValidationError::IdentifierNotUnique(id));
                 }
             }
         }
