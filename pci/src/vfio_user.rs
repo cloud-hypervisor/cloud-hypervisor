@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::vfio::{Interrupt, Vfio, VfioCommon, VfioError};
+use crate::vfio::{Interrupt, UserMemoryRegion, Vfio, VfioCommon, VfioError};
 use crate::{BarReprogrammingParams, PciBarConfiguration, VfioPciError};
 use crate::{
     PciBdf, PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciSubclass,
@@ -174,22 +174,30 @@ impl VfioUserPciDevice {
                     continue;
                 }
 
-                let slot = mem_slot();
-                let mem_region = vm.make_user_memory_region(
-                    slot,
-                    mmio_region.start.0,
-                    mmio_region.length as u64,
-                    host_addr as u64,
-                    false,
-                    false,
-                );
+                let user_memory_regions = vec![UserMemoryRegion {
+                    slot: mem_slot(),
+                    start: mmio_region.start.0,
+                    size: mmio_region.length as u64,
+                    host_addr: host_addr as u64,
+                }];
 
-                vm.create_user_memory_region(mem_region)
-                    .map_err(VfioUserPciDeviceError::MapRegionGuest)?;
+                for user_memory_region in user_memory_regions.iter() {
+                    let mem_region = vm.make_user_memory_region(
+                        user_memory_region.slot,
+                        user_memory_region.start,
+                        user_memory_region.size,
+                        user_memory_region.host_addr,
+                        false,
+                        false,
+                    );
 
-                mmio_region.mem_slot = Some(slot);
+                    vm.create_user_memory_region(mem_region)
+                        .map_err(VfioUserPciDeviceError::MapRegionGuest)?;
+                }
+
                 mmio_region.host_addr = Some(host_addr as u64);
                 mmio_region.mmap_size = Some(mmio_region.length as usize);
+                mmio_region.user_memory_regions = user_memory_regions;
             }
         }
 
@@ -198,17 +206,13 @@ impl VfioUserPciDevice {
 
     pub fn unmap_mmio_regions(&mut self) {
         for mmio_region in self.common.mmio_regions.iter() {
-            if let (Some(host_addr), Some(mmap_size), Some(mem_slot)) = (
-                mmio_region.host_addr,
-                mmio_region.mmap_size,
-                mmio_region.mem_slot,
-            ) {
+            for user_memory_region in mmio_region.user_memory_regions.iter() {
                 // Remove region
                 let r = self.vm.make_user_memory_region(
-                    mem_slot,
-                    mmio_region.start.raw_value(),
-                    mmap_size as u64,
-                    host_addr as u64,
+                    user_memory_region.slot,
+                    user_memory_region.start,
+                    user_memory_region.size,
+                    user_memory_region.host_addr,
                     false,
                     false,
                 );
@@ -216,7 +220,11 @@ impl VfioUserPciDevice {
                 if let Err(e) = self.vm.remove_user_memory_region(r) {
                     error!("Could not remove the userspace memory region: {}", e);
                 }
+            }
 
+            if let (Some(host_addr), Some(mmap_size)) =
+                (mmio_region.host_addr, mmio_region.mmap_size)
+            {
                 let ret = unsafe { libc::munmap(host_addr as *mut libc::c_void, mmap_size) };
                 if ret != 0 {
                     error!(
@@ -450,35 +458,41 @@ impl PciDevice for VfioUserPciDevice {
             if mmio_region.start.raw_value() == old_base {
                 mmio_region.start = GuestAddress(new_base);
 
-                if let Some(mem_slot) = mmio_region.mem_slot {
-                    if let Some(host_addr) = mmio_region.host_addr {
-                        // Remove original region
-                        let old_region = self.vm.make_user_memory_region(
-                            mem_slot,
-                            old_base,
-                            mmio_region.length as u64,
-                            host_addr as u64,
-                            false,
-                            false,
-                        );
+                for user_memory_region in mmio_region.user_memory_regions.iter_mut() {
+                    // Remove old region
+                    let old_region = self.vm.make_user_memory_region(
+                        user_memory_region.slot,
+                        user_memory_region.start,
+                        user_memory_region.size,
+                        user_memory_region.host_addr,
+                        false,
+                        false,
+                    );
 
-                        self.vm
-                            .remove_user_memory_region(old_region)
-                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                    self.vm
+                        .remove_user_memory_region(old_region)
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
-                        let new_region = self.vm.make_user_memory_region(
-                            mem_slot,
-                            new_base,
-                            mmio_region.length as u64,
-                            host_addr as u64,
-                            false,
-                            false,
-                        );
-
-                        self.vm
-                            .create_user_memory_region(new_region)
-                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                    // Update the user memory region with the correct start address.
+                    if new_base > old_base {
+                        user_memory_region.start += new_base - old_base;
+                    } else {
+                        user_memory_region.start -= old_base - new_base;
                     }
+
+                    // Insert new region
+                    let new_region = self.vm.make_user_memory_region(
+                        user_memory_region.slot,
+                        user_memory_region.start,
+                        user_memory_region.size,
+                        user_memory_region.host_addr,
+                        false,
+                        false,
+                    );
+
+                    self.vm
+                        .create_user_memory_region(new_region)
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
                 }
                 info!("Moved bar 0x{:x} -> 0x{:x}", old_base, new_base);
             }
