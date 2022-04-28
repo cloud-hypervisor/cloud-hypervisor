@@ -1021,13 +1021,18 @@ impl Vm {
     }
 
     #[cfg(target_arch = "x86_64")]
-    fn load_kernel(&mut self) -> Result<EntryPoint> {
+    fn load_kernel(
+        mut kernel: File,
+        cmdline: Cmdline,
+        memory_manager: Arc<Mutex<MemoryManager>>,
+    ) -> Result<EntryPoint> {
         use linux_loader::loader::{elf::Error::InvalidElfMagicNumber, Error::Elf};
         info!("Loading kernel");
-        let cmdline = Self::generate_cmdline(&self.config)?;
-        let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
-        let mem = guest_memory.memory();
-        let mut kernel = self.kernel.as_ref().unwrap();
+
+        let mem = {
+            let guest_memory = memory_manager.lock().as_ref().unwrap().guest_memory();
+            guest_memory.memory()
+        };
         let entry_addr = match linux_loader::loader::elf::Elf::load(
             mem.deref(),
             None,
@@ -1056,7 +1061,7 @@ impl Vm {
                         size
                     );
 
-                    self.memory_manager
+                    memory_manager
                         .lock()
                         .unwrap()
                         .add_ram_region(load_address, size as usize)
@@ -1065,9 +1070,7 @@ impl Vm {
                     kernel
                         .seek(SeekFrom::Start(0))
                         .map_err(Error::FirmwareFile)?;
-                    guest_memory
-                        .memory()
-                        .read_exact_from(load_address, &mut kernel, size as usize)
+                    mem.read_exact_from(load_address, &mut kernel, size as usize)
                         .map_err(Error::FirmwareLoad)?;
 
                     return Ok(EntryPoint { entry_addr: None });
@@ -2061,8 +2064,14 @@ impl Vm {
             return Ok(None);
         }
 
-        Ok(if self.kernel.as_ref().is_some() {
-            Some(self.load_kernel()?)
+        Ok(if let Some(kernel) = self.kernel.as_ref() {
+            let cmdline = Self::generate_cmdline(&self.config)?;
+            let entry_point = Self::load_kernel(
+                kernel.try_clone().unwrap(),
+                cmdline,
+                self.memory_manager.clone(),
+            )?;
+            Some(entry_point)
         } else {
             None
         })
