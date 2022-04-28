@@ -31,6 +31,10 @@ use crate::{
     PciDeviceInfo, CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_SNAPSHOT_ID,
 };
 use anyhow::anyhow;
+#[cfg(target_arch = "aarch64")]
+use arch::aarch64::gic::gicv3_its::kvm::{KvmGicV3Its, GIC_V3_ITS_SNAPSHOT_ID};
+#[cfg(target_arch = "aarch64")]
+use arch::aarch64::gic::kvm::create_gic;
 use arch::get_host_cpu_phys_bits;
 #[cfg(target_arch = "x86_64")]
 use arch::layout::{KVM_IDENTITY_MAP_START, KVM_TSS_START};
@@ -40,6 +44,8 @@ use arch::EntryPoint;
 #[cfg(target_arch = "aarch64")]
 use arch::PciSpaceInfo;
 use arch::{NumaNode, NumaNodes};
+#[cfg(target_arch = "aarch64")]
+use devices::interrupt_controller::{self, InterruptController};
 use devices::AcpiNotificationFlags;
 #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
 use gdbstub_arch::x86::reg::X86_64CoreRegs;
@@ -91,13 +97,6 @@ use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::unblock_signal;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 use vmm_sys_util::terminal::Terminal;
-
-#[cfg(target_arch = "aarch64")]
-use arch::aarch64::gic::gicv3_its::kvm::{KvmGicV3Its, GIC_V3_ITS_SNAPSHOT_ID};
-#[cfg(target_arch = "aarch64")]
-use arch::aarch64::gic::kvm::create_gic;
-#[cfg(target_arch = "aarch64")]
-use devices::interrupt_controller::{self, InterruptController};
 
 /// Errors associated with VM management
 #[derive(Debug, Error)]
