@@ -211,10 +211,10 @@ impl Interrupt {
 
 #[derive(Copy, Clone)]
 pub struct UserMemoryRegion {
-    slot: u32,
-    start: u64,
-    size: u64,
-    host_addr: u64,
+    pub slot: u32,
+    pub start: u64,
+    pub size: u64,
+    pub host_addr: u64,
 }
 
 #[derive(Clone)]
@@ -223,7 +223,6 @@ pub struct MmioRegion {
     pub length: GuestUsize,
     pub(crate) type_: PciBarRegionType,
     pub(crate) index: u32,
-    pub(crate) mem_slot: Option<u32>,
     pub(crate) host_addr: Option<u64>,
     pub(crate) mmap_size: Option<usize>,
     pub(crate) user_memory_regions: Vec<UserMemoryRegion>,
@@ -546,7 +545,6 @@ impl VfioCommon {
                 length: region_size,
                 type_: region_type,
                 index: bar_id as u32,
-                mem_slot: None,
                 host_addr: None,
                 mmap_size: None,
                 user_memory_regions: Vec::new(),
