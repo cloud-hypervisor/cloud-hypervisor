@@ -236,6 +236,7 @@ pub struct Region {
     pub index: u32,
     pub size: u64,
     pub file_offset: Option<FileOffset>,
+    pub sparse_areas: Vec<vfio_region_sparse_mmap_area>,
 }
 
 #[derive(Debug)]
@@ -476,12 +477,23 @@ impl Client {
         let num_regions = reply.num_regions;
         let mut regions = Vec::new();
         for index in 0..num_regions {
-            let (region_info, fd) = self.get_region_info(index, None)?;
+            let (mut region_info, mut fd, mut sparse_areas) = self.get_region_info(index, None)?;
+            if region_info.argsz > std::mem::size_of::<vfio_region_info>() as u32 {
+                // Note: workaround for https://github.com/rust-lang/rust/issues/71126 to compile with rust toolchian 1.56
+                let (_region_info, _fd, _sparse_areas) = self.get_region_info(
+                    index,
+                    Some(region_info.argsz - std::mem::size_of::<vfio_region_info>() as u32),
+                )?;
+                region_info = _region_info;
+                fd = _fd;
+                sparse_areas = _sparse_areas;
+            }
             regions.push(Region {
                 flags: region_info.flags,
                 index: region_info.index,
                 size: region_info.size,
                 file_offset: fd.map(|fd| FileOffset::new(fd, region_info.offset)),
+                sparse_areas,
             });
         }
 
@@ -492,7 +504,14 @@ impl Client {
         &mut self,
         index: u32,
         cap_size: Option<u32>,
-    ) -> Result<(vfio_region_info, Option<File>), Error> {
+    ) -> Result<
+        (
+            vfio_region_info,
+            Option<File>,
+            Vec<vfio_region_sparse_mmap_area>,
+        ),
+        Error,
+    > {
         let get_region_info = DeviceGetRegionInfo {
             header: Header {
                 message_id: self.next_message_id.0,
@@ -521,20 +540,95 @@ impl Client {
             .map_err(Error::ReceiveWithFd)?;
         debug!("Reply: {:?}", reply);
 
-        // TODO: Handle region with capabilities
-        if let Some(cap_size) = cap_size {
-            assert_eq!(
-                cap_size,
-                reply.header.message_size - size_of::<DeviceGetRegionInfo>() as u32
-            );
-            let mut _cap_data = Vec::with_capacity(cap_size as usize);
-            _cap_data.resize(_cap_data.capacity(), 0u8);
-            self.stream
-                .read_exact(_cap_data.as_mut_slice())
-                .map_err(Error::StreamRead)?;
+        let sparse_areas = match cap_size {
+            Some(cap_size) => {
+                assert_eq!(
+                    cap_size,
+                    reply.header.message_size - size_of::<DeviceGetRegionInfo>() as u32
+                );
+                let mut cap_data = Vec::with_capacity(cap_size as usize);
+                cap_data.resize(cap_data.capacity(), 0u8);
+                self.stream
+                    .read_exact(cap_data.as_mut_slice())
+                    .map_err(Error::StreamRead)?;
+
+                Self::parse_region_caps(&cap_data, &reply.region_info)?
+            }
+            None => Vec::new(),
+        };
+
+        Ok((reply.region_info, fd, sparse_areas))
+    }
+
+    fn parse_region_caps(
+        cap_data: &[u8],
+        region_info: &vfio_region_info,
+    ) -> Result<Vec<vfio_region_sparse_mmap_area>, Error> {
+        let mut sparse_areas: Vec<vfio_region_sparse_mmap_area> = Vec::new();
+
+        let cap_size = cap_data.len() as u32;
+        let cap_header_size = size_of::<vfio_info_cap_header>() as u32;
+        let mmap_cap_size = size_of::<vfio_region_info_cap_sparse_mmap>() as u32;
+        let mmap_area_size = size_of::<vfio_region_sparse_mmap_area>() as u32;
+
+        let cap_data_ptr = cap_data.as_ptr() as *const u8;
+        let mut region_info_offset = region_info.cap_offset;
+        while region_info_offset != 0 {
+            // calculate the offset from the begining of the cap_data based on the offset
+            // that is relative to the begining of the VFIO region info structure
+            let cap_offset = region_info_offset - size_of::<vfio_region_info>() as u32;
+            if cap_offset + cap_header_size > cap_size {
+                warn!(
+                    "Unexpected end of cap data: 'cap_offset + cap_header_size > cap_size' \
+                cap_offset = {}, cap_header_size = {}, cap_size = {}",
+                    cap_offset, cap_header_size, cap_size
+                );
+                break;
+            }
+
+            // Safe because the `cap_data_ptr` is valid and the `cap_offset` is checked above
+            let cap_ptr = unsafe { cap_data_ptr.offset(cap_offset as isize) };
+            let cap_header = unsafe { &*(cap_ptr as *const vfio_info_cap_header) };
+            match cap_header.id as u32 {
+                VFIO_REGION_INFO_CAP_SPARSE_MMAP => {
+                    if cap_offset + mmap_cap_size > cap_size {
+                        warn!(
+                            "Unexpected end of cap data: 'cap_offset + mmap_cap_size > cap_size' \
+                        cap_offset = {}, mmap_cap_size = {}, cap_size = {}",
+                            cap_offset, mmap_cap_size, cap_size
+                        );
+                        break;
+                    }
+                    // Safe because the `cap_ptr` is valid and its size is also checked above
+                    let sparse_mmap = unsafe {
+                        &*(cap_ptr as *mut u8 as *const vfio_region_info_cap_sparse_mmap)
+                    };
+
+                    let area_num = sparse_mmap.nr_areas;
+                    if cap_offset + mmap_cap_size + area_num * mmap_area_size > cap_size {
+                        warn!("Unexpected end of cap data: 'cap_offset + mmap_cap_size + area_num * mmap_area_size > cap_size' \
+                        cap_offset = {}, mmap_cap_size = {}, area_num = {}, mmap_area_size = {}, cap_size = {}",
+                        cap_offset, mmap_cap_size, area_num, mmap_area_size, cap_size);
+                        break;
+                    }
+                    // Safe because the `sparse_mmap` is valid and its size is also checked above
+                    let areas =
+                        unsafe { sparse_mmap.areas.as_slice(sparse_mmap.nr_areas as usize) };
+                    for area in areas.iter() {
+                        sparse_areas.push(*area);
+                    }
+                }
+                _ => {
+                    warn!(
+                        "Ignoring unsupported vfio region capability (id = '{}')",
+                        cap_header.id
+                    );
+                }
+            }
+            region_info_offset = cap_header.next;
         }
 
-        Ok((reply.region_info, fd))
+        Ok(sparse_areas)
     }
 
     pub fn region_read(&mut self, region: u32, offset: u64, data: &mut [u8]) -> Result<(), Error> {
