@@ -4,6 +4,7 @@
 //
 
 use std::ffi::CString;
+use std::fs::File;
 use std::io::{IoSlice, Read, Write};
 use std::mem::size_of;
 use std::num::Wrapping;
@@ -475,52 +476,65 @@ impl Client {
         let num_regions = reply.num_regions;
         let mut regions = Vec::new();
         for index in 0..num_regions {
-            let get_region_info = DeviceGetRegionInfo {
-                header: Header {
-                    message_id: self.next_message_id.0,
-                    command: Command::DeviceGetRegionInfo,
-                    flags: HeaderFlags::Command as u32,
-                    message_size: std::mem::size_of::<DeviceGetRegionInfo>() as u32,
-                    ..Default::default()
-                },
-                region_info: vfio_region_info {
-                    argsz: 1024, // Arbitrary max size
-                    index,
-                    ..Default::default()
-                },
-            };
-            debug!("Command: {:?}", get_region_info);
-            self.next_message_id += Wrapping(1);
-
-            self.stream
-                .write_all(get_region_info.as_slice())
-                .map_err(Error::StreamWrite)?;
-
-            let mut reply = DeviceGetRegionInfo::default();
-            let (_, fd) = self
-                .stream
-                .recv_with_fd(reply.as_mut_slice())
-                .map_err(Error::ReceiveWithFd)?;
-            debug!("Reply: {:?}", reply);
-
+            let (region_info, fd) = self.get_region_info(index, None)?;
             regions.push(Region {
-                flags: reply.region_info.flags,
-                index: reply.region_info.index,
-                size: reply.region_info.size,
-                file_offset: fd.map(|fd| FileOffset::new(fd, reply.region_info.offset)),
+                flags: region_info.flags,
+                index: region_info.index,
+                size: region_info.size,
+                file_offset: fd.map(|fd| FileOffset::new(fd, region_info.offset)),
             });
+        }
 
-            // TODO: Handle region with capabilities
-            let mut _cap_data = Vec::with_capacity(
-                reply.header.message_size as usize - std::mem::size_of::<DeviceGetRegionInfo>(),
+        Ok(regions)
+    }
+
+    fn get_region_info(
+        &mut self,
+        index: u32,
+        cap_size: Option<u32>,
+    ) -> Result<(vfio_region_info, Option<File>), Error> {
+        let get_region_info = DeviceGetRegionInfo {
+            header: Header {
+                message_id: self.next_message_id.0,
+                command: Command::DeviceGetRegionInfo,
+                flags: HeaderFlags::Command as u32,
+                message_size: std::mem::size_of::<DeviceGetRegionInfo>() as u32,
+                ..Default::default()
+            },
+            region_info: vfio_region_info {
+                argsz: size_of::<vfio_region_info>() as u32 + cap_size.unwrap_or_default(),
+                index,
+                ..Default::default()
+            },
+        };
+        debug!("Command: {:?}", get_region_info);
+        self.next_message_id += Wrapping(1);
+
+        self.stream
+            .write_all(get_region_info.as_slice())
+            .map_err(Error::StreamWrite)?;
+
+        let mut reply = DeviceGetRegionInfo::default();
+        let (_, fd) = self
+            .stream
+            .recv_with_fd(reply.as_mut_slice())
+            .map_err(Error::ReceiveWithFd)?;
+        debug!("Reply: {:?}", reply);
+
+        // TODO: Handle region with capabilities
+        if let Some(cap_size) = cap_size {
+            assert_eq!(
+                cap_size,
+                reply.header.message_size - size_of::<DeviceGetRegionInfo>() as u32
             );
+            let mut _cap_data = Vec::with_capacity(cap_size as usize);
             _cap_data.resize(_cap_data.capacity(), 0u8);
             self.stream
                 .read_exact(_cap_data.as_mut_slice())
                 .map_err(Error::StreamRead)?;
         }
 
-        Ok(regions)
+        Ok((reply.region_info, fd))
     }
 
     pub fn region_read(&mut self, region: u32, offset: u64, data: &mut [u8]) -> Result<(), Error> {
