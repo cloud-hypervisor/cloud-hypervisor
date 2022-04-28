@@ -3354,12 +3354,6 @@ impl DeviceManager {
         )
         .map_err(DeviceManagerError::VfioUserCreate)?;
 
-        vfio_user_pci_device
-            .map_mmio_regions(&self.address_manager.vm, || {
-                self.memory_manager.lock().unwrap().allocate_memory_slot()
-            })
-            .map_err(DeviceManagerError::VfioUserMapRegion)?;
-
         let memory = self.memory_manager.lock().unwrap().guest_memory();
         let vfio_user_mapping = Arc::new(VfioUserDmaMapping::new(client, Arc::new(memory)));
         for virtio_mem_device in self.virtio_mem_devices.iter() {
@@ -3390,6 +3384,16 @@ impl DeviceManager {
             pci_device_bdf,
             resources,
         )?;
+
+        // Note it is required to call 'add_pci_device()' in advance to have the list of
+        // mmio regions provisioned correctly
+        vfio_user_pci_device
+            .lock()
+            .unwrap()
+            .map_mmio_regions(&self.address_manager.vm, || {
+                self.memory_manager.lock().unwrap().allocate_memory_slot()
+            })
+            .map_err(DeviceManagerError::VfioUserMapRegion)?;
 
         let mut node = device_node!(vfio_user_name);
 
