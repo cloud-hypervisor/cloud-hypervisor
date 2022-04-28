@@ -834,7 +834,8 @@ pub struct DeviceManager {
     #[cfg(target_arch = "aarch64")]
     interrupt_controller: Option<Arc<Mutex<gic::Gic>>>,
 
-    // Things to be added to the commandline (i.e. for virtio-mmio)
+    // Things to be added to the commandline (e.g. aarch64 early console)
+    #[cfg(target_arch = "aarch64")]
     cmdline_additions: Vec<String>,
 
     // ACPI GED notification device
@@ -1029,6 +1030,7 @@ impl DeviceManager {
             address_manager: Arc::clone(&address_manager),
             console: Arc::new(Console::default()),
             interrupt_controller: None,
+            #[cfg(target_arch = "aarch64")]
             cmdline_additions: Vec::new(),
             ged_notification_device: None,
             config,
@@ -3607,6 +3609,7 @@ impl DeviceManager {
         &self.console
     }
 
+    #[cfg(target_arch = "aarch64")]
     pub fn cmdline_additions(&self) -> &[String] {
         self.cmdline_additions.as_slice()
     }

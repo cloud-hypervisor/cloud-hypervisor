@@ -972,6 +972,8 @@ impl Vm {
         cmdline
             .insert_str(self.config.lock().unwrap().cmdline.args.clone())
             .map_err(Error::CmdLineInsertStr)?;
+
+        #[cfg(target_arch = "aarch64")]
         for entry in self.device_manager.lock().unwrap().cmdline_additions() {
             cmdline.insert_str(entry).map_err(Error::CmdLineInsertStr)?;
         }
