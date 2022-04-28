@@ -1030,7 +1030,6 @@ impl DeviceManager {
             console: Arc::new(Console::default()),
             interrupt_controller: None,
             cmdline_additions: Vec::new(),
-
             ged_notification_device: None,
             config,
             memory_manager,
@@ -1051,15 +1050,12 @@ impl DeviceManager {
             #[cfg(target_arch = "aarch64")]
             id_to_dev_info: HashMap::new(),
             seccomp_action,
-
             numa_nodes,
             balloon: None,
             activate_evt: activate_evt
                 .try_clone()
                 .map_err(DeviceManagerError::EventFd)?,
-
             acpi_address,
-
             selected_segment: 0,
             serial_pty: None,
             serial_manager: None,
