@@ -255,7 +255,6 @@ pub fn start_http_path_thread(
     seccomp_action: &SeccompAction,
     exit_evt: EventFd,
 ) -> Result<thread::JoinHandle<Result<()>>> {
-    std::fs::remove_file(path).unwrap_or_default();
     let socket_path = PathBuf::from(path);
     let socket_fd = UnixListener::bind(socket_path).map_err(VmmError::CreateApiServerSocket)?;
     let server =
