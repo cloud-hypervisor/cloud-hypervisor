@@ -1477,6 +1477,11 @@ impl Vm {
             disks.retain(|dev| dev.id.as_ref() != Some(&id));
         }
 
+        // Remove if fs device
+        if let Some(fs) = config.fs.as_mut() {
+            fs.retain(|dev| dev.id.as_ref() != Some(&id));
+        }
+
         // Remove if net device
         if let Some(net) = config.net.as_mut() {
             net.retain(|dev| dev.id.as_ref() != Some(&id));
