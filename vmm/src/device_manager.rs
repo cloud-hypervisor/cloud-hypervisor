@@ -72,7 +72,7 @@ use pci::{
     VfioUserPciDevice, VfioUserPciDeviceError,
 };
 use seccompiler::SeccompAction;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::convert::TryInto;
 use std::fs::{read_link, File, OpenOptions};
 use std::io::{self, stdout, Seek, SeekFrom};
@@ -934,6 +934,9 @@ pub struct DeviceManager {
 
     // io_uring availability if detected
     io_uring_supported: Option<bool>,
+
+    // List of unique identifiers provided at boot through the configuration.
+    boot_id_list: BTreeSet<String>,
 }
 
 impl DeviceManager {
@@ -949,6 +952,7 @@ impl DeviceManager {
         activate_evt: &EventFd,
         force_iommu: bool,
         restoring: bool,
+        boot_id_list: BTreeSet<String>,
     ) -> DeviceManagerResult<Arc<Mutex<Self>>> {
         let device_tree = Arc::new(Mutex::new(DeviceTree::new()));
 
@@ -1071,6 +1075,7 @@ impl DeviceManager {
             force_iommu,
             restoring,
             io_uring_supported: None,
+            boot_id_list,
         };
 
         let device_manager = Arc::new(Mutex::new(device_manager));
@@ -3002,7 +3007,9 @@ impl DeviceManager {
             // Increment the counter.
             self.device_id_cnt += Wrapping(1);
             // Check if the name is already in use.
-            if !self.device_tree.lock().unwrap().contains_key(&name) {
+            if !self.boot_id_list.contains(&name)
+                && !self.device_tree.lock().unwrap().contains_key(&name)
+            {
                 return Ok(name);
             }
 

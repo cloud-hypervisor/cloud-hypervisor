@@ -2329,7 +2329,9 @@ pub struct VmConfig {
 
 impl VmConfig {
     // Also enables virtio-iommu if the config needs it
-    pub fn validate(&mut self) -> ValidationResult<()> {
+    // Returns the list of unique identifiers provided through the
+    // configuration.
+    pub fn validate(&mut self) -> ValidationResult<BTreeSet<String>> {
         let mut id_list = BTreeSet::new();
 
         #[cfg(not(feature = "tdx"))]
@@ -2578,7 +2580,7 @@ impl VmConfig {
             .map(|p| p.iommu_segments.is_some())
             .unwrap_or_default();
 
-        Ok(())
+        Ok(id_list)
     }
 
     pub fn parse(vm_params: VmParams) -> Result<Self> {

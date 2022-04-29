@@ -570,7 +570,7 @@ impl Vm {
             None
         };
 
-        config
+        let boot_id_list = config
             .lock()
             .unwrap()
             .validate()
@@ -603,6 +603,7 @@ impl Vm {
             &activate_evt,
             force_iommu,
             restoring,
+            boot_id_list,
         )
         .map_err(Error::DeviceManager)?;
 
