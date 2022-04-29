@@ -5058,7 +5058,7 @@ mod parallel {
         let guest = Guest::new(Box::new(focal));
         let kernel_path = direct_kernel_boot_path();
 
-        let api_socket = temp_api_path(&guest.tmp_dir);
+        let api_socket_source = format!("{}.1", temp_api_path(&guest.tmp_dir));
 
         let net_id = "net123";
         let net_params = format!(
@@ -5074,7 +5074,7 @@ mod parallel {
         let socket = temp_vsock_path(&guest.tmp_dir);
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--api-socket", &api_socket])
+            .args(&["--api-socket", &api_socket_source])
             .args(&["--cpus", "boot=4"])
             .args(&[
                 "--memory",
@@ -5110,11 +5110,11 @@ mod parallel {
             // Check the guest RAM
             assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
             // Increase guest RAM with virtio-mem
-            resize_command(&api_socket, None, Some(6 << 30), None);
+            resize_command(&api_socket_source, None, Some(6 << 30), None);
             thread::sleep(std::time::Duration::new(5, 0));
             assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
             // Use balloon to remove RAM from the VM
-            resize_command(&api_socket, None, None, Some(1 << 30));
+            resize_command(&api_socket_source, None, None, Some(1 << 30));
             thread::sleep(std::time::Duration::new(5, 0));
             let total_memory = guest.get_total_memory().unwrap_or_default();
             assert!(total_memory > 4_800_000);
@@ -5131,12 +5131,16 @@ mod parallel {
             // AArch64: Device hotplug is currently not supported, skipping here.
             #[cfg(target_arch = "x86_64")]
             {
-                assert!(remote_command(&api_socket, "remove-device", Some(net_id),));
+                assert!(remote_command(
+                    &api_socket_source,
+                    "remove-device",
+                    Some(net_id),
+                ));
                 thread::sleep(std::time::Duration::new(10, 0));
 
                 // Plug the virtio-net device again
                 assert!(remote_command(
-                    &api_socket,
+                    &api_socket_source,
                     "add-net",
                     Some(net_params.as_str()),
                 ));
@@ -5144,11 +5148,11 @@ mod parallel {
             }
 
             // Pause the VM
-            assert!(remote_command(&api_socket, "pause", None));
+            assert!(remote_command(&api_socket_source, "pause", None));
 
             // Take a snapshot from the VM
             assert!(remote_command(
-                &api_socket,
+                &api_socket_source,
                 "snapshot",
                 Some(format!("file://{}", snapshot_dir).as_str()),
             ));
@@ -5175,9 +5179,11 @@ mod parallel {
             .output()
             .unwrap();
 
+        let api_socket_restored = format!("{}.2", temp_api_path(&guest.tmp_dir));
+
         // Restore the VM from the snapshot
         let mut child = GuestCommand::new(&guest)
-            .args(&["--api-socket", &api_socket])
+            .args(&["--api-socket", &api_socket_restored])
             .args(&[
                 "--restore",
                 format!("source_url=file://{}", snapshot_dir).as_str(),
@@ -5191,7 +5197,7 @@ mod parallel {
 
         let r = std::panic::catch_unwind(|| {
             // Resume the VM
-            assert!(remote_command(&api_socket, "resume", None));
+            assert!(remote_command(&api_socket_restored, "resume", None));
 
             // Perform same checks to validate VM has been properly restored
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
@@ -5199,11 +5205,11 @@ mod parallel {
             assert!(total_memory > 4_800_000);
             assert!(total_memory < 5_760_000);
             // Deflate balloon to restore entire RAM to the VM
-            resize_command(&api_socket, None, None, Some(0));
+            resize_command(&api_socket_restored, None, None, Some(0));
             thread::sleep(std::time::Duration::new(5, 0));
             assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
             // Decrease guest RAM with virtio-mem
-            resize_command(&api_socket, None, Some(5 << 30), None);
+            resize_command(&api_socket_restored, None, Some(5 << 30), None);
             thread::sleep(std::time::Duration::new(5, 0));
             let total_memory = guest.get_total_memory().unwrap_or_default();
             assert!(total_memory > 4_800_000);
@@ -5598,9 +5604,9 @@ mod parallel {
 
         let focal2 = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest2 = Guest::new(Box::new(focal2));
-        let api_socket = temp_api_path(&guest2.tmp_dir);
+        let api_socket_source = format!("{}.1", temp_api_path(&guest2.tmp_dir));
 
-        let (mut child1, mut child2) = setup_ovs_dpdk_guests(&guest1, &guest2, &api_socket);
+        let (mut child1, mut child2) = setup_ovs_dpdk_guests(&guest1, &guest2, &api_socket_source);
 
         // Create the snapshot directory
         let snapshot_dir = temp_snapshot_dir_path(&guest2.tmp_dir);
@@ -5634,11 +5640,11 @@ mod parallel {
             guest2.ssh_command("nc -vz 172.100.0.1 12345").unwrap();
 
             // Pause the VM
-            assert!(remote_command(&api_socket, "pause", None));
+            assert!(remote_command(&api_socket_source, "pause", None));
 
             // Take a snapshot from the VM
             assert!(remote_command(
-                &api_socket,
+                &api_socket_source,
                 "snapshot",
                 Some(format!("file://{}", snapshot_dir).as_str()),
             ));
@@ -5659,9 +5665,10 @@ mod parallel {
             .output()
             .unwrap();
 
+        let api_socket_restored = format!("{}.2", temp_api_path(&guest2.tmp_dir));
         // Restore the VM from the snapshot
         let mut child2 = GuestCommand::new(&guest2)
-            .args(&["--api-socket", &api_socket])
+            .args(&["--api-socket", &api_socket_restored])
             .args(&[
                 "--restore",
                 format!("source_url=file://{}", snapshot_dir).as_str(),
@@ -5675,7 +5682,7 @@ mod parallel {
 
         let r = std::panic::catch_unwind(|| {
             // Resume the VM
-            assert!(remote_command(&api_socket, "resume", None));
+            assert!(remote_command(&api_socket_restored, "resume", None));
 
             // Spawn a new netcat listener in the first VM
             let guest_ip = guest1.network.guest_ip.clone();
@@ -6477,10 +6484,10 @@ mod windows {
         ovmf_path.push(OVMF_NAME);
 
         let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
-        let api_socket = temp_api_path(&tmp_dir);
+        let api_socket_source = format!("{}.1", temp_api_path(&tmp_dir));
 
         let mut child = GuestCommand::new(windows_guest.guest())
-            .args(&["--api-socket", &api_socket])
+            .args(&["--api-socket", &api_socket_source])
             .args(&["--cpus", "boot=2,kvm_hyperv=on"])
             .args(&["--memory", "size=4G"])
             .args(&["--kernel", ovmf_path.to_str().unwrap()])
@@ -6507,11 +6514,11 @@ mod windows {
         let snapshot_dir = temp_snapshot_dir_path(&tmp_dir);
 
         // Pause the VM
-        assert!(remote_command(&api_socket, "pause", None));
+        assert!(remote_command(&api_socket_source, "pause", None));
 
         // Take a snapshot from the VM
         assert!(remote_command(
-            &api_socket,
+            &api_socket_source,
             "snapshot",
             Some(format!("file://{}", snapshot_dir).as_str()),
         ));
@@ -6522,9 +6529,11 @@ mod windows {
         let _ = child.kill();
         child.wait().unwrap();
 
+        let api_socket_restored = format!("{}.2", temp_api_path(&tmp_dir));
+
         // Restore the VM from the snapshot
         let mut child = GuestCommand::new(windows_guest.guest())
-            .args(&["--api-socket", &api_socket])
+            .args(&["--api-socket", &api_socket_restored])
             .args(&[
                 "--restore",
                 format!("source_url=file://{}", snapshot_dir).as_str(),
@@ -6538,7 +6547,7 @@ mod windows {
 
         let r = std::panic::catch_unwind(|| {
             // Resume the VM
-            assert!(remote_command(&api_socket, "resume", None));
+            assert!(remote_command(&api_socket_restored, "resume", None));
 
             windows_guest.shutdown();
         });
