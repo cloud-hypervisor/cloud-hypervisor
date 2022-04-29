@@ -2146,7 +2146,8 @@ impl Vm {
         self.setup_signal_handler()?;
         self.setup_tty()?;
 
-        // Load kernel if configured
+        // Load kernel synchronously or if asynchronous then wait for load to
+        // finish.
         let entry_point = self.entry_point()?;
 
         // The initial TDX configuration must be done before the vCPUs are
