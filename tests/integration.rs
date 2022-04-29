@@ -1868,9 +1868,9 @@ fn check_guest_watchdog_one_reboot(
 }
 
 mod parallel {
-    use std::io::SeekFrom;
-
     use crate::*;
+    use libc::SIGTERM;
+    use std::io::SeekFrom;
 
     #[test]
     #[cfg(target_arch = "x86_64")]
@@ -5226,7 +5226,7 @@ mod parallel {
 
         let socket = temp_vsock_path(&guest.tmp_dir);
 
-        let mut child = GuestCommand::new(&guest)
+        let child = GuestCommand::new(&guest)
             .args(&["--api-socket", &api_socket])
             .args(&["--cpus", "boot=4"])
             .args(&[
@@ -5311,7 +5311,7 @@ mod parallel {
         });
 
         // Shutdown the source VM and check console output
-        let _ = child.kill();
+        let _ = unsafe { libc::kill(child.id().try_into().unwrap(), SIGTERM) };
         let output = child.wait_with_output().unwrap();
         handle_child_output(r, &output);
 
@@ -5675,7 +5675,7 @@ mod parallel {
         let guest2 = Guest::new(Box::new(focal2));
         let api_socket = temp_api_path(&guest2.tmp_dir);
 
-        let (mut child1, mut child2) = setup_ovs_dpdk_guests(&guest1, &guest2, &api_socket, false);
+        let (mut child1, child2) = setup_ovs_dpdk_guests(&guest1, &guest2, &api_socket, false);
 
         // Create the snapshot directory
         let snapshot_dir = temp_snapshot_dir_path(&guest2.tmp_dir);
@@ -5723,7 +5723,7 @@ mod parallel {
         });
 
         // Shutdown the source VM
-        let _ = child2.kill();
+        let _ = unsafe { libc::kill(child2.id().try_into().unwrap(), SIGTERM) };
         let output = child2.wait_with_output().unwrap();
         handle_child_output(r, &output);
 
