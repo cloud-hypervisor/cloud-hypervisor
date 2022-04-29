@@ -477,6 +477,9 @@ pub enum DeviceManagerError {
 
     /// Failed to create UEFI flash
     CreateUefiFlash(hypervisor::vm::HypervisorVmError),
+
+    /// Invalid identifier as it is not unique.
+    IdentifierNotUnique(String),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -3707,6 +3710,8 @@ impl DeviceManager {
         &mut self,
         device_cfg: &mut DeviceConfig,
     ) -> DeviceManagerResult<PciDeviceInfo> {
+        self.validate_identifier(&device_cfg.id)?;
+
         if device_cfg.iommu && !self.is_iommu_segment(device_cfg.pci_segment) {
             return Err(DeviceManagerError::InvalidIommuHotplug);
         }
@@ -3726,6 +3731,8 @@ impl DeviceManager {
         &mut self,
         device_cfg: &mut UserDeviceConfig,
     ) -> DeviceManagerResult<PciDeviceInfo> {
+        self.validate_identifier(&device_cfg.id)?;
+
         let (bdf, device_name) = self.add_vfio_user_device(device_cfg)?;
 
         // Update the PCIU bitmap
@@ -4035,6 +4042,8 @@ impl DeviceManager {
     }
 
     pub fn add_disk(&mut self, disk_cfg: &mut DiskConfig) -> DeviceManagerResult<PciDeviceInfo> {
+        self.validate_identifier(&disk_cfg.id)?;
+
         if disk_cfg.iommu && !self.is_iommu_segment(disk_cfg.pci_segment) {
             return Err(DeviceManagerError::InvalidIommuHotplug);
         }
@@ -4044,11 +4053,15 @@ impl DeviceManager {
     }
 
     pub fn add_fs(&mut self, fs_cfg: &mut FsConfig) -> DeviceManagerResult<PciDeviceInfo> {
+        self.validate_identifier(&fs_cfg.id)?;
+
         let device = self.make_virtio_fs_device(fs_cfg)?;
         self.hotplug_virtio_pci_device(device)
     }
 
     pub fn add_pmem(&mut self, pmem_cfg: &mut PmemConfig) -> DeviceManagerResult<PciDeviceInfo> {
+        self.validate_identifier(&pmem_cfg.id)?;
+
         if pmem_cfg.iommu && !self.is_iommu_segment(pmem_cfg.pci_segment) {
             return Err(DeviceManagerError::InvalidIommuHotplug);
         }
@@ -4058,6 +4071,8 @@ impl DeviceManager {
     }
 
     pub fn add_net(&mut self, net_cfg: &mut NetConfig) -> DeviceManagerResult<PciDeviceInfo> {
+        self.validate_identifier(&net_cfg.id)?;
+
         if net_cfg.iommu && !self.is_iommu_segment(net_cfg.pci_segment) {
             return Err(DeviceManagerError::InvalidIommuHotplug);
         }
@@ -4067,6 +4082,8 @@ impl DeviceManager {
     }
 
     pub fn add_vdpa(&mut self, vdpa_cfg: &mut VdpaConfig) -> DeviceManagerResult<PciDeviceInfo> {
+        self.validate_identifier(&vdpa_cfg.id)?;
+
         if vdpa_cfg.iommu && !self.is_iommu_segment(vdpa_cfg.pci_segment) {
             return Err(DeviceManagerError::InvalidIommuHotplug);
         }
@@ -4076,6 +4093,8 @@ impl DeviceManager {
     }
 
     pub fn add_vsock(&mut self, vsock_cfg: &mut VsockConfig) -> DeviceManagerResult<PciDeviceInfo> {
+        self.validate_identifier(&vsock_cfg.id)?;
+
         if vsock_cfg.iommu && !self.is_iommu_segment(vsock_cfg.pci_segment) {
             return Err(DeviceManagerError::InvalidIommuHotplug);
         }
@@ -4202,6 +4221,16 @@ impl DeviceManager {
     #[cfg(target_arch = "aarch64")]
     pub fn uefi_flash(&self) -> GuestMemoryAtomic<GuestMemoryMmap> {
         self.uefi_flash.as_ref().unwrap().clone()
+    }
+
+    fn validate_identifier(&self, id: &Option<String>) -> DeviceManagerResult<()> {
+        if let Some(id) = id {
+            if self.device_tree.lock().unwrap().contains_key(id) {
+                return Err(DeviceManagerError::IdentifierNotUnique(id.clone()));
+            }
+        }
+
+        Ok(())
     }
 }
 
