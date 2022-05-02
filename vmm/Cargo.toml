@@ -29,7 +29,7 @@ gdbstub = "0.6.1"
 gdbstub_arch = "0.2.2"
 hypervisor = { path = "../hypervisor" }
 lazy_static = "1.4.0"
-libc = "0.2.124"
+libc = "0.2.125"
 linux-loader = { version = "0.4.0", features = ["elf", "bzimage", "pe"] }
 log = "0.4.16"
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "main" }
@@ -39,7 +39,7 @@ pci = { path = "../pci" }
 qcow = { path = "../qcow" }
 seccompiler = "0.2.0"
 serde = { version = "1.0.137", features = ["rc"] }
-serde_derive = "1.0.136"
+serde_derive = "1.0.137"
 serde_json = "1.0.80"
 signal-hook = "0.3.13"
 thiserror = "1.0.31"
