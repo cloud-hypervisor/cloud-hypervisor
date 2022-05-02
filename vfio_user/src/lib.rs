@@ -477,17 +477,7 @@ impl Client {
         let num_regions = reply.num_regions;
         let mut regions = Vec::new();
         for index in 0..num_regions {
-            let (mut region_info, mut fd, mut sparse_areas) = self.get_region_info(index, None)?;
-            if region_info.argsz > std::mem::size_of::<vfio_region_info>() as u32 {
-                // Note: workaround for https://github.com/rust-lang/rust/issues/71126 to compile with rust toolchian 1.56
-                let (_region_info, _fd, _sparse_areas) = self.get_region_info(
-                    index,
-                    Some(region_info.argsz - std::mem::size_of::<vfio_region_info>() as u32),
-                )?;
-                region_info = _region_info;
-                fd = _fd;
-                sparse_areas = _sparse_areas;
-            }
+            let (region_info, fd, sparse_areas) = self.get_region_info(index)?;
             regions.push(Region {
                 flags: region_info.flags,
                 index: region_info.index,
@@ -503,7 +493,6 @@ impl Client {
     fn get_region_info(
         &mut self,
         index: u32,
-        cap_size: Option<u32>,
     ) -> Result<
         (
             vfio_region_info,
@@ -512,7 +501,8 @@ impl Client {
         ),
         Error,
     > {
-        let get_region_info = DeviceGetRegionInfo {
+        // Retrieve the region info without capability
+        let mut get_region_info = DeviceGetRegionInfo {
             header: Header {
                 message_id: self.next_message_id.0,
                 command: Command::DeviceGetRegionInfo,
@@ -521,7 +511,7 @@ impl Client {
                 ..Default::default()
             },
             region_info: vfio_region_info {
-                argsz: size_of::<vfio_region_info>() as u32 + cap_size.unwrap_or_default(),
+                argsz: size_of::<vfio_region_info>() as u32,
                 index,
                 ..Default::default()
             },
@@ -540,24 +530,40 @@ impl Client {
             .map_err(Error::ReceiveWithFd)?;
         debug!("Reply: {:?}", reply);
 
-        let sparse_areas = match cap_size {
-            Some(cap_size) => {
-                assert_eq!(
-                    cap_size,
-                    reply.header.message_size - size_of::<DeviceGetRegionInfo>() as u32
-                );
-                let mut cap_data = Vec::with_capacity(cap_size as usize);
-                cap_data.resize(cap_data.capacity(), 0u8);
-                self.stream
-                    .read_exact(cap_data.as_mut_slice())
-                    .map_err(Error::StreamRead)?;
+        // Retrieve the region info again with capabilities if needed
+        if reply.region_info.argsz > std::mem::size_of::<vfio_region_info>() as u32 {
+            get_region_info.region_info.argsz = reply.region_info.argsz;
+            debug!("Command: {:?}", get_region_info);
+            self.next_message_id += Wrapping(1);
 
-                Self::parse_region_caps(&cap_data, &reply.region_info)?
-            }
-            None => Vec::new(),
-        };
+            self.stream
+                .write_all(get_region_info.as_slice())
+                .map_err(Error::StreamWrite)?;
 
-        Ok((reply.region_info, fd, sparse_areas))
+            let mut reply = DeviceGetRegionInfo::default();
+            let (_, fd) = self
+                .stream
+                .recv_with_fd(reply.as_mut_slice())
+                .map_err(Error::ReceiveWithFd)?;
+            debug!("Reply: {:?}", reply);
+
+            let cap_size = reply.region_info.argsz - std::mem::size_of::<vfio_region_info>() as u32;
+            assert_eq!(
+                cap_size,
+                reply.header.message_size - size_of::<DeviceGetRegionInfo>() as u32
+            );
+            let mut cap_data = Vec::with_capacity(cap_size as usize);
+            cap_data.resize(cap_data.capacity(), 0u8);
+            self.stream
+                .read_exact(cap_data.as_mut_slice())
+                .map_err(Error::StreamRead)?;
+
+            let sparse_areas = Self::parse_region_caps(&cap_data, &reply.region_info)?;
+
+            Ok((reply.region_info, fd, sparse_areas))
+        } else {
+            Ok((reply.region_info, fd, Vec::new()))
+        }
     }
 
     fn parse_region_caps(
