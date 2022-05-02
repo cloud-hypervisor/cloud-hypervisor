@@ -20,7 +20,7 @@ libc = "0.2.124"
 log = "0.4.16"
 serde = "1.0.136"
 serde_derive = "1.0.136"
-thiserror = "1.0.30"
+thiserror = "1.0.31"
 versionize = "0.1.6"
 versionize_derive = "0.1.4"
 vm-allocator = { path = "../vm-allocator" }
