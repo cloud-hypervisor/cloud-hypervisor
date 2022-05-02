@@ -21,7 +21,7 @@ arc-swap = "1.5.0"
 arch = { path = "../arch" }
 bitflags = "1.3.2"
 block_util = { path = "../block_util" }
-clap = "3.1.13"
+clap = "3.1.14"
 devices = { path = "../devices" }
 epoll = "4.3.1"
 event_monitor = { path = "../event_monitor" }
@@ -42,7 +42,7 @@ serde = { version = "1.0.136", features = ["rc"] }
 serde_derive = "1.0.136"
 serde_json = "1.0.79"
 signal-hook = "0.3.13"
-thiserror = "1.0.30"
+thiserror = "1.0.31"
 uuid = "1.0.0"
 versionize = "0.1.6"
 versionize_derive = "0.1.4"

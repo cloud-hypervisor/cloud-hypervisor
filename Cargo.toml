@@ -18,7 +18,7 @@ lto = true
 [dependencies]
 anyhow = "1.0.57"
 api_client = { path = "api_client" }
-clap = { version = "3.1.13", features = ["wrap_help","cargo"] }
+clap = { version = "3.1.14", features = ["wrap_help","cargo"] }
 epoll = "4.3.1"
 event_monitor = { path = "event_monitor" }
 hypervisor = { path = "hypervisor" }
@@ -28,13 +28,13 @@ option_parser = { path = "option_parser" }
 seccompiler = "0.2.0"
 serde_json = "1.0.79"
 signal-hook = "0.3.13"
-thiserror = "1.0.30"
+thiserror = "1.0.31"
 vmm = { path = "vmm" }
 vmm-sys-util = "0.9.0"
 vm-memory = "0.7.0"
 
 [build-dependencies]
-clap = { version = "3.1.13", features = ["cargo"] }
+clap = { version = "3.1.14", features = ["cargo"] }
 
 # List of patched crates
 [patch.crates-io]
