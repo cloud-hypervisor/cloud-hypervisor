@@ -9,7 +9,7 @@ build = "build.rs"
 clap = { version = "3.1.14", features = ["wrap_help","cargo"] }
 dirs = "4.0.0"
 serde = { version = "1.0.137", features = ["rc"] }
-serde_derive = "1.0.136"
+serde_derive = "1.0.137"
 serde_json = "1.0.80"
 test_infra = { path = "../test_infra" }
 thiserror = "1.0.31"
