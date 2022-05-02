@@ -5,5 +5,5 @@ edition = "2021"
 
 [dependencies]
 libc = "0.2.125"
-log = "0.4.16"
+log = "0.4.17"
 vmm-sys-util = "0.9.0"

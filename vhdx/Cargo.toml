@@ -9,7 +9,7 @@ license = "Apache-2.0"
 byteorder = "1.4.3"
 crc32c = "0.6.3"
 libc = "0.2.125"
-log = "0.4.16"
+log = "0.4.17"
 remain = "0.2.3"
 thiserror = "1.0"
 uuid = { version = "1.0.0", features = ["v4"] }
