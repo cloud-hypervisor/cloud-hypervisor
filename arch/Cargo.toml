@@ -15,7 +15,7 @@ byteorder = "1.4.3"
 hypervisor = { path = "../hypervisor" }
 libc = "0.2.125"
 linux-loader = { version = "0.4.0", features = ["elf", "bzimage", "pe"] }
-log = "0.4.16"
+log = "0.4.17"
 serde = { version = "1.0.137", features = ["rc"] }
 serde_derive = "1.0.137"
 thiserror = "1.0.31"
