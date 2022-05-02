@@ -52,7 +52,7 @@ pub const PCI_CONFIG_IO_PORT: u64 = 0xcf8;
 #[cfg(target_arch = "x86_64")]
 pub const PCI_CONFIG_IO_PORT_SIZE: u64 = 0x8;
 
-#[derive(Clone, Copy, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
 pub struct PciBdf(u32);
 
 struct PciBdfVisitor;

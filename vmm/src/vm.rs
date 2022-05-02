@@ -1516,7 +1516,8 @@ impl Vm {
     }
 
     pub fn remove_device(&mut self, id: String) -> Result<()> {
-        self.device_manager
+        let barrier = self
+            .device_manager
             .lock()
             .unwrap()
             .remove_device(id.clone())
@@ -1573,6 +1574,11 @@ impl Vm {
             .unwrap()
             .notify_hotplug(AcpiNotificationFlags::PCI_DEVICES_CHANGED)
             .map_err(Error::DeviceManager)?;
+
+        // Once the ACPI notification has been triggered, let's wait on the
+        // barrier to consider the removal complete.
+        barrier.wait();
+
         Ok(())
     }
 

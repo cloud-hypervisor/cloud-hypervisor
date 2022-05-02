@@ -72,7 +72,7 @@ use pci::{
     VfioUserPciDevice, VfioUserPciDeviceError,
 };
 use seccompiler::SeccompAction;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::convert::TryInto;
 use std::fs::{read_link, File, OpenOptions};
 use std::io::{self, stdout, Seek, SeekFrom};
@@ -82,7 +82,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
 use std::result;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Barrier, Mutex};
 use vfio_ioctls::{VfioContainer, VfioDevice};
 use virtio_devices::transport::VirtioPciDevice;
 use virtio_devices::transport::VirtioTransport;
@@ -347,6 +347,9 @@ pub enum DeviceManagerError {
 
     /// Failed to remove a bus device from the MMIO bus.
     RemoveDeviceFromMmioBus(vm_device::BusError),
+
+    /// Couldn't find the barrier associated with the PCI device being removed.
+    RemoveDeviceMissingBarrier,
 
     /// Failed to find the device corresponding to a specific PCI b/d/f.
     UnknownPciBdf(u32),
@@ -937,6 +940,9 @@ pub struct DeviceManager {
 
     // List of unique identifiers provided at boot through the configuration.
     boot_id_list: BTreeSet<String>,
+
+    // Synchronize PCI devices removal
+    barrier_remove_pci_devices: BTreeMap<PciBdf, Arc<Barrier>>,
 }
 
 impl DeviceManager {
@@ -1076,6 +1082,7 @@ impl DeviceManager {
             restoring,
             io_uring_supported: None,
             boot_id_list,
+            barrier_remove_pci_devices: BTreeMap::new(),
         };
 
         let device_manager = Arc::new(Mutex::new(device_manager));
@@ -3737,7 +3744,7 @@ impl DeviceManager {
         })
     }
 
-    pub fn remove_device(&mut self, id: String) -> DeviceManagerResult<()> {
+    pub fn remove_device(&mut self, id: String) -> DeviceManagerResult<Arc<Barrier>> {
         // The node can be directly a PCI node in case the 'id' refers to a
         // VFIO device or a virtio-pci one.
         // In case the 'id' refers to a virtio device, we must find the PCI
@@ -3792,7 +3799,12 @@ impl DeviceManager {
         // Update the PCID bitmap
         self.pci_segments[pci_segment_id as usize].pci_devices_down |= 1 << pci_device_bdf.device();
 
-        Ok(())
+        // Create the barrier related to the removal of the current PCI device.
+        let barrier = Arc::new(Barrier::new(2));
+        self.barrier_remove_pci_devices
+            .insert(pci_device_bdf, Arc::clone(&barrier));
+
+        Ok(barrier)
     }
 
     pub fn eject_device(&mut self, pci_segment_id: u16, device_id: u8) -> DeviceManagerResult<()> {
@@ -3958,6 +3970,12 @@ impl DeviceManager {
 
             self.virtio_devices
                 .retain(|handler| !Arc::ptr_eq(&handler.virtio_device, &virtio_device));
+        }
+
+        if let Some(barrier) = self.barrier_remove_pci_devices.remove(&pci_device_bdf) {
+            barrier.wait();
+        } else {
+            return Err(DeviceManagerError::RemoveDeviceMissingBarrier);
         }
 
         // At this point, the device has been removed from all the list and
