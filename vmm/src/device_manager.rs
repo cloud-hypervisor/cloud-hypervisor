@@ -116,29 +116,23 @@ use vmm_sys_util::eventfd::EventFd;
 const MMIO_LEN: u64 = 0x1000;
 
 const VFIO_DEVICE_NAME_PREFIX: &str = "_vfio";
-
 const VFIO_USER_DEVICE_NAME_PREFIX: &str = "_vfio_user";
-
 #[cfg(target_arch = "x86_64")]
-const IOAPIC_DEVICE_NAME: &str = "_ioapic";
-
+const IOAPIC_DEVICE_NAME_PREFIX: &str = "_ioapic";
 const SERIAL_DEVICE_NAME_PREFIX: &str = "_serial";
 #[cfg(target_arch = "aarch64")]
 const GPIO_DEVICE_NAME_PREFIX: &str = "_gpio";
-
-const CONSOLE_DEVICE_NAME: &str = "_console";
+const CONSOLE_DEVICE_NAME_PREFIX: &str = "_console";
 const DISK_DEVICE_NAME_PREFIX: &str = "_disk";
 const FS_DEVICE_NAME_PREFIX: &str = "_fs";
-const BALLOON_DEVICE_NAME: &str = "_balloon";
+const BALLOON_DEVICE_NAME_PREFIX: &str = "_balloon";
 const NET_DEVICE_NAME_PREFIX: &str = "_net";
 const PMEM_DEVICE_NAME_PREFIX: &str = "_pmem";
-const RNG_DEVICE_NAME: &str = "_rng";
+const RNG_DEVICE_NAME_PREFIX: &str = "_rng";
 const VDPA_DEVICE_NAME_PREFIX: &str = "_vdpa";
 const VSOCK_DEVICE_NAME_PREFIX: &str = "_vsock";
-const WATCHDOG_DEVICE_NAME: &str = "_watchdog";
-
-const IOMMU_DEVICE_NAME: &str = "_iommu";
-
+const WATCHDOG_DEVICE_NAME_PREFIX: &str = "_watchdog";
+const IOMMU_DEVICE_NAME_PREFIX: &str = "_iommu";
 const VIRTIO_PCI_DEVICE_NAME_PREFIX: &str = "_virtio-pci";
 
 /// Errors associated with device manager
@@ -773,10 +767,23 @@ impl DeviceRelocation for AddressManager {
     }
 }
 
+#[derive(Clone, Default, Serialize, Deserialize)]
+struct SingleDeviceIdentifiers {
+    balloon_id: Option<String>,
+    console_id: Option<String>,
+    gpio_id: Option<String>,
+    ioapic_id: Option<String>,
+    iommu_id: Option<String>,
+    rng_id: Option<String>,
+    serial_id: Option<String>,
+    watchdog_id: Option<String>,
+}
+
 #[derive(Serialize, Deserialize)]
 struct DeviceManagerState {
     device_tree: DeviceTree,
     device_id_cnt: Wrapping<usize>,
+    single_device_ids: SingleDeviceIdentifiers,
 }
 
 #[derive(Debug)]
@@ -940,6 +947,9 @@ pub struct DeviceManager {
 
     // List of unique identifiers provided at boot through the configuration.
     boot_id_list: BTreeSet<String>,
+
+    // Store identifiers assigned to single devices to be able to restore them
+    single_device_ids: SingleDeviceIdentifiers,
 }
 
 impl DeviceManager {
@@ -1079,6 +1089,7 @@ impl DeviceManager {
             restoring,
             io_uring_supported: None,
             boot_id_list,
+            single_device_ids: SingleDeviceIdentifiers::default(),
         };
 
         let device_manager = Arc::new(Mutex::new(device_manager));
@@ -1187,12 +1198,14 @@ impl DeviceManager {
         DeviceManagerState {
             device_tree: self.device_tree.lock().unwrap().clone(),
             device_id_cnt: self.device_id_cnt,
+            single_device_ids: self.single_device_ids.clone(),
         }
     }
 
     fn set_state(&mut self, state: &DeviceManagerState) {
         *self.device_tree.lock().unwrap() = state.device_tree.clone();
         self.device_id_cnt = state.device_id_cnt;
+        self.single_device_ids = state.single_device_ids.clone();
     }
 
     fn get_msi_iova_space(&mut self) -> (u64, u64) {
@@ -1220,7 +1233,10 @@ impl DeviceManager {
         &mut self,
         virtio_devices: Vec<MetaVirtioDevice>,
     ) -> DeviceManagerResult<()> {
-        let iommu_id = String::from(IOMMU_DEVICE_NAME);
+        let iommu_id = match &self.single_device_ids.iommu_id {
+            Some(id) => id.clone(),
+            None => self.next_device_name(IOMMU_DEVICE_NAME_PREFIX)?,
+        };
 
         let iommu_device = if self.config.lock().unwrap().iommu {
             let (device, mapping) = virtio_devices::Iommu::new(
@@ -1243,6 +1259,8 @@ impl DeviceManager {
                 .lock()
                 .unwrap()
                 .insert(iommu_id.clone(), device_node!(iommu_id, device));
+
+            self.single_device_ids.iommu_id = Some(iommu_id.clone());
 
             Some(device)
         } else {
@@ -1342,7 +1360,10 @@ impl DeviceManager {
     fn add_interrupt_controller(
         &mut self,
     ) -> DeviceManagerResult<Arc<Mutex<dyn InterruptController>>> {
-        let id = String::from(IOAPIC_DEVICE_NAME);
+        let id = match &self.single_device_ids.ioapic_id {
+            Some(id) => id.clone(),
+            None => self.next_device_name(IOAPIC_DEVICE_NAME_PREFIX)?,
+        };
 
         // Create IOAPIC
         let interrupt_controller = Arc::new(Mutex::new(
@@ -1371,6 +1392,8 @@ impl DeviceManager {
             .lock()
             .unwrap()
             .insert(id.clone(), device_node!(id, interrupt_controller));
+
+        self.single_device_ids.ioapic_id = Some(id);
 
         Ok(interrupt_controller)
     }
@@ -1565,7 +1588,10 @@ impl DeviceManager {
         );
 
         // Add a GPIO device
-        let id = String::from(GPIO_DEVICE_NAME_PREFIX);
+        let id = match &self.single_device_ids.gpio_id {
+            Some(id) => id.clone(),
+            None => self.next_device_name(GPIO_DEVICE_NAME_PREFIX)?,
+        };
         let gpio_irq = self
             .address_manager
             .allocator
@@ -1611,6 +1637,8 @@ impl DeviceManager {
             .unwrap()
             .insert(id.clone(), device_node!(id, gpio_device));
 
+        self.single_device_ids.gpio_id = Some(id);
+
         // On AArch64, the UEFI binary requires a flash device at address 0.
         // 4 MiB memory is mapped to simulate the flash.
         let uefi_mem_slot = self.memory_manager.lock().unwrap().allocate_memory_slot();
@@ -1655,7 +1683,10 @@ impl DeviceManager {
         // Serial is tied to IRQ #4
         let serial_irq = 4;
 
-        let id = String::from(SERIAL_DEVICE_NAME_PREFIX);
+        let id = match &self.single_device_ids.serial_id {
+            Some(id) => id.clone(),
+            None => self.next_device_name(SERIAL_DEVICE_NAME_PREFIX)?,
+        };
 
         let interrupt_group = interrupt_manager
             .create_group(LegacyIrqGroupConfig {
@@ -1692,6 +1723,8 @@ impl DeviceManager {
             .unwrap()
             .insert(id.clone(), device_node!(id, serial));
 
+        self.single_device_ids.serial_id = Some(id);
+
         Ok(serial)
     }
 
@@ -1701,7 +1734,10 @@ impl DeviceManager {
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
         serial_writer: Option<Box<dyn io::Write + Send>>,
     ) -> DeviceManagerResult<Arc<Mutex<Pl011>>> {
-        let id = String::from(SERIAL_DEVICE_NAME_PREFIX);
+        let id = match &self.single_device_ids.serial_id {
+            Some(id) => id.clone(),
+            None => self.next_device_name(SERIAL_DEVICE_NAME_PREFIX)?,
+        };
 
         let serial_irq = self
             .address_manager
@@ -1752,6 +1788,8 @@ impl DeviceManager {
             .lock()
             .unwrap()
             .insert(id.clone(), device_node!(id, serial));
+
+        self.single_device_ids.serial_id = Some(id);
 
         Ok(serial)
     }
@@ -1870,7 +1908,10 @@ impl DeviceManager {
             ConsoleOutputMode::Null => Endpoint::Null,
             ConsoleOutputMode::Off => return Ok(None),
         };
-        let id = String::from(CONSOLE_DEVICE_NAME);
+        let id = match &self.single_device_ids.console_id {
+            Some(id) => id.clone(),
+            None => self.next_device_name(CONSOLE_DEVICE_NAME_PREFIX)?,
+        };
 
         let (virtio_console_device, console_resizer) = virtio_devices::Console::new(
             id.clone(),
@@ -1902,6 +1943,8 @@ impl DeviceManager {
             .lock()
             .unwrap()
             .insert(id.clone(), device_node!(id, virtio_console_device));
+
+        self.single_device_ids.console_id = Some(id);
 
         // Only provide a resizer (for SIGWINCH handling) if the console is attached to the TTY
         Ok(if matches!(console_config.mode, ConsoleOutputMode::Tty) {
@@ -2350,7 +2393,10 @@ impl DeviceManager {
         let rng_config = self.config.lock().unwrap().rng.clone();
         if let Some(rng_path) = rng_config.src.to_str() {
             info!("Creating virtio-rng device: {:?}", rng_config);
-            let id = String::from(RNG_DEVICE_NAME);
+            let id = match &self.single_device_ids.rng_id {
+                Some(id) => id.clone(),
+                None => self.next_device_name(RNG_DEVICE_NAME_PREFIX)?,
+            };
 
             let virtio_rng_device = Arc::new(Mutex::new(
                 virtio_devices::Rng::new(
@@ -2380,6 +2426,8 @@ impl DeviceManager {
                 .lock()
                 .unwrap()
                 .insert(id.clone(), device_node!(id, virtio_rng_device));
+
+            self.single_device_ids.rng_id = Some(id);
         }
 
         Ok(devices)
@@ -2863,8 +2911,11 @@ impl DeviceManager {
     fn make_virtio_balloon_devices(&mut self) -> DeviceManagerResult<Vec<MetaVirtioDevice>> {
         let mut devices = Vec::new();
 
-        if let Some(balloon_config) = &self.config.lock().unwrap().balloon {
-            let id = String::from(BALLOON_DEVICE_NAME);
+        if let Some(balloon_config) = &self.config.clone().lock().unwrap().balloon {
+            let id = match &self.single_device_ids.balloon_id {
+                Some(id) => id.clone(),
+                None => self.next_device_name(BALLOON_DEVICE_NAME_PREFIX)?,
+            };
             info!("Creating virtio-balloon device: id = {}", id);
 
             let virtio_balloon_device = Arc::new(Mutex::new(
@@ -2896,6 +2947,8 @@ impl DeviceManager {
                 .lock()
                 .unwrap()
                 .insert(id.clone(), device_node!(id, virtio_balloon_device));
+
+            self.single_device_ids.balloon_id = Some(id);
         }
 
         Ok(devices)
@@ -2908,7 +2961,10 @@ impl DeviceManager {
             return Ok(devices);
         }
 
-        let id = String::from(WATCHDOG_DEVICE_NAME);
+        let id = match &self.single_device_ids.watchdog_id {
+            Some(id) => id.clone(),
+            None => self.next_device_name(WATCHDOG_DEVICE_NAME_PREFIX)?,
+        };
         info!("Creating virtio-watchdog device: id = {}", id);
 
         let virtio_watchdog_device = Arc::new(Mutex::new(
@@ -2935,6 +2991,8 @@ impl DeviceManager {
             .lock()
             .unwrap()
             .insert(id.clone(), device_node!(id, virtio_watchdog_device));
+
+        self.single_device_ids.watchdog_id = Some(id);
 
         Ok(devices)
     }

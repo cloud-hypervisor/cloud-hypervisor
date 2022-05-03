@@ -1558,15 +1558,15 @@ fn get_counters(api_socket: &str) -> Counters {
     let counters: HashMap<&str, HashMap<&str, u64>> =
         serde_json::from_slice(&cmd_output).unwrap_or_default();
 
-    let rx_bytes = *counters.get("_net2").unwrap().get("rx_bytes").unwrap();
-    let rx_frames = *counters.get("_net2").unwrap().get("rx_frames").unwrap();
-    let tx_bytes = *counters.get("_net2").unwrap().get("tx_bytes").unwrap();
-    let tx_frames = *counters.get("_net2").unwrap().get("tx_frames").unwrap();
+    let rx_bytes = *counters.get("_net5").unwrap().get("rx_bytes").unwrap();
+    let rx_frames = *counters.get("_net5").unwrap().get("rx_frames").unwrap();
+    let tx_bytes = *counters.get("_net5").unwrap().get("tx_bytes").unwrap();
+    let tx_frames = *counters.get("_net5").unwrap().get("tx_frames").unwrap();
 
-    let read_bytes = *counters.get("_disk0").unwrap().get("read_bytes").unwrap();
-    let write_bytes = *counters.get("_disk0").unwrap().get("write_bytes").unwrap();
-    let read_ops = *counters.get("_disk0").unwrap().get("read_ops").unwrap();
-    let write_ops = *counters.get("_disk0").unwrap().get("write_ops").unwrap();
+    let read_bytes = *counters.get("_disk3").unwrap().get("read_bytes").unwrap();
+    let write_bytes = *counters.get("_disk3").unwrap().get("write_bytes").unwrap();
+    let read_ops = *counters.get("_disk3").unwrap().get("read_ops").unwrap();
+    let write_ops = *counters.get("_disk3").unwrap().get("write_ops").unwrap();
 
     Counters {
         rx_bytes,
@@ -5628,10 +5628,10 @@ mod parallel {
             assert!(cmd_success);
             #[cfg(target_arch = "x86_64")]
             assert!(String::from_utf8_lossy(&cmd_output)
-                .contains("{\"id\":\"_net2\",\"bdf\":\"0000:00:05.0\"}"));
+                .contains("{\"id\":\"_net7\",\"bdf\":\"0000:00:05.0\"}"));
             #[cfg(target_arch = "aarch64")]
             assert!(String::from_utf8_lossy(&cmd_output)
-                .contains("{\"id\":\"_net0\",\"bdf\":\"0000:00:05.0\"}"));
+                .contains("{\"id\":\"_net5\",\"bdf\":\"0000:00:05.0\"}"));
         }
 
         // The functional connectivity provided by the virtio-net device
@@ -6829,7 +6829,7 @@ mod windows {
                 Some(windows_guest.guest().default_net_string().as_str()),
             );
             assert!(cmd_success);
-            assert!(String::from_utf8_lossy(&cmd_output).contains("\"id\":\"_net2\""));
+            assert!(String::from_utf8_lossy(&cmd_output).contains("\"id\":\"_net6\""));
             thread::sleep(std::time::Duration::new(5, 0));
             // Verify the device  is on the system
             let netdev_num = 2;
@@ -6837,7 +6837,7 @@ mod windows {
             assert_eq!(netdev_ctrl_threads_count(child.id()), netdev_num);
 
             // Remove network device
-            let cmd_success = remote_command(&api_socket, "remove-device", Some("_net2"));
+            let cmd_success = remote_command(&api_socket, "remove-device", Some("_net6"));
             assert!(cmd_success);
             thread::sleep(std::time::Duration::new(5, 0));
             // Verify the device has been removed
@@ -6903,7 +6903,7 @@ mod windows {
                 Some(format!("path={},readonly=off", disk).as_str()),
             );
             assert!(cmd_success);
-            assert!(String::from_utf8_lossy(&cmd_output).contains("\"id\":\"_disk2\""));
+            assert!(String::from_utf8_lossy(&cmd_output).contains("\"id\":\"_disk6\""));
             thread::sleep(std::time::Duration::new(5, 0));
             // Online disk device
             windows_guest.disks_set_rw();
@@ -6918,7 +6918,7 @@ mod windows {
             windows_guest.disk_file_put(fname, data);
 
             // Unmount disk device
-            let cmd_success = remote_command(&api_socket, "remove-device", Some("_disk2"));
+            let cmd_success = remote_command(&api_socket, "remove-device", Some("_disk6"));
             assert!(cmd_success);
             thread::sleep(std::time::Duration::new(5, 0));
             // Verify the device has been removed
@@ -6982,13 +6982,13 @@ mod windows {
         // Predefined data to used at various test stages
         let disk_test_data: [[String; 4]; 2] = [
             [
-                "_disk2".to_string(),
+                "_disk6".to_string(),
                 windows_guest.disk_new(WindowsGuest::FS_FAT, 123),
                 "d:\\world".to_string(),
                 "hello".to_string(),
             ],
             [
-                "_disk3".to_string(),
+                "_disk7".to_string(),
                 windows_guest.disk_new(WindowsGuest::FS_NTFS, 333),
                 "e:\\hello".to_string(),
                 "world".to_string(),
