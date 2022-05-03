@@ -8,4 +8,4 @@ edition = "2021"
 libc = "0.2.125"
 serde = { version = "1.0.137", features = ["rc"] }
 serde_derive = "1.0.137"
-serde_json = "1.0.80"
+serde_json = "1.0.81"
