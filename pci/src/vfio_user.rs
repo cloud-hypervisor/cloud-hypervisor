@@ -164,45 +164,44 @@ impl VfioUserPciDevice {
                     prot |= libc::PROT_WRITE;
                 }
 
-                let host_addr = unsafe {
-                    libc::mmap(
-                        null_mut(),
-                        mmio_region.length as usize,
-                        prot,
-                        libc::MAP_SHARED,
-                        file_offset.as_ref().unwrap().file().as_raw_fd(),
-                        file_offset.as_ref().unwrap().start() as libc::off_t,
-                    )
+                let mmaps = if sparse_areas.is_empty() {
+                    vec![vfio_region_sparse_mmap_area {
+                        offset: 0,
+                        size: mmio_region.length,
+                    }]
+                } else {
+                    sparse_areas
                 };
-
-                if host_addr == libc::MAP_FAILED {
-                    error!(
-                        "Could not mmap regions, error:{}",
-                        std::io::Error::last_os_error()
-                    );
-                    continue;
-                }
 
                 let mut user_memory_regions = Vec::new();
-                if sparse_areas.is_empty() {
-                    user_memory_regions.push(UserMemoryRegion {
-                        slot: mem_slot(),
-                        start: mmio_region.start.0,
-                        size: mmio_region.length as u64,
-                        host_addr: host_addr as u64,
-                    })
-                } else {
-                    for s in sparse_areas.iter() {
-                        user_memory_regions.push(UserMemoryRegion {
-                            slot: mem_slot(),
-                            start: mmio_region.start.0 + s.offset,
-                            size: s.size,
-                            host_addr: host_addr as u64 + s.offset,
-                        });
-                    }
-                };
+                for s in mmaps.iter() {
+                    let host_addr = unsafe {
+                        libc::mmap(
+                            null_mut(),
+                            s.size as usize,
+                            prot,
+                            libc::MAP_SHARED,
+                            file_offset.as_ref().unwrap().file().as_raw_fd(),
+                            file_offset.as_ref().unwrap().start() as libc::off_t
+                                + s.offset as libc::off_t,
+                        )
+                    };
 
-                for user_memory_region in user_memory_regions.iter() {
+                    if host_addr == libc::MAP_FAILED {
+                        error!(
+                            "Could not mmap regions, error:{}",
+                            std::io::Error::last_os_error()
+                        );
+                        continue;
+                    }
+
+                    let user_memory_region = UserMemoryRegion {
+                        slot: mem_slot(),
+                        start: mmio_region.start.0 + s.offset,
+                        size: s.size,
+                        host_addr: host_addr as u64,
+                    };
+
                     let mem_region = vm.make_user_memory_region(
                         user_memory_region.slot,
                         user_memory_region.start,
@@ -214,10 +213,10 @@ impl VfioUserPciDevice {
 
                     vm.create_user_memory_region(mem_region)
                         .map_err(VfioUserPciDeviceError::MapRegionGuest)?;
+
+                    user_memory_regions.push(user_memory_region);
                 }
 
-                mmio_region.host_addr = Some(host_addr as u64);
-                mmio_region.mmap_size = Some(mmio_region.length as usize);
                 mmio_region.user_memory_regions = user_memory_regions;
             }
         }
@@ -241,12 +240,14 @@ impl VfioUserPciDevice {
                 if let Err(e) = self.vm.remove_user_memory_region(r) {
                     error!("Could not remove the userspace memory region: {}", e);
                 }
-            }
 
-            if let (Some(host_addr), Some(mmap_size)) =
-                (mmio_region.host_addr, mmio_region.mmap_size)
-            {
-                let ret = unsafe { libc::munmap(host_addr as *mut libc::c_void, mmap_size) };
+                // Remove mmaps
+                let ret = unsafe {
+                    libc::munmap(
+                        user_memory_region.host_addr as *mut libc::c_void,
+                        user_memory_region.size as usize,
+                    )
+                };
                 if ret != 0 {
                     error!(
                         "Could not unmap region {}, error:{}",
