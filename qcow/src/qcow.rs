@@ -516,6 +516,19 @@ impl QcowFile {
 
         let l2_entries = cluster_size / size_of::<u64>() as u64;
 
+        // Check for compressed blocks
+        for l2_addr_disk in l1_table.get_values() {
+            if *l2_addr_disk != 0 {
+                if let Err(e) = Self::read_l2_cluster(&mut raw_file, *l2_addr_disk) {
+                    if let Some(os_error) = e.raw_os_error() {
+                        if os_error == ENOTSUP {
+                            return Err(Error::CompressedBlocksNotSupported);
+                        }
+                    }
+                }
+            }
+        }
+
         let mut qcow = QcowFile {
             raw_file,
             header,
