@@ -3817,6 +3817,22 @@ impl DeviceManager {
         let pci_device_node = device_tree
             .remove_node_by_pci_bdf(pci_device_bdf)
             .ok_or(DeviceManagerError::MissingPciDevice)?;
+
+        // For VFIO and vfio-user the PCI device id is the id.
+        // For virtio we overwrite it later as we want the id of the
+        // underlying device.
+        let mut id = pci_device_node.id;
+        let pci_device_handle = pci_device_node
+            .pci_device_handle
+            .ok_or(DeviceManagerError::MissingPciDevice)?;
+        if matches!(pci_device_handle, PciDeviceHandle::Virtio(_)) {
+            // The virtio-pci device has a single child
+            if !pci_device_node.children.is_empty() {
+                assert_eq!(pci_device_node.children.len(), 1);
+                let child_id = &pci_device_node.children[0];
+                id = child_id.clone();
+            }
+        }
         for child in pci_device_node.children.iter() {
             device_tree.remove(child);
         }
@@ -3828,9 +3844,6 @@ impl DeviceManager {
             }
         }
 
-        let pci_device_handle = pci_device_node
-            .pci_device_handle
-            .ok_or(DeviceManagerError::MissingPciDevice)?;
         let (pci_device, bus_device, virtio_device, remove_dma_handler) = match pci_device_handle {
             // No need to remove any virtio-mem mapping here as the container outlives all devices
             PciDeviceHandle::Vfio(vfio_pci_device) => (
@@ -3959,6 +3972,15 @@ impl DeviceManager {
             self.virtio_devices
                 .retain(|handler| !Arc::ptr_eq(&handler.virtio_device, &virtio_device));
         }
+
+        event!(
+            "vm",
+            "device-removed",
+            "id",
+            &id,
+            "bdf",
+            pci_device_bdf.to_string()
+        );
 
         // At this point, the device has been removed from all the list and
         // buses where it was stored. At the end of this function, after
