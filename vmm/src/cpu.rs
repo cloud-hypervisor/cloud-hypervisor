@@ -46,8 +46,9 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, io, result, thread};
 use thiserror::Error;
 use vm_device::BusDevice;
-use vm_memory::GuestAddress;
-use vm_memory::GuestMemoryAtomic;
+#[cfg(feature = "gdb")]
+use vm_memory::{Bytes, GuestAddressSpace};
+use vm_memory::{GuestAddress, GuestMemoryAtomic};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
     Transportable,
@@ -2046,10 +2047,11 @@ impl Debuggable for CpuManager {
             };
             let psize = arch::PAGE_SIZE as u64;
             let read_len = std::cmp::min(len as u64 - total_read, psize - (paddr & (psize - 1)));
-            self.vmmops
-                .guest_mem_read(
-                    paddr,
+            self.vm_memory
+                .memory()
+                .read(
                     &mut buf[total_read as usize..total_read as usize + read_len as usize],
+                    GuestAddress(paddr),
                 )
                 .map_err(DebuggableError::ReadMem)?;
             total_read += read_len;
@@ -2078,10 +2080,11 @@ impl Debuggable for CpuManager {
                 data.len() as u64 - total_written,
                 psize - (paddr & (psize - 1)),
             );
-            self.vmmops
-                .guest_mem_write(
-                    paddr,
+            self.vm_memory
+                .memory()
+                .write(
                     &data[total_written as usize..total_written as usize + write_len as usize],
+                    GuestAddress(paddr),
                 )
                 .map_err(DebuggableError::WriteMem)?;
             total_written += write_len;

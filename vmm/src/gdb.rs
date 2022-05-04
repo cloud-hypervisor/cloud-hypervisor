@@ -5,8 +5,6 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{os::unix::net::UnixListener, sync::mpsc};
-
 use gdbstub::{
     arch::Arch,
     common::{Signal, Tid},
@@ -30,7 +28,8 @@ use gdbstub::{
 use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
 #[cfg(target_arch = "x86_64")]
 use gdbstub_arch::x86::X86_64_SSE as GdbArch;
-use vm_memory::GuestAddress;
+use std::{os::unix::net::UnixListener, sync::mpsc};
+use vm_memory::{GuestAddress, GuestMemoryError};
 
 #[cfg(target_arch = "x86_64")]
 type ArchUsize = u64;
@@ -42,8 +41,8 @@ pub enum DebuggableError {
     Resume(vm_migration::MigratableError),
     ReadRegs(crate::cpu::Error),
     WriteRegs(crate::cpu::Error),
-    ReadMem(hypervisor::HypervisorVmError),
-    WriteMem(hypervisor::HypervisorVmError),
+    ReadMem(GuestMemoryError),
+    WriteMem(GuestMemoryError),
     TranslateGva(crate::cpu::Error),
     PoisonedState,
 }
