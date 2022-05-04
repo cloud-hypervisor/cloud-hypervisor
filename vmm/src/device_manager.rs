@@ -115,30 +115,28 @@ use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "aarch64")]
 const MMIO_LEN: u64 = 0x1000;
 
-const VFIO_DEVICE_NAME_PREFIX: &str = "_vfio";
-
-const VFIO_USER_DEVICE_NAME_PREFIX: &str = "_vfio_user";
-
+// Singleton devices / devices the user cannot name
 #[cfg(target_arch = "x86_64")]
-const IOAPIC_DEVICE_NAME: &str = "_ioapic";
-
-const SERIAL_DEVICE_NAME_PREFIX: &str = "_serial";
+const IOAPIC_DEVICE_NAME: &str = "__ioapic";
+const SERIAL_DEVICE_NAME: &str = "__serial";
 #[cfg(target_arch = "aarch64")]
-const GPIO_DEVICE_NAME_PREFIX: &str = "_gpio";
+const GPIO_DEVICE_NAME: &str = "__gpio";
+const RNG_DEVICE_NAME: &str = "__rng";
+const IOMMU_DEVICE_NAME: &str = "__iommu";
+const BALLOON_DEVICE_NAME: &str = "__balloon";
+const CONSOLE_DEVICE_NAME: &str = "__console";
 
-const CONSOLE_DEVICE_NAME: &str = "_console";
+// Devices that the user may name and for which we generate
+// identifiers if the user doesn't give one
 const DISK_DEVICE_NAME_PREFIX: &str = "_disk";
 const FS_DEVICE_NAME_PREFIX: &str = "_fs";
-const BALLOON_DEVICE_NAME: &str = "_balloon";
 const NET_DEVICE_NAME_PREFIX: &str = "_net";
 const PMEM_DEVICE_NAME_PREFIX: &str = "_pmem";
-const RNG_DEVICE_NAME: &str = "_rng";
 const VDPA_DEVICE_NAME_PREFIX: &str = "_vdpa";
 const VSOCK_DEVICE_NAME_PREFIX: &str = "_vsock";
-const WATCHDOG_DEVICE_NAME: &str = "_watchdog";
-
-const IOMMU_DEVICE_NAME: &str = "_iommu";
-
+const WATCHDOG_DEVICE_NAME: &str = "__watchdog";
+const VFIO_DEVICE_NAME_PREFIX: &str = "_vfio";
+const VFIO_USER_DEVICE_NAME_PREFIX: &str = "_vfio_user";
 const VIRTIO_PCI_DEVICE_NAME_PREFIX: &str = "_virtio-pci";
 
 /// Errors associated with device manager
@@ -480,6 +478,9 @@ pub enum DeviceManagerError {
 
     /// Invalid identifier as it is not unique.
     IdentifierNotUnique(String),
+
+    /// Invalid identifier
+    InvalidIdentifier(String),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -1565,7 +1566,7 @@ impl DeviceManager {
         );
 
         // Add a GPIO device
-        let id = String::from(GPIO_DEVICE_NAME_PREFIX);
+        let id = String::from(GPIO_DEVICE_NAME);
         let gpio_irq = self
             .address_manager
             .allocator
@@ -1655,7 +1656,7 @@ impl DeviceManager {
         // Serial is tied to IRQ #4
         let serial_irq = 4;
 
-        let id = String::from(SERIAL_DEVICE_NAME_PREFIX);
+        let id = String::from(SERIAL_DEVICE_NAME);
 
         let interrupt_group = interrupt_manager
             .create_group(LegacyIrqGroupConfig {
@@ -1701,7 +1702,7 @@ impl DeviceManager {
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
         serial_writer: Option<Box<dyn io::Write + Send>>,
     ) -> DeviceManagerResult<Arc<Mutex<Pl011>>> {
-        let id = String::from(SERIAL_DEVICE_NAME_PREFIX);
+        let id = String::from(SERIAL_DEVICE_NAME);
 
         let serial_irq = self
             .address_manager
@@ -4225,6 +4226,10 @@ impl DeviceManager {
 
     fn validate_identifier(&self, id: &Option<String>) -> DeviceManagerResult<()> {
         if let Some(id) = id {
+            if id.starts_with("__") {
+                return Err(DeviceManagerError::InvalidIdentifier(id.clone()));
+            }
+
             if self.device_tree.lock().unwrap().contains_key(id) {
                 return Err(DeviceManagerError::IdentifierNotUnique(id.clone()));
             }
