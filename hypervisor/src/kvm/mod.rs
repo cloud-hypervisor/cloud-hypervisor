@@ -17,7 +17,7 @@ use crate::cpu;
 use crate::device;
 use crate::hypervisor;
 use crate::vec_with_array_field;
-use crate::vm::{self, VmmOps};
+use crate::vm::{self, VmOps};
 #[cfg(target_arch = "aarch64")]
 use crate::{arm64_core_reg_id, offset__of};
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
@@ -234,7 +234,7 @@ impl vm::Vm for KvmVm {
     fn create_vcpu(
         &self,
         id: u8,
-        vmmops: Option<Arc<dyn VmmOps>>,
+        vm_ops: Option<Arc<dyn VmOps>>,
     ) -> vm::Result<Arc<dyn cpu::Vcpu>> {
         let vc = self
             .fd
@@ -244,7 +244,7 @@ impl vm::Vm for KvmVm {
             fd: vc,
             #[cfg(target_arch = "x86_64")]
             msrs: self.msrs.clone(),
-            vmmops,
+            vm_ops,
             #[cfg(target_arch = "x86_64")]
             hyperv_synic: AtomicBool::new(false),
         };
@@ -816,7 +816,7 @@ pub struct KvmVcpu {
     fd: VcpuFd,
     #[cfg(target_arch = "x86_64")]
     msrs: MsrEntries,
-    vmmops: Option<Arc<dyn vm::VmmOps>>,
+    vm_ops: Option<Arc<dyn vm::VmOps>>,
     #[cfg(target_arch = "x86_64")]
     hyperv_synic: AtomicBool,
 }
@@ -1056,8 +1056,8 @@ impl cpu::Vcpu for KvmVcpu {
             Ok(run) => match run {
                 #[cfg(target_arch = "x86_64")]
                 VcpuExit::IoIn(addr, data) => {
-                    if let Some(vmmops) = &self.vmmops {
-                        return vmmops
+                    if let Some(vm_ops) = &self.vm_ops {
+                        return vm_ops
                             .pio_read(addr.into(), data)
                             .map(|_| cpu::VmExit::Ignore)
                             .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()));
@@ -1067,8 +1067,8 @@ impl cpu::Vcpu for KvmVcpu {
                 }
                 #[cfg(target_arch = "x86_64")]
                 VcpuExit::IoOut(addr, data) => {
-                    if let Some(vmmops) = &self.vmmops {
-                        return vmmops
+                    if let Some(vm_ops) = &self.vm_ops {
+                        return vm_ops
                             .pio_write(addr.into(), data)
                             .map(|_| cpu::VmExit::Ignore)
                             .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()));
@@ -1100,8 +1100,8 @@ impl cpu::Vcpu for KvmVcpu {
                 }
 
                 VcpuExit::MmioRead(addr, data) => {
-                    if let Some(vmmops) = &self.vmmops {
-                        return vmmops
+                    if let Some(vm_ops) = &self.vm_ops {
+                        return vm_ops
                             .mmio_read(addr, data)
                             .map(|_| cpu::VmExit::Ignore)
                             .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()));
@@ -1110,8 +1110,8 @@ impl cpu::Vcpu for KvmVcpu {
                     Ok(cpu::VmExit::MmioRead(addr, data))
                 }
                 VcpuExit::MmioWrite(addr, data) => {
-                    if let Some(vmmops) = &self.vmmops {
-                        return vmmops
+                    if let Some(vm_ops) = &self.vm_ops {
+                        return vm_ops
                             .mmio_write(addr, data)
                             .map(|_| cpu::VmExit::Ignore)
                             .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()));

@@ -11,7 +11,7 @@ use crate::cpu;
 use crate::cpu::Vcpu;
 use crate::hypervisor;
 use crate::vec_with_array_field;
-use crate::vm::{self, VmmOps};
+use crate::vm::{self, VmOps};
 pub use mshv_bindings::*;
 pub use mshv_ioctls::IoEventAddress;
 use mshv_ioctls::{set_registers_64, Mshv, NoDatamatch, VcpuFd, VmFd};
@@ -122,7 +122,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
             fd: vm_fd,
             msrs,
             hv_state: hv_state_init(),
-            vmmops: None,
+            vm_ops: None,
             dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
         }))
     }
@@ -151,7 +151,7 @@ pub struct MshvVcpu {
     cpuid: CpuId,
     msrs: MsrEntries,
     hv_state: Arc<RwLock<HvState>>, // Mshv State
-    vmmops: Option<Arc<dyn vm::VmmOps>>,
+    vm_ops: Option<Arc<dyn vm::VmOps>>,
 }
 
 /// Implementation of Vcpu trait for Microsoft Hypervisor
@@ -355,14 +355,14 @@ impl cpu::Vcpu for MshvVcpu {
 
                     if is_write {
                         let data = (info.rax as u32).to_le_bytes();
-                        if let Some(vmmops) = &self.vmmops {
-                            vmmops
+                        if let Some(vm_ops) = &self.vm_ops {
+                            vm_ops
                                 .pio_write(port.into(), &data[0..len])
                                 .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
                         }
                     } else {
-                        if let Some(vmmops) = &self.vmmops {
-                            vmmops
+                        if let Some(vm_ops) = &self.vm_ops {
+                            vm_ops
                                 .pio_read(port.into(), &mut data[0..len])
                                 .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
                         }
@@ -655,9 +655,9 @@ impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
             gpa
         );
 
-        if let Some(vmmops) = &self.vcpu.vmmops {
-            if vmmops.guest_mem_read(gpa, data).is_err() {
-                vmmops
+        if let Some(vm_ops) = &self.vcpu.vm_ops {
+            if vm_ops.guest_mem_read(gpa, data).is_err() {
+                vm_ops
                     .mmio_read(gpa, data)
                     .map_err(|e| PlatformError::MemoryReadFailure(e.into()))?;
             }
@@ -675,9 +675,9 @@ impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
             gpa
         );
 
-        if let Some(vmmops) = &self.vcpu.vmmops {
-            if vmmops.guest_mem_write(gpa, data).is_err() {
-                vmmops
+        if let Some(vm_ops) = &self.vcpu.vm_ops {
+            if vm_ops.guest_mem_write(gpa, data).is_err() {
+                vm_ops
                     .mmio_write(gpa, data)
                     .map_err(|e| PlatformError::MemoryWriteFailure(e.into()))?;
             }
@@ -746,7 +746,7 @@ pub struct MshvVm {
     msrs: MsrEntries,
     // Hypervisor State
     hv_state: Arc<RwLock<HvState>>,
-    vmmops: Option<Arc<dyn vm::VmmOps>>,
+    vm_ops: Option<Arc<dyn vm::VmOps>>,
     dirty_log_slots: Arc<RwLock<HashMap<u64, MshvDirtyLogSlot>>>,
 }
 
@@ -816,7 +816,7 @@ impl vm::Vm for MshvVm {
     fn create_vcpu(
         &self,
         id: u8,
-        vmmops: Option<Arc<dyn VmmOps>>,
+        vm_ops: Option<Arc<dyn VmOps>>,
     ) -> vm::Result<Arc<dyn cpu::Vcpu>> {
         let vcpu_fd = self
             .fd
@@ -828,7 +828,7 @@ impl vm::Vm for MshvVm {
             cpuid: CpuId::new(1).unwrap(),
             msrs: self.msrs.clone(),
             hv_state: self.hv_state.clone(),
-            vmmops,
+            vm_ops,
         };
         Ok(Arc::new(vcpu))
     }
