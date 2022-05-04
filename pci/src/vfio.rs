@@ -18,7 +18,9 @@ use std::ptr::null_mut;
 use std::sync::{Arc, Barrier, Mutex};
 use thiserror::Error;
 use vfio_bindings::bindings::vfio::*;
-use vfio_ioctls::{VfioContainer, VfioDevice, VfioIrq, VfioRegionInfoCap};
+use vfio_ioctls::{
+    VfioContainer, VfioDevice, VfioIrq, VfioRegionInfoCap, VfioRegionSparseMmapArea,
+};
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
@@ -29,6 +31,8 @@ use vmm_sys_util::eventfd::EventFd;
 
 #[derive(Debug, Error)]
 pub enum VfioPciError {
+    #[error("Failed to create user memory region: {0}")]
+    CreateUserMemoryRegion(#[source] HypervisorVmError),
     #[error("Failed to DMA map: {0}")]
     DmaMap(#[source] vfio_ioctls::VfioError),
     #[error("Failed to DMA unmap: {0}")]
@@ -39,10 +43,14 @@ pub enum VfioPciError {
     EnableMsi(#[source] VfioError),
     #[error("Failed to enable MSI-x: {0}")]
     EnableMsix(#[source] VfioError),
-    #[error("Failed to map VFIO PCI region into guest: {0}")]
-    MapRegionGuest(#[source] HypervisorVmError),
+    #[error("Failed to mmap the area")]
+    MmapArea,
     #[error("Failed to notifier's eventfd")]
     MissingNotifier,
+    #[error("Invalid region alignment")]
+    RegionAlignment,
+    #[error("Invalid region size")]
+    RegionSize,
 }
 
 #[derive(Copy, Clone)]
@@ -223,8 +231,6 @@ pub struct MmioRegion {
     pub length: GuestUsize,
     pub(crate) type_: PciBarRegionType,
     pub(crate) index: u32,
-    pub(crate) host_addr: Option<u64>,
-    pub(crate) mmap_size: Option<usize>,
     pub(crate) user_memory_regions: Vec<UserMemoryRegion>,
 }
 #[derive(Debug, Error)]
@@ -545,8 +551,6 @@ impl VfioCommon {
                 length: region_size,
                 type_: region_type,
                 index: bar_id as u32,
-                host_addr: None,
-                mmap_size: None,
                 user_memory_regions: Vec::new(),
             });
 
@@ -1058,71 +1062,84 @@ impl VfioPciDevice {
         (size & 0xfff) == 0
     }
 
-    fn generate_user_memory_regions<F>(
+    fn generate_sparse_areas(
+        caps: &[VfioRegionInfoCap],
         region_index: u32,
         region_start: u64,
         region_size: u64,
-        host_addr: u64,
-        mem_slot: F,
         vfio_msix: Option<&VfioMsix>,
-    ) -> Vec<UserMemoryRegion>
-    where
-        F: Fn() -> u32,
-    {
-        if !Self::is_4k_aligned(region_start) {
-            error!(
-                "Region start address 0x{:x} must be at least aligned on 4KiB",
-                region_start
-            );
-        }
-        if !Self::is_4k_multiple(region_size) {
-            error!(
-                "Region size 0x{:x} must be at least a multiple of 4KiB",
-                region_size
-            );
-        }
+    ) -> Result<Vec<VfioRegionSparseMmapArea>, VfioPciError> {
+        for cap in caps {
+            match cap {
+                VfioRegionInfoCap::SparseMmap(sparse_mmap) => return Ok(sparse_mmap.areas.clone()),
+                VfioRegionInfoCap::MsixMappable => {
+                    if !Self::is_4k_aligned(region_start) {
+                        error!(
+                            "Region start address 0x{:x} must be at least aligned on 4KiB",
+                            region_start
+                        );
+                        return Err(VfioPciError::RegionAlignment);
+                    }
+                    if !Self::is_4k_multiple(region_size) {
+                        error!(
+                            "Region size 0x{:x} must be at least a multiple of 4KiB",
+                            region_size
+                        );
+                        return Err(VfioPciError::RegionSize);
+                    }
 
-        // Using a BtreeMap as the list provided through the iterator is sorted
-        // by key. This ensures proper split of the whole region.
-        let mut inter_ranges = BTreeMap::new();
-        if let Some(msix) = vfio_msix {
-            if region_index == msix.cap.table_bir() {
-                let (offset, size) = msix.cap.table_range();
-                let base = region_start + offset;
-                inter_ranges.insert(base, size);
+                    // In case the region contains the MSI-X vectors table or
+                    // the MSI-X PBA table, we must calculate the subregions
+                    // around them, leading to a list of sparse areas.
+                    // We want to make sure we will still trap MMIO accesses
+                    // to these MSI-X specific ranges.
+                    //
+                    // Using a BtreeMap as the list provided through the iterator is sorted
+                    // by key. This ensures proper split of the whole region.
+                    let mut inter_ranges = BTreeMap::new();
+                    if let Some(msix) = vfio_msix {
+                        if region_index == msix.cap.table_bir() {
+                            let (offset, size) = msix.cap.table_range();
+                            inter_ranges.insert(offset, size);
+                        }
+                        if region_index == msix.cap.pba_bir() {
+                            let (offset, size) = msix.cap.pba_range();
+                            inter_ranges.insert(offset, size);
+                        }
+                    }
+
+                    let mut sparse_areas = Vec::new();
+                    let mut current_offset = 0;
+                    for (range_offset, range_size) in inter_ranges {
+                        if range_offset > current_offset {
+                            sparse_areas.push(VfioRegionSparseMmapArea {
+                                offset: current_offset,
+                                size: range_offset - current_offset,
+                            });
+                        }
+
+                        current_offset = Self::align_4k(range_offset + range_size);
+                    }
+
+                    if region_size > current_offset {
+                        sparse_areas.push(VfioRegionSparseMmapArea {
+                            offset: current_offset,
+                            size: region_size - current_offset,
+                        });
+                    }
+
+                    return Ok(sparse_areas);
+                }
+                _ => {}
             }
-            if region_index == msix.cap.pba_bir() {
-                let (offset, size) = msix.cap.pba_range();
-                let base = region_start + offset;
-                inter_ranges.insert(base, size);
-            }
         }
 
-        let mut user_memory_regions = Vec::new();
-        let mut new_start = region_start;
-        for (range_start, range_size) in inter_ranges {
-            if range_start > new_start {
-                user_memory_regions.push(UserMemoryRegion {
-                    slot: mem_slot(),
-                    start: new_start,
-                    size: range_start - new_start,
-                    host_addr: host_addr + new_start - region_start,
-                });
-            }
-
-            new_start = Self::align_4k(range_start + range_size);
-        }
-
-        if region_start + region_size > new_start {
-            user_memory_regions.push(UserMemoryRegion {
-                slot: mem_slot(),
-                start: new_start,
-                size: region_start + region_size - new_start,
-                host_addr: host_addr + new_start - region_start,
-            });
-        }
-
-        user_memory_regions
+        // In case no relevant capabilities have been found, create a single
+        // sparse area corresponding to the entire MMIO region.
+        Ok(vec![VfioRegionSparseMmapArea {
+            offset: 0,
+            size: region_size,
+        }])
     }
 
     /// Map MMIO regions into the guest, and avoid VM exits when the guest tries
@@ -1173,42 +1190,46 @@ impl VfioPciDevice {
                 }
 
                 let mmap_size = self.device.get_region_size(region.index);
-                let offset = self.device.get_region_offset(region.index);
+                let mmap_offset = self.device.get_region_offset(region.index);
 
-                let host_addr = unsafe {
-                    libc::mmap(
-                        null_mut(),
-                        mmap_size as usize,
-                        prot,
-                        libc::MAP_SHARED,
-                        fd,
-                        offset as libc::off_t,
-                    )
-                };
-
-                if host_addr == libc::MAP_FAILED {
-                    error!(
-                        "Could not mmap region index {}: {}",
-                        region.index,
-                        io::Error::last_os_error()
-                    );
-                    continue;
-                }
-
-                // In case the region that is being mapped contains the MSI-X
-                // vectors table or the MSI-X PBA table, we must adjust what
-                // is being declared through the hypervisor. We want to make
-                // sure we will still trap MMIO accesses to these MSI-X
-                // specific ranges.
-                let user_memory_regions = Self::generate_user_memory_regions(
+                let sparse_areas = Self::generate_sparse_areas(
+                    &caps,
                     region.index,
-                    region.start.raw_value(),
+                    region.start.0,
                     mmap_size,
-                    host_addr as u64,
-                    &mem_slot,
                     self.common.interrupt.msix.as_ref(),
-                );
-                for user_memory_region in user_memory_regions.iter() {
+                )?;
+
+                let mut user_memory_regions = Vec::new();
+                for area in sparse_areas.iter() {
+                    let host_addr = unsafe {
+                        libc::mmap(
+                            null_mut(),
+                            area.size as usize,
+                            prot,
+                            libc::MAP_SHARED,
+                            fd,
+                            mmap_offset as libc::off_t + area.offset as libc::off_t,
+                        )
+                    };
+
+                    if host_addr == libc::MAP_FAILED {
+                        error!(
+                            "Could not mmap sparse area (offset = 0x{:x}, size = 0x{:x}): {}",
+                            area.offset,
+                            area.size,
+                            std::io::Error::last_os_error()
+                        );
+                        return Err(VfioPciError::MmapArea);
+                    }
+
+                    let user_memory_region = UserMemoryRegion {
+                        slot: mem_slot(),
+                        start: region.start.0 + area.offset,
+                        size: area.size,
+                        host_addr: host_addr as u64,
+                    };
+
                     let mem_region = vm.make_user_memory_region(
                         user_memory_region.slot,
                         user_memory_region.start,
@@ -1219,12 +1240,11 @@ impl VfioPciDevice {
                     );
 
                     vm.create_user_memory_region(mem_region)
-                        .map_err(VfioPciError::MapRegionGuest)?;
+                        .map_err(VfioPciError::CreateUserMemoryRegion)?;
+
+                    user_memory_regions.push(user_memory_region);
                 }
 
-                // Update the region with memory mapped info.
-                region.host_addr = Some(host_addr as u64);
-                region.mmap_size = Some(mmap_size as usize);
                 region.user_memory_regions = user_memory_regions;
             }
         }
@@ -1248,10 +1268,13 @@ impl VfioPciDevice {
                 if let Err(e) = self.vm.remove_user_memory_region(r) {
                     error!("Could not remove the userspace memory region: {}", e);
                 }
-            }
 
-            if let (Some(host_addr), Some(mmap_size)) = (region.host_addr, region.mmap_size) {
-                let ret = unsafe { libc::munmap(host_addr as *mut libc::c_void, mmap_size) };
+                let ret = unsafe {
+                    libc::munmap(
+                        user_memory_region.host_addr as *mut libc::c_void,
+                        user_memory_region.size as usize,
+                    )
+                };
                 if ret != 0 {
                     error!(
                         "Could not unmap region {}, error:{}",
