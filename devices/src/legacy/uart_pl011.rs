@@ -10,6 +10,7 @@ use crate::{read_le_u32, write_le_u32};
 use std::collections::VecDeque;
 use std::fmt;
 use std::sync::{Arc, Barrier};
+use std::time::Instant;
 use std::{io, result};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
@@ -120,6 +121,7 @@ impl Pl011 {
         id: String,
         irq: Arc<dyn InterruptSourceGroup>,
         out: Option<Box<dyn io::Write + Send>>,
+        timestamp: Instant,
     ) -> Self {
         Self {
             id,
@@ -140,7 +142,7 @@ impl Pl011 {
             read_trigger: 1u32,
             irq,
             out,
-            timestamp: std::time::Instant::now(),
+            timestamp,
         }
     }
 
@@ -495,6 +497,7 @@ mod tests {
             String::from(SERIAL_NAME),
             Arc::new(TestInterrupt::new(intr_evt.try_clone().unwrap())),
             Some(Box::new(pl011_out.clone())),
+            Instant::now(),
         );
 
         pl011.write(0, UARTDR as u64, &[b'x', b'y']);
@@ -515,6 +518,7 @@ mod tests {
             String::from(SERIAL_NAME),
             Arc::new(TestInterrupt::new(intr_evt.try_clone().unwrap())),
             Some(Box::new(pl011_out)),
+            Instant::now(),
         );
 
         // write 1 to the interrupt event fd, so that read doesn't block in case the event fd
