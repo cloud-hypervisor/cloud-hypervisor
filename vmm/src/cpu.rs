@@ -34,7 +34,7 @@ use hypervisor::kvm::kvm_bindings;
 use hypervisor::x86_64::{SpecialRegisters, StandardRegisters};
 #[cfg(target_arch = "x86_64")]
 use hypervisor::CpuId;
-use hypervisor::{vm::VmmOps, CpuState, HypervisorCpuError, VmExit};
+use hypervisor::{vm::VmOps, CpuState, HypervisorCpuError, VmExit};
 #[cfg(feature = "tdx")]
 use hypervisor::{TdxExitDetails, TdxExitStatus};
 use libc::{c_void, siginfo_t};
@@ -255,14 +255,14 @@ impl Vcpu {
     ///
     /// * `id` - Represents the CPU number between [0, max vcpus).
     /// * `vm` - The virtual machine this vcpu will get attached to.
-    /// * `vmmops` - Optional object for exit handling.
+    /// * `vm_ops` - Optional object for exit handling.
     pub fn new(
         id: u8,
         vm: &Arc<dyn hypervisor::Vm>,
-        vmmops: Option<Arc<dyn VmmOps>>,
+        vm_ops: Option<Arc<dyn VmOps>>,
     ) -> Result<Self> {
         let vcpu = vm
-            .create_vcpu(id, vmmops)
+            .create_vcpu(id, vm_ops)
             .map_err(|e| Error::VcpuCreate(e.into()))?;
         // Initially the cpuid per vCPU is the one supported by this VM.
         Ok(Vcpu {
@@ -412,7 +412,7 @@ pub struct CpuManager {
     selected_cpu: u8,
     vcpus: Vec<Arc<Mutex<Vcpu>>>,
     seccomp_action: SeccompAction,
-    vmmops: Arc<dyn VmmOps>,
+    vm_ops: Arc<dyn VmOps>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     acpi_address: Option<GuestAddress>,
     proximity_domain_per_cpu: BTreeMap<u8, u32>,
@@ -562,7 +562,7 @@ impl CpuManager {
         #[cfg(feature = "gdb")] vm_debug_evt: EventFd,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         seccomp_action: SeccompAction,
-        vmmops: Arc<dyn VmmOps>,
+        vm_ops: Arc<dyn VmOps>,
         #[cfg(feature = "tdx")] tdx_enabled: bool,
         numa_nodes: &NumaNodes,
     ) -> Result<Arc<Mutex<CpuManager>>> {
@@ -684,7 +684,7 @@ impl CpuManager {
             selected_cpu: 0,
             vcpus: Vec::with_capacity(usize::from(config.max_vcpus)),
             seccomp_action,
-            vmmops,
+            vm_ops,
             acpi_address,
             proximity_domain_per_cpu,
             affinity,
@@ -713,7 +713,7 @@ impl CpuManager {
     ) -> Result<()> {
         info!("Creating vCPU: cpu_id = {}", cpu_id);
 
-        let mut vcpu = Vcpu::new(cpu_id, &self.vm, Some(self.vmmops.clone()))?;
+        let mut vcpu = Vcpu::new(cpu_id, &self.vm, Some(self.vm_ops.clone()))?;
 
         if let Some(snapshot) = snapshot {
             // AArch64 vCPUs should be initialized after created.

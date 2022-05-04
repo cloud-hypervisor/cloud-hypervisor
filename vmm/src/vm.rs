@@ -49,7 +49,7 @@ use devices::interrupt_controller::{self, InterruptController};
 use devices::AcpiNotificationFlags;
 #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
 use gdbstub_arch::x86::reg::X86_64CoreRegs;
-use hypervisor::vm::{HypervisorVmError, VmmOps};
+use hypervisor::vm::{HypervisorVmError, VmOps};
 use linux_loader::cmdline::Cmdline;
 #[cfg(target_arch = "x86_64")]
 use linux_loader::loader::elf::PvhBootCapability::PvhEntryPresent;
@@ -343,7 +343,7 @@ impl VmState {
     }
 }
 
-struct VmOps {
+struct VmOpsHandler {
     memory: GuestMemoryAtomic<GuestMemoryMmap>,
     #[cfg(target_arch = "x86_64")]
     io_bus: Arc<Bus>,
@@ -352,7 +352,7 @@ struct VmOps {
     pci_config_io: Arc<Mutex<dyn BusDevice>>,
 }
 
-impl VmmOps for VmOps {
+impl VmOps for VmOpsHandler {
     fn guest_mem_write(&self, gpa: u64, buf: &[u8]) -> hypervisor::vm::Result<usize> {
         self.memory
             .memory()
@@ -544,13 +544,11 @@ impl Vm {
         #[cfg(target_arch = "x86_64")]
         let io_bus = Arc::clone(device_manager.lock().unwrap().io_bus());
         let mmio_bus = Arc::clone(device_manager.lock().unwrap().mmio_bus());
-        // Create the VmOps structure, which implements the VmmOps trait.
-        // And send it to the hypervisor.
 
         #[cfg(target_arch = "x86_64")]
         let pci_config_io =
             device_manager.lock().unwrap().pci_config_io() as Arc<Mutex<dyn BusDevice>>;
-        let vm_ops: Arc<dyn VmmOps> = Arc::new(VmOps {
+        let vm_ops: Arc<dyn VmOps> = Arc::new(VmOpsHandler {
             memory,
             #[cfg(target_arch = "x86_64")]
             io_bus,
