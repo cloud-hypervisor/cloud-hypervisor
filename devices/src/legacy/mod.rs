@@ -6,6 +6,8 @@
 // found in the LICENSE-BSD-3-Clause file.
 
 mod cmos;
+#[cfg(target_arch = "x86_64")]
+mod debug_port;
 #[cfg(feature = "fwdebug")]
 mod fwdebug;
 #[cfg(target_arch = "aarch64")]
@@ -18,6 +20,8 @@ mod serial;
 mod uart_pl011;
 
 pub use self::cmos::Cmos;
+#[cfg(target_arch = "x86_64")]
+pub use self::debug_port::DebugPort;
 #[cfg(feature = "fwdebug")]
 pub use self::fwdebug::FwDebugDevice;
 pub use self::i8042::I8042Device;

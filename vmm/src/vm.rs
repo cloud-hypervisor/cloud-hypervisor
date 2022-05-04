@@ -66,8 +66,6 @@ use std::cmp;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::convert::TryInto;
-#[cfg(target_arch = "x86_64")]
-use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::io::{Seek, SeekFrom};
@@ -78,6 +76,7 @@ use std::ops::Deref;
 use std::os::unix::net::UnixStream;
 use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::Instant;
 use std::{result, str, thread};
 use thiserror::Error;
 use vm_device::Bus;
@@ -344,76 +343,13 @@ impl VmState {
     }
 }
 
-// Debug I/O port
-#[cfg(target_arch = "x86_64")]
-const DEBUG_IOPORT: u16 = 0x80;
-#[cfg(target_arch = "x86_64")]
-const DEBUG_IOPORT_PREFIX: &str = "Debug I/O port";
-
-#[cfg(target_arch = "x86_64")]
-/// Debug I/O port, see:
-/// https://www.intel.com/content/www/us/en/support/articles/000005500/boards-and-kits.html
-///
-/// Since we're not a physical platform, we can freely assign code ranges for
-/// debugging specific parts of our virtual platform.
-pub enum DebugIoPortRange {
-    Firmware,
-    Bootloader,
-    Kernel,
-    Userspace,
-    Custom,
-}
-#[cfg(target_arch = "x86_64")]
-impl DebugIoPortRange {
-    fn from_u8(value: u8) -> DebugIoPortRange {
-        match value {
-            0x00..=0x1f => DebugIoPortRange::Firmware,
-            0x20..=0x3f => DebugIoPortRange::Bootloader,
-            0x40..=0x5f => DebugIoPortRange::Kernel,
-            0x60..=0x7f => DebugIoPortRange::Userspace,
-            _ => DebugIoPortRange::Custom,
-        }
-    }
-}
-
-#[cfg(target_arch = "x86_64")]
-impl fmt::Display for DebugIoPortRange {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            DebugIoPortRange::Firmware => write!(f, "{}: Firmware", DEBUG_IOPORT_PREFIX),
-            DebugIoPortRange::Bootloader => write!(f, "{}: Bootloader", DEBUG_IOPORT_PREFIX),
-            DebugIoPortRange::Kernel => write!(f, "{}: Kernel", DEBUG_IOPORT_PREFIX),
-            DebugIoPortRange::Userspace => write!(f, "{}: Userspace", DEBUG_IOPORT_PREFIX),
-            DebugIoPortRange::Custom => write!(f, "{}: Custom", DEBUG_IOPORT_PREFIX),
-        }
-    }
-}
-
 struct VmOps {
     memory: GuestMemoryAtomic<GuestMemoryMmap>,
     #[cfg(target_arch = "x86_64")]
     io_bus: Arc<Bus>,
     mmio_bus: Arc<Bus>,
     #[cfg(target_arch = "x86_64")]
-    timestamp: std::time::Instant,
-    #[cfg(target_arch = "x86_64")]
     pci_config_io: Arc<Mutex<dyn BusDevice>>,
-}
-
-impl VmOps {
-    #[cfg(target_arch = "x86_64")]
-    // Log debug io port codes.
-    fn log_debug_ioport(&self, code: u8) {
-        let elapsed = self.timestamp.elapsed();
-
-        info!(
-            "[{} code 0x{:x}] {}.{:>06} seconds",
-            DebugIoPortRange::from_u8(code),
-            code,
-            elapsed.as_secs(),
-            elapsed.as_micros()
-        );
-    }
 }
 
 impl VmmOps for VmOps {
@@ -475,11 +411,6 @@ impl VmmOps for VmOps {
     #[cfg(target_arch = "x86_64")]
     fn pio_write(&self, port: u64, data: &[u8]) -> hypervisor::vm::Result<()> {
         use pci::{PCI_CONFIG_IO_PORT, PCI_CONFIG_IO_PORT_SIZE};
-
-        if port == DEBUG_IOPORT as u64 && data.len() == 1 {
-            self.log_debug_ioport(data[0]);
-            return Ok(());
-        }
 
         if (PCI_CONFIG_IO_PORT..(PCI_CONFIG_IO_PORT + PCI_CONFIG_IO_PORT_SIZE)).contains(&port) {
             self.pci_config_io.lock().unwrap().write(
@@ -553,6 +484,7 @@ impl Vm {
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         activate_evt: EventFd,
         restoring: bool,
+        timestamp: Instant,
     ) -> Result<Self> {
         let kernel = config
             .lock()
@@ -604,6 +536,7 @@ impl Vm {
             force_iommu,
             restoring,
             boot_id_list,
+            timestamp,
         )
         .map_err(Error::DeviceManager)?;
 
@@ -622,8 +555,6 @@ impl Vm {
             #[cfg(target_arch = "x86_64")]
             io_bus,
             mmio_bus,
-            #[cfg(target_arch = "x86_64")]
-            timestamp: std::time::Instant::now(),
             #[cfg(target_arch = "x86_64")]
             pci_config_io,
         });
@@ -780,6 +711,8 @@ impl Vm {
         console_pty: Option<PtyPair>,
         console_resize_pipe: Option<File>,
     ) -> Result<Self> {
+        let timestamp = Instant::now();
+
         #[cfg(feature = "tdx")]
         let tdx_enabled = config.lock().unwrap().tdx.is_some();
         hypervisor.check_required_extensions().unwrap();
@@ -833,6 +766,7 @@ impl Vm {
             hypervisor,
             activate_evt,
             false,
+            timestamp,
         )?;
 
         // The device manager must create the devices from here as it is part
@@ -859,6 +793,8 @@ impl Vm {
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         activate_evt: EventFd,
     ) -> Result<Self> {
+        let timestamp = Instant::now();
+
         hypervisor.check_required_extensions().unwrap();
         let vm = hypervisor.create_vm().unwrap();
 
@@ -907,6 +843,7 @@ impl Vm {
             hypervisor,
             activate_evt,
             true,
+            timestamp,
         )
     }
 
@@ -922,6 +859,8 @@ impl Vm {
         memory_manager_data: &MemoryManagerSnapshotData,
         existing_memory_files: Option<HashMap<u32, File>>,
     ) -> Result<Self> {
+        let timestamp = Instant::now();
+
         hypervisor.check_required_extensions().unwrap();
         let vm = hypervisor.create_vm().unwrap();
 
@@ -961,6 +900,7 @@ impl Vm {
             hypervisor,
             activate_evt,
             true,
+            timestamp,
         )
     }
 

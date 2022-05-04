@@ -83,6 +83,7 @@ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
 use std::result;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use vfio_ioctls::{VfioContainer, VfioDevice};
 use virtio_devices::transport::VirtioPciDevice;
 use virtio_devices::transport::VirtioTransport;
@@ -941,6 +942,9 @@ pub struct DeviceManager {
 
     // List of unique identifiers provided at boot through the configuration.
     boot_id_list: BTreeSet<String>,
+
+    // Start time of the VM
+    timestamp: Instant,
 }
 
 impl DeviceManager {
@@ -957,6 +961,7 @@ impl DeviceManager {
         force_iommu: bool,
         restoring: bool,
         boot_id_list: BTreeSet<String>,
+        timestamp: Instant,
     ) -> DeviceManagerResult<Arc<Mutex<Self>>> {
         let device_tree = Arc::new(Mutex::new(DeviceTree::new()));
 
@@ -1080,6 +1085,7 @@ impl DeviceManager {
             restoring,
             io_uring_supported: None,
             boot_id_list,
+            timestamp,
         };
 
         let device_manager = Arc::new(Mutex::new(device_manager));
@@ -1521,6 +1527,15 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::BusError)?;
         }
 
+        // 0x80 debug port
+        let debug_port = Arc::new(Mutex::new(devices::legacy::DebugPort::new(self.timestamp)));
+        self.bus_devices
+            .push(Arc::clone(&debug_port) as Arc<Mutex<dyn BusDevice>>);
+        self.address_manager
+            .io_bus
+            .insert(debug_port, 0x80, 0x1)
+            .map_err(DeviceManagerError::BusError)?;
+
         Ok(())
     }
 
@@ -1722,6 +1737,7 @@ impl DeviceManager {
             id.clone(),
             interrupt_group,
             serial_writer,
+            self.timestamp,
         )));
 
         self.bus_devices
