@@ -2211,7 +2211,7 @@ impl DeviceManager {
         };
         info!("Creating virtio-net device: {:?}", net_cfg);
 
-        if net_cfg.vhost_user {
+        let (virtio_device, migratable_device) = if net_cfg.vhost_user {
             let socket = net_cfg.vhost_socket.as_ref().unwrap().clone();
             let vu_cfg = VhostUserConfig {
                 socket,
@@ -2222,7 +2222,7 @@ impl DeviceManager {
                 VhostMode::Client => false,
                 VhostMode::Server => true,
             };
-            let vhost_user_net_device = Arc::new(Mutex::new(
+            let vhost_user_net = Arc::new(Mutex::new(
                 match virtio_devices::vhost_user::Net::new(
                     id.clone(),
                     net_cfg.mac,
@@ -2242,24 +2242,12 @@ impl DeviceManager {
                 },
             ));
 
-            // Fill the device tree with a new node. In case of restore, we
-            // know there is nothing to do, so we can simply override the
-            // existing entry.
-            self.device_tree
-                .lock()
-                .unwrap()
-                .insert(id.clone(), device_node!(id, vhost_user_net_device));
-
-            Ok(MetaVirtioDevice {
-                virtio_device: Arc::clone(&vhost_user_net_device)
-                    as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
-                iommu: net_cfg.iommu,
-                id,
-                pci_segment: net_cfg.pci_segment,
-                dma_handler: None,
-            })
+            (
+                Arc::clone(&vhost_user_net) as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
+                vhost_user_net as Arc<Mutex<dyn Migratable>>,
+            )
         } else {
-            let virtio_net_device = if let Some(ref tap_if_name) = net_cfg.tap {
+            let virtio_net = if let Some(ref tap_if_name) = net_cfg.tap {
                 Arc::new(Mutex::new(
                     virtio_devices::Net::new(
                         id.clone(),
@@ -2317,23 +2305,27 @@ impl DeviceManager {
                 ))
             };
 
-            // Fill the device tree with a new node. In case of restore, we
-            // know there is nothing to do, so we can simply override the
-            // existing entry.
-            self.device_tree
-                .lock()
-                .unwrap()
-                .insert(id.clone(), device_node!(id, virtio_net_device));
+            (
+                Arc::clone(&virtio_net) as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
+                virtio_net as Arc<Mutex<dyn Migratable>>,
+            )
+        };
 
-            Ok(MetaVirtioDevice {
-                virtio_device: Arc::clone(&virtio_net_device)
-                    as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
-                iommu: net_cfg.iommu,
-                id,
-                pci_segment: net_cfg.pci_segment,
-                dma_handler: None,
-            })
-        }
+        // Fill the device tree with a new node. In case of restore, we
+        // know there is nothing to do, so we can simply override the
+        // existing entry.
+        self.device_tree
+            .lock()
+            .unwrap()
+            .insert(id.clone(), device_node!(id, migratable_device));
+
+        Ok(MetaVirtioDevice {
+            virtio_device,
+            iommu: net_cfg.iommu,
+            id,
+            pci_segment: net_cfg.pci_segment,
+            dma_handler: None,
+        })
     }
 
     /// Add virto-net and vhost-user-net devices
