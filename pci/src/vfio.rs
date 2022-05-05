@@ -1200,7 +1200,6 @@ impl VfioPciDevice {
                     self.common.interrupt.msix.as_ref(),
                 )?;
 
-                let mut user_memory_regions = Vec::new();
                 for area in sparse_areas.iter() {
                     let host_addr = unsafe {
                         libc::mmap(
@@ -1230,6 +1229,8 @@ impl VfioPciDevice {
                         host_addr: host_addr as u64,
                     };
 
+                    region.user_memory_regions.push(user_memory_region);
+
                     let mem_region = vm.make_user_memory_region(
                         user_memory_region.slot,
                         user_memory_region.start,
@@ -1241,11 +1242,7 @@ impl VfioPciDevice {
 
                     vm.create_user_memory_region(mem_region)
                         .map_err(VfioPciError::CreateUserMemoryRegion)?;
-
-                    user_memory_regions.push(user_memory_region);
                 }
-
-                region.user_memory_regions = user_memory_regions;
             }
         }
 
