@@ -499,6 +499,10 @@ pub fn performance_boot_time(control: &PerformanceTestControl) -> f64 {
         let mut cmd = GuestCommand::new(&guest);
 
         let c = cmd
+            .args(&[
+                "--cpus",
+                &format!("boot={}", control.num_boot_vcpus.unwrap_or(1)),
+            ])
             .args(&["--memory", "size=1G"])
             .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
@@ -522,6 +526,10 @@ pub fn performance_boot_time_pmem(control: &PerformanceTestControl) -> f64 {
         let guest = performance_test_new_guest(Box::new(focal));
         let mut cmd = GuestCommand::new(&guest);
         let c = cmd
+            .args(&[
+                "--cpus",
+                &format!("boot={}", control.num_boot_vcpus.unwrap_or(1)),
+            ])
             .args(&["--memory", "size=1G,hugepages=on"])
             .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(&["--cmdline", "root=/dev/pmem0p1 console=ttyS0 quiet rw"])

@@ -91,6 +91,7 @@ pub struct PerformanceTestControl {
     queue_size: Option<u32>,
     net_rx: Option<bool>,
     fio_ops: Option<FioOps>,
+    num_boot_vcpus: Option<u8>,
 }
 
 impl fmt::Display for PerformanceTestControl {
@@ -125,6 +126,7 @@ impl PerformanceTestControl {
             queue_size: None,
             net_rx: None,
             fio_ops: None,
+            num_boot_vcpus: Some(1),
         }
     }
 }
@@ -216,7 +218,7 @@ mod adjuster {
     }
 }
 
-const TEST_LIST: [PerformanceTest; 15] = [
+const TEST_LIST: [PerformanceTest; 17] = [
     PerformanceTest {
         name: "boot_time_ms",
         func_ptr: performance_boot_time,
@@ -233,6 +235,28 @@ const TEST_LIST: [PerformanceTest; 15] = [
         control: PerformanceTestControl {
             test_timeout: 2,
             test_iterations: 10,
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::s_to_ms,
+    },
+    PerformanceTest {
+        name: "boot_time_16_vcpus_ms",
+        func_ptr: performance_boot_time,
+        control: PerformanceTestControl {
+            test_timeout: 2,
+            test_iterations: 10,
+            num_boot_vcpus: Some(16),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::s_to_ms,
+    },
+    PerformanceTest {
+        name: "boot_time_16_vcpus_pmem_ms",
+        func_ptr: performance_boot_time_pmem,
+        control: PerformanceTestControl {
+            test_timeout: 2,
+            test_iterations: 10,
+            num_boot_vcpus: Some(16),
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_ms,
