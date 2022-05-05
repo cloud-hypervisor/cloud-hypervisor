@@ -169,11 +169,13 @@ pub enum ValidationError {
     /// On a IOMMU segment but not behind IOMMU
     OnIommuSegment(u16),
     // On a IOMMU segment but IOMMU not suported
-    IommuNotSupported(u16),
+    IommuNotSupportedOnSegment(u16),
     // Identifier is not unique
     IdentifierNotUnique(String),
     /// Invalid identifier
     InvalidIdentifier(String),
+    /// Placing the device behind a virtual IOMMU is not supported
+    IommuNotSupported,
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -253,10 +255,10 @@ impl fmt::Display for ValidationError {
                     pci_segment
                 )
             }
-            IommuNotSupported(pci_segment) => {
+            IommuNotSupportedOnSegment(pci_segment) => {
                 write!(
                     f,
-                    "Device is on an IOMMU PCI segment ({}) but does support being placed behind IOMMU",
+                    "Device is on an IOMMU PCI segment ({}) but does not support being placed behind IOMMU",
                     pci_segment
                 )
             }
@@ -265,6 +267,9 @@ impl fmt::Display for ValidationError {
             }
             InvalidIdentifier(s) => {
                 write!(f, "Identifier {} is invalid", s)
+            }
+            IommuNotSupported => {
+                write!(f, "Device does not support being placed behind IOMMU")
             }
         }
     }
@@ -1157,6 +1162,10 @@ impl DiskConfig {
             return Err(ValidationError::TooManyQueues);
         }
 
+        if self.vhost_user && self.iommu {
+            return Err(ValidationError::IommuNotSupported);
+        }
+
         if let Some(platform_config) = vm_config.platform.as_ref() {
             if self.pci_segment >= platform_config.num_pci_segments {
                 return Err(ValidationError::InvalidPciSegment(self.pci_segment));
@@ -1453,6 +1462,10 @@ impl NetConfig {
             return Err(ValidationError::TooManyQueues);
         }
 
+        if self.vhost_user && self.iommu {
+            return Err(ValidationError::IommuNotSupported);
+        }
+
         if let Some(platform_config) = vm_config.platform.as_ref() {
             if self.pci_segment >= platform_config.num_pci_segments {
                 return Err(ValidationError::InvalidPciSegment(self.pci_segment));
@@ -1682,7 +1695,9 @@ impl FsConfig {
 
             if let Some(iommu_segments) = platform_config.iommu_segments.as_ref() {
                 if iommu_segments.contains(&self.pci_segment) {
-                    return Err(ValidationError::IommuNotSupported(self.pci_segment));
+                    return Err(ValidationError::IommuNotSupportedOnSegment(
+                        self.pci_segment,
+                    ));
                 }
             }
         }
@@ -1971,7 +1986,9 @@ impl UserDeviceConfig {
 
             if let Some(iommu_segments) = platform_config.iommu_segments.as_ref() {
                 if iommu_segments.contains(&self.pci_segment) {
-                    return Err(ValidationError::IommuNotSupported(self.pci_segment));
+                    return Err(ValidationError::IommuNotSupportedOnSegment(
+                        self.pci_segment,
+                    ));
                 }
             }
         }
@@ -3725,7 +3742,7 @@ mod tests {
         }]);
         assert_eq!(
             invalid_config.validate(),
-            Err(ValidationError::IommuNotSupported(1))
+            Err(ValidationError::IommuNotSupportedOnSegment(1))
         );
 
         let mut invalid_config = valid_config.clone();
@@ -3756,7 +3773,7 @@ mod tests {
         }]);
         assert_eq!(
             invalid_config.validate(),
-            Err(ValidationError::IommuNotSupported(1))
+            Err(ValidationError::IommuNotSupportedOnSegment(1))
         );
     }
 }
