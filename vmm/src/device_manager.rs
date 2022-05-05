@@ -2045,14 +2045,14 @@ impl DeviceManager {
 
         info!("Creating virtio-block device: {:?}", disk_cfg);
 
-        if disk_cfg.vhost_user {
+        let (virtio_device, migratable_device) = if disk_cfg.vhost_user {
             let socket = disk_cfg.vhost_socket.as_ref().unwrap().clone();
             let vu_cfg = VhostUserConfig {
                 socket,
                 num_queues: disk_cfg.num_queues,
                 queue_size: disk_cfg.queue_size,
             };
-            let vhost_user_block_device = Arc::new(Mutex::new(
+            let vhost_user_block = Arc::new(Mutex::new(
                 match virtio_devices::vhost_user::Blk::new(
                     id.clone(),
                     vu_cfg,
@@ -2070,22 +2070,10 @@ impl DeviceManager {
                 },
             ));
 
-            // Fill the device tree with a new node. In case of restore, we
-            // know there is nothing to do, so we can simply override the
-            // existing entry.
-            self.device_tree
-                .lock()
-                .unwrap()
-                .insert(id.clone(), device_node!(id, vhost_user_block_device));
-
-            Ok(MetaVirtioDevice {
-                virtio_device: Arc::clone(&vhost_user_block_device)
-                    as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
-                iommu: false,
-                id,
-                pci_segment: disk_cfg.pci_segment,
-                dma_handler: None,
-            })
+            (
+                Arc::clone(&vhost_user_block) as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
+                vhost_user_block as Arc<Mutex<dyn Migratable>>,
+            )
         } else {
             let mut options = OpenOptions::new();
             options.read(true);
@@ -2151,7 +2139,7 @@ impl DeviceManager {
                 }
             };
 
-            let dev = Arc::new(Mutex::new(
+            let virtio_block = Arc::new(Mutex::new(
                 virtio_devices::Block::new(
                     id.clone(),
                     image,
@@ -2173,25 +2161,27 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::CreateVirtioBlock)?,
             ));
 
-            let virtio_device = Arc::clone(&dev) as Arc<Mutex<dyn virtio_devices::VirtioDevice>>;
-            let migratable_device = dev as Arc<Mutex<dyn Migratable>>;
+            (
+                Arc::clone(&virtio_block) as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
+                virtio_block as Arc<Mutex<dyn Migratable>>,
+            )
+        };
 
-            // Fill the device tree with a new node. In case of restore, we
-            // know there is nothing to do, so we can simply override the
-            // existing entry.
-            self.device_tree
-                .lock()
-                .unwrap()
-                .insert(id.clone(), device_node!(id, migratable_device));
+        // Fill the device tree with a new node. In case of restore, we
+        // know there is nothing to do, so we can simply override the
+        // existing entry.
+        self.device_tree
+            .lock()
+            .unwrap()
+            .insert(id.clone(), device_node!(id, migratable_device));
 
-            Ok(MetaVirtioDevice {
-                virtio_device,
-                iommu: disk_cfg.iommu,
-                id,
-                pci_segment: disk_cfg.pci_segment,
-                dma_handler: None,
-            })
-        }
+        Ok(MetaVirtioDevice {
+            virtio_device,
+            iommu: disk_cfg.iommu,
+            id,
+            pci_segment: disk_cfg.pci_segment,
+            dma_handler: None,
+        })
     }
 
     fn make_virtio_block_devices(&mut self) -> DeviceManagerResult<Vec<MetaVirtioDevice>> {
