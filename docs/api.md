@@ -89,6 +89,7 @@ Trigger power button of the VM     | `/vm.power-button`   | N/A                 
 Pause the VM                       | `/vm.pause`          | N/A                       | N/A                      | The VM is booted
 Resume the VM                      | `/vm.resume`         | N/A                       | N/A                      | The VM is paused
 Task a snapshot of the VM          | `/vm.snapshot`       | `/schemas/VmSnapshotConfig`| N/A                     | The VM is paused
+Perform a coredump of the VM       | `/vm.coredump`       | `/schemas/VmCoredumpData` | N/A                      | The VM is paused
 Restore the VM from a snapshot     | `/vm.restore`        | `/schemas/RestoreConfig`  | N/A                      | The VM is created but not booted
 Add/remove CPUs to/from the VM     | `/vm.resize`         | `/schemas/VmResize`       | N/A                      | The VM is booted
 Add/remove memory from the VM      | `/vm.resize`         | `/schemas/VmResize`       | N/A                      | The VM is booted

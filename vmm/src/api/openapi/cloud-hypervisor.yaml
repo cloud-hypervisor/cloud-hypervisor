@@ -366,6 +366,24 @@ paths:
         405:
           description: The VM instance could not be snapshotted because it is not booted.
 
+  /vm.coredump:
+    put:
+      summary: Takes a VM coredump.
+      requestBody:
+        description: The coredump configuration
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VmCoredumpData'
+        required: true
+      responses:
+        204:
+          description: The VM instance was successfully coredumped.
+        404:
+          description: The VM instance could not be coredumped because it is not created.
+        405:
+          description: The VM instance could not be coredumped because it is not booted.
+
   /vm.restore:
     put:
       summary: Restore a VM from a snapshot.
@@ -1105,6 +1123,12 @@ components:
           type: string
 
     VmSnapshotConfig:
+      type: object
+      properties:
+        destination_url:
+          type: string
+
+    VmCoredumpData:
       type: object
       properties:
         destination_url:
