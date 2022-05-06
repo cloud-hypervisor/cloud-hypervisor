@@ -1031,7 +1031,12 @@ impl Vm {
                     kernel
                         .seek(SeekFrom::Start(0))
                         .map_err(Error::FirmwareFile)?;
-                    mem.read_exact_from(load_address, &mut kernel, size as usize)
+                    memory_manager
+                        .lock()
+                        .unwrap()
+                        .guest_memory()
+                        .memory()
+                        .read_exact_from(load_address, &mut kernel, size as usize)
                         .map_err(Error::FirmwareLoad)?;
 
                     return Ok(EntryPoint { entry_addr: None });
