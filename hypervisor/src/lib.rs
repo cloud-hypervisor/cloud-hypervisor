@@ -74,7 +74,7 @@ pub fn new() -> std::result::Result<Arc<dyn Hypervisor>, HypervisorError> {
     #[cfg(feature = "mshv")]
     let hv = mshv::MshvHypervisor::new()?;
 
-    Ok(Arc::new(hv))
+    Ok(hv)
 }
 
 // Returns a `Vec<T>` with a size in bytes at least as large as `size_in_bytes`.
