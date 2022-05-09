@@ -1,3 +1,4 @@
+- [v23.1](#v231)
 - [v23.0](#v230)
     - [vDPA Support](#vdpa-support)
     - [Updated OS Support list](#updated-os-support-list)
@@ -202,6 +203,15 @@
     - [Console over virtio](#console-over-virtio)
     - [Unit testing](#unit-testing)
     - [Integration tests parallelization](#integration-tests-parallelization)
+# v23.1
+
+This is a bug fix release. The following issues have been addressed:
+
+* Add some missing seccomp rules
+* Remove `virtio-fs` filesystem entries from config on removal
+* Do not delete API socket on API server start (#4026)
+* Reject `virtio-mem` resize if the guest doesn't activate the device
+* Fix OpenAPI naming of I/O throttling knobs
 
 # v23.0
 
