@@ -916,6 +916,16 @@ impl KvmHypervisor {
 
         Ok(Arc::new(KvmHypervisor { kvm: kvm_obj }))
     }
+    /// Check if the hypervisor is available
+    pub fn is_available() -> hypervisor::Result<bool> {
+        match std::fs::metadata("/dev/kvm") {
+            Ok(_) => Ok(true),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(err) => Err(hypervisor::HypervisorError::HypervisorAvailableCheck(
+                err.into(),
+            )),
+        }
+    }
 }
 /// Implementation of Hypervisor trait for KVM
 /// Example:
