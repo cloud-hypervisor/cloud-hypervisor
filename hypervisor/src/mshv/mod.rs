@@ -183,6 +183,16 @@ impl MshvHypervisor {
             Mshv::new().map_err(|e| hypervisor::HypervisorError::HypervisorCreate(e.into()))?;
         Ok(Arc::new(MshvHypervisor { mshv: mshv_obj }))
     }
+    /// Check if the hypervisor is available
+    pub fn is_available() -> hypervisor::Result<bool> {
+        match std::fs::metadata("/dev/mshv") {
+            Ok(_) => Ok(true),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(err) => Err(hypervisor::HypervisorError::HypervisorAvailableCheck(
+                err.into(),
+            )),
+        }
+    }
 }
 /// Implementation of Hypervisor trait for Mshv
 /// Example:

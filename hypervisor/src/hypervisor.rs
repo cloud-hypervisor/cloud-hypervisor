@@ -21,6 +21,11 @@ use thiserror::Error;
 ///
 pub enum HypervisorError {
     ///
+    /// Hypervisor availability check error
+    ///
+    #[error("Failed to check availability of the hypervisor: {0}")]
+    HypervisorAvailableCheck(#[source] anyhow::Error),
+    ///
     /// hypervisor creation error
     ///
     #[error("Failed to create the hypervisor: {0}")]
