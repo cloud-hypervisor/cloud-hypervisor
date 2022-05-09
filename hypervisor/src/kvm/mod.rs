@@ -905,7 +905,8 @@ pub enum KvmError {
 pub type KvmResult<T> = result::Result<T, KvmError>;
 impl KvmHypervisor {
     /// Create a hypervisor based on Kvm
-    pub fn new() -> hypervisor::Result<KvmHypervisor> {
+    #[allow(clippy::new_ret_no_self)]
+    pub fn new() -> hypervisor::Result<Arc<dyn hypervisor::Hypervisor>> {
         let kvm_obj = Kvm::new().map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
         let api_version = kvm_obj.get_api_version();
 
@@ -913,7 +914,7 @@ impl KvmHypervisor {
             return Err(hypervisor::HypervisorError::IncompatibleApiVersion);
         }
 
-        Ok(KvmHypervisor { kvm: kvm_obj })
+        Ok(Arc::new(KvmHypervisor { kvm: kvm_obj }))
     }
 }
 /// Implementation of Hypervisor trait for KVM

@@ -177,10 +177,11 @@ impl MshvHypervisor {
 
 impl MshvHypervisor {
     /// Create a hypervisor based on Mshv
-    pub fn new() -> hypervisor::Result<MshvHypervisor> {
+    #[allow(clippy::new_ret_no_self)]
+    pub fn new() -> hypervisor::Result<Arc<dyn hypervisor::Hypervisor>> {
         let mshv_obj =
             Mshv::new().map_err(|e| hypervisor::HypervisorError::HypervisorCreate(e.into()))?;
-        Ok(MshvHypervisor { mshv: mshv_obj })
+        Ok(Arc::new(MshvHypervisor { mshv: mshv_obj }))
     }
 }
 /// Implementation of Hypervisor trait for Mshv
