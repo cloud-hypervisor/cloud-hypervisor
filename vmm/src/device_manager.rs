@@ -56,11 +56,7 @@ use devices::legacy::Serial;
 use devices::{
     interrupt_controller, interrupt_controller::InterruptController, AcpiNotificationFlags,
 };
-#[cfg(feature = "kvm")]
-use hypervisor::kvm_ioctls::*;
-use hypervisor::DeviceFd;
-#[cfg(feature = "mshv")]
-use hypervisor::IoEventAddress;
+use hypervisor::{DeviceFd, IoEventAddress};
 use libc::{
     cfmakeraw, isatty, tcgetattr, tcsetattr, termios, MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED,
     O_TMPFILE, PROT_READ, PROT_WRITE, TCSANOW,
