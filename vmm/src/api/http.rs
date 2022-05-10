@@ -161,6 +161,8 @@ lazy_static! {
         r.routes.insert(endpoint!("/vm.send-migration"), Box::new(VmActionHandler::new(VmAction::SendMigration(Arc::default()))));
         r.routes.insert(endpoint!("/vm.shutdown"), Box::new(VmActionHandler::new(VmAction::Shutdown)));
         r.routes.insert(endpoint!("/vm.snapshot"), Box::new(VmActionHandler::new(VmAction::Snapshot(Arc::default()))));
+        #[cfg(feature = "guest_debug")]
+        r.routes.insert(endpoint!("/vm.coredump"), Box::new(VmActionHandler::new(VmAction::Coredump(Arc::default()))));
         r.routes.insert(endpoint!("/vmm.ping"), Box::new(VmmPing {}));
         r.routes.insert(endpoint!("/vmm.shutdown"), Box::new(VmmShutdown {}));
 

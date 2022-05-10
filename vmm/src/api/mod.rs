@@ -99,6 +99,9 @@ pub enum ApiError {
     /// The VM could not restored.
     VmRestore(VmError),
 
+    /// The VM could not be coredumped.
+    VmCoredump(VmError),
+
     /// The VMM could not shutdown.
     VmmShutdown(VmError),
 
@@ -186,6 +189,12 @@ pub struct VmRemoveDeviceData {
 #[derive(Clone, Deserialize, Serialize, Default, Debug)]
 pub struct VmSnapshotConfig {
     /// The snapshot destination URL
+    pub destination_url: String,
+}
+
+#[derive(Clone, Deserialize, Serialize, Default, Debug)]
+pub struct VmCoredumpData {
+    /// The coredump destination file
     pub destination_url: String,
 }
 
@@ -310,6 +319,10 @@ pub enum ApiRequest {
     /// Restore from a VM snapshot
     VmRestore(Arc<RestoreConfig>, Sender<ApiResponse>),
 
+    /// Take a VM coredump
+    #[cfg(feature = "guest_debug")]
+    VmCoredump(Arc<VmCoredumpData>, Sender<ApiResponse>),
+
     /// Incoming migration
     VmReceiveMigration(Arc<VmReceiveMigrationData>, Sender<ApiResponse>),
 
@@ -402,6 +415,10 @@ pub enum VmAction {
     /// Snapshot VM
     Snapshot(Arc<VmSnapshotConfig>),
 
+    /// Coredump VM
+    #[cfg(feature = "guest_debug")]
+    Coredump(Arc<VmCoredumpData>),
+
     /// Incoming migration
     ReceiveMigration(Arc<VmReceiveMigrationData>),
 
@@ -441,6 +458,8 @@ fn vm_action(
         ResizeZone(v) => ApiRequest::VmResizeZone(v, response_sender),
         Restore(v) => ApiRequest::VmRestore(v, response_sender),
         Snapshot(v) => ApiRequest::VmSnapshot(v, response_sender),
+        #[cfg(feature = "guest_debug")]
+        Coredump(v) => ApiRequest::VmCoredump(v, response_sender),
         ReceiveMigration(v) => ApiRequest::VmReceiveMigration(v, response_sender),
         SendMigration(v) => ApiRequest::VmSendMigration(v, response_sender),
         PowerButton => ApiRequest::VmPowerButton(response_sender),
@@ -524,6 +543,15 @@ pub fn vm_restore(
     data: Arc<RestoreConfig>,
 ) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::Restore(data))
+}
+
+#[cfg(feature = "guest_debug")]
+pub fn vm_coredump(
+    api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
+    data: Arc<VmCoredumpData>,
+) -> ApiResult<Option<Body>> {
+    vm_action(api_evt, api_sender, VmAction::Coredump(data))
 }
 
 pub fn vm_info(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<VmInfo> {

@@ -18,6 +18,8 @@ use crate::config::{
     add_to_config, DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, RestoreConfig,
     UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
 };
+#[cfg(feature = "guest_debug")]
+use crate::coredump::GuestDebuggable;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use crate::migration::get_vm_snapshot;
 use crate::migration::{recv_vm_config, recv_vm_state};
@@ -559,6 +561,15 @@ impl Vmm {
             vm.restore(snapshot).map_err(VmError::Restore)
         } else {
             Err(VmError::VmNotCreated)
+        }
+    }
+
+    #[cfg(feature = "guest_debug")]
+    fn vm_coredump(&mut self, destination_url: &str) -> result::Result<(), VmError> {
+        if let Some(ref mut vm) = self.vm {
+            vm.coredump(destination_url).map_err(VmError::Coredump)
+        } else {
+            Err(VmError::VmNotRunning)
         }
     }
 
@@ -1680,6 +1691,15 @@ impl Vmm {
                                 let response = self
                                     .vm_restore(restore_data.as_ref().clone())
                                     .map_err(ApiError::VmRestore)
+                                    .map(|_| ApiResponsePayload::Empty);
+
+                                sender.send(response).map_err(Error::ApiResponseSend)?;
+                            }
+                            #[cfg(feature = "guest_debug")]
+                            ApiRequest::VmCoredump(coredump_data, sender) => {
+                                let response = self
+                                    .vm_coredump(&coredump_data.destination_url)
+                                    .map_err(ApiError::VmCoredump)
                                     .map(|_| ApiResponsePayload::Empty);
 
                                 sender.send(response).map_err(Error::ApiResponseSend)?;
