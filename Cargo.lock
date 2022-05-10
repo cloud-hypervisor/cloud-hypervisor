@@ -356,6 +356,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "thiserror",
+ "vm-device",
  "vm-memory",
  "vmm-sys-util",
 ]

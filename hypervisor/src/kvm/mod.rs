@@ -32,6 +32,7 @@ use std::result;
 #[cfg(target_arch = "x86_64")]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
+use vm_device::interrupt::InterruptSourceConfig;
 use vmm_sys_util::eventfd::EventFd;
 // x86_64 dependencies
 #[cfg(target_arch = "x86_64")]
@@ -284,6 +285,64 @@ impl vm::Vm for KvmVm {
             .unregister_ioevent(fd, addr, NoDatamatch)
             .map_err(|e| vm::HypervisorVmError::UnregisterIoEvent(e.into()))
     }
+
+    ///
+    /// Constructs a routing entry
+    ///
+    fn make_routing_entry(
+        &self,
+        gsi: u32,
+        config: &InterruptSourceConfig,
+    ) -> kvm_irq_routing_entry {
+        match &config {
+            InterruptSourceConfig::MsiIrq(cfg) => {
+                let mut kvm_route = kvm_irq_routing_entry {
+                    gsi,
+                    type_: KVM_IRQ_ROUTING_MSI,
+                    ..Default::default()
+                };
+
+                kvm_route.u.msi.address_lo = cfg.low_addr;
+                kvm_route.u.msi.address_hi = cfg.high_addr;
+                kvm_route.u.msi.data = cfg.data;
+
+                if self.check_extension(crate::Cap::MsiDevid) {
+                    // On AArch64, there is limitation on the range of the 'devid',
+                    // it can not be greater than 65536 (the max of u16).
+                    //
+                    // BDF can not be used directly, because 'segment' is in high
+                    // 16 bits. The layout of the u32 BDF is:
+                    // |---- 16 bits ----|-- 8 bits --|-- 5 bits --|-- 3 bits --|
+                    // |      segment    |     bus    |   device   |  function  |
+                    //
+                    // Now that we support 1 bus only in a segment, we can build a
+                    // 'devid' by replacing the 'bus' bits with the low 8 bits of
+                    // 'segment' data.
+                    // This way we can resolve the range checking problem and give
+                    // different `devid` to all the devices. Limitation is that at
+                    // most 256 segments can be supported.
+                    //
+                    let modified_devid = (cfg.devid & 0x00ff_0000) >> 8 | cfg.devid & 0xff;
+
+                    kvm_route.flags = KVM_MSI_VALID_DEVID;
+                    kvm_route.u.msi.__bindgen_anon_1.devid = modified_devid;
+                }
+                kvm_route
+            }
+            InterruptSourceConfig::LegacyIrq(cfg) => {
+                let mut kvm_route = kvm_irq_routing_entry {
+                    gsi,
+                    type_: KVM_IRQ_ROUTING_IRQCHIP,
+                    ..Default::default()
+                };
+                kvm_route.u.irqchip.irqchip = cfg.irqchip;
+                kvm_route.u.irqchip.pin = cfg.pin;
+
+                kvm_route
+            }
+        }
+    }
+
     ///
     /// Sets the GSI routing table entries, overwriting any previously set
     /// entries, as per the `KVM_SET_GSI_ROUTING` ioctl.

@@ -303,9 +303,7 @@ impl InterruptManager for MsiInterruptManager<IrqRoutingEntry> {
 #[cfg(feature = "kvm")]
 pub mod kvm {
     use super::*;
-    use hypervisor::kvm::KVM_MSI_VALID_DEVID;
-    use hypervisor::kvm::{kvm_irq_routing_entry, KVM_IRQ_ROUTING_IRQCHIP, KVM_IRQ_ROUTING_MSI};
-    use pci::PciBdf;
+    use hypervisor::kvm::kvm_irq_routing_entry;
 
     type KvmRoutingEntry = RoutingEntry<kvm_irq_routing_entry>;
     pub type KvmMsiInterruptManager = MsiInterruptManager<kvm_irq_routing_entry>;
@@ -316,66 +314,10 @@ pub mod kvm {
             gsi: u32,
             config: &InterruptSourceConfig,
         ) -> Result<Box<Self>> {
-            if let InterruptSourceConfig::MsiIrq(cfg) = &config {
-                let mut kvm_route = kvm_irq_routing_entry {
-                    gsi,
-                    type_: KVM_IRQ_ROUTING_MSI,
-                    ..Default::default()
-                };
-
-                kvm_route.u.msi.address_lo = cfg.low_addr;
-                kvm_route.u.msi.address_hi = cfg.high_addr;
-                kvm_route.u.msi.data = cfg.data;
-
-                if vm.check_extension(hypervisor::Cap::MsiDevid) {
-                    // On AArch64, there is limitation on the range of the 'devid',
-                    // it can not be greater than 65536 (the max of u16).
-                    //
-                    // BDF can not be used directly, because 'segment' is in high
-                    // 16 bits. The layout of the u32 BDF is:
-                    // |---- 16 bits ----|-- 8 bits --|-- 5 bits --|-- 3 bits --|
-                    // |      segment    |     bus    |   device   |  function  |
-                    //
-                    // Now that we support 1 bus only in a segment, we can build a
-                    // 'devid' by replacing the 'bus' bits with the low 8 bits of
-                    // 'segment' data.
-                    // This way we can resolve the range checking problem and give
-                    // different `devid` to all the devices. Limitation is that at
-                    // most 256 segments can be supported.
-                    //
-                    let bdf: PciBdf = PciBdf::from(cfg.devid);
-                    let modified_bdf: PciBdf =
-                        PciBdf::new(0, bdf.segment() as u8, bdf.device(), bdf.function());
-                    kvm_route.flags = KVM_MSI_VALID_DEVID;
-                    kvm_route.u.msi.__bindgen_anon_1.devid = modified_bdf.into();
-                }
-
-                let kvm_entry = KvmRoutingEntry {
-                    route: kvm_route,
-                    masked: false,
-                };
-
-                return Ok(Box::new(kvm_entry));
-            } else if let InterruptSourceConfig::LegacyIrq(cfg) = &config {
-                let mut kvm_route = kvm_irq_routing_entry {
-                    gsi,
-                    type_: KVM_IRQ_ROUTING_IRQCHIP,
-                    ..Default::default()
-                };
-                kvm_route.u.irqchip.irqchip = cfg.irqchip;
-                kvm_route.u.irqchip.pin = cfg.pin;
-                let kvm_entry = KvmRoutingEntry {
-                    route: kvm_route,
-                    masked: false,
-                };
-
-                return Ok(Box::new(kvm_entry));
-            }
-
-            Err(io::Error::new(
-                io::ErrorKind::Other,
-                "Interrupt config type not supported",
-            ))
+            Ok(Box::new(Self {
+                masked: false,
+                route: vm.make_routing_entry(gsi, config),
+            }))
         }
     }
 }
@@ -383,36 +325,21 @@ pub mod kvm {
 #[cfg(feature = "mshv")]
 pub mod mshv {
     use super::*;
-    use hypervisor::mshv::*;
+    use hypervisor::mshv::mshv_msi_routing_entry;
 
     type MshvRoutingEntry = RoutingEntry<mshv_msi_routing_entry>;
     pub type MshvMsiInterruptManager = MsiInterruptManager<mshv_msi_routing_entry>;
 
     impl MshvRoutingEntry {
         pub fn make_entry(
-            _vm: &Arc<dyn hypervisor::Vm>,
+            vm: &Arc<dyn hypervisor::Vm>,
             gsi: u32,
             config: &InterruptSourceConfig,
         ) -> Result<Box<Self>> {
-            if let InterruptSourceConfig::MsiIrq(cfg) = &config {
-                let route = mshv_msi_routing_entry {
-                    gsi,
-                    address_lo: cfg.low_addr,
-                    address_hi: cfg.high_addr,
-                    data: cfg.data,
-                };
-                let entry = MshvRoutingEntry {
-                    route,
-                    masked: false,
-                };
-
-                return Ok(Box::new(entry));
-            }
-
-            Err(io::Error::new(
-                io::ErrorKind::Other,
-                "Interrupt config type not supported",
-            ))
+            Ok(Box::new(Self {
+                masked: false,
+                route: vm.make_routing_entry(gsi, config),
+            }))
         }
     }
 }

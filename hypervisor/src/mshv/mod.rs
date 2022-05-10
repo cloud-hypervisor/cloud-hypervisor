@@ -23,6 +23,7 @@ use vm::DataMatch;
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
 use crate::device;
+use vm_device::interrupt::InterruptSourceConfig;
 use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::VcpuMshvState as CpuState;
@@ -955,6 +956,27 @@ impl vm::Vm for MshvVm {
 
         self.create_device(&mut vfio_dev)
             .map_err(|e| vm::HypervisorVmError::CreatePassthroughDevice(e.into()))
+    }
+
+    ///
+    /// Constructs a routing entry
+    ///
+    fn make_routing_entry(
+        &self,
+        gsi: u32,
+        config: &InterruptSourceConfig,
+    ) -> mshv_msi_routing_entry {
+        match config {
+            InterruptSourceConfig::MsiIrq(cfg) => mshv_msi_routing_entry {
+                gsi,
+                address_lo: cfg.low_addr,
+                address_hi: cfg.high_addr,
+                data: cfg.data,
+            },
+            _ => {
+                unreachable!()
+            }
+        }
     }
 
     fn set_gsi_routing(&self, entries: &[IrqRoutingEntry]) -> vm::Result<()> {
