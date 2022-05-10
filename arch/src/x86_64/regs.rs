@@ -9,7 +9,7 @@
 use crate::layout::{BOOT_GDT_START, BOOT_IDT_START, PVH_INFO_START};
 use crate::GuestMemoryMmap;
 use hypervisor::arch::x86::gdt::{gdt_entry, segment_from_gdt};
-use hypervisor::arch::x86::regs::*;
+use hypervisor::arch::x86::regs::CR0_PE;
 use hypervisor::x86_64::{FpuState, SpecialRegisters, StandardRegisters};
 use std::sync::Arc;
 use std::{mem, result};
