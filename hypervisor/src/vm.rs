@@ -28,6 +28,7 @@ use kvm_ioctls::Cap;
 use std::fs::File;
 use std::sync::Arc;
 use thiserror::Error;
+use vm_device::interrupt::InterruptSourceConfig;
 use vmm_sys_util::eventfd::EventFd;
 
 ///
@@ -245,6 +246,8 @@ pub trait Vm: Send + Sync {
     ) -> Result<()>;
     /// Unregister an event from a certain address it has been previously registered to.
     fn unregister_ioevent(&self, fd: &EventFd, addr: &IoEventAddress) -> Result<()>;
+    // Construct a routing entry
+    fn make_routing_entry(&self, gsi: u32, config: &InterruptSourceConfig) -> IrqRoutingEntry;
     /// Sets the GSI routing table entries, overwriting any previously set
     fn set_gsi_routing(&self, entries: &[IrqRoutingEntry]) -> Result<()>;
     /// Creates a memory region structure that can be used with {create/remove}_user_memory_region
