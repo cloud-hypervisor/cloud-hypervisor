@@ -11,7 +11,7 @@ use crate::cpu;
 use crate::cpu::Vcpu;
 use crate::hypervisor;
 use crate::vec_with_array_field;
-use crate::vm::{self, VmOps};
+use crate::vm::{self, InterruptSourceConfig, VmOps};
 pub use mshv_bindings::*;
 pub use mshv_ioctls::IoEventAddress;
 use mshv_ioctls::{set_registers_64, Mshv, NoDatamatch, VcpuFd, VmFd};
@@ -23,7 +23,6 @@ use vm::DataMatch;
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
 use crate::device;
-use vm_device::interrupt::InterruptSourceConfig;
 use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::VcpuMshvState as CpuState;
