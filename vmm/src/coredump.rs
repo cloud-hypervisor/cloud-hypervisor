@@ -79,7 +79,6 @@ pub struct X86_64UserRegs {
 unsafe impl ByteValued for X86_64UserRegs {}
 
 #[repr(C)]
-#[allow(dead_code)]
 pub struct X86_64ElfPrStatus {
     pub pad1: [u8; 32],
     pub pid: u32,
