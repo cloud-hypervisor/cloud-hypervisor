@@ -356,7 +356,6 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "thiserror",
- "vm-device",
  "vm-memory",
  "vmm-sys-util",
 ]
@@ -1297,6 +1296,7 @@ name = "vm-device"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "hypervisor",
  "serde",
  "serde_derive",
  "serde_json",

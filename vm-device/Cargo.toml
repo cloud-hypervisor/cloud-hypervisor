@@ -11,6 +11,7 @@ mshv = ["vfio-ioctls/mshv"]
 
 [dependencies]
 anyhow = "1.0.57"
+hypervisor = { path = "../hypervisor" }
 thiserror = "1.0.31"
 serde = { version = "1.0.137", features = ["rc"] }
 serde_derive = "1.0.137"

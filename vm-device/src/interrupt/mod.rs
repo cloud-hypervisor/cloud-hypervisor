@@ -57,6 +57,7 @@
 //! * The virtual device backend requests the interrupt manager to create an interrupt group
 //!   according to guest configuration information
 
+pub use hypervisor::vm::{InterruptSourceConfig, LegacyIrqSourceConfig, MsiIrqSourceConfig};
 use std::sync::Arc;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -65,39 +66,6 @@ pub type Result<T> = std::io::Result<T>;
 
 /// Data type to store an interrupt source identifier.
 pub type InterruptIndex = u32;
-
-/// Configuration data for legacy interrupts.
-///
-/// On x86 platforms, legacy interrupts means those interrupts routed through PICs or IOAPICs.
-#[derive(Copy, Clone, Debug)]
-pub struct LegacyIrqSourceConfig {
-    pub irqchip: u32,
-    pub pin: u32,
-}
-
-/// Configuration data for MSI/MSI-X interrupts.
-///
-/// On x86 platforms, these interrupts are vectors delivered directly to the LAPIC.
-#[derive(Copy, Clone, Debug, Default)]
-pub struct MsiIrqSourceConfig {
-    /// High address to delivery message signaled interrupt.
-    pub high_addr: u32,
-    /// Low address to delivery message signaled interrupt.
-    pub low_addr: u32,
-    /// Data to write to delivery message signaled interrupt.
-    pub data: u32,
-    /// Unique ID of the device to delivery message signaled interrupt.
-    pub devid: u32,
-}
-
-/// Configuration data for an interrupt source.
-#[derive(Copy, Clone, Debug)]
-pub enum InterruptSourceConfig {
-    /// Configuration data for Legacy interrupts.
-    LegacyIrq(LegacyIrqSourceConfig),
-    /// Configuration data for PciMsi, PciMsix and generic MSI interrupts.
-    MsiIrq(MsiIrqSourceConfig),
-}
 
 /// Configuration data for legacy, pin based interrupt groups.
 ///
