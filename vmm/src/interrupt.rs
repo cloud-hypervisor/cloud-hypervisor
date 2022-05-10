@@ -84,19 +84,19 @@ impl InterruptRoute {
     }
 }
 
-pub struct RoutingEntry<IrqRoutingEntry> {
+pub struct RoutingEntry {
     route: IrqRoutingEntry,
     masked: bool,
 }
 
-pub struct MsiInterruptGroup<IrqRoutingEntry> {
+pub struct MsiInterruptGroup {
     vm: Arc<dyn hypervisor::Vm>,
-    gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<IrqRoutingEntry>>>>,
+    gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry>>>,
     irq_routes: HashMap<InterruptIndex, InterruptRoute>,
 }
 
-impl MsiInterruptGroup<IrqRoutingEntry> {
-    fn set_gsi_routes(&self, routes: &HashMap<u32, RoutingEntry<IrqRoutingEntry>>) -> Result<()> {
+impl MsiInterruptGroup {
+    fn set_gsi_routes(&self, routes: &HashMap<u32, RoutingEntry>) -> Result<()> {
         let mut entry_vec: Vec<IrqRoutingEntry> = Vec::new();
         for (_, entry) in routes.iter() {
             if entry.masked {
@@ -115,10 +115,10 @@ impl MsiInterruptGroup<IrqRoutingEntry> {
     }
 }
 
-impl MsiInterruptGroup<IrqRoutingEntry> {
+impl MsiInterruptGroup {
     fn new(
         vm: Arc<dyn hypervisor::Vm>,
-        gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<IrqRoutingEntry>>>>,
+        gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry>>>,
         irq_routes: HashMap<InterruptIndex, InterruptRoute>,
     ) -> Self {
         MsiInterruptGroup {
@@ -129,7 +129,7 @@ impl MsiInterruptGroup<IrqRoutingEntry> {
     }
 }
 
-impl InterruptSourceGroup for MsiInterruptGroup<IrqRoutingEntry> {
+impl InterruptSourceGroup for MsiInterruptGroup {
     fn enable(&self) -> Result<()> {
         for (_, route) in self.irq_routes.iter() {
             route.enable(&self.vm)?;
@@ -172,15 +172,17 @@ impl InterruptSourceGroup for MsiInterruptGroup<IrqRoutingEntry> {
         masked: bool,
     ) -> Result<()> {
         if let Some(route) = self.irq_routes.get(&index) {
-            let mut entry = RoutingEntry::<_>::make_entry(&self.vm, route.gsi, &config)?;
-            entry.masked = masked;
+            let entry = RoutingEntry {
+                route: self.vm.make_routing_entry(route.gsi, &config),
+                masked,
+            };
             if masked {
                 route.disable(&self.vm)?;
             } else {
                 route.enable(&self.vm)?;
             }
             let mut routes = self.gsi_msi_routes.lock().unwrap();
-            routes.insert(route.gsi, *entry);
+            routes.insert(route.gsi, entry);
             return self.set_gsi_routes(&routes);
         }
 
@@ -234,10 +236,10 @@ pub struct LegacyUserspaceInterruptManager {
     ioapic: Arc<Mutex<dyn InterruptController>>,
 }
 
-pub struct MsiInterruptManager<IrqRoutingEntry> {
+pub struct MsiInterruptManager {
     allocator: Arc<Mutex<SystemAllocator>>,
     vm: Arc<dyn hypervisor::Vm>,
-    gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<IrqRoutingEntry>>>>,
+    gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry>>>,
 }
 
 impl LegacyUserspaceInterruptManager {
@@ -246,7 +248,7 @@ impl LegacyUserspaceInterruptManager {
     }
 }
 
-impl MsiInterruptManager<IrqRoutingEntry> {
+impl MsiInterruptManager {
     pub fn new(allocator: Arc<Mutex<SystemAllocator>>, vm: Arc<dyn hypervisor::Vm>) -> Self {
         // Create a shared list of GSI that can be shared through all PCI
         // devices. This way, we can maintain the full list of used GSI,
@@ -277,7 +279,7 @@ impl InterruptManager for LegacyUserspaceInterruptManager {
     }
 }
 
-impl InterruptManager for MsiInterruptManager<IrqRoutingEntry> {
+impl InterruptManager for MsiInterruptManager {
     type GroupConfig = MsiIrqGroupConfig;
 
     fn create_group(&self, config: Self::GroupConfig) -> Result<Arc<dyn InterruptSourceGroup>> {
@@ -297,50 +299,6 @@ impl InterruptManager for MsiInterruptManager<IrqRoutingEntry> {
 
     fn destroy_group(&self, _group: Arc<dyn InterruptSourceGroup>) -> Result<()> {
         Ok(())
-    }
-}
-
-#[cfg(feature = "kvm")]
-pub mod kvm {
-    use super::*;
-    use hypervisor::kvm::kvm_irq_routing_entry;
-
-    type KvmRoutingEntry = RoutingEntry<kvm_irq_routing_entry>;
-    pub type KvmMsiInterruptManager = MsiInterruptManager<kvm_irq_routing_entry>;
-
-    impl KvmRoutingEntry {
-        pub fn make_entry(
-            vm: &Arc<dyn hypervisor::Vm>,
-            gsi: u32,
-            config: &InterruptSourceConfig,
-        ) -> Result<Box<Self>> {
-            Ok(Box::new(Self {
-                masked: false,
-                route: vm.make_routing_entry(gsi, config),
-            }))
-        }
-    }
-}
-
-#[cfg(feature = "mshv")]
-pub mod mshv {
-    use super::*;
-    use hypervisor::mshv::mshv_msi_routing_entry;
-
-    type MshvRoutingEntry = RoutingEntry<mshv_msi_routing_entry>;
-    pub type MshvMsiInterruptManager = MsiInterruptManager<mshv_msi_routing_entry>;
-
-    impl MshvRoutingEntry {
-        pub fn make_entry(
-            vm: &Arc<dyn hypervisor::Vm>,
-            gsi: u32,
-            config: &InterruptSourceConfig,
-        ) -> Result<Box<Self>> {
-            Ok(Box::new(Self {
-                masked: false,
-                route: vm.make_routing_entry(gsi, config),
-            }))
-        }
     }
 }
 

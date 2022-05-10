@@ -14,11 +14,8 @@ use crate::config::{
     VdpaConfig, VhostMode, VmConfig, VsockConfig,
 };
 use crate::device_tree::{DeviceNode, DeviceTree};
-#[cfg(feature = "kvm")]
-use crate::interrupt::kvm::KvmMsiInterruptManager as MsiInterruptManager;
-#[cfg(feature = "mshv")]
-use crate::interrupt::mshv::MshvMsiInterruptManager as MsiInterruptManager;
 use crate::interrupt::LegacyUserspaceInterruptManager;
+use crate::interrupt::MsiInterruptManager;
 use crate::memory_manager::MEMORY_MANAGER_ACPI_SIZE;
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 use crate::pci_segment::PciSegment;
