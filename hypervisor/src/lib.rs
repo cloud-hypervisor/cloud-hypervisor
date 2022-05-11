@@ -37,7 +37,7 @@ pub mod kvm;
 pub mod mshv;
 
 /// Hypevisor related module
-pub mod hypervisor;
+mod hypervisor;
 
 /// Vm related module
 mod vm;
