@@ -15,7 +15,8 @@ pub mod regs;
 use crate::GuestMemoryMmap;
 use crate::InitramfsConfig;
 use crate::RegionType;
-use hypervisor::{CpuId, CpuIdEntry, HypervisorError, CPUID_FLAG_VALID_INDEX};
+use hypervisor::x86_64::{CpuId, CpuIdEntry, CPUID_FLAG_VALID_INDEX};
+use hypervisor::HypervisorError;
 use linux_loader::loader::bootparam::boot_params;
 use linux_loader::loader::elf::start_info::{
     hvm_memmap_table_entry, hvm_modlist_entry, hvm_start_info,
