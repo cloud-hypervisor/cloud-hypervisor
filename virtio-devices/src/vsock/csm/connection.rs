@@ -819,6 +819,7 @@ mod tests {
             let stream = TestStream::new();
             let mut pkt = VsockPacket::from_rx_virtq_head(
                 &mut handler_ctx.handler.queues[0]
+                    .lock_with_memory()
                     .iter()
                     .unwrap()
                     .next()

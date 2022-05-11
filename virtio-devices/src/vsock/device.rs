@@ -48,6 +48,7 @@ use std::sync::{Arc, Barrier, RwLock};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_queue::Queue;
+use virtio_queue::QueueStateSync;
 use vm_memory::GuestMemoryAtomic;
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
@@ -88,7 +89,7 @@ pub const BACKEND_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 4;
 ///
 pub struct VsockEpollHandler<B: VsockBackend> {
     pub mem: GuestMemoryAtomic<GuestMemoryMmap>,
-    pub queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
+    pub queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>>,
     pub queue_evts: Vec<EventFd>,
     pub kill_evt: EventFd,
     pub pause_evt: EventFd,
@@ -124,36 +125,39 @@ where
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
 
-        let mut avail_iter = self.queues[0].iter().map_err(DeviceError::QueueIterator)?;
-        for mut desc_chain in &mut avail_iter {
-            let used_len = match VsockPacket::from_rx_virtq_head(
-                &mut desc_chain,
-                self.access_platform.as_ref(),
-            ) {
-                Ok(mut pkt) => {
-                    if self.backend.write().unwrap().recv_pkt(&mut pkt).is_ok() {
-                        pkt.hdr().len() as u32 + pkt.len()
-                    } else {
-                        // We are using a consuming iterator over the virtio buffers, so, if we can't
-                        // fill in this buffer, we'll need to undo the last iterator step.
-                        avail_iter.go_to_previous_position();
-                        break;
+        {
+            let mut q_lock = self.queues[0].lock_with_memory();
+            let mut avail_iter = q_lock.iter().map_err(DeviceError::QueueIterator)?;
+            for mut desc_chain in &mut avail_iter {
+                let used_len = match VsockPacket::from_rx_virtq_head(
+                    &mut desc_chain,
+                    self.access_platform.as_ref(),
+                ) {
+                    Ok(mut pkt) => {
+                        if self.backend.write().unwrap().recv_pkt(&mut pkt).is_ok() {
+                            pkt.hdr().len() as u32 + pkt.len()
+                        } else {
+                            // We are using a consuming iterator over the virtio buffers, so, if we can't
+                            // fill in this buffer, we'll need to undo the last iterator step.
+                            avail_iter.go_to_previous_position();
+                            break;
+                        }
                     }
-                }
-                Err(e) => {
-                    warn!("vsock: RX queue error: {:?}", e);
-                    0
-                }
-            };
+                    Err(e) => {
+                        warn!("vsock: RX queue error: {:?}", e);
+                        0
+                    }
+                };
 
-            used_desc_heads[used_count] = (desc_chain.head_index(), used_len);
-            used_count += 1;
-        }
+                used_desc_heads[used_count] = (desc_chain.head_index(), used_len);
+                used_count += 1;
+            }
 
-        for &(desc_index, len) in &used_desc_heads[..used_count] {
-            self.queues[0]
-                .add_used(desc_index, len)
-                .map_err(DeviceError::QueueAddUsed)?;
+            for &(desc_index, len) in &used_desc_heads[..used_count] {
+                q_lock
+                    .add_used(desc_index, len)
+                    .map_err(DeviceError::QueueAddUsed)?;
+            }
         }
 
         if used_count > 0 {
@@ -171,35 +175,37 @@ where
 
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
+        {
+            let mut q_lock = self.queues[1].lock_with_memory();
+            let mut avail_iter = q_lock.iter().map_err(DeviceError::QueueIterator)?;
+            for mut desc_chain in &mut avail_iter {
+                let pkt = match VsockPacket::from_tx_virtq_head(
+                    &mut desc_chain,
+                    self.access_platform.as_ref(),
+                ) {
+                    Ok(pkt) => pkt,
+                    Err(e) => {
+                        error!("vsock: error reading TX packet: {:?}", e);
+                        used_desc_heads[used_count] = (desc_chain.head_index(), 0);
+                        used_count += 1;
+                        continue;
+                    }
+                };
 
-        let mut avail_iter = self.queues[1].iter().map_err(DeviceError::QueueIterator)?;
-        for mut desc_chain in &mut avail_iter {
-            let pkt = match VsockPacket::from_tx_virtq_head(
-                &mut desc_chain,
-                self.access_platform.as_ref(),
-            ) {
-                Ok(pkt) => pkt,
-                Err(e) => {
-                    error!("vsock: error reading TX packet: {:?}", e);
-                    used_desc_heads[used_count] = (desc_chain.head_index(), 0);
-                    used_count += 1;
-                    continue;
+                if self.backend.write().unwrap().send_pkt(&pkt).is_err() {
+                    avail_iter.go_to_previous_position();
+                    break;
                 }
-            };
 
-            if self.backend.write().unwrap().send_pkt(&pkt).is_err() {
-                avail_iter.go_to_previous_position();
-                break;
+                used_desc_heads[used_count] = (desc_chain.head_index(), 0);
+                used_count += 1;
             }
 
-            used_desc_heads[used_count] = (desc_chain.head_index(), 0);
-            used_count += 1;
-        }
-
-        for &(desc_index, len) in &used_desc_heads[..used_count] {
-            self.queues[1]
-                .add_used(desc_index, len)
-                .map_err(DeviceError::QueueAddUsed)?;
+            for &(desc_index, len) in &used_desc_heads[..used_count] {
+                q_lock
+                    .add_used(desc_index, len)
+                    .map_err(DeviceError::QueueAddUsed)?;
+            }
         }
 
         if used_count > 0 {
@@ -432,7 +438,7 @@ where
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
+        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>>,
         queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;

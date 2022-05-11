@@ -14,6 +14,7 @@ use virtio_bindings::bindings::virtio_net::{
     VIRTIO_NET_F_GUEST_UFO, VIRTIO_NET_OK,
 };
 use virtio_queue::Queue;
+use virtio_queue::QueueStateSync;
 use vm_memory::{ByteValued, Bytes, GuestMemoryAtomic, GuestMemoryError};
 use vm_virtio::{AccessPlatform, Translatable};
 
@@ -58,12 +59,16 @@ impl CtrlQueue {
 
     pub fn process(
         &mut self,
-        queue: &mut Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
+        queue: &mut Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>,
         access_platform: Option<&Arc<dyn AccessPlatform>>,
     ) -> Result<()> {
         let mut used_desc_heads = Vec::new();
         loop {
-            for mut desc_chain in queue.iter().map_err(Error::QueueIterator)? {
+            for mut desc_chain in queue
+                .lock_with_memory()
+                .iter()
+                .map_err(Error::QueueIterator)?
+            {
                 let ctrl_desc = desc_chain.next().ok_or(Error::NoControlHeaderDescriptor)?;
 
                 let ctrl_hdr: ControlHeader = desc_chain

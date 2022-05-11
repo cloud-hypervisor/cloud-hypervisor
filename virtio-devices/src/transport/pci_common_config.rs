@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use virtio_queue::Queue;
+use virtio_queue::{Queue, QueueStateSync, QueueStateT};
 use vm_memory::{GuestAddress, GuestMemoryAtomic};
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, VersionMapped};
 use vm_virtio::AccessPlatform;
@@ -90,7 +90,7 @@ impl VirtioPciCommonConfig {
         &mut self,
         offset: u64,
         data: &mut [u8],
-        queues: &mut [Queue<GuestMemoryAtomic<GuestMemoryMmap>>],
+        queues: &mut [Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>],
         device: Arc<Mutex<dyn VirtioDevice>>,
     ) {
         assert!(data.len() <= 8);
@@ -120,7 +120,7 @@ impl VirtioPciCommonConfig {
         &mut self,
         offset: u64,
         data: &[u8],
-        queues: &mut [Queue<GuestMemoryAtomic<GuestMemoryMmap>>],
+        queues: &mut [Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>],
         device: Arc<Mutex<dyn VirtioDevice>>,
     ) {
         assert!(data.len() <= 8);
@@ -162,17 +162,17 @@ impl VirtioPciCommonConfig {
     fn read_common_config_word(
         &self,
         offset: u64,
-        queues: &[Queue<GuestMemoryAtomic<GuestMemoryMmap>>],
+        queues: &[Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>],
     ) -> u16 {
         debug!("read_common_config_word: offset 0x{:x}", offset);
         match offset {
             0x10 => self.msix_config.load(Ordering::Acquire),
             0x12 => queues.len() as u16, // num_queues
             0x16 => self.queue_select,
-            0x18 => self.with_queue(queues, |q| q.state.size).unwrap_or(0),
+            0x18 => self.with_queue(queues, |q| q.state.size()).unwrap_or(0),
             0x1a => self.msix_queues.lock().unwrap()[self.queue_select as usize],
             0x1c => {
-                if self.with_queue(queues, |q| q.state.ready).unwrap_or(false) {
+                if self.with_queue(queues, |q| q.ready()).unwrap_or(false) {
                     1
                 } else {
                     0
@@ -190,38 +190,39 @@ impl VirtioPciCommonConfig {
         &mut self,
         offset: u64,
         value: u16,
-        queues: &mut [Queue<GuestMemoryAtomic<GuestMemoryMmap>>],
+        queues: &mut [Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>],
     ) {
         debug!("write_common_config_word: offset 0x{:x}", offset);
         match offset {
             0x10 => self.msix_config.store(value, Ordering::Release),
             0x16 => self.queue_select = value,
-            0x18 => self.with_queue_mut(queues, |q| q.state.size = value),
+            0x18 => self.with_queue_mut(queues, |q| q.set_size(value)),
             0x1a => self.msix_queues.lock().unwrap()[self.queue_select as usize] = value,
             0x1c => self.with_queue_mut(queues, |q| {
                 let ready = value == 1;
-                q.set_ready(ready);
+                let mut q_state = q.lock();
+                q_state.set_ready(ready);
                 // Translate address of descriptor table and vrings.
                 if let Some(access_platform) = &self.access_platform {
                     if ready {
                         let desc_table = access_platform
-                            .translate_gva(q.state.desc_table.0, 0)
+                            .translate_gva(q_state.desc_table.0, 0)
                             .unwrap();
                         let avail_ring = access_platform
-                            .translate_gva(q.state.avail_ring.0, 0)
+                            .translate_gva(q_state.avail_ring.0, 0)
                             .unwrap();
                         let used_ring = access_platform
-                            .translate_gva(q.state.used_ring.0, 0)
+                            .translate_gva(q_state.used_ring.0, 0)
                             .unwrap();
-                        q.set_desc_table_address(
+                        q_state.set_desc_table_address(
                             Some((desc_table & 0xffff_ffff) as u32),
                             Some((desc_table >> 32) as u32),
                         );
-                        q.set_avail_ring_address(
+                        q_state.set_avail_ring_address(
                             Some((avail_ring & 0xffff_ffff) as u32),
                             Some((avail_ring >> 32) as u32),
                         );
-                        q.set_used_ring_address(
+                        q_state.set_used_ring_address(
                             Some((used_ring & 0xffff_ffff) as u32),
                             Some((used_ring >> 32) as u32),
                         );
@@ -260,7 +261,7 @@ impl VirtioPciCommonConfig {
         &mut self,
         offset: u64,
         value: u32,
-        queues: &mut [Queue<GuestMemoryAtomic<GuestMemoryMmap>>],
+        queues: &mut [Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>],
         device: Arc<Mutex<dyn VirtioDevice>>,
     ) {
         debug!("write_common_config_dword: offset 0x{:x}", offset);
@@ -287,12 +288,12 @@ impl VirtioPciCommonConfig {
                     );
                 }
             }
-            0x20 => self.with_queue_mut(queues, |q| lo(&mut q.state.desc_table, value)),
-            0x24 => self.with_queue_mut(queues, |q| hi(&mut q.state.desc_table, value)),
-            0x28 => self.with_queue_mut(queues, |q| lo(&mut q.state.avail_ring, value)),
-            0x2c => self.with_queue_mut(queues, |q| hi(&mut q.state.avail_ring, value)),
-            0x30 => self.with_queue_mut(queues, |q| lo(&mut q.state.used_ring, value)),
-            0x34 => self.with_queue_mut(queues, |q| hi(&mut q.state.used_ring, value)),
+            0x20 => self.with_queue_mut(queues, |q| lo(&mut q.lock().desc_table, value)),
+            0x24 => self.with_queue_mut(queues, |q| hi(&mut q.lock().desc_table, value)),
+            0x28 => self.with_queue_mut(queues, |q| lo(&mut q.lock().avail_ring, value)),
+            0x2c => self.with_queue_mut(queues, |q| hi(&mut q.lock().avail_ring, value)),
+            0x30 => self.with_queue_mut(queues, |q| lo(&mut q.lock().used_ring, value)),
+            0x34 => self.with_queue_mut(queues, |q| hi(&mut q.lock().used_ring, value)),
             _ => {
                 warn!("invalid virtio register dword write: 0x{:x}", offset);
             }
@@ -308,13 +309,13 @@ impl VirtioPciCommonConfig {
         &mut self,
         offset: u64,
         value: u64,
-        queues: &mut [Queue<GuestMemoryAtomic<GuestMemoryMmap>>],
+        queues: &mut [Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>],
     ) {
         debug!("write_common_config_qword: offset 0x{:x}", offset);
         match offset {
-            0x20 => self.with_queue_mut(queues, |q| q.state.desc_table = GuestAddress(value)),
-            0x28 => self.with_queue_mut(queues, |q| q.state.avail_ring = GuestAddress(value)),
-            0x30 => self.with_queue_mut(queues, |q| q.state.used_ring = GuestAddress(value)),
+            0x20 => self.with_queue_mut(queues, |q| q.lock().desc_table = GuestAddress(value)),
+            0x28 => self.with_queue_mut(queues, |q| q.lock().avail_ring = GuestAddress(value)),
+            0x30 => self.with_queue_mut(queues, |q| q.lock().used_ring = GuestAddress(value)),
             _ => {
                 warn!("invalid virtio register qword write: 0x{:x}", offset);
             }
@@ -323,18 +324,18 @@ impl VirtioPciCommonConfig {
 
     fn with_queue<U, F>(
         &self,
-        queues: &[Queue<GuestMemoryAtomic<GuestMemoryMmap>>],
+        queues: &[Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>],
         f: F,
     ) -> Option<U>
     where
-        F: FnOnce(&Queue<GuestMemoryAtomic<GuestMemoryMmap>>) -> U,
+        F: FnOnce(&Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>) -> U,
     {
         queues.get(self.queue_select as usize).map(f)
     }
 
-    fn with_queue_mut<F: FnOnce(&mut Queue<GuestMemoryAtomic<GuestMemoryMmap>>)>(
+    fn with_queue_mut<F: FnOnce(&mut Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>)>(
         &self,
-        queues: &mut [Queue<GuestMemoryAtomic<GuestMemoryMmap>>],
+        queues: &mut [Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>],
         f: F,
     ) {
         if let Some(queue) = queues.get_mut(self.queue_select as usize) {
@@ -366,7 +367,7 @@ mod tests {
     use crate::GuestMemoryMmap;
     use crate::{ActivateResult, VirtioInterrupt};
     use std::sync::Arc;
-    use virtio_queue::Queue;
+    use virtio_queue::{Queue, QueueStateSync};
     use vm_memory::GuestMemoryAtomic;
     use vmm_sys_util::eventfd::EventFd;
 
@@ -385,7 +386,7 @@ mod tests {
             &mut self,
             _mem: GuestMemoryAtomic<GuestMemoryMmap>,
             _interrupt_evt: Arc<dyn VirtioInterrupt>,
-            _queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
+            _queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>>,
             _queue_evts: Vec<EventFd>,
         ) -> ActivateResult {
             Ok(())

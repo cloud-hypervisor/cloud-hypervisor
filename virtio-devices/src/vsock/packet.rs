@@ -402,6 +402,7 @@ mod tests {
         ($test_ctx:expr, $handler_ctx:expr, $err:pat, $ctor:ident, $vq:expr) => {
             match VsockPacket::$ctor(
                 &mut $handler_ctx.handler.queues[$vq]
+                    .lock_with_memory()
                     .iter()
                     .unwrap()
                     .next()
@@ -433,6 +434,7 @@ mod tests {
 
             let pkt = VsockPacket::from_tx_virtq_head(
                 &mut handler_ctx.handler.queues[1]
+                    .lock_with_memory()
                     .iter()
                     .unwrap()
                     .next()
@@ -471,6 +473,7 @@ mod tests {
             set_pkt_len(0, &handler_ctx.guest_txvq.dtable[0], &test_ctx.mem);
             let mut pkt = VsockPacket::from_tx_virtq_head(
                 &mut handler_ctx.handler.queues[1]
+                    .lock_with_memory()
                     .iter()
                     .unwrap()
                     .next()
@@ -529,6 +532,7 @@ mod tests {
             create_context!(test_ctx, handler_ctx);
             let pkt = VsockPacket::from_rx_virtq_head(
                 &mut handler_ctx.handler.queues[0]
+                    .lock_with_memory()
                     .iter()
                     .unwrap()
                     .next()
@@ -586,6 +590,7 @@ mod tests {
         create_context!(test_ctx, handler_ctx);
         let mut pkt = VsockPacket::from_rx_virtq_head(
             &mut handler_ctx.handler.queues[0]
+                .lock_with_memory()
                 .iter()
                 .unwrap()
                 .next()
@@ -677,6 +682,7 @@ mod tests {
         create_context!(test_ctx, handler_ctx);
         let mut pkt = VsockPacket::from_rx_virtq_head(
             &mut handler_ctx.handler.queues[0]
+                .lock_with_memory()
                 .iter()
                 .unwrap()
                 .next()

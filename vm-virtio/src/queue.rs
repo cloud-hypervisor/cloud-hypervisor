@@ -11,7 +11,7 @@
 pub mod testing {
     use std::marker::PhantomData;
     use std::mem;
-    use virtio_queue::{Queue, QueueState, VirtqUsedElem};
+    use virtio_queue::{Queue, QueueStateSync, QueueStateT, VirtqUsedElem};
     use vm_memory::{bitmap::AtomicBitmap, Address, GuestAddress, GuestUsize};
     use vm_memory::{Bytes, GuestMemoryAtomic};
 
@@ -225,16 +225,19 @@ pub mod testing {
         }
 
         // Creates a new Queue, using the underlying memory regions represented by the VirtQueue.
-        pub fn create_queue(&self) -> Queue<GuestMemoryAtomic<GuestMemoryMmap>> {
+        pub fn create_queue(&self) -> Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync> {
             let mem = GuestMemoryAtomic::new(self.mem.clone());
             let mut q =
-                Queue::<GuestMemoryAtomic<GuestMemoryMmap>, QueueState>::new(mem, self.size());
+                Queue::<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>::new(mem, self.size());
 
-            q.state.size = self.size();
-            q.state.ready = true;
-            q.state.desc_table = self.dtable_start();
-            q.state.avail_ring = self.avail_start();
-            q.state.used_ring = self.used_start();
+            {
+                let mut q_state = q.lock();
+                q_state.set_size(self.size());
+                q_state.set_ready(true);
+                q_state.desc_table = self.dtable_start();
+                q_state.avail_ring = self.avail_start();
+                q_state.used_ring = self.used_start();
+            }
 
             q
         }

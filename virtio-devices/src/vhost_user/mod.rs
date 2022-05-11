@@ -18,8 +18,8 @@ use vhost::vhost_user::message::{
 };
 use vhost::vhost_user::{MasterReqHandler, VhostUserMasterReqHandler};
 use vhost::Error as VhostError;
-use virtio_queue::Error as QueueError;
 use virtio_queue::Queue;
+use virtio_queue::{Error as QueueError, QueueStateSync};
 use vm_memory::{
     mmap::MmapRegionError, Address, Error as MmapError, GuestAddressSpace, GuestMemory,
     GuestMemoryAtomic,
@@ -167,7 +167,7 @@ pub struct VhostUserEpollHandler<S: VhostUserMasterReqHandler> {
     pub mem: GuestMemoryAtomic<GuestMemoryMmap>,
     pub kill_evt: EventFd,
     pub pause_evt: EventFd,
-    pub queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
+    pub queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>>,
     pub queue_evts: Vec<EventFd>,
     pub virtio_interrupt: Arc<dyn VirtioInterrupt>,
     pub acked_features: u64,
@@ -299,7 +299,7 @@ impl VhostUserCommon {
     pub fn activate<T: VhostUserMasterReqHandler>(
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
-        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
+        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>>,
         queue_evts: Vec<EventFd>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         acked_features: u64,

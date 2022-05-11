@@ -19,7 +19,7 @@ use std::sync::{
     Arc, Barrier,
 };
 use std::thread;
-use virtio_queue::Queue;
+use virtio_queue::{Queue, QueueStateSync};
 use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestUsize};
 use vm_migration::{MigratableError, Pausable};
 use vm_virtio::AccessPlatform;
@@ -107,7 +107,7 @@ pub trait VirtioDevice: Send {
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_evt: Arc<dyn VirtioInterrupt>,
-        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
+        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>>,
         queue_evts: Vec<EventFd>,
     ) -> ActivateResult;
 
@@ -251,7 +251,7 @@ impl VirtioCommon {
 
     pub fn activate(
         &mut self,
-        queues: &[Queue<GuestMemoryAtomic<GuestMemoryMmap>>],
+        queues: &[Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>],
         queue_evts: &[EventFd],
         interrupt_cb: &Arc<dyn VirtioInterrupt>,
     ) -> ActivateResult {

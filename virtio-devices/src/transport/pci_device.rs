@@ -29,7 +29,7 @@ use std::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use virtio_queue::{Error as QueueError, Queue};
+use virtio_queue::{Error as QueueError, Queue, QueueStateSync, QueueStateT};
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{
@@ -312,7 +312,7 @@ pub struct VirtioPciDevice {
     interrupt_source_group: Arc<dyn InterruptSourceGroup>,
 
     // virtio queues
-    queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
+    queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>>,
     queue_evts: Vec<EventFd>,
 
     // Guest memory
@@ -376,7 +376,7 @@ impl VirtioPciDevice {
             .queue_max_sizes()
             .iter()
             .map(|&s| {
-                Queue::<GuestMemoryAtomic<GuestMemoryMmap>, virtio_queue::QueueState>::new(
+                Queue::<GuestMemoryAtomic<GuestMemoryMmap>, virtio_queue::QueueStateSync>::new(
                     memory.clone(),
                     s,
                 )
@@ -481,13 +481,16 @@ impl VirtioPciDevice {
             queues: self
                 .queues
                 .iter()
-                .map(|q| QueueState {
-                    max_size: q.max_size(),
-                    size: q.state.size,
-                    ready: q.state.ready,
-                    desc_table: q.state.desc_table.0,
-                    avail_ring: q.state.avail_ring.0,
-                    used_ring: q.state.used_ring.0,
+                .map(|q| {
+                    let q_state = q.state.lock_state();
+                    QueueState {
+                        max_size: q_state.max_size,
+                        size: q_state.size,
+                        ready: q_state.ready,
+                        desc_table: q_state.desc_table.0,
+                        avail_ring: q_state.avail_ring.0,
+                        used_ring: q_state.used_ring.0,
+                    }
                 })
                 .collect(),
         }
@@ -501,23 +504,18 @@ impl VirtioPciDevice {
 
         // Update virtqueues indexes for both available and used rings.
         for (i, queue) in self.queues.iter_mut().enumerate() {
-            queue.state.size = state.queues[i].size;
-            queue.state.ready = state.queues[i].ready;
-            queue.state.desc_table = GuestAddress(state.queues[i].desc_table);
-            queue.state.avail_ring = GuestAddress(state.queues[i].avail_ring);
-            queue.state.used_ring = GuestAddress(state.queues[i].used_ring);
-            queue.set_next_avail(
-                queue
-                    .used_idx(Ordering::Acquire)
-                    .map_err(Error::QueueRingIndex)?
-                    .0,
-            );
-            queue.set_next_used(
-                queue
-                    .used_idx(Ordering::Acquire)
-                    .map_err(Error::QueueRingIndex)?
-                    .0,
-            );
+            let used_idx = queue
+                .used_idx(Ordering::Acquire)
+                .map_err(Error::QueueRingIndex)?
+                .0;
+            let mut q_state = queue.lock();
+            q_state.size = state.queues[i].size;
+            q_state.ready = state.queues[i].ready;
+            q_state.desc_table = GuestAddress(state.queues[i].desc_table);
+            q_state.avail_ring = GuestAddress(state.queues[i].avail_ring);
+            q_state.used_ring = GuestAddress(state.queues[i].used_ring);
+            q_state.set_next_avail(used_idx);
+            q_state.set_next_used(used_idx);
         }
 
         Ok(())
@@ -673,7 +671,7 @@ impl VirtioPciDevice {
                 let mut device = self.device.lock().unwrap();
                 let mut queue_evts = Vec::new();
                 let mut queues = self.queues.clone();
-                queues.retain(|q| q.state.ready);
+                queues.retain(|q| q.ready());
                 for (i, queue) in queues.iter().enumerate() {
                     queue_evts.push(self.queue_evts[i].try_clone().unwrap());
                     if !queue.is_valid() {

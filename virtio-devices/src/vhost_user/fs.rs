@@ -27,7 +27,7 @@ use vhost::vhost_user::message::{
 use vhost::vhost_user::{
     HandlerResult, MasterReqHandler, VhostUserMaster, VhostUserMasterReqHandler,
 };
-use virtio_queue::Queue;
+use virtio_queue::{Queue, QueueStateSync};
 use vm_memory::{
     Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
 };
@@ -504,7 +504,7 @@ impl VirtioDevice for Fs {
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
+        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>>,
         queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;

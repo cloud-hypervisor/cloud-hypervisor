@@ -34,7 +34,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use virtio_queue::{DescriptorChain, Queue};
+use virtio_queue::{DescriptorChain, Queue, QueueStateSync};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryError,
@@ -467,7 +467,7 @@ struct MemEpollHandler {
     blocks_state: Arc<Mutex<BlocksState>>,
     config: Arc<Mutex<VirtioMemConfig>>,
     resize: ResizeSender,
-    queue: Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
+    queue: Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     queue_evt: EventFd,
     kill_evt: EventFd,
@@ -666,7 +666,7 @@ impl MemEpollHandler {
         let mut request_list = Vec::new();
         let mut used_count = 0;
 
-        for mut desc_chain in self.queue.iter().unwrap() {
+        for mut desc_chain in self.queue.lock_with_memory().iter().unwrap() {
             request_list.push((
                 desc_chain.head_index(),
                 Request::parse(&mut desc_chain),
@@ -1004,7 +1004,7 @@ impl VirtioDevice for Mem {
         &mut self,
         _mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        mut queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
+        mut queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;

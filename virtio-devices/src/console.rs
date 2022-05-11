@@ -24,7 +24,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use virtio_queue::Queue;
+use virtio_queue::{Queue, QueueStateSync};
 use vm_memory::{ByteValued, Bytes, GuestMemoryAtomic};
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -74,7 +74,7 @@ impl Default for VirtioConsoleConfig {
 unsafe impl ByteValued for VirtioConsoleConfig {}
 
 struct ConsoleEpollHandler {
-    queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
+    queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     in_buffer: Arc<Mutex<VecDeque<u8>>>,
     resizer: Arc<ConsoleResizer>,
@@ -142,7 +142,8 @@ impl ConsoleEpollHandler {
             return false;
         }
 
-        let mut avail_iter = recv_queue.iter().unwrap();
+        let mut q_lock = recv_queue.lock_with_memory();
+        let mut avail_iter = q_lock.iter().unwrap();
         for mut desc_chain in &mut avail_iter {
             let desc = desc_chain.next().unwrap();
             let len = cmp::min(desc.len() as u32, in_buffer.len() as u32);
@@ -167,7 +168,7 @@ impl ConsoleEpollHandler {
         }
 
         for &(desc_index, len) in &used_desc_heads[..used_count] {
-            recv_queue.add_used(desc_index, len).unwrap();
+            q_lock.add_used(desc_index, len).unwrap();
         }
 
         used_count > 0
@@ -185,7 +186,7 @@ impl ConsoleEpollHandler {
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
 
-        for mut desc_chain in trans_queue.iter().unwrap() {
+        for mut desc_chain in trans_queue.lock_with_memory().iter().unwrap() {
             let desc = desc_chain.next().unwrap();
             if let Some(ref mut out) = self.endpoint.out_file() {
                 let _ = desc_chain.memory().write_to(
@@ -490,7 +491,7 @@ impl VirtioDevice for Console {
         &mut self,
         _mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
+        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;

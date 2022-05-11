@@ -35,7 +35,7 @@ use std::{collections::HashMap, convert::TryInto};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_bindings::bindings::virtio_blk::*;
-use virtio_queue::Queue;
+use virtio_queue::{Queue, QueueStateSync, QueueStateT};
 use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -84,7 +84,7 @@ pub struct BlockCounters {
 
 struct BlockEpollHandler {
     queue_index: u16,
-    queue: Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
+    queue: Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>,
     mem: GuestMemoryAtomic<GuestMemoryMmap>,
     disk_image: Box<dyn AsyncIo>,
     disk_nsectors: u64,
@@ -107,7 +107,8 @@ impl BlockEpollHandler {
         let mut used_desc_heads = Vec::new();
         let mut used_count = 0;
 
-        let mut avail_iter = queue.iter().map_err(Error::QueueIterator)?;
+        let mut q_lock = queue.lock_with_memory();
+        let mut avail_iter = q_lock.iter().map_err(Error::QueueIterator)?;
         for mut desc_chain in &mut avail_iter {
             let mut request = Request::parse(&mut desc_chain, self.access_platform.as_ref())
                 .map_err(Error::RequestParsing)?;
@@ -172,7 +173,7 @@ impl BlockEpollHandler {
         }
 
         for &(desc_index, len) in used_desc_heads.iter() {
-            queue
+            q_lock
                 .add_used(desc_index, len)
                 .map_err(Error::QueueAddUsed)?;
         }
@@ -587,7 +588,7 @@ impl VirtioDevice for Block {
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        mut queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
+        mut queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
@@ -599,7 +600,7 @@ impl VirtioDevice for Block {
         for i in 0..queues.len() {
             let queue_evt = queue_evts.remove(0);
             let queue = queues.remove(0);
-            let queue_size = queue.state.size;
+            let queue_size = queue.state.size();
             let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
             let rate_limiter: Option<RateLimiter> = self

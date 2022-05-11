@@ -42,6 +42,7 @@ kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branc
 kvm-ioctls = { git = "https://github.com/rust-vmm/kvm-ioctls", branch = "main" }
 versionize_derive = { git = "https://github.com/cloud-hypervisor/versionize_derive", branch = "ch" }
 vhost-user-backend = { git = "https://github.com/rust-vmm/vhost-user-backend", branch = "main" }
+virtio-queue = { git = "https://github.com/sboeuf/vm-virtio", branch = "fix_virtio-queue" }
 
 [dev-dependencies]
 dirs = "4.0.0"

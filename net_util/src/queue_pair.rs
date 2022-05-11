@@ -10,7 +10,7 @@ use std::num::Wrapping;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use virtio_queue::Queue;
+use virtio_queue::{Queue, QueueStateSync};
 use vm_memory::{Bytes, GuestMemory, GuestMemoryAtomic};
 use vm_virtio::{AccessPlatform, Translatable};
 
@@ -37,7 +37,7 @@ impl TxVirtio {
     pub fn process_desc_chain(
         &mut self,
         tap: &mut Tap,
-        queue: &mut Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
+        queue: &mut Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>,
         rate_limiter: &mut Option<RateLimiter>,
         access_platform: Option<&Arc<dyn AccessPlatform>>,
     ) -> Result<bool, NetQueuePairError> {
@@ -46,7 +46,8 @@ impl TxVirtio {
 
         loop {
             let used_desc_head: (u16, u32);
-            let mut avail_iter = queue
+            let mut q_lock = queue.lock_with_memory();
+            let mut avail_iter = q_lock
                 .iter()
                 .map_err(NetQueuePairError::QueueIteratorFailed)?;
 
@@ -129,10 +130,10 @@ impl TxVirtio {
                 break;
             }
 
-            queue
+            q_lock
                 .add_used(used_desc_head.0, used_desc_head.1)
                 .map_err(NetQueuePairError::QueueAddUsed)?;
-            if !queue
+            if !q_lock
                 .enable_notification()
                 .map_err(NetQueuePairError::QueueEnableNotification)?
             {
@@ -167,7 +168,7 @@ impl RxVirtio {
     pub fn process_desc_chain(
         &mut self,
         tap: &mut Tap,
-        queue: &mut Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
+        queue: &mut Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>,
         rate_limiter: &mut Option<RateLimiter>,
         access_platform: Option<&Arc<dyn AccessPlatform>>,
     ) -> Result<bool, NetQueuePairError> {
@@ -176,7 +177,8 @@ impl RxVirtio {
 
         loop {
             let used_desc_head: (u16, u32);
-            let mut avail_iter = queue
+            let mut q_lock = queue.lock_with_memory();
+            let mut avail_iter = q_lock
                 .iter()
                 .map_err(NetQueuePairError::QueueIteratorFailed)?;
 
@@ -280,10 +282,10 @@ impl RxVirtio {
                 break;
             }
 
-            queue
+            q_lock
                 .add_used(used_desc_head.0, used_desc_head.1)
                 .map_err(NetQueuePairError::QueueAddUsed)?;
-            if !queue
+            if !q_lock
                 .enable_notification()
                 .map_err(NetQueuePairError::QueueEnableNotification)?
             {
@@ -355,7 +357,7 @@ pub struct NetQueuePair {
 impl NetQueuePair {
     pub fn process_tx(
         &mut self,
-        queue: &mut Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
+        queue: &mut Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>,
     ) -> Result<bool, NetQueuePairError> {
         let tx_tap_retry = self.tx.process_desc_chain(
             &mut self.tap,
@@ -403,7 +405,7 @@ impl NetQueuePair {
 
     pub fn process_rx(
         &mut self,
-        queue: &mut Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
+        queue: &mut Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>,
     ) -> Result<bool, NetQueuePairError> {
         self.rx_desc_avail = !self.rx.process_desc_chain(
             &mut self.tap,

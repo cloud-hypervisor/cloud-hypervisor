@@ -30,7 +30,7 @@ use std::sync::{
 };
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use virtio_queue::Queue;
+use virtio_queue::{Queue, QueueStateSync};
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryAtomic, GuestMemoryError,
     GuestMemoryRegion,
@@ -163,7 +163,7 @@ impl VirtioBalloonResize {
 struct BalloonEpollHandler {
     config: Arc<Mutex<VirtioBalloonConfig>>,
     resize_receiver: VirtioBalloonResizeReceiver,
-    queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
+    queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     inflate_queue_evt: EventFd,
     deflate_queue_evt: EventFd,
@@ -246,6 +246,7 @@ impl BalloonEpollHandler {
     fn process_queue(&mut self, queue_index: usize) -> result::Result<(), Error> {
         let mut used_descs = Vec::new();
         for mut desc_chain in self.queues[queue_index]
+            .lock_with_memory()
             .iter()
             .map_err(Error::QueueIterator)?
         {
@@ -301,6 +302,7 @@ impl BalloonEpollHandler {
         let mut used_descs = Vec::new();
 
         for mut desc_chain in self.queues[queue_index]
+            .lock_with_memory()
             .iter()
             .map_err(Error::QueueIterator)?
         {
@@ -542,7 +544,7 @@ impl VirtioDevice for Balloon {
         &mut self,
         _mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
+        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;

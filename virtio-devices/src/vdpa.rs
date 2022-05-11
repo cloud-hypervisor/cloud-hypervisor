@@ -9,7 +9,9 @@ use crate::{
     VIRTIO_F_IOMMU_PLATFORM,
 };
 use std::{
-    io, result,
+    io,
+    ops::Deref,
+    result,
     sync::{atomic::Ordering, Arc, Mutex},
 };
 use thiserror::Error;
@@ -19,7 +21,7 @@ use vhost::{
     vhost_kern::VhostKernFeatures,
     VhostBackend, VringConfigData,
 };
-use virtio_queue::{Descriptor, Queue};
+use virtio_queue::{Descriptor, Queue, QueueStateSync, QueueStateT};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic};
 use vm_virtio::{AccessPlatform, Translatable};
@@ -145,7 +147,7 @@ impl Vdpa {
         &mut self,
         _mem: &GuestMemoryMmap,
         virtio_interrupt: &Arc<dyn VirtioInterrupt>,
-        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
+        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>>,
         queue_evts: Vec<EventFd>,
     ) -> Result<()> {
         self.vhost
@@ -156,8 +158,10 @@ impl Vdpa {
             .map_err(Error::SetBackendFeatures)?;
 
         for (queue_index, queue) in queues.iter().enumerate() {
-            let queue_max_size = queue.max_size();
-            let queue_size = queue.state.size;
+            let mem = queue.mem.memory();
+            let q_state = queue.state.lock_state();
+            let queue_max_size = q_state.max_size;
+            let queue_size = q_state.size;
             self.vhost
                 .set_vring_num(queue_index, queue_size)
                 .map_err(Error::SetVringNum)?;
@@ -166,24 +170,21 @@ impl Vdpa {
                 queue_max_size,
                 queue_size,
                 flags: 0u32,
-                desc_table_addr: queue
-                    .state
+                desc_table_addr: q_state
                     .desc_table
                     .translate_gpa(
                         self.common.access_platform.as_ref(),
                         queue_size as usize * std::mem::size_of::<Descriptor>(),
                     )
                     .0,
-                used_ring_addr: queue
-                    .state
+                used_ring_addr: q_state
                     .used_ring
                     .translate_gpa(
                         self.common.access_platform.as_ref(),
                         4 + queue_size as usize * 8,
                     )
                     .0,
-                avail_ring_addr: queue
-                    .state
+                avail_ring_addr: q_state
                     .avail_ring
                     .translate_gpa(
                         self.common.access_platform.as_ref(),
@@ -199,8 +200,8 @@ impl Vdpa {
             self.vhost
                 .set_vring_base(
                     queue_index,
-                    queue
-                        .avail_idx(Ordering::Acquire)
+                    q_state
+                        .avail_idx(mem.deref(), Ordering::Acquire)
                         .map_err(Error::GetAvailableIndex)?
                         .0,
                 )
@@ -297,7 +298,7 @@ impl VirtioDevice for Vdpa {
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
         virtio_interrupt: Arc<dyn VirtioInterrupt>,
-        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
+        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>>,
         queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
         self.activate_vdpa(&mem.memory(), &virtio_interrupt, queues, queue_evts)

@@ -35,7 +35,7 @@ use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_bindings::bindings::virtio_net::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
-use virtio_queue::Queue;
+use virtio_queue::{Queue, QueueStateSync};
 use vm_memory::{ByteValued, GuestMemoryAtomic};
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -51,7 +51,7 @@ pub struct NetCtrlEpollHandler {
     pub pause_evt: EventFd,
     pub ctrl_q: CtrlQueue,
     pub queue_evt: EventFd,
-    pub queue: Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
+    pub queue: Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>,
     pub access_platform: Option<Arc<dyn AccessPlatform>>,
     pub interrupt_cb: Arc<dyn VirtioInterrupt>,
     pub queue_index: u16,
@@ -155,7 +155,7 @@ struct NetEpollHandler {
     kill_evt: EventFd,
     pause_evt: EventFd,
     queue_index_base: u16,
-    queue_pair: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
+    queue_pair: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>>,
     queue_evt_pair: Vec<EventFd>,
     // Always generate interrupts until the driver has signalled to the device.
     // This mitigates a problem with interrupts from tap events being "lost" upon
@@ -585,7 +585,7 @@ impl VirtioDevice for Net {
         &mut self,
         _mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        mut queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
+        mut queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>, QueueStateSync>>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
