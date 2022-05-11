@@ -57,7 +57,7 @@
 //! * The virtual device backend requests the interrupt manager to create an interrupt group
 //!   according to guest configuration information
 
-pub use hypervisor::vm::{InterruptSourceConfig, LegacyIrqSourceConfig, MsiIrqSourceConfig};
+pub use hypervisor::{InterruptSourceConfig, LegacyIrqSourceConfig, MsiIrqSourceConfig};
 use std::sync::Arc;
 use vmm_sys_util::eventfd::EventFd;
 

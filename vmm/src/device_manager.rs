@@ -53,7 +53,7 @@ use devices::legacy::Serial;
 use devices::{
     interrupt_controller, interrupt_controller::InterruptController, AcpiNotificationFlags,
 };
-use hypervisor::{DeviceFd, IoEventAddress};
+use hypervisor::{DeviceFd, HypervisorVmError, IoEventAddress};
 use libc::{
     cfmakeraw, isatty, tcgetattr, tcsetattr, termios, MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED,
     O_TMPFILE, PROT_READ, PROT_WRITE, TCSANOW,
@@ -468,7 +468,7 @@ pub enum DeviceManagerError {
     InvalidIommuHotplug,
 
     /// Failed to create UEFI flash
-    CreateUefiFlash(hypervisor::vm::HypervisorVmError),
+    CreateUefiFlash(HypervisorVmError),
 
     /// Invalid identifier as it is not unique.
     IdentifierNotUnique(String),
