@@ -12,6 +12,12 @@
 use crate::aarch64::VcpuInit;
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::{RegList, Register, StandardRegisters};
+#[cfg(feature = "tdx")]
+use crate::kvm::{TdxExitDetails, TdxExitStatus};
+#[cfg(all(feature = "mshv", target_arch = "x86_64"))]
+use crate::x86_64::SuspendRegisters;
+#[cfg(target_arch = "x86_64")]
+use crate::x86_64::Xsave;
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::{CpuId, LapicState};
 #[cfg(target_arch = "x86_64")]
@@ -23,12 +29,6 @@ use crate::CpuState;
 use crate::DeviceAttr;
 #[cfg(feature = "kvm")]
 use crate::MpState;
-#[cfg(all(feature = "mshv", target_arch = "x86_64"))]
-use crate::SuspendRegisters;
-#[cfg(target_arch = "x86_64")]
-use crate::Xsave;
-#[cfg(feature = "tdx")]
-use crate::{TdxExitDetails, TdxExitStatus};
 use thiserror::Error;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use vm_memory::GuestAddress;

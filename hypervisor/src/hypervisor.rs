@@ -7,13 +7,13 @@
 // Copyright 2018-2019 CrowdStrike, Inc.
 //
 //
+#[cfg(feature = "tdx")]
+use crate::kvm::TdxCapabilities;
 use crate::vm::Vm;
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::CpuId;
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::MsrList;
-#[cfg(feature = "tdx")]
-use crate::TdxCapabilities;
 use std::sync::Arc;
 use thiserror::Error;
 

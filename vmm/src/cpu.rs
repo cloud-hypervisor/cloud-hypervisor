@@ -30,13 +30,13 @@ use devices::interrupt_controller::InterruptController;
 use gdbstub_arch::x86::reg::{X86SegmentRegs, X86_64CoreRegs};
 #[cfg(target_arch = "aarch64")]
 use hypervisor::kvm::kvm_bindings;
+#[cfg(feature = "tdx")]
+use hypervisor::kvm::{TdxExitDetails, TdxExitStatus};
 #[cfg(target_arch = "x86_64")]
 use hypervisor::x86_64::CpuId;
 #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
 use hypervisor::x86_64::{SpecialRegisters, StandardRegisters};
 use hypervisor::{CpuState, HypervisorCpuError, VmExit, VmOps};
-#[cfg(feature = "tdx")]
-use hypervisor::{TdxExitDetails, TdxExitStatus};
 use libc::{c_void, siginfo_t};
 use seccompiler::{apply_filter, SeccompAction};
 use std::collections::BTreeMap;
