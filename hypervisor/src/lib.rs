@@ -40,7 +40,7 @@ pub mod mshv;
 pub mod hypervisor;
 
 /// Vm related module
-pub mod vm;
+mod vm;
 
 /// CPU related module
 mod cpu;
@@ -48,16 +48,19 @@ mod cpu;
 /// Device related module
 mod device;
 
-pub use crate::hypervisor::{Hypervisor, HypervisorError};
 pub use cpu::{HypervisorCpuError, Vcpu, VmExit};
 pub use device::{Device, HypervisorDeviceError};
+pub use hypervisor::{Hypervisor, HypervisorError};
 #[cfg(feature = "tdx")]
 pub use kvm::TdxCapabilities;
 #[cfg(feature = "kvm")]
 pub use kvm::*;
 #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
 pub use mshv::*;
-pub use vm::{DataMatch, HypervisorVmError, Vm};
+pub use vm::{
+    DataMatch, HypervisorVmError, InterruptSourceConfig, LegacyIrqSourceConfig, MsiIrqSourceConfig,
+    Vm, VmOps,
+};
 
 use std::sync::Arc;
 

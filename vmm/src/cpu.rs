@@ -34,7 +34,7 @@ use hypervisor::kvm::kvm_bindings;
 use hypervisor::x86_64::{SpecialRegisters, StandardRegisters};
 #[cfg(target_arch = "x86_64")]
 use hypervisor::CpuId;
-use hypervisor::{vm::VmOps, CpuState, HypervisorCpuError, VmExit};
+use hypervisor::{CpuState, HypervisorCpuError, VmExit, VmOps};
 #[cfg(feature = "tdx")]
 use hypervisor::{TdxExitDetails, TdxExitStatus};
 use libc::{c_void, siginfo_t};

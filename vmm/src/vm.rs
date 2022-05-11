@@ -49,7 +49,7 @@ use devices::interrupt_controller::{self, InterruptController};
 use devices::AcpiNotificationFlags;
 #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
 use gdbstub_arch::x86::reg::X86_64CoreRegs;
-use hypervisor::vm::{HypervisorVmError, VmOps};
+use hypervisor::{HypervisorVmError, VmOps};
 use linux_loader::cmdline::Cmdline;
 #[cfg(target_arch = "x86_64")]
 use linux_loader::loader::elf::PvhBootCapability::PvhEntryPresent;
@@ -353,28 +353,28 @@ struct VmOpsHandler {
 }
 
 impl VmOps for VmOpsHandler {
-    fn guest_mem_write(&self, gpa: u64, buf: &[u8]) -> hypervisor::vm::Result<usize> {
+    fn guest_mem_write(&self, gpa: u64, buf: &[u8]) -> result::Result<usize, HypervisorVmError> {
         self.memory
             .memory()
             .write(buf, GuestAddress(gpa))
             .map_err(|e| HypervisorVmError::GuestMemWrite(e.into()))
     }
 
-    fn guest_mem_read(&self, gpa: u64, buf: &mut [u8]) -> hypervisor::vm::Result<usize> {
+    fn guest_mem_read(&self, gpa: u64, buf: &mut [u8]) -> result::Result<usize, HypervisorVmError> {
         self.memory
             .memory()
             .read(buf, GuestAddress(gpa))
             .map_err(|e| HypervisorVmError::GuestMemRead(e.into()))
     }
 
-    fn mmio_read(&self, gpa: u64, data: &mut [u8]) -> hypervisor::vm::Result<()> {
+    fn mmio_read(&self, gpa: u64, data: &mut [u8]) -> result::Result<(), HypervisorVmError> {
         if let Err(vm_device::BusError::MissingAddressRange) = self.mmio_bus.read(gpa, data) {
             warn!("Guest MMIO read to unregistered address 0x{:x}", gpa);
         }
         Ok(())
     }
 
-    fn mmio_write(&self, gpa: u64, data: &[u8]) -> hypervisor::vm::Result<()> {
+    fn mmio_write(&self, gpa: u64, data: &[u8]) -> result::Result<(), HypervisorVmError> {
         match self.mmio_bus.write(gpa, data) {
             Err(vm_device::BusError::MissingAddressRange) => {
                 warn!("Guest MMIO write to unregistered address 0x{:x}", gpa);
@@ -390,7 +390,7 @@ impl VmOps for VmOpsHandler {
     }
 
     #[cfg(target_arch = "x86_64")]
-    fn pio_read(&self, port: u64, data: &mut [u8]) -> hypervisor::vm::Result<()> {
+    fn pio_read(&self, port: u64, data: &mut [u8]) -> result::Result<(), HypervisorVmError> {
         use pci::{PCI_CONFIG_IO_PORT, PCI_CONFIG_IO_PORT_SIZE};
 
         if (PCI_CONFIG_IO_PORT..(PCI_CONFIG_IO_PORT + PCI_CONFIG_IO_PORT_SIZE)).contains(&port) {
@@ -409,7 +409,7 @@ impl VmOps for VmOpsHandler {
     }
 
     #[cfg(target_arch = "x86_64")]
-    fn pio_write(&self, port: u64, data: &[u8]) -> hypervisor::vm::Result<()> {
+    fn pio_write(&self, port: u64, data: &[u8]) -> result::Result<(), HypervisorVmError> {
         use pci::{PCI_CONFIG_IO_PORT, PCI_CONFIG_IO_PORT_SIZE};
 
         if (PCI_CONFIG_IO_PORT..(PCI_CONFIG_IO_PORT + PCI_CONFIG_IO_PORT_SIZE)).contains(&port) {
