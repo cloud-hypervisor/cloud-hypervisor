@@ -1048,6 +1048,3 @@ impl vm::Vm for MshvVm {
             .map_err(|e| vm::HypervisorVmError::GetDirtyLog(e.into()))
     }
 }
-pub use hv_cpuid_entry as CpuIdEntry;
-
-pub const CPUID_FLAG_VALID_INDEX: u32 = 0;
