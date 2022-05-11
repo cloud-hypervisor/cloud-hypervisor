@@ -989,8 +989,8 @@ impl CpuManager {
                                     }
                                     #[cfg(feature = "tdx")]
                                     VmExit::Tdx => {
-                                        if let Some(vcpu_fd) = Arc::get_mut(&mut vcpu.vcpu) {
-                                            match vcpu_fd.get_tdx_exit_details() {
+                                        if let Some(vcpu) = Arc::get_mut(&mut vcpu.vcpu) {
+                                            match vcpu.get_tdx_exit_details() {
                                                 Ok(details) => match details {
                                                     TdxExitDetails::GetQuote => warn!("TDG_VP_VMCALL_GET_QUOTE not supported"),
                                                     TdxExitDetails::SetupEventNotifyInterrupt => {
@@ -999,7 +999,7 @@ impl CpuManager {
                                                 },
                                                 Err(e) => error!("Unexpected TDX VMCALL: {}", e),
                                             }
-                                            vcpu_fd.set_tdx_status(TdxExitStatus::InvalidOperand);
+                                            vcpu.set_tdx_status(TdxExitStatus::InvalidOperand);
                                         } else {
                                             // We should never reach this code as
                                             // this means the design from the code
