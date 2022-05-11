@@ -135,7 +135,7 @@ pub fn clone_queue(
             next_avail: queue.state.next_avail,
             next_used: queue.state.next_used,
             event_idx_enabled: queue.state.event_idx_enabled,
-            signalled_used: queue.state.signalled_used,
+            num_added: queue.state.num_added,
             size: queue.state.size,
             ready: queue.state.ready,
             desc_table: queue.state.desc_table,
