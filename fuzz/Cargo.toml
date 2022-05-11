@@ -19,7 +19,7 @@ virtio-devices = { path = "../virtio-devices" }
 virtio-queue = "0.2.0"
 vmm-sys-util = "0.9.0"
 vm-virtio = { path = "../vm-virtio" }
-vm-memory = "0.7.0"
+vm-memory = "0.8.0"
 
 [dependencies.cloud-hypervisor]
 path = ".."

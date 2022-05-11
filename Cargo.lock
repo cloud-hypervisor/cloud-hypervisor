@@ -1181,8 +1181,7 @@ dependencies = [
 [[package]]
 name = "vhost-user-backend"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1490f2028d4f119b2292efe218b5f8cfc6471f039b53b6a6eb5d9513e964facc"
+source = "git+https://github.com/rust-vmm/vhost-user-backend?branch=main#14f58eda14076e973704d4f904850be1146fbb05"
 dependencies = [
  "libc",
  "log",
@@ -1273,9 +1272,9 @@ dependencies = [
 
 [[package]]
 name = "virtio-queue"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3785325315e6496fa88673842ee6cd198b9658e88e8b0e1ad48a5dc818b221dc"
+checksum = "88f2d73c184c18f8acc32dab77fcb6e3af92d53262538d3a68aa474810d6863c"
 dependencies = [
  "log",
  "vm-memory",
@@ -1312,9 +1311,9 @@ source = "git+https://github.com/rust-vmm/vm-fdt?branch=main#ca35d96191f8232bd7a
 
 [[package]]
 name = "vm-memory"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "339d4349c126fdcd87e034631d7274370cf19eb0e87b33166bcd956589fc72c5"
+checksum = "767ed8aaebbff902e02e6d3749dc2baef55e46565f8a6414a065e5baee4b4a81"
 dependencies = [
  "arc-swap",
  "libc",
