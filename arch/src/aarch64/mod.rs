@@ -64,16 +64,16 @@ pub struct EntryPoint {
 
 /// Configure the specified VCPU, and return its MPIDR.
 pub fn configure_vcpu(
-    fd: &Arc<dyn hypervisor::Vcpu>,
+    vcpu: &Arc<dyn hypervisor::Vcpu>,
     id: u8,
     kernel_entry_point: Option<EntryPoint>,
 ) -> super::Result<u64> {
     if let Some(kernel_entry_point) = kernel_entry_point {
-        regs::setup_regs(fd, id, kernel_entry_point.entry_addr.raw_value())
+        regs::setup_regs(vcpu, id, kernel_entry_point.entry_addr.raw_value())
             .map_err(Error::RegsConfiguration)?;
     }
 
-    let mpidr = fd.read_mpidr().map_err(Error::VcpuRegMpidr)?;
+    let mpidr = vcpu.read_mpidr().map_err(Error::VcpuRegMpidr)?;
     Ok(mpidr)
 }
 
