@@ -305,7 +305,7 @@ impl vm::Vm for KvmVm {
                 kvm_route.u.msi.address_hi = cfg.high_addr;
                 kvm_route.u.msi.data = cfg.data;
 
-                if self.check_extension(crate::Cap::MsiDevid) {
+                if self.check_extension(crate::kvm::Cap::MsiDevid) {
                     // On AArch64, there is limitation on the range of the 'devid',
                     // it can not be greater than 65536 (the max of u16).
                     //
