@@ -224,7 +224,7 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
         vhost_user
             .reinitialize_vhost_user(
                 self.mem.memory().deref(),
-                self.queues.clone(),
+                self.queues.iter().map(vm_virtio::clone_queue).collect(),
                 self.queue_evts
                     .iter()
                     .map(|q| q.try_clone().unwrap())
@@ -324,7 +324,7 @@ impl VhostUserCommon {
             .unwrap()
             .setup_vhost_user(
                 &mem.memory(),
-                queues.clone(),
+                queues.iter().map(vm_virtio::clone_queue).collect(),
                 queue_evts.iter().map(|q| q.try_clone().unwrap()).collect(),
                 &interrupt_cb,
                 acked_features,

@@ -672,7 +672,8 @@ impl VirtioPciDevice {
                 let mem = self.memory.as_ref().unwrap().clone();
                 let mut device = self.device.lock().unwrap();
                 let mut queue_evts = Vec::new();
-                let mut queues = self.queues.clone();
+                let mut queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>> =
+                    self.queues.iter().map(vm_virtio::clone_queue).collect();
                 queues.retain(|q| q.state.ready);
                 for (i, queue) in queues.iter().enumerate() {
                     queue_evts.push(self.queue_evts[i].try_clone().unwrap());
