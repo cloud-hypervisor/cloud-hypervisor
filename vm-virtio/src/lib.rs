@@ -12,8 +12,10 @@
 
 use std::fmt::{self, Debug};
 use std::sync::Arc;
+use virtio_queue::Queue;
+use vm_memory::{bitmap::AtomicBitmap, GuestAddress, GuestMemoryAtomic};
 
-use vm_memory::GuestAddress;
+type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
 pub mod queue;
 pub use queue::*;
@@ -119,5 +121,26 @@ impl Translatable for GuestAddress {
         } else {
             *self
         }
+    }
+}
+
+/// Helper for cloning a Queue since QueueState doesn't derive Clone
+pub fn clone_queue(
+    queue: &Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
+) -> Queue<GuestMemoryAtomic<GuestMemoryMmap>> {
+    Queue::<GuestMemoryAtomic<GuestMemoryMmap>, virtio_queue::QueueState> {
+        mem: queue.mem.clone(),
+        state: virtio_queue::QueueState {
+            max_size: queue.state.max_size,
+            next_avail: queue.state.next_avail,
+            next_used: queue.state.next_used,
+            event_idx_enabled: queue.state.event_idx_enabled,
+            signalled_used: queue.state.signalled_used,
+            size: queue.state.size,
+            ready: queue.state.ready,
+            desc_table: queue.state.desc_table,
+            avail_ring: queue.state.avail_ring,
+            used_ring: queue.state.used_ring,
+        },
     }
 }
