@@ -151,6 +151,10 @@ fn temp_api_path(tmp_dir: &TempDir) -> String {
     )
 }
 
+fn temp_event_monitor_path(tmp_dir: &TempDir) -> String {
+    String::from(tmp_dir.as_path().join("event.json").to_str().unwrap())
+}
+
 // Creates the directory and returns the path.
 fn temp_snapshot_dir_path(tmp_dir: &TempDir) -> String {
     let snapshot_dir = String::from(tmp_dir.as_path().join("snapshot").to_str().unwrap());
@@ -458,6 +462,103 @@ fn fw_path(_fw_type: FwType) -> String {
     }
 
     fw_path.to_str().unwrap().to_string()
+}
+
+struct MetaEvent {
+    event: String,
+    device_id: Option<String>,
+}
+
+impl MetaEvent {
+    pub fn match_with_json_event(&self, v: &serde_json::Value) -> bool {
+        let mut matched = false;
+        if v["event"].as_str().unwrap() == self.event {
+            if let Some(device_id) = &self.device_id {
+                if v["properties"]["id"].as_str().unwrap() == device_id {
+                    matched = true
+                }
+            } else {
+                matched = true;
+            }
+        }
+        matched
+    }
+}
+
+// Parse the event_monitor file based on the format that each event
+// is surrounded by '{' and '}'
+fn parse_event_file(event_file: &str) -> Vec<serde_json::Value> {
+    let content = fs::read(event_file).unwrap();
+
+    let mut ret = Vec::new();
+    let mut entry_start = 0;
+    let mut count = 0;
+    for (idx, &c) in content.iter().enumerate() {
+        if c as char == '{' {
+            count += 1;
+        } else if c as char == '}' {
+            assert!(count > 0);
+            count -= 1;
+        }
+
+        if count == 0 {
+            let entry = String::from_utf8_lossy(&content[entry_start..idx + 1]);
+            ret.push(serde_json::from_str(&entry).unwrap());
+            entry_start = idx + 1;
+        }
+    }
+
+    ret
+}
+
+// Return true if all events from the input 'expected_events' are matched sequentially
+// with events from the 'event_file'
+fn check_sequential_events(expected_events: &[&MetaEvent], event_file: &str) -> bool {
+    let json_events = parse_event_file(event_file);
+    let len = expected_events.len();
+    let mut idx = 0;
+    for e in &json_events {
+        if idx == len {
+            break;
+        }
+        if expected_events[idx].match_with_json_event(e) {
+            idx += 1;
+        }
+    }
+
+    idx == len
+}
+
+// Return true if all events from the input 'expected_events' are matched exactly
+// with events from the 'event_file'
+fn check_sequential_events_exact(expected_events: &[&MetaEvent], event_file: &str) -> bool {
+    let json_events = parse_event_file(event_file);
+    assert!(expected_events.len() <= json_events.len());
+    let json_events = &json_events[..expected_events.len()];
+
+    for (idx, e) in json_events.iter().enumerate() {
+        if !expected_events[idx].match_with_json_event(e) {
+            return false;
+        }
+    }
+
+    true
+}
+
+// Return true if events from the input 'expected_events' are matched exactly
+// with the most recent events from the 'event_file'
+fn check_latest_events_exact(latest_events: &[&MetaEvent], event_file: &str) -> bool {
+    let json_events = parse_event_file(event_file);
+    assert!(latest_events.len() <= json_events.len());
+    let json_events = &json_events[(json_events.len() - latest_events.len())..];
+
+    for (idx, e) in json_events.iter().enumerate() {
+        if !latest_events[idx].match_with_json_event(e) {
+            return false;
+        }
+    }
+
+    true
 }
 
 fn test_cpu_topology(threads_per_core: u8, cores_per_package: u8, packages: u8, use_fw: bool) {
@@ -1900,6 +2001,7 @@ mod parallel {
     fn test_simple_launch(fw_path: String, disk_path: &str) {
         let disk_config = Box::new(UbuntuDiskConfig::new(disk_path.to_string()));
         let guest = Guest::new(disk_config);
+        let event_path = temp_event_monitor_path(&guest.tmp_dir);
 
         let mut child = GuestCommand::new(&guest)
             .args(&["--cpus", "boot=1"])
@@ -1908,6 +2010,7 @@ mod parallel {
             .default_disks()
             .default_net()
             .args(&["--serial", "tty", "--console", "off"])
+            .args(&["--event-monitor", format!("path={}", event_path).as_str()])
             .capture_output()
             .spawn()
             .unwrap();
@@ -1920,6 +2023,51 @@ mod parallel {
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
             assert!(guest.get_entropy().unwrap_or_default() >= 900);
             assert_eq!(guest.get_pci_bridge_class().unwrap_or_default(), "0x060000");
+
+            let expected_sequential_events = [
+                &MetaEvent {
+                    event: "starting".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "booting".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "booted".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "activated".to_string(),
+                    device_id: Some("_disk0".to_string()),
+                },
+                &MetaEvent {
+                    event: "reset".to_string(),
+                    device_id: Some("_disk0".to_string()),
+                },
+            ];
+            assert!(check_sequential_events(
+                &expected_sequential_events,
+                &event_path
+            ));
+
+            guest.ssh_command("sudo poweroff").unwrap();
+            thread::sleep(std::time::Duration::new(5, 0));
+            let latest_events = [
+                &MetaEvent {
+                    event: "shutdown".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "deleted".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "shutdown".to_string(),
+                    device_id: None,
+                },
+            ];
+            assert!(check_latest_events_exact(&latest_events, &event_path));
         });
 
         let _ = child.kill();
@@ -5225,9 +5373,11 @@ mod parallel {
         );
 
         let socket = temp_vsock_path(&guest.tmp_dir);
+        let event_path = temp_event_monitor_path(&guest.tmp_dir);
 
         let mut child = GuestCommand::new(&guest)
             .args(&["--api-socket", &api_socket_source])
+            .args(&["--event-monitor", format!("path={}", event_path).as_str()])
             .args(&["--cpus", "boot=4"])
             .args(&[
                 "--memory",
@@ -5290,6 +5440,11 @@ mod parallel {
                     Some(net_id),
                 ));
                 thread::sleep(std::time::Duration::new(10, 0));
+                let latest_events = [&MetaEvent {
+                    event: "device-removed".to_string(),
+                    device_id: Some(net_id.to_string()),
+                }];
+                assert!(check_latest_events_exact(&latest_events, &event_path));
 
                 // Plug the virtio-net device again
                 assert!(remote_command(
@@ -5302,6 +5457,17 @@ mod parallel {
 
             // Pause the VM
             assert!(remote_command(&api_socket_source, "pause", None));
+            let latest_events = [
+                &MetaEvent {
+                    event: "pausing".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "paused".to_string(),
+                    device_id: None,
+                },
+            ];
+            assert!(check_latest_events_exact(&latest_events, &event_path));
 
             // Take a snapshot from the VM
             assert!(remote_command(
@@ -5312,6 +5478,18 @@ mod parallel {
 
             // Wait to make sure the snapshot is completed
             thread::sleep(std::time::Duration::new(10, 0));
+
+            let latest_events = [
+                &MetaEvent {
+                    event: "snapshotting".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "snapshotted".to_string(),
+                    device_id: None,
+                },
+            ];
+            assert!(check_latest_events_exact(&latest_events, &event_path));
         });
 
         // Shutdown the source VM and check console output
@@ -5333,10 +5511,15 @@ mod parallel {
             .unwrap();
 
         let api_socket_restored = format!("{}.2", temp_api_path(&guest.tmp_dir));
+        let event_path_restored = format!("{}.2", temp_event_monitor_path(&guest.tmp_dir));
 
         // Restore the VM from the snapshot
         let mut child = GuestCommand::new(&guest)
             .args(&["--api-socket", &api_socket_restored])
+            .args(&[
+                "--event-monitor",
+                format!("path={}", event_path_restored).as_str(),
+            ])
             .args(&[
                 "--restore",
                 format!("source_url=file://{}", snapshot_dir).as_str(),
@@ -5347,10 +5530,46 @@ mod parallel {
 
         // Wait for the VM to be restored
         thread::sleep(std::time::Duration::new(10, 0));
+        let expected_events = [
+            &MetaEvent {
+                event: "starting".to_string(),
+                device_id: None,
+            },
+            &MetaEvent {
+                event: "restoring".to_string(),
+                device_id: None,
+            },
+        ];
+        assert!(check_sequential_events_exact(
+            &expected_events,
+            &event_path_restored
+        ));
+        let latest_events = [&MetaEvent {
+            event: "restored".to_string(),
+            device_id: None,
+        }];
+        assert!(check_latest_events_exact(
+            &latest_events,
+            &event_path_restored
+        ));
 
         let r = std::panic::catch_unwind(|| {
             // Resume the VM
             assert!(remote_command(&api_socket_restored, "resume", None));
+            let latest_events = [
+                &MetaEvent {
+                    event: "resuming".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "resumed".to_string(),
+                    device_id: None,
+                },
+            ];
+            assert!(check_latest_events_exact(
+                &latest_events,
+                &event_path_restored
+            ));
 
             // Perform same checks to validate VM has been properly restored
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
