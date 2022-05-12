@@ -278,6 +278,7 @@ fn resize_command(
     desired_vcpus: Option<u8>,
     desired_ram: Option<usize>,
     desired_balloon: Option<usize>,
+    event_file: Option<&str>,
 ) -> bool {
     let mut cmd = Command::new(clh_command("ch-remote"));
     cmd.args(&[&format!("--api-socket={}", api_socket), "resize"]);
@@ -294,7 +295,23 @@ fn resize_command(
         cmd.arg(format!("--balloon={}", desired_balloon));
     }
 
-    cmd.status().expect("Failed to launch ch-remote").success()
+    let ret = cmd.status().expect("Failed to launch ch-remote").success();
+
+    if let Some(event_path) = event_file {
+        let latest_events = [
+            &MetaEvent {
+                event: "resizing".to_string(),
+                device_id: None,
+            },
+            &MetaEvent {
+                event: "resized".to_string(),
+                device_id: None,
+            },
+        ];
+        assert!(check_latest_events_exact(&latest_events, event_path));
+    }
+
+    ret
 }
 
 fn resize_zone_command(api_socket: &str, id: &str, desired_size: &str) -> bool {
@@ -692,7 +709,7 @@ fn _test_guest_numa_nodes(acpi: bool) {
             resize_zone_command(&api_socket, "mem2", "4G");
             // Resize to the maximum amount of CPUs and check each NUMA
             // node has been assigned the right CPUs set.
-            resize_command(&api_socket, Some(12), None, None);
+            resize_command(&api_socket, Some(12), None, None, None);
             thread::sleep(std::time::Duration::new(5, 0));
 
             guest.check_numa_common(
@@ -878,7 +895,7 @@ fn test_vhost_user_net(
 
             // Add RAM to the VM
             let desired_ram = 1024 << 20;
-            resize_command(&api_socket, None, Some(desired_ram), None);
+            resize_command(&api_socket, None, Some(desired_ram), None, None);
 
             thread::sleep(std::time::Duration::new(10, 0));
 
@@ -1017,7 +1034,7 @@ fn test_vhost_user_blk(
 
             // Add RAM to the VM
             let desired_ram = 1024 << 20;
-            resize_command(&api_socket, None, Some(desired_ram), None);
+            resize_command(&api_socket, None, Some(desired_ram), None, None);
 
             thread::sleep(std::time::Duration::new(10, 0));
 
@@ -1255,7 +1272,7 @@ fn test_virtio_fs(
 
             // Add RAM to the VM
             let desired_ram = 1024 << 20;
-            resize_command(&api_socket, None, Some(desired_ram), None);
+            resize_command(&api_socket, None, Some(desired_ram), None, None);
 
             thread::sleep(std::time::Duration::new(30, 0));
             assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
@@ -4319,7 +4336,7 @@ mod parallel {
 
             // Resize the VM
             let desired_vcpus = 4;
-            resize_command(&api_socket, Some(desired_vcpus), None, None);
+            resize_command(&api_socket, Some(desired_vcpus), None, None, None);
 
             guest
                 .ssh_command("echo 1 | sudo tee /sys/bus/cpu/devices/cpu2/online")
@@ -4342,7 +4359,7 @@ mod parallel {
 
             // Resize the VM
             let desired_vcpus = 2;
-            resize_command(&api_socket, Some(desired_vcpus), None, None);
+            resize_command(&api_socket, Some(desired_vcpus), None, None, None);
 
             thread::sleep(std::time::Duration::new(10, 0));
             assert_eq!(
@@ -4352,7 +4369,7 @@ mod parallel {
 
             // Resize the VM back up to 4
             let desired_vcpus = 4;
-            resize_command(&api_socket, Some(desired_vcpus), None, None);
+            resize_command(&api_socket, Some(desired_vcpus), None, None, None);
 
             guest
                 .ssh_command("echo 1 | sudo tee /sys/bus/cpu/devices/cpu2/online")
@@ -4410,14 +4427,14 @@ mod parallel {
 
             // Add RAM to the VM
             let desired_ram = 1024 << 20;
-            resize_command(&api_socket, None, Some(desired_ram), None);
+            resize_command(&api_socket, None, Some(desired_ram), None, None);
 
             thread::sleep(std::time::Duration::new(10, 0));
             assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
 
             // Use balloon to remove RAM from the VM
             let desired_balloon = 512 << 20;
-            resize_command(&api_socket, None, None, Some(desired_balloon));
+            resize_command(&api_socket, None, None, Some(desired_balloon), None);
 
             thread::sleep(std::time::Duration::new(10, 0));
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
@@ -4429,7 +4446,7 @@ mod parallel {
 
             // Use balloon add RAM to the VM
             let desired_balloon = 0;
-            resize_command(&api_socket, None, None, Some(desired_balloon));
+            resize_command(&api_socket, None, None, Some(desired_balloon), None);
 
             thread::sleep(std::time::Duration::new(10, 0));
 
@@ -4439,14 +4456,14 @@ mod parallel {
 
             // Add RAM to the VM
             let desired_ram = 2048 << 20;
-            resize_command(&api_socket, None, Some(desired_ram), None);
+            resize_command(&api_socket, None, Some(desired_ram), None, None);
 
             thread::sleep(std::time::Duration::new(10, 0));
             assert!(guest.get_total_memory().unwrap_or_default() > 1_920_000);
 
             // Remove RAM to the VM (only applies after reboot)
             let desired_ram = 1024 << 20;
-            resize_command(&api_socket, None, Some(desired_ram), None);
+            resize_command(&api_socket, None, Some(desired_ram), None, None);
 
             guest.reboot_linux(1, None);
 
@@ -4493,21 +4510,21 @@ mod parallel {
 
             // Add RAM to the VM
             let desired_ram = 1024 << 20;
-            resize_command(&api_socket, None, Some(desired_ram), None);
+            resize_command(&api_socket, None, Some(desired_ram), None, None);
 
             thread::sleep(std::time::Duration::new(10, 0));
             assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
 
             // Add RAM to the VM
             let desired_ram = 2048 << 20;
-            resize_command(&api_socket, None, Some(desired_ram), None);
+            resize_command(&api_socket, None, Some(desired_ram), None, None);
 
             thread::sleep(std::time::Duration::new(10, 0));
             assert!(guest.get_total_memory().unwrap_or_default() > 1_920_000);
 
             // Remove RAM from the VM
             let desired_ram = 1024 << 20;
-            resize_command(&api_socket, None, Some(desired_ram), None);
+            resize_command(&api_socket, None, Some(desired_ram), None, None);
 
             thread::sleep(std::time::Duration::new(10, 0));
             assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
@@ -4521,7 +4538,7 @@ mod parallel {
 
             // Check we can still resize to 512MiB
             let desired_ram = 512 << 20;
-            resize_command(&api_socket, None, Some(desired_ram), None);
+            resize_command(&api_socket, None, Some(desired_ram), None, None);
             thread::sleep(std::time::Duration::new(10, 0));
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
             assert!(guest.get_total_memory().unwrap_or_default() < 960_000);
@@ -4567,7 +4584,13 @@ mod parallel {
             // Resize the VM
             let desired_vcpus = 4;
             let desired_ram = 1024 << 20;
-            resize_command(&api_socket, Some(desired_vcpus), Some(desired_ram), None);
+            resize_command(
+                &api_socket,
+                Some(desired_vcpus),
+                Some(desired_ram),
+                None,
+                None,
+            );
 
             guest
                 .ssh_command("echo 1 | sudo tee /sys/bus/cpu/devices/cpu2/online")
@@ -5413,11 +5436,23 @@ mod parallel {
             // Check the guest RAM
             assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
             // Increase guest RAM with virtio-mem
-            resize_command(&api_socket_source, None, Some(6 << 30), None);
+            resize_command(
+                &api_socket_source,
+                None,
+                Some(6 << 30),
+                None,
+                Some(&event_path),
+            );
             thread::sleep(std::time::Duration::new(5, 0));
             assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
             // Use balloon to remove RAM from the VM
-            resize_command(&api_socket_source, None, None, Some(1 << 30));
+            resize_command(
+                &api_socket_source,
+                None,
+                None,
+                Some(1 << 30),
+                Some(&event_path),
+            );
             thread::sleep(std::time::Duration::new(5, 0));
             let total_memory = guest.get_total_memory().unwrap_or_default();
             assert!(total_memory > 4_800_000);
@@ -5577,11 +5612,11 @@ mod parallel {
             assert!(total_memory > 4_800_000);
             assert!(total_memory < 5_760_000);
             // Deflate balloon to restore entire RAM to the VM
-            resize_command(&api_socket_restored, None, None, Some(0));
+            resize_command(&api_socket_restored, None, None, Some(0), None);
             thread::sleep(std::time::Duration::new(5, 0));
             assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
             // Decrease guest RAM with virtio-mem
-            resize_command(&api_socket_restored, None, Some(5 << 30), None);
+            resize_command(&api_socket_restored, None, Some(5 << 30), None, None);
             thread::sleep(std::time::Duration::new(5, 0));
             let total_memory = guest.get_total_memory().unwrap_or_default();
             assert!(total_memory > 4_800_000);
@@ -6896,7 +6931,7 @@ mod windows {
 
             let vcpu_num = 6;
             // Hotplug some CPUs
-            resize_command(&api_socket, Some(vcpu_num), None, None);
+            resize_command(&api_socket, Some(vcpu_num), None, None, None);
             // Wait to make sure CPUs are added
             thread::sleep(std::time::Duration::new(10, 0));
             // Check the guest sees the correct number
@@ -6906,7 +6941,7 @@ mod windows {
 
             let vcpu_num = 4;
             // Remove some CPUs. Note that Windows doesn't support hot-remove.
-            resize_command(&api_socket, Some(vcpu_num), None, None);
+            resize_command(&api_socket, Some(vcpu_num), None, None, None);
             // Wait to make sure CPUs are removed
             thread::sleep(std::time::Duration::new(10, 0));
             // Reboot to let Windows catch up
@@ -6974,7 +7009,7 @@ mod windows {
 
             let ram_size = 4 * 1024 * 1024 * 1024;
             // Hotplug some RAM
-            resize_command(&api_socket, None, Some(ram_size), None);
+            resize_command(&api_socket, None, Some(ram_size), None, None);
             // Wait to make sure RAM has been added
             thread::sleep(std::time::Duration::new(10, 0));
             // Check the guest sees the correct number
@@ -6982,7 +7017,7 @@ mod windows {
 
             let ram_size = 3 * 1024 * 1024 * 1024;
             // Unplug some RAM. Note that hot-remove most likely won't work.
-            resize_command(&api_socket, None, Some(ram_size), None);
+            resize_command(&api_socket, None, Some(ram_size), None, None);
             // Wait to make sure RAM has been added
             thread::sleep(std::time::Duration::new(10, 0));
             // Reboot to let Windows catch up
@@ -7452,7 +7487,7 @@ mod vfio {
 
             // Add RAM to the VM
             let desired_ram = 6 << 30;
-            resize_command(&api_socket, None, Some(desired_ram), None);
+            resize_command(&api_socket, None, Some(desired_ram), None, None);
             thread::sleep(std::time::Duration::new(30, 0));
             assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
 
@@ -7682,11 +7717,11 @@ mod live_migration {
             if balloon {
                 assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
                 // Increase the guest RAM
-                resize_command(&src_api_socket, None, Some(6 << 30), None);
+                resize_command(&src_api_socket, None, Some(6 << 30), None, None);
                 thread::sleep(std::time::Duration::new(5, 0));
                 assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
                 // Use balloon to remove RAM from the VM
-                resize_command(&src_api_socket, None, None, Some(1 << 30));
+                resize_command(&src_api_socket, None, None, Some(1 << 30), None);
                 thread::sleep(std::time::Duration::new(5, 0));
                 let total_memory = guest.get_total_memory().unwrap_or_default();
                 assert!(total_memory > 4_800_000);
@@ -7923,7 +7958,7 @@ mod live_migration {
                     resize_zone_command(&dest_api_socket, "mem2", "4G");
                     // Resize to the maximum amount of CPUs and check each NUMA
                     // node has been assigned the right CPUs set.
-                    resize_command(&dest_api_socket, Some(12), None, None);
+                    resize_command(&dest_api_socket, Some(12), None, None, None);
                     thread::sleep(std::time::Duration::new(5, 0));
 
                     guest.check_numa_common(
@@ -7949,11 +7984,11 @@ mod live_migration {
                 assert!(total_memory > 4_800_000);
                 assert!(total_memory < 5_760_000);
                 // Deflate balloon to restore entire RAM to the VM
-                resize_command(&dest_api_socket, None, None, Some(0));
+                resize_command(&dest_api_socket, None, None, Some(0), None);
                 thread::sleep(std::time::Duration::new(5, 0));
                 assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
                 // Decrease guest RAM with virtio-mem
-                resize_command(&dest_api_socket, None, Some(5 << 30), None);
+                resize_command(&dest_api_socket, None, Some(5 << 30), None, None);
                 thread::sleep(std::time::Duration::new(5, 0));
                 let total_memory = guest.get_total_memory().unwrap_or_default();
                 assert!(total_memory > 4_800_000);
