@@ -503,26 +503,16 @@ impl MetaEvent {
 }
 
 // Parse the event_monitor file based on the format that each event
-// is surrounded by '{' and '}'
+// is followed by a double newline
 fn parse_event_file(event_file: &str) -> Vec<serde_json::Value> {
     let content = fs::read(event_file).unwrap();
-
     let mut ret = Vec::new();
-    let mut entry_start = 0;
-    let mut count = 0;
-    for (idx, &c) in content.iter().enumerate() {
-        if c as char == '{' {
-            count += 1;
-        } else if c as char == '}' {
-            assert!(count > 0);
-            count -= 1;
-        }
-
-        if count == 0 {
-            let entry = String::from_utf8_lossy(&content[entry_start..idx + 1]);
-            ret.push(serde_json::from_str(&entry).unwrap());
-            entry_start = idx + 1;
-        }
+    for entry in String::from_utf8_lossy(&content)
+        .trim()
+        .split("\n\n")
+        .collect::<Vec<&str>>()
+    {
+        ret.push(serde_json::from_str(entry).unwrap());
     }
 
     ret

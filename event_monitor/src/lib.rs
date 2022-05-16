@@ -9,6 +9,7 @@ extern crate serde_derive;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs::File;
+use std::io::Write;
 use std::os::unix::io::AsRawFd;
 use std::time::{Duration, Instant};
 
@@ -50,6 +51,9 @@ pub fn event_log(source: &str, event: &str, properties: Option<&HashMap<Cow<str>
             properties,
         };
         serde_json::to_writer_pretty(file, &e).ok();
+
+        let mut file = file;
+        file.write_all(b"\n\n").ok();
     }
 }
 
