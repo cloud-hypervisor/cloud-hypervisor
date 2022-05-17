@@ -75,8 +75,7 @@ Here is an example how to create a bridge and add two DPDK ports to it
 ovs-vsctl add-br ovsbr0 -- set bridge ovsbr0 datapath_type=netdev
 # create two DPDK ports and add them to the bridge
 ovs-vsctl add-port ovsbr0 vhost-user1 -- set Interface vhost-user1 type=dpdkvhostuser
-ovs-vsctl add-port ovsbr0 vhost-user2 -- set Interface vhost-user2
-type=dpdkvhostuser
+ovs-vsctl add-port ovsbr0 vhost-user2 -- set Interface vhost-user2 type=dpdkvhostuser
 # set the number of rx queues
 ovs-vsctl set Interface vhost-user1 options:n_rxq=2
 ovs-vsctl set Interface vhost-user2 options:n_rxq=2
