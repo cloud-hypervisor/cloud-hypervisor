@@ -8,6 +8,7 @@ use net_util::MacAddr;
 use option_parser::{
     ByteSized, IntegerList, OptionParser, OptionParserError, StringList, Toggle, Tuple,
 };
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 use std::convert::From;
 use std::fmt;

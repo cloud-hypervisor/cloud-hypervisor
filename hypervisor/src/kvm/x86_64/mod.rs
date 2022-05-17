@@ -10,7 +10,7 @@
 
 use crate::arch::x86::{msr_index, SegmentRegisterOps, MTRR_ENABLE, MTRR_MEM_TYPE_WB};
 use crate::kvm::{Cap, Kvm, KvmError, KvmResult};
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 ///
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms

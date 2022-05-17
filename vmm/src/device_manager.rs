@@ -65,6 +65,7 @@ use pci::{
     VfioUserPciDevice, VfioUserPciDeviceError,
 };
 use seccompiler::SeccompAction;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 use std::convert::TryInto;
 use std::fs::{read_link, File, OpenOptions};

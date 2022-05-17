@@ -4,6 +4,7 @@
 //
 
 use crate::{MigratableError, VersionMapped};
+use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;

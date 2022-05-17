@@ -8,7 +8,7 @@
 //
 //
 use crate::arch::x86::{msr_index, SegmentRegisterOps, MTRR_ENABLE, MTRR_MEM_TYPE_WB};
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 ///

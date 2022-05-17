@@ -15,7 +15,7 @@ use crate::vm::{self, InterruptSourceConfig, VmOps};
 pub use mshv_bindings::*;
 pub use mshv_ioctls::IoEventAddress;
 use mshv_ioctls::{set_registers_64, Mshv, NoDatamatch, VcpuFd, VmFd};
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use vm::DataMatch;

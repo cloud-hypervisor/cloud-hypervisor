@@ -9,11 +9,10 @@
 
 #[macro_use]
 extern crate log;
-#[macro_use]
-extern crate serde_derive;
 
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::SgxEpcSection;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::result;
