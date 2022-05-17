@@ -79,10 +79,12 @@ use std::result;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use vfio_ioctls::{VfioContainer, VfioDevice};
-use virtio_devices::transport::VirtioPciDevice;
 use virtio_devices::transport::VirtioTransport;
+use virtio_devices::transport::{VirtioPciDevice, VirtioPciDeviceActivator};
 use virtio_devices::vhost_user::VhostUserConfig;
-use virtio_devices::{AccessPlatformMapping, VdpaDmaMapping, VirtioMemMappingSource};
+use virtio_devices::{
+    AccessPlatformMapping, ActivateError, VdpaDmaMapping, VirtioMemMappingSource,
+};
 use virtio_devices::{Endpoint, IommuMapping};
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::dma_mapping::vfio::VfioDmaMapping;
@@ -475,6 +477,9 @@ pub enum DeviceManagerError {
 
     /// Invalid identifier
     InvalidIdentifier(String),
+
+    /// Error activating virtio device
+    VirtioActivate(ActivateError),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -938,6 +943,9 @@ pub struct DeviceManager {
 
     // Start time of the VM
     timestamp: Instant,
+
+    // Pending activations
+    pending_activations: Arc<Mutex<Vec<VirtioPciDeviceActivator>>>,
 }
 
 impl DeviceManager {
@@ -1079,6 +1087,7 @@ impl DeviceManager {
             io_uring_supported: None,
             boot_id_list,
             timestamp,
+            pending_activations: Arc::new(Mutex::new(Vec::default())),
         };
 
         let device_manager = Arc::new(Mutex::new(device_manager));
@@ -3417,6 +3426,7 @@ impl DeviceManager {
                 // The exception being if not on the default PCI segment.
                 pci_segment_id > 0 || device_type != VirtioDeviceType::Block as u32,
                 dma_handler,
+                self.pending_activations.clone(),
             )
             .map_err(DeviceManagerError::VirtioDevice)?,
         ));
@@ -3571,17 +3581,10 @@ impl DeviceManager {
     }
 
     pub fn activate_virtio_devices(&self) -> DeviceManagerResult<()> {
-        // Find virtio pci devices and activate any pending ones
-        let device_tree = self.device_tree.lock().unwrap();
-        for pci_device_node in device_tree.pci_devices() {
-            #[allow(irrefutable_let_patterns)]
-            if let PciDeviceHandle::Virtio(virtio_pci_device) = &pci_device_node
-                .pci_device_handle
-                .as_ref()
-                .ok_or(DeviceManagerError::MissingPciDevice)?
-            {
-                virtio_pci_device.lock().unwrap().maybe_activate();
-            }
+        for mut activator in self.pending_activations.lock().unwrap().drain(..) {
+            activator
+                .activate()
+                .map_err(DeviceManagerError::VirtioActivate)?;
         }
         Ok(())
     }
