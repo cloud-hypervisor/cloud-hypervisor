@@ -88,12 +88,10 @@ Hypervisor. Here, all the steps are based on Ubuntu, for other Linux
 distributions please replace the package manager and package name.
 
 ```shell
-# Install git
-$ sudo apt install git
+# Install build-essential, git, and qemu-img
+$ sudo apt install git build-essential qemu-img
 # Install rust tool chain
 $ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-# Install build-essential
-$ sudo apt install build-essential
 # If you want to build statically linked binary please add musl target
 $ rustup target add x86_64-unknown-linux-musl
 ```
