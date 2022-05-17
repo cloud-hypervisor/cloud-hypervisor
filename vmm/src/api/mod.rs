@@ -41,6 +41,7 @@ use crate::config::{
 use crate::device_tree::DeviceTree;
 use crate::vm::{Error as VmError, VmState};
 use micro_http::Body;
+use serde::{Deserialize, Serialize};
 use std::io;
 use std::sync::mpsc::{channel, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};

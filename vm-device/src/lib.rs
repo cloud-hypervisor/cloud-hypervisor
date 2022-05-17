@@ -3,8 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-#[macro_use]
-extern crate serde_derive;
+use serde::{Deserialize, Serialize};
 
 mod bus;
 pub mod dma_mapping;

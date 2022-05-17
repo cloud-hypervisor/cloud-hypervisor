@@ -3,9 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-#[macro_use]
-extern crate serde_derive;
-
 use crate::protocol::MemoryRangeTable;
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};

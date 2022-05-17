@@ -12,7 +12,7 @@ mod performance_tests;
 
 use clap::{Arg, Command as ClapCommand};
 use performance_tests::*;
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use std::{env, fmt, process::Command, sync::mpsc::channel, thread, time::Duration};
 use thiserror::Error;
 

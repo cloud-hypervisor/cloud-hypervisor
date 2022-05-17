@@ -7,8 +7,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.57"
 thiserror = "1.0.31"
-serde = { version = "1.0.137", features = ["rc"] }
-serde_derive = "1.0.137"
+serde = { version = "1.0.137", features = ["rc", "derive"] }
 serde_json = "1.0.81"
 versionize = "0.1.6"
 versionize_derive = "0.1.4"

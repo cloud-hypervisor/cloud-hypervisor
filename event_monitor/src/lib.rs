@@ -3,9 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-#[macro_use]
-extern crate serde_derive;
-
+use serde::Serialize;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs::File;

@@ -14,9 +14,8 @@
 extern crate event_monitor;
 #[macro_use]
 extern crate log;
-#[macro_use]
-extern crate serde_derive;
 
+use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 use std::io;
 

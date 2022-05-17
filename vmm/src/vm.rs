@@ -57,6 +57,7 @@ use linux_loader::loader::elf::PvhBootCapability::PvhEntryPresent;
 use linux_loader::loader::pe::Error::InvalidImageMagicNumber;
 use linux_loader::loader::KernelLoader;
 use seccompiler::{apply_filter, SeccompAction};
+use serde::{Deserialize, Serialize};
 use signal_hook::{
     consts::{SIGINT, SIGTERM, SIGWINCH},
     iterator::backend::Handle,

@@ -4,6 +4,7 @@
 
 use crate::device_manager::PciDeviceHandle;
 use pci::PciBdf;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use vm_device::Resource;
