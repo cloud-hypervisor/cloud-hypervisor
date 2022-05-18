@@ -1,0 +1,36 @@
+#!/bin/bash
+
+set -e
+
+CH_VER=$1
+CH_SPEC_DIR=$(pwd)
+CH_TMP_DIR=$CH_SPEC_DIR/ch_tmp
+CH_SRC_DIR=$CH_SPEC_DIR/SOURCES
+
+if [ -z $CH_VER ]; then
+	echo "Replace sources with the given <version>"
+	echo "Usage: $0 <version>"
+	exit 1
+fi
+
+rm -rf $CH_TMP_DIR
+if [ ! -d $CH_SRC_DIR ]; then
+	mkdir $CH_SRC_DIR
+fi
+rm -f $CH_SRC_DIR/v*.tar.gz $CH_SRC_DIR/config.toml $CH_SRC_DIR/vendor.tar.gz
+
+
+wget https://github.com/cloud-hypervisor/cloud-hypervisor/archive/v${CH_VER}.tar.gz -O $CH_SRC_DIR/v${CH_VER}.tar.gz
+mkdir $CH_TMP_DIR
+tar xf $CH_SRC_DIR/v${CH_VER}.tar.gz -C $CH_TMP_DIR --strip-components=1
+
+
+pushd $CH_TMP_DIR
+
+cargo vendor > $CH_SRC_DIR/config.toml
+tar czvf $CH_SRC_DIR/vendor.tar.gz vendor
+
+popd
+
+rm -rf $CH_TMP_DIR
+
