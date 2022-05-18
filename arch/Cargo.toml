@@ -13,7 +13,7 @@ acpi_tables = { path = "../acpi_tables" }
 anyhow = "1.0.57"
 byteorder = "1.4.3"
 hypervisor = { path = "../hypervisor" }
-libc = "0.2.125"
+libc = "0.2.126"
 linux-loader = { version = "0.4.0", features = ["elf", "bzimage", "pe"] }
 log = "0.4.17"
 serde = { version = "1.0.137", features = ["rc", "derive"] }
