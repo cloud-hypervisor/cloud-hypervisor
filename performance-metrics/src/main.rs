@@ -13,7 +13,13 @@ mod performance_tests;
 use clap::{Arg, Command as ClapCommand};
 use performance_tests::*;
 use serde::{Deserialize, Serialize};
-use std::{env, fmt, process::Command, sync::mpsc::channel, thread, time::Duration};
+use std::{
+    env, fmt,
+    process::Command,
+    sync::{mpsc::channel, Arc},
+    thread,
+    time::Duration,
+};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -84,6 +90,21 @@ impl Default for MetricsReport {
     }
 }
 
+#[derive(Default)]
+pub struct PerformanceTestOverrides {
+    test_iterations: Option<u32>,
+}
+
+impl fmt::Display for PerformanceTestOverrides {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if let Some(test_iterations) = self.test_iterations {
+            write!(f, "test_iterations = {}", test_iterations)?;
+        }
+
+        Ok(())
+    }
+}
+
 pub struct PerformanceTestControl {
     test_timeout: u32,
     test_iterations: u32,
@@ -142,9 +163,12 @@ struct PerformanceTest {
 }
 
 impl PerformanceTest {
-    pub fn run(&self) -> PerformanceTestResult {
+    pub fn run(&self, overrides: &PerformanceTestOverrides) -> PerformanceTestResult {
         let mut metrics = Vec::new();
-        for _ in 0..self.control.test_iterations {
+        for _ in 0..overrides
+            .test_iterations
+            .unwrap_or(self.control.test_iterations)
+        {
             metrics.push((self.func_ptr)(&self.control));
         }
 
@@ -164,8 +188,9 @@ impl PerformanceTest {
 
     // Calculate the timeout for each test
     // Note: To cover the setup/cleanup time, 20s is added for each iteration of the test
-    pub fn calc_timeout(&self) -> u64 {
-        ((self.control.test_timeout + 20) * self.control.test_iterations) as u64
+    pub fn calc_timeout(&self, test_iterations: &Option<u32>) -> u64 {
+        ((self.control.test_timeout + 20) * test_iterations.unwrap_or(self.control.test_iterations))
+            as u64
     }
 }
 
@@ -405,12 +430,20 @@ const TEST_LIST: [PerformanceTest; 17] = [
     },
 ];
 
-fn run_test_with_timeout(test: &'static PerformanceTest) -> Result<PerformanceTestResult, Error> {
+fn run_test_with_timeout(
+    test: &'static PerformanceTest,
+    overrides: &Arc<PerformanceTestOverrides>,
+) -> Result<PerformanceTestResult, Error> {
     let (sender, receiver) = channel::<Result<PerformanceTestResult, Error>>();
+    let test_iterations = overrides.test_iterations;
+    let overrides = overrides.clone();
     thread::spawn(move || {
-        println!("Test '{}' running .. ({})", test.name, test.control);
+        println!(
+            "Test '{}' running .. (control: {}, overrides: {})",
+            test.name, test.control, overrides
+        );
 
-        let output = match std::panic::catch_unwind(|| test.run()) {
+        let output = match std::panic::catch_unwind(|| test.run(&overrides)) {
             Ok(test_result) => {
                 println!(
                     "Test '{}' .. ok: mean = {}, std_dev = {}",
@@ -425,7 +458,7 @@ fn run_test_with_timeout(test: &'static PerformanceTest) -> Result<PerformanceTe
     });
 
     // Todo: Need to cleanup/kill all hanging child processes
-    let test_timeout = test.calc_timeout();
+    let test_timeout = test.calc_timeout(&test_iterations);
     receiver
         .recv_timeout(Duration::from_secs(test_timeout))
         .map_err(|_| {
@@ -469,6 +502,12 @@ fn main() {
                 .help("Report file. Standard error is used if not specified")
                 .takes_value(true),
         )
+        .arg(
+            Arg::new("iterations")
+                .long("iterations")
+                .help("Override number of test iterations")
+                .takes_value(true),
+        )
         .get_matches();
 
     // It seems that the tool (ethr) used for testing the virtio-net latency
@@ -497,9 +536,17 @@ fn main() {
 
     init_tests();
 
+    let overrides = Arc::new(PerformanceTestOverrides {
+        test_iterations: cmd_arguments
+            .value_of("iterations")
+            .map(|s| s.parse())
+            .transpose()
+            .unwrap_or_default(),
+    });
+
     for test in test_list.iter() {
         if test_filter.is_empty() || test_filter.iter().any(|&s| test.name.contains(s)) {
-            match run_test_with_timeout(test) {
+            match run_test_with_timeout(test, &overrides) {
                 Ok(r) => {
                     metrics_report.results.push(r);
                 }
