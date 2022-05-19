@@ -238,6 +238,7 @@ pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
         .default_disks()
         .args(&["--net", net_params.as_str()])
         .capture_output()
+        .verbosity(VerbosityLevel::Warn)
         .set_print_cmd(false)
         .spawn()
         .unwrap();
@@ -367,6 +368,7 @@ pub fn performance_net_latency(control: &PerformanceTestControl) -> f64 {
         .default_disks()
         .args(&["--net", net_params.as_str()])
         .capture_output()
+        .verbosity(VerbosityLevel::Warn)
         .set_print_cmd(false)
         .spawn()
         .unwrap();
@@ -472,7 +474,12 @@ fn parse_boot_time_output(output: &[u8]) -> Result<f64, Error> {
 }
 
 fn measure_boot_time(cmd: &mut GuestCommand, test_timeout: u32) -> Result<f64, Error> {
-    let mut child = cmd.capture_output().set_print_cmd(false).spawn().unwrap();
+    let mut child = cmd
+        .capture_output()
+        .verbosity(VerbosityLevel::Warn)
+        .set_print_cmd(false)
+        .spawn()
+        .unwrap();
 
     thread::sleep(Duration::new(test_timeout as u64, 0));
     let _ = child.kill();
@@ -663,6 +670,7 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
         .default_net()
         .args(&["--api-socket", &api_socket])
         .capture_output()
+        .verbosity(VerbosityLevel::Warn)
         .set_print_cmd(false)
         .spawn()
         .unwrap();
