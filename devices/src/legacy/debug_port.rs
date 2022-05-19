@@ -73,7 +73,7 @@ impl BusDevice for DebugPort {
         let elapsed = self.timestamp.elapsed();
 
         let code = data[0];
-        info!(
+        warn!(
             "[{} code 0x{:x}] {}.{:>06} seconds",
             DebugIoPortRange::from_u8(code),
             code,
