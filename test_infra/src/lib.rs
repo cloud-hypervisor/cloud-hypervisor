@@ -9,6 +9,7 @@ extern crate lazy_static;
 use ssh2::Session;
 use std::env;
 use std::ffi::OsStr;
+use std::fmt::Debug;
 use std::fs;
 use std::io;
 use std::io::{Read, Write};
@@ -1220,11 +1221,35 @@ impl Guest {
     }
 }
 
+pub enum VerbosityLevel {
+    Warn,
+    Info,
+    Debug,
+}
+
+impl Default for VerbosityLevel {
+    fn default() -> Self {
+        Self::Warn
+    }
+}
+
+impl ToString for VerbosityLevel {
+    fn to_string(&self) -> String {
+        use VerbosityLevel::*;
+        match self {
+            Warn => "".to_string(),
+            Info => "-v".to_string(),
+            Debug => "-vv".to_string(),
+        }
+    }
+}
+
 pub struct GuestCommand<'a> {
     command: Command,
     guest: &'a Guest,
     capture_output: bool,
     print_cmd: bool,
+    verbosity: VerbosityLevel,
 }
 
 impl<'a> GuestCommand<'a> {
@@ -1238,7 +1263,13 @@ impl<'a> GuestCommand<'a> {
             guest,
             capture_output: false,
             print_cmd: true,
+            verbosity: VerbosityLevel::Info,
         }
+    }
+
+    pub fn verbosity(&mut self, verbosity: VerbosityLevel) -> &mut Self {
+        self.verbosity = verbosity;
+        self
     }
 
     pub fn capture_output(&mut self) -> &mut Self {
@@ -1252,6 +1283,17 @@ impl<'a> GuestCommand<'a> {
     }
 
     pub fn spawn(&mut self) -> io::Result<Child> {
+        use VerbosityLevel::*;
+        match &self.verbosity {
+            Warn => {}
+            Info => {
+                self.command.arg("-v");
+            }
+            Debug => {
+                self.command.arg("-vv");
+            }
+        };
+
         if self.print_cmd {
             println!(
                 "\n\n==== Start cloud-hypervisor command-line ====\n\n\
@@ -1264,7 +1306,6 @@ impl<'a> GuestCommand<'a> {
         if self.capture_output {
             let child = self
                 .command
-                .arg("-v")
                 .stderr(Stdio::piped())
                 .stdout(Stdio::piped())
                 .spawn()
@@ -1284,7 +1325,7 @@ impl<'a> GuestCommand<'a> {
                 ))
             }
         } else {
-            self.command.arg("-v").spawn()
+            self.command.spawn()
         }
     }
 
