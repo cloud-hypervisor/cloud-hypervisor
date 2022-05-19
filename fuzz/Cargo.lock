@@ -47,7 +47,6 @@ dependencies = [
  "linux-loader",
  "log",
  "serde",
- "serde_derive",
  "thiserror",
  "versionize",
  "versionize_derive",
@@ -243,7 +242,6 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "serde",
- "serde_derive",
  "serde_json",
 ]
 
@@ -315,7 +313,6 @@ dependencies = [
  "libc",
  "log",
  "serde",
- "serde_derive",
  "serde_json",
  "thiserror",
  "vm-memory",
@@ -472,9 +469,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.10.0"
+version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87f3e037eac156d1775da914196f0f37741a274155e34a0b7e427c35d2a2ecb9"
+checksum = "7b10983b38c53aebdf33f542c6275b0f58a238129d00c4ae0e6fb59738d783ca"
 
 [[package]]
 name = "option_parser"
@@ -502,7 +499,6 @@ dependencies = [
  "libc",
  "log",
  "serde",
- "serde_derive",
  "thiserror",
  "versionize",
  "versionize_derive",
@@ -600,6 +596,9 @@ name = "serde"
 version = "1.0.137"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61ea8d54c77f8315140a05f4c7237403bf38b72704d031543aa1d16abbf517d1"
+dependencies = [
+ "serde_derive",
+]
 
 [[package]]
 name = "serde_derive"
@@ -847,7 +846,6 @@ dependencies = [
  "rate_limiter",
  "seccompiler",
  "serde",
- "serde_derive",
  "serde_json",
  "thiserror",
  "versionize",
@@ -890,7 +888,6 @@ dependencies = [
  "anyhow",
  "hypervisor",
  "serde",
- "serde_derive",
  "serde_json",
  "thiserror",
  "vfio-ioctls",
@@ -920,7 +917,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "serde",
- "serde_derive",
  "serde_json",
  "thiserror",
  "versionize",
@@ -966,7 +962,6 @@ dependencies = [
  "qcow",
  "seccompiler",
  "serde",
- "serde_derive",
  "serde_json",
  "signal-hook",
  "thiserror",
