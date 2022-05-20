@@ -6535,7 +6535,7 @@ mod windows {
                 .spawn()
                 .unwrap();
             let stdin = child.stdin.as_mut().expect("failed to open stdin");
-            let _ = stdin
+            stdin
                 .write_all("type=7".as_bytes())
                 .expect("failed to write stdin");
             let out = child.wait_with_output().expect("sfdisk failed").stdout;
