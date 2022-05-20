@@ -34,7 +34,6 @@ pub enum Thread {
 /// [`SeccompCondition`]: struct.SeccompCondition.html
 /// [`SeccompRule`]: struct.SeccompRule.html
 macro_rules! and {
-    ($($x:expr,)*) => (SeccompRule::new(vec![$($x),*]).unwrap());
     ($($x:expr),*) => (SeccompRule::new(vec![$($x),*]).unwrap())
 }
 
