@@ -162,6 +162,11 @@ fn temp_snapshot_dir_path(tmp_dir: &TempDir) -> String {
     snapshot_dir
 }
 
+fn temp_vmcore_file_path(tmp_dir: &TempDir) -> String {
+    let vmcore_file = String::from(tmp_dir.as_path().join("vmcore").to_str().unwrap());
+    vmcore_file
+}
+
 // Creates the path for direct kernel boot and return the path.
 // For x86_64, this function returns the vmlinux kernel path.
 // For AArch64, this function returns the PE kernel path.
@@ -5656,6 +5661,56 @@ mod parallel {
 
             // Check that all the counters have increased
             assert!(new_counters > orig_counters);
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    #[cfg(feature = "guest_debug")]
+    fn test_coredump() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+        let api_socket = temp_api_path(&guest.tmp_dir);
+
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(&["--cpus", "boot=4"])
+            .args(&["--memory", "size=4G"])
+            .args(&["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .default_disks()
+            .args(&["--net", guest.default_net_string().as_str()])
+            .args(&["--api-socket", &api_socket])
+            .capture_output();
+
+        let mut child = cmd.spawn().unwrap();
+        let vmcore_file = temp_vmcore_file_path(&guest.tmp_dir);
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            assert!(remote_command(&api_socket, "pause", None));
+
+            assert!(remote_command(
+                &api_socket,
+                "coredump",
+                Some(format!("file://{}", vmcore_file).as_str()),
+            ));
+
+            // the num of CORE notes should equals to vcpu
+            let readelf_core_num_cmd = format!(
+                "readelf --all {} |grep CORE |grep -v Type |wc -l",
+                vmcore_file
+            );
+            let core_num_in_elf = exec_host_command_output(&readelf_core_num_cmd);
+            assert_eq!(String::from_utf8_lossy(&core_num_in_elf.stdout).trim(), "4");
+
+            // the num of QEMU notes should equals to vcpu
+            let readelf_vmm_num_cmd = format!("readelf --all {} |grep QEMU |wc -l", vmcore_file);
+            let vmm_num_in_elf = exec_host_command_output(&readelf_vmm_num_cmd);
+            assert_eq!(String::from_utf8_lossy(&vmm_num_in_elf.stdout).trim(), "4");
         });
 
         let _ = child.kill();
