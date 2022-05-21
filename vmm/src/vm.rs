@@ -19,6 +19,8 @@ use crate::config::{
 #[cfg(feature = "guest_debug")]
 use crate::coredump::DumpState;
 #[cfg(feature = "guest_debug")]
+use crate::coredump::{Elf64Writable, NoteDescType};
+#[cfg(feature = "guest_debug")]
 use crate::coredump::{GuestDebuggable, GuestDebuggableError};
 use crate::cpu;
 use crate::device_manager::{Console, DeviceManager, DeviceManagerError, PtyPair};
@@ -3021,6 +3023,9 @@ impl Debuggable for Vm {
 pub const UINT16_MAX: u32 = 65535;
 
 #[cfg(feature = "guest_debug")]
+impl Elf64Writable for Vm {}
+
+#[cfg(feature = "guest_debug")]
 impl GuestDebuggable for Vm {
     fn coredump(&mut self, destination_url: &str) -> std::result::Result<(), GuestDebuggableError> {
         event!("vm", "coredumping");
@@ -3042,6 +3047,10 @@ impl GuestDebuggable for Vm {
         }
 
         let coredump_state = self.get_dump_state(destination_url)?;
+
+        self.write_header(&coredump_state)?;
+        self.write_note(&coredump_state)?;
+        self.write_loads(&coredump_state)?;
 
         Ok(())
     }
