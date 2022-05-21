@@ -287,37 +287,6 @@ struct VirtioPciDeviceState {
 
 impl VersionMapped for VirtioPciDeviceState {}
 
-pub struct VirtioPciDeviceActivator {
-    interrupt: Option<Arc<dyn VirtioInterrupt>>,
-    memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
-    device: Arc<Mutex<dyn VirtioDevice>>,
-    device_activated: Arc<AtomicBool>,
-    queues: Option<Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>>,
-    queue_evts: Option<Vec<EventFd>>,
-    barrier: Option<Arc<Barrier>>,
-    id: String,
-}
-
-impl VirtioPciDeviceActivator {
-    pub fn activate(&mut self) -> ActivateResult {
-        self.device.lock().unwrap().activate(
-            self.memory.take().unwrap(),
-            self.interrupt.take().unwrap(),
-            self.queues.take().unwrap(),
-            self.queue_evts.take().unwrap(),
-        )?;
-        self.device_activated.store(true, Ordering::SeqCst);
-
-        if let Some(barrier) = self.barrier.take() {
-            info!("{}: Waiting for barrier", self.id);
-            barrier.wait();
-            info!("{}: Barrier released", self.id);
-        }
-
-        Ok(())
-    }
-}
-
 pub struct VirtioPciDevice {
     id: String,
 
@@ -369,11 +338,11 @@ pub struct VirtioPciDevice {
     // EventFd to signal on to request activation
     activate_evt: EventFd,
 
+    // Barrier that is used to wait on for activation
+    activate_barrier: Arc<Barrier>,
+
     // Optional DMA handler
     dma_handler: Option<Arc<dyn ExternalDmaMapping>>,
-
-    // Pending activations
-    pending_activations: Arc<Mutex<Vec<VirtioPciDeviceActivator>>>,
 }
 
 impl VirtioPciDevice {
@@ -390,7 +359,6 @@ impl VirtioPciDevice {
         activate_evt: EventFd,
         use_64bit_bar: bool,
         dma_handler: Option<Arc<dyn ExternalDmaMapping>>,
-        pending_activations: Arc<Mutex<Vec<VirtioPciDeviceActivator>>>,
     ) -> Result<Self> {
         let device_clone = device.clone();
         let mut locked_device = device_clone.lock().unwrap();
@@ -490,8 +458,8 @@ impl VirtioPciDevice {
             cap_pci_cfg_info: VirtioPciCfgCapInfo::default(),
             bar_regions: vec![],
             activate_evt,
+            activate_barrier: Arc::new(Barrier::new(2)),
             dma_handler,
-            pending_activations,
         };
 
         if let Some(msix_config) = &virtio_pci_device.msix_config {
@@ -698,37 +666,37 @@ impl VirtioPciDevice {
         self.device.clone()
     }
 
-    fn prepare_activator(&mut self, barrier: Option<Arc<Barrier>>) -> VirtioPciDeviceActivator {
-        let mut queue_evts = Vec::new();
-        let mut queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>> =
-            self.queues.iter().map(vm_virtio::clone_queue).collect();
-        queues.retain(|q| q.state.ready);
-        for (i, queue) in queues.iter().enumerate() {
-            queue_evts.push(self.queue_evts[i].try_clone().unwrap());
-            if !queue.is_valid() {
-                error!("Queue {} is not valid", i);
+    fn activate(&mut self) -> ActivateResult {
+        if let Some(virtio_interrupt) = self.virtio_interrupt.take() {
+            if self.memory.is_some() {
+                let mem = self.memory.as_ref().unwrap().clone();
+                let mut device = self.device.lock().unwrap();
+                let mut queue_evts = Vec::new();
+                let mut queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>> =
+                    self.queues.iter().map(vm_virtio::clone_queue).collect();
+                queues.retain(|q| q.state.ready);
+                for (i, queue) in queues.iter().enumerate() {
+                    queue_evts.push(self.queue_evts[i].try_clone().unwrap());
+                    if !queue.is_valid() {
+                        error!("Queue {} is not valid", i);
+                    }
+                }
+                return device.activate(mem, virtio_interrupt, queues, queue_evts);
             }
         }
-
-        VirtioPciDeviceActivator {
-            interrupt: self.virtio_interrupt.take(),
-            memory: self.memory.clone(),
-            device: self.device.clone(),
-            queues: Some(queues),
-            device_activated: self.device_activated.clone(),
-            queue_evts: Some(
-                queue_evts
-                    .iter()
-                    .map(|fd| fd.try_clone().unwrap())
-                    .collect(),
-            ),
-            barrier,
-            id: self.id.clone(),
-        }
+        Ok(())
     }
 
-    fn activate(&mut self) -> ActivateResult {
-        self.prepare_activator(None).activate()
+    pub fn maybe_activate(&mut self) {
+        if self.needs_activation() {
+            self.activate().expect("Failed to activate device");
+            self.device_activated.store(true, Ordering::SeqCst);
+            info!("{}: Waiting for barrier", self.id);
+            self.activate_barrier.wait();
+            info!("{}: Barrier released", self.id);
+        } else {
+            info!("{}: Device does not need activation", self.id)
+        }
     }
 
     fn needs_activation(&self) -> bool {
@@ -1090,16 +1058,13 @@ impl PciDevice for VirtioPciDevice {
 
         // Try and activate the device if the driver status has changed
         if self.needs_activation() {
-            let barrier = Arc::new(Barrier::new(2));
-            let activator = self.prepare_activator(Some(barrier.clone()));
-            self.pending_activations.lock().unwrap().push(activator);
             info!(
                 "{}: Needs activation; writing to activate event fd",
                 self.id
             );
             self.activate_evt.write(1).ok();
             info!("{}: Needs activation; returning barrier", self.id);
-            return Some(barrier);
+            return Some(self.activate_barrier.clone());
         }
 
         // Device has been reset by the driver
