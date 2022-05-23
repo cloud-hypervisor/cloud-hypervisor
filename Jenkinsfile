@@ -56,7 +56,7 @@ pipeline{
 		stage ('Build') {
 			parallel {
 				stage ('Worker build') {
-					agent { node { label 'focal' } }
+					agent { node { label 'jammy' } }
 					when {
 						beforeAgent true
 						expression {
@@ -132,7 +132,7 @@ pipeline{
 					}
 				}
 				stage ('Worker build (musl)') {
-					agent { node { label 'focal' } }
+					agent { node { label 'jammy' } }
 					when {
 						beforeAgent true
 						expression {
@@ -249,7 +249,7 @@ pipeline{
 					}
 				}
 				stage ('Worker build - Windows guest') {
-					agent { node { label 'focal' } }
+					agent { node { label 'jammy' } }
 					when {
 						beforeAgent true
 						expression {
@@ -295,7 +295,7 @@ pipeline{
 					}
 				}
 				stage ('Worker build - Live Migration') {
-					agent { node { label 'focal-small' } }
+					agent { node { label 'jammy-small' } }
 					when {
 						beforeAgent true
 						expression {
@@ -400,7 +400,7 @@ def cancelPreviousBuilds() {
 def installAzureCli() {
 	sh "sudo apt install -y ca-certificates curl apt-transport-https lsb-release gnupg"
 	sh "curl -sL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null"
-	sh "echo \"deb [arch=amd64] https://packages.microsoft.com/repos/azure-cli/ focal main\" | sudo tee /etc/apt/sources.list.d/azure-cli.list"
+	sh "echo \"deb [arch=amd64] https://packages.microsoft.com/repos/azure-cli/ jammy main\" | sudo tee /etc/apt/sources.list.d/azure-cli.list"
 	sh "sudo apt update"
 	sh "sudo apt install -y azure-cli"
 }
