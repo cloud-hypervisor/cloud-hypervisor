@@ -3052,7 +3052,10 @@ impl GuestDebuggable for Vm {
         self.write_note(&coredump_state)?;
         self.write_loads(&coredump_state)?;
 
-        Ok(())
+        self.memory_manager
+            .lock()
+            .unwrap()
+            .coredump_iterate_save_mem(&coredump_state)
     }
 }
 

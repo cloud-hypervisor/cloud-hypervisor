@@ -8,7 +8,7 @@ use crate::config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
 #[cfg(feature = "guest_debug")]
 use crate::coredump::{CoredumpMemoryRegion, CoredumpMemoryRegions};
 #[cfg(feature = "guest_debug")]
-use crate::coredump::{DumpState, GuestDebuggable, GuestDebuggableError};
+use crate::coredump::{DumpState, GuestDebuggableError};
 use crate::migration::url_to_path;
 use crate::MEMORY_MANAGER_SNAPSHOT_ID;
 use crate::{GuestMemoryMmap, GuestRegionMmap};
@@ -1876,6 +1876,47 @@ impl MemoryManager {
         }
 
         CoredumpMemoryRegions { ram_maps }
+    }
+
+    #[cfg(feature = "guest_debug")]
+    pub fn coredump_iterate_save_mem(
+        &mut self,
+        dump_state: &DumpState,
+    ) -> std::result::Result<(), GuestDebuggableError> {
+        let snapshot_memory_ranges = self
+            .memory_range_table(false)
+            .map_err(|e| GuestDebuggableError::Coredump(e.into()))?;
+
+        if snapshot_memory_ranges.is_empty() {
+            return Ok(());
+        }
+
+        let mut coredump_file = dump_state.file.as_ref().unwrap();
+
+        let guest_memory = self.guest_memory.memory();
+        let mut total_bytes: u64 = 0;
+
+        for range in snapshot_memory_ranges.regions() {
+            let mut offset: u64 = 0;
+            loop {
+                let bytes_written = guest_memory
+                    .write_to(
+                        GuestAddress(range.gpa + offset),
+                        &mut coredump_file,
+                        (range.length - offset) as usize,
+                    )
+                    .map_err(|e| GuestDebuggableError::Coredump(e.into()))?;
+                offset += bytes_written as u64;
+                total_bytes += bytes_written as u64;
+
+                if offset == range.length {
+                    break;
+                }
+            }
+        }
+
+        debug!("coredump total bytes {}", total_bytes);
+        Ok(())
     }
 }
 
