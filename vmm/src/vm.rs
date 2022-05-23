@@ -1013,19 +1013,22 @@ impl Vm {
         let vm = hypervisor.create_vm_with_type(0).unwrap(); // type 0 = KVM_X86_LEGACY_VM
         println!("created vm");
 
-        /* TODO the rest */
-        return Err(Error::Console(vmm_sys_util::errno::Error::new(1)));
-
         let phys_bits = physical_bits(config.lock().unwrap().cpus.max_phys_bits);
 
-        let memory_manager = MemoryManager::new(
+        let memory_manager = MemoryManager::new_craton(
             vm.clone(),
-            &config.lock().unwrap().memory.clone(),
-            None,
+            GuestAddress(ram_start),
+            ram_size.try_into().unwrap(),
+            ram_offset * (PAGE_SIZE as u64),
+            std::path::PathBuf::from(ram_file),
             phys_bits,
-            None,
         )
         .map_err(Error::MemoryManager)?;
+
+        println!("created MemoryManager");
+
+        /* TODO the rest */
+        return Err(Error::Console(vmm_sys_util::errno::Error::new(1)));
 
         let new_vm = Vm::new_from_memory_manager(
             config,

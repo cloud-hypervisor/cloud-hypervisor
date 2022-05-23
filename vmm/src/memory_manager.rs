@@ -135,8 +135,8 @@ struct GuestRamMapping {
 }
 
 #[derive(Clone, Serialize, Deserialize, Versionize)]
-struct ArchMemRegion {
-    base: u64,
+pub struct ArchMemRegion {
+    pub base: u64,
     size: usize,
     r_type: RegionType,
 }
@@ -167,7 +167,7 @@ pub struct MemoryManager {
     snapshot_memory_ranges: MemoryRangeTable,
     memory_zones: MemoryZones,
     log_dirty: bool, // Enable dirty logging for created RAM regions
-    arch_mem_regions: Vec<ArchMemRegion>,
+    pub arch_mem_regions: Vec<ArchMemRegion>,
     ram_allocator: AddressAllocator,
 
     // Keep track of calls to create_userspace_mapping() for guest RAM.
@@ -1062,6 +1062,183 @@ impl MemoryManager {
         if let Some(sgx_epc_config) = sgx_epc_config {
             memory_manager.setup_sgx(sgx_epc_config)?;
         }
+
+        Ok(Arc::new(Mutex::new(memory_manager)))
+    }
+
+    pub fn new_craton(
+        vm: Arc<dyn hypervisor::Vm>,
+        ram_start: GuestAddress,
+        ram_size: usize,
+        ram_offset: u64,
+        ram_path: PathBuf,
+        phys_bits: u8,
+    ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
+
+        /* Nuno: just 1 ram region based on the uio device passed in */
+        let arch_mem_regions = vec![(ram_start, ram_size, RegionType::Ram)];
+        let arch_mem_regions: Vec<ArchMemRegion> = arch_mem_regions
+            .iter()
+            .map(|(a, b, c)| ArchMemRegion {
+                base: a.0,
+                size: *b,
+                r_type: *c,
+            })
+            .collect();
+
+        /* Nuno: this replaces create_memory_regions_from_zones */
+        let mut mem_regions = Vec::new();
+        let mut memory_zones = HashMap::new();
+        // Add zone id to the list of memory zones.
+        let zone_id = String::from(DEFAULT_MEMORY_ZONE);
+        memory_zones.insert(zone_id.clone(), MemoryZone::default());
+        /* Nuno: We can't use create_ram_region because we need MmapRegion::build_raw
+         * (The vm-memory crate doesn't support mmaping a device, because the file size of
+         * the device may be smaller than the mmap region size, so we do the mmap here)
+         */
+        let ram_file = OpenOptions::new().read(true).write(true).open(ram_path).unwrap();
+        println!("opened ram file");
+        let prot = libc::PROT_READ | libc::PROT_WRITE;
+        let flags = libc::MAP_SHARED;
+        println!("libc::MAP_SHARED = {:?}", flags);
+        println!("libc::PROT_READ | libc::PROT_WRITE = {:?}", prot);
+        use core::ptr::null_mut;
+        let mmap_addr = unsafe {
+            libc::mmap(
+                null_mut(),
+                ram_size,
+                prot,
+                flags,
+                ram_file.as_raw_fd(),
+                ram_offset as libc::off_t,
+                )
+        };
+
+        if mmap_addr == libc::MAP_FAILED {
+            eprintln!("mmap failed!");
+            return Err(Error::SharedFileCreate(io::Error::last_os_error()));
+        }
+        println!("mmap succeeded! {:?}", mmap_addr);
+        unsafe {
+            //*(mmap_addr as *mut u8) = 69;
+            let vec: Vec<u8> = vec!(1,2,3);
+            std::ptr::copy_nonoverlapping(vec.as_ptr(), mmap_addr as *mut u8, 3);
+        };
+
+        // Safe because we just mmapped this region successfully
+        let region = unsafe {
+            MmapRegion::build_raw(
+                mmap_addr as *mut u8,
+                ram_size,
+                prot,
+                flags
+            )
+        }.unwrap();
+        let region = Arc::new(GuestRegionMmap::new(region, ram_start).unwrap());
+        println!("created GuestRegionMmap");
+        println!(" pointer: {:#x}", region.as_ptr() as u64);
+        println!(" guest addr: {:#x}", region.start_addr().raw_value());
+        println!(" size: {:#x}", region.len() as u64);
+
+        if let Some(memory_zone) = memory_zones.get_mut(&zone_id) {
+            memory_zone.regions.push(region.clone());
+        }
+        mem_regions.push(region);
+
+        /* Nuno: this just wraps the mem_regions with GuestMemoryMmap structure... */
+        let guest_memory =
+            GuestMemoryMmap::from_arc_regions(mem_regions).map_err(Error::GuestMemory)?;
+        let boot_guest_memory = guest_memory.clone();
+
+        /* Nuno:
+         * Get the first address after ram as the device area
+         */
+        let start_of_device_area =
+            MemoryManager::start_addr(guest_memory.last_addr(), false)?;
+        let end_of_ram_area = start_of_device_area.unchecked_sub(1);
+
+        /* Nuno: copy what new() does here; I guess this isn't used if hotplug is disabled */
+        let mut hotplug_slots = Vec::with_capacity(HOTPLUG_COUNT);
+        hotplug_slots.resize_with(HOTPLUG_COUNT, HotPlugState::default);
+
+        /* Nuno:
+         * This just cuts 64k off from the total address space size, for reasons
+         * then checks it's 64k aligned
+         */
+        let mmio_address_space_size = mmio_address_space_size(phys_bits);
+        debug_assert_eq!(
+            (((mmio_address_space_size) >> 16) << 16),
+            mmio_address_space_size
+        );
+        /* Nuno
+         * The 'platform devices' will go at the end of addressable ram
+         */
+        let start_of_platform_device_area =
+            GuestAddress(mmio_address_space_size - PLATFORM_DEVICE_AREA_SIZE);
+        /* Nuno
+         * Okay so this makes device area massive; all the way from end of physical ram
+         * to near the end of virtual address space - where platform device area is...
+         */
+        let end_of_device_area = start_of_platform_device_area.unchecked_sub(1);
+        /*
+         * Nuno: assumption "Both MMIO and PIO address spaces start at address 0."
+         * This is used for allocating device memory by DeviceManager
+         */
+        let allocator = Arc::new(Mutex::new(
+            SystemAllocator::new(
+                start_of_platform_device_area,
+                PLATFORM_DEVICE_AREA_SIZE,
+                layout::MEM_32BIT_DEVICES_START,
+                layout::MEM_32BIT_DEVICES_SIZE,
+            )
+            .ok_or(Error::CreateSystemAllocator)?,
+        ));
+
+        /* Nuno: assumption start of device area is just after ram */
+        let end_of_ram_area = start_of_device_area.unchecked_sub(1);
+        /* Nuno: assumption device area is after ram */
+        let ram_allocator = AddressAllocator::new(ram_start, start_of_device_area.0).unwrap();
+        println!("created AddressAllocator");
+
+        /* Nuno: this needs to be atomic now */
+        let guest_memory = GuestMemoryAtomic::new(guest_memory);
+
+        let mut memory_manager = MemoryManager {
+            boot_guest_memory,
+            guest_memory,
+            next_memory_slot: 0,
+            start_of_device_area,
+            end_of_device_area,
+            end_of_ram_area,
+            vm,
+            hotplug_slots,
+            selected_slot: 0,
+            mergeable: false,
+            allocator,
+            hotplug_method: HotplugMethod::default(),
+            boot_ram: ram_size.try_into().unwrap(),
+            current_ram: ram_size.try_into().unwrap(),
+            next_hotplug_slot: 0,
+            shared: false,
+            hugepages: false,
+            hugepage_size: None,
+            prefault: false,
+            user_provided_zones: false,
+            snapshot_memory_ranges: MemoryRangeTable::default(),
+            memory_zones,
+            log_dirty: false,
+            arch_mem_regions,
+            ram_allocator, /* Nuno: used in allocate_address_space, and memory hotplug */
+            guest_ram_mappings: Vec::new(),
+        };
+
+        /*
+         * Nuno: this maps regions into kvm guest with ioctls, and calls the allocator to occupy
+         * those regions so they can't be reused - I think we keep it as is
+         */
+        println!("Allocating address space");
+        memory_manager.allocate_address_space()?;
+        println!("Allocated address space");
 
         Ok(Arc::new(Mutex::new(memory_manager)))
     }
