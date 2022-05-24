@@ -53,6 +53,9 @@ jobs:
       - name: Build (default features + gdb)
         run: cargo rustc --locked --bin cloud-hypervisor --features "gdb" -- -D warnings
 
+      - name: Build (default features + guest_debug)
+        run: cargo rustc --locked --bin cloud-hypervisor --features "guest_debug" -- -D warnings
+
       - name: Build (common + mshv)
         run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "common,mshv"  -- -D warnings
 
