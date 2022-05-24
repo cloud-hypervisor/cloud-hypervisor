@@ -52,6 +52,8 @@ mod acpi;
 pub mod api;
 mod clone3;
 pub mod config;
+#[cfg(feature = "guest_debug")]
+mod coredump;
 pub mod cpu;
 pub mod device_manager;
 pub mod device_tree;
