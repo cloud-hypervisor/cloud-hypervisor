@@ -16,6 +16,10 @@ use crate::config::{
     add_to_config, DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, PmemConfig,
     UserDeviceConfig, ValidationError, VdpaConfig, VmConfig, VsockConfig,
 };
+#[cfg(feature = "guest_debug")]
+use crate::coredump::DumpState;
+#[cfg(feature = "guest_debug")]
+use crate::coredump::{GuestDebuggable, GuestDebuggableError};
 use crate::cpu;
 use crate::device_manager::{Console, DeviceManager, DeviceManagerError, PtyPair};
 use crate::device_tree::DeviceTree;
@@ -24,6 +28,8 @@ use crate::gdb::{Debuggable, DebuggableError, GdbRequestPayload, GdbResponsePayl
 use crate::memory_manager::{
     Error as MemoryManagerError, MemoryManager, MemoryManagerSnapshotData,
 };
+#[cfg(feature = "guest_debug")]
+use crate::migration::url_to_file;
 use crate::migration::{get_vm_snapshot, url_to_path, SNAPSHOT_CONFIG_FILE, SNAPSHOT_STATE_FILE};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::GuestMemoryMmap;
@@ -51,6 +57,8 @@ use devices::AcpiNotificationFlags;
 use gdbstub_arch::x86::reg::X86_64CoreRegs;
 use hypervisor::{HypervisorVmError, VmOps};
 use linux_loader::cmdline::Cmdline;
+#[cfg(feature = "guest_debug")]
+use linux_loader::elf;
 #[cfg(target_arch = "x86_64")]
 use linux_loader::loader::elf::PvhBootCapability::PvhEntryPresent;
 #[cfg(target_arch = "aarch64")]
@@ -72,6 +80,8 @@ use std::io::{self, Read, Write};
 use std::io::{Seek, SeekFrom};
 #[cfg(feature = "tdx")]
 use std::mem;
+#[cfg(feature = "guest_debug")]
+use std::mem::size_of;
 use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::net::UnixStream;
@@ -294,6 +304,10 @@ pub enum Error {
     #[cfg(target_arch = "x86_64")]
     #[error("Error joining kernel loading thread")]
     KernelLoadThreadJoin(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
+
+    #[cfg(feature = "guest_debug")]
+    #[error("Error coredumping VM: {0:?}")]
+    Coredump(GuestDebuggableError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -2527,6 +2541,54 @@ impl Vm {
         }
         Ok(GdbResponsePayload::CommandComplete)
     }
+
+    #[cfg(feature = "guest_debug")]
+    fn get_dump_state(
+        &mut self,
+        destination_url: &str,
+    ) -> std::result::Result<DumpState, GuestDebuggableError> {
+        let nr_cpus = self.config.lock().unwrap().cpus.boot_vcpus as u32;
+        let elf_note_size = self.get_note_size(NoteDescType::ElfAndVmmDesc, nr_cpus) as isize;
+        let mut elf_phdr_num = 1 as u16;
+        let elf_sh_info = 0;
+        let coredump_file_path = url_to_file(destination_url)?;
+        let mapping_num = self.memory_manager.lock().unwrap().num_guest_ram_mappings();
+
+        if mapping_num < UINT16_MAX - 2 {
+            elf_phdr_num += mapping_num as u16;
+        } else {
+            panic!("mapping num beyond 65535 not supported");
+        }
+        let coredump_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(coredump_file_path)
+            .map_err(|e| GuestDebuggableError::Coredump(e.into()))?;
+
+        let mem_offset = self.coredump_get_mem_offset(elf_phdr_num, elf_note_size);
+        let mem_data = self
+            .memory_manager
+            .lock()
+            .unwrap()
+            .coredump_memory_regions(mem_offset);
+
+        Ok(DumpState {
+            elf_note_size,
+            elf_phdr_num,
+            elf_sh_info,
+            mem_offset,
+            mem_info: Some(mem_data),
+            file: Some(coredump_file),
+        })
+    }
+
+    #[cfg(feature = "guest_debug")]
+    fn coredump_get_mem_offset(&self, phdr_num: u16, note_size: isize) -> u64 {
+        size_of::<elf::Elf64_Ehdr>() as u64
+            + note_size as u64
+            + size_of::<elf::Elf64_Phdr>() as u64 * phdr_num as u64
+    }
 }
 
 impl Pausable for Vm {
@@ -2952,6 +3014,36 @@ impl Debuggable for Vm {
             // The VM is not booted yet. Report boot_vcpus() instead.
             self.cpu_manager.lock().unwrap().boot_vcpus() as usize
         }
+    }
+}
+
+#[cfg(feature = "guest_debug")]
+pub const UINT16_MAX: u32 = 65535;
+
+#[cfg(feature = "guest_debug")]
+impl GuestDebuggable for Vm {
+    fn coredump(&mut self, destination_url: &str) -> std::result::Result<(), GuestDebuggableError> {
+        event!("vm", "coredumping");
+
+        #[cfg(feature = "tdx")]
+        {
+            if self.config.lock().unwrap().tdx.is_some() {
+                return Err(GuestDebuggableError::Coredump(anyhow!(
+                    "Coredump not possible with TDX VM"
+                )));
+            }
+        }
+
+        let current_state = self.get_state().unwrap();
+        if current_state != VmState::Paused {
+            return Err(GuestDebuggableError::Coredump(anyhow!(
+                "Trying to coredump while VM is running"
+            )));
+        }
+
+        let coredump_state = self.get_dump_state(destination_url)?;
+
+        Ok(())
     }
 }
 

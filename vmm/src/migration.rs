@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+#[cfg(feature = "guest_debug")]
+use crate::coredump::GuestDebuggableError;
 use crate::{
     config::VmConfig,
     vm::{VmSnapshot, VM_SNAPSHOT_ID},
@@ -30,6 +32,18 @@ pub fn url_to_path(url: &str) -> std::result::Result<PathBuf, MigratableError> {
     }
 
     Ok(path)
+}
+
+#[cfg(feature = "guest_debug")]
+pub fn url_to_file(url: &str) -> std::result::Result<PathBuf, GuestDebuggableError> {
+    let file: PathBuf = url
+        .strip_prefix("file://")
+        .ok_or_else(|| {
+            GuestDebuggableError::Coredump(anyhow!("Could not extract file from URL: {}", url))
+        })
+        .map(|s| s.into())?;
+
+    Ok(file)
 }
 
 pub fn recv_vm_config(source_url: &str) -> std::result::Result<VmConfig, MigratableError> {
