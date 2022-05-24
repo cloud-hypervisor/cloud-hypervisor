@@ -124,7 +124,7 @@ pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, Region
         ),
         // 1 GiB ~ : Ram
         (
-            GuestAddress(layout::RAM_64BIT_START),
+            GuestAddress(get_ram_start()),
             (size - ram_deduction) as usize,
             RegionType::Ram,
         ),
@@ -189,9 +189,35 @@ pub fn initramfs_load_addr(
     }
 }
 
+static mut KERNEL_START: u64 = layout::KERNEL_START;
+static mut RAM_64BIT_START: u64 = layout::RAM_64BIT_START;
+static mut FDT_START: u64 = layout::FDT_START;
+
+pub fn set_kernel_start(start: u64) {
+    unsafe {
+        KERNEL_START = start;
+    };
+}
+
+pub fn set_ram_start(start: u64) {
+    unsafe {
+        RAM_64BIT_START = start;
+    };
+}
+
+pub fn set_fdt_addr(addr: u64) {
+    unsafe {
+        FDT_START = addr;
+    };
+}
+
 /// Returns the memory address where the kernel could be loaded.
 pub fn get_kernel_start() -> u64 {
-    layout::KERNEL_START
+    unsafe {KERNEL_START}
+}
+
+pub fn get_ram_start() -> u64 {
+    unsafe {RAM_64BIT_START}
 }
 
 ///Return guest memory address where the uefi should be loaded.
@@ -201,7 +227,7 @@ pub fn get_uefi_start() -> u64 {
 
 // Auxiliary function to get the address where the device tree blob is loaded.
 fn get_fdt_addr() -> u64 {
-    layout::FDT_START
+    unsafe{FDT_START}
 }
 
 pub fn get_host_cpu_phys_bits() -> u8 {

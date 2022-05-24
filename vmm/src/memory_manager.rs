@@ -1486,7 +1486,7 @@ impl MemoryManager {
 
         #[cfg(target_arch = "x86_64")]
         if mem_end < arch::layout::MEM_32BIT_RESERVED_START {
-            return Ok(arch::layout::RAM_64BIT_START);
+            return Ok(arch::get_ram_start());
         }
 
         Ok(start_addr)

@@ -1010,6 +1010,11 @@ impl Vm {
                             );
         println!(" ram offset: {:#x}", ram_offset);
 
+        /* horrible hack but idk what else to do */
+        arch::set_ram_start(ram_start);
+        arch::set_fdt_addr(ram_start);
+        arch::set_kernel_start(ram_start + arch::layout::FDT_MAX_SIZE as u64);
+
         /* Nuno: this checks for SignalMsi and OneReg */
         hypervisor.check_required_extensions().unwrap();
 

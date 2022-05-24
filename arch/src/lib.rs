@@ -87,7 +87,7 @@ pub mod aarch64;
 #[cfg(target_arch = "aarch64")]
 pub use aarch64::{
     arch_memory_regions, configure_system, configure_vcpu, fdt::DeviceInfoForFdt,
-    get_host_cpu_phys_bits, get_kernel_start, get_uefi_start, initramfs_load_addr, layout,
+    get_host_cpu_phys_bits, set_ram_start, set_kernel_start, set_fdt_addr, get_kernel_start, get_ram_start, get_uefi_start, initramfs_load_addr, layout,
     layout::CMDLINE_MAX_SIZE, layout::IRQ_BASE, uefi, EntryPoint,
 };
 
