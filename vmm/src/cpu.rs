@@ -1248,6 +1248,16 @@ impl CpuManager {
     }
 
     #[cfg(target_arch = "aarch64")]
+    pub fn get_presented_mpidrs(&self) -> Vec<u64> {
+        let online_cpus = self.config.boot_vcpus;
+        self.vcpus
+            .iter()
+            .filter(|cpu| cpu.lock().unwrap().id < online_cpus)
+            .map(|cpu| cpu.lock().unwrap().get_mpidr())
+            .collect()
+    }
+
+    #[cfg(target_arch = "aarch64")]
     pub fn get_vcpu_topology(&self) -> Option<(u8, u8, u8)> {
         self.config
             .topology

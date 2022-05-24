@@ -1146,7 +1146,7 @@ impl Vm {
     #[cfg(target_arch = "aarch64")]
     fn configure_system(&mut self, _rsdp_addr: GuestAddress) -> Result<()> {
         let cmdline = Self::generate_cmdline(&self.config, &self.device_manager)?;
-        let vcpu_mpidrs = self.cpu_manager.lock().unwrap().get_mpidrs();
+        let vcpu_mpidrs = self.cpu_manager.lock().unwrap().get_presented_mpidrs();
         let vcpu_topology = self.cpu_manager.lock().unwrap().get_vcpu_topology();
         let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
         let mut pci_space_info: Vec<PciSpaceInfo> = Vec::new();
