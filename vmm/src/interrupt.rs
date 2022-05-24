@@ -305,7 +305,7 @@ impl InterruptManager for MsiInterruptManager {
 #[cfg(target_arch = "aarch64")]
 #[cfg(test)]
 mod tests {
-    use arch::aarch64::gic::kvm::{create_gic, save_pending_tables};
+    use arch::aarch64::gic::kvm::{create_gic, KvmGicV3Its};
     use arch::aarch64::gic::{
         get_dist_regs, get_icc_regs, get_redist_regs, set_dist_regs, set_icc_regs, set_redist_regs,
     };
@@ -375,6 +375,6 @@ mod tests {
         let _ = vm.create_vcpu(0, None).unwrap();
         let gic = create_gic(&vm, 1).expect("Cannot create gic");
 
-        assert!(save_pending_tables(gic.device()).is_ok());
+        assert!(KvmGicV3Its::save_pending_tables(gic.device()).is_ok());
     }
 }

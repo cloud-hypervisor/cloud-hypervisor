@@ -31,9 +31,7 @@ pub trait GicDevice: Send {
     fn device(&self) -> &Arc<dyn hypervisor::Device>;
 
     /// Returns the hypervisor agnostic Device of the ITS device
-    fn its_device(&self) -> Option<&Arc<dyn hypervisor::Device>> {
-        None
-    }
+    fn its_device(&self) -> Option<&Arc<dyn hypervisor::Device>>;
 
     /// Returns the fdt compatibility property of the device
     fn fdt_compatibility(&self) -> &str;
@@ -42,25 +40,19 @@ pub trait GicDevice: Send {
     fn fdt_maint_irq(&self) -> u32;
 
     /// Returns an array with GIC device properties
-    fn device_properties(&self) -> &[u64];
+    fn device_properties(&self) -> [u64; 4];
 
     /// Returns the number of vCPUs this GIC handles
     fn vcpu_count(&self) -> u64;
 
     /// Returns whether the GIC device is MSI compatible or not
-    fn msi_compatible(&self) -> bool {
-        false
-    }
+    fn msi_compatible(&self) -> bool;
 
     /// Returns the MSI compatibility property of the device
-    fn msi_compatibility(&self) -> &str {
-        ""
-    }
+    fn msi_compatibility(&self) -> &str;
 
     /// Returns the MSI reg property of the device
-    fn msi_properties(&self) -> &[u64] {
-        &[]
-    }
+    fn msi_properties(&self) -> [u64; 2];
 
     fn set_its_device(&mut self, its_device: Option<Arc<dyn hypervisor::Device>>);
 
@@ -163,11 +155,23 @@ pub mod kvm {
         /// Vector holding values of GICR_TYPER for each vCPU
         gicr_typers: Vec<u64>,
 
-        /// GIC device properties, to be used for setting up the fdt entry
-        gic_properties: [u64; 4],
+        /// GIC distributor address
+        dist_addr: u64,
 
-        /// MSI device properties, to be used for setting up the fdt entry
-        msi_properties: [u64; 2],
+        /// GIC distributor size
+        dist_size: u64,
+
+        /// GIC distributors address
+        redists_addr: u64,
+
+        /// GIC distributors size
+        redists_size: u64,
+
+        /// GIC MSI address
+        msi_addr: u64,
+
+        /// GIC MSI size
+        msi_size: u64,
 
         /// Number of CPUs handled by the device
         vcpu_count: u64,
@@ -191,34 +195,6 @@ pub mod kvm {
     impl KvmGicV3Its {
         /// Device trees specific constants
         pub const ARCH_GIC_V3_MAINT_IRQ: u32 = 9;
-
-        /// Get the address of the GIC distributor.
-        pub fn get_dist_addr() -> u64 {
-            layout::GIC_V3_DIST_START.raw_value()
-        }
-
-        /// Get the size of the GIC distributor.
-        pub fn get_dist_size() -> u64 {
-            layout::GIC_V3_DIST_SIZE
-        }
-
-        /// Get the address of the GIC redistributors.
-        pub fn get_redists_addr(vcpu_count: u64) -> u64 {
-            KvmGicV3Its::get_dist_addr() - KvmGicV3Its::get_redists_size(vcpu_count)
-        }
-
-        /// Get the size of the GIC redistributors.
-        pub fn get_redists_size(vcpu_count: u64) -> u64 {
-            vcpu_count * layout::GIC_V3_REDIST_SIZE
-        }
-
-        fn get_msi_size() -> u64 {
-            layout::GIC_V3_ITS_SIZE
-        }
-
-        fn get_msi_addr(vcpu_count: u64) -> u64 {
-            KvmGicV3Its::get_redists_addr(vcpu_count) - KvmGicV3Its::get_msi_size()
-        }
 
         /// Save the state of GICv3ITS.
         fn state(&self, gicr_typers: &[u64]) -> Result<Gicv3ItsState> {
@@ -376,6 +352,7 @@ pub mod kvm {
         fn init_device_attributes(
             &mut self,
             vm: &Arc<dyn hypervisor::Vm>,
+            nr_irqs: u32,
         ) -> crate::aarch64::gic::Result<()> {
             // GicV3 part attributes
             /* Setting up the distributor attribute.
@@ -385,7 +362,7 @@ pub mod kvm {
                 self.device(),
                 kvm_bindings::KVM_DEV_ARM_VGIC_GRP_ADDR,
                 u64::from(kvm_bindings::KVM_VGIC_V3_ADDR_TYPE_DIST),
-                &KvmGicV3Its::get_dist_addr() as *const u64 as u64,
+                &self.dist_addr as *const u64 as u64,
                 0,
             )?;
 
@@ -396,7 +373,7 @@ pub mod kvm {
                 self.device(),
                 kvm_bindings::KVM_DEV_ARM_VGIC_GRP_ADDR,
                 u64::from(kvm_bindings::KVM_VGIC_V3_ADDR_TYPE_REDIST),
-                &KvmGicV3Its::get_redists_addr(self.vcpu_count()) as *const u64 as u64,
+                &self.redists_addr as *const u64 as u64,
                 0,
             )?;
 
@@ -415,7 +392,7 @@ pub mod kvm {
                 &its_fd,
                 kvm_bindings::KVM_DEV_ARM_VGIC_GRP_ADDR,
                 u64::from(kvm_bindings::KVM_VGIC_ITS_ADDR_TYPE),
-                &KvmGicV3Its::get_msi_addr(self.vcpu_count()) as *const u64 as u64,
+                &self.msi_addr as *const u64 as u64,
                 0,
             )?;
 
@@ -432,7 +409,6 @@ pub mod kvm {
             /* We need to tell the kernel how many irqs to support with this vgic.
              * See the `layout` module for details.
              */
-            let nr_irqs: u32 = layout::IRQ_NUM;
             let nr_irqs_ptr = &nr_irqs as *const u32;
             Self::set_device_attribute(
                 self.device(),
@@ -489,29 +465,50 @@ pub mod kvm {
             Ok(())
         }
 
+        /// Function that saves RDIST pending tables into guest RAM.
+        ///
+        /// The tables get flushed to guest RAM whenever the VM gets stopped.
+        pub fn save_pending_tables(vgic: &Arc<dyn hypervisor::Device>) -> Result<()> {
+            let init_gic_attr = kvm_bindings::kvm_device_attr {
+                group: kvm_bindings::KVM_DEV_ARM_VGIC_GRP_CTRL,
+                attr: u64::from(kvm_bindings::KVM_DEV_ARM_VGIC_SAVE_PENDING_TABLES),
+                addr: 0,
+                flags: 0,
+            };
+            vgic.set_device_attr(&init_gic_attr)
+                .map_err(super::Error::SetDeviceAttribute)
+        }
+
         /// Method to initialize the GIC device
         #[allow(clippy::new_ret_no_self)]
-        fn new(vm: &Arc<dyn hypervisor::Vm>, vcpu_count: u64) -> Result<Box<dyn GicDevice>> {
+        fn new(
+            vm: &Arc<dyn hypervisor::Vm>,
+            vcpu_count: u64,
+            dist_addr: u64,
+            dist_size: u64,
+            redist_size: u64,
+            msi_size: u64,
+            nr_irqs: u32,
+        ) -> Result<Box<dyn GicDevice>> {
             let vgic = Self::create_device(vm)?;
+            let redists_size: u64 = redist_size * vcpu_count;
+            let redists_addr: u64 = dist_addr - redists_size;
+            let msi_addr: u64 = redists_addr - msi_size;
 
             let mut gic_device = Box::new(KvmGicV3Its {
                 device: vgic,
                 its_device: None,
                 gicr_typers: vec![0; vcpu_count.try_into().unwrap()],
-                gic_properties: [
-                    KvmGicV3Its::get_dist_addr(),
-                    KvmGicV3Its::get_dist_size(),
-                    KvmGicV3Its::get_redists_addr(vcpu_count),
-                    KvmGicV3Its::get_redists_size(vcpu_count),
-                ],
-                msi_properties: [
-                    KvmGicV3Its::get_msi_addr(vcpu_count),
-                    KvmGicV3Its::get_msi_size(),
-                ],
+                dist_addr,
+                dist_size,
+                redists_addr,
+                redists_size,
+                msi_addr,
+                msi_size,
                 vcpu_count,
             });
 
-            gic_device.init_device_attributes(vm)?;
+            gic_device.init_device_attributes(vm, nr_irqs)?;
 
             Ok(gic_device)
         }
@@ -521,21 +518,15 @@ pub mod kvm {
     ///
     pub fn create_gic(vm: &Arc<dyn hypervisor::Vm>, vcpu_count: u64) -> Result<Box<dyn GicDevice>> {
         debug!("creating a GICv3-ITS");
-        KvmGicV3Its::new(vm, vcpu_count)
-    }
-
-    /// Function that saves RDIST pending tables into guest RAM.
-    ///
-    /// The tables get flushed to guest RAM whenever the VM gets stopped.
-    pub fn save_pending_tables(gic: &Arc<dyn hypervisor::Device>) -> Result<()> {
-        let init_gic_attr = kvm_bindings::kvm_device_attr {
-            group: kvm_bindings::KVM_DEV_ARM_VGIC_GRP_CTRL,
-            attr: u64::from(kvm_bindings::KVM_DEV_ARM_VGIC_SAVE_PENDING_TABLES),
-            addr: 0,
-            flags: 0,
-        };
-        gic.set_device_attr(&init_gic_attr)
-            .map_err(super::Error::SetDeviceAttribute)
+        KvmGicV3Its::new(
+            vm,
+            vcpu_count,
+            layout::GIC_V3_DIST_START.raw_value(),
+            layout::GIC_V3_DIST_SIZE,
+            layout::GIC_V3_REDIST_SIZE,
+            layout::GIC_V3_ITS_SIZE,
+            layout::IRQ_NUM,
+        )
     }
 
     impl GicDevice for KvmGicV3Its {
@@ -563,16 +554,21 @@ pub mod kvm {
             KvmGicV3Its::ARCH_GIC_V3_MAINT_IRQ
         }
 
-        fn msi_properties(&self) -> &[u64] {
-            &self.msi_properties
-        }
-
-        fn device_properties(&self) -> &[u64] {
-            &self.gic_properties
-        }
-
         fn vcpu_count(&self) -> u64 {
             self.vcpu_count
+        }
+
+        fn device_properties(&self) -> [u64; 4] {
+            [
+                self.dist_addr,
+                self.dist_size,
+                self.redists_addr,
+                self.redists_size,
+            ]
+        }
+
+        fn msi_properties(&self) -> [u64; 2] {
+            [self.msi_addr, self.msi_size]
         }
 
         fn set_its_device(&mut self, its_device: Option<Arc<dyn hypervisor::Device>>) {
@@ -612,7 +608,7 @@ pub mod kvm {
     impl Pausable for KvmGicV3Its {
         fn pause(&mut self) -> std::result::Result<(), MigratableError> {
             // Flush redistributors pending tables to guest RAM.
-            save_pending_tables(self.device()).map_err(|e| {
+            KvmGicV3Its::save_pending_tables(self.device()).map_err(|e| {
                 MigratableError::Pause(anyhow!(
                     "Could not save GICv3ITS GIC pending tables {:?}",
                     e
