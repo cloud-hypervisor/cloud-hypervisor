@@ -17,11 +17,9 @@ use crate::config::{
     UserDeviceConfig, ValidationError, VdpaConfig, VmConfig, VsockConfig,
 };
 #[cfg(feature = "guest_debug")]
-use crate::coredump::DumpState;
-#[cfg(feature = "guest_debug")]
-use crate::coredump::{Elf64Writable, NoteDescType};
-#[cfg(feature = "guest_debug")]
-use crate::coredump::{GuestDebuggable, GuestDebuggableError};
+use crate::coredump::{
+    CpuElf64Writable, DumpState, Elf64Writable, GuestDebuggable, GuestDebuggableError, NoteDescType,
+};
 use crate::cpu;
 use crate::device_manager::{Console, DeviceManager, DeviceManagerError, PtyPair};
 use crate::device_tree::DeviceTree;
@@ -3051,6 +3049,15 @@ impl GuestDebuggable for Vm {
         self.write_header(&coredump_state)?;
         self.write_note(&coredump_state)?;
         self.write_loads(&coredump_state)?;
+
+        self.cpu_manager
+            .lock()
+            .unwrap()
+            .cpu_write_elf64_note(&coredump_state)?;
+        self.cpu_manager
+            .lock()
+            .unwrap()
+            .cpu_write_vmm_note(&coredump_state)?;
 
         self.memory_manager
             .lock()

@@ -12,6 +12,12 @@
 //
 
 use crate::config::CpusConfig;
+#[cfg(feature = "guest_debug")]
+use crate::coredump::{
+    CpuElf64Writable, CpuSegment, CpuState as DumpCpusState, DumpState, Elf64Writable,
+    GuestDebuggableError, NoteDescType, X86_64ElfPrStatus, X86_64UserRegs, COREDUMP_NAME_SIZE,
+    NT_PRSTATUS,
+};
 use crate::device_manager::DeviceManager;
 #[cfg(feature = "gdb")]
 use crate::gdb::{get_raw_tid, Debuggable, DebuggableError};
@@ -28,24 +34,36 @@ use arch::NumaNodes;
 use devices::interrupt_controller::InterruptController;
 #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
 use gdbstub_arch::x86::reg::{X86SegmentRegs, X86_64CoreRegs};
+#[cfg(feature = "guest_debug")]
+use hypervisor::arch::x86::msr_index;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::kvm::kvm_bindings;
 #[cfg(feature = "tdx")]
 use hypervisor::kvm::{TdxExitDetails, TdxExitStatus};
 #[cfg(target_arch = "x86_64")]
 use hypervisor::x86_64::CpuId;
+#[cfg(feature = "guest_debug")]
+use hypervisor::x86_64::{MsrEntries, MsrEntry};
 #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
 use hypervisor::x86_64::{SpecialRegisters, StandardRegisters};
 use hypervisor::{CpuState, HypervisorCpuError, VmExit, VmOps};
 use libc::{c_void, siginfo_t};
+#[cfg(feature = "guest_debug")]
+use linux_loader::elf::Elf64_Nhdr;
 use seccompiler::{apply_filter, SeccompAction};
 use std::collections::BTreeMap;
+#[cfg(feature = "guest_debug")]
+use std::io::Write;
+#[cfg(feature = "guest_debug")]
+use std::mem::size_of;
 use std::os::unix::thread::JoinHandleExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, io, result, thread};
 use thiserror::Error;
 use vm_device::BusDevice;
+#[cfg(feature = "guest_debug")]
+use vm_memory::ByteValued;
 #[cfg(feature = "gdb")]
 use vm_memory::{Bytes, GuestAddressSpace};
 use vm_memory::{GuestAddress, GuestMemoryAtomic};
@@ -236,6 +254,13 @@ struct InterruptSourceOverride {
     pub source: u8,
     pub gsi: u32,
     pub flags: u16,
+}
+
+#[cfg(feature = "guest_debug")]
+macro_rules! round_up {
+    ($n:expr,$d:expr) => {
+        (($n / ($d + 1)) + 1) * $d
+    };
 }
 
 /// A wrapper around creating and using a kvm-based VCPU.
@@ -2094,6 +2119,217 @@ impl Debuggable for CpuManager {
 
     fn active_vcpus(&self) -> usize {
         self.present_vcpus() as usize
+    }
+}
+
+#[cfg(feature = "guest_debug")]
+impl Elf64Writable for CpuManager {}
+
+#[cfg(feature = "guest_debug")]
+impl CpuElf64Writable for CpuManager {
+    fn cpu_write_elf64_note(
+        &mut self,
+        dump_state: &DumpState,
+    ) -> std::result::Result<(), GuestDebuggableError> {
+        let mut coredump_file = dump_state.file.as_ref().unwrap();
+        for vcpu in &self.vcpus {
+            let note_size = self.get_note_size(NoteDescType::ElfDesc, 1);
+            let mut pos: usize = 0;
+            let mut buf = vec![0 as u8; note_size as usize];
+            let descsz = size_of::<X86_64ElfPrStatus>();
+            let vcpu_id = vcpu.lock().unwrap().id;
+
+            let note = Elf64_Nhdr {
+                n_namesz: COREDUMP_NAME_SIZE,
+                n_descsz: descsz as u32,
+                n_type: NT_PRSTATUS,
+            };
+
+            let bytes: &[u8] = note.as_slice();
+            buf.splice(0.., bytes.to_vec());
+            pos += round_up!(size_of::<Elf64_Nhdr>(), 4);
+            buf.resize(pos + 4, 0);
+            buf.splice(pos.., "CORE".to_string().into_bytes());
+
+            pos += round_up!(COREDUMP_NAME_SIZE as usize, 4);
+            buf.resize(pos + 32 + 4, 0);
+            let pid = vcpu_id as u64;
+            let bytes: &[u8] = pid.as_slice();
+            buf.splice(pos + 32.., bytes.to_vec()); /* pr_pid */
+
+            pos += descsz - size_of::<X86_64UserRegs>() - size_of::<u64>();
+
+            let orig_rax: u64 = 0;
+            let gregs = self.vcpus[usize::from(vcpu_id)]
+                .lock()
+                .unwrap()
+                .vcpu
+                .get_regs()
+                .map_err(|_e| GuestDebuggableError::Coredump(anyhow!("get regs failed")))?;
+
+            let regs1 = [
+                gregs.r15, gregs.r14, gregs.r13, gregs.r12, gregs.rbp, gregs.rbx, gregs.r11,
+                gregs.r10,
+            ];
+            let regs2 = [
+                gregs.r9, gregs.r8, gregs.rax, gregs.rcx, gregs.rdx, gregs.rsi, gregs.rdi, orig_rax,
+            ];
+
+            let sregs = self.vcpus[usize::from(vcpu_id)]
+                .lock()
+                .unwrap()
+                .vcpu
+                .get_sregs()
+                .map_err(|_e| GuestDebuggableError::Coredump(anyhow!("get sregs failed")))?;
+
+            debug!(
+                "rip 0x{:x} rsp 0x{:x} gs 0x{:x} cs 0x{:x} ss 0x{:x} ds 0x{:x}",
+                gregs.rip,
+                gregs.rsp,
+                sregs.gs.base,
+                sregs.cs.selector,
+                sregs.ss.selector,
+                sregs.ds.selector,
+            );
+
+            let regs = X86_64UserRegs {
+                regs1,
+                regs2,
+                rip: gregs.rip,
+                cs: sregs.cs.selector as u64,
+                eflags: gregs.rflags,
+                rsp: gregs.rsp,
+                ss: sregs.ss.selector as u64,
+                fs_base: sregs.fs.base as u64,
+                gs_base: sregs.gs.base as u64,
+                ds: sregs.ds.selector as u64,
+                es: sregs.es.selector as u64,
+                fs: sregs.fs.selector as u64,
+                gs: sregs.gs.selector as u64,
+            };
+
+            // let bytes: &[u8] = unsafe { any_as_u8_slice(&regs) };
+            let bytes: &[u8] = regs.as_slice();
+            buf.resize(note_size as usize, 0);
+            buf.splice(pos.., bytes.to_vec());
+            buf.resize(note_size as usize, 0);
+
+            coredump_file
+                .write(&buf)
+                .map_err(|e| GuestDebuggableError::CoredumpFile(e.into()))?;
+        }
+
+        Ok(())
+    }
+
+    fn cpu_write_vmm_note(
+        &mut self,
+        dump_state: &DumpState,
+    ) -> std::result::Result<(), GuestDebuggableError> {
+        let mut coredump_file = dump_state.file.as_ref().unwrap();
+        for vcpu in &self.vcpus {
+            let note_size = self.get_note_size(NoteDescType::VmmDesc, 1);
+            let mut pos: usize = 0;
+            let mut buf = vec![0 as u8; note_size as usize];
+            let descsz = size_of::<DumpCpusState>();
+            let vcpu_id = vcpu.lock().unwrap().id;
+
+            let note = Elf64_Nhdr {
+                n_namesz: COREDUMP_NAME_SIZE,
+                n_descsz: descsz as u32,
+                n_type: 0 as u32,
+            };
+
+            let bytes: &[u8] = note.as_slice();
+            buf.splice(0.., bytes.to_vec());
+            pos += round_up!(size_of::<Elf64_Nhdr>(), 4);
+
+            buf.resize(pos + 4, 0);
+            buf.splice(pos.., "QEMU".to_string().into_bytes());
+
+            pos += round_up!(COREDUMP_NAME_SIZE as usize, 4);
+
+            let gregs = self.vcpus[usize::from(vcpu_id)]
+                .lock()
+                .unwrap()
+                .vcpu
+                .get_regs()
+                .map_err(|_e| GuestDebuggableError::Coredump(anyhow!("get regs failed")))?;
+
+            let regs1 = [
+                gregs.rax, gregs.rbx, gregs.rcx, gregs.rdx, gregs.rsi, gregs.rdi, gregs.rsp,
+                gregs.rbp,
+            ];
+
+            let regs2 = [
+                gregs.r8, gregs.r9, gregs.r10, gregs.r11, gregs.r12, gregs.r13, gregs.r14,
+                gregs.r15,
+            ];
+
+            let sregs = self.vcpus[usize::from(vcpu_id)]
+                .lock()
+                .unwrap()
+                .vcpu
+                .get_sregs()
+                .map_err(|_e| GuestDebuggableError::Coredump(anyhow!("get sregs failed")))?;
+
+            let mut msrs = MsrEntries::from_entries(&[MsrEntry {
+                index: msr_index::MSR_KERNEL_GS_BASE,
+                ..Default::default()
+            }])
+            .map_err(|_e| GuestDebuggableError::Coredump(anyhow!("get msr failed")))?;
+
+            self.vcpus[vcpu_id as usize]
+                .lock()
+                .unwrap()
+                .vcpu
+                .get_msrs(&mut msrs)
+                .map_err(|_e| GuestDebuggableError::Coredump(anyhow!("get msr failed")))?;
+            let kernel_gs_base = msrs.as_slice()[0].data;
+
+            let cs = CpuSegment::new(sregs.cs);
+            let ds = CpuSegment::new(sregs.ds);
+            let es = CpuSegment::new(sregs.es);
+            let fs = CpuSegment::new(sregs.fs);
+            let gs = CpuSegment::new(sregs.gs);
+            let ss = CpuSegment::new(sregs.ss);
+            let ldt = CpuSegment::new(sregs.ldt);
+            let tr = CpuSegment::new(sregs.tr);
+            let gdt = CpuSegment::new_from_table(sregs.gdt);
+            let idt = CpuSegment::new_from_table(sregs.idt);
+            let cr = [sregs.cr0, sregs.cr8, sregs.cr2, sregs.cr3, sregs.cr4];
+            let regs = DumpCpusState {
+                version: 1 as u32,
+                size: size_of::<DumpCpusState>() as u32,
+                regs1,
+                regs2,
+                rip: gregs.rip,
+                rflags: gregs.rflags,
+                cs,
+                ds,
+                es,
+                fs,
+                gs,
+                ss,
+                ldt,
+                tr,
+                gdt,
+                idt,
+                cr,
+                kernel_gs_base,
+            };
+
+            let bytes: &[u8] = regs.as_slice();
+            buf.resize(note_size as usize, 0);
+            buf.splice(pos.., bytes.to_vec());
+            buf.resize(note_size as usize, 0);
+
+            coredump_file
+                .write(&buf)
+                .map_err(|e| GuestDebuggableError::CoredumpFile(e.into()))?;
+        }
+
+        Ok(())
     }
 }
 
