@@ -30,7 +30,7 @@ use crate::{device_node, DEVICE_MANAGER_SNAPSHOT_ID};
 use acpi_tables::{aml, aml::Aml};
 use anyhow::anyhow;
 #[cfg(target_arch = "aarch64")]
-use arch::aarch64::gic::gicv3_its::kvm::KvmGicV3Its;
+use arch::aarch64::gic::kvm::KvmGicV3Its;
 use arch::layout;
 #[cfg(target_arch = "x86_64")]
 use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
