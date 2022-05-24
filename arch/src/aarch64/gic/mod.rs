@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 pub mod dist_regs;
-pub mod gicv3;
 pub mod gicv3_its;
 pub mod icc_regs;
 pub mod redist_regs;

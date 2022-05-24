@@ -10,7 +10,6 @@ pub mod kvm {
         construct_gicr_typers, get_redist_regs, set_redist_regs,
     };
 
-    use crate::aarch64::gic::gicv3::kvm::KvmGicV3;
     use crate::aarch64::gic::kvm::{save_pending_tables, KvmGicDevice};
     use crate::aarch64::gic::GicDevice;
     use crate::layout;
@@ -22,6 +21,7 @@ pub mod kvm {
     use std::convert::TryInto;
     use std::sync::Arc;
     use std::{boxed::Box, result};
+    use vm_memory::Address;
     use vm_migration::{
         Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable,
     };
@@ -175,12 +175,35 @@ pub mod kvm {
     }
 
     impl KvmGicV3Its {
+        // Device trees specific constants
+        pub const ARCH_GIC_V3_MAINT_IRQ: u32 = 9;
+
+        /// Get the address of the GIC distributor.
+        pub fn get_dist_addr() -> u64 {
+            layout::GIC_V3_DIST_START.raw_value()
+        }
+
+        /// Get the size of the GIC distributor.
+        pub fn get_dist_size() -> u64 {
+            layout::GIC_V3_DIST_SIZE
+        }
+
+        /// Get the address of the GIC redistributors.
+        pub fn get_redists_addr(vcpu_count: u64) -> u64 {
+            KvmGicV3Its::get_dist_addr() - KvmGicV3Its::get_redists_size(vcpu_count)
+        }
+
+        /// Get the size of the GIC redistributors.
+        pub fn get_redists_size(vcpu_count: u64) -> u64 {
+            vcpu_count * layout::GIC_V3_REDIST_SIZE
+        }
+
         fn get_msi_size() -> u64 {
             layout::GIC_V3_ITS_SIZE
         }
 
         fn get_msi_addr(vcpu_count: u64) -> u64 {
-            KvmGicV3::get_redists_addr(vcpu_count) - KvmGicV3Its::get_msi_size()
+            KvmGicV3Its::get_redists_addr(vcpu_count) - KvmGicV3Its::get_msi_size()
         }
 
         /// Save the state of GICv3ITS.
@@ -374,7 +397,7 @@ pub mod kvm {
         }
 
         fn fdt_maint_irq(&self) -> u32 {
-            KvmGicV3::ARCH_GIC_V3_MAINT_IRQ
+            KvmGicV3Its::ARCH_GIC_V3_MAINT_IRQ
         }
 
         fn msi_properties(&self) -> &[u64] {
@@ -405,7 +428,7 @@ pub mod kvm {
 
     impl KvmGicDevice for KvmGicV3Its {
         fn version() -> u32 {
-            KvmGicV3::version()
+            kvm_bindings::kvm_device_type_KVM_DEV_TYPE_ARM_VGIC_V3
         }
 
         fn create_device(
@@ -417,10 +440,10 @@ pub mod kvm {
                 its_device: None,
                 gicr_typers: vec![0; vcpu_count.try_into().unwrap()],
                 gic_properties: [
-                    KvmGicV3::get_dist_addr(),
-                    KvmGicV3::get_dist_size(),
-                    KvmGicV3::get_redists_addr(vcpu_count),
-                    KvmGicV3::get_redists_size(vcpu_count),
+                    KvmGicV3Its::get_dist_addr(),
+                    KvmGicV3Its::get_dist_size(),
+                    KvmGicV3Its::get_redists_addr(vcpu_count),
+                    KvmGicV3Its::get_redists_size(vcpu_count),
                 ],
                 msi_properties: [
                     KvmGicV3Its::get_msi_addr(vcpu_count),
@@ -434,8 +457,30 @@ pub mod kvm {
             vm: &Arc<dyn hypervisor::Vm>,
             gic_device: &mut dyn GicDevice,
         ) -> crate::aarch64::gic::Result<()> {
-            KvmGicV3::init_device_attributes(vm, gic_device)?;
+            // GicV3 part attributes
+            /* Setting up the distributor attribute.
+             We are placing the GIC below 1GB so we need to substract the size of the distributor.
+            */
+            Self::set_device_attribute(
+                gic_device.device(),
+                kvm_bindings::KVM_DEV_ARM_VGIC_GRP_ADDR,
+                u64::from(kvm_bindings::KVM_VGIC_V3_ADDR_TYPE_DIST),
+                &KvmGicV3Its::get_dist_addr() as *const u64 as u64,
+                0,
+            )?;
 
+            /* Setting up the redistributors' attribute.
+            We are calculating here the start of the redistributors address. We have one per CPU.
+            */
+            Self::set_device_attribute(
+                gic_device.device(),
+                kvm_bindings::KVM_DEV_ARM_VGIC_GRP_ADDR,
+                u64::from(kvm_bindings::KVM_VGIC_V3_ADDR_TYPE_REDIST),
+                &KvmGicV3Its::get_redists_addr(gic_device.vcpu_count()) as *const u64 as u64,
+                0,
+            )?;
+
+            // ITS part attributes
             let mut its_device = kvm_bindings::kvm_create_device {
                 type_: kvm_bindings::kvm_device_type_KVM_DEV_TYPE_ARM_VGIC_ITS,
                 fd: 0,
