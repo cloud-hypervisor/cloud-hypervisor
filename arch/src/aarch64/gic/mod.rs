@@ -372,40 +372,17 @@ pub mod kvm {
             kvm_bindings::kvm_device_type_KVM_DEV_TYPE_ARM_VGIC_V3
         }
 
-        /// Create the GIC device object
-        fn create_device(
-            device: Arc<dyn hypervisor::Device>,
-            vcpu_count: u64,
-        ) -> Box<dyn GicDevice> {
-            Box::new(KvmGicV3Its {
-                device,
-                its_device: None,
-                gicr_typers: vec![0; vcpu_count.try_into().unwrap()],
-                gic_properties: [
-                    KvmGicV3Its::get_dist_addr(),
-                    KvmGicV3Its::get_dist_size(),
-                    KvmGicV3Its::get_redists_addr(vcpu_count),
-                    KvmGicV3Its::get_redists_size(vcpu_count),
-                ],
-                msi_properties: [
-                    KvmGicV3Its::get_msi_addr(vcpu_count),
-                    KvmGicV3Its::get_msi_size(),
-                ],
-                vcpu_count,
-            })
-        }
-
         /// Setup the device-specific attributes
         fn init_device_attributes(
+            &mut self,
             vm: &Arc<dyn hypervisor::Vm>,
-            gic_device: &mut dyn GicDevice,
         ) -> crate::aarch64::gic::Result<()> {
             // GicV3 part attributes
             /* Setting up the distributor attribute.
              We are placing the GIC below 1GB so we need to substract the size of the distributor.
             */
             Self::set_device_attribute(
-                gic_device.device(),
+                self.device(),
                 kvm_bindings::KVM_DEV_ARM_VGIC_GRP_ADDR,
                 u64::from(kvm_bindings::KVM_VGIC_V3_ADDR_TYPE_DIST),
                 &KvmGicV3Its::get_dist_addr() as *const u64 as u64,
@@ -416,10 +393,10 @@ pub mod kvm {
             We are calculating here the start of the redistributors address. We have one per CPU.
             */
             Self::set_device_attribute(
-                gic_device.device(),
+                self.device(),
                 kvm_bindings::KVM_DEV_ARM_VGIC_GRP_ADDR,
                 u64::from(kvm_bindings::KVM_VGIC_V3_ADDR_TYPE_REDIST),
-                &KvmGicV3Its::get_redists_addr(gic_device.vcpu_count()) as *const u64 as u64,
+                &KvmGicV3Its::get_redists_addr(self.vcpu_count()) as *const u64 as u64,
                 0,
             )?;
 
@@ -438,7 +415,7 @@ pub mod kvm {
                 &its_fd,
                 kvm_bindings::KVM_DEV_ARM_VGIC_GRP_ADDR,
                 u64::from(kvm_bindings::KVM_VGIC_ITS_ADDR_TYPE),
-                &KvmGicV3Its::get_msi_addr(gic_device.vcpu_count()) as *const u64 as u64,
+                &KvmGicV3Its::get_msi_addr(self.vcpu_count()) as *const u64 as u64,
                 0,
             )?;
 
@@ -450,13 +427,37 @@ pub mod kvm {
                 0,
             )?;
 
-            gic_device.set_its_device(Some(its_fd));
+            self.set_its_device(Some(its_fd));
+
+            /* We need to tell the kernel how many irqs to support with this vgic.
+             * See the `layout` module for details.
+             */
+            let nr_irqs: u32 = layout::IRQ_NUM;
+            let nr_irqs_ptr = &nr_irqs as *const u32;
+            Self::set_device_attribute(
+                self.device(),
+                kvm_bindings::KVM_DEV_ARM_VGIC_GRP_NR_IRQS,
+                0,
+                nr_irqs_ptr as u64,
+                0,
+            )?;
+
+            /* Finalize the GIC.
+             * See https://code.woboq.org/linux/linux/virt/kvm/arm/vgic/vgic-kvm-device.c.html#211.
+             */
+            Self::set_device_attribute(
+                self.device(),
+                kvm_bindings::KVM_DEV_ARM_VGIC_GRP_CTRL,
+                u64::from(kvm_bindings::KVM_DEV_ARM_VGIC_CTRL_INIT),
+                0,
+                0,
+            )?;
 
             Ok(())
         }
 
-        /// Initialize a GIC device
-        fn init_device(vm: &Arc<dyn hypervisor::Vm>) -> Result<Arc<dyn hypervisor::Device>> {
+        /// Create a KVM Vgic device
+        fn create_device(vm: &Arc<dyn hypervisor::Vm>) -> Result<Arc<dyn hypervisor::Device>> {
             let mut gic_device = kvm_bindings::kvm_create_device {
                 type_: Self::version(),
                 fd: 0,
@@ -488,47 +489,31 @@ pub mod kvm {
             Ok(())
         }
 
-        /// Finalize the setup of a GIC device
-        fn finalize_device(gic_device: &dyn GicDevice) -> Result<()> {
-            /* We need to tell the kernel how many irqs to support with this vgic.
-             * See the `layout` module for details.
-             */
-            let nr_irqs: u32 = layout::IRQ_NUM;
-            let nr_irqs_ptr = &nr_irqs as *const u32;
-            Self::set_device_attribute(
-                gic_device.device(),
-                kvm_bindings::KVM_DEV_ARM_VGIC_GRP_NR_IRQS,
-                0,
-                nr_irqs_ptr as u64,
-                0,
-            )?;
-
-            /* Finalize the GIC.
-             * See https://code.woboq.org/linux/linux/virt/kvm/arm/vgic/vgic-kvm-device.c.html#211.
-             */
-            Self::set_device_attribute(
-                gic_device.device(),
-                kvm_bindings::KVM_DEV_ARM_VGIC_GRP_CTRL,
-                u64::from(kvm_bindings::KVM_DEV_ARM_VGIC_CTRL_INIT),
-                0,
-                0,
-            )?;
-
-            Ok(())
-        }
-
         /// Method to initialize the GIC device
         #[allow(clippy::new_ret_no_self)]
         fn new(vm: &Arc<dyn hypervisor::Vm>, vcpu_count: u64) -> Result<Box<dyn GicDevice>> {
-            let vgic_fd = Self::init_device(vm)?;
+            let vgic = Self::create_device(vm)?;
 
-            let mut device = Self::create_device(vgic_fd, vcpu_count);
+            let mut gic_device = Box::new(KvmGicV3Its {
+                device: vgic,
+                its_device: None,
+                gicr_typers: vec![0; vcpu_count.try_into().unwrap()],
+                gic_properties: [
+                    KvmGicV3Its::get_dist_addr(),
+                    KvmGicV3Its::get_dist_size(),
+                    KvmGicV3Its::get_redists_addr(vcpu_count),
+                    KvmGicV3Its::get_redists_size(vcpu_count),
+                ],
+                msi_properties: [
+                    KvmGicV3Its::get_msi_addr(vcpu_count),
+                    KvmGicV3Its::get_msi_size(),
+                ],
+                vcpu_count,
+            });
 
-            Self::init_device_attributes(vm, &mut *device)?;
+            gic_device.init_device_attributes(vm)?;
 
-            Self::finalize_device(&*device)?;
-
-            Ok(device)
+            Ok(gic_device)
         }
     }
 
