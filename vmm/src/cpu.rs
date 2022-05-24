@@ -1533,6 +1533,8 @@ struct Cpu {
     cpu_id: u8,
     proximity_domain: u32,
     dynamic: bool,
+    #[cfg(target_arch = "aarch64")]
+    mpidr: u64,
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -1555,11 +1557,41 @@ impl Cpu {
 
         mat_data
     }
+
+    #[cfg(target_arch = "aarch64")]
+    fn generate_mat(&self) -> Vec<u8> {
+        use crate::acpi;
+        let mpidr_mask = 0xff_00ff_ffff;
+        let gicc = GicC {
+            r#type: acpi::ACPI_APIC_GENERIC_CPU_INTERFACE,
+            length: 80,
+            reserved0: 0,
+            cpu_interface_number: self.cpu_id as u32,
+            uid: self.cpu_id as u32,
+            flags: 1,
+            parking_version: 0,
+            performance_interrupt: 0,
+            parked_address: 0,
+            base_address: 0,
+            gicv_base_address: 0,
+            gich_base_address: 0,
+            vgic_interrupt: 0,
+            gicr_base_address: 0,
+            mpidr: self.mpidr & mpidr_mask,
+            proc_power_effi_class: 0,
+            reserved1: 0,
+            spe_overflow_interrupt: 0,
+        };
+        let mut mat_data: Vec<u8> = Vec::new();
+        mat_data.resize(std::mem::size_of_val(&gicc), 0);
+        unsafe { *(mat_data.as_mut_ptr() as *mut GicC) = gicc };
+
+        mat_data
+    }
 }
 
 impl Aml for Cpu {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
-        #[cfg(target_arch = "x86_64")]
         let mat_data: Vec<u8> = self.generate_mat();
         #[allow(clippy::if_same_then_else)]
         if self.dynamic {
@@ -1578,7 +1610,6 @@ impl Aml for Cpu {
                     Bit [4] – Set if the battery is present.
                     Bits [31:5] – Reserved (must be cleared).
                     */
-                    #[cfg(target_arch = "x86_64")]
                     &aml::Method::new(
                         "_STA".into(),
                         0,
@@ -1598,10 +1629,8 @@ impl Aml for Cpu {
                     // The Linux kernel expects every CPU device to have a _MAT entry
                     // containing the LAPIC for this processor with the enabled bit set
                     // even it if is disabled in the MADT (non-boot CPU)
-                    #[cfg(target_arch = "x86_64")]
                     &aml::Name::new("_MAT".into(), &aml::Buffer::new(mat_data)),
                     // Trigger CPU ejection
-                    #[cfg(target_arch = "x86_64")]
                     &aml::Method::new(
                         "_EJ0".into(),
                         1,
@@ -1779,7 +1808,6 @@ impl Aml for CpuMethods {
 
 impl Aml for CpuManager {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
-        #[cfg(target_arch = "x86_64")]
         if let Some(acpi_address) = self.acpi_address {
             // CPU hotplug controller
             aml::Device::new(
@@ -1851,6 +1879,8 @@ impl Aml for CpuManager {
                 cpu_id,
                 proximity_domain,
                 dynamic: self.dynamic,
+                #[cfg(target_arch = "aarch64")]
+                mpidr: self.vcpus[cpu_id as usize].lock().unwrap().get_mpidr(),
             };
 
             cpu_devices.push(cpu_device);
