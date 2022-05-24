@@ -778,7 +778,11 @@ impl CpuManager {
         }
 
         // Only create vCPUs in excess of all the allocated vCPUs.
-        for cpu_id in self.vcpus.len() as u8..desired_vcpus {
+        #[cfg(target_arch = "aarch64")]
+        let possible_cpus = self.config.max_vcpus;
+        #[cfg(target_arch = "x86_64")]
+        let possible_cpus = desired_vcpus;
+        for cpu_id in self.vcpus.len() as u8..possible_cpus {
             self.create_vcpu(cpu_id, entry_point, None)?;
         }
 
