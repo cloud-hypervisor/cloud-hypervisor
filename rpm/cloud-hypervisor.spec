@@ -11,7 +11,7 @@
 
 Name:           cloud-hypervisor
 Summary:        Cloud Hypervisor is an open source Virtual Machine Monitor (VMM) that runs on top of KVM.
-Version:        23.1
+Version:        24.0
 Release:        0%{?dist}
 License:        ASL 2.0 or BSD-3-clause
 Group:          Applications/System
@@ -145,6 +145,9 @@ rm -rf %{buildroot}
 
 
 %changelog
+*   Wed May 25 2022 Sebastien Boeuf <sebastien.boeuf@intel.com> 24.0-0
+-   Update to 24.0
+
 *   Tue May 18 2022 Anatol Belski <anbelski@linux.microsoft.com> - 23.1-0
 -   Update to 23.1
 -   Add support for aarch64 build
