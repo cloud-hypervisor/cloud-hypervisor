@@ -1337,7 +1337,11 @@ impl CpuManager {
                     uid: cpu as u32,
                     flags: if cpu < self.config.boot_vcpus { 1 } else { 0 },
                     parking_version: 0,
-                    performance_interrupt: 0,
+                    performance_interrupt: if cpu < self.config.boot_vcpus {
+                        arch::aarch64::fdt::AARCH64_PMU_IRQ + 16
+                    } else {
+                        0
+                    },
                     parked_address: 0,
                     base_address: 0,
                     gicv_base_address: 0,
@@ -1570,7 +1574,7 @@ impl Cpu {
             uid: self.cpu_id as u32,
             flags: 1,
             parking_version: 0,
-            performance_interrupt: 0,
+            performance_interrupt: arch::aarch64::fdt::AARCH64_PMU_IRQ + 16,
             parked_address: 0,
             base_address: 0,
             gicv_base_address: 0,
