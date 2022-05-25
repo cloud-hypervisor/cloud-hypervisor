@@ -7697,7 +7697,7 @@ mod live_migration {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(Some(30)).unwrap();
+            guest.wait_vm_boot(None).unwrap();
 
             // Make sure the source VM is functaionl
             // Check the number of vCPUs
