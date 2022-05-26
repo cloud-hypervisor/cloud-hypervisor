@@ -153,7 +153,7 @@ dependencies = [
 
 [[package]]
 name = "cloud-hypervisor"
-version = "23.0.0"
+version = "24.0.0"
 dependencies = [
  "anyhow",
  "api_client",
@@ -720,9 +720,9 @@ checksum = "d22af068fba1eb5edcb4aea19d382b2a3deb4c8f9d475c589b6ada9e0fd493ee"
 
 [[package]]
 name = "uuid"
-version = "1.0.0"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8cfcd319456c4d6ea10087ed423473267e1a071f3bc0aa89f80d60997843c6f0"
+checksum = "93bbc61e655a4833cf400d0d15bf3649313422fa7572886ad6dab16d79886365"
 dependencies = [
  "getrandom",
 ]
