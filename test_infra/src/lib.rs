@@ -1037,50 +1037,6 @@ impl Guest {
         Ok(false)
     }
 
-    pub fn valid_virtio_fs_cache_size(
-        &self,
-        dax: bool,
-        cache_size: Option<u64>,
-    ) -> Result<bool, Error> {
-        // SHM region is called different things depending on kernel
-        let shm_region = self
-            .ssh_command("sudo grep 'virtio[0-9]\\|virtio-pci-shm' /proc/iomem || true")?
-            .trim()
-            .to_string();
-
-        if shm_region.is_empty() {
-            return Ok(!dax);
-        }
-
-        // From this point, the region is not empty, hence it is an error
-        // if DAX is off.
-        if !dax {
-            return Ok(false);
-        }
-
-        let cache = if let Some(cache) = cache_size {
-            cache
-        } else {
-            // 8Gib by default
-            0x0002_0000_0000
-        };
-
-        let args: Vec<&str> = shm_region.split(':').collect();
-        if args.is_empty() {
-            return Ok(false);
-        }
-
-        let args: Vec<&str> = args[0].trim().split('-').collect();
-        if args.len() != 2 {
-            return Ok(false);
-        }
-
-        let start_addr = u64::from_str_radix(args[0], 16).map_err(Error::Parsing)?;
-        let end_addr = u64::from_str_radix(args[1], 16).map_err(Error::Parsing)?;
-
-        Ok(cache == (end_addr - start_addr + 1))
-    }
-
     pub fn check_vsock(&self, socket: &str) {
         // Listen from guest on vsock CID=3 PORT=16
         // SOCKET-LISTEN:<domain>:<protocol>:<local-address>
