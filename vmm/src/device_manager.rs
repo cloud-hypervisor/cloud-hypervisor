@@ -84,7 +84,6 @@ use virtio_devices::transport::VirtioTransport;
 use virtio_devices::vhost_user::VhostUserConfig;
 use virtio_devices::{AccessPlatformMapping, VdpaDmaMapping, VirtioMemMappingSource};
 use virtio_devices::{Endpoint, IommuMapping};
-use virtio_devices::{VirtioSharedMemory, VirtioSharedMemoryList};
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::dma_mapping::vfio::VfioDmaMapping;
 use vm_device::dma_mapping::ExternalDmaMapping;
@@ -2394,109 +2393,7 @@ impl DeviceManager {
 
         let mut node = device_node!(id);
 
-        // Look for the id in the device tree. If it can be found, that means
-        // the device is being restored, otherwise it's created from scratch.
-        let cache_range = if let Some(node) = self.device_tree.lock().unwrap().get(&id) {
-            info!("Restoring virtio-fs {} resources", id);
-
-            let mut cache_range: Option<(u64, u64)> = None;
-            for resource in node.resources.iter() {
-                match resource {
-                    Resource::MmioAddressRange { base, size } => {
-                        if cache_range.is_some() {
-                            return Err(DeviceManagerError::ResourceAlreadyExists);
-                        }
-
-                        cache_range = Some((*base, *size));
-                    }
-                    _ => {
-                        error!("Unexpected resource {:?} for {}", resource, id);
-                    }
-                }
-            }
-
-            cache_range
-        } else {
-            None
-        };
-
-        // DAX is not supported, we override the config by disabling the option.
-        fs_cfg.dax = false;
-
         if let Some(fs_socket) = fs_cfg.socket.to_str() {
-            let cache = if fs_cfg.dax {
-                let (cache_base, cache_size) = if let Some((base, size)) = cache_range {
-                    // The memory needs to be 2MiB aligned in order to support
-                    // hugepages.
-                    self.pci_segments[fs_cfg.pci_segment as usize]
-                        .allocator
-                        .lock()
-                        .unwrap()
-                        .allocate(
-                            Some(GuestAddress(base)),
-                            size as GuestUsize,
-                            Some(0x0020_0000),
-                        )
-                        .ok_or(DeviceManagerError::FsRangeAllocation)?;
-
-                    (base, size)
-                } else {
-                    let size = fs_cfg.cache_size;
-                    // The memory needs to be 2MiB aligned in order to support
-                    // hugepages.
-                    let base = self.pci_segments[fs_cfg.pci_segment as usize]
-                        .allocator
-                        .lock()
-                        .unwrap()
-                        .allocate(None, size as GuestUsize, Some(0x0020_0000))
-                        .ok_or(DeviceManagerError::FsRangeAllocation)?;
-
-                    (base.raw_value(), size)
-                };
-
-                // Update the node with correct resource information.
-                node.resources.push(Resource::MmioAddressRange {
-                    base: cache_base,
-                    size: cache_size,
-                });
-
-                let mmap_region = MmapRegion::build(
-                    None,
-                    cache_size as usize,
-                    libc::PROT_NONE,
-                    libc::MAP_ANONYMOUS | libc::MAP_PRIVATE,
-                )
-                .map_err(DeviceManagerError::NewMmapRegion)?;
-                let host_addr: u64 = mmap_region.as_ptr() as u64;
-
-                let mem_slot = self
-                    .memory_manager
-                    .lock()
-                    .unwrap()
-                    .create_userspace_mapping(
-                        cache_base, cache_size, host_addr, false, false, false,
-                    )
-                    .map_err(DeviceManagerError::MemoryManager)?;
-
-                let region_list = vec![VirtioSharedMemory {
-                    offset: 0,
-                    len: cache_size,
-                }];
-
-                Some((
-                    VirtioSharedMemoryList {
-                        host_addr,
-                        mem_slot,
-                        addr: GuestAddress(cache_base),
-                        len: cache_size as GuestUsize,
-                        region_list,
-                    },
-                    mmap_region,
-                ))
-            } else {
-                None
-            };
-
             let virtio_fs_device = Arc::new(Mutex::new(
                 virtio_devices::vhost_user::Fs::new(
                     id.clone(),
@@ -2504,7 +2401,7 @@ impl DeviceManager {
                     &fs_cfg.tag,
                     fs_cfg.num_queues,
                     fs_cfg.queue_size,
-                    cache,
+                    None,
                     self.seccomp_action.clone(),
                     self.restoring,
                     self.exit_evt
