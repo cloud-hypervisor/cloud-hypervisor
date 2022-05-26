@@ -75,11 +75,7 @@ const DIRECT_KERNEL_BOOT_CMDLINE: &str =
 
 const CONSOLE_TEST_STRING: &str = "Started OpenBSD Secure Shell server";
 
-fn prepare_virtiofsd(
-    tmp_dir: &TempDir,
-    shared_dir: &str,
-    cache: &str,
-) -> (std::process::Child, String) {
+fn prepare_virtiofsd(tmp_dir: &TempDir, shared_dir: &str) -> (std::process::Child, String) {
     let mut workload_path = dirs::home_dir().unwrap();
     workload_path.push("workloads");
 
@@ -94,7 +90,7 @@ fn prepare_virtiofsd(
     let child = Command::new(virtiofsd_path.as_str())
         .args(&["--shared-dir", shared_dir])
         .args(&["--socket-path", virtiofsd_socket_path.as_str()])
-        .args(&["--cache", cache])
+        .args(&["--cache", "never"])
         .spawn()
         .unwrap();
 
@@ -1129,8 +1125,7 @@ fn test_boot_from_vhost_user_blk(
 fn test_virtio_fs(
     dax: bool,
     cache_size: Option<u64>,
-    virtiofsd_cache: &str,
-    prepare_daemon: &dyn Fn(&TempDir, &str, &str) -> (std::process::Child, String),
+    prepare_daemon: &dyn Fn(&TempDir, &str) -> (std::process::Child, String),
     hotplug: bool,
     pci_segment: Option<u16>,
 ) {
@@ -1168,11 +1163,8 @@ fn test_virtio_fs(
         "".to_string()
     };
 
-    let (mut daemon_child, virtiofsd_socket_path) = prepare_daemon(
-        &guest.tmp_dir,
-        shared_dir.to_str().unwrap(),
-        virtiofsd_cache,
-    );
+    let (mut daemon_child, virtiofsd_socket_path) =
+        prepare_daemon(&guest.tmp_dir, shared_dir.to_str().unwrap());
 
     let mut guest_command = GuestCommand::new(&guest);
     guest_command
@@ -1284,11 +1276,8 @@ fn test_virtio_fs(
 
     let (r, hotplug_daemon_child) = if r.is_ok() && hotplug {
         thread::sleep(std::time::Duration::new(10, 0));
-        let (daemon_child, virtiofsd_socket_path) = prepare_daemon(
-            &guest.tmp_dir,
-            shared_dir.to_str().unwrap(),
-            virtiofsd_cache,
-        );
+        let (daemon_child, virtiofsd_socket_path) =
+            prepare_daemon(&guest.tmp_dir, shared_dir.to_str().unwrap());
 
         let r = std::panic::catch_unwind(|| {
             thread::sleep(std::time::Duration::new(10, 0));
@@ -3120,24 +3109,24 @@ mod parallel {
 
     #[test]
     fn test_virtio_fs_dax_off() {
-        test_virtio_fs(false, None, "never", &prepare_virtiofsd, false, None)
+        test_virtio_fs(false, None, &prepare_virtiofsd, false, None)
     }
 
     #[test]
     fn test_virtio_fs_hotplug_dax_off() {
-        test_virtio_fs(false, None, "never", &prepare_virtiofsd, true, None)
+        test_virtio_fs(false, None, &prepare_virtiofsd, true, None)
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_virtio_fs_multi_segment_hotplug() {
-        test_virtio_fs(false, None, "never", &prepare_virtiofsd, true, Some(15))
+        test_virtio_fs(false, None, &prepare_virtiofsd, true, Some(15))
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_virtio_fs_multi_segment() {
-        test_virtio_fs(false, None, "never", &prepare_virtiofsd, false, Some(15))
+        test_virtio_fs(false, None, &prepare_virtiofsd, false, Some(15))
     }
 
     #[test]
