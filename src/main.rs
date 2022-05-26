@@ -1323,40 +1323,6 @@ mod unit_tests {
                 }"#,
                 false,
             ),
-            #[cfg(target_arch = "x86_64")]
-            (
-                vec![
-                    "cloud-hypervisor",
-                    "--kernel",
-                    "/path/to/kernel",
-                    "--pmem",
-                    "file=/path/to/img/1,size=1G,mergeable=on",
-                ],
-                r#"{
-                    "kernel": {"path": "/path/to/kernel"},
-                    "pmem": [
-                        {"file": "/path/to/img/1", "size": 1073741824, "mergeable": true}
-                    ]
-                }"#,
-                true,
-            ),
-            #[cfg(target_arch = "x86_64")]
-            (
-                vec![
-                    "cloud-hypervisor",
-                    "--kernel",
-                    "/path/to/kernel",
-                    "--pmem",
-                    "file=/path/to/img/1,size=1G,mergeable=off",
-                ],
-                r#"{
-                    "kernel": {"path": "/path/to/kernel"},
-                    "pmem": [
-                        {"file": "/path/to/img/1", "size": 1073741824, "mergeable": false}
-                    ]
-                }"#,
-                true,
-            ),
         ]
         .iter()
         .for_each(|(cli, openapi, equal)| {
