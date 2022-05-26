@@ -43,8 +43,6 @@ pub enum Error {
     ParseFsTagMissing,
     /// Filesystem socket is missing
     ParseFsSockMissing,
-    /// Cannot have dax=off along with cache_size parameter.
-    InvalidCacheSizeWithDaxOff,
     /// Missing persistent memory file parameter.
     ParsePmemFileMissing,
     /// Missing vsock socket path parameter.
@@ -291,9 +289,6 @@ impl fmt::Display for Error {
             ParseFileSystem(o) => write!(f, "Error parsing --fs: {}", o),
             ParseFsSockMissing => write!(f, "Error parsing --fs: socket missing"),
             ParseFsTagMissing => write!(f, "Error parsing --fs: tag missing"),
-            InvalidCacheSizeWithDaxOff => {
-                write!(f, "Error parsing --fs: cache_size used with dax=off")
-            }
             ParsePersistentMemory(o) => write!(f, "Error parsing --pmem: {}", o),
             ParsePmemFileMissing => write!(f, "Error parsing --pmem: file missing"),
             ParseVsock(o) => write!(f, "Error parsing --vsock: {}", o),
@@ -1577,10 +1572,6 @@ pub struct FsConfig {
     pub num_queues: usize,
     #[serde(default = "default_fsconfig_queue_size")]
     pub queue_size: u16,
-    #[serde(default = "default_fsconfig_dax")]
-    pub dax: bool,
-    #[serde(default = "default_fsconfig_cache_size")]
-    pub cache_size: u64,
     #[serde(default)]
     pub id: Option<String>,
     #[serde(default)]
@@ -1595,14 +1586,6 @@ fn default_fsconfig_queue_size() -> u16 {
     1024
 }
 
-fn default_fsconfig_dax() -> bool {
-    false
-}
-
-fn default_fsconfig_cache_size() -> u64 {
-    0x0002_0000_0000
-}
-
 impl Default for FsConfig {
     fn default() -> Self {
         Self {
@@ -1610,8 +1593,6 @@ impl Default for FsConfig {
             socket: PathBuf::new(),
             num_queues: default_fsconfig_num_queues(),
             queue_size: default_fsconfig_queue_size(),
-            dax: default_fsconfig_dax(),
-            cache_size: default_fsconfig_cache_size(),
             id: None,
             pci_segment: 0,
         }
@@ -1621,15 +1602,12 @@ impl Default for FsConfig {
 impl FsConfig {
     pub const SYNTAX: &'static str = "virtio-fs parameters \
     \"tag=<tag_name>,socket=<socket_path>,num_queues=<number_of_queues>,\
-    queue_size=<size_of_each_queue>,dax=on|off,cache_size=<DAX cache size: \
-    default 8Gib>,id=<device_id>,pci_segment=<segment_id>\"";
+    queue_size=<size_of_each_queue>,id=<device_id>,pci_segment=<segment_id>\"";
 
     pub fn parse(fs: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
             .add("tag")
-            .add("dax")
-            .add("cache_size")
             .add("queue_size")
             .add("num_queues")
             .add("socket")
@@ -1649,22 +1627,6 @@ impl FsConfig {
             .map_err(Error::ParseFileSystem)?
             .unwrap_or_else(default_fsconfig_num_queues);
 
-        let dax = parser
-            .convert::<Toggle>("dax")
-            .map_err(Error::ParseFileSystem)?
-            .unwrap_or_else(|| Toggle(default_fsconfig_dax()))
-            .0;
-
-        if parser.is_set("cache_size") && !dax {
-            return Err(Error::InvalidCacheSizeWithDaxOff);
-        }
-
-        let cache_size = parser
-            .convert::<ByteSized>("cache_size")
-            .map_err(Error::ParseFileSystem)?
-            .unwrap_or_else(|| ByteSized(default_fsconfig_cache_size()))
-            .0;
-
         let id = parser.get("id");
 
         let pci_segment = parser
@@ -1677,8 +1639,6 @@ impl FsConfig {
             socket,
             num_queues,
             queue_size,
-            dax,
-            cache_size,
             id,
             pci_segment,
         })
@@ -1701,15 +1661,6 @@ impl FsConfig {
                     ));
                 }
             }
-        }
-
-        if self.dax {
-            // TODO: Remove the dax parameter.
-            // Tracked by https://github.com/cloud-hypervisor/cloud-hypervisor/issues/3889
-            warn!(
-                "The experimental DAX feature is deprecated and will be \
-                removed in a future release. A request to enable it is ignored."
-            );
         }
 
         Ok(())
@@ -3116,29 +3067,7 @@ mod tests {
                 ..Default::default()
             }
         );
-        // DAX on -> default cache size
-        assert_eq!(
-            FsConfig::parse("tag=mytag,socket=/tmp/sock,dax=on")?,
-            FsConfig {
-                socket: PathBuf::from("/tmp/sock"),
-                tag: "mytag".to_owned(),
-                dax: true,
-                cache_size: default_fsconfig_cache_size(),
-                ..Default::default()
-            }
-        );
-        assert_eq!(
-            FsConfig::parse("tag=mytag,socket=/tmp/sock,dax=on,cache_size=4G")?,
-            FsConfig {
-                socket: PathBuf::from("/tmp/sock"),
-                tag: "mytag".to_owned(),
-                dax: true,
-                cache_size: 4 << 30,
-                ..Default::default()
-            }
-        );
-        // Cache size without DAX is an error
-        assert!(FsConfig::parse("tag=mytag,socket=/tmp/sock,dax=off,cache_size=4G").is_err());
+
         Ok(())
     }
 
