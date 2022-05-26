@@ -905,9 +905,6 @@ components:
         iommu:
           type: boolean
           default: false
-        mergeable:
-          type: boolean
-          default: false
         discard_writes:
           type: boolean
           default: false

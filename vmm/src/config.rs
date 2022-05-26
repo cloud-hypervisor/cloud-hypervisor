@@ -1675,8 +1675,6 @@ pub struct PmemConfig {
     #[serde(default)]
     pub iommu: bool,
     #[serde(default)]
-    pub mergeable: bool,
-    #[serde(default)]
     pub discard_writes: bool,
     #[serde(default)]
     pub id: Option<String>,
@@ -1693,7 +1691,6 @@ impl PmemConfig {
         parser
             .add("size")
             .add("file")
-            .add("mergeable")
             .add("iommu")
             .add("discard_writes")
             .add("id")
@@ -1705,11 +1702,6 @@ impl PmemConfig {
             .convert::<ByteSized>("size")
             .map_err(Error::ParsePersistentMemory)?
             .map(|v| v.0);
-        let mergeable = parser
-            .convert::<Toggle>("mergeable")
-            .map_err(Error::ParsePersistentMemory)?
-            .unwrap_or(Toggle(false))
-            .0;
         let iommu = parser
             .convert::<Toggle>("iommu")
             .map_err(Error::ParsePersistentMemory)?
@@ -1730,7 +1722,6 @@ impl PmemConfig {
             file,
             size,
             iommu,
-            mergeable,
             discard_writes,
             id,
             pci_segment,
@@ -1738,10 +1729,6 @@ impl PmemConfig {
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        if self.mergeable {
-            warn!("Enabling mergable pages for PMEM devices is ineffectual. This option is deprecated and will be removed in a later release");
-        }
-
         if let Some(platform_config) = vm_config.platform.as_ref() {
             if self.pci_segment >= platform_config.num_pci_segments {
                 return Err(ValidationError::InvalidPciSegment(self.pci_segment));
@@ -3094,11 +3081,10 @@ mod tests {
             }
         );
         assert_eq!(
-            PmemConfig::parse("file=/tmp/pmem,size=128M,iommu=on,mergeable=on,discard_writes=on")?,
+            PmemConfig::parse("file=/tmp/pmem,size=128M,iommu=on,discard_writes=on")?,
             PmemConfig {
                 file: PathBuf::from("/tmp/pmem"),
                 size: Some(128 << 20),
-                mergeable: true,
                 discard_writes: true,
                 iommu: true,
                 ..Default::default()
