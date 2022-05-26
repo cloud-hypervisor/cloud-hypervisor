@@ -870,8 +870,6 @@ components:
 
     FsConfig:
       required:
-      - cache_size
-      - dax
       - num_queues
       - queue_size
       - socket
@@ -888,13 +886,6 @@ components:
         queue_size:
           type: integer
           default: 1024
-        dax:
-          type: boolean
-          default: true
-        cache_size:
-          type: integer
-          format: int64
-          default: 8589934592
         pci_segment:
           type: integer
           format: int16
