@@ -1122,7 +1122,7 @@ fn test_boot_from_vhost_user_blk(
     handle_child_output(r, &output);
 }
 
-fn test_virtio_fs(
+fn _test_virtio_fs(
     dax: bool,
     cache_size: Option<u64>,
     prepare_daemon: &dyn Fn(&TempDir, &str) -> (std::process::Child, String),
@@ -3109,24 +3109,24 @@ mod parallel {
 
     #[test]
     fn test_virtio_fs_dax_off() {
-        test_virtio_fs(false, None, &prepare_virtiofsd, false, None)
+        _test_virtio_fs(false, None, &prepare_virtiofsd, false, None)
     }
 
     #[test]
     fn test_virtio_fs_hotplug_dax_off() {
-        test_virtio_fs(false, None, &prepare_virtiofsd, true, None)
+        _test_virtio_fs(false, None, &prepare_virtiofsd, true, None)
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_virtio_fs_multi_segment_hotplug() {
-        test_virtio_fs(false, None, &prepare_virtiofsd, true, Some(15))
+        _test_virtio_fs(false, None, &prepare_virtiofsd, true, Some(15))
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_virtio_fs_multi_segment() {
-        test_virtio_fs(false, None, &prepare_virtiofsd, false, Some(15))
+        _test_virtio_fs(false, None, &prepare_virtiofsd, false, Some(15))
     }
 
     #[test]
