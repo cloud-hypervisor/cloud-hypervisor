@@ -292,7 +292,7 @@ impl fmt::Display for Error {
             ParseFsSockMissing => write!(f, "Error parsing --fs: socket missing"),
             ParseFsTagMissing => write!(f, "Error parsing --fs: tag missing"),
             InvalidCacheSizeWithDaxOff => {
-                write!(f, "Error parsing --fs: cache_size used with dax=on")
+                write!(f, "Error parsing --fs: cache_size used with dax=off")
             }
             ParsePersistentMemory(o) => write!(f, "Error parsing --pmem: {}", o),
             ParsePmemFileMissing => write!(f, "Error parsing --pmem: file missing"),
