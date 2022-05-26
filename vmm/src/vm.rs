@@ -960,55 +960,18 @@ impl Vm {
         console_resize_pipe: Option<File>,
     ) -> Result<Self> {
 
-        let mut ram_dev = 0;
-        let mut ram_file = String::new();
-        let mut dev_num = 0;
-        println!("UIO devices:");
-        'uio_devices: loop {
-            let path = format!("/dev/uio{}", dev_num);
-            match OpenOptions::new().read(true).write(true).open(path.clone()) {
-                Ok(_) => (), /* but we don't actually need the file here */
-                Err(error) => match error.kind() {
-                    std::io::ErrorKind::NotFound => break 'uio_devices,
-                    _ => continue 'uio_devices,
-                },
+        let uio_devices_info = devices::legacy::uio::get_uio_devices_info().unwrap();
+        let ram_dev_info: &devices::legacy::uio::UioDeviceInfo =
+            match uio_devices_info.iter().find(|d| d.is_ram) {
+                Some(dev_info) => dev_info,
+                None => {
+                    error!("Couldn't find uio ram device!");
+                    return Err(Error::Console(vmm_sys_util::errno::Error::new(1)));
+                }
             };
-            let name_path = format!("/sys/class/uio/uio{}/name", dev_num);
-            let mut name_file = File::open(name_path).unwrap();
-            let mut name = String::new();
-            name_file.read_to_string(&mut name).unwrap();
-            if name.trim().eq("ram") {
-                println!("Found ram device. Path: {}", path);
-                ram_file = path.clone();
-                ram_dev = dev_num;
-            }
-            println!(" {}", name.trim());
-            dev_num += 1;
-        }
-        println!("Found ram device at: {}", ram_file);
-        if ram_file.is_empty() {
-            eprintln!("Couldn't find uio ram device!");
-            return Err(Error::Console(vmm_sys_util::errno::Error::new(1)));
-        }
-        fn open_and_parse_hex(path: String) -> u64 {
-            let mut file = File::open(path).unwrap();
-            let mut num = String::new();
-            file.read_to_string(&mut num).unwrap();
-            let just_num = num.trim().trim_start_matches("0x");
-            u64::from_str_radix(just_num, 16).unwrap()
-        }
-        let ram_start = open_and_parse_hex(
-                                format!("/sys/class/uio/uio{}/maps/map0/addr", ram_dev)
-                            );
-        println!(" ram start: {:#x}", ram_start);
-        let ram_size = open_and_parse_hex(
-                                format!("/sys/class/uio/uio{}/maps/map0/size", ram_dev)
-                            );
-        println!(" ram size: {:#x}", ram_size);
-        let ram_offset = open_and_parse_hex(
-                                format!("/sys/class/uio/uio{}/maps/map0/offset", ram_dev)
-                            );
-        println!(" ram offset: {:#x}", ram_offset);
+        let ram_start = ram_dev_info.mappings[0].0;
+        let ram_size = ram_dev_info.mappings[0].1;
+        let ram_offset = ram_dev_info.mappings[0].2;
 
         /* horrible hack but idk what else to do */
         arch::set_ram_start(ram_start);
@@ -1019,7 +982,6 @@ impl Vm {
         hypervisor.check_required_extensions().unwrap();
 
         let vm = hypervisor.create_vm_with_type(0).unwrap(); // type 0 = KVM_X86_LEGACY_VM
-        println!("created vm");
 
         let phys_bits = physical_bits(config.lock().unwrap().cpus.max_phys_bits);
 
@@ -1028,7 +990,7 @@ impl Vm {
             GuestAddress(ram_start),
             ram_size.try_into().unwrap(),
             ram_offset * (PAGE_SIZE as u64),
-            std::path::PathBuf::from(ram_file),
+            &ram_dev_info.dev_path,
             phys_bits,
         )
         .map_err(Error::MemoryManager)?;

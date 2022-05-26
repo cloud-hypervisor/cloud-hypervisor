@@ -51,6 +51,7 @@ use block_util::{
     fixed_vhd_async::FixedVhdDiskAsync, fixed_vhd_sync::FixedVhdDiskSync, qcow_sync::QcowDiskSync,
     raw_async::RawFileDisk, raw_sync::RawFileDiskSync, vhdx_sync::VhdxDiskSync, ImageType,
 };
+use devices::legacy::uio;
 #[cfg(target_arch = "aarch64")]
 use devices::gic;
 #[cfg(target_arch = "x86_64")]

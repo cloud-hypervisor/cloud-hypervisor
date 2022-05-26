@@ -1072,7 +1072,7 @@ impl MemoryManager {
         ram_start: GuestAddress,
         ram_size: usize,
         ram_offset: u64,
-        ram_path: PathBuf,
+        ram_path: &PathBuf,
         phys_bits: u8,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
 

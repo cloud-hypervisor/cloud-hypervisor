@@ -17,6 +17,7 @@ mod rtc_pl031;
 mod serial;
 #[cfg(target_arch = "aarch64")]
 mod uart_pl011;
+pub mod uio;
 
 #[cfg(feature = "cmos")]
 pub use self::cmos::Cmos;
@@ -33,3 +34,4 @@ pub use self::gpio_pl061::Gpio;
 pub use self::rtc_pl031::Rtc;
 #[cfg(target_arch = "aarch64")]
 pub use self::uart_pl011::Pl011;
+pub use self::uio::Uio;
