@@ -1123,8 +1123,6 @@ fn test_boot_from_vhost_user_blk(
 }
 
 fn _test_virtio_fs(
-    dax: bool,
-    cache_size: Option<u64>,
     prepare_daemon: &dyn Fn(&TempDir, &str) -> (std::process::Child, String),
     hotplug: bool,
     pci_segment: Option<u16>,
@@ -1156,13 +1154,6 @@ fn _test_virtio_fs(
         direct_kernel_boot_path()
     };
 
-    let (dax_vmm_param, dax_mount_param) = if dax { ("on", "-o dax") } else { ("off", "") };
-    let cache_size_vmm_param = if let Some(cache) = cache_size {
-        format!(",cache_size={}", cache)
-    } else {
-        "".to_string()
-    };
-
     let (mut daemon_child, virtiofsd_socket_path) =
         prepare_daemon(&guest.tmp_dir, shared_dir.to_str().unwrap());
 
@@ -1180,10 +1171,8 @@ fn _test_virtio_fs(
     }
 
     let fs_params = format!(
-        "id=myfs0,tag=myfs,socket={},num_queues=1,queue_size=1024,dax={}{}{}",
+        "id=myfs0,tag=myfs,socket={},num_queues=1,queue_size=1024{}",
         virtiofsd_socket_path,
-        dax_vmm_param,
-        cache_size_vmm_param,
         if let Some(pci_segment) = pci_segment {
             format!(",pci_segment={}", pci_segment)
         } else {
@@ -1220,16 +1209,9 @@ fn _test_virtio_fs(
         }
 
         // Mount shared directory through virtio_fs filesystem
-        let mount_cmd = format!(
-            "mkdir -p mount_dir && \
-                 sudo mount -t virtiofs {} myfs mount_dir/",
-            dax_mount_param
-        );
-        guest.ssh_command(&mount_cmd).unwrap();
-
-        assert!(guest
-            .valid_virtio_fs_cache_size(dax, cache_size)
-            .unwrap_or_default());
+        guest
+            .ssh_command("mkdir -p mount_dir && sudo mount -t virtiofs myfs mount_dir/")
+            .unwrap();
 
         // Check file1 exists and its content is "foo"
         assert_eq!(
@@ -1282,10 +1264,8 @@ fn _test_virtio_fs(
         let r = std::panic::catch_unwind(|| {
             thread::sleep(std::time::Duration::new(10, 0));
             let fs_params = format!(
-                "id=myfs0,tag=myfs,socket={},num_queues=1,queue_size=1024,dax={}{}{}",
+                "id=myfs0,tag=myfs,socket={},num_queues=1,queue_size=1024{}",
                 virtiofsd_socket_path,
-                dax_vmm_param,
-                cache_size_vmm_param,
                 if let Some(pci_segment) = pci_segment {
                     format!(",pci_segment={}", pci_segment)
                 } else {
@@ -1309,12 +1289,10 @@ fn _test_virtio_fs(
 
             thread::sleep(std::time::Duration::new(10, 0));
             // Mount shared directory through virtio_fs filesystem
-            let mount_cmd = format!(
-                "mkdir -p mount_dir && \
-                     sudo mount -t virtiofs {} myfs mount_dir/",
-                dax_mount_param
-            );
-            guest.ssh_command(&mount_cmd).unwrap();
+            guest
+                .ssh_command("mkdir -p mount_dir && sudo mount -t virtiofs myfs mount_dir/")
+                .unwrap();
+
             // Check file1 exists and its content is "foo"
             assert_eq!(
                 guest.ssh_command("cat mount_dir/file1").unwrap().trim(),
@@ -3108,25 +3086,25 @@ mod parallel {
     }
 
     #[test]
-    fn test_virtio_fs_dax_off() {
-        _test_virtio_fs(false, None, &prepare_virtiofsd, false, None)
+    fn test_virtio_fs() {
+        _test_virtio_fs(&prepare_virtiofsd, false, None)
     }
 
     #[test]
-    fn test_virtio_fs_hotplug_dax_off() {
-        _test_virtio_fs(false, None, &prepare_virtiofsd, true, None)
+    fn test_virtio_fs_hotplug() {
+        _test_virtio_fs(&prepare_virtiofsd, true, None)
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_virtio_fs_multi_segment_hotplug() {
-        _test_virtio_fs(false, None, &prepare_virtiofsd, true, Some(15))
+        _test_virtio_fs(&prepare_virtiofsd, true, Some(15))
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_virtio_fs_multi_segment() {
-        _test_virtio_fs(false, None, &prepare_virtiofsd, false, Some(15))
+        _test_virtio_fs(&prepare_virtiofsd, false, Some(15))
     }
 
     #[test]
