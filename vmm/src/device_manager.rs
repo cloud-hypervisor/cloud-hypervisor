@@ -1229,6 +1229,51 @@ impl DeviceManager {
         Ok(())
     }
 
+    #[cfg(all(feature = "kvm", target_arch = "aarch64"))]
+    pub fn create_devices_craton(
+        &mut self,
+        serial_pty: Option<PtyPair>,
+        console_pty: Option<PtyPair>,
+        console_resize_pipe: Option<File>,
+        uio_devices_info: Vec<uio::UioDeviceInfo>,
+    ) -> DeviceManagerResult<()> {
+        let mut virtio_devices: Vec<(VirtioDeviceArc, bool, String, u16)> = Vec::new();
+
+        let interrupt_controller = self.add_interrupt_controller()?;
+
+        // Now we can create the legacy interrupt manager, which needs the freshly
+        // formed IOAPIC device.
+        let legacy_interrupt_manager: Arc<
+            dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>,
+        > = Arc::new(LegacyUserspaceInterruptManager::new(Arc::clone(
+            &interrupt_controller,
+        )));
+
+        self.add_craton_uio_devices(&legacy_interrupt_manager, uio_devices_info)?;
+
+        self.console = self.add_console_device(
+            &legacy_interrupt_manager,
+            &mut virtio_devices,
+            serial_pty,
+            console_pty,
+            console_resize_pipe,
+        )?;
+
+        virtio_devices.append(&mut self.make_virtio_devices()?);
+
+        if cfg!(feature = "pci_support") {
+            self.add_pci_devices(virtio_devices.clone())?;
+        } else if cfg!(feature = "mmio_support") {
+            self.add_mmio_devices(virtio_devices.clone(), &legacy_interrupt_manager)?;
+        }
+
+        self.legacy_interrupt_manager = Some(legacy_interrupt_manager);
+
+        self.virtio_devices = virtio_devices;
+
+        Ok(())
+    }
+
     fn state(&self) -> DeviceManagerState {
         DeviceManagerState {
             device_tree: self.device_tree.lock().unwrap().clone(),
@@ -1654,6 +1699,105 @@ impl DeviceManager {
             .lock()
             .unwrap()
             .insert(id.clone(), device_node!(id, gpio_device));
+
+        Ok(())
+    }
+
+    #[cfg(all(feature = "kvm", target_arch = "aarch64"))]
+    fn add_craton_uio_devices(
+        &mut self,
+        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
+        uio_devices_info: Vec<uio::UioDeviceInfo>,
+    ) -> DeviceManagerResult<()> {
+        for uio_dev_info in uio_devices_info.iter() {
+            if uio_dev_info.is_ram {
+                continue;
+            }
+            info!("Creating uio device \"{}\"", uio_dev_info.name);
+            // TODO support other devices
+            assert!(uio_dev_info.name.eq("rtc0"));
+
+            let irq = self
+                .address_manager
+                .allocator
+                .lock()
+                .unwrap()
+                .allocate_irq()
+                .unwrap();
+
+            /* interrupts */
+            /* just 1 for now */
+            /* TODO allow 0 to n interrupts... */
+            let device = Arc::new(Mutex::new(devices::legacy::Uio::new()));
+
+            /* TODO eventfd for interrupt, connect to kvm */
+
+            /* mappings */
+            /* just 1 for now */
+
+            let addr = uio_dev_info.mappings[0].0;
+            let len = uio_dev_info.mappings[0].1;
+            let offset = uio_dev_info.mappings[0].2;
+
+            /* TODO do this? or no */
+            /* basically does nothing...? */
+            self.bus_devices
+                .push(Arc::clone(&device) as Arc<Mutex<dyn BusDevice>>);
+
+            /* add to mmio bus to ensure it doesn't overlap other devices */
+            self.address_manager
+                .mmio_bus
+                .insert(device, addr, len)
+                .map_err(DeviceManagerError::BusError)?;
+
+            /* mmap the memory (copied from memory manager new_craton() */
+            let dev_file = OpenOptions::new().read(true).write(true).open(&uio_dev_info.dev_path).unwrap();
+            info!("opened {}", uio_dev_info.name);
+            let prot = libc::PROT_READ | libc::PROT_WRITE;
+            let flags = libc::MAP_SHARED;
+            use core::ptr::null_mut;
+            let mmap_addr = unsafe {
+                libc::mmap(
+                    null_mut(),
+                    len as usize,
+                    prot,
+                    flags,
+                    dev_file.as_raw_fd(), /* Note: after mapping we can safely close the file */
+                    offset as libc::off_t,
+                    )
+            };
+
+            if mmap_addr == libc::MAP_FAILED {
+                error!("uio device mmap failed!");
+                return Err(DeviceManagerError::Mmap(io::Error::last_os_error()));
+            }
+            info!("uio device mmap succeeded! {:?}", mmap_addr);
+
+            /* map into guest */
+            let _slot = self
+                    .memory_manager
+                    .lock()
+                    .unwrap()
+                    .create_userspace_mapping(
+                        addr, len, mmap_addr as u64, false, false, false,
+                    )
+                    .map_err(DeviceManagerError::MemoryManager)?;
+            /* dont need to update guest_ram_mapping in memory manager... */
+
+            /* TODO need to put it into device tree...? */
+            /* TODO for uio devices, they will be in the ARE device tree.. for now hardcoded this
+             * thing becuase it's the only device, RTC...
+             */
+            self.id_to_dev_info.insert(
+                (DeviceType::Rtc, uio_dev_info.name.clone()),
+                MmioDeviceInfo {
+                    addr: addr,
+                    len: len,
+                    irq: irq,
+                },
+            );
+
+        }
 
         Ok(())
     }

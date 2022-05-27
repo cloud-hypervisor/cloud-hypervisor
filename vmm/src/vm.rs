@@ -1091,7 +1091,7 @@ impl Vm {
             .device_manager
             .lock()
             .unwrap()
-            .create_devices(serial_pty, console_pty, console_resize_pipe)
+            .create_devices_craton(serial_pty, console_pty, console_resize_pipe, uio_devices_info)
             .map_err(Error::DeviceManager)?;
 
         Ok(new_vm)
