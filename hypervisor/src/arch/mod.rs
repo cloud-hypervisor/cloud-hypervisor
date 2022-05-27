@@ -10,9 +10,14 @@
 //
 // Copyright © 2020, Microsoft Corporation
 //
+// Copyright 2022 Arm Limited (or its affiliates). All rights reserved.
+//
 
 pub mod emulator;
 
 #[cfg(target_arch = "x86_64")]
 #[macro_use]
 pub mod x86;
+
+#[cfg(target_arch = "aarch64")]
+pub mod aarch64;
