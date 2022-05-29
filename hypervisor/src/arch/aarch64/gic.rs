@@ -1,6 +1,6 @@
 // Copyright 2022 Arm Limited (or its affiliates). All rights reserved.
 
-use crate::{CpuState, Device, HypervisorDeviceError, HypervisorVmError};
+use crate::{CpuState, Device, GicState, HypervisorDeviceError, HypervisorVmError};
 use std::any::Any;
 use std::result;
 use std::sync::Arc;
@@ -18,13 +18,7 @@ pub enum Error {
 pub type Result<T> = result::Result<T, Error>;
 
 /// Hypervisor agnostic interface for a virtualized GIC
-pub trait Vgic: Send {
-    /// Returns the hypervisor agnostic Device of the GIC device
-    fn device(&self) -> &Arc<dyn Device>;
-
-    /// Returns the hypervisor agnostic Device of the ITS device
-    fn its_device(&self) -> Option<&Arc<dyn Device>>;
-
+pub trait Vgic: Send + Sync {
     /// Returns the fdt compatibility property of the device
     fn fdt_compatibility(&self) -> &str;
 
@@ -54,11 +48,9 @@ pub trait Vgic: Send {
     /// Downcast the trait object to its concrete type.
     fn as_any_concrete_mut(&mut self) -> &mut dyn Any;
 
-    /*
-        /// Save the state of GICv3ITS.
-        fn state(&self, gicr_typers: &[u64]) -> Result<GicState>;
+    /// Save the state of GICv3ITS.
+    fn state(&self, gicr_typers: &[u64]) -> Result<GicState>;
 
-        /// Restore the state of GICv3ITS.
-        fn set_state(&mut self, gicr_typers: &[u64], state: &GicState) -> Result<()>;
-    */
+    /// Restore the state of GICv3ITS.
+    fn set_state(&mut self, gicr_typers: &[u64], state: &GicState) -> Result<()>;
 }
