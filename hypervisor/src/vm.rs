@@ -10,6 +10,8 @@
 
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::VcpuInit;
+#[cfg(target_arch = "aarch64")]
+use crate::arch::aarch64::gic::Vgic;
 use crate::cpu::Vcpu;
 use crate::device::Device;
 #[cfg(feature = "kvm")]
@@ -210,6 +212,11 @@ pub enum HypervisorVmError {
     ///
     #[error("Failed to initialize memory region TDX: {0}")]
     InitMemRegionTdx(#[source] std::io::Error),
+    ///
+    /// Create Vgic error
+    ///
+    #[error("Failed to create Vgic: {0}")]
+    CreateVgic(#[source] anyhow::Error),
 }
 ///
 /// Result type for returning from a function
@@ -269,6 +276,17 @@ pub trait Vm: Send + Sync {
     fn unregister_irqfd(&self, fd: &EventFd, gsi: u32) -> Result<()>;
     /// Creates a new KVM vCPU file descriptor and maps the memory corresponding
     fn create_vcpu(&self, id: u8, vm_ops: Option<Arc<dyn VmOps>>) -> Result<Arc<dyn Vcpu>>;
+    #[cfg(target_arch = "aarch64")]
+    fn create_vgic(
+        &self,
+        vcpu_count: u64,
+        dist_addr: u64,
+        dist_size: u64,
+        redist_size: u64,
+        msi_size: u64,
+        nr_irqs: u32,
+    ) -> Result<Box<dyn Vgic>>;
+
     /// Registers an event to be signaled whenever a certain address is written to.
     fn register_ioevent(
         &self,

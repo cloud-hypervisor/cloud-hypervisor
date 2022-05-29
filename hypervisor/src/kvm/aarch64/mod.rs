@@ -8,9 +8,8 @@
 //
 //
 
-///
-/// Export generically-named wrappers of kvm-bindings for Unix-based platforms
-///
+pub mod gic;
+
 use crate::kvm::{KvmError, KvmResult};
 use kvm_bindings::{
     kvm_mp_state, kvm_one_reg, kvm_regs, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG,
