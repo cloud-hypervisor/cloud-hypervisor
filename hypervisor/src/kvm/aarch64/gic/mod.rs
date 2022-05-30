@@ -341,14 +341,16 @@ impl Vgic for KvmGicV3Its {
     }
 
     /// Save the state of GICv3ITS.
-    fn state(&self, gicr_typers: &[u64]) -> Result<Gicv3ItsState> {
+    fn state(&self) -> Result<Gicv3ItsState> {
+        let gicr_typers = self.gicr_typers.clone();
+
         let gicd_ctlr = read_ctlr(self.device())?;
 
         let dist_state = get_dist_regs(self.device())?;
 
-        let rdist_state = get_redist_regs(self.device(), gicr_typers)?;
+        let rdist_state = get_redist_regs(self.device(), &gicr_typers)?;
 
-        let icc_state = get_icc_regs(self.device(), gicr_typers)?;
+        let icc_state = get_icc_regs(self.device(), &gicr_typers)?;
 
         let its_baser_state: [u64; 8] = [0; 8];
         for i in 0..8 {
@@ -421,14 +423,16 @@ impl Vgic for KvmGicV3Its {
     }
 
     /// Restore the state of GICv3ITS.
-    fn set_state(&mut self, gicr_typers: &[u64], state: &Gicv3ItsState) -> Result<()> {
+    fn set_state(&mut self, state: &Gicv3ItsState) -> Result<()> {
+        let gicr_typers = self.gicr_typers.clone();
+
         write_ctlr(self.device(), state.gicd_ctlr)?;
 
         set_dist_regs(self.device(), &state.dist)?;
 
-        set_redist_regs(self.device(), gicr_typers, &state.rdist)?;
+        set_redist_regs(self.device(), &gicr_typers, &state.rdist)?;
 
-        set_icc_regs(self.device(), gicr_typers, &state.icc)?;
+        set_icc_regs(self.device(), &gicr_typers, &state.icc)?;
 
         //Restore GICv3ITS registers
         gicv3_its_attr_access(

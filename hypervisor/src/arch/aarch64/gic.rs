@@ -49,8 +49,8 @@ pub trait Vgic: Send + Sync {
     fn as_any_concrete_mut(&mut self) -> &mut dyn Any;
 
     /// Save the state of GICv3ITS.
-    fn state(&self, gicr_typers: &[u64]) -> Result<GicState>;
+    fn state(&self) -> Result<GicState>;
 
     /// Restore the state of GICv3ITS.
-    fn set_state(&mut self, gicr_typers: &[u64], state: &GicState) -> Result<()>;
+    fn set_state(&mut self, state: &GicState) -> Result<()>;
 }
