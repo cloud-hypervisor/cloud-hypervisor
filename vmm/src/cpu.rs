@@ -375,43 +375,38 @@ impl Vcpu {
 }
 
 const VCPU_SNAPSHOT_ID: &str = "vcpu";
-impl Pausable for Vcpu {
-    fn pause(&mut self) -> std::result::Result<(), MigratableError> {
-        self.saved_state =
-            Some(self.vcpu.state().map_err(|e| {
-                MigratableError::Pause(anyhow!("Could not get vCPU state {:?}", e))
-            })?);
-
-        Ok(())
-    }
-
-    fn resume(&mut self) -> std::result::Result<(), MigratableError> {
-        if let Some(vcpu_state) = &self.saved_state {
-            self.vcpu.set_state(vcpu_state).map_err(|e| {
-                MigratableError::Pause(anyhow!("Could not set the vCPU state {:?}", e))
-            })?;
-        }
-
-        Ok(())
-    }
-}
+impl Pausable for Vcpu {}
 impl Snapshottable for Vcpu {
     fn id(&self) -> String {
         VCPU_SNAPSHOT_ID.to_string()
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+        let saved_state = self
+            .vcpu
+            .state()
+            .map_err(|e| MigratableError::Pause(anyhow!("Could not get vCPU state {:?}", e)))?;
+
         let mut vcpu_snapshot = Snapshot::new(&format!("{}", self.id));
         vcpu_snapshot.add_data_section(SnapshotDataSection::new_from_state(
             VCPU_SNAPSHOT_ID,
-            &self.saved_state,
+            &saved_state,
         )?);
+
+        self.saved_state = Some(saved_state);
 
         Ok(vcpu_snapshot)
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.saved_state = Some(snapshot.to_state(VCPU_SNAPSHOT_ID)?);
+        let saved_state: CpuState = snapshot.to_state(VCPU_SNAPSHOT_ID)?;
+
+        self.vcpu
+            .set_state(&saved_state)
+            .map_err(|e| MigratableError::Pause(anyhow!("Could not set the vCPU state {:?}", e)))?;
+
+        self.saved_state = Some(saved_state);
+
         Ok(())
     }
 }
