@@ -27,7 +27,7 @@ pub const IRQ_LEGACY_COUNT: usize = 32;
 //   2. Move this file and ioapic.rs to arch/, as they are architecture specific.
 pub struct Gic {
     interrupt_source_group: Arc<dyn InterruptSourceGroup>,
-    gic_device: Option<Arc<Mutex<Box<dyn GicDevice>>>>,
+    gic_device: Option<Arc<Mutex<GicDevice>>>,
 }
 
 impl Gic {
@@ -48,11 +48,11 @@ impl Gic {
         })
     }
 
-    pub fn set_gic_device(&mut self, gic_device: Arc<Mutex<Box<dyn GicDevice>>>) {
+    pub fn set_gic_device(&mut self, gic_device: Arc<Mutex<GicDevice>>) {
         self.gic_device = Some(gic_device);
     }
 
-    pub fn get_gic_device(&self) -> Option<&Arc<Mutex<Box<dyn GicDevice>>>> {
+    pub fn get_gic_device(&self) -> Option<&Arc<Mutex<GicDevice>>> {
         self.gic_device.as_ref()
     }
 }

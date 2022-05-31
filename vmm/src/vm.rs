@@ -38,9 +38,7 @@ use crate::{
 };
 use anyhow::anyhow;
 #[cfg(target_arch = "aarch64")]
-use arch::aarch64::gic::kvm::create_gic;
-#[cfg(target_arch = "aarch64")]
-use arch::aarch64::gic::kvm::{KvmGicV3Its, GIC_V3_ITS_SNAPSHOT_ID};
+use arch::aarch64::gic::{GicDevice, GIC_V3_ITS_SNAPSHOT_ID};
 use arch::get_host_cpu_phys_bits;
 #[cfg(target_arch = "x86_64")]
 use arch::layout::{KVM_IDENTITY_MAP_START, KVM_TSS_START};
@@ -1184,7 +1182,7 @@ impl Vm {
             .as_ref()
             .map(|(v, _)| *v);
 
-        let gic_device = create_gic(
+        let gic_device = GicDevice::new(
             &self.memory_manager.lock().as_ref().unwrap().vm,
             self.cpu_manager.lock().unwrap().boot_vcpus() as u64,
         )
@@ -1215,13 +1213,14 @@ impl Vm {
             &initramfs_config,
             &pci_space_info,
             virtio_iommu_bdf.map(|bdf| bdf.into()),
-            &*gic_device,
+            &gic_device,
             &self.numa_nodes,
             pmu_supported,
         )
         .map_err(Error::ConfigureSystem)?;
 
         // Update the GIC entity in device manager
+        let gic_device = Arc::new(Mutex::new(gic_device));
         self.device_manager
             .lock()
             .unwrap()
@@ -1229,7 +1228,7 @@ impl Vm {
             .unwrap()
             .lock()
             .unwrap()
-            .set_gic_device(Arc::new(Mutex::new(gic_device)));
+            .set_gic_device(gic_device);
 
         // Activate gic device
         self.device_manager
@@ -2237,20 +2236,7 @@ impl Vm {
             .unwrap()
             .set_gicr_typers(&saved_vcpu_states);
 
-        vm_snapshot.add_snapshot(
-            if let Some(gicv3_its) = gic_device
-                .lock()
-                .unwrap()
-                .as_any_concrete_mut()
-                .downcast_mut::<KvmGicV3Its>()
-            {
-                gicv3_its.snapshot()?
-            } else {
-                return Err(MigratableError::Snapshot(anyhow!(
-                    "GicDevice downcast to KvmGicV3Its failed when snapshotting VM!"
-                )));
-            },
-        );
+        vm_snapshot.add_snapshot(gic_device.lock().unwrap().snapshot()?);
 
         Ok(())
     }
@@ -2268,7 +2254,7 @@ impl Vm {
         // Creating a GIC device here, as the GIC will not be created when
         // restoring the device manager. Note that currently only the bare GICv3
         // without ITS is supported.
-        let mut gic_device = create_gic(&self.vm, vcpu_numbers.try_into().unwrap())
+        let mut gic_device = GicDevice::new(&self.vm, vcpu_numbers.try_into().unwrap())
             .map_err(|e| MigratableError::Restore(anyhow!("Could not create GIC: {:#?}", e)))?;
 
         // PMU interrupt sticks to PPI, so need to be added by 16 to get real irq number.
@@ -2290,22 +2276,14 @@ impl Vm {
             .unwrap()
             .lock()
             .unwrap()
-            .set_gic_device(Arc::clone(&gic_device));
+            .set_gic_device(gic_device.clone());
 
         // Restore GIC states.
         if let Some(gicv3_its_snapshot) = vm_snapshot.snapshots.get(GIC_V3_ITS_SNAPSHOT_ID) {
-            if let Some(gicv3_its) = gic_device
+            gic_device
                 .lock()
                 .unwrap()
-                .as_any_concrete_mut()
-                .downcast_mut::<KvmGicV3Its>()
-            {
-                gicv3_its.restore(*gicv3_its_snapshot.clone())?;
-            } else {
-                return Err(MigratableError::Restore(anyhow!(
-                    "GicDevice downcast to KvmGicV3Its failed when restoring VM!"
-                )));
-            };
+                .restore(*gicv3_its_snapshot.clone())?;
         } else {
             return Err(MigratableError::Restore(anyhow!(
                 "Missing GicV3Its snapshot"

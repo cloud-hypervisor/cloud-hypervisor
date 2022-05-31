@@ -1,11 +1,12 @@
 // Copyright 2021 Arm Limited (or its affiliates). All rights reserved.
 
+use crate::layout;
+use anyhow::anyhow;
 use hypervisor::{arch::aarch64::gic::Vgic, CpuState};
 use std::result;
 use std::sync::Arc;
-use vm_migration::{
-    Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
-};
+use vm_memory::Address;
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 
 /// Errors thrown while setting up the GIC.
 #[derive(Debug)]
@@ -35,7 +36,9 @@ impl GicDevice {
         Ok(GicDevice { vgic })
     }
 
-    pub fn set_gicr_typers(&mut self, vcpu_states: &[CpuState]) {}
+    pub fn set_gicr_typers(&mut self, vcpu_states: &[CpuState]) {
+        self.vgic.set_gicr_typers(vcpu_states)
+    }
 
     pub fn get_vgic(&self) -> &dyn Vgic {
         &*self.vgic
@@ -54,30 +57,23 @@ impl Snapshottable for GicDevice {
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.vgic.set_state(&snapshot.to_state(&self.id())?)
+        self.vgic
+            .set_state(&snapshot.to_state(&self.id())?)
             .map_err(|e| {
                 MigratableError::Restore(anyhow!("Could not restore GICv3ITS state {:?}", e))
             })
-        Ok(())
     }
 }
 
 impl Pausable for GicDevice {
     fn pause(&mut self) -> std::result::Result<(), MigratableError> {
-        /*
-                // Flush redistributors pending tables to guest RAM.
-                KvmGicDevice::save_pending_tables(self.device()).map_err(|e| {
-                    MigratableError::Pause(anyhow!(
-                        "Could not save GICv3ITS GIC pending tables {:?}",
-                        e
-                    ))
-                })?;
-                // Flush ITS tables to guest RAM.
-                gicv3_its_tables_access(self.its_device().unwrap(), true).map_err(|e| {
-                    MigratableError::Pause(anyhow!("Could not save GICv3ITS ITS tables {:?}", e))
-                })?;
-        */
-        Ok(())
+        // Flush tables to guest RAM
+        self.vgic.save_data_tables().map_err(|e| {
+            MigratableError::Pause(anyhow!(
+                "Could not save GICv3ITS GIC pending tables {:?}",
+                e
+            ))
+        })
     }
 }
 impl Transportable for GicDevice {}
