@@ -244,20 +244,6 @@ impl KvmGicV3Its {
             .map_err(Error::SetDeviceAttribute)
     }
 
-    /// Function that saves RDIST pending tables into guest RAM.
-    ///
-    /// The tables get flushed to guest RAM whenever the VM gets stopped.
-    pub fn save_pending_tables(vgic: &Arc<dyn Device>) -> Result<()> {
-        let init_gic_attr = kvm_bindings::kvm_device_attr {
-            group: kvm_bindings::KVM_DEV_ARM_VGIC_GRP_CTRL,
-            attr: u64::from(kvm_bindings::KVM_DEV_ARM_VGIC_SAVE_PENDING_TABLES),
-            addr: 0,
-            flags: 0,
-        };
-        vgic.set_device_attr(&init_gic_attr)
-            .map_err(Error::SetDeviceAttribute)
-    }
-
     /// Method to initialize the GIC device
     #[allow(clippy::new_ret_no_self)]
     pub fn new(
@@ -486,8 +472,24 @@ impl Vgic for KvmGicV3Its {
             GITS_CTLR,
             &state.its_ctlr,
             true,
-        )?;
+        )
+    }
 
-        Ok(())
+    /// Saves GIC internal data tables into RAM, including:
+    /// - RDIST pending tables
+    /// - ITS tables into guest RAM.
+    fn save_data_tables(&self) -> Result<()> {
+        // Flash RDIST pending tables
+        let init_gic_attr = kvm_bindings::kvm_device_attr {
+            group: kvm_bindings::KVM_DEV_ARM_VGIC_GRP_CTRL,
+            attr: u64::from(kvm_bindings::KVM_DEV_ARM_VGIC_SAVE_PENDING_TABLES),
+            addr: 0,
+            flags: 0,
+        };
+        self.device()
+            .set_device_attr(&init_gic_attr)
+            .map_err(Error::SetDeviceAttribute)?;
+        // Flush ITS tables to guest RAM.
+        gicv3_its_tables_access(self.its_device().unwrap(), true)
     }
 }
