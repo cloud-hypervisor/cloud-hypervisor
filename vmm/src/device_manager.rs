@@ -29,8 +29,6 @@ use crate::PciDeviceInfo;
 use crate::{device_node, DEVICE_MANAGER_SNAPSHOT_ID};
 use acpi_tables::{aml, aml::Aml};
 use anyhow::anyhow;
-#[cfg(target_arch = "aarch64")]
-use arch::aarch64::gic::kvm::KvmGicV3Its;
 use arch::layout;
 #[cfg(target_arch = "x86_64")]
 use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
@@ -4327,26 +4325,15 @@ impl Pausable for DeviceManager {
         // and ITS tables to guest RAM.
         #[cfg(target_arch = "aarch64")]
         {
-            let gic_device = Arc::clone(
-                self.get_interrupt_controller()
-                    .unwrap()
-                    .lock()
-                    .unwrap()
-                    .get_gic_device()
-                    .unwrap(),
-            );
-            if let Some(gicv3_its) = gic_device
+            self.get_interrupt_controller()
+                .unwrap()
                 .lock()
                 .unwrap()
-                .as_any_concrete_mut()
-                .downcast_mut::<KvmGicV3Its>()
-            {
-                gicv3_its.pause()?;
-            } else {
-                return Err(MigratableError::Pause(anyhow!(
-                    "GicDevice downcast to KvmGicV3Its failed when pausing device manager!"
-                )));
-            };
+                .get_gic_device()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .pause()?;
         };
 
         Ok(())
