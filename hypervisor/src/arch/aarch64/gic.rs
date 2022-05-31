@@ -53,4 +53,7 @@ pub trait Vgic: Send + Sync {
 
     /// Restore the state of GICv3ITS.
     fn set_state(&mut self, state: &GicState) -> Result<()>;
+
+    /// Saves GIC internal data tables into RAM.
+    fn save_data_tables(&self) -> Result<()>;
 }
