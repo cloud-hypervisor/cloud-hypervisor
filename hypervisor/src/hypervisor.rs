@@ -123,3 +123,13 @@ pub trait Hypervisor: Send + Sync {
     #[cfg(feature = "tdx")]
     fn tdx_capabilities(&self) -> Result<TdxCapabilities>;
 }
+///
+/// Generic MemoryRegion struct
+///
+pub struct UserMemoryRegion {
+    pub slot: u32,
+    pub guest_phys_addr: u64,
+    pub memory_size: u64,
+    pub userspace_addr: u64,
+    pub flags: u32,
+}
