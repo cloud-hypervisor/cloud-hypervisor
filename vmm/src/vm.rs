@@ -3331,7 +3331,6 @@ mod tests {
     use super::*;
     use crate::GuestMemoryMmap;
     use arch::aarch64::fdt::create_fdt;
-    use arch::aarch64::gic::kvm::create_gic;
     use arch::aarch64::layout;
     use arch::{DeviceType, MmioDeviceInfo};
 
@@ -3374,14 +3373,23 @@ mod tests {
 
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().unwrap();
-        let gic = create_gic(&vm, 1).unwrap();
+        let gic = vm
+            .create_vgic(
+                1,
+                0x0900_0000 - 0x01_0000,
+                0x01_0000,
+                0x02_0000,
+                0x02_0000,
+                256,
+            )
+            .expect("Cannot create gic");
         assert!(create_fdt(
             &mem,
             "console=tty0",
             vec![0],
             Some((0, 0, 0)),
             &dev_info,
-            &*gic,
+            &gic,
             &None,
             &Vec::new(),
             &BTreeMap::new(),
