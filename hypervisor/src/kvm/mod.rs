@@ -35,6 +35,8 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
 #[cfg(target_arch = "x86_64")]
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_arch = "aarch64")]
+use std::sync::Mutex;
 use std::sync::{Arc, RwLock};
 use vmm_sys_util::eventfd::EventFd;
 // x86_64 dependencies
@@ -266,8 +268,8 @@ impl vm::Vm for KvmVm {
         redist_size: u64,
         msi_size: u64,
         nr_irqs: u32,
-    ) -> vm::Result<Box<dyn Vgic>> {
-        KvmGicV3Its::new(
+    ) -> vm::Result<Arc<Mutex<dyn Vgic>>> {
+        let gic_device = KvmGicV3Its::new(
             self,
             vcpu_count,
             dist_addr,
@@ -276,7 +278,8 @@ impl vm::Vm for KvmVm {
             msi_size,
             nr_irqs,
         )
-        .map_err(|e| vm::HypervisorVmError::CreateVgic(anyhow!("Vgic error {:?}", e)))
+        .map_err(|e| vm::HypervisorVmError::CreateVgic(anyhow!("Vgic error {:?}", e)))?;
+        Ok(Arc::new(Mutex::new(gic_device)))
     }
     ///
     /// Registers an event to be signaled whenever a certain address is written to.

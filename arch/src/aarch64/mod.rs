@@ -4,8 +4,6 @@
 
 /// Module for the flattened device tree.
 pub mod fdt;
-/// Module for the global interrupt controller configuration.
-pub mod gic;
 /// Layout for this aarch64 system.
 pub mod layout;
 /// Logic for configuring aarch64 registers.
@@ -15,11 +13,12 @@ pub mod uefi;
 
 pub use self::fdt::DeviceInfoForFdt;
 use crate::{DeviceType, GuestMemoryMmap, NumaNodes, PciSpaceInfo, RegionType};
+use hypervisor::arch::aarch64::gic::Vgic;
 use log::{log_enabled, Level};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt::Debug;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use vm_memory::{Address, GuestAddress, GuestMemory, GuestUsize};
 
 /// Errors thrown while configuring aarch64 system.
@@ -32,7 +31,7 @@ pub enum Error {
     WriteFdtToMemory(fdt::Error),
 
     /// Failed to create a GIC.
-    SetupGic(gic::Error),
+    SetupGic,
 
     /// Failed to compute the initramfs address.
     InitramfsAddress,
@@ -142,7 +141,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Bui
     initrd: &Option<super::InitramfsConfig>,
     pci_space_info: &[PciSpaceInfo],
     virtio_iommu_bdf: Option<u32>,
-    gic_device: &gic::GicDevice,
+    gic_device: &Arc<Mutex<dyn Vgic>>,
     numa_nodes: &NumaNodes,
     pmu_supported: bool,
 ) -> super::Result<()> {
@@ -152,7 +151,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Bui
         vcpu_mpidr,
         vcpu_topology,
         device_info,
-        gic_device.get_vgic(),
+        gic_device,
         initrd,
         pci_space_info,
         numa_nodes,

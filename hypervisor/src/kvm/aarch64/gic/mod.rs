@@ -12,7 +12,6 @@ use icc_regs::{get_icc_regs, set_icc_regs};
 use redist_regs::{construct_gicr_typers, get_redist_regs, set_redist_regs};
 use serde::{Deserialize, Serialize};
 use std::any::Any;
-use std::boxed::Box;
 use std::convert::TryInto;
 use std::sync::Arc;
 
@@ -254,13 +253,13 @@ impl KvmGicV3Its {
         redist_size: u64,
         msi_size: u64,
         nr_irqs: u32,
-    ) -> Result<Box<dyn Vgic>> {
+    ) -> Result<KvmGicV3Its> {
         let vgic = Self::create_device(vm)?;
         let redists_size: u64 = redist_size * vcpu_count;
         let redists_addr: u64 = dist_addr - redists_size;
         let msi_addr: u64 = redists_addr - msi_size;
 
-        let mut gic_device = Box::new(KvmGicV3Its {
+        let mut gic_device = KvmGicV3Its {
             device: vgic,
             its_device: None,
             gicr_typers: vec![0; vcpu_count.try_into().unwrap()],
@@ -271,7 +270,7 @@ impl KvmGicV3Its {
             msi_addr,
             msi_size,
             vcpu_count,
-        });
+        };
 
         gic_device.init_device_attributes(vm, nr_irqs)?;
 

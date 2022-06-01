@@ -4329,10 +4329,6 @@ impl Pausable for DeviceManager {
                 .unwrap()
                 .lock()
                 .unwrap()
-                .get_gic_device()
-                .unwrap()
-                .lock()
-                .unwrap()
                 .pause()?;
         };
 

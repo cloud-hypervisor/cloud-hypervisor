@@ -37,8 +37,6 @@ use crate::{
     PciDeviceInfo, CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_SNAPSHOT_ID,
 };
 use anyhow::anyhow;
-#[cfg(target_arch = "aarch64")]
-use arch::aarch64::gic::{GicDevice, GIC_V3_ITS_SNAPSHOT_ID};
 use arch::get_host_cpu_phys_bits;
 #[cfg(target_arch = "x86_64")]
 use arch::layout::{KVM_IDENTITY_MAP_START, KVM_TSS_START};
@@ -48,6 +46,8 @@ use arch::EntryPoint;
 #[cfg(target_arch = "aarch64")]
 use arch::PciSpaceInfo;
 use arch::{NumaNode, NumaNodes};
+#[cfg(target_arch = "aarch64")]
+use devices::gic::GIC_V3_ITS_SNAPSHOT_ID;
 #[cfg(target_arch = "aarch64")]
 use devices::interrupt_controller::{self, InterruptController};
 use devices::AcpiNotificationFlags;
@@ -1182,15 +1182,23 @@ impl Vm {
             .as_ref()
             .map(|(v, _)| *v);
 
-        let gic_device = GicDevice::new(
-            &self.memory_manager.lock().as_ref().unwrap().vm,
-            self.cpu_manager.lock().unwrap().boot_vcpus() as u64,
-        )
-        .map_err(|e| {
-            Error::ConfigureSystem(arch::Error::PlatformSpecific(
-                arch::aarch64::Error::SetupGic(e),
-            ))
-        })?;
+        let vgic = self
+            .device_manager
+            .lock()
+            .unwrap()
+            .get_interrupt_controller()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .create_vgic(
+                &self.memory_manager.lock().as_ref().unwrap().vm,
+                self.cpu_manager.lock().unwrap().boot_vcpus() as u64,
+            )
+            .map_err(|_| {
+                Error::ConfigureSystem(arch::Error::PlatformSpecific(
+                    arch::aarch64::Error::SetupGic,
+                ))
+            })?;
 
         // PMU interrupt sticks to PPI, so need to be added by 16 to get real irq number.
         let pmu_supported = self
@@ -1213,22 +1221,11 @@ impl Vm {
             &initramfs_config,
             &pci_space_info,
             virtio_iommu_bdf.map(|bdf| bdf.into()),
-            &gic_device,
+            &vgic,
             &self.numa_nodes,
             pmu_supported,
         )
         .map_err(Error::ConfigureSystem)?;
-
-        // Update the GIC entity in device manager
-        let gic_device = Arc::new(Mutex::new(gic_device));
-        self.device_manager
-            .lock()
-            .unwrap()
-            .get_interrupt_controller()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .set_gic_device(gic_device);
 
         // Activate gic device
         self.device_manager
@@ -2219,7 +2216,16 @@ impl Vm {
         vm_snapshot: &mut Snapshot,
     ) -> std::result::Result<(), MigratableError> {
         let saved_vcpu_states = self.cpu_manager.lock().unwrap().get_saved_states();
-        let gic_device = Arc::clone(
+        self.device_manager
+            .lock()
+            .unwrap()
+            .get_interrupt_controller()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .set_gicr_typers(&saved_vcpu_states);
+
+        vm_snapshot.add_snapshot(
             self.device_manager
                 .lock()
                 .unwrap()
@@ -2227,16 +2233,8 @@ impl Vm {
                 .unwrap()
                 .lock()
                 .unwrap()
-                .get_gic_device()
-                .unwrap(),
+                .snapshot()?,
         );
-
-        gic_device
-            .lock()
-            .unwrap()
-            .set_gicr_typers(&saved_vcpu_states);
-
-        vm_snapshot.add_snapshot(gic_device.lock().unwrap().snapshot()?);
 
         Ok(())
     }
@@ -2254,7 +2252,14 @@ impl Vm {
         // Creating a GIC device here, as the GIC will not be created when
         // restoring the device manager. Note that currently only the bare GICv3
         // without ITS is supported.
-        let mut gic_device = GicDevice::new(&self.vm, vcpu_numbers.try_into().unwrap())
+        self.device_manager
+            .lock()
+            .unwrap()
+            .get_interrupt_controller()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .create_vgic(&self.vm, vcpu_numbers.try_into().unwrap())
             .map_err(|e| MigratableError::Restore(anyhow!("Could not create GIC: {:#?}", e)))?;
 
         // PMU interrupt sticks to PPI, so need to be added by 16 to get real irq number.
@@ -2265,10 +2270,6 @@ impl Vm {
             .map_err(|e| MigratableError::Restore(anyhow!("Error init PMU: {:?}", e)))?;
 
         // Here we prepare the GICR_TYPER registers from the restored vCPU states.
-        gic_device.set_gicr_typers(&saved_vcpu_states);
-
-        let gic_device = Arc::new(Mutex::new(gic_device));
-        // Update the GIC entity in device manager
         self.device_manager
             .lock()
             .unwrap()
@@ -2276,11 +2277,15 @@ impl Vm {
             .unwrap()
             .lock()
             .unwrap()
-            .set_gic_device(gic_device.clone());
+            .set_gicr_typers(&saved_vcpu_states);
 
         // Restore GIC states.
         if let Some(gicv3_its_snapshot) = vm_snapshot.snapshots.get(GIC_V3_ITS_SNAPSHOT_ID) {
-            gic_device
+            self.device_manager
+                .lock()
+                .unwrap()
+                .get_interrupt_controller()
+                .unwrap()
                 .lock()
                 .unwrap()
                 .restore(*gicv3_its_snapshot.clone())?;

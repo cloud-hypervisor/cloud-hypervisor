@@ -206,6 +206,7 @@ dependencies = [
  "bitflags",
  "byteorder",
  "epoll",
+ "hypervisor",
  "libc",
  "log",
  "versionize",
