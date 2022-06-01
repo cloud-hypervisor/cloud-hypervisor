@@ -492,3 +492,124 @@ impl Vgic for KvmGicV3Its {
         gicv3_its_tables_access(self.its_device().unwrap(), true)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::aarch64::gic::{
+        get_dist_regs, get_icc_regs, get_redist_regs, set_dist_regs, set_icc_regs, set_redist_regs,
+    };
+    use crate::kvm::KvmGicV3Its;
+
+    #[test]
+    fn test_create_gic() {
+        let hv = crate::new().unwrap();
+        let vm = hv.create_vm().unwrap();
+
+        assert!(KvmGicV3Its::new(
+            &*vm,
+            1,
+            0x0900_0000 - 0x01_0000,
+            0x01_0000,
+            0x02_0000,
+            0x02_0000,
+            256
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn test_get_set_dist_regs() {
+        let hv = crate::new().unwrap();
+        let vm = hv.create_vm().unwrap();
+        let _ = vm.create_vcpu(0, None).unwrap();
+        let gic = KvmGicV3Its::new(
+            &*vm,
+            1,
+            0x0900_0000 - 0x01_0000,
+            0x01_0000,
+            0x02_0000,
+            0x02_0000,
+            256,
+        )
+        .expect("Cannot create gic");
+
+        let res = get_dist_regs(gic.device());
+        assert!(res.is_ok());
+        let state = res.unwrap();
+        assert_eq!(state.len(), 568);
+
+        let res = set_dist_regs(gic.device(), &state);
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn test_get_set_redist_regs() {
+        let hv = crate::new().unwrap();
+        let vm = hv.create_vm().unwrap();
+        let _ = vm.create_vcpu(0, None).unwrap();
+        let gic = KvmGicV3Its::new(
+            &*vm,
+            1,
+            0x0900_0000 - 0x01_0000,
+            0x01_0000,
+            0x02_0000,
+            0x02_0000,
+            256,
+        )
+        .expect("Cannot create gic");
+
+        let gicr_typer = vec![123];
+        let res = get_redist_regs(gic.device(), &gicr_typer);
+        assert!(res.is_ok());
+        let state = res.unwrap();
+        println!("{}", state.len());
+        assert!(state.len() == 24);
+
+        assert!(set_redist_regs(gic.device(), &gicr_typer, &state).is_ok());
+    }
+
+    #[test]
+    fn test_get_set_icc_regs() {
+        let hv = crate::new().unwrap();
+        let vm = hv.create_vm().unwrap();
+        let _ = vm.create_vcpu(0, None).unwrap();
+        let gic = KvmGicV3Its::new(
+            &*vm,
+            1,
+            0x0900_0000 - 0x01_0000,
+            0x01_0000,
+            0x02_0000,
+            0x02_0000,
+            256,
+        )
+        .expect("Cannot create gic");
+
+        let gicr_typer = vec![123];
+        let res = get_icc_regs(gic.device(), &gicr_typer);
+        assert!(res.is_ok());
+        let state = res.unwrap();
+        println!("{}", state.len());
+        assert!(state.len() == 9);
+
+        assert!(set_icc_regs(gic.device(), &gicr_typer, &state).is_ok());
+    }
+
+    #[test]
+    fn test_save_data_tables() {
+        let hv = crate::new().unwrap();
+        let vm = hv.create_vm().unwrap();
+        let _ = vm.create_vcpu(0, None).unwrap();
+        let gic = vm
+            .create_vgic(
+                1,
+                0x0900_0000 - 0x01_0000,
+                0x01_0000,
+                0x02_0000,
+                0x02_0000,
+                256,
+            )
+            .expect("Cannot create gic");
+
+        assert!(gic.lock().unwrap().save_data_tables().is_ok());
+    }
+}
