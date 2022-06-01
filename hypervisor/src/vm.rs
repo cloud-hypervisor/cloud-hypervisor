@@ -29,6 +29,8 @@ use kvm_ioctls::Cap;
 #[cfg(target_arch = "x86_64")]
 use std::fs::File;
 use std::sync::Arc;
+#[cfg(target_arch = "aarch64")]
+use std::sync::Mutex;
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -285,7 +287,7 @@ pub trait Vm: Send + Sync {
         redist_size: u64,
         msi_size: u64,
         nr_irqs: u32,
-    ) -> Result<Box<dyn Vgic>>;
+    ) -> Result<Arc<Mutex<dyn Vgic>>>;
 
     /// Registers an event to be signaled whenever a certain address is written to.
     fn register_ioevent(
