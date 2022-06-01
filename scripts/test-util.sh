@@ -46,9 +46,11 @@ build_custom_linux() {
     ARCH=$(uname -m)
     SRCDIR=$PWD
     LINUX_CUSTOM_DIR="$WORKLOADS_DIR/linux-custom"
-    LINUX_CUSTOM_BRANCH="ch-5.15.12"
-    LINUX_CUSTOM_URL="https://github.com/cloud-hypervisor/linux.git"
+    LINUX_CUSTOM_BRANCH="vcpu_hotplug_arm_5.15.12"
+#    LINUX_CUSTOM_BRANCH="ch-5.15.12"
+    LINUX_CUSTOM_URL="https://github.com/jongwu/linux.git"
 
+    rm -rf "$LINUX_CUSTOM_DIR"
     checkout_repo "$LINUX_CUSTOM_DIR" "$LINUX_CUSTOM_URL" "$LINUX_CUSTOM_BRANCH"
 
     cp $SRCDIR/resources/linux-config-${ARCH} $LINUX_CUSTOM_DIR/.config
