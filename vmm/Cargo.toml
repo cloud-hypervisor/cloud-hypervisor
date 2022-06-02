@@ -43,7 +43,7 @@ serde = { version = "1.0.137", features = ["rc", "derive"] }
 serde_json = "1.0.81"
 signal-hook = "0.3.14"
 thiserror = "1.0.31"
-uuid = "1.1.0"
+uuid = "1.1.1"
 versionize = "0.1.6"
 versionize_derive = "0.1.4"
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
