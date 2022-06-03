@@ -395,22 +395,20 @@ impl AsRawFd for Tap {
 
 #[cfg(test)]
 mod tests {
-    extern crate pnet;
-
     use std::net::Ipv4Addr;
     use std::str;
     use std::sync::{mpsc, Mutex};
     use std::thread;
     use std::time::Duration;
 
-    use self::pnet::datalink::Channel::Ethernet;
-    use self::pnet::datalink::{self, DataLinkReceiver, DataLinkSender, NetworkInterface};
-    use self::pnet::packet::ethernet::{EtherTypes, EthernetPacket, MutableEthernetPacket};
-    use self::pnet::packet::ip::IpNextHeaderProtocols;
-    use self::pnet::packet::ipv4::{Ipv4Packet, MutableIpv4Packet};
-    use self::pnet::packet::udp::{MutableUdpPacket, UdpPacket};
-    use self::pnet::packet::{MutablePacket, Packet};
-    use self::pnet::util::MacAddr;
+    use pnet::packet::ethernet::{EtherTypes, EthernetPacket, MutableEthernetPacket};
+    use pnet::packet::ip::IpNextHeaderProtocols;
+    use pnet::packet::ipv4::{Ipv4Packet, MutableIpv4Packet};
+    use pnet::packet::udp::{MutableUdpPacket, UdpPacket};
+    use pnet::packet::{MutablePacket, Packet};
+    use pnet::util::MacAddr;
+    use pnet_datalink::Channel::Ethernet;
+    use pnet_datalink::{DataLinkReceiver, DataLinkSender, NetworkInterface};
 
     use super::*;
 
@@ -543,10 +541,10 @@ mod tests {
         let interface_name_matches = |iface: &NetworkInterface| iface.name == ifname;
 
         // Find the network interface with the provided name.
-        let interfaces = datalink::interfaces();
+        let interfaces = pnet_datalink::interfaces();
         let interface = interfaces.into_iter().find(interface_name_matches).unwrap();
 
-        if let Ok(Ethernet(tx, rx)) = datalink::channel(&interface, Default::default()) {
+        if let Ok(Ethernet(tx, rx)) = pnet_datalink::channel(&interface, Default::default()) {
             (interface.mac.unwrap(), tx, rx)
         } else {
             panic!("datalink channel error or unhandled channel type");
