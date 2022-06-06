@@ -2436,7 +2436,7 @@ mod tests {
 #[cfg(target_arch = "aarch64")]
 #[cfg(test)]
 mod tests {
-    use arch::aarch64::regs::*;
+    use arch::layout;
     use hypervisor::kvm::aarch64::{is_system_register, MPIDR_EL1};
     use hypervisor::kvm::kvm_bindings::{
         kvm_one_reg, kvm_regs, kvm_vcpu_init, user_pt_regs, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG,
@@ -2451,7 +2451,7 @@ mod tests {
         let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0, None).unwrap();
 
-        let res = setup_regs(&vcpu, 0, 0x0);
+        let res = vcpu.setup_regs(0, 0x0, layout::FDT_START.0);
         // Must fail when vcpu is not initialized yet.
         assert!(res.is_err());
 
@@ -2459,7 +2459,7 @@ mod tests {
         vm.get_preferred_target(&mut kvi).unwrap();
         vcpu.vcpu_init(&kvi).unwrap();
 
-        assert!(setup_regs(&vcpu, 0, 0x0).is_ok());
+        assert!(vcpu.setup_regs(0, 0x0, layout::FDT_START.0).is_ok());
     }
 
     #[test]

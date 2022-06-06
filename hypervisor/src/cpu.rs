@@ -453,6 +453,11 @@ pub trait Vcpu: Send + Sync {
     #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
     fn read_mpidr(&self) -> Result<u64>;
     ///
+    /// Configure core registers for a given CPU.
+    ///
+    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    fn setup_regs(&self, cpu_id: u8, boot_ip: u64, fdt_start: u64) -> Result<()>;
+    ///
     /// Retrieve the vCPU state.
     /// This function is necessary to snapshot the VM
     ///
