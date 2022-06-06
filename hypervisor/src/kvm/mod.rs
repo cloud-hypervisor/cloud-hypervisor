@@ -1566,6 +1566,51 @@ impl cpu::Vcpu for KvmVcpu {
             .get_one_reg(MPIDR_EL1)
             .map_err(|e| cpu::HypervisorCpuError::GetSysRegister(e.into()))
     }
+    ///
+    /// Configure core registers for a given CPU.
+    ///
+    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    fn setup_regs(&self, cpu_id: u8, boot_ip: u64, fdt_start: u64) -> cpu::Result<()> {
+        #[allow(non_upper_case_globals)]
+        // PSR (Processor State Register) bits.
+        // Taken from arch/arm64/include/uapi/asm/ptrace.h.
+        const PSR_MODE_EL1h: u64 = 0x0000_0005;
+        const PSR_F_BIT: u64 = 0x0000_0040;
+        const PSR_I_BIT: u64 = 0x0000_0080;
+        const PSR_A_BIT: u64 = 0x0000_0100;
+        const PSR_D_BIT: u64 = 0x0000_0200;
+        // Taken from arch/arm64/kvm/inject_fault.c.
+        const PSTATE_FAULT_BITS_64: u64 =
+            PSR_MODE_EL1h | PSR_A_BIT | PSR_F_BIT | PSR_I_BIT | PSR_D_BIT;
+
+        let kreg_off = offset__of!(kvm_regs, regs);
+
+        // Get the register index of the PSTATE (Processor State) register.
+        let pstate = offset__of!(user_pt_regs, pstate) + kreg_off;
+        self.set_reg(
+            arm64_core_reg_id!(KVM_REG_SIZE_U64, pstate),
+            PSTATE_FAULT_BITS_64,
+        )
+        .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
+
+        // Other vCPUs are powered off initially awaiting PSCI wakeup.
+        if cpu_id == 0 {
+            // Setting the PC (Processor Counter) to the current program address (kernel address).
+            let pc = offset__of!(user_pt_regs, pc) + kreg_off;
+            self.set_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, pc), boot_ip as u64)
+                .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
+
+            // Last mandatory thing to set -> the address pointing to the FDT (also called DTB).
+            // "The device tree blob (dtb) must be placed on an 8-byte boundary and must
+            // not exceed 2 megabytes in size." -> https://www.kernel.org/doc/Documentation/arm64/booting.txt.
+            // We are choosing to place it the end of DRAM. See `get_fdt_addr`.
+            let regs0 = offset__of!(user_pt_regs, regs) + kreg_off;
+            self.set_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, regs0), fdt_start)
+                .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
+        }
+        Ok(())
+    }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// Get the current CPU state

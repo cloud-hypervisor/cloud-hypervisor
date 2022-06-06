@@ -6,8 +6,6 @@
 pub mod fdt;
 /// Layout for this aarch64 system.
 pub mod layout;
-/// Logic for configuring aarch64 registers.
-pub mod regs;
 /// Module for loading UEFI binary.
 pub mod uefi;
 
@@ -37,7 +35,7 @@ pub enum Error {
     InitramfsAddress,
 
     /// Error configuring the general purpose registers
-    RegsConfiguration(regs::Error),
+    RegsConfiguration(hypervisor::HypervisorCpuError),
 
     /// Error configuring the MPIDR register
     VcpuRegMpidr(hypervisor::HypervisorCpuError),
@@ -67,8 +65,12 @@ pub fn configure_vcpu(
     kernel_entry_point: Option<EntryPoint>,
 ) -> super::Result<u64> {
     if let Some(kernel_entry_point) = kernel_entry_point {
-        regs::setup_regs(vcpu, id, kernel_entry_point.entry_addr.raw_value())
-            .map_err(Error::RegsConfiguration)?;
+        vcpu.setup_regs(
+            id,
+            kernel_entry_point.entry_addr.raw_value(),
+            super::layout::FDT_START.raw_value(),
+        )
+        .map_err(Error::RegsConfiguration)?;
     }
 
     let mpidr = vcpu.read_mpidr().map_err(Error::VcpuRegMpidr)?;
