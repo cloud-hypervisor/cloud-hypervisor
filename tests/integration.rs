@@ -8063,51 +8063,43 @@ mod live_migration {
     }
 
     #[test]
-    #[ignore]
     fn test_live_upgrade_basic() {
         _test_live_migration(true, false, false, false, false)
     }
 
     #[test]
-    #[ignore]
     fn test_live_upgrade_local() {
         _test_live_migration(true, false, true, false, false)
     }
 
     #[test]
-    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_numa() {
         _test_live_migration(true, true, false, false, false)
     }
 
     #[test]
-    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_numa_local() {
         _test_live_migration(true, true, true, false, false)
     }
 
     #[test]
-    #[ignore]
     fn test_live_upgrade_watchdog() {
         _test_live_migration(true, false, false, true, false)
     }
 
     #[test]
-    #[ignore]
     fn test_live_upgrade_watchdog_local() {
         _test_live_migration(true, false, true, true, false)
     }
 
     #[test]
-    #[ignore]
     fn test_live_upgrade_balloon() {
         _test_live_migration(true, false, false, false, true)
     }
 
     #[test]
-    #[ignore]
     fn test_live_upgrade_balloon_local() {
         _test_live_migration(true, false, true, false, true)
     }
@@ -8327,14 +8319,12 @@ mod live_migration {
     }
 
     #[test]
-    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_ovs_dpdk() {
         _test_live_migration_ovs_dpdk(true, false);
     }
 
     #[test]
-    #[ignore]
     #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_ovs_dpdk_local() {
         _test_live_migration_ovs_dpdk(true, true);
