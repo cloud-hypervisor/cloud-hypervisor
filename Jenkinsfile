@@ -23,19 +23,6 @@ pipeline{
 						}
 					}
 				}
-				stage ('Check for fuzzer cargo files only changes') {
-					when {
-						expression {
-							return fuzzCargoFileOnly()
-						}
-					}
-					steps {
-						script {
-							runWorkers = false
-							echo "Fuzzer cargo files only changes, no need to run the CI"
-						}
-					}
-				}
 				stage ('Check for RFC/WIP builds') {
 					when {
   						changeRequest comparator: 'REGEXP', title: '.*(rfc|RFC|wip|WIP).*'
@@ -298,16 +285,5 @@ def boolean docsFileOnly() {
     return sh(
         returnStatus: true,
         script: "git diff --name-only origin/${env.CHANGE_TARGET}... | grep -v '\\.md'"
-    ) != 0
-}
-
-def boolean fuzzCargoFileOnly() {
-    if (env.CHANGE_TARGET == null) {
-        return false;
-    }
-
-    return sh(
-        returnStatus: true,
-        script: "git diff --name-only origin/${env.CHANGE_TARGET}... | grep -v -E 'fuzz\/Cargo.(toml|lock)'"
     ) != 0
 }
