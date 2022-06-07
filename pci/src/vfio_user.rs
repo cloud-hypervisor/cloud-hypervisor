@@ -26,6 +26,7 @@ use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{
     Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryRegion, GuestRegionMmap,
 };
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 pub struct VfioUserPciDevice {
@@ -550,6 +551,34 @@ impl Drop for VfioUserPciDevice {
         }
     }
 }
+
+impl Pausable for VfioUserPciDevice {}
+
+impl Snapshottable for VfioUserPciDevice {
+    fn id(&self) -> String {
+        self.id.clone()
+    }
+
+    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+        let mut vfio_pci_dev_snapshot = Snapshot::new(&self.id);
+
+        // Snapshot VfioCommon
+        vfio_pci_dev_snapshot.add_snapshot(self.common.snapshot()?);
+
+        Ok(vfio_pci_dev_snapshot)
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        // Restore VfioCommon
+        if let Some(vfio_common_snapshot) = snapshot.snapshots.get(&self.common.id()) {
+            self.common.restore(*vfio_common_snapshot.clone())?;
+        }
+
+        Ok(())
+    }
+}
+impl Transportable for VfioUserPciDevice {}
+impl Migratable for VfioUserPciDevice {}
 
 pub struct VfioUserDmaMapping<M: GuestAddressSpace> {
     client: Arc<Mutex<Client>>,
