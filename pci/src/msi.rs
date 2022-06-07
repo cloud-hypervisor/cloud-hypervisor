@@ -179,7 +179,7 @@ struct MsiConfigState {
 impl VersionMapped for MsiConfigState {}
 
 pub struct MsiConfig {
-    cap: MsiCap,
+    pub cap: MsiCap,
     interrupt_source_group: Arc<dyn InterruptSourceGroup>,
 }
 
