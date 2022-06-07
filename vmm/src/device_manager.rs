@@ -358,9 +358,6 @@ pub enum DeviceManagerError {
     /// Could not give the PCI device ID back.
     PutPciDeviceId(pci::PciRootError),
 
-    /// Incorrect device ID as it is already used by another device.
-    DeviceIdAlreadyInUse,
-
     /// No disk path was specified when one was expected
     NoDiskPath,
 
@@ -3203,10 +3200,6 @@ impl DeviceManager {
         device_cfg: &mut UserDeviceConfig,
     ) -> DeviceManagerResult<(PciBdf, String)> {
         let vfio_user_name = if let Some(id) = &device_cfg.id {
-            if self.device_tree.lock().unwrap().contains_key(id) {
-                return Err(DeviceManagerError::DeviceIdAlreadyInUse);
-            }
-
             id.clone()
         } else {
             let id = self.next_device_name(VFIO_USER_DEVICE_NAME_PREFIX)?;
@@ -3244,6 +3237,7 @@ impl DeviceManager {
             self.msi_interrupt_manager.clone(),
             legacy_interrupt_group,
             pci_device_bdf,
+            self.restoring,
         )
         .map_err(DeviceManagerError::VfioUserCreate)?;
 
@@ -3288,7 +3282,7 @@ impl DeviceManager {
             })
             .map_err(DeviceManagerError::VfioUserMapRegion)?;
 
-        let mut node = device_node!(vfio_user_name);
+        let mut node = device_node!(vfio_user_name, vfio_user_pci_device);
 
         // Update the device tree with correct resource information.
         node.resources = new_resources;
