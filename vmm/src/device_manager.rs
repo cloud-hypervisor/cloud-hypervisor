@@ -2978,10 +2978,6 @@ impl DeviceManager {
         device_cfg: &mut DeviceConfig,
     ) -> DeviceManagerResult<(PciBdf, String)> {
         let vfio_name = if let Some(id) = &device_cfg.id {
-            if self.device_tree.lock().unwrap().contains_key(id) {
-                return Err(DeviceManagerError::DeviceIdAlreadyInUse);
-            }
-
             id.clone()
         } else {
             let id = self.next_device_name(VFIO_DEVICE_NAME_PREFIX)?;
@@ -3090,6 +3086,7 @@ impl DeviceManager {
             legacy_interrupt_group,
             device_cfg.iommu,
             pci_device_bdf,
+            self.restoring,
         )
         .map_err(DeviceManagerError::VfioPciCreate)?;
 
@@ -3111,7 +3108,7 @@ impl DeviceManager {
             })
             .map_err(DeviceManagerError::VfioMapRegion)?;
 
-        let mut node = device_node!(vfio_name);
+        let mut node = device_node!(vfio_name, vfio_pci_device);
 
         // Update the device tree with correct resource information.
         node.resources = new_resources;
