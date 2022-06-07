@@ -69,6 +69,7 @@ impl VfioUserPciDevice {
         msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
         bdf: PciBdf,
+        restoring: bool,
     ) -> Result<Self, VfioUserPciDeviceError> {
         // This is used for the BAR and capabilities only
         let configuration = PciConfiguration::new(
@@ -109,10 +110,15 @@ impl VfioUserPciDevice {
             vfio_wrapper: Arc::new(vfio_wrapper) as Arc<dyn Vfio>,
         };
 
-        common.parse_capabilities(bdf);
-        common
-            .initialize_legacy_interrupt()
-            .map_err(VfioUserPciDeviceError::InitializeLegacyInterrupts)?;
+        // No need to parse capabilities from the device if on the restore path.
+        // The initialization will be performed later when restore() will be
+        // called.
+        if !restoring {
+            common.parse_capabilities(bdf);
+            common
+                .initialize_legacy_interrupt()
+                .map_err(VfioUserPciDeviceError::InitializeLegacyInterrupts)?;
+        }
 
         Ok(Self {
             id,
