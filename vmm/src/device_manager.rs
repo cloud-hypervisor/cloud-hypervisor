@@ -722,8 +722,9 @@ impl DeviceRelocation for AddressManager {
                             old_base,
                             shm_regions.len,
                             shm_regions.host_addr,
-                            false,
-                            false,
+                            hypervisor::user_memory_region_flags::READ
+                                | hypervisor::user_memory_region_flags::WRITE
+                                | hypervisor::user_memory_region_flags::EXECUTE,
                         );
 
                         self.vm.remove_user_memory_region(mem_region).map_err(|e| {
@@ -739,8 +740,9 @@ impl DeviceRelocation for AddressManager {
                             new_base,
                             shm_regions.len,
                             shm_regions.host_addr,
-                            false,
-                            false,
+                            hypervisor::user_memory_region_flags::READ
+                                | hypervisor::user_memory_region_flags::WRITE
+                                | hypervisor::user_memory_region_flags::EXECUTE,
                         );
 
                         self.vm.create_user_memory_region(mem_region).map_err(|e| {
@@ -1641,8 +1643,9 @@ impl DeviceManager {
                 uefi_region.start_addr().raw_value(),
                 uefi_region.len() as u64,
                 uefi_region.as_ptr() as u64,
-                false,
-                false,
+                hypervisor::user_memory_region_flags::READ
+                    | hypervisor::user_memory_region_flags::WRITE
+                    | hypervisor::user_memory_region_flags::EXECUTE,
             );
         self.memory_manager
             .lock()

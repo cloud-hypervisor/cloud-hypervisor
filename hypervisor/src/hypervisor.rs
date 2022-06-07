@@ -126,10 +126,18 @@ pub trait Hypervisor: Send + Sync {
 ///
 /// Generic MemoryRegion struct
 ///
+#[derive(Debug, Default, PartialEq)]
 pub struct UserMemoryRegion {
     pub slot: u32,
     pub guest_phys_addr: u64,
     pub memory_size: u64,
     pub userspace_addr: u64,
     pub flags: u32,
+}
+
+pub mod user_memory_region_flags {
+    pub const READ: u32 = 1;
+    pub const WRITE: u32 = 1 << 1;
+    pub const EXECUTE: u32 = 1 << 2;
+    pub const LOG_DIRTY_PAGES: u32 = 1 << 3;
 }

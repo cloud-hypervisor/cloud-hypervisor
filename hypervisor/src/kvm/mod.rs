@@ -88,9 +88,8 @@ pub use {
     kvm_bindings::kvm_clock_data as ClockData, kvm_bindings::kvm_create_device as CreateDevice,
     kvm_bindings::kvm_device_attr as DeviceAttr,
     kvm_bindings::kvm_irq_routing_entry as IrqRoutingEntry, kvm_bindings::kvm_mp_state as MpState,
-    kvm_bindings::kvm_run, kvm_bindings::kvm_userspace_memory_region as MemoryRegion,
-    kvm_bindings::kvm_vcpu_events as VcpuEvents, kvm_ioctls::DeviceFd, kvm_ioctls::IoEventAddress,
-    kvm_ioctls::VcpuExit,
+    kvm_bindings::kvm_run, kvm_bindings::kvm_vcpu_events as VcpuEvents, kvm_ioctls::DeviceFd,
+    kvm_ioctls::IoEventAddress, kvm_ioctls::VcpuExit,
 };
 
 #[cfg(target_arch = "x86_64")]
@@ -160,7 +159,56 @@ pub struct TdxCapabilities {
     pub cpuid_configs: [TdxCpuidConfig; TDX_MAX_NR_CPUID_CONFIGS],
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+impl From<kvm_userspace_memory_region> for hypervisor::UserMemoryRegion {
+    fn from(region: kvm_userspace_memory_region) -> hypervisor::UserMemoryRegion {
+        hypervisor::UserMemoryRegion {
+            slot: region.slot,
+            guest_phys_addr: region.guest_phys_addr,
+            memory_size: region.memory_size,
+            userspace_addr: region.userspace_addr,
+            flags: hypervisor::user_memory_region_flags::READ
+                | if region.flags & KVM_MEM_READONLY != 0 {
+                    0
+                } else {
+                    hypervisor::user_memory_region_flags::WRITE
+                        | hypervisor::user_memory_region_flags::EXECUTE
+                }
+                | if region.flags & KVM_MEM_LOG_DIRTY_PAGES != 0 {
+                    hypervisor::user_memory_region_flags::LOG_DIRTY_PAGES
+                } else {
+                    0
+                },
+        }
+    }
+}
+
+impl From<hypervisor::UserMemoryRegion> for kvm_userspace_memory_region {
+    fn from(region: hypervisor::UserMemoryRegion) -> kvm_userspace_memory_region {
+        assert!(
+            region.flags & hypervisor::user_memory_region_flags::READ != 0,
+            "KVM mapped memory is always readable"
+        );
+
+        kvm_userspace_memory_region {
+            slot: region.slot,
+            guest_phys_addr: region.guest_phys_addr,
+            memory_size: region.memory_size,
+            userspace_addr: region.userspace_addr,
+            flags: if region.flags & hypervisor::user_memory_region_flags::WRITE != 0 {
+                0
+            } else {
+                KVM_MEM_READONLY
+            } | if region.flags & hypervisor::user_memory_region_flags::LOG_DIRTY_PAGES != 0
+            {
+                KVM_MEM_LOG_DIRTY_PAGES
+            } else {
+                0
+            },
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 pub struct KvmVmState {}
 
 pub use KvmVmState as VmState;
@@ -405,27 +453,29 @@ impl vm::Vm for KvmVm {
         guest_phys_addr: u64,
         memory_size: u64,
         userspace_addr: u64,
-        readonly: bool,
-        log_dirty_pages: bool,
-    ) -> MemoryRegion {
-        MemoryRegion {
+        flags: u32,
+    ) -> hypervisor::UserMemoryRegion {
+        // KVM doesn't have individual flags for write and execute so some flag configurations are not valid, these are checked here using asserts.
+        assert!(
+            flags & hypervisor::user_memory_region_flags::READ != 0,
+            "KVM mapped memory is always readable"
+        );
+        hypervisor::UserMemoryRegion {
             slot,
             guest_phys_addr,
             memory_size,
             userspace_addr,
-            flags: if readonly { KVM_MEM_READONLY } else { 0 }
-                | if log_dirty_pages {
-                    KVM_MEM_LOG_DIRTY_PAGES
-                } else {
-                    0
-                },
+            flags,
         }
     }
     ///
     /// Creates a guest physical memory region.
     ///
-    fn create_user_memory_region(&self, user_memory_region: MemoryRegion) -> vm::Result<()> {
-        let mut region = user_memory_region;
+    fn create_user_memory_region(
+        &self,
+        user_memory_region: hypervisor::UserMemoryRegion,
+    ) -> vm::Result<()> {
+        let mut region: kvm_userspace_memory_region = user_memory_region.into();
 
         if (region.flags & KVM_MEM_LOG_DIRTY_PAGES) != 0 {
             if (region.flags & KVM_MEM_READONLY) != 0 {
@@ -460,8 +510,11 @@ impl vm::Vm for KvmVm {
     ///
     /// Removes a guest physical memory region.
     ///
-    fn remove_user_memory_region(&self, user_memory_region: MemoryRegion) -> vm::Result<()> {
-        let mut region = user_memory_region;
+    fn remove_user_memory_region(
+        &self,
+        user_memory_region: hypervisor::UserMemoryRegion,
+    ) -> vm::Result<()> {
+        let mut region: kvm_userspace_memory_region = user_memory_region.into();
 
         // Remove the corresponding entry from "self.dirty_log_slots" if needed
         self.dirty_log_slots.write().unwrap().remove(&region.slot);
@@ -571,17 +624,20 @@ impl vm::Vm for KvmVm {
     fn start_dirty_log(&self) -> vm::Result<()> {
         let dirty_log_slots = self.dirty_log_slots.read().unwrap();
         for (_, s) in dirty_log_slots.iter() {
-            let region = MemoryRegion {
+            let region = hypervisor::UserMemoryRegion {
                 slot: s.slot,
                 guest_phys_addr: s.guest_phys_addr,
                 memory_size: s.memory_size,
                 userspace_addr: s.userspace_addr,
-                flags: KVM_MEM_LOG_DIRTY_PAGES,
+                flags: hypervisor::user_memory_region_flags::LOG_DIRTY_PAGES
+                    | hypervisor::user_memory_region_flags::WRITE
+                    | hypervisor::user_memory_region_flags::READ
+                    | hypervisor::user_memory_region_flags::EXECUTE,
             };
             // SAFETY: Safe because guest regions are guaranteed not to overlap.
             unsafe {
                 self.fd
-                    .set_user_memory_region(region)
+                    .set_user_memory_region(region.into())
                     .map_err(|e| vm::HypervisorVmError::StartDirtyLog(e.into()))?;
             }
         }
@@ -595,17 +651,19 @@ impl vm::Vm for KvmVm {
     fn stop_dirty_log(&self) -> vm::Result<()> {
         let dirty_log_slots = self.dirty_log_slots.read().unwrap();
         for (_, s) in dirty_log_slots.iter() {
-            let region = MemoryRegion {
+            let region = hypervisor::UserMemoryRegion {
                 slot: s.slot,
                 guest_phys_addr: s.guest_phys_addr,
                 memory_size: s.memory_size,
                 userspace_addr: s.userspace_addr,
-                flags: 0,
+                flags: hypervisor::user_memory_region_flags::WRITE
+                    | hypervisor::user_memory_region_flags::READ
+                    | hypervisor::user_memory_region_flags::EXECUTE,
             };
             // SAFETY: Safe because guest regions are guaranteed not to overlap.
             unsafe {
                 self.fd
-                    .set_user_memory_region(region)
+                    .set_user_memory_region(region.into())
                     .map_err(|e| vm::HypervisorVmError::StartDirtyLog(e.into()))?;
             }
         }

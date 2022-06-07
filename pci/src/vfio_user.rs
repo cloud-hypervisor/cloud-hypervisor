@@ -213,8 +213,9 @@ impl VfioUserPciDevice {
                         user_memory_region.start,
                         user_memory_region.size,
                         user_memory_region.host_addr,
-                        false,
-                        false,
+                        hypervisor::user_memory_region_flags::READ
+                            | hypervisor::user_memory_region_flags::WRITE
+                            | hypervisor::user_memory_region_flags::EXECUTE,
                     );
 
                     self.vm
@@ -236,8 +237,9 @@ impl VfioUserPciDevice {
                     user_memory_region.start,
                     user_memory_region.size,
                     user_memory_region.host_addr,
-                    false,
-                    false,
+                    hypervisor::user_memory_region_flags::READ
+                        | hypervisor::user_memory_region_flags::WRITE
+                        | hypervisor::user_memory_region_flags::EXECUTE,
                 );
 
                 if let Err(e) = self.vm.remove_user_memory_region(r) {
@@ -490,8 +492,9 @@ impl PciDevice for VfioUserPciDevice {
                         user_memory_region.start,
                         user_memory_region.size,
                         user_memory_region.host_addr,
-                        false,
-                        false,
+                        hypervisor::user_memory_region_flags::READ
+                            | hypervisor::user_memory_region_flags::WRITE
+                            | hypervisor::user_memory_region_flags::EXECUTE,
                     );
 
                     self.vm
@@ -511,8 +514,9 @@ impl PciDevice for VfioUserPciDevice {
                         user_memory_region.start,
                         user_memory_region.size,
                         user_memory_region.host_addr,
-                        false,
-                        false,
+                        hypervisor::user_memory_region_flags::READ
+                            | hypervisor::user_memory_region_flags::WRITE
+                            | hypervisor::user_memory_region_flags::EXECUTE,
                     );
 
                     self.vm

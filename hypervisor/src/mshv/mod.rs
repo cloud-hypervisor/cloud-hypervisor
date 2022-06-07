@@ -47,6 +47,52 @@ pub use {
 
 pub const PAGE_SHIFT: usize = 12;
 
+impl From<mshv_user_mem_region> for hypervisor::UserMemoryRegion {
+    fn from(region: mshv_user_mem_region) -> Self {
+        let mut flags: u32 = 0;
+        if region.flags & HV_MAP_GPA_READABLE != 0 {
+            flags |= hypervisor::user_memory_region_flags::READ;
+        }
+        if region.flags & HV_MAP_GPA_WRITABLE != 0 {
+            flags |= hypervisor::user_memory_region_flags::WRITE;
+        }
+        if region.flags & HV_MAP_GPA_EXECUTABLE != 0 {
+            flags |= hypervisor::user_memory_region_flags::EXECUTE;
+        }
+
+        hypervisor::UserMemoryRegion {
+            guest_phys_addr: (region.guest_pfn << PAGE_SHIFT as u64)
+                + (region.userspace_addr & ((1 << PAGE_SHIFT) - 1)),
+            memory_size: region.size,
+            userspace_addr: region.userspace_addr,
+            flags: flags,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<hypervisor::UserMemoryRegion> for mshv_user_mem_region {
+    fn from(region: hypervisor::UserMemoryRegion) -> Self {
+        let mut flags: u32 = 0;
+        if region.flags & hypervisor::user_memory_region_flags::READ != 0 {
+            flags |= HV_MAP_GPA_READABLE;
+        }
+        if region.flags & hypervisor::user_memory_region_flags::WRITE != 0 {
+            flags |= HV_MAP_GPA_WRITABLE;
+        }
+        if region.flags & hypervisor::user_memory_region_flags::EXECUTE != 0 {
+            flags |= HV_MAP_GPA_EXECUTABLE;
+        }
+
+        mshv_user_mem_region {
+            guest_pfn: region.guest_phys_addr >> PAGE_SHIFT,
+            size: region.memory_size,
+            userspace_addr: region.userspace_addr,
+            flags: flags,
+        }
+    }
+}
+
 #[derive(Debug, Default, Copy, Clone, Serialize, Deserialize)]
 pub struct HvState {
     hypercall_page: u64,
@@ -890,7 +936,11 @@ impl vm::Vm for MshvVm {
     }
 
     /// Creates a guest physical memory region.
-    fn create_user_memory_region(&self, user_memory_region: MemoryRegion) -> vm::Result<()> {
+    fn create_user_memory_region(
+        &self,
+        user_memory_region: hypervisor::UserMemoryRegion,
+    ) -> vm::Result<()> {
+        let user_memory_region: mshv_user_mem_region = user_memory_region.into();
         // No matter read only or not we keep track the slots.
         // For readonly hypervisor can enable the dirty bits,
         // but a VM exit happens before setting the dirty bits
@@ -909,12 +959,16 @@ impl vm::Vm for MshvVm {
     }
 
     /// Removes a guest physical memory region.
-    fn remove_user_memory_region(&self, user_memory_region: MemoryRegion) -> vm::Result<()> {
+    fn remove_user_memory_region(
+        &self,
+        user_memory_region: hypervisor::UserMemoryRegion,
+    ) -> vm::Result<()> {
+        let user_memory_region: mshv_user_mem_region = user_memory_region.into();
         // Remove the corresponding entry from "self.dirty_log_slots" if needed
         self.dirty_log_slots
             .write()
             .unwrap()
-            .remove(&user_memory_region.guest_pfn);
+            .remove(&(user_memory_region.guest_pfn));
 
         self.fd
             .unmap_user_memory(user_memory_region)
@@ -928,19 +982,14 @@ impl vm::Vm for MshvVm {
         guest_phys_addr: u64,
         memory_size: u64,
         userspace_addr: u64,
-        readonly: bool,
-        _log_dirty_pages: bool,
-    ) -> MemoryRegion {
-        let mut flags = HV_MAP_GPA_READABLE | HV_MAP_GPA_EXECUTABLE;
-        if !readonly {
-            flags |= HV_MAP_GPA_WRITABLE;
-        }
-
-        mshv_user_mem_region {
+        flags: u32,
+    ) -> hypervisor::UserMemoryRegion {
+        hypervisor::UserMemoryRegion {
+            guest_phys_addr,
+            memory_size,
+            userspace_addr,
             flags,
-            guest_pfn: guest_phys_addr >> PAGE_SHIFT,
-            size: memory_size,
-            userspace_addr: userspace_addr as u64,
+            ..Default::default()
         }
     }
 

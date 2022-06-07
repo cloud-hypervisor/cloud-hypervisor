@@ -15,9 +15,8 @@ use std::fmt;
 /// Export generically-named wrappers of mshv_bindings for Unix-based platforms
 ///
 pub use {
-    mshv_bindings::hv_cpuid_entry as CpuIdEntry,
-    mshv_bindings::mshv_user_mem_region as MemoryRegion, mshv_bindings::msr_entry as MsrEntry,
-    mshv_bindings::CpuId, mshv_bindings::DebugRegisters,
+    mshv_bindings::hv_cpuid_entry as CpuIdEntry, mshv_bindings::mshv_user_mem_region,
+    mshv_bindings::msr_entry as MsrEntry, mshv_bindings::CpuId, mshv_bindings::DebugRegisters,
     mshv_bindings::FloatingPointUnit as FpuState, mshv_bindings::LapicState,
     mshv_bindings::MiscRegs as MiscRegisters, mshv_bindings::MsrList,
     mshv_bindings::Msrs as MsrEntries, mshv_bindings::Msrs, mshv_bindings::SegmentRegister,
