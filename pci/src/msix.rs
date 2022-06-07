@@ -441,7 +441,7 @@ impl Snapshottable for MsixConfig {
 
 #[allow(dead_code)]
 #[repr(packed)]
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Versionize)]
 pub struct MsixCap {
     // Message Control Register
     //   10-0:  MSI-X Table size
