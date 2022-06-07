@@ -1480,8 +1480,18 @@ impl MemoryManager {
             guest_phys_addr,
             memory_size,
             userspace_addr,
-            readonly,
-            log_dirty,
+            hypervisor::user_memory_region_flags::READ
+                | if readonly {
+                    0
+                } else {
+                    hypervisor::user_memory_region_flags::WRITE
+                        | hypervisor::user_memory_region_flags::EXECUTE
+                }
+                | if log_dirty {
+                    hypervisor::user_memory_region_flags::LOG_DIRTY_PAGES
+                } else {
+                    0
+                },
         );
 
         info!(
@@ -1539,8 +1549,9 @@ impl MemoryManager {
             guest_phys_addr,
             memory_size,
             userspace_addr,
-            false, /* readonly -- don't care */
-            false, /* log dirty */
+            hypervisor::user_memory_region_flags::READ
+                | hypervisor::user_memory_region_flags::WRITE
+                | hypervisor::user_memory_region_flags::EXECUTE,
         );
 
         self.vm

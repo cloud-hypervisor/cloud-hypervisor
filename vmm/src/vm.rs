@@ -3429,8 +3429,9 @@ pub fn test_vm() {
             region.start_addr().raw_value(),
             region.len() as u64,
             region.as_ptr() as u64,
-            false,
-            false,
+            hypervisor::user_memory_region_flags::READ
+                | hypervisor::user_memory_region_flags::WRITE
+                | hypervisor::user_memory_region_flags::EXECUTE,
         );
 
         vm.create_user_memory_region(mem_region)
