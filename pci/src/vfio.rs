@@ -1153,6 +1153,7 @@ impl VfioPciDevice {
         legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
         iommu_attached: bool,
         bdf: PciBdf,
+        restoring: bool,
     ) -> Result<Self, VfioPciError> {
         let device = Arc::new(device);
         device.reset();
@@ -1185,8 +1186,13 @@ impl VfioPciDevice {
             vfio_wrapper: Arc::new(vfio_wrapper) as Arc<dyn Vfio>,
         };
 
-        common.parse_capabilities(bdf);
-        common.initialize_legacy_interrupt()?;
+        // No need to parse capabilities from the device if on the restore path.
+        // The initialization will be performed later when restore() will be
+        // called.
+        if !restoring {
+            common.parse_capabilities(bdf);
+            common.initialize_legacy_interrupt()?;
+        }
 
         let vfio_pci_device = VfioPciDevice {
             id,
