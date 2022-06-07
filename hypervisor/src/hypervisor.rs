@@ -66,6 +66,11 @@ pub enum HypervisorError {
     ///
     #[error("Failed to retrieve TDX capabilities:{0}")]
     TdxCapabilities(#[source] anyhow::Error),
+    ///
+    /// Failed to set partition property
+    ///
+    #[error("Failed to set partition property:{0}")]
+    SetPartitionProperty(#[source] anyhow::Error),
 }
 
 ///

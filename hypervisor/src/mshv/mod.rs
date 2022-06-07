@@ -108,6 +108,17 @@ impl hypervisor::Hypervisor for MshvHypervisor {
             break;
         }
 
+        // Default Microsoft Hypervisor behavior for unimplemented MSR is to
+        // send a fault to the guest if it tries to access it. It is possible
+        // to override this behavior with a more suitable option i.e., ignore
+        // writes from the guest and return zero in attempt to read unimplemented
+        // MSR.
+        fd.set_partition_property(
+            hv_partition_property_code_HV_PARTITION_PROPERTY_UNIMPLEMENTED_MSR_ACTION,
+            hv_unimplemented_msr_action_HV_UNIMPLEMENTED_MSR_ACTION_IGNORE_WRITE_READ_ZERO as u64,
+        )
+        .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
+
         let msr_list = self.get_msr_list()?;
         let num_msrs = msr_list.as_fam_struct_ref().nmsrs as usize;
         let mut msrs = MsrEntries::new(num_msrs).unwrap();
