@@ -2128,9 +2128,9 @@ impl CpuElf64Writable for CpuManager {
     ) -> std::result::Result<(), GuestDebuggableError> {
         let mut coredump_file = dump_state.file.as_ref().unwrap();
         for vcpu in &self.vcpus {
-            let note_size = self.get_note_size(NoteDescType::ElfDesc, 1);
+            let note_size = self.get_note_size(NoteDescType::Elf, 1);
             let mut pos: usize = 0;
-            let mut buf = vec![0 as u8; note_size as usize];
+            let mut buf = vec![0; note_size as usize];
             let descsz = size_of::<X86_64ElfPrStatus>();
             let vcpu_id = vcpu.lock().unwrap().id;
 
@@ -2211,7 +2211,7 @@ impl CpuElf64Writable for CpuManager {
 
             coredump_file
                 .write(&buf)
-                .map_err(|e| GuestDebuggableError::CoredumpFile(e.into()))?;
+                .map_err(GuestDebuggableError::CoredumpFile)?;
         }
 
         Ok(())
@@ -2223,16 +2223,16 @@ impl CpuElf64Writable for CpuManager {
     ) -> std::result::Result<(), GuestDebuggableError> {
         let mut coredump_file = dump_state.file.as_ref().unwrap();
         for vcpu in &self.vcpus {
-            let note_size = self.get_note_size(NoteDescType::VmmDesc, 1);
+            let note_size = self.get_note_size(NoteDescType::Vmm, 1);
             let mut pos: usize = 0;
-            let mut buf = vec![0 as u8; note_size as usize];
+            let mut buf = vec![0; note_size as usize];
             let descsz = size_of::<DumpCpusState>();
             let vcpu_id = vcpu.lock().unwrap().id;
 
             let note = Elf64_Nhdr {
                 n_namesz: COREDUMP_NAME_SIZE,
                 n_descsz: descsz as u32,
-                n_type: 0 as u32,
+                n_type: 0,
             };
 
             let bytes: &[u8] = note.as_slice();
@@ -2294,7 +2294,7 @@ impl CpuElf64Writable for CpuManager {
             let idt = CpuSegment::new_from_table(sregs.idt);
             let cr = [sregs.cr0, sregs.cr8, sregs.cr2, sregs.cr3, sregs.cr4];
             let regs = DumpCpusState {
-                version: 1 as u32,
+                version: 1,
                 size: size_of::<DumpCpusState>() as u32,
                 regs1,
                 regs2,
@@ -2321,7 +2321,7 @@ impl CpuElf64Writable for CpuManager {
 
             coredump_file
                 .write(&buf)
-                .map_err(|e| GuestDebuggableError::CoredumpFile(e.into()))?;
+                .map_err(GuestDebuggableError::CoredumpFile)?;
         }
 
         Ok(())
