@@ -2531,8 +2531,8 @@ impl Vm {
         destination_url: &str,
     ) -> std::result::Result<DumpState, GuestDebuggableError> {
         let nr_cpus = self.config.lock().unwrap().cpus.boot_vcpus as u32;
-        let elf_note_size = self.get_note_size(NoteDescType::ElfAndVmmDesc, nr_cpus) as isize;
-        let mut elf_phdr_num = 1 as u16;
+        let elf_note_size = self.get_note_size(NoteDescType::ElfAndVmm, nr_cpus) as isize;
+        let mut elf_phdr_num = 1;
         let elf_sh_info = 0;
         let coredump_file_path = url_to_file(destination_url)?;
         let mapping_num = self.memory_manager.lock().unwrap().num_guest_ram_mappings();
