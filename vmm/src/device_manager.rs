@@ -16,8 +16,7 @@ use crate::config::{
 use crate::device_tree::{DeviceNode, DeviceTree};
 use crate::interrupt::LegacyUserspaceInterruptManager;
 use crate::interrupt::MsiInterruptManager;
-use crate::memory_manager::MEMORY_MANAGER_ACPI_SIZE;
-use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
+use crate::memory_manager::{Error as MemoryManagerError, MemoryManager, MEMORY_MANAGER_ACPI_SIZE};
 use crate::pci_segment::PciSegment;
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::serial_manager::{Error as SerialManagerError, SerialManager};
@@ -3074,6 +3073,8 @@ impl DeviceManager {
                 None
             };
 
+        let memory_manager = self.memory_manager.clone();
+
         let vfio_pci_device = VfioPciDevice::new(
             vfio_name.clone(),
             &self.address_manager.vm,
@@ -3084,6 +3085,7 @@ impl DeviceManager {
             device_cfg.iommu,
             pci_device_bdf,
             self.restoring,
+            Arc::new(move || memory_manager.lock().unwrap().allocate_memory_slot()),
         )
         .map_err(DeviceManagerError::VfioPciCreate)?;
 
@@ -3097,13 +3099,15 @@ impl DeviceManager {
             resources,
         )?;
 
-        vfio_pci_device
-            .lock()
-            .unwrap()
-            .map_mmio_regions(&self.address_manager.vm, || {
-                self.memory_manager.lock().unwrap().allocate_memory_slot()
-            })
-            .map_err(DeviceManagerError::VfioMapRegion)?;
+        // When restoring a VM, the restore codepath will take care of mapping
+        // the MMIO regions based on the information from the snapshot.
+        if !self.restoring {
+            vfio_pci_device
+                .lock()
+                .unwrap()
+                .map_mmio_regions()
+                .map_err(DeviceManagerError::VfioMapRegion)?;
+        }
 
         let mut node = device_node!(vfio_name, vfio_pci_device);
 
@@ -3230,6 +3234,8 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::VfioUserCreateClient)?,
         ));
 
+        let memory_manager = self.memory_manager.clone();
+
         let mut vfio_user_pci_device = VfioUserPciDevice::new(
             vfio_user_name.clone(),
             &self.address_manager.vm,
@@ -3238,6 +3244,7 @@ impl DeviceManager {
             legacy_interrupt_group,
             pci_device_bdf,
             self.restoring,
+            Arc::new(move || memory_manager.lock().unwrap().allocate_memory_slot()),
         )
         .map_err(DeviceManagerError::VfioUserCreate)?;
 
@@ -3272,15 +3279,17 @@ impl DeviceManager {
             resources,
         )?;
 
-        // Note it is required to call 'add_pci_device()' in advance to have the list of
-        // mmio regions provisioned correctly
-        vfio_user_pci_device
-            .lock()
-            .unwrap()
-            .map_mmio_regions(&self.address_manager.vm, || {
-                self.memory_manager.lock().unwrap().allocate_memory_slot()
-            })
-            .map_err(DeviceManagerError::VfioUserMapRegion)?;
+        // When restoring a VM, the restore codepath will take care of mapping
+        // the MMIO regions based on the information from the snapshot.
+        if !self.restoring {
+            // Note it is required to call 'add_pci_device()' in advance to have the list of
+            // mmio regions provisioned correctly
+            vfio_user_pci_device
+                .lock()
+                .unwrap()
+                .map_mmio_regions()
+                .map_err(DeviceManagerError::VfioUserMapRegion)?;
+        }
 
         let mut node = device_node!(vfio_user_name, vfio_user_pci_device);
 

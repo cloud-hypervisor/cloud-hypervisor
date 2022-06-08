@@ -8,6 +8,7 @@ use crate::{BarReprogrammingParams, PciBarConfiguration, VfioPciError};
 use crate::{
     PciBdf, PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciSubclass,
 };
+use anyhow::anyhow;
 use hypervisor::HypervisorVmError;
 use std::any::Any;
 use std::os::unix::prelude::AsRawFd;
@@ -34,6 +35,7 @@ pub struct VfioUserPciDevice {
     vm: Arc<dyn hypervisor::Vm>,
     client: Arc<Mutex<Client>>,
     common: VfioCommon,
+    memory_slot: Arc<dyn Fn() -> u32 + Send + Sync>,
 }
 
 #[derive(Error, Debug)]
@@ -62,6 +64,7 @@ impl PciSubclass for PciVfioUserSubclass {
 }
 
 impl VfioUserPciDevice {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         vm: &Arc<dyn hypervisor::Vm>,
@@ -70,6 +73,7 @@ impl VfioUserPciDevice {
         legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
         bdf: PciBdf,
         restoring: bool,
+        memory_slot: Arc<dyn Fn() -> u32 + Send + Sync>,
     ) -> Result<Self, VfioUserPciDeviceError> {
         // This is used for the BAR and capabilities only
         let configuration = PciConfiguration::new(
@@ -125,17 +129,11 @@ impl VfioUserPciDevice {
             vm: vm.clone(),
             client,
             common,
+            memory_slot,
         })
     }
 
-    pub fn map_mmio_regions<F>(
-        &mut self,
-        vm: &Arc<dyn hypervisor::Vm>,
-        mem_slot: F,
-    ) -> Result<(), VfioUserPciDeviceError>
-    where
-        F: Fn() -> u32,
-    {
+    pub fn map_mmio_regions(&mut self) -> Result<(), VfioUserPciDeviceError> {
         for mmio_region in &mut self.common.mmio_regions {
             let region_flags = self
                 .client
@@ -202,7 +200,7 @@ impl VfioUserPciDevice {
                     }
 
                     let user_memory_region = UserMemoryRegion {
-                        slot: mem_slot(),
+                        slot: (self.memory_slot)(),
                         start: mmio_region.start.0 + s.offset,
                         size: s.size,
                         host_addr: host_addr as u64,
@@ -210,7 +208,7 @@ impl VfioUserPciDevice {
 
                     mmio_region.user_memory_regions.push(user_memory_region);
 
-                    let mem_region = vm.make_user_memory_region(
+                    let mem_region = self.vm.make_user_memory_region(
                         user_memory_region.slot,
                         user_memory_region.start,
                         user_memory_region.size,
@@ -219,7 +217,8 @@ impl VfioUserPciDevice {
                         false,
                     );
 
-                    vm.create_user_memory_region(mem_region)
+                    self.vm
+                        .create_user_memory_region(mem_region)
                         .map_err(VfioUserPciDeviceError::MapRegionGuest)?;
                 }
             }
@@ -578,6 +577,12 @@ impl Snapshottable for VfioUserPciDevice {
         // Restore VfioCommon
         if let Some(vfio_common_snapshot) = snapshot.snapshots.get(&self.common.id()) {
             self.common.restore(*vfio_common_snapshot.clone())?;
+            self.map_mmio_regions().map_err(|e| {
+                MigratableError::Restore(anyhow!(
+                    "Could not map MMIO regions for VfioUserPciDevice on restore {:?}",
+                    e
+                ))
+            })?;
         }
 
         Ok(())
