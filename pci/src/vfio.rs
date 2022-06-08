@@ -1139,6 +1139,7 @@ pub struct VfioPciDevice {
     container: Arc<VfioContainer>,
     common: VfioCommon,
     iommu_attached: bool,
+    memory_slot: Arc<dyn Fn() -> u32 + Send + Sync>,
 }
 
 impl VfioPciDevice {
@@ -1154,6 +1155,7 @@ impl VfioPciDevice {
         iommu_attached: bool,
         bdf: PciBdf,
         restoring: bool,
+        memory_slot: Arc<dyn Fn() -> u32 + Send + Sync>,
     ) -> Result<Self, VfioPciError> {
         let device = Arc::new(device);
         device.reset();
@@ -1201,6 +1203,7 @@ impl VfioPciDevice {
             container,
             common,
             iommu_attached,
+            memory_slot,
         };
 
         Ok(vfio_pci_device)
@@ -1310,14 +1313,7 @@ impl VfioPciDevice {
     /// * `vm` - The VM object. It is used to set the VFIO MMIO regions
     ///          as user memory regions.
     /// * `mem_slot` - The closure to return a memory slot.
-    pub fn map_mmio_regions<F>(
-        &mut self,
-        vm: &Arc<dyn hypervisor::Vm>,
-        mem_slot: F,
-    ) -> Result<(), VfioPciError>
-    where
-        F: Fn() -> u32,
-    {
+    pub fn map_mmio_regions(&mut self) -> Result<(), VfioPciError> {
         let fd = self.device.as_raw_fd();
 
         for region in self.common.mmio_regions.iter_mut() {
@@ -1383,7 +1379,7 @@ impl VfioPciDevice {
                     }
 
                     let user_memory_region = UserMemoryRegion {
-                        slot: mem_slot(),
+                        slot: (self.memory_slot)(),
                         start: region.start.0 + area.offset,
                         size: area.size,
                         host_addr: host_addr as u64,
@@ -1391,7 +1387,7 @@ impl VfioPciDevice {
 
                     region.user_memory_regions.push(user_memory_region);
 
-                    let mem_region = vm.make_user_memory_region(
+                    let mem_region = self.vm.make_user_memory_region(
                         user_memory_region.slot,
                         user_memory_region.start,
                         user_memory_region.size,
@@ -1400,7 +1396,8 @@ impl VfioPciDevice {
                         false,
                     );
 
-                    vm.create_user_memory_region(mem_region)
+                    self.vm
+                        .create_user_memory_region(mem_region)
                         .map_err(VfioPciError::CreateUserMemoryRegion)?;
                 }
             }
@@ -1645,6 +1642,12 @@ impl Snapshottable for VfioPciDevice {
         // Restore VfioCommon
         if let Some(vfio_common_snapshot) = snapshot.snapshots.get(&self.common.id()) {
             self.common.restore(*vfio_common_snapshot.clone())?;
+            self.map_mmio_regions().map_err(|e| {
+                MigratableError::Restore(anyhow!(
+                    "Could not map MMIO regions for VfioPciDevice on restore {:?}",
+                    e
+                ))
+            })?;
         }
 
         Ok(())
