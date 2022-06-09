@@ -1317,7 +1317,7 @@ impl CpuManager {
              */
 
             // See section 5.2.12.14 GIC CPU Interface (GICC) Structure in ACPI spec.
-            for cpu in 0..self.config.boot_vcpus {
+            for cpu in 0..self.config.max_vcpus {
                 let vcpu = &self.vcpus[cpu as usize];
                 let mpidr = vcpu.lock().unwrap().get_mpidr();
                 /* ARMv8 MPIDR format:
@@ -1335,7 +1335,7 @@ impl CpuManager {
                     reserved0: 0,
                     cpu_interface_number: cpu as u32,
                     uid: cpu as u32,
-                    flags: 1,
+                    flags: if cpu < self.config.boot_vcpus { 1 } else { 0 },
                     parking_version: 0,
                     performance_interrupt: 0,
                     parked_address: 0,
@@ -1367,7 +1367,7 @@ impl CpuManager {
             madt.append(gicd);
 
             // See 5.2.12.17 GIC Redistributor (GICR) Structure in ACPI spec.
-            let gicr_size: u32 = 0x0001_0000 * 2 * (self.config.boot_vcpus as u32);
+            let gicr_size: u32 = 0x0001_0000 * 2 * (self.config.max_vcpus as u32);
             let gicr_base: u64 =
                 arch::layout::MAPPED_IO_START.raw_value() - 0x0001_0000 - gicr_size as u64;
             let gicr = GicR {

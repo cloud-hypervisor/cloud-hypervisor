@@ -1192,7 +1192,7 @@ impl Vm {
             .unwrap()
             .create_vgic(
                 &self.memory_manager.lock().as_ref().unwrap().vm,
-                self.cpu_manager.lock().unwrap().boot_vcpus() as u64,
+                self.cpu_manager.lock().unwrap().max_vcpus() as u64,
             )
             .map_err(|_| {
                 Error::ConfigureSystem(arch::Error::PlatformSpecific(
