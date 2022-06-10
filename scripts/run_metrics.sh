@@ -113,6 +113,9 @@ if [ -n "$test_filter" ]; then
     test_binary_args+=("--test-filter $test_filter")
 fi
 
+# Ensure that git commands can be run in this directory (for metrics report)
+git config --global --add safe.directory $PWD
+
 export RUST_BACKTRACE=1
 time target/$BUILD_TARGET/release/performance-metrics ${test_binary_args[*]}
 RES=$?
