@@ -53,18 +53,30 @@ impl Default for MetricsReport {
         let mut git_human_readable = "".to_string();
         if let Ok(git_out) = Command::new("git").args(&["describe", "--dirty"]).output() {
             if git_out.status.success() {
-                if let Ok(git_out_str) = String::from_utf8(git_out.stdout) {
-                    git_human_readable = git_out_str.trim().to_string();
-                }
+                git_human_readable = String::from_utf8(git_out.stdout)
+                    .unwrap()
+                    .trim()
+                    .to_string();
+            } else {
+                eprintln!(
+                    "Error generating human readable git reference: {}",
+                    String::from_utf8(git_out.stderr).unwrap()
+                );
             }
         }
 
         let mut git_revision = "".to_string();
         if let Ok(git_out) = Command::new("git").args(&["rev-parse", "HEAD"]).output() {
             if git_out.status.success() {
-                if let Ok(git_out_str) = String::from_utf8(git_out.stdout) {
-                    git_revision = git_out_str.trim().to_string();
-                }
+                git_revision = String::from_utf8(git_out.stdout)
+                    .unwrap()
+                    .trim()
+                    .to_string();
+            } else {
+                eprintln!(
+                    "Error generating git reference: {}",
+                    String::from_utf8(git_out.stderr).unwrap()
+                );
             }
         }
 
@@ -74,9 +86,15 @@ impl Default for MetricsReport {
             .output()
         {
             if git_out.status.success() {
-                if let Ok(git_out_str) = String::from_utf8(git_out.stdout) {
-                    git_commit_date = git_out_str.trim().to_string();
-                }
+                git_commit_date = String::from_utf8(git_out.stdout)
+                    .unwrap()
+                    .trim()
+                    .to_string();
+            } else {
+                eprintln!(
+                    "Error generating git commit date: {}",
+                    String::from_utf8(git_out.stderr).unwrap()
+                );
             }
         }
 
