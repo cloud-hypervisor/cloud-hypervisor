@@ -522,7 +522,7 @@ dependencies = [
 [[package]]
 name = "mshv-bindings"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/mshv?branch=main#ae244716b34b1f168179dda23366fb0248c636ba"
+source = "git+https://github.com/rust-vmm/mshv?branch=main#82be8577d11b74d33090929d4a382af2fb5c8c21"
 dependencies = [
  "libc",
  "serde",
@@ -534,7 +534,7 @@ dependencies = [
 [[package]]
 name = "mshv-ioctls"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/mshv?branch=main#ae244716b34b1f168179dda23366fb0248c636ba"
+source = "git+https://github.com/rust-vmm/mshv?branch=main#82be8577d11b74d33090929d4a382af2fb5c8c21"
 dependencies = [
  "libc",
  "mshv-bindings",
@@ -1076,9 +1076,9 @@ dependencies = [
 
 [[package]]
 name = "unicode-ident"
-version = "1.0.0"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d22af068fba1eb5edcb4aea19d382b2a3deb4c8f9d475c589b6ada9e0fd493ee"
+checksum = "5bd2fe26506023ed7b5e1e315add59d6f584c621d037f9368fea9cfb988f368c"
 
 [[package]]
 name = "unicode-xid"
