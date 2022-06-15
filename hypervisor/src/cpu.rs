@@ -21,10 +21,10 @@ use crate::x86_64::Xsave;
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::LapicState;
 #[cfg(target_arch = "x86_64")]
-use crate::generic_x86_64::CpuId;
+use crate::generic_x86_64::{CpuId, StandardRegisters};
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::{
-    ExtendedControlRegisters, FpuState, MsrEntries, SpecialRegisters, StandardRegisters, VcpuEvents,
+    ExtendedControlRegisters, FpuState, MsrEntries, SpecialRegisters, VcpuEvents,
 };
 use crate::CpuState;
 #[cfg(target_arch = "aarch64")]

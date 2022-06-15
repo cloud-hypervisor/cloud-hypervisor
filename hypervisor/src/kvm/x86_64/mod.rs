@@ -20,7 +20,7 @@ pub use {
     kvm_bindings::kvm_cpuid_entry2, kvm_bindings::kvm_dtable as DescriptorTable,
     kvm_bindings::kvm_fpu as FpuState, kvm_bindings::kvm_lapic_state as LapicState,
     kvm_bindings::kvm_mp_state as MpState, kvm_bindings::kvm_msr_entry as MsrEntry,
-    kvm_bindings::kvm_regs as StandardRegisters, kvm_bindings::kvm_segment as SegmentRegister,
+    kvm_bindings::kvm_regs, kvm_bindings::kvm_segment as SegmentRegister,
     kvm_bindings::kvm_sregs as SpecialRegisters, kvm_bindings::kvm_vcpu_events as VcpuEvents,
     kvm_bindings::kvm_xcrs as ExtendedControlRegisters, kvm_bindings::kvm_xsave as Xsave,
     kvm_bindings::CpuId, kvm_bindings::MsrList, kvm_bindings::Msrs as MsrEntries,
@@ -140,7 +140,7 @@ pub struct VcpuKvmState {
     pub cpuid: generic_x86_64::CpuId,
     pub msrs: MsrEntries,
     pub vcpu_events: VcpuEvents,
-    pub regs: StandardRegisters,
+    pub regs: generic_x86_64::StandardRegisters,
     pub sregs: SpecialRegisters,
     pub fpu: FpuState,
     pub lapic_state: LapicState,
@@ -193,4 +193,55 @@ pub fn convert_from_generic_cpu_id(cpuid: &generic_x86_64::CpuId) -> CpuId {
         .map(|&entry| entry.into())
         .collect();
     CpuId::from_entries(&cpuid_vector).unwrap()
+}
+
+
+impl From<&kvm_regs> for generic_x86_64::StandardRegisters {
+    fn from(regs: &kvm_regs) -> Self {
+        generic_x86_64::StandardRegisters {
+            rax: regs.rax,
+            rbx: regs.rbx,
+            rcx: regs.rcx,
+            rdx: regs.rdx,
+            rsi: regs.rsi,
+            rdi: regs.rdi,
+            rsp: regs.rsp,
+            rbp: regs.rbp,
+            r8: regs.r8,
+            r9: regs.r9,
+            r10: regs.r10,
+            r11: regs.r11,
+            r12: regs.r12,
+            r13: regs.r13,
+            r14: regs.r14,
+            r15: regs.r15,
+            rip: regs.rip,
+            rflags: regs.rflags,
+        }
+    }
+}
+
+impl From<&generic_x86_64::StandardRegisters> for kvm_regs {
+    fn from(regs: &generic_x86_64::StandardRegisters) -> Self {
+        kvm_regs {
+            rax: regs.rax,
+            rbx: regs.rbx,
+            rcx: regs.rcx,
+            rdx: regs.rdx,
+            rsi: regs.rsi,
+            rdi: regs.rdi,
+            rsp: regs.rsp,
+            rbp: regs.rbp,
+            r8: regs.r8,
+            r9: regs.r9,
+            r10: regs.r10,
+            r11: regs.r11,
+            r12: regs.r12,
+            r13: regs.r13,
+            r14: regs.r14,
+            r15: regs.r15,
+            rip: regs.rip,
+            rflags: regs.rflags,
+        }
+    }
 }

@@ -52,14 +52,14 @@ use kvm_bindings::{
     KVM_CAP_SPLIT_IRQCHIP, KVM_GUESTDBG_ENABLE, KVM_GUESTDBG_SINGLESTEP, KVM_GUESTDBG_USE_HW_BP,
 };
 #[cfg(target_arch = "x86_64")]
-use x86_64::{check_required_kvm_extensions, FpuState, SpecialRegisters, StandardRegisters};
+use x86_64::{check_required_kvm_extensions, FpuState, SpecialRegisters};
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
     ExtendedControlRegisters, LapicState, MsrEntries, VcpuKvmState as CpuState,
     Xsave, convert_from_generic_cpu_id, convert_to_generic_cpu_id,
 };
 #[cfg(target_arch = "x86_64")]
-use crate::generic_x86_64::{CpuId};
+use crate::generic_x86_64::{CpuId, StandardRegisters};
 // aarch64 dependencies
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;
@@ -987,7 +987,7 @@ impl cpu::Vcpu for KvmVcpu {
     fn get_regs(&self) -> cpu::Result<StandardRegisters> {
         self.fd
             .get_regs()
-            .map_err(|e| cpu::HypervisorCpuError::GetStandardRegs(e.into()))
+            .map_err(|e| cpu::HypervisorCpuError::GetStandardRegs(e.into())).map(|r| (&r).into())
     }
     #[cfg(target_arch = "x86_64")]
     ///
@@ -995,7 +995,7 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     fn set_regs(&self, regs: &StandardRegisters) -> cpu::Result<()> {
         self.fd
-            .set_regs(regs)
+            .set_regs(&(regs.into()))
             .map_err(|e| cpu::HypervisorCpuError::SetStandardRegs(e.into()))
     }
 

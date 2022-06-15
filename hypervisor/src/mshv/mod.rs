@@ -228,18 +228,18 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// Returns the vCPU general purpose registers.
     ///
-    fn get_regs(&self) -> cpu::Result<StandardRegisters> {
+    fn get_regs(&self) -> cpu::Result<generic_x86_64::StandardRegisters> {
         self.fd
             .get_regs()
-            .map_err(|e| cpu::HypervisorCpuError::GetStandardRegs(e.into()))
+            .map_err(|e| cpu::HypervisorCpuError::GetStandardRegs(e.into())).map(|r| (&r).into())
     }
     #[cfg(target_arch = "x86_64")]
     ///
     /// Sets the vCPU general purpose registers.
     ///
-    fn set_regs(&self, regs: &StandardRegisters) -> cpu::Result<()> {
+    fn set_regs(&self, regs: &generic_x86_64::StandardRegisters) -> cpu::Result<()> {
         self.fd
-            .set_regs(regs)
+            .set_regs(&(regs.into()))
             .map_err(|e| cpu::HypervisorCpuError::SetStandardRegs(e.into()))
     }
     #[cfg(target_arch = "x86_64")]

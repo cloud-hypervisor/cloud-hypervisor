@@ -32,7 +32,7 @@ pub const CPUID_FLAG_VALID_INDEX: u32 = 0;
 pub struct VcpuMshvState {
     pub msrs: MsrEntries,
     pub vcpu_events: VcpuEvents,
-    pub regs: StandardRegisters,
+    pub regs: generic_x86_64::StandardRegisters,
     pub sregs: SpecialRegisters,
     pub fpu: FpuState,
     pub xcrs: ExtendedControlRegisters,
@@ -195,4 +195,54 @@ pub fn convert_from_generic_cpu_id(cpuid: &generic_x86_64::CpuId) -> CpuId {
         .map(|&entry| entry.into())
         .collect();
     CpuId::from_entries(&cpuid_vector).unwrap()
+}
+
+impl From<&StandardRegisters> for generic_x86_64::StandardRegisters {
+    fn from(regs: &StandardRegisters) -> Self {
+        generic_x86_64::StandardRegisters {
+            rax: regs.rax,
+            rbx: regs.rbx,
+            rcx: regs.rcx,
+            rdx: regs.rdx,
+            rsi: regs.rsi,
+            rdi: regs.rdi,
+            rsp: regs.rsp,
+            rbp: regs.rbp,
+            r8: regs.r8,
+            r9: regs.r9,
+            r10: regs.r10,
+            r11: regs.r11,
+            r12: regs.r12,
+            r13: regs.r13,
+            r14: regs.r14,
+            r15: regs.r15,
+            rip: regs.rip,
+            rflags: regs.rflags,
+        }
+    }
+}
+
+impl From<&generic_x86_64::StandardRegisters> for StandardRegisters {
+    fn from(regs: &generic_x86_64::StandardRegisters) -> Self {
+        StandardRegisters {
+            rax: regs.rax,
+            rbx: regs.rbx,
+            rcx: regs.rcx,
+            rdx: regs.rdx,
+            rsi: regs.rsi,
+            rdi: regs.rdi,
+            rsp: regs.rsp,
+            rbp: regs.rbp,
+            r8: regs.r8,
+            r9: regs.r9,
+            r10: regs.r10,
+            r11: regs.r11,
+            r12: regs.r12,
+            r13: regs.r13,
+            r14: regs.r14,
+            r15: regs.r15,
+            rip: regs.rip,
+            rflags: regs.rflags,
+        }
+    }
 }

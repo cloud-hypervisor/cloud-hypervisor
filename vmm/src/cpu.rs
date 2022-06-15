@@ -45,7 +45,9 @@ use hypervisor::generic_x86_64::CpuId;
 #[cfg(feature = "guest_debug")]
 use hypervisor::x86_64::{MsrEntries, MsrEntry};
 #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
-use hypervisor::x86_64::{SpecialRegisters, StandardRegisters};
+use hypervisor::x86_64::{SpecialRegisters};
+#[cfg(all(target_arch = "x86_64", feature = "gdb"))]
+use hypervisor::generic_x86_64::StandardRegisters;
 use hypervisor::{CpuState, HypervisorCpuError, VmExit, VmOps};
 use libc::{c_void, siginfo_t};
 #[cfg(feature = "guest_debug")]
@@ -2336,7 +2338,8 @@ impl CpuElf64Writable for CpuManager {
 mod tests {
     use arch::x86_64::interrupts::*;
     use arch::x86_64::regs::*;
-    use hypervisor::x86_64::{FpuState, LapicState, StandardRegisters};
+    use hypervisor::x86_64::{FpuState, LapicState};
+    use hypervisor::generic_x86_64::StandardRegisters;
 
     #[test]
     fn test_setlint() {
