@@ -291,9 +291,9 @@ dependencies = [
 
 [[package]]
 name = "gdbstub_arch"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51dc4b5718ac76d21e8605c0966dd32d80273b89b11e6cfef467b04e45934d37"
+checksum = "c24f469ba9556c5a063d6df35a8a338025fccf96ecae44f330a156b686f7a268"
 dependencies = [
  "gdbstub",
  "num-traits",
