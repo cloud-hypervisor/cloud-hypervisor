@@ -55,9 +55,11 @@ use kvm_bindings::{
 use x86_64::{check_required_kvm_extensions, FpuState, SpecialRegisters, StandardRegisters};
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
-    CpuId, CpuIdEntry, ExtendedControlRegisters, LapicState, MsrEntries, VcpuKvmState as CpuState,
-    Xsave, CPUID_FLAG_VALID_INDEX,
+    ExtendedControlRegisters, LapicState, MsrEntries, VcpuKvmState as CpuState,
+    Xsave, convert_from_generic_cpu_id, convert_to_generic_cpu_id,
 };
+#[cfg(target_arch = "x86_64")]
+use crate::generic_x86_64::{CpuId};
 // aarch64 dependencies
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;
@@ -917,7 +919,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
     fn get_cpuid(&self) -> hypervisor::Result<CpuId> {
         self.kvm
             .get_supported_cpuid(kvm_bindings::KVM_MAX_CPUID_ENTRIES)
-            .map_err(|e| hypervisor::HypervisorError::GetCpuId(e.into()))
+            .map_err(|e| hypervisor::HypervisorError::GetCpuId(e.into())).map(|cpuid| convert_to_generic_cpu_id(&cpuid))
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -1059,7 +1061,7 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     fn set_cpuid2(&self, cpuid: &CpuId) -> cpu::Result<()> {
         self.fd
-            .set_cpuid2(cpuid)
+            .set_cpuid2(&convert_from_generic_cpu_id(cpuid))
             .map_err(|e| cpu::HypervisorCpuError::SetCpuid(e.into()))
     }
     #[cfg(target_arch = "x86_64")]
@@ -1086,7 +1088,7 @@ impl cpu::Vcpu for KvmVcpu {
     fn get_cpuid2(&self, num_entries: usize) -> cpu::Result<CpuId> {
         self.fd
             .get_cpuid2(num_entries)
-            .map_err(|e| cpu::HypervisorCpuError::GetCpuid(e.into()))
+            .map_err(|e| cpu::HypervisorCpuError::GetCpuid(e.into())).map(|cpuid| convert_to_generic_cpu_id(&cpuid))
     }
     #[cfg(target_arch = "x86_64")]
     ///

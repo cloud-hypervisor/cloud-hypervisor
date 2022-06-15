@@ -28,6 +28,8 @@ use vmm_sys_util::eventfd::EventFd;
 pub use x86_64::VcpuMshvState as CpuState;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::*;
+#[cfg(target_arch = "x86_64")]
+use crate::generic_x86_64;
 
 #[cfg(target_arch = "x86_64")]
 use std::fs::File;
@@ -186,8 +188,8 @@ impl hypervisor::Hypervisor for MshvHypervisor {
     ///
     /// Get the supported CpuID
     ///
-    fn get_cpuid(&self) -> hypervisor::Result<CpuId> {
-        Ok(CpuId::new(1).unwrap())
+    fn get_cpuid(&self) -> hypervisor::Result<generic_x86_64::CpuId> {
+        Ok(generic_x86_64::CpuId::new(1).unwrap())
     }
     #[cfg(target_arch = "x86_64")]
     ///
@@ -205,7 +207,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
 pub struct MshvVcpu {
     fd: VcpuFd,
     vp_index: u8,
-    cpuid: CpuId,
+    cpuid: generic_x86_64::CpuId,
     msrs: MsrEntries,
     hv_state: Arc<RwLock<HvState>>, // Mshv State
     vm_ops: Option<Arc<dyn vm::VmOps>>,
@@ -509,14 +511,14 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// X86 specific call to setup the CPUID registers.
     ///
-    fn set_cpuid2(&self, _cpuid: &CpuId) -> cpu::Result<()> {
+    fn set_cpuid2(&self, _cpuid: &generic_x86_64::CpuId) -> cpu::Result<()> {
         Ok(())
     }
     #[cfg(target_arch = "x86_64")]
     ///
     /// X86 specific call to retrieve the CPUID registers.
     ///
-    fn get_cpuid2(&self, _num_entries: usize) -> cpu::Result<CpuId> {
+    fn get_cpuid2(&self, _num_entries: usize) -> cpu::Result<generic_x86_64::CpuId> {
         Ok(self.cpuid.clone())
     }
     #[cfg(target_arch = "x86_64")]
@@ -882,7 +884,7 @@ impl vm::Vm for MshvVm {
         let vcpu = MshvVcpu {
             fd: vcpu_fd,
             vp_index: id,
-            cpuid: CpuId::new(1).unwrap(),
+            cpuid: generic_x86_64::CpuId::new(1).unwrap(),
             msrs: self.msrs.clone(),
             hv_state: self.hv_state.clone(),
             vm_ops,

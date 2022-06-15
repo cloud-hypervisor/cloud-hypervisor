@@ -19,7 +19,7 @@ use crate::kvm::KvmVmState as VmState;
 #[cfg(feature = "mshv")]
 use crate::mshv::HvState as VmState;
 #[cfg(feature = "tdx")]
-use crate::x86_64::CpuId;
+use crate::generic_x86_64::CpuId;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use crate::ClockData;
 use crate::CreateDevice;

@@ -41,7 +41,7 @@ use hypervisor::kvm::kvm_bindings;
 #[cfg(feature = "tdx")]
 use hypervisor::kvm::{TdxExitDetails, TdxExitStatus};
 #[cfg(target_arch = "x86_64")]
-use hypervisor::x86_64::CpuId;
+use hypervisor::generic_x86_64::CpuId;
 #[cfg(feature = "guest_debug")]
 use hypervisor::x86_64::{MsrEntries, MsrEntry};
 #[cfg(all(target_arch = "x86_64", feature = "gdb"))]

@@ -19,7 +19,9 @@ use crate::x86_64::SuspendRegisters;
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::Xsave;
 #[cfg(target_arch = "x86_64")]
-use crate::x86_64::{CpuId, LapicState};
+use crate::x86_64::LapicState;
+#[cfg(target_arch = "x86_64")]
+use crate::generic_x86_64::CpuId;
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::{
     ExtendedControlRegisters, FpuState, MsrEntries, SpecialRegisters, StandardRegisters, VcpuEvents,

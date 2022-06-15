@@ -11,7 +11,7 @@
 use crate::kvm::TdxCapabilities;
 use crate::vm::Vm;
 #[cfg(target_arch = "x86_64")]
-use crate::x86_64::CpuId;
+use crate::generic_x86_64::CpuId;
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::MsrList;
 use std::sync::Arc;

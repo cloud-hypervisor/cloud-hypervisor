@@ -2650,7 +2650,7 @@ pub struct VmSnapshot {
     pub clock: Option<hypervisor::ClockData>,
     pub state: Option<hypervisor::VmState>,
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-    pub common_cpuid: hypervisor::x86_64::CpuId,
+    pub common_cpuid: hypervisor::generic_x86_64::CpuId,
 }
 
 pub const VM_SNAPSHOT_ID: &str = "vm";

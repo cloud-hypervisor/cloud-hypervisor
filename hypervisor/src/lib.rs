@@ -26,6 +26,7 @@ extern crate anyhow;
 #[macro_use]
 extern crate log;
 
+pub mod generic_x86_64;
 /// Architecture specific definitions
 #[macro_use]
 pub mod arch;

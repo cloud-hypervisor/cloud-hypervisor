@@ -10,12 +10,13 @@
 use crate::arch::x86::{msr_index, SegmentRegisterOps, MTRR_ENABLE, MTRR_MEM_TYPE_WB};
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use crate::generic_x86_64;
 
 ///
 /// Export generically-named wrappers of mshv_bindings for Unix-based platforms
 ///
 pub use {
-    mshv_bindings::hv_cpuid_entry as CpuIdEntry, mshv_bindings::mshv_user_mem_region,
+    mshv_bindings::hv_cpuid_entry, mshv_bindings::mshv_user_mem_region as MemoryRegion,
     mshv_bindings::msr_entry as MsrEntry, mshv_bindings::CpuId, mshv_bindings::DebugRegisters,
     mshv_bindings::FloatingPointUnit as FpuState, mshv_bindings::LapicState,
     mshv_bindings::MiscRegs as MiscRegisters, mshv_bindings::MsrList,
@@ -148,4 +149,50 @@ pub fn boot_msr_entries() -> MsrEntries {
         msr_data!(msr_index::MSR_MTRRdefType, MTRR_ENABLE | MTRR_MEM_TYPE_WB),
     ])
     .unwrap()
+}
+
+impl From<hv_cpuid_entry> for generic_x86_64::CpuIdEntry {
+    fn from(entry: hv_cpuid_entry) -> Self {
+        generic_x86_64::CpuIdEntry {
+            function: entry.function,
+            index: entry.index,
+            flags: entry.flags,
+            eax: entry.eax,
+            ebx: entry.ebx,
+            ecx: entry.ecx,
+            edx: entry.edx,
+            padding: entry.padding,
+        }
+    }
+}
+
+impl From<generic_x86_64::CpuIdEntry> for hv_cpuid_entry {
+    fn from(entry: generic_x86_64::CpuIdEntry) -> Self {
+        hv_cpuid_entry {
+            function: entry.function,
+            index: entry.index,
+            flags: entry.flags,
+            eax: entry.eax,
+            ebx: entry.ebx,
+            ecx: entry.ecx,
+            edx: entry.edx,
+            padding: entry.padding,
+        }
+    }
+}
+
+pub fn convert_to_generic_cpu_id(cpuid: &CpuId) -> generic_x86_64::CpuId {
+    let cpuid_vector: Vec<generic_x86_64::CpuIdEntry> = cpuid.as_slice()
+        .iter()
+        .map(|&entry| entry.into())
+        .collect();
+    generic_x86_64::CpuId::from_entries(&cpuid_vector).unwrap()
+}
+
+pub fn convert_from_generic_cpu_id(cpuid: &generic_x86_64::CpuId) -> CpuId {
+    let cpuid_vector: Vec<hv_cpuid_entry> = cpuid.as_slice()
+        .iter()
+        .map(|&entry| entry.into())
+        .collect();
+    CpuId::from_entries(&cpuid_vector).unwrap()
 }

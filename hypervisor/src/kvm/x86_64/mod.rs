@@ -11,19 +11,19 @@
 use crate::arch::x86::{msr_index, SegmentRegisterOps, MTRR_ENABLE, MTRR_MEM_TYPE_WB};
 use crate::kvm::{Cap, Kvm, KvmError, KvmResult};
 use serde::{Deserialize, Serialize};
+use crate::generic_x86_64;
 
 ///
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
 ///
 pub use {
-    kvm_bindings::kvm_cpuid_entry2 as CpuIdEntry, kvm_bindings::kvm_dtable as DescriptorTable,
+    kvm_bindings::kvm_cpuid_entry2, kvm_bindings::kvm_dtable as DescriptorTable,
     kvm_bindings::kvm_fpu as FpuState, kvm_bindings::kvm_lapic_state as LapicState,
     kvm_bindings::kvm_mp_state as MpState, kvm_bindings::kvm_msr_entry as MsrEntry,
     kvm_bindings::kvm_regs as StandardRegisters, kvm_bindings::kvm_segment as SegmentRegister,
     kvm_bindings::kvm_sregs as SpecialRegisters, kvm_bindings::kvm_vcpu_events as VcpuEvents,
     kvm_bindings::kvm_xcrs as ExtendedControlRegisters, kvm_bindings::kvm_xsave as Xsave,
     kvm_bindings::CpuId, kvm_bindings::MsrList, kvm_bindings::Msrs as MsrEntries,
-    kvm_bindings::KVM_CPUID_FLAG_SIGNIFCANT_INDEX as CPUID_FLAG_VALID_INDEX,
 };
 
 impl SegmentRegisterOps for SegmentRegister {
@@ -137,7 +137,7 @@ pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct VcpuKvmState {
-    pub cpuid: CpuId,
+    pub cpuid: generic_x86_64::CpuId,
     pub msrs: MsrEntries,
     pub vcpu_events: VcpuEvents,
     pub regs: StandardRegisters,
@@ -147,4 +147,50 @@ pub struct VcpuKvmState {
     pub xsave: Xsave,
     pub xcrs: ExtendedControlRegisters,
     pub mp_state: MpState,
+}
+
+impl From<kvm_cpuid_entry2> for generic_x86_64::CpuIdEntry {
+    fn from(entry: kvm_cpuid_entry2) -> Self {
+        generic_x86_64::CpuIdEntry {
+            function: entry.function,
+            index: entry.index,
+            flags: entry.flags,
+            eax: entry.eax,
+            ebx: entry.ebx,
+            ecx: entry.ecx,
+            edx: entry.edx,
+            padding: entry.padding,
+        }
+    }
+}
+
+impl From<generic_x86_64::CpuIdEntry> for kvm_cpuid_entry2 {
+    fn from(entry: generic_x86_64::CpuIdEntry) -> Self {
+        kvm_cpuid_entry2 {
+            function: entry.function,
+            index: entry.index,
+            flags: entry.flags,
+            eax: entry.eax,
+            ebx: entry.ebx,
+            ecx: entry.ecx,
+            edx: entry.edx,
+            padding: entry.padding,
+        }
+    }
+}
+
+pub fn convert_to_generic_cpu_id(cpuid: &CpuId) -> generic_x86_64::CpuId {
+    let cpuid_vector: Vec<generic_x86_64::CpuIdEntry> = cpuid.as_slice()
+        .iter()
+        .map(|&entry| entry.into())
+        .collect();
+    generic_x86_64::CpuId::from_entries(&cpuid_vector).unwrap()
+}
+
+pub fn convert_from_generic_cpu_id(cpuid: &generic_x86_64::CpuId) -> CpuId {
+    let cpuid_vector: Vec<kvm_cpuid_entry2> = cpuid.as_slice()
+        .iter()
+        .map(|&entry| entry.into())
+        .collect();
+    CpuId::from_entries(&cpuid_vector).unwrap()
 }
