@@ -52,7 +52,7 @@ pub struct GuestNetworkConfig {
 
 pub const DEFAULT_TCP_LISTENER_MESSAGE: &str = "booted";
 pub const DEFAULT_TCP_LISTENER_PORT: u16 = 8000;
-pub const DEFAULT_TCP_LISTENER_TIMEOUT: i32 = 80;
+pub const DEFAULT_TCP_LISTENER_TIMEOUT: i32 = 120;
 
 #[derive(Debug)]
 pub enum WaitForBootError {
