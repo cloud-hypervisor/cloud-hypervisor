@@ -10,6 +10,7 @@
 
 use vmm_sys_util::{generate_fam_struct_impl, fam::FamStruct, fam::FamStructWrapper};
 use serde::{Deserialize, Serialize};
+use crate::arch::x86::SegmentRegisterOps;
 
 #[repr(C)]
 #[derive(Default)]
@@ -122,4 +123,89 @@ pub struct StandardRegisters {
     pub r15: u64,
     pub rip: u64,
     pub rflags: u64,
+}
+
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+#[derive(Deserialize, Serialize)]
+pub struct SegmentRegister {
+    /* segment register + descriptor */
+    pub base: u64,
+    pub limit: u32,
+    pub selector: u16,
+    pub type_: u8,   /* type, writeable etc: 4 */
+    pub present: u8, /* if not present, exception generated: 1 */
+    pub dpl: u8,     /* descriptor privilege level (ring): 2 */
+    pub db: u8,      /* default/big (16 or 32 bit size offset): 1 */
+    pub s: u8,       /* non-system segment */
+    pub l: u8,       /* long (64 bit): 1 */
+    pub g: u8,       /* granularity (bytes or 4096 byte pages): 1 */
+    pub avl: u8,     /* available (free bit for software to use): 1 */
+    pub unusable: u8,
+    pub padding: u8,
+}
+
+impl SegmentRegisterOps for SegmentRegister {
+    fn segment_type(&self) -> u8 {
+        self.type_
+    }
+    fn set_segment_type(&mut self, val: u8) {
+        self.type_ = val;
+    }
+
+    fn dpl(&self) -> u8 {
+        self.dpl
+    }
+
+    fn set_dpl(&mut self, val: u8) {
+        self.dpl = val;
+    }
+
+    fn present(&self) -> u8 {
+        self.present
+    }
+
+    fn set_present(&mut self, val: u8) {
+        self.present = val;
+    }
+
+    fn long(&self) -> u8 {
+        self.l
+    }
+
+    fn set_long(&mut self, val: u8) {
+        self.l = val;
+    }
+
+    fn avl(&self) -> u8 {
+        self.avl
+    }
+
+    fn set_avl(&mut self, val: u8) {
+        self.avl = val;
+    }
+
+    fn desc_type(&self) -> u8 {
+        self.s
+    }
+
+    fn set_desc_type(&mut self, val: u8) {
+        self.s = val;
+    }
+
+    fn granularity(&self) -> u8 {
+        self.g
+    }
+
+    fn set_granularity(&mut self, val: u8) {
+        self.g = val;
+    }
+
+    fn db(&self) -> u8 {
+        self.db
+    }
+
+    fn set_db(&mut self, val: u8) {
+        self.db = val;
+    }
 }
