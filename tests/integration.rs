@@ -4076,6 +4076,165 @@ mod parallel {
 
     #[test]
     // Start cloud-hypervisor with no VM parameters, only the API server running.
+    // From the API: Create a VM, boot it and check it can be shutdown and then
+    // booted again
+    fn test_api_shutdown() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+
+        let api_socket = temp_api_path(&guest.tmp_dir);
+
+        let mut child = GuestCommand::new(&guest)
+            .args(&["--api-socket", &api_socket])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        thread::sleep(std::time::Duration::new(1, 0));
+
+        // Verify API server is running
+        curl_command(&api_socket, "GET", "http://localhost/api/v1/vmm.ping", None);
+
+        // Create the VM first
+        let cpu_count: u8 = 4;
+        let http_body = guest.api_create_body(
+            cpu_count,
+            fw_path(FwType::RustHypervisorFirmware).as_str(),
+            direct_kernel_boot_path().to_str().unwrap(),
+            DIRECT_KERNEL_BOOT_CMDLINE,
+        );
+
+        curl_command(
+            &api_socket,
+            "PUT",
+            "http://localhost/api/v1/vm.create",
+            Some(&http_body),
+        );
+
+        // Then boot it
+        curl_command(&api_socket, "PUT", "http://localhost/api/v1/vm.boot", None);
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            // Check that the VM booted as expected
+            assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
+            assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+            assert!(guest.get_entropy().unwrap_or_default() >= 900);
+
+            // Shutdown without powering off to prevent filesystem corruption
+            guest.ssh_command("sudo shutdown -H now").unwrap();
+
+            // Then shut it down
+            curl_command(
+                &api_socket,
+                "PUT",
+                "http://localhost/api/v1/vm.shutdown",
+                None,
+            );
+
+            // Then boot it again
+            curl_command(&api_socket, "PUT", "http://localhost/api/v1/vm.boot", None);
+
+            guest.wait_vm_boot(None).unwrap();
+
+            // Check that the VM booted as expected
+            assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
+            assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+            assert!(guest.get_entropy().unwrap_or_default() >= 900);
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    // Start cloud-hypervisor with no VM parameters, only the API server running.
+    // From the API: Create a VM, boot it and check it can be deleted and then recreated
+    // booted again.
+    fn test_api_delete() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+
+        let api_socket = temp_api_path(&guest.tmp_dir);
+
+        let mut child = GuestCommand::new(&guest)
+            .args(&["--api-socket", &api_socket])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        thread::sleep(std::time::Duration::new(1, 0));
+
+        // Verify API server is running
+        curl_command(&api_socket, "GET", "http://localhost/api/v1/vmm.ping", None);
+
+        // Create the VM first
+        let cpu_count: u8 = 4;
+        let http_body = guest.api_create_body(
+            cpu_count,
+            fw_path(FwType::RustHypervisorFirmware).as_str(),
+            direct_kernel_boot_path().to_str().unwrap(),
+            DIRECT_KERNEL_BOOT_CMDLINE,
+        );
+
+        let r = std::panic::catch_unwind(|| {
+            curl_command(
+                &api_socket,
+                "PUT",
+                "http://localhost/api/v1/vm.create",
+                Some(&http_body),
+            );
+
+            // Then boot it
+            curl_command(&api_socket, "PUT", "http://localhost/api/v1/vm.boot", None);
+
+            guest.wait_vm_boot(None).unwrap();
+
+            // Check that the VM booted as expected
+            assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
+            assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+            assert!(guest.get_entropy().unwrap_or_default() >= 900);
+
+            // Shutdown without powering off to prevent filesystem corruption
+            guest.ssh_command("sudo shutdown -H now").unwrap();
+
+            // Then delete it
+            curl_command(
+                &api_socket,
+                "PUT",
+                "http://localhost/api/v1/vm.delete",
+                None,
+            );
+
+            curl_command(
+                &api_socket,
+                "PUT",
+                "http://localhost/api/v1/vm.create",
+                Some(&http_body),
+            );
+
+            // Then boot it again
+            curl_command(&api_socket, "PUT", "http://localhost/api/v1/vm.boot", None);
+
+            guest.wait_vm_boot(None).unwrap();
+
+            // Check that the VM booted as expected
+            assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
+            assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+            assert!(guest.get_entropy().unwrap_or_default() >= 900);
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    // Start cloud-hypervisor with no VM parameters, only the API server running.
     // From the API: Create a VM, boot it and check that it looks as expected.
     // Then we pause the VM, check that it's no longer available.
     // Finally we resume the VM and check that it's available.
