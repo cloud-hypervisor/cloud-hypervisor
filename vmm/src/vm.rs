@@ -1373,6 +1373,15 @@ impl Vm {
             .enable()
             .map_err(Error::EnableInterruptController)?;
 
+        let craton_enabled = self.config.lock().unwrap().craton;
+        if craton_enabled {
+            self.device_manager
+                .lock()
+                .unwrap()
+                .enable_craton_uio_devices()
+                .unwrap();
+        }
+
         Ok(())
     }
 

@@ -962,6 +962,9 @@ pub struct DeviceManager {
 
     // io_uring availability if detected
     io_uring_supported: Option<bool>,
+
+    #[cfg(all(feature = "kvm", target_arch = "aarch64"))]
+    craton_uio_devices: Vec<(EventFd, EventFd, u32)>,
 }
 
 impl DeviceManager {
@@ -1119,6 +1122,8 @@ impl DeviceManager {
             force_iommu,
             restoring,
             io_uring_supported: None,
+            #[cfg(all(feature = "kvm", target_arch = "aarch64"))]
+            craton_uio_devices: Vec::new(),
         };
 
         let device_manager = Arc::new(Mutex::new(device_manager));
@@ -1702,6 +1707,21 @@ impl DeviceManager {
 
         Ok(())
     }
+    #[cfg(all(feature = "kvm", target_arch = "aarch64"))]
+    pub fn enable_craton_uio_devices(
+        &mut self
+    ) -> DeviceManagerResult<()> {
+        /* connect eventfd and resample fd to kvm */
+        for (eventfd, resamplefd, irq) in self.craton_uio_devices.iter() {
+            self.address_manager.vm.register_irqfd_with_resample(eventfd, resamplefd, *irq).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("Failed registering irq_fd: {}", e),
+                )
+            }).unwrap();
+        }
+        Ok(())
+    }
 
     #[cfg(all(feature = "kvm", target_arch = "aarch64"))]
     fn add_craton_uio_devices(
@@ -1762,13 +1782,8 @@ impl DeviceManager {
                 .allocate_irq()
                 .unwrap();
 
-            /* connect eventfd and resample fd to kvm */
-            /*vm.register_irqfd_and_resamplefd(&eventfd, &resamplefd, irq).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("Failed registering irq_fd: {}", e),
-                )
-            })?;*/
+            /* we'll enable it later... because gic isn't initialized yet */
+            self.craton_uio_devices.push((eventfd, resamplefd, irq));
 
             /* and create the device... does nothing for now */
             let device = Arc::new(Mutex::new(devices::legacy::Uio::new()));
@@ -1830,9 +1845,9 @@ impl DeviceManager {
             self.id_to_dev_info.insert(
                 (DeviceType::Rtc, uio_dev_info.name.clone()),
                 MmioDeviceInfo {
-                    addr: addr,
-                    len: len,
-                    irq: irq,
+                    addr,
+                    len,
+                    irq,
                 },
             );
 
