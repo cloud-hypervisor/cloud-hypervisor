@@ -598,6 +598,8 @@ fn main() {
                 ),
         )
         .subcommand(Command::new("resume").about("Resume the VM"))
+        .subcommand(Command::new("boot").about("Boot a created VM"))
+        .subcommand(Command::new("delete").about("Delete a VM"))
         .subcommand(Command::new("shutdown").about("Shutdown the VM"))
         .subcommand(
             Command::new("snapshot")
