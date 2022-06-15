@@ -1717,6 +1717,43 @@ impl DeviceManager {
             // TODO support other devices
             assert!(uio_dev_info.name.eq("rtc0"));
 
+            /* open the device file for mapping and interrupt fds */
+            let dev_file = OpenOptions::new().read(true).write(true).open(&uio_dev_info.dev_path).unwrap();
+            info!("opened {}", uio_dev_info.name);
+
+            /* interrupts */
+            /* TODO allow 0 to n interrupts... */
+
+            /* create eventfd and resamplefd */
+            /* (copying what qemu-craton does) */
+            let eventfd = EventFd::new(libc::EFD_NONBLOCK | libc::EFD_CLOEXEC).unwrap();
+            let resamplefd = EventFd::new(libc::EFD_NONBLOCK | libc::EFD_CLOEXEC).unwrap();
+            info!("Created eventfd and resamplefd");
+
+            /* register eventfd and resample fd with uio driver */
+            use vmm_sys_util::ioctl::{ioctl_with_ref};
+            use vmm_sys_util::{ioctl_expr, ioctl_ioc_nr, ioctl_iow_nr};
+            #[repr(C, packed)]
+            #[derive(Debug, Copy, Clone)]
+            struct uio_azure_sphere_irqfd_set {
+                irq_index: u32,
+                fd: i32,
+                resamplefd: i32,
+            }
+            ioctl_iow_nr!(UIO_AZURE_SPHERE_IRQFD_SET, 0xf8, 0x1, uio_azure_sphere_irqfd_set);
+            let ioctl_in = uio_azure_sphere_irqfd_set {
+                irq_index:  0,
+                fd:         eventfd.as_raw_fd(),
+                resamplefd: resamplefd.as_raw_fd(),
+            };
+            let ret = unsafe { ioctl_with_ref(&dev_file, UIO_AZURE_SPHERE_IRQFD_SET(), &ioctl_in) };
+            if ret != 0 {
+                error!("Failed UIO_AZURE_SPHERE_IRQFD_SET");
+                continue;
+            }
+            info!("Successfully bound eventfd and resamplefd to uio interrupt");
+
+            /* first allocate an interrupt in the guest's interrupt space... */
             let irq = self
                 .address_manager
                 .allocator
@@ -1725,12 +1762,16 @@ impl DeviceManager {
                 .allocate_irq()
                 .unwrap();
 
-            /* interrupts */
-            /* just 1 for now */
-            /* TODO allow 0 to n interrupts... */
-            let device = Arc::new(Mutex::new(devices::legacy::Uio::new()));
+            /* connect eventfd and resample fd to kvm */
+            /*vm.register_irqfd_and_resamplefd(&eventfd, &resamplefd, irq).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("Failed registering irq_fd: {}", e),
+                )
+            })?;*/
 
-            /* TODO eventfd for interrupt, connect to kvm */
+            /* and create the device... does nothing for now */
+            let device = Arc::new(Mutex::new(devices::legacy::Uio::new()));
 
             /* mappings */
             /* just 1 for now */
@@ -1751,8 +1792,6 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::BusError)?;
 
             /* mmap the memory (copied from memory manager new_craton() */
-            let dev_file = OpenOptions::new().read(true).write(true).open(&uio_dev_info.dev_path).unwrap();
-            info!("opened {}", uio_dev_info.name);
             let prot = libc::PROT_READ | libc::PROT_WRITE;
             let flags = libc::MAP_SHARED;
             use core::ptr::null_mut;
