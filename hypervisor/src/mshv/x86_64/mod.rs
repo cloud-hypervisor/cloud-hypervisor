@@ -7,10 +7,10 @@
 // Copyright 2018-2019 CrowdStrike, Inc.
 //
 //
-use crate::arch::x86::{msr_index, SegmentRegisterOps, MTRR_ENABLE, MTRR_MEM_TYPE_WB};
+use crate::arch::x86::{msr_index, MTRR_ENABLE, MTRR_MEM_TYPE_WB};
+use crate::generic_x86_64;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use crate::generic_x86_64;
 
 ///
 /// Export generically-named wrappers of mshv_bindings for Unix-based platforms
@@ -18,12 +18,12 @@ use crate::generic_x86_64;
 pub use {
     mshv_bindings::hv_cpuid_entry, mshv_bindings::mshv_user_mem_region as MemoryRegion,
     mshv_bindings::msr_entry as MsrEntry, mshv_bindings::CpuId, mshv_bindings::DebugRegisters,
-    mshv_bindings::FloatingPointUnit as FpuState, mshv_bindings::LapicState,
+    mshv_bindings::FloatingPointUnit, mshv_bindings::LapicState,
     mshv_bindings::MiscRegs as MiscRegisters, mshv_bindings::MsrList,
     mshv_bindings::Msrs as MsrEntries, mshv_bindings::Msrs, mshv_bindings::SegmentRegister,
     mshv_bindings::SpecialRegisters, mshv_bindings::StandardRegisters,
-    mshv_bindings::SuspendRegisters, mshv_bindings::VcpuEvents, mshv_bindings::XSave as Xsave,
-    mshv_bindings::Xcrs as ExtendedControlRegisters, mshv_bindings::TableRegister,
+    mshv_bindings::SuspendRegisters, mshv_bindings::TableRegister, mshv_bindings::VcpuEvents,
+    mshv_bindings::XSave as Xsave,
 };
 
 pub const CPUID_FLAG_VALID_INDEX: u32 = 0;
@@ -33,9 +33,8 @@ pub struct VcpuMshvState {
     pub msrs: MsrEntries,
     pub vcpu_events: VcpuEvents,
     pub regs: generic_x86_64::StandardRegisters,
-    pub sregs: SpecialRegisters,
-    pub fpu: FpuState,
-    pub xcrs: ExtendedControlRegisters,
+    pub sregs: generic_x86_64::SpecialRegisters,
+    pub fpu: generic_x86_64::FpuState,
     pub lapic: LapicState,
     pub dbg: DebugRegisters,
     pub xsave: Xsave,
@@ -51,14 +50,13 @@ impl fmt::Display for VcpuMshvState {
             msr_entries[i][1] = entry.data;
             msr_entries[i][0] = entry.index as u64;
         }
-        write!(f, "Number of MSRs: {}: MSRs: {:#010X?}, -- VCPU Events: {:?} -- Standard registers: {:?} Special Registers: {:?} ---- Floating Point Unit: {:?} --- Extended Control Register: {:?} --- Local APIC: {:?} --- DBG: {:?} --- Xsave: {:?}",
+        write!(f, "Number of MSRs: {}: MSRs: {:#010X?}, -- VCPU Events: {:?} -- Standard registers: {:?} Special Registers: {:?} ---- Floating Point Unit: {:?} --- Local APIC: {:?} --- DBG: {:?} --- Xsave: {:?}",
                 msr_entries.len(),
                 msr_entries,
                 self.vcpu_events,
                 self.regs,
                 self.sregs,
                 self.fpu,
-                self.xcrs,
                 self.lapic,
                 self.dbg,
                 self.xsave,
@@ -69,7 +67,6 @@ impl fmt::Display for VcpuMshvState {
 pub struct IrqRouting {}
 pub enum VcpuExit {}
 pub struct MpState {}
-
 
 pub fn boot_msr_entries() -> MsrEntries {
     MsrEntries::from_entries(&[
@@ -118,18 +115,14 @@ impl From<generic_x86_64::CpuIdEntry> for hv_cpuid_entry {
 }
 
 pub fn convert_to_generic_cpu_id(cpuid: &CpuId) -> generic_x86_64::CpuId {
-    let cpuid_vector: Vec<generic_x86_64::CpuIdEntry> = cpuid.as_slice()
-        .iter()
-        .map(|&entry| entry.into())
-        .collect();
+    let cpuid_vector: Vec<generic_x86_64::CpuIdEntry> =
+        cpuid.as_slice().iter().map(|&entry| entry.into()).collect();
     generic_x86_64::CpuId::from_entries(&cpuid_vector).unwrap()
 }
 
 pub fn convert_from_generic_cpu_id(cpuid: &generic_x86_64::CpuId) -> CpuId {
-    let cpuid_vector: Vec<hv_cpuid_entry> = cpuid.as_slice()
-        .iter()
-        .map(|&entry| entry.into())
-        .collect();
+    let cpuid_vector: Vec<hv_cpuid_entry> =
+        cpuid.as_slice().iter().map(|&entry| entry.into()).collect();
     CpuId::from_entries(&cpuid_vector).unwrap()
 }
 
@@ -237,6 +230,92 @@ impl From<&generic_x86_64::TableRegister> for TableRegister {
         TableRegister {
             base: table.base,
             limit: table.limit,
+        }
+    }
+}
+
+impl From<&SpecialRegisters> for generic_x86_64::SpecialRegisters {
+    fn from(sregs: &SpecialRegisters) -> Self {
+        generic_x86_64::SpecialRegisters {
+            cs: (&sregs.cs).into(),
+            ds: (&sregs.ds).into(),
+            es: (&sregs.es).into(),
+            fs: (&sregs.fs).into(),
+            gs: (&sregs.gs).into(),
+            ss: (&sregs.ss).into(),
+            tr: (&sregs.tr).into(),
+            ldt: (&sregs.ldt).into(),
+            gdt: (&sregs.gdt).into(),
+            idt: (&sregs.idt).into(),
+            cr0: sregs.cr0,
+            cr2: sregs.cr2,
+            cr3: sregs.cr3,
+            cr4: sregs.cr4,
+            cr8: sregs.cr8,
+            efer: sregs.efer,
+            apic_base: sregs.apic_base,
+            interrupt_bitmap: sregs.interrupt_bitmap,
+        }
+    }
+}
+
+impl From<&generic_x86_64::SpecialRegisters> for SpecialRegisters {
+    fn from(sregs: &generic_x86_64::SpecialRegisters) -> Self {
+        SpecialRegisters {
+            cs: (&sregs.cs).into(),
+            ds: (&sregs.ds).into(),
+            es: (&sregs.es).into(),
+            fs: (&sregs.fs).into(),
+            gs: (&sregs.gs).into(),
+            ss: (&sregs.ss).into(),
+            tr: (&sregs.tr).into(),
+            ldt: (&sregs.ldt).into(),
+            gdt: (&sregs.gdt).into(),
+            idt: (&sregs.idt).into(),
+            cr0: sregs.cr0,
+            cr2: sregs.cr2,
+            cr3: sregs.cr3,
+            cr4: sregs.cr4,
+            cr8: sregs.cr8,
+            efer: sregs.efer,
+            apic_base: sregs.apic_base,
+            interrupt_bitmap: sregs.interrupt_bitmap,
+        }
+    }
+}
+
+impl From<&FloatingPointUnit> for generic_x86_64::FpuState {
+    fn from(fpu: &FloatingPointUnit) -> Self {
+        generic_x86_64::FpuState {
+            fpr: fpu.fpr,
+            fcw: fpu.fcw,
+            fsw: fpu.fsw,
+            ftwx: fpu.ftwx,
+            pad1: fpu.pad1,
+            last_opcode: fpu.last_opcode,
+            last_ip: fpu.last_ip,
+            last_dp: fpu.last_dp,
+            xmm: fpu.xmm,
+            mxcsr: fpu.mxcsr,
+            pad2: fpu.pad2,
+        }
+    }
+}
+
+impl From<&generic_x86_64::FpuState> for FloatingPointUnit {
+    fn from(fpu: &generic_x86_64::FpuState) -> Self {
+        FloatingPointUnit {
+            fpr: fpu.fpr,
+            fcw: fpu.fcw,
+            fsw: fpu.fsw,
+            ftwx: fpu.ftwx,
+            pad1: fpu.pad1,
+            last_opcode: fpu.last_opcode,
+            last_ip: fpu.last_ip,
+            last_dp: fpu.last_dp,
+            xmm: fpu.xmm,
+            mxcsr: fpu.mxcsr,
+            pad2: fpu.pad2,
         }
     }
 }

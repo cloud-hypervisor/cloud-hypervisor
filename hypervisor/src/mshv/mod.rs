@@ -23,13 +23,13 @@ use vm::DataMatch;
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
 use crate::device;
+#[cfg(target_arch = "x86_64")]
+use crate::generic_x86_64;
 use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::VcpuMshvState as CpuState;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::*;
-#[cfg(target_arch = "x86_64")]
-use crate::generic_x86_64;
 
 #[cfg(target_arch = "x86_64")]
 use std::fs::File;
@@ -231,7 +231,8 @@ impl cpu::Vcpu for MshvVcpu {
     fn get_regs(&self) -> cpu::Result<generic_x86_64::StandardRegisters> {
         self.fd
             .get_regs()
-            .map_err(|e| cpu::HypervisorCpuError::GetStandardRegs(e.into())).map(|r| (&r).into())
+            .map_err(|e| cpu::HypervisorCpuError::GetStandardRegs(e.into()))
+            .map(|r| (&r).into())
     }
     #[cfg(target_arch = "x86_64")]
     ///
@@ -246,36 +247,38 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// Returns the vCPU special registers.
     ///
-    fn get_sregs(&self) -> cpu::Result<SpecialRegisters> {
+    fn get_sregs(&self) -> cpu::Result<generic_x86_64::SpecialRegisters> {
         self.fd
             .get_sregs()
             .map_err(|e| cpu::HypervisorCpuError::GetSpecialRegs(e.into()))
+            .map(|sregs| (&sregs).into())
     }
     #[cfg(target_arch = "x86_64")]
     ///
     /// Sets the vCPU special registers.
     ///
-    fn set_sregs(&self, sregs: &SpecialRegisters) -> cpu::Result<()> {
+    fn set_sregs(&self, sregs: &generic_x86_64::SpecialRegisters) -> cpu::Result<()> {
         self.fd
-            .set_sregs(sregs)
+            .set_sregs(&sregs.into())
             .map_err(|e| cpu::HypervisorCpuError::SetSpecialRegs(e.into()))
     }
     #[cfg(target_arch = "x86_64")]
     ///
     /// Returns the floating point state (FPU) from the vCPU.
     ///
-    fn get_fpu(&self) -> cpu::Result<FpuState> {
+    fn get_fpu(&self) -> cpu::Result<generic_x86_64::FpuState> {
         self.fd
             .get_fpu()
             .map_err(|e| cpu::HypervisorCpuError::GetFloatingPointRegs(e.into()))
+            .map(|fpu| (&fpu).into())
     }
     #[cfg(target_arch = "x86_64")]
     ///
     /// Set the floating point state (FPU) of a vCPU.
     ///
-    fn set_fpu(&self, fpu: &FpuState) -> cpu::Result<()> {
+    fn set_fpu(&self, fpu: &generic_x86_64::FpuState) -> cpu::Result<()> {
         self.fd
-            .set_fpu(fpu)
+            .set_fpu(&fpu.into())
             .map_err(|e| cpu::HypervisorCpuError::SetFloatingPointRegs(e.into()))
     }
 
@@ -297,25 +300,6 @@ impl cpu::Vcpu for MshvVcpu {
         self.fd
             .set_msrs(msrs)
             .map_err(|e| cpu::HypervisorCpuError::SetMsrEntries(e.into()))
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    ///
-    /// X86 specific call that returns the vcpu's current "xcrs".
-    ///
-    fn get_xcrs(&self) -> cpu::Result<ExtendedControlRegisters> {
-        self.fd
-            .get_xcrs()
-            .map_err(|e| cpu::HypervisorCpuError::GetXcsr(e.into()))
-    }
-    #[cfg(target_arch = "x86_64")]
-    ///
-    /// X86 specific call that sets the vcpu's current "xcrs".
-    ///
-    fn set_xcrs(&self, xcrs: &ExtendedControlRegisters) -> cpu::Result<()> {
-        self.fd
-            .set_xcrs(xcrs)
-            .map_err(|e| cpu::HypervisorCpuError::SetXcsr(e.into()))
     }
     #[cfg(target_arch = "x86_64")]
     ///
@@ -566,7 +550,6 @@ impl cpu::Vcpu for MshvVcpu {
         self.set_regs(&state.regs)?;
         self.set_sregs(&state.sregs)?;
         self.set_fpu(&state.fpu)?;
-        self.set_xcrs(&state.xcrs)?;
         self.set_lapic(&state.lapic)?;
         self.set_xsave(&state.xsave)?;
         // These registers are global and needed to be set only for first VCPU
@@ -587,7 +570,6 @@ impl cpu::Vcpu for MshvVcpu {
     fn state(&self) -> cpu::Result<CpuState> {
         let regs = self.get_regs()?;
         let sregs = self.get_sregs()?;
-        let xcrs = self.get_xcrs()?;
         let fpu = self.get_fpu()?;
         let vcpu_events = self.get_vcpu_events()?;
         let mut msrs = self.msrs.clone();
@@ -609,7 +591,6 @@ impl cpu::Vcpu for MshvVcpu {
             regs,
             sregs,
             fpu,
-            xcrs,
             lapic,
             dbg,
             xsave,

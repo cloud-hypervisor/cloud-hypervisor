@@ -8,9 +8,9 @@
 //
 //
 
-use vmm_sys_util::{generate_fam_struct_impl, fam::FamStruct, fam::FamStructWrapper};
-use serde::{Deserialize, Serialize};
 use crate::arch::x86::SegmentRegisterOps;
+use serde::{Deserialize, Serialize};
+use vmm_sys_util::{fam::FamStruct, fam::FamStructWrapper, generate_fam_struct_impl};
 
 #[repr(C)]
 #[derive(Default)]
@@ -62,10 +62,8 @@ impl<T> ::std::clone::Clone for __IncompleteArrayField<T> {
     }
 }
 
-
 #[repr(C)]
-#[derive(Debug, Default, Copy, Clone, PartialEq)]
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Deserialize, Serialize)]
 pub struct CpuIdEntry {
     pub function: u32,
     pub index: u32,
@@ -78,8 +76,7 @@ pub struct CpuIdEntry {
 }
 
 #[repr(C)]
-#[derive(Debug, Default)]
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct HypervisorCpuId {
     pub nent: u32,
     pub padding: u32,
@@ -91,7 +88,6 @@ pub const CPUID_FLAG_VALID_INDEX: u32 = 0x1;
 pub const HYPERVISOR_MAX_CPUID_ENTRIES: usize = 80;
 pub type CpuId = FamStructWrapper<HypervisorCpuId>;
 
-
 generate_fam_struct_impl!(
     HypervisorCpuId,
     CpuIdEntry,
@@ -102,8 +98,7 @@ generate_fam_struct_impl!(
 );
 
 #[repr(C)]
-#[derive(Debug, Default, Copy, Clone, PartialEq)]
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Deserialize, Serialize)]
 pub struct StandardRegisters {
     pub rax: u64,
     pub rbx: u64,
@@ -126,8 +121,7 @@ pub struct StandardRegisters {
 }
 
 #[repr(C)]
-#[derive(Debug, Default, Copy, Clone)]
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Default, Copy, Clone, Deserialize, Serialize)]
 pub struct SegmentRegister {
     /* segment register + descriptor */
     pub base: u64,
@@ -210,11 +204,48 @@ impl SegmentRegisterOps for SegmentRegister {
     }
 }
 
-
 #[repr(C)]
-#[derive(Debug, Default, Copy, Clone, PartialEq)]
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Deserialize, Serialize)]
 pub struct TableRegister {
     pub base: u64,
     pub limit: u16,
+}
+
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone, Deserialize, Serialize)]
+pub struct SpecialRegisters {
+    pub cs: SegmentRegister,
+    pub ds: SegmentRegister,
+    pub es: SegmentRegister,
+    pub fs: SegmentRegister,
+    pub gs: SegmentRegister,
+    pub ss: SegmentRegister,
+    pub tr: SegmentRegister,
+    pub ldt: SegmentRegister,
+    pub gdt: TableRegister,
+    pub idt: TableRegister,
+    pub cr0: u64,
+    pub cr2: u64,
+    pub cr3: u64,
+    pub cr4: u64,
+    pub cr8: u64,
+    pub efer: u64,
+    pub apic_base: u64,
+    pub interrupt_bitmap: [u64; 4usize],
+}
+
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Deserialize, Serialize)]
+pub struct FpuState {
+    pub fpr: [[u8; 16usize]; 8usize],
+    pub fcw: u16,
+    pub fsw: u16,
+    pub ftwx: u8,
+    pub pad1: u8,
+    pub last_opcode: u16,
+    pub last_ip: u64,
+    pub last_dp: u64,
+    pub xmm: [[u8; 16usize]; 16usize],
+    pub mxcsr: u32,
+    pub pad2: u32,
 }

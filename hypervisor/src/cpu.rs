@@ -12,20 +12,18 @@
 use crate::aarch64::VcpuInit;
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::{RegList, Register, StandardRegisters};
+#[cfg(target_arch = "x86_64")]
+use crate::generic_x86_64::{CpuId, FpuState, SpecialRegisters, StandardRegisters};
 #[cfg(feature = "tdx")]
 use crate::kvm::{TdxExitDetails, TdxExitStatus};
+#[cfg(target_arch = "x86_64")]
+use crate::x86_64::LapicState;
 #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
 use crate::x86_64::SuspendRegisters;
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::Xsave;
 #[cfg(target_arch = "x86_64")]
-use crate::x86_64::LapicState;
-#[cfg(target_arch = "x86_64")]
-use crate::generic_x86_64::{CpuId, StandardRegisters};
-#[cfg(target_arch = "x86_64")]
-use crate::x86_64::{
-    ExtendedControlRegisters, FpuState, MsrEntries, SpecialRegisters, VcpuEvents,
-};
+use crate::x86_64::{MsrEntries, VcpuEvents};
 use crate::CpuState;
 #[cfg(target_arch = "aarch64")]
 use crate::DeviceAttr;
@@ -375,16 +373,6 @@ pub trait Vcpu: Send + Sync {
     /// X86 specific call that sets the vcpu's current "xsave struct".
     ///
     fn set_xsave(&self, xsave: &Xsave) -> Result<()>;
-    #[cfg(target_arch = "x86_64")]
-    ///
-    /// X86 specific call that returns the vcpu's current "xcrs".
-    ///
-    fn get_xcrs(&self) -> Result<ExtendedControlRegisters>;
-    #[cfg(target_arch = "x86_64")]
-    ///
-    /// X86 specific call that sets the vcpu's current "xcrs".
-    ///
-    fn set_xcrs(&self, xcrs: &ExtendedControlRegisters) -> Result<()>;
     #[cfg(target_arch = "x86_64")]
     ///
     /// Returns currently pending exceptions, interrupts, and NMIs as well as related

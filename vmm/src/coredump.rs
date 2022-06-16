@@ -4,9 +4,9 @@
 //
 
 #[cfg(target_arch = "x86_64")]
-use hypervisor::generic_x86_64::TableRegister;
-#[cfg(target_arch = "x86_64")]
 use hypervisor::generic_x86_64::SegmentRegister;
+#[cfg(target_arch = "x86_64")]
+use hypervisor::generic_x86_64::TableRegister;
 use linux_loader::elf;
 use std::fs::File;
 use std::io::Write;

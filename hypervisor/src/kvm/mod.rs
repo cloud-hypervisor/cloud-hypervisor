@@ -44,6 +44,8 @@ use vmm_sys_util::eventfd::EventFd;
 pub mod x86_64;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::NUM_IOAPIC_PINS;
+#[cfg(target_arch = "x86_64")]
+use crate::generic_x86_64::{CpuId, FpuState, SpecialRegisters, StandardRegisters};
 #[cfg(target_arch = "aarch64")]
 use aarch64::{RegList, Register, StandardRegisters};
 #[cfg(target_arch = "x86_64")]
@@ -52,14 +54,12 @@ use kvm_bindings::{
     KVM_CAP_SPLIT_IRQCHIP, KVM_GUESTDBG_ENABLE, KVM_GUESTDBG_SINGLESTEP, KVM_GUESTDBG_USE_HW_BP,
 };
 #[cfg(target_arch = "x86_64")]
-use x86_64::{check_required_kvm_extensions, FpuState, SpecialRegisters};
+use x86_64::check_required_kvm_extensions;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
-    ExtendedControlRegisters, LapicState, MsrEntries, VcpuKvmState as CpuState,
-    Xsave, convert_from_generic_cpu_id, convert_to_generic_cpu_id,
+    convert_from_generic_cpu_id, convert_to_generic_cpu_id, LapicState, MsrEntries,
+    VcpuKvmState as CpuState, Xsave,
 };
-#[cfg(target_arch = "x86_64")]
-use crate::generic_x86_64::{CpuId, StandardRegisters};
 // aarch64 dependencies
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;
@@ -919,7 +919,8 @@ impl hypervisor::Hypervisor for KvmHypervisor {
     fn get_cpuid(&self) -> hypervisor::Result<CpuId> {
         self.kvm
             .get_supported_cpuid(kvm_bindings::KVM_MAX_CPUID_ENTRIES)
-            .map_err(|e| hypervisor::HypervisorError::GetCpuId(e.into())).map(|cpuid| convert_to_generic_cpu_id(&cpuid))
+            .map_err(|e| hypervisor::HypervisorError::GetCpuId(e.into()))
+            .map(|cpuid| convert_to_generic_cpu_id(&cpuid))
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -987,7 +988,8 @@ impl cpu::Vcpu for KvmVcpu {
     fn get_regs(&self) -> cpu::Result<StandardRegisters> {
         self.fd
             .get_regs()
-            .map_err(|e| cpu::HypervisorCpuError::GetStandardRegs(e.into())).map(|r| (&r).into())
+            .map_err(|e| cpu::HypervisorCpuError::GetStandardRegs(e.into()))
+            .map(|r| (&r).into())
     }
     #[cfg(target_arch = "x86_64")]
     ///
@@ -1027,6 +1029,7 @@ impl cpu::Vcpu for KvmVcpu {
         self.fd
             .get_sregs()
             .map_err(|e| cpu::HypervisorCpuError::GetSpecialRegs(e.into()))
+            .map(|sreg| (&sreg).into())
     }
     #[cfg(target_arch = "x86_64")]
     ///
@@ -1034,7 +1037,7 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     fn set_sregs(&self, sregs: &SpecialRegisters) -> cpu::Result<()> {
         self.fd
-            .set_sregs(sregs)
+            .set_sregs(&sregs.into())
             .map_err(|e| cpu::HypervisorCpuError::SetSpecialRegs(e.into()))
     }
     #[cfg(target_arch = "x86_64")]
@@ -1045,6 +1048,7 @@ impl cpu::Vcpu for KvmVcpu {
         self.fd
             .get_fpu()
             .map_err(|e| cpu::HypervisorCpuError::GetFloatingPointRegs(e.into()))
+            .map(|fpu| (&fpu).into())
     }
     #[cfg(target_arch = "x86_64")]
     ///
@@ -1052,7 +1056,7 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     fn set_fpu(&self, fpu: &FpuState) -> cpu::Result<()> {
         self.fd
-            .set_fpu(fpu)
+            .set_fpu(&fpu.into())
             .map_err(|e| cpu::HypervisorCpuError::SetFloatingPointRegs(e.into()))
     }
     #[cfg(target_arch = "x86_64")]
@@ -1088,7 +1092,8 @@ impl cpu::Vcpu for KvmVcpu {
     fn get_cpuid2(&self, num_entries: usize) -> cpu::Result<CpuId> {
         self.fd
             .get_cpuid2(num_entries)
-            .map_err(|e| cpu::HypervisorCpuError::GetCpuid(e.into())).map(|cpuid| convert_to_generic_cpu_id(&cpuid))
+            .map_err(|e| cpu::HypervisorCpuError::GetCpuid(e.into()))
+            .map(|cpuid| convert_to_generic_cpu_id(&cpuid))
     }
     #[cfg(target_arch = "x86_64")]
     ///
@@ -1160,24 +1165,6 @@ impl cpu::Vcpu for KvmVcpu {
         self.fd
             .set_xsave(xsave)
             .map_err(|e| cpu::HypervisorCpuError::SetXsaveState(e.into()))
-    }
-    #[cfg(target_arch = "x86_64")]
-    ///
-    /// X86 specific call that returns the vcpu's current "xcrs".
-    ///
-    fn get_xcrs(&self) -> cpu::Result<ExtendedControlRegisters> {
-        self.fd
-            .get_xcrs()
-            .map_err(|e| cpu::HypervisorCpuError::GetXcsr(e.into()))
-    }
-    #[cfg(target_arch = "x86_64")]
-    ///
-    /// X86 specific call that sets the vcpu's current "xcrs".
-    ///
-    fn set_xcrs(&self, xcrs: &ExtendedControlRegisters) -> cpu::Result<()> {
-        self.fd
-            .set_xcrs(xcrs)
-            .map_err(|e| cpu::HypervisorCpuError::SetXcsr(e.into()))
     }
     #[cfg(target_arch = "x86_64")]
     ///
@@ -1715,7 +1702,6 @@ impl cpu::Vcpu for KvmVcpu {
         let regs = self.get_regs()?;
         let sregs = self.get_sregs()?;
         let xsave = self.get_xsave()?;
-        let xcrs = self.get_xcrs()?;
         let lapic_state = self.get_lapic()?;
         let fpu = self.get_fpu()?;
 
@@ -1798,7 +1784,6 @@ impl cpu::Vcpu for KvmVcpu {
             fpu,
             lapic_state,
             xsave,
-            xcrs,
             mp_state,
         })
     }
@@ -1863,7 +1848,6 @@ impl cpu::Vcpu for KvmVcpu {
         self.set_regs(&state.regs)?;
         self.set_sregs(&state.sregs)?;
         self.set_xsave(&state.xsave)?;
-        self.set_xcrs(&state.xcrs)?;
         self.set_lapic(&state.lapic_state)?;
         self.set_fpu(&state.fpu)?;
 

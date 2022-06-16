@@ -14,12 +14,12 @@ use crate::aarch64::VcpuInit;
 use crate::arch::aarch64::gic::Vgic;
 use crate::cpu::Vcpu;
 use crate::device::Device;
+#[cfg(feature = "tdx")]
+use crate::generic_x86_64::CpuId;
 #[cfg(feature = "kvm")]
 use crate::kvm::KvmVmState as VmState;
 #[cfg(feature = "mshv")]
 use crate::mshv::HvState as VmState;
-#[cfg(feature = "tdx")]
-use crate::generic_x86_64::CpuId;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use crate::ClockData;
 use crate::CreateDevice;

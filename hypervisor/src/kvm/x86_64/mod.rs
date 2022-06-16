@@ -9,24 +9,21 @@
 //
 
 use crate::arch::x86::{msr_index, MTRR_ENABLE, MTRR_MEM_TYPE_WB};
+use crate::generic_x86_64;
 use crate::kvm::{Cap, Kvm, KvmError, KvmResult};
 use serde::{Deserialize, Serialize};
-use crate::generic_x86_64;
 
 ///
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
 ///
 pub use {
-    kvm_bindings::kvm_cpuid_entry2, kvm_bindings::kvm_dtable,
-    kvm_bindings::kvm_fpu as FpuState, kvm_bindings::kvm_lapic_state as LapicState,
-    kvm_bindings::kvm_mp_state as MpState, kvm_bindings::kvm_msr_entry as MsrEntry,
-    kvm_bindings::kvm_regs, kvm_bindings::kvm_segment,
-    kvm_bindings::kvm_sregs as SpecialRegisters, kvm_bindings::kvm_vcpu_events as VcpuEvents,
-    kvm_bindings::kvm_xcrs as ExtendedControlRegisters, kvm_bindings::kvm_xsave as Xsave,
+    kvm_bindings::kvm_cpuid_entry2, kvm_bindings::kvm_dtable, kvm_bindings::kvm_fpu,
+    kvm_bindings::kvm_lapic_state as LapicState, kvm_bindings::kvm_mp_state as MpState,
+    kvm_bindings::kvm_msr_entry as MsrEntry, kvm_bindings::kvm_regs, kvm_bindings::kvm_segment,
+    kvm_bindings::kvm_sregs, kvm_bindings::kvm_vcpu_events as VcpuEvents,
+    kvm_bindings::kvm_xsave as Xsave,
     kvm_bindings::CpuId, kvm_bindings::MsrList, kvm_bindings::Msrs as MsrEntries,
 };
-
-
 
 pub fn boot_msr_entries() -> MsrEntries {
     MsrEntries::from_entries(&[
@@ -78,11 +75,10 @@ pub struct VcpuKvmState {
     pub msrs: MsrEntries,
     pub vcpu_events: VcpuEvents,
     pub regs: generic_x86_64::StandardRegisters,
-    pub sregs: SpecialRegisters,
-    pub fpu: FpuState,
+    pub sregs: generic_x86_64::SpecialRegisters,
+    pub fpu: generic_x86_64::FpuState,
     pub lapic_state: LapicState,
     pub xsave: Xsave,
-    pub xcrs: ExtendedControlRegisters,
     pub mp_state: MpState,
 }
 
@@ -117,21 +113,16 @@ impl From<generic_x86_64::CpuIdEntry> for kvm_cpuid_entry2 {
 }
 
 pub fn convert_to_generic_cpu_id(cpuid: &CpuId) -> generic_x86_64::CpuId {
-    let cpuid_vector: Vec<generic_x86_64::CpuIdEntry> = cpuid.as_slice()
-        .iter()
-        .map(|&entry| entry.into())
-        .collect();
+    let cpuid_vector: Vec<generic_x86_64::CpuIdEntry> =
+        cpuid.as_slice().iter().map(|&entry| entry.into()).collect();
     generic_x86_64::CpuId::from_entries(&cpuid_vector).unwrap()
 }
 
 pub fn convert_from_generic_cpu_id(cpuid: &generic_x86_64::CpuId) -> CpuId {
-    let cpuid_vector: Vec<kvm_cpuid_entry2> = cpuid.as_slice()
-        .iter()
-        .map(|&entry| entry.into())
-        .collect();
+    let cpuid_vector: Vec<kvm_cpuid_entry2> =
+        cpuid.as_slice().iter().map(|&entry| entry.into()).collect();
     CpuId::from_entries(&cpuid_vector).unwrap()
 }
-
 
 impl From<&kvm_regs> for generic_x86_64::StandardRegisters {
     fn from(regs: &kvm_regs) -> Self {
@@ -237,8 +228,93 @@ impl From<&generic_x86_64::TableRegister> for kvm_dtable {
         kvm_dtable {
             base: table.base,
             limit: table.limit,
-            padding: [0;3],
+            padding: [0; 3],
         }
     }
 }
 
+impl From<&kvm_sregs> for generic_x86_64::SpecialRegisters {
+    fn from(sregs: &kvm_sregs) -> Self {
+        generic_x86_64::SpecialRegisters {
+            cs: (&sregs.cs).into(),
+            ds: (&sregs.ds).into(),
+            es: (&sregs.es).into(),
+            fs: (&sregs.fs).into(),
+            gs: (&sregs.gs).into(),
+            ss: (&sregs.ss).into(),
+            tr: (&sregs.tr).into(),
+            ldt: (&sregs.ldt).into(),
+            gdt: (&sregs.gdt).into(),
+            idt: (&sregs.idt).into(),
+            cr0: sregs.cr0,
+            cr2: sregs.cr2,
+            cr3: sregs.cr3,
+            cr4: sregs.cr4,
+            cr8: sregs.cr8,
+            efer: sregs.efer,
+            apic_base: sregs.apic_base,
+            interrupt_bitmap: sregs.interrupt_bitmap,
+        }
+    }
+}
+
+impl From<&generic_x86_64::SpecialRegisters> for kvm_sregs {
+    fn from(sregs: &generic_x86_64::SpecialRegisters) -> Self {
+        kvm_sregs {
+            cs: (&sregs.cs).into(),
+            ds: (&sregs.ds).into(),
+            es: (&sregs.es).into(),
+            fs: (&sregs.fs).into(),
+            gs: (&sregs.gs).into(),
+            ss: (&sregs.ss).into(),
+            tr: (&sregs.tr).into(),
+            ldt: (&sregs.ldt).into(),
+            gdt: (&sregs.gdt).into(),
+            idt: (&sregs.idt).into(),
+            cr0: sregs.cr0,
+            cr2: sregs.cr2,
+            cr3: sregs.cr3,
+            cr4: sregs.cr4,
+            cr8: sregs.cr8,
+            efer: sregs.efer,
+            apic_base: sregs.apic_base,
+            interrupt_bitmap: sregs.interrupt_bitmap,
+        }
+    }
+}
+
+impl From<&kvm_fpu> for generic_x86_64::FpuState {
+    fn from(fpu: &kvm_fpu) -> Self {
+        generic_x86_64::FpuState {
+            fpr: fpu.fpr,
+            fcw: fpu.fcw,
+            fsw: fpu.fsw,
+            ftwx: fpu.ftwx,
+            pad1: fpu.pad1,
+            last_opcode: fpu.last_opcode,
+            last_ip: fpu.last_ip,
+            last_dp: fpu.last_dp,
+            xmm: fpu.xmm,
+            mxcsr: fpu.mxcsr,
+            pad2: fpu.pad2,
+        }
+    }
+}
+
+impl From<&generic_x86_64::FpuState> for kvm_fpu {
+    fn from(fpu: &generic_x86_64::FpuState) -> Self {
+        kvm_fpu {
+            fpr: fpu.fpr,
+            fcw: fpu.fcw,
+            fsw: fpu.fsw,
+            ftwx: fpu.ftwx,
+            pad1: fpu.pad1,
+            last_opcode: fpu.last_opcode,
+            last_ip: fpu.last_ip,
+            last_dp: fpu.last_dp,
+            xmm: fpu.xmm,
+            mxcsr: fpu.mxcsr,
+            pad2: fpu.pad2,
+        }
+    }
+}
