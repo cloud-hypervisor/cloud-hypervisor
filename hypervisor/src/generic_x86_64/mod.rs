@@ -209,3 +209,12 @@ impl SegmentRegisterOps for SegmentRegister {
         self.db = val;
     }
 }
+
+
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+#[derive(Deserialize, Serialize)]
+pub struct TableRegister {
+    pub base: u64,
+    pub limit: u16,
+}

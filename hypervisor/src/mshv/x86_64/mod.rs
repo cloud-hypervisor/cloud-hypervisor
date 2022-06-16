@@ -23,7 +23,7 @@ pub use {
     mshv_bindings::Msrs as MsrEntries, mshv_bindings::Msrs, mshv_bindings::SegmentRegister,
     mshv_bindings::SpecialRegisters, mshv_bindings::StandardRegisters,
     mshv_bindings::SuspendRegisters, mshv_bindings::VcpuEvents, mshv_bindings::XSave as Xsave,
-    mshv_bindings::Xcrs as ExtendedControlRegisters,
+    mshv_bindings::Xcrs as ExtendedControlRegisters, mshv_bindings::TableRegister,
 };
 
 pub const CPUID_FLAG_VALID_INDEX: u32 = 0;
@@ -219,6 +219,24 @@ impl From<&generic_x86_64::SegmentRegister> for SegmentRegister {
             avl: seg.avl,
             unusable: seg.unusable,
             padding: seg.padding,
+        }
+    }
+}
+
+impl From<&TableRegister> for generic_x86_64::TableRegister {
+    fn from(table: &TableRegister) -> Self {
+        generic_x86_64::TableRegister {
+            base: table.base,
+            limit: table.limit,
+        }
+    }
+}
+
+impl From<&generic_x86_64::TableRegister> for TableRegister {
+    fn from(table: &generic_x86_64::TableRegister) -> Self {
+        TableRegister {
+            base: table.base,
+            limit: table.limit,
         }
     }
 }

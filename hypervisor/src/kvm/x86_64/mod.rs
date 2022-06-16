@@ -17,7 +17,7 @@ use crate::generic_x86_64;
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
 ///
 pub use {
-    kvm_bindings::kvm_cpuid_entry2, kvm_bindings::kvm_dtable as DescriptorTable,
+    kvm_bindings::kvm_cpuid_entry2, kvm_bindings::kvm_dtable,
     kvm_bindings::kvm_fpu as FpuState, kvm_bindings::kvm_lapic_state as LapicState,
     kvm_bindings::kvm_mp_state as MpState, kvm_bindings::kvm_msr_entry as MsrEntry,
     kvm_bindings::kvm_regs, kvm_bindings::kvm_segment,
@@ -222,3 +222,23 @@ impl From<&generic_x86_64::SegmentRegister> for kvm_segment {
         }
     }
 }
+
+impl From<&kvm_dtable> for generic_x86_64::TableRegister {
+    fn from(table: &kvm_dtable) -> Self {
+        generic_x86_64::TableRegister {
+            base: table.base,
+            limit: table.limit,
+        }
+    }
+}
+
+impl From<&generic_x86_64::TableRegister> for kvm_dtable {
+    fn from(table: &generic_x86_64::TableRegister) -> Self {
+        kvm_dtable {
+            base: table.base,
+            limit: table.limit,
+            padding: [0;3],
+        }
+    }
+}
+
