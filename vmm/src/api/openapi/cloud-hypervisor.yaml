@@ -614,6 +614,9 @@ components:
           type: integer
         topology:
           $ref: '#/components/schemas/CpuTopology'
+        kvm_hyperv:
+          type: boolean
+          default: false
         max_phys_bits:
           type: integer
         affinity:
