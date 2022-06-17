@@ -4045,7 +4045,6 @@ mod parallel {
         let cpu_count: u8 = 4;
         let http_body = guest.api_create_body(
             cpu_count,
-            fw_path(FwType::RustHypervisorFirmware).as_str(),
             direct_kernel_boot_path().to_str().unwrap(),
             DIRECT_KERNEL_BOOT_CMDLINE,
         );
@@ -4099,7 +4098,6 @@ mod parallel {
         let cpu_count: u8 = 4;
         let http_body = guest.api_create_body(
             cpu_count,
-            fw_path(FwType::RustHypervisorFirmware).as_str(),
             direct_kernel_boot_path().to_str().unwrap(),
             DIRECT_KERNEL_BOOT_CMDLINE,
         );
@@ -4175,7 +4173,6 @@ mod parallel {
         let cpu_count: u8 = 4;
         let http_body = guest.api_create_body(
             cpu_count,
-            fw_path(FwType::RustHypervisorFirmware).as_str(),
             direct_kernel_boot_path().to_str().unwrap(),
             DIRECT_KERNEL_BOOT_CMDLINE,
         );
@@ -4259,7 +4256,6 @@ mod parallel {
         let cpu_count: u8 = 4;
         let http_body = guest.api_create_body(
             cpu_count,
-            fw_path(FwType::RustHypervisorFirmware).as_str(),
             direct_kernel_boot_path().to_str().unwrap(),
             DIRECT_KERNEL_BOOT_CMDLINE,
         );
