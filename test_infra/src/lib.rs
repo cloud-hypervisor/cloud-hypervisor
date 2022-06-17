@@ -832,30 +832,12 @@ impl Guest {
         )
     }
 
-    pub fn api_create_body(
-        &self,
-        cpu_count: u8,
-        _fw_path: &str,
-        _kernel_path: &str,
-        _kernel_cmd: &str,
-    ) -> String {
-        #[cfg(all(target_arch = "x86_64", not(feature = "mshv")))]
-        format! {"{{\"cpus\":{{\"boot_vcpus\":{},\"max_vcpus\":{}}},\"kernel\":{{\"path\":\"{}\"}},\"cmdline\":{{\"args\": \"\"}},\"net\":[{{\"ip\":\"{}\", \"mask\":\"255.255.255.0\", \"mac\":\"{}\"}}], \"disks\":[{{\"path\":\"{}\"}}, {{\"path\":\"{}\"}}]}}",
-                 cpu_count,
-                 cpu_count,
-                 _fw_path,
-                 self.network.host_ip,
-                 self.network.guest_mac,
-                 self.disk_config.disk(DiskType::OperatingSystem).unwrap().as_str(),
-                 self.disk_config.disk(DiskType::CloudInit).unwrap().as_str(),
-        }
-
-        #[cfg(any(target_arch = "aarch64", feature = "mshv"))]
+    pub fn api_create_body(&self, cpu_count: u8, kernel_path: &str, kernel_cmd: &str) -> String {
         format! {"{{\"cpus\":{{\"boot_vcpus\":{},\"max_vcpus\":{}}},\"kernel\":{{\"path\":\"{}\"}},\"cmdline\":{{\"args\": \"{}\"}},\"net\":[{{\"ip\":\"{}\", \"mask\":\"255.255.255.0\", \"mac\":\"{}\"}}], \"disks\":[{{\"path\":\"{}\"}}, {{\"path\":\"{}\"}}]}}",
                  cpu_count,
                  cpu_count,
-                 _kernel_path,
-                 _kernel_cmd,
+                 kernel_path,
+                 kernel_cmd,
                  self.network.host_ip,
                  self.network.guest_mac,
                  self.disk_config.disk(DiskType::OperatingSystem).unwrap().as_str(),
