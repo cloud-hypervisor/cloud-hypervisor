@@ -1915,10 +1915,29 @@ impl Snapshottable for CpuManager {
         Ok(cpu_manager_snapshot)
     }
 
+    #[cfg(target_arch = "x86_64")]
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
         for (cpu_id, snapshot) in snapshot.snapshots.iter() {
             info!("Restoring VCPU {}", cpu_id);
             self.create_vcpu(cpu_id.parse::<u8>().unwrap(), None, Some(*snapshot.clone()))
+                .map_err(|e| MigratableError::Restore(anyhow!("Could not create vCPU {:?}", e)))?;
+        }
+
+        Ok(())
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    // We must keep the original order when create vcpus
+    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        let mut snap_raw: Vec<(u8, Box<Snapshot>)> = Vec::new();
+        for (cpu_id, snapshot) in snapshot.snapshots.iter() {
+            let id = cpu_id.parse::<u8>().unwrap();
+            snap_raw.push((id, snapshot.clone()));
+        }
+        snap_raw.sort_by_key(|k| k.0);
+        for (cpu_id, snapshot) in snap_raw.iter() {
+            info!("Restoring VCPU {}", cpu_id);
+            self.create_vcpu(*cpu_id, None, Some(*snapshot.clone()))
                 .map_err(|e| MigratableError::Restore(anyhow!("Could not create vCPU {:?}", e)))?;
         }
 
