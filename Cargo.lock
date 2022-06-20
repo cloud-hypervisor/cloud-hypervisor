@@ -554,10 +554,10 @@ version = "0.1.0"
 dependencies = [
  "epoll",
  "getrandom",
- "lazy_static",
  "libc",
  "log",
  "net_gen",
+ "once_cell",
  "pnet",
  "pnet_datalink",
  "rate_limiter",
