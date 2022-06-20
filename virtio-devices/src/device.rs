@@ -206,7 +206,7 @@ pub trait VirtioDevice: Send {
 /// address translation before they try to read from the guest physical address.
 /// On the other side, the implementation itself should be provided by the code
 /// emulating the IOMMU for the guest.
-pub trait DmaRemapping: Send + Sync {
+pub trait DmaRemapping {
     /// Provide a way to translate GVA address ranges into GPAs.
     fn translate_gva(&self, id: u32, addr: u64) -> std::result::Result<u64, std::io::Error>;
     /// Provide a way to translate GPA address ranges into GVAs.
