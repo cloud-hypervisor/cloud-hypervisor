@@ -57,7 +57,7 @@ pub fn error_response(error: HttpError, status: StatusCode) -> Response {
 }
 
 /// An HTTP endpoint handler interface
-pub trait EndpointHandler: Sync + Send {
+pub trait EndpointHandler {
     /// Handles an HTTP request.
     /// After parsing the request, the handler could decide to send an
     /// associated API request down to the VMM API server to e.g. create
