@@ -8,6 +8,7 @@ use crate::api::{ApiError, ApiRequest, VmAction};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{Error as VmmError, Result};
 use micro_http::{Body, HttpServer, MediaType, Method, Request, Response, StatusCode, Version};
+use once_cell::sync::Lazy;
 use seccompiler::{apply_filter, SeccompAction};
 use serde_json::Error as SerdeError;
 use std::collections::HashMap;
@@ -129,46 +130,125 @@ macro_rules! endpoint {
     };
 }
 
-lazy_static! {
-    /// HTTP_ROUTES contain all the cloud-hypervisor HTTP routes.
-    pub static ref HTTP_ROUTES: HttpRoutes = {
-        let mut r = HttpRoutes {
-            routes: HashMap::new(),
-        };
-
-        r.routes.insert(endpoint!("/vm.add-device"), Box::new(VmActionHandler::new(VmAction::AddDevice(Arc::default()))));
-        r.routes.insert(endpoint!("/vm.add-user-device"), Box::new(VmActionHandler::new(VmAction::AddUserDevice(Arc::default()))));
-        r.routes.insert(endpoint!("/vm.add-disk"), Box::new(VmActionHandler::new(VmAction::AddDisk(Arc::default()))));
-        r.routes.insert(endpoint!("/vm.add-fs"), Box::new(VmActionHandler::new(VmAction::AddFs(Arc::default()))));
-        r.routes.insert(endpoint!("/vm.add-net"), Box::new(VmActionHandler::new(VmAction::AddNet(Arc::default()))));
-        r.routes.insert(endpoint!("/vm.add-pmem"), Box::new(VmActionHandler::new(VmAction::AddPmem(Arc::default()))));
-        r.routes.insert(endpoint!("/vm.add-vdpa"), Box::new(VmActionHandler::new(VmAction::AddVdpa(Arc::default()))));
-        r.routes.insert(endpoint!("/vm.add-vsock"), Box::new(VmActionHandler::new(VmAction::AddVsock(Arc::default()))));
-        r.routes.insert(endpoint!("/vm.boot"), Box::new(VmActionHandler::new(VmAction::Boot)));
-        r.routes.insert(endpoint!("/vm.counters"), Box::new(VmActionHandler::new(VmAction::Counters)));
-        r.routes.insert(endpoint!("/vm.create"), Box::new(VmCreate {}));
-        r.routes.insert(endpoint!("/vm.delete"), Box::new(VmActionHandler::new(VmAction::Delete)));
-        r.routes.insert(endpoint!("/vm.info"), Box::new(VmInfo {}));
-        r.routes.insert(endpoint!("/vm.pause"), Box::new(VmActionHandler::new(VmAction::Pause)));
-        r.routes.insert(endpoint!("/vm.power-button"), Box::new(VmActionHandler::new(VmAction::PowerButton)));
-        r.routes.insert(endpoint!("/vm.reboot"), Box::new(VmActionHandler::new(VmAction::Reboot)));
-        r.routes.insert(endpoint!("/vm.receive-migration"), Box::new(VmActionHandler::new(VmAction::ReceiveMigration(Arc::default()))));
-        r.routes.insert(endpoint!("/vm.remove-device"), Box::new(VmActionHandler::new(VmAction::RemoveDevice(Arc::default()))));
-        r.routes.insert(endpoint!("/vm.resize"), Box::new(VmActionHandler::new(VmAction::Resize(Arc::default()))));
-        r.routes.insert(endpoint!("/vm.resize-zone"), Box::new(VmActionHandler::new(VmAction::ResizeZone(Arc::default()))));
-        r.routes.insert(endpoint!("/vm.restore"), Box::new(VmActionHandler::new(VmAction::Restore(Arc::default()))));
-        r.routes.insert(endpoint!("/vm.resume"), Box::new(VmActionHandler::new(VmAction::Resume)));
-        r.routes.insert(endpoint!("/vm.send-migration"), Box::new(VmActionHandler::new(VmAction::SendMigration(Arc::default()))));
-        r.routes.insert(endpoint!("/vm.shutdown"), Box::new(VmActionHandler::new(VmAction::Shutdown)));
-        r.routes.insert(endpoint!("/vm.snapshot"), Box::new(VmActionHandler::new(VmAction::Snapshot(Arc::default()))));
-        #[cfg(feature = "guest_debug")]
-        r.routes.insert(endpoint!("/vm.coredump"), Box::new(VmActionHandler::new(VmAction::Coredump(Arc::default()))));
-        r.routes.insert(endpoint!("/vmm.ping"), Box::new(VmmPing {}));
-        r.routes.insert(endpoint!("/vmm.shutdown"), Box::new(VmmShutdown {}));
-
-        r
+/// HTTP_ROUTES contain all the cloud-hypervisor HTTP routes.
+pub static HTTP_ROUTES: Lazy<HttpRoutes> = Lazy::new(|| {
+    let mut r = HttpRoutes {
+        routes: HashMap::new(),
     };
-}
+
+    r.routes.insert(
+        endpoint!("/vm.add-device"),
+        Box::new(VmActionHandler::new(VmAction::AddDevice(Arc::default()))),
+    );
+    r.routes.insert(
+        endpoint!("/vm.add-user-device"),
+        Box::new(VmActionHandler::new(
+            VmAction::AddUserDevice(Arc::default()),
+        )),
+    );
+    r.routes.insert(
+        endpoint!("/vm.add-disk"),
+        Box::new(VmActionHandler::new(VmAction::AddDisk(Arc::default()))),
+    );
+    r.routes.insert(
+        endpoint!("/vm.add-fs"),
+        Box::new(VmActionHandler::new(VmAction::AddFs(Arc::default()))),
+    );
+    r.routes.insert(
+        endpoint!("/vm.add-net"),
+        Box::new(VmActionHandler::new(VmAction::AddNet(Arc::default()))),
+    );
+    r.routes.insert(
+        endpoint!("/vm.add-pmem"),
+        Box::new(VmActionHandler::new(VmAction::AddPmem(Arc::default()))),
+    );
+    r.routes.insert(
+        endpoint!("/vm.add-vdpa"),
+        Box::new(VmActionHandler::new(VmAction::AddVdpa(Arc::default()))),
+    );
+    r.routes.insert(
+        endpoint!("/vm.add-vsock"),
+        Box::new(VmActionHandler::new(VmAction::AddVsock(Arc::default()))),
+    );
+    r.routes.insert(
+        endpoint!("/vm.boot"),
+        Box::new(VmActionHandler::new(VmAction::Boot)),
+    );
+    r.routes.insert(
+        endpoint!("/vm.counters"),
+        Box::new(VmActionHandler::new(VmAction::Counters)),
+    );
+    r.routes
+        .insert(endpoint!("/vm.create"), Box::new(VmCreate {}));
+    r.routes.insert(
+        endpoint!("/vm.delete"),
+        Box::new(VmActionHandler::new(VmAction::Delete)),
+    );
+    r.routes.insert(endpoint!("/vm.info"), Box::new(VmInfo {}));
+    r.routes.insert(
+        endpoint!("/vm.pause"),
+        Box::new(VmActionHandler::new(VmAction::Pause)),
+    );
+    r.routes.insert(
+        endpoint!("/vm.power-button"),
+        Box::new(VmActionHandler::new(VmAction::PowerButton)),
+    );
+    r.routes.insert(
+        endpoint!("/vm.reboot"),
+        Box::new(VmActionHandler::new(VmAction::Reboot)),
+    );
+    r.routes.insert(
+        endpoint!("/vm.receive-migration"),
+        Box::new(VmActionHandler::new(VmAction::ReceiveMigration(
+            Arc::default(),
+        ))),
+    );
+    r.routes.insert(
+        endpoint!("/vm.remove-device"),
+        Box::new(VmActionHandler::new(VmAction::RemoveDevice(Arc::default()))),
+    );
+    r.routes.insert(
+        endpoint!("/vm.resize"),
+        Box::new(VmActionHandler::new(VmAction::Resize(Arc::default()))),
+    );
+    r.routes.insert(
+        endpoint!("/vm.resize-zone"),
+        Box::new(VmActionHandler::new(VmAction::ResizeZone(Arc::default()))),
+    );
+    r.routes.insert(
+        endpoint!("/vm.restore"),
+        Box::new(VmActionHandler::new(VmAction::Restore(Arc::default()))),
+    );
+    r.routes.insert(
+        endpoint!("/vm.resume"),
+        Box::new(VmActionHandler::new(VmAction::Resume)),
+    );
+    r.routes.insert(
+        endpoint!("/vm.send-migration"),
+        Box::new(VmActionHandler::new(
+            VmAction::SendMigration(Arc::default()),
+        )),
+    );
+    r.routes.insert(
+        endpoint!("/vm.shutdown"),
+        Box::new(VmActionHandler::new(VmAction::Shutdown)),
+    );
+    r.routes.insert(
+        endpoint!("/vm.snapshot"),
+        Box::new(VmActionHandler::new(VmAction::Snapshot(Arc::default()))),
+    );
+    #[cfg(feature = "guest_debug")]
+    r.routes.insert(
+        endpoint!("/vm.coredump"),
+        Box::new(VmActionHandler::new(VmAction::Coredump(Arc::default()))),
+    );
+    r.routes
+        .insert(endpoint!("/vmm.ping"), Box::new(VmmPing {}));
+    r.routes
+        .insert(endpoint!("/vmm.shutdown"), Box::new(VmmShutdown {}));
+
+    r
+});
 
 fn handle_http_request(
     request: &Request,
