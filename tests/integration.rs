@@ -8,10 +8,6 @@
 // related warnings for our quality workflow to pass.
 #![allow(dead_code)]
 
-#[cfg(target_arch = "x86_64")]
-#[macro_use]
-extern crate lazy_static;
-
 extern crate test_infra;
 
 use net_util::MacAddr;
@@ -6565,10 +6561,9 @@ mod sequential {
 #[cfg(target_arch = "x86_64")]
 mod windows {
     use crate::*;
+    use once_cell::sync::Lazy;
 
-    lazy_static! {
-        static ref NEXT_DISK_ID: Mutex<u8> = Mutex::new(1);
-    }
+    static NEXT_DISK_ID: Lazy<Mutex<u8>> = Lazy::new(|| Mutex::new(1));
 
     struct WindowsGuest {
         guest: Guest,
