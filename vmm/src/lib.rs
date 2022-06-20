@@ -6,8 +6,6 @@
 #[macro_use]
 extern crate event_monitor;
 #[macro_use]
-extern crate lazy_static;
-#[macro_use]
 extern crate log;
 
 use crate::api::{
