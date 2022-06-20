@@ -99,7 +99,7 @@ pub enum EmulationError<T: Debug> {
 /// A CpuState is an architecture specific type, representing a CPU state.
 /// The emulator and its instruction handlers modify a given CPU state and
 /// eventually ask the platform to commit it back through `set_cpu_state`.
-pub trait PlatformEmulator: Send + Sync {
+pub trait PlatformEmulator {
     type CpuState: Clone;
 
     /// Read guest memory into a u8 slice.
