@@ -45,8 +45,8 @@ const BLK_SIZE: u32 = 512;
 // and the overhead of the emulation layer.
 const POLL_QUEUE_US: u128 = 50;
 
-trait DiskFile: Read + Seek + Write + Send + Sync {}
-impl<D: Read + Seek + Write + Send + Sync> DiskFile for D {}
+trait DiskFile: Read + Seek + Write + Send {}
+impl<D: Read + Seek + Write + Send> DiskFile for D {}
 
 type Result<T> = std::result::Result<T, Error>;
 type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
