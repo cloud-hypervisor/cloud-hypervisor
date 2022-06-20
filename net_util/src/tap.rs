@@ -401,6 +401,8 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
+    use once_cell::sync::Lazy;
+
     use pnet::packet::ethernet::{EtherTypes, EthernetPacket, MutableEthernetPacket};
     use pnet::packet::ip::IpNextHeaderProtocols;
     use pnet::packet::ipv4::{Ipv4Packet, MutableIpv4Packet};
@@ -415,16 +417,13 @@ mod tests {
     static DATA_STRING: &str = "test for tap";
     static SUBNET_MASK: &str = "255.255.255.0";
 
-    // We needed to have a mutex as a global variable, so we used the crate that provides the
-    // lazy_static! macro for testing. The main potential problem, caused by tests being run in
-    // parallel by cargo, is creating different TAPs and trying to associate the same address,
-    // so we hide the IP address &str behind this mutex, more as a convention to remember to lock
-    // it at the very beginning of each function susceptible to this issue. Another variant is
-    // to use a different IP address per function, but we must remember to pick an unique one
-    // each time.
-    lazy_static! {
-        static ref TAP_IP_LOCK: Mutex<&'static str> = Mutex::new("192.168.241.1");
-    }
+    // We needed to have a mutex as a global variable, so we used once_cell for testing. The main
+    // potential problem, caused by tests being run in parallel by cargo, is creating different
+    // TAPs and trying to associate the same address, so we hide the IP address &str behind this
+    // mutex, more as a convention to remember to lock it at the very beginning of each function
+    // susceptible to this issue. Another variant is to use a different IP address per function,
+    // but we must remember to pick an unique one each time.
+    static TAP_IP_LOCK: Lazy<Mutex<&'static str>> = Lazy::new(|| Mutex::new("192.168.241.1"));
 
     // Describes the outcomes we are currently interested in when parsing a packet (we use
     // an UDP packet for testing).

@@ -5,11 +5,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
-// This is only used by the tests module from tap.rs, but we cannot use #[macro_use] unless the
-// reference to lazy_static is declared at the root level of the importing crate.
-#[cfg(test)]
-#[macro_use]
-extern crate lazy_static;
 #[macro_use]
 extern crate log;
 
