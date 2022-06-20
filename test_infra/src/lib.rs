@@ -3,9 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-#[macro_use]
-extern crate lazy_static;
-
+use once_cell::sync::Lazy;
 use ssh2::Session;
 use std::env;
 use std::ffi::OsStr;
@@ -722,9 +720,7 @@ pub fn exec_host_command_output(command: &str) -> Output {
 
 pub const PIPE_SIZE: i32 = 32 << 20;
 
-lazy_static! {
-    static ref NEXT_VM_ID: Mutex<u8> = Mutex::new(1);
-}
+static NEXT_VM_ID: Lazy<Mutex<u8>> = Lazy::new(|| Mutex::new(1));
 
 pub struct Guest {
     pub tmp_dir: TempDir,
