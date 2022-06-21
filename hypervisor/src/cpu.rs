@@ -429,12 +429,12 @@ pub trait Vcpu: Send + Sync {
     /// Save the state of the system registers.
     ///
     #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
-    fn system_registers(&self, state: &mut Vec<Register>) -> Result<()>;
+    fn get_sys_regs(&self) -> Result<Vec<Register>>;
     ///
     /// Restore the state of the system registers.
     ///
     #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
-    fn set_system_registers(&self, state: &[Register]) -> Result<()>;
+    fn set_sys_regs(&self, state: &[Register]) -> Result<()>;
     ///
     /// Read the MPIDR - Multiprocessor Affinity Register.
     ///

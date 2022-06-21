@@ -1573,9 +1573,10 @@ impl cpu::Vcpu for KvmVcpu {
     /// Save the state of the system registers.
     ///
     #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
-    fn system_registers(&self, state: &mut Vec<Register>) -> cpu::Result<()> {
+    fn get_sys_regs(&self) -> cpu::Result<Vec<Register>> {
         // Call KVM_GET_REG_LIST to get all registers available to the guest. For ArmV8 there are
         // around 500 registers.
+        let mut state: Vec<Register> = Vec::new();
         let mut reg_list = RegList::new(500).unwrap();
         self.fd
             .get_reg_list(&mut reg_list)
@@ -1601,13 +1602,13 @@ impl cpu::Vcpu for KvmVcpu {
             });
         }
 
-        Ok(())
+        Ok(state)
     }
     ///
     /// Restore the state of the system registers.
     ///
     #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
-    fn set_system_registers(&self, state: &[Register]) -> cpu::Result<()> {
+    fn set_sys_regs(&self, state: &[Register]) -> cpu::Result<()> {
         for reg in state {
             self.fd
                 .set_one_reg(reg.id, reg.addr)
@@ -1811,7 +1812,7 @@ impl cpu::Vcpu for KvmVcpu {
             ..Default::default()
         };
         state.core_regs = self.get_regs()?;
-        self.system_registers(&mut state.sys_regs)?;
+        state.sys_regs = self.get_sys_regs()?;
 
         Ok(state)
     }
@@ -1905,7 +1906,7 @@ impl cpu::Vcpu for KvmVcpu {
     #[cfg(target_arch = "aarch64")]
     fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
         self.set_regs(&state.core_regs)?;
-        self.set_system_registers(&state.sys_regs)?;
+        self.set_sys_regs(&state.sys_regs)?;
         self.set_mp_state(state.mp_state)?;
 
         Ok(())
