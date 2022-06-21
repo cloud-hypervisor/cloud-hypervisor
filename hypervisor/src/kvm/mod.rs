@@ -542,7 +542,7 @@ impl vm::Vm for KvmVm {
     ///
     /// Returns the preferred CPU target type which can be emulated by KVM on underlying host.
     ///
-    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    #[cfg(target_arch = "aarch64")]
     fn get_preferred_target(&self, kvi: &mut VcpuInit) -> vm::Result<()> {
         self.fd
             .get_preferred_target(kvi)
@@ -866,7 +866,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             }))
         }
 
-        #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+        #[cfg(target_arch = "aarch64")]
         {
             Ok(Arc::new(KvmVm {
                 fd: vm_fd,
@@ -1535,7 +1535,7 @@ impl cpu::Vcpu for KvmVcpu {
             .set_guest_debug(&dbg)
             .map_err(|e| cpu::HypervisorCpuError::SetDebugRegs(e.into()))
     }
-    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    #[cfg(target_arch = "aarch64")]
     fn vcpu_init(&self, kvi: &VcpuInit) -> cpu::Result<()> {
         self.fd
             .vcpu_init(kvi)
@@ -1544,7 +1544,7 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     /// Sets the value of one register for this vCPU.
     ///
-    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    #[cfg(target_arch = "aarch64")]
     fn set_reg(&self, reg_id: u64, data: u64) -> cpu::Result<()> {
         self.fd
             .set_one_reg(reg_id, data)
@@ -1553,7 +1553,7 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     /// Gets the value of one register for this vCPU.
     ///
-    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    #[cfg(target_arch = "aarch64")]
     fn get_reg(&self, reg_id: u64) -> cpu::Result<u64> {
         self.fd
             .get_one_reg(reg_id)
@@ -1563,7 +1563,7 @@ impl cpu::Vcpu for KvmVcpu {
     /// Gets a list of the guest registers that are supported for the
     /// KVM_GET_ONE_REG/KVM_SET_ONE_REG calls.
     ///
-    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    #[cfg(target_arch = "aarch64")]
     fn get_reg_list(&self, reg_list: &mut RegList) -> cpu::Result<()> {
         self.fd
             .get_reg_list(reg_list)
@@ -1572,7 +1572,7 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     /// Save the state of the system registers.
     ///
-    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    #[cfg(target_arch = "aarch64")]
     fn get_sys_regs(&self) -> cpu::Result<Vec<Register>> {
         // Call KVM_GET_REG_LIST to get all registers available to the guest. For ArmV8 there are
         // around 500 registers.
@@ -1607,7 +1607,7 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     /// Restore the state of the system registers.
     ///
-    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    #[cfg(target_arch = "aarch64")]
     fn set_sys_regs(&self, state: &[Register]) -> cpu::Result<()> {
         for reg in state {
             self.fd
@@ -1619,7 +1619,7 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     /// Read the MPIDR - Multiprocessor Affinity Register.
     ///
-    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    #[cfg(target_arch = "aarch64")]
     fn read_mpidr(&self) -> cpu::Result<u64> {
         self.fd
             .get_one_reg(MPIDR_EL1)
@@ -1628,7 +1628,7 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     /// Configure core registers for a given CPU.
     ///
-    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    #[cfg(target_arch = "aarch64")]
     fn setup_regs(&self, cpu_id: u8, boot_ip: u64, fdt_start: u64) -> cpu::Result<()> {
         #[allow(non_upper_case_globals)]
         // PSR (Processor State Register) bits.

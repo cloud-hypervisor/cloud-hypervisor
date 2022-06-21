@@ -407,43 +407,43 @@ pub trait Vcpu: Send + Sync {
     ///
     /// Sets the type of CPU to be exposed to the guest and optional features.
     ///
-    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    #[cfg(target_arch = "aarch64")]
     fn vcpu_init(&self, kvi: &VcpuInit) -> Result<()>;
     ///
     /// Sets the value of one register for this vCPU.
     ///
-    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    #[cfg(target_arch = "aarch64")]
     fn set_reg(&self, reg_id: u64, data: u64) -> Result<()>;
     ///
     /// Sets the value of one register for this vCPU.
     ///
-    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    #[cfg(target_arch = "aarch64")]
     fn get_reg(&self, reg_id: u64) -> Result<u64>;
     ///
     /// Gets a list of the guest registers that are supported for the
     /// KVM_GET_ONE_REG/KVM_SET_ONE_REG calls.
     ///
-    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    #[cfg(target_arch = "aarch64")]
     fn get_reg_list(&self, reg_list: &mut RegList) -> Result<()>;
     ///
     /// Save the state of the system registers.
     ///
-    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    #[cfg(target_arch = "aarch64")]
     fn get_sys_regs(&self) -> Result<Vec<Register>>;
     ///
     /// Restore the state of the system registers.
     ///
-    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    #[cfg(target_arch = "aarch64")]
     fn set_sys_regs(&self, state: &[Register]) -> Result<()>;
     ///
     /// Read the MPIDR - Multiprocessor Affinity Register.
     ///
-    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    #[cfg(target_arch = "aarch64")]
     fn read_mpidr(&self) -> Result<u64>;
     ///
     /// Configure core registers for a given CPU.
     ///
-    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    #[cfg(target_arch = "aarch64")]
     fn setup_regs(&self, cpu_id: u8, boot_ip: u64, fdt_start: u64) -> Result<()>;
     ///
     /// Retrieve the vCPU state.
