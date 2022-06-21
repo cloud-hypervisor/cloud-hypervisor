@@ -31,6 +31,7 @@ seccompiler = "0.3.0"
 serde_json = "1.0.85"
 signal-hook = "0.3.14"
 thiserror = "1.0.35"
+tracer = { path = "tracer" }
 vmm = { path = "vmm" }
 vmm-sys-util = "0.10.0"
 vm-memory = "0.9.0"
@@ -62,6 +63,7 @@ guest_debug = ["vmm/guest_debug"]
 kvm = ["vmm/kvm"]
 mshv = ["vmm/mshv"]
 tdx = ["vmm/tdx"]
+tracing = ["vmm/tracing", "tracer/tracing"]
 
 [workspace]
 members = [
@@ -81,6 +83,7 @@ members = [
     "rate_limiter",
     "serial_buffer",
     "test_infra",
+    "tracer",
     "vfio_user",
     "vhdx",
     "vhost_user_block",
