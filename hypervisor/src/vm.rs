@@ -320,7 +320,7 @@ pub trait Vm: Send + Sync {
     /// Creates an emulated device in the kernel.
     fn create_device(&self, device: &mut CreateDevice) -> Result<Arc<dyn Device>>;
     /// Returns the preferred CPU target type which can be emulated by KVM on underlying host.
-    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    #[cfg(target_arch = "aarch64")]
     fn get_preferred_target(&self, kvi: &mut VcpuInit) -> Result<()>;
     /// Enable split Irq capability
     #[cfg(target_arch = "x86_64")]
