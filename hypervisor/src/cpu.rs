@@ -278,7 +278,6 @@ pub type Result<T> = anyhow::Result<T, HypervisorCpuError>;
 /// Trait to represent a generic Vcpu
 ///
 pub trait Vcpu: Send + Sync {
-    #[cfg(target_arch = "x86_64")]
     ///
     /// Returns the vCPU general purpose registers.
     ///
@@ -293,7 +292,6 @@ pub trait Vcpu: Send + Sync {
     /// Check if vcpu has attribute.
     ///
     fn has_vcpu_attr(&self, attr: &DeviceAttr) -> Result<()>;
-    #[cfg(target_arch = "x86_64")]
     ///
     /// Sets the vCPU general purpose registers.
     ///
@@ -427,16 +425,6 @@ pub trait Vcpu: Send + Sync {
     ///
     #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
     fn get_reg_list(&self, reg_list: &mut RegList) -> Result<()>;
-    ///
-    /// Save the state of the core registers.
-    ///
-    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
-    fn core_registers(&self, state: &mut StandardRegisters) -> Result<()>;
-    ///
-    /// Restore the state of the core registers.
-    ///
-    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
-    fn set_core_registers(&self, state: &StandardRegisters) -> Result<()>;
     ///
     /// Save the state of the system registers.
     ///

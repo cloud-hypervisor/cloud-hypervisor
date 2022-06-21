@@ -981,6 +981,103 @@ impl cpu::Vcpu for KvmVcpu {
             .get_regs()
             .map_err(|e| cpu::HypervisorCpuError::GetStandardRegs(e.into()))
     }
+    ///
+    /// Returns the vCPU general purpose registers.
+    /// The `KVM_GET_REGS` ioctl is not available on AArch64, `KVM_GET_ONE_REG`
+    /// is used to get registers one by one.
+    ///
+    #[cfg(target_arch = "aarch64")]
+    fn get_regs(&self) -> cpu::Result<StandardRegisters> {
+        let mut state: StandardRegisters = kvm_regs::default();
+        let mut off = offset__of!(user_pt_regs, regs);
+        // There are 31 user_pt_regs:
+        // https://elixir.free-electrons.com/linux/v4.14.174/source/arch/arm64/include/uapi/asm/ptrace.h#L72
+        // These actually are the general-purpose registers of the Armv8-a
+        // architecture (i.e x0-x30 if used as a 64bit register or w0-30 when used as a 32bit register).
+        for i in 0..31 {
+            state.regs.regs[i] = self
+                .fd
+                .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off))
+                .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?;
+            off += std::mem::size_of::<u64>();
+        }
+
+        // We are now entering the "Other register" section of the ARMv8-a architecture.
+        // First one, stack pointer.
+        let off = offset__of!(user_pt_regs, sp);
+        state.regs.sp = self
+            .fd
+            .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off))
+            .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?;
+
+        // Second one, the program counter.
+        let off = offset__of!(user_pt_regs, pc);
+        state.regs.pc = self
+            .fd
+            .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off))
+            .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?;
+
+        // Next is the processor state.
+        let off = offset__of!(user_pt_regs, pstate);
+        state.regs.pstate = self
+            .fd
+            .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off))
+            .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?;
+
+        // The stack pointer associated with EL1
+        let off = offset__of!(kvm_regs, sp_el1);
+        state.sp_el1 = self
+            .fd
+            .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off))
+            .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?;
+
+        // Exception Link Register for EL1, when taking an exception to EL1, this register
+        // holds the address to which to return afterwards.
+        let off = offset__of!(kvm_regs, elr_el1);
+        state.elr_el1 = self
+            .fd
+            .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off))
+            .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?;
+
+        // Saved Program Status Registers, there are 5 of them used in the kernel.
+        let mut off = offset__of!(kvm_regs, spsr);
+        for i in 0..KVM_NR_SPSR as usize {
+            state.spsr[i] = self
+                .fd
+                .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off))
+                .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?;
+            off += std::mem::size_of::<u64>();
+        }
+
+        // Now moving on to floting point registers which are stored in the user_fpsimd_state in the kernel:
+        // https://elixir.free-electrons.com/linux/v4.9.62/source/arch/arm64/include/uapi/asm/kvm.h#L53
+        let mut off = offset__of!(kvm_regs, fp_regs) + offset__of!(user_fpsimd_state, vregs);
+        for i in 0..32 {
+            state.fp_regs.vregs[i] = self
+                .fd
+                .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U128, off))
+                .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?
+                .into();
+            off += mem::size_of::<u128>();
+        }
+
+        // Floating-point Status Register
+        let off = offset__of!(kvm_regs, fp_regs) + offset__of!(user_fpsimd_state, fpsr);
+        state.fp_regs.fpsr = self
+            .fd
+            .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U32, off))
+            .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?
+            as u32;
+
+        // Floating-point Control Register
+        let off = offset__of!(kvm_regs, fp_regs) + offset__of!(user_fpsimd_state, fpcr);
+        state.fp_regs.fpcr = self
+            .fd
+            .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U32, off))
+            .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?
+            as u32;
+        Ok(state)
+    }
     #[cfg(target_arch = "x86_64")]
     ///
     /// Sets the vCPU general purpose registers using the `KVM_SET_REGS` ioctl.
@@ -989,6 +1086,88 @@ impl cpu::Vcpu for KvmVcpu {
         self.fd
             .set_regs(regs)
             .map_err(|e| cpu::HypervisorCpuError::SetStandardRegs(e.into()))
+    }
+
+    ///
+    /// Sets the vCPU general purpose registers.
+    /// The `KVM_SET_REGS` ioctl is not available on AArch64, `KVM_SET_ONE_REG`
+    /// is used to set registers one by one.
+    ///
+    #[cfg(target_arch = "aarch64")]
+    fn set_regs(&self, state: &StandardRegisters) -> cpu::Result<()> {
+        // The function follows the exact identical order from `state`. Look there
+        // for some additional info on registers.
+        let mut off = offset__of!(user_pt_regs, regs);
+        for i in 0..31 {
+            self.fd
+                .set_one_reg(
+                    arm64_core_reg_id!(KVM_REG_SIZE_U64, off),
+                    state.regs.regs[i],
+                )
+                .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
+            off += std::mem::size_of::<u64>();
+        }
+
+        let off = offset__of!(user_pt_regs, sp);
+        self.fd
+            .set_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off), state.regs.sp)
+            .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
+
+        let off = offset__of!(user_pt_regs, pc);
+        self.fd
+            .set_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off), state.regs.pc)
+            .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
+
+        let off = offset__of!(user_pt_regs, pstate);
+        self.fd
+            .set_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off), state.regs.pstate)
+            .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
+
+        let off = offset__of!(kvm_regs, sp_el1);
+        self.fd
+            .set_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off), state.sp_el1)
+            .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
+
+        let off = offset__of!(kvm_regs, elr_el1);
+        self.fd
+            .set_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off), state.elr_el1)
+            .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
+
+        let mut off = offset__of!(kvm_regs, spsr);
+        for i in 0..KVM_NR_SPSR as usize {
+            self.fd
+                .set_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off), state.spsr[i])
+                .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
+            off += std::mem::size_of::<u64>();
+        }
+
+        let mut off = offset__of!(kvm_regs, fp_regs) + offset__of!(user_fpsimd_state, vregs);
+        for i in 0..32 {
+            self.fd
+                .set_one_reg(
+                    arm64_core_reg_id!(KVM_REG_SIZE_U128, off),
+                    state.fp_regs.vregs[i] as u64,
+                )
+                .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
+            off += mem::size_of::<u128>();
+        }
+
+        let off = offset__of!(kvm_regs, fp_regs) + offset__of!(user_fpsimd_state, fpsr);
+        self.fd
+            .set_one_reg(
+                arm64_core_reg_id!(KVM_REG_SIZE_U32, off),
+                state.fp_regs.fpsr as u64,
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
+
+        let off = offset__of!(kvm_regs, fp_regs) + offset__of!(user_fpsimd_state, fpcr);
+        self.fd
+            .set_one_reg(
+                arm64_core_reg_id!(KVM_REG_SIZE_U32, off),
+                state.fp_regs.fpcr as u64,
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
+        Ok(())
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -1391,179 +1570,6 @@ impl cpu::Vcpu for KvmVcpu {
             .map_err(|e| cpu::HypervisorCpuError::GetRegList(e.into()))
     }
     ///
-    /// Save the state of the core registers.
-    ///
-    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
-    fn core_registers(&self, state: &mut StandardRegisters) -> cpu::Result<()> {
-        let mut off = offset__of!(user_pt_regs, regs);
-        // There are 31 user_pt_regs:
-        // https://elixir.free-electrons.com/linux/v4.14.174/source/arch/arm64/include/uapi/asm/ptrace.h#L72
-        // These actually are the general-purpose registers of the Armv8-a
-        // architecture (i.e x0-x30 if used as a 64bit register or w0-30 when used as a 32bit register).
-        for i in 0..31 {
-            state.regs.regs[i] = self
-                .fd
-                .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off))
-                .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?;
-            off += std::mem::size_of::<u64>();
-        }
-
-        // We are now entering the "Other register" section of the ARMv8-a architecture.
-        // First one, stack pointer.
-        let off = offset__of!(user_pt_regs, sp);
-        state.regs.sp = self
-            .fd
-            .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off))
-            .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?;
-
-        // Second one, the program counter.
-        let off = offset__of!(user_pt_regs, pc);
-        state.regs.pc = self
-            .fd
-            .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off))
-            .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?;
-
-        // Next is the processor state.
-        let off = offset__of!(user_pt_regs, pstate);
-        state.regs.pstate = self
-            .fd
-            .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off))
-            .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?;
-
-        // The stack pointer associated with EL1
-        let off = offset__of!(kvm_regs, sp_el1);
-        state.sp_el1 = self
-            .fd
-            .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off))
-            .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?;
-
-        // Exception Link Register for EL1, when taking an exception to EL1, this register
-        // holds the address to which to return afterwards.
-        let off = offset__of!(kvm_regs, elr_el1);
-        state.elr_el1 = self
-            .fd
-            .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off))
-            .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?;
-
-        // Saved Program Status Registers, there are 5 of them used in the kernel.
-        let mut off = offset__of!(kvm_regs, spsr);
-        for i in 0..KVM_NR_SPSR as usize {
-            state.spsr[i] = self
-                .fd
-                .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off))
-                .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?;
-            off += std::mem::size_of::<u64>();
-        }
-
-        // Now moving on to floting point registers which are stored in the user_fpsimd_state in the kernel:
-        // https://elixir.free-electrons.com/linux/v4.9.62/source/arch/arm64/include/uapi/asm/kvm.h#L53
-        let mut off = offset__of!(kvm_regs, fp_regs) + offset__of!(user_fpsimd_state, vregs);
-        for i in 0..32 {
-            state.fp_regs.vregs[i] = self
-                .fd
-                .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U128, off))
-                .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?
-                .into();
-            off += mem::size_of::<u128>();
-        }
-
-        // Floating-point Status Register
-        let off = offset__of!(kvm_regs, fp_regs) + offset__of!(user_fpsimd_state, fpsr);
-        state.fp_regs.fpsr = self
-            .fd
-            .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U32, off))
-            .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?
-            as u32;
-
-        // Floating-point Control Register
-        let off = offset__of!(kvm_regs, fp_regs) + offset__of!(user_fpsimd_state, fpcr);
-        state.fp_regs.fpcr = self
-            .fd
-            .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U32, off))
-            .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?
-            as u32;
-        Ok(())
-    }
-    ///
-    /// Restore the state of the core registers.
-    ///
-    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
-    fn set_core_registers(&self, state: &StandardRegisters) -> cpu::Result<()> {
-        // The function follows the exact identical order from `state`. Look there
-        // for some additional info on registers.
-        let mut off = offset__of!(user_pt_regs, regs);
-        for i in 0..31 {
-            self.fd
-                .set_one_reg(
-                    arm64_core_reg_id!(KVM_REG_SIZE_U64, off),
-                    state.regs.regs[i],
-                )
-                .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
-            off += std::mem::size_of::<u64>();
-        }
-
-        let off = offset__of!(user_pt_regs, sp);
-        self.fd
-            .set_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off), state.regs.sp)
-            .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
-
-        let off = offset__of!(user_pt_regs, pc);
-        self.fd
-            .set_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off), state.regs.pc)
-            .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
-
-        let off = offset__of!(user_pt_regs, pstate);
-        self.fd
-            .set_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off), state.regs.pstate)
-            .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
-
-        let off = offset__of!(kvm_regs, sp_el1);
-        self.fd
-            .set_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off), state.sp_el1)
-            .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
-
-        let off = offset__of!(kvm_regs, elr_el1);
-        self.fd
-            .set_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off), state.elr_el1)
-            .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
-
-        let mut off = offset__of!(kvm_regs, spsr);
-        for i in 0..KVM_NR_SPSR as usize {
-            self.fd
-                .set_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off), state.spsr[i])
-                .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
-            off += std::mem::size_of::<u64>();
-        }
-
-        let mut off = offset__of!(kvm_regs, fp_regs) + offset__of!(user_fpsimd_state, vregs);
-        for i in 0..32 {
-            self.fd
-                .set_one_reg(
-                    arm64_core_reg_id!(KVM_REG_SIZE_U128, off),
-                    state.fp_regs.vregs[i] as u64,
-                )
-                .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
-            off += mem::size_of::<u128>();
-        }
-
-        let off = offset__of!(kvm_regs, fp_regs) + offset__of!(user_fpsimd_state, fpsr);
-        self.fd
-            .set_one_reg(
-                arm64_core_reg_id!(KVM_REG_SIZE_U32, off),
-                state.fp_regs.fpsr as u64,
-            )
-            .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
-
-        let off = offset__of!(kvm_regs, fp_regs) + offset__of!(user_fpsimd_state, fpcr);
-        self.fd
-            .set_one_reg(
-                arm64_core_reg_id!(KVM_REG_SIZE_U32, off),
-                state.fp_regs.fpcr as u64,
-            )
-            .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
-        Ok(())
-    }
-    ///
     /// Save the state of the system registers.
     ///
     #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
@@ -1804,7 +1810,7 @@ impl cpu::Vcpu for KvmVcpu {
             mpidr: self.read_mpidr()?,
             ..Default::default()
         };
-        self.core_registers(&mut state.core_regs)?;
+        state.core_regs = self.get_regs()?;
         self.system_registers(&mut state.sys_regs)?;
 
         Ok(state)
@@ -1898,7 +1904,7 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     #[cfg(target_arch = "aarch64")]
     fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
-        self.set_core_registers(&state.core_regs)?;
+        self.set_regs(&state.core_regs)?;
         self.set_system_registers(&state.sys_regs)?;
         self.set_mp_state(state.mp_state)?;
 
