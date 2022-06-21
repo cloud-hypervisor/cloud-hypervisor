@@ -2537,10 +2537,10 @@ mod tests {
 
         // Must fail when vcpu is not initialized yet.
         let mut state: Vec<kvm_one_reg> = Vec::new();
-        let res = vcpu.system_registers(&mut state);
+        let res = vcpu.get_sys_regs();
         assert!(res.is_err());
         assert_eq!(
-            format!("{}", res.unwrap_err()),
+            format!("{}", res.as_ref().unwrap_err()),
             "Failed to retrieve list of registers: Exec format error (os error 8)"
         );
 
@@ -2548,7 +2548,7 @@ mod tests {
             id: MPIDR_EL1,
             addr: 0x00,
         });
-        let res = vcpu.set_system_registers(&state);
+        let res = vcpu.set_sys_regs(&state);
         assert!(res.is_err());
         assert_eq!(
             format!("{}", res.unwrap_err()),
@@ -2556,14 +2556,17 @@ mod tests {
         );
 
         vcpu.vcpu_init(&kvi).unwrap();
-        assert!(vcpu.system_registers(&mut state).is_ok());
+        let res = vcpu.get_sys_regs();
+        assert!(res.is_ok());
+        state = res.unwrap();
+
         let initial_mpidr: u64 = vcpu.read_mpidr().expect("Fail to read mpidr");
         assert!(state.contains(&kvm_one_reg {
             id: MPIDR_EL1,
             addr: initial_mpidr
         }));
 
-        assert!(vcpu.set_system_registers(&state).is_ok());
+        assert!(vcpu.set_sys_regs(&state).is_ok());
         let mpidr: u64 = vcpu.read_mpidr().expect("Fail to read mpidr");
         assert_eq!(initial_mpidr, mpidr);
     }
