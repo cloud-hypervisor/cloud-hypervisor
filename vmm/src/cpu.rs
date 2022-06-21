@@ -2498,15 +2498,15 @@ mod tests {
         vm.get_preferred_target(&mut kvi).unwrap();
 
         // Must fail when vcpu is not initialized yet.
-        let mut state = kvm_regs::default();
-        let res = vcpu.core_registers(&mut state);
+        let res = vcpu.get_regs();
         assert!(res.is_err());
         assert_eq!(
             format!("{}", res.unwrap_err()),
             "Failed to get core register: Exec format error (os error 8)"
         );
 
-        let res = vcpu.set_core_registers(&state);
+        let mut state = kvm_regs::default();
+        let res = vcpu.set_regs(&state);
         assert!(res.is_err());
         assert_eq!(
             format!("{}", res.unwrap_err()),
@@ -2514,10 +2514,12 @@ mod tests {
         );
 
         vcpu.vcpu_init(&kvi).unwrap();
-        assert!(vcpu.core_registers(&mut state).is_ok());
+        let res = vcpu.get_regs();
+        assert!(res.is_ok());
+        state = res.unwrap();
         assert_eq!(state.regs.pstate, 0x3C5);
 
-        assert!(vcpu.set_core_registers(&state).is_ok());
+        assert!(vcpu.set_regs(&state).is_ok());
         let off = offset__of!(user_pt_regs, pstate);
         let pstate = vcpu
             .get_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off))
