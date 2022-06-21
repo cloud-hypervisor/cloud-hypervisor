@@ -175,6 +175,7 @@ dependencies = [
  "signal-hook",
  "test_infra",
  "thiserror",
+ "tracer",
  "vm-memory",
  "vmm",
  "vmm-sys-util",
@@ -1198,6 +1199,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracer"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "log",
+ "once_cell",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1516,6 +1528,7 @@ dependencies = [
  "serial_buffer",
  "signal-hook",
  "thiserror",
+ "tracer",
  "uuid",
  "versionize",
  "versionize_derive",
