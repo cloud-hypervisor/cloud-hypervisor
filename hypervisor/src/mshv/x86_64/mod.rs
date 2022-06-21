@@ -35,7 +35,7 @@ pub struct VcpuMshvState {
     pub regs: generic_x86_64::StandardRegisters,
     pub sregs: generic_x86_64::SpecialRegisters,
     pub fpu: generic_x86_64::FpuState,
-    pub lapic: LapicState,
+    pub lapic: generic_x86_64::LapicState,
     pub dbg: DebugRegisters,
     pub xsave: Xsave,
     pub misc: MiscRegisters,
@@ -316,6 +316,23 @@ impl From<&generic_x86_64::FpuState> for FloatingPointUnit {
             xmm: fpu.xmm,
             mxcsr: fpu.mxcsr,
             pad2: fpu.pad2,
+        }
+    }
+}
+
+
+impl From<&LapicState> for generic_x86_64::LapicState {
+    fn from(lapic: &LapicState) -> Self {
+        generic_x86_64::LapicState {
+            regs: lapic.regs,
+        }
+    }
+}
+
+impl From<&generic_x86_64::LapicState> for LapicState {
+    fn from(lapic: &generic_x86_64::LapicState) -> Self {
+        LapicState {
+            regs: lapic.regs,
         }
     }
 }

@@ -13,11 +13,9 @@ use crate::aarch64::VcpuInit;
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::{RegList, Register, StandardRegisters};
 #[cfg(target_arch = "x86_64")]
-use crate::generic_x86_64::{CpuId, FpuState, SpecialRegisters, StandardRegisters};
+use crate::generic_x86_64::{CpuId, FpuState, SpecialRegisters, StandardRegisters, LapicState};
 #[cfg(feature = "tdx")]
 use crate::kvm::{TdxExitDetails, TdxExitStatus};
-#[cfg(target_arch = "x86_64")]
-use crate::x86_64::LapicState;
 #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
 use crate::x86_64::SuspendRegisters;
 #[cfg(target_arch = "x86_64")]

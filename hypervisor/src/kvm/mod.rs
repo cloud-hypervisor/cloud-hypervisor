@@ -45,7 +45,7 @@ pub mod x86_64;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::NUM_IOAPIC_PINS;
 #[cfg(target_arch = "x86_64")]
-use crate::generic_x86_64::{CpuId, FpuState, SpecialRegisters, StandardRegisters};
+use crate::generic_x86_64::{CpuId, FpuState, SpecialRegisters, StandardRegisters, LapicState};
 #[cfg(target_arch = "aarch64")]
 use aarch64::{RegList, Register, StandardRegisters};
 #[cfg(target_arch = "x86_64")]
@@ -57,7 +57,7 @@ use kvm_bindings::{
 use x86_64::check_required_kvm_extensions;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
-    convert_from_generic_cpu_id, convert_to_generic_cpu_id, LapicState, MsrEntries,
+    convert_from_generic_cpu_id, convert_to_generic_cpu_id, MsrEntries,
     VcpuKvmState as CpuState, Xsave,
 };
 // aarch64 dependencies
@@ -1102,7 +1102,7 @@ impl cpu::Vcpu for KvmVcpu {
     fn get_lapic(&self) -> cpu::Result<LapicState> {
         self.fd
             .get_lapic()
-            .map_err(|e| cpu::HypervisorCpuError::GetlapicState(e.into()))
+            .map_err(|e| cpu::HypervisorCpuError::GetlapicState(e.into())).map(|lapic| (&lapic).into())
     }
     #[cfg(target_arch = "x86_64")]
     ///
@@ -1110,7 +1110,7 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     fn set_lapic(&self, klapic: &LapicState) -> cpu::Result<()> {
         self.fd
-            .set_lapic(klapic)
+            .set_lapic(&klapic.into())
             .map_err(|e| cpu::HypervisorCpuError::SetLapicState(e.into()))
     }
     #[cfg(target_arch = "x86_64")]

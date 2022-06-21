@@ -509,18 +509,18 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// Returns the state of the LAPIC (Local Advanced Programmable Interrupt Controller).
     ///
-    fn get_lapic(&self) -> cpu::Result<LapicState> {
+    fn get_lapic(&self) -> cpu::Result<generic_x86_64::LapicState> {
         self.fd
             .get_lapic()
-            .map_err(|e| cpu::HypervisorCpuError::GetlapicState(e.into()))
+            .map_err(|e| cpu::HypervisorCpuError::GetlapicState(e.into())).map(|lapic| (&lapic).into())
     }
     #[cfg(target_arch = "x86_64")]
     ///
     /// Sets the state of the LAPIC (Local Advanced Programmable Interrupt Controller).
     ///
-    fn set_lapic(&self, lapic: &LapicState) -> cpu::Result<()> {
+    fn set_lapic(&self, lapic: &generic_x86_64::LapicState) -> cpu::Result<()> {
         self.fd
-            .set_lapic(lapic)
+            .set_lapic(&lapic.into())
             .map_err(|e| cpu::HypervisorCpuError::SetLapicState(e.into()))
     }
     #[cfg(target_arch = "x86_64")]

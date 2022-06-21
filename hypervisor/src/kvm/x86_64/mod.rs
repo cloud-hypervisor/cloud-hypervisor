@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 ///
 pub use {
     kvm_bindings::kvm_cpuid_entry2, kvm_bindings::kvm_dtable, kvm_bindings::kvm_fpu,
-    kvm_bindings::kvm_lapic_state as LapicState, kvm_bindings::kvm_mp_state as MpState,
+    kvm_bindings::kvm_lapic_state, kvm_bindings::kvm_mp_state as MpState,
     kvm_bindings::kvm_msr_entry as MsrEntry, kvm_bindings::kvm_regs, kvm_bindings::kvm_segment,
     kvm_bindings::kvm_sregs, kvm_bindings::kvm_vcpu_events as VcpuEvents,
     kvm_bindings::kvm_xsave as Xsave,
@@ -77,7 +77,7 @@ pub struct VcpuKvmState {
     pub regs: generic_x86_64::StandardRegisters,
     pub sregs: generic_x86_64::SpecialRegisters,
     pub fpu: generic_x86_64::FpuState,
-    pub lapic_state: LapicState,
+    pub lapic_state: generic_x86_64::LapicState,
     pub xsave: Xsave,
     pub mp_state: MpState,
 }
@@ -315,6 +315,22 @@ impl From<&generic_x86_64::FpuState> for kvm_fpu {
             xmm: fpu.xmm,
             mxcsr: fpu.mxcsr,
             pad2: fpu.pad2,
+        }
+    }
+}
+
+impl From<&kvm_lapic_state> for generic_x86_64::LapicState {
+    fn from(lapic: &kvm_lapic_state) -> Self {
+        generic_x86_64::LapicState {
+            regs: lapic.regs,
+        }
+    }
+}
+
+impl From<&generic_x86_64::LapicState> for kvm_lapic_state {
+    fn from(lapic: &generic_x86_64::LapicState) -> Self {
+        kvm_lapic_state {
+            regs: lapic.regs,
         }
     }
 }

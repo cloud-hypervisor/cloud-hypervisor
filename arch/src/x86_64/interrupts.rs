@@ -6,7 +6,7 @@
 // found in the LICENSE-BSD-3-Clause file.
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use hypervisor::x86_64::LapicState;
+use hypervisor::generic_x86_64::LapicState;
 use std::io::Cursor;
 use std::mem;
 use std::result;
