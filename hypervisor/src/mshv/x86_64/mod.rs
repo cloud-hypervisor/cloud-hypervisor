@@ -7,7 +7,6 @@
 // Copyright 2018-2019 CrowdStrike, Inc.
 //
 //
-use crate::arch::x86::{msr_index, MTRR_ENABLE, MTRR_MEM_TYPE_WB};
 use crate::generic_x86_64;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -17,10 +16,10 @@ use std::fmt;
 ///
 pub use {
     mshv_bindings::hv_cpuid_entry, mshv_bindings::mshv_user_mem_region as MemoryRegion,
-    mshv_bindings::msr_entry as MsrEntry, mshv_bindings::CpuId, mshv_bindings::DebugRegisters,
+    mshv_bindings::msr_entry, mshv_bindings::CpuId, mshv_bindings::DebugRegisters,
     mshv_bindings::FloatingPointUnit, mshv_bindings::LapicState,
     mshv_bindings::MiscRegs as MiscRegisters, mshv_bindings::MsrList,
-    mshv_bindings::Msrs as MsrEntries, mshv_bindings::Msrs, mshv_bindings::SegmentRegister,
+    mshv_bindings::Msrs, mshv_bindings::SegmentRegister,
     mshv_bindings::SpecialRegisters, mshv_bindings::StandardRegisters,
     mshv_bindings::SuspendRegisters, mshv_bindings::TableRegister, mshv_bindings::VcpuEvents,
     mshv_bindings::XSave as Xsave,
@@ -30,7 +29,7 @@ pub const CPUID_FLAG_VALID_INDEX: u32 = 0;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct VcpuMshvState {
-    pub msrs: MsrEntries,
+    pub msrs: generic_x86_64::MsrEntries,
     pub vcpu_events: VcpuEvents,
     pub regs: generic_x86_64::StandardRegisters,
     pub sregs: generic_x86_64::SpecialRegisters,
@@ -67,22 +66,6 @@ impl fmt::Display for VcpuMshvState {
 pub struct IrqRouting {}
 pub enum VcpuExit {}
 pub struct MpState {}
-
-pub fn boot_msr_entries() -> MsrEntries {
-    MsrEntries::from_entries(&[
-        msr!(msr_index::MSR_IA32_SYSENTER_CS),
-        msr!(msr_index::MSR_IA32_SYSENTER_ESP),
-        msr!(msr_index::MSR_IA32_SYSENTER_EIP),
-        msr!(msr_index::MSR_STAR),
-        msr!(msr_index::MSR_CSTAR),
-        msr!(msr_index::MSR_LSTAR),
-        msr!(msr_index::MSR_KERNEL_GS_BASE),
-        msr!(msr_index::MSR_SYSCALL_MASK),
-        msr!(msr_index::MSR_IA32_TSC),
-        msr_data!(msr_index::MSR_MTRRdefType, MTRR_ENABLE | MTRR_MEM_TYPE_WB),
-    ])
-    .unwrap()
-}
 
 impl From<hv_cpuid_entry> for generic_x86_64::CpuIdEntry {
     fn from(entry: hv_cpuid_entry) -> Self {
@@ -335,4 +318,45 @@ impl From<&generic_x86_64::LapicState> for LapicState {
             regs: lapic.regs,
         }
     }
+}
+
+impl From<&msr_entry> for generic_x86_64::MsrEntry {
+    fn from(msr_entry: &msr_entry) -> Self {
+        generic_x86_64::MsrEntry {
+            index: msr_entry.index,
+            reserved: msr_entry.reserved,
+            data: msr_entry.data,
+        }
+    }
+}
+
+impl From<&generic_x86_64::MsrEntry> for msr_entry {
+    fn from(msr_entry: &generic_x86_64::MsrEntry) -> Self {
+        msr_entry {
+            index: msr_entry.index,
+            reserved: msr_entry.reserved,
+            data: msr_entry.data,
+        }
+    }
+}
+
+pub fn convert_from_generic_msrs(msr_entries: &generic_x86_64::MsrEntries) -> Msrs {
+    let msrs_vector: Vec<msr_entry> = msr_entries.as_slice().iter().map(|msr| msr.into()).collect();
+    Msrs::from_entries(&msrs_vector).unwrap()
+}
+
+pub fn convert_to_generic_msrs(msr_entries: &Msrs) -> generic_x86_64::MsrEntries {
+    let msrs_vector: Vec<generic_x86_64::MsrEntry> =
+        msr_entries.as_slice().iter().map(|msr| msr.into()).collect();
+    generic_x86_64::MsrEntries::from_entries(&msrs_vector).unwrap()
+}
+
+pub fn convert_from_generic_msr_list(msr_list: &generic_x86_64::MsrList) -> MsrList {
+    let msr_list_vector: &[u32] = msr_list.as_slice();
+    MsrList::from_entries(msr_list_vector).unwrap()
+}
+
+pub fn convert_to_generic_msr_list(msr_list: &MsrList) -> generic_x86_64::MsrList {
+    let msr_list_vector: &[u32] = msr_list.as_slice();
+    generic_x86_64::MsrList::from_entries(msr_list_vector).unwrap()
 }

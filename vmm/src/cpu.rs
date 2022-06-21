@@ -45,7 +45,7 @@ use hypervisor::kvm::kvm_bindings;
 #[cfg(feature = "tdx")]
 use hypervisor::kvm::{TdxExitDetails, TdxExitStatus};
 #[cfg(feature = "guest_debug")]
-use hypervisor::x86_64::{MsrEntries, MsrEntry};
+use hypervisor::generic_x86_64::{MsrEntries, MsrEntry};
 use hypervisor::{CpuState, HypervisorCpuError, VmExit, VmOps};
 use libc::{c_void, siginfo_t};
 #[cfg(feature = "guest_debug")]
@@ -2389,7 +2389,7 @@ mod tests {
     #[test]
     fn test_setup_msrs() {
         use hypervisor::arch::x86::msr_index;
-        use hypervisor::x86_64::{MsrEntries, MsrEntry};
+        use hypervisor::generic_x86_64::{MsrEntries, MsrEntry};
 
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().expect("new VM fd creation failed");
@@ -2412,7 +2412,7 @@ mod tests {
         // Official entries that were setup when we did setup_msrs. We need to assert that the
         // tenth one (i.e the one with index msr_index::MSR_IA32_MISC_ENABLE has the data we
         // expect.
-        let entry_vec = hypervisor::x86_64::boot_msr_entries();
+        let entry_vec = hypervisor::generic_x86_64::boot_msr_entries();
         assert_eq!(entry_vec.as_slice()[9], msrs.as_slice()[0]);
     }
 

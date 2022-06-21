@@ -8,7 +8,6 @@
 //
 //
 
-use crate::arch::x86::{msr_index, MTRR_ENABLE, MTRR_MEM_TYPE_WB};
 use crate::generic_x86_64;
 use crate::kvm::{Cap, Kvm, KvmError, KvmResult};
 use serde::{Deserialize, Serialize};
@@ -19,31 +18,13 @@ use serde::{Deserialize, Serialize};
 pub use {
     kvm_bindings::kvm_cpuid_entry2, kvm_bindings::kvm_dtable, kvm_bindings::kvm_fpu,
     kvm_bindings::kvm_lapic_state, kvm_bindings::kvm_mp_state as MpState,
-    kvm_bindings::kvm_msr_entry as MsrEntry, kvm_bindings::kvm_regs, kvm_bindings::kvm_segment,
+    kvm_bindings::kvm_msr_entry, kvm_bindings::kvm_regs, kvm_bindings::kvm_segment,
     kvm_bindings::kvm_sregs, kvm_bindings::kvm_vcpu_events as VcpuEvents,
     kvm_bindings::kvm_xsave as Xsave,
-    kvm_bindings::CpuId, kvm_bindings::MsrList, kvm_bindings::Msrs as MsrEntries,
+    kvm_bindings::CpuId, kvm_bindings::MsrList, kvm_bindings::Msrs,
 };
 
-pub fn boot_msr_entries() -> MsrEntries {
-    MsrEntries::from_entries(&[
-        msr!(msr_index::MSR_IA32_SYSENTER_CS),
-        msr!(msr_index::MSR_IA32_SYSENTER_ESP),
-        msr!(msr_index::MSR_IA32_SYSENTER_EIP),
-        msr!(msr_index::MSR_STAR),
-        msr!(msr_index::MSR_CSTAR),
-        msr!(msr_index::MSR_LSTAR),
-        msr!(msr_index::MSR_KERNEL_GS_BASE),
-        msr!(msr_index::MSR_SYSCALL_MASK),
-        msr!(msr_index::MSR_IA32_TSC),
-        msr_data!(
-            msr_index::MSR_IA32_MISC_ENABLE,
-            msr_index::MSR_IA32_MISC_ENABLE_FAST_STRING as u64
-        ),
-        msr_data!(msr_index::MSR_MTRRdefType, MTRR_ENABLE | MTRR_MEM_TYPE_WB),
-    ])
-    .unwrap()
-}
+
 
 ///
 /// Check KVM extension for Linux
@@ -72,7 +53,7 @@ pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct VcpuKvmState {
     pub cpuid: generic_x86_64::CpuId,
-    pub msrs: MsrEntries,
+    pub msrs: generic_x86_64::MsrEntries,
     pub vcpu_events: VcpuEvents,
     pub regs: generic_x86_64::StandardRegisters,
     pub sregs: generic_x86_64::SpecialRegisters,
@@ -333,4 +314,45 @@ impl From<&generic_x86_64::LapicState> for kvm_lapic_state {
             regs: lapic.regs,
         }
     }
+}
+
+impl From<&kvm_msr_entry> for generic_x86_64::MsrEntry {
+    fn from(msr_entry: &kvm_msr_entry) -> Self {
+        generic_x86_64::MsrEntry {
+            index: msr_entry.index,
+            reserved: msr_entry.reserved,
+            data: msr_entry.data,
+        }
+    }
+}
+
+impl From<&generic_x86_64::MsrEntry> for kvm_msr_entry {
+    fn from(msr_entry: &generic_x86_64::MsrEntry) -> Self {
+        kvm_msr_entry {
+            index: msr_entry.index,
+            reserved: msr_entry.reserved,
+            data: msr_entry.data,
+        }
+    }
+}
+
+pub fn convert_from_generic_msrs(msr_entries: &generic_x86_64::MsrEntries) -> Msrs {
+    let msrs_vector: Vec<kvm_msr_entry> = msr_entries.as_slice().iter().map(|msr| msr.into()).collect();
+    Msrs::from_entries(&msrs_vector).unwrap()
+}
+
+pub fn convert_to_generic_msrs(msr_entries: &Msrs) -> generic_x86_64::MsrEntries {
+    let msrs_vector: Vec<generic_x86_64::MsrEntry> =
+        msr_entries.as_slice().iter().map(|msr| msr.into()).collect();
+    generic_x86_64::MsrEntries::from_entries(&msrs_vector).unwrap()
+}
+
+pub fn convert_from_generic_msr_list(msr_list: &generic_x86_64::MsrList) -> MsrList {
+    let msr_list_vector: &[u32] = msr_list.as_slice();
+    MsrList::from_entries(msr_list_vector).unwrap()
+}
+
+pub fn convert_to_generic_msr_list(msr_list: &MsrList) -> generic_x86_64::MsrList {
+    let msr_list_vector: &[u32] = msr_list.as_slice();
+    generic_x86_64::MsrList::from_entries(msr_list_vector).unwrap()
 }

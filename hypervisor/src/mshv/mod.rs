@@ -169,7 +169,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
 
         let msr_list = self.get_msr_list()?;
         let num_msrs = msr_list.as_fam_struct_ref().nmsrs as usize;
-        let mut msrs = MsrEntries::new(num_msrs).unwrap();
+        let mut msrs = generic_x86_64::MsrEntries::new(num_msrs).unwrap();
         let indices = msr_list.as_slice();
         let msr_entries = msrs.as_mut_slice();
         for (pos, index) in indices.iter().enumerate() {
@@ -195,10 +195,10 @@ impl hypervisor::Hypervisor for MshvHypervisor {
     ///
     /// Retrieve the list of MSRs supported by MSHV.
     ///
-    fn get_msr_list(&self) -> hypervisor::Result<MsrList> {
+    fn get_msr_list(&self) -> hypervisor::Result<generic_x86_64::MsrList> {
         self.mshv
             .get_msr_index_list()
-            .map_err(|e| hypervisor::HypervisorError::GetMsrList(e.into()))
+            .map_err(|e| hypervisor::HypervisorError::GetMsrList(e.into())).map(|msrs| convert_to_generic_msr_list(&msrs))
     }
 }
 
@@ -208,7 +208,7 @@ pub struct MshvVcpu {
     fd: VcpuFd,
     vp_index: u8,
     cpuid: generic_x86_64::CpuId,
-    msrs: MsrEntries,
+    msrs: generic_x86_64::MsrEntries,
     hv_state: Arc<RwLock<HvState>>, // Mshv State
     vm_ops: Option<Arc<dyn vm::VmOps>>,
 }
@@ -286,19 +286,22 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// Returns the model-specific registers (MSR) for this vCPU.
     ///
-    fn get_msrs(&self, msrs: &mut MsrEntries) -> cpu::Result<usize> {
-        self.fd
-            .get_msrs(msrs)
-            .map_err(|e| cpu::HypervisorCpuError::GetMsrEntries(e.into()))
+    fn get_msrs(&self, msrs: &mut generic_x86_64::MsrEntries) -> cpu::Result<usize> {
+        let mut mshv_msrs = convert_from_generic_msrs(msrs);
+        let result = self.fd
+            .get_msrs(&mut mshv_msrs)
+            .map_err(|e| cpu::HypervisorCpuError::GetMsrEntries(e.into()));
+        msrs.clone_from(&convert_to_generic_msrs(&mshv_msrs));
+        result
     }
     #[cfg(target_arch = "x86_64")]
     ///
     /// Setup the model-specific registers (MSR) for this vCPU.
     /// Returns the number of MSR entries actually written.
     ///
-    fn set_msrs(&self, msrs: &MsrEntries) -> cpu::Result<usize> {
+    fn set_msrs(&self, msrs: &generic_x86_64::MsrEntries) -> cpu::Result<usize> {
         self.fd
-            .set_msrs(msrs)
+            .set_msrs(&convert_from_generic_msrs(msrs))
             .map_err(|e| cpu::HypervisorCpuError::SetMsrEntries(e.into()))
     }
     #[cfg(target_arch = "x86_64")]
@@ -783,7 +786,7 @@ impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
 /// Wrapper over Mshv VM ioctls.
 pub struct MshvVm {
     fd: Arc<VmFd>,
-    msrs: MsrEntries,
+    msrs: generic_x86_64::MsrEntries,
     // Hypervisor State
     hv_state: Arc<RwLock<HvState>>,
     vm_ops: Option<Arc<dyn vm::VmOps>>,

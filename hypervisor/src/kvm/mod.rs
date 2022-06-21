@@ -45,19 +45,19 @@ pub mod x86_64;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::NUM_IOAPIC_PINS;
 #[cfg(target_arch = "x86_64")]
-use crate::generic_x86_64::{CpuId, FpuState, SpecialRegisters, StandardRegisters, LapicState};
+use crate::generic_x86_64::{CpuId, FpuState, SpecialRegisters, StandardRegisters, LapicState, MsrEntries, MsrList};
 #[cfg(target_arch = "aarch64")]
 use aarch64::{RegList, Register, StandardRegisters};
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{
-    kvm_enable_cap, kvm_guest_debug, kvm_msr_entry, MsrList, KVM_CAP_HYPERV_SYNIC,
+    kvm_enable_cap, kvm_guest_debug, kvm_msr_entry, KVM_CAP_HYPERV_SYNIC,
     KVM_CAP_SPLIT_IRQCHIP, KVM_GUESTDBG_ENABLE, KVM_GUESTDBG_SINGLESTEP, KVM_GUESTDBG_USE_HW_BP,
 };
 #[cfg(target_arch = "x86_64")]
 use x86_64::check_required_kvm_extensions;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
-    convert_from_generic_cpu_id, convert_to_generic_cpu_id, MsrEntries,
+    convert_from_generic_cpu_id, convert_to_generic_cpu_id, convert_from_generic_msrs, convert_to_generic_msrs, convert_from_generic_msr_list, convert_to_generic_msr_list,
     VcpuKvmState as CpuState, Xsave,
 };
 // aarch64 dependencies
@@ -930,7 +930,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
     fn get_msr_list(&self) -> hypervisor::Result<MsrList> {
         self.kvm
             .get_msr_index_list()
-            .map_err(|e| hypervisor::HypervisorError::GetMsrList(e.into()))
+            .map_err(|e| hypervisor::HypervisorError::GetMsrList(e.into())).map(|msrs| convert_to_generic_msr_list(&msrs))
     }
     #[cfg(target_arch = "aarch64")]
     ///
@@ -1118,9 +1118,12 @@ impl cpu::Vcpu for KvmVcpu {
     /// Returns the model-specific registers (MSR) for this vCPU.
     ///
     fn get_msrs(&self, msrs: &mut MsrEntries) -> cpu::Result<usize> {
-        self.fd
-            .get_msrs(msrs)
-            .map_err(|e| cpu::HypervisorCpuError::GetMsrEntries(e.into()))
+        let mut kvm_msrs = convert_from_generic_msrs(msrs);
+        let result = self.fd
+            .get_msrs(&mut kvm_msrs)
+            .map_err(|e| cpu::HypervisorCpuError::GetMsrEntries(e.into()));
+        msrs.clone_from(&convert_to_generic_msrs(&kvm_msrs));
+        result
     }
     #[cfg(target_arch = "x86_64")]
     ///
@@ -1129,7 +1132,7 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     fn set_msrs(&self, msrs: &MsrEntries) -> cpu::Result<usize> {
         self.fd
-            .set_msrs(msrs)
+            .set_msrs(&convert_from_generic_msrs(msrs))
             .map_err(|e| cpu::HypervisorCpuError::SetMsrEntries(e.into()))
     }
     ///
@@ -1727,7 +1730,7 @@ impl cpu::Vcpu for KvmVcpu {
                     index,
                     ..Default::default()
                 };
-                msr_entries.push(msr).unwrap();
+                msr_entries.push((&msr).into()).unwrap();
             }
         }
 

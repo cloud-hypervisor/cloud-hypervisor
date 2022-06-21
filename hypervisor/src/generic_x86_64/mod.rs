@@ -8,7 +8,8 @@
 //
 //
 
-use crate::arch::x86::SegmentRegisterOps;
+use crate::arch::x86::{SegmentRegisterOps, msr_index, MTRR_ENABLE, MTRR_MEM_TYPE_WB};
+use crate::{msr, msr_data};
 use serde::{Deserialize, Serialize, Serializer, Deserializer};
 use vmm_sys_util::{fam::FamStruct, fam::FamStructWrapper, generate_fam_struct_impl};
 
@@ -287,4 +288,56 @@ impl Serialize for LapicState {
         let regs = &self.regs[..];
         regs.serialize(serializer)
     }
+}
+
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+#[derive(Deserialize, Serialize)]
+pub struct MsrEntry {
+    pub index: u32,
+    pub reserved: u32,
+    pub data: u64,
+}
+
+#[repr(C)]
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct HypervisorMsrs {
+    pub nmsrs: u32,
+    pub padding: u32,
+    #[serde(skip)]
+    pub entries: __IncompleteArrayField<MsrEntry>,
+}
+
+pub const HYPERVISOR_MAX_MSR_ENTRIES: usize = 256;
+generate_fam_struct_impl!(HypervisorMsrs, MsrEntry, entries, u32, nmsrs, HYPERVISOR_MAX_MSR_ENTRIES);
+pub type MsrEntries = FamStructWrapper<HypervisorMsrs>;
+
+#[repr(C)]
+#[derive(Debug, Default)]
+pub struct HypervisorMsrList {
+    pub nmsrs: u32,
+    pub indices: __IncompleteArrayField<u32>,
+}
+
+generate_fam_struct_impl!(HypervisorMsrList, u32, indices, u32, nmsrs, HYPERVISOR_MAX_MSR_ENTRIES);
+pub type MsrList = FamStructWrapper<HypervisorMsrList>;
+
+pub fn boot_msr_entries() -> MsrEntries {
+    MsrEntries::from_entries(&[
+        msr!(msr_index::MSR_IA32_SYSENTER_CS),
+        msr!(msr_index::MSR_IA32_SYSENTER_ESP),
+        msr!(msr_index::MSR_IA32_SYSENTER_EIP),
+        msr!(msr_index::MSR_STAR),
+        msr!(msr_index::MSR_CSTAR),
+        msr!(msr_index::MSR_LSTAR),
+        msr!(msr_index::MSR_KERNEL_GS_BASE),
+        msr!(msr_index::MSR_SYSCALL_MASK),
+        msr!(msr_index::MSR_IA32_TSC),
+        msr_data!(
+            msr_index::MSR_IA32_MISC_ENABLE,
+            msr_index::MSR_IA32_MISC_ENABLE_FAST_STRING as u64
+        ),
+        msr_data!(msr_index::MSR_MTRRdefType, MTRR_ENABLE | MTRR_MEM_TYPE_WB),
+    ])
+    .unwrap()
 }

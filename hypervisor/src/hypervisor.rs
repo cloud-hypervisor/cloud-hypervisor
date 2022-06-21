@@ -8,12 +8,10 @@
 //
 //
 #[cfg(target_arch = "x86_64")]
-use crate::generic_x86_64::CpuId;
+use crate::generic_x86_64::{CpuId, MsrList};
 #[cfg(feature = "tdx")]
 use crate::kvm::TdxCapabilities;
 use crate::vm::Vm;
-#[cfg(target_arch = "x86_64")]
-use crate::x86_64::MsrList;
 use std::sync::Arc;
 use thiserror::Error;
 
