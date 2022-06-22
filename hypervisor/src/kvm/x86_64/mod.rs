@@ -20,7 +20,7 @@ pub use {
     kvm_bindings::kvm_lapic_state, kvm_bindings::kvm_mp_state as MpState,
     kvm_bindings::kvm_msr_entry, kvm_bindings::kvm_regs, kvm_bindings::kvm_segment,
     kvm_bindings::kvm_sregs, kvm_bindings::kvm_vcpu_events as VcpuEvents,
-    kvm_bindings::kvm_xsave as Xsave,
+    kvm_bindings::kvm_xsave,
     kvm_bindings::CpuId, kvm_bindings::MsrList, kvm_bindings::Msrs,
 };
 
@@ -59,7 +59,7 @@ pub struct VcpuKvmState {
     pub sregs: generic_x86_64::SpecialRegisters,
     pub fpu: generic_x86_64::FpuState,
     pub lapic_state: generic_x86_64::LapicState,
-    pub xsave: Xsave,
+    pub xsave: generic_x86_64::Xsave,
     pub mp_state: MpState,
 }
 

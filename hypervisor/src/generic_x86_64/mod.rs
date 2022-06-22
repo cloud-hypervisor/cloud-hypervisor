@@ -341,3 +341,37 @@ pub fn boot_msr_entries() -> MsrEntries {
     ])
     .unwrap()
 }
+
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+pub enum _Xsave{
+    Kvm(kvm_bindings::kvm_xsave),
+    Mshv(mshv_bindings::XSave),
+}
+
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+pub struct Xsave {
+    xsave: _Xsave,
+}
+
+impl Xsave {
+    pub fn xsave(&self) -> _Xsave {
+        self.xsave.clone()
+    }
+
+    pub fn set_xsave(&mut self, new_xsave: _Xsave) -> () {
+        self.xsave = new_xsave;
+    }
+    /// Need to implement these functions instead of From trait, because xsave is a private field, 
+    /// and cannot be accessed outside here
+    pub fn from_kvm(new_xsave: kvm_bindings::kvm_xsave) -> Self {
+        Xsave{
+            xsave: _Xsave::Kvm(new_xsave),
+        }
+    }
+
+    pub fn from_mshv(new_xsave: mshv_bindings::XSave) -> Self {
+        Xsave{
+            xsave: _Xsave::Mshv(new_xsave),
+        }
+    }
+}

@@ -45,7 +45,7 @@ pub mod x86_64;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::NUM_IOAPIC_PINS;
 #[cfg(target_arch = "x86_64")]
-use crate::generic_x86_64::{CpuId, FpuState, SpecialRegisters, StandardRegisters, LapicState, MsrEntries, MsrList};
+use crate::generic_x86_64::{CpuId, FpuState, SpecialRegisters, StandardRegisters, LapicState, MsrEntries, MsrList, Xsave, _Xsave};
 #[cfg(target_arch = "aarch64")]
 use aarch64::{RegList, Register, StandardRegisters};
 #[cfg(target_arch = "x86_64")]
@@ -58,7 +58,7 @@ use x86_64::check_required_kvm_extensions;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
     convert_from_generic_cpu_id, convert_to_generic_cpu_id, convert_from_generic_msrs, convert_to_generic_msrs, convert_from_generic_msr_list, convert_to_generic_msr_list,
-    VcpuKvmState as CpuState, Xsave,
+    VcpuKvmState as CpuState,
 };
 // aarch64 dependencies
 #[cfg(target_arch = "aarch64")]
@@ -1156,18 +1156,30 @@ impl cpu::Vcpu for KvmVcpu {
     /// X86 specific call that returns the vcpu's current "xsave struct".
     ///
     fn get_xsave(&self) -> cpu::Result<Xsave> {
-        self.fd
+        let result = self.fd
             .get_xsave()
-            .map_err(|e| cpu::HypervisorCpuError::GetXsaveState(e.into()))
+            .map_err(|e| cpu::HypervisorCpuError::GetXsaveState(e.into()));
+        let xsave: Xsave;
+        match result {
+            Ok(xs) => {
+                xsave = Xsave::from_kvm(xs);
+                cpu::Result::Ok(xsave)
+            },
+            Err(e) => Err(e)
+        }
     }
     #[cfg(target_arch = "x86_64")]
     ///
     /// X86 specific call that sets the vcpu's current "xsave struct".
     ///
     fn set_xsave(&self, xsave: &Xsave) -> cpu::Result<()> {
-        self.fd
-            .set_xsave(xsave)
-            .map_err(|e| cpu::HypervisorCpuError::SetXsaveState(e.into()))
+        match xsave.xsave() {
+            _Xsave::Kvm(xs) => self.fd
+            .set_xsave(&xs)
+            .map_err(|e| cpu::HypervisorCpuError::SetXsaveState(e.into())),
+
+            _Xsave::Mshv(_) => cpu::Result::Err(cpu::HypervisorCpuError::SetXsaveState(anyhow!("Wrong Hypervisor")))
+        }
     }
     #[cfg(target_arch = "x86_64")]
     ///

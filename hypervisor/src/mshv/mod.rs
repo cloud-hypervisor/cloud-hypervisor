@@ -530,19 +530,31 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// X86 specific call that returns the vcpu's current "xsave struct".
     ///
-    fn get_xsave(&self) -> cpu::Result<Xsave> {
-        self.fd
+    fn get_xsave(&self) -> cpu::Result<generic_x86_64::Xsave> {
+        let result = self.fd
             .get_xsave()
-            .map_err(|e| cpu::HypervisorCpuError::GetXsaveState(e.into()))
+            .map_err(|e| cpu::HypervisorCpuError::GetXsaveState(e.into()));
+        let xsave: generic_x86_64::Xsave;
+        match result {
+            Ok(xs) => {
+                xsave = generic_x86_64::Xsave::from_mshv(xs);
+                cpu::Result::Ok(xsave)
+            },
+            Err(e) => Err(e)
+        }
     }
     #[cfg(target_arch = "x86_64")]
     ///
     /// X86 specific call that sets the vcpu's current "xsave struct".
     ///
-    fn set_xsave(&self, xsave: &Xsave) -> cpu::Result<()> {
-        self.fd
-            .set_xsave(xsave)
-            .map_err(|e| cpu::HypervisorCpuError::SetXsaveState(e.into()))
+    fn set_xsave(&self, xsave: &generic_x86_64::Xsave) -> cpu::Result<()> {
+        match xsave.xsave() {
+            generic_x86_64::_Xsave::Mshv(xs) => self.fd
+            .set_xsave(&xs)
+            .map_err(|e| cpu::HypervisorCpuError::SetXsaveState(e.into())),
+
+            generic_x86_64::_Xsave::Kvm(_) => cpu::Result::Err(cpu::HypervisorCpuError::SetXsaveState(anyhow!("Wrong Hypervisor")))
+        }
     }
     ///
     /// Set CPU state

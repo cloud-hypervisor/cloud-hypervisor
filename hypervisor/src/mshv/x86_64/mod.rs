@@ -22,7 +22,7 @@ pub use {
     mshv_bindings::Msrs, mshv_bindings::SegmentRegister,
     mshv_bindings::SpecialRegisters, mshv_bindings::StandardRegisters,
     mshv_bindings::SuspendRegisters, mshv_bindings::TableRegister, mshv_bindings::VcpuEvents,
-    mshv_bindings::XSave as Xsave,
+    mshv_bindings::XSave,
 };
 
 pub const CPUID_FLAG_VALID_INDEX: u32 = 0;
@@ -36,7 +36,7 @@ pub struct VcpuMshvState {
     pub fpu: generic_x86_64::FpuState,
     pub lapic: generic_x86_64::LapicState,
     pub dbg: DebugRegisters,
-    pub xsave: Xsave,
+    pub xsave: generic_x86_64::Xsave,
     pub misc: MiscRegisters,
 }
 
