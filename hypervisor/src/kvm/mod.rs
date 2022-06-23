@@ -45,7 +45,7 @@ pub mod x86_64;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::NUM_IOAPIC_PINS;
 #[cfg(target_arch = "x86_64")]
-use crate::generic_x86_64::{CpuId, FpuState, SpecialRegisters, StandardRegisters, LapicState, MsrEntries, MsrList, Xsave, _Xsave};
+use crate::generic_x86_64::{CpuId, FpuState, SpecialRegisters, StandardRegisters, LapicState, MsrEntries, MsrList, Xsave, _Xsave, VcpuEvents, _VcpuEvents};
 #[cfg(target_arch = "aarch64")]
 use aarch64::{RegList, Register, StandardRegisters};
 #[cfg(target_arch = "x86_64")]
@@ -90,7 +90,7 @@ pub use {
     kvm_bindings::kvm_clock_data as ClockData, kvm_bindings::kvm_create_device as CreateDevice,
     kvm_bindings::kvm_device_attr as DeviceAttr,
     kvm_bindings::kvm_irq_routing_entry as IrqRoutingEntry, kvm_bindings::kvm_mp_state as MpState,
-    kvm_bindings::kvm_run, kvm_bindings::kvm_vcpu_events as VcpuEvents, kvm_ioctls::DeviceFd,
+    kvm_bindings::kvm_run, kvm_bindings::kvm_vcpu_events, kvm_ioctls::DeviceFd,
     kvm_ioctls::IoEventAddress, kvm_ioctls::VcpuExit,
 };
 
@@ -1296,9 +1296,17 @@ impl cpu::Vcpu for KvmVcpu {
     /// states of the vcpu.
     ///
     fn get_vcpu_events(&self) -> cpu::Result<VcpuEvents> {
-        self.fd
+        let result = self.fd
             .get_vcpu_events()
-            .map_err(|e| cpu::HypervisorCpuError::GetVcpuEvents(e.into()))
+            .map_err(|e| cpu::HypervisorCpuError::GetVcpuEvents(e.into()));
+        let vcpu_events: VcpuEvents;
+        match result {
+            Ok(events) => {
+                vcpu_events = VcpuEvents::from_kvm(events);
+                cpu::Result::Ok(vcpu_events)
+            },
+            Err(e) => Err(e)
+        }
     }
     #[cfg(target_arch = "x86_64")]
     ///
@@ -1306,9 +1314,13 @@ impl cpu::Vcpu for KvmVcpu {
     /// of the vcpu.
     ///
     fn set_vcpu_events(&self, events: &VcpuEvents) -> cpu::Result<()> {
-        self.fd
-            .set_vcpu_events(events)
-            .map_err(|e| cpu::HypervisorCpuError::SetVcpuEvents(e.into()))
+        match events.events() {
+            _VcpuEvents::Kvm(ev) => self.fd
+            .set_vcpu_events(&ev)
+            .map_err(|e| cpu::HypervisorCpuError::SetVcpuEvents(e.into())),
+
+            _VcpuEvents::Mshv(_) => cpu::Result::Err(cpu::HypervisorCpuError::SetXsaveState(anyhow!("Wrong Hypervisor")))
+        }
     }
     #[cfg(target_arch = "x86_64")]
     ///

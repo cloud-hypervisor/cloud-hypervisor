@@ -309,20 +309,32 @@ impl cpu::Vcpu for MshvVcpu {
     /// Returns currently pending exceptions, interrupts, and NMIs as well as related
     /// states of the vcpu.
     ///
-    fn get_vcpu_events(&self) -> cpu::Result<VcpuEvents> {
-        self.fd
+    fn get_vcpu_events(&self) -> cpu::Result<generic_x86_64::VcpuEvents> {
+        let result = self.fd
             .get_vcpu_events()
-            .map_err(|e| cpu::HypervisorCpuError::GetVcpuEvents(e.into()))
+            .map_err(|e| cpu::HypervisorCpuError::GetVcpuEvents(e.into()));
+        let vcpu_events: generic_x86_64::VcpuEvents;
+        match result {
+            Ok(events) => {
+                vcpu_events = generic_x86_64::VcpuEvents::from_mshv(events);
+                cpu::Result::Ok(vcpu_events)
+            },
+            Err(e) => Err(e)
+        }
     }
     #[cfg(target_arch = "x86_64")]
     ///
     /// Sets pending exceptions, interrupts, and NMIs as well as related states
     /// of the vcpu.
     ///
-    fn set_vcpu_events(&self, events: &VcpuEvents) -> cpu::Result<()> {
-        self.fd
-            .set_vcpu_events(events)
-            .map_err(|e| cpu::HypervisorCpuError::SetVcpuEvents(e.into()))
+    fn set_vcpu_events(&self, events: &generic_x86_64::VcpuEvents) -> cpu::Result<()> {
+        match events.events() {
+            generic_x86_64::_VcpuEvents::Mshv(ev) => self.fd
+            .set_vcpu_events(&ev)
+            .map_err(|e| cpu::HypervisorCpuError::SetVcpuEvents(e.into())),
+
+            generic_x86_64::_VcpuEvents::Kvm(_) => cpu::Result::Err(cpu::HypervisorCpuError::SetXsaveState(anyhow!("Wrong Hypervisor")))
+        }
     }
     #[cfg(target_arch = "x86_64")]
     ///

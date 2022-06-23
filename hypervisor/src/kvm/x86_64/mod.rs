@@ -19,7 +19,7 @@ pub use {
     kvm_bindings::kvm_cpuid_entry2, kvm_bindings::kvm_dtable, kvm_bindings::kvm_fpu,
     kvm_bindings::kvm_lapic_state, kvm_bindings::kvm_mp_state as MpState,
     kvm_bindings::kvm_msr_entry, kvm_bindings::kvm_regs, kvm_bindings::kvm_segment,
-    kvm_bindings::kvm_sregs, kvm_bindings::kvm_vcpu_events as VcpuEvents,
+    kvm_bindings::kvm_sregs, kvm_bindings::kvm_vcpu_events,
     kvm_bindings::kvm_xsave,
     kvm_bindings::CpuId, kvm_bindings::MsrList, kvm_bindings::Msrs,
 };
@@ -54,7 +54,7 @@ pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
 pub struct VcpuKvmState {
     pub cpuid: generic_x86_64::CpuId,
     pub msrs: generic_x86_64::MsrEntries,
-    pub vcpu_events: VcpuEvents,
+    pub vcpu_events: generic_x86_64::VcpuEvents,
     pub regs: generic_x86_64::StandardRegisters,
     pub sregs: generic_x86_64::SpecialRegisters,
     pub fpu: generic_x86_64::FpuState,

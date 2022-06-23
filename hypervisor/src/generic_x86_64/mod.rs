@@ -375,3 +375,36 @@ impl Xsave {
         }
     }
 }
+
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+pub enum _VcpuEvents {
+    Kvm(kvm_bindings::kvm_vcpu_events),
+    Mshv(mshv_bindings::VcpuEvents),
+}
+
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+pub struct VcpuEvents {
+    events: _VcpuEvents,
+}
+
+impl VcpuEvents {
+    pub fn events(&self) -> _VcpuEvents {
+        self.events
+    }
+
+    pub fn set_vcpu_events(&mut self, new_events: _VcpuEvents) -> () {
+        self.events = new_events;
+    }
+
+    pub fn from_kvm(new_events: kvm_bindings::kvm_vcpu_events) -> Self {
+        VcpuEvents{
+            events: _VcpuEvents::Kvm(new_events),
+        }
+    }
+
+    pub fn from_mshv(new_events: mshv_bindings::VcpuEvents) -> Self {
+        VcpuEvents{
+            events: _VcpuEvents::Mshv(new_events),
+        }
+    }
+}

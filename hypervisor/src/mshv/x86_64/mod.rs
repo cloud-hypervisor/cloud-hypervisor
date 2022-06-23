@@ -30,7 +30,7 @@ pub const CPUID_FLAG_VALID_INDEX: u32 = 0;
 #[derive(Clone, Serialize, Deserialize)]
 pub struct VcpuMshvState {
     pub msrs: generic_x86_64::MsrEntries,
-    pub vcpu_events: VcpuEvents,
+    pub vcpu_events: generic_x86_64::VcpuEvents,
     pub regs: generic_x86_64::StandardRegisters,
     pub sregs: generic_x86_64::SpecialRegisters,
     pub fpu: generic_x86_64::FpuState,
