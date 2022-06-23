@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 ///
 pub use {
     kvm_bindings::kvm_cpuid_entry2, kvm_bindings::kvm_dtable, kvm_bindings::kvm_fpu,
-    kvm_bindings::kvm_lapic_state, kvm_bindings::kvm_mp_state as MpState,
+    kvm_bindings::kvm_lapic_state, kvm_bindings::kvm_mp_state,
     kvm_bindings::kvm_msr_entry, kvm_bindings::kvm_regs, kvm_bindings::kvm_segment,
     kvm_bindings::kvm_sregs, kvm_bindings::kvm_vcpu_events,
     kvm_bindings::kvm_xsave,
@@ -60,7 +60,7 @@ pub struct VcpuKvmState {
     pub fpu: generic_x86_64::FpuState,
     pub lapic_state: generic_x86_64::LapicState,
     pub xsave: generic_x86_64::Xsave,
-    pub mp_state: MpState,
+    pub mp_state: generic_x86_64::MpState,
 }
 
 impl From<kvm_cpuid_entry2> for generic_x86_64::CpuIdEntry {
@@ -355,4 +355,20 @@ pub fn convert_from_generic_msr_list(msr_list: &generic_x86_64::MsrList) -> MsrL
 pub fn convert_to_generic_msr_list(msr_list: &MsrList) -> generic_x86_64::MsrList {
     let msr_list_vector: &[u32] = msr_list.as_slice();
     generic_x86_64::MsrList::from_entries(msr_list_vector).unwrap()
+}
+
+impl From<&kvm_mp_state> for generic_x86_64::MpState {
+    fn from(state: &kvm_mp_state) -> generic_x86_64::MpState{
+        generic_x86_64::MpState {
+            mp_state: state.mp_state,
+        }
+    }
+}
+
+impl From<&generic_x86_64::MpState> for kvm_mp_state {
+    fn from(state: &generic_x86_64::MpState) -> kvm_mp_state {
+        kvm_mp_state {
+            mp_state: state.mp_state,
+        }
+    }
 }

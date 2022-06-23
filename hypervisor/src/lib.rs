@@ -62,14 +62,14 @@ pub use kvm::{aarch64, GicState};
 #[cfg(feature = "kvm")]
 pub use kvm::{
     ClockData, CpuState, CreateDevice, DeviceAttr, DeviceFd, IoEventAddress, IrqRoutingEntry,
-    MpState, VcpuExit, VmState,
+    VcpuExit, VmState,
 };
 #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
 pub use mshv::x86_64;
 // Aliased types exposed from both hypervisors
 #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
 pub use mshv::{
-    CpuState, CreateDevice, DeviceAttr, DeviceFd, IoEventAddress, IrqRoutingEntry, MpState,
+    CpuState, CreateDevice, DeviceAttr, DeviceFd, IoEventAddress, IrqRoutingEntry,
     VcpuEvents, VcpuExit, VmState,
 };
 use std::sync::Arc;

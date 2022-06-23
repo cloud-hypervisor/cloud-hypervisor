@@ -13,7 +13,7 @@ use crate::aarch64::VcpuInit;
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::{RegList, Register, StandardRegisters};
 #[cfg(target_arch = "x86_64")]
-use crate::generic_x86_64::{CpuId, FpuState, SpecialRegisters, StandardRegisters, LapicState, MsrEntries, Xsave, VcpuEvents};
+use crate::generic_x86_64::{CpuId, FpuState, SpecialRegisters, StandardRegisters, LapicState, MsrEntries, Xsave, VcpuEvents, MpState};
 #[cfg(feature = "tdx")]
 use crate::kvm::{TdxExitDetails, TdxExitStatus};
 #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
@@ -21,8 +21,6 @@ use crate::x86_64::SuspendRegisters;
 use crate::CpuState;
 #[cfg(target_arch = "aarch64")]
 use crate::DeviceAttr;
-#[cfg(feature = "kvm")]
-use crate::MpState;
 use thiserror::Error;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use vm_memory::GuestAddress;
@@ -347,16 +345,18 @@ pub trait Vcpu: Send + Sync {
     /// Setup the model-specific registers (MSR) for this vCPU.
     ///
     fn set_msrs(&self, msrs: &MsrEntries) -> Result<usize>;
-    #[cfg(feature = "kvm")]
     ///
     /// Returns the vcpu's current "multiprocessing state".
     ///
-    fn get_mp_state(&self) -> Result<MpState>;
-    #[cfg(feature = "kvm")]
+    fn get_mp_state(&self) -> Result<MpState> {
+        Result::Err(HypervisorCpuError::GetMpState(anyhow!("Not implemented")))
+    }
     ///
     /// Sets the vcpu's current "multiprocessing state".
     ///
-    fn set_mp_state(&self, mp_state: MpState) -> Result<()>;
+    fn set_mp_state(&self, _mp_state: MpState) -> Result<()> {
+        Result::Err(HypervisorCpuError::SetMpState(anyhow!("Not implemented")))
+    }
     #[cfg(target_arch = "x86_64")]
     ///
     /// X86 specific call that returns the vcpu's current "xsave struct".

@@ -408,3 +408,10 @@ impl VcpuEvents {
         }
     }
 }
+
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+#[derive(Deserialize, Serialize)]
+pub struct MpState {
+    pub mp_state: u32,
+}

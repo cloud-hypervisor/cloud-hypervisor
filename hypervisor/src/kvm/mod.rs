@@ -45,7 +45,7 @@ pub mod x86_64;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::NUM_IOAPIC_PINS;
 #[cfg(target_arch = "x86_64")]
-use crate::generic_x86_64::{CpuId, FpuState, SpecialRegisters, StandardRegisters, LapicState, MsrEntries, MsrList, Xsave, _Xsave, VcpuEvents, _VcpuEvents};
+use crate::generic_x86_64::{CpuId, FpuState, SpecialRegisters, StandardRegisters, LapicState, MsrEntries, MsrList, Xsave, _Xsave, VcpuEvents, _VcpuEvents, MpState};
 #[cfg(target_arch = "aarch64")]
 use aarch64::{RegList, Register, StandardRegisters};
 #[cfg(target_arch = "x86_64")]
@@ -89,9 +89,10 @@ use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_expr, ioctl_ioc_nr, ioctl_iowr_n
 pub use {
     kvm_bindings::kvm_clock_data as ClockData, kvm_bindings::kvm_create_device as CreateDevice,
     kvm_bindings::kvm_device_attr as DeviceAttr,
-    kvm_bindings::kvm_irq_routing_entry as IrqRoutingEntry, kvm_bindings::kvm_mp_state as MpState,
-    kvm_bindings::kvm_run, kvm_bindings::kvm_vcpu_events, kvm_ioctls::DeviceFd,
-    kvm_ioctls::IoEventAddress, kvm_ioctls::VcpuExit,
+    kvm_bindings::kvm_irq_routing_entry as IrqRoutingEntry, kvm_bindings::kvm_mp_state,
+    kvm_bindings::kvm_run,
+    kvm_bindings::kvm_vcpu_events, kvm_ioctls::DeviceFd, kvm_ioctls::IoEventAddress,
+    kvm_ioctls::VcpuExit,
 };
 
 #[cfg(target_arch = "x86_64")]
@@ -1141,14 +1142,14 @@ impl cpu::Vcpu for KvmVcpu {
     fn get_mp_state(&self) -> cpu::Result<MpState> {
         self.fd
             .get_mp_state()
-            .map_err(|e| cpu::HypervisorCpuError::GetMpState(e.into()))
+            .map_err(|e| cpu::HypervisorCpuError::GetMpState(e.into())).map(|state| (&state).into())
     }
     ///
     /// Sets the vcpu's current "multiprocessing state".
     ///
     fn set_mp_state(&self, mp_state: MpState) -> cpu::Result<()> {
         self.fd
-            .set_mp_state(mp_state)
+            .set_mp_state((&mp_state).into())
             .map_err(|e| cpu::HypervisorCpuError::SetMpState(e.into()))
     }
     #[cfg(target_arch = "x86_64")]
