@@ -474,11 +474,12 @@ pub trait Vcpu: Send + Sync {
     fn get_suspend_regs(&self) -> Result<SuspendRegisters> {
         Result::Err(HypervisorCpuError::GetSuspendRegs(anyhow!("Not implemented")))
     }
-    #[cfg(feature = "kvm")]
     ///
     /// Set the "immediate_exit" state
     ///
-    fn set_immediate_exit(&self, exit: bool);
+    fn set_immediate_exit(&self, _exit: bool) {
+        error!("Not implemented");
+    }
     #[cfg(feature = "tdx")]
     ///
     /// Returns the details about TDX exit reason
