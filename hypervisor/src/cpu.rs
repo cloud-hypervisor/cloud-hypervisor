@@ -377,12 +377,14 @@ pub trait Vcpu: Send + Sync {
     /// of the vcpu.
     ///
     fn set_vcpu_events(&self, events: &VcpuEvents) -> Result<()>;
-    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     ///
     /// Let the guest know that it has been paused, which prevents from
     /// potential soft lockups when being resumed.
     ///
-    fn notify_guest_clock_paused(&self) -> Result<()>;
+    fn notify_guest_clock_paused(&self) -> Result<()> {
+        Ok(())
+    }
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     ///
     /// Sets debug registers to set hardware breakpoints and/or enable single step.
