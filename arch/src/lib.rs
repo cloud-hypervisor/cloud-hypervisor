@@ -138,6 +138,9 @@ pub enum DeviceType {
     /// Device Type: GPIO.
     #[cfg(target_arch = "aarch64")]
     Gpio,
+    /// Device Type: fw_cfg.
+    #[cfg(target_arch = "aarch64")]
+    FwCfg,
 }
 
 /// Default (smallest) memory page size for the supported architectures.

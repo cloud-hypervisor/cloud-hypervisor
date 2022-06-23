@@ -935,6 +935,10 @@ pub struct DeviceManager {
     // Flash device for UEFI on AArch64
     uefi_flash: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
 
+    #[cfg(target_arch = "aarch64")]
+    // Fw_cfg device on AArch64
+    pub fw_cfg: Option<Arc<Mutex<devices::legacy::FWCfgState>>>,
+
     // Flag to force setting the iommu on virtio devices
     force_iommu: bool,
 
@@ -1093,6 +1097,8 @@ impl DeviceManager {
             gpio_device: None,
             #[cfg(target_arch = "aarch64")]
             uefi_flash: None,
+            #[cfg(target_arch = "aarch64")]
+            fw_cfg: None,
             force_iommu,
             restoring,
             io_uring_supported: None,
@@ -1649,6 +1655,50 @@ impl DeviceManager {
             .lock()
             .unwrap()
             .insert(id.clone(), device_node!(id, gpio_device));
+
+        // Add firmware config device
+        let id = String::from("fw_cfg");
+        let fwcfg_irq = self
+            .address_manager
+            .allocator
+            .lock()
+            .unwrap()
+            .allocate_irq()
+            .unwrap();
+
+        let fw_cfg = Arc::new(Mutex::new(devices::legacy::FWCfgState::new(
+            "fw_cfg".to_string(),
+            self.memory_manager.lock().unwrap().guest_memory(),
+        )));
+
+        let fw_cfg_data = Arc::new(Mutex::new(devices::legacy::FWCfgStateSnapShotData::new(
+            "fw_cfg".to_string(),
+        )));
+        fw_cfg.lock().unwrap().init();
+        self.bus_devices
+            .push(Arc::clone(&fw_cfg) as Arc<Mutex<dyn BusDevice>>);
+        let addr = arch::layout::LEGACY_FW_CFG_MAPPED_IO_START;
+
+        self.address_manager
+            .mmio_bus
+            .insert(fw_cfg.clone(), addr.0, MMIO_LEN)
+            .map_err(DeviceManagerError::BusError)?;
+
+        self.fw_cfg = Some(fw_cfg.clone());
+
+        self.id_to_dev_info.insert(
+            (DeviceType::FwCfg, id.clone()),
+            MmioDeviceInfo {
+                addr: addr.0,
+                len: MMIO_LEN,
+                irq: fwcfg_irq,
+            },
+        );
+
+        self.device_tree
+            .lock()
+            .unwrap()
+            .insert(id.clone(), device_node!(id, fw_cfg_data));
 
         // On AArch64, the UEFI binary requires a flash device at address 0.
         // 4 MiB memory is mapped to simulate the flash.
