@@ -415,3 +415,11 @@ impl VcpuEvents {
 pub struct MpState {
     pub mp_state: u32,
 }
+
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+#[derive(Deserialize, Serialize)]
+pub struct SuspendRegisters {
+    pub explicit_register: u64,
+    pub intercept_register: u64,
+}

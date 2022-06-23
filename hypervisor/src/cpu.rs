@@ -13,11 +13,9 @@ use crate::aarch64::VcpuInit;
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::{RegList, Register, StandardRegisters};
 #[cfg(target_arch = "x86_64")]
-use crate::generic_x86_64::{CpuId, FpuState, SpecialRegisters, StandardRegisters, LapicState, MsrEntries, Xsave, VcpuEvents, MpState};
+use crate::generic_x86_64::{CpuId, FpuState, SpecialRegisters, StandardRegisters, LapicState, MsrEntries, Xsave, VcpuEvents, MpState, SuspendRegisters};
 #[cfg(feature = "tdx")]
 use crate::kvm::{TdxExitDetails, TdxExitStatus};
-#[cfg(all(feature = "mshv", target_arch = "x86_64"))]
-use crate::x86_64::SuspendRegisters;
 use crate::CpuState;
 #[cfg(target_arch = "aarch64")]
 use crate::DeviceAttr;
@@ -465,11 +463,13 @@ pub trait Vcpu: Send + Sync {
     ///
     #[cfg(feature = "tdx")]
     fn tdx_init(&self, hob_address: u64) -> Result<()>;
-    #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     ///
     /// Return suspend registers(explicit and intercept suspend registers)
     ///
-    fn get_suspend_regs(&self) -> Result<SuspendRegisters>;
+    fn get_suspend_regs(&self) -> Result<SuspendRegisters> {
+        Result::Err(HypervisorCpuError::GetSuspendRegs(anyhow!("Not implemented")))
+    }
     #[cfg(feature = "kvm")]
     ///
     /// Set the "immediate_exit" state

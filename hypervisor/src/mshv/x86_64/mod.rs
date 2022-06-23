@@ -360,3 +360,21 @@ pub fn convert_to_generic_msr_list(msr_list: &MsrList) -> generic_x86_64::MsrLis
     let msr_list_vector: &[u32] = msr_list.as_slice();
     generic_x86_64::MsrList::from_entries(msr_list_vector).unwrap()
 }
+
+impl From<&SuspendRegisters> for generic_x86_64::SuspendRegisters {
+    fn from(sus_reg: &SuspendRegisters) -> generic_x86_64::SuspendRegisters {
+        generic_x86_64::SuspendRegisters {
+            explicit_register: sus_reg.explicit_register,
+            intercept_register: sus_reg.intercept_register,
+        }
+    }
+}
+
+impl From<&generic_x86_64::SuspendRegisters> for SuspendRegisters {
+    fn from(sus_reg: &generic_x86_64::SuspendRegisters) -> SuspendRegisters {
+        SuspendRegisters {
+            explicit_register: sus_reg.explicit_register,
+            intercept_register: sus_reg.intercept_register,
+        }
+    }
+}

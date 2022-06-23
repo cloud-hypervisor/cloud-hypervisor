@@ -644,10 +644,10 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// X86 specific call that returns the vcpu's current "suspend registers".
     ///
-    fn get_suspend_regs(&self) -> cpu::Result<SuspendRegisters> {
+    fn get_suspend_regs(&self) -> cpu::Result<generic_x86_64::SuspendRegisters> {
         self.fd
             .get_suspend_regs()
-            .map_err(|e| cpu::HypervisorCpuError::GetSuspendRegs(e.into()))
+            .map_err(|e| cpu::HypervisorCpuError::GetSuspendRegs(e.into())).map(|sus_reg| (&sus_reg).into())
     }
 }
 
