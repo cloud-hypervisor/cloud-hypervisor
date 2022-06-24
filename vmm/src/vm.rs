@@ -89,6 +89,7 @@ use vm_device::Bus;
 use vm_device::BusDevice;
 #[cfg(target_arch = "x86_64")]
 use vm_memory::Address;
+use vm_memory::GuestMemory;
 #[cfg(feature = "tdx")]
 use vm_memory::{ByteValued, GuestMemory, GuestMemoryRegion};
 use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
@@ -113,6 +114,18 @@ pub enum Error {
 
     #[error("Cannot load the kernel into memory: {0}")]
     KernelLoad(#[source] linux_loader::loader::Error),
+
+    #[error("Cannot seek kernel end")]
+    SeekKernelEnd,
+
+    #[error("Cannot seek kernel start")]
+    SeekKernelStart,
+
+    #[error("Cannot read kernel")]
+    ReadKernelImage(#[source] vm_memory::GuestMemoryError),
+
+    #[error("Kernel image too big")]
+    KernelTooBig,
 
     #[cfg(target_arch = "aarch64")]
     #[error("Cannot load the UEFI binary in memory: {0:?}")]
@@ -454,6 +467,7 @@ pub fn physical_bits(max_phys_bits: u8) -> u8 {
 pub struct Vm {
     #[cfg(any(target_arch = "aarch64", feature = "tdx"))]
     kernel: Option<File>,
+    firmware: Option<File>,
     initramfs: Option<File>,
     threads: Vec<thread::JoinHandle<()>>,
     device_manager: Arc<Mutex<DeviceManager>>,
@@ -494,6 +508,15 @@ impl Vm {
         restoring: bool,
         timestamp: Instant,
     ) -> Result<Self> {
+        let firmware = match config.lock() {
+            Ok(f) => f
+                .firmware
+                .as_ref()
+                .map(|f| File::open(&f.path))
+                .transpose()
+                .map_err(Error::FirmwareFile)?,
+            Err(_) => None,
+        };
         let kernel = config
             .lock()
             .unwrap()
@@ -600,6 +623,8 @@ impl Vm {
             .map_err(Error::InitramfsFile)?;
 
         Ok(Vm {
+            #[cfg(target_arch = "aarch64")]
+            firmware,
             #[cfg(any(target_arch = "aarch64", feature = "tdx"))]
             kernel,
             initramfs,
@@ -944,9 +969,67 @@ impl Vm {
     }
 
     #[cfg(target_arch = "aarch64")]
+    fn load_kernel_to_mem<F, M: GuestMemory>(
+        &self,
+        guest_mem: &M,
+        guest_addr: GuestAddress,
+        kernel_image: &mut F,
+    ) -> Result<()>
+    where
+        F: Read + Seek,
+    {
+        let kernel_size = kernel_image
+            .seek(SeekFrom::End(0))
+            .map_err(|_| Error::SeekKernelEnd)? as usize;
+
+        if kernel_size > arch::aarch64::fdt::KERNEL_RESERVE_MEM_SIZE as usize {
+            return Err(Error::KernelTooBig);
+        }
+
+        kernel_image
+            .seek(SeekFrom::Start(0))
+            .map_err(|_| Error::SeekKernelStart)?;
+
+        guest_mem
+            .read_exact_from(guest_addr, kernel_image, kernel_size)
+            .map_err(|e| Error::ReadKernelImage(e))
+    }
+
+    #[cfg(target_arch = "aarch64")]
     fn load_kernel(&mut self) -> Result<EntryPoint> {
         let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
         let mem = guest_memory.memory();
+        let boot_mem = self.memory_manager.lock().unwrap().boot_guest_memory();
+
+        // If there is firmware image, load it and negelect kernel image load.
+        if let Some(mut f) = self.firmware.as_ref() {
+            let uefi_flash = self.device_manager.lock().as_ref().unwrap().uefi_flash();
+            let mem_uefi = uefi_flash.memory();
+            arch::aarch64::uefi::load_uefi(mem_uefi.deref(), arch::layout::UEFI_START, &mut f)
+                .map_err(Error::UefiLoad)?;
+
+            // If there is no kernel image, just boot from firmware and try to load kernel from disk
+            if let Some(mut k) = self.kernel.as_ref() {
+                // Firmware will try to boot kernel added here.
+                let kernel_start =
+                    arch::aarch64::fdt::find_kernel_memory_base(&self.numa_nodes, &boot_mem);
+
+                self.load_kernel_to_mem(mem.deref(), GuestAddress(kernel_start), &mut k)
+                    .map_err(|e| e)?;
+            }
+
+            if let Ok(cmdline) = self.config.lock().as_ref() {
+                let mut cmd = cmdline.cmdline.args.clone();
+                // Firmware need cmdline string end with NULL in "C"
+                cmd.push(0 as char);
+            }
+
+            // The entry point offset in UEFI image is always 0.
+            return Ok(EntryPoint {
+                entry_addr: arch::layout::UEFI_START,
+            });
+        }
+
         let mut kernel = self.kernel.as_ref().unwrap();
         let entry_addr = match linux_loader::loader::pe::PE::load(
             mem.deref(),
@@ -1210,6 +1293,10 @@ impl Vm {
                 ))
             })?;
 
+        let mut kernel_size = 0;
+        if let Some(k) = &self.kernel {
+            kernel_size = k.metadata().unwrap().len();
+        }
         arch::configure_system(
             &mem,
             cmdline.as_str(),
@@ -1222,6 +1309,7 @@ impl Vm {
             &vgic,
             &self.numa_nodes,
             pmu_supported,
+            kernel_size,
         )
         .map_err(Error::ConfigureSystem)?;
 
@@ -2058,11 +2146,13 @@ impl Vm {
 
     #[cfg(target_arch = "aarch64")]
     fn entry_point(&mut self) -> Result<Option<EntryPoint>> {
-        Ok(if self.kernel.as_ref().is_some() {
-            Some(self.load_kernel()?)
-        } else {
-            None
-        })
+        Ok(
+            if self.kernel.as_ref().is_some() || self.firmware.as_ref().is_some() {
+                Some(self.load_kernel()?)
+            } else {
+                None
+            },
+        )
     }
 
     pub fn boot(&mut self) -> Result<()> {
