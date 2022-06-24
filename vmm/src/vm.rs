@@ -50,6 +50,10 @@ use arch::{NumaNode, NumaNodes};
 use devices::gic::GIC_V3_ITS_SNAPSHOT_ID;
 #[cfg(target_arch = "aarch64")]
 use devices::interrupt_controller::{self, InterruptController};
+#[cfg(target_arch = "aarch64")]
+use devices::legacy::fw_cfg::{
+    FW_CFG_CMDLINE_DATA, FW_CFG_CMDLINE_SIZE, FW_CFG_KERNEL_DATA, FW_CFG_KERNEL_SIZE,
+};
 use devices::AcpiNotificationFlags;
 #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
 use gdbstub_arch::x86::reg::X86_64CoreRegs;
@@ -454,6 +458,7 @@ pub fn physical_bits(max_phys_bits: u8) -> u8 {
 pub struct Vm {
     #[cfg(any(target_arch = "aarch64", feature = "tdx"))]
     kernel: Option<File>,
+    firmware: Option<File>,
     initramfs: Option<File>,
     threads: Vec<thread::JoinHandle<()>>,
     device_manager: Arc<Mutex<DeviceManager>>,
@@ -494,6 +499,15 @@ impl Vm {
         restoring: bool,
         timestamp: Instant,
     ) -> Result<Self> {
+        let firmware = match config.lock() {
+            Ok(f) => f
+                .firmware
+                .as_ref()
+                .map(|f| File::open(&f.path))
+                .transpose()
+                .map_err(Error::FirmwareFile)?,
+            Err(_) => None,
+        };
         let kernel = config
             .lock()
             .unwrap()
@@ -600,6 +614,8 @@ impl Vm {
             .map_err(Error::InitramfsFile)?;
 
         Ok(Vm {
+            #[cfg(target_arch = "aarch64")]
+            firmware,
             #[cfg(any(target_arch = "aarch64", feature = "tdx"))]
             kernel,
             initramfs,
@@ -947,6 +963,82 @@ impl Vm {
     fn load_kernel(&mut self) -> Result<EntryPoint> {
         let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
         let mem = guest_memory.memory();
+
+        // If there is firmware image, load it and negelect kernel image load.
+        if let Some(mut f) = self.firmware.as_ref() {
+            let uefi_flash = self.device_manager.lock().as_ref().unwrap().uefi_flash();
+            let mem = uefi_flash.memory();
+            arch::aarch64::uefi::load_uefi(mem.deref(), arch::layout::UEFI_START, &mut f)
+                .map_err(Error::UefiLoad)?;
+
+            // If there is no kernel image, just boot from firmware and try to load kernel from disk
+            if let Some(k) = self.kernel.as_ref() {
+                // Firmware will try to boot kernel added here.
+                let mut kernel = k;
+                let mut buff = Vec::new();
+                let size = kernel.read_to_end(&mut buff).unwrap();
+                let data = Box::new(buff);
+                self.device_manager
+                    .lock()
+                    .as_ref()
+                    .unwrap()
+                    .fw_cfg
+                    .as_ref()
+                    .unwrap()
+                    .lock()
+                    .as_mut()
+                    .unwrap()
+                    .add_bytes(FW_CFG_KERNEL_DATA, Some(data), size as u32);
+
+                self.device_manager
+                    .lock()
+                    .as_ref()
+                    .unwrap()
+                    .fw_cfg
+                    .as_ref()
+                    .unwrap()
+                    .lock()
+                    .as_mut()
+                    .unwrap()
+                    .add_i32(FW_CFG_KERNEL_SIZE, size as i32);
+            }
+
+            if let Ok(cmdline) = self.config.lock().as_ref() {
+                let mut cmd = cmdline.cmdline.args.clone();
+                // Firmware need cmdline string end with NULL in "C"
+                cmd.push(0 as char);
+                // Add cmdline to fw_cfg
+                self.device_manager
+                    .lock()
+                    .as_ref()
+                    .unwrap()
+                    .fw_cfg
+                    .as_ref()
+                    .unwrap()
+                    .lock()
+                    .as_mut()
+                    .unwrap()
+                    .add_string(FW_CFG_CMDLINE_DATA, cmd.as_str());
+
+                self.device_manager
+                    .lock()
+                    .as_ref()
+                    .unwrap()
+                    .fw_cfg
+                    .as_ref()
+                    .unwrap()
+                    .lock()
+                    .as_mut()
+                    .unwrap()
+                    .add_i32(FW_CFG_CMDLINE_SIZE, cmd.len() as i32);
+            }
+
+            // The entry point offset in UEFI image is always 0.
+            return Ok(EntryPoint {
+                entry_addr: arch::layout::UEFI_START,
+            });
+        }
+
         let mut kernel = self.kernel.as_ref().unwrap();
         let entry_addr = match linux_loader::loader::pe::PE::load(
             mem.deref(),
@@ -2049,11 +2141,13 @@ impl Vm {
 
     #[cfg(target_arch = "aarch64")]
     fn entry_point(&mut self) -> Result<Option<EntryPoint>> {
-        Ok(if self.kernel.as_ref().is_some() {
-            Some(self.load_kernel()?)
-        } else {
-            None
-        })
+        Ok(
+            if self.kernel.as_ref().is_some() || self.firmware.as_ref().is_some() {
+                Some(self.load_kernel()?)
+            } else {
+                None
+            },
+        )
     }
 
     pub fn boot(&mut self) -> Result<()> {
