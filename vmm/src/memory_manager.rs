@@ -1207,6 +1207,14 @@ impl MemoryManager {
         let mut hotplug_slots = Vec::with_capacity(HOTPLUG_COUNT);
         hotplug_slots.resize_with(HOTPLUG_COUNT, HotPlugState::default);
 
+        /* Nuno: copy what new() does */
+        #[cfg(feature = "acpi")]
+        let acpi_address = allocator
+            .lock()
+            .unwrap()
+            .allocate_platform_mmio_addresses(None, MEMORY_MANAGER_ACPI_SIZE as u64, None)
+            .ok_or(Error::AllocateMmioAddress)?;
+
         let mut memory_manager = MemoryManager {
             boot_guest_memory,
             guest_memory,
@@ -1234,6 +1242,8 @@ impl MemoryManager {
             arch_mem_regions,
             ram_allocator, /* Nuno: used in allocate_address_space, and memory hotplug */
             guest_ram_mappings: Vec::new(),
+            #[cfg(feature = "acpi")]
+            acpi_address,
         };
 
         /*
