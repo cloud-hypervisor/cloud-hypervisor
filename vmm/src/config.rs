@@ -340,6 +340,7 @@ pub struct VmParams<'a> {
     pub cpus: &'a str,
     pub memory: &'a str,
     pub memory_zones: Option<Vec<&'a str>>,
+    pub firmware: Option<&'a str>,
     pub kernel: Option<&'a str>,
     pub initramfs: Option<&'a str>,
     pub cmdline: Option<&'a str>,
@@ -375,6 +376,7 @@ impl<'a> VmParams<'a> {
         let rng = args.value_of("rng").unwrap();
         let serial = args.value_of("serial").unwrap();
 
+        let firmware = args.value_of("firmware");
         let kernel = args.value_of("kernel");
         let initramfs = args.value_of("initramfs");
         let cmdline = args.value_of("cmdline");
@@ -402,6 +404,7 @@ impl<'a> VmParams<'a> {
             cpus,
             memory,
             memory_zones,
+            firmware,
             kernel,
             initramfs,
             cmdline,
@@ -2242,6 +2245,7 @@ pub struct VmConfig {
     pub cpus: CpusConfig,
     #[serde(default)]
     pub memory: MemoryConfig,
+    pub firmware: Option<KernelConfig>,
     pub kernel: Option<KernelConfig>,
     #[serde(default)]
     pub initramfs: Option<InitramfsConfig>,
@@ -2625,6 +2629,13 @@ impl VmConfig {
             numa = Some(numa_config_list);
         }
 
+        let mut firmware: Option<KernelConfig> = None;
+        if let Some(f) = vm_params.firmware {
+            firmware = Some(KernelConfig {
+                path: PathBuf::from(f),
+            });
+        }
+
         let mut kernel: Option<KernelConfig> = None;
         if let Some(k) = vm_params.kernel {
             kernel = Some(KernelConfig {
@@ -2648,6 +2659,7 @@ impl VmConfig {
         let mut config = VmConfig {
             cpus: CpusConfig::parse(vm_params.cpus)?,
             memory: MemoryConfig::parse(vm_params.memory, vm_params.memory_zones)?,
+            firmware,
             kernel,
             initramfs,
             cmdline: CmdlineConfig::parse(vm_params.cmdline)?,
@@ -3238,6 +3250,9 @@ mod tests {
                 prefault: false,
                 zones: None,
             },
+            firmware: Some(KernelConfig {
+                path: PathBuf::from("/path/to/firmware"),
+            }),
             kernel: Some(KernelConfig {
                 path: PathBuf::from("/path/to/kernel"),
             }),

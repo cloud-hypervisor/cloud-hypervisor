@@ -193,6 +193,15 @@ fn create_app<'a>(
                 .group("vm-config"),
         )
         .arg(
+            Arg::new("firmware")
+                .long("firmware")
+                .help(
+                     "Path to firmware image, generally a UEFI image",
+                )
+                .takes_value(true)
+                .group("vm-config"),
+        )
+        .arg(
             Arg::new("kernel")
                 .long("kernel")
                 .help(
