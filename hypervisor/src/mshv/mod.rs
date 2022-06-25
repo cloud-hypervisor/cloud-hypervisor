@@ -11,7 +11,7 @@ use crate::cpu;
 use crate::cpu::Vcpu;
 use crate::hypervisor;
 use crate::vec_with_array_field;
-use crate::vm::{self, InterruptSourceConfig, VmOps, VmState};
+use crate::vm::{self, InterruptSourceConfig, VmOps, VmState, CreateDevice, DeviceType};
 pub use mshv_bindings::*;
 pub use mshv_ioctls::IoEventAddress;
 use mshv_ioctls::{set_registers_64, Mshv, NoDatamatch, VcpuFd, VmFd};
@@ -40,7 +40,6 @@ const DIRTY_BITMAP_SET_DIRTY: u64 = 0x8;
 /// Export generically-named wrappers of mshv-bindings for Unix-based platforms
 ///
 pub use {
-    mshv_bindings::mshv_create_device as CreateDevice,
     mshv_bindings::mshv_device_attr as DeviceAttr,
     mshv_bindings::mshv_msi_routing_entry as IrqRoutingEntry, mshv_ioctls::DeviceFd,
 };
@@ -89,6 +88,40 @@ impl From<hypervisor::UserMemoryRegion> for mshv_user_mem_region {
             size: region.memory_size,
             userspace_addr: region.userspace_addr,
             flags: flags,
+        }
+    }
+}
+
+impl From<&mut mshv_create_device> for CreateDevice {
+    fn from(device: &mut mshv_create_device) -> CreateDevice {
+        CreateDevice {
+            type_: match device.type_{
+                mshv_bindings::mshv_device_type_MSHV_DEV_TYPE_VFIO => DeviceType::VFIO,
+                mshv_bindings::mshv_device_type_MSHV_DEV_TYPE_MAX => DeviceType::MAX,
+                _ => unreachable!()
+            },
+            fd: device.fd,
+            flags: match device.flags{
+                mshv_bindings::MSHV_CREATE_DEVICE_TEST => vm::CREATE_DEVICE_TEST,
+                _ => 0
+            },
+        }
+    }
+}
+
+impl From<&mut CreateDevice> for mshv_create_device {
+    fn from(device: &mut CreateDevice) -> mshv_create_device {
+        mshv_create_device {
+            type_: match device.type_{
+                DeviceType::VFIO => mshv_bindings::mshv_device_type_MSHV_DEV_TYPE_VFIO,
+                DeviceType::MAX => mshv_bindings::mshv_device_type_MSHV_DEV_TYPE_MAX,
+                _ => unreachable!()
+            },
+            fd: device.fd,
+            flags: match device.flags{
+                vm::CREATE_DEVICE_TEST => mshv_bindings::MSHV_CREATE_DEVICE_TEST,
+                _ => 0
+            },
         }
     }
 }
@@ -1013,9 +1046,10 @@ impl vm::Vm for MshvVm {
     ///
     /// See the documentation for `MSHV_CREATE_DEVICE`.
     fn create_device(&self, device: &mut CreateDevice) -> vm::Result<Arc<dyn device::Device>> {
+        let mut device: mshv_create_device = device.into();
         let fd = self
             .fd
-            .create_device(device)
+            .create_device(&mut device)
             .map_err(|e| vm::HypervisorVmError::CreateDevice(e.into()))?;
         let device = MshvDevice { fd };
         Ok(Arc::new(device))
@@ -1028,7 +1062,7 @@ impl vm::Vm for MshvVm {
             flags: 0,
         };
 
-        self.create_device(&mut vfio_dev)
+        self.create_device(&mut (&mut vfio_dev).into())
             .map_err(|e| vm::HypervisorVmError::CreatePassthroughDevice(e.into()))
     }
 

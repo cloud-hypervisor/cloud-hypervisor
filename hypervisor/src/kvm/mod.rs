@@ -21,7 +21,7 @@ use crate::cpu;
 use crate::device;
 use crate::hypervisor;
 use crate::vec_with_array_field;
-use crate::vm::{self, InterruptSourceConfig, VmOps, VmState};
+use crate::vm::{self, InterruptSourceConfig, VmOps, VmState, CreateDevice, DeviceType};
 #[cfg(target_arch = "aarch64")]
 use crate::{arm64_core_reg_id, offset__of};
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
@@ -87,7 +87,7 @@ use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_expr, ioctl_ioc_nr, ioctl_iowr_n
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
 ///
 pub use {
-    kvm_bindings::kvm_clock_data as ClockData, kvm_bindings::kvm_create_device as CreateDevice,
+    kvm_bindings::kvm_clock_data as ClockData,
     kvm_bindings::kvm_device_attr as DeviceAttr,
     kvm_bindings::kvm_irq_routing_entry as IrqRoutingEntry, kvm_bindings::kvm_mp_state,
     kvm_bindings::kvm_run,
@@ -206,6 +206,57 @@ impl From<hypervisor::UserMemoryRegion> for kvm_userspace_memory_region {
                 KVM_MEM_LOG_DIRTY_PAGES
             } else {
                 0
+            },
+        }
+    }
+}
+
+impl From<&mut kvm_create_device> for CreateDevice {
+    fn from(device: &mut kvm_create_device) -> CreateDevice {
+        CreateDevice {
+            type_: match device.type_{
+                kvm_bindings::kvm_device_type_KVM_DEV_TYPE_FSL_MPIC_20 => DeviceType::FSL_MPIC_20,
+                kvm_bindings::kvm_device_type_KVM_DEV_TYPE_FSL_MPIC_42 => DeviceType::FSL_MPIC_42,
+                kvm_bindings::kvm_device_type_KVM_DEV_TYPE_XICS => DeviceType::XICS,
+                kvm_bindings::kvm_device_type_KVM_DEV_TYPE_VFIO => DeviceType::VFIO,
+                kvm_bindings::kvm_device_type_KVM_DEV_TYPE_ARM_VGIC_V2 => DeviceType::ARM_VGIC_V2,
+                kvm_bindings::kvm_device_type_KVM_DEV_TYPE_FLIC => DeviceType::FLIC,
+                kvm_bindings::kvm_device_type_KVM_DEV_TYPE_ARM_VGIC_V3 => DeviceType::ARM_VGIC_V3,
+                kvm_bindings::kvm_device_type_KVM_DEV_TYPE_ARM_VGIC_ITS => DeviceType::ARM_VGIC_ITS,
+                kvm_bindings::kvm_device_type_KVM_DEV_TYPE_XIVE => DeviceType::XIVE,
+                kvm_bindings::kvm_device_type_KVM_DEV_TYPE_ARM_PV_TIME => DeviceType::ARM_PV_TIME,
+                kvm_bindings::kvm_device_type_KVM_DEV_TYPE_MAX => DeviceType::MAX,
+                _ => unreachable!()
+            },
+            fd: device.fd,
+            flags: match device.flags{
+                kvm_bindings::KVM_CREATE_DEVICE_TEST => vm::CREATE_DEVICE_TEST,
+                _ => 0
+            },
+        }
+    }
+}
+
+impl From<&mut CreateDevice> for kvm_create_device {
+    fn from(device: &mut CreateDevice) -> kvm_create_device {
+        kvm_create_device {
+            type_: match device.type_{
+                DeviceType::FSL_MPIC_20 => kvm_bindings::kvm_device_type_KVM_DEV_TYPE_FSL_MPIC_20,
+                DeviceType::FSL_MPIC_42 => kvm_bindings::kvm_device_type_KVM_DEV_TYPE_FSL_MPIC_42,
+                DeviceType::XICS => kvm_bindings::kvm_device_type_KVM_DEV_TYPE_XICS,
+                DeviceType::VFIO => kvm_bindings::kvm_device_type_KVM_DEV_TYPE_VFIO,
+                DeviceType::ARM_VGIC_V2 => kvm_bindings::kvm_device_type_KVM_DEV_TYPE_ARM_VGIC_V2,
+                DeviceType::FLIC => kvm_bindings::kvm_device_type_KVM_DEV_TYPE_FLIC,
+                DeviceType::ARM_VGIC_V3 => kvm_bindings::kvm_device_type_KVM_DEV_TYPE_ARM_VGIC_V3,
+                DeviceType::ARM_VGIC_ITS => kvm_bindings::kvm_device_type_KVM_DEV_TYPE_ARM_VGIC_ITS,
+                DeviceType::XIVE => kvm_bindings::kvm_device_type_KVM_DEV_TYPE_XIVE,
+                DeviceType::ARM_PV_TIME => kvm_bindings::kvm_device_type_KVM_DEV_TYPE_ARM_PV_TIME,
+                DeviceType::MAX => kvm_bindings::kvm_device_type_KVM_DEV_TYPE_MAX,
+            },
+            fd: device.fd,
+            flags: match device.flags{
+                vm::CREATE_DEVICE_TEST => kvm_bindings::KVM_CREATE_DEVICE_TEST,
+                _ => 0
             },
         }
     }
@@ -534,9 +585,10 @@ impl vm::Vm for KvmVm {
     ///
     /// See the documentation for `KVM_CREATE_DEVICE`.
     fn create_device(&self, device: &mut CreateDevice) -> vm::Result<Arc<dyn device::Device>> {
+        let mut device: kvm_create_device = device.into();
         let fd = self
             .fd
-            .create_device(device)
+            .create_device(&mut device)
             .map_err(|e| vm::HypervisorVmError::CreateDevice(e.into()))?;
         let device = KvmDevice { fd };
         Ok(Arc::new(device))
@@ -603,7 +655,7 @@ impl vm::Vm for KvmVm {
             flags: 0,
         };
 
-        self.create_device(&mut vfio_dev)
+        self.create_device(&mut (&mut vfio_dev).into())
             .map_err(|e| vm::HypervisorVmError::CreatePassthroughDevice(e.into()))
     }
     ///

@@ -22,7 +22,6 @@ use crate::kvm::KvmVmState;
 use crate::mshv::HvState;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use crate::ClockData;
-use crate::CreateDevice;
 use crate::{IoEventAddress, IrqRoutingEntry, UserMemoryRegion};
 #[cfg(feature = "kvm")]
 use kvm_ioctls::Cap;
@@ -407,4 +406,30 @@ impl VmState {
             state: _VmState::Mshv(state),
         }
     }
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct CreateDevice {
+    pub type_: DeviceType,
+    pub fd: u32,
+    pub flags: u32,
+}
+
+pub const CREATE_DEVICE_TEST: u32 = 1;
+
+#[allow(non_camel_case_types)]
+#[derive(Debug, Copy, Clone)]
+pub enum DeviceType {
+    FSL_MPIC_20,
+    FSL_MPIC_42,
+    XICS,
+    VFIO,
+    ARM_VGIC_V2,
+    FLIC,
+    ARM_VGIC_V3,
+    ARM_VGIC_ITS,
+    XIVE,
+    ARM_PV_TIME,
+    MAX,
 }
