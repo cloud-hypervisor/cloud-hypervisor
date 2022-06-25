@@ -21,7 +21,7 @@ use crate::cpu;
 use crate::device;
 use crate::hypervisor;
 use crate::vec_with_array_field;
-use crate::vm::{self, InterruptSourceConfig, VmOps};
+use crate::vm::{self, InterruptSourceConfig, VmOps, VmState};
 #[cfg(target_arch = "aarch64")]
 use crate::{arm64_core_reg_id, offset__of};
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
@@ -213,8 +213,6 @@ impl From<hypervisor::UserMemoryRegion> for kvm_userspace_memory_region {
 
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 pub struct KvmVmState {}
-
-pub use KvmVmState as VmState;
 
 struct KvmDirtyLogSlot {
     slot: u32,
@@ -612,7 +610,7 @@ impl vm::Vm for KvmVm {
     /// Get the Vm state. Return VM specific data
     ///
     fn state(&self) -> vm::Result<VmState> {
-        Ok(self.state)
+        Ok(VmState::from_kvm(self.state))
     }
     ///
     /// Set the VM state
@@ -870,7 +868,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             Ok(Arc::new(KvmVm {
                 fd: vm_fd,
                 msrs,
-                state: VmState {},
+                state: KvmVmState {},
                 dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
             }))
         }

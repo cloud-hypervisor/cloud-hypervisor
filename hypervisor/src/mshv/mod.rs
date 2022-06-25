@@ -11,7 +11,7 @@ use crate::cpu;
 use crate::cpu::Vcpu;
 use crate::hypervisor;
 use crate::vec_with_array_field;
-use crate::vm::{self, InterruptSourceConfig, VmOps};
+use crate::vm::{self, InterruptSourceConfig, VmOps, VmState};
 pub use mshv_bindings::*;
 pub use mshv_ioctls::IoEventAddress;
 use mshv_ioctls::{set_registers_64, Mshv, NoDatamatch, VcpuFd, VmFd};
@@ -97,8 +97,6 @@ impl From<hypervisor::UserMemoryRegion> for mshv_user_mem_region {
 pub struct HvState {
     hypercall_page: u64,
 }
-
-pub use HvState as VmState;
 
 struct MshvDirtyLogSlot {
     guest_pfn: u64,
@@ -1077,13 +1075,19 @@ impl vm::Vm for MshvVm {
     /// Get the Vm state. Return VM specific data
     ///
     fn state(&self) -> vm::Result<VmState> {
-        Ok(*self.hv_state.read().unwrap())
+        Ok(VmState::from_mshv(*self.hv_state.read().unwrap()))
     }
     ///
     /// Set the VM state
     ///
     fn set_state(&self, state: VmState) -> vm::Result<()> {
-        self.hv_state.write().unwrap().hypercall_page = state.hypercall_page;
+        match state.state(){
+            vm::_VmState::Mshv(s) => {
+                self.hv_state.write().unwrap().hypercall_page = s.hypercall_page;
+            },
+            _ => {}
+        }
+        
         Ok(())
     }
     ///

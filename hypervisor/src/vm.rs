@@ -17,9 +17,9 @@ use crate::device::Device;
 #[cfg(feature = "tdx")]
 use crate::generic_x86_64::CpuId;
 #[cfg(feature = "kvm")]
-use crate::kvm::KvmVmState as VmState;
+use crate::kvm::KvmVmState;
 #[cfg(feature = "mshv")]
-use crate::mshv::HvState as VmState;
+use crate::mshv::HvState;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use crate::ClockData;
 use crate::CreateDevice;
@@ -33,6 +33,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
+use serde::{Deserialize, Serialize};
 
 ///
 /// I/O events data matches (32 or 64 bits).
@@ -372,4 +373,38 @@ pub trait VmOps: Send + Sync {
     fn pio_read(&self, port: u64, data: &mut [u8]) -> Result<()>;
     #[cfg(target_arch = "x86_64")]
     fn pio_write(&self, port: u64, data: &[u8]) -> Result<()>;
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+pub enum _VmState {
+    Kvm(KvmVmState),
+    #[cfg(feature = "mshv")]
+    Mshv(HvState),
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+pub struct VmState {
+    state: _VmState,
+}
+
+impl VmState {
+    pub fn state(&self) -> _VmState {
+        self.state.clone()
+    }
+
+    pub fn set_state(&mut self, new_state: _VmState) {
+        self.state = new_state;
+    }
+
+    pub fn from_kvm(state: KvmVmState) -> Self {
+        VmState {
+            state: _VmState::Kvm(state),
+        }
+    }
+    #[cfg(feature = "mshv")]
+    pub fn from_mshv(state: HvState) -> Self {
+        VmState {
+            state: _VmState::Mshv(state),
+        }
+    }
 }
