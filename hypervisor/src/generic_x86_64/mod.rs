@@ -12,6 +12,9 @@ use crate::arch::x86::{SegmentRegisterOps, msr_index, MTRR_ENABLE, MTRR_MEM_TYPE
 use crate::{msr, msr_data};
 use serde::{Deserialize, Serialize, Serializer, Deserializer};
 use vmm_sys_util::{fam::FamStruct, fam::FamStructWrapper, generate_fam_struct_impl};
+use crate::kvm;
+#[cfg(feature = "mshv")]
+use crate::mshv;
 
 #[repr(C)]
 #[derive(Default)]
@@ -422,4 +425,38 @@ pub struct MpState {
 pub struct SuspendRegisters {
     pub explicit_register: u64,
     pub intercept_register: u64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub enum _CpuState {
+    Kvm(kvm::x86_64::VcpuKvmState),
+    #[cfg(feature = "mshv")]
+    Mshv(mshv::x86_64::VcpuMshvState,)
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct CpuState {
+    state: _CpuState,
+}
+
+impl CpuState {
+    pub fn state(&self) -> _CpuState {
+        self.state.clone()
+    }
+
+    pub fn set_state(&mut self, new_state: _CpuState) -> () {
+        self.state = new_state;
+    }
+
+    pub fn from_kvm(new_state: kvm::x86_64::VcpuKvmState) -> Self {
+        CpuState{
+            state: _CpuState::Kvm(new_state),
+        }
+    }
+    #[cfg(feature = "mshv")]
+    pub fn from_mshv(new_state: mshv::x86_64::VcpuMshvState) -> Self {
+        CpuState{
+            state: _CpuState::Mshv(new_state),
+        }
+    }
 }

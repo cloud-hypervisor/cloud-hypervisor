@@ -27,8 +27,6 @@ use crate::device;
 use crate::generic_x86_64;
 use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "x86_64")]
-pub use x86_64::VcpuMshvState as CpuState;
-#[cfg(target_arch = "x86_64")]
 pub use x86_64::*;
 
 #[cfg(target_arch = "x86_64")]
@@ -571,30 +569,39 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// Set CPU state
     ///
-    fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
-        self.set_msrs(&state.msrs)?;
-        self.set_vcpu_events(&state.vcpu_events)?;
-        self.set_regs(&state.regs)?;
-        self.set_sregs(&state.sregs)?;
-        self.set_fpu(&state.fpu)?;
-        self.set_lapic(&state.lapic)?;
-        self.set_xsave(&state.xsave)?;
+    fn set_state(&self, state: &generic_x86_64::CpuState) -> cpu::Result<()> {
+        let new_state: VcpuMshvState;
+        match state.state() {
+            generic_x86_64::_CpuState::Mshv(s) => {
+                new_state = s;
+            },
+            _ => {
+                unreachable!() //TODO: return proper error here
+            }
+        }
+        self.set_msrs(&new_state.msrs)?;
+        self.set_vcpu_events(&new_state.vcpu_events)?;
+        self.set_regs(&new_state.regs)?;
+        self.set_sregs(&new_state.sregs)?;
+        self.set_fpu(&new_state.fpu)?;
+        self.set_lapic(&new_state.lapic)?;
+        self.set_xsave(&new_state.xsave)?;
         // These registers are global and needed to be set only for first VCPU
         // as Microsoft Hypervisor allows setting this regsier for only one VCPU
         if self.vp_index == 0 {
             self.fd
-                .set_misc_regs(&state.misc)
+                .set_misc_regs(&new_state.misc)
                 .map_err(|e| cpu::HypervisorCpuError::SetMiscRegs(e.into()))?
         }
         self.fd
-            .set_debug_regs(&state.dbg)
+            .set_debug_regs(&new_state.dbg)
             .map_err(|e| cpu::HypervisorCpuError::SetDebugRegs(e.into()))?;
         Ok(())
     }
     ///
     /// Get CPU State
     ///
-    fn state(&self) -> cpu::Result<CpuState> {
+    fn state(&self) -> cpu::Result<generic_x86_64::CpuState> {
         let regs = self.get_regs()?;
         let sregs = self.get_sregs()?;
         let fpu = self.get_fpu()?;
@@ -612,7 +619,7 @@ impl cpu::Vcpu for MshvVcpu {
             .get_debug_regs()
             .map_err(|e| cpu::HypervisorCpuError::GetDebugRegs(e.into()))?;
 
-        Ok(CpuState {
+        Ok(generic_x86_64::CpuState::from_mshv(VcpuMshvState {
             msrs,
             vcpu_events,
             regs,
@@ -622,7 +629,7 @@ impl cpu::Vcpu for MshvVcpu {
             dbg,
             xsave,
             misc,
-        })
+        }))
     }
     #[cfg(target_arch = "x86_64")]
     ///

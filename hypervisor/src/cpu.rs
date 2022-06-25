@@ -13,10 +13,9 @@ use crate::aarch64::VcpuInit;
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::{RegList, Register, StandardRegisters};
 #[cfg(target_arch = "x86_64")]
-use crate::generic_x86_64::{CpuId, FpuState, SpecialRegisters, StandardRegisters, LapicState, MsrEntries, Xsave, VcpuEvents, MpState, SuspendRegisters};
+use crate::generic_x86_64::{CpuId, FpuState, SpecialRegisters, StandardRegisters, LapicState, MsrEntries, Xsave, VcpuEvents, MpState, SuspendRegisters, CpuState};
 #[cfg(feature = "tdx")]
 use crate::kvm::{TdxExitDetails, TdxExitStatus};
-use crate::CpuState;
 #[cfg(target_arch = "aarch64")]
 use crate::DeviceAttr;
 use thiserror::Error;

@@ -45,7 +45,7 @@ pub mod x86_64;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::NUM_IOAPIC_PINS;
 #[cfg(target_arch = "x86_64")]
-use crate::generic_x86_64::{CpuId, FpuState, SpecialRegisters, StandardRegisters, LapicState, MsrEntries, MsrList, Xsave, _Xsave, VcpuEvents, _VcpuEvents, MpState};
+use crate::generic_x86_64::{CpuId, FpuState, SpecialRegisters, StandardRegisters, LapicState, MsrEntries, MsrList, Xsave, _Xsave, VcpuEvents, _VcpuEvents, MpState, CpuState, _CpuState};
 #[cfg(target_arch = "aarch64")]
 use aarch64::{RegList, Register, StandardRegisters};
 #[cfg(target_arch = "x86_64")]
@@ -58,7 +58,7 @@ use x86_64::check_required_kvm_extensions;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
     convert_from_generic_cpu_id, convert_to_generic_cpu_id, convert_from_generic_msrs, convert_to_generic_msrs, convert_from_generic_msr_list, convert_to_generic_msr_list,
-    VcpuKvmState as CpuState,
+    VcpuKvmState,
 };
 // aarch64 dependencies
 #[cfg(target_arch = "aarch64")]
@@ -1803,7 +1803,7 @@ impl cpu::Vcpu for KvmVcpu {
 
         let vcpu_events = self.get_vcpu_events()?;
 
-        Ok(CpuState {
+        Ok(CpuState::from_kvm(VcpuKvmState {
             cpuid,
             msrs,
             vcpu_events,
@@ -1813,7 +1813,7 @@ impl cpu::Vcpu for KvmVcpu {
             lapic_state,
             xsave,
             mp_state,
-        })
+        }))
     }
     ///
     /// Get the current AArch64 CPU state
@@ -1871,33 +1871,42 @@ impl cpu::Vcpu for KvmVcpu {
     /// vcpu.set_state(&state).unwrap();
     /// ```
     fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
-        self.set_cpuid2(&state.cpuid)?;
-        self.set_mp_state(state.mp_state)?;
-        self.set_regs(&state.regs)?;
-        self.set_sregs(&state.sregs)?;
-        self.set_xsave(&state.xsave)?;
-        self.set_lapic(&state.lapic_state)?;
-        self.set_fpu(&state.fpu)?;
+        let new_state: VcpuKvmState;
+        match state.state() {
+            _CpuState::Kvm(s) => {
+                new_state = s;
+            },
+            _ => {
+                unreachable!() //TODO: return proper error here
+            }
+        }
+        self.set_cpuid2(&new_state.cpuid)?;
+        self.set_mp_state(new_state.mp_state)?;
+        self.set_regs(&new_state.regs)?;
+        self.set_sregs(&new_state.sregs)?;
+        self.set_xsave(&new_state.xsave)?;
+        self.set_lapic(&new_state.lapic_state)?;
+        self.set_fpu(&new_state.fpu)?;
 
         // Try to set all MSRs previously stored.
         // If the number of MSRs set from SET_MSRS is different from the
         // expected amount, we fallback onto a slower method by setting MSRs
         // by chunks. This is the only way to make sure we try to set as many
         // MSRs as possible, even if some MSRs are not supported.
-        let expected_num_msrs = state.msrs.as_fam_struct_ref().nmsrs as usize;
-        let num_msrs = self.set_msrs(&state.msrs)?;
+        let expected_num_msrs = new_state.msrs.as_fam_struct_ref().nmsrs as usize;
+        let num_msrs = self.set_msrs(&new_state.msrs)?;
         if num_msrs != expected_num_msrs {
             let mut faulty_msr_index = num_msrs;
 
             loop {
                 warn!(
                     "Detected faulty MSR 0x{:x} while setting MSRs",
-                    state.msrs.as_slice()[faulty_msr_index].index
+                    new_state.msrs.as_slice()[faulty_msr_index].index
                 );
 
                 let start_pos = faulty_msr_index + 1;
                 let sub_msr_entries =
-                    MsrEntries::from_entries(&state.msrs.as_slice()[start_pos..]).unwrap();
+                    MsrEntries::from_entries(&new_state.msrs.as_slice()[start_pos..]).unwrap();
                 let expected_num_msrs = sub_msr_entries.as_fam_struct_ref().nmsrs as usize;
                 let num_msrs = self.set_msrs(&sub_msr_entries)?;
 
@@ -1909,7 +1918,7 @@ impl cpu::Vcpu for KvmVcpu {
             }
         }
 
-        self.set_vcpu_events(&state.vcpu_events)?;
+        self.set_vcpu_events(&new_state.vcpu_events)?;
 
         Ok(())
     }
