@@ -53,7 +53,7 @@ mod device;
 
 pub use cpu::{HypervisorCpuError, Vcpu, VmExit};
 pub use device::{Device, HypervisorDeviceError};
-pub use hypervisor::{user_memory_region_flags, Hypervisor, HypervisorError, UserMemoryRegion};
+pub use hypervisor::{user_memory_region_flags, Hypervisor, HypervisorError, UserMemoryRegion, IoEventAddress};
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 pub use kvm::x86_64;
 #[cfg(all(feature = "kvm", target_arch = "aarch64"))]
@@ -64,14 +64,14 @@ pub use crate::vm::{VmState, CreateDevice};
 // Aliased types exposed from both hypervisors
 #[cfg(feature = "kvm")]
 pub use kvm::{
-    ClockData, DeviceAttr, DeviceFd, IoEventAddress, IrqRoutingEntry,
+    ClockData, DeviceAttr, DeviceFd, IrqRoutingEntry,
 };
 #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
 pub use mshv::x86_64;
 // Aliased types exposed from both hypervisors
 #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
 pub use mshv::{
-    DeviceAttr, DeviceFd, IoEventAddress, IrqRoutingEntry,
+    DeviceAttr, DeviceFd, IrqRoutingEntry,
 };
 use std::sync::Arc;
 pub use vm::{

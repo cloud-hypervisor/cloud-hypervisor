@@ -139,3 +139,9 @@ pub mod user_memory_region_flags {
     pub const EXECUTE: u32 = 1 << 2;
     pub const LOG_DIRTY_PAGES: u32 = 1 << 3;
 }
+
+#[derive(Eq, PartialEq, Hash, Clone, Debug, Copy)]
+pub enum IoEventAddress {
+    Pio(u64),
+    Mmio(u64),
+}

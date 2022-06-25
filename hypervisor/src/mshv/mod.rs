@@ -126,6 +126,24 @@ impl From<&mut CreateDevice> for mshv_create_device {
     }
 }
 
+impl From<&IoEventAddress> for hypervisor::IoEventAddress {
+    fn from(addr: &IoEventAddress) -> hypervisor::IoEventAddress {
+        match addr{
+            IoEventAddress::Pio(a) => hypervisor::IoEventAddress::Pio(*a),
+            IoEventAddress::Mmio(a) => hypervisor::IoEventAddress::Mmio(*a)
+        }
+    }
+}
+
+impl From<&hypervisor::IoEventAddress> for IoEventAddress {
+    fn from(addr: &hypervisor::IoEventAddress) -> IoEventAddress {
+        match addr{
+            hypervisor::IoEventAddress::Pio(a) => IoEventAddress::Pio(*a),
+            hypervisor::IoEventAddress::Mmio(a) => IoEventAddress::Mmio(*a),
+        }
+    }
+}
+
 #[derive(Debug, Default, Copy, Clone, Serialize, Deserialize)]
 pub struct HvState {
     hypercall_page: u64,
@@ -948,7 +966,7 @@ impl vm::Vm for MshvVm {
     fn register_ioevent(
         &self,
         fd: &EventFd,
-        addr: &IoEventAddress,
+        addr: &hypervisor::IoEventAddress,
         datamatch: Option<DataMatch>,
     ) -> vm::Result<()> {
         debug!(
@@ -957,29 +975,30 @@ impl vm::Vm for MshvVm {
             addr,
             datamatch
         );
+        let addr: IoEventAddress = addr.into();
         if let Some(dm) = datamatch {
             match dm {
                 vm::DataMatch::DataMatch32(mshv_dm32) => self
                     .fd
-                    .register_ioevent(fd, addr, mshv_dm32)
+                    .register_ioevent(fd, &addr, mshv_dm32)
                     .map_err(|e| vm::HypervisorVmError::RegisterIoEvent(e.into())),
                 vm::DataMatch::DataMatch64(mshv_dm64) => self
                     .fd
-                    .register_ioevent(fd, addr, mshv_dm64)
+                    .register_ioevent(fd, &addr, mshv_dm64)
                     .map_err(|e| vm::HypervisorVmError::RegisterIoEvent(e.into())),
             }
         } else {
             self.fd
-                .register_ioevent(fd, addr, NoDatamatch)
+                .register_ioevent(fd, &addr, NoDatamatch)
                 .map_err(|e| vm::HypervisorVmError::RegisterIoEvent(e.into()))
         }
     }
     /// Unregister an event from a certain address it has been previously registered to.
-    fn unregister_ioevent(&self, fd: &EventFd, addr: &IoEventAddress) -> vm::Result<()> {
+    fn unregister_ioevent(&self, fd: &EventFd, addr: &hypervisor::IoEventAddress) -> vm::Result<()> {
         debug!("unregister_ioevent fd {} addr {:x?}", fd.as_raw_fd(), addr);
 
         self.fd
-            .unregister_ioevent(fd, addr, NoDatamatch)
+            .unregister_ioevent(fd, &addr.into(), NoDatamatch)
             .map_err(|e| vm::HypervisorVmError::UnregisterIoEvent(e.into()))
     }
 
