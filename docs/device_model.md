@@ -6,22 +6,22 @@ This document describes the device model supported by `cloud-hypervisor`.
 
 | Device | Build configurable | Enabled by default | Runtime configurable |
 | :----: | :----: | :----: | :----: |
-| Serial port | :negative_squared_cross_mark: | :negative_squared_cross_mark: | :heavy_check_mark: |
-| RTC/CMOS | :heavy_check_mark: | :heavy_check_mark: | :negative_squared_cross_mark: |
-| I/O APIC | :negative_squared_cross_mark: | :negative_squared_cross_mark: | :heavy_check_mark: |
-| i8042 shutdown/reboot | :negative_squared_cross_mark: | :negative_squared_cross_mark: | :negative_squared_cross_mark: |
-| ACPI shutdown/reboot | :negative_squared_cross_mark: | :heavy_check_mark: | :negative_squared_cross_mark: |
-| virtio-blk | :negative_squared_cross_mark: | :negative_squared_cross_mark: | :heavy_check_mark: |
-| virtio-console | :negative_squared_cross_mark: | :negative_squared_cross_mark: | :heavy_check_mark: |
-| virtio-iommu | :negative_squared_cross_mark: | :negative_squared_cross_mark: | :heavy_check_mark: |
-| virtio-net | :negative_squared_cross_mark: | :negative_squared_cross_mark: | :heavy_check_mark: |
-| virtio-pmem | :negative_squared_cross_mark: | :negative_squared_cross_mark: | :heavy_check_mark: |
-| virtio-rng | :negative_squared_cross_mark: | :negative_squared_cross_mark: | :heavy_check_mark: |
-| virtio-vsock | :negative_squared_cross_mark: | :negative_squared_cross_mark: | :heavy_check_mark: |
-| vhost-user-blk | :negative_squared_cross_mark: | :negative_squared_cross_mark: | :heavy_check_mark: |
-| vhost-user-fs | :negative_squared_cross_mark: | :negative_squared_cross_mark: | :heavy_check_mark: |
-| vhost-user-net | :negative_squared_cross_mark: | :negative_squared_cross_mark: | :heavy_check_mark: |
-| VFIO | :heavy_check_mark: | :negative_squared_cross_mark: | :heavy_check_mark: |
+| Serial port | :x: | :x: | :heavy_check_mark: |
+| RTC/CMOS | :heavy_check_mark: | :heavy_check_mark: | :x: |
+| I/O APIC | :x: | :x: | :heavy_check_mark: |
+| i8042 shutdown/reboot | :x: | :x: | :x: |
+| ACPI shutdown/reboot | :x: | :heavy_check_mark: | :x: |
+| virtio-blk | :x: | :x: | :heavy_check_mark: |
+| virtio-console | :x: | :x: | :heavy_check_mark: |
+| virtio-iommu | :x: | :x: | :heavy_check_mark: |
+| virtio-net | :x: | :x: | :heavy_check_mark: |
+| virtio-pmem | :x: | :x: | :heavy_check_mark: |
+| virtio-rng | :x: | :x: | :heavy_check_mark: |
+| virtio-vsock | :x: | :x: | :heavy_check_mark: |
+| vhost-user-blk | :x: | :x: | :heavy_check_mark: |
+| vhost-user-fs | :x: | :x: | :heavy_check_mark: |
+| vhost-user-net | :x: | :x: | :heavy_check_mark: |
+| VFIO | :heavy_check_mark: | :x: | :heavy_check_mark: |
 
 ## Legacy devices
 
