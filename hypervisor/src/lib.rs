@@ -65,7 +65,6 @@ pub use crate::vm::VmState;
 #[cfg(feature = "kvm")]
 pub use kvm::{
     ClockData, CreateDevice, DeviceAttr, DeviceFd, IoEventAddress, IrqRoutingEntry,
-    VcpuExit,
 };
 #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
 pub use mshv::x86_64;
@@ -73,7 +72,6 @@ pub use mshv::x86_64;
 #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
 pub use mshv::{
     CreateDevice, DeviceAttr, DeviceFd, IoEventAddress, IrqRoutingEntry,
-    VcpuExit,
 };
 use std::sync::Arc;
 pub use vm::{
