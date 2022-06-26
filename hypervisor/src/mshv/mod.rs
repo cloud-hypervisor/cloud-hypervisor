@@ -715,18 +715,29 @@ impl device::Device for MshvDevice {
     ///
     /// Set device attribute
     ///
-    fn set_device_attr(&self, attr: &DeviceAttr) -> device::Result<()> {
+    fn set_device_attr(&self, attr: &device::DeviceAttr) -> device::Result<()> {
+        let attr: DeviceAttr = match attr.attr() {
+            device::_DeviceAttr::Mshv(at) => at,
+            _ => unreachable!(),
+        };
         self.fd
-            .set_device_attr(attr)
+            .set_device_attr(&attr)
             .map_err(|e| device::HypervisorDeviceError::SetDeviceAttribute(e.into()))
     }
     ///
     /// Get device attribute
     ///
-    fn get_device_attr(&self, attr: &mut DeviceAttr) -> device::Result<()> {
-        self.fd
-            .get_device_attr(attr)
-            .map_err(|e| device::HypervisorDeviceError::GetDeviceAttribute(e.into()))
+    fn get_device_attr(&self, attr: &mut device::DeviceAttr) -> device::Result<()> {
+        let mut mshv_attr: DeviceAttr = match attr.attr() {
+            device::_DeviceAttr::Mshv(mshv_attr) => mshv_attr,
+            _ => unreachable!(),
+        };
+        
+        let result = self.fd
+            .get_device_attr(&mut mshv_attr)
+            .map_err(|e| device::HypervisorDeviceError::GetDeviceAttribute(e.into()));
+        attr.set_attr(device::_DeviceAttr::Mshv(mshv_attr));
+        result
     }
 }
 

@@ -2071,18 +2071,29 @@ impl device::Device for KvmDevice {
     ///
     /// Set device attribute
     ///
-    fn set_device_attr(&self, attr: &DeviceAttr) -> device::Result<()> {
+    fn set_device_attr(&self, attr: &device::DeviceAttr) -> device::Result<()> {
+        let attr: DeviceAttr = match attr.attr() {
+            device::_DeviceAttr::Kvm(at) => at,
+            _ => unreachable!(),
+        };
         self.fd
-            .set_device_attr(attr)
+            .set_device_attr(&attr)
             .map_err(|e| device::HypervisorDeviceError::SetDeviceAttribute(e.into()))
     }
     ///
     /// Get device attribute
     ///
-    fn get_device_attr(&self, attr: &mut DeviceAttr) -> device::Result<()> {
-        self.fd
-            .get_device_attr(attr)
-            .map_err(|e| device::HypervisorDeviceError::GetDeviceAttribute(e.into()))
+    fn get_device_attr(&self, attr: &mut device::DeviceAttr) -> device::Result<()> {
+        let mut kvm_attr: DeviceAttr = match attr.attr() {
+            device::_DeviceAttr::Kvm(kvm_attr) => kvm_attr,
+            _ => unreachable!(),
+        };
+
+        let result = self.fd
+            .get_device_attr(&mut kvm_attr)
+            .map_err(|e| device::HypervisorDeviceError::GetDeviceAttribute(e.into()));
+        attr.set_attr(device::_DeviceAttr::Kvm(kvm_attr));
+        result
     }
 }
 
