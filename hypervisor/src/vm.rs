@@ -22,7 +22,7 @@ use crate::kvm::KvmVmState;
 use crate::mshv::HvState;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use crate::ClockData;
-use crate::{IoEventAddress, IrqRoutingEntry, UserMemoryRegion};
+use crate::{IoEventAddress, UserMemoryRegion};
 #[cfg(feature = "kvm")]
 use kvm_ioctls::Cap;
 #[cfg(target_arch = "x86_64")]
@@ -257,6 +257,13 @@ pub enum InterruptSourceConfig {
     /// Configuration data for PciMsi, PciMsix and generic MSI interrupts.
     MsiIrq(MsiIrqSourceConfig),
 }
+
+#[derive(Copy, Clone)]
+pub enum IrqRoutingEntry {
+    Kvm(kvm_bindings::kvm_irq_routing_entry),
+    Mshv(mshv_bindings::mshv_msi_routing_entry),
+}
+
 
 ///
 /// Trait to represent a Vm

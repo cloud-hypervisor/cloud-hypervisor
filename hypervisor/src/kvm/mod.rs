@@ -21,7 +21,7 @@ use crate::cpu;
 use crate::device;
 use crate::hypervisor;
 use crate::vec_with_array_field;
-use crate::vm::{self, InterruptSourceConfig, VmOps, VmState, CreateDevice, DeviceType};
+use crate::vm::{self, InterruptSourceConfig, VmOps, VmState, CreateDevice, DeviceType, IrqRoutingEntry};
 #[cfg(target_arch = "aarch64")]
 use crate::{arm64_core_reg_id, offset__of};
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
@@ -89,7 +89,7 @@ use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_expr, ioctl_ioc_nr, ioctl_iowr_n
 pub use {
     kvm_bindings::kvm_clock_data as ClockData,
     kvm_bindings::kvm_device_attr as DeviceAttr,
-    kvm_bindings::kvm_irq_routing_entry as IrqRoutingEntry, kvm_bindings::kvm_mp_state,
+    kvm_bindings::kvm_mp_state,
     kvm_bindings::kvm_run,
     kvm_bindings::kvm_vcpu_events, kvm_ioctls::DeviceFd, kvm_ioctls::IoEventAddress,
     kvm_ioctls::VcpuExit,
@@ -442,7 +442,7 @@ impl vm::Vm for KvmVm {
         &self,
         gsi: u32,
         config: &InterruptSourceConfig,
-    ) -> kvm_irq_routing_entry {
+    ) -> IrqRoutingEntry {
         match &config {
             InterruptSourceConfig::MsiIrq(cfg) => {
                 let mut kvm_route = kvm_irq_routing_entry {
@@ -476,7 +476,7 @@ impl vm::Vm for KvmVm {
                     kvm_route.flags = KVM_MSI_VALID_DEVID;
                     kvm_route.u.msi.__bindgen_anon_1.devid = modified_devid;
                 }
-                kvm_route
+                IrqRoutingEntry::Kvm(kvm_route)
             }
             InterruptSourceConfig::LegacyIrq(cfg) => {
                 let mut kvm_route = kvm_irq_routing_entry {
@@ -487,7 +487,7 @@ impl vm::Vm for KvmVm {
                 kvm_route.u.irqchip.irqchip = cfg.irqchip;
                 kvm_route.u.irqchip.pin = cfg.pin;
 
-                kvm_route
+                IrqRoutingEntry::Kvm(kvm_route)
             }
         }
     }
@@ -497,6 +497,11 @@ impl vm::Vm for KvmVm {
     /// entries, as per the `KVM_SET_GSI_ROUTING` ioctl.
     ///
     fn set_gsi_routing(&self, entries: &[IrqRoutingEntry]) -> vm::Result<()> {
+        let entries: Vec<kvm_irq_routing_entry> = entries.iter().map(|ire| match ire {
+            IrqRoutingEntry::Kvm(kvm_ire) => *kvm_ire,
+            _ => unreachable!(),
+        }).collect();
+        let entries: &[kvm_irq_routing_entry] = entries.as_slice();
         let mut irq_routing =
             vec_with_array_field::<kvm_irq_routing, kvm_irq_routing_entry>(entries.len());
         irq_routing[0].nr = entries.len() as u32;

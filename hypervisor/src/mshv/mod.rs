@@ -40,8 +40,7 @@ const DIRTY_BITMAP_SET_DIRTY: u64 = 0x8;
 /// Export generically-named wrappers of mshv-bindings for Unix-based platforms
 ///
 pub use {
-    mshv_bindings::mshv_device_attr as DeviceAttr,
-    mshv_bindings::mshv_msi_routing_entry as IrqRoutingEntry, mshv_ioctls::DeviceFd,
+    mshv_bindings::mshv_device_attr as DeviceAttr, mshv_ioctls::DeviceFd,
 };
 
 pub const PAGE_SHIFT: usize = 12;
@@ -1092,21 +1091,26 @@ impl vm::Vm for MshvVm {
         &self,
         gsi: u32,
         config: &InterruptSourceConfig,
-    ) -> mshv_msi_routing_entry {
+    ) -> vm::IrqRoutingEntry {
         match config {
-            InterruptSourceConfig::MsiIrq(cfg) => mshv_msi_routing_entry {
+            InterruptSourceConfig::MsiIrq(cfg) => vm::IrqRoutingEntry::Mshv(mshv_msi_routing_entry {
                 gsi,
                 address_lo: cfg.low_addr,
                 address_hi: cfg.high_addr,
                 data: cfg.data,
-            },
+            }),
             _ => {
                 unreachable!()
             }
         }
     }
 
-    fn set_gsi_routing(&self, entries: &[IrqRoutingEntry]) -> vm::Result<()> {
+    fn set_gsi_routing(&self, entries: &[vm::IrqRoutingEntry]) -> vm::Result<()> {
+        let entries: Vec<mshv_msi_routing_entry> = entries.iter().map(|ire| match ire {
+            vm::IrqRoutingEntry::Mshv(mshv_ire) => *mshv_ire,
+            _ =>unreachable!(),
+        }).collect();
+        let entries: &[mshv_msi_routing_entry] = entries.as_slice();
         let mut msi_routing =
             vec_with_array_field::<mshv_msi_routing, mshv_msi_routing_entry>(entries.len());
         msi_routing[0].nr = entries.len() as u32;

@@ -60,18 +60,18 @@ pub use kvm::x86_64;
 pub use kvm::{aarch64, GicState, CpuState};
 #[cfg(target_arch = "x86_64")]
 pub use generic_x86_64::CpuState;
-pub use crate::vm::{VmState, CreateDevice};
+pub use crate::vm::{VmState, CreateDevice, IrqRoutingEntry};
 // Aliased types exposed from both hypervisors
 #[cfg(feature = "kvm")]
 pub use kvm::{
-    ClockData, DeviceAttr, DeviceFd, IrqRoutingEntry,
+    ClockData, DeviceAttr, DeviceFd,
 };
 #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
 pub use mshv::x86_64;
 // Aliased types exposed from both hypervisors
 #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
 pub use mshv::{
-    DeviceAttr, DeviceFd, IrqRoutingEntry,
+    DeviceAttr, DeviceFd,
 };
 use std::sync::Arc;
 pub use vm::{
