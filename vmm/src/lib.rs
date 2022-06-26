@@ -1880,7 +1880,7 @@ mod unit_tests {
             #[cfg(feature = "gdb")]
             EventFd::new(EFD_NONBLOCK).unwrap(),
             SeccompAction::Allow,
-            hypervisor::new().unwrap(),
+            hypervisor::new(hypervisor::HypervisorType::Kvm).unwrap(),
             EventFd::new(EFD_NONBLOCK).unwrap(),
         )
         .unwrap()

@@ -53,7 +53,7 @@ mod device;
 
 pub use cpu::{HypervisorCpuError, Vcpu, VmExit};
 pub use device::{Device, DeviceAttr, HypervisorDeviceError};
-pub use hypervisor::{user_memory_region_flags, Hypervisor, HypervisorError, UserMemoryRegion, IoEventAddress};
+pub use hypervisor::{user_memory_region_flags, Hypervisor, HypervisorError, UserMemoryRegion, IoEventAddress, HypervisorType};
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 pub use kvm::x86_64;
 #[cfg(all(feature = "kvm", target_arch = "aarch64"))]
@@ -79,7 +79,8 @@ pub use vm::{
     Vm, VmOps,
 };
 
-pub fn new() -> std::result::Result<Arc<dyn Hypervisor>, HypervisorError> {
+pub fn new(hypervisor_type: HypervisorType) -> std::result::Result<Arc<dyn Hypervisor>, HypervisorError> {
+    unsafe {HYPERVISOR_TYPE = hypervisor_type;}
     #[cfg(feature = "kvm")]
     let hv = kvm::KvmHypervisor::new()?;
 
@@ -117,4 +118,16 @@ pub fn vec_with_array_field<T: Default, F>(count: usize) -> Vec<T> {
     let element_space = count * size_of::<F>();
     let vec_size_bytes = size_of::<T>() + element_space;
     vec_with_size_in_bytes(vec_size_bytes)
+}
+static mut HYPERVISOR_TYPE: HypervisorType = HypervisorType::Kvm;
+
+pub fn get_hypervisor_type() -> HypervisorType {
+    let ht: HypervisorType;
+    unsafe {
+        match HYPERVISOR_TYPE {
+            HypervisorType::Kvm => ht = HypervisorType::Kvm,
+            HypervisorType::Mshv => ht = HypervisorType::Mshv
+        }
+    }
+    ht
 }

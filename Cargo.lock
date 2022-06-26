@@ -347,6 +347,7 @@ dependencies = [
  "iced-x86",
  "kvm-bindings",
  "kvm-ioctls",
+ "lazy_static",
  "libc",
  "log",
  "mshv-bindings",

@@ -2340,7 +2340,7 @@ mod tests {
 
     #[test]
     fn test_setlint() {
-        let hv = hypervisor::new().unwrap();
+        let hv = hypervisor::new(hypervisor::HypervisorType::Kvm).unwrap();
         let vm = hv.create_vm().expect("new VM fd creation failed");
         assert!(hv.check_required_extensions().is_ok());
         // Calling get_lapic will fail if there is no irqchip before hand.
@@ -2366,7 +2366,7 @@ mod tests {
 
     #[test]
     fn test_setup_fpu() {
-        let hv = hypervisor::new().unwrap();
+        let hv = hypervisor::new(hypervisor::HypervisorType::Kvm).unwrap();
         let vm = hv.create_vm().expect("new VM fd creation failed");
         let vcpu = vm.create_vcpu(0, None).unwrap();
         setup_fpu(&vcpu).unwrap();
@@ -2391,7 +2391,7 @@ mod tests {
         use hypervisor::arch::x86::msr_index;
         use hypervisor::generic_x86_64::{MsrEntries, MsrEntry};
 
-        let hv = hypervisor::new().unwrap();
+        let hv = hypervisor::new(hypervisor::HypervisorType::Kvm).unwrap();
         let vm = hv.create_vm().expect("new VM fd creation failed");
         let vcpu = vm.create_vcpu(0, None).unwrap();
         setup_msrs(&vcpu).unwrap();
@@ -2418,7 +2418,7 @@ mod tests {
 
     #[test]
     fn test_setup_regs() {
-        let hv = hypervisor::new().unwrap();
+        let hv = hypervisor::new(hypervisor::HypervisorType::Kvm).unwrap();
         let vm = hv.create_vm().expect("new VM fd creation failed");
         let vcpu = vm.create_vcpu(0, None).unwrap();
 

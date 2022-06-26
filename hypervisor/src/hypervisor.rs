@@ -145,3 +145,9 @@ pub enum IoEventAddress {
     Pio(u64),
     Mmio(u64),
 }
+
+#[derive(Copy, Clone, Debug)]
+pub enum HypervisorType {
+    Kvm,
+    Mshv
+}

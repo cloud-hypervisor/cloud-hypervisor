@@ -379,6 +379,14 @@ fn create_app<'a>(
                 .takes_value(true)
                 .possible_values(&["true", "false", "log"])
                 .default_value("true"),
+        )
+        .arg(
+            Arg::new("hypervisor")
+                .long("hypervisor")
+                .help("Choose hypervisor: kvm|mshv")
+                .default_value("kvm")
+                .takes_value(true)
+                .possible_values(["kvm", "mshv"]) 
         );
 
     #[cfg(target_arch = "x86_64")]
@@ -528,8 +536,18 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
     }
 
     event!("vmm", "starting");
-
-    let hypervisor = hypervisor::new().map_err(Error::CreateHypervisor)?;
+    
+    let hypervisor_type = if let Some(x) = cmd_arguments.value_of("hypervisor") {
+        match x {
+            "kvm" => hypervisor::HypervisorType::Kvm,
+            "mshv" => hypervisor::HypervisorType::Mshv,
+            _ => unreachable!(),
+        }
+    }
+    else {
+        unreachable!()
+    };
+    let hypervisor = hypervisor::new(hypervisor_type).map_err(Error::CreateHypervisor)?;
 
     #[cfg(feature = "gdb")]
     let gdb_socket_path = if let Some(gdb_config) = cmd_arguments.value_of("gdb") {

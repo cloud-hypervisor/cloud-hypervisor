@@ -3421,7 +3421,7 @@ pub fn test_vm() {
     let load_addr = GuestAddress(0x1000);
     let mem = GuestMemoryMmap::from_ranges(&[(load_addr, mem_size)]).unwrap();
 
-    let hv = hypervisor::new().unwrap();
+    let hv = hypervisor::new(hypervisor::HypervisorType::Kvm).unwrap();
     let vm = hv.create_vm().expect("new VM creation failed");
 
     for (index, region) in mem.iter().enumerate() {
