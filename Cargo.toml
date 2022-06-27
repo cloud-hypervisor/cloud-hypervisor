@@ -51,7 +51,7 @@ test_infra = { path = "test_infra" }
 wait-timeout = "0.2.0"
 
 [features]
-default = ["common", "kvm"]
+default = ["common", "kvm", "mshv"]
 # Common features for all hypervisors
 common = ["fwdebug"]
 amx = ["vmm/amx"]

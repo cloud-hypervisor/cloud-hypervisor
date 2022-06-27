@@ -52,10 +52,8 @@ mod cpu;
 mod device;
 
 pub use cpu::{HypervisorCpuError, Vcpu, VmExit};
-pub use device::{Device, DeviceAttr, HypervisorDeviceError};
+pub use device::{Device, DeviceAttr, DeviceFd, HypervisorDeviceError};
 pub use hypervisor::{user_memory_region_flags, Hypervisor, HypervisorError, UserMemoryRegion, IoEventAddress, HypervisorType};
-#[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-pub use kvm::x86_64;
 #[cfg(all(feature = "kvm", target_arch = "aarch64"))]
 pub use kvm::{aarch64, GicState, CpuState, DeviceAttr};
 #[cfg(target_arch = "x86_64")]
@@ -64,14 +62,7 @@ pub use crate::vm::{VmState, CreateDevice, IrqRoutingEntry};
 // Aliased types exposed from both hypervisors
 #[cfg(feature = "kvm")]
 pub use kvm::{
-    ClockData, DeviceFd,
-};
-#[cfg(all(feature = "mshv", target_arch = "x86_64"))]
-pub use mshv::x86_64;
-// Aliased types exposed from both hypervisors
-#[cfg(all(feature = "mshv", target_arch = "x86_64"))]
-pub use mshv::{
-    DeviceFd,
+    ClockData,
 };
 use std::sync::Arc;
 pub use vm::{
@@ -81,13 +72,10 @@ pub use vm::{
 
 pub fn new(hypervisor_type: HypervisorType) -> std::result::Result<Arc<dyn Hypervisor>, HypervisorError> {
     unsafe {HYPERVISOR_TYPE = hypervisor_type;}
-    #[cfg(feature = "kvm")]
-    let hv = kvm::KvmHypervisor::new()?;
-
-    #[cfg(feature = "mshv")]
-    let hv = mshv::MshvHypervisor::new()?;
-
-    Ok(Arc::new(hv))
+    match hypervisor_type {
+        HypervisorType::Kvm => Ok(Arc::new(kvm::KvmHypervisor::new()?)),
+        HypervisorType::Mshv => Ok(Arc::new(mshv::MshvHypervisor::new()?))
+    }
 }
 
 // Returns a `Vec<T>` with a size in bytes at least as large as `size_in_bytes`.

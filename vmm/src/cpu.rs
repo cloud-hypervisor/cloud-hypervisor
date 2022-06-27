@@ -940,8 +940,7 @@ impl CpuManager {
                                 // to complete pending operations without allowing any further instructions
                                 // to be executed.
 
-                                #[cfg(feature = "kvm")]
-                                {
+                                if let hypervisor::HypervisorType::Kvm = hypervisor::get_hypervisor_type() {
                                     vcpu.lock().as_ref().unwrap().vcpu.set_immediate_exit(true);
                                     if !matches!(vcpu.lock().unwrap().run(), Ok(VmExit::Ignore)) {
                                         error!("Unexpected VM exit on \"immediate_exit\" run");

@@ -227,13 +227,10 @@ fn create_vmm_ioctl_seccomp_rule_common_kvm() -> Result<Vec<SeccompRule>, Backen
 }
 
 fn create_vmm_ioctl_seccomp_rule_hypervisor() -> Result<Vec<SeccompRule>, BackendError> {
-    #[cfg(feature = "kvm")]
-    let rules = create_vmm_ioctl_seccomp_rule_common_kvm();
-
-    #[cfg(feature = "mshv")]
-    let rules = create_vmm_ioctl_seccomp_rule_common_mshv();
-
-    rules
+    match hypervisor::get_hypervisor_type() {
+        hypervisor::HypervisorType::Kvm => create_vmm_ioctl_seccomp_rule_common_kvm(),
+        hypervisor::HypervisorType::Mshv => create_vmm_ioctl_seccomp_rule_common_mshv(),
+    }
 }
 
 fn create_vmm_ioctl_seccomp_rule_common() -> Result<Vec<SeccompRule>, BackendError> {
@@ -393,13 +390,10 @@ fn create_vmm_ioctl_seccomp_rule_mshv() -> Result<Vec<SeccompRule>, BackendError
 }
 
 fn create_vmm_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, BackendError> {
-    #[cfg(feature = "kvm")]
-    let rules = create_vmm_ioctl_seccomp_rule_kvm();
-
-    #[cfg(feature = "mshv")]
-    let rules = create_vmm_ioctl_seccomp_rule_mshv();
-
-    rules
+    match hypervisor::get_hypervisor_type() {
+        hypervisor::HypervisorType::Kvm => create_vmm_ioctl_seccomp_rule_kvm(),
+        hypervisor::HypervisorType::Mshv => create_vmm_ioctl_seccomp_rule_mshv(),
+    }
 }
 
 fn create_api_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, BackendError> {
@@ -620,13 +614,10 @@ fn create_vcpu_ioctl_seccomp_rule_mshv() -> Result<Vec<SeccompRule>, BackendErro
 }
 
 fn create_vcpu_ioctl_seccomp_rule_hypervisor() -> Result<Vec<SeccompRule>, BackendError> {
-    #[cfg(feature = "kvm")]
-    let rules = create_vcpu_ioctl_seccomp_rule_kvm();
-
-    #[cfg(feature = "mshv")]
-    let rules = create_vcpu_ioctl_seccomp_rule_mshv();
-
-    rules
+    match hypervisor::get_hypervisor_type() {
+        hypervisor::HypervisorType::Kvm => create_vcpu_ioctl_seccomp_rule_kvm(),
+        hypervisor::HypervisorType::Mshv => create_vcpu_ioctl_seccomp_rule_mshv(),
+    }
 }
 
 fn create_vcpu_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, BackendError> {

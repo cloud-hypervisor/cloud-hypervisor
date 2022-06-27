@@ -334,13 +334,19 @@ pub trait Vm: Send + Sync {
     fn enable_sgx_attribute(&self, file: File) -> Result<()>;
     /// Retrieve guest clock.
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-    fn get_clock(&self) -> Result<ClockData>;
+    fn get_clock(&self) -> Result<ClockData> {
+        unimplemented!()
+    }
     /// Set guest clock.
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-    fn set_clock(&self, data: &ClockData) -> Result<()>;
+    fn set_clock(&self, _data: &ClockData) -> Result<()> {
+        unimplemented!()
+    }
     #[cfg(feature = "kvm")]
     /// Checks if a particular `Cap` is available.
-    fn check_extension(&self, c: Cap) -> bool;
+    fn check_extension(&self, _c: Cap) -> bool {
+        unimplemented!()
+    }
     /// Create a device that is used for passthrough
     fn create_passthrough_device(&self) -> Result<Arc<dyn Device>>;
     /// Get the Vm state. Return VM specific data

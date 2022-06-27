@@ -53,7 +53,7 @@ use devices::interrupt_controller::{self, InterruptController};
 use devices::AcpiNotificationFlags;
 #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
 use gdbstub_arch::x86::reg::X86_64CoreRegs;
-use hypervisor::{HypervisorVmError, VmOps};
+use hypervisor::{HypervisorVmError, VmOps, get_hypervisor_type, HypervisorType};
 use linux_loader::cmdline::Cmdline;
 #[cfg(feature = "guest_debug")]
 use linux_loader::elf;
@@ -2588,15 +2588,18 @@ impl Pausable for Vm {
             .valid_transition(new_state)
             .map_err(|e| MigratableError::Pause(anyhow!("Invalid transition: {:?}", e)))?;
 
-        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-        {
-            let mut clock = self
-                .vm
-                .get_clock()
-                .map_err(|e| MigratableError::Pause(anyhow!("Could not get VM clock: {}", e)))?;
-            // Reset clock flags.
-            clock.flags = 0;
-            self.saved_clock = Some(clock);
+        #[cfg(target_arch = "x86_64")]
+        match get_hypervisor_type() {
+            HypervisorType::Kvm => {
+                let mut clock = self
+                    .vm
+                    .get_clock()
+                    .map_err(|e| MigratableError::Pause(anyhow!("Could not get VM clock: {}", e)))?;
+                // Reset clock flags.
+                clock.flags = 0;
+                self.saved_clock = Some(clock);
+            },
+            _ => ()
         }
 
         // Before pausing the vCPUs activate any pending virtio devices that might
@@ -2627,13 +2630,16 @@ impl Pausable for Vm {
             .map_err(|e| MigratableError::Resume(anyhow!("Invalid transition: {:?}", e)))?;
 
         self.cpu_manager.lock().unwrap().resume()?;
-        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-        {
-            if let Some(clock) = &self.saved_clock {
-                self.vm.set_clock(clock).map_err(|e| {
-                    MigratableError::Resume(anyhow!("Could not set VM clock: {}", e))
-                })?;
-            }
+        #[cfg(target_arch = "x86_64")]
+        match get_hypervisor_type() {
+            HypervisorType::Kvm => {
+                if let Some(clock) = &self.saved_clock {
+                    self.vm.set_clock(clock).map_err(|e| {
+                        MigratableError::Resume(anyhow!("Could not set VM clock: {}", e))
+                    })?;
+                }
+            },
+            _ => ()
         }
         self.device_manager.lock().unwrap().resume()?;
 

@@ -9,7 +9,7 @@
 // Copyright 2020, ARM Limited
 //
 
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, RawFd};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -74,6 +74,35 @@ impl DeviceAttr {
     pub fn from_mshv(attr: mshv_bindings::mshv_device_attr) -> DeviceAttr {
         DeviceAttr {
             attr: _DeviceAttr::Mshv(attr),
+        }
+    }
+}
+
+pub enum DeviceFd {
+    Kvm(kvm_ioctls::DeviceFd),
+    Mshv(mshv_ioctls::DeviceFd),
+}
+
+impl DeviceFd {
+    pub fn set_device_attr(&self, device_attr: &DeviceAttr) -> Result<()> {
+        match self {
+            DeviceFd::Kvm(dev_fd) => {
+                let device_attr: kvm_bindings::kvm_device_attr = if let _DeviceAttr::Kvm(dev_attr) = device_attr.attr() { dev_attr } else { unreachable!() };
+                    dev_fd.set_device_attr(&device_attr).map_err(|e| HypervisorDeviceError::SetDeviceAttribute(e.into()))
+            },
+            DeviceFd::Mshv(dev_fd) => {
+                let device_attr: mshv_bindings::mshv_device_attr = if let _DeviceAttr::Mshv(dev_attr) = device_attr.attr() { dev_attr } else { unreachable!() };
+                    dev_fd.set_device_attr(&device_attr).map_err(|e| HypervisorDeviceError::SetDeviceAttribute(e.into()))
+            }
+        }
+    }
+}
+
+impl AsRawFd for DeviceFd {
+    fn as_raw_fd(&self) -> RawFd {
+        match self {
+            DeviceFd::Kvm(dev_fd) => dev_fd.as_raw_fd(),
+            DeviceFd::Mshv(dev_fd) => dev_fd.as_raw_fd()
         }
     }
 }

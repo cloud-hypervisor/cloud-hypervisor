@@ -32,14 +32,7 @@ enum Error {
     #[cfg(feature = "gdb")]
     #[error("Failed to create Debug EventFd: {0}")]
     CreateDebugEventFd(#[source] std::io::Error),
-    #[cfg_attr(
-        feature = "kvm",
-        error("Failed to open hypervisor interface (is /dev/kvm available?): {0}")
-    )]
-    #[cfg_attr(
-        feature = "mshv",
-        error("Failed to open hypervisor interface (is /dev/mshv available?): {0}")
-    )]
+    #[error("Failed to opn hypervisor interface: {0}")]
     CreateHypervisor(#[source] hypervisor::HypervisorError),
     #[error("Failed to start the VMM thread: {0}")]
     StartVmmThread(#[source] vmm::Error),

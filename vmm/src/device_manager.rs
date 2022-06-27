@@ -50,7 +50,7 @@ use devices::legacy::Serial;
 use devices::{
     interrupt_controller, interrupt_controller::InterruptController, AcpiNotificationFlags,
 };
-use hypervisor::{DeviceFd, HypervisorVmError, IoEventAddress};
+use hypervisor::{HypervisorVmError, IoEventAddress, get_hypervisor_type};
 use libc::{
     cfmakeraw, isatty, tcgetattr, tcsetattr, termios, MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED,
     O_TMPFILE, PROT_READ, PROT_WRITE, TCSANOW,
@@ -2964,11 +2964,15 @@ impl DeviceManager {
 
         // SAFETY the raw fd conversion here is safe because:
         //   1. When running on KVM or MSHV, passthrough_device wraps around DeviceFd.
-        //   2. The conversion here extracts the raw fd and then turns the raw fd into a DeviceFd
+        //   2. The conversion here extracts the raw fd and then turns the raw fd into a  
         //      of the same (correct) type.
+        let container: Result<VfioContainer, DeviceManagerError> = match get_hypervisor_type() {
+            hypervisor::HypervisorType::Kvm => VfioContainer::new(Arc::new(unsafe { hypervisor::kvm::DeviceFd::from_raw_fd(dup_device_fd).into() })).map_err(DeviceManagerError::VfioCreate),
+            hypervisor::HypervisorType::Mshv => VfioContainer::new(Arc::new(unsafe { hypervisor::mshv::DeviceFd::from_raw_fd(dup_device_fd).into() })).map_err(DeviceManagerError::VfioCreate),
+
+        };
         Ok(Arc::new(
-            VfioContainer::new(Arc::new(unsafe { DeviceFd::from_raw_fd(dup_device_fd) }))
-                .map_err(DeviceManagerError::VfioCreate)?,
+            container?
         ))
     }
 
