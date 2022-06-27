@@ -197,7 +197,7 @@ impl Default for PayloadImageType {
     }
 }
 
-#[repr(C)]
+#[repr(C, packed)]
 #[derive(Copy, Clone, Default, Debug)]
 pub struct PayloadInfo {
     pub image_type: PayloadImageType,
