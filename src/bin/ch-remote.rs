@@ -12,6 +12,7 @@ use api_client::Error as ApiClientError;
 use clap::{Arg, ArgMatches, Command};
 use option_parser::{ByteSized, ByteSizedParseError};
 use std::fmt;
+use std::io::Read;
 use std::os::unix::net::UnixStream;
 use std::process;
 
@@ -31,6 +32,8 @@ enum Error {
     AddVdpaConfig(vmm::config::Error),
     AddVsockConfig(vmm::config::Error),
     Restore(vmm::config::Error),
+    ReadingStdin(std::io::Error),
+    ReadingFile(std::io::Error),
 }
 
 impl fmt::Display for Error {
@@ -51,6 +54,8 @@ impl fmt::Display for Error {
             AddVdpaConfig(e) => write!(f, "Error parsing vDPA device syntax: {}", e),
             AddVsockConfig(e) => write!(f, "Error parsing vsock syntax: {}", e),
             Restore(e) => write!(f, "Error parsing restore syntax: {}", e),
+            ReadingStdin(e) => write!(f, "Error reading from stdin: {}", e),
+            ReadingFile(e) => write!(f, "Error reading from file: {}", e),
         }
     }
 }
@@ -309,6 +314,20 @@ fn send_migration_api_command(
     .map_err(Error::ApiClient)
 }
 
+fn create_api_command(socket: &mut UnixStream, path: &str) -> Result<(), Error> {
+    let mut data = String::default();
+    if path == "-" {
+        std::io::stdin()
+            .read_to_string(&mut data)
+            .map_err(Error::ReadingStdin)?;
+    } else {
+        let mut f = std::fs::File::open(path).map_err(Error::ReadingFile)?;
+        f.read_to_string(&mut data).map_err(Error::ReadingFile)?;
+    };
+
+    simple_api_command(socket, "PUT", "create", Some(&data)).map_err(Error::ApiClient)
+}
+
 fn do_command(matches: &ArgMatches) -> Result<(), Error> {
     let mut socket =
         UnixStream::connect(matches.value_of("api-socket").unwrap()).map_err(Error::Connect)?;
@@ -462,6 +481,14 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
                 .subcommand_matches("receive-migration")
                 .unwrap()
                 .value_of("receive_migration_config")
+                .unwrap(),
+        ),
+        Some("create") => create_api_command(
+            &mut socket,
+            matches
+                .subcommand_matches("create")
+                .unwrap()
+                .value_of("path")
                 .unwrap(),
         ),
         Some(c) => simple_api_command(&mut socket, "PUT", c, None).map_err(Error::ApiClient),
@@ -646,6 +673,11 @@ fn main() {
                         .index(1)
                         .help("<receiver_url>"),
                 ),
+        )
+        .subcommand(
+            Command::new("create")
+                .about("Create VM from a JSON configuration")
+                .arg(Arg::new("path").index(1).default_value("-")),
         );
 
     let matches = app.get_matches();
