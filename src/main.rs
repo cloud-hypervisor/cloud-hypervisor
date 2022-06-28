@@ -23,6 +23,7 @@ use thiserror::Error;
 use vmm::config;
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::block_signal;
+use vmm_sys_util::terminal::Terminal;
 
 #[derive(Error, Debug)]
 enum Error {
@@ -622,6 +623,13 @@ fn main() {
             1
         }
     };
+
+    let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO as i32) } != 0;
+    if on_tty {
+        // Don't forget to set the terminal in canonical mode
+        // before to exit.
+        std::io::stdin().lock().set_canon_mode().unwrap();
+    }
 
     std::process::exit(exit_code);
 }

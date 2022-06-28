@@ -1694,13 +1694,14 @@ impl Vm {
                     console_input_clone.update_console_size();
                 }
                 SIGTERM | SIGINT => {
-                    if on_tty {
-                        io::stdin()
-                            .lock()
-                            .set_canon_mode()
-                            .expect("failed to restore terminal mode");
-                    }
                     if exit_evt.write(1).is_err() {
+                        // Resetting the terminal is usually done as the VMM exits
+                        if on_tty {
+                            io::stdin()
+                                .lock()
+                                .set_canon_mode()
+                                .expect("failed to restore terminal mode");
+                        }
                         std::process::exit(1);
                     }
                 }
