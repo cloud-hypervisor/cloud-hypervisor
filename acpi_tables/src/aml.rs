@@ -68,7 +68,7 @@ impl Aml for Path {
         };
 
         for part in self.name_parts.clone().iter_mut() {
-            bytes.extend_from_slice(&part.to_vec());
+            bytes.extend_from_slice(part.as_ref());
         }
     }
 }
