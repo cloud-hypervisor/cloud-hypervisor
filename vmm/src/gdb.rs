@@ -363,9 +363,7 @@ impl MultiThreadSingleStep for GdbStub {
         }
         match self.vm_request(GdbRequestPayload::Resume, tid_to_cpuid(tid)) {
             Ok(_) => Ok(()),
-            Err(e) => {
-                return Err(format!("Failed to resume the target: {:?}", e));
-            }
+            Err(e) => Err(format!("Failed to resume the target: {:?}", e)),
         }
     }
 }

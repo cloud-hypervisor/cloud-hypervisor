@@ -624,10 +624,10 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioUserDmaMappi
                     )
                 })
         } else {
-            return Err(std::io::Error::new(
+            Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 format!("Region not found for 0x{:x}", gpa),
-            ));
+            ))
         }
     }
 
