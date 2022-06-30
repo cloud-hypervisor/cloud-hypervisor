@@ -12,7 +12,7 @@ pub mod interrupt;
 pub use self::bus::{Bus, BusDevice, Error as BusError};
 
 /// Type of Message Signalled Interrupt
-#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MsiIrqType {
     /// PCI MSI IRQ numbers.
     PciMsi,
@@ -22,7 +22,7 @@ pub enum MsiIrqType {
     GenericMsi,
 }
 
-#[derive(Copy, Clone, PartialEq, Serialize, Deserialize, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Debug)]
 pub enum PciBarType {
     Io,
     Mmio32,

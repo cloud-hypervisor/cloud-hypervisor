@@ -309,7 +309,7 @@ pub enum Error {
 }
 pub type Result<T> = result::Result<T, Error>;
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum VmState {
     Created,
     Running,

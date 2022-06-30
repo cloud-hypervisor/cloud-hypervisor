@@ -7,7 +7,7 @@
 
 //! Handles routing to devices in an address space.
 
-use std::cmp::{Ord, Ordering, PartialEq, PartialOrd};
+use std::cmp::{Eq, Ord, Ordering, PartialEq, PartialOrd};
 use std::collections::btree_map::BTreeMap;
 use std::sync::{Arc, Barrier, Mutex, RwLock, Weak};
 use std::{convert, error, fmt, io, result};

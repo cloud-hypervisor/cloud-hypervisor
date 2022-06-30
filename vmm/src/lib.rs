@@ -164,7 +164,7 @@ pub enum Error {
 }
 pub type Result<T> = result::Result<T, Error>;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u64)]
 pub enum EpollDispatch {
     Exit = 0,

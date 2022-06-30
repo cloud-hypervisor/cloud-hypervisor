@@ -51,7 +51,7 @@ impl Default for Command {
 
 #[allow(dead_code)]
 #[repr(u32)]
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum HeaderFlags {
     Command = 0,
     Reply = 1,

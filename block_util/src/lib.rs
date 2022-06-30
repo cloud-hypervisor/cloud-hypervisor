@@ -138,7 +138,7 @@ impl ExecuteError {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RequestType {
     In,
     Out,

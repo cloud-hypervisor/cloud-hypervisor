@@ -139,7 +139,7 @@ impl Request {
 }
 
 #[repr(u16)]
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub enum Status {
     Invalid,
     Ok,

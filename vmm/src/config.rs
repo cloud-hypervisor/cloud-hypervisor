@@ -113,7 +113,7 @@ pub enum Error {
     ParseVdpaPathMissing,
 }
 
-#[derive(Debug, PartialEq, Error)]
+#[derive(Debug, PartialEq, Eq, Error)]
 pub enum ValidationError {
     /// Both console and serial are tty.
     DoubleTtyMode,
@@ -430,7 +430,7 @@ impl<'a> VmParams<'a> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub enum HotplugMethod {
     Acpi,
     VirtioMem,
@@ -459,13 +459,13 @@ impl FromStr for HotplugMethod {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CpuAffinity {
     pub vcpu: u8,
     pub host_cpus: Vec<u8>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CpuFeatures {
     #[cfg(all(feature = "amx", target_arch = "x86_64"))]
     pub amx: bool,
@@ -475,7 +475,7 @@ pub enum CpuTopologyParseError {
     InvalidValue(String),
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CpuTopology {
     pub threads_per_core: u8,
     pub cores_per_die: u8,
@@ -516,7 +516,7 @@ fn default_cpuconfig_max_phys_bits() -> u8 {
     DEFAULT_MAX_PHYS_BITS
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CpusConfig {
     pub boot_vcpus: u8,
     pub max_vcpus: u8,
@@ -626,7 +626,7 @@ fn default_platformconfig_num_pci_segments() -> u16 {
     DEFAULT_NUM_PCI_SEGMENTS
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PlatformConfig {
     #[serde(default = "default_platformconfig_num_pci_segments")]
     pub num_pci_segments: u16,
@@ -691,7 +691,7 @@ impl Default for PlatformConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct MemoryZoneConfig {
     pub id: String,
     pub size: u64,
@@ -713,7 +713,7 @@ pub struct MemoryZoneConfig {
     pub prefault: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct MemoryConfig {
     pub size: u64,
     #[serde(default)]
@@ -918,17 +918,17 @@ impl Default for MemoryConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct KernelConfig {
     pub path: PathBuf,
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct InitramfsConfig {
     pub path: PathBuf,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CmdlineConfig {
     pub args: String,
 }
@@ -943,7 +943,7 @@ impl CmdlineConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct DiskConfig {
     pub path: Option<PathBuf>,
     #[serde(default)]
@@ -1178,7 +1178,7 @@ impl DiskConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub enum VhostMode {
     Client,
     Server,
@@ -1207,7 +1207,7 @@ impl FromStr for VhostMode {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct NetConfig {
     #[serde(default = "default_netconfig_tap")]
     pub tap: Option<String>,
@@ -1478,7 +1478,7 @@ impl NetConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct RngConfig {
     pub src: PathBuf,
     #[serde(default)]
@@ -1515,7 +1515,7 @@ impl Default for RngConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct BalloonConfig {
     pub size: u64,
     /// Option to deflate the balloon in case the guest is out of memory.
@@ -1564,7 +1564,7 @@ impl BalloonConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct FsConfig {
     pub tag: String,
     pub socket: PathBuf,
@@ -1667,7 +1667,7 @@ impl FsConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct PmemConfig {
     pub file: PathBuf,
     #[serde(default)]
@@ -1745,7 +1745,7 @@ impl PmemConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub enum ConsoleOutputMode {
     Off,
     Pty,
@@ -1754,7 +1754,7 @@ pub enum ConsoleOutputMode {
     Null,
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ConsoleConfig {
     #[serde(default = "default_consoleconfig_file")]
     pub file: Option<PathBuf>,
@@ -1824,7 +1824,7 @@ impl ConsoleConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct DeviceConfig {
     pub path: PathBuf,
     #[serde(default)]
@@ -1883,7 +1883,7 @@ impl DeviceConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct UserDeviceConfig {
     pub socket: PathBuf,
     #[serde(default)]
@@ -1936,7 +1936,7 @@ impl UserDeviceConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct VdpaConfig {
     pub path: PathBuf,
     #[serde(default = "default_vdpaconfig_num_queues")]
@@ -2012,7 +2012,7 @@ impl VdpaConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct VsockConfig {
     pub cid: u64,
     pub socket: PathBuf,
@@ -2083,7 +2083,7 @@ impl VsockConfig {
 }
 
 #[cfg(feature = "tdx")]
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct TdxConfig {
     pub firmware: PathBuf,
 }
@@ -2103,7 +2103,7 @@ impl TdxConfig {
 }
 
 #[cfg(target_arch = "x86_64")]
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct SgxEpcConfig {
     pub id: String,
     #[serde(default)]
@@ -2137,7 +2137,7 @@ impl SgxEpcConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct NumaDistance {
     #[serde(default)]
     pub destination: u32,
@@ -2145,7 +2145,7 @@ pub struct NumaDistance {
     pub distance: u8,
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct NumaConfig {
     #[serde(default)]
     pub guest_numa_id: u32,
@@ -2214,7 +2214,7 @@ impl NumaConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct RestoreConfig {
     pub source_url: PathBuf,
     #[serde(default)]
@@ -2248,7 +2248,7 @@ impl RestoreConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct VmConfig {
     #[serde(default)]
     pub cpus: CpusConfig,

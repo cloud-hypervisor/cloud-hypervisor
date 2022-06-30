@@ -16,7 +16,7 @@ use iced_x86::*;
 mod instructions;
 
 /// x86 CPU modes
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum CpuMode {
     /// Real mode
     Real,

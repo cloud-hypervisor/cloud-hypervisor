@@ -106,7 +106,7 @@ impl Display for Error {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 enum RequestType {
     Flush,
 }
