@@ -522,7 +522,7 @@ dependencies = [
 [[package]]
 name = "mshv-bindings"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/mshv?branch=main#27477b713d696da880ea34b3b659de8deb628061"
+source = "git+https://github.com/rust-vmm/mshv?branch=main#d94c30583fb3c14d6ba72c55096946ea93877f87"
 dependencies = [
  "libc",
  "serde",
@@ -534,7 +534,7 @@ dependencies = [
 [[package]]
 name = "mshv-ioctls"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/mshv?branch=main#27477b713d696da880ea34b3b659de8deb628061"
+source = "git+https://github.com/rust-vmm/mshv?branch=main#d94c30583fb3c14d6ba72c55096946ea93877f87"
 dependencies = [
  "libc",
  "mshv-bindings",
@@ -906,9 +906,9 @@ dependencies = [
 
 [[package]]
 name = "semver"
-version = "1.0.10"
+version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a41d061efea015927ac527063765e73601444cdc344ba855bc7bd44578b25e1c"
+checksum = "3d92beeab217753479be2f74e54187a6aed4c125ff0703a866c3147a02f0c6dd"
 
 [[package]]
 name = "serde"
