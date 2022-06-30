@@ -1052,7 +1052,7 @@ impl PciDevice for VirtioPciDevice {
                 self.device.clone(),
             ),
             o if (ISR_CONFIG_BAR_OFFSET..ISR_CONFIG_BAR_OFFSET + ISR_CONFIG_SIZE).contains(&o) => {
-                if let Some(v) = data.get(0) {
+                if let Some(v) = data.first() {
                     self.interrupt_status
                         .fetch_and(!(*v as usize), Ordering::AcqRel);
                 }
