@@ -6,6 +6,8 @@
 //
 // SPDX-License-Identifier: (Apache-2.0 AND BSD-3-Clause)
 
+#![allow(clippy::significant_drop_in_scrutinee)]
+
 use libc::{self, EFD_NONBLOCK};
 use log::*;
 use net_util::{
