@@ -187,7 +187,7 @@ pub trait PciProgrammingInterface {
 }
 
 /// Types of PCI capabilities.
-#[derive(PartialEq, Copy, Clone)]
+#[derive(PartialEq, Eq, Copy, Clone)]
 #[allow(dead_code)]
 #[allow(non_camel_case_types)]
 #[repr(C)]
@@ -321,7 +321,7 @@ pub struct PciConfiguration {
 }
 
 /// See pci_regs.h in kernel
-#[derive(Copy, Clone, PartialEq, Versionize, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Versionize, Debug)]
 pub enum PciBarRegionType {
     Memory32BitRegion = 0,
     IoRegion = 0x01,

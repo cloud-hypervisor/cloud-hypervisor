@@ -1614,7 +1614,7 @@ fn process_rss_kib(pid: u32) -> usize {
 // 10MB is our maximum accepted overhead.
 const MAXIMUM_VMM_OVERHEAD_KB: u32 = 10 * 1024;
 
-#[derive(PartialEq, PartialOrd)]
+#[derive(PartialEq, Eq, PartialOrd)]
 struct Counters {
     rx_bytes: u64,
     rx_frames: u64,
