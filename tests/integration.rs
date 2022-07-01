@@ -253,8 +253,15 @@ fn remote_command(api_socket: &str, command: &str, arg: Option<&str>) -> bool {
     if let Some(arg) = arg {
         cmd.arg(arg);
     }
-
-    cmd.status().expect("Failed to launch ch-remote").success()
+    let output = cmd.output().unwrap();
+    if output.status.success() {
+        true
+    } else {
+        eprintln!("Error running ch-remote command: {:?}", &cmd);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        eprintln!("stderr: {}", stderr);
+        false
+    }
 }
 
 fn remote_command_w_output(api_socket: &str, command: &str, arg: Option<&str>) -> (bool, Vec<u8>) {
