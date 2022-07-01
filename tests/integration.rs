@@ -1996,7 +1996,6 @@ mod parallel {
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
             assert_eq!(guest.get_initial_apicid().unwrap_or(1), 0);
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
-            assert!(guest.get_entropy().unwrap_or_default() >= 900);
             assert_eq!(guest.get_pci_bridge_class().unwrap_or_default(), "0x060000");
 
             let expected_sequential_events = [
@@ -2622,7 +2621,6 @@ mod parallel {
 
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
-            assert!(guest.get_entropy().unwrap_or_default() >= 900);
 
             let grep_cmd = if cfg!(target_arch = "x86_64") {
                 "grep -c PCI-MSI /proc/interrupts"
@@ -3952,7 +3950,6 @@ mod parallel {
 
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
-            assert!(guest.get_entropy().unwrap_or_default() >= 900);
         });
 
         let _ = child.kill();
@@ -4060,7 +4057,6 @@ mod parallel {
             // Check that the VM booted as expected
             assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
-            assert!(guest.get_entropy().unwrap_or_default() >= 900);
         });
 
         let _ = child.kill();
@@ -4114,7 +4110,6 @@ mod parallel {
             // Check that the VM booted as expected
             assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
-            assert!(guest.get_entropy().unwrap_or_default() >= 900);
 
             // Shutdown without powering off to prevent filesystem corruption
             guest.ssh_command("sudo shutdown -H now").unwrap();
@@ -4135,7 +4130,6 @@ mod parallel {
             // Check that the VM booted as expected
             assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
-            assert!(guest.get_entropy().unwrap_or_default() >= 900);
         });
 
         let _ = child.kill();
@@ -4189,7 +4183,6 @@ mod parallel {
             // Check that the VM booted as expected
             assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
-            assert!(guest.get_entropy().unwrap_or_default() >= 900);
 
             // Shutdown without powering off to prevent filesystem corruption
             guest.ssh_command("sudo shutdown -H now").unwrap();
@@ -4217,7 +4210,6 @@ mod parallel {
             // Check that the VM booted as expected
             assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
-            assert!(guest.get_entropy().unwrap_or_default() >= 900);
         });
 
         let _ = child.kill();
@@ -4270,7 +4262,6 @@ mod parallel {
             // Check that the VM booted as expected
             assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
-            assert!(guest.get_entropy().unwrap_or_default() >= 900);
 
             // We now pause the VM
             assert!(remote_command(&api_socket, "pause", None));
@@ -8518,7 +8509,6 @@ mod aarch64_acpi {
 
                 assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
                 assert!(guest.get_total_memory().unwrap_or_default() > 400_000);
-                assert!(guest.get_entropy().unwrap_or_default() >= 900);
                 assert_eq!(guest.get_pci_bridge_class().unwrap_or_default(), "0x060000");
             });
 
