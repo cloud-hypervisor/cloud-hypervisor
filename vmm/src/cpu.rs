@@ -1271,7 +1271,7 @@ impl CpuManager {
                         1 << MADT_CPU_ENABLE_FLAG
                     } else {
                         0
-                    },
+                    } | 1 << MADT_CPU_ONLINE_CAPABLE_FLAG,
                 };
                 madt.append(lapic);
             }
@@ -1523,6 +1523,9 @@ struct Cpu {
 
 #[cfg(target_arch = "x86_64")]
 const MADT_CPU_ENABLE_FLAG: usize = 0;
+
+#[cfg(target_arch = "x86_64")]
+const MADT_CPU_ONLINE_CAPABLE_FLAG: usize = 1;
 
 impl Cpu {
     #[cfg(target_arch = "x86_64")]
