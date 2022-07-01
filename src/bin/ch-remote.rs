@@ -321,9 +321,8 @@ fn create_api_command(socket: &mut UnixStream, path: &str) -> Result<(), Error> 
             .read_to_string(&mut data)
             .map_err(Error::ReadingStdin)?;
     } else {
-        let mut f = std::fs::File::open(path).map_err(Error::ReadingFile)?;
-        f.read_to_string(&mut data).map_err(Error::ReadingFile)?;
-    };
+        data = std::fs::read_to_string(path).map_err(Error::ReadingFile)?;
+    }
 
     simple_api_command(socket, "PUT", "create", Some(&data)).map_err(Error::ApiClient)
 }
