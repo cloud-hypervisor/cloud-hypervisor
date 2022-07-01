@@ -4045,15 +4045,17 @@ mod parallel {
             DIRECT_KERNEL_BOOT_CMDLINE,
         );
 
-        curl_command(
+        let temp_config_path = guest.tmp_dir.as_path().join("config");
+        std::fs::write(&temp_config_path, http_body).unwrap();
+
+        remote_command(
             &api_socket,
-            "PUT",
-            "http://localhost/api/v1/vm.create",
-            Some(&http_body),
+            "create",
+            Some(temp_config_path.as_os_str().to_str().unwrap()),
         );
 
         // Then boot it
-        curl_command(&api_socket, "PUT", "http://localhost/api/v1/vm.boot", None);
+        remote_command(&api_socket, "boot", None);
         thread::sleep(std::time::Duration::new(20, 0));
 
         let r = std::panic::catch_unwind(|| {
