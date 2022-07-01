@@ -963,13 +963,6 @@ impl Guest {
         Ok(())
     }
 
-    pub fn get_entropy(&self) -> Result<u32, Error> {
-        self.ssh_command("cat /proc/sys/kernel/random/entropy_avail")?
-            .trim()
-            .parse()
-            .map_err(Error::Parsing)
-    }
-
     pub fn get_pci_bridge_class(&self) -> Result<String, Error> {
         Ok(self
             .ssh_command("cat /sys/bus/pci/devices/0000:00:00.0/class")?
