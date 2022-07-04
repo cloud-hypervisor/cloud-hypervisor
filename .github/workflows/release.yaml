@@ -16,23 +16,23 @@ jobs:
       - name: Install Rust toolchain (x86_64-unknown-linux-gnu)
         uses: actions-rs/toolchain@v1
         with:
-            toolchain: "1.60"
+            toolchain: "1.62"
             target: x86_64-unknown-linux-gnu
       - name: Install Rust toolchain (x86_64-unknown-linux-musl)
         uses: actions-rs/toolchain@v1
         with:
-            toolchain: "1.60"
+            toolchain: "1.62"
             target: x86_64-unknown-linux-musl
       - name: Build
         uses: actions-rs/cargo@v1
         with:
-            toolchain: "1.60"
+            toolchain: "1.62"
             command: build
             args: --all --release --target=x86_64-unknown-linux-gnu
       - name: Static Build
         uses: actions-rs/cargo@v1
         with:
-            toolchain: "1.60"
+            toolchain: "1.62"
             command: build
             args: --all --release --target=x86_64-unknown-linux-musl
       - name: Strip cloud-hypervisor binaries
@@ -40,7 +40,7 @@ jobs:
       - name: Install Rust toolchain (aarch64-unknown-linux-musl)
         uses: actions-rs/toolchain@v1
         with:
-            toolchain: "1.60"
+            toolchain: "1.62"
             target: aarch64-unknown-linux-musl
             override: true
       - name: Static Build (AArch64)
