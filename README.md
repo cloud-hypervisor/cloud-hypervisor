@@ -199,7 +199,7 @@ To build the kernel:
 
 # Clone the Cloud Hypervisor Linux branch
 $ pushd $CLOUDH
-$ git clone --depth 1 https://github.com/cloud-hypervisor/linux.git -b ch-5.18.8 linux-cloud-hypervisor
+$ git clone --depth 1 https://github.com/cloud-hypervisor/linux.git -b ch-5.15.12 linux-cloud-hypervisor
 $ pushd linux-cloud-hypervisor
 
 # Use the cloud-hypervisor kernel config to build your kernel
