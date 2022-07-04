@@ -45,7 +45,7 @@ versionize_derive = { git = "https://github.com/cloud-hypervisor/versionize_deri
 [dev-dependencies]
 dirs = "4.0.0"
 net_util = { path = "net_util" }
-once_cell = "1.12.0"
+once_cell = "1.12.1"
 serde_json = "1.0.82"
 test_infra = { path = "test_infra" }
 wait-timeout = "0.2.0"
