@@ -321,15 +321,13 @@ impl Tap {
 
         // If TAP device is already up don't try and enable it
         let ifru_flags = unsafe { ifreq.ifr_ifru.ifru_flags };
-        if ifru_flags
-            & (net_gen::net_device_flags_IFF_UP | net_gen::net_device_flags_IFF_RUNNING) as i16
-            == (net_gen::net_device_flags_IFF_UP | net_gen::net_device_flags_IFF_RUNNING) as i16
+        if ifru_flags & net_gen::net_device_flags_IFF_UP as i16
+            == net_gen::net_device_flags_IFF_UP as i16
         {
             return Ok(());
         }
 
-        ifreq.ifr_ifru.ifru_flags =
-            (net_gen::net_device_flags_IFF_UP | net_gen::net_device_flags_IFF_RUNNING) as i16;
+        ifreq.ifr_ifru.ifru_flags = net_gen::net_device_flags_IFF_UP as i16;
 
         // ioctl is safe. Called with a valid sock fd, and we check the return.
         let ret =
