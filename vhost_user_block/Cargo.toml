@@ -14,7 +14,7 @@ log = "0.4.17"
 option_parser = { path = "../option_parser" }
 qcow = { path = "../qcow" }
 vhost = { version = "0.4.0", features = ["vhost-user-slave"] }
-vhost-user-backend = { git = "https://github.com/rust-vmm/vhost-user-backend", rev = "14f58eda14076e973704d4f904850be1146fbb05" }
+vhost-user-backend = "0.5.0"
 virtio-bindings = "0.1.0"
 vm-memory = "0.8.0"
 vmm-sys-util = "0.9.0"

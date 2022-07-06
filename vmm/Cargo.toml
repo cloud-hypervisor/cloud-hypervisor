@@ -50,7 +50,7 @@ vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", defau
 vfio_user = { path = "../vfio_user" }
 vhdx = { path = "../vhdx" }
 virtio-devices = { path = "../virtio-devices" }
-virtio-queue = "0.3.0"
+virtio-queue = "0.4.0"
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
 vm-memory = { version = "0.8.0", features = ["backend-mmap", "backend-atomic", "backend-bitmap"] }
