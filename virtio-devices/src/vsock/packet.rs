@@ -16,13 +16,14 @@
 /// to temporary buffers, before passing it on to the vsock backend.
 ///
 use byteorder::{ByteOrder, LittleEndian};
+use std::ops::Deref;
 use std::sync::Arc;
 
 use super::defs;
 use super::{Result, VsockError};
-use crate::{get_host_address_range, GuestMemoryMmap};
+use crate::get_host_address_range;
 use virtio_queue::DescriptorChain;
-use vm_memory::GuestMemoryLoadGuard;
+use vm_memory::GuestMemory;
 use vm_virtio::{AccessPlatform, Translatable};
 
 // The vsock packet header is defined by the C struct:
@@ -107,10 +108,14 @@ impl VsockPacket {
     /// descriptor can optionally end the chain. Bounds and pointer checks are performed when
     /// creating the wrapper.
     ///
-    pub fn from_tx_virtq_head(
-        desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap>>,
+    pub fn from_tx_virtq_head<M>(
+        desc_chain: &mut DescriptorChain<M>,
         access_platform: Option<&Arc<dyn AccessPlatform>>,
-    ) -> Result<Self> {
+    ) -> Result<Self>
+    where
+        M: Clone + Deref,
+        M::Target: GuestMemory,
+    {
         let head = desc_chain.next().ok_or(VsockError::HdrDescMissing)?;
 
         // All buffers in the TX queue must be readable.
@@ -181,10 +186,14 @@ impl VsockPacket {
     /// There must be two descriptors in the chain, both writable: a header descriptor and a data
     /// descriptor. Bounds and pointer checks are performed when creating the wrapper.
     ///
-    pub fn from_rx_virtq_head(
-        desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap>>,
+    pub fn from_rx_virtq_head<M>(
+        desc_chain: &mut DescriptorChain<M>,
         access_platform: Option<&Arc<dyn AccessPlatform>>,
-    ) -> Result<Self> {
+    ) -> Result<Self>
+    where
+        M: Clone + Deref,
+        M::Target: GuestMemory,
+    {
         let head = desc_chain.next().ok_or(VsockError::HdrDescMissing)?;
 
         // All RX buffers must be writable.
@@ -379,7 +388,8 @@ mod tests {
     use super::*;
     use crate::vsock::defs::MAX_PKT_BUF_SIZE;
     use crate::GuestMemoryMmap;
-    use virtio_queue::defs::VIRTQ_DESC_F_WRITE;
+    use virtio_bindings::bindings::virtio_ring::VRING_DESC_F_WRITE;
+    use virtio_queue::QueueOwnedT;
     use vm_memory::GuestAddress;
     use vm_virtio::queue::testing::VirtqDesc as GuestQDesc;
 
@@ -402,7 +412,7 @@ mod tests {
         ($test_ctx:expr, $handler_ctx:expr, $err:pat, $ctor:ident, $vq:expr) => {
             match VsockPacket::$ctor(
                 &mut $handler_ctx.handler.queues[$vq]
-                    .iter()
+                    .iter(&$test_ctx.mem)
                     .unwrap()
                     .next()
                     .unwrap(),
@@ -433,7 +443,7 @@ mod tests {
 
             let pkt = VsockPacket::from_tx_virtq_head(
                 &mut handler_ctx.handler.queues[1]
-                    .iter()
+                    .iter(&test_ctx.mem)
                     .unwrap()
                     .next()
                     .unwrap(),
@@ -452,7 +462,7 @@ mod tests {
             create_context!(test_ctx, handler_ctx);
             handler_ctx.guest_txvq.dtable[0]
                 .flags
-                .set(VIRTQ_DESC_F_WRITE);
+                .set(VRING_DESC_F_WRITE.try_into().unwrap());
             expect_asm_error!(tx, test_ctx, handler_ctx, VsockError::UnreadableDescriptor);
         }
 
@@ -471,7 +481,7 @@ mod tests {
             set_pkt_len(0, &handler_ctx.guest_txvq.dtable[0], &test_ctx.mem);
             let mut pkt = VsockPacket::from_tx_virtq_head(
                 &mut handler_ctx.handler.queues[1]
-                    .iter()
+                    .iter(&test_ctx.mem)
                     .unwrap()
                     .next()
                     .unwrap(),
@@ -508,7 +518,7 @@ mod tests {
             create_context!(test_ctx, handler_ctx);
             handler_ctx.guest_txvq.dtable[1]
                 .flags
-                .set(VIRTQ_DESC_F_WRITE);
+                .set(VRING_DESC_F_WRITE.try_into().unwrap());
             expect_asm_error!(tx, test_ctx, handler_ctx, VsockError::UnreadableDescriptor);
         }
 
@@ -529,7 +539,7 @@ mod tests {
             create_context!(test_ctx, handler_ctx);
             let pkt = VsockPacket::from_rx_virtq_head(
                 &mut handler_ctx.handler.queues[0]
-                    .iter()
+                    .iter(&test_ctx.mem)
                     .unwrap()
                     .next()
                     .unwrap(),
@@ -564,7 +574,7 @@ mod tests {
             create_context!(test_ctx, handler_ctx);
             handler_ctx.guest_rxvq.dtable[0]
                 .flags
-                .set(VIRTQ_DESC_F_WRITE);
+                .set(VRING_DESC_F_WRITE.try_into().unwrap());
             expect_asm_error!(rx, test_ctx, handler_ctx, VsockError::BufDescMissing);
         }
     }
@@ -586,7 +596,7 @@ mod tests {
         create_context!(test_ctx, handler_ctx);
         let mut pkt = VsockPacket::from_rx_virtq_head(
             &mut handler_ctx.handler.queues[0]
-                .iter()
+                .iter(&test_ctx.mem)
                 .unwrap()
                 .next()
                 .unwrap(),
@@ -677,7 +687,7 @@ mod tests {
         create_context!(test_ctx, handler_ctx);
         let mut pkt = VsockPacket::from_rx_virtq_head(
             &mut handler_ctx.handler.queues[0]
-                .iter()
+                .iter(&test_ctx.mem)
                 .unwrap()
                 .next()
                 .unwrap(),

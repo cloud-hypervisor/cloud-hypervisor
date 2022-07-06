@@ -40,6 +40,7 @@ use crate::{
 use byteorder::{ByteOrder, LittleEndian};
 use seccompiler::SeccompAction;
 use std::io;
+use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::result;
@@ -48,6 +49,9 @@ use std::sync::{Arc, Barrier, RwLock};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_queue::Queue;
+use virtio_queue::QueueOwnedT;
+use virtio_queue::QueueT;
+use vm_memory::GuestAddressSpace;
 use vm_memory::GuestMemoryAtomic;
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
@@ -88,7 +92,7 @@ pub const BACKEND_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 4;
 ///
 pub struct VsockEpollHandler<B: VsockBackend> {
     pub mem: GuestMemoryAtomic<GuestMemoryMmap>,
-    pub queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
+    pub queues: Vec<Queue>,
     pub queue_evts: Vec<EventFd>,
     pub kill_evt: EventFd,
     pub pause_evt: EventFd,
@@ -124,7 +128,9 @@ where
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
 
-        let mut avail_iter = self.queues[0].iter().map_err(DeviceError::QueueIterator)?;
+        let mut avail_iter = self.queues[0]
+            .iter(self.mem.memory())
+            .map_err(DeviceError::QueueIterator)?;
         for mut desc_chain in &mut avail_iter {
             let used_len = match VsockPacket::from_rx_virtq_head(
                 &mut desc_chain,
@@ -150,9 +156,10 @@ where
             used_count += 1;
         }
 
+        let mem = self.mem.memory();
         for &(desc_index, len) in &used_desc_heads[..used_count] {
             self.queues[0]
-                .add_used(desc_index, len)
+                .add_used(mem.deref(), desc_index, len)
                 .map_err(DeviceError::QueueAddUsed)?;
         }
 
@@ -172,7 +179,9 @@ where
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
 
-        let mut avail_iter = self.queues[1].iter().map_err(DeviceError::QueueIterator)?;
+        let mut avail_iter = self.queues[1]
+            .iter(self.mem.memory())
+            .map_err(DeviceError::QueueIterator)?;
         for mut desc_chain in &mut avail_iter {
             let pkt = match VsockPacket::from_tx_virtq_head(
                 &mut desc_chain,
@@ -196,9 +205,10 @@ where
             used_count += 1;
         }
 
+        let mem = self.mem.memory();
         for &(desc_index, len) in &used_desc_heads[..used_count] {
             self.queues[1]
-                .add_used(desc_index, len)
+                .add_used(mem.deref(), desc_index, len)
                 .map_err(DeviceError::QueueAddUsed)?;
         }
 
@@ -432,7 +442,7 @@ where
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
+        queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
         self.common.activate(&queues, &interrupt_cb)?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
@@ -592,38 +602,36 @@ mod tests {
         // A warning is, however, logged, if the guest driver attempts to write any config data.
         ctx.device.write_config(0, &data[..4]);
 
+        let memory = GuestMemoryAtomic::new(ctx.mem.clone());
+
         // Test a bad activation.
-        let bad_activate = ctx.device.activate(
-            GuestMemoryAtomic::new(ctx.mem.clone()),
-            Arc::new(NoopVirtioInterrupt {}),
-            Vec::new(),
-        );
+        let bad_activate =
+            ctx.device
+                .activate(memory.clone(), Arc::new(NoopVirtioInterrupt {}), Vec::new());
         match bad_activate {
             Err(ActivateError::BadActivate) => (),
             other => panic!("{:?}", other),
         }
 
-        let memory = GuestMemoryAtomic::new(ctx.mem.clone());
-
         // Test a correct activation.
         ctx.device
             .activate(
-                memory.clone(),
+                memory,
                 Arc::new(NoopVirtioInterrupt {}),
                 vec![
                     (
                         0,
-                        Queue::new(memory.clone(), 256),
+                        Queue::new(256).unwrap(),
                         EventFd::new(EFD_NONBLOCK).unwrap(),
                     ),
                     (
                         1,
-                        Queue::new(memory.clone(), 256),
+                        Queue::new(256).unwrap(),
                         EventFd::new(EFD_NONBLOCK).unwrap(),
                     ),
                     (
                         2,
-                        Queue::new(memory, 256),
+                        Queue::new(256).unwrap(),
                         EventFd::new(EFD_NONBLOCK).unwrap(),
                     ),
                 ],
@@ -637,9 +645,8 @@ mod tests {
         {
             let test_ctx = TestContext::new();
             let ctx = test_ctx.create_epoll_handler_context();
-            let memory = GuestMemoryAtomic::new(test_ctx.mem.clone());
 
-            let _queue: Queue<GuestMemoryAtomic<GuestMemoryMmap>> = Queue::new(memory, 256);
+            let _queue: Queue = Queue::new(256).unwrap();
             assert!(ctx.handler.signal_used_queue(0).is_ok());
         }
     }

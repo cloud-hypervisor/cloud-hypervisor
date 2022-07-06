@@ -817,6 +817,8 @@ mod tests {
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::path::{Path, PathBuf};
 
+    use virtio_queue::QueueOwnedT;
+
     use super::super::super::csm::defs as csm_defs;
     use super::super::super::tests::TestContext as VsockTestContext;
     use super::*;
@@ -842,7 +844,7 @@ mod tests {
             let mut handler_ctx = vsock_test_ctx.create_epoll_handler_context();
             let pkt = VsockPacket::from_rx_virtq_head(
                 &mut handler_ctx.handler.queues[0]
-                    .iter()
+                    .iter(&vsock_test_ctx.mem)
                     .unwrap()
                     .next()
                     .unwrap(),

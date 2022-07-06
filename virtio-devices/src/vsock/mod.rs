@@ -170,7 +170,7 @@ mod tests {
     use std::os::unix::io::AsRawFd;
     use std::path::PathBuf;
     use std::sync::{Arc, RwLock};
-    use virtio_queue::{defs::VIRTQ_DESC_F_NEXT, defs::VIRTQ_DESC_F_WRITE};
+    use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use vm_memory::{GuestAddress, GuestMemoryAtomic};
     use vm_virtio::queue::testing::VirtQueue as GuestQ;
     use vmm_sys_util::eventfd::EventFd;
@@ -295,15 +295,20 @@ mod tests {
             guest_rxvq.dtable[0].set(
                 0x0040_0000,
                 VSOCK_PKT_HDR_SIZE as u32,
-                VIRTQ_DESC_F_WRITE | VIRTQ_DESC_F_NEXT,
+                (VRING_DESC_F_WRITE | VRING_DESC_F_NEXT).try_into().unwrap(),
                 1,
             );
-            guest_rxvq.dtable[1].set(0x0040_1000, 4096, VIRTQ_DESC_F_WRITE, 0);
+            guest_rxvq.dtable[1].set(0x0040_1000, 4096, VRING_DESC_F_WRITE.try_into().unwrap(), 0);
             guest_rxvq.avail.ring[0].set(0);
             guest_rxvq.avail.idx.set(1);
 
             // Set up one available descriptor in the TX queue.
-            guest_txvq.dtable[0].set(0x0050_0000, VSOCK_PKT_HDR_SIZE as u32, VIRTQ_DESC_F_NEXT, 1);
+            guest_txvq.dtable[0].set(
+                0x0050_0000,
+                VSOCK_PKT_HDR_SIZE as u32,
+                VRING_DESC_F_NEXT.try_into().unwrap(),
+                1,
+            );
             guest_txvq.dtable[1].set(0x0050_1000, 4096, 0, 0);
             guest_txvq.avail.ring[0].set(0);
             guest_txvq.avail.idx.set(1);

@@ -10,8 +10,8 @@ use std::num::Wrapping;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use virtio_queue::Queue;
-use vm_memory::{Bytes, GuestMemory, GuestMemoryAtomic};
+use virtio_queue::{Queue, QueueOwnedT, QueueT};
+use vm_memory::{Bytes, GuestMemory};
 use vm_virtio::{AccessPlatform, Translatable};
 
 #[derive(Clone)]
@@ -36,8 +36,9 @@ impl TxVirtio {
 
     pub fn process_desc_chain(
         &mut self,
+        mem: &GuestMemoryMmap,
         tap: &mut Tap,
-        queue: &mut Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
+        queue: &mut Queue,
         rate_limiter: &mut Option<RateLimiter>,
         access_platform: Option<&Arc<dyn AccessPlatform>>,
     ) -> Result<bool, NetQueuePairError> {
@@ -47,7 +48,7 @@ impl TxVirtio {
         loop {
             let used_desc_head: (u16, u32);
             let mut avail_iter = queue
-                .iter()
+                .iter(mem)
                 .map_err(NetQueuePairError::QueueIteratorFailed)?;
 
             if let Some(mut desc_chain) = avail_iter.next() {
@@ -130,10 +131,10 @@ impl TxVirtio {
             }
 
             queue
-                .add_used(used_desc_head.0, used_desc_head.1)
+                .add_used(mem, used_desc_head.0, used_desc_head.1)
                 .map_err(NetQueuePairError::QueueAddUsed)?;
             if !queue
-                .enable_notification()
+                .enable_notification(mem)
                 .map_err(NetQueuePairError::QueueEnableNotification)?
             {
                 break;
@@ -166,8 +167,9 @@ impl RxVirtio {
 
     pub fn process_desc_chain(
         &mut self,
+        mem: &GuestMemoryMmap,
         tap: &mut Tap,
-        queue: &mut Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
+        queue: &mut Queue,
         rate_limiter: &mut Option<RateLimiter>,
         access_platform: Option<&Arc<dyn AccessPlatform>>,
     ) -> Result<bool, NetQueuePairError> {
@@ -177,7 +179,7 @@ impl RxVirtio {
         loop {
             let used_desc_head: (u16, u32);
             let mut avail_iter = queue
-                .iter()
+                .iter(mem)
                 .map_err(NetQueuePairError::QueueIteratorFailed)?;
 
             if let Some(mut desc_chain) = avail_iter.next() {
@@ -281,10 +283,10 @@ impl RxVirtio {
             }
 
             queue
-                .add_used(used_desc_head.0, used_desc_head.1)
+                .add_used(mem, used_desc_head.0, used_desc_head.1)
                 .map_err(NetQueuePairError::QueueAddUsed)?;
             if !queue
-                .enable_notification()
+                .enable_notification(mem)
                 .map_err(NetQueuePairError::QueueEnableNotification)?
             {
                 break;
@@ -355,9 +357,11 @@ pub struct NetQueuePair {
 impl NetQueuePair {
     pub fn process_tx(
         &mut self,
-        queue: &mut Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
+        mem: &GuestMemoryMmap,
+        queue: &mut Queue,
     ) -> Result<bool, NetQueuePairError> {
         let tx_tap_retry = self.tx.process_desc_chain(
+            mem,
             &mut self.tap,
             queue,
             &mut self.tx_rate_limiter,
@@ -397,15 +401,17 @@ impl NetQueuePair {
         self.tx.counter_frames = Wrapping(0);
 
         queue
-            .needs_notification()
+            .needs_notification(mem)
             .map_err(NetQueuePairError::QueueNeedsNotification)
     }
 
     pub fn process_rx(
         &mut self,
-        queue: &mut Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
+        mem: &GuestMemoryMmap,
+        queue: &mut Queue,
     ) -> Result<bool, NetQueuePairError> {
         self.rx_desc_avail = !self.rx.process_desc_chain(
+            mem,
             &mut self.tap,
             queue,
             &mut self.rx_rate_limiter,
@@ -440,7 +446,7 @@ impl NetQueuePair {
         self.rx.counter_frames = Wrapping(0);
 
         queue
-            .needs_notification()
+            .needs_notification(mem)
             .map_err(NetQueuePairError::QueueNeedsNotification)
     }
 }

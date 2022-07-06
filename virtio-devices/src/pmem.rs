@@ -21,16 +21,17 @@ use std::fmt::{self, Display};
 use std::fs::File;
 use std::io;
 use std::mem::size_of;
+use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use virtio_queue::{DescriptorChain, Queue};
+use virtio_queue::{DescriptorChain, Queue, QueueOwnedT, QueueT};
 use vm_memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryError,
-    GuestMemoryLoadGuard,
+    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
+    GuestMemoryError, GuestMemoryLoadGuard,
 };
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -165,7 +166,8 @@ impl Request {
 }
 
 struct PmemEpollHandler {
-    queue: Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
+    mem: GuestMemoryAtomic<GuestMemoryMmap>,
+    queue: Queue,
     disk: File,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     queue_evt: EventFd,
@@ -178,7 +180,7 @@ impl PmemEpollHandler {
     fn process_queue(&mut self) -> bool {
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
-        for mut desc_chain in self.queue.iter().unwrap() {
+        for mut desc_chain in self.queue.iter(self.mem.memory()).unwrap() {
             let len = match Request::parse(&mut desc_chain, self.access_platform.as_ref()) {
                 Ok(ref req) if (req.type_ == RequestType::Flush) => {
                     let status_code = match self.disk.sync_all() {
@@ -213,8 +215,9 @@ impl PmemEpollHandler {
             used_count += 1;
         }
 
+        let mem = self.mem.memory();
         for &(desc_index, len) in &used_desc_heads[..used_count] {
-            self.queue.add_used(desc_index, len).unwrap();
+            self.queue.add_used(mem.deref(), desc_index, len).unwrap();
         }
         used_count > 0
     }
@@ -377,9 +380,9 @@ impl VirtioDevice for Pmem {
 
     fn activate(
         &mut self,
-        _mem: GuestMemoryAtomic<GuestMemoryMmap>,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        mut queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
+        mut queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
         self.common.activate(&queues, &interrupt_cb)?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
@@ -392,6 +395,7 @@ impl VirtioDevice for Pmem {
             let (_, queue, queue_evt) = queues.remove(0);
 
             let mut handler = PmemEpollHandler {
+                mem,
                 queue,
                 disk,
                 interrupt_cb,

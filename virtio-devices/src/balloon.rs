@@ -22,6 +22,7 @@ use libc::EFD_NONBLOCK;
 use seccompiler::SeccompAction;
 use std::io;
 use std::mem::size_of;
+use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::{
@@ -30,10 +31,10 @@ use std::sync::{
 };
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use virtio_queue::Queue;
+use virtio_queue::{Queue, QueueOwnedT, QueueT};
 use vm_memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryAtomic, GuestMemoryError,
-    GuestMemoryRegion,
+    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
+    GuestMemoryError, GuestMemoryRegion,
 };
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
@@ -161,9 +162,10 @@ impl VirtioBalloonResize {
 }
 
 struct BalloonEpollHandler {
+    mem: GuestMemoryAtomic<GuestMemoryMmap>,
     config: Arc<Mutex<VirtioBalloonConfig>>,
     resize_receiver: VirtioBalloonResizeReceiver,
-    queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
+    queues: Vec<Queue>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     inflate_queue_evt: EventFd,
     deflate_queue_evt: EventFd,
@@ -230,9 +232,10 @@ impl BalloonEpollHandler {
         queue_index: usize,
         used_descs: Vec<(u16, u32)>,
     ) -> result::Result<(), Error> {
+        let mem = self.mem.memory();
         for (desc_index, len) in used_descs.iter() {
             self.queues[queue_index]
-                .add_used(*desc_index, *len)
+                .add_used(mem.deref(), *desc_index, *len)
                 .map_err(Error::QueueAddUsed)?;
         }
 
@@ -244,9 +247,10 @@ impl BalloonEpollHandler {
     }
 
     fn process_queue(&mut self, queue_index: usize) -> result::Result<(), Error> {
+        let mem = self.mem.memory();
         let mut used_descs = Vec::new();
         for mut desc_chain in self.queues[queue_index]
-            .iter()
+            .iter(mem)
             .map_err(Error::QueueIterator)?
         {
             let desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
@@ -298,10 +302,11 @@ impl BalloonEpollHandler {
     }
 
     fn process_reporting_queue(&mut self, queue_index: usize) -> result::Result<(), Error> {
+        let mem = self.mem.memory();
         let mut used_descs = Vec::new();
 
         for mut desc_chain in self.queues[queue_index]
-            .iter()
+            .iter(mem)
             .map_err(Error::QueueIterator)?
         {
             let mut descs_len = 0;
@@ -540,9 +545,9 @@ impl VirtioDevice for Balloon {
 
     fn activate(
         &mut self,
-        _mem: GuestMemoryAtomic<GuestMemoryMmap>,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        mut queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
+        mut queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
         self.common.activate(&queues, &interrupt_cb)?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
@@ -564,6 +569,7 @@ impl VirtioDevice for Balloon {
             };
 
         let mut handler = BalloonEpollHandler {
+            mem,
             config: self.config.clone(),
             resize_receiver: self.resize.get_receiver().map_err(|e| {
                 error!("failed to clone resize EventFd: {:?}", e);

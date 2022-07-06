@@ -18,6 +18,7 @@ use option_parser::{OptionParser, OptionParserError};
 use std::fmt;
 use std::io;
 use std::net::Ipv4Addr;
+use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::process;
 use std::sync::{Arc, Mutex, RwLock};
@@ -26,6 +27,7 @@ use vhost::vhost_user::message::*;
 use vhost::vhost_user::Listener;
 use vhost_user_backend::{VhostUserBackendMut, VhostUserDaemon, VringRwLock, VringT};
 use virtio_bindings::bindings::virtio_net::*;
+use vm_memory::GuestAddressSpace;
 use vm_memory::{bitmap::AtomicBitmap, GuestMemoryAtomic};
 use vmm_sys_util::{epoll::EventSet, eventfd::EventFd};
 
@@ -113,6 +115,7 @@ pub struct VhostUserNetBackend {
     num_queues: usize,
     queue_size: u16,
     queues_per_thread: Vec<u64>,
+    mem: GuestMemoryAtomic<GuestMemoryMmap>,
 }
 
 impl VhostUserNetBackend {
@@ -123,6 +126,7 @@ impl VhostUserNetBackend {
         num_queues: usize,
         queue_size: u16,
         ifname: Option<&str>,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
     ) -> Result<Self> {
         let mut taps = open_tap(
             ifname,
@@ -147,6 +151,7 @@ impl VhostUserNetBackend {
             num_queues,
             queue_size,
             queues_per_thread,
+            mem,
         })
     }
 }
@@ -214,7 +219,7 @@ impl VhostUserBackendMut<VringRwLock<GuestMemoryAtomic<GuestMemoryMmap>>, Atomic
                 let mut vring = vrings[1].get_mut();
                 if thread
                     .net
-                    .process_tx(vring.get_queue_mut())
+                    .process_tx(self.mem.memory().deref(), vring.get_queue_mut())
                     .map_err(Error::NetQueuePair)?
                 {
                     vring
@@ -226,7 +231,7 @@ impl VhostUserBackendMut<VringRwLock<GuestMemoryAtomic<GuestMemoryMmap>>, Atomic
                 let mut vring = vrings[0].get_mut();
                 if thread
                     .net
-                    .process_rx(vring.get_queue_mut())
+                    .process_rx(self.mem.memory().deref(), vring.get_queue_mut())
                     .map_err(Error::NetQueuePair)?
                 {
                     vring
@@ -342,6 +347,8 @@ pub fn start_net_backend(backend_command: &str) {
 
     let tap = backend_config.tap.as_deref();
 
+    let mem = GuestMemoryAtomic::new(GuestMemoryMmap::new());
+
     let net_backend = Arc::new(RwLock::new(
         VhostUserNetBackend::new(
             backend_config.ip,
@@ -350,6 +357,7 @@ pub fn start_net_backend(backend_command: &str) {
             backend_config.num_queues,
             backend_config.queue_size,
             tap,
+            mem.clone(),
         )
         .unwrap(),
     ));
@@ -357,7 +365,7 @@ pub fn start_net_backend(backend_command: &str) {
     let mut net_daemon = VhostUserDaemon::new(
         "vhost-user-net-backend".to_string(),
         net_backend.clone(),
-        GuestMemoryAtomic::new(GuestMemoryMmap::new()),
+        mem,
     )
     .unwrap();
 

@@ -24,6 +24,7 @@ use net_util::{
 use seccompiler::SeccompAction;
 use std::net::Ipv4Addr;
 use std::num::Wrapping;
+use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -35,8 +36,8 @@ use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_bindings::bindings::virtio_net::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
-use virtio_queue::Queue;
-use vm_memory::{ByteValued, GuestMemoryAtomic};
+use virtio_queue::{Queue, QueueT};
+use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
@@ -47,11 +48,12 @@ use vmm_sys_util::eventfd::EventFd;
 const CTRL_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 
 pub struct NetCtrlEpollHandler {
+    pub mem: GuestMemoryAtomic<GuestMemoryMmap>,
     pub kill_evt: EventFd,
     pub pause_evt: EventFd,
     pub ctrl_q: CtrlQueue,
     pub queue_evt: EventFd,
-    pub queue: Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
+    pub queue: Queue,
     pub access_platform: Option<Arc<dyn AccessPlatform>>,
     pub interrupt_cb: Arc<dyn VirtioInterrupt>,
     pub queue_index: u16,
@@ -85,18 +87,19 @@ impl EpollHelperHandler for NetCtrlEpollHandler {
         let ev_type = event.data as u16;
         match ev_type {
             CTRL_QUEUE_EVENT => {
+                let mem = self.mem.memory();
                 if let Err(e) = self.queue_evt.read() {
                     error!("Failed to get control queue event: {:?}", e);
                     return true;
                 }
-                if let Err(e) = self
-                    .ctrl_q
-                    .process(&mut self.queue, self.access_platform.as_ref())
+                if let Err(e) =
+                    self.ctrl_q
+                        .process(mem.deref(), &mut self.queue, self.access_platform.as_ref())
                 {
                     error!("Failed to process control queue: {:?}", e);
                     return true;
                 } else {
-                    match self.queue.needs_notification() {
+                    match self.queue.needs_notification(mem.deref()) {
                         Ok(true) => {
                             if let Err(e) = self.signal_used_queue(self.queue_index) {
                                 error!("Error signalling that control queue was used: {:?}", e);
@@ -151,11 +154,12 @@ pub type Result<T> = result::Result<T, Error>;
 
 struct NetEpollHandler {
     net: NetQueuePair,
+    mem: GuestMemoryAtomic<GuestMemoryMmap>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     kill_evt: EventFd,
     pause_evt: EventFd,
     queue_index_base: u16,
-    queue_pair: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
+    queue_pair: Vec<Queue>,
     queue_evt_pair: Vec<EventFd>,
     // Always generate interrupts until the driver has signalled to the device.
     // This mitigates a problem with interrupts from tap events being "lost" upon
@@ -206,7 +210,7 @@ impl NetEpollHandler {
     fn process_tx(&mut self) -> result::Result<(), DeviceError> {
         if self
             .net
-            .process_tx(&mut self.queue_pair[1])
+            .process_tx(&self.mem.memory(), &mut self.queue_pair[1])
             .map_err(DeviceError::NetQueuePair)?
             || !self.driver_awake
         {
@@ -235,7 +239,7 @@ impl NetEpollHandler {
     fn handle_rx_tap_event(&mut self) -> result::Result<(), DeviceError> {
         if self
             .net
-            .process_rx(&mut self.queue_pair[0])
+            .process_rx(&self.mem.memory(), &mut self.queue_pair[0])
             .map_err(DeviceError::NetQueuePair)?
             || !self.driver_awake
         {
@@ -262,13 +266,14 @@ impl NetEpollHandler {
             helper.add_event(rate_limiter.as_raw_fd(), TX_RATE_LIMITER_EVENT)?;
         }
 
+        let mem = self.mem.memory();
         // If there are some already available descriptors on the RX queue,
         // then we can start the thread while listening onto the TAP.
         if self.queue_pair[0]
-            .used_idx(Ordering::Acquire)
+            .used_idx(mem.deref(), Ordering::Acquire)
             .map_err(EpollHelperError::QueueRingIndex)?
             < self.queue_pair[0]
-                .avail_idx(Ordering::Acquire)
+                .avail_idx(mem.deref(), Ordering::Acquire)
                 .map_err(EpollHelperError::QueueRingIndex)?
         {
             helper.add_event(self.net.tap.as_raw_fd(), RX_TAP_EVENT)?;
@@ -583,9 +588,9 @@ impl VirtioDevice for Net {
 
     fn activate(
         &mut self,
-        _mem: GuestMemoryAtomic<GuestMemoryMmap>,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        mut queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
+        mut queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
         self.common.activate(&queues, &interrupt_cb)?;
 
@@ -599,6 +604,7 @@ impl VirtioDevice for Net {
 
             let (kill_evt, pause_evt) = self.common.dup_eventfds();
             let mut ctrl_handler = NetCtrlEpollHandler {
+                mem: mem.clone(),
                 kill_evt,
                 pause_evt,
                 ctrl_q: CtrlQueue::new(self.taps.clone()),
@@ -685,6 +691,7 @@ impl VirtioDevice for Net {
                     tx_rate_limiter,
                     access_platform: self.common.access_platform.clone(),
                 },
+                mem: mem.clone(),
                 queue_index_base: (i * 2) as u16,
                 queue_pair,
                 queue_evt_pair,

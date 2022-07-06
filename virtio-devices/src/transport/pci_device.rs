@@ -24,19 +24,20 @@ use pci::{
 use std::any::Any;
 use std::cmp;
 use std::io::Write;
+use std::ops::Deref;
 use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use virtio_queue::{Error as QueueError, Queue};
+use virtio_queue::{Error as QueueError, Queue, QueueT};
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
 };
 use vm_device::{BusDevice, Resource};
-use vm_memory::{Address, ByteValued, GuestAddress, GuestMemoryAtomic, Le32};
+use vm_memory::{Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, Le32};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
 };
@@ -292,8 +293,7 @@ pub struct VirtioPciDeviceActivator {
     memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     device: Arc<Mutex<dyn VirtioDevice>>,
     device_activated: Arc<AtomicBool>,
-    #[allow(clippy::type_complexity)]
-    queues: Option<Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>>,
+    queues: Option<Vec<(usize, Queue, EventFd)>>,
     barrier: Option<Arc<Barrier>>,
     id: String,
 }
@@ -342,11 +342,11 @@ pub struct VirtioPciDevice {
     interrupt_source_group: Arc<dyn InterruptSourceGroup>,
 
     // virtio queues
-    queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
+    queues: Vec<Queue>,
     queue_evts: Vec<EventFd>,
 
     // Guest memory
-    memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
+    memory: GuestMemoryAtomic<GuestMemoryMmap>,
 
     // Settings PCI BAR
     settings_bar: u8,
@@ -406,12 +406,7 @@ impl VirtioPciDevice {
         let queues = locked_device
             .queue_max_sizes()
             .iter()
-            .map(|&s| {
-                Queue::<GuestMemoryAtomic<GuestMemoryMmap>, virtio_queue::QueueState>::new(
-                    memory.clone(),
-                    s,
-                )
-            })
+            .map(|&s| Queue::new(s).unwrap())
             .collect();
 
         let pci_device_id = VIRTIO_PCI_DEVICE_ID_BASE + locked_device.device_type() as u16;
@@ -482,7 +477,7 @@ impl VirtioPciDevice {
             virtio_interrupt: None,
             queues,
             queue_evts,
-            memory: Some(memory),
+            memory,
             settings_bar: 0,
             use_64bit_bar,
             interrupt_source_group,
@@ -514,11 +509,11 @@ impl VirtioPciDevice {
                 .iter()
                 .map(|q| QueueState {
                     max_size: q.max_size(),
-                    size: q.state.size,
-                    ready: q.state.ready,
-                    desc_table: q.state.desc_table.0,
-                    avail_ring: q.state.avail_ring.0,
-                    used_ring: q.state.used_ring.0,
+                    size: q.size(),
+                    ready: q.ready(),
+                    desc_table: q.desc_table(),
+                    avail_ring: q.avail_ring(),
+                    used_ring: q.used_ring(),
                 })
                 .collect(),
         }
@@ -532,20 +527,26 @@ impl VirtioPciDevice {
 
         // Update virtqueues indexes for both available and used rings.
         for (i, queue) in self.queues.iter_mut().enumerate() {
-            queue.state.size = state.queues[i].size;
-            queue.state.ready = state.queues[i].ready;
-            queue.state.desc_table = GuestAddress(state.queues[i].desc_table);
-            queue.state.avail_ring = GuestAddress(state.queues[i].avail_ring);
-            queue.state.used_ring = GuestAddress(state.queues[i].used_ring);
+            queue.set_size(state.queues[i].size);
+            queue.set_ready(state.queues[i].ready);
+            queue
+                .try_set_desc_table_address(GuestAddress(state.queues[i].desc_table))
+                .unwrap();
+            queue
+                .try_set_avail_ring_address(GuestAddress(state.queues[i].avail_ring))
+                .unwrap();
+            queue
+                .try_set_used_ring_address(GuestAddress(state.queues[i].used_ring))
+                .unwrap();
             queue.set_next_avail(
                 queue
-                    .used_idx(Ordering::Acquire)
+                    .used_idx(self.memory.memory().deref(), Ordering::Acquire)
                     .map_err(Error::QueueRingIndex)?
                     .0,
             );
             queue.set_next_used(
                 queue
-                    .used_idx(Ordering::Acquire)
+                    .used_idx(self.memory.memory().deref(), Ordering::Acquire)
                     .map_err(Error::QueueRingIndex)?
                     .0,
             );
@@ -701,11 +702,11 @@ impl VirtioPciDevice {
         let mut queues = Vec::new();
 
         for (queue_index, queue) in self.queues.iter().enumerate() {
-            if !queue.state.ready {
+            if !queue.ready() {
                 continue;
             }
 
-            if !queue.is_valid() {
+            if !queue.is_valid(self.memory.memory().deref()) {
                 error!("Queue {} is not valid", queue_index);
             }
 
@@ -718,7 +719,7 @@ impl VirtioPciDevice {
 
         VirtioPciDeviceActivator {
             interrupt: self.virtio_interrupt.take(),
-            memory: self.memory.clone(),
+            memory: Some(self.memory.clone()),
             device: self.device.clone(),
             queues: Some(queues),
             device_activated: self.device_activated.clone(),

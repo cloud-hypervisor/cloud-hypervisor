@@ -160,7 +160,7 @@ impl TryInto<rate_limiter::RateLimiter> for RateLimiterConfig {
 /// to a host pointer and verify that the provided size define a valid
 /// range within a single memory region.
 /// Return None if it is out of bounds or if addr+size overlaps a single region.
-pub fn get_host_address_range<M: GuestMemory>(
+pub fn get_host_address_range<M: GuestMemory + ?Sized>(
     mem: &M,
     addr: GuestAddress,
     size: usize,

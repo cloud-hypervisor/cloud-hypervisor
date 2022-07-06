@@ -11,9 +11,8 @@
 pub mod testing {
     use std::marker::PhantomData;
     use std::mem;
-    use virtio_queue::{Queue, QueueState, VirtqUsedElem};
-    use vm_memory::{bitmap::AtomicBitmap, Address, GuestAddress, GuestUsize};
-    use vm_memory::{Bytes, GuestMemoryAtomic};
+    use virtio_queue::{Queue, QueueT, VirtqUsedElem};
+    use vm_memory::{bitmap::AtomicBitmap, Address, Bytes, GuestAddress, GuestUsize};
 
     type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
@@ -225,16 +224,14 @@ pub mod testing {
         }
 
         // Creates a new Queue, using the underlying memory regions represented by the VirtQueue.
-        pub fn create_queue(&self) -> Queue<GuestMemoryAtomic<GuestMemoryMmap>> {
-            let mem = GuestMemoryAtomic::new(self.mem.clone());
-            let mut q =
-                Queue::<GuestMemoryAtomic<GuestMemoryMmap>, QueueState>::new(mem, self.size());
+        pub fn create_queue(&self) -> Queue {
+            let mut q = Queue::new(self.size()).unwrap();
 
-            q.state.size = self.size();
-            q.state.ready = true;
-            q.state.desc_table = self.dtable_start();
-            q.state.avail_ring = self.avail_start();
-            q.state.used_ring = self.used_start();
+            q.set_size(self.size());
+            q.set_ready(true);
+            q.try_set_desc_table_address(self.dtable_start()).unwrap();
+            q.try_set_avail_ring_address(self.avail_start()).unwrap();
+            q.try_set_used_ring_address(self.used_start()).unwrap();
 
             q
         }

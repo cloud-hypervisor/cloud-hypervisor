@@ -26,6 +26,7 @@ use rate_limiter::{RateLimiter, TokenType};
 use seccompiler::SeccompAction;
 use std::io;
 use std::num::Wrapping;
+use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::result;
@@ -35,7 +36,7 @@ use std::{collections::HashMap, convert::TryInto};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_bindings::bindings::virtio_blk::*;
-use virtio_queue::Queue;
+use virtio_queue::{Queue, QueueOwnedT, QueueT};
 use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -84,7 +85,7 @@ pub struct BlockCounters {
 
 struct BlockEpollHandler {
     queue_index: u16,
-    queue: Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
+    queue: Queue,
     mem: GuestMemoryAtomic<GuestMemoryMmap>,
     disk_image: Box<dyn AsyncIo>,
     disk_nsectors: u64,
@@ -107,7 +108,9 @@ impl BlockEpollHandler {
         let mut used_desc_heads = Vec::new();
         let mut used_count = 0;
 
-        let mut avail_iter = queue.iter().map_err(Error::QueueIterator)?;
+        let mut avail_iter = queue
+            .iter(self.mem.memory())
+            .map_err(Error::QueueIterator)?;
         for mut desc_chain in &mut avail_iter {
             let mut request = Request::parse(&mut desc_chain, self.access_platform.as_ref())
                 .map_err(Error::RequestParsing)?;
@@ -171,9 +174,10 @@ impl BlockEpollHandler {
             }
         }
 
+        let mem = self.mem.memory();
         for &(desc_index, len) in used_desc_heads.iter() {
             queue
-                .add_used(desc_index, len)
+                .add_used(mem.deref(), desc_index, len)
                 .map_err(Error::QueueAddUsed)?;
         }
 
@@ -239,7 +243,7 @@ impl BlockEpollHandler {
 
         for &(desc_index, len) in used_desc_heads.iter() {
             queue
-                .add_used(desc_index, len)
+                .add_used(mem.deref(), desc_index, len)
                 .map_err(Error::QueueAddUsed)?;
         }
 
@@ -587,7 +591,7 @@ impl VirtioDevice for Block {
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        mut queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
+        mut queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
         self.common.activate(&queues, &interrupt_cb)?;
 
@@ -597,7 +601,7 @@ impl VirtioDevice for Block {
         let mut epoll_threads = Vec::new();
         for i in 0..queues.len() {
             let (_, queue, queue_evt) = queues.remove(0);
-            let queue_size = queue.state.size;
+            let queue_size = queue.size();
             let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
             let rate_limiter: Option<RateLimiter> = self

@@ -15,7 +15,7 @@ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
 use std::sync::Arc;
 use virtio_devices::{Block, VirtioDevice, VirtioInterrupt, VirtioInterruptType};
-use virtio_queue::{Queue, QueueState};
+use virtio_queue::{Queue, QueueT};
 use vm_memory::{bitmap::AtomicBitmap, Bytes, GuestAddress, GuestMemoryAtomic};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
@@ -77,12 +77,9 @@ fuzz_target!(|bytes| {
 
     let guest_memory = GuestMemoryAtomic::new(mem);
 
-    let mut q = Queue::<
-        GuestMemoryAtomic<GuestMemoryMmap>,
-        QueueState,
-    >::new(guest_memory.clone(), QUEUE_SIZE);
-    q.state.ready = true;
-    q.state.size = QUEUE_SIZE / 2;
+    let mut q = Queue::new(QUEUE_SIZE).unwrap();
+    q.set_ready(true);
+    q.set_size(QUEUE_SIZE / 2);
 
     let evt = EventFd::new(0).unwrap();
     let queue_evt = unsafe { EventFd::from_raw_fd(libc::dup(evt.as_raw_fd())) };
