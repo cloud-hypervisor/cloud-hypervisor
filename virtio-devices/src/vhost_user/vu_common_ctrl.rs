@@ -290,10 +290,7 @@ impl VhostUserHandle {
     }
 
     pub fn reset_vhost_user(&mut self, num_queues: usize) -> Result<()> {
-        self.enable_vhost_user_vrings(num_queues, false)?;
-
-        // Reset the owner.
-        self.vu.reset_owner().map_err(Error::VhostUserResetOwner)
+        self.enable_vhost_user_vrings(num_queues, false)
     }
 
     pub fn set_protocol_features_vhost_user(
