@@ -167,7 +167,7 @@ pub struct VhostUserEpollHandler<S: VhostUserMasterReqHandler> {
     pub mem: GuestMemoryAtomic<GuestMemoryMmap>,
     pub kill_evt: EventFd,
     pub pause_evt: EventFd,
-    pub queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
+    pub queues: Vec<(usize, Queue, EventFd)>,
     pub virtio_interrupt: Arc<dyn VirtioInterrupt>,
     pub acked_features: u64,
     pub acked_protocol_features: u64,
@@ -297,7 +297,7 @@ impl VhostUserCommon {
     pub fn activate<T: VhostUserMasterReqHandler>(
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
-        queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
+        queues: Vec<(usize, Queue, EventFd)>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         acked_features: u64,
         slave_req_handler: Option<MasterReqHandler<T>>,

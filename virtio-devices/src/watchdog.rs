@@ -18,6 +18,7 @@ use anyhow::anyhow;
 use seccompiler::SeccompAction;
 use std::fs::File;
 use std::io::{self, Read};
+use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::result;
 use std::sync::atomic::AtomicBool;
@@ -25,8 +26,8 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::time::Instant;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use virtio_queue::Queue;
-use vm_memory::{Bytes, GuestMemoryAtomic};
+use virtio_queue::{Queue, QueueOwnedT, QueueT};
+use vm_memory::{Bytes, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
@@ -47,7 +48,8 @@ const WATCHDOG_TIMER_INTERVAL: i64 = 15;
 const WATCHDOG_TIMEOUT: u64 = WATCHDOG_TIMER_INTERVAL as u64 + 5;
 
 struct WatchdogEpollHandler {
-    queue: Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
+    mem: GuestMemoryAtomic<GuestMemoryMmap>,
+    queue: Queue,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     queue_evt: EventFd,
     kill_evt: EventFd,
@@ -64,7 +66,7 @@ impl WatchdogEpollHandler {
         let queue = &mut self.queue;
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
-        for mut desc_chain in queue.iter().unwrap() {
+        for mut desc_chain in queue.iter(self.mem.memory()).unwrap() {
             let desc = desc_chain.next().unwrap();
 
             let mut len = 0;
@@ -88,8 +90,9 @@ impl WatchdogEpollHandler {
             used_count += 1;
         }
 
+        let mem = self.mem.memory();
         for &(desc_index, len) in &used_desc_heads[..used_count] {
-            queue.add_used(desc_index, len).unwrap();
+            queue.add_used(mem.deref(), desc_index, len).unwrap();
         }
         used_count > 0
     }
@@ -289,9 +292,9 @@ impl VirtioDevice for Watchdog {
 
     fn activate(
         &mut self,
-        _mem: GuestMemoryAtomic<GuestMemoryMmap>,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        mut queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
+        mut queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
         self.common.activate(&queues, &interrupt_cb)?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
@@ -309,6 +312,7 @@ impl VirtioDevice for Watchdog {
         let (_, queue, queue_evt) = queues.remove(0);
 
         let mut handler = WatchdogEpollHandler {
+            mem,
             queue,
             interrupt_cb,
             queue_evt,

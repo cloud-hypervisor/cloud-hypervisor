@@ -107,7 +107,7 @@ pub trait VirtioDevice: Send {
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_evt: Arc<dyn VirtioInterrupt>,
-        queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
+        queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult;
 
     /// Optionally deactivates this device and returns ownership of the guest memory map, interrupt
@@ -250,7 +250,7 @@ impl VirtioCommon {
 
     pub fn activate(
         &mut self,
-        queues: &[(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)],
+        queues: &[(usize, Queue, EventFd)],
         interrupt_cb: &Arc<dyn VirtioInterrupt>,
     ) -> ActivateResult {
         if queues.len() < self.min_queues.into() {

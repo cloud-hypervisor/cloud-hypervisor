@@ -15,14 +15,15 @@ use crate::{VirtioInterrupt, VirtioInterruptType};
 use seccompiler::SeccompAction;
 use std::fs::File;
 use std::io;
+use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use virtio_queue::Queue;
-use vm_memory::{Bytes, GuestMemoryAtomic};
+use virtio_queue::{Queue, QueueOwnedT, QueueT};
+use vm_memory::{Bytes, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::{AccessPlatform, Translatable};
@@ -35,7 +36,8 @@ const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE];
 const QUEUE_AVAIL_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 
 struct RngEpollHandler {
-    queue: Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
+    mem: GuestMemoryAtomic<GuestMemoryMmap>,
+    queue: Queue,
     random_file: File,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     queue_evt: EventFd,
@@ -50,7 +52,7 @@ impl RngEpollHandler {
 
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
-        for mut desc_chain in queue.iter().unwrap() {
+        for mut desc_chain in queue.iter(self.mem.memory()).unwrap() {
             let desc = desc_chain.next().unwrap();
             let mut len = 0;
 
@@ -75,8 +77,9 @@ impl RngEpollHandler {
             used_count += 1;
         }
 
+        let mem = self.mem.memory();
         for &(desc_index, len) in &used_desc_heads[..used_count] {
-            queue.add_used(desc_index, len).unwrap();
+            queue.add_used(mem.deref(), desc_index, len).unwrap();
         }
         used_count > 0
     }
@@ -217,9 +220,9 @@ impl VirtioDevice for Rng {
 
     fn activate(
         &mut self,
-        _mem: GuestMemoryAtomic<GuestMemoryMmap>,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        mut queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
+        mut queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
         self.common.activate(&queues, &interrupt_cb)?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
@@ -233,6 +236,7 @@ impl VirtioDevice for Rng {
             let (_, queue, queue_evt) = queues.remove(0);
 
             let mut handler = RngEpollHandler {
+                mem,
                 queue,
                 random_file,
                 interrupt_cb,

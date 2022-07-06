@@ -673,6 +673,7 @@ where
 #[cfg(test)]
 mod tests {
     use libc::EFD_NONBLOCK;
+    use virtio_queue::QueueOwnedT;
 
     use std::io::{Error as IoError, ErrorKind, Read, Result as IoResult, Write};
     use std::os::unix::io::RawFd;
@@ -819,7 +820,7 @@ mod tests {
             let stream = TestStream::new();
             let mut pkt = VsockPacket::from_rx_virtq_head(
                 &mut handler_ctx.handler.queues[0]
-                    .iter()
+                    .iter(&vsock_test_ctx.mem)
                     .unwrap()
                     .next()
                     .unwrap(),

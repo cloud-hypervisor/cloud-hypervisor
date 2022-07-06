@@ -12,10 +12,8 @@
 
 use std::fmt::{self, Debug};
 use std::sync::Arc;
-use virtio_queue::Queue;
-use vm_memory::{bitmap::AtomicBitmap, GuestAddress, GuestMemoryAtomic};
-
-type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
+use virtio_queue::{Queue, QueueT};
+use vm_memory::GuestAddress;
 
 pub mod queue;
 pub use queue::*;
@@ -109,15 +107,24 @@ pub trait Translatable {
 
 impl Translatable for GuestAddress {
     fn translate_gva(&self, access_platform: Option<&Arc<dyn AccessPlatform>>, len: usize) -> Self {
+        GuestAddress(self.0.translate_gva(access_platform, len))
+    }
+    fn translate_gpa(&self, access_platform: Option<&Arc<dyn AccessPlatform>>, len: usize) -> Self {
+        GuestAddress(self.0.translate_gpa(access_platform, len))
+    }
+}
+
+impl Translatable for u64 {
+    fn translate_gva(&self, access_platform: Option<&Arc<dyn AccessPlatform>>, len: usize) -> Self {
         if let Some(access_platform) = access_platform {
-            GuestAddress(access_platform.translate_gva(self.0, len as u64).unwrap())
+            access_platform.translate_gva(*self, len as u64).unwrap()
         } else {
             *self
         }
     }
     fn translate_gpa(&self, access_platform: Option<&Arc<dyn AccessPlatform>>, len: usize) -> Self {
         if let Some(access_platform) = access_platform {
-            GuestAddress(access_platform.translate_gpa(self.0, len as u64).unwrap())
+            access_platform.translate_gpa(*self, len as u64).unwrap()
         } else {
             *self
         }
@@ -125,22 +132,20 @@ impl Translatable for GuestAddress {
 }
 
 /// Helper for cloning a Queue since QueueState doesn't derive Clone
-pub fn clone_queue(
-    queue: &Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
-) -> Queue<GuestMemoryAtomic<GuestMemoryMmap>> {
-    Queue::<GuestMemoryAtomic<GuestMemoryMmap>, virtio_queue::QueueState> {
-        mem: queue.mem.clone(),
-        state: virtio_queue::QueueState {
-            max_size: queue.state.max_size,
-            next_avail: queue.state.next_avail,
-            next_used: queue.state.next_used,
-            event_idx_enabled: queue.state.event_idx_enabled,
-            num_added: queue.state.num_added,
-            size: queue.state.size,
-            ready: queue.state.ready,
-            desc_table: queue.state.desc_table,
-            avail_ring: queue.state.avail_ring,
-            used_ring: queue.state.used_ring,
-        },
-    }
+pub fn clone_queue(queue: &Queue) -> Queue {
+    let mut q = Queue::new(queue.max_size()).unwrap();
+
+    q.set_next_avail(queue.next_avail());
+    q.set_next_used(queue.next_used());
+    q.set_event_idx(queue.event_idx_enabled());
+    q.set_size(queue.size());
+    q.set_ready(queue.ready());
+    q.try_set_desc_table_address(GuestAddress(queue.desc_table()))
+        .unwrap();
+    q.try_set_avail_ring_address(GuestAddress(queue.avail_ring()))
+        .unwrap();
+    q.try_set_used_ring_address(GuestAddress(queue.used_ring()))
+        .unwrap();
+
+    q
 }

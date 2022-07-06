@@ -17,17 +17,18 @@ use std::fmt::{self, Display};
 use std::io;
 use std::mem::size_of;
 use std::ops::Bound::Included;
+use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex, RwLock};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use virtio_queue::{DescriptorChain, Queue};
+use virtio_queue::{DescriptorChain, Queue, QueueOwnedT, QueueT};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryError,
-    GuestMemoryLoadGuard,
+    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
+    GuestMemoryError, GuestMemoryLoadGuard,
 };
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -660,7 +661,8 @@ impl Request {
 }
 
 struct IommuEpollHandler {
-    queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
+    mem: GuestMemoryAtomic<GuestMemoryMmap>,
+    queues: Vec<Queue>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     queue_evts: Vec<EventFd>,
     kill_evt: EventFd,
@@ -674,7 +676,7 @@ impl IommuEpollHandler {
     fn request_queue(&mut self) -> bool {
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
-        for mut desc_chain in self.queues[0].iter().unwrap() {
+        for mut desc_chain in self.queues[0].iter(self.mem.memory()).unwrap() {
             let len = match Request::parse(
                 &mut desc_chain,
                 &self.mapping,
@@ -692,8 +694,11 @@ impl IommuEpollHandler {
             used_count += 1;
         }
 
+        let mem = self.mem.memory();
         for &(desc_index, len) in &used_desc_heads[..used_count] {
-            self.queues[0].add_used(desc_index, len).unwrap();
+            self.queues[0]
+                .add_used(mem.deref(), desc_index, len)
+                .unwrap();
         }
         used_count > 0
     }
@@ -1050,9 +1055,9 @@ impl VirtioDevice for Iommu {
 
     fn activate(
         &mut self,
-        _mem: GuestMemoryAtomic<GuestMemoryMmap>,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
+        queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
         self.common.activate(&queues, &interrupt_cb)?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
@@ -1065,6 +1070,7 @@ impl VirtioDevice for Iommu {
         }
 
         let mut handler = IommuEpollHandler {
+            mem,
             queues: virtqueues,
             interrupt_cb,
             queue_evts,

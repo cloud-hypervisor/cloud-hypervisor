@@ -13,8 +13,8 @@ use virtio_bindings::bindings::virtio_net::{
     VIRTIO_NET_F_GUEST_ECN, VIRTIO_NET_F_GUEST_TSO4, VIRTIO_NET_F_GUEST_TSO6,
     VIRTIO_NET_F_GUEST_UFO, VIRTIO_NET_OK,
 };
-use virtio_queue::Queue;
-use vm_memory::{ByteValued, Bytes, GuestMemoryAtomic, GuestMemoryError};
+use virtio_queue::{Queue, QueueOwnedT, QueueT};
+use vm_memory::{ByteValued, Bytes, GuestMemoryError};
 use vm_virtio::{AccessPlatform, Translatable};
 
 #[derive(Debug)]
@@ -58,12 +58,13 @@ impl CtrlQueue {
 
     pub fn process(
         &mut self,
-        queue: &mut Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
+        mem: &GuestMemoryMmap,
+        queue: &mut Queue,
         access_platform: Option<&Arc<dyn AccessPlatform>>,
     ) -> Result<()> {
         let mut used_desc_heads = Vec::new();
         loop {
-            for mut desc_chain in queue.iter().map_err(Error::QueueIterator)? {
+            for mut desc_chain in queue.iter(mem).map_err(Error::QueueIterator)? {
                 let ctrl_desc = desc_chain.next().ok_or(Error::NoControlHeaderDescriptor)?;
 
                 let ctrl_hdr: ControlHeader = desc_chain
@@ -144,12 +145,12 @@ impl CtrlQueue {
 
             for (desc_index, len) in used_desc_heads.iter() {
                 queue
-                    .add_used(*desc_index, *len)
+                    .add_used(mem, *desc_index, *len)
                     .map_err(Error::QueueAddUsed)?;
             }
 
             if !queue
-                .enable_notification()
+                .enable_notification(mem)
                 .map_err(Error::QueueEnableNotification)?
             {
                 break;

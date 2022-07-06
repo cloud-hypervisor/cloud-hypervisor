@@ -27,7 +27,7 @@ use virtio_bindings::bindings::virtio_net::{
     VIRTIO_NET_F_MAC, VIRTIO_NET_F_MRG_RXBUF,
 };
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
-use virtio_queue::Queue;
+use virtio_queue::{Queue, QueueT};
 use vm_memory::{ByteValued, GuestMemoryAtomic};
 use vm_migration::{
     protocol::MemoryRangeTable, Migratable, MigratableError, Pausable, Snapshot, Snapshottable,
@@ -272,7 +272,7 @@ impl VirtioDevice for Net {
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        mut queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
+        mut queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
         self.common.activate(&queues, &interrupt_cb)?;
         self.guest_memory = Some(mem.clone());
@@ -288,6 +288,7 @@ impl VirtioDevice for Net {
             let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
             let mut ctrl_handler = NetCtrlEpollHandler {
+                mem: mem.clone(),
                 kill_evt,
                 pause_evt,
                 ctrl_q: CtrlQueue::new(Vec::new()),

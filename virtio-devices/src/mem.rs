@@ -27,6 +27,7 @@ use seccompiler::SeccompAction;
 use std::collections::BTreeMap;
 use std::io;
 use std::mem::size_of;
+use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -34,11 +35,11 @@ use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use virtio_queue::{DescriptorChain, Queue};
+use virtio_queue::{DescriptorChain, Queue, QueueOwnedT, QueueT};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryError,
-    GuestMemoryLoadGuard, GuestMemoryRegion,
+    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
+    GuestMemoryError, GuestMemoryLoadGuard, GuestMemoryRegion,
 };
 use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{
@@ -462,12 +463,13 @@ impl BlocksState {
 }
 
 struct MemEpollHandler {
+    mem: GuestMemoryAtomic<GuestMemoryMmap>,
     host_addr: u64,
     host_fd: Option<RawFd>,
     blocks_state: Arc<Mutex<BlocksState>>,
     config: Arc<Mutex<VirtioMemConfig>>,
     resize: ResizeSender,
-    queue: Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
+    queue: Queue,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     queue_evt: EventFd,
     kill_evt: EventFd,
@@ -666,7 +668,7 @@ impl MemEpollHandler {
         let mut request_list = Vec::new();
         let mut used_count = 0;
 
-        for mut desc_chain in self.queue.iter().unwrap() {
+        for mut desc_chain in self.queue.iter(self.mem.memory()).unwrap() {
             request_list.push((
                 desc_chain.head_index(),
                 Request::parse(&mut desc_chain),
@@ -674,6 +676,7 @@ impl MemEpollHandler {
             ));
         }
 
+        let mem = self.mem.memory();
         for (head_index, request, memory) in request_list {
             let len = match request {
                 Err(e) => {
@@ -707,7 +710,7 @@ impl MemEpollHandler {
                 },
             };
 
-            self.queue.add_used(head_index, len).unwrap();
+            self.queue.add_used(mem.deref(), head_index, len).unwrap();
             used_count += 1;
         }
 
@@ -1002,9 +1005,9 @@ impl VirtioDevice for Mem {
 
     fn activate(
         &mut self,
-        _mem: GuestMemoryAtomic<GuestMemoryMmap>,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        mut queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
+        mut queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
         self.common.activate(&queues, &interrupt_cb)?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
@@ -1012,6 +1015,7 @@ impl VirtioDevice for Mem {
         let (_, queue, queue_evt) = queues.remove(0);
 
         let mut handler = MemEpollHandler {
+            mem,
             host_addr: self.host_addr,
             host_fd: self.host_fd,
             blocks_state: Arc::clone(&self.blocks_state),

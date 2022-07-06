@@ -19,6 +19,7 @@ use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::Read;
 use std::io::{Seek, SeekFrom, Write};
+use std::ops::Deref;
 use std::ops::DerefMut;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
@@ -34,6 +35,8 @@ use vhost::vhost_user::Listener;
 use vhost_user_backend::{VhostUserBackendMut, VhostUserDaemon, VringRwLock, VringState, VringT};
 use virtio_bindings::bindings::virtio_blk::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
+use virtio_queue::{QueueOwnedT, QueueT};
+use vm_memory::GuestAddressSpace;
 use vm_memory::{bitmap::AtomicBitmap, ByteValued, Bytes, GuestMemoryAtomic};
 use vmm_sys_util::{epoll::EventSet, eventfd::EventFd};
 
@@ -95,6 +98,7 @@ struct VhostUserBlkThread {
     event_idx: bool,
     kill_evt: EventFd,
     writeback: Arc<AtomicBool>,
+    mem: GuestMemoryAtomic<GuestMemoryMmap>,
 }
 
 impl VhostUserBlkThread {
@@ -103,6 +107,7 @@ impl VhostUserBlkThread {
         disk_image_id: Vec<u8>,
         disk_nsectors: u64,
         writeback: Arc<AtomicBool>,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
     ) -> Result<Self> {
         Ok(VhostUserBlkThread {
             disk_image,
@@ -111,6 +116,7 @@ impl VhostUserBlkThread {
             event_idx: false,
             kill_evt: EventFd::new(EFD_NONBLOCK).map_err(Error::CreateKillEventFd)?,
             writeback,
+            mem,
         })
     }
 
@@ -120,7 +126,7 @@ impl VhostUserBlkThread {
     ) -> bool {
         let mut used_desc_heads = Vec::new();
 
-        for mut desc_chain in vring.get_queue_mut().iter().unwrap() {
+        for mut desc_chain in vring.get_queue_mut().iter(self.mem.memory()).unwrap() {
             debug!("got an element in the queue");
             let len;
             match Request::parse(&mut desc_chain, None) {
@@ -156,12 +162,13 @@ impl VhostUserBlkThread {
             used_desc_heads.push((desc_chain.head_index(), len));
         }
 
+        let mem = self.mem.memory();
         let mut needs_signalling = false;
         for (desc_head, len) in used_desc_heads.iter() {
             if self.event_idx {
                 let queue = vring.get_queue_mut();
-                if queue.add_used(*desc_head, *len).is_ok() {
-                    if queue.needs_notification().unwrap() {
+                if queue.add_used(mem.deref(), *desc_head, *len).is_ok() {
+                    if queue.needs_notification(mem.deref()).unwrap() {
                         debug!("signalling queue");
                         needs_signalling = true;
                     } else {
@@ -170,7 +177,10 @@ impl VhostUserBlkThread {
                 }
             } else {
                 debug!("signalling queue");
-                vring.get_queue_mut().add_used(*desc_head, *len).unwrap();
+                vring
+                    .get_queue_mut()
+                    .add_used(mem.deref(), *desc_head, *len)
+                    .unwrap();
                 needs_signalling = true;
             }
         }
@@ -192,6 +202,7 @@ struct VhostUserBlkBackend {
     queue_size: usize,
     acked_features: u64,
     writeback: Arc<AtomicBool>,
+    mem: GuestMemoryAtomic<GuestMemoryMmap>,
 }
 
 impl VhostUserBlkBackend {
@@ -202,6 +213,7 @@ impl VhostUserBlkBackend {
         direct: bool,
         poll_queue: bool,
         queue_size: usize,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
     ) -> Result<Self> {
         let mut options = OpenOptions::new();
         options.read(true);
@@ -243,6 +255,7 @@ impl VhostUserBlkBackend {
                 image_id.clone(),
                 nsectors,
                 writeback.clone(),
+                mem.clone(),
             )?);
             threads.push(thread);
             queues_per_thread.push(0b1 << i);
@@ -257,6 +270,7 @@ impl VhostUserBlkBackend {
             queue_size,
             acked_features: 0,
             writeback,
+            mem,
         })
     }
 
@@ -364,7 +378,10 @@ impl VhostUserBackendMut<VringRwLock<GuestMemoryAtomic<GuestMemoryMmap>>, Atomic
                     // calling process_queue() until it stops finding new
                     // requests on the queue.
                     loop {
-                        vring.get_queue_mut().enable_notification().unwrap();
+                        vring
+                            .get_queue_mut()
+                            .enable_notification(self.mem.memory().deref())
+                            .unwrap();
                         if !thread.process_queue(&mut vring) {
                             break;
                         }
@@ -491,6 +508,8 @@ pub fn start_block_backend(backend_command: &str) {
         }
     };
 
+    let mem = GuestMemoryAtomic::new(GuestMemoryMmap::new());
+
     let blk_backend = Arc::new(RwLock::new(
         VhostUserBlkBackend::new(
             backend_config.path,
@@ -499,6 +518,7 @@ pub fn start_block_backend(backend_command: &str) {
             backend_config.direct,
             backend_config.poll_queue,
             backend_config.queue_size,
+            mem.clone(),
         )
         .unwrap(),
     ));
@@ -508,12 +528,7 @@ pub fn start_block_backend(backend_command: &str) {
     let listener = Listener::new(&backend_config.socket, true).unwrap();
 
     let name = "vhost-user-blk-backend";
-    let mut blk_daemon = VhostUserDaemon::new(
-        name.to_string(),
-        blk_backend.clone(),
-        GuestMemoryAtomic::new(GuestMemoryMmap::new()),
-    )
-    .unwrap();
+    let mut blk_daemon = VhostUserDaemon::new(name.to_string(), blk_backend.clone(), mem).unwrap();
 
     debug!("blk_daemon is created!\n");
 
