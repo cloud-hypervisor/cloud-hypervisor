@@ -44,6 +44,10 @@ use vmm_sys_util::eventfd::EventFd;
 pub mod x86_64;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::NUM_IOAPIC_PINS;
+use crate::{
+    UserMemoryRegion, USER_MEMORY_REGION_LOG_DIRTY, USER_MEMORY_REGION_READ,
+    USER_MEMORY_REGION_WRITE,
+};
 #[cfg(target_arch = "aarch64")]
 use aarch64::{RegList, Register, StandardRegisters};
 #[cfg(target_arch = "x86_64")]
@@ -158,6 +162,51 @@ pub struct TdxCapabilities {
     pub nr_cpuid_configs: u32,
     pub padding: u32,
     pub cpuid_configs: [TdxCpuidConfig; TDX_MAX_NR_CPUID_CONFIGS],
+}
+
+impl From<kvm_userspace_memory_region> for UserMemoryRegion {
+    fn from(region: kvm_userspace_memory_region) -> Self {
+        let mut flags = USER_MEMORY_REGION_READ;
+        if region.flags & KVM_MEM_READONLY == 0 {
+            flags |= USER_MEMORY_REGION_WRITE;
+        }
+        if region.flags & KVM_MEM_LOG_DIRTY_PAGES != 0 {
+            flags |= USER_MEMORY_REGION_LOG_DIRTY;
+        }
+
+        UserMemoryRegion {
+            slot: region.slot,
+            guest_phys_addr: region.guest_phys_addr,
+            memory_size: region.memory_size,
+            userspace_addr: region.userspace_addr,
+            flags,
+        }
+    }
+}
+
+impl From<UserMemoryRegion> for kvm_userspace_memory_region {
+    fn from(region: UserMemoryRegion) -> Self {
+        assert!(
+            region.flags & USER_MEMORY_REGION_READ != 0,
+            "KVM mapped memory is always readable"
+        );
+
+        let mut flags = 0;
+        if region.flags & USER_MEMORY_REGION_WRITE == 0 {
+            flags |= KVM_MEM_READONLY;
+        }
+        if region.flags & USER_MEMORY_REGION_LOG_DIRTY != 0 {
+            flags |= KVM_MEM_LOG_DIRTY_PAGES;
+        }
+
+        kvm_userspace_memory_region {
+            slot: region.slot,
+            guest_phys_addr: region.guest_phys_addr,
+            memory_size: region.memory_size,
+            userspace_addr: region.userspace_addr,
+            flags,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
