@@ -26,7 +26,7 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::time::Instant;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use virtio_queue::{Queue, QueueOwnedT, QueueT};
+use virtio_queue::{Queue, QueueT};
 use vm_memory::{Bytes, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -66,7 +66,7 @@ impl WatchdogEpollHandler {
         let queue = &mut self.queue;
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
-        for mut desc_chain in queue.iter(self.mem.memory()).unwrap() {
+        while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
             let desc = desc_chain.next().unwrap();
 
             let mut len = 0;

@@ -24,7 +24,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex, RwLock};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use virtio_queue::{DescriptorChain, Queue, QueueOwnedT, QueueT};
+use virtio_queue::{DescriptorChain, Queue, QueueT};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
@@ -676,7 +676,7 @@ impl IommuEpollHandler {
     fn request_queue(&mut self) -> bool {
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
-        for mut desc_chain in self.queues[0].iter(self.mem.memory()).unwrap() {
+        while let Some(mut desc_chain) = self.queues[0].pop_descriptor_chain(self.mem.memory()) {
             let len = match Request::parse(
                 &mut desc_chain,
                 &self.mapping,

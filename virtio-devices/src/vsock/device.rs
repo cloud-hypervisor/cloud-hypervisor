@@ -128,10 +128,7 @@ where
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
 
-        let mut avail_iter = self.queues[0]
-            .iter(self.mem.memory())
-            .map_err(DeviceError::QueueIterator)?;
-        for mut desc_chain in &mut avail_iter {
+        while let Some(mut desc_chain) = self.queues[0].pop_descriptor_chain(self.mem.memory()) {
             let used_len = match VsockPacket::from_rx_virtq_head(
                 &mut desc_chain,
                 self.access_platform.as_ref(),
@@ -142,7 +139,7 @@ where
                     } else {
                         // We are using a consuming iterator over the virtio buffers, so, if we can't
                         // fill in this buffer, we'll need to undo the last iterator step.
-                        avail_iter.go_to_previous_position();
+                        self.queues[0].go_to_previous_position();
                         break;
                     }
                 }
@@ -179,10 +176,7 @@ where
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
 
-        let mut avail_iter = self.queues[1]
-            .iter(self.mem.memory())
-            .map_err(DeviceError::QueueIterator)?;
-        for mut desc_chain in &mut avail_iter {
+        while let Some(mut desc_chain) = self.queues[1].pop_descriptor_chain(self.mem.memory()) {
             let pkt = match VsockPacket::from_tx_virtq_head(
                 &mut desc_chain,
                 self.access_platform.as_ref(),
@@ -197,7 +191,7 @@ where
             };
 
             if self.backend.write().unwrap().send_pkt(&pkt).is_err() {
-                avail_iter.go_to_previous_position();
+                self.queues[1].go_to_previous_position();
                 break;
             }
 

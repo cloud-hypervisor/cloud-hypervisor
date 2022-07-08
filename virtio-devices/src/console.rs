@@ -144,8 +144,7 @@ impl ConsoleEpollHandler {
             return false;
         }
 
-        let mut avail_iter = recv_queue.iter(self.mem.memory()).unwrap();
-        for mut desc_chain in &mut avail_iter {
+        while let Some(mut desc_chain) = recv_queue.pop_descriptor_chain(self.mem.memory()) {
             let desc = desc_chain.next().unwrap();
             let len = cmp::min(desc.len() as u32, in_buffer.len() as u32);
             let source_slice = in_buffer.drain(..len as usize).collect::<Vec<u8>>();
@@ -156,7 +155,7 @@ impl ConsoleEpollHandler {
                     .translate_gva(self.access_platform.as_ref(), desc.len() as usize),
             ) {
                 error!("Failed to write slice: {:?}", e);
-                avail_iter.go_to_previous_position();
+                recv_queue.go_to_previous_position();
                 break;
             }
 
@@ -188,7 +187,7 @@ impl ConsoleEpollHandler {
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
 
-        for mut desc_chain in trans_queue.iter(self.mem.memory()).unwrap() {
+        while let Some(mut desc_chain) = trans_queue.pop_descriptor_chain(self.mem.memory()) {
             let desc = desc_chain.next().unwrap();
             if let Some(ref mut out) = self.endpoint.out_file() {
                 let _ = desc_chain.memory().write_to(
