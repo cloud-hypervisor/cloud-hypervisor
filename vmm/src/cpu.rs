@@ -2412,7 +2412,7 @@ mod tests {
         // Official entries that were setup when we did setup_msrs. We need to assert that the
         // tenth one (i.e the one with index msr_index::MSR_IA32_MISC_ENABLE has the data we
         // expect.
-        let entry_vec = hypervisor::x86_64::boot_msr_entries();
+        let entry_vec = vcpu.boot_msr_entries();
         assert_eq!(entry_vec.as_slice()[9], msrs.as_slice()[0]);
     }
 

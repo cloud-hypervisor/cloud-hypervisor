@@ -1905,6 +1905,32 @@ impl cpu::Vcpu for KvmVcpu {
             TdxExitStatus::InvalidOperand => TDG_VP_VMCALL_INVALID_OPERAND,
         };
     }
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Return the list of initial MSR entries for a VCPU
+    ///
+    fn boot_msr_entries(&self) -> MsrEntries {
+        use crate::arch::x86::{msr_index, MTRR_ENABLE, MTRR_MEM_TYPE_WB};
+        use kvm_bindings::kvm_msr_entry as MsrEntry;
+
+        MsrEntries::from_entries(&[
+            msr!(msr_index::MSR_IA32_SYSENTER_CS),
+            msr!(msr_index::MSR_IA32_SYSENTER_ESP),
+            msr!(msr_index::MSR_IA32_SYSENTER_EIP),
+            msr!(msr_index::MSR_STAR),
+            msr!(msr_index::MSR_CSTAR),
+            msr!(msr_index::MSR_LSTAR),
+            msr!(msr_index::MSR_KERNEL_GS_BASE),
+            msr!(msr_index::MSR_SYSCALL_MASK),
+            msr!(msr_index::MSR_IA32_TSC),
+            msr_data!(
+                msr_index::MSR_IA32_MISC_ENABLE,
+                msr_index::MSR_IA32_MISC_ENABLE_FAST_STRING as u64
+            ),
+            msr_data!(msr_index::MSR_MTRRdefType, MTRR_ENABLE | MTRR_MEM_TYPE_WB),
+        ])
+        .unwrap()
+    }
 }
 
 /// Device struct for KVM
