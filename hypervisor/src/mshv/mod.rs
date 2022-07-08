@@ -960,7 +960,8 @@ impl vm::Vm for MshvVm {
     }
 
     /// Creates a guest physical memory region.
-    fn create_user_memory_region(&self, user_memory_region: MemoryRegion) -> vm::Result<()> {
+    fn create_user_memory_region(&self, user_memory_region: UserMemoryRegion) -> vm::Result<()> {
+        let user_memory_region: mshv_user_mem_region = user_memory_region.into();
         // No matter read only or not we keep track the slots.
         // For readonly hypervisor can enable the dirty bits,
         // but a VM exit happens before setting the dirty bits
@@ -979,7 +980,8 @@ impl vm::Vm for MshvVm {
     }
 
     /// Removes a guest physical memory region.
-    fn remove_user_memory_region(&self, user_memory_region: MemoryRegion) -> vm::Result<()> {
+    fn remove_user_memory_region(&self, user_memory_region: UserMemoryRegion) -> vm::Result<()> {
+        let user_memory_region: mshv_user_mem_region = user_memory_region.into();
         // Remove the corresponding entry from "self.dirty_log_slots" if needed
         self.dirty_log_slots
             .write()
@@ -1000,7 +1002,7 @@ impl vm::Vm for MshvVm {
         userspace_addr: u64,
         readonly: bool,
         _log_dirty_pages: bool,
-    ) -> MemoryRegion {
+    ) -> UserMemoryRegion {
         let mut flags = HV_MAP_GPA_READABLE | HV_MAP_GPA_EXECUTABLE;
         if !readonly {
             flags |= HV_MAP_GPA_WRITABLE;
@@ -1012,6 +1014,7 @@ impl vm::Vm for MshvVm {
             size: memory_size,
             userspace_addr: userspace_addr as u64,
         }
+        .into()
     }
 
     ///
