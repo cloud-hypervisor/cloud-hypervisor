@@ -92,9 +92,8 @@ pub use {
     kvm_bindings::kvm_clock_data as ClockData, kvm_bindings::kvm_create_device as CreateDevice,
     kvm_bindings::kvm_device_attr as DeviceAttr,
     kvm_bindings::kvm_irq_routing_entry as IrqRoutingEntry, kvm_bindings::kvm_mp_state as MpState,
-    kvm_bindings::kvm_run, kvm_bindings::kvm_userspace_memory_region as MemoryRegion,
-    kvm_bindings::kvm_vcpu_events as VcpuEvents, kvm_ioctls::DeviceFd, kvm_ioctls::IoEventAddress,
-    kvm_ioctls::VcpuExit,
+    kvm_bindings::kvm_run, kvm_bindings::kvm_vcpu_events as VcpuEvents, kvm_ioctls::DeviceFd,
+    kvm_ioctls::IoEventAddress, kvm_ioctls::VcpuExit,
 };
 
 #[cfg(target_arch = "x86_64")]
@@ -456,8 +455,8 @@ impl vm::Vm for KvmVm {
         userspace_addr: u64,
         readonly: bool,
         log_dirty_pages: bool,
-    ) -> MemoryRegion {
-        MemoryRegion {
+    ) -> UserMemoryRegion {
+        kvm_userspace_memory_region {
             slot,
             guest_phys_addr,
             memory_size,
@@ -469,12 +468,13 @@ impl vm::Vm for KvmVm {
                     0
                 },
         }
+        .into()
     }
     ///
     /// Creates a guest physical memory region.
     ///
-    fn create_user_memory_region(&self, user_memory_region: MemoryRegion) -> vm::Result<()> {
-        let mut region = user_memory_region;
+    fn create_user_memory_region(&self, user_memory_region: UserMemoryRegion) -> vm::Result<()> {
+        let mut region: kvm_userspace_memory_region = user_memory_region.into();
 
         if (region.flags & KVM_MEM_LOG_DIRTY_PAGES) != 0 {
             if (region.flags & KVM_MEM_READONLY) != 0 {
@@ -509,8 +509,8 @@ impl vm::Vm for KvmVm {
     ///
     /// Removes a guest physical memory region.
     ///
-    fn remove_user_memory_region(&self, user_memory_region: MemoryRegion) -> vm::Result<()> {
-        let mut region = user_memory_region;
+    fn remove_user_memory_region(&self, user_memory_region: UserMemoryRegion) -> vm::Result<()> {
+        let mut region: kvm_userspace_memory_region = user_memory_region.into();
 
         // Remove the corresponding entry from "self.dirty_log_slots" if needed
         self.dirty_log_slots.write().unwrap().remove(&region.slot);
@@ -620,7 +620,7 @@ impl vm::Vm for KvmVm {
     fn start_dirty_log(&self) -> vm::Result<()> {
         let dirty_log_slots = self.dirty_log_slots.read().unwrap();
         for (_, s) in dirty_log_slots.iter() {
-            let region = MemoryRegion {
+            let region = kvm_userspace_memory_region {
                 slot: s.slot,
                 guest_phys_addr: s.guest_phys_addr,
                 memory_size: s.memory_size,
@@ -644,7 +644,7 @@ impl vm::Vm for KvmVm {
     fn stop_dirty_log(&self) -> vm::Result<()> {
         let dirty_log_slots = self.dirty_log_slots.read().unwrap();
         for (_, s) in dirty_log_slots.iter() {
-            let region = MemoryRegion {
+            let region = kvm_userspace_memory_region {
                 slot: s.slot,
                 guest_phys_addr: s.guest_phys_addr,
                 memory_size: s.memory_size,
