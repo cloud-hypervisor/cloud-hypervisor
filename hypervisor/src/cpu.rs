@@ -501,4 +501,9 @@ pub trait Vcpu: Send + Sync {
     /// Set the status code for TDX exit
     ///
     fn set_tdx_status(&mut self, status: TdxExitStatus);
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Return the list of initial MSR entries for a VCPU
+    ///
+    fn boot_msr_entries(&self) -> MsrEntries;
 }
