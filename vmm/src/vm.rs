@@ -64,11 +64,7 @@ use linux_loader::loader::pe::Error::InvalidImageMagicNumber;
 use linux_loader::loader::KernelLoader;
 use seccompiler::{apply_filter, SeccompAction};
 use serde::{Deserialize, Serialize};
-use signal_hook::{
-    consts::{SIGINT, SIGTERM, SIGWINCH},
-    iterator::backend::Handle,
-    iterator::Signals,
-};
+use signal_hook::{consts::SIGWINCH, iterator::backend::Handle, iterator::Signals};
 use std::cmp;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -455,8 +451,6 @@ pub fn physical_bits(max_phys_bits: u8) -> u8 {
     cmp::min(host_phys_bits, max_phys_bits)
 }
 
-pub const HANDLED_SIGNALS: [i32; 3] = [SIGWINCH, SIGTERM, SIGINT];
-
 pub struct Vm {
     #[cfg(any(target_arch = "aarch64", feature = "tdx"))]
     kernel: Option<File>,
@@ -485,6 +479,8 @@ pub struct Vm {
 }
 
 impl Vm {
+    pub const HANDLED_SIGNALS: [i32; 1] = [SIGWINCH];
+
     #[allow(clippy::too_many_arguments)]
     fn new_from_memory_manager(
         config: Arc<Mutex<VmConfig>>,
@@ -1678,34 +1674,14 @@ impl Vm {
         Ok(self.device_manager.lock().unwrap().counters())
     }
 
-    fn os_signal_handler(
-        mut signals: Signals,
-        console_input_clone: Arc<Console>,
-        on_tty: bool,
-        exit_evt: &EventFd,
-    ) {
-        for sig in &HANDLED_SIGNALS {
+    fn signal_handler(mut signals: Signals, console_input_clone: Arc<Console>) {
+        for sig in &Vm::HANDLED_SIGNALS {
             unblock_signal(*sig).unwrap();
         }
 
         for signal in signals.forever() {
-            match signal {
-                SIGWINCH => {
-                    console_input_clone.update_console_size();
-                }
-                SIGTERM | SIGINT => {
-                    if exit_evt.write(1).is_err() {
-                        // Resetting the terminal is usually done as the VMM exits
-                        if on_tty {
-                            io::stdin()
-                                .lock()
-                                .set_canon_mode()
-                                .expect("failed to restore terminal mode");
-                        }
-                        std::process::exit(1);
-                    }
-                }
-                _ => (),
+            if signal == SIGWINCH {
+                console_input_clone.update_console_size();
             }
         }
     }
@@ -1994,18 +1970,17 @@ impl Vm {
 
     fn setup_signal_handler(&mut self) -> Result<()> {
         let console = self.device_manager.lock().unwrap().console().clone();
-        let signals = Signals::new(&HANDLED_SIGNALS);
+        let signals = Signals::new(&Vm::HANDLED_SIGNALS);
         match signals {
             Ok(signals) => {
                 self.signals = Some(signals.handle());
                 let exit_evt = self.exit_evt.try_clone().map_err(Error::EventFdClone)?;
-                let on_tty = self.on_tty;
                 let signal_handler_seccomp_filter =
                     get_seccomp_filter(&self.seccomp_action, Thread::SignalHandler)
                         .map_err(Error::CreateSeccompFilter)?;
                 self.threads.push(
                     thread::Builder::new()
-                        .name("signal_handler".to_string())
+                        .name("vm_signal_handler".to_string())
                         .spawn(move || {
                             if !signal_handler_seccomp_filter.is_empty() {
                                 if let Err(e) = apply_filter(&signal_handler_seccomp_filter)
@@ -2017,7 +1992,7 @@ impl Vm {
                                 }
                             }
                             std::panic::catch_unwind(AssertUnwindSafe(|| {
-                                Vm::os_signal_handler(signals, console, on_tty, &exit_evt);
+                                Vm::signal_handler(signals, console);
                             }))
                             .map_err(|_| {
                                 error!("signal_handler thead panicked");
