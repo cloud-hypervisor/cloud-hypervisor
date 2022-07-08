@@ -26,12 +26,13 @@ use crate::migration::{recv_vm_config, recv_vm_state};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::vm::{Error as VmError, Vm, VmState};
 use anyhow::anyhow;
-use libc::EFD_NONBLOCK;
+use libc::{EFD_NONBLOCK, SIGINT, SIGTERM};
 use memory_manager::MemoryManagerSnapshotData;
 use pci::PciBdf;
 use seccompiler::{apply_filter, SeccompAction};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::{Deserialize, Serialize};
+use signal_hook::iterator::{Handle, Signals};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io;
@@ -39,6 +40,7 @@ use std::io::{Read, Write};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::UnixListener;
 use std::os::unix::net::UnixStream;
+use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};
@@ -48,7 +50,9 @@ use vm_memory::bitmap::AtomicBitmap;
 use vm_migration::{protocol::*, Migratable};
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
+use vmm_sys_util::signal::unblock_signal;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
+use vmm_sys_util::terminal::Terminal;
 
 mod acpi;
 pub mod api;
@@ -163,6 +167,12 @@ pub enum Error {
     #[cfg(feature = "gdb")]
     #[error("Error sending GDB request: {0}")]
     GdbResponseSend(#[source] SendError<gdb::GdbResponse>),
+
+    #[error("Cannot spawn a signal handler thread: {0}")]
+    SignalHandlerSpawn(#[source] io::Error),
+
+    #[error("Failed to join on threads: {0:?}")]
+    ThreadCleanup(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -299,6 +309,8 @@ pub fn start_vmm_thread(
                     exit_evt,
                 )?;
 
+                vmm.setup_signal_handler()?;
+
                 vmm.control_loop(
                     Arc::new(api_receiver),
                     #[cfg(feature = "gdb")]
@@ -362,9 +374,78 @@ pub struct Vmm {
     seccomp_action: SeccompAction,
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
     activate_evt: EventFd,
+    signals: Option<Handle>,
+    threads: Vec<thread::JoinHandle<()>>,
 }
 
 impl Vmm {
+    pub const HANDLED_SIGNALS: [i32; 2] = [SIGTERM, SIGINT];
+
+    fn signal_handler(mut signals: Signals, on_tty: bool, exit_evt: &EventFd) {
+        for sig in &Self::HANDLED_SIGNALS {
+            unblock_signal(*sig).unwrap();
+        }
+
+        for signal in signals.forever() {
+            match signal {
+                SIGTERM | SIGINT => {
+                    if exit_evt.write(1).is_err() {
+                        // Resetting the terminal is usually done as the VMM exits
+                        if on_tty {
+                            io::stdin()
+                                .lock()
+                                .set_canon_mode()
+                                .expect("failed to restore terminal mode");
+                        }
+                        std::process::exit(1);
+                    }
+                }
+                _ => (),
+            }
+        }
+    }
+
+    fn setup_signal_handler(&mut self) -> Result<()> {
+        let signals = Signals::new(&Self::HANDLED_SIGNALS);
+        match signals {
+            Ok(signals) => {
+                self.signals = Some(signals.handle());
+                let exit_evt = self.exit_evt.try_clone().map_err(Error::EventFdClone)?;
+                let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO as i32) } != 0;
+
+                let signal_handler_seccomp_filter =
+                    get_seccomp_filter(&self.seccomp_action, Thread::SignalHandler)
+                        .map_err(Error::CreateSeccompFilter)?;
+                self.threads.push(
+                    thread::Builder::new()
+                        .name("vmm_signal_handler".to_string())
+                        .spawn(move || {
+                            if !signal_handler_seccomp_filter.is_empty() {
+                                if let Err(e) = apply_filter(&signal_handler_seccomp_filter)
+                                    .map_err(Error::ApplySeccompFilter)
+                                {
+                                    error!("Error applying seccomp filter: {:?}", e);
+                                    exit_evt.write(1).ok();
+                                    return;
+                                }
+                            }
+                            std::panic::catch_unwind(AssertUnwindSafe(|| {
+                                Vmm::signal_handler(signals, on_tty, &exit_evt);
+                            }))
+                            .map_err(|_| {
+                                error!("signal_handler thead panicked");
+                                exit_evt.write(1).ok()
+                            })
+                            .ok();
+                        })
+                        .map_err(Error::SignalHandlerSpawn)?,
+                );
+            }
+            Err(e) => error!("Signal not found {}", e),
+        }
+        Ok(())
+    }
+
     fn new(
         vmm_version: String,
         api_evt: EventFd,
@@ -414,6 +495,8 @@ impl Vmm {
             seccomp_action,
             hypervisor,
             activate_evt,
+            signals: None,
+            threads: vec![],
         })
     }
 
@@ -1853,6 +1936,16 @@ impl Vmm {
                     EpollDispatch::Debug => {}
                 }
             }
+        }
+
+        // Trigger the termination of the signal_handler thread
+        if let Some(signals) = self.signals.take() {
+            signals.close();
+        }
+
+        // Wait for all the threads to finish
+        for thread in self.threads.drain(..) {
+            thread.join().map_err(Error::ThreadCleanup)?
         }
 
         Ok(())
