@@ -326,23 +326,44 @@ generate_fam_struct_impl!(HypervisorMsrList, u32, indices, u32, nmsrs, HYPERVISO
 pub type MsrList = FamStructWrapper<HypervisorMsrList>;
 
 pub fn boot_msr_entries() -> MsrEntries {
-    MsrEntries::from_entries(&[
-        msr!(msr_index::MSR_IA32_SYSENTER_CS),
-        msr!(msr_index::MSR_IA32_SYSENTER_ESP),
-        msr!(msr_index::MSR_IA32_SYSENTER_EIP),
-        msr!(msr_index::MSR_STAR),
-        msr!(msr_index::MSR_CSTAR),
-        msr!(msr_index::MSR_LSTAR),
-        msr!(msr_index::MSR_KERNEL_GS_BASE),
-        msr!(msr_index::MSR_SYSCALL_MASK),
-        msr!(msr_index::MSR_IA32_TSC),
-        msr_data!(
-            msr_index::MSR_IA32_MISC_ENABLE,
-            msr_index::MSR_IA32_MISC_ENABLE_FAST_STRING as u64
-        ),
-        msr_data!(msr_index::MSR_MTRRdefType, MTRR_ENABLE | MTRR_MEM_TYPE_WB),
-    ])
-    .unwrap()
+    match crate::get_hypervisor_type() {
+        crate::HypervisorType::Kvm => {
+            MsrEntries::from_entries(&[
+                msr!(msr_index::MSR_IA32_SYSENTER_CS),
+                msr!(msr_index::MSR_IA32_SYSENTER_ESP),
+                msr!(msr_index::MSR_IA32_SYSENTER_EIP),
+                msr!(msr_index::MSR_STAR),
+                msr!(msr_index::MSR_CSTAR),
+                msr!(msr_index::MSR_LSTAR),
+                msr!(msr_index::MSR_KERNEL_GS_BASE),
+                msr!(msr_index::MSR_SYSCALL_MASK),
+                msr!(msr_index::MSR_IA32_TSC),
+                msr_data!(
+                    msr_index::MSR_IA32_MISC_ENABLE,
+                    msr_index::MSR_IA32_MISC_ENABLE_FAST_STRING as u64
+                ),
+                msr_data!(msr_index::MSR_MTRRdefType, MTRR_ENABLE | MTRR_MEM_TYPE_WB),
+            ])
+            .unwrap()
+        },
+
+        crate::HypervisorType::Mshv => {
+            MsrEntries::from_entries(&[
+                msr!(msr_index::MSR_IA32_SYSENTER_CS),
+                msr!(msr_index::MSR_IA32_SYSENTER_ESP),
+                msr!(msr_index::MSR_IA32_SYSENTER_EIP),
+                msr!(msr_index::MSR_STAR),
+                msr!(msr_index::MSR_CSTAR),
+                msr!(msr_index::MSR_LSTAR),
+                msr!(msr_index::MSR_KERNEL_GS_BASE),
+                msr!(msr_index::MSR_SYSCALL_MASK),
+                msr!(msr_index::MSR_IA32_TSC),
+                msr_data!(msr_index::MSR_MTRRdefType, MTRR_ENABLE | MTRR_MEM_TYPE_WB),
+            ])
+            .unwrap()
+        }
+    }
+    
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
