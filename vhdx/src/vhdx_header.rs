@@ -397,26 +397,20 @@ impl VhdxHeader {
         header_1: Result<Header>,
         header_2: Result<Header>,
     ) -> Result<(HeaderNo, Header)> {
-        let mut header1_seq_num: u64 = 0;
-        let mut header2_seq_num: u64 = 0;
-        let mut valid_hdr_found: bool = false;
+        let header_1 = header_1.ok();
+        let header_2 = header_2.ok();
 
-        if let Ok(ref header_1) = header_1 {
-            valid_hdr_found = true;
-            header1_seq_num = header_1.sequence_number;
-        }
-
-        if let Ok(ref header_2) = header_2 {
-            valid_hdr_found = true;
-            header2_seq_num = header_2.sequence_number;
-        }
-
-        if !valid_hdr_found {
-            Err(VhdxHeaderError::NoValidHeader)
-        } else if header1_seq_num >= header2_seq_num {
-            Ok((HeaderNo::First, header_1.unwrap()))
-        } else {
-            Ok((HeaderNo::Second, header_2.unwrap()))
+        match (header_1, header_2) {
+            (None, None) => Err(VhdxHeaderError::NoValidHeader),
+            (Some(header_1), None) => Ok((HeaderNo::First, header_1)),
+            (None, Some(header_2)) => Ok((HeaderNo::Second, header_2)),
+            (Some(header_1), Some(header_2)) => {
+                if header_1.sequence_number >= header_2.sequence_number {
+                    Ok((HeaderNo::First, header_1))
+                } else {
+                    Ok((HeaderNo::Second, header_2))
+                }
+            }
         }
     }
 
