@@ -35,7 +35,7 @@ use vhost::vhost_user::Listener;
 use vhost_user_backend::{VhostUserBackendMut, VhostUserDaemon, VringRwLock, VringState, VringT};
 use virtio_bindings::bindings::virtio_blk::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
-use virtio_queue::{QueueOwnedT, QueueT};
+use virtio_queue::QueueT;
 use vm_memory::GuestAddressSpace;
 use vm_memory::{bitmap::AtomicBitmap, ByteValued, Bytes, GuestMemoryAtomic};
 use vmm_sys_util::{epoll::EventSet, eventfd::EventFd};
@@ -126,7 +126,10 @@ impl VhostUserBlkThread {
     ) -> bool {
         let mut used_desc_heads = Vec::new();
 
-        for mut desc_chain in vring.get_queue_mut().iter(self.mem.memory()).unwrap() {
+        while let Some(mut desc_chain) = vring
+            .get_queue_mut()
+            .pop_descriptor_chain(self.mem.memory())
+        {
             debug!("got an element in the queue");
             let len;
             match Request::parse(&mut desc_chain, None) {

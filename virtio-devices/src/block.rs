@@ -108,10 +108,7 @@ impl BlockEpollHandler {
         let mut used_desc_heads = Vec::new();
         let mut used_count = 0;
 
-        let mut avail_iter = queue
-            .iter(self.mem.memory())
-            .map_err(Error::QueueIterator)?;
-        for mut desc_chain in &mut avail_iter {
+        while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
             let mut request = Request::parse(&mut desc_chain, self.access_platform.as_ref())
                 .map_err(Error::RequestParsing)?;
 
@@ -121,7 +118,7 @@ impl BlockEpollHandler {
                 if !rate_limiter.consume(1, TokenType::Ops) {
                     // Stop processing the queue and return this descriptor chain to the
                     // avail ring, for later processing.
-                    avail_iter.go_to_previous_position();
+                    queue.go_to_previous_position();
                     break;
                 }
                 // Exercise the rate limiter only if this request is of data transfer type.
@@ -140,7 +137,7 @@ impl BlockEpollHandler {
                         rate_limiter.manual_replenish(1, TokenType::Ops);
                         // Stop processing the queue and return this descriptor chain to the
                         // avail ring, for later processing.
-                        avail_iter.go_to_previous_position();
+                        queue.go_to_previous_position();
                         break;
                     }
                 };

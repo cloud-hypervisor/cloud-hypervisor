@@ -247,11 +247,9 @@ impl BalloonEpollHandler {
     }
 
     fn process_queue(&mut self, queue_index: usize) -> result::Result<(), Error> {
-        let mem = self.mem.memory();
         let mut used_descs = Vec::new();
-        for mut desc_chain in self.queues[queue_index]
-            .iter(mem)
-            .map_err(Error::QueueIterator)?
+        while let Some(mut desc_chain) =
+            self.queues[queue_index].pop_descriptor_chain(self.mem.memory())
         {
             let desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
 

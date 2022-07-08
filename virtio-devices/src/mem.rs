@@ -35,7 +35,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use virtio_queue::{DescriptorChain, Queue, QueueOwnedT, QueueT};
+use virtio_queue::{DescriptorChain, Queue, QueueT};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
@@ -668,7 +668,7 @@ impl MemEpollHandler {
         let mut request_list = Vec::new();
         let mut used_count = 0;
 
-        for mut desc_chain in self.queue.iter(self.mem.memory()).unwrap() {
+        while let Some(mut desc_chain) = self.queue.pop_descriptor_chain(self.mem.memory()) {
             request_list.push((
                 desc_chain.head_index(),
                 Request::parse(&mut desc_chain),
