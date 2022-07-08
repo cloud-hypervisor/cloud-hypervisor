@@ -23,6 +23,9 @@ use vm::DataMatch;
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
 use crate::device;
+use crate::{
+    UserMemoryRegion, USER_MEMORY_REGION_EXECUTE, USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
+};
 use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::VcpuMshvState as CpuState;
@@ -46,6 +49,52 @@ pub use {
 };
 
 pub const PAGE_SHIFT: usize = 12;
+
+impl From<mshv_user_mem_region> for UserMemoryRegion {
+    fn from(region: mshv_user_mem_region) -> Self {
+        let mut flags: u32 = 0;
+        if region.flags & HV_MAP_GPA_READABLE != 0 {
+            flags |= USER_MEMORY_REGION_READ;
+        }
+        if region.flags & HV_MAP_GPA_WRITABLE != 0 {
+            flags |= USER_MEMORY_REGION_WRITE;
+        }
+        if region.flags & HV_MAP_GPA_EXECUTABLE != 0 {
+            flags |= USER_MEMORY_REGION_EXECUTE;
+        }
+
+        UserMemoryRegion {
+            guest_phys_addr: (region.guest_pfn << PAGE_SHIFT as u64)
+                + (region.userspace_addr & ((1 << PAGE_SHIFT) - 1)),
+            memory_size: region.size,
+            userspace_addr: region.userspace_addr,
+            flags,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<UserMemoryRegion> for mshv_user_mem_region {
+    fn from(region: UserMemoryRegion) -> Self {
+        let mut flags: u32 = 0;
+        if region.flags & USER_MEMORY_REGION_READ != 0 {
+            flags |= HV_MAP_GPA_READABLE;
+        }
+        if region.flags & USER_MEMORY_REGION_WRITE != 0 {
+            flags |= HV_MAP_GPA_WRITABLE;
+        }
+        if region.flags & USER_MEMORY_REGION_EXECUTE != 0 {
+            flags |= HV_MAP_GPA_EXECUTABLE;
+        }
+
+        mshv_user_mem_region {
+            guest_pfn: region.guest_phys_addr >> PAGE_SHIFT,
+            size: region.memory_size,
+            userspace_addr: region.userspace_addr,
+            flags,
+        }
+    }
+}
 
 #[derive(Debug, Default, Copy, Clone, Serialize, Deserialize)]
 pub struct HvState {
