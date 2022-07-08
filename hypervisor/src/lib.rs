@@ -116,3 +116,23 @@ pub fn vec_with_array_field<T: Default, F>(count: usize) -> Vec<T> {
     let vec_size_bytes = size_of::<T>() + element_space;
     vec_with_size_in_bytes(vec_size_bytes)
 }
+
+///
+/// User memory region structure
+///
+#[derive(Debug, Default, Eq, PartialEq)]
+pub struct UserMemoryRegion {
+    pub slot: u32,
+    pub guest_phys_addr: u64,
+    pub memory_size: u64,
+    pub userspace_addr: u64,
+    pub flags: u32,
+}
+
+///
+/// Flags for user memory region
+///
+pub const USER_MEMORY_REGION_READ: u32 = 1;
+pub const USER_MEMORY_REGION_WRITE: u32 = 1 << 1;
+pub const USER_MEMORY_REGION_EXECUTE: u32 = 1 << 2;
+pub const USER_MEMORY_REGION_LOG_DIRTY: u32 = 1 << 3;
