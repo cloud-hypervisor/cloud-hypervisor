@@ -32,7 +32,7 @@ pub use x86_64::*;
 
 #[cfg(target_arch = "x86_64")]
 use std::fs::File;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::AsRawFd;
 
 const DIRTY_BITMAP_CLEAR_DIRTY: u64 = 0x4;
 const DIRTY_BITMAP_SET_DIRTY: u64 = 0x8;
@@ -618,25 +618,21 @@ impl cpu::Vcpu for MshvVcpu {
 }
 
 /// Device struct for MSHV
-pub struct MshvDevice {
-    fd: DeviceFd,
-}
+pub type MshvDevice = DeviceFd;
 
 impl device::Device for MshvDevice {
     ///
     /// Set device attribute
     ///
     fn set_device_attr(&self, attr: &DeviceAttr) -> device::Result<()> {
-        self.fd
-            .set_device_attr(attr)
+        self.set_device_attr(attr)
             .map_err(|e| device::HypervisorDeviceError::SetDeviceAttribute(e.into()))
     }
     ///
     /// Get device attribute
     ///
     fn get_device_attr(&self, attr: &mut DeviceAttr) -> device::Result<()> {
-        self.fd
-            .get_device_attr(attr)
+        self.get_device_attr(attr)
             .map_err(|e| device::HypervisorDeviceError::GetDeviceAttribute(e.into()))
     }
     ///
@@ -644,12 +640,6 @@ impl device::Device for MshvDevice {
     ///
     fn as_any(&self) -> &dyn Any {
         self
-    }
-}
-
-impl AsRawFd for MshvDevice {
-    fn as_raw_fd(&self) -> RawFd {
-        self.fd.as_raw_fd()
     }
 }
 
@@ -977,12 +967,11 @@ impl vm::Vm for MshvVm {
     ///
     /// See the documentation for `MSHV_CREATE_DEVICE`.
     fn create_device(&self, device: &mut CreateDevice) -> vm::Result<Arc<dyn device::Device>> {
-        let fd = self
+        let device_fd = self
             .fd
             .create_device(device)
             .map_err(|e| vm::HypervisorVmError::CreateDevice(e.into()))?;
-        let device = MshvDevice { fd };
-        Ok(Arc::new(device))
+        Ok(Arc::new(device_fd))
     }
 
     fn create_passthrough_device(&self) -> vm::Result<Arc<dyn device::Device>> {
