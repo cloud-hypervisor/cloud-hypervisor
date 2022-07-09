@@ -26,6 +26,7 @@ use crate::vm::{self, InterruptSourceConfig, VmOps};
 use crate::{arm64_core_reg_id, offset__of};
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
 use serde::{Deserialize, Serialize};
+use std::any::Any;
 use std::collections::HashMap;
 #[cfg(target_arch = "aarch64")]
 use std::convert::TryInto;
@@ -2003,6 +2004,12 @@ impl device::Device for KvmDevice {
         self.fd
             .get_device_attr(attr)
             .map_err(|e| device::HypervisorDeviceError::GetDeviceAttribute(e.into()))
+    }
+    ///
+    /// Cast to the underlying KVM device fd
+    ///
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 

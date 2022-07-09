@@ -10,6 +10,7 @@
 //
 
 use crate::DeviceAttr;
+use std::any::Any;
 use std::os::unix::io::AsRawFd;
 use thiserror::Error;
 
@@ -44,4 +45,6 @@ pub trait Device: Send + Sync + AsRawFd {
     fn set_device_attr(&self, attr: &DeviceAttr) -> Result<()>;
     /// Get device attribute.
     fn get_device_attr(&self, attr: &mut DeviceAttr) -> Result<()>;
+    /// Provide a way to downcast to the device fd.
+    fn as_any(&self) -> &dyn Any;
 }
