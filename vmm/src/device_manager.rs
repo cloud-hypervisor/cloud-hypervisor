@@ -2959,6 +2959,8 @@ impl DeviceManager {
             return vmm_sys_util::errno::errno_result().map_err(DeviceManagerError::DupFd);
         }
 
+        assert!(passthrough_device.as_any().is::<DeviceFd>());
+
         // SAFETY the raw fd conversion here is safe because:
         //   1. When running on KVM or MSHV, passthrough_device wraps around DeviceFd.
         //   2. The conversion here extracts the raw fd and then turns the raw fd into a DeviceFd
