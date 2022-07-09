@@ -32,7 +32,10 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 #[cfg(target_arch = "x86_64")]
 use std::fs::File;
-use std::os::unix::io::{AsRawFd, RawFd};
+#[cfg(target_arch = "x86_64")]
+use std::os::unix::io::AsRawFd;
+#[cfg(feature = "tdx")]
+use std::os::unix::io::RawFd;
 use std::result;
 #[cfg(target_arch = "x86_64")]
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -530,12 +533,11 @@ impl vm::Vm for KvmVm {
     ///
     /// See the documentation for `KVM_CREATE_DEVICE`.
     fn create_device(&self, device: &mut CreateDevice) -> vm::Result<Arc<dyn device::Device>> {
-        let fd = self
+        let device_fd = self
             .fd
             .create_device(device)
             .map_err(|e| vm::HypervisorVmError::CreateDevice(e.into()))?;
-        let device = KvmDevice { fd };
-        Ok(Arc::new(device))
+        Ok(Arc::new(device_fd))
     }
     ///
     /// Returns the preferred CPU target type which can be emulated by KVM on underlying host.
@@ -1984,25 +1986,21 @@ impl cpu::Vcpu for KvmVcpu {
 }
 
 /// Device struct for KVM
-pub struct KvmDevice {
-    fd: DeviceFd,
-}
+pub type KvmDevice = DeviceFd;
 
 impl device::Device for KvmDevice {
     ///
     /// Set device attribute
     ///
     fn set_device_attr(&self, attr: &DeviceAttr) -> device::Result<()> {
-        self.fd
-            .set_device_attr(attr)
+        self.set_device_attr(attr)
             .map_err(|e| device::HypervisorDeviceError::SetDeviceAttribute(e.into()))
     }
     ///
     /// Get device attribute
     ///
     fn get_device_attr(&self, attr: &mut DeviceAttr) -> device::Result<()> {
-        self.fd
-            .get_device_attr(attr)
+        self.get_device_attr(attr)
             .map_err(|e| device::HypervisorDeviceError::GetDeviceAttribute(e.into()))
     }
     ///
@@ -2010,11 +2008,5 @@ impl device::Device for KvmDevice {
     ///
     fn as_any(&self) -> &dyn Any {
         self
-    }
-}
-
-impl AsRawFd for KvmDevice {
-    fn as_raw_fd(&self) -> RawFd {
-        self.fd.as_raw_fd()
     }
 }
