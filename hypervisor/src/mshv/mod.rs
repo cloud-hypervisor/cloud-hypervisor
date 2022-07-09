@@ -16,6 +16,7 @@ pub use mshv_bindings::*;
 pub use mshv_ioctls::IoEventAddress;
 use mshv_ioctls::{set_registers_64, Mshv, NoDatamatch, VcpuFd, VmFd};
 use serde::{Deserialize, Serialize};
+use std::any::Any;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use vm::DataMatch;
@@ -637,6 +638,12 @@ impl device::Device for MshvDevice {
         self.fd
             .get_device_attr(attr)
             .map_err(|e| device::HypervisorDeviceError::GetDeviceAttribute(e.into()))
+    }
+    ///
+    /// Cast to the underlying MSHV device fd
+    ///
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 
