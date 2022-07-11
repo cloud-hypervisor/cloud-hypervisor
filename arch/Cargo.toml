@@ -16,7 +16,7 @@ hypervisor = { path = "../hypervisor" }
 libc = "0.2.126"
 linux-loader = { version = "0.4.0", features = ["elf", "bzimage", "pe"] }
 log = "0.4.17"
-serde = { version = "1.0.138", features = ["rc", "derive"] }
+serde = { version = "1.0.139", features = ["rc", "derive"] }
 thiserror = "1.0.31"
 versionize = "0.1.6"
 versionize_derive = "0.1.4"
