@@ -153,7 +153,7 @@ dependencies = [
 
 [[package]]
 name = "cloud-hypervisor"
-version = "24.0.0"
+version = "25.0.0"
 dependencies = [
  "anyhow",
  "api_client",
@@ -318,9 +318,9 @@ dependencies = [
 
 [[package]]
 name = "io-uring"
-version = "0.5.2"
+version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d75829ed9377bab6c90039fe47b9d84caceb4b5063266142e21bcce6550cda8"
+checksum = "427496d698429d86ff947537dff68facb83fe753b7abea4fab4ac1c4b7a4b94b"
 dependencies = [
  "bitflags",
  "libc",
@@ -819,9 +819,9 @@ dependencies = [
 
 [[package]]
 name = "virtio-queue"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88f2d73c184c18f8acc32dab77fcb6e3af92d53262538d3a68aa474810d6863c"
+checksum = "519c0a333c871650269cba303bc108075d52a0c0d64f9b91fae61829b53725af"
 dependencies = [
  "log",
  "vm-memory",
