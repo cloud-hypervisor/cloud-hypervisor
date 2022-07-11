@@ -77,6 +77,8 @@ generate_read_fn!(read_le_i32, i32, i8, 4, from_le_bytes);
 generate_read_fn!(read_be_u16, u16, u8, 2, from_be_bytes);
 #[cfg(target_arch = "aarch64")]
 generate_read_fn!(read_be_u32, u32, u8, 4, from_be_bytes);
+#[cfg(target_arch = "aarch64")]
+generate_read_fn!(read_be_u64, u64, u8, 8, from_be_bytes);
 
 #[cfg(target_arch = "aarch64")]
 generate_write_fn!(write_le_u16, u16, u8, to_le_bytes);
@@ -91,3 +93,5 @@ generate_write_fn!(write_le_i32, i32, i8, to_le_bytes);
 generate_write_fn!(write_be_u16, u16, u8, to_be_bytes);
 #[cfg(target_arch = "aarch64")]
 generate_write_fn!(write_be_u32, u32, u8, to_be_bytes);
+#[cfg(target_arch = "aarch64")]
+generate_write_fn!(write_be_u64, u64, u8, to_be_bytes);
