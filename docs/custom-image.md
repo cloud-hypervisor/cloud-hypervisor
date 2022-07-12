@@ -59,6 +59,16 @@ mkdir -p /mnt
 sudo mount -o loop,offset=$((227328 * 512)) focal-server-cloudimg-amd64.raw /mnt
 ```
 
+### Set up DNS
+
+The next step describes changing the root directory to the rootfs contained by 
+the cloud image. For DNS to work in the root directory, you will need to first bind-mount 
+the host `/etc/resolv.conf` onto the mounted linux partition of the cloud image.
+
+```bash
+sudo mount -o bind /etc/resolv.conf /mnt/etc/resolv.conf
+```
+
 ### Change root directory
 
 Changing the root directory will allow us to install new packages to the rootfs
@@ -108,6 +118,7 @@ umount /dev/pts
 umount /proc
 history -c
 exit
+umount /mnt/etc/resolv.conf
 umount /mnt
 ```
 
