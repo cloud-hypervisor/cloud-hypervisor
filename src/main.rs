@@ -130,10 +130,9 @@ fn create_app<'a, 'b>(
     default_memory: &'a str,
     default_rng: &'a str,
 ) -> App<'a, 'b> {
-    #[cfg(target_arch = "x86_64")]
+
     let mut app: App;
-    #[cfg(target_arch = "aarch64")]
-    let app: App;
+
 
     app = App::new("cloud-hypervisor")
         // 'BUILT_VERSION' is set by the build script 'build.rs' at
@@ -399,7 +398,18 @@ fn create_app<'a, 'b>(
                 .group("vm-config"),
         );
     }
-
+    #[cfg(target_arch = "aarch64")]
+    {
+        app = app.arg(
+            Arg::with_name("dtb")
+                .long("dtb")
+                .help(
+                    "Path to device tree file.",
+                )
+                .takes_value(true)
+                .group("vm-config"),
+        );
+    }
     app
 }
 
