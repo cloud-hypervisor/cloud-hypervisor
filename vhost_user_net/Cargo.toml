@@ -5,7 +5,7 @@ authors = ["The Cloud Hypervisor Authors"]
 edition = "2021"
 
 [dependencies]
-clap = { version = "3.2.8", features = ["wrap_help","cargo"] }
+clap = { version = "3.2.10", features = ["wrap_help","cargo"] }
 env_logger = "0.9.0"
 epoll = "4.3.1"
 libc = "0.2.126"
@@ -19,4 +19,4 @@ vm-memory = "0.8.0"
 vmm-sys-util = "0.9.0"
 
 [build-dependencies]
-clap = { version = "3.2.8", features = ["cargo"] }
+clap = { version = "3.2.10", features = ["cargo"] }
