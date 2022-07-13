@@ -446,3 +446,74 @@ impl Transportable for FWCfgStateSnapShotData {}
 impl Migratable for FWCfgStateSnapShotData {}
 
 impl VersionMapped for FWCfgStateSnapShotData {}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_be_to_le() {
+        let input: u64 = 0x01;
+        let output = be_to_le(input, 1);
+        assert_eq!(0x01, output);
+
+        let input: u64 = 0x0102;
+        let output = be_to_le(input, 2);
+        assert_eq!(0x0201, output);
+
+        let input: u64 = 0x01020304;
+        let output = be_to_le(input, 4);
+        assert_eq!(0x04030201, output);
+
+        let input: u64 = 0x0102030405060708;
+        let output = be_to_le(input, 8);
+        assert_eq!(0x0807060504030201, output);
+    }
+
+    #[test]
+    fn test_fw_cfg_add_key() {
+        let fw_cfg = FWCfgState::new("fw_cfg");
+        fw_cfg.init();
+
+        //test add_string
+        let s = "console=hvc0 console=ttyAMA0 earlycon root=/dev/vda1 rw";
+        let val: i32 = s.len();
+        fw_cfg.add_string(FW_CFG_CMDLINE_DATA, s);
+        fw_cfg.add_i32(FW_CFG_CMDLINE_SIZE, val);
+        match fw_cfg.core_data.entries {
+            Some(d) => {
+                let data = d[FW_CFG_CMDLINE_DATA].data.unwrap();
+                let size = d[FW_CFG_CMDLINE_SIZE].data.unwrap();
+                let mut vec = Vec::new();
+                let vc = &mut vec;
+                for i in data {
+                    vc.push(i);
+                }
+                let mut num = 0;
+                let n = &mut num;
+                for i in size {
+                    n <<= 8;
+                    n |= i;
+                }
+                let sv = String::from_utf8(vec).unwrap();
+                let sr = &sv[0..sv.len()];
+                assert_eq!(s, sr);
+                assert_eq!(num, val);
+            }
+            None => error!("test fw_cfg add_key fail, no data found"),
+        }
+    }
+
+    #[test]
+    fn test_data_read_write() {
+        let fw_cfg = FWCfgState::new("fw_cfg");
+        fw_cfg.init();
+
+        let mut data_input: Vec<u8> = Vec::with_capacity(2);
+        let mut data_output: Vec<u8> = Vec::with_capacity(2);
+
+        write_be_u16(data_input, FW_CFG_ID);
+        fw_cfg.write(0, FW_CFG_REG_CTL_OFFSET, data_input);
+        fw_cfg.read(0, FW_CFG_REG_DATA_OFFSET, data_output);
+
+        assert_eq!(data_input, data_output);
+    }
+}
