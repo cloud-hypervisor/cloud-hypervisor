@@ -98,6 +98,8 @@ pub enum Error {
     /// Cannot open the kernel image
     KernelFile(io::Error),
 
+    /// Cannot open the device tree file
+    DtbFile(io::Error),
     /// Cannot open the initramfs image
     InitramfsFile(io::Error),
 
@@ -1338,6 +1340,16 @@ impl Vm {
             Error::ConfigureSystem(arch::Error::AArch64Setup(arch::aarch64::Error::SetupGic(e)))
         })?;
 
+        let dtb_path = self
+            .config
+            .lock()
+            .unwrap()
+            .dtb
+            .as_ref()
+            .map(|k| File::open(&k.path))
+            .transpose()
+            .map_err(Error::DtbFile)?;
+
         arch::configure_system(
             &mem,
             cmdline.as_str(),
@@ -1349,6 +1361,7 @@ impl Vm {
             virtio_iommu_bdf.map(|bdf| bdf.into()),
             &*gic_device,
             &self.numa_nodes,
+            dtb_path,
         )
         .map_err(Error::ConfigureSystem)?;
 

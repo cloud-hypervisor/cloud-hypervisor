@@ -20,6 +20,8 @@ use log::{log_enabled, Level};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt::Debug;
+use std::fs::File;
+use std::path::PathBuf;
 use std::sync::Arc;
 use vm_memory::{
     Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic, GuestUsize,
@@ -144,7 +146,9 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Bui
     virtio_iommu_bdf: Option<u32>,
     gic_device: &dyn GicDevice,
     numa_nodes: &NumaNodes,
+    dtb_path: Option<File>,
 ) -> super::Result<()> {
+
     let fdt_final = fdt::create_fdt(
         guest_mem,
         cmdline,
