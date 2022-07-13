@@ -149,20 +149,24 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Bui
     dtb_path: Option<File>,
 ) -> super::Result<()> {
 
-    let fdt_final = fdt::create_fdt(
-        guest_mem,
-        cmdline,
-        vcpu_mpidr,
-        vcpu_topology,
-        device_info,
-        gic_device,
-        initrd,
-        pci_space_address,
-        numa_nodes,
-        virtio_iommu_bdf,
-    )
-    .map_err(|_| Error::SetupFdt)?;
-
+    
+    let fdt_final = if let Some(mut dtb_file) = dtb_path {
+        fdt::fdt_file_to_vec(&mut dtb_file).map_err(|_| Error::SetupFdt)?
+    } else {
+        fdt::create_fdt(
+            guest_mem,
+            cmdline,
+            vcpu_mpidr,
+            vcpu_topology,
+            device_info,
+            gic_device,
+            initrd,
+            pci_space_address,
+            numa_nodes,
+            virtio_iommu_bdf,
+        )
+        .map_err(|_| Error::SetupFdt)?
+    };
     if log_enabled!(Level::Debug) {
         fdt::print_fdt(&fdt_final);
     }
