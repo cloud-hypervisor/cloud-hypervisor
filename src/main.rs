@@ -713,6 +713,7 @@ mod unit_tests {
             kernel: Some(KernelConfig {
                 path: PathBuf::from("/path/to/kernel"),
             }),
+            firmware: None,
             initramfs: None,
             cmdline: CmdlineConfig {
                 args: String::from(""),
