@@ -23,8 +23,8 @@ use vm::DataMatch;
 pub mod x86_64;
 use crate::device;
 use crate::{
-    ClockData, CpuState, IoEventAddress, MpState, UserMemoryRegion, USER_MEMORY_REGION_EXECUTE,
-    USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
+    ClockData, CpuState, IoEventAddress, IrqRoutingEntry, MpState, UserMemoryRegion,
+    USER_MEMORY_REGION_EXECUTE, USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
 };
 use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "x86_64")]
@@ -44,8 +44,7 @@ const DIRTY_BITMAP_SET_DIRTY: u64 = 0x8;
 ///
 pub use {
     mshv_bindings::mshv_create_device as CreateDevice,
-    mshv_bindings::mshv_device_attr as DeviceAttr,
-    mshv_bindings::mshv_msi_routing_entry as IrqRoutingEntry, mshv_ioctls::DeviceFd,
+    mshv_bindings::mshv_device_attr as DeviceAttr, mshv_ioctls::DeviceFd,
 };
 
 pub const PAGE_SHIFT: usize = 12;
@@ -127,6 +126,23 @@ impl From<CpuState> for VcpuMshvState {
             /* Needed in case other hypervisors are enabled */
             #[allow(unreachable_patterns)]
             _ => panic!("CpuState is not valid"),
+        }
+    }
+}
+
+impl From<mshv_msi_routing_entry> for IrqRoutingEntry {
+    fn from(s: mshv_msi_routing_entry) -> Self {
+        IrqRoutingEntry::Mshv(s)
+    }
+}
+
+impl From<IrqRoutingEntry> for mshv_msi_routing_entry {
+    fn from(e: IrqRoutingEntry) -> Self {
+        match e {
+            IrqRoutingEntry::Mshv(e) => e,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("IrqRoutingEntry is not valid"),
         }
     }
 }
@@ -1074,18 +1090,15 @@ impl vm::Vm for MshvVm {
     ///
     /// Constructs a routing entry
     ///
-    fn make_routing_entry(
-        &self,
-        gsi: u32,
-        config: &InterruptSourceConfig,
-    ) -> mshv_msi_routing_entry {
+    fn make_routing_entry(&self, gsi: u32, config: &InterruptSourceConfig) -> IrqRoutingEntry {
         match config {
             InterruptSourceConfig::MsiIrq(cfg) => mshv_msi_routing_entry {
                 gsi,
                 address_lo: cfg.low_addr,
                 address_hi: cfg.high_addr,
                 data: cfg.data,
-            },
+            }
+            .into(),
             _ => {
                 unreachable!()
             }
@@ -1097,13 +1110,22 @@ impl vm::Vm for MshvVm {
             vec_with_array_field::<mshv_msi_routing, mshv_msi_routing_entry>(entries.len());
         msi_routing[0].nr = entries.len() as u32;
 
+        let entries: Vec<mshv_msi_routing_entry> = entries
+            .iter()
+            .map(|entry| match entry {
+                IrqRoutingEntry::Mshv(e) => *e,
+                #[allow(unreachable_patterns)]
+                _ => panic!("IrqRoutingEntry type is wrong"),
+            })
+            .collect();
+
         // SAFETY: msi_routing initialized with entries.len() and now it is being turned into
         // entries_slice with entries.len() again. It is guaranteed to be large enough to hold
         // everything from entries.
         unsafe {
             let entries_slice: &mut [mshv_msi_routing_entry] =
                 msi_routing[0].entries.as_mut_slice(entries.len());
-            entries_slice.copy_from_slice(entries);
+            entries_slice.copy_from_slice(&entries);
         }
 
         self.fd

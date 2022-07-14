@@ -50,8 +50,8 @@ use crate::arch::x86::NUM_IOAPIC_PINS;
 #[cfg(target_arch = "x86_64")]
 use crate::ClockData;
 use crate::{
-    CpuState, IoEventAddress, MpState, UserMemoryRegion, USER_MEMORY_REGION_LOG_DIRTY,
-    USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
+    CpuState, IoEventAddress, IrqRoutingEntry, MpState, UserMemoryRegion,
+    USER_MEMORY_REGION_LOG_DIRTY, USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
 };
 #[cfg(target_arch = "aarch64")]
 use aarch64::{RegList, Register, StandardRegisters};
@@ -95,8 +95,8 @@ use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_expr, ioctl_ioc_nr, ioctl_iowr_n
 ///
 pub use {
     kvm_bindings::kvm_create_device as CreateDevice, kvm_bindings::kvm_device_attr as DeviceAttr,
-    kvm_bindings::kvm_irq_routing_entry as IrqRoutingEntry, kvm_bindings::kvm_run,
-    kvm_bindings::kvm_vcpu_events as VcpuEvents, kvm_ioctls::DeviceFd, kvm_ioctls::VcpuExit,
+    kvm_bindings::kvm_run, kvm_bindings::kvm_vcpu_events as VcpuEvents, kvm_ioctls::DeviceFd,
+    kvm_ioctls::VcpuExit,
 };
 
 #[cfg(target_arch = "x86_64")]
@@ -282,6 +282,23 @@ impl From<ClockData> for kvm_clock_data {
     }
 }
 
+impl From<kvm_irq_routing_entry> for IrqRoutingEntry {
+    fn from(s: kvm_irq_routing_entry) -> Self {
+        IrqRoutingEntry::Kvm(s)
+    }
+}
+
+impl From<IrqRoutingEntry> for kvm_irq_routing_entry {
+    fn from(e: IrqRoutingEntry) -> Self {
+        match e {
+            IrqRoutingEntry::Kvm(e) => e,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("IrqRoutingEntry is not valid"),
+        }
+    }
+}
+
 struct KvmDirtyLogSlot {
     slot: u32,
     guest_phys_addr: u64,
@@ -437,11 +454,7 @@ impl vm::Vm for KvmVm {
     ///
     /// Constructs a routing entry
     ///
-    fn make_routing_entry(
-        &self,
-        gsi: u32,
-        config: &InterruptSourceConfig,
-    ) -> kvm_irq_routing_entry {
+    fn make_routing_entry(&self, gsi: u32, config: &InterruptSourceConfig) -> IrqRoutingEntry {
         match &config {
             InterruptSourceConfig::MsiIrq(cfg) => {
                 let mut kvm_route = kvm_irq_routing_entry {
@@ -475,7 +488,7 @@ impl vm::Vm for KvmVm {
                     kvm_route.flags = KVM_MSI_VALID_DEVID;
                     kvm_route.u.msi.__bindgen_anon_1.devid = modified_devid;
                 }
-                kvm_route
+                kvm_route.into()
             }
             InterruptSourceConfig::LegacyIrq(cfg) => {
                 let mut kvm_route = kvm_irq_routing_entry {
@@ -486,7 +499,7 @@ impl vm::Vm for KvmVm {
                 kvm_route.u.irqchip.irqchip = cfg.irqchip;
                 kvm_route.u.irqchip.pin = cfg.pin;
 
-                kvm_route
+                kvm_route.into()
             }
         }
     }
@@ -500,6 +513,14 @@ impl vm::Vm for KvmVm {
             vec_with_array_field::<kvm_irq_routing, kvm_irq_routing_entry>(entries.len());
         irq_routing[0].nr = entries.len() as u32;
         irq_routing[0].flags = 0;
+        let entries: Vec<kvm_irq_routing_entry> = entries
+            .iter()
+            .map(|entry| match entry {
+                IrqRoutingEntry::Kvm(e) => *e,
+                #[allow(unreachable_patterns)]
+                _ => panic!("IrqRoutingEntry type is wrong"),
+            })
+            .collect();
 
         // SAFETY: irq_routing initialized with entries.len() and now it is being turned into
         // entries_slice with entries.len() again. It is guaranteed to be large enough to hold
@@ -507,7 +528,7 @@ impl vm::Vm for KvmVm {
         unsafe {
             let entries_slice: &mut [kvm_irq_routing_entry] =
                 irq_routing[0].entries.as_mut_slice(entries.len());
-            entries_slice.copy_from_slice(entries);
+            entries_slice.copy_from_slice(&entries);
         }
 
         self.fd
