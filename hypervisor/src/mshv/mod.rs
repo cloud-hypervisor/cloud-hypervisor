@@ -25,7 +25,8 @@ use vm::DataMatch;
 pub mod x86_64;
 use crate::device;
 use crate::{
-    UserMemoryRegion, USER_MEMORY_REGION_EXECUTE, USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
+    MpState, UserMemoryRegion, USER_MEMORY_REGION_EXECUTE, USER_MEMORY_REGION_READ,
+    USER_MEMORY_REGION_WRITE,
 };
 use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "x86_64")]
@@ -540,6 +541,18 @@ impl cpu::Vcpu for MshvVcpu {
         self.fd
             .set_lapic(lapic)
             .map_err(|e| cpu::HypervisorCpuError::SetLapicState(e.into()))
+    }
+    ///
+    /// Returns the vcpu's current "multiprocessing state".
+    ///
+    fn get_mp_state(&self) -> cpu::Result<MpState> {
+        Ok(MpState::Mshv)
+    }
+    ///
+    /// Sets the vcpu's current "multiprocessing state".
+    ///
+    fn set_mp_state(&self, _mp_state: MpState) -> cpu::Result<()> {
+        Ok(())
     }
     #[cfg(target_arch = "x86_64")]
     ///

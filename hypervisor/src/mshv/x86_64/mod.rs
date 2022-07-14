@@ -66,8 +66,6 @@ impl fmt::Display for VcpuMshvState {
     }
 }
 
-pub struct MpState {}
-
 impl SegmentRegisterOps for SegmentRegister {
     fn segment_type(&self) -> u8 {
         self.type_

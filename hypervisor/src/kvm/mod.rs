@@ -49,7 +49,7 @@ pub mod x86_64;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::NUM_IOAPIC_PINS;
 use crate::{
-    UserMemoryRegion, USER_MEMORY_REGION_LOG_DIRTY, USER_MEMORY_REGION_READ,
+    MpState, UserMemoryRegion, USER_MEMORY_REGION_LOG_DIRTY, USER_MEMORY_REGION_READ,
     USER_MEMORY_REGION_WRITE,
 };
 #[cfg(target_arch = "aarch64")]
@@ -74,7 +74,7 @@ pub use kvm_bindings;
 use kvm_bindings::KVMIO;
 pub use kvm_bindings::{
     kvm_create_device, kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_irq_routing, kvm_irq_routing_entry,
-    kvm_userspace_memory_region, KVM_IRQ_ROUTING_IRQCHIP, KVM_IRQ_ROUTING_MSI,
+    kvm_mp_state, kvm_userspace_memory_region, KVM_IRQ_ROUTING_IRQCHIP, KVM_IRQ_ROUTING_MSI,
     KVM_MEM_LOG_DIRTY_PAGES, KVM_MEM_READONLY, KVM_MSI_VALID_DEVID,
 };
 #[cfg(target_arch = "aarch64")]
@@ -95,9 +95,9 @@ use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_expr, ioctl_ioc_nr, ioctl_iowr_n
 pub use {
     kvm_bindings::kvm_clock_data as ClockData, kvm_bindings::kvm_create_device as CreateDevice,
     kvm_bindings::kvm_device_attr as DeviceAttr,
-    kvm_bindings::kvm_irq_routing_entry as IrqRoutingEntry, kvm_bindings::kvm_mp_state as MpState,
-    kvm_bindings::kvm_run, kvm_bindings::kvm_vcpu_events as VcpuEvents, kvm_ioctls::DeviceFd,
-    kvm_ioctls::IoEventAddress, kvm_ioctls::VcpuExit,
+    kvm_bindings::kvm_irq_routing_entry as IrqRoutingEntry, kvm_bindings::kvm_run,
+    kvm_bindings::kvm_vcpu_events as VcpuEvents, kvm_ioctls::DeviceFd, kvm_ioctls::IoEventAddress,
+    kvm_ioctls::VcpuExit,
 };
 
 #[cfg(target_arch = "x86_64")]
@@ -208,6 +208,23 @@ impl From<UserMemoryRegion> for kvm_userspace_memory_region {
             memory_size: region.memory_size,
             userspace_addr: region.userspace_addr,
             flags,
+        }
+    }
+}
+
+impl From<kvm_mp_state> for MpState {
+    fn from(s: kvm_mp_state) -> Self {
+        MpState::Kvm(s)
+    }
+}
+
+impl From<MpState> for kvm_mp_state {
+    fn from(ms: MpState) -> Self {
+        match ms {
+            MpState::Kvm(s) => s,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("CpuState is not valid"),
         }
     }
 }
@@ -1302,16 +1319,18 @@ impl cpu::Vcpu for KvmVcpu {
     /// Returns the vcpu's current "multiprocessing state".
     ///
     fn get_mp_state(&self) -> cpu::Result<MpState> {
-        self.fd
+        Ok(self
+            .fd
             .get_mp_state()
-            .map_err(|e| cpu::HypervisorCpuError::GetMpState(e.into()))
+            .map_err(|e| cpu::HypervisorCpuError::GetMpState(e.into()))?
+            .into())
     }
     ///
     /// Sets the vcpu's current "multiprocessing state".
     ///
     fn set_mp_state(&self, mp_state: MpState) -> cpu::Result<()> {
         self.fd
-            .set_mp_state(mp_state)
+            .set_mp_state(mp_state.into())
             .map_err(|e| cpu::HypervisorCpuError::SetMpState(e.into()))
     }
     #[cfg(target_arch = "x86_64")]
@@ -1710,7 +1729,7 @@ impl cpu::Vcpu for KvmVcpu {
     /// ```
     fn state(&self) -> cpu::Result<CpuState> {
         let cpuid = self.get_cpuid2(kvm_bindings::KVM_MAX_CPUID_ENTRIES)?;
-        let mp_state = self.get_mp_state()?;
+        let mp_state = self.get_mp_state()?.into();
         let regs = self.get_regs()?;
         let sregs = self.get_sregs()?;
         let xsave = self.get_xsave()?;
@@ -1807,7 +1826,7 @@ impl cpu::Vcpu for KvmVcpu {
     #[cfg(target_arch = "aarch64")]
     fn state(&self) -> cpu::Result<CpuState> {
         let mut state = CpuState {
-            mp_state: self.get_mp_state()?,
+            mp_state: self.get_mp_state()?.into(),
             mpidr: self.read_mpidr()?,
             ..Default::default()
         };
@@ -1858,7 +1877,7 @@ impl cpu::Vcpu for KvmVcpu {
     /// ```
     fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
         self.set_cpuid2(&state.cpuid)?;
-        self.set_mp_state(state.mp_state)?;
+        self.set_mp_state(state.mp_state.into())?;
         self.set_regs(&state.regs)?;
         self.set_sregs(&state.sregs)?;
         self.set_xsave(&state.xsave)?;
@@ -1907,7 +1926,7 @@ impl cpu::Vcpu for KvmVcpu {
     fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
         self.set_regs(&state.core_regs)?;
         self.set_sys_regs(&state.sys_regs)?;
-        self.set_mp_state(state.mp_state)?;
+        self.set_mp_state(state.mp_state.into())?;
 
         Ok(())
     }
