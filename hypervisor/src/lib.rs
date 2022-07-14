@@ -59,12 +59,12 @@ pub use kvm::x86_64;
 pub use kvm::{aarch64, GicState};
 // Aliased types exposed from both hypervisors
 #[cfg(feature = "kvm")]
-pub use kvm::{CreateDevice, DeviceAttr, DeviceFd, IrqRoutingEntry};
+pub use kvm::{CreateDevice, DeviceAttr, DeviceFd};
 #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
 pub use mshv::x86_64;
 // Aliased types exposed from both hypervisors
 #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
-pub use mshv::{CreateDevice, DeviceAttr, DeviceFd, IrqRoutingEntry};
+pub use mshv::{CreateDevice, DeviceAttr, DeviceFd};
 use std::sync::Arc;
 pub use vm::{
     DataMatch, HypervisorVmError, InterruptSourceConfig, LegacyIrqSourceConfig, MsiIrqSourceConfig,
@@ -172,4 +172,12 @@ impl ClockData {
             _ => {}
         }
     }
+}
+
+#[derive(Copy, Clone)]
+pub enum IrqRoutingEntry {
+    #[cfg(feature = "kvm")]
+    Kvm(kvm_bindings::kvm_irq_routing_entry),
+    #[cfg(feature = "mshv")]
+    Mshv(mshv_bindings::mshv_msi_routing_entry),
 }
