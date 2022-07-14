@@ -46,7 +46,7 @@ use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
 #[cfg(target_arch = "x86_64")]
-use crate::arch::x86::{StandardRegisters, NUM_IOAPIC_PINS};
+use crate::arch::x86::{SpecialRegisters, StandardRegisters, NUM_IOAPIC_PINS};
 #[cfg(target_arch = "x86_64")]
 use crate::ClockData;
 use crate::{
@@ -61,7 +61,7 @@ use kvm_bindings::{
     KVM_CAP_SPLIT_IRQCHIP, KVM_GUESTDBG_ENABLE, KVM_GUESTDBG_SINGLESTEP, KVM_GUESTDBG_USE_HW_BP,
 };
 #[cfg(target_arch = "x86_64")]
-use x86_64::{check_required_kvm_extensions, FpuState, SpecialRegisters};
+use x86_64::{check_required_kvm_extensions, FpuState};
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
     CpuId, CpuIdEntry, ExtendedControlRegisters, LapicState, MsrEntries, VcpuKvmState, Xsave,
@@ -1273,17 +1273,20 @@ impl cpu::Vcpu for KvmVcpu {
     /// Returns the vCPU special registers.
     ///
     fn get_sregs(&self) -> cpu::Result<SpecialRegisters> {
-        self.fd
+        Ok(self
+            .fd
             .get_sregs()
-            .map_err(|e| cpu::HypervisorCpuError::GetSpecialRegs(e.into()))
+            .map_err(|e| cpu::HypervisorCpuError::GetSpecialRegs(e.into()))?
+            .into())
     }
     #[cfg(target_arch = "x86_64")]
     ///
     /// Sets the vCPU special registers using the `KVM_SET_SREGS` ioctl.
     ///
     fn set_sregs(&self, sregs: &SpecialRegisters) -> cpu::Result<()> {
+        let sregs = (*sregs).into();
         self.fd
-            .set_sregs(sregs)
+            .set_sregs(&sregs)
             .map_err(|e| cpu::HypervisorCpuError::SetSpecialRegs(e.into()))
     }
     #[cfg(target_arch = "x86_64")]
@@ -1873,7 +1876,7 @@ impl cpu::Vcpu for KvmVcpu {
             msrs,
             vcpu_events,
             regs: regs.into(),
-            sregs,
+            sregs: sregs.into(),
             fpu,
             lapic_state,
             xsave,
@@ -1942,7 +1945,7 @@ impl cpu::Vcpu for KvmVcpu {
         self.set_cpuid2(&state.cpuid)?;
         self.set_mp_state(state.mp_state.into())?;
         self.set_regs(&state.regs.into())?;
-        self.set_sregs(&state.sregs)?;
+        self.set_sregs(&state.sregs.into())?;
         self.set_xsave(&state.xsave)?;
         self.set_xcrs(&state.xcrs)?;
         self.set_lapic(&state.lapic_state)?;

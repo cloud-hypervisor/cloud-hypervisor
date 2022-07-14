@@ -10,8 +10,8 @@ use crate::layout::{BOOT_GDT_START, BOOT_IDT_START, PVH_INFO_START};
 use crate::GuestMemoryMmap;
 use hypervisor::arch::x86::gdt::{gdt_entry, segment_from_gdt};
 use hypervisor::arch::x86::regs::CR0_PE;
-use hypervisor::arch::x86::StandardRegisters;
-use hypervisor::x86_64::{FpuState, SpecialRegisters};
+use hypervisor::arch::x86::{SpecialRegisters, StandardRegisters};
+use hypervisor::x86_64::FpuState;
 use std::sync::Arc;
 use std::{mem, result};
 use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError};
@@ -148,13 +148,13 @@ pub fn configure_segments_and_sregs(
     sregs.idt.base = BOOT_IDT_START.raw_value();
     sregs.idt.limit = mem::size_of::<u64>() as u16 - 1;
 
-    sregs.cs = code_seg.into();
-    sregs.ds = data_seg.into();
-    sregs.es = data_seg.into();
-    sregs.fs = data_seg.into();
-    sregs.gs = data_seg.into();
-    sregs.ss = data_seg.into();
-    sregs.tr = tss_seg.into();
+    sregs.cs = code_seg;
+    sregs.ds = data_seg;
+    sregs.es = data_seg;
+    sregs.fs = data_seg;
+    sregs.gs = data_seg;
+    sregs.ss = data_seg;
+    sregs.tr = tss_seg;
 
     sregs.cr0 = CR0_PE;
     sregs.cr4 = 0;

@@ -205,3 +205,26 @@ pub struct DescriptorTable {
     pub base: u64,
     pub limit: u16,
 }
+
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "with-serde", derive(Deserialize, Serialize))]
+pub struct SpecialRegisters {
+    pub cs: SegmentRegister,
+    pub ds: SegmentRegister,
+    pub es: SegmentRegister,
+    pub fs: SegmentRegister,
+    pub gs: SegmentRegister,
+    pub ss: SegmentRegister,
+    pub tr: SegmentRegister,
+    pub ldt: SegmentRegister,
+    pub gdt: DescriptorTable,
+    pub idt: DescriptorTable,
+    pub cr0: u64,
+    pub cr2: u64,
+    pub cr3: u64,
+    pub cr4: u64,
+    pub cr8: u64,
+    pub efer: u64,
+    pub apic_base: u64,
+    pub interrupt_bitmap: [u64; 4usize],
+}
