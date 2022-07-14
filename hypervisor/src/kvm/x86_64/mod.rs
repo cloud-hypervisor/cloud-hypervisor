@@ -8,7 +8,7 @@
 //
 //
 
-use crate::arch::x86::{DescriptorTable, SegmentRegister, StandardRegisters};
+use crate::arch::x86::{DescriptorTable, SegmentRegister, SpecialRegisters, StandardRegisters};
 use crate::kvm::{Cap, Kvm, KvmError, KvmResult};
 use serde::{Deserialize, Serialize};
 
@@ -19,7 +19,7 @@ pub use {
     kvm_bindings::kvm_cpuid_entry2 as CpuIdEntry, kvm_bindings::kvm_dtable,
     kvm_bindings::kvm_fpu as FpuState, kvm_bindings::kvm_lapic_state as LapicState,
     kvm_bindings::kvm_mp_state as MpState, kvm_bindings::kvm_msr_entry as MsrEntry,
-    kvm_bindings::kvm_regs, kvm_bindings::kvm_segment, kvm_bindings::kvm_sregs as SpecialRegisters,
+    kvm_bindings::kvm_regs, kvm_bindings::kvm_segment, kvm_bindings::kvm_sregs,
     kvm_bindings::kvm_vcpu_events as VcpuEvents,
     kvm_bindings::kvm_xcrs as ExtendedControlRegisters, kvm_bindings::kvm_xsave as Xsave,
     kvm_bindings::CpuId, kvm_bindings::MsrList, kvm_bindings::Msrs as MsrEntries,
@@ -56,7 +56,7 @@ pub struct VcpuKvmState {
     pub msrs: MsrEntries,
     pub vcpu_events: VcpuEvents,
     pub regs: kvm_regs,
-    pub sregs: SpecialRegisters,
+    pub sregs: kvm_sregs,
     pub fpu: FpuState,
     pub lapic_state: LapicState,
     pub xsave: Xsave,
@@ -168,6 +168,56 @@ impl From<kvm_dtable> for DescriptorTable {
         Self {
             base: dt.base,
             limit: dt.limit,
+        }
+    }
+}
+
+impl From<SpecialRegisters> for kvm_sregs {
+    fn from(s: SpecialRegisters) -> Self {
+        Self {
+            cs: s.cs.into(),
+            ds: s.ds.into(),
+            es: s.es.into(),
+            fs: s.fs.into(),
+            gs: s.gs.into(),
+            ss: s.ss.into(),
+            tr: s.tr.into(),
+            ldt: s.ldt.into(),
+            gdt: s.gdt.into(),
+            idt: s.idt.into(),
+            cr0: s.cr0,
+            cr2: s.cr2,
+            cr3: s.cr3,
+            cr4: s.cr4,
+            cr8: s.cr8,
+            efer: s.efer,
+            apic_base: s.apic_base,
+            interrupt_bitmap: s.interrupt_bitmap,
+        }
+    }
+}
+
+impl From<kvm_sregs> for SpecialRegisters {
+    fn from(s: kvm_sregs) -> Self {
+        Self {
+            cs: s.cs.into(),
+            ds: s.ds.into(),
+            es: s.es.into(),
+            fs: s.fs.into(),
+            gs: s.gs.into(),
+            ss: s.ss.into(),
+            tr: s.tr.into(),
+            ldt: s.ldt.into(),
+            gdt: s.gdt.into(),
+            idt: s.idt.into(),
+            cr0: s.cr0,
+            cr2: s.cr2,
+            cr3: s.cr3,
+            cr4: s.cr4,
+            cr8: s.cr8,
+            efer: s.efer,
+            apic_base: s.apic_base,
+            interrupt_bitmap: s.interrupt_bitmap,
         }
     }
 }

@@ -4,9 +4,7 @@
 //
 
 #[cfg(target_arch = "x86_64")]
-use hypervisor::arch::x86::SegmentRegister;
-#[cfg(target_arch = "x86_64")]
-use hypervisor::kvm::kvm_bindings::kvm_dtable as DTableRegister;
+use hypervisor::arch::x86::{DescriptorTable, SegmentRegister};
 use linux_loader::elf;
 use std::fs::File;
 use std::io::Write;
@@ -135,7 +133,7 @@ impl CpuSegment {
         }
     }
 
-    pub fn new_from_table(reg: DTableRegister) -> Self {
+    pub fn new_from_table(reg: DescriptorTable) -> Self {
         CpuSegment {
             selector: 0,
             limit: reg.limit as u32,

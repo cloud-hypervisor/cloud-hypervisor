@@ -7,7 +7,7 @@
 // Copyright 2018-2019 CrowdStrike, Inc.
 //
 //
-use crate::arch::x86::{DescriptorTable, SegmentRegister, StandardRegisters};
+use crate::arch::x86::{DescriptorTable, SegmentRegister, SpecialRegisters, StandardRegisters};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -21,7 +21,8 @@ pub use {
     mshv_bindings::FloatingPointUnit as FpuState, mshv_bindings::LapicState,
     mshv_bindings::MiscRegs as MiscRegisters, mshv_bindings::MsrList,
     mshv_bindings::Msrs as MsrEntries, mshv_bindings::Msrs,
-    mshv_bindings::SegmentRegister as MshvSegmentRegister, mshv_bindings::SpecialRegisters,
+    mshv_bindings::SegmentRegister as MshvSegmentRegister,
+    mshv_bindings::SpecialRegisters as MshvSpecialRegisters,
     mshv_bindings::StandardRegisters as MshvStandardRegisters, mshv_bindings::SuspendRegisters,
     mshv_bindings::TableRegister, mshv_bindings::VcpuEvents, mshv_bindings::XSave as Xsave,
     mshv_bindings::Xcrs as ExtendedControlRegisters,
@@ -34,7 +35,7 @@ pub struct VcpuMshvState {
     pub msrs: MsrEntries,
     pub vcpu_events: VcpuEvents,
     pub regs: MshvStandardRegisters,
-    pub sregs: SpecialRegisters,
+    pub sregs: MshvSpecialRegisters,
     pub fpu: FpuState,
     pub xcrs: ExtendedControlRegisters,
     pub lapic: LapicState,
@@ -170,6 +171,56 @@ impl From<TableRegister> for DescriptorTable {
         Self {
             base: dt.base,
             limit: dt.limit,
+        }
+    }
+}
+
+impl From<SpecialRegisters> for MshvSpecialRegisters {
+    fn from(s: SpecialRegisters) -> Self {
+        Self {
+            cs: s.cs.into(),
+            ds: s.ds.into(),
+            es: s.es.into(),
+            fs: s.fs.into(),
+            gs: s.gs.into(),
+            ss: s.ss.into(),
+            tr: s.tr.into(),
+            ldt: s.ldt.into(),
+            gdt: s.gdt.into(),
+            idt: s.idt.into(),
+            cr0: s.cr0,
+            cr2: s.cr2,
+            cr3: s.cr3,
+            cr4: s.cr4,
+            cr8: s.cr8,
+            efer: s.efer,
+            apic_base: s.apic_base,
+            interrupt_bitmap: s.interrupt_bitmap,
+        }
+    }
+}
+
+impl From<MshvSpecialRegisters> for SpecialRegisters {
+    fn from(s: MshvSpecialRegisters) -> Self {
+        Self {
+            cs: s.cs.into(),
+            ds: s.ds.into(),
+            es: s.es.into(),
+            fs: s.fs.into(),
+            gs: s.gs.into(),
+            ss: s.ss.into(),
+            tr: s.tr.into(),
+            ldt: s.ldt.into(),
+            gdt: s.gdt.into(),
+            idt: s.idt.into(),
+            cr0: s.cr0,
+            cr2: s.cr2,
+            cr3: s.cr3,
+            cr4: s.cr4,
+            cr8: s.cr8,
+            efer: s.efer,
+            apic_base: s.apic_base,
+            interrupt_bitmap: s.interrupt_bitmap,
         }
     }
 }
