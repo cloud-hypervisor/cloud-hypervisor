@@ -4,6 +4,7 @@
 
 use crate::arch::aarch64::gic::{Error, Result};
 use crate::kvm::kvm_bindings::{kvm_device_attr, KVM_DEV_ARM_VGIC_GRP_REDIST_REGS};
+use crate::kvm::VcpuKvmState;
 use crate::{CpuState, Device};
 use std::sync::Arc;
 
@@ -190,6 +191,7 @@ pub fn construct_gicr_typers(vcpu_states: &[CpuState]) -> Vec<u64> {
      */
     let mut gicr_typers: Vec<u64> = Vec::new();
     for (index, state) in vcpu_states.iter().enumerate() {
+        let state: VcpuKvmState = state.clone().into();
         let last = {
             if index == vcpu_states.len() - 1 {
                 1

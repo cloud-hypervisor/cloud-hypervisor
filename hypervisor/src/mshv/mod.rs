@@ -24,12 +24,12 @@ use vm::DataMatch;
 pub mod x86_64;
 use crate::device;
 use crate::{
-    IoEventAddress, MpState, UserMemoryRegion, USER_MEMORY_REGION_EXECUTE, USER_MEMORY_REGION_READ,
-    USER_MEMORY_REGION_WRITE,
+    CpuState, IoEventAddress, MpState, UserMemoryRegion, USER_MEMORY_REGION_EXECUTE,
+    USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
 };
 use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "x86_64")]
-pub use x86_64::VcpuMshvState as CpuState;
+pub use x86_64::VcpuMshvState;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::*;
 
@@ -111,6 +111,23 @@ impl From<IoEventAddress> for mshv_ioctls::IoEventAddress {
         match a {
             IoEventAddress::Pio(x) => Self::Pio(x),
             IoEventAddress::Mmio(x) => Self::Mmio(x),
+        }
+    }
+}
+
+impl From<VcpuMshvState> for CpuState {
+    fn from(s: VcpuMshvState) -> Self {
+        CpuState::Mshv(s)
+    }
+}
+
+impl From<CpuState> for VcpuMshvState {
+    fn from(s: CpuState) -> Self {
+        match s {
+            CpuState::Mshv(s) => s,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("CpuState is not valid"),
         }
     }
 }
@@ -593,6 +610,7 @@ impl cpu::Vcpu for MshvVcpu {
     /// Set CPU state
     ///
     fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
+        let state: VcpuMshvState = state.clone().into();
         self.set_msrs(&state.msrs)?;
         self.set_vcpu_events(&state.vcpu_events)?;
         self.set_regs(&state.regs)?;
@@ -635,7 +653,7 @@ impl cpu::Vcpu for MshvVcpu {
             .get_debug_regs()
             .map_err(|e| cpu::HypervisorCpuError::GetDebugRegs(e.into()))?;
 
-        Ok(CpuState {
+        Ok(VcpuMshvState {
             msrs,
             vcpu_events,
             regs,
@@ -646,7 +664,8 @@ impl cpu::Vcpu for MshvVcpu {
             dbg,
             xsave,
             misc,
-        })
+        }
+        .into())
     }
     #[cfg(target_arch = "x86_64")]
     ///

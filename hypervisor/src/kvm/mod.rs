@@ -13,7 +13,7 @@ use crate::aarch64::gic::KvmGicV3Its;
 #[cfg(target_arch = "aarch64")]
 pub use crate::aarch64::{
     check_required_kvm_extensions, gic::Gicv3ItsState as GicState, is_system_register, VcpuInit,
-    VcpuKvmState as CpuState, MPIDR_EL1,
+    VcpuKvmState, MPIDR_EL1,
 };
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::gic::Vgic;
@@ -49,7 +49,7 @@ pub mod x86_64;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::NUM_IOAPIC_PINS;
 use crate::{
-    IoEventAddress, MpState, UserMemoryRegion, USER_MEMORY_REGION_LOG_DIRTY,
+    CpuState, IoEventAddress, MpState, UserMemoryRegion, USER_MEMORY_REGION_LOG_DIRTY,
     USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
 };
 #[cfg(target_arch = "aarch64")]
@@ -63,8 +63,8 @@ use kvm_bindings::{
 use x86_64::{check_required_kvm_extensions, FpuState, SpecialRegisters, StandardRegisters};
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
-    CpuId, CpuIdEntry, ExtendedControlRegisters, LapicState, MsrEntries, VcpuKvmState as CpuState,
-    Xsave, CPUID_FLAG_VALID_INDEX,
+    CpuId, CpuIdEntry, ExtendedControlRegisters, LapicState, MsrEntries, VcpuKvmState, Xsave,
+    CPUID_FLAG_VALID_INDEX,
 };
 // aarch64 dependencies
 #[cfg(target_arch = "aarch64")]
@@ -242,6 +242,23 @@ impl From<IoEventAddress> for kvm_ioctls::IoEventAddress {
         match a {
             IoEventAddress::Pio(x) => Self::Pio(x),
             IoEventAddress::Mmio(x) => Self::Mmio(x),
+        }
+    }
+}
+
+impl From<VcpuKvmState> for CpuState {
+    fn from(s: VcpuKvmState) -> Self {
+        CpuState::Kvm(s)
+    }
+}
+
+impl From<CpuState> for VcpuKvmState {
+    fn from(s: CpuState) -> Self {
+        match s {
+            CpuState::Kvm(s) => s,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("CpuState is not valid"),
         }
     }
 }
@@ -1826,7 +1843,7 @@ impl cpu::Vcpu for KvmVcpu {
 
         let vcpu_events = self.get_vcpu_events()?;
 
-        Ok(CpuState {
+        Ok(VcpuKvmState {
             cpuid,
             msrs,
             vcpu_events,
@@ -1837,14 +1854,15 @@ impl cpu::Vcpu for KvmVcpu {
             xsave,
             xcrs,
             mp_state,
-        })
+        }
+        .into())
     }
     ///
     /// Get the current AArch64 CPU state
     ///
     #[cfg(target_arch = "aarch64")]
     fn state(&self) -> cpu::Result<CpuState> {
-        let mut state = CpuState {
+        let mut state = VcpuKvmState {
             mp_state: self.get_mp_state()?.into(),
             mpidr: self.read_mpidr()?,
             ..Default::default()
@@ -1852,7 +1870,7 @@ impl cpu::Vcpu for KvmVcpu {
         state.core_regs = self.get_regs()?;
         state.sys_regs = self.get_sys_regs()?;
 
-        Ok(state)
+        Ok(state.into())
     }
     #[cfg(target_arch = "x86_64")]
     ///
@@ -1895,6 +1913,7 @@ impl cpu::Vcpu for KvmVcpu {
     /// vcpu.set_state(&state).unwrap();
     /// ```
     fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
+        let state: VcpuKvmState = state.clone().into();
         self.set_cpuid2(&state.cpuid)?;
         self.set_mp_state(state.mp_state.into())?;
         self.set_regs(&state.regs)?;
@@ -1943,6 +1962,7 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     #[cfg(target_arch = "aarch64")]
     fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
+        let state: VcpuKvmState = state.clone().into();
         self.set_regs(&state.core_regs)?;
         self.set_sys_regs(&state.sys_regs)?;
         self.set_mp_state(state.mp_state.into())?;
