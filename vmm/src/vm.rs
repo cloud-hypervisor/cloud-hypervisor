@@ -2564,8 +2564,7 @@ impl Pausable for Vm {
                 .vm
                 .get_clock()
                 .map_err(|e| MigratableError::Pause(anyhow!("Could not get VM clock: {}", e)))?;
-            // Reset clock flags.
-            clock.flags = 0;
+            clock.reset_flags();
             self.saved_clock = Some(clock);
         }
 

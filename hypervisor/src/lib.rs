@@ -59,7 +59,7 @@ pub use kvm::x86_64;
 pub use kvm::{aarch64, GicState};
 // Aliased types exposed from both hypervisors
 #[cfg(feature = "kvm")]
-pub use kvm::{ClockData, CreateDevice, DeviceAttr, DeviceFd, IrqRoutingEntry};
+pub use kvm::{CreateDevice, DeviceAttr, DeviceFd, IrqRoutingEntry};
 #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
 pub use mshv::x86_64;
 // Aliased types exposed from both hypervisors
@@ -151,4 +151,25 @@ pub enum CpuState {
     Kvm(kvm::VcpuKvmState),
     #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
     Mshv(mshv::VcpuMshvState),
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[cfg(target_arch = "x86_64")]
+pub enum ClockData {
+    #[cfg(feature = "kvm")]
+    Kvm(kvm_bindings::kvm_clock_data),
+    #[cfg(feature = "mshv")]
+    Mshv, /* MSHV does not supprt ClockData yet */
+}
+
+#[cfg(target_arch = "x86_64")]
+impl ClockData {
+    pub fn reset_flags(&mut self) {
+        match self {
+            #[cfg(feature = "kvm")]
+            ClockData::Kvm(s) => s.flags = 0,
+            #[allow(unreachable_patterns)]
+            _ => {}
+        }
+    }
 }
