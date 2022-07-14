@@ -8,7 +8,7 @@
 //
 //
 
-use crate::arch::x86::{SegmentRegister, StandardRegisters};
+use crate::arch::x86::{DescriptorTable, SegmentRegister, StandardRegisters};
 use crate::kvm::{Cap, Kvm, KvmError, KvmResult};
 use serde::{Deserialize, Serialize};
 
@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
 ///
 pub use {
-    kvm_bindings::kvm_cpuid_entry2 as CpuIdEntry, kvm_bindings::kvm_dtable as DescriptorTable,
+    kvm_bindings::kvm_cpuid_entry2 as CpuIdEntry, kvm_bindings::kvm_dtable,
     kvm_bindings::kvm_fpu as FpuState, kvm_bindings::kvm_lapic_state as LapicState,
     kvm_bindings::kvm_mp_state as MpState, kvm_bindings::kvm_msr_entry as MsrEntry,
     kvm_bindings::kvm_regs, kvm_bindings::kvm_segment, kvm_bindings::kvm_sregs as SpecialRegisters,
@@ -149,6 +149,25 @@ impl From<kvm_segment> for SegmentRegister {
             g: s.g,
             avl: s.avl,
             unusable: s.unusable,
+        }
+    }
+}
+
+impl From<DescriptorTable> for kvm_dtable {
+    fn from(dt: DescriptorTable) -> Self {
+        Self {
+            base: dt.base,
+            limit: dt.limit,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<kvm_dtable> for DescriptorTable {
+    fn from(dt: kvm_dtable) -> Self {
+        Self {
+            base: dt.base,
+            limit: dt.limit,
         }
     }
 }

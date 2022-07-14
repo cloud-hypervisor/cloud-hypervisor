@@ -198,3 +198,10 @@ pub struct StandardRegisters {
     pub rip: u64,
     pub rflags: u64,
 }
+
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "with-serde", derive(Deserialize, Serialize))]
+pub struct DescriptorTable {
+    pub base: u64,
+    pub limit: u16,
+}

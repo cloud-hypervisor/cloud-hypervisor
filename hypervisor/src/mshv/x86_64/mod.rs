@@ -7,7 +7,7 @@
 // Copyright 2018-2019 CrowdStrike, Inc.
 //
 //
-use crate::arch::x86::{SegmentRegister, StandardRegisters};
+use crate::arch::x86::{DescriptorTable, SegmentRegister, StandardRegisters};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -23,7 +23,7 @@ pub use {
     mshv_bindings::Msrs as MsrEntries, mshv_bindings::Msrs,
     mshv_bindings::SegmentRegister as MshvSegmentRegister, mshv_bindings::SpecialRegisters,
     mshv_bindings::StandardRegisters as MshvStandardRegisters, mshv_bindings::SuspendRegisters,
-    mshv_bindings::VcpuEvents, mshv_bindings::XSave as Xsave,
+    mshv_bindings::TableRegister, mshv_bindings::VcpuEvents, mshv_bindings::XSave as Xsave,
     mshv_bindings::Xcrs as ExtendedControlRegisters,
 };
 
@@ -152,6 +152,24 @@ impl From<MshvSegmentRegister> for SegmentRegister {
             g: s.g,
             avl: s.avl,
             unusable: s.unusable,
+        }
+    }
+}
+
+impl From<DescriptorTable> for TableRegister {
+    fn from(dt: DescriptorTable) -> Self {
+        Self {
+            base: dt.base,
+            limit: dt.limit,
+        }
+    }
+}
+
+impl From<TableRegister> for DescriptorTable {
+    fn from(dt: TableRegister) -> Self {
+        Self {
+            base: dt.base,
+            limit: dt.limit,
         }
     }
 }
