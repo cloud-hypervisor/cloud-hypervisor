@@ -36,6 +36,9 @@ pub use x86_64::*;
 use std::fs::File;
 use std::os::unix::io::AsRawFd;
 
+#[cfg(target_arch = "x86_64")]
+use crate::arch::x86::StandardRegisters;
+
 const DIRTY_BITMAP_CLEAR_DIRTY: u64 = 0x4;
 const DIRTY_BITMAP_SET_DIRTY: u64 = 0x8;
 
@@ -272,17 +275,20 @@ impl cpu::Vcpu for MshvVcpu {
     /// Returns the vCPU general purpose registers.
     ///
     fn get_regs(&self) -> cpu::Result<StandardRegisters> {
-        self.fd
+        Ok(self
+            .fd
             .get_regs()
-            .map_err(|e| cpu::HypervisorCpuError::GetStandardRegs(e.into()))
+            .map_err(|e| cpu::HypervisorCpuError::GetStandardRegs(e.into()))?
+            .into())
     }
     #[cfg(target_arch = "x86_64")]
     ///
     /// Sets the vCPU general purpose registers.
     ///
     fn set_regs(&self, regs: &StandardRegisters) -> cpu::Result<()> {
+        let regs = (*regs).into();
         self.fd
-            .set_regs(regs)
+            .set_regs(&regs)
             .map_err(|e| cpu::HypervisorCpuError::SetStandardRegs(e.into()))
     }
     #[cfg(target_arch = "x86_64")]
@@ -619,7 +625,7 @@ impl cpu::Vcpu for MshvVcpu {
         let state: VcpuMshvState = state.clone().into();
         self.set_msrs(&state.msrs)?;
         self.set_vcpu_events(&state.vcpu_events)?;
-        self.set_regs(&state.regs)?;
+        self.set_regs(&state.regs.into())?;
         self.set_sregs(&state.sregs)?;
         self.set_fpu(&state.fpu)?;
         self.set_xcrs(&state.xcrs)?;
@@ -662,7 +668,7 @@ impl cpu::Vcpu for MshvVcpu {
         Ok(VcpuMshvState {
             msrs,
             vcpu_events,
-            regs,
+            regs: regs.into(),
             sregs,
             fpu,
             xcrs,

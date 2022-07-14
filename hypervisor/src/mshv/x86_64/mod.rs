@@ -7,7 +7,7 @@
 // Copyright 2018-2019 CrowdStrike, Inc.
 //
 //
-use crate::arch::x86::SegmentRegisterOps;
+use crate::arch::x86::{SegmentRegisterOps, StandardRegisters};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -21,7 +21,7 @@ pub use {
     mshv_bindings::FloatingPointUnit as FpuState, mshv_bindings::LapicState,
     mshv_bindings::MiscRegs as MiscRegisters, mshv_bindings::MsrList,
     mshv_bindings::Msrs as MsrEntries, mshv_bindings::Msrs, mshv_bindings::SegmentRegister,
-    mshv_bindings::SpecialRegisters, mshv_bindings::StandardRegisters,
+    mshv_bindings::SpecialRegisters, mshv_bindings::StandardRegisters as MshvStandardRegisters,
     mshv_bindings::SuspendRegisters, mshv_bindings::VcpuEvents, mshv_bindings::XSave as Xsave,
     mshv_bindings::Xcrs as ExtendedControlRegisters,
 };
@@ -32,7 +32,7 @@ pub const CPUID_FLAG_VALID_INDEX: u32 = 0;
 pub struct VcpuMshvState {
     pub msrs: MsrEntries,
     pub vcpu_events: VcpuEvents,
-    pub regs: StandardRegisters,
+    pub regs: MshvStandardRegisters,
     pub sregs: SpecialRegisters,
     pub fpu: FpuState,
     pub xcrs: ExtendedControlRegisters,
@@ -128,5 +128,55 @@ impl SegmentRegisterOps for SegmentRegister {
 
     fn set_db(&mut self, val: u8) {
         self.db = val;
+    }
+}
+
+impl From<StandardRegisters> for MshvStandardRegisters {
+    fn from(regs: StandardRegisters) -> Self {
+        Self {
+            rax: regs.rax,
+            rbx: regs.rbx,
+            rcx: regs.rcx,
+            rdx: regs.rdx,
+            rsi: regs.rsi,
+            rdi: regs.rdi,
+            rsp: regs.rsp,
+            rbp: regs.rbp,
+            r8: regs.r8,
+            r9: regs.r9,
+            r10: regs.r10,
+            r11: regs.r11,
+            r12: regs.r12,
+            r13: regs.r13,
+            r14: regs.r14,
+            r15: regs.r15,
+            rip: regs.rip,
+            rflags: regs.rflags,
+        }
+    }
+}
+
+impl From<MshvStandardRegisters> for StandardRegisters {
+    fn from(regs: MshvStandardRegisters) -> Self {
+        Self {
+            rax: regs.rax,
+            rbx: regs.rbx,
+            rcx: regs.rcx,
+            rdx: regs.rdx,
+            rsi: regs.rsi,
+            rdi: regs.rdi,
+            rsp: regs.rsp,
+            rbp: regs.rbp,
+            r8: regs.r8,
+            r9: regs.r9,
+            r10: regs.r10,
+            r11: regs.r11,
+            r12: regs.r12,
+            r13: regs.r13,
+            r14: regs.r14,
+            r15: regs.r15,
+            rip: regs.rip,
+            rflags: regs.rflags,
+        }
     }
 }
