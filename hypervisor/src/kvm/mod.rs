@@ -49,8 +49,8 @@ pub mod x86_64;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::NUM_IOAPIC_PINS;
 use crate::{
-    MpState, UserMemoryRegion, USER_MEMORY_REGION_LOG_DIRTY, USER_MEMORY_REGION_READ,
-    USER_MEMORY_REGION_WRITE,
+    IoEventAddress, MpState, UserMemoryRegion, USER_MEMORY_REGION_LOG_DIRTY,
+    USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
 };
 #[cfg(target_arch = "aarch64")]
 use aarch64::{RegList, Register, StandardRegisters};
@@ -96,8 +96,7 @@ pub use {
     kvm_bindings::kvm_clock_data as ClockData, kvm_bindings::kvm_create_device as CreateDevice,
     kvm_bindings::kvm_device_attr as DeviceAttr,
     kvm_bindings::kvm_irq_routing_entry as IrqRoutingEntry, kvm_bindings::kvm_run,
-    kvm_bindings::kvm_vcpu_events as VcpuEvents, kvm_ioctls::DeviceFd, kvm_ioctls::IoEventAddress,
-    kvm_ioctls::VcpuExit,
+    kvm_bindings::kvm_vcpu_events as VcpuEvents, kvm_ioctls::DeviceFd, kvm_ioctls::VcpuExit,
 };
 
 #[cfg(target_arch = "x86_64")]
@@ -225,6 +224,24 @@ impl From<MpState> for kvm_mp_state {
             /* Needed in case other hypervisors are enabled */
             #[allow(unreachable_patterns)]
             _ => panic!("CpuState is not valid"),
+        }
+    }
+}
+
+impl From<kvm_ioctls::IoEventAddress> for IoEventAddress {
+    fn from(a: kvm_ioctls::IoEventAddress) -> Self {
+        match a {
+            kvm_ioctls::IoEventAddress::Pio(x) => Self::Pio(x),
+            kvm_ioctls::IoEventAddress::Mmio(x) => Self::Mmio(x),
+        }
+    }
+}
+
+impl From<IoEventAddress> for kvm_ioctls::IoEventAddress {
+    fn from(a: IoEventAddress) -> Self {
+        match a {
+            IoEventAddress::Pio(x) => Self::Pio(x),
+            IoEventAddress::Mmio(x) => Self::Mmio(x),
         }
     }
 }
@@ -359,6 +376,7 @@ impl vm::Vm for KvmVm {
         addr: &IoEventAddress,
         datamatch: Option<vm::DataMatch>,
     ) -> vm::Result<()> {
+        let addr = &kvm_ioctls::IoEventAddress::from(*addr);
         if let Some(dm) = datamatch {
             match dm {
                 vm::DataMatch::DataMatch32(kvm_dm32) => self
@@ -380,6 +398,7 @@ impl vm::Vm for KvmVm {
     /// Unregisters an event from a certain address it has been previously registered to.
     ///
     fn unregister_ioevent(&self, fd: &EventFd, addr: &IoEventAddress) -> vm::Result<()> {
+        let addr = &kvm_ioctls::IoEventAddress::from(*addr);
         self.fd
             .unregister_ioevent(fd, addr, NoDatamatch)
             .map_err(|e| vm::HypervisorVmError::UnregisterIoEvent(e.into()))

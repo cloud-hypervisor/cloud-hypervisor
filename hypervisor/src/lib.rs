@@ -60,16 +60,14 @@ pub use kvm::{aarch64, GicState};
 // Aliased types exposed from both hypervisors
 #[cfg(feature = "kvm")]
 pub use kvm::{
-    ClockData, CpuState, CreateDevice, DeviceAttr, DeviceFd, IoEventAddress, IrqRoutingEntry,
-    VcpuEvents, VmState,
+    ClockData, CpuState, CreateDevice, DeviceAttr, DeviceFd, IrqRoutingEntry, VcpuEvents, VmState,
 };
 #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
 pub use mshv::x86_64;
 // Aliased types exposed from both hypervisors
 #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
 pub use mshv::{
-    CpuState, CreateDevice, DeviceAttr, DeviceFd, IoEventAddress, IrqRoutingEntry, VcpuEvents,
-    VmState,
+    CpuState, CreateDevice, DeviceAttr, DeviceFd, IrqRoutingEntry, VcpuEvents, VmState,
 };
 use std::sync::Arc;
 pub use vm::{
@@ -143,4 +141,10 @@ pub enum MpState {
     Kvm(kvm_bindings::kvm_mp_state),
     #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
     Mshv, /* MSHV does not supprt MpState yet */
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum IoEventAddress {
+    Pio(u64),
+    Mmio(u64),
 }
