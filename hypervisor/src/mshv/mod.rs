@@ -23,7 +23,7 @@ use vm::DataMatch;
 pub mod x86_64;
 use crate::device;
 use crate::{
-    CpuState, IoEventAddress, MpState, UserMemoryRegion, USER_MEMORY_REGION_EXECUTE,
+    ClockData, CpuState, IoEventAddress, MpState, UserMemoryRegion, USER_MEMORY_REGION_EXECUTE,
     USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
 };
 use vmm_sys_util::eventfd::EventFd;
@@ -1147,5 +1147,15 @@ impl vm::Vm for MshvVm {
                 DIRTY_BITMAP_CLEAR_DIRTY,
             )
             .map_err(|e| vm::HypervisorVmError::GetDirtyLog(e.into()))
+    }
+    /// Retrieve guest clock.
+    #[cfg(target_arch = "x86_64")]
+    fn get_clock(&self) -> vm::Result<ClockData> {
+        Ok(ClockData::Mshv)
+    }
+    /// Set guest clock.
+    #[cfg(target_arch = "x86_64")]
+    fn set_clock(&self, _data: &ClockData) -> vm::Result<()> {
+        Ok(())
     }
 }

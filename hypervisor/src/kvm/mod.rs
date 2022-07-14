@@ -47,6 +47,8 @@ use vmm_sys_util::eventfd::EventFd;
 pub mod x86_64;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::NUM_IOAPIC_PINS;
+#[cfg(target_arch = "x86_64")]
+use crate::ClockData;
 use crate::{
     CpuState, IoEventAddress, MpState, UserMemoryRegion, USER_MEMORY_REGION_LOG_DIRTY,
     USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
@@ -72,9 +74,9 @@ pub use kvm_bindings;
 #[cfg(feature = "tdx")]
 use kvm_bindings::KVMIO;
 pub use kvm_bindings::{
-    kvm_create_device, kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_irq_routing, kvm_irq_routing_entry,
-    kvm_mp_state, kvm_userspace_memory_region, KVM_IRQ_ROUTING_IRQCHIP, KVM_IRQ_ROUTING_MSI,
-    KVM_MEM_LOG_DIRTY_PAGES, KVM_MEM_READONLY, KVM_MSI_VALID_DEVID,
+    kvm_clock_data, kvm_create_device, kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_irq_routing,
+    kvm_irq_routing_entry, kvm_mp_state, kvm_userspace_memory_region, KVM_IRQ_ROUTING_IRQCHIP,
+    KVM_IRQ_ROUTING_MSI, KVM_MEM_LOG_DIRTY_PAGES, KVM_MEM_READONLY, KVM_MSI_VALID_DEVID,
 };
 #[cfg(target_arch = "aarch64")]
 use kvm_bindings::{
@@ -92,8 +94,7 @@ use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_expr, ioctl_ioc_nr, ioctl_iowr_n
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
 ///
 pub use {
-    kvm_bindings::kvm_clock_data as ClockData, kvm_bindings::kvm_create_device as CreateDevice,
-    kvm_bindings::kvm_device_attr as DeviceAttr,
+    kvm_bindings::kvm_create_device as CreateDevice, kvm_bindings::kvm_device_attr as DeviceAttr,
     kvm_bindings::kvm_irq_routing_entry as IrqRoutingEntry, kvm_bindings::kvm_run,
     kvm_bindings::kvm_vcpu_events as VcpuEvents, kvm_ioctls::DeviceFd, kvm_ioctls::VcpuExit,
 };
@@ -255,6 +256,25 @@ impl From<CpuState> for VcpuKvmState {
     fn from(s: CpuState) -> Self {
         match s {
             CpuState::Kvm(s) => s,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("CpuState is not valid"),
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+impl From<kvm_clock_data> for ClockData {
+    fn from(d: kvm_clock_data) -> Self {
+        ClockData::Kvm(d)
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+impl From<ClockData> for kvm_clock_data {
+    fn from(ms: ClockData) -> Self {
+        match ms {
+            ClockData::Kvm(s) => s,
             /* Needed in case other hypervisors are enabled */
             #[allow(unreachable_patterns)]
             _ => panic!("CpuState is not valid"),
@@ -624,15 +644,18 @@ impl vm::Vm for KvmVm {
     /// Retrieve guest clock.
     #[cfg(target_arch = "x86_64")]
     fn get_clock(&self) -> vm::Result<ClockData> {
-        self.fd
+        Ok(self
+            .fd
             .get_clock()
-            .map_err(|e| vm::HypervisorVmError::GetClock(e.into()))
+            .map_err(|e| vm::HypervisorVmError::GetClock(e.into()))?
+            .into())
     }
     /// Set guest clock.
     #[cfg(target_arch = "x86_64")]
     fn set_clock(&self, data: &ClockData) -> vm::Result<()> {
+        let data = (*data).into();
         self.fd
-            .set_clock(data)
+            .set_clock(&data)
             .map_err(|e| vm::HypervisorVmError::SetClock(e.into()))
     }
     /// Checks if a particular `Cap` is available.

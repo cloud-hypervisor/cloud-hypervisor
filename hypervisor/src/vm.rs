@@ -16,7 +16,7 @@ use crate::cpu::Vcpu;
 use crate::device::Device;
 #[cfg(feature = "tdx")]
 use crate::x86_64::CpuId;
-#[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+#[cfg(target_arch = "x86_64")]
 use crate::ClockData;
 use crate::CreateDevice;
 use crate::UserMemoryRegion;
@@ -324,10 +324,10 @@ pub trait Vm: Send + Sync {
     #[cfg(target_arch = "x86_64")]
     fn enable_sgx_attribute(&self, file: File) -> Result<()>;
     /// Retrieve guest clock.
-    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     fn get_clock(&self) -> Result<ClockData>;
     /// Set guest clock.
-    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     fn set_clock(&self, data: &ClockData) -> Result<()>;
     #[cfg(feature = "kvm")]
     /// Checks if a particular `Cap` is available.
