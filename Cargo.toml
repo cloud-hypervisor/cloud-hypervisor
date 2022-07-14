@@ -18,7 +18,7 @@ lto = true
 [dependencies]
 anyhow = "1.0.58"
 api_client = { path = "api_client" }
-clap = { version = "3.2.8", features = ["wrap_help","cargo"] }
+clap = { version = "3.2.11", features = ["wrap_help","cargo"] }
 epoll = "4.3.1"
 event_monitor = { path = "event_monitor" }
 hypervisor = { path = "hypervisor" }
@@ -34,7 +34,7 @@ vmm-sys-util = "0.9.0"
 vm-memory = "0.8.0"
 
 [build-dependencies]
-clap = { version = "3.2.8", features = ["cargo"] }
+clap = { version = "3.2.11", features = ["cargo"] }
 
 # List of patched crates
 [patch.crates-io]
