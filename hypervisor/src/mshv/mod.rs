@@ -13,7 +13,6 @@ use crate::hypervisor;
 use crate::vec_with_array_field;
 use crate::vm::{self, InterruptSourceConfig, VmOps};
 pub use mshv_bindings::*;
-pub use mshv_ioctls::IoEventAddress;
 use mshv_ioctls::{set_registers_64, Mshv, NoDatamatch, VcpuFd, VmFd};
 use serde::{Deserialize, Serialize};
 use std::any::Any;
@@ -25,7 +24,7 @@ use vm::DataMatch;
 pub mod x86_64;
 use crate::device;
 use crate::{
-    MpState, UserMemoryRegion, USER_MEMORY_REGION_EXECUTE, USER_MEMORY_REGION_READ,
+    IoEventAddress, MpState, UserMemoryRegion, USER_MEMORY_REGION_EXECUTE, USER_MEMORY_REGION_READ,
     USER_MEMORY_REGION_WRITE,
 };
 use vmm_sys_util::eventfd::EventFd;
@@ -94,6 +93,24 @@ impl From<UserMemoryRegion> for mshv_user_mem_region {
             size: region.memory_size,
             userspace_addr: region.userspace_addr,
             flags,
+        }
+    }
+}
+
+impl From<mshv_ioctls::IoEventAddress> for IoEventAddress {
+    fn from(a: mshv_ioctls::IoEventAddress) -> Self {
+        match a {
+            mshv_ioctls::IoEventAddress::Pio(x) => Self::Pio(x),
+            mshv_ioctls::IoEventAddress::Mmio(x) => Self::Mmio(x),
+        }
+    }
+}
+
+impl From<IoEventAddress> for mshv_ioctls::IoEventAddress {
+    fn from(a: IoEventAddress) -> Self {
+        match a {
+            IoEventAddress::Pio(x) => Self::Pio(x),
+            IoEventAddress::Mmio(x) => Self::Mmio(x),
         }
     }
 }
@@ -937,6 +954,7 @@ impl vm::Vm for MshvVm {
         addr: &IoEventAddress,
         datamatch: Option<DataMatch>,
     ) -> vm::Result<()> {
+        let addr = &mshv_ioctls::IoEventAddress::from(*addr);
         debug!(
             "register_ioevent fd {} addr {:x?} datamatch {:?}",
             fd.as_raw_fd(),
@@ -962,6 +980,7 @@ impl vm::Vm for MshvVm {
     }
     /// Unregister an event from a certain address it has been previously registered to.
     fn unregister_ioevent(&self, fd: &EventFd, addr: &IoEventAddress) -> vm::Result<()> {
+        let addr = &mshv_ioctls::IoEventAddress::from(*addr);
         debug!("unregister_ioevent fd {} addr {:x?}", fd.as_raw_fd(), addr);
 
         self.fd
