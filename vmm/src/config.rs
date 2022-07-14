@@ -2317,7 +2317,11 @@ impl VmConfig {
         let mut id_list = BTreeSet::new();
 
         #[cfg(not(feature = "tdx"))]
-        self.kernel.as_ref().ok_or(ValidationError::KernelMissing)?;
+        if let None = self.kernel.as_ref() {
+            if let None = self.firmware.as_ref() {
+                return Err(ValidationError::KernelMissing);
+            }
+        }
 
         #[cfg(feature = "tdx")]
         {

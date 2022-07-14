@@ -583,7 +583,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         cmd_arguments.is_present("kernel") || cmd_arguments.is_present("tdx");
 
     #[cfg(not(feature = "tdx"))]
-    let tdx_or_kernel_present = cmd_arguments.is_present("kernel");
+    let tdx_or_kernel_present = cmd_arguments.is_present("firmware") || cmd_arguments.is_present("kernel");
 
     if tdx_or_kernel_present {
         let vm_params = config::VmParams::from_arg_matches(&cmd_arguments);
