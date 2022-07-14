@@ -2287,14 +2287,14 @@ impl CpuElf64Writable for CpuManager {
                 .map_err(|_e| GuestDebuggableError::Coredump(anyhow!("get msr failed")))?;
             let kernel_gs_base = msrs.as_slice()[0].data;
 
-            let cs = CpuSegment::new(sregs.cs);
-            let ds = CpuSegment::new(sregs.ds);
-            let es = CpuSegment::new(sregs.es);
-            let fs = CpuSegment::new(sregs.fs);
-            let gs = CpuSegment::new(sregs.gs);
-            let ss = CpuSegment::new(sregs.ss);
-            let ldt = CpuSegment::new(sregs.ldt);
-            let tr = CpuSegment::new(sregs.tr);
+            let cs = CpuSegment::new(sregs.cs.into());
+            let ds = CpuSegment::new(sregs.ds.into());
+            let es = CpuSegment::new(sregs.es.into());
+            let fs = CpuSegment::new(sregs.fs.into());
+            let gs = CpuSegment::new(sregs.gs.into());
+            let ss = CpuSegment::new(sregs.ss.into());
+            let ldt = CpuSegment::new(sregs.ldt.into());
+            let tr = CpuSegment::new(sregs.tr.into());
             let gdt = CpuSegment::new_from_table(sregs.gdt);
             let idt = CpuSegment::new_from_table(sregs.idt);
             let cr = [sregs.cr0, sregs.cr8, sregs.cr2, sregs.cr3, sregs.cr4];

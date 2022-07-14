@@ -8,7 +8,7 @@
 //
 //
 
-use crate::arch::x86::{SegmentRegisterOps, StandardRegisters};
+use crate::arch::x86::{SegmentRegister, StandardRegisters};
 use crate::kvm::{Cap, Kvm, KvmError, KvmResult};
 use serde::{Deserialize, Serialize};
 
@@ -19,77 +19,12 @@ pub use {
     kvm_bindings::kvm_cpuid_entry2 as CpuIdEntry, kvm_bindings::kvm_dtable as DescriptorTable,
     kvm_bindings::kvm_fpu as FpuState, kvm_bindings::kvm_lapic_state as LapicState,
     kvm_bindings::kvm_mp_state as MpState, kvm_bindings::kvm_msr_entry as MsrEntry,
-    kvm_bindings::kvm_regs, kvm_bindings::kvm_segment as SegmentRegister,
-    kvm_bindings::kvm_sregs as SpecialRegisters, kvm_bindings::kvm_vcpu_events as VcpuEvents,
+    kvm_bindings::kvm_regs, kvm_bindings::kvm_segment, kvm_bindings::kvm_sregs as SpecialRegisters,
+    kvm_bindings::kvm_vcpu_events as VcpuEvents,
     kvm_bindings::kvm_xcrs as ExtendedControlRegisters, kvm_bindings::kvm_xsave as Xsave,
     kvm_bindings::CpuId, kvm_bindings::MsrList, kvm_bindings::Msrs as MsrEntries,
     kvm_bindings::KVM_CPUID_FLAG_SIGNIFCANT_INDEX as CPUID_FLAG_VALID_INDEX,
 };
-
-impl SegmentRegisterOps for SegmentRegister {
-    fn segment_type(&self) -> u8 {
-        self.type_
-    }
-    fn set_segment_type(&mut self, val: u8) {
-        self.type_ = val;
-    }
-
-    fn dpl(&self) -> u8 {
-        self.dpl
-    }
-
-    fn set_dpl(&mut self, val: u8) {
-        self.dpl = val;
-    }
-
-    fn present(&self) -> u8 {
-        self.present
-    }
-
-    fn set_present(&mut self, val: u8) {
-        self.present = val;
-    }
-
-    fn long(&self) -> u8 {
-        self.l
-    }
-
-    fn set_long(&mut self, val: u8) {
-        self.l = val;
-    }
-
-    fn avl(&self) -> u8 {
-        self.avl
-    }
-
-    fn set_avl(&mut self, val: u8) {
-        self.avl = val;
-    }
-
-    fn desc_type(&self) -> u8 {
-        self.s
-    }
-
-    fn set_desc_type(&mut self, val: u8) {
-        self.s = val;
-    }
-
-    fn granularity(&self) -> u8 {
-        self.g
-    }
-
-    fn set_granularity(&mut self, val: u8) {
-        self.g = val;
-    }
-
-    fn db(&self) -> u8 {
-        self.db
-    }
-
-    fn set_db(&mut self, val: u8) {
-        self.db = val;
-    }
-}
 
 ///
 /// Check KVM extension for Linux
@@ -175,6 +110,45 @@ impl From<kvm_regs> for StandardRegisters {
             r15: regs.r15,
             rip: regs.rip,
             rflags: regs.rflags,
+        }
+    }
+}
+
+impl From<SegmentRegister> for kvm_segment {
+    fn from(s: SegmentRegister) -> Self {
+        Self {
+            base: s.base,
+            limit: s.limit,
+            selector: s.selector,
+            type_: s.type_,
+            present: s.present,
+            dpl: s.dpl,
+            db: s.db,
+            s: s.s,
+            l: s.l,
+            g: s.g,
+            avl: s.avl,
+            unusable: s.unusable,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<kvm_segment> for SegmentRegister {
+    fn from(s: kvm_segment) -> Self {
+        Self {
+            base: s.base,
+            limit: s.limit,
+            selector: s.selector,
+            type_: s.type_,
+            present: s.present,
+            dpl: s.dpl,
+            db: s.db,
+            s: s.s,
+            l: s.l,
+            g: s.g,
+            avl: s.avl,
+            unusable: s.unusable,
         }
     }
 }

@@ -7,7 +7,7 @@
 // Copyright 2018-2019 CrowdStrike, Inc.
 //
 //
-use crate::arch::x86::{SegmentRegisterOps, StandardRegisters};
+use crate::arch::x86::{SegmentRegister, StandardRegisters};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -20,9 +20,10 @@ pub use {
     mshv_bindings::CpuId, mshv_bindings::DebugRegisters,
     mshv_bindings::FloatingPointUnit as FpuState, mshv_bindings::LapicState,
     mshv_bindings::MiscRegs as MiscRegisters, mshv_bindings::MsrList,
-    mshv_bindings::Msrs as MsrEntries, mshv_bindings::Msrs, mshv_bindings::SegmentRegister,
-    mshv_bindings::SpecialRegisters, mshv_bindings::StandardRegisters as MshvStandardRegisters,
-    mshv_bindings::SuspendRegisters, mshv_bindings::VcpuEvents, mshv_bindings::XSave as Xsave,
+    mshv_bindings::Msrs as MsrEntries, mshv_bindings::Msrs,
+    mshv_bindings::SegmentRegister as MshvSegmentRegister, mshv_bindings::SpecialRegisters,
+    mshv_bindings::StandardRegisters as MshvStandardRegisters, mshv_bindings::SuspendRegisters,
+    mshv_bindings::VcpuEvents, mshv_bindings::XSave as Xsave,
     mshv_bindings::Xcrs as ExtendedControlRegisters,
 };
 
@@ -63,71 +64,6 @@ impl fmt::Display for VcpuMshvState {
                 self.dbg,
                 self.xsave,
         )
-    }
-}
-
-impl SegmentRegisterOps for SegmentRegister {
-    fn segment_type(&self) -> u8 {
-        self.type_
-    }
-    fn set_segment_type(&mut self, val: u8) {
-        self.type_ = val;
-    }
-
-    fn dpl(&self) -> u8 {
-        self.dpl
-    }
-
-    fn set_dpl(&mut self, val: u8) {
-        self.dpl = val;
-    }
-
-    fn present(&self) -> u8 {
-        self.present
-    }
-
-    fn set_present(&mut self, val: u8) {
-        self.present = val;
-    }
-
-    fn long(&self) -> u8 {
-        self.l
-    }
-
-    fn set_long(&mut self, val: u8) {
-        self.l = val;
-    }
-
-    fn avl(&self) -> u8 {
-        self.avl
-    }
-
-    fn set_avl(&mut self, val: u8) {
-        self.avl = val;
-    }
-
-    fn desc_type(&self) -> u8 {
-        self.s
-    }
-
-    fn set_desc_type(&mut self, val: u8) {
-        self.s = val;
-    }
-
-    fn granularity(&self) -> u8 {
-        self.g
-    }
-
-    fn set_granularity(&mut self, val: u8) {
-        self.g = val;
-    }
-
-    fn db(&self) -> u8 {
-        self.db
-    }
-
-    fn set_db(&mut self, val: u8) {
-        self.db = val;
     }
 }
 
@@ -177,6 +113,45 @@ impl From<MshvStandardRegisters> for StandardRegisters {
             r15: regs.r15,
             rip: regs.rip,
             rflags: regs.rflags,
+        }
+    }
+}
+
+impl From<SegmentRegister> for MshvSegmentRegister {
+    fn from(s: SegmentRegister) -> Self {
+        Self {
+            base: s.base,
+            limit: s.limit,
+            selector: s.selector,
+            type_: s.type_,
+            present: s.present,
+            dpl: s.dpl,
+            db: s.db,
+            s: s.s,
+            l: s.l,
+            g: s.g,
+            avl: s.avl,
+            unusable: s.unusable,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<MshvSegmentRegister> for SegmentRegister {
+    fn from(s: MshvSegmentRegister) -> Self {
+        Self {
+            base: s.base,
+            limit: s.limit,
+            selector: s.selector,
+            type_: s.type_,
+            present: s.present,
+            dpl: s.dpl,
+            db: s.db,
+            s: s.s,
+            l: s.l,
+            g: s.g,
+            avl: s.avl,
+            unusable: s.unusable,
         }
     }
 }
