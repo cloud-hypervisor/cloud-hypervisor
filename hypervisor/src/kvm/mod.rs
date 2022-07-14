@@ -25,7 +25,6 @@ use crate::vm::{self, InterruptSourceConfig, VmOps};
 #[cfg(target_arch = "aarch64")]
 use crate::{arm64_core_reg_id, offset__of};
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
-use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::collections::HashMap;
 #[cfg(target_arch = "aarch64")]
@@ -263,11 +262,6 @@ impl From<CpuState> for VcpuKvmState {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct KvmVmState {}
-
-pub use KvmVmState as VmState;
-
 struct KvmDirtyLogSlot {
     slot: u32,
     guest_phys_addr: u64,
@@ -280,7 +274,6 @@ pub struct KvmVm {
     fd: Arc<VmFd>,
     #[cfg(target_arch = "x86_64")]
     msrs: MsrEntries,
-    state: KvmVmState,
     dirty_log_slots: Arc<RwLock<HashMap<u32, KvmDirtyLogSlot>>>,
 }
 
@@ -658,19 +651,6 @@ impl vm::Vm for KvmVm {
             .map_err(|e| vm::HypervisorVmError::CreatePassthroughDevice(e.into()))
     }
     ///
-    /// Get the Vm state. Return VM specific data
-    ///
-    fn state(&self) -> vm::Result<VmState> {
-        Ok(self.state)
-    }
-    ///
-    /// Set the VM state
-    ///
-    fn set_state(&self, _state: VmState) -> vm::Result<()> {
-        Ok(())
-    }
-
-    ///
     /// Start logging dirty pages
     ///
     fn start_dirty_log(&self) -> vm::Result<()> {
@@ -914,7 +894,6 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             Ok(Arc::new(KvmVm {
                 fd: vm_fd,
                 msrs,
-                state: VmState {},
                 dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
             }))
         }
@@ -923,7 +902,6 @@ impl hypervisor::Hypervisor for KvmHypervisor {
         {
             Ok(Arc::new(KvmVm {
                 fd: vm_fd,
-                state: VmState {},
                 dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
             }))
         }
