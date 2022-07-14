@@ -61,7 +61,7 @@ pub use kvm::{aarch64, GicState};
 #[cfg(feature = "kvm")]
 pub use kvm::{
     ClockData, CpuState, CreateDevice, DeviceAttr, DeviceFd, IoEventAddress, IrqRoutingEntry,
-    MpState, VcpuEvents, VcpuExit, VmState,
+    MpState, VcpuEvents, VmState,
 };
 #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
 pub use mshv::x86_64;
@@ -69,7 +69,7 @@ pub use mshv::x86_64;
 #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
 pub use mshv::{
     CpuState, CreateDevice, DeviceAttr, DeviceFd, IoEventAddress, IrqRoutingEntry, MpState,
-    VcpuEvents, VcpuExit, VmState,
+    VcpuEvents, VmState,
 };
 use std::sync::Arc;
 pub use vm::{

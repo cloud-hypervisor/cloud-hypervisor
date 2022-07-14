@@ -67,7 +67,6 @@ impl fmt::Display for VcpuMshvState {
 }
 
 pub struct IrqRouting {}
-pub enum VcpuExit {}
 pub struct MpState {}
 
 impl SegmentRegisterOps for SegmentRegister {
