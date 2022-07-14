@@ -14,7 +14,6 @@ use crate::vec_with_array_field;
 use crate::vm::{self, InterruptSourceConfig, VmOps};
 pub use mshv_bindings::*;
 use mshv_ioctls::{set_registers_64, Mshv, NoDatamatch, VcpuFd, VmFd};
-use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -132,13 +131,6 @@ impl From<CpuState> for VcpuMshvState {
     }
 }
 
-#[derive(Debug, Default, Copy, Clone, Serialize, Deserialize)]
-pub struct HvState {
-    hypercall_page: u64,
-}
-
-pub use HvState as VmState;
-
 struct MshvDirtyLogSlot {
     guest_pfn: u64,
     memory_size: u64,
@@ -217,7 +209,6 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         Ok(Arc::new(MshvVm {
             fd: vm_fd,
             msrs,
-            hv_state: hv_state_init(),
             vm_ops: None,
             dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
         }))
@@ -246,7 +237,6 @@ pub struct MshvVcpu {
     vp_index: u8,
     cpuid: CpuId,
     msrs: MsrEntries,
-    hv_state: Arc<RwLock<HvState>>, // Mshv State
     vm_ops: Option<Arc<dyn vm::VmOps>>,
 }
 
@@ -871,14 +861,8 @@ impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
 pub struct MshvVm {
     fd: Arc<VmFd>,
     msrs: MsrEntries,
-    // Hypervisor State
-    hv_state: Arc<RwLock<HvState>>,
     vm_ops: Option<Arc<dyn vm::VmOps>>,
     dirty_log_slots: Arc<RwLock<HashMap<u64, MshvDirtyLogSlot>>>,
-}
-
-fn hv_state_init() -> Arc<RwLock<HvState>> {
-    Arc::new(RwLock::new(HvState { hypercall_page: 0 }))
 }
 
 ///
@@ -954,7 +938,6 @@ impl vm::Vm for MshvVm {
             vp_index: id,
             cpuid: CpuId::new(1).unwrap(),
             msrs: self.msrs.clone(),
-            hv_state: self.hv_state.clone(),
             vm_ops,
         };
         Ok(Arc::new(vcpu))
@@ -1126,19 +1109,6 @@ impl vm::Vm for MshvVm {
         self.fd
             .set_msi_routing(&msi_routing[0])
             .map_err(|e| vm::HypervisorVmError::SetGsiRouting(e.into()))
-    }
-    ///
-    /// Get the Vm state. Return VM specific data
-    ///
-    fn state(&self) -> vm::Result<VmState> {
-        Ok(*self.hv_state.read().unwrap())
-    }
-    ///
-    /// Set the VM state
-    ///
-    fn set_state(&self, state: VmState) -> vm::Result<()> {
-        self.hv_state.write().unwrap().hypercall_page = state.hypercall_page;
-        Ok(())
     }
     ///
     /// Start logging dirty pages

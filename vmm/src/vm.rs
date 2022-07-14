@@ -30,7 +30,7 @@ use crate::memory_manager::{
 };
 #[cfg(feature = "guest_debug")]
 use crate::migration::url_to_file;
-use crate::migration::{get_vm_snapshot, url_to_path, SNAPSHOT_CONFIG_FILE, SNAPSHOT_STATE_FILE};
+use crate::migration::{url_to_path, SNAPSHOT_CONFIG_FILE, SNAPSHOT_STATE_FILE};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::GuestMemoryMmap;
 use crate::{
@@ -811,12 +811,6 @@ impl Vm {
                 .unwrap();
             vm.set_tss_address(KVM_TSS_START.0 as usize).unwrap();
             vm.enable_split_irq().unwrap();
-        }
-
-        let vm_snapshot = get_vm_snapshot(snapshot).map_err(Error::Restore)?;
-        if let Some(state) = vm_snapshot.state {
-            vm.set_state(state)
-                .map_err(|e| Error::Restore(MigratableError::Restore(e.into())))?;
         }
 
         let memory_manager = if let Some(memory_manager_snapshot) =
@@ -2180,6 +2174,7 @@ impl Vm {
         &mut self,
         snapshot: &Snapshot,
     ) -> Result<Option<hypervisor::ClockData>> {
+        use crate::migration::get_vm_snapshot;
         let vm_snapshot = get_vm_snapshot(snapshot).map_err(Error::Restore)?;
         self.saved_clock = vm_snapshot.clock;
         Ok(self.saved_clock)
@@ -2623,7 +2618,6 @@ impl Pausable for Vm {
 pub struct VmSnapshot {
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     pub clock: Option<hypervisor::ClockData>,
-    pub state: Option<hypervisor::VmState>,
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     pub common_cpuid: hypervisor::x86_64::CpuId,
 }
@@ -2673,14 +2667,9 @@ impl Snapshottable for Vm {
         };
 
         let mut vm_snapshot = Snapshot::new(VM_SNAPSHOT_ID);
-        let vm_state = self
-            .vm
-            .state()
-            .map_err(|e| MigratableError::Snapshot(e.into()))?;
         let vm_snapshot_data = serde_json::to_vec(&VmSnapshot {
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             clock: self.saved_clock,
-            state: Some(vm_state),
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             common_cpuid,
         })

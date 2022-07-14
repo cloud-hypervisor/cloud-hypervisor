@@ -14,10 +14,6 @@ use crate::aarch64::VcpuInit;
 use crate::arch::aarch64::gic::Vgic;
 use crate::cpu::Vcpu;
 use crate::device::Device;
-#[cfg(feature = "kvm")]
-use crate::kvm::KvmVmState as VmState;
-#[cfg(feature = "mshv")]
-use crate::mshv::HvState as VmState;
 #[cfg(feature = "tdx")]
 use crate::x86_64::CpuId;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
@@ -338,10 +334,6 @@ pub trait Vm: Send + Sync {
     fn check_extension(&self, c: Cap) -> bool;
     /// Create a device that is used for passthrough
     fn create_passthrough_device(&self) -> Result<Arc<dyn Device>>;
-    /// Get the Vm state. Return VM specific data
-    fn state(&self) -> Result<VmState>;
-    /// Set the VM state
-    fn set_state(&self, state: VmState) -> Result<()>;
     /// Start logging dirty pages
     fn start_dirty_log(&self) -> Result<()>;
     /// Stop logging dirty pages
