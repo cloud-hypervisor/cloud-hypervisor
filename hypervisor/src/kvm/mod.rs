@@ -46,7 +46,7 @@ use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
 #[cfg(target_arch = "x86_64")]
-use crate::arch::x86::NUM_IOAPIC_PINS;
+use crate::arch::x86::{StandardRegisters, NUM_IOAPIC_PINS};
 #[cfg(target_arch = "x86_64")]
 use crate::ClockData;
 use crate::{
@@ -61,7 +61,7 @@ use kvm_bindings::{
     KVM_CAP_SPLIT_IRQCHIP, KVM_GUESTDBG_ENABLE, KVM_GUESTDBG_SINGLESTEP, KVM_GUESTDBG_USE_HW_BP,
 };
 #[cfg(target_arch = "x86_64")]
-use x86_64::{check_required_kvm_extensions, FpuState, SpecialRegisters, StandardRegisters};
+use x86_64::{check_required_kvm_extensions, FpuState, SpecialRegisters};
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
     CpuId, CpuIdEntry, ExtendedControlRegisters, LapicState, MsrEntries, VcpuKvmState, Xsave,
@@ -1052,9 +1052,11 @@ impl cpu::Vcpu for KvmVcpu {
     /// Returns the vCPU general purpose registers.
     ///
     fn get_regs(&self) -> cpu::Result<StandardRegisters> {
-        self.fd
+        Ok(self
+            .fd
             .get_regs()
-            .map_err(|e| cpu::HypervisorCpuError::GetStandardRegs(e.into()))
+            .map_err(|e| cpu::HypervisorCpuError::GetStandardRegs(e.into()))?
+            .into())
     }
     ///
     /// Returns the vCPU general purpose registers.
@@ -1158,8 +1160,9 @@ impl cpu::Vcpu for KvmVcpu {
     /// Sets the vCPU general purpose registers using the `KVM_SET_REGS` ioctl.
     ///
     fn set_regs(&self, regs: &StandardRegisters) -> cpu::Result<()> {
+        let regs = (*regs).into();
         self.fd
-            .set_regs(regs)
+            .set_regs(&regs)
             .map_err(|e| cpu::HypervisorCpuError::SetStandardRegs(e.into()))
     }
 
@@ -1869,7 +1872,7 @@ impl cpu::Vcpu for KvmVcpu {
             cpuid,
             msrs,
             vcpu_events,
-            regs,
+            regs: regs.into(),
             sregs,
             fpu,
             lapic_state,
@@ -1938,7 +1941,7 @@ impl cpu::Vcpu for KvmVcpu {
         let state: VcpuKvmState = state.clone().into();
         self.set_cpuid2(&state.cpuid)?;
         self.set_mp_state(state.mp_state.into())?;
-        self.set_regs(&state.regs)?;
+        self.set_regs(&state.regs.into())?;
         self.set_sregs(&state.sregs)?;
         self.set_xsave(&state.xsave)?;
         self.set_xcrs(&state.xcrs)?;

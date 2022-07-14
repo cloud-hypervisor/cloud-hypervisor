@@ -7,8 +7,10 @@
 use crate::arch::emulator::{EmulationError, EmulationResult, PlatformEmulator, PlatformError};
 use crate::arch::x86::emulator::instructions::*;
 use crate::arch::x86::regs::{CR0_PE, EFER_LMA};
-use crate::arch::x86::{segment_type_expand_down, segment_type_ro, Exception, SegmentRegisterOps};
-use crate::x86_64::{SegmentRegister, SpecialRegisters, StandardRegisters};
+use crate::arch::x86::{
+    segment_type_expand_down, segment_type_ro, Exception, SegmentRegisterOps, StandardRegisters,
+};
+use crate::x86_64::{SegmentRegister, SpecialRegisters};
 use anyhow::Context;
 use iced_x86::*;
 

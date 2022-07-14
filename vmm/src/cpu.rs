@@ -36,16 +36,18 @@ use devices::interrupt_controller::InterruptController;
 use gdbstub_arch::x86::reg::{X86SegmentRegs, X86_64CoreRegs};
 #[cfg(feature = "guest_debug")]
 use hypervisor::arch::x86::msr_index;
+#[cfg(all(target_arch = "x86_64", feature = "gdb"))]
+use hypervisor::arch::x86::StandardRegisters;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::kvm::kvm_bindings;
 #[cfg(feature = "tdx")]
 use hypervisor::kvm::{TdxExitDetails, TdxExitStatus};
 #[cfg(target_arch = "x86_64")]
 use hypervisor::x86_64::CpuId;
+#[cfg(all(target_arch = "x86_64", feature = "gdb"))]
+use hypervisor::x86_64::SpecialRegisters;
 #[cfg(feature = "guest_debug")]
 use hypervisor::x86_64::{MsrEntries, MsrEntry};
-#[cfg(all(target_arch = "x86_64", feature = "gdb"))]
-use hypervisor::x86_64::{SpecialRegisters, StandardRegisters};
 use hypervisor::{CpuState, HypervisorCpuError, VmExit, VmOps};
 use libc::{c_void, siginfo_t};
 #[cfg(feature = "guest_debug")]
@@ -2336,7 +2338,8 @@ impl CpuElf64Writable for CpuManager {
 mod tests {
     use arch::x86_64::interrupts::*;
     use arch::x86_64::regs::*;
-    use hypervisor::x86_64::{FpuState, LapicState, StandardRegisters};
+    use hypervisor::arch::x86::StandardRegisters;
+    use hypervisor::x86_64::{FpuState, LapicState};
 
     #[test]
     fn test_setlint() {
