@@ -53,40 +53,86 @@ pub enum Exception {
 
 pub mod regs;
 
-// Abstracted segment register ops.
-// Each x86 hypervisor should implement those.
-pub trait SegmentRegisterOps {
-    // Segment type
-    fn segment_type(&self) -> u8;
-    fn set_segment_type(&mut self, val: u8);
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "with-serde", derive(Deserialize, Serialize))]
+pub struct SegmentRegister {
+    pub base: u64,
+    pub limit: u32,
+    pub selector: u16,
+    pub type_: u8,
+    pub present: u8,
+    pub dpl: u8,
+    pub db: u8,
+    pub s: u8,
+    pub l: u8,
+    pub g: u8,
+    pub avl: u8,
+    pub unusable: u8,
+}
 
-    // Descriptor Privilege Level (DPL)
-    fn dpl(&self) -> u8;
-    fn set_dpl(&mut self, val: u8);
+impl SegmentRegister {
+    pub fn segment_type(&self) -> u8 {
+        self.type_
+    }
+    pub fn set_segment_type(&mut self, val: u8) {
+        self.type_ = val;
+    }
 
-    // Granularity
-    fn granularity(&self) -> u8;
-    fn set_granularity(&mut self, val: u8);
+    pub fn dpl(&self) -> u8 {
+        self.dpl
+    }
 
-    // Memory Presence
-    fn present(&self) -> u8;
-    fn set_present(&mut self, val: u8);
+    pub fn set_dpl(&mut self, val: u8) {
+        self.dpl = val;
+    }
 
-    // Long mode
-    fn long(&self) -> u8;
-    fn set_long(&mut self, val: u8);
+    pub fn present(&self) -> u8 {
+        self.present
+    }
 
-    // Available for system use (AVL)
-    fn avl(&self) -> u8;
-    fn set_avl(&mut self, val: u8);
+    pub fn set_present(&mut self, val: u8) {
+        self.present = val;
+    }
 
-    // Descriptor type (System or code/data)
-    fn desc_type(&self) -> u8;
-    fn set_desc_type(&mut self, val: u8);
+    pub fn long(&self) -> u8 {
+        self.l
+    }
 
-    // D/B
-    fn db(&self) -> u8;
-    fn set_db(&mut self, val: u8);
+    pub fn set_long(&mut self, val: u8) {
+        self.l = val;
+    }
+
+    pub fn avl(&self) -> u8 {
+        self.avl
+    }
+
+    pub fn set_avl(&mut self, val: u8) {
+        self.avl = val;
+    }
+
+    pub fn desc_type(&self) -> u8 {
+        self.s
+    }
+
+    pub fn set_desc_type(&mut self, val: u8) {
+        self.s = val;
+    }
+
+    pub fn granularity(&self) -> u8 {
+        self.g
+    }
+
+    pub fn set_granularity(&mut self, val: u8) {
+        self.g = val;
+    }
+
+    pub fn db(&self) -> u8 {
+        self.db
+    }
+
+    pub fn set_db(&mut self, val: u8) {
+        self.db = val;
+    }
 }
 
 // Code segment

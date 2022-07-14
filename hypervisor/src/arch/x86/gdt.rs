@@ -8,7 +8,7 @@
 // found in the LICENSE-BSD-3-Clause file.
 
 // For GDT details see arch/x86/include/asm/segment.h
-use crate::x86_64::SegmentRegister;
+use crate::arch::x86::SegmentRegister;
 
 /// Constructor for a conventional segment GDT (or LDT) entry. Derived from the kernel's segment.h.
 pub fn gdt_entry(flags: u16, base: u32, limit: u32) -> u64 {
@@ -106,7 +106,6 @@ pub fn segment_from_gdt(entry: u64, table_index: u8) -> SegmentRegister {
         l: get_l(entry),
         g: get_g(entry),
         avl: get_avl(entry),
-        padding: 0,
         unusable: match get_p(entry) {
             0 => 1,
             _ => 0,

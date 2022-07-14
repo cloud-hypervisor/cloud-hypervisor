@@ -8,9 +8,9 @@ use crate::arch::emulator::{EmulationError, EmulationResult, PlatformEmulator, P
 use crate::arch::x86::emulator::instructions::*;
 use crate::arch::x86::regs::{CR0_PE, EFER_LMA};
 use crate::arch::x86::{
-    segment_type_expand_down, segment_type_ro, Exception, SegmentRegisterOps, StandardRegisters,
+    segment_type_expand_down, segment_type_ro, Exception, SegmentRegister, StandardRegisters,
 };
-use crate::x86_64::{SegmentRegister, SpecialRegisters};
+use crate::x86_64::SpecialRegisters;
 use anyhow::Context;
 use iced_x86::*;
 
@@ -390,12 +390,12 @@ impl CpuStateManager for EmulatorCpuState {
         }
 
         match reg {
-            Register::CS => Ok(self.sregs.cs),
-            Register::DS => Ok(self.sregs.ds),
-            Register::ES => Ok(self.sregs.es),
-            Register::FS => Ok(self.sregs.fs),
-            Register::GS => Ok(self.sregs.gs),
-            Register::SS => Ok(self.sregs.ss),
+            Register::CS => Ok(self.sregs.cs.into()),
+            Register::DS => Ok(self.sregs.ds.into()),
+            Register::ES => Ok(self.sregs.es.into()),
+            Register::FS => Ok(self.sregs.fs.into()),
+            Register::GS => Ok(self.sregs.gs.into()),
+            Register::SS => Ok(self.sregs.ss.into()),
             r => Err(PlatformError::InvalidRegister(anyhow!(
                 "read_segment invalid register {:?}",
                 r
@@ -413,12 +413,12 @@ impl CpuStateManager for EmulatorCpuState {
         }
 
         match reg {
-            Register::CS => self.sregs.cs = segment_register,
-            Register::DS => self.sregs.ds = segment_register,
-            Register::ES => self.sregs.es = segment_register,
-            Register::FS => self.sregs.fs = segment_register,
-            Register::GS => self.sregs.gs = segment_register,
-            Register::SS => self.sregs.ss = segment_register,
+            Register::CS => self.sregs.cs = segment_register.into(),
+            Register::DS => self.sregs.ds = segment_register.into(),
+            Register::ES => self.sregs.es = segment_register.into(),
+            Register::FS => self.sregs.fs = segment_register.into(),
+            Register::GS => self.sregs.gs = segment_register.into(),
+            Register::SS => self.sregs.ss = segment_register.into(),
             r => return Err(PlatformError::InvalidRegister(anyhow!("{:?}", r))),
         }
 

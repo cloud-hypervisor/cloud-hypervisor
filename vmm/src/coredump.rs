@@ -4,9 +4,9 @@
 //
 
 #[cfg(target_arch = "x86_64")]
-use hypervisor::kvm::kvm_bindings::kvm_dtable as DTableRegister;
+use hypervisor::arch::x86::SegmentRegister;
 #[cfg(target_arch = "x86_64")]
-use hypervisor::x86_64::SegmentRegister;
+use hypervisor::kvm::kvm_bindings::kvm_dtable as DTableRegister;
 use linux_loader::elf;
 use std::fs::File;
 use std::io::Write;
