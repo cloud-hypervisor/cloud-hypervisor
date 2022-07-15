@@ -11,7 +11,7 @@
 use crate::kvm::TdxCapabilities;
 use crate::vm::Vm;
 #[cfg(target_arch = "x86_64")]
-use crate::x86_64::CpuId;
+use crate::x86_64::CpuIdEntry;
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::MsrList;
 use std::sync::Arc;
@@ -100,7 +100,7 @@ pub trait Hypervisor: Send + Sync {
     ///
     /// Get the supported CpuID
     ///
-    fn get_cpuid(&self) -> Result<CpuId>;
+    fn get_cpuid(&self) -> Result<Vec<CpuIdEntry>>;
     ///
     /// Check particular extensions if any
     ///

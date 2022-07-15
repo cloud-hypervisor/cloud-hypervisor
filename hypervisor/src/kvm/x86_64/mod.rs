@@ -52,7 +52,7 @@ pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct VcpuKvmState {
-    pub cpuid: CpuId,
+    pub cpuid: Vec<CpuIdEntry>,
     pub msrs: MsrEntries,
     pub vcpu_events: VcpuEvents,
     pub regs: kvm_regs,

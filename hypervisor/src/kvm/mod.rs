@@ -755,7 +755,15 @@ impl vm::Vm for KvmVm {
     /// Initialize TDX for this VM
     ///
     #[cfg(feature = "tdx")]
-    fn tdx_init(&self, cpuid: &CpuId, max_vcpus: u32) -> vm::Result<()> {
+    fn tdx_init(&self, cpuid: &[CpuIdEntry], max_vcpus: u32) -> vm::Result<()> {
+        use std::io::{Error, ErrorKind};
+        let kvm_cpuid = kvm_bindings::CpuId::from_entries(cpuid).map_err(|_| {
+            vm::HypervisorVmError::InitializeTdx(Error::new(
+                ErrorKind::Other,
+                "failed to allocate CpuId",
+            ))
+        })?;
+
         #[repr(C)]
         struct TdxInitVm {
             max_vcpus: u32,
@@ -771,7 +779,7 @@ impl vm::Vm for KvmVm {
             max_vcpus,
             tsc_khz: 0,
             attributes: 0,
-            cpuid: cpuid.as_fam_struct_ptr() as u64,
+            cpuid: kvm_cpuid.as_fam_struct_ptr() as u64,
             mrconfigid: [0; 6],
             mrowner: [0; 6],
             mrownerconfig: [0; 6],
@@ -983,10 +991,15 @@ impl hypervisor::Hypervisor for KvmHypervisor {
     ///
     /// X86 specific call to get the system supported CPUID values.
     ///
-    fn get_cpuid(&self) -> hypervisor::Result<CpuId> {
-        self.kvm
+    fn get_cpuid(&self) -> hypervisor::Result<Vec<CpuIdEntry>> {
+        let kvm_cpuid = self
+            .kvm
             .get_supported_cpuid(kvm_bindings::KVM_MAX_CPUID_ENTRIES)
-            .map_err(|e| hypervisor::HypervisorError::GetCpuId(e.into()))
+            .map_err(|e| hypervisor::HypervisorError::GetCpuId(e.into()))?;
+
+        let v = kvm_cpuid.as_slice().to_vec();
+
+        Ok(v)
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -1311,9 +1324,12 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     /// X86 specific call to setup the CPUID registers.
     ///
-    fn set_cpuid2(&self, cpuid: &CpuId) -> cpu::Result<()> {
+    fn set_cpuid2(&self, cpuid: &[CpuIdEntry]) -> cpu::Result<()> {
+        let kvm_cpuid = CpuId::from_entries(cpuid)
+            .map_err(|_| cpu::HypervisorCpuError::SetCpuid(anyhow!("failed to create CpuId")))?;
+
         self.fd
-            .set_cpuid2(cpuid)
+            .set_cpuid2(&kvm_cpuid)
             .map_err(|e| cpu::HypervisorCpuError::SetCpuid(e.into()))
     }
     #[cfg(target_arch = "x86_64")]
@@ -1337,10 +1353,15 @@ impl cpu::Vcpu for KvmVcpu {
     /// X86 specific call to retrieve the CPUID registers.
     ///
     #[cfg(target_arch = "x86_64")]
-    fn get_cpuid2(&self, num_entries: usize) -> cpu::Result<CpuId> {
-        self.fd
+    fn get_cpuid2(&self, num_entries: usize) -> cpu::Result<Vec<CpuIdEntry>> {
+        let kvm_cpuid = self
+            .fd
             .get_cpuid2(num_entries)
-            .map_err(|e| cpu::HypervisorCpuError::GetCpuid(e.into()))
+            .map_err(|e| cpu::HypervisorCpuError::GetCpuid(e.into()))?;
+
+        let v = kvm_cpuid.as_slice().to_vec();
+
+        Ok(v)
     }
     #[cfg(target_arch = "x86_64")]
     ///

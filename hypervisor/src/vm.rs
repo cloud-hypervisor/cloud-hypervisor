@@ -15,7 +15,7 @@ use crate::arch::aarch64::gic::Vgic;
 use crate::cpu::Vcpu;
 use crate::device::Device;
 #[cfg(feature = "tdx")]
-use crate::x86_64::CpuId;
+use crate::x86_64::CpuIdEntry;
 #[cfg(target_arch = "x86_64")]
 use crate::ClockData;
 use crate::CreateDevice;
@@ -342,7 +342,7 @@ pub trait Vm: Send + Sync {
     fn get_dirty_log(&self, slot: u32, base_gpa: u64, memory_size: u64) -> Result<Vec<u64>>;
     #[cfg(feature = "tdx")]
     /// Initalize TDX on this VM
-    fn tdx_init(&self, cpuid: &CpuId, max_vcpus: u32) -> Result<()>;
+    fn tdx_init(&self, cpuid: &[CpuIdEntry], max_vcpus: u32) -> Result<()>;
     #[cfg(feature = "tdx")]
     /// Finalize the configuration of TDX on this VM
     fn tdx_finalize(&self) -> Result<()>;

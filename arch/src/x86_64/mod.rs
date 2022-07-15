@@ -15,7 +15,7 @@ pub mod regs;
 use crate::GuestMemoryMmap;
 use crate::InitramfsConfig;
 use crate::RegionType;
-use hypervisor::x86_64::{CpuId, CpuIdEntry, CPUID_FLAG_VALID_INDEX};
+use hypervisor::x86_64::{CpuIdEntry, CPUID_FLAG_VALID_INDEX};
 use hypervisor::HypervisorError;
 use linux_loader::loader::bootparam::boot_params;
 use linux_loader::loader::elf::start_info::{
@@ -223,16 +223,14 @@ pub struct CpuidPatch {
 
 impl CpuidPatch {
     pub fn set_cpuid_reg(
-        cpuid: &mut CpuId,
+        cpuid: &mut Vec<CpuIdEntry>,
         function: u32,
         index: Option<u32>,
         reg: CpuidReg,
         value: u32,
     ) {
-        let entries = cpuid.as_mut_slice();
-
         let mut entry_found = false;
-        for entry in entries.iter_mut() {
+        for entry in cpuid.iter_mut() {
             if entry.function == function && (index == None || index.unwrap() == entry.index) {
                 entry_found = true;
                 match reg {
@@ -279,16 +277,12 @@ impl CpuidPatch {
                 }
             }
 
-            if let Err(e) = cpuid.push(entry) {
-                error!("Failed adding new CPUID entry: {:?}", e);
-            }
+            cpuid.push(entry);
         }
     }
 
-    pub fn patch_cpuid(cpuid: &mut CpuId, patches: Vec<CpuidPatch>) {
-        let entries = cpuid.as_mut_slice();
-
-        for entry in entries.iter_mut() {
+    pub fn patch_cpuid(cpuid: &mut [CpuIdEntry], patches: Vec<CpuidPatch>) {
+        for entry in cpuid {
             for patch in patches.iter() {
                 if entry.function == patch.function && entry.index == patch.index {
                     if let Some(flags_bit) = patch.flags_bit {
@@ -312,16 +306,15 @@ impl CpuidPatch {
     }
 
     pub fn is_feature_enabled(
-        cpuid: &CpuId,
+        cpuid: &[CpuIdEntry],
         function: u32,
         index: u32,
         reg: CpuidReg,
         feature_bit: usize,
     ) -> bool {
-        let entries = cpuid.as_slice();
         let mask = 1 << feature_bit;
 
-        for entry in entries.iter() {
+        for entry in cpuid {
             if entry.function == function && entry.index == index {
                 let reg_val = match reg {
                     CpuidReg::EAX => entry.eax,
@@ -470,12 +463,12 @@ impl CpuidFeatureEntry {
     }
 
     fn get_features_from_cpuid(
-        cpuid: &CpuId,
+        cpuid: &[CpuIdEntry],
         feature_entry_list: &[CpuidFeatureEntry],
     ) -> Vec<u32> {
         let mut features = vec![0; feature_entry_list.len()];
         for (i, feature_entry) in feature_entry_list.iter().enumerate() {
-            for cpuid_entry in cpuid.as_slice().iter() {
+            for cpuid_entry in cpuid {
                 if cpuid_entry.function == feature_entry.function
                     && cpuid_entry.index == feature_entry.index
                 {
@@ -505,8 +498,8 @@ impl CpuidFeatureEntry {
     // The function returns `Error` (a.k.a. "incompatible"), when the CPUID features from `src_vm_cpuid`
     // is not a subset of those of the `dest_vm_cpuid`.
     pub fn check_cpuid_compatibility(
-        src_vm_cpuid: &CpuId,
-        dest_vm_cpuid: &CpuId,
+        src_vm_cpuid: &[CpuIdEntry],
+        dest_vm_cpuid: &[CpuIdEntry],
     ) -> Result<(), Error> {
         let feature_entry_list = &Self::checked_feature_entry_list();
         let src_vm_features = Self::get_features_from_cpuid(src_vm_cpuid, feature_entry_list);
@@ -558,7 +551,7 @@ pub fn generate_common_cpuid(
     phys_bits: u8,
     kvm_hyperv: bool,
     #[cfg(feature = "tdx")] tdx_enabled: bool,
-) -> super::Result<CpuId> {
+) -> super::Result<Vec<CpuIdEntry>> {
     let cpuid_patches = vec![
         // Patch tsc deadline timer bit
         CpuidPatch {
@@ -669,16 +662,14 @@ pub fn generate_common_cpuid(
     for i in 0x8000_0002..=0x8000_0004 {
         cpuid.retain(|c| c.function != i);
         let leaf = unsafe { std::arch::x86_64::__cpuid(i) };
-        cpuid
-            .push(CpuIdEntry {
-                function: i,
-                eax: leaf.eax,
-                ebx: leaf.ebx,
-                ecx: leaf.ecx,
-                edx: leaf.edx,
-                ..Default::default()
-            })
-            .map_err(Error::CpuidIdentification)?;
+        cpuid.push(CpuIdEntry {
+            function: i,
+            eax: leaf.eax,
+            ebx: leaf.ebx,
+            ecx: leaf.ecx,
+            edx: leaf.edx,
+            ..Default::default()
+        });
     }
 
     if kvm_hyperv {
@@ -687,56 +678,44 @@ pub fn generate_common_cpuid(
         cpuid.retain(|c| c.function != 0x4000_0001);
         // See "Hypervisor Top Level Functional Specification" for details
         // Compliance with "Hv#1" requires leaves up to 0x4000_000a
-        cpuid
-            .push(CpuIdEntry {
-                function: 0x40000000,
-                eax: 0x4000000a, // Maximum cpuid leaf
-                ebx: 0x756e694c, // "Linu"
-                ecx: 0x564b2078, // "x KV"
-                edx: 0x7648204d, // "M Hv"
-                ..Default::default()
-            })
-            .map_err(Error::CpuidKvmHyperV)?;
-        cpuid
-            .push(CpuIdEntry {
-                function: 0x40000001,
-                eax: 0x31237648, // "Hv#1"
-                ..Default::default()
-            })
-            .map_err(Error::CpuidKvmHyperV)?;
-        cpuid
-            .push(CpuIdEntry {
-                function: 0x40000002,
-                eax: 0x3839,  // "Build number"
-                ebx: 0xa0000, // "Version"
-                ..Default::default()
-            })
-            .map_err(Error::CpuidKvmHyperV)?;
-        cpuid
-            .push(CpuIdEntry {
-                function: 0x4000_0003,
-                eax: 1 << 1 // AccessPartitionReferenceCounter
+        cpuid.push(CpuIdEntry {
+            function: 0x40000000,
+            eax: 0x4000000a, // Maximum cpuid leaf
+            ebx: 0x756e694c, // "Linu"
+            ecx: 0x564b2078, // "x KV"
+            edx: 0x7648204d, // "M Hv"
+            ..Default::default()
+        });
+        cpuid.push(CpuIdEntry {
+            function: 0x40000001,
+            eax: 0x31237648, // "Hv#1"
+            ..Default::default()
+        });
+        cpuid.push(CpuIdEntry {
+            function: 0x40000002,
+            eax: 0x3839,  // "Build number"
+            ebx: 0xa0000, // "Version"
+            ..Default::default()
+        });
+        cpuid.push(CpuIdEntry {
+            function: 0x4000_0003,
+            eax: 1 << 1 // AccessPartitionReferenceCounter
                    | 1 << 2 // AccessSynicRegs
                    | 1 << 3 // AccessSyntheticTimerRegs
                    | 1 << 9, // AccessPartitionReferenceTsc
-                edx: 1 << 3, // CPU dynamic partitioning
-                ..Default::default()
-            })
-            .map_err(Error::CpuidKvmHyperV)?;
-        cpuid
-            .push(CpuIdEntry {
-                function: 0x4000_0004,
-                eax: 1 << 5, // Recommend relaxed timing
-                ..Default::default()
-            })
-            .map_err(Error::CpuidKvmHyperV)?;
+            edx: 1 << 3, // CPU dynamic partitioning
+            ..Default::default()
+        });
+        cpuid.push(CpuIdEntry {
+            function: 0x4000_0004,
+            eax: 1 << 5, // Recommend relaxed timing
+            ..Default::default()
+        });
         for i in 0x4000_0005..=0x4000_000a {
-            cpuid
-                .push(CpuIdEntry {
-                    function: i,
-                    ..Default::default()
-                })
-                .map_err(Error::CpuidKvmHyperV)?;
+            cpuid.push(CpuIdEntry {
+                function: i,
+                ..Default::default()
+            });
         }
     }
 
@@ -748,7 +727,7 @@ pub fn configure_vcpu(
     id: u8,
     kernel_entry_point: Option<EntryPoint>,
     vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
-    cpuid: CpuId,
+    cpuid: Vec<CpuIdEntry>,
     kvm_hyperv: bool,
 ) -> super::Result<()> {
     // Per vCPU CPUID changes; common are handled via generate_common_cpuid()
@@ -1056,7 +1035,7 @@ pub fn get_host_cpu_phys_bits() -> u8 {
 }
 
 fn update_cpuid_topology(
-    cpuid: &mut CpuId,
+    cpuid: &mut Vec<CpuIdEntry>,
     threads_per_core: u8,
     cores_per_die: u8,
     dies_per_package: u8,
@@ -1120,7 +1099,10 @@ fn update_cpuid_topology(
 
 // The goal is to update the CPUID sub-leaves to reflect the number of EPC
 // sections exposed to the guest.
-fn update_cpuid_sgx(cpuid: &mut CpuId, epc_sections: Vec<SgxEpcSection>) -> Result<(), Error> {
+fn update_cpuid_sgx(
+    cpuid: &mut Vec<CpuIdEntry>,
+    epc_sections: Vec<SgxEpcSection>,
+) -> Result<(), Error> {
     // Something's wrong if there's no EPC section.
     if epc_sections.is_empty() {
         return Err(Error::NoSgxEpcSection);
