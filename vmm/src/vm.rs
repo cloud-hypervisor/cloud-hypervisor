@@ -90,6 +90,8 @@ use arch::aarch64::gic::gicv3_its::kvm::{KvmGicV3Its, GIC_V3_ITS_SNAPSHOT_ID};
 #[cfg(target_arch = "aarch64")]
 use arch::aarch64::gic::kvm::create_gic;
 #[cfg(target_arch = "aarch64")]
+use arch::aarch64::gic::kvm::create_gic_its;
+#[cfg(target_arch = "aarch64")]
 use devices::interrupt_controller::{self, InterruptController};
 
 /// Errors associated with VM management
@@ -1288,6 +1290,7 @@ impl Vm {
             Some(_) => Some(self.load_initramfs(&mem)?),
             None => None,
         };
+        let craton_enabled = self.config.lock().unwrap().craton;
 
         let device_info = &self
             .device_manager
@@ -1332,10 +1335,17 @@ impl Vm {
             None
         };
 
-        let gic_device = create_gic(
-            &self.memory_manager.lock().as_ref().unwrap().vm,
-            self.cpu_manager.lock().unwrap().boot_vcpus() as u64,
-        )
+        let gic_device = if craton_enabled {
+            create_gic(
+                &self.memory_manager.lock().as_ref().unwrap().vm,
+                self.cpu_manager.lock().unwrap().boot_vcpus() as u64,
+            )
+        } else {
+            create_gic_its(
+                &self.memory_manager.lock().as_ref().unwrap().vm,
+                self.cpu_manager.lock().unwrap().boot_vcpus() as u64,
+            )
+        }
         .map_err(|e| {
             Error::ConfigureSystem(arch::Error::AArch64Setup(arch::aarch64::Error::SetupGic(e)))
         })?;
@@ -1386,7 +1396,6 @@ impl Vm {
             .enable()
             .map_err(Error::EnableInterruptController)?;
 
-        let craton_enabled = self.config.lock().unwrap().craton;
         if craton_enabled {
             self.device_manager
                 .lock()
@@ -2408,12 +2417,17 @@ impl Vm {
         let saved_vcpu_states = self.cpu_manager.lock().unwrap().get_saved_states();
         // The number of vCPUs is the same as the number of saved vCPU states.
         let vcpu_numbers = saved_vcpu_states.len();
+        let craton_enabled = self.config.lock().unwrap().craton;
 
         // Creating a GIC device here, as the GIC will not be created when
         // restoring the device manager. Note that currently only the bare GICv3
         // without ITS is supported.
-        let mut gic_device = create_gic(&self.vm, vcpu_numbers.try_into().unwrap())
-            .map_err(|e| MigratableError::Restore(anyhow!("Could not create GIC: {:#?}", e)))?;
+        let mut gic_device = if craton_enabled {
+            create_gic(&self.vm, vcpu_numbers.try_into().unwrap())
+        } else {
+            create_gic_its(&self.vm, vcpu_numbers.try_into().unwrap())
+        }
+        .map_err(|e| MigratableError::Restore(anyhow!("Could not create GIC: {:#?}", e)))?;
 
         // Here we prepare the GICR_TYPER registers from the restored vCPU states.
         gic_device.set_gicr_typers(&saved_vcpu_states);

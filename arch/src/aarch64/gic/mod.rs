@@ -76,6 +76,7 @@ pub trait GicDevice: Send {
 pub mod kvm {
     use super::GicDevice;
     use super::Result;
+    use crate::aarch64::gic::gicv3::kvm::KvmGicV3;
     use crate::aarch64::gic::gicv3_its::kvm::KvmGicV3Its;
     use crate::layout;
     use hypervisor::kvm::kvm_bindings;
@@ -199,9 +200,19 @@ pub mod kvm {
 
     /// Create a GICv3-ITS device.
     ///
-    pub fn create_gic(vm: &Arc<dyn hypervisor::Vm>, vcpu_count: u64) -> Result<Box<dyn GicDevice>> {
+    pub fn create_gic_its(
+        vm: &Arc<dyn hypervisor::Vm>,
+        vcpu_count: u64,
+    ) -> Result<Box<dyn GicDevice>> {
         debug!("creating a GICv3-ITS");
         KvmGicV3Its::new(vm, vcpu_count)
+    }
+
+    /// Create a GICv3 device.
+    ///
+    pub fn create_gic(vm: &Arc<dyn hypervisor::Vm>, vcpu_count: u64) -> Result<Box<dyn GicDevice>> {
+        debug!("creating a GICv3");
+        KvmGicV3::new(vm, vcpu_count)
     }
 
     /// Function that saves RDIST pending tables into guest RAM.
