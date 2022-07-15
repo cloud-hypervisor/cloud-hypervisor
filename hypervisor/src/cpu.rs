@@ -19,8 +19,6 @@ use crate::kvm::{TdxExitDetails, TdxExitStatus};
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::LapicState;
 #[cfg(target_arch = "x86_64")]
-use crate::x86_64::Xsave;
-#[cfg(target_arch = "x86_64")]
 use crate::x86_64::{ExtendedControlRegisters, MsrEntries, VcpuEvents};
 use crate::CpuState;
 #[cfg(target_arch = "aarch64")]
@@ -351,16 +349,6 @@ pub trait Vcpu: Send + Sync {
     /// Sets the vcpu's current "multiprocessing state".
     ///
     fn set_mp_state(&self, mp_state: MpState) -> Result<()>;
-    #[cfg(target_arch = "x86_64")]
-    ///
-    /// X86 specific call that returns the vcpu's current "xsave struct".
-    ///
-    fn get_xsave(&self) -> Result<Xsave>;
-    #[cfg(target_arch = "x86_64")]
-    ///
-    /// X86 specific call that sets the vcpu's current "xsave struct".
-    ///
-    fn set_xsave(&self, xsave: &Xsave) -> Result<()>;
     #[cfg(target_arch = "x86_64")]
     ///
     /// X86 specific call that returns the vcpu's current "xcrs".
