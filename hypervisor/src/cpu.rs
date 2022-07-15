@@ -16,8 +16,6 @@ use crate::aarch64::{RegList, Register, StandardRegisters};
 use crate::arch::x86::{SpecialRegisters, StandardRegisters};
 #[cfg(feature = "tdx")]
 use crate::kvm::{TdxExitDetails, TdxExitStatus};
-#[cfg(all(feature = "mshv", target_arch = "x86_64"))]
-use crate::x86_64::SuspendRegisters;
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::Xsave;
 #[cfg(target_arch = "x86_64")]
@@ -46,11 +44,6 @@ pub enum HypervisorCpuError {
     ///
     #[error("Failed to get standard registers: {0}")]
     GetStandardRegs(#[source] anyhow::Error),
-    ///
-    /// Getting suspend registers error
-    ///
-    #[error("Failed to get suspend registers: {0}")]
-    GetSuspendRegs(#[source] anyhow::Error),
     ///
     /// Setting special register error
     ///
@@ -466,11 +459,6 @@ pub trait Vcpu: Send + Sync {
     ///
     #[cfg(feature = "tdx")]
     fn tdx_init(&self, hob_address: u64) -> Result<()>;
-    #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
-    ///
-    /// Return suspend registers(explicit and intercept suspend registers)
-    ///
-    fn get_suspend_regs(&self) -> Result<SuspendRegisters>;
     #[cfg(feature = "kvm")]
     ///
     /// Set the "immediate_exit" state
