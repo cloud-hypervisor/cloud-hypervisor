@@ -19,7 +19,7 @@ use crate::kvm::{TdxExitDetails, TdxExitStatus};
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::Xsave;
 #[cfg(target_arch = "x86_64")]
-use crate::x86_64::{CpuId, LapicState};
+use crate::x86_64::{CpuIdEntry, LapicState};
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::{ExtendedControlRegisters, FpuState, MsrEntries, VcpuEvents};
 use crate::CpuState;
@@ -312,7 +312,7 @@ pub trait Vcpu: Send + Sync {
     ///
     /// X86 specific call to setup the CPUID registers.
     ///
-    fn set_cpuid2(&self, cpuid: &CpuId) -> Result<()>;
+    fn set_cpuid2(&self, cpuid: &[CpuIdEntry]) -> Result<()>;
     #[cfg(target_arch = "x86_64")]
     ///
     /// X86 specific call to enable HyperV SynIC
@@ -322,7 +322,7 @@ pub trait Vcpu: Send + Sync {
     ///
     /// X86 specific call to retrieve the CPUID registers.
     ///
-    fn get_cpuid2(&self, num_entries: usize) -> Result<CpuId>;
+    fn get_cpuid2(&self, num_entries: usize) -> Result<Vec<CpuIdEntry>>;
     #[cfg(target_arch = "x86_64")]
     ///
     /// Returns the state of the LAPIC (Local Advanced Programmable Interrupt Controller).

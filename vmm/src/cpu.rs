@@ -43,7 +43,7 @@ use hypervisor::kvm::kvm_bindings;
 #[cfg(feature = "tdx")]
 use hypervisor::kvm::{TdxExitDetails, TdxExitStatus};
 #[cfg(target_arch = "x86_64")]
-use hypervisor::x86_64::CpuId;
+use hypervisor::x86_64::CpuIdEntry;
 #[cfg(feature = "guest_debug")]
 use hypervisor::x86_64::{MsrEntries, MsrEntry};
 use hypervisor::{CpuState, HypervisorCpuError, VmExit, VmOps};
@@ -311,7 +311,7 @@ impl Vcpu {
         #[cfg(target_arch = "aarch64")] vm: &Arc<dyn hypervisor::Vm>,
         kernel_entry_point: Option<EntryPoint>,
         #[cfg(target_arch = "x86_64")] vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
-        #[cfg(target_arch = "x86_64")] cpuid: CpuId,
+        #[cfg(target_arch = "x86_64")] cpuid: Vec<CpuIdEntry>,
         #[cfg(target_arch = "x86_64")] kvm_hyperv: bool,
     ) -> Result<()> {
         #[cfg(target_arch = "aarch64")]
@@ -418,7 +418,7 @@ pub struct CpuManager {
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     vm_memory: GuestMemoryAtomic<GuestMemoryMmap>,
     #[cfg(target_arch = "x86_64")]
-    cpuid: CpuId,
+    cpuid: Vec<CpuIdEntry>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     vm: Arc<dyn hypervisor::Vm>,
     vcpus_kill_signalled: Arc<AtomicBool>,
@@ -1217,7 +1217,7 @@ impl CpuManager {
     }
 
     #[cfg(target_arch = "x86_64")]
-    pub fn common_cpuid(&self) -> CpuId {
+    pub fn common_cpuid(&self) -> Vec<CpuIdEntry> {
         self.cpuid.clone()
     }
 

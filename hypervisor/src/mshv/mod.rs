@@ -235,8 +235,8 @@ impl hypervisor::Hypervisor for MshvHypervisor {
     ///
     /// Get the supported CpuID
     ///
-    fn get_cpuid(&self) -> hypervisor::Result<CpuId> {
-        Ok(CpuId::new(1).unwrap())
+    fn get_cpuid(&self) -> hypervisor::Result<Vec<CpuIdEntry>> {
+        Ok(Vec::new())
     }
     #[cfg(target_arch = "x86_64")]
     ///
@@ -254,7 +254,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
 pub struct MshvVcpu {
     fd: VcpuFd,
     vp_index: u8,
-    cpuid: CpuId,
+    cpuid: Vec<CpuIdEntry>,
     msrs: MsrEntries,
     vm_ops: Option<Arc<dyn vm::VmOps>>,
 }
@@ -563,14 +563,14 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// X86 specific call to setup the CPUID registers.
     ///
-    fn set_cpuid2(&self, _cpuid: &CpuId) -> cpu::Result<()> {
+    fn set_cpuid2(&self, _cpuid: &[CpuIdEntry]) -> cpu::Result<()> {
         Ok(())
     }
     #[cfg(target_arch = "x86_64")]
     ///
     /// X86 specific call to retrieve the CPUID registers.
     ///
-    fn get_cpuid2(&self, _num_entries: usize) -> cpu::Result<CpuId> {
+    fn get_cpuid2(&self, _num_entries: usize) -> cpu::Result<Vec<CpuIdEntry>> {
         Ok(self.cpuid.clone())
     }
     #[cfg(target_arch = "x86_64")]
@@ -952,7 +952,7 @@ impl vm::Vm for MshvVm {
         let vcpu = MshvVcpu {
             fd: vcpu_fd,
             vp_index: id,
-            cpuid: CpuId::new(1).unwrap(),
+            cpuid: Vec::new(),
             msrs: self.msrs.clone(),
             vm_ops,
         };
