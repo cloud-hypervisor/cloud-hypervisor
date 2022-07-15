@@ -8,7 +8,7 @@ use std::fs::File;
 use std::os::unix::io::AsRawFd;
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
-use vmm_sys_util::{ioctl_expr, ioctl_io_nr, ioctl_ioc_nr};
+use vmm_sys_util::{ioctl_io_nr, ioctl_ioc_nr};
 
 #[derive(Error, Debug)]
 pub enum DiskFileError {
