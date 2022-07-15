@@ -1200,9 +1200,9 @@ dependencies = [
 
 [[package]]
 name = "vhost-user-backend"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3eeb6723bbee20dbc2db95c575941922fb96e77eb41786ecd1c8c03348709c4c"
+checksum = "ded8a9f15b09e61bb8a501d0a7a38056f4c1bd7f51cedcd41081c0e4233d5aa6"
 dependencies = [
  "libc",
  "log",
@@ -1412,9 +1412,9 @@ dependencies = [
 
 [[package]]
 name = "vmm-sys-util"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "733537bded03aaa93543f785ae997727b30d1d9f4a03b7861d23290474242e11"
+checksum = "08604d7be03eb26e33b3cee3ed4aef2bf550b305d1cca60e84da5d28d3790b62"
 dependencies = [
  "bitflags",
  "libc",

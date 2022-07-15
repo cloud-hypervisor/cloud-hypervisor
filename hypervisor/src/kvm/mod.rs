@@ -89,7 +89,7 @@ pub use kvm_ioctls::{Cap, Kvm};
 use std::mem;
 use thiserror::Error;
 #[cfg(feature = "tdx")]
-use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_expr, ioctl_ioc_nr, ioctl_iowr_nr};
+use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_ioc_nr, ioctl_iowr_nr};
 ///
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
 ///

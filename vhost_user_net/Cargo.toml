@@ -13,10 +13,10 @@ log = "0.4.17"
 net_util = { path = "../net_util" }
 option_parser = { path = "../option_parser" }
 vhost = { version = "0.4.0", features = ["vhost-user-slave"] }
-vhost-user-backend = "0.5.0"
+vhost-user-backend = "0.5.1"
 virtio-bindings = "0.1.0"
 vm-memory = "0.8.0"
-vmm-sys-util = "0.9.0"
+vmm-sys-util = "0.10.0"
 
 [build-dependencies]
 clap = { version = "3.2.12", features = ["cargo"] }
