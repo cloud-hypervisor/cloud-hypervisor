@@ -241,3 +241,16 @@ pub struct CpuIdEntry {
 }
 
 pub const CPUID_FLAG_VALID_INDEX: u32 = 1;
+
+#[derive(Default, Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct FpuState {
+    pub fpr: [[u8; 16usize]; 8usize],
+    pub fcw: u16,
+    pub fsw: u16,
+    pub ftwx: u8,
+    pub last_opcode: u16,
+    pub last_ip: u64,
+    pub last_dp: u64,
+    pub xmm: [[u8; 16usize]; 16usize],
+    pub mxcsr: u32,
+}

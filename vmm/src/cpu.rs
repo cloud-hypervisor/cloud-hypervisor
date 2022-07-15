@@ -2336,8 +2336,8 @@ impl CpuElf64Writable for CpuManager {
 mod tests {
     use arch::x86_64::interrupts::*;
     use arch::x86_64::regs::*;
-    use hypervisor::arch::x86::StandardRegisters;
-    use hypervisor::x86_64::{FpuState, LapicState};
+    use hypervisor::arch::x86::{FpuState, StandardRegisters};
+    use hypervisor::x86_64::LapicState;
 
     #[test]
     fn test_setlint() {

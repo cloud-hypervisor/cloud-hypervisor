@@ -37,7 +37,7 @@ use std::fs::File;
 use std::os::unix::io::AsRawFd;
 
 #[cfg(target_arch = "x86_64")]
-use crate::arch::x86::{CpuIdEntry, SpecialRegisters, StandardRegisters};
+use crate::arch::x86::{CpuIdEntry, FpuState, SpecialRegisters, StandardRegisters};
 
 const DIRTY_BITMAP_CLEAR_DIRTY: u64 = 0x4;
 const DIRTY_BITMAP_SET_DIRTY: u64 = 0x8;
@@ -317,17 +317,20 @@ impl cpu::Vcpu for MshvVcpu {
     /// Returns the floating point state (FPU) from the vCPU.
     ///
     fn get_fpu(&self) -> cpu::Result<FpuState> {
-        self.fd
+        Ok(self
+            .fd
             .get_fpu()
-            .map_err(|e| cpu::HypervisorCpuError::GetFloatingPointRegs(e.into()))
+            .map_err(|e| cpu::HypervisorCpuError::GetFloatingPointRegs(e.into()))?
+            .into())
     }
     #[cfg(target_arch = "x86_64")]
     ///
     /// Set the floating point state (FPU) of a vCPU.
     ///
     fn set_fpu(&self, fpu: &FpuState) -> cpu::Result<()> {
+        let fpu: mshv_bindings::FloatingPointUnit = (*fpu).clone().into();
         self.fd
-            .set_fpu(fpu)
+            .set_fpu(&fpu)
             .map_err(|e| cpu::HypervisorCpuError::SetFloatingPointRegs(e.into()))
     }
 

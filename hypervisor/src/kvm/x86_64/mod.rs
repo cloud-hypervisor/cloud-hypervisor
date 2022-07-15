@@ -9,7 +9,7 @@
 //
 
 use crate::arch::x86::{
-    CpuIdEntry, DescriptorTable, SegmentRegister, SpecialRegisters, StandardRegisters,
+    CpuIdEntry, DescriptorTable, FpuState, SegmentRegister, SpecialRegisters, StandardRegisters,
     CPUID_FLAG_VALID_INDEX,
 };
 use crate::kvm::{Cap, Kvm, KvmError, KvmResult};
@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
 ///
 pub use {
-    kvm_bindings::kvm_cpuid_entry2, kvm_bindings::kvm_dtable, kvm_bindings::kvm_fpu as FpuState,
+    kvm_bindings::kvm_cpuid_entry2, kvm_bindings::kvm_dtable, kvm_bindings::kvm_fpu,
     kvm_bindings::kvm_lapic_state as LapicState, kvm_bindings::kvm_mp_state as MpState,
     kvm_bindings::kvm_msr_entry as MsrEntry, kvm_bindings::kvm_regs, kvm_bindings::kvm_segment,
     kvm_bindings::kvm_sregs, kvm_bindings::kvm_vcpu_events as VcpuEvents,
@@ -259,6 +259,39 @@ impl From<kvm_cpuid_entry2> for CpuIdEntry {
             ebx: e.ebx,
             ecx: e.ecx,
             edx: e.edx,
+        }
+    }
+}
+
+impl From<kvm_fpu> for FpuState {
+    fn from(s: kvm_fpu) -> Self {
+        Self {
+            fpr: s.fpr,
+            fcw: s.fcw,
+            fsw: s.fsw,
+            ftwx: s.ftwx,
+            last_opcode: s.last_opcode,
+            last_ip: s.last_ip,
+            last_dp: s.last_dp,
+            xmm: s.xmm,
+            mxcsr: s.mxcsr,
+        }
+    }
+}
+
+impl From<FpuState> for kvm_fpu {
+    fn from(s: FpuState) -> Self {
+        Self {
+            fpr: s.fpr,
+            fcw: s.fcw,
+            fsw: s.fsw,
+            ftwx: s.ftwx,
+            last_opcode: s.last_opcode,
+            last_ip: s.last_ip,
+            last_dp: s.last_dp,
+            xmm: s.xmm,
+            mxcsr: s.mxcsr,
+            ..Default::default()
         }
     }
 }
