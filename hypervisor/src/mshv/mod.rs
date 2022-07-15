@@ -700,15 +700,6 @@ impl cpu::Vcpu for MshvVcpu {
     }
     #[cfg(target_arch = "x86_64")]
     ///
-    /// X86 specific call that returns the vcpu's current "suspend registers".
-    ///
-    fn get_suspend_regs(&self) -> cpu::Result<SuspendRegisters> {
-        self.fd
-            .get_suspend_regs()
-            .map_err(|e| cpu::HypervisorCpuError::GetSuspendRegs(e.into()))
-    }
-    #[cfg(target_arch = "x86_64")]
-    ///
     /// Return the list of initial MSR entries for a VCPU
     ///
     fn boot_msr_entries(&self) -> MsrEntries {
