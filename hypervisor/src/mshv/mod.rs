@@ -356,24 +356,6 @@ impl cpu::Vcpu for MshvVcpu {
 
     #[cfg(target_arch = "x86_64")]
     ///
-    /// X86 specific call that returns the vcpu's current "xcrs".
-    ///
-    fn get_xcrs(&self) -> cpu::Result<ExtendedControlRegisters> {
-        self.fd
-            .get_xcrs()
-            .map_err(|e| cpu::HypervisorCpuError::GetXcsr(e.into()))
-    }
-    #[cfg(target_arch = "x86_64")]
-    ///
-    /// X86 specific call that sets the vcpu's current "xcrs".
-    ///
-    fn set_xcrs(&self, xcrs: &ExtendedControlRegisters) -> cpu::Result<()> {
-        self.fd
-            .set_xcrs(xcrs)
-            .map_err(|e| cpu::HypervisorCpuError::SetXcsr(e.into()))
-    }
-    #[cfg(target_arch = "x86_64")]
-    ///
     /// Returns currently pending exceptions, interrupts, and NMIs as well as related
     /// states of the vcpu.
     ///
@@ -724,6 +706,24 @@ impl MshvVcpu {
         self.fd
             .set_xsave(xsave)
             .map_err(|e| cpu::HypervisorCpuError::SetXsaveState(e.into()))
+    }
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// X86 specific call that returns the vcpu's current "xcrs".
+    ///
+    fn get_xcrs(&self) -> cpu::Result<ExtendedControlRegisters> {
+        self.fd
+            .get_xcrs()
+            .map_err(|e| cpu::HypervisorCpuError::GetXcsr(e.into()))
+    }
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// X86 specific call that sets the vcpu's current "xcrs".
+    ///
+    fn set_xcrs(&self, xcrs: &ExtendedControlRegisters) -> cpu::Result<()> {
+        self.fd
+            .set_xcrs(xcrs)
+            .map_err(|e| cpu::HypervisorCpuError::SetXcsr(e.into()))
     }
 }
 
