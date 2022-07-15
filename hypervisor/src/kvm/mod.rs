@@ -46,7 +46,9 @@ use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
 #[cfg(target_arch = "x86_64")]
-use crate::arch::x86::{CpuIdEntry, SpecialRegisters, StandardRegisters, NUM_IOAPIC_PINS};
+use crate::arch::x86::{
+    CpuIdEntry, FpuState, SpecialRegisters, StandardRegisters, NUM_IOAPIC_PINS,
+};
 #[cfg(target_arch = "x86_64")]
 use crate::ClockData;
 use crate::{
@@ -61,7 +63,7 @@ use kvm_bindings::{
     KVM_CAP_SPLIT_IRQCHIP, KVM_GUESTDBG_ENABLE, KVM_GUESTDBG_SINGLESTEP, KVM_GUESTDBG_USE_HW_BP,
 };
 #[cfg(target_arch = "x86_64")]
-use x86_64::{check_required_kvm_extensions, FpuState};
+use x86_64::check_required_kvm_extensions;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{CpuId, ExtendedControlRegisters, LapicState, MsrEntries, VcpuKvmState, Xsave};
 // aarch64 dependencies
@@ -1306,17 +1308,20 @@ impl cpu::Vcpu for KvmVcpu {
     /// Returns the floating point state (FPU) from the vCPU.
     ///
     fn get_fpu(&self) -> cpu::Result<FpuState> {
-        self.fd
+        Ok(self
+            .fd
             .get_fpu()
-            .map_err(|e| cpu::HypervisorCpuError::GetFloatingPointRegs(e.into()))
+            .map_err(|e| cpu::HypervisorCpuError::GetFloatingPointRegs(e.into()))?
+            .into())
     }
     #[cfg(target_arch = "x86_64")]
     ///
     /// Set the floating point state (FPU) of a vCPU using the `KVM_SET_FPU` ioct.
     ///
     fn set_fpu(&self, fpu: &FpuState) -> cpu::Result<()> {
+        let fpu: kvm_bindings::kvm_fpu = (*fpu).clone().into();
         self.fd
-            .set_fpu(fpu)
+            .set_fpu(&fpu)
             .map_err(|e| cpu::HypervisorCpuError::SetFloatingPointRegs(e.into()))
     }
     #[cfg(target_arch = "x86_64")]

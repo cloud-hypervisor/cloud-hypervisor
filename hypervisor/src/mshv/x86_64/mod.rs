@@ -8,7 +8,7 @@
 //
 //
 use crate::arch::x86::{
-    CpuIdEntry, DescriptorTable, SegmentRegister, SpecialRegisters, StandardRegisters,
+    CpuIdEntry, DescriptorTable, FpuState, SegmentRegister, SpecialRegisters, StandardRegisters,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -19,7 +19,7 @@ use std::fmt;
 pub use {
     mshv_bindings::hv_cpuid_entry, mshv_bindings::mshv_user_mem_region as MemoryRegion,
     mshv_bindings::msr_entry as MsrEntry, mshv_bindings::CpuId, mshv_bindings::DebugRegisters,
-    mshv_bindings::FloatingPointUnit as FpuState, mshv_bindings::LapicState,
+    mshv_bindings::FloatingPointUnit, mshv_bindings::LapicState,
     mshv_bindings::MiscRegs as MiscRegisters, mshv_bindings::MsrList,
     mshv_bindings::Msrs as MsrEntries, mshv_bindings::Msrs,
     mshv_bindings::SegmentRegister as MshvSegmentRegister,
@@ -249,6 +249,39 @@ impl From<hv_cpuid_entry> for CpuIdEntry {
             ebx: e.ebx,
             ecx: e.ecx,
             edx: e.edx,
+        }
+    }
+}
+
+impl From<FloatingPointUnit> for FpuState {
+    fn from(s: FloatingPointUnit) -> Self {
+        Self {
+            fpr: s.fpr,
+            fcw: s.fcw,
+            fsw: s.fsw,
+            ftwx: s.ftwx,
+            last_opcode: s.last_opcode,
+            last_ip: s.last_ip,
+            last_dp: s.last_dp,
+            xmm: s.xmm,
+            mxcsr: s.mxcsr,
+        }
+    }
+}
+
+impl From<FpuState> for FloatingPointUnit {
+    fn from(s: FpuState) -> Self {
+        Self {
+            fpr: s.fpr,
+            fcw: s.fcw,
+            fsw: s.fsw,
+            ftwx: s.ftwx,
+            last_opcode: s.last_opcode,
+            last_ip: s.last_ip,
+            last_dp: s.last_dp,
+            xmm: s.xmm,
+            mxcsr: s.mxcsr,
+            ..Default::default()
         }
     }
 }
