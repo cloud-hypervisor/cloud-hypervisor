@@ -606,24 +606,6 @@ impl cpu::Vcpu for MshvVcpu {
     fn set_mp_state(&self, _mp_state: MpState) -> cpu::Result<()> {
         Ok(())
     }
-    #[cfg(target_arch = "x86_64")]
-    ///
-    /// X86 specific call that returns the vcpu's current "xsave struct".
-    ///
-    fn get_xsave(&self) -> cpu::Result<Xsave> {
-        self.fd
-            .get_xsave()
-            .map_err(|e| cpu::HypervisorCpuError::GetXsaveState(e.into()))
-    }
-    #[cfg(target_arch = "x86_64")]
-    ///
-    /// X86 specific call that sets the vcpu's current "xsave struct".
-    ///
-    fn set_xsave(&self, xsave: &Xsave) -> cpu::Result<()> {
-        self.fd
-            .set_xsave(xsave)
-            .map_err(|e| cpu::HypervisorCpuError::SetXsaveState(e.into()))
-    }
     ///
     /// Set CPU state
     ///
@@ -721,6 +703,27 @@ impl cpu::Vcpu for MshvVcpu {
             msr_data!(msr_index::MSR_MTRRdefType, MTRR_ENABLE | MTRR_MEM_TYPE_WB),
         ])
         .unwrap()
+    }
+}
+
+impl MshvVcpu {
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// X86 specific call that returns the vcpu's current "xsave struct".
+    ///
+    fn get_xsave(&self) -> cpu::Result<Xsave> {
+        self.fd
+            .get_xsave()
+            .map_err(|e| cpu::HypervisorCpuError::GetXsaveState(e.into()))
+    }
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// X86 specific call that sets the vcpu's current "xsave struct".
+    ///
+    fn set_xsave(&self, xsave: &Xsave) -> cpu::Result<()> {
+        self.fd
+            .set_xsave(xsave)
+            .map_err(|e| cpu::HypervisorCpuError::SetXsaveState(e.into()))
     }
 }
 

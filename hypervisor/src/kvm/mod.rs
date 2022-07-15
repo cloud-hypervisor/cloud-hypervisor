@@ -1426,24 +1426,6 @@ impl cpu::Vcpu for KvmVcpu {
     }
     #[cfg(target_arch = "x86_64")]
     ///
-    /// X86 specific call that returns the vcpu's current "xsave struct".
-    ///
-    fn get_xsave(&self) -> cpu::Result<Xsave> {
-        self.fd
-            .get_xsave()
-            .map_err(|e| cpu::HypervisorCpuError::GetXsaveState(e.into()))
-    }
-    #[cfg(target_arch = "x86_64")]
-    ///
-    /// X86 specific call that sets the vcpu's current "xsave struct".
-    ///
-    fn set_xsave(&self, xsave: &Xsave) -> cpu::Result<()> {
-        self.fd
-            .set_xsave(xsave)
-            .map_err(|e| cpu::HypervisorCpuError::SetXsaveState(e.into()))
-    }
-    #[cfg(target_arch = "x86_64")]
-    ///
     /// X86 specific call that returns the vcpu's current "xcrs".
     ///
     fn get_xcrs(&self) -> cpu::Result<ExtendedControlRegisters> {
@@ -2102,6 +2084,27 @@ impl cpu::Vcpu for KvmVcpu {
             msr_data!(msr_index::MSR_MTRRdefType, MTRR_ENABLE | MTRR_MEM_TYPE_WB),
         ])
         .unwrap()
+    }
+}
+
+impl KvmVcpu {
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// X86 specific call that returns the vcpu's current "xsave struct".
+    ///
+    fn get_xsave(&self) -> cpu::Result<Xsave> {
+        self.fd
+            .get_xsave()
+            .map_err(|e| cpu::HypervisorCpuError::GetXsaveState(e.into()))
+    }
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// X86 specific call that sets the vcpu's current "xsave struct".
+    ///
+    fn set_xsave(&self, xsave: &Xsave) -> cpu::Result<()> {
+        self.fd
+            .set_xsave(xsave)
+            .map_err(|e| cpu::HypervisorCpuError::SetXsaveState(e.into()))
     }
 }
 
