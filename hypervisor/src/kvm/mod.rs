@@ -1535,26 +1535,6 @@ impl cpu::Vcpu for KvmVcpu {
     }
     #[cfg(target_arch = "x86_64")]
     ///
-    /// Returns currently pending exceptions, interrupts, and NMIs as well as related
-    /// states of the vcpu.
-    ///
-    fn get_vcpu_events(&self) -> cpu::Result<VcpuEvents> {
-        self.fd
-            .get_vcpu_events()
-            .map_err(|e| cpu::HypervisorCpuError::GetVcpuEvents(e.into()))
-    }
-    #[cfg(target_arch = "x86_64")]
-    ///
-    /// Sets pending exceptions, interrupts, and NMIs as well as related states
-    /// of the vcpu.
-    ///
-    fn set_vcpu_events(&self, events: &VcpuEvents) -> cpu::Result<()> {
-        self.fd
-            .set_vcpu_events(events)
-            .map_err(|e| cpu::HypervisorCpuError::SetVcpuEvents(e.into()))
-    }
-    #[cfg(target_arch = "x86_64")]
-    ///
     /// Let the guest know that it has been paused, which prevents from
     /// potential soft lockups when being resumed.
     ///
@@ -2105,6 +2085,26 @@ impl KvmVcpu {
         self.fd
             .set_xcrs(xcrs)
             .map_err(|e| cpu::HypervisorCpuError::SetXcsr(e.into()))
+    }
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Returns currently pending exceptions, interrupts, and NMIs as well as related
+    /// states of the vcpu.
+    ///
+    fn get_vcpu_events(&self) -> cpu::Result<VcpuEvents> {
+        self.fd
+            .get_vcpu_events()
+            .map_err(|e| cpu::HypervisorCpuError::GetVcpuEvents(e.into()))
+    }
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Sets pending exceptions, interrupts, and NMIs as well as related states
+    /// of the vcpu.
+    ///
+    fn set_vcpu_events(&self, events: &VcpuEvents) -> cpu::Result<()> {
+        self.fd
+            .set_vcpu_events(events)
+            .map_err(|e| cpu::HypervisorCpuError::SetVcpuEvents(e.into()))
     }
 }
 

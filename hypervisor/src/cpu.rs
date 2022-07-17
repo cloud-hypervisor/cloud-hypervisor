@@ -19,7 +19,7 @@ use crate::kvm::{TdxExitDetails, TdxExitStatus};
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::LapicState;
 #[cfg(target_arch = "x86_64")]
-use crate::x86_64::{MsrEntries, VcpuEvents};
+use crate::x86_64::MsrEntries;
 use crate::CpuState;
 #[cfg(target_arch = "aarch64")]
 use crate::DeviceAttr;
@@ -349,18 +349,6 @@ pub trait Vcpu: Send + Sync {
     /// Sets the vcpu's current "multiprocessing state".
     ///
     fn set_mp_state(&self, mp_state: MpState) -> Result<()>;
-    #[cfg(target_arch = "x86_64")]
-    ///
-    /// Returns currently pending exceptions, interrupts, and NMIs as well as related
-    /// states of the vcpu.
-    ///
-    fn get_vcpu_events(&self) -> Result<VcpuEvents>;
-    #[cfg(target_arch = "x86_64")]
-    ///
-    /// Sets pending exceptions, interrupts, and NMIs as well as related states
-    /// of the vcpu.
-    ///
-    fn set_vcpu_events(&self, events: &VcpuEvents) -> Result<()>;
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     ///
     /// Let the guest know that it has been paused, which prevents from
