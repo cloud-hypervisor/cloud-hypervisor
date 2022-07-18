@@ -32,8 +32,12 @@ use anyhow::anyhow;
 use arch::EntryPoint;
 use arch::NumaNodes;
 use devices::interrupt_controller::InterruptController;
+#[cfg(all(target_arch = "aarch64", feature = "gdb"))]
+use gdbstub_arch::arm::reg::Aarch64CoreRegs as CoreRegs;
 #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
-use gdbstub_arch::x86::reg::{X86SegmentRegs, X86_64CoreRegs};
+use gdbstub_arch::x86::reg::{X86SegmentRegs, X86_64CoreRegs as CoreRegs};
+#[cfg(all(target_arch = "aarch64", feature = "gdb"))]
+use hypervisor::aarch64::StandardRegisters;
 #[cfg(feature = "guest_debug")]
 use hypervisor::arch::x86::msr_index;
 #[cfg(target_arch = "x86_64")]
@@ -133,7 +137,7 @@ pub enum Error {
     #[error("Error initializing PMU: {0}")]
     InitPmu(#[source] hypervisor::HypervisorCpuError),
 
-    #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
+    #[cfg(feature = "gdb")]
     #[error("Error during CPU debug: {0}")]
     CpuDebug(#[source] hypervisor::HypervisorCpuError),
 
@@ -950,7 +954,7 @@ impl CpuManager {
                             // vcpu.run() returns false on a triple-fault so trigger a reset
                             match vcpu.run() {
                                 Ok(run) => match run {
-                                    #[cfg(all(target_arch = "x86_64", feature = "kvm"))]
+                                    #[cfg(feature = "kvm")]
                                     VmExit::Debug => {
                                         info!("VmExit::Debug");
                                         #[cfg(feature = "gdb")]
@@ -1437,7 +1441,7 @@ impl CpuManager {
         pptt
     }
 
-    #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
+    #[cfg(feature = "gdb")]
     fn get_regs(&self, cpu_id: u8) -> Result<StandardRegisters> {
         self.vcpus[usize::from(cpu_id)]
             .lock()
@@ -1447,7 +1451,7 @@ impl CpuManager {
             .map_err(Error::CpuDebug)
     }
 
-    #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
+    #[cfg(feature = "gdb")]
     fn set_regs(&self, cpu_id: u8, regs: &StandardRegisters) -> Result<()> {
         self.vcpus[usize::from(cpu_id)]
             .lock()
@@ -1486,6 +1490,11 @@ impl CpuManager {
             .translate_gva(gva, /* flags: unused */ 0)
             .map_err(Error::TranslateVirtualAddress)?;
         Ok(gpa)
+    }
+
+    #[cfg(all(target_arch = "aarch64", feature = "gdb"))]
+    fn translate_gva(&self, cpu_id: u8, gva: u64) -> Result<u64> {
+        unimplemented!()
     }
 }
 
@@ -1932,7 +1941,7 @@ impl Debuggable for CpuManager {
     }
 
     #[cfg(target_arch = "x86_64")]
-    fn read_regs(&self, cpu_id: usize) -> std::result::Result<X86_64CoreRegs, DebuggableError> {
+    fn read_regs(&self, cpu_id: usize) -> std::result::Result<CoreRegs, DebuggableError> {
         // General registers: RAX, RBX, RCX, RDX, RSI, RDI, RBP, RSP, r8-r15
         let gregs = self
             .get_regs(cpu_id as u8)
@@ -1962,7 +1971,7 @@ impl Debuggable for CpuManager {
 
         // TODO: Add other registers
 
-        Ok(X86_64CoreRegs {
+        Ok(CoreRegs {
             regs,
             eflags,
             rip,
@@ -1971,11 +1980,24 @@ impl Debuggable for CpuManager {
         })
     }
 
+    #[cfg(target_arch = "aarch64")]
+    fn read_regs(&self, cpu_id: usize) -> std::result::Result<CoreRegs, DebuggableError> {
+        let gregs = self
+            .get_regs(cpu_id as u8)
+            .map_err(DebuggableError::ReadRegs)?;
+        Ok(CoreRegs {
+            regs: gregs.regs.regs,
+            sp: gregs.regs.sp,
+            pc: gregs.regs.pc,
+            cpsr: 0u32, // FIXME: CPSR is to be updated
+        })
+    }
+
     #[cfg(target_arch = "x86_64")]
     fn write_regs(
         &self,
         cpu_id: usize,
-        regs: &X86_64CoreRegs,
+        regs: &CoreRegs,
     ) -> std::result::Result<(), DebuggableError> {
         let orig_gregs = self
             .get_regs(cpu_id as u8)
@@ -2025,7 +2047,26 @@ impl Debuggable for CpuManager {
         Ok(())
     }
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(target_arch = "aarch64")]
+    fn write_regs(
+        &self,
+        cpu_id: usize,
+        regs: &CoreRegs,
+    ) -> std::result::Result<(), DebuggableError> {
+        let mut gregs = self
+            .get_regs(cpu_id as u8)
+            .map_err(DebuggableError::ReadRegs)?;
+
+        gregs.regs.regs = regs.regs;
+        gregs.regs.sp = regs.sp;
+        gregs.regs.pc = regs.pc;
+
+        self.set_regs(cpu_id as u8, &gregs)
+            .map_err(DebuggableError::WriteRegs)?;
+
+        Ok(())
+    }
+
     fn read_mem(
         &self,
         cpu_id: usize,
@@ -2056,7 +2097,6 @@ impl Debuggable for CpuManager {
         Ok(buf)
     }
 
-    #[cfg(target_arch = "x86_64")]
     fn write_mem(
         &self,
         cpu_id: usize,

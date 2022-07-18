@@ -51,8 +51,10 @@ use devices::gic::GIC_V3_ITS_SNAPSHOT_ID;
 #[cfg(target_arch = "aarch64")]
 use devices::interrupt_controller::{self, InterruptController};
 use devices::AcpiNotificationFlags;
+#[cfg(all(target_arch = "aarch64", feature = "gdb"))]
+use gdbstub_arch::arm::reg::Aarch64CoreRegs as CoreRegs;
 #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
-use gdbstub_arch::x86::reg::X86_64CoreRegs;
+use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
 use hypervisor::{HypervisorVmError, VmOps};
 use linux_loader::cmdline::Cmdline;
 #[cfg(feature = "guest_debug")]
@@ -2483,7 +2485,7 @@ impl Vm {
         self.memory_manager.lock().unwrap().snapshot_data()
     }
 
-    #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
+    #[cfg(feature = "gdb")]
     pub fn debug_request(
         &mut self,
         gdb_request: &GdbRequestPayload,
@@ -2934,14 +2936,14 @@ impl Debuggable for Vm {
         Ok(())
     }
 
-    fn read_regs(&self, cpu_id: usize) -> std::result::Result<X86_64CoreRegs, DebuggableError> {
+    fn read_regs(&self, cpu_id: usize) -> std::result::Result<CoreRegs, DebuggableError> {
         self.cpu_manager.lock().unwrap().read_regs(cpu_id)
     }
 
     fn write_regs(
         &self,
         cpu_id: usize,
-        regs: &X86_64CoreRegs,
+        regs: &CoreRegs,
     ) -> std::result::Result<(), DebuggableError> {
         self.cpu_manager.lock().unwrap().write_regs(cpu_id, regs)
     }

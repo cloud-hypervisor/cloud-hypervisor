@@ -31,7 +31,11 @@ use gdbstub_arch::x86::X86_64_SSE as GdbArch;
 use std::{os::unix::net::UnixListener, sync::mpsc};
 use vm_memory::{GuestAddress, GuestMemoryError};
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_arch = "aarch64")]
+use gdbstub_arch::arm::reg::Aarch64CoreRegs as CoreRegs;
+#[cfg(target_arch = "aarch64")]
+use gdbstub_arch::arm::Aarch64 as GdbArch;
+
 type ArchUsize = u64;
 
 #[derive(Debug)]
@@ -121,7 +125,6 @@ pub struct GdbStub {
     gdb_sender: mpsc::Sender<GdbRequest>,
     gdb_event: vmm_sys_util::eventfd::EventFd,
     vm_event: vmm_sys_util::eventfd::EventFd,
-
     hw_breakpoints: Vec<GuestAddress>,
     single_step: bool,
 }
