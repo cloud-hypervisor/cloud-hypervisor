@@ -6969,6 +6969,7 @@ mod windows {
 
     #[test]
     #[cfg(not(feature = "mshv"))]
+    #[ignore = "See #4327"]
     fn test_windows_guest_snapshot_restore() {
         let windows_guest = WindowsGuest::new();
 
