@@ -8,7 +8,10 @@
 //
 //
 
-use crate::arch::x86::{DescriptorTable, SegmentRegister, SpecialRegisters, StandardRegisters};
+use crate::arch::x86::{
+    CpuIdEntry, DescriptorTable, SegmentRegister, SpecialRegisters, StandardRegisters,
+    CPUID_FLAG_VALID_INDEX,
+};
 use crate::kvm::{Cap, Kvm, KvmError, KvmResult};
 use serde::{Deserialize, Serialize};
 
@@ -16,14 +19,13 @@ use serde::{Deserialize, Serialize};
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
 ///
 pub use {
-    kvm_bindings::kvm_cpuid_entry2 as CpuIdEntry, kvm_bindings::kvm_dtable,
-    kvm_bindings::kvm_fpu as FpuState, kvm_bindings::kvm_lapic_state as LapicState,
-    kvm_bindings::kvm_mp_state as MpState, kvm_bindings::kvm_msr_entry as MsrEntry,
-    kvm_bindings::kvm_regs, kvm_bindings::kvm_segment, kvm_bindings::kvm_sregs,
-    kvm_bindings::kvm_vcpu_events as VcpuEvents,
+    kvm_bindings::kvm_cpuid_entry2, kvm_bindings::kvm_dtable, kvm_bindings::kvm_fpu as FpuState,
+    kvm_bindings::kvm_lapic_state as LapicState, kvm_bindings::kvm_mp_state as MpState,
+    kvm_bindings::kvm_msr_entry as MsrEntry, kvm_bindings::kvm_regs, kvm_bindings::kvm_segment,
+    kvm_bindings::kvm_sregs, kvm_bindings::kvm_vcpu_events as VcpuEvents,
     kvm_bindings::kvm_xcrs as ExtendedControlRegisters, kvm_bindings::kvm_xsave as Xsave,
     kvm_bindings::CpuId, kvm_bindings::MsrList, kvm_bindings::Msrs as MsrEntries,
-    kvm_bindings::KVM_CPUID_FLAG_SIGNIFCANT_INDEX as CPUID_FLAG_VALID_INDEX,
+    kvm_bindings::KVM_CPUID_FLAG_SIGNIFCANT_INDEX,
 };
 
 ///
@@ -218,6 +220,45 @@ impl From<kvm_sregs> for SpecialRegisters {
             efer: s.efer,
             apic_base: s.apic_base,
             interrupt_bitmap: s.interrupt_bitmap,
+        }
+    }
+}
+
+impl From<CpuIdEntry> for kvm_cpuid_entry2 {
+    fn from(e: CpuIdEntry) -> Self {
+        let flags = if e.flags & CPUID_FLAG_VALID_INDEX != 0 {
+            KVM_CPUID_FLAG_SIGNIFCANT_INDEX
+        } else {
+            0
+        };
+        Self {
+            function: e.function,
+            index: e.index,
+            flags,
+            eax: e.eax,
+            ebx: e.ebx,
+            ecx: e.ecx,
+            edx: e.edx,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<kvm_cpuid_entry2> for CpuIdEntry {
+    fn from(e: kvm_cpuid_entry2) -> Self {
+        let flags = if e.flags & KVM_CPUID_FLAG_SIGNIFCANT_INDEX != 0 {
+            CPUID_FLAG_VALID_INDEX
+        } else {
+            0
+        };
+        Self {
+            function: e.function,
+            index: e.index,
+            flags,
+            eax: e.eax,
+            ebx: e.ebx,
+            ecx: e.ecx,
+            edx: e.edx,
         }
     }
 }

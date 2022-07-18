@@ -36,14 +36,14 @@ use devices::interrupt_controller::InterruptController;
 use gdbstub_arch::x86::reg::{X86SegmentRegs, X86_64CoreRegs};
 #[cfg(feature = "guest_debug")]
 use hypervisor::arch::x86::msr_index;
+#[cfg(target_arch = "x86_64")]
+use hypervisor::arch::x86::CpuIdEntry;
 #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
 use hypervisor::arch::x86::{SpecialRegisters, StandardRegisters};
 #[cfg(target_arch = "aarch64")]
 use hypervisor::kvm::kvm_bindings;
 #[cfg(feature = "tdx")]
 use hypervisor::kvm::{TdxExitDetails, TdxExitStatus};
-#[cfg(target_arch = "x86_64")]
-use hypervisor::x86_64::CpuIdEntry;
 #[cfg(feature = "guest_debug")]
 use hypervisor::x86_64::{MsrEntries, MsrEntry};
 use hypervisor::{CpuState, HypervisorCpuError, VmExit, VmOps};
