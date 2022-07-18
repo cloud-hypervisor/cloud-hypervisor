@@ -254,3 +254,68 @@ pub struct FpuState {
     pub xmm: [[u8; 16usize]; 16usize],
     pub mxcsr: u32,
 }
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub enum LapicState {
+    #[cfg(feature = "kvm")]
+    Kvm(kvm_bindings::kvm_lapic_state),
+    #[cfg(feature = "mshv")]
+    Mshv(mshv_bindings::LapicState),
+}
+
+#[cfg(any(feature = "kvm", feature = "mshv"))]
+impl LapicState {
+    pub fn get_klapic_reg(&self, reg_offset: usize) -> u32 {
+        use byteorder::{LittleEndian, ReadBytesExt};
+        use std::io::Cursor;
+        use std::mem;
+
+        let sliceu8 = match self {
+            #[cfg(feature = "kvm")]
+            LapicState::Kvm(s) => unsafe {
+                // This array is only accessed as parts of a u32 word, so interpret it as a u8 array.
+                // Cursors are only readable on arrays of u8, not i8(c_char).
+                mem::transmute::<&[i8], &[u8]>(&s.regs[reg_offset..])
+            },
+            #[cfg(feature = "mshv")]
+            LapicState::Mshv(s) => unsafe {
+                // This array is only accessed as parts of a u32 word, so interpret it as a u8 array.
+                // Cursors are only readable on arrays of u8, not i8(c_char).
+                mem::transmute::<&[i8], &[u8]>(&s.regs[reg_offset..])
+            },
+        };
+
+        let mut reader = Cursor::new(sliceu8);
+        // Following call can't fail if the offsets defined above are correct.
+        reader
+            .read_u32::<LittleEndian>()
+            .expect("Failed to read klapic register")
+    }
+
+    pub fn set_klapic_reg(&mut self, reg_offset: usize, value: u32) {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        use std::io::Cursor;
+        use std::mem;
+
+        let sliceu8 = match self {
+            #[cfg(feature = "kvm")]
+            LapicState::Kvm(s) => unsafe {
+                // This array is only accessed as parts of a u32 word, so interpret it as a u8 array.
+                // Cursors are only readable on arrays of u8, not i8(c_char).
+                mem::transmute::<&mut [i8], &mut [u8]>(&mut s.regs[reg_offset..])
+            },
+            #[cfg(feature = "mshv")]
+            LapicState::Mshv(s) => unsafe {
+                // This array is only accessed as parts of a u32 word, so interpret it as a u8 array.
+                // Cursors are only readable on arrays of u8, not i8(c_char).
+                mem::transmute::<&mut [i8], &mut [u8]>(&mut s.regs[reg_offset..])
+            },
+        };
+
+        let mut writer = Cursor::new(sliceu8);
+        // Following call can't fail if the offsets defined above are correct.
+        writer
+            .write_u32::<LittleEndian>(value)
+            .expect("Failed to write klapic register")
+    }
+}

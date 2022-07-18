@@ -2336,8 +2336,7 @@ impl CpuElf64Writable for CpuManager {
 mod tests {
     use arch::x86_64::interrupts::*;
     use arch::x86_64::regs::*;
-    use hypervisor::arch::x86::{FpuState, StandardRegisters};
-    use hypervisor::x86_64::LapicState;
+    use hypervisor::arch::x86::{FpuState, LapicState, StandardRegisters};
 
     #[test]
     fn test_setlint() {
@@ -2350,8 +2349,8 @@ mod tests {
         let klapic_before: LapicState = vcpu.get_lapic().unwrap();
 
         // Compute the value that is expected to represent LVT0 and LVT1.
-        let lint0 = get_klapic_reg(&klapic_before, APIC_LVT0);
-        let lint1 = get_klapic_reg(&klapic_before, APIC_LVT1);
+        let lint0 = klapic_before.get_klapic_reg(APIC_LVT0);
+        let lint1 = klapic_before.get_klapic_reg(APIC_LVT1);
         let lint0_mode_expected = set_apic_delivery_mode(lint0, APIC_MODE_EXTINT);
         let lint1_mode_expected = set_apic_delivery_mode(lint1, APIC_MODE_NMI);
 
@@ -2359,8 +2358,8 @@ mod tests {
 
         // Compute the value that represents LVT0 and LVT1 after set_lint.
         let klapic_actual: LapicState = vcpu.get_lapic().unwrap();
-        let lint0_mode_actual = get_klapic_reg(&klapic_actual, APIC_LVT0);
-        let lint1_mode_actual = get_klapic_reg(&klapic_actual, APIC_LVT1);
+        let lint0_mode_actual = klapic_actual.get_klapic_reg(APIC_LVT0);
+        let lint1_mode_actual = klapic_actual.get_klapic_reg(APIC_LVT1);
         assert_eq!(lint0_mode_expected, lint0_mode_actual);
         assert_eq!(lint1_mode_expected, lint1_mode_actual);
     }

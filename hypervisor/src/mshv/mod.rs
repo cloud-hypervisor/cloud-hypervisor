@@ -37,7 +37,7 @@ use std::fs::File;
 use std::os::unix::io::AsRawFd;
 
 #[cfg(target_arch = "x86_64")]
-use crate::arch::x86::{CpuIdEntry, FpuState, SpecialRegisters, StandardRegisters};
+use crate::arch::x86::{CpuIdEntry, FpuState, LapicState, SpecialRegisters, StandardRegisters};
 
 const DIRTY_BITMAP_CLEAR_DIRTY: u64 = 0x4;
 const DIRTY_BITMAP_SET_DIRTY: u64 = 0x8;
@@ -543,17 +543,20 @@ impl cpu::Vcpu for MshvVcpu {
     /// Returns the state of the LAPIC (Local Advanced Programmable Interrupt Controller).
     ///
     fn get_lapic(&self) -> cpu::Result<LapicState> {
-        self.fd
+        Ok(self
+            .fd
             .get_lapic()
-            .map_err(|e| cpu::HypervisorCpuError::GetlapicState(e.into()))
+            .map_err(|e| cpu::HypervisorCpuError::GetlapicState(e.into()))?
+            .into())
     }
     #[cfg(target_arch = "x86_64")]
     ///
     /// Sets the state of the LAPIC (Local Advanced Programmable Interrupt Controller).
     ///
     fn set_lapic(&self, lapic: &LapicState) -> cpu::Result<()> {
+        let lapic: mshv_bindings::LapicState = (*lapic).clone().into();
         self.fd
-            .set_lapic(lapic)
+            .set_lapic(&lapic)
             .map_err(|e| cpu::HypervisorCpuError::SetLapicState(e.into()))
     }
     ///

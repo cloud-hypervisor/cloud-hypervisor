@@ -47,7 +47,7 @@ use vmm_sys_util::eventfd::EventFd;
 pub mod x86_64;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{
-    CpuIdEntry, FpuState, SpecialRegisters, StandardRegisters, NUM_IOAPIC_PINS,
+    CpuIdEntry, FpuState, LapicState, SpecialRegisters, StandardRegisters, NUM_IOAPIC_PINS,
 };
 #[cfg(target_arch = "x86_64")]
 use crate::ClockData;
@@ -65,7 +65,7 @@ use kvm_bindings::{
 #[cfg(target_arch = "x86_64")]
 use x86_64::check_required_kvm_extensions;
 #[cfg(target_arch = "x86_64")]
-pub use x86_64::{CpuId, ExtendedControlRegisters, LapicState, MsrEntries, VcpuKvmState, Xsave};
+pub use x86_64::{CpuId, ExtendedControlRegisters, MsrEntries, VcpuKvmState, Xsave};
 // aarch64 dependencies
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;
@@ -1374,17 +1374,20 @@ impl cpu::Vcpu for KvmVcpu {
     /// Returns the state of the LAPIC (Local Advanced Programmable Interrupt Controller).
     ///
     fn get_lapic(&self) -> cpu::Result<LapicState> {
-        self.fd
+        Ok(self
+            .fd
             .get_lapic()
-            .map_err(|e| cpu::HypervisorCpuError::GetlapicState(e.into()))
+            .map_err(|e| cpu::HypervisorCpuError::GetlapicState(e.into()))?
+            .into())
     }
     #[cfg(target_arch = "x86_64")]
     ///
     /// Sets the state of the LAPIC (Local Advanced Programmable Interrupt Controller).
     ///
     fn set_lapic(&self, klapic: &LapicState) -> cpu::Result<()> {
+        let klapic: kvm_bindings::kvm_lapic_state = (*klapic).clone().into();
         self.fd
-            .set_lapic(klapic)
+            .set_lapic(&klapic)
             .map_err(|e| cpu::HypervisorCpuError::SetLapicState(e.into()))
     }
     #[cfg(target_arch = "x86_64")]
