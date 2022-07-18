@@ -9,8 +9,8 @@
 //
 
 use crate::arch::x86::{
-    CpuIdEntry, DescriptorTable, FpuState, SegmentRegister, SpecialRegisters, StandardRegisters,
-    CPUID_FLAG_VALID_INDEX,
+    CpuIdEntry, DescriptorTable, FpuState, LapicState, SegmentRegister, SpecialRegisters,
+    StandardRegisters, CPUID_FLAG_VALID_INDEX,
 };
 use crate::kvm::{Cap, Kvm, KvmError, KvmResult};
 use serde::{Deserialize, Serialize};
@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 ///
 pub use {
     kvm_bindings::kvm_cpuid_entry2, kvm_bindings::kvm_dtable, kvm_bindings::kvm_fpu,
-    kvm_bindings::kvm_lapic_state as LapicState, kvm_bindings::kvm_mp_state as MpState,
+    kvm_bindings::kvm_lapic_state, kvm_bindings::kvm_mp_state as MpState,
     kvm_bindings::kvm_msr_entry as MsrEntry, kvm_bindings::kvm_regs, kvm_bindings::kvm_segment,
     kvm_bindings::kvm_sregs, kvm_bindings::kvm_vcpu_events as VcpuEvents,
     kvm_bindings::kvm_xcrs as ExtendedControlRegisters, kvm_bindings::kvm_xsave as Xsave,
@@ -293,5 +293,22 @@ impl From<FpuState> for kvm_fpu {
             mxcsr: s.mxcsr,
             ..Default::default()
         }
+    }
+}
+
+impl From<LapicState> for kvm_lapic_state {
+    fn from(s: LapicState) -> Self {
+        match s {
+            LapicState::Kvm(s) => s,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("LapicState is not valid"),
+        }
+    }
+}
+
+impl From<kvm_lapic_state> for LapicState {
+    fn from(s: kvm_lapic_state) -> Self {
+        LapicState::Kvm(s)
     }
 }

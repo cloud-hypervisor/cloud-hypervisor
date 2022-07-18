@@ -12,6 +12,7 @@ tdx = []
 
 [dependencies]
 anyhow = "1.0.58"
+byteorder = "1.4.3"
 epoll = "4.3.1"
 thiserror = "1.0.31"
 libc = "0.2.126"
