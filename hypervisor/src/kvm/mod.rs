@@ -46,7 +46,7 @@ use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
 #[cfg(target_arch = "x86_64")]
-use crate::arch::x86::{SpecialRegisters, StandardRegisters, NUM_IOAPIC_PINS};
+use crate::arch::x86::{CpuIdEntry, SpecialRegisters, StandardRegisters, NUM_IOAPIC_PINS};
 #[cfg(target_arch = "x86_64")]
 use crate::ClockData;
 use crate::{
@@ -63,10 +63,7 @@ use kvm_bindings::{
 #[cfg(target_arch = "x86_64")]
 use x86_64::{check_required_kvm_extensions, FpuState};
 #[cfg(target_arch = "x86_64")]
-pub use x86_64::{
-    CpuId, CpuIdEntry, ExtendedControlRegisters, LapicState, MsrEntries, VcpuKvmState, Xsave,
-    CPUID_FLAG_VALID_INDEX,
-};
+pub use x86_64::{CpuId, ExtendedControlRegisters, LapicState, MsrEntries, VcpuKvmState, Xsave};
 // aarch64 dependencies
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;
@@ -757,7 +754,9 @@ impl vm::Vm for KvmVm {
     #[cfg(feature = "tdx")]
     fn tdx_init(&self, cpuid: &[CpuIdEntry], max_vcpus: u32) -> vm::Result<()> {
         use std::io::{Error, ErrorKind};
-        let kvm_cpuid = kvm_bindings::CpuId::from_entries(cpuid).map_err(|_| {
+        let cpuid: Vec<kvm_bindings::kvm_cpuid_entry2> =
+            cpuid.iter().map(|e| (*e).into()).collect();
+        let kvm_cpuid = kvm_bindings::CpuId::from_entries(&cpuid).map_err(|_| {
             vm::HypervisorVmError::InitializeTdx(Error::new(
                 ErrorKind::Other,
                 "failed to allocate CpuId",
@@ -997,7 +996,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             .get_supported_cpuid(kvm_bindings::KVM_MAX_CPUID_ENTRIES)
             .map_err(|e| hypervisor::HypervisorError::GetCpuId(e.into()))?;
 
-        let v = kvm_cpuid.as_slice().to_vec();
+        let v = kvm_cpuid.as_slice().iter().map(|e| (*e).into()).collect();
 
         Ok(v)
     }
@@ -1325,7 +1324,9 @@ impl cpu::Vcpu for KvmVcpu {
     /// X86 specific call to setup the CPUID registers.
     ///
     fn set_cpuid2(&self, cpuid: &[CpuIdEntry]) -> cpu::Result<()> {
-        let kvm_cpuid = CpuId::from_entries(cpuid)
+        let cpuid: Vec<kvm_bindings::kvm_cpuid_entry2> =
+            cpuid.iter().map(|e| (*e).into()).collect();
+        let kvm_cpuid = <CpuId>::from_entries(&cpuid)
             .map_err(|_| cpu::HypervisorCpuError::SetCpuid(anyhow!("failed to create CpuId")))?;
 
         self.fd
@@ -1359,7 +1360,7 @@ impl cpu::Vcpu for KvmVcpu {
             .get_cpuid2(num_entries)
             .map_err(|e| cpu::HypervisorCpuError::GetCpuid(e.into()))?;
 
-        let v = kvm_cpuid.as_slice().to_vec();
+        let v = kvm_cpuid.as_slice().iter().map(|e| (*e).into()).collect();
 
         Ok(v)
     }

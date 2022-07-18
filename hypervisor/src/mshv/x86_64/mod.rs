@@ -7,7 +7,9 @@
 // Copyright 2018-2019 CrowdStrike, Inc.
 //
 //
-use crate::arch::x86::{DescriptorTable, SegmentRegister, SpecialRegisters, StandardRegisters};
+use crate::arch::x86::{
+    CpuIdEntry, DescriptorTable, SegmentRegister, SpecialRegisters, StandardRegisters,
+};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -15,9 +17,8 @@ use std::fmt;
 /// Export generically-named wrappers of mshv_bindings for Unix-based platforms
 ///
 pub use {
-    mshv_bindings::hv_cpuid_entry as CpuIdEntry,
-    mshv_bindings::mshv_user_mem_region as MemoryRegion, mshv_bindings::msr_entry as MsrEntry,
-    mshv_bindings::CpuId, mshv_bindings::DebugRegisters,
+    mshv_bindings::hv_cpuid_entry, mshv_bindings::mshv_user_mem_region as MemoryRegion,
+    mshv_bindings::msr_entry as MsrEntry, mshv_bindings::CpuId, mshv_bindings::DebugRegisters,
     mshv_bindings::FloatingPointUnit as FpuState, mshv_bindings::LapicState,
     mshv_bindings::MiscRegs as MiscRegisters, mshv_bindings::MsrList,
     mshv_bindings::Msrs as MsrEntries, mshv_bindings::Msrs,
@@ -27,8 +28,6 @@ pub use {
     mshv_bindings::TableRegister, mshv_bindings::VcpuEvents, mshv_bindings::XSave as Xsave,
     mshv_bindings::Xcrs as ExtendedControlRegisters,
 };
-
-pub const CPUID_FLAG_VALID_INDEX: u32 = 0;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct VcpuMshvState {
@@ -221,6 +220,35 @@ impl From<MshvSpecialRegisters> for SpecialRegisters {
             efer: s.efer,
             apic_base: s.apic_base,
             interrupt_bitmap: s.interrupt_bitmap,
+        }
+    }
+}
+
+impl From<CpuIdEntry> for hv_cpuid_entry {
+    fn from(e: CpuIdEntry) -> Self {
+        Self {
+            function: e.function,
+            index: e.index,
+            flags: e.flags,
+            eax: e.eax,
+            ebx: e.ebx,
+            ecx: e.ecx,
+            edx: e.edx,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<hv_cpuid_entry> for CpuIdEntry {
+    fn from(e: hv_cpuid_entry) -> Self {
+        Self {
+            function: e.function,
+            index: e.index,
+            flags: e.flags,
+            eax: e.eax,
+            ebx: e.ebx,
+            ecx: e.ecx,
+            edx: e.edx,
         }
     }
 }

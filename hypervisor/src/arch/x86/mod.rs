@@ -228,3 +228,16 @@ pub struct SpecialRegisters {
     pub apic_base: u64,
     pub interrupt_bitmap: [u64; 4usize],
 }
+
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct CpuIdEntry {
+    pub function: u32,
+    pub index: u32,
+    pub flags: u32,
+    pub eax: u32,
+    pub ebx: u32,
+    pub ecx: u32,
+    pub edx: u32,
+}
+
+pub const CPUID_FLAG_VALID_INDEX: u32 = 1;

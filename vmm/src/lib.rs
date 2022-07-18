@@ -355,7 +355,7 @@ pub fn start_vmm_thread(
 struct VmMigrationConfig {
     vm_config: Arc<Mutex<VmConfig>>,
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-    common_cpuid: Vec<hypervisor::x86_64::CpuIdEntry>,
+    common_cpuid: Vec<hypervisor::arch::x86::CpuIdEntry>,
     memory_manager_data: MemoryManagerSnapshotData,
 }
 
@@ -1593,7 +1593,7 @@ impl Vmm {
     fn vm_check_cpuid_compatibility(
         &self,
         src_vm_config: &Arc<Mutex<VmConfig>>,
-        src_vm_cpuid: &[hypervisor::x86_64::CpuIdEntry],
+        src_vm_cpuid: &[hypervisor::arch::x86::CpuIdEntry],
     ) -> result::Result<(), MigratableError> {
         // We check the `CPUID` compatibility of between the source vm and destination, which is
         // mostly about feature compatibility and "topology/sgx" leaves are not relevant.

@@ -13,13 +13,13 @@ use crate::aarch64::VcpuInit;
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::{RegList, Register, StandardRegisters};
 #[cfg(target_arch = "x86_64")]
-use crate::arch::x86::{SpecialRegisters, StandardRegisters};
+use crate::arch::x86::{CpuIdEntry, SpecialRegisters, StandardRegisters};
 #[cfg(feature = "tdx")]
 use crate::kvm::{TdxExitDetails, TdxExitStatus};
 #[cfg(target_arch = "x86_64")]
-use crate::x86_64::Xsave;
+use crate::x86_64::LapicState;
 #[cfg(target_arch = "x86_64")]
-use crate::x86_64::{CpuIdEntry, LapicState};
+use crate::x86_64::Xsave;
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::{ExtendedControlRegisters, FpuState, MsrEntries, VcpuEvents};
 use crate::CpuState;

@@ -37,7 +37,7 @@ use std::fs::File;
 use std::os::unix::io::AsRawFd;
 
 #[cfg(target_arch = "x86_64")]
-use crate::arch::x86::{SpecialRegisters, StandardRegisters};
+use crate::arch::x86::{CpuIdEntry, SpecialRegisters, StandardRegisters};
 
 const DIRTY_BITMAP_CLEAR_DIRTY: u64 = 0x4;
 const DIRTY_BITMAP_SET_DIRTY: u64 = 0x8;

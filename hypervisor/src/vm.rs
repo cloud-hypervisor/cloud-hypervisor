@@ -12,10 +12,10 @@
 use crate::aarch64::VcpuInit;
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::gic::Vgic;
+#[cfg(feature = "tdx")]
+use crate::arch::x86::CpuIdEntry;
 use crate::cpu::Vcpu;
 use crate::device::Device;
-#[cfg(feature = "tdx")]
-use crate::x86_64::CpuIdEntry;
 #[cfg(target_arch = "x86_64")]
 use crate::ClockData;
 use crate::CreateDevice;
