@@ -161,6 +161,18 @@ pub struct MshvHypervisor {
 }
 
 impl MshvHypervisor {
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Retrieve the list of MSRs supported by MSHV.
+    ///
+    fn get_msr_list(&self) -> hypervisor::Result<MsrList> {
+        self.mshv
+            .get_msr_index_list()
+            .map_err(|e| hypervisor::HypervisorError::GetMsrList(e.into()))
+    }
+}
+
+impl MshvHypervisor {
     /// Create a hypervisor based on Mshv
     pub fn new() -> hypervisor::Result<MshvHypervisor> {
         let mshv_obj =
@@ -237,15 +249,6 @@ impl hypervisor::Hypervisor for MshvHypervisor {
     ///
     fn get_cpuid(&self) -> hypervisor::Result<Vec<CpuIdEntry>> {
         Ok(Vec::new())
-    }
-    #[cfg(target_arch = "x86_64")]
-    ///
-    /// Retrieve the list of MSRs supported by MSHV.
-    ///
-    fn get_msr_list(&self) -> hypervisor::Result<MsrList> {
-        self.mshv
-            .get_msr_index_list()
-            .map_err(|e| hypervisor::HypervisorError::GetMsrList(e.into()))
     }
 }
 

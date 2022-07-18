@@ -12,8 +12,6 @@ use crate::arch::x86::CpuIdEntry;
 #[cfg(feature = "tdx")]
 use crate::kvm::TdxCapabilities;
 use crate::vm::Vm;
-#[cfg(target_arch = "x86_64")]
-use crate::x86_64::MsrList;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -107,11 +105,6 @@ pub trait Hypervisor: Send + Sync {
     fn check_required_extensions(&self) -> Result<()> {
         Ok(())
     }
-    #[cfg(target_arch = "x86_64")]
-    ///
-    /// Retrieve the list of MSRs supported by the hypervisor.
-    ///
-    fn get_msr_list(&self) -> Result<MsrList>;
     #[cfg(target_arch = "aarch64")]
     ///
     /// Retrieve AArch64 host maximum IPA size supported by KVM.
