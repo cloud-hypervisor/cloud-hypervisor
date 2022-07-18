@@ -27,7 +27,7 @@ devices = { path = "../devices" }
 epoll = "4.3.1"
 event_monitor = { path = "../event_monitor" }
 gdbstub = { version = "0.6.2", optional = true }
-gdbstub_arch = { version = "0.2.3", optional = true }
+gdbstub_arch = { git = "https://github.com/michael2012z/gdbstub_arch_test.git", branch = "main", optional = true }
 hypervisor = { path = "../hypervisor" }
 libc = "0.2.129"
 linux-loader = { version = "0.4.0", features = ["elf", "bzimage", "pe"] }
