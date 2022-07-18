@@ -875,6 +875,19 @@ fn tdx_command(
 pub struct KvmHypervisor {
     kvm: Kvm,
 }
+
+impl KvmHypervisor {
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Retrieve the list of MSRs supported by the hypervisor.
+    ///
+    fn get_msr_list(&self) -> hypervisor::Result<MsrList> {
+        self.kvm
+            .get_msr_index_list()
+            .map_err(|e| hypervisor::HypervisorError::GetMsrList(e.into()))
+    }
+}
+
 /// Enum for KVM related error
 #[derive(Debug, Error)]
 pub enum KvmError {
@@ -1003,15 +1016,6 @@ impl hypervisor::Hypervisor for KvmHypervisor {
         Ok(v)
     }
 
-    #[cfg(target_arch = "x86_64")]
-    ///
-    /// Retrieve the list of MSRs supported by KVM.
-    ///
-    fn get_msr_list(&self) -> hypervisor::Result<MsrList> {
-        self.kvm
-            .get_msr_index_list()
-            .map_err(|e| hypervisor::HypervisorError::GetMsrList(e.into()))
-    }
     #[cfg(target_arch = "aarch64")]
     ///
     /// Retrieve AArch64 host maximum IPA size supported by KVM.
