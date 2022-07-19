@@ -19,7 +19,6 @@ use crate::kvm::{TdxExitDetails, TdxExitStatus};
 use crate::CpuState;
 use crate::MpState;
 use thiserror::Error;
-#[cfg(target_arch = "x86_64")]
 use vm_memory::GuestAddress;
 
 #[derive(Error, Debug)]
@@ -347,7 +346,6 @@ pub trait Vcpu: Send + Sync {
     fn notify_guest_clock_paused(&self) -> Result<()> {
         Ok(())
     }
-    #[cfg(target_arch = "x86_64")]
     ///
     /// Sets debug registers to set hardware breakpoints and/or enable single step.
     ///

@@ -60,8 +60,8 @@ use crate::{
 use aarch64::{RegList, Register, StandardRegisters};
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{
-    kvm_enable_cap, kvm_guest_debug, kvm_msr_entry, MsrList, KVM_CAP_HYPERV_SYNIC,
-    KVM_CAP_SPLIT_IRQCHIP, KVM_GUESTDBG_ENABLE, KVM_GUESTDBG_SINGLESTEP, KVM_GUESTDBG_USE_HW_BP,
+    kvm_enable_cap, kvm_msr_entry, MsrList, KVM_CAP_HYPERV_SYNIC, KVM_CAP_SPLIT_IRQCHIP,
+    KVM_GUESTDBG_USE_HW_BP,
 };
 #[cfg(target_arch = "x86_64")]
 use x86_64::check_required_kvm_extensions;
@@ -74,16 +74,17 @@ pub use kvm_bindings;
 #[cfg(feature = "tdx")]
 use kvm_bindings::KVMIO;
 pub use kvm_bindings::{
-    kvm_clock_data, kvm_create_device, kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_irq_routing,
-    kvm_irq_routing_entry, kvm_mp_state, kvm_userspace_memory_region, KVM_IRQ_ROUTING_IRQCHIP,
-    KVM_IRQ_ROUTING_MSI, KVM_MEM_LOG_DIRTY_PAGES, KVM_MEM_READONLY, KVM_MSI_VALID_DEVID,
+    kvm_clock_data, kvm_create_device, kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_guest_debug,
+    kvm_irq_routing, kvm_irq_routing_entry, kvm_mp_state, kvm_userspace_memory_region,
+    KVM_GUESTDBG_ENABLE, KVM_GUESTDBG_SINGLESTEP, KVM_IRQ_ROUTING_IRQCHIP, KVM_IRQ_ROUTING_MSI,
+    KVM_MEM_LOG_DIRTY_PAGES, KVM_MEM_READONLY, KVM_MSI_VALID_DEVID,
 };
 #[cfg(target_arch = "aarch64")]
 use kvm_bindings::{
-    kvm_regs, user_fpsimd_state, user_pt_regs, KVM_NR_SPSR, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG,
-    KVM_REG_ARM64_SYSREG_CRM_MASK, KVM_REG_ARM64_SYSREG_CRN_MASK, KVM_REG_ARM64_SYSREG_OP0_MASK,
-    KVM_REG_ARM64_SYSREG_OP1_MASK, KVM_REG_ARM64_SYSREG_OP2_MASK, KVM_REG_ARM_CORE,
-    KVM_REG_SIZE_U128, KVM_REG_SIZE_U32, KVM_REG_SIZE_U64,
+    kvm_regs, user_fpsimd_state, user_pt_regs, KVM_GUESTDBG_USE_HW, KVM_NR_SPSR, KVM_REG_ARM64,
+    KVM_REG_ARM64_SYSREG, KVM_REG_ARM64_SYSREG_CRM_MASK, KVM_REG_ARM64_SYSREG_CRN_MASK,
+    KVM_REG_ARM64_SYSREG_OP0_MASK, KVM_REG_ARM64_SYSREG_OP1_MASK, KVM_REG_ARM64_SYSREG_OP2_MASK,
+    KVM_REG_ARM_CORE, KVM_REG_SIZE_U128, KVM_REG_SIZE_U32, KVM_REG_SIZE_U64,
 };
 pub use kvm_ioctls;
 pub use kvm_ioctls::{Cap, Kvm};
@@ -1582,7 +1583,6 @@ impl cpu::Vcpu for KvmVcpu {
 
         Ok(())
     }
-    #[cfg(target_arch = "x86_64")]
     ///
     /// Sets debug registers to set hardware breakpoints and/or enable single step.
     ///
@@ -1599,24 +1599,43 @@ impl cpu::Vcpu for KvmVcpu {
         }
 
         let mut dbg = kvm_guest_debug {
+            #[cfg(target_arch = "x86_64")]
             control: KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_HW_BP,
+            #[cfg(target_arch = "aarch64")]
+            control: KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_HW,
             ..Default::default()
         };
         if singlestep {
             dbg.control |= KVM_GUESTDBG_SINGLESTEP;
         }
 
-        // Set bits 9 and 10.
-        // bit 9: GE (global exact breakpoint enable) flag.
-        // bit 10: always 1.
-        dbg.arch.debugreg[7] = 0x0600;
+        #[cfg(target_arch = "x86_64")]
+        {
+            // Set bits 9 and 10.
+            // bit 9: GE (global exact breakpoint enable) flag.
+            // bit 10: always 1.
+            dbg.arch.debugreg[7] = 0x0600;
 
-        for (i, addr) in addrs.iter().enumerate() {
-            dbg.arch.debugreg[i] = addr.0;
-            // Set global breakpoint enable flag
-            dbg.arch.debugreg[7] |= 2 << (i * 2);
+            for (i, addr) in addrs.iter().enumerate() {
+                dbg.arch.debugreg[i] = addr.0;
+                // Set global breakpoint enable flag
+                dbg.arch.debugreg[7] |= 2 << (i * 2);
+            }
         }
-
+        #[cfg(target_arch = "aarch64")]
+        {
+            for (i, addr) in addrs.iter().enumerate() {
+                // DBGBCR_EL1 (Debug Breakpoint Control Registers, D13.3.2):
+                // bit 0: 1 (Enabled)
+                // bit 1~2: 0b11 (PMC = EL1/EL0)
+                // bit 5~8: 0b1111 (BAS = AArch64)
+                // others: 0
+                dbg.arch.dbg_bcr[i] = 0b1u64 | 0b110u64 | 0b1_1110_0000u64;
+                // DBGBVR_EL1 (Debug Breakpoint Value Registers, D13.3.3):
+                // bit 2~52: VA[2:52]
+                dbg.arch.dbg_bvr[i] = (!0u64 >> 11) & addr.0;
+            }
+        }
         self.fd
             .set_guest_debug(&dbg)
             .map_err(|e| cpu::HypervisorCpuError::SetDebugRegs(e.into()))
