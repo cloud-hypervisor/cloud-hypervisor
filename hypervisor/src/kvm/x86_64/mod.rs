@@ -9,7 +9,7 @@
 //
 
 use crate::arch::x86::{
-    CpuIdEntry, DescriptorTable, FpuState, LapicState, SegmentRegister, SpecialRegisters,
+    CpuIdEntry, DescriptorTable, FpuState, LapicState, MsrEntry, SegmentRegister, SpecialRegisters,
     StandardRegisters, CPUID_FLAG_VALID_INDEX,
 };
 use crate::kvm::{Cap, Kvm, KvmError, KvmResult};
@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 pub use {
     kvm_bindings::kvm_cpuid_entry2, kvm_bindings::kvm_dtable, kvm_bindings::kvm_fpu,
     kvm_bindings::kvm_lapic_state, kvm_bindings::kvm_mp_state as MpState,
-    kvm_bindings::kvm_msr_entry as MsrEntry, kvm_bindings::kvm_regs, kvm_bindings::kvm_segment,
+    kvm_bindings::kvm_msr_entry, kvm_bindings::kvm_regs, kvm_bindings::kvm_segment,
     kvm_bindings::kvm_sregs, kvm_bindings::kvm_vcpu_events as VcpuEvents,
     kvm_bindings::kvm_xcrs as ExtendedControlRegisters, kvm_bindings::kvm_xsave as Xsave,
     kvm_bindings::CpuId, kvm_bindings::MsrList, kvm_bindings::Msrs as MsrEntries,
@@ -310,5 +310,24 @@ impl From<LapicState> for kvm_lapic_state {
 impl From<kvm_lapic_state> for LapicState {
     fn from(s: kvm_lapic_state) -> Self {
         LapicState::Kvm(s)
+    }
+}
+
+impl From<kvm_msr_entry> for MsrEntry {
+    fn from(e: kvm_msr_entry) -> Self {
+        Self {
+            index: e.index,
+            data: e.data,
+        }
+    }
+}
+
+impl From<MsrEntry> for kvm_msr_entry {
+    fn from(e: MsrEntry) -> Self {
+        Self {
+            index: e.index,
+            data: e.data,
+            ..Default::default()
+        }
     }
 }
