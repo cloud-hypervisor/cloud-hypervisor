@@ -39,3 +39,6 @@ macro_rules! arm64_sys_reg {
 }
 
 arm64_sys_reg!(MPIDR_EL1, 3, 0, 0, 0, 5);
+arm64_sys_reg!(ID_AA64MMFR0_EL1, 3, 0, 0, 7, 0);
+arm64_sys_reg!(TTBR1_EL1, 3, 0, 2, 0, 1);
+arm64_sys_reg!(TCR_EL1, 3, 0, 2, 0, 2);
