@@ -161,7 +161,6 @@ macro_rules! msr {
         MsrEntry {
             index: $msr,
             data: 0x0,
-            ..Default::default()
         }
     };
 }
@@ -171,7 +170,6 @@ macro_rules! msr_data {
         MsrEntry {
             index: $msr,
             data: $data,
-            ..Default::default()
         }
     };
 }
@@ -318,4 +316,10 @@ impl LapicState {
             .write_u32::<LittleEndian>(value)
             .expect("Failed to write klapic register")
     }
+}
+
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct MsrEntry {
+    pub index: u32,
+    pub data: u64,
 }

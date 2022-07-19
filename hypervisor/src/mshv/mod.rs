@@ -37,7 +37,9 @@ use std::fs::File;
 use std::os::unix::io::AsRawFd;
 
 #[cfg(target_arch = "x86_64")]
-use crate::arch::x86::{CpuIdEntry, FpuState, LapicState, SpecialRegisters, StandardRegisters};
+use crate::arch::x86::{
+    CpuIdEntry, FpuState, LapicState, MsrEntry, SpecialRegisters, StandardRegisters,
+};
 
 const DIRTY_BITMAP_CLEAR_DIRTY: u64 = 0x4;
 const DIRTY_BITMAP_SET_DIRTY: u64 = 0x8;
@@ -346,13 +348,19 @@ impl cpu::Vcpu for MshvVcpu {
     /// Returns the model-specific registers (MSR) for this vCPU.
     ///
     fn get_msrs(&self, msrs: &mut Vec<MsrEntry>) -> cpu::Result<usize> {
-        let mut mshv_msrs = MsrEntries::from_entries(msrs).unwrap();
+        let mshv_msrs: Vec<msr_entry> = msrs.iter().map(|e| (*e).into()).collect();
+        let mut mshv_msrs = MsrEntries::from_entries(&mshv_msrs).unwrap();
         let succ = self
             .fd
             .get_msrs(&mut mshv_msrs)
             .map_err(|e| cpu::HypervisorCpuError::GetMsrEntries(e.into()))?;
 
-        msrs[..succ].copy_from_slice(&mshv_msrs.as_slice()[..succ]);
+        msrs[..succ].copy_from_slice(
+            &mshv_msrs.as_slice()[..succ]
+                .iter()
+                .map(|e| (*e).into())
+                .collect::<Vec<MsrEntry>>(),
+        );
 
         Ok(succ)
     }
@@ -362,7 +370,8 @@ impl cpu::Vcpu for MshvVcpu {
     /// Returns the number of MSR entries actually written.
     ///
     fn set_msrs(&self, msrs: &[MsrEntry]) -> cpu::Result<usize> {
-        let mshv_msrs = MsrEntries::from_entries(msrs).unwrap();
+        let mshv_msrs: Vec<msr_entry> = msrs.iter().map(|e| (*e).into()).collect();
+        let mshv_msrs = MsrEntries::from_entries(&mshv_msrs).unwrap();
         self.fd
             .set_msrs(&mshv_msrs)
             .map_err(|e| cpu::HypervisorCpuError::SetMsrEntries(e.into()))

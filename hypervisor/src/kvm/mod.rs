@@ -47,7 +47,8 @@ use vmm_sys_util::eventfd::EventFd;
 pub mod x86_64;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{
-    CpuIdEntry, FpuState, LapicState, SpecialRegisters, StandardRegisters, NUM_IOAPIC_PINS,
+    CpuIdEntry, FpuState, LapicState, MsrEntry, SpecialRegisters, StandardRegisters,
+    NUM_IOAPIC_PINS,
 };
 #[cfg(target_arch = "x86_64")]
 use crate::ClockData;
@@ -65,7 +66,7 @@ use kvm_bindings::{
 #[cfg(target_arch = "x86_64")]
 use x86_64::check_required_kvm_extensions;
 #[cfg(target_arch = "x86_64")]
-pub use x86_64::{CpuId, ExtendedControlRegisters, MsrEntries, MsrEntry, VcpuKvmState, Xsave};
+pub use x86_64::{CpuId, ExtendedControlRegisters, MsrEntries, VcpuKvmState, Xsave};
 // aarch64 dependencies
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;
@@ -1403,13 +1404,19 @@ impl cpu::Vcpu for KvmVcpu {
     /// Returns the model-specific registers (MSR) for this vCPU.
     ///
     fn get_msrs(&self, msrs: &mut Vec<MsrEntry>) -> cpu::Result<usize> {
-        let mut kvm_msrs = MsrEntries::from_entries(msrs).unwrap();
+        let kvm_msrs: Vec<kvm_msr_entry> = msrs.iter().map(|e| (*e).into()).collect();
+        let mut kvm_msrs = MsrEntries::from_entries(&kvm_msrs).unwrap();
         let succ = self
             .fd
             .get_msrs(&mut kvm_msrs)
             .map_err(|e| cpu::HypervisorCpuError::GetMsrEntries(e.into()))?;
 
-        msrs[..succ].copy_from_slice(&kvm_msrs.as_slice()[..succ]);
+        msrs[..succ].copy_from_slice(
+            &kvm_msrs.as_slice()[..succ]
+                .iter()
+                .map(|e| (*e).into())
+                .collect::<Vec<MsrEntry>>(),
+        );
 
         Ok(succ)
     }
@@ -1419,7 +1426,8 @@ impl cpu::Vcpu for KvmVcpu {
     /// Returns the number of MSR entries actually written.
     ///
     fn set_msrs(&self, msrs: &[MsrEntry]) -> cpu::Result<usize> {
-        let kvm_msrs = MsrEntries::from_entries(msrs).unwrap();
+        let kvm_msrs: Vec<kvm_msr_entry> = msrs.iter().map(|e| (*e).into()).collect();
+        let kvm_msrs = MsrEntries::from_entries(&kvm_msrs).unwrap();
         self.fd
             .set_msrs(&kvm_msrs)
             .map_err(|e| cpu::HypervisorCpuError::SetMsrEntries(e.into()))
@@ -1812,7 +1820,7 @@ impl cpu::Vcpu for KvmVcpu {
                     index,
                     ..Default::default()
                 };
-                msr_entries.push(msr);
+                msr_entries.push(msr.into());
             }
         }
 

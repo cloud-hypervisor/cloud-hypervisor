@@ -8,7 +8,7 @@
 //
 //
 use crate::arch::x86::{
-    CpuIdEntry, DescriptorTable, FpuState, LapicState, SegmentRegister, SpecialRegisters,
+    CpuIdEntry, DescriptorTable, FpuState, LapicState, MsrEntry, SegmentRegister, SpecialRegisters,
     StandardRegisters,
 };
 use serde::{Deserialize, Serialize};
@@ -19,7 +19,7 @@ use std::fmt;
 ///
 pub use {
     mshv_bindings::hv_cpuid_entry, mshv_bindings::mshv_user_mem_region as MemoryRegion,
-    mshv_bindings::msr_entry as MsrEntry, mshv_bindings::CpuId, mshv_bindings::DebugRegisters,
+    mshv_bindings::msr_entry, mshv_bindings::CpuId, mshv_bindings::DebugRegisters,
     mshv_bindings::FloatingPointUnit, mshv_bindings::LapicState as MshvLapicState,
     mshv_bindings::MiscRegs as MiscRegisters, mshv_bindings::MsrList,
     mshv_bindings::Msrs as MsrEntries, mshv_bindings::Msrs,
@@ -301,5 +301,24 @@ impl From<LapicState> for MshvLapicState {
 impl From<MshvLapicState> for LapicState {
     fn from(s: MshvLapicState) -> Self {
         LapicState::Mshv(s)
+    }
+}
+
+impl From<msr_entry> for MsrEntry {
+    fn from(e: msr_entry) -> Self {
+        Self {
+            index: e.index,
+            data: e.data,
+        }
+    }
+}
+
+impl From<MsrEntry> for msr_entry {
+    fn from(e: MsrEntry) -> Self {
+        Self {
+            index: e.index,
+            data: e.data,
+            ..Default::default()
+        }
     }
 }

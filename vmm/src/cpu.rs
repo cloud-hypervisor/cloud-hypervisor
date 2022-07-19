@@ -38,14 +38,14 @@ use gdbstub_arch::x86::reg::{X86SegmentRegs, X86_64CoreRegs};
 use hypervisor::arch::x86::msr_index;
 #[cfg(target_arch = "x86_64")]
 use hypervisor::arch::x86::CpuIdEntry;
+#[cfg(feature = "guest_debug")]
+use hypervisor::arch::x86::MsrEntry;
 #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
 use hypervisor::arch::x86::{SpecialRegisters, StandardRegisters};
 #[cfg(target_arch = "aarch64")]
 use hypervisor::kvm::kvm_bindings;
 #[cfg(feature = "tdx")]
 use hypervisor::kvm::{TdxExitDetails, TdxExitStatus};
-#[cfg(feature = "guest_debug")]
-use hypervisor::x86_64::MsrEntry;
 use hypervisor::{CpuState, HypervisorCpuError, VmExit, VmOps};
 use libc::{c_void, siginfo_t};
 #[cfg(feature = "guest_debug")]
@@ -2387,8 +2387,7 @@ mod tests {
 
     #[test]
     fn test_setup_msrs() {
-        use hypervisor::arch::x86::msr_index;
-        use hypervisor::x86_64::MsrEntry;
+        use hypervisor::arch::x86::{msr_index, MsrEntry};
 
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().expect("new VM fd creation failed");
