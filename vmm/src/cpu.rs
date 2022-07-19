@@ -45,7 +45,7 @@ use hypervisor::kvm::kvm_bindings;
 #[cfg(feature = "tdx")]
 use hypervisor::kvm::{TdxExitDetails, TdxExitStatus};
 #[cfg(feature = "guest_debug")]
-use hypervisor::x86_64::{MsrEntries, MsrEntry};
+use hypervisor::x86_64::MsrEntry;
 use hypervisor::{CpuState, HypervisorCpuError, VmExit, VmOps};
 use libc::{c_void, siginfo_t};
 #[cfg(feature = "guest_debug")]
@@ -2271,11 +2271,10 @@ impl CpuElf64Writable for CpuManager {
                 .get_sregs()
                 .map_err(|_e| GuestDebuggableError::Coredump(anyhow!("get sregs failed")))?;
 
-            let mut msrs = MsrEntries::from_entries(&[MsrEntry {
+            let mut msrs = vec![MsrEntry {
                 index: msr_index::MSR_KERNEL_GS_BASE,
                 ..Default::default()
-            }])
-            .map_err(|_e| GuestDebuggableError::Coredump(anyhow!("get msr failed")))?;
+            }];
 
             self.vcpus[vcpu_id as usize]
                 .lock()
@@ -2283,7 +2282,7 @@ impl CpuElf64Writable for CpuManager {
                 .vcpu
                 .get_msrs(&mut msrs)
                 .map_err(|_e| GuestDebuggableError::Coredump(anyhow!("get msr failed")))?;
-            let kernel_gs_base = msrs.as_slice()[0].data;
+            let kernel_gs_base = msrs[0].data;
 
             let cs = CpuSegment::new(sregs.cs);
             let ds = CpuSegment::new(sregs.ds);
@@ -2389,7 +2388,7 @@ mod tests {
     #[test]
     fn test_setup_msrs() {
         use hypervisor::arch::x86::msr_index;
-        use hypervisor::x86_64::{MsrEntries, MsrEntry};
+        use hypervisor::x86_64::MsrEntry;
 
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().expect("new VM fd creation failed");
@@ -2398,11 +2397,10 @@ mod tests {
 
         // This test will check against the last MSR entry configured (the tenth one).
         // See create_msr_entries for details.
-        let mut msrs = MsrEntries::from_entries(&[MsrEntry {
+        let mut msrs = vec![MsrEntry {
             index: msr_index::MSR_IA32_MISC_ENABLE,
             ..Default::default()
-        }])
-        .unwrap();
+        }];
 
         // get_msrs returns the number of msrs that it succeed in reading. We only want to read 1
         // in this test case scenario.

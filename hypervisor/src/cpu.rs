@@ -17,7 +17,7 @@ use crate::arch::x86::{CpuIdEntry, FpuState, LapicState, SpecialRegisters, Stand
 #[cfg(feature = "tdx")]
 use crate::kvm::{TdxExitDetails, TdxExitStatus};
 #[cfg(target_arch = "x86_64")]
-use crate::x86_64::MsrEntries;
+use crate::x86_64::MsrEntry;
 use crate::CpuState;
 #[cfg(target_arch = "aarch64")]
 use crate::DeviceAttr;
@@ -333,12 +333,12 @@ pub trait Vcpu: Send + Sync {
     ///
     /// Returns the model-specific registers (MSR) for this vCPU.
     ///
-    fn get_msrs(&self, msrs: &mut MsrEntries) -> Result<usize>;
+    fn get_msrs(&self, msrs: &mut Vec<MsrEntry>) -> Result<usize>;
     #[cfg(target_arch = "x86_64")]
     ///
     /// Setup the model-specific registers (MSR) for this vCPU.
     ///
-    fn set_msrs(&self, msrs: &MsrEntries) -> Result<usize>;
+    fn set_msrs(&self, msrs: &[MsrEntry]) -> Result<usize>;
     ///
     /// Returns the vcpu's current "multiprocessing state".
     ///
@@ -442,5 +442,5 @@ pub trait Vcpu: Send + Sync {
     ///
     /// Return the list of initial MSR entries for a VCPU
     ///
-    fn boot_msr_entries(&self) -> MsrEntries;
+    fn boot_msr_entries(&self) -> Vec<MsrEntry>;
 }
