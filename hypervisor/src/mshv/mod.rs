@@ -229,11 +229,15 @@ impl hypervisor::Hypervisor for MshvHypervisor {
 
         let msr_list = self.get_msr_list()?;
         let num_msrs = msr_list.as_fam_struct_ref().nmsrs as usize;
-        let mut msrs = MsrEntries::new(num_msrs).unwrap();
+        let mut msrs: Vec<MsrEntry> = vec![
+            MsrEntry {
+                ..Default::default()
+            };
+            num_msrs
+        ];
         let indices = msr_list.as_slice();
-        let msr_entries = msrs.as_mut_slice();
         for (pos, index) in indices.iter().enumerate() {
-            msr_entries[pos].index = *index;
+            msrs[pos].index = *index;
         }
         let vm_fd = Arc::new(fd);
 
@@ -258,7 +262,7 @@ pub struct MshvVcpu {
     fd: VcpuFd,
     vp_index: u8,
     cpuid: Vec<CpuIdEntry>,
-    msrs: MsrEntries,
+    msrs: Vec<MsrEntry>,
     vm_ops: Option<Arc<dyn vm::VmOps>>,
 }
 
@@ -341,19 +345,26 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// Returns the model-specific registers (MSR) for this vCPU.
     ///
-    fn get_msrs(&self, msrs: &mut MsrEntries) -> cpu::Result<usize> {
-        self.fd
-            .get_msrs(msrs)
-            .map_err(|e| cpu::HypervisorCpuError::GetMsrEntries(e.into()))
+    fn get_msrs(&self, msrs: &mut Vec<MsrEntry>) -> cpu::Result<usize> {
+        let mut mshv_msrs = MsrEntries::from_entries(msrs).unwrap();
+        let succ = self
+            .fd
+            .get_msrs(&mut mshv_msrs)
+            .map_err(|e| cpu::HypervisorCpuError::GetMsrEntries(e.into()))?;
+
+        msrs[..succ].copy_from_slice(&mshv_msrs.as_slice()[..succ]);
+
+        Ok(succ)
     }
     #[cfg(target_arch = "x86_64")]
     ///
     /// Setup the model-specific registers (MSR) for this vCPU.
     /// Returns the number of MSR entries actually written.
     ///
-    fn set_msrs(&self, msrs: &MsrEntries) -> cpu::Result<usize> {
+    fn set_msrs(&self, msrs: &[MsrEntry]) -> cpu::Result<usize> {
+        let mshv_msrs = MsrEntries::from_entries(msrs).unwrap();
         self.fd
-            .set_msrs(msrs)
+            .set_msrs(&mshv_msrs)
             .map_err(|e| cpu::HypervisorCpuError::SetMsrEntries(e.into()))
     }
 
@@ -655,10 +666,10 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// Return the list of initial MSR entries for a VCPU
     ///
-    fn boot_msr_entries(&self) -> MsrEntries {
+    fn boot_msr_entries(&self) -> Vec<MsrEntry> {
         use crate::arch::x86::{msr_index, MTRR_ENABLE, MTRR_MEM_TYPE_WB};
 
-        MsrEntries::from_entries(&[
+        [
             msr!(msr_index::MSR_IA32_SYSENTER_CS),
             msr!(msr_index::MSR_IA32_SYSENTER_ESP),
             msr!(msr_index::MSR_IA32_SYSENTER_EIP),
@@ -669,8 +680,8 @@ impl cpu::Vcpu for MshvVcpu {
             msr!(msr_index::MSR_SYSCALL_MASK),
             msr!(msr_index::MSR_IA32_TSC),
             msr_data!(msr_index::MSR_MTRRdefType, MTRR_ENABLE | MTRR_MEM_TYPE_WB),
-        ])
-        .unwrap()
+        ]
+        .to_vec()
     }
 }
 
@@ -888,7 +899,7 @@ impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
 /// Wrapper over Mshv VM ioctls.
 pub struct MshvVm {
     fd: Arc<VmFd>,
-    msrs: MsrEntries,
+    msrs: Vec<MsrEntry>,
     vm_ops: Option<Arc<dyn vm::VmOps>>,
     dirty_log_slots: Arc<RwLock<HashMap<u64, MshvDirtyLogSlot>>>,
 }

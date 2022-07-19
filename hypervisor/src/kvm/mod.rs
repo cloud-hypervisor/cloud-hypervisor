@@ -65,7 +65,7 @@ use kvm_bindings::{
 #[cfg(target_arch = "x86_64")]
 use x86_64::check_required_kvm_extensions;
 #[cfg(target_arch = "x86_64")]
-pub use x86_64::{CpuId, ExtendedControlRegisters, MsrEntries, VcpuKvmState, Xsave};
+pub use x86_64::{CpuId, ExtendedControlRegisters, MsrEntries, MsrEntry, VcpuKvmState, Xsave};
 // aarch64 dependencies
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;
@@ -309,7 +309,7 @@ struct KvmDirtyLogSlot {
 pub struct KvmVm {
     fd: Arc<VmFd>,
     #[cfg(target_arch = "x86_64")]
-    msrs: MsrEntries,
+    msrs: Vec<MsrEntry>,
     dirty_log_slots: Arc<RwLock<HashMap<u32, KvmDirtyLogSlot>>>,
 }
 
@@ -950,11 +950,15 @@ impl hypervisor::Hypervisor for KvmHypervisor {
         {
             let msr_list = self.get_msr_list()?;
             let num_msrs = msr_list.as_fam_struct_ref().nmsrs as usize;
-            let mut msrs = MsrEntries::new(num_msrs).unwrap();
+            let mut msrs: Vec<MsrEntry> = vec![
+                MsrEntry {
+                    ..Default::default()
+                };
+                num_msrs
+            ];
             let indices = msr_list.as_slice();
-            let msr_entries = msrs.as_mut_slice();
             for (pos, index) in indices.iter().enumerate() {
-                msr_entries[pos].index = *index;
+                msrs[pos].index = *index;
             }
 
             Ok(Arc::new(KvmVm {
@@ -1049,7 +1053,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
 pub struct KvmVcpu {
     fd: VcpuFd,
     #[cfg(target_arch = "x86_64")]
-    msrs: MsrEntries,
+    msrs: Vec<MsrEntry>,
     vm_ops: Option<Arc<dyn vm::VmOps>>,
     #[cfg(target_arch = "x86_64")]
     hyperv_synic: AtomicBool,
@@ -1398,19 +1402,26 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     /// Returns the model-specific registers (MSR) for this vCPU.
     ///
-    fn get_msrs(&self, msrs: &mut MsrEntries) -> cpu::Result<usize> {
-        self.fd
-            .get_msrs(msrs)
-            .map_err(|e| cpu::HypervisorCpuError::GetMsrEntries(e.into()))
+    fn get_msrs(&self, msrs: &mut Vec<MsrEntry>) -> cpu::Result<usize> {
+        let mut kvm_msrs = MsrEntries::from_entries(msrs).unwrap();
+        let succ = self
+            .fd
+            .get_msrs(&mut kvm_msrs)
+            .map_err(|e| cpu::HypervisorCpuError::GetMsrEntries(e.into()))?;
+
+        msrs[..succ].copy_from_slice(&kvm_msrs.as_slice()[..succ]);
+
+        Ok(succ)
     }
     #[cfg(target_arch = "x86_64")]
     ///
     /// Setup the model-specific registers (MSR) for this vCPU.
     /// Returns the number of MSR entries actually written.
     ///
-    fn set_msrs(&self, msrs: &MsrEntries) -> cpu::Result<usize> {
+    fn set_msrs(&self, msrs: &[MsrEntry]) -> cpu::Result<usize> {
+        let kvm_msrs = MsrEntries::from_entries(msrs).unwrap();
         self.fd
-            .set_msrs(msrs)
+            .set_msrs(&kvm_msrs)
             .map_err(|e| cpu::HypervisorCpuError::SetMsrEntries(e.into()))
     }
     ///
@@ -1801,41 +1812,31 @@ impl cpu::Vcpu for KvmVcpu {
                     index,
                     ..Default::default()
                 };
-                msr_entries.push(msr).unwrap();
+                msr_entries.push(msr);
             }
         }
 
-        let expected_num_msrs = msr_entries.as_fam_struct_ref().nmsrs as usize;
+        let expected_num_msrs = msr_entries.len();
         let num_msrs = self.get_msrs(&mut msr_entries)?;
         let msrs = if num_msrs != expected_num_msrs {
             let mut faulty_msr_index = num_msrs;
-            let mut msr_entries_tmp =
-                MsrEntries::from_entries(&msr_entries.as_slice()[..faulty_msr_index]).unwrap();
+            let mut msr_entries_tmp = msr_entries[..faulty_msr_index].to_vec();
 
             loop {
                 warn!(
                     "Detected faulty MSR 0x{:x} while getting MSRs",
-                    msr_entries.as_slice()[faulty_msr_index].index
+                    msr_entries[faulty_msr_index].index
                 );
 
+                // Skip the first bad MSR
                 let start_pos = faulty_msr_index + 1;
-                let mut sub_msr_entries =
-                    MsrEntries::from_entries(&msr_entries.as_slice()[start_pos..]).unwrap();
-                let expected_num_msrs = sub_msr_entries.as_fam_struct_ref().nmsrs as usize;
+
+                let mut sub_msr_entries = msr_entries[start_pos..].to_vec();
                 let num_msrs = self.get_msrs(&mut sub_msr_entries)?;
 
-                for i in 0..num_msrs {
-                    msr_entries_tmp
-                        .push(sub_msr_entries.as_slice()[i])
-                        .map_err(|e| {
-                            cpu::HypervisorCpuError::GetMsrEntries(anyhow!(
-                                "Failed adding MSR entries: {:?}",
-                                e
-                            ))
-                        })?;
-                }
+                msr_entries_tmp.extend(&sub_msr_entries[..num_msrs]);
 
-                if num_msrs == expected_num_msrs {
+                if num_msrs == sub_msr_entries.len() {
                     break;
                 }
 
@@ -1934,7 +1935,7 @@ impl cpu::Vcpu for KvmVcpu {
         // expected amount, we fallback onto a slower method by setting MSRs
         // by chunks. This is the only way to make sure we try to set as many
         // MSRs as possible, even if some MSRs are not supported.
-        let expected_num_msrs = state.msrs.as_fam_struct_ref().nmsrs as usize;
+        let expected_num_msrs = state.msrs.len();
         let num_msrs = self.set_msrs(&state.msrs)?;
         if num_msrs != expected_num_msrs {
             let mut faulty_msr_index = num_msrs;
@@ -1942,16 +1943,17 @@ impl cpu::Vcpu for KvmVcpu {
             loop {
                 warn!(
                     "Detected faulty MSR 0x{:x} while setting MSRs",
-                    state.msrs.as_slice()[faulty_msr_index].index
+                    state.msrs[faulty_msr_index].index
                 );
 
+                // Skip the first bad MSR
                 let start_pos = faulty_msr_index + 1;
-                let sub_msr_entries =
-                    MsrEntries::from_entries(&state.msrs.as_slice()[start_pos..]).unwrap();
-                let expected_num_msrs = sub_msr_entries.as_fam_struct_ref().nmsrs as usize;
+
+                let sub_msr_entries = state.msrs[start_pos..].to_vec();
+
                 let num_msrs = self.set_msrs(&sub_msr_entries)?;
 
-                if num_msrs == expected_num_msrs {
+                if num_msrs == sub_msr_entries.len() {
                     break;
                 }
 
@@ -2032,11 +2034,10 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     /// Return the list of initial MSR entries for a VCPU
     ///
-    fn boot_msr_entries(&self) -> MsrEntries {
+    fn boot_msr_entries(&self) -> Vec<MsrEntry> {
         use crate::arch::x86::{msr_index, MTRR_ENABLE, MTRR_MEM_TYPE_WB};
-        use kvm_bindings::kvm_msr_entry as MsrEntry;
 
-        MsrEntries::from_entries(&[
+        [
             msr!(msr_index::MSR_IA32_SYSENTER_CS),
             msr!(msr_index::MSR_IA32_SYSENTER_ESP),
             msr!(msr_index::MSR_IA32_SYSENTER_EIP),
@@ -2051,8 +2052,8 @@ impl cpu::Vcpu for KvmVcpu {
                 msr_index::MSR_IA32_MISC_ENABLE_FAST_STRING as u64
             ),
             msr_data!(msr_index::MSR_MTRRdefType, MTRR_ENABLE | MTRR_MEM_TYPE_WB),
-        ])
-        .unwrap()
+        ]
+        .to_vec()
     }
 }
 

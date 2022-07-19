@@ -32,7 +32,7 @@ pub use {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct VcpuMshvState {
-    pub msrs: MsrEntries,
+    pub msrs: Vec<MsrEntry>,
     pub vcpu_events: VcpuEvents,
     pub regs: MshvStandardRegisters,
     pub sregs: MshvSpecialRegisters,
@@ -46,10 +46,10 @@ pub struct VcpuMshvState {
 
 impl fmt::Display for VcpuMshvState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let expected_num_msrs = self.msrs.as_fam_struct_ref().nmsrs as usize;
+        let expected_num_msrs = self.msrs.len();
         let mut msr_entries = vec![vec![0; 2]; expected_num_msrs];
 
-        for (i, entry) in self.msrs.as_slice().iter().enumerate() {
+        for (i, entry) in self.msrs.iter().enumerate() {
             msr_entries[i][1] = entry.data;
             msr_entries[i][0] = entry.index as u64;
         }
