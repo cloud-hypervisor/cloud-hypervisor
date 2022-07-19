@@ -13,6 +13,7 @@ pub mod kvm {
     use crate::aarch64::gic::gicv3::kvm::KvmGicV3;
     use crate::aarch64::gic::kvm::{save_pending_tables, KvmGicDevice};
     use crate::aarch64::gic::GicDevice;
+    use crate::aarch64::*;
     use crate::layout;
     use anyhow::anyhow;
     use hypervisor::kvm::kvm_bindings;
@@ -185,7 +186,7 @@ pub mod kvm {
         }
 
         fn get_msi_addr(vcpu_count: u64) -> u64 {
-            KvmGicV3::get_redists_addr(vcpu_count) - KvmGicV3Its::get_msi_size()
+            get_gic_its_addr()
         }
 
         /// Save the state of GICv3ITS.

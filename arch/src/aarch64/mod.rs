@@ -200,6 +200,10 @@ pub fn initramfs_load_addr(
 static mut KERNEL_START: u64 = layout::KERNEL_START;
 static mut RAM_64BIT_START: u64 = layout::RAM_64BIT_START;
 static mut FDT_START: u64 = layout::FDT_START;
+static mut GIC_V3_DIST_START: u64 = layout::GIC_V3_DIST_START;
+static mut GIC_V3_REDISTS_ADDR: u64 = layout::GIC_V3_DIST_START - layout::GIC_V3_REDIST_SIZE;
+static mut GIC_V3_REDISTS_SIZE: u64 = layout::GIC_V3_REDIST_SIZE;
+static mut GIC_V3_ITS_ADDR: u64 = unsafe{GIC_V3_REDISTS_ADDR - layout::GIC_V3_ITS_SIZE};
 
 pub fn set_kernel_start(start: u64) {
     unsafe {
@@ -216,6 +220,30 @@ pub fn set_ram_start(start: u64) {
 pub fn set_fdt_addr(addr: u64) {
     unsafe {
         FDT_START = addr;
+    };
+}
+
+pub fn set_gic_dist_addr(addr: u64) {
+    unsafe {
+        GIC_V3_DIST_START = addr;
+    };
+}
+
+pub fn set_gic_redists_addr(addr: u64) {
+    unsafe {
+        GIC_V3_REDISTS_ADDR = addr;
+    };
+}
+
+pub fn set_gic_redists_size(addr: u64) {
+    unsafe {
+        GIC_V3_REDISTS_SIZE = addr;
+    };
+}
+
+pub fn set_gic_its_addr(addr: u64) {
+    unsafe {
+        GIC_V3_ITS_ADDR = addr;
     };
 }
 
@@ -236,6 +264,22 @@ pub fn get_uefi_start() -> u64 {
 // Auxiliary function to get the address where the device tree blob is loaded.
 fn get_fdt_addr() -> u64 {
     unsafe{FDT_START}
+}
+
+pub fn get_gic_dist_addr() -> u64 {
+    unsafe {GIC_V3_DIST_START}
+}
+
+pub fn get_gic_redists_addr() -> u64 {
+    unsafe {GIC_V3_REDISTS_ADDR}
+}
+
+pub fn get_gic_redists_size() -> u64 {
+    unsafe {GIC_V3_REDISTS_SIZE}
+}
+
+pub fn get_gic_its_addr() -> u64 {
+    unsafe {GIC_V3_ITS_ADDR}
 }
 
 pub fn get_host_cpu_phys_bits() -> u8 {

@@ -12,6 +12,7 @@ pub mod kvm {
         construct_gicr_typers, get_redist_regs, set_redist_regs,
     };
     use crate::aarch64::gic::GicDevice;
+    use crate::aarch64::*;
     use crate::layout;
     use anyhow::anyhow;
     use hypervisor::kvm::kvm_bindings;
@@ -83,7 +84,7 @@ pub mod kvm {
 
         /// Get the address of the GIC distributor.
         pub fn get_dist_addr() -> u64 {
-            layout::GIC_V3_DIST_START
+            get_gic_dist_addr()
         }
 
         /// Get the size of the GIC distributor.
@@ -93,12 +94,12 @@ pub mod kvm {
 
         /// Get the address of the GIC redistributors.
         pub fn get_redists_addr(vcpu_count: u64) -> u64 {
-            KvmGicV3::get_dist_addr() - KvmGicV3::get_redists_size(vcpu_count)
+            get_gic_redists_addr()
         }
 
         /// Get the size of the GIC redistributors.
         pub fn get_redists_size(vcpu_count: u64) -> u64 {
-            vcpu_count * layout::GIC_V3_REDIST_SIZE
+            get_gic_redists_size()
         }
 
         /// Save the state of GIC.

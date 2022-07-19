@@ -772,6 +772,17 @@ impl Vm {
                         console_resize_pipe);
             }
         }
+        /* hacky hack */
+        #[cfg(all(feature = "kvm", target_arch = "aarch64"))]
+        {
+            use arch::aarch64::*;
+            set_gic_redists_size(
+                config.lock().unwrap().cpus.boot_vcpus as u64 * layout::GIC_V3_REDIST_SIZE,
+            );
+            set_gic_redists_addr(get_gic_dist_addr() - get_gic_redists_size());
+            set_gic_its_addr(get_gic_redists_addr() - layout::GIC_V3_ITS_SIZE);
+        }
+
         #[cfg(feature = "tdx")]
         let tdx_enabled = config.lock().unwrap().tdx.is_some();
         hypervisor.check_required_extensions().unwrap();
@@ -981,6 +992,10 @@ impl Vm {
         arch::set_ram_start(ram_start);
         arch::set_fdt_addr(ram_start);
         arch::set_kernel_start(ram_start + arch::layout::FDT_MAX_SIZE as u64);
+        /* TODO get these from dtb */
+        arch::aarch64::set_gic_dist_addr(0x800_0000);
+        arch::aarch64::set_gic_redists_addr(0x80a_0000);
+        arch::aarch64::set_gic_redists_size(0xf6_0000);
 
         /* Nuno: this checks for SignalMsi and OneReg */
         hypervisor.check_required_extensions().unwrap();
