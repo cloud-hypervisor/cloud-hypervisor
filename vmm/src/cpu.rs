@@ -29,6 +29,8 @@ use crate::GuestMemoryMmap;
 use crate::CPU_MANAGER_SNAPSHOT_ID;
 use acpi_tables::{aml, aml::Aml, sdt::Sdt};
 use anyhow::anyhow;
+#[cfg(all(target_arch = "aarch64", feature = "gdb"))]
+use arch::aarch64::regs;
 use arch::EntryPoint;
 use arch::NumaNodes;
 use devices::interrupt_controller::InterruptController;
@@ -77,6 +79,18 @@ use vm_migration::{
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::{register_signal_handler, SIGRTMIN};
+
+#[cfg(all(target_arch = "aarch64", feature = "gdb"))]
+/// Extract the specified bits of a 64-bit integer.
+/// For example, to extrace 2 bits from offset 1 (zero based) of `6u64`,
+/// following expression should return 3 (`0b11`):
+/// `extract_bits_64!(0b0000_0110u64, 1, 2)`
+///
+macro_rules! extract_bits_64 {
+    ($value: tt, $offset: tt, $length: tt) => {
+        ($value >> $offset) & (!0u64 >> (64 - $length))
+    };
+}
 
 pub const CPU_MANAGER_ACPI_SIZE: usize = 0xc;
 
@@ -144,6 +158,10 @@ pub enum Error {
     #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
     #[error("Error translating virtual address: {0}")]
     TranslateVirtualAddress(#[source] hypervisor::HypervisorCpuError),
+
+    #[cfg(all(target_arch = "aarch64", feature = "gdb"))]
+    #[error("Error translating virtual address: {0}")]
+    TranslateVirtualAddress(#[source] anyhow::Error),
 
     #[cfg(all(feature = "amx", target_arch = "x86_64"))]
     #[error("Error setting up AMX: {0}")]
@@ -1491,9 +1509,168 @@ impl CpuManager {
         Ok(gpa)
     }
 
+    ///
+    /// On AArch64, `translate_gva` API is not provided by KVM. We implemented
+    /// it in VMM by walking through translation tables.
+    ///
+    /// Address translation is big topic, here we only focus the scenario that
+    /// happens in VMM while debugging kernel. This `translate_gva`
+    /// implementation is restricted to:
+    /// - Exception Level 1
+    /// - Translate high address range only (kernel space)
+    ///
+    /// This implementation supports following Arm-v8a features related to
+    /// address translation:
+    /// - FEAT_LPA
+    /// - FEAT_LVA
+    /// - FEAT_LPA2
+    ///
     #[cfg(all(target_arch = "aarch64", feature = "gdb"))]
     fn translate_gva(&self, cpu_id: u8, gva: u64) -> Result<u64> {
-        unimplemented!()
+        let tcr_el1: u64 = self.vcpus[usize::from(cpu_id)]
+            .lock()
+            .unwrap()
+            .vcpu
+            .get_sys_reg(regs::TCR_EL1)
+            .map_err(|e| Error::TranslateVirtualAddress(e.into()))?;
+        let ttbr1_el1: u64 = self.vcpus[usize::from(cpu_id)]
+            .lock()
+            .unwrap()
+            .vcpu
+            .get_sys_reg(regs::TTBR1_EL1)
+            .map_err(|e| Error::TranslateVirtualAddress(e.into()))?;
+        let id_aa64mmfr0_el1: u64 = self.vcpus[usize::from(cpu_id)]
+            .lock()
+            .unwrap()
+            .vcpu
+            .get_sys_reg(regs::ID_AA64MMFR0_EL1)
+            .map_err(|e| Error::TranslateVirtualAddress(e.into()))?;
+
+        // Bit 55 of the VA determines the range, high (0xFFFxxx...)
+        // or low (0x000xxx...).
+        let high_range = extract_bits_64!(gva, 55, 1);
+        if high_range == 0 {
+            info!("VA (0x{:x}) range is not supported!", gva);
+            return Ok(gva);
+        }
+
+        // High range size offset
+        let tsz = extract_bits_64!(tcr_el1, 16, 6);
+        // Granule size
+        let tg = extract_bits_64!(tcr_el1, 30, 2);
+        // Indication of 48-bits (0) or 52-bits (1) for FEAT_LPA2
+        let ds = extract_bits_64!(tcr_el1, 59, 1);
+
+        if tsz == 0 {
+            info!("VA translation is not ready!");
+            return Ok(gva);
+        }
+
+        // VA size is determined by TCR_BL1.T1SZ
+        let va_size = 64 - tsz;
+        // Number of bits in VA consumed in each level of translation
+        let stride = match tg {
+            3 => 13, // 64KB granule size
+            1 => 11, // 16KB granule size
+            _ => 9,  // 4KB, default
+        };
+        // Starting level of walking
+        let mut level = 4 - (va_size - 4) / stride;
+
+        // PA or IPA size is determined
+        let tcr_ips = extract_bits_64!(tcr_el1, 32, 3);
+        #[allow(clippy::identity_op)]
+        let pa_range = extract_bits_64!(id_aa64mmfr0_el1, 0, 4);
+        // The IPA size in TCR_BL1 and PA Range in ID_AA64MMFR0_EL1 should match.
+        // To be safe, we use the minimum value if they are different.
+        let pa_range = std::cmp::min(tcr_ips, pa_range);
+        // PA size in bits
+        let pa_size = match pa_range {
+            0 => 32,
+            1 => 36,
+            2 => 40,
+            3 => 42,
+            4 => 44,
+            5 => 48,
+            6 => 52,
+            _ => {
+                return Err(Error::TranslateVirtualAddress(anyhow!(format!(
+                    "PA range not supported {}",
+                    pa_range
+                ))))
+            }
+        };
+
+        let indexmask_grainsize = (!0u64) >> (64 - (stride + 3));
+        let mut indexmask = (!0u64) >> (64 - (va_size - (stride * (4 - level))));
+        // If FEAT_LPA2 is present, the translation table descriptor holds
+        // 50 bits of the table address of next level.
+        // Otherwise, it is 48 bits.
+        let descaddrmask = if ds == 1 {
+            !0u64 >> (64 - 50) // mask with 50 least significant bits
+        } else {
+            !0u64 >> (64 - 48) // mask with 48 least significant bits
+        };
+        let descaddrmask = descaddrmask & !indexmask_grainsize;
+
+        // Translation table base address
+        #[allow(clippy::identity_op)]
+        let mut descaddr: u64 = extract_bits_64!(ttbr1_el1, 0, 48);
+        // In the case of FEAT_LPA and FEAT_LPA2, the initial translation table
+        // addresss bits [48:51] comes from TTBR1_EL1 bits [2:5].
+        if pa_size == 52 {
+            descaddr |= extract_bits_64!(ttbr1_el1, 2, 4) << 48;
+        }
+
+        // Loop through tables of each level
+        loop {
+            // Table offset for current level
+            let table_offset: u64 = (gva >> (stride * (4 - level))) & indexmask;
+            descaddr |= table_offset;
+            descaddr &= !7u64;
+
+            let mut buf = [0; 8];
+            self.vm_memory
+                .memory()
+                .read(&mut buf, GuestAddress(descaddr))
+                .map_err(|e| Error::TranslateVirtualAddress(e.into()))?;
+            let descriptor = u64::from_le_bytes(buf);
+
+            descaddr = descriptor & descaddrmask;
+            // In the case of FEAT_LPA, the next-level translation table address
+            // bits [48:51] comes from bits [12:15] of the current descriptor.
+            // For FEAT_LPA2, the next-level translation table address
+            // bits [50:51] comes from bits [8:9] of the current descriptor,
+            // bits [48:49] comes from bits [48:49] of the descriptor which was
+            // handled previously.
+            if pa_size == 52 {
+                if ds == 1 {
+                    // FEAT_LPA2
+                    descaddr |= extract_bits_64!(descriptor, 8, 2) << 50;
+                } else {
+                    // FEAT_LPA
+                    descaddr |= extract_bits_64!(descriptor, 12, 4) << 48;
+                }
+            }
+
+            if (descriptor & 2) != 0 && (level < 3) {
+                // This is a table entry. Go down to next level.
+                level += 1;
+                indexmask = indexmask_grainsize;
+                continue;
+            }
+
+            break;
+        }
+
+        // We have reached either:
+        // - a page entry at level 3 or
+        // - a block entry at level 1 or 2
+        let page_size = 1u64 << ((stride * (4 - level)) + 3);
+        descaddr &= !(page_size - 1);
+        descaddr |= gva & (page_size - 1);
+
+        Ok(descaddr)
     }
 }
 
