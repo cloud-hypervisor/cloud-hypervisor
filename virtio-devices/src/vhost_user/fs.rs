@@ -333,7 +333,7 @@ impl Fs {
                     device_type: VirtioDeviceType::Fs as u32,
                     queue_sizes: vec![queue_size; num_queues],
                     paused_sync: Some(Arc::new(Barrier::new(2))),
-                    min_queues: DEFAULT_QUEUE_NUMBER as u16,
+                    min_queues: 1,
                     ..Default::default()
                 },
                 vu_common: VhostUserCommon {
@@ -413,7 +413,7 @@ impl Fs {
                 acked_features: acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits(),
                 queue_sizes: vec![queue_size; num_queues],
                 paused_sync: Some(Arc::new(Barrier::new(2))),
-                min_queues: DEFAULT_QUEUE_NUMBER as u16,
+                min_queues: 1,
                 ..Default::default()
             },
             vu_common: VhostUserCommon {
