@@ -542,17 +542,23 @@ impl VirtioDevice for Balloon {
         &mut self,
         _mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
-        mut queue_evts: Vec<EventFd>,
+        mut queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
+        self.common.activate(&queues, &interrupt_cb)?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
-        let inflate_queue_evt = queue_evts.remove(0);
-        let deflate_queue_evt = queue_evts.remove(0);
+        let mut virtqueues = Vec::new();
+        let (_, queue, queue_evt) = queues.remove(0);
+        virtqueues.push(queue);
+        let inflate_queue_evt = queue_evt;
+        let (_, queue, queue_evt) = queues.remove(0);
+        virtqueues.push(queue);
+        let deflate_queue_evt = queue_evt;
         let reporting_queue_evt =
-            if self.common.feature_acked(VIRTIO_BALLOON_F_REPORTING) && !queue_evts.is_empty() {
-                Some(queue_evts.remove(0))
+            if self.common.feature_acked(VIRTIO_BALLOON_F_REPORTING) && !queues.is_empty() {
+                let (_, queue, queue_evt) = queues.remove(0);
+                virtqueues.push(queue);
+                Some(queue_evt)
             } else {
                 None
             };
@@ -563,7 +569,7 @@ impl VirtioDevice for Balloon {
                 error!("failed to clone resize EventFd: {:?}", e);
                 ActivateError::BadActivate
             })?,
-            queues,
+            queues: virtqueues,
             interrupt_cb,
             inflate_queue_evt,
             deflate_queue_evt,

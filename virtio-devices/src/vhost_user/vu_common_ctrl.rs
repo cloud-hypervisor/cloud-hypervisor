@@ -151,8 +151,7 @@ impl VhostUserHandle {
     pub fn setup_vhost_user<S: VhostUserMasterReqHandler>(
         &mut self,
         mem: &GuestMemoryMmap,
-        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
-        queue_evts: Vec<EventFd>,
+        queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
         virtio_interrupt: &Arc<dyn VirtioInterrupt>,
         acked_features: u64,
         slave_req_handler: &Option<MasterReqHandler<S>>,
@@ -171,9 +170,9 @@ impl VhostUserHandle {
         // Send set_vring_num here, since it could tell backends, like SPDK,
         // how many virt queues to be handled, which backend required to know
         // at early stage.
-        for (queue_index, queue) in queues.iter().enumerate() {
+        for (queue_index, queue, _) in queues.iter() {
             self.vu
-                .set_vring_num(queue_index, queue.state.size)
+                .set_vring_num(*queue_index, queue.state.size)
                 .map_err(Error::VhostUserSetVringNum)?;
         }
 
@@ -184,7 +183,7 @@ impl VhostUserHandle {
                     mmap_size: 0,
                     mmap_offset: 0,
                     num_queues: queues.len() as u16,
-                    queue_size: queues[0].state.size,
+                    queue_size: queues[0].1.state.size,
                 };
                 let (info, fd) = self
                     .vu
@@ -202,7 +201,7 @@ impl VhostUserHandle {
         let num_queues = queues.len() as usize;
 
         let mut vrings_info = Vec::new();
-        for (queue_index, queue) in queues.into_iter().enumerate() {
+        for (queue_index, queue, queue_evt) in queues.iter() {
             let actual_size: usize = queue.state.size.try_into().unwrap();
 
             let config_data = VringConfigData {
@@ -240,11 +239,11 @@ impl VhostUserHandle {
             });
 
             self.vu
-                .set_vring_addr(queue_index, &config_data)
+                .set_vring_addr(*queue_index, &config_data)
                 .map_err(Error::VhostUserSetVringAddr)?;
             self.vu
                 .set_vring_base(
-                    queue_index,
+                    *queue_index,
                     queue
                         .avail_idx(Ordering::Acquire)
                         .map_err(Error::GetAvailableIndex)?
@@ -253,15 +252,15 @@ impl VhostUserHandle {
                 .map_err(Error::VhostUserSetVringBase)?;
 
             if let Some(eventfd) =
-                virtio_interrupt.notifier(VirtioInterruptType::Queue(queue_index as u16))
+                virtio_interrupt.notifier(VirtioInterruptType::Queue(*queue_index as u16))
             {
                 self.vu
-                    .set_vring_call(queue_index, &eventfd)
+                    .set_vring_call(*queue_index, &eventfd)
                     .map_err(Error::VhostUserSetVringCall)?;
             }
 
             self.vu
-                .set_vring_kick(queue_index, &queue_evts[queue_index])
+                .set_vring_kick(*queue_index, queue_evt)
                 .map_err(Error::VhostUserSetVringKick)?;
         }
 
@@ -326,8 +325,7 @@ impl VhostUserHandle {
     pub fn reinitialize_vhost_user<S: VhostUserMasterReqHandler>(
         &mut self,
         mem: &GuestMemoryMmap,
-        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
-        queue_evts: Vec<EventFd>,
+        queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
         virtio_interrupt: &Arc<dyn VirtioInterrupt>,
         acked_features: u64,
         acked_protocol_features: u64,
@@ -339,7 +337,6 @@ impl VhostUserHandle {
         self.setup_vhost_user(
             mem,
             queues,
-            queue_evts,
             virtio_interrupt,
             acked_features,
             slave_req_handler,

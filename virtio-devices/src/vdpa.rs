@@ -145,8 +145,7 @@ impl Vdpa {
         &mut self,
         _mem: &GuestMemoryMmap,
         virtio_interrupt: &Arc<dyn VirtioInterrupt>,
-        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
-        queue_evts: Vec<EventFd>,
+        queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
     ) -> Result<()> {
         self.vhost
             .set_features(self.common.acked_features)
@@ -155,11 +154,11 @@ impl Vdpa {
             .set_backend_features(self.backend_features)
             .map_err(Error::SetBackendFeatures)?;
 
-        for (queue_index, queue) in queues.iter().enumerate() {
+        for (queue_index, queue, queue_evt) in queues.iter() {
             let queue_max_size = queue.max_size();
             let queue_size = queue.state.size;
             self.vhost
-                .set_vring_num(queue_index, queue_size)
+                .set_vring_num(*queue_index, queue_size)
                 .map_err(Error::SetVringNum)?;
 
             let config_data = VringConfigData {
@@ -194,11 +193,11 @@ impl Vdpa {
             };
 
             self.vhost
-                .set_vring_addr(queue_index, &config_data)
+                .set_vring_addr(*queue_index, &config_data)
                 .map_err(Error::SetVringAddr)?;
             self.vhost
                 .set_vring_base(
-                    queue_index,
+                    *queue_index,
                     queue
                         .avail_idx(Ordering::Acquire)
                         .map_err(Error::GetAvailableIndex)?
@@ -207,15 +206,15 @@ impl Vdpa {
                 .map_err(Error::SetVringBase)?;
 
             if let Some(eventfd) =
-                virtio_interrupt.notifier(VirtioInterruptType::Queue(queue_index as u16))
+                virtio_interrupt.notifier(VirtioInterruptType::Queue(*queue_index as u16))
             {
                 self.vhost
-                    .set_vring_call(queue_index, &eventfd)
+                    .set_vring_call(*queue_index, &eventfd)
                     .map_err(Error::SetVringCall)?;
             }
 
             self.vhost
-                .set_vring_kick(queue_index, &queue_evts[queue_index])
+                .set_vring_kick(*queue_index, queue_evt)
                 .map_err(Error::SetVringKick)?;
         }
 
@@ -297,10 +296,9 @@ impl VirtioDevice for Vdpa {
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
         virtio_interrupt: Arc<dyn VirtioInterrupt>,
-        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
-        queue_evts: Vec<EventFd>,
+        queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
     ) -> ActivateResult {
-        self.activate_vdpa(&mem.memory(), &virtio_interrupt, queues, queue_evts)
+        self.activate_vdpa(&mem.memory(), &virtio_interrupt, queues)
             .map_err(ActivateError::ActivateVdpa)?;
 
         // Store the virtio interrupt handler as we need to return it on reset

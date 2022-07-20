@@ -587,18 +587,16 @@ impl VirtioDevice for Block {
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        mut queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
-        mut queue_evts: Vec<EventFd>,
+        mut queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
+        self.common.activate(&queues, &interrupt_cb)?;
 
         let disk_image_id = build_disk_image_id(&self.disk_path);
         self.update_writeback();
 
         let mut epoll_threads = Vec::new();
         for i in 0..queues.len() {
-            let queue_evt = queue_evts.remove(0);
-            let queue = queues.remove(0);
+            let (_, queue, queue_evt) = queues.remove(0);
             let queue_size = queue.state.size;
             let (kill_evt, pause_evt) = self.common.dup_eventfds();
 

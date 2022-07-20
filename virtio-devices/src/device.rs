@@ -107,8 +107,7 @@ pub trait VirtioDevice: Send {
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_evt: Arc<dyn VirtioInterrupt>,
-        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
-        queue_evts: Vec<EventFd>,
+        queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
     ) -> ActivateResult;
 
     /// Optionally deactivates this device and returns ownership of the guest memory map, interrupt
@@ -251,19 +250,9 @@ impl VirtioCommon {
 
     pub fn activate(
         &mut self,
-        queues: &[Queue<GuestMemoryAtomic<GuestMemoryMmap>>],
-        queue_evts: &[EventFd],
+        queues: &[(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)],
         interrupt_cb: &Arc<dyn VirtioInterrupt>,
     ) -> ActivateResult {
-        if queues.len() != queue_evts.len() {
-            error!(
-                "Cannot activate: length mismatch: queue_evts={} queues={}",
-                queue_evts.len(),
-                queues.len()
-            );
-            return Err(ActivateError::BadActivate);
-        }
-
         if queues.len() < self.min_queues.into() {
             error!(
                 "Number of enabled queues lower than min: {} vs {}",
@@ -290,7 +279,7 @@ impl VirtioCommon {
         self.interrupt_cb = Some(interrupt_cb.clone());
 
         let mut tmp_queue_evts: Vec<EventFd> = Vec::new();
-        for queue_evt in queue_evts.iter() {
+        for (_, _, queue_evt) in queues.iter() {
             // Save the queue EventFD as we need to return it on reset
             // but clone it to pass into the thread.
             tmp_queue_evts.push(queue_evt.try_clone().map_err(|e| {

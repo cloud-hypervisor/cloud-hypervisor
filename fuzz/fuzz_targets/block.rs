@@ -84,9 +84,8 @@ fuzz_target!(|bytes| {
     q.state.ready = true;
     q.state.size = QUEUE_SIZE / 2;
 
-    let queue_evts: Vec<EventFd> = vec![EventFd::new(0).unwrap()];
-    let queue_fd = queue_evts[0].as_raw_fd();
-    let queue_evt = unsafe { EventFd::from_raw_fd(libc::dup(queue_fd)) };
+    let evt = EventFd::new(0).unwrap();
+    let queue_evt = unsafe { EventFd::from_raw_fd(libc::dup(evt.as_raw_fd())) };
 
     let shm = memfd_create(&ffi::CString::new("fuzz").unwrap(), 0).unwrap();
     let disk_file: File = unsafe { File::from_raw_fd(shm) };
@@ -110,8 +109,7 @@ fuzz_target!(|bytes| {
         .activate(
             guest_memory,
             Arc::new(NoopVirtioInterrupt {}),
-            vec![q],
-            queue_evts,
+            vec![(0, q, evt)],
         )
         .ok();
 

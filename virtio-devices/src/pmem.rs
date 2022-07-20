@@ -379,21 +379,23 @@ impl VirtioDevice for Pmem {
         &mut self,
         _mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        mut queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
-        mut queue_evts: Vec<EventFd>,
+        mut queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
+        self.common.activate(&queues, &interrupt_cb)?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
         if let Some(disk) = self.disk.as_ref() {
             let disk = disk.try_clone().map_err(|e| {
                 error!("failed cloning pmem disk: {}", e);
                 ActivateError::BadActivate
             })?;
+
+            let (_, queue, queue_evt) = queues.remove(0);
+
             let mut handler = PmemEpollHandler {
-                queue: queues.remove(0),
+                queue,
                 disk,
                 interrupt_cb,
-                queue_evt: queue_evts.remove(0),
+                queue_evt,
                 kill_evt,
                 pause_evt,
                 access_platform: self.common.access_platform.clone(),

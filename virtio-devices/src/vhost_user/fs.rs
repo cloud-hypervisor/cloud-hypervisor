@@ -504,10 +504,9 @@ impl VirtioDevice for Fs {
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
-        queue_evts: Vec<EventFd>,
+        queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
+        self.common.activate(&queues, &interrupt_cb)?;
         self.guest_memory = Some(mem.clone());
 
         // Initialize slave communication.
@@ -547,7 +546,6 @@ impl VirtioDevice for Fs {
         let mut handler = self.vu_common.activate(
             mem,
             queues,
-            queue_evts,
             interrupt_cb,
             self.common.acked_features,
             slave_req_handler,

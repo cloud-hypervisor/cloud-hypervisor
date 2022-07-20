@@ -35,7 +35,7 @@ const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE];
 const QUEUE_AVAIL_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 
 struct RngEpollHandler {
-    queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
+    queue: Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
     random_file: File,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     queue_evt: EventFd,
@@ -46,7 +46,7 @@ struct RngEpollHandler {
 
 impl RngEpollHandler {
     fn process_queue(&mut self) -> bool {
-        let queue = &mut self.queues[0];
+        let queue = &mut self.queue;
 
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
@@ -219,10 +219,9 @@ impl VirtioDevice for Rng {
         &mut self,
         _mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
-        mut queue_evts: Vec<EventFd>,
+        mut queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
+        self.common.activate(&queues, &interrupt_cb)?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
         if let Some(file) = self.random_file.as_ref() {
@@ -230,11 +229,14 @@ impl VirtioDevice for Rng {
                 error!("failed cloning rng source: {}", e);
                 ActivateError::BadActivate
             })?;
+
+            let (_, queue, queue_evt) = queues.remove(0);
+
             let mut handler = RngEpollHandler {
-                queues,
+                queue,
                 random_file,
                 interrupt_cb,
-                queue_evt: queue_evts.remove(0),
+                queue_evt,
                 kill_evt,
                 pause_evt,
                 access_platform: self.common.access_platform.clone(),

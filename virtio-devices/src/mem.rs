@@ -1004,20 +1004,22 @@ impl VirtioDevice for Mem {
         &mut self,
         _mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        mut queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
-        mut queue_evts: Vec<EventFd>,
+        mut queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
+        self.common.activate(&queues, &interrupt_cb)?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
+
+        let (_, queue, queue_evt) = queues.remove(0);
+
         let mut handler = MemEpollHandler {
             host_addr: self.host_addr,
             host_fd: self.host_fd,
             blocks_state: Arc::clone(&self.blocks_state),
             config: self.config.clone(),
             resize: self.resize.clone(),
-            queue: queues.remove(0),
+            queue,
             interrupt_cb,
-            queue_evt: queue_evts.remove(0),
+            queue_evt,
             kill_evt,
             pause_evt,
             hugepages: self.hugepages,
