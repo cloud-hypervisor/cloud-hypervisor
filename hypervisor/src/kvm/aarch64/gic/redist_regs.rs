@@ -3,10 +3,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::arch::aarch64::gic::{Error, Result};
+use crate::device::HypervisorDeviceError;
 use crate::kvm::kvm_bindings::{kvm_device_attr, KVM_DEV_ARM_VGIC_GRP_REDIST_REGS};
 use crate::kvm::VcpuKvmState;
-use crate::{CpuState, Device};
-use std::sync::Arc;
+use crate::CpuState;
+use kvm_ioctls::DeviceFd;
 
 // Relevant redistributor registers that we want to save/restore.
 const GICR_CTLR: u32 = 0x0000;
@@ -84,31 +85,27 @@ static VGIC_SGI_REGS: &[RdistReg] = &[
     VGIC_RDIST_REG!(GICR_IPRIORITYR0, 32),
 ];
 
-fn redist_attr_access(
-    gic: &Arc<dyn Device>,
-    offset: u32,
-    typer: u64,
-    val: &u32,
-    set: bool,
-) -> Result<()> {
-    let mut gic_dist_attr = kvm_device_attr {
+fn redist_attr_access(gic: &DeviceFd, offset: u32, typer: u64, val: &u32, set: bool) -> Result<()> {
+    let mut gic_redist_attr = kvm_device_attr {
         group: KVM_DEV_ARM_VGIC_GRP_REDIST_REGS,
         attr: (typer & KVM_DEV_ARM_VGIC_V3_MPIDR_MASK) | (offset as u64), // this needs the mpidr
         addr: val as *const u32 as u64,
         flags: 0,
     };
     if set {
-        gic.set_device_attr(&gic_dist_attr)
-            .map_err(Error::SetDeviceAttribute)?;
+        gic.set_device_attr(&gic_redist_attr).map_err(|e| {
+            Error::SetDeviceAttribute(HypervisorDeviceError::SetDeviceAttribute(e.into()))
+        })?;
     } else {
-        gic.get_device_attr(&mut gic_dist_attr)
-            .map_err(Error::GetDeviceAttribute)?;
+        gic.get_device_attr(&mut gic_redist_attr).map_err(|e| {
+            Error::GetDeviceAttribute(HypervisorDeviceError::GetDeviceAttribute(e.into()))
+        })?;
     }
     Ok(())
 }
 
 fn access_redists_aux(
-    gic: &Arc<dyn Device>,
+    gic: &DeviceFd,
     gicr_typer: &[u64],
     state: &mut Vec<u32>,
     reg_list: &[RdistReg],
@@ -138,7 +135,7 @@ fn access_redists_aux(
 }
 
 /// Get redistributor registers.
-pub fn get_redist_regs(gic: &Arc<dyn Device>, gicr_typer: &[u64]) -> Result<Vec<u32>> {
+pub fn get_redist_regs(gic: &DeviceFd, gicr_typer: &[u64]) -> Result<Vec<u32>> {
     let mut state = Vec::new();
     let mut idx: usize = 0;
     access_redists_aux(
@@ -155,7 +152,7 @@ pub fn get_redist_regs(gic: &Arc<dyn Device>, gicr_typer: &[u64]) -> Result<Vec<
 }
 
 /// Set redistributor registers.
-pub fn set_redist_regs(gic: &Arc<dyn Device>, gicr_typer: &[u64], state: &[u32]) -> Result<()> {
+pub fn set_redist_regs(gic: &DeviceFd, gicr_typer: &[u64], state: &[u32]) -> Result<()> {
     let mut idx: usize = 0;
     let mut mut_state = state.to_owned();
     access_redists_aux(

@@ -3,14 +3,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::arch::aarch64::gic::{Error, Result};
+use crate::device::HypervisorDeviceError;
 use crate::kvm::kvm_bindings::{
     kvm_device_attr, KVM_DEV_ARM_VGIC_GRP_CPU_SYSREGS, KVM_REG_ARM64_SYSREG_CRM_MASK,
     KVM_REG_ARM64_SYSREG_CRM_SHIFT, KVM_REG_ARM64_SYSREG_CRN_MASK, KVM_REG_ARM64_SYSREG_CRN_SHIFT,
     KVM_REG_ARM64_SYSREG_OP0_MASK, KVM_REG_ARM64_SYSREG_OP0_SHIFT, KVM_REG_ARM64_SYSREG_OP1_MASK,
     KVM_REG_ARM64_SYSREG_OP1_SHIFT, KVM_REG_ARM64_SYSREG_OP2_MASK, KVM_REG_ARM64_SYSREG_OP2_SHIFT,
 };
-use crate::Device;
-use std::sync::Arc;
+use kvm_ioctls::DeviceFd;
 
 const KVM_DEV_ARM_VGIC_V3_MPIDR_SHIFT: u32 = 32;
 const KVM_DEV_ARM_VGIC_V3_MPIDR_MASK: u64 = 0xffffffff << KVM_DEV_ARM_VGIC_V3_MPIDR_SHIFT as u64;
@@ -79,13 +79,7 @@ static VGIC_ICC_REGS: &[u64] = &[
     SYS_ICC_AP1R3_EL1,
 ];
 
-fn icc_attr_access(
-    gic: &Arc<dyn Device>,
-    offset: u64,
-    typer: u64,
-    val: &u32,
-    set: bool,
-) -> Result<()> {
+fn icc_attr_access(gic: &DeviceFd, offset: u64, typer: u64, val: &u32, set: bool) -> Result<()> {
     let mut gic_icc_attr = kvm_device_attr {
         group: KVM_DEV_ARM_VGIC_GRP_CPU_SYSREGS,
         attr: ((typer & KVM_DEV_ARM_VGIC_V3_MPIDR_MASK) | offset), // this needs the mpidr
@@ -93,17 +87,19 @@ fn icc_attr_access(
         flags: 0,
     };
     if set {
-        gic.set_device_attr(&gic_icc_attr)
-            .map_err(Error::SetDeviceAttribute)?;
+        gic.set_device_attr(&gic_icc_attr).map_err(|e| {
+            Error::SetDeviceAttribute(HypervisorDeviceError::SetDeviceAttribute(e.into()))
+        })?;
     } else {
-        gic.get_device_attr(&mut gic_icc_attr)
-            .map_err(Error::GetDeviceAttribute)?;
+        gic.get_device_attr(&mut gic_icc_attr).map_err(|e| {
+            Error::GetDeviceAttribute(HypervisorDeviceError::GetDeviceAttribute(e.into()))
+        })?;
     }
     Ok(())
 }
 
 /// Get ICC registers.
-pub fn get_icc_regs(gic: &Arc<dyn Device>, gicr_typer: &[u64]) -> Result<Vec<u32>> {
+pub fn get_icc_regs(gic: &DeviceFd, gicr_typer: &[u64]) -> Result<Vec<u32>> {
     let mut state: Vec<u32> = Vec::new();
     // We need this for the ICC_AP<m>R<n>_EL1 registers.
     let mut num_priority_bits = 0;
@@ -156,7 +152,7 @@ pub fn get_icc_regs(gic: &Arc<dyn Device>, gicr_typer: &[u64]) -> Result<Vec<u32
 }
 
 /// Set ICC registers.
-pub fn set_icc_regs(gic: &Arc<dyn Device>, gicr_typer: &[u64], state: &[u32]) -> Result<()> {
+pub fn set_icc_regs(gic: &DeviceFd, gicr_typer: &[u64], state: &[u32]) -> Result<()> {
     let mut num_priority_bits = 0;
     let mut idx = 0;
     for ix in gicr_typer {
