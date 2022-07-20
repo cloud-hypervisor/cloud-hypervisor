@@ -61,6 +61,12 @@ pub use vm::{
     Vm, VmOps,
 };
 
+#[derive(Debug, Copy, Clone)]
+pub enum HypervisorType {
+    Kvm,
+    Mshv,
+}
+
 pub fn new() -> std::result::Result<Arc<dyn Hypervisor>, HypervisorError> {
     #[cfg(feature = "kvm")]
     let hv = kvm::KvmHypervisor::new()?;

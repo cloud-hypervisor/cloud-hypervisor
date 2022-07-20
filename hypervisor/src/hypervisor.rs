@@ -12,6 +12,7 @@ use crate::arch::x86::CpuIdEntry;
 #[cfg(feature = "tdx")]
 use crate::kvm::TdxCapabilities;
 use crate::vm::Vm;
+use crate::HypervisorType;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -82,6 +83,10 @@ pub type Result<T> = std::result::Result<T, HypervisorError>;
 /// This crate provides a hypervisor-agnostic interfaces
 ///
 pub trait Hypervisor: Send + Sync {
+    ///
+    /// Returns the type of the hypervisor
+    ///
+    fn hypervisor_type(&self) -> HypervisorType;
     ///
     /// Create a Vm using the underlying hypervisor
     /// Return a hypervisor-agnostic Vm trait object
