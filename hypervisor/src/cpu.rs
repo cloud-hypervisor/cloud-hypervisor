@@ -21,7 +21,7 @@ use crate::kvm::{TdxExitDetails, TdxExitStatus};
 use crate::CpuState;
 use crate::MpState;
 use thiserror::Error;
-#[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+#[cfg(target_arch = "x86_64")]
 use vm_memory::GuestAddress;
 
 #[derive(Error, Debug)]
@@ -341,17 +341,21 @@ pub trait Vcpu: Send + Sync {
     /// Sets the vcpu's current "multiprocessing state".
     ///
     fn set_mp_state(&self, mp_state: MpState) -> Result<()>;
-    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     ///
     /// Let the guest know that it has been paused, which prevents from
     /// potential soft lockups when being resumed.
     ///
-    fn notify_guest_clock_paused(&self) -> Result<()>;
-    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+    fn notify_guest_clock_paused(&self) -> Result<()> {
+        Ok(())
+    }
+    #[cfg(target_arch = "x86_64")]
     ///
     /// Sets debug registers to set hardware breakpoints and/or enable single step.
     ///
-    fn set_guest_debug(&self, addrs: &[GuestAddress], singlestep: bool) -> Result<()>;
+    fn set_guest_debug(&self, _addrs: &[GuestAddress], _singlestep: bool) -> Result<()> {
+        Err(HypervisorCpuError::SetDebugRegs(anyhow!("unimplemented")))
+    }
     ///
     /// Sets the type of CPU to be exposed to the guest and optional features.
     ///
@@ -427,11 +431,10 @@ pub trait Vcpu: Send + Sync {
     ///
     #[cfg(feature = "tdx")]
     fn tdx_init(&self, hob_address: u64) -> Result<()>;
-    #[cfg(feature = "kvm")]
     ///
     /// Set the "immediate_exit" state
     ///
-    fn set_immediate_exit(&self, exit: bool);
+    fn set_immediate_exit(&self, _exit: bool) {}
     #[cfg(feature = "tdx")]
     ///
     /// Returns the details about TDX exit reason
