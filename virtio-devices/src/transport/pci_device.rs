@@ -699,15 +699,20 @@ impl VirtioPciDevice {
     }
 
     fn prepare_activator(&mut self, barrier: Option<Arc<Barrier>>) -> VirtioPciDeviceActivator {
+        let mut queues = Vec::new();
         let mut queue_evts = Vec::new();
-        let mut queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>> =
-            self.queues.iter().map(vm_virtio::clone_queue).collect();
-        queues.retain(|q| q.state.ready);
-        for (i, queue) in queues.iter().enumerate() {
-            queue_evts.push(self.queue_evts[i].try_clone().unwrap());
-            if !queue.is_valid() {
-                error!("Queue {} is not valid", i);
+
+        for (queue_index, queue) in self.queues.iter().enumerate() {
+            if !queue.state.ready {
+                continue;
             }
+
+            if !queue.is_valid() {
+                error!("Queue {} is not valid", queue_index);
+            }
+
+            queues.push(vm_virtio::clone_queue(queue));
+            queue_evts.push(self.queue_evts[queue_index].try_clone().unwrap());
         }
 
         VirtioPciDeviceActivator {
@@ -716,12 +721,7 @@ impl VirtioPciDevice {
             device: self.device.clone(),
             queues: Some(queues),
             device_activated: self.device_activated.clone(),
-            queue_evts: Some(
-                queue_evts
-                    .iter()
-                    .map(|fd| fd.try_clone().unwrap())
-                    .collect(),
-            ),
+            queue_evts: Some(queue_evts),
             barrier,
             id: self.id.clone(),
         }
