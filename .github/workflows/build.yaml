@@ -59,6 +59,9 @@ jobs:
       - name: Build (common + mshv)
         run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "common,mshv"  -- -D warnings
 
+      - name: Build (common + mshv + kvm)
+        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "common,mshv,kvm"  -- -D warnings
+
       - name: Release Build (default features)
         run: cargo build --locked --all --release --target=${{ matrix.target }}
 
