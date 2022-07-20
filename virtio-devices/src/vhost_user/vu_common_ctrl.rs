@@ -294,6 +294,11 @@ impl VhostUserHandle {
             self.vu
                 .set_vring_enable(queue_index, false)
                 .map_err(Error::VhostUserSetVringEnable)?;
+
+            let _ = self
+                .vu
+                .get_vring_base(queue_index)
+                .map_err(Error::VhostUserGetVringBase)?;
         }
 
         Ok(())
