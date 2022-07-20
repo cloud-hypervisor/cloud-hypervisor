@@ -19,8 +19,6 @@ use crate::cpu::Vcpu;
 use crate::ClockData;
 use crate::UserMemoryRegion;
 use crate::{IoEventAddress, IrqRoutingEntry};
-#[cfg(feature = "kvm")]
-use kvm_ioctls::Cap;
 use std::any::Any;
 #[cfg(target_arch = "x86_64")]
 use std::fs::File;
@@ -326,9 +324,6 @@ pub trait Vm: Send + Sync + Any {
     /// Set guest clock.
     #[cfg(target_arch = "x86_64")]
     fn set_clock(&self, data: &ClockData) -> Result<()>;
-    #[cfg(feature = "kvm")]
-    /// Checks if a particular `Cap` is available.
-    fn check_extension(&self, c: Cap) -> bool;
     /// Create a device that is used for passthrough
     fn create_passthrough_device(&self) -> Result<vfio_ioctls::VfioDeviceFd>;
     /// Start logging dirty pages
