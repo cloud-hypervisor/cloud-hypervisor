@@ -50,7 +50,7 @@ use devices::legacy::Serial;
 use devices::{
     interrupt_controller, interrupt_controller::InterruptController, AcpiNotificationFlags,
 };
-use hypervisor::{HypervisorVmError, IoEventAddress};
+use hypervisor::{HypervisorType, HypervisorVmError, IoEventAddress};
 use libc::{
     cfmakeraw, isatty, tcgetattr, tcsetattr, termios, MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED,
     O_TMPFILE, PROT_READ, PROT_WRITE, TCSANOW,
@@ -807,6 +807,9 @@ struct MetaVirtioDevice {
 }
 
 pub struct DeviceManager {
+    // The underlying hypervisor
+    hypervisor_type: HypervisorType,
+
     // Manage address space related to devices
     address_manager: Arc<AddressManager>,
 
@@ -945,6 +948,7 @@ pub struct DeviceManager {
 impl DeviceManager {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        hypervisor_type: HypervisorType,
         vm: Arc<dyn hypervisor::Vm>,
         config: Arc<Mutex<VmConfig>>,
         memory_manager: Arc<Mutex<MemoryManager>>,
@@ -1035,6 +1039,7 @@ impl DeviceManager {
         }
 
         let device_manager = DeviceManager {
+            hypervisor_type,
             address_manager: Arc::clone(&address_manager),
             console: Arc::new(Console::default()),
             interrupt_controller: None,
@@ -1803,8 +1808,12 @@ impl DeviceManager {
     }
 
     fn listen_for_sigwinch_on_tty(&mut self, pty: &File) -> std::io::Result<()> {
-        let seccomp_filter =
-            get_seccomp_filter(&self.seccomp_action, Thread::PtyForeground).unwrap();
+        let seccomp_filter = get_seccomp_filter(
+            &self.seccomp_action,
+            Thread::PtyForeground,
+            self.hypervisor_type,
+        )
+        .unwrap();
 
         match start_sigwinch_listener(seccomp_filter, pty) {
             Ok(pipe) => {

@@ -4,6 +4,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use hypervisor::HypervisorType;
 use seccompiler::{
     BackendError, BpfProgram, Error, SeccompAction, SeccompCmpArgLen as ArgLen, SeccompCmpOp::Eq,
     SeccompCondition as Cond, SeccompFilter, SeccompRule,
@@ -226,17 +227,22 @@ fn create_vmm_ioctl_seccomp_rule_common_kvm() -> Result<Vec<SeccompRule>, Backen
     ])
 }
 
-fn create_vmm_ioctl_seccomp_rule_hypervisor() -> Result<Vec<SeccompRule>, BackendError> {
-    #[cfg(feature = "kvm")]
-    let rules = create_vmm_ioctl_seccomp_rule_common_kvm();
-
-    #[cfg(feature = "mshv")]
-    let rules = create_vmm_ioctl_seccomp_rule_common_mshv();
-
-    rules
+fn create_vmm_ioctl_seccomp_rule_hypervisor(
+    hypervisor_type: HypervisorType,
+) -> Result<Vec<SeccompRule>, BackendError> {
+    match hypervisor_type {
+        #[cfg(feature = "kvm")]
+        HypervisorType::Kvm => create_vmm_ioctl_seccomp_rule_common_kvm(),
+        #[cfg(feature = "mshv")]
+        HypervisorType::Mshv => create_vmm_ioctl_seccomp_rule_common_mshv(),
+        #[allow(unreachable_patterns)]
+        _ => panic!("Invalid hypervisor {:?}", hypervisor_type),
+    }
 }
 
-fn create_vmm_ioctl_seccomp_rule_common() -> Result<Vec<SeccompRule>, BackendError> {
+fn create_vmm_ioctl_seccomp_rule_common(
+    hypervisor_type: HypervisorType,
+) -> Result<Vec<SeccompRule>, BackendError> {
     let mut common_rules = or![
         and![Cond::new(1, ArgLen::Dword, Eq, BLKSSZGET)?],
         and![Cond::new(1, ArgLen::Dword, Eq, BLKPBSZGET)?],
@@ -308,7 +314,7 @@ fn create_vmm_ioctl_seccomp_rule_common() -> Result<Vec<SeccompRule>, BackendErr
         and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_GET_IOVA_RANGE)?],
     ];
 
-    let hypervisor_rules = create_vmm_ioctl_seccomp_rule_hypervisor()?;
+    let hypervisor_rules = create_vmm_ioctl_seccomp_rule_hypervisor(hypervisor_type)?;
 
     common_rules.extend(hypervisor_rules);
 
@@ -341,7 +347,7 @@ fn create_vmm_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, BackendError>
     const KVM_SET_GUEST_DEBUG: u64 = 0x4048_ae9b;
     const KVM_TRANSLATE: u64 = 0xc018_ae85;
 
-    let common_rules = create_vmm_ioctl_seccomp_rule_common()?;
+    let common_rules = create_vmm_ioctl_seccomp_rule_common(HypervisorType::Kvm)?;
     let mut arch_rules = or![
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_CREATE_PIT2)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_GET_CLOCK,)?],
@@ -377,7 +383,7 @@ fn create_vmm_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, BackendError>
     const KVM_ARM_PREFERRED_TARGET: u64 = 0x8020_aeaf;
     const KVM_ARM_VCPU_INIT: u64 = 0x4020_aeae;
 
-    let common_rules = create_vmm_ioctl_seccomp_rule_common()?;
+    let common_rules = create_vmm_ioctl_seccomp_rule_common(HypervisorType::Kvm)?;
     let mut arch_rules = or![
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_ARM_PREFERRED_TARGET,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_ARM_VCPU_INIT,)?],
@@ -389,17 +395,20 @@ fn create_vmm_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, BackendError>
 
 #[cfg(all(target_arch = "x86_64", feature = "mshv"))]
 fn create_vmm_ioctl_seccomp_rule_mshv() -> Result<Vec<SeccompRule>, BackendError> {
-    create_vmm_ioctl_seccomp_rule_common()
+    create_vmm_ioctl_seccomp_rule_common(HypervisorType::Mshv)
 }
 
-fn create_vmm_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, BackendError> {
-    #[cfg(feature = "kvm")]
-    let rules = create_vmm_ioctl_seccomp_rule_kvm();
-
-    #[cfg(feature = "mshv")]
-    let rules = create_vmm_ioctl_seccomp_rule_mshv();
-
-    rules
+fn create_vmm_ioctl_seccomp_rule(
+    hypervisor_type: HypervisorType,
+) -> Result<Vec<SeccompRule>, BackendError> {
+    match hypervisor_type {
+        #[cfg(feature = "kvm")]
+        HypervisorType::Kvm => create_vmm_ioctl_seccomp_rule_kvm(),
+        #[cfg(feature = "mshv")]
+        HypervisorType::Mshv => create_vmm_ioctl_seccomp_rule_mshv(),
+        #[allow(unreachable_patterns)]
+        _ => panic!("Invalid hypervisor {:?}", hypervisor_type),
+    }
 }
 
 fn create_api_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, BackendError> {
@@ -465,7 +474,9 @@ fn pty_foreground_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
 
 // The filter containing the white listed syscall rules required by the VMM to
 // function.
-fn vmm_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
+fn vmm_thread_rules(
+    hypervisor_type: HypervisorType,
+) -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
     Ok(vec![
         (libc::SYS_accept4, vec![]),
         #[cfg(target_arch = "x86_64")]
@@ -506,7 +517,10 @@ fn vmm_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
         (libc::SYS_gettid, vec![]),
         (libc::SYS_gettimeofday, vec![]),
         (libc::SYS_getuid, vec![]),
-        (libc::SYS_ioctl, create_vmm_ioctl_seccomp_rule()?),
+        (
+            libc::SYS_ioctl,
+            create_vmm_ioctl_seccomp_rule(hypervisor_type)?,
+        ),
         (libc::SYS_io_uring_enter, vec![]),
         (libc::SYS_io_uring_setup, vec![]),
         (libc::SYS_io_uring_register, vec![]),
@@ -619,17 +633,22 @@ fn create_vcpu_ioctl_seccomp_rule_mshv() -> Result<Vec<SeccompRule>, BackendErro
     ])
 }
 
-fn create_vcpu_ioctl_seccomp_rule_hypervisor() -> Result<Vec<SeccompRule>, BackendError> {
-    #[cfg(feature = "kvm")]
-    let rules = create_vcpu_ioctl_seccomp_rule_kvm();
-
-    #[cfg(feature = "mshv")]
-    let rules = create_vcpu_ioctl_seccomp_rule_mshv();
-
-    rules
+fn create_vcpu_ioctl_seccomp_rule_hypervisor(
+    hypervisor_type: HypervisorType,
+) -> Result<Vec<SeccompRule>, BackendError> {
+    match hypervisor_type {
+        #[cfg(feature = "kvm")]
+        HypervisorType::Kvm => create_vcpu_ioctl_seccomp_rule_kvm(),
+        #[cfg(feature = "mshv")]
+        HypervisorType::Mshv => create_vcpu_ioctl_seccomp_rule_mshv(),
+        #[allow(unreachable_patterns)]
+        _ => panic!("Invalid hypervisor {:?}", hypervisor_type),
+    }
 }
 
-fn create_vcpu_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, BackendError> {
+fn create_vcpu_ioctl_seccomp_rule(
+    hypervisor_type: HypervisorType,
+) -> Result<Vec<SeccompRule>, BackendError> {
     let mut rules = or![
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_DEVICE_SET_IRQS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_GROUP_UNSET_CONTAINER)?],
@@ -645,14 +664,16 @@ fn create_vcpu_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, BackendError> {
         )?],
     ];
 
-    let hypervisor_rules = create_vcpu_ioctl_seccomp_rule_hypervisor()?;
+    let hypervisor_rules = create_vcpu_ioctl_seccomp_rule_hypervisor(hypervisor_type)?;
 
     rules.extend(hypervisor_rules);
 
     Ok(rules)
 }
 
-fn vcpu_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
+fn vcpu_thread_rules(
+    hypervisor_type: HypervisorType,
+) -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
     Ok(vec![
         (libc::SYS_brk, vec![]),
         (libc::SYS_clock_gettime, vec![]),
@@ -665,7 +686,10 @@ fn vcpu_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
         (libc::SYS_futex, vec![]),
         (libc::SYS_getrandom, vec![]),
         (libc::SYS_getpid, vec![]),
-        (libc::SYS_ioctl, create_vcpu_ioctl_seccomp_rule()?),
+        (
+            libc::SYS_ioctl,
+            create_vcpu_ioctl_seccomp_rule(hypervisor_type)?,
+        ),
         (libc::SYS_lseek, vec![]),
         (libc::SYS_madvise, vec![]),
         (libc::SYS_mmap, vec![]),
@@ -727,12 +751,15 @@ fn api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
     ])
 }
 
-fn get_seccomp_rules(thread_type: Thread) -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
+fn get_seccomp_rules(
+    thread_type: Thread,
+    hypervisor_type: HypervisorType,
+) -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
     match thread_type {
         Thread::Api => Ok(api_thread_rules()?),
         Thread::SignalHandler => Ok(signal_handler_thread_rules()?),
-        Thread::Vcpu => Ok(vcpu_thread_rules()?),
-        Thread::Vmm => Ok(vmm_thread_rules()?),
+        Thread::Vcpu => Ok(vcpu_thread_rules(hypervisor_type)?),
+        Thread::Vmm => Ok(vmm_thread_rules(hypervisor_type)?),
         Thread::PtyForeground => Ok(pty_foreground_thread_rules()?),
     }
 }
@@ -741,11 +768,12 @@ fn get_seccomp_rules(thread_type: Thread) -> Result<Vec<(i64, Vec<SeccompRule>)>
 pub fn get_seccomp_filter(
     seccomp_action: &SeccompAction,
     thread_type: Thread,
+    hypervisor_type: HypervisorType,
 ) -> Result<BpfProgram, Error> {
     match seccomp_action {
         SeccompAction::Allow => Ok(vec![]),
         SeccompAction::Log => SeccompFilter::new(
-            get_seccomp_rules(thread_type)
+            get_seccomp_rules(thread_type, hypervisor_type)
                 .map_err(Error::Backend)?
                 .into_iter()
                 .collect(),
@@ -756,7 +784,7 @@ pub fn get_seccomp_filter(
         .and_then(|filter| filter.try_into())
         .map_err(Error::Backend),
         _ => SeccompFilter::new(
-            get_seccomp_rules(thread_type)
+            get_seccomp_rules(thread_type, hypervisor_type)
                 .map_err(Error::Backend)?
                 .into_iter()
                 .collect(),

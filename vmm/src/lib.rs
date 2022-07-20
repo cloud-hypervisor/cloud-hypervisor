@@ -280,10 +280,11 @@ pub fn start_vmm_thread(
     let gdb_vm_debug_event = vm_debug_event.try_clone().map_err(Error::EventFdClone)?;
 
     let http_api_event = api_event.try_clone().map_err(Error::EventFdClone)?;
+    let hypervisor_type = hypervisor.hypervisor_type();
 
     // Retrieve seccomp filter
-    let vmm_seccomp_filter =
-        get_seccomp_filter(seccomp_action, Thread::Vmm).map_err(Error::CreateSeccompFilter)?;
+    let vmm_seccomp_filter = get_seccomp_filter(seccomp_action, Thread::Vmm, hypervisor_type)
+        .map_err(Error::CreateSeccompFilter)?;
 
     let vmm_seccomp_action = seccomp_action.clone();
     let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
@@ -328,6 +329,7 @@ pub fn start_vmm_thread(
             api_sender,
             seccomp_action,
             exit_evt,
+            hypervisor_type,
         )?;
     } else if let Some(http_fd) = http_fd {
         api::start_http_fd_thread(
@@ -336,6 +338,7 @@ pub fn start_vmm_thread(
             api_sender,
             seccomp_action,
             exit_evt,
+            hypervisor_type,
         )?;
     }
 
@@ -413,9 +416,12 @@ impl Vmm {
                 let exit_evt = self.exit_evt.try_clone().map_err(Error::EventFdClone)?;
                 let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO as i32) } != 0;
 
-                let signal_handler_seccomp_filter =
-                    get_seccomp_filter(&self.seccomp_action, Thread::SignalHandler)
-                        .map_err(Error::CreateSeccompFilter)?;
+                let signal_handler_seccomp_filter = get_seccomp_filter(
+                    &self.seccomp_action,
+                    Thread::SignalHandler,
+                    self.hypervisor.hypervisor_type(),
+                )
+                .map_err(Error::CreateSeccompFilter)?;
                 self.threads.push(
                     thread::Builder::new()
                         .name("vmm_signal_handler".to_string())
