@@ -401,12 +401,9 @@ impl VhostUserCommon {
 
     pub fn pause(&mut self) -> std::result::Result<(), MigratableError> {
         if let Some(vu) = &self.vu {
-            vu.lock()
-                .unwrap()
-                .pause_vhost_user(self.vu_num_queues)
-                .map_err(|e| {
-                    MigratableError::Pause(anyhow!("Error pausing vhost-user-blk backend: {:?}", e))
-                })
+            vu.lock().unwrap().pause_vhost_user().map_err(|e| {
+                MigratableError::Pause(anyhow!("Error pausing vhost-user-blk backend: {:?}", e))
+            })
         } else {
             Ok(())
         }
@@ -414,15 +411,9 @@ impl VhostUserCommon {
 
     pub fn resume(&mut self) -> std::result::Result<(), MigratableError> {
         if let Some(vu) = &self.vu {
-            vu.lock()
-                .unwrap()
-                .resume_vhost_user(self.vu_num_queues)
-                .map_err(|e| {
-                    MigratableError::Resume(anyhow!(
-                        "Error resuming vhost-user-blk backend: {:?}",
-                        e
-                    ))
-                })
+            vu.lock().unwrap().resume_vhost_user().map_err(|e| {
+                MigratableError::Resume(anyhow!("Error resuming vhost-user-blk backend: {:?}", e))
+            })
         } else {
             Ok(())
         }
