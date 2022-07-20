@@ -167,8 +167,7 @@ pub struct VhostUserEpollHandler<S: VhostUserMasterReqHandler> {
     pub mem: GuestMemoryAtomic<GuestMemoryMmap>,
     pub kill_evt: EventFd,
     pub pause_evt: EventFd,
-    pub queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
-    pub queue_evts: Vec<EventFd>,
+    pub queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
     pub virtio_interrupt: Arc<dyn VirtioInterrupt>,
     pub acked_features: u64,
     pub acked_protocol_features: u64,
@@ -224,10 +223,9 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
         vhost_user
             .reinitialize_vhost_user(
                 self.mem.memory().deref(),
-                self.queues.iter().map(vm_virtio::clone_queue).collect(),
-                self.queue_evts
+                self.queues
                     .iter()
-                    .map(|q| q.try_clone().unwrap())
+                    .map(|(i, q, e)| (*i, vm_virtio::clone_queue(q), e.try_clone().unwrap()))
                     .collect(),
                 &self.virtio_interrupt,
                 self.acked_features,
@@ -299,8 +297,7 @@ impl VhostUserCommon {
     pub fn activate<T: VhostUserMasterReqHandler>(
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
-        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
-        queue_evts: Vec<EventFd>,
+        queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         acked_features: u64,
         slave_req_handler: Option<MasterReqHandler<T>>,
@@ -324,8 +321,10 @@ impl VhostUserCommon {
             .unwrap()
             .setup_vhost_user(
                 &mem.memory(),
-                queues.iter().map(vm_virtio::clone_queue).collect(),
-                queue_evts.iter().map(|q| q.try_clone().unwrap()).collect(),
+                queues
+                    .iter()
+                    .map(|(i, q, e)| (*i, vm_virtio::clone_queue(q), e.try_clone().unwrap()))
+                    .collect(),
                 &interrupt_cb,
                 acked_features,
                 &slave_req_handler,
@@ -339,7 +338,6 @@ impl VhostUserCommon {
             kill_evt,
             pause_evt,
             queues,
-            queue_evts,
             virtio_interrupt: interrupt_cb,
             acked_features,
             acked_protocol_features: self.acked_protocol_features,

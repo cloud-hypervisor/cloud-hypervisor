@@ -272,18 +272,16 @@ impl VirtioDevice for Net {
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        mut queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
-        mut queue_evts: Vec<EventFd>,
+        mut queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
+        self.common.activate(&queues, &interrupt_cb)?;
         self.guest_memory = Some(mem.clone());
 
         let num_queues = queues.len();
         let event_idx = self.common.feature_acked(VIRTIO_RING_F_EVENT_IDX.into());
         if self.common.feature_acked(VIRTIO_NET_F_CTRL_VQ.into()) && num_queues % 2 != 0 {
             let ctrl_queue_index = num_queues - 1;
-            let mut ctrl_queue = queues.remove(ctrl_queue_index);
-            let ctrl_queue_evt = queue_evts.remove(ctrl_queue_index);
+            let (_, mut ctrl_queue, ctrl_queue_evt) = queues.remove(ctrl_queue_index);
 
             ctrl_queue.set_event_idx(event_idx);
 
@@ -336,7 +334,6 @@ impl VirtioDevice for Net {
         let mut handler = self.vu_common.activate(
             mem,
             queues,
-            queue_evts,
             interrupt_cb,
             backend_acked_features,
             slave_req_handler,

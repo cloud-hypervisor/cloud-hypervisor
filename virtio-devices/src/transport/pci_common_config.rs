@@ -385,8 +385,7 @@ mod tests {
             &mut self,
             _mem: GuestMemoryAtomic<GuestMemoryMmap>,
             _interrupt_evt: Arc<dyn VirtioInterrupt>,
-            _queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
-            _queue_evts: Vec<EventFd>,
+            _queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
         ) -> ActivateResult {
             Ok(())
         }

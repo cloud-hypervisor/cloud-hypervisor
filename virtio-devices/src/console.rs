@@ -490,10 +490,9 @@ impl VirtioDevice for Console {
         &mut self,
         _mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
-        mut queue_evts: Vec<EventFd>,
+        mut queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
+        self.common.activate(&queues, &interrupt_cb)?;
         self.resizer
             .acked_features
             .store(self.common.acked_features, Ordering::Relaxed);
@@ -507,13 +506,21 @@ impl VirtioDevice for Console {
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
         let input_evt = EventFd::new(EFD_NONBLOCK).unwrap();
 
+        let mut virtqueues = Vec::new();
+        let (_, queue, queue_evt) = queues.remove(0);
+        virtqueues.push(queue);
+        let input_queue_evt = queue_evt;
+        let (_, queue, queue_evt) = queues.remove(0);
+        virtqueues.push(queue);
+        let output_queue_evt = queue_evt;
+
         let mut handler = ConsoleEpollHandler {
-            queues,
+            queues: virtqueues,
             interrupt_cb,
             in_buffer: self.in_buffer.clone(),
             endpoint: self.endpoint.clone(),
-            input_queue_evt: queue_evts.remove(0),
-            output_queue_evt: queue_evts.remove(0),
+            input_queue_evt,
+            output_queue_evt,
             input_evt,
             config_evt: self.resizer.config_evt.try_clone().unwrap(),
             resize_pipe: self.resize_pipe.as_ref().map(|p| p.try_clone().unwrap()),

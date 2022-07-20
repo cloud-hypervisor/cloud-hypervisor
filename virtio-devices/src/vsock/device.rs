@@ -432,15 +432,21 @@ where
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
-        queue_evts: Vec<EventFd>,
+        queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
+        self.common.activate(&queues, &interrupt_cb)?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
+
+        let mut virtqueues = Vec::new();
+        let mut queue_evts = Vec::new();
+        for (_, queue, queue_evt) in queues {
+            virtqueues.push(queue);
+            queue_evts.push(queue_evt);
+        }
 
         let mut handler = VsockEpollHandler {
             mem,
-            queues,
+            queues: virtqueues,
             queue_evts,
             kill_evt,
             pause_evt,
@@ -591,7 +597,6 @@ mod tests {
             GuestMemoryAtomic::new(ctx.mem.clone()),
             Arc::new(NoopVirtioInterrupt {}),
             Vec::new(),
-            Vec::new(),
         );
         match bad_activate {
             Err(ActivateError::BadActivate) => (),
@@ -606,14 +611,21 @@ mod tests {
                 memory.clone(),
                 Arc::new(NoopVirtioInterrupt {}),
                 vec![
-                    Queue::new(memory.clone(), 256),
-                    Queue::new(memory.clone(), 256),
-                    Queue::new(memory, 256),
-                ],
-                vec![
-                    EventFd::new(EFD_NONBLOCK).unwrap(),
-                    EventFd::new(EFD_NONBLOCK).unwrap(),
-                    EventFd::new(EFD_NONBLOCK).unwrap(),
+                    (
+                        0,
+                        Queue::new(memory.clone(), 256),
+                        EventFd::new(EFD_NONBLOCK).unwrap(),
+                    ),
+                    (
+                        1,
+                        Queue::new(memory.clone(), 256),
+                        EventFd::new(EFD_NONBLOCK).unwrap(),
+                    ),
+                    (
+                        2,
+                        Queue::new(memory, 256),
+                        EventFd::new(EFD_NONBLOCK).unwrap(),
+                    ),
                 ],
             )
             .unwrap();

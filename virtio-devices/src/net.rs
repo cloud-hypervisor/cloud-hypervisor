@@ -585,17 +585,15 @@ impl VirtioDevice for Net {
         &mut self,
         _mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        mut queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
-        mut queue_evts: Vec<EventFd>,
+        mut queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
+        self.common.activate(&queues, &interrupt_cb)?;
 
         let num_queues = queues.len();
         let event_idx = self.common.feature_acked(VIRTIO_RING_F_EVENT_IDX.into());
         if self.common.feature_acked(VIRTIO_NET_F_CTRL_VQ.into()) && num_queues % 2 != 0 {
             let ctrl_queue_index = num_queues - 1;
-            let mut ctrl_queue = queues.remove(ctrl_queue_index);
-            let ctrl_queue_evt = queue_evts.remove(ctrl_queue_index);
+            let (_, mut ctrl_queue, ctrl_queue_evt) = queues.remove(ctrl_queue_index);
 
             ctrl_queue.set_event_idx(event_idx);
 
@@ -641,11 +639,13 @@ impl VirtioDevice for Net {
             let tx = TxVirtio::new();
             let rx_tap_listening = false;
 
-            let mut queue_pair = vec![queues.remove(0), queues.remove(0)];
+            let (_, queue_0, queue_evt_0) = queues.remove(0);
+            let (_, queue_1, queue_evt_1) = queues.remove(0);
+            let mut queue_pair = vec![queue_0, queue_1];
             queue_pair[0].set_event_idx(event_idx);
             queue_pair[1].set_event_idx(event_idx);
 
-            let queue_evt_pair = vec![queue_evts.remove(0), queue_evts.remove(0)];
+            let queue_evt_pair = vec![queue_evt_0, queue_evt_1];
 
             let (kill_evt, pause_evt) = self.common.dup_eventfds();
 

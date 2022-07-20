@@ -292,8 +292,8 @@ pub struct VirtioPciDeviceActivator {
     memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     device: Arc<Mutex<dyn VirtioDevice>>,
     device_activated: Arc<AtomicBool>,
-    queues: Option<Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>>,
-    queue_evts: Option<Vec<EventFd>>,
+    #[allow(clippy::type_complexity)]
+    queues: Option<Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>>,
     barrier: Option<Arc<Barrier>>,
     id: String,
 }
@@ -304,7 +304,6 @@ impl VirtioPciDeviceActivator {
             self.memory.take().unwrap(),
             self.interrupt.take().unwrap(),
             self.queues.take().unwrap(),
-            self.queue_evts.take().unwrap(),
         )?;
         self.device_activated.store(true, Ordering::SeqCst);
 
@@ -700,7 +699,6 @@ impl VirtioPciDevice {
 
     fn prepare_activator(&mut self, barrier: Option<Arc<Barrier>>) -> VirtioPciDeviceActivator {
         let mut queues = Vec::new();
-        let mut queue_evts = Vec::new();
 
         for (queue_index, queue) in self.queues.iter().enumerate() {
             if !queue.state.ready {
@@ -711,8 +709,11 @@ impl VirtioPciDevice {
                 error!("Queue {} is not valid", queue_index);
             }
 
-            queues.push(vm_virtio::clone_queue(queue));
-            queue_evts.push(self.queue_evts[queue_index].try_clone().unwrap());
+            queues.push((
+                queue_index,
+                vm_virtio::clone_queue(queue),
+                self.queue_evts[queue_index].try_clone().unwrap(),
+            ));
         }
 
         VirtioPciDeviceActivator {
@@ -721,7 +722,6 @@ impl VirtioPciDevice {
             device: self.device.clone(),
             queues: Some(queues),
             device_activated: self.device_activated.clone(),
-            queue_evts: Some(queue_evts),
             barrier,
             id: self.id.clone(),
         }

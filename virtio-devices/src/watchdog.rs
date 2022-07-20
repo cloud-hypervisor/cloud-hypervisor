@@ -47,7 +47,7 @@ const WATCHDOG_TIMER_INTERVAL: i64 = 15;
 const WATCHDOG_TIMEOUT: u64 = WATCHDOG_TIMER_INTERVAL as u64 + 5;
 
 struct WatchdogEpollHandler {
-    queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
+    queue: Queue<GuestMemoryAtomic<GuestMemoryMmap>>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     queue_evt: EventFd,
     kill_evt: EventFd,
@@ -61,7 +61,7 @@ impl WatchdogEpollHandler {
     // The main queue is very simple - the driver "pings" the device by passing it a (write-only)
     // descriptor. In response the device writes a 1 into the descriptor and returns it to the driver
     fn process_queue(&mut self) -> bool {
-        let queue = &mut self.queues[0];
+        let queue = &mut self.queue;
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
         for mut desc_chain in queue.iter().unwrap() {
@@ -291,10 +291,9 @@ impl VirtioDevice for Watchdog {
         &mut self,
         _mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
-        mut queue_evts: Vec<EventFd>,
+        mut queues: Vec<(usize, Queue<GuestMemoryAtomic<GuestMemoryMmap>>, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
+        self.common.activate(&queues, &interrupt_cb)?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
         let reset_evt = self.reset_evt.try_clone().map_err(|e| {
@@ -307,10 +306,12 @@ impl VirtioDevice for Watchdog {
             ActivateError::BadActivate
         })?;
 
+        let (_, queue, queue_evt) = queues.remove(0);
+
         let mut handler = WatchdogEpollHandler {
-            queues,
+            queue,
             interrupt_cb,
-            queue_evt: queue_evts.remove(0),
+            queue_evt,
             kill_evt,
             pause_evt,
             timer,
