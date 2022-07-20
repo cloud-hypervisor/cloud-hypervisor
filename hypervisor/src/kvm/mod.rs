@@ -1279,26 +1279,6 @@ impl cpu::Vcpu for KvmVcpu {
         Ok(())
     }
 
-    #[cfg(target_arch = "aarch64")]
-    ///
-    /// Set attribute for vcpu.
-    ///
-    fn set_vcpu_attr(&self, attr: &DeviceAttr) -> cpu::Result<()> {
-        self.fd
-            .set_device_attr(attr)
-            .map_err(|e| cpu::HypervisorCpuError::SetVcpuAttribute(e.into()))
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    ///
-    /// Check if vcpu has a certain attribute.
-    ///
-    fn has_vcpu_attr(&self, attr: &DeviceAttr) -> cpu::Result<()> {
-        self.fd
-            .has_device_attr(attr)
-            .map_err(|e| cpu::HypervisorCpuError::HasVcpuAttribute(e.into()))
-    }
-
     #[cfg(target_arch = "x86_64")]
     ///
     /// Returns the vCPU special registers.
@@ -2079,7 +2059,7 @@ impl cpu::Vcpu for KvmVcpu {
             addr: 0x0,
             flags: 0,
         };
-        self.has_vcpu_attr(&cpu_attr).is_ok()
+        self.fd.has_device_attr(&cpu_attr).is_ok()
     }
     #[cfg(target_arch = "aarch64")]
     fn init_pmu(&self, irq: u32) -> cpu::Result<()> {
@@ -2095,9 +2075,11 @@ impl cpu::Vcpu for KvmVcpu {
             addr: &irq as *const u32 as u64,
             flags: 0,
         };
-        self.set_vcpu_attr(&cpu_attr_irq)
+        self.fd
+            .set_device_attr(&cpu_attr_irq)
             .map_err(|_| cpu::HypervisorCpuError::InitializePmu)?;
-        self.set_vcpu_attr(&cpu_attr)
+        self.fd
+            .set_device_attr(&cpu_attr)
             .map_err(|_| cpu::HypervisorCpuError::InitializePmu)
     }
 }
