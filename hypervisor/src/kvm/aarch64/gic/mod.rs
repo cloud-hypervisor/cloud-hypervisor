@@ -5,7 +5,7 @@ mod icc_regs;
 mod redist_regs;
 
 use crate::arch::aarch64::gic::{Error, Result, Vgic};
-use crate::kvm::kvm_bindings;
+use crate::kvm::{kvm_bindings, KvmVm};
 use crate::{CpuState, Device, Vm};
 use dist_regs::{get_dist_regs, read_ctlr, set_dist_regs, write_ctlr};
 use icc_regs::{get_icc_regs, set_icc_regs};
@@ -136,7 +136,7 @@ impl KvmGicV3Its {
     }
 
     /// Setup the device-specific attributes
-    fn init_device_attributes(&mut self, vm: &dyn Vm, nr_irqs: u32) -> Result<()> {
+    fn init_device_attributes(&mut self, vm: &KvmVm, nr_irqs: u32) -> Result<()> {
         // GicV3 part attributes
         /* Setting up the distributor attribute.
          We are placing the GIC below 1GB so we need to substract the size of the distributor.
@@ -214,7 +214,7 @@ impl KvmGicV3Its {
     }
 
     /// Create a KVM Vgic device
-    fn create_device(vm: &dyn Vm) -> Result<Arc<dyn Device>> {
+    fn create_device(vm: &KvmVm) -> Result<Arc<dyn Device>> {
         let mut gic_device = kvm_bindings::kvm_create_device {
             type_: Self::version(),
             fd: 0,
@@ -254,6 +254,9 @@ impl KvmGicV3Its {
         msi_size: u64,
         nr_irqs: u32,
     ) -> Result<KvmGicV3Its> {
+        // This is inside KVM module
+        let vm = vm.as_any().downcast_ref::<KvmVm>().expect("Wrong VM type?");
+
         let vgic = Self::create_device(vm)?;
         let redists_size: u64 = redist_size * vcpu_count;
         let redists_addr: u64 = dist_addr - redists_size;
