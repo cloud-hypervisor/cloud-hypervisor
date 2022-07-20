@@ -236,6 +236,12 @@ pub enum HypervisorCpuError {
     #[cfg(feature = "tdx")]
     #[error("Unknown TDX VM call")]
     UnknownTdxVmCall,
+    #[cfg(target_arch = "aarch64")]
+    ///
+    /// Failed to intialize PMU
+    ///
+    #[error("Failed to initialize PMU")]
+    InitializePmu,
 }
 
 #[derive(Debug)]
@@ -399,6 +405,16 @@ pub trait Vcpu: Send + Sync {
     ///
     #[cfg(target_arch = "aarch64")]
     fn setup_regs(&self, cpu_id: u8, boot_ip: u64, fdt_start: u64) -> Result<()>;
+    ///
+    /// Check if the CPU supports PMU
+    ///
+    #[cfg(target_arch = "aarch64")]
+    fn has_pmu_support(&self) -> bool;
+    ///
+    /// Initialize PMU
+    ///
+    #[cfg(target_arch = "aarch64")]
+    fn init_pmu(&self, irq: u32) -> Result<()>;
     ///
     /// Retrieve the vCPU state.
     /// This function is necessary to snapshot the VM

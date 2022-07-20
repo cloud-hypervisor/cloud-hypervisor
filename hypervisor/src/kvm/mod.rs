@@ -2063,6 +2063,35 @@ impl cpu::Vcpu for KvmVcpu {
         ]
         .to_vec()
     }
+    #[cfg(target_arch = "aarch64")]
+    fn has_pmu_support(&self) -> bool {
+        let cpu_attr = kvm_bindings::kvm_device_attr {
+            group: kvm_bindings::KVM_ARM_VCPU_PMU_V3_CTRL,
+            attr: u64::from(kvm_bindings::KVM_ARM_VCPU_PMU_V3_INIT),
+            addr: 0x0,
+            flags: 0,
+        };
+        self.has_vcpu_attr(&cpu_attr).is_ok()
+    }
+    #[cfg(target_arch = "aarch64")]
+    fn init_pmu(&self, irq: u32) -> cpu::Result<()> {
+        let cpu_attr = kvm_bindings::kvm_device_attr {
+            group: kvm_bindings::KVM_ARM_VCPU_PMU_V3_CTRL,
+            attr: u64::from(kvm_bindings::KVM_ARM_VCPU_PMU_V3_INIT),
+            addr: 0x0,
+            flags: 0,
+        };
+        let cpu_attr_irq = kvm_bindings::kvm_device_attr {
+            group: kvm_bindings::KVM_ARM_VCPU_PMU_V3_CTRL,
+            attr: u64::from(kvm_bindings::KVM_ARM_VCPU_PMU_V3_IRQ),
+            addr: &irq as *const u32 as u64,
+            flags: 0,
+        };
+        self.set_vcpu_attr(&cpu_attr_irq)
+            .map_err(|_| cpu::HypervisorCpuError::InitializePmu)?;
+        self.set_vcpu_attr(&cpu_attr)
+            .map_err(|_| cpu::HypervisorCpuError::InitializePmu)
+    }
 }
 
 impl KvmVcpu {
