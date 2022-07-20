@@ -325,6 +325,10 @@ impl KvmVm {
             .map_err(|e| vm::HypervisorVmError::CreateDevice(e.into()))?;
         Ok(VfioDeviceFd::new_from_kvm(device_fd))
     }
+    /// Checks if a particular `Cap` is available.
+    fn check_extension(&self, c: Cap) -> bool {
+        self.fd.check_extension(c)
+    }
 }
 
 ///
@@ -680,10 +684,6 @@ impl vm::Vm for KvmVm {
         self.fd
             .set_clock(&data)
             .map_err(|e| vm::HypervisorVmError::SetClock(e.into()))
-    }
-    /// Checks if a particular `Cap` is available.
-    fn check_extension(&self, c: Cap) -> bool {
-        self.fd.check_extension(c)
     }
     /// Create a device that is used for passthrough
     fn create_passthrough_device(&self) -> vm::Result<VfioDeviceFd> {
