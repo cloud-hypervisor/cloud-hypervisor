@@ -23,6 +23,7 @@ use crate::UserMemoryRegion;
 use crate::{IoEventAddress, IrqRoutingEntry};
 #[cfg(feature = "kvm")]
 use kvm_ioctls::Cap;
+use std::any::Any;
 #[cfg(target_arch = "x86_64")]
 use std::fs::File;
 use std::sync::Arc;
@@ -260,7 +261,7 @@ pub enum InterruptSourceConfig {
 ///
 /// This crate provides a hypervisor-agnostic interfaces for Vm
 ///
-pub trait Vm: Send + Sync {
+pub trait Vm: Send + Sync + Any {
     #[cfg(target_arch = "x86_64")]
     /// Sets the address of the one-page region in the VM's address space.
     fn set_identity_map_address(&self, address: u64) -> Result<()>;
@@ -355,6 +356,8 @@ pub trait Vm: Send + Sync {
         size: u64,
         measure: bool,
     ) -> Result<()>;
+    /// Downcast to the underlying hypervisor VM type
+    fn as_any(&self) -> &dyn Any;
 }
 
 pub trait VmOps: Send + Sync {

@@ -1212,4 +1212,8 @@ impl vm::Vm for MshvVm {
     fn set_clock(&self, _data: &ClockData) -> vm::Result<()> {
         Ok(())
     }
+    /// Downcast to the underlying MshvVm type
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }

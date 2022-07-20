@@ -837,6 +837,10 @@ impl vm::Vm for KvmVm {
         )
         .map_err(vm::HypervisorVmError::InitMemRegionTdx)
     }
+    /// Downcast to the underlying KvmVm type
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
 #[cfg(feature = "tdx")]
