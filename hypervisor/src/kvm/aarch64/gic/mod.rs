@@ -187,7 +187,7 @@ impl KvmGicV3Its {
             0,
         )?;
 
-        self.set_its_device(Some(its_fd));
+        self.its_device = Some(its_fd);
 
         /* We need to tell the kernel how many irqs to support with this vgic.
          * See the `layout` module for details.
@@ -313,10 +313,6 @@ impl Vgic for KvmGicV3Its {
 
     fn msi_properties(&self) -> [u64; 2] {
         [self.msi_addr, self.msi_size]
-    }
-
-    fn set_its_device(&mut self, its_device: Option<Arc<dyn Device>>) {
-        self.its_device = its_device;
     }
 
     fn set_gicr_typers(&mut self, vcpu_states: &[CpuState]) {

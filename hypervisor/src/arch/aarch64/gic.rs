@@ -1,9 +1,8 @@
 // Copyright 2022 Arm Limited (or its affiliates). All rights reserved.
 
-use crate::{CpuState, Device, GicState, HypervisorDeviceError, HypervisorVmError};
+use crate::{CpuState, GicState, HypervisorDeviceError, HypervisorVmError};
 use std::any::Any;
 use std::result;
-use std::sync::Arc;
 
 /// Errors thrown while setting up the VGIC.
 #[derive(Debug)]
@@ -39,8 +38,6 @@ pub trait Vgic: Send + Sync {
 
     /// Returns the MSI reg property of the device
     fn msi_properties(&self) -> [u64; 2];
-
-    fn set_its_device(&mut self, its_device: Option<Arc<dyn Device>>);
 
     /// Get the values of GICR_TYPER for each vCPU.
     fn set_gicr_typers(&mut self, vcpu_states: &[CpuState]);
