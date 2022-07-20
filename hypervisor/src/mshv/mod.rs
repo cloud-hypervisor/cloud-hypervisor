@@ -12,6 +12,7 @@ use crate::cpu::Vcpu;
 use crate::hypervisor;
 use crate::vec_with_array_field;
 use crate::vm::{self, InterruptSourceConfig, VmOps};
+use crate::HypervisorType;
 pub use mshv_bindings::*;
 use mshv_ioctls::{set_registers_64, Mshv, NoDatamatch, VcpuFd, VmFd};
 use std::any::Any;
@@ -191,6 +192,12 @@ impl MshvHypervisor {
 /// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
 ///
 impl hypervisor::Hypervisor for MshvHypervisor {
+    ///
+    /// Returns the type of the hypervisor
+    ///
+    fn hypervisor_type(&self) -> HypervisorType {
+        HypervisorType::Mshv
+    }
     /// Create a mshv vm object and return the object as Vm trait object
     /// Example
     /// # extern crate hypervisor;
