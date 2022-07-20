@@ -319,12 +319,12 @@ impl KvmVm {
     /// Creates an emulated device in the kernel.
     ///
     /// See the documentation for `KVM_CREATE_DEVICE`.
-    fn create_device(&self, device: &mut CreateDevice) -> vm::Result<Arc<dyn device::Device>> {
+    fn create_device(&self, device: &mut CreateDevice) -> vm::Result<DeviceFd> {
         let device_fd = self
             .fd
             .create_device(device)
             .map_err(|e| vm::HypervisorVmError::CreateDevice(e.into()))?;
-        Ok(Arc::new(device_fd))
+        Ok(device_fd)
     }
 }
 
@@ -694,8 +694,9 @@ impl vm::Vm for KvmVm {
             flags: 0,
         };
 
-        self.create_device(&mut vfio_dev)
-            .map_err(|e| vm::HypervisorVmError::CreatePassthroughDevice(e.into()))
+        Ok(Arc::new(self.create_device(&mut vfio_dev).map_err(
+            |e| vm::HypervisorVmError::CreatePassthroughDevice(e.into()),
+        )?))
     }
     ///
     /// Start logging dirty pages

@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::arch::aarch64::gic::{Error, Result};
+use crate::device::HypervisorDeviceError;
 use crate::kvm::kvm_bindings::{
     kvm_device_attr, KVM_DEV_ARM_VGIC_GRP_DIST_REGS, KVM_DEV_ARM_VGIC_GRP_NR_IRQS,
 };
-use crate::Device;
-use std::sync::Arc;
+use kvm_ioctls::DeviceFd;
 
 /*
  Distributor registers as detailed at page 456 from
@@ -77,7 +77,7 @@ static VGIC_DIST_REGS: &[DistReg] = &[
     VGIC_DIST_REG!(GICD_IPRIORITYR, 8, 0),
 ];
 
-fn dist_attr_access(gic: &Arc<dyn Device>, offset: u32, val: &u32, set: bool) -> Result<()> {
+fn dist_attr_access(gic: &DeviceFd, offset: u32, val: &u32, set: bool) -> Result<()> {
     let mut gic_dist_attr = kvm_device_attr {
         group: KVM_DEV_ARM_VGIC_GRP_DIST_REGS,
         attr: offset as u64,
@@ -85,28 +85,30 @@ fn dist_attr_access(gic: &Arc<dyn Device>, offset: u32, val: &u32, set: bool) ->
         flags: 0,
     };
     if set {
-        gic.set_device_attr(&gic_dist_attr)
-            .map_err(Error::SetDeviceAttribute)?;
+        gic.set_device_attr(&gic_dist_attr).map_err(|e| {
+            Error::SetDeviceAttribute(HypervisorDeviceError::SetDeviceAttribute(e.into()))
+        })?;
     } else {
-        gic.get_device_attr(&mut gic_dist_attr)
-            .map_err(Error::GetDeviceAttribute)?;
+        gic.get_device_attr(&mut gic_dist_attr).map_err(|e| {
+            Error::GetDeviceAttribute(HypervisorDeviceError::GetDeviceAttribute(e.into()))
+        })?;
     }
     Ok(())
 }
 
 /// Get the distributor control register.
-pub fn read_ctlr(gic: &Arc<dyn Device>) -> Result<u32> {
+pub fn read_ctlr(gic: &DeviceFd) -> Result<u32> {
     let val: u32 = 0;
     dist_attr_access(gic, GICD_CTLR, &val, false)?;
     Ok(val)
 }
 
 /// Set the distributor control register.
-pub fn write_ctlr(gic: &Arc<dyn Device>, val: u32) -> Result<()> {
+pub fn write_ctlr(gic: &DeviceFd, val: u32) -> Result<()> {
     dist_attr_access(gic, GICD_CTLR, &val, true)
 }
 
-fn get_interrupts_num(gic: &Arc<dyn Device>) -> Result<u32> {
+fn get_interrupts_num(gic: &DeviceFd) -> Result<u32> {
     let num_irq = 0;
 
     let mut nr_irqs_attr = kvm_device_attr {
@@ -115,12 +117,13 @@ fn get_interrupts_num(gic: &Arc<dyn Device>) -> Result<u32> {
         addr: &num_irq as *const u32 as u64,
         flags: 0,
     };
-    gic.get_device_attr(&mut nr_irqs_attr)
-        .map_err(Error::GetDeviceAttribute)?;
+    gic.get_device_attr(&mut nr_irqs_attr).map_err(|e| {
+        Error::GetDeviceAttribute(HypervisorDeviceError::GetDeviceAttribute(e.into()))
+    })?;
     Ok(num_irq)
 }
 
-fn compute_reg_len(gic: &Arc<dyn Device>, reg: &DistReg, base: u32) -> Result<u32> {
+fn compute_reg_len(gic: &DeviceFd, reg: &DistReg, base: u32) -> Result<u32> {
     // FIXME:
     // Redefine some GIC constants to avoid the dependency on `layout` crate.
     // This is temporary solution, will be fixed in future refactoring.
@@ -147,7 +150,7 @@ fn compute_reg_len(gic: &Arc<dyn Device>, reg: &DistReg, base: u32) -> Result<u3
 }
 
 /// Set distributor registers of the GIC.
-pub fn set_dist_regs(gic: &Arc<dyn Device>, state: &[u32]) -> Result<()> {
+pub fn set_dist_regs(gic: &DeviceFd, state: &[u32]) -> Result<()> {
     let mut idx = 0;
 
     for dreg in VGIC_DIST_REGS {
@@ -164,7 +167,7 @@ pub fn set_dist_regs(gic: &Arc<dyn Device>, state: &[u32]) -> Result<()> {
     Ok(())
 }
 /// Get distributor registers of the GIC.
-pub fn get_dist_regs(gic: &Arc<dyn Device>) -> Result<Vec<u32>> {
+pub fn get_dist_regs(gic: &DeviceFd) -> Result<Vec<u32>> {
     let mut state = Vec::new();
 
     for dreg in VGIC_DIST_REGS {
