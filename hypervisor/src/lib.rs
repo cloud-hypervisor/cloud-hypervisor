@@ -148,6 +148,7 @@ pub enum IoEventAddress {
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum CpuState {
     #[cfg(feature = "kvm")]
     Kvm(kvm::VcpuKvmState),
