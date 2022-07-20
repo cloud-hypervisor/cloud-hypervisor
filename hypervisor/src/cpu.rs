@@ -19,8 +19,6 @@ use crate::arch::x86::{
 #[cfg(feature = "tdx")]
 use crate::kvm::{TdxExitDetails, TdxExitStatus};
 use crate::CpuState;
-#[cfg(target_arch = "aarch64")]
-use crate::DeviceAttr;
 use crate::MpState;
 use thiserror::Error;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
@@ -276,16 +274,6 @@ pub trait Vcpu: Send + Sync {
     /// Returns the vCPU general purpose registers.
     ///
     fn get_regs(&self) -> Result<StandardRegisters>;
-    #[cfg(target_arch = "aarch64")]
-    ///
-    /// Sets vcpu attribute
-    ///
-    fn set_vcpu_attr(&self, attr: &DeviceAttr) -> Result<()>;
-    #[cfg(target_arch = "aarch64")]
-    ///
-    /// Check if vcpu has attribute.
-    ///
-    fn has_vcpu_attr(&self, attr: &DeviceAttr) -> Result<()>;
     ///
     /// Sets the vCPU general purpose registers.
     ///
