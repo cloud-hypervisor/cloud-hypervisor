@@ -51,5 +51,8 @@ jobs:
       - name: Clippy (common + mshv)
         run: cargo clippy --locked --all --all-targets --no-default-features --tests --features "common,mshv" -- -D warnings
 
+      - name: Clippy (common + mshv + kvm)
+        run: cargo clippy --locked --all --all-targets --no-default-features --tests --features "common,mshv,kvm" -- -D warnings
+
       - name: Check build did not modify any files
         run: test -z "$(git status --porcelain)"
