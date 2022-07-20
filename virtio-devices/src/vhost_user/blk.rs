@@ -342,11 +342,7 @@ impl VirtioDevice for Blk {
         }
 
         if let Some(vu) = &self.vu_common.vu {
-            if let Err(e) = vu
-                .lock()
-                .unwrap()
-                .reset_vhost_user(self.common.queue_sizes.len())
-            {
+            if let Err(e) = vu.lock().unwrap().reset_vhost_user() {
                 error!("Failed to reset vhost-user daemon: {:?}", e);
                 return None;
             }

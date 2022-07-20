@@ -54,6 +54,7 @@ pub struct VhostUserHandle {
     shm_log: Option<Arc<MmapRegion>>,
     acked_features: u64,
     vrings_info: Option<Vec<VringInfo>>,
+    queue_indexes: Vec<usize>,
 }
 
 impl VhostUserHandle {
@@ -198,8 +199,6 @@ impl VhostUserHandle {
                 .map_err(Error::VhostUserSetInflight)?;
         }
 
-        let num_queues = queues.len() as usize;
-
         let mut vrings_info = Vec::new();
         for (queue_index, queue, queue_evt) in queues.iter() {
             let actual_size: usize = queue.state.size.try_into().unwrap();
@@ -262,9 +261,11 @@ impl VhostUserHandle {
             self.vu
                 .set_vring_kick(*queue_index, queue_evt)
                 .map_err(Error::VhostUserSetVringKick)?;
+
+            self.queue_indexes.push(*queue_index);
         }
 
-        self.enable_vhost_user_vrings(num_queues, true)?;
+        self.enable_vhost_user_vrings(self.queue_indexes.clone(), true)?;
 
         if let Some(slave_req_handler) = slave_req_handler {
             self.vu
@@ -278,8 +279,8 @@ impl VhostUserHandle {
         Ok(())
     }
 
-    fn enable_vhost_user_vrings(&mut self, num_queues: usize, enable: bool) -> Result<()> {
-        for queue_index in 0..num_queues {
+    fn enable_vhost_user_vrings(&mut self, queue_indexes: Vec<usize>, enable: bool) -> Result<()> {
+        for queue_index in queue_indexes {
             self.vu
                 .set_vring_enable(queue_index, enable)
                 .map_err(Error::VhostUserSetVringEnable)?;
@@ -288,8 +289,14 @@ impl VhostUserHandle {
         Ok(())
     }
 
-    pub fn reset_vhost_user(&mut self, num_queues: usize) -> Result<()> {
-        self.enable_vhost_user_vrings(num_queues, false)
+    pub fn reset_vhost_user(&mut self) -> Result<()> {
+        for queue_index in self.queue_indexes.drain(..) {
+            self.vu
+                .set_vring_enable(queue_index, false)
+                .map_err(Error::VhostUserSetVringEnable)?;
+        }
+
+        Ok(())
     }
 
     pub fn set_protocol_features_vhost_user(
@@ -367,6 +374,7 @@ impl VhostUserHandle {
                 shm_log: None,
                 acked_features: 0,
                 vrings_info: None,
+                queue_indexes: Vec::new(),
             })
         } else {
             let now = Instant::now();
@@ -382,6 +390,7 @@ impl VhostUserHandle {
                             shm_log: None,
                             acked_features: 0,
                             vrings_info: None,
+                            queue_indexes: Vec::new(),
                         })
                     }
                     Err(e) => e,
@@ -405,17 +414,17 @@ impl VhostUserHandle {
         &mut self.vu
     }
 
-    pub fn pause_vhost_user(&mut self, num_queues: usize) -> Result<()> {
+    pub fn pause_vhost_user(&mut self) -> Result<()> {
         if self.ready {
-            self.enable_vhost_user_vrings(num_queues, false)?;
+            self.enable_vhost_user_vrings(self.queue_indexes.clone(), false)?;
         }
 
         Ok(())
     }
 
-    pub fn resume_vhost_user(&mut self, num_queues: usize) -> Result<()> {
+    pub fn resume_vhost_user(&mut self) -> Result<()> {
         if self.ready {
-            self.enable_vhost_user_vrings(num_queues, true)?;
+            self.enable_vhost_user_vrings(self.queue_indexes.clone(), true)?;
         }
 
         Ok(())
