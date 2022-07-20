@@ -46,7 +46,7 @@ use hypervisor::arch::x86::{SpecialRegisters, StandardRegisters};
 use hypervisor::kvm::kvm_bindings;
 #[cfg(feature = "tdx")]
 use hypervisor::kvm::{TdxExitDetails, TdxExitStatus};
-use hypervisor::{CpuState, HypervisorCpuError, VmExit, VmOps};
+use hypervisor::{CpuState, HypervisorCpuError, HypervisorType, VmExit, VmOps};
 use libc::{c_void, siginfo_t};
 #[cfg(feature = "guest_debug")]
 use linux_loader::elf::Elf64_Nhdr;
@@ -412,6 +412,7 @@ impl Snapshottable for Vcpu {
 }
 
 pub struct CpuManager {
+    hypervisor_type: HypervisorType,
     config: CpusConfig,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     interrupt_controller: Option<Arc<Mutex<dyn InterruptController>>>,
@@ -589,6 +590,7 @@ impl CpuManager {
         let guest_memory = memory_manager.lock().unwrap().guest_memory();
         let mut vcpu_states = Vec::with_capacity(usize::from(config.max_vcpus));
         vcpu_states.resize_with(usize::from(config.max_vcpus), VcpuState::default);
+        let hypervisor_type = hypervisor.hypervisor_type();
 
         #[cfg(target_arch = "x86_64")]
         let sgx_epc_sections = memory_manager
@@ -688,6 +690,7 @@ impl CpuManager {
         };
 
         let cpu_manager = Arc::new(Mutex::new(CpuManager {
+            hypervisor_type,
             config: config.clone(),
             interrupt_controller: device_manager.interrupt_controller().clone(),
             vm_memory: guest_memory,
@@ -836,8 +839,9 @@ impl CpuManager {
         });
 
         // Retrieve seccomp filter for vcpu thread
-        let vcpu_seccomp_filter = get_seccomp_filter(&self.seccomp_action, Thread::Vcpu)
-            .map_err(Error::CreateSeccompFilter)?;
+        let vcpu_seccomp_filter =
+            get_seccomp_filter(&self.seccomp_action, Thread::Vcpu, self.hypervisor_type)
+                .map_err(Error::CreateSeccompFilter)?;
 
         #[cfg(target_arch = "x86_64")]
         let interrupt_controller_clone = self.interrupt_controller.as_ref().cloned();

@@ -471,7 +471,6 @@ pub struct Vm {
     numa_nodes: NumaNodes,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
-    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
     stop_on_boot: bool,
     #[cfg(target_arch = "x86_64")]
@@ -534,6 +533,7 @@ impl Vm {
         let stop_on_boot = false;
 
         let device_manager = DeviceManager::new(
+            hypervisor.hypervisor_type(),
             vm.clone(),
             config.clone(),
             memory_manager.clone(),
@@ -617,7 +617,6 @@ impl Vm {
             numa_nodes,
             seccomp_action: seccomp_action.clone(),
             exit_evt,
-            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             hypervisor,
             stop_on_boot,
             #[cfg(target_arch = "x86_64")]
@@ -1969,9 +1968,12 @@ impl Vm {
             Ok(signals) => {
                 self.signals = Some(signals.handle());
                 let exit_evt = self.exit_evt.try_clone().map_err(Error::EventFdClone)?;
-                let signal_handler_seccomp_filter =
-                    get_seccomp_filter(&self.seccomp_action, Thread::SignalHandler)
-                        .map_err(Error::CreateSeccompFilter)?;
+                let signal_handler_seccomp_filter = get_seccomp_filter(
+                    &self.seccomp_action,
+                    Thread::SignalHandler,
+                    self.hypervisor.hypervisor_type(),
+                )
+                .map_err(Error::CreateSeccompFilter)?;
                 self.threads.push(
                     thread::Builder::new()
                         .name("vm_signal_handler".to_string())

@@ -7,6 +7,7 @@ use crate::api::http_endpoint::{VmActionHandler, VmCreate, VmInfo, VmmPing, VmmS
 use crate::api::{ApiError, ApiRequest, VmAction};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{Error as VmmError, Result};
+use hypervisor::HypervisorType;
 use micro_http::{Body, HttpServer, MediaType, Method, Request, Response, StatusCode, Version};
 use once_cell::sync::Lazy;
 use seccompiler::{apply_filter, SeccompAction};
@@ -278,10 +279,11 @@ fn start_http_thread(
     api_sender: Sender<ApiRequest>,
     seccomp_action: &SeccompAction,
     exit_evt: EventFd,
+    hypervisor_type: HypervisorType,
 ) -> Result<thread::JoinHandle<Result<()>>> {
     // Retrieve seccomp filter for API thread
-    let api_seccomp_filter =
-        get_seccomp_filter(seccomp_action, Thread::Api).map_err(VmmError::CreateSeccompFilter)?;
+    let api_seccomp_filter = get_seccomp_filter(seccomp_action, Thread::Api, hypervisor_type)
+        .map_err(VmmError::CreateSeccompFilter)?;
 
     thread::Builder::new()
         .name("http-server".to_string())
@@ -336,12 +338,20 @@ pub fn start_http_path_thread(
     api_sender: Sender<ApiRequest>,
     seccomp_action: &SeccompAction,
     exit_evt: EventFd,
+    hypervisor_type: HypervisorType,
 ) -> Result<thread::JoinHandle<Result<()>>> {
     let socket_path = PathBuf::from(path);
     let socket_fd = UnixListener::bind(socket_path).map_err(VmmError::CreateApiServerSocket)?;
     let server =
         HttpServer::new_from_fd(socket_fd.into_raw_fd()).map_err(VmmError::CreateApiServer)?;
-    start_http_thread(server, api_notifier, api_sender, seccomp_action, exit_evt)
+    start_http_thread(
+        server,
+        api_notifier,
+        api_sender,
+        seccomp_action,
+        exit_evt,
+        hypervisor_type,
+    )
 }
 
 pub fn start_http_fd_thread(
@@ -350,7 +360,15 @@ pub fn start_http_fd_thread(
     api_sender: Sender<ApiRequest>,
     seccomp_action: &SeccompAction,
     exit_evt: EventFd,
+    hypervisor_type: HypervisorType,
 ) -> Result<thread::JoinHandle<Result<()>>> {
     let server = HttpServer::new_from_fd(fd).map_err(VmmError::CreateApiServer)?;
-    start_http_thread(server, api_notifier, api_sender, seccomp_action, exit_evt)
+    start_http_thread(
+        server,
+        api_notifier,
+        api_sender,
+        seccomp_action,
+        exit_evt,
+        hypervisor_type,
+    )
 }
