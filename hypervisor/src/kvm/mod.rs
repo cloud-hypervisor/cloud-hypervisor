@@ -314,6 +314,20 @@ pub struct KvmVm {
     dirty_log_slots: Arc<RwLock<HashMap<u32, KvmDirtyLogSlot>>>,
 }
 
+impl KvmVm {
+    ///
+    /// Creates an emulated device in the kernel.
+    ///
+    /// See the documentation for `KVM_CREATE_DEVICE`.
+    fn create_device(&self, device: &mut CreateDevice) -> vm::Result<Arc<dyn device::Device>> {
+        let device_fd = self
+            .fd
+            .create_device(device)
+            .map_err(|e| vm::HypervisorVmError::CreateDevice(e.into()))?;
+        Ok(Arc::new(device_fd))
+    }
+}
+
 ///
 /// Implementation of Vm trait for KVM
 /// Example:
@@ -614,17 +628,6 @@ impl vm::Vm for KvmVm {
                 .set_user_memory_region(region)
                 .map_err(|e| vm::HypervisorVmError::RemoveUserMemory(e.into()))
         }
-    }
-    ///
-    /// Creates an emulated device in the kernel.
-    ///
-    /// See the documentation for `KVM_CREATE_DEVICE`.
-    fn create_device(&self, device: &mut CreateDevice) -> vm::Result<Arc<dyn device::Device>> {
-        let device_fd = self
-            .fd
-            .create_device(device)
-            .map_err(|e| vm::HypervisorVmError::CreateDevice(e.into()))?;
-        Ok(Arc::new(device_fd))
     }
     ///
     /// Returns the preferred CPU target type which can be emulated by KVM on underlying host.

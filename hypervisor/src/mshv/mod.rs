@@ -913,6 +913,20 @@ pub struct MshvVm {
     dirty_log_slots: Arc<RwLock<HashMap<u64, MshvDirtyLogSlot>>>,
 }
 
+impl MshvVm {
+    ///
+    /// Creates an in-kernel device.
+    ///
+    /// See the documentation for `MSHV_CREATE_DEVICE`.
+    fn create_device(&self, device: &mut CreateDevice) -> vm::Result<Arc<dyn device::Device>> {
+        let device_fd = self
+            .fd
+            .create_device(device)
+            .map_err(|e| vm::HypervisorVmError::CreateDevice(e.into()))?;
+        Ok(Arc::new(device_fd))
+    }
+}
+
 ///
 /// Implementation of Vm trait for Mshv
 /// Example:
@@ -1094,18 +1108,6 @@ impl vm::Vm for MshvVm {
             userspace_addr: userspace_addr as u64,
         }
         .into()
-    }
-
-    ///
-    /// Creates an in-kernel device.
-    ///
-    /// See the documentation for `MSHV_CREATE_DEVICE`.
-    fn create_device(&self, device: &mut CreateDevice) -> vm::Result<Arc<dyn device::Device>> {
-        let device_fd = self
-            .fd
-            .create_device(device)
-            .map_err(|e| vm::HypervisorVmError::CreateDevice(e.into()))?;
-        Ok(Arc::new(device_fd))
     }
 
     fn create_passthrough_device(&self) -> vm::Result<Arc<dyn device::Device>> {
