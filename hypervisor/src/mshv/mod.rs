@@ -17,11 +17,11 @@ use mshv_ioctls::{set_registers_64, Mshv, NoDatamatch, VcpuFd, VmFd};
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use vfio_ioctls::VfioDeviceFd;
 use vm::DataMatch;
 // x86_64 dependencies
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
-use crate::device;
 use crate::{
     ClockData, CpuState, IoEventAddress, IrqRoutingEntry, MpState, UserMemoryRegion,
     USER_MEMORY_REGION_EXECUTE, USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
@@ -753,32 +753,6 @@ impl MshvVcpu {
     }
 }
 
-/// Device struct for MSHV
-pub type MshvDevice = DeviceFd;
-
-impl device::Device for MshvDevice {
-    ///
-    /// Set device attribute
-    ///
-    fn set_device_attr(&self, attr: &DeviceAttr) -> device::Result<()> {
-        self.set_device_attr(attr)
-            .map_err(|e| device::HypervisorDeviceError::SetDeviceAttribute(e.into()))
-    }
-    ///
-    /// Get device attribute
-    ///
-    fn get_device_attr(&self, attr: &mut DeviceAttr) -> device::Result<()> {
-        self.get_device_attr(attr)
-            .map_err(|e| device::HypervisorDeviceError::GetDeviceAttribute(e.into()))
-    }
-    ///
-    /// Cast to the underlying MSHV device fd
-    ///
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
 struct MshvEmulatorContext<'a> {
     vcpu: &'a MshvVcpu,
     map: (u64, u64), // Initial GVA to GPA mapping provided by the hypervisor
@@ -918,12 +892,12 @@ impl MshvVm {
     /// Creates an in-kernel device.
     ///
     /// See the documentation for `MSHV_CREATE_DEVICE`.
-    fn create_device(&self, device: &mut CreateDevice) -> vm::Result<DeviceFd> {
+    fn create_device(&self, device: &mut CreateDevice) -> vm::Result<VfioDeviceFd> {
         let device_fd = self
             .fd
             .create_device(device)
             .map_err(|e| vm::HypervisorVmError::CreateDevice(e.into()))?;
-        Ok(device_fd)
+        Ok(VfioDeviceFd::new_from_mshv(device_fd))
     }
 }
 
@@ -1110,16 +1084,15 @@ impl vm::Vm for MshvVm {
         .into()
     }
 
-    fn create_passthrough_device(&self) -> vm::Result<Arc<dyn device::Device>> {
+    fn create_passthrough_device(&self) -> vm::Result<VfioDeviceFd> {
         let mut vfio_dev = mshv_create_device {
             type_: mshv_device_type_MSHV_DEV_TYPE_VFIO,
             fd: 0,
             flags: 0,
         };
 
-        Ok(Arc::new(self.create_device(&mut vfio_dev).map_err(
-            |e| vm::HypervisorVmError::CreatePassthroughDevice(e.into()),
-        )?))
+        self.create_device(&mut vfio_dev)
+            .map_err(|e| vm::HypervisorVmError::CreatePassthroughDevice(e.into()))
     }
 
     ///

@@ -18,7 +18,6 @@ pub use crate::aarch64::{
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::gic::Vgic;
 use crate::cpu;
-use crate::device;
 use crate::hypervisor;
 use crate::vec_with_array_field;
 use crate::vm::{self, InterruptSourceConfig, VmOps};
@@ -88,6 +87,7 @@ pub use kvm_ioctls::{Cap, Kvm};
 #[cfg(target_arch = "aarch64")]
 use std::mem;
 use thiserror::Error;
+use vfio_ioctls::VfioDeviceFd;
 #[cfg(feature = "tdx")]
 use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_ioc_nr, ioctl_iowr_nr};
 ///
@@ -95,8 +95,7 @@ use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_ioc_nr, ioctl_iowr_nr};
 ///
 pub use {
     kvm_bindings::kvm_create_device as CreateDevice, kvm_bindings::kvm_device_attr as DeviceAttr,
-    kvm_bindings::kvm_run, kvm_bindings::kvm_vcpu_events as VcpuEvents, kvm_ioctls::DeviceFd,
-    kvm_ioctls::VcpuExit,
+    kvm_bindings::kvm_run, kvm_bindings::kvm_vcpu_events as VcpuEvents, kvm_ioctls::VcpuExit,
 };
 
 #[cfg(target_arch = "x86_64")]
@@ -319,12 +318,12 @@ impl KvmVm {
     /// Creates an emulated device in the kernel.
     ///
     /// See the documentation for `KVM_CREATE_DEVICE`.
-    fn create_device(&self, device: &mut CreateDevice) -> vm::Result<DeviceFd> {
+    fn create_device(&self, device: &mut CreateDevice) -> vm::Result<vfio_ioctls::VfioDeviceFd> {
         let device_fd = self
             .fd
             .create_device(device)
             .map_err(|e| vm::HypervisorVmError::CreateDevice(e.into()))?;
-        Ok(device_fd)
+        Ok(VfioDeviceFd::new_from_kvm(device_fd))
     }
 }
 
@@ -687,16 +686,15 @@ impl vm::Vm for KvmVm {
         self.fd.check_extension(c)
     }
     /// Create a device that is used for passthrough
-    fn create_passthrough_device(&self) -> vm::Result<Arc<dyn device::Device>> {
+    fn create_passthrough_device(&self) -> vm::Result<VfioDeviceFd> {
         let mut vfio_dev = kvm_create_device {
             type_: kvm_device_type_KVM_DEV_TYPE_VFIO,
             fd: 0,
             flags: 0,
         };
 
-        Ok(Arc::new(self.create_device(&mut vfio_dev).map_err(
-            |e| vm::HypervisorVmError::CreatePassthroughDevice(e.into()),
-        )?))
+        self.create_device(&mut vfio_dev)
+            .map_err(|e| vm::HypervisorVmError::CreatePassthroughDevice(e.into()))
     }
     ///
     /// Start logging dirty pages
@@ -2140,31 +2138,5 @@ impl KvmVcpu {
         self.fd
             .set_vcpu_events(events)
             .map_err(|e| cpu::HypervisorCpuError::SetVcpuEvents(e.into()))
-    }
-}
-
-/// Device struct for KVM
-pub type KvmDevice = DeviceFd;
-
-impl device::Device for KvmDevice {
-    ///
-    /// Set device attribute
-    ///
-    fn set_device_attr(&self, attr: &DeviceAttr) -> device::Result<()> {
-        self.set_device_attr(attr)
-            .map_err(|e| device::HypervisorDeviceError::SetDeviceAttribute(e.into()))
-    }
-    ///
-    /// Get device attribute
-    ///
-    fn get_device_attr(&self, attr: &mut DeviceAttr) -> device::Result<()> {
-        self.get_device_attr(attr)
-            .map_err(|e| device::HypervisorDeviceError::GetDeviceAttribute(e.into()))
-    }
-    ///
-    /// Cast to the underlying KVM device fd
-    ///
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }
