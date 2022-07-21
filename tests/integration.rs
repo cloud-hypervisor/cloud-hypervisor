@@ -5069,6 +5069,10 @@ mod parallel {
                 .ssh_command("stress --vm 25 --vm-keep --vm-bytes 1G --timeout 20")
                 .unwrap();
 
+            // Give some time for the OOM to happen in the guest and be reported
+            // back to the host.
+            thread::sleep(std::time::Duration::new(20, 0));
+
             // 2nd: check balloon_mem's value to verify balloon has been automatically deflated
             let deflated_balloon = balloon_size(&api_socket);
             println!(
