@@ -50,7 +50,7 @@ use devices::legacy::Serial;
 use devices::{
     interrupt_controller, interrupt_controller::InterruptController, AcpiNotificationFlags,
 };
-use hypervisor::{DeviceFd, HypervisorVmError, IoEventAddress};
+use hypervisor::{HypervisorVmError, IoEventAddress};
 use libc::{
     cfmakeraw, isatty, tcgetattr, tcsetattr, termios, MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED,
     O_TMPFILE, PROT_READ, PROT_WRITE, TCSANOW,
@@ -75,7 +75,7 @@ use std::path::PathBuf;
 use std::result;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use vfio_ioctls::{VfioContainer, VfioDevice};
+use vfio_ioctls::{VfioContainer, VfioDevice, VfioDeviceFd};
 use virtio_devices::transport::VirtioTransport;
 use virtio_devices::transport::{VirtioPciDevice, VirtioPciDeviceActivator};
 use virtio_devices::vhost_user::VhostUserConfig;
@@ -867,7 +867,7 @@ pub struct DeviceManager {
     legacy_interrupt_manager: Option<Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>>,
 
     // Passthrough device handle
-    passthrough_device: Option<Arc<dyn hypervisor::Device>>,
+    passthrough_device: Option<VfioDeviceFd>,
 
     // VFIO container
     // Only one container can be created, therefore it is stored as part of the
@@ -2942,32 +2942,12 @@ impl DeviceManager {
             .as_ref()
             .ok_or(DeviceManagerError::NoDevicePassthroughSupport)?;
 
-        // Safe because we know the RawFd is valid.
-        //
-        // This dup() is mandatory to be able to give full ownership of the
-        // file descriptor to the DeviceFd::from_raw_fd() function later in
-        // the code.
-        //
-        // This is particularly needed so that VfioContainer will still have
-        // a valid file descriptor even if DeviceManager, and therefore the
-        // passthrough_device are dropped. In case of Drop, the file descriptor
-        // would be closed, but Linux would still have the duplicated file
-        // descriptor opened from DeviceFd, preventing from unexpected behavior
-        // where the VfioContainer would try to use a closed file descriptor.
-        let dup_device_fd = unsafe { libc::dup(passthrough_device.as_raw_fd()) };
-        if dup_device_fd == -1 {
-            return vmm_sys_util::errno::errno_result().map_err(DeviceManagerError::DupFd);
-        }
+        let dup = passthrough_device
+            .try_clone()
+            .map_err(DeviceManagerError::VfioCreate)?;
 
-        assert!(passthrough_device.as_any().is::<DeviceFd>());
-
-        // SAFETY the raw fd conversion here is safe because:
-        //   1. When running on KVM or MSHV, passthrough_device wraps around DeviceFd.
-        //   2. The conversion here extracts the raw fd and then turns the raw fd into a DeviceFd
-        //      of the same (correct) type.
         Ok(Arc::new(
-            VfioContainer::new(Arc::new(unsafe { DeviceFd::from_raw_fd(dup_device_fd) }))
-                .map_err(DeviceManagerError::VfioCreate)?,
+            VfioContainer::new(Some(Arc::new(dup))).map_err(DeviceManagerError::VfioCreate)?,
         ))
     }
 

@@ -9,9 +9,6 @@
 // Copyright 2020, ARM Limited
 //
 
-use crate::DeviceAttr;
-use std::any::Any;
-use std::os::unix::io::AsRawFd;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -28,23 +25,4 @@ pub enum HypervisorDeviceError {
     ///
     #[error("Failed to get device attribute: {0}")]
     GetDeviceAttribute(#[source] anyhow::Error),
-}
-
-///
-/// Result type for returning from a function
-///
-pub type Result<T> = std::result::Result<T, HypervisorDeviceError>;
-
-///
-/// Trait to represent a device
-///
-/// This crate provides a hypervisor-agnostic interfaces for device
-///
-pub trait Device: Send + Sync + AsRawFd {
-    /// Set device attribute.
-    fn set_device_attr(&self, attr: &DeviceAttr) -> Result<()>;
-    /// Get device attribute.
-    fn get_device_attr(&self, attr: &mut DeviceAttr) -> Result<()>;
-    /// Provide a way to downcast to the device fd.
-    fn as_any(&self) -> &dyn Any;
 }

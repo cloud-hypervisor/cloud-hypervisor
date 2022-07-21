@@ -51,20 +51,15 @@ mod cpu;
 mod device;
 
 pub use cpu::{HypervisorCpuError, Vcpu, VmExit};
-pub use device::{Device, HypervisorDeviceError};
+pub use device::HypervisorDeviceError;
 pub use hypervisor::{Hypervisor, HypervisorError};
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 pub use kvm::x86_64;
 #[cfg(all(feature = "kvm", target_arch = "aarch64"))]
 pub use kvm::{aarch64, GicState};
 // Aliased types exposed from both hypervisors
-#[cfg(feature = "kvm")]
-pub use kvm::{CreateDevice, DeviceAttr, DeviceFd};
 #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
 pub use mshv::x86_64;
-// Aliased types exposed from both hypervisors
-#[cfg(all(feature = "mshv", target_arch = "x86_64"))]
-pub use mshv::{CreateDevice, DeviceAttr, DeviceFd};
 use std::sync::Arc;
 pub use vm::{
     DataMatch, HypervisorVmError, InterruptSourceConfig, LegacyIrqSourceConfig, MsiIrqSourceConfig,

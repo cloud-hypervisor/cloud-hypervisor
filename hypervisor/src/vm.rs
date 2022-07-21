@@ -15,7 +15,6 @@ use crate::arch::aarch64::gic::Vgic;
 #[cfg(feature = "tdx")]
 use crate::arch::x86::CpuIdEntry;
 use crate::cpu::Vcpu;
-use crate::device::Device;
 #[cfg(target_arch = "x86_64")]
 use crate::ClockData;
 use crate::UserMemoryRegion;
@@ -331,7 +330,7 @@ pub trait Vm: Send + Sync + Any {
     /// Checks if a particular `Cap` is available.
     fn check_extension(&self, c: Cap) -> bool;
     /// Create a device that is used for passthrough
-    fn create_passthrough_device(&self) -> Result<Arc<dyn Device>>;
+    fn create_passthrough_device(&self) -> Result<vfio_ioctls::VfioDeviceFd>;
     /// Start logging dirty pages
     fn start_dirty_log(&self) -> Result<()>;
     /// Stop logging dirty pages

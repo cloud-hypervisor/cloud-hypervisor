@@ -293,6 +293,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "vfio-ioctls",
  "vm-memory",
  "vmm-sys-util",
 ]
@@ -723,7 +724,7 @@ dependencies = [
 [[package]]
 name = "vfio-ioctls"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vfio?branch=main#4630612f2ff300e78b6d55be324fb5481aa84661"
+source = "git+https://github.com/rust-vmm/vfio?branch=main#1ff2324e5cb0fccab825f9c96bb9387a1a01863f"
 dependencies = [
  "byteorder",
  "kvm-bindings",
