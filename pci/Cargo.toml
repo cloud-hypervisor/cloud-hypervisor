@@ -18,7 +18,7 @@ vfio_user = { path = "../vfio_user" }
 vmm-sys-util = "0.10.0"
 libc = "0.2.126"
 log = "0.4.17"
-serde = { version="1.0.139", features=["derive"] }
+serde = { version="1.0.140", features=["derive"] }
 thiserror = "1.0.31"
 versionize = "0.1.6"
 versionize_derive = "0.1.4"
