@@ -20,6 +20,9 @@ vm-memory = "0.8.0"
 vm-migration = { path = "../vm-migration" }
 vmm-sys-util = "0.10.0"
 
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+arch = { path = "../arch" }
+
 [features]
 default = []
 cmos = []
