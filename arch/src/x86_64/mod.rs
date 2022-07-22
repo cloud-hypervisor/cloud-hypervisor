@@ -202,7 +202,7 @@ impl From<Error> for super::Error {
     }
 }
 
-#[allow(dead_code, clippy::upper_case_acronyms)]
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Copy, Clone, Debug)]
 pub enum CpuidReg {
     EAX,
