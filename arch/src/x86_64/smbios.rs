@@ -15,7 +15,6 @@ use std::slice;
 use vm_memory::ByteValued;
 use vm_memory::{Address, Bytes, GuestAddress};
 
-#[allow(unused_variables)]
 #[derive(Debug)]
 pub enum Error {
     /// There was too little guest memory to store the entire SMBIOS table.
