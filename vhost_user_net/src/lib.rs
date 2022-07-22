@@ -16,7 +16,7 @@ use net_util::{
 use option_parser::Toggle;
 use option_parser::{OptionParser, OptionParserError};
 use std::fmt;
-use std::io::{self};
+use std::io;
 use std::net::Ipv4Addr;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::process;
