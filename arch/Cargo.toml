@@ -9,7 +9,6 @@ default = []
 tdx = []
 
 [dependencies]
-acpi_tables = { path = "../acpi_tables" }
 anyhow = "1.0.58"
 byteorder = "1.4.3"
 hypervisor = { path = "../hypervisor" }
