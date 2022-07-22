@@ -69,12 +69,18 @@ pub enum HypervisorType {
 
 pub fn new() -> std::result::Result<Arc<dyn Hypervisor>, HypervisorError> {
     #[cfg(feature = "kvm")]
-    let hv = kvm::KvmHypervisor::new()?;
+    if kvm::KvmHypervisor::is_available()? {
+        return kvm::KvmHypervisor::new();
+    }
 
     #[cfg(feature = "mshv")]
-    let hv = mshv::MshvHypervisor::new()?;
+    if mshv::MshvHypervisor::is_available()? {
+        return mshv::MshvHypervisor::new();
+    }
 
-    Ok(hv)
+    Err(HypervisorError::HypervisorCreate(anyhow!(
+        "no supported hypervisor"
+    )))
 }
 
 // Returns a `Vec<T>` with a size in bytes at least as large as `size_in_bytes`.
