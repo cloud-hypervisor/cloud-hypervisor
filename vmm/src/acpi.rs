@@ -7,6 +7,7 @@ use crate::device_manager::DeviceManager;
 use crate::memory_manager::MemoryManager;
 use crate::pci_segment::PciSegment;
 use crate::{GuestMemoryMmap, GuestRegionMmap};
+#[cfg(target_arch = "aarch64")]
 use acpi_tables::sdt::GenericAddress;
 use acpi_tables::{aml::Aml, rsdp::Rsdp, sdt::Sdt};
 #[cfg(target_arch = "aarch64")]
@@ -14,7 +15,6 @@ use arch::aarch64::DeviceInfoForFdt;
 #[cfg(target_arch = "aarch64")]
 use arch::DeviceType;
 use arch::NumaNodes;
-
 use bitflags::bitflags;
 use pci::PciBdf;
 use std::sync::{Arc, Mutex};
@@ -185,25 +185,39 @@ pub fn create_dsdt_table(
     dsdt
 }
 
-fn create_facp_table(dsdt_offset: GuestAddress) -> Sdt {
+fn create_facp_table(dsdt_offset: GuestAddress, device_manager: &Arc<Mutex<DeviceManager>>) -> Sdt {
     // Revision 6 of the ACPI FADT table is 276 bytes long
     let mut facp = Sdt::new(*b"FACP", 276, 6, *b"CLOUDH", *b"CHFACP  ", 1);
 
-    // x86_64 specific fields
-    #[cfg(target_arch = "x86_64")]
     {
-        // PM_TMR_BLK I/O port
-        facp.write(76, 0xb008u32);
-        // RESET_REG
-        facp.write(116, GenericAddress::io_port_address::<u8>(0x3c0));
-        // RESET_VALUE
-        facp.write(128, 1u8);
-        // X_PM_TMR_BLK
-        facp.write(208, GenericAddress::io_port_address::<u32>(0xb008));
-        // SLEEP_CONTROL_REG
-        facp.write(244, GenericAddress::io_port_address::<u8>(0x3c0));
-        // SLEEP_STATUS_REG
-        facp.write(256, GenericAddress::io_port_address::<u8>(0x3c0));
+        let device_manager = device_manager.lock().unwrap();
+        if let Some(address) = device_manager.acpi_platform_addresses().reset_reg_address {
+            // RESET_REG
+            facp.write(116, address);
+            // RESET_VALUE
+            facp.write(128, 1u8);
+        }
+
+        if let Some(address) = device_manager
+            .acpi_platform_addresses()
+            .sleep_control_reg_address
+        {
+            // SLEEP_CONTROL_REG
+            facp.write(244, address);
+        }
+
+        if let Some(address) = device_manager
+            .acpi_platform_addresses()
+            .sleep_status_reg_address
+        {
+            // SLEEP_STATUS_REG
+            facp.write(256, address);
+        }
+
+        if let Some(address) = device_manager.acpi_platform_addresses().pm_timer_address {
+            // X_PM_TMR_BLK
+            facp.write(208, address);
+        }
     }
 
     // aarch64 specific fields
@@ -604,7 +618,7 @@ pub fn create_acpi_tables(
         .expect("Error writing DSDT table");
 
     // FACP aka FADT
-    let facp = create_facp_table(dsdt_offset);
+    let facp = create_facp_table(dsdt_offset, device_manager);
     let facp_offset = dsdt_offset.checked_add(dsdt.len() as u64).unwrap();
     guest_mem
         .write_slice(facp.as_slice(), facp_offset)
@@ -792,7 +806,7 @@ pub fn create_acpi_tables_tdx(
     )];
 
     // FACP aka FADT
-    tables.push(create_facp_table(GuestAddress(0)));
+    tables.push(create_facp_table(GuestAddress(0), device_manager));
 
     // MADT
     tables.push(cpu_manager.lock().unwrap().create_madt());
