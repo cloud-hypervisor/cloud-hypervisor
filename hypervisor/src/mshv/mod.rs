@@ -264,7 +264,6 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         Ok(Arc::new(MshvVm {
             fd: vm_fd,
             msrs,
-            vm_ops: None,
             dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
         }))
     }
@@ -276,7 +275,6 @@ impl hypervisor::Hypervisor for MshvHypervisor {
     }
 }
 
-#[allow(dead_code)]
 /// Vcpu struct for Microsoft Hypervisor
 pub struct MshvVcpu {
     fd: VcpuFd,
@@ -896,12 +894,10 @@ impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
     }
 }
 
-#[allow(dead_code)]
 /// Wrapper over Mshv VM ioctls.
 pub struct MshvVm {
     fd: Arc<VmFd>,
     msrs: Vec<MsrEntry>,
-    vm_ops: Option<Arc<dyn vm::VmOps>>,
     dirty_log_slots: Arc<RwLock<HashMap<u64, MshvDirtyLogSlot>>>,
 }
 
