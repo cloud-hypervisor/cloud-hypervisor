@@ -1487,10 +1487,6 @@ impl CpuManager {
             .map_err(Error::TranslateVirtualAddress)?;
         Ok(gpa)
     }
-
-    pub fn vcpus_paused(&self) -> bool {
-        self.vcpus_pause_signalled.load(Ordering::SeqCst)
-    }
 }
 
 struct Cpu {
