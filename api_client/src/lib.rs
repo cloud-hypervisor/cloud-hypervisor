@@ -101,6 +101,10 @@ fn parse_http_response(socket: &mut dyn Read) -> Result<Option<String>, Error> {
     loop {
         let mut bytes = vec![0; 256];
         let count = socket.read(&mut bytes).map_err(Error::Socket)?;
+        // If the return value is 0, the peer has performed an orderly shutdown.
+        if count == 0 {
+            break;
+        }
         res.push_str(std::str::from_utf8(&bytes[0..count]).unwrap());
 
         // End of headers
