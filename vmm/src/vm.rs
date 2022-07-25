@@ -2143,13 +2143,11 @@ impl Vm {
             self.vm.tdx_finalize().map_err(Error::FinalizeTdx)?;
         }
 
-        if new_state == VmState::Running {
-            self.cpu_manager
-                .lock()
-                .unwrap()
-                .start_boot_vcpus()
-                .map_err(Error::CpuManager)?;
-        }
+        self.cpu_manager
+            .lock()
+            .unwrap()
+            .start_boot_vcpus(new_state == VmState::BreakPoint)
+            .map_err(Error::CpuManager)?;
 
         let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
         *state = new_state;
@@ -2885,9 +2883,10 @@ impl Debuggable for Vm {
     }
 
     fn debug_pause(&mut self) -> std::result::Result<(), DebuggableError> {
-        if !self.cpu_manager.lock().unwrap().vcpus_paused() {
+        if *self.state.read().unwrap() == VmState::Running {
             self.pause().map_err(DebuggableError::Pause)?;
         }
+
         let mut state = self
             .state
             .try_write()
@@ -2897,25 +2896,10 @@ impl Debuggable for Vm {
     }
 
     fn debug_resume(&mut self) -> std::result::Result<(), DebuggableError> {
-        if !self.cpu_manager.lock().unwrap().vcpus_paused() {
-            self.cpu_manager
-                .lock()
-                .unwrap()
-                .start_boot_vcpus()
-                .map_err(|e| {
-                    DebuggableError::Resume(MigratableError::Resume(anyhow!(
-                        "Could not start boot vCPUs: {:?}",
-                        e
-                    )))
-                })?;
-        } else {
-            self.resume().map_err(DebuggableError::Resume)?;
+        if *self.state.read().unwrap() == VmState::BreakPoint {
+            self.resume().map_err(DebuggableError::Pause)?;
         }
-        let mut state = self
-            .state
-            .try_write()
-            .map_err(|_| DebuggableError::PoisonedState)?;
-        *state = VmState::Running;
+
         Ok(())
     }
 
