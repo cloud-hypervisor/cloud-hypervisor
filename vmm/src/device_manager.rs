@@ -26,6 +26,7 @@ use crate::GuestMemoryMmap;
 use crate::GuestRegionMmap;
 use crate::PciDeviceInfo;
 use crate::{device_node, DEVICE_MANAGER_SNAPSHOT_ID};
+use acpi_tables::sdt::GenericAddress;
 use acpi_tables::{aml, aml::Aml};
 use anyhow::anyhow;
 use arch::layout;
@@ -806,6 +807,14 @@ struct MetaVirtioDevice {
     dma_handler: Option<Arc<dyn ExternalDmaMapping>>,
 }
 
+#[derive(Default)]
+pub struct AcpiPlatformAddresses {
+    pub pm_timer_address: Option<GenericAddress>,
+    pub reset_reg_address: Option<GenericAddress>,
+    pub sleep_control_reg_address: Option<GenericAddress>,
+    pub sleep_status_reg_address: Option<GenericAddress>,
+}
+
 pub struct DeviceManager {
     // The underlying hypervisor
     hypervisor_type: HypervisorType,
@@ -943,6 +952,9 @@ pub struct DeviceManager {
 
     // Pending activations
     pending_activations: Arc<Mutex<Vec<VirtioPciDeviceActivator>>>,
+
+    // Addresses for ACPI platform devices e.g. ACPI PM timer, sleep/reset registers
+    acpi_platform_addresses: AcpiPlatformAddresses,
 }
 
 impl DeviceManager {
@@ -1087,6 +1099,7 @@ impl DeviceManager {
             boot_id_list,
             timestamp,
             pending_activations: Arc::new(Mutex::new(Vec::default())),
+            acpi_platform_addresses: AcpiPlatformAddresses::default(),
         };
 
         let device_manager = Arc::new(Mutex::new(device_manager));
@@ -1409,6 +1422,12 @@ impl DeviceManager {
                 .io_bus
                 .insert(shutdown_device, 0x3c0, 0x4)
                 .map_err(DeviceManagerError::BusError)?;
+            self.acpi_platform_addresses.sleep_control_reg_address =
+                Some(GenericAddress::io_port_address::<u8>(0x3c0));
+            self.acpi_platform_addresses.sleep_status_reg_address =
+                Some(GenericAddress::io_port_address::<u8>(0x3c0));
+            self.acpi_platform_addresses.reset_reg_address =
+                Some(GenericAddress::io_port_address::<u8>(0x3c0));
         }
 
         let ged_irq = self
@@ -1468,6 +1487,9 @@ impl DeviceManager {
                 .io_bus
                 .insert(pm_timer_device, 0xb008, 0x4)
                 .map_err(DeviceManagerError::BusError)?;
+
+            self.acpi_platform_addresses.pm_timer_address =
+                Some(GenericAddress::io_port_address::<u32>(0xb008));
         }
 
         Ok(Some(ged_device))
@@ -4121,6 +4143,10 @@ impl DeviceManager {
         }
 
         Ok(())
+    }
+
+    pub(crate) fn acpi_platform_addresses(&self) -> &AcpiPlatformAddresses {
+        &self.acpi_platform_addresses
     }
 }
 
