@@ -62,7 +62,6 @@ impl CtrlQueue {
         queue: &mut Queue,
         access_platform: Option<&Arc<dyn AccessPlatform>>,
     ) -> Result<()> {
-        let mut used_desc_heads = Vec::new();
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(mem) {
             let ctrl_desc = desc_chain.next().ok_or(Error::NoControlHeaderDescriptor)?;
 
@@ -139,7 +138,10 @@ impl CtrlQueue {
                 )
                 .map_err(Error::GuestMemory)?;
             let len = ctrl_desc.len() + data_desc.len() + status_desc.len();
-            used_desc_heads.push((desc_chain.head_index(), len));
+
+            queue
+                .add_used(desc_chain.memory(), desc_chain.head_index(), len)
+                .map_err(Error::QueueAddUsed)?;
 
             if !queue
                 .enable_notification(mem)
@@ -147,12 +149,6 @@ impl CtrlQueue {
             {
                 break;
             }
-        }
-
-        for (desc_index, len) in used_desc_heads.iter() {
-            queue
-                .add_used(mem, *desc_index, *len)
-                .map_err(Error::QueueAddUsed)?;
         }
 
         Ok(())

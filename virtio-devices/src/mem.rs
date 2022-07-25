@@ -27,7 +27,6 @@ use seccompiler::SeccompAction;
 use std::collections::BTreeMap;
 use std::io;
 use std::mem::size_of;
-use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -665,20 +664,10 @@ impl MemEpollHandler {
     }
 
     fn process_queue(&mut self) -> bool {
-        let mut request_list = Vec::new();
-        let mut used_count = 0;
+        let mut used_descs = false;
 
         while let Some(mut desc_chain) = self.queue.pop_descriptor_chain(self.mem.memory()) {
-            request_list.push((
-                desc_chain.head_index(),
-                Request::parse(&mut desc_chain),
-                desc_chain.memory().clone(),
-            ));
-        }
-
-        let mem = self.mem.memory();
-        for (head_index, request, memory) in request_list {
-            let len = match request {
+            let len = match Request::parse(&mut desc_chain) {
                 Err(e) => {
                     error!("failed parse VirtioMemReq: {:?}", e);
                     0
@@ -687,21 +676,21 @@ impl MemEpollHandler {
                     VIRTIO_MEM_REQ_PLUG => {
                         let resp_type =
                             self.state_change_request(r.req.addr, r.req.nb_blocks, true);
-                        r.send_response(&memory, resp_type, 0u16)
+                        r.send_response(desc_chain.memory(), resp_type, 0u16)
                     }
                     VIRTIO_MEM_REQ_UNPLUG => {
                         let resp_type =
                             self.state_change_request(r.req.addr, r.req.nb_blocks, false);
-                        r.send_response(&memory, resp_type, 0u16)
+                        r.send_response(desc_chain.memory(), resp_type, 0u16)
                     }
                     VIRTIO_MEM_REQ_UNPLUG_ALL => {
                         let resp_type = self.unplug_all();
-                        r.send_response(&memory, resp_type, 0u16)
+                        r.send_response(desc_chain.memory(), resp_type, 0u16)
                     }
                     VIRTIO_MEM_REQ_STATE => {
                         let (resp_type, resp_state) =
                             self.state_request(r.req.addr, r.req.nb_blocks);
-                        r.send_response(&memory, resp_type, resp_state)
+                        r.send_response(desc_chain.memory(), resp_type, resp_state)
                     }
                     _ => {
                         error!("VirtioMemReq unknown request type {:?}", r.req.req_type);
@@ -710,11 +699,13 @@ impl MemEpollHandler {
                 },
             };
 
-            self.queue.add_used(mem.deref(), head_index, len).unwrap();
-            used_count += 1;
+            self.queue
+                .add_used(desc_chain.memory(), desc_chain.head_index(), len)
+                .unwrap();
+            used_descs = true;
         }
 
-        used_count > 0
+        used_descs
     }
 
     fn run(

@@ -40,7 +40,6 @@ use crate::{
 use byteorder::{ByteOrder, LittleEndian};
 use seccompiler::SeccompAction;
 use std::io;
-use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::result;
@@ -125,8 +124,7 @@ where
     fn process_rx(&mut self) -> result::Result<(), DeviceError> {
         debug!("vsock: epoll_handler::process_rx()");
 
-        let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
-        let mut used_count = 0;
+        let mut used_descs = false;
 
         while let Some(mut desc_chain) = self.queues[0].pop_descriptor_chain(self.mem.memory()) {
             let used_len = match VsockPacket::from_rx_virtq_head(
@@ -149,18 +147,13 @@ where
                 }
             };
 
-            used_desc_heads[used_count] = (desc_chain.head_index(), used_len);
-            used_count += 1;
-        }
-
-        let mem = self.mem.memory();
-        for &(desc_index, len) in &used_desc_heads[..used_count] {
             self.queues[0]
-                .add_used(mem.deref(), desc_index, len)
+                .add_used(desc_chain.memory(), desc_chain.head_index(), used_len)
                 .map_err(DeviceError::QueueAddUsed)?;
+            used_descs = true;
         }
 
-        if used_count > 0 {
+        if used_descs {
             self.signal_used_queue(0)
         } else {
             Ok(())
@@ -173,8 +166,7 @@ where
     fn process_tx(&mut self) -> result::Result<(), DeviceError> {
         debug!("vsock: epoll_handler::process_tx()");
 
-        let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
-        let mut used_count = 0;
+        let mut used_descs = false;
 
         while let Some(mut desc_chain) = self.queues[1].pop_descriptor_chain(self.mem.memory()) {
             let pkt = match VsockPacket::from_tx_virtq_head(
@@ -184,8 +176,10 @@ where
                 Ok(pkt) => pkt,
                 Err(e) => {
                     error!("vsock: error reading TX packet: {:?}", e);
-                    used_desc_heads[used_count] = (desc_chain.head_index(), 0);
-                    used_count += 1;
+                    self.queues[1]
+                        .add_used(desc_chain.memory(), desc_chain.head_index(), 0)
+                        .map_err(DeviceError::QueueAddUsed)?;
+                    used_descs = true;
                     continue;
                 }
             };
@@ -195,18 +189,13 @@ where
                 break;
             }
 
-            used_desc_heads[used_count] = (desc_chain.head_index(), 0);
-            used_count += 1;
-        }
-
-        let mem = self.mem.memory();
-        for &(desc_index, len) in &used_desc_heads[..used_count] {
             self.queues[1]
-                .add_used(mem.deref(), desc_index, len)
+                .add_used(desc_chain.memory(), desc_chain.head_index(), 0)
                 .map_err(DeviceError::QueueAddUsed)?;
+            used_descs = true;
         }
 
-        if used_count > 0 {
+        if used_descs {
             self.signal_used_queue(1)
         } else {
             Ok(())

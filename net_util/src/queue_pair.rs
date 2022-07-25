@@ -120,7 +120,7 @@ impl TxVirtio {
             }
 
             queue
-                .add_used(mem, desc_chain.head_index(), len)
+                .add_used(desc_chain.memory(), desc_chain.head_index(), len)
                 .map_err(NetQueuePairError::QueueAddUsed)?;
 
             if !queue
@@ -262,7 +262,7 @@ impl RxVirtio {
             }
 
             queue
-                .add_used(mem, desc_chain.head_index(), len)
+                .add_used(desc_chain.memory(), desc_chain.head_index(), len)
                 .map_err(NetQueuePairError::QueueAddUsed)?;
 
             if !queue
