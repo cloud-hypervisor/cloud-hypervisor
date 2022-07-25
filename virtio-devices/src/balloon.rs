@@ -22,7 +22,6 @@ use libc::EFD_NONBLOCK;
 use seccompiler::SeccompAction;
 use std::io;
 use std::mem::size_of;
-use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::{
@@ -31,7 +30,7 @@ use std::sync::{
 };
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use virtio_queue::{Queue, QueueOwnedT, QueueT};
+use virtio_queue::{Queue, QueueT};
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
     GuestMemoryError, GuestMemoryRegion,
@@ -227,33 +226,12 @@ impl BalloonEpollHandler {
         Self::advise_memory_range(memory, range_base, range_len, libc::MADV_DONTNEED)
     }
 
-    fn notify_queue(
-        &mut self,
-        queue_index: usize,
-        used_descs: Vec<(u16, u32)>,
-    ) -> result::Result<(), Error> {
-        let mem = self.mem.memory();
-        for (desc_index, len) in used_descs.iter() {
-            self.queues[queue_index]
-                .add_used(mem.deref(), *desc_index, *len)
-                .map_err(Error::QueueAddUsed)?;
-        }
-
-        if !used_descs.is_empty() {
-            self.signal(VirtioInterruptType::Queue(queue_index as u16))?;
-        }
-
-        Ok(())
-    }
-
     fn process_queue(&mut self, queue_index: usize) -> result::Result<(), Error> {
-        let mut used_descs = Vec::new();
+        let mut used_descs = false;
         while let Some(mut desc_chain) =
             self.queues[queue_index].pop_descriptor_chain(self.mem.memory())
         {
             let desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
-
-            used_descs.push((desc_chain.head_index(), desc.len()));
 
             let data_chunk_size = size_of::<u32>();
 
@@ -294,18 +272,24 @@ impl BalloonEpollHandler {
                     _ => return Err(Error::InvalidQueueIndex(queue_index)),
                 }
             }
+
+            self.queues[queue_index]
+                .add_used(desc_chain.memory(), desc_chain.head_index(), desc.len())
+                .map_err(Error::QueueAddUsed)?;
+            used_descs = true;
         }
 
-        self.notify_queue(queue_index, used_descs)
+        if used_descs {
+            self.signal(VirtioInterruptType::Queue(queue_index as u16))
+        } else {
+            Ok(())
+        }
     }
 
     fn process_reporting_queue(&mut self, queue_index: usize) -> result::Result<(), Error> {
-        let mem = self.mem.memory();
-        let mut used_descs = Vec::new();
-
-        for mut desc_chain in self.queues[queue_index]
-            .iter(mem)
-            .map_err(Error::QueueIterator)?
+        let mut used_descs = false;
+        while let Some(mut desc_chain) =
+            self.queues[queue_index].pop_descriptor_chain(self.mem.memory())
         {
             let mut descs_len = 0;
             while let Some(desc) = desc_chain.next() {
@@ -313,10 +297,17 @@ impl BalloonEpollHandler {
                 Self::release_memory_range(desc_chain.memory(), desc.addr(), desc.len() as usize)?;
             }
 
-            used_descs.push((desc_chain.head_index(), descs_len));
+            self.queues[queue_index]
+                .add_used(desc_chain.memory(), desc_chain.head_index(), descs_len)
+                .map_err(Error::QueueAddUsed)?;
+            used_descs = true;
         }
 
-        self.notify_queue(queue_index, used_descs)
+        if used_descs {
+            self.signal(VirtioInterruptType::Queue(queue_index as u16))
+        } else {
+            Ok(())
+        }
     }
 
     fn run(

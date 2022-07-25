@@ -105,8 +105,7 @@ impl BlockEpollHandler {
     fn process_queue_submit(&mut self) -> Result<bool> {
         let queue = &mut self.queue;
 
-        let mut used_desc_heads = Vec::new();
-        let mut used_count = 0;
+        let mut used_descs = false;
 
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
             let mut request = Request::parse(&mut desc_chain, self.access_platform.as_ref())
@@ -166,26 +165,20 @@ impl BlockEpollHandler {
 
                 // If no asynchronous operation has been submitted, we can
                 // simply return the used descriptor.
-                used_desc_heads.push((desc_chain.head_index(), 0));
-                used_count += 1;
+                queue
+                    .add_used(desc_chain.memory(), desc_chain.head_index(), 0)
+                    .map_err(Error::QueueAddUsed)?;
+                used_descs = true;
             }
         }
 
-        let mem = self.mem.memory();
-        for &(desc_index, len) in used_desc_heads.iter() {
-            queue
-                .add_used(mem.deref(), desc_index, len)
-                .map_err(Error::QueueAddUsed)?;
-        }
-
-        Ok(used_count > 0)
+        Ok(used_descs)
     }
 
     fn process_queue_complete(&mut self) -> Result<bool> {
         let queue = &mut self.queue;
 
-        let mut used_desc_heads = Vec::new();
-        let mut used_count = 0;
+        let mut used_descs = false;
         let mem = self.mem.memory();
         let mut read_bytes = Wrapping(0);
         let mut write_bytes = Wrapping(0);
@@ -234,14 +227,10 @@ impl BlockEpollHandler {
             // checked that the status_addr was valid.
             mem.write_obj(status, request.status_addr).unwrap();
 
-            used_desc_heads.push((desc_index as u16, len));
-            used_count += 1;
-        }
-
-        for &(desc_index, len) in used_desc_heads.iter() {
             queue
-                .add_used(mem.deref(), desc_index, len)
+                .add_used(mem.deref(), desc_index as u16, len)
                 .map_err(Error::QueueAddUsed)?;
+            used_descs = true;
         }
 
         self.counters
@@ -258,7 +247,7 @@ impl BlockEpollHandler {
             .read_ops
             .fetch_add(read_ops.0, Ordering::AcqRel);
 
-        Ok(used_count > 0)
+        Ok(used_descs)
     }
 
     fn signal_used_queue(&self) -> result::Result<(), DeviceError> {

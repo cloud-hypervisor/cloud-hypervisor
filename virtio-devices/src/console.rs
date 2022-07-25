@@ -18,7 +18,6 @@ use std::collections::VecDeque;
 use std::fs::File;
 use std::io;
 use std::io::{Read, Write};
-use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -137,8 +136,7 @@ impl ConsoleEpollHandler {
     fn process_input_queue(&mut self) -> bool {
         let mut in_buffer = self.in_buffer.lock().unwrap();
         let recv_queue = &mut self.queues[0]; //receiveq
-        let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
-        let mut used_count = 0;
+        let mut used_descs = false;
 
         if in_buffer.is_empty() {
             return false;
@@ -159,20 +157,17 @@ impl ConsoleEpollHandler {
                 break;
             }
 
-            used_desc_heads[used_count] = (desc_chain.head_index(), len);
-            used_count += 1;
+            recv_queue
+                .add_used(desc_chain.memory(), desc_chain.head_index(), len)
+                .unwrap();
+            used_descs = true;
 
             if in_buffer.is_empty() {
                 break;
             }
         }
 
-        let mem = self.mem.memory();
-        for &(desc_index, len) in &used_desc_heads[..used_count] {
-            recv_queue.add_used(mem.deref(), desc_index, len).unwrap();
-        }
-
-        used_count > 0
+        used_descs
     }
 
     /*
@@ -184,8 +179,7 @@ impl ConsoleEpollHandler {
      */
     fn process_output_queue(&mut self) -> bool {
         let trans_queue = &mut self.queues[1]; //transmitq
-        let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
-        let mut used_count = 0;
+        let mut used_descs = false;
 
         while let Some(mut desc_chain) = trans_queue.pop_descriptor_chain(self.mem.memory()) {
             let desc = desc_chain.next().unwrap();
@@ -198,15 +192,13 @@ impl ConsoleEpollHandler {
                 );
                 let _ = out.flush();
             }
-            used_desc_heads[used_count] = (desc_chain.head_index(), desc.len());
-            used_count += 1;
+            trans_queue
+                .add_used(desc_chain.memory(), desc_chain.head_index(), desc.len())
+                .unwrap();
+            used_descs = true;
         }
 
-        let mem = self.mem.memory();
-        for &(desc_index, len) in &used_desc_heads[..used_count] {
-            trans_queue.add_used(mem.deref(), desc_index, len).unwrap();
-        }
-        used_count > 0
+        used_descs
     }
 
     fn signal_used_queue(&self, queue_index: u16) -> result::Result<(), DeviceError> {

@@ -17,7 +17,6 @@ use std::fmt::{self, Display};
 use std::io;
 use std::mem::size_of;
 use std::ops::Bound::Included;
-use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -674,8 +673,7 @@ struct IommuEpollHandler {
 
 impl IommuEpollHandler {
     fn request_queue(&mut self) -> bool {
-        let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
-        let mut used_count = 0;
+        let mut used_descs = false;
         while let Some(mut desc_chain) = self.queues[0].pop_descriptor_chain(self.mem.memory()) {
             let len = match Request::parse(
                 &mut desc_chain,
@@ -690,17 +688,13 @@ impl IommuEpollHandler {
                 }
             };
 
-            used_desc_heads[used_count] = (desc_chain.head_index(), len);
-            used_count += 1;
+            self.queues[0]
+                .add_used(desc_chain.memory(), desc_chain.head_index(), len)
+                .unwrap();
+            used_descs = true;
         }
 
-        let mem = self.mem.memory();
-        for &(desc_index, len) in &used_desc_heads[..used_count] {
-            self.queues[0]
-                .add_used(mem.deref(), desc_index, len)
-                .unwrap();
-        }
-        used_count > 0
+        used_descs
     }
 
     fn event_queue(&mut self) -> bool {

@@ -15,7 +15,6 @@ use crate::{VirtioInterrupt, VirtioInterruptType};
 use seccompiler::SeccompAction;
 use std::fs::File;
 use std::io;
-use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::AtomicBool;
@@ -50,8 +49,7 @@ impl RngEpollHandler {
     fn process_queue(&mut self) -> bool {
         let queue = &mut self.queue;
 
-        let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
-        let mut used_count = 0;
+        let mut used_descs = false;
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
             let desc = desc_chain.next().unwrap();
             let mut len = 0;
@@ -73,15 +71,13 @@ impl RngEpollHandler {
                 }
             }
 
-            used_desc_heads[used_count] = (desc_chain.head_index(), len);
-            used_count += 1;
+            queue
+                .add_used(desc_chain.memory(), desc_chain.head_index(), len)
+                .unwrap();
+            used_descs = true;
         }
 
-        let mem = self.mem.memory();
-        for &(desc_index, len) in &used_desc_heads[..used_count] {
-            queue.add_used(mem.deref(), desc_index, len).unwrap();
-        }
-        used_count > 0
+        used_descs
     }
 
     fn signal_used_queue(&self) -> result::Result<(), DeviceError> {

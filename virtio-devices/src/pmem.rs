@@ -21,7 +21,6 @@ use std::fmt::{self, Display};
 use std::fs::File;
 use std::io;
 use std::mem::size_of;
-use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::AtomicBool;
@@ -178,8 +177,7 @@ struct PmemEpollHandler {
 
 impl PmemEpollHandler {
     fn process_queue(&mut self) -> bool {
-        let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
-        let mut used_count = 0;
+        let mut used_descs = false;
         while let Some(mut desc_chain) = self.queue.pop_descriptor_chain(self.mem.memory()) {
             let len = match Request::parse(&mut desc_chain, self.access_platform.as_ref()) {
                 Ok(ref req) if (req.type_ == RequestType::Flush) => {
@@ -211,15 +209,13 @@ impl PmemEpollHandler {
                 }
             };
 
-            used_desc_heads[used_count] = (desc_chain.head_index(), len);
-            used_count += 1;
+            self.queue
+                .add_used(desc_chain.memory(), desc_chain.head_index(), len)
+                .unwrap();
+            used_descs = true;
         }
 
-        let mem = self.mem.memory();
-        for &(desc_index, len) in &used_desc_heads[..used_count] {
-            self.queue.add_used(mem.deref(), desc_index, len).unwrap();
-        }
-        used_count > 0
+        used_descs
     }
 
     fn signal_used_queue(&self) -> result::Result<(), DeviceError> {

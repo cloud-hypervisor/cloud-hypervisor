@@ -124,7 +124,7 @@ impl VhostUserBlkThread {
         &mut self,
         vring: &mut RwLockWriteGuard<VringState<GuestMemoryAtomic<GuestMemoryMmap>>>,
     ) -> bool {
-        let mut used_desc_heads = Vec::new();
+        let mut used_descs = false;
 
         while let Some(mut desc_chain) = vring
             .get_queue_mut()
@@ -162,37 +162,35 @@ impl VhostUserBlkThread {
                 }
             }
 
-            used_desc_heads.push((desc_chain.head_index(), len));
+            vring
+                .get_queue_mut()
+                .add_used(desc_chain.memory(), desc_chain.head_index(), len)
+                .unwrap();
+            used_descs = true;
         }
 
-        let mem = self.mem.memory();
         let mut needs_signalling = false;
-        for (desc_head, len) in used_desc_heads.iter() {
-            if self.event_idx {
-                let queue = vring.get_queue_mut();
-                if queue.add_used(mem.deref(), *desc_head, *len).is_ok() {
-                    if queue.needs_notification(mem.deref()).unwrap() {
-                        debug!("signalling queue");
-                        needs_signalling = true;
-                    } else {
-                        debug!("omitting signal (event_idx)");
-                    }
-                }
-            } else {
+        if self.event_idx {
+            if vring
+                .get_queue_mut()
+                .needs_notification(self.mem.memory().deref())
+                .unwrap()
+            {
                 debug!("signalling queue");
-                vring
-                    .get_queue_mut()
-                    .add_used(mem.deref(), *desc_head, *len)
-                    .unwrap();
                 needs_signalling = true;
+            } else {
+                debug!("omitting signal (event_idx)");
             }
+        } else {
+            debug!("signalling queue");
+            needs_signalling = true;
         }
 
         if needs_signalling {
             vring.signal_used_queue().unwrap();
         }
 
-        !used_desc_heads.is_empty()
+        used_descs
     }
 }
 
