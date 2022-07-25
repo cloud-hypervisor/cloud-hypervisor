@@ -1048,7 +1048,12 @@ impl CpuManager {
     }
 
     /// Start up as many vCPUs threads as needed to reach `desired_vcpus`
-    fn activate_vcpus(&mut self, desired_vcpus: u8, inserting: bool) -> Result<()> {
+    fn activate_vcpus(
+        &mut self,
+        desired_vcpus: u8,
+        inserting: bool,
+        paused: Option<bool>,
+    ) -> Result<()> {
         if desired_vcpus > self.config.max_vcpus {
             return Err(Error::DesiredVCpuCountExceedsMax);
         }
@@ -1057,11 +1062,16 @@ impl CpuManager {
             (desired_vcpus - self.present_vcpus() + 1) as usize,
         ));
 
+        if let Some(paused) = paused {
+            self.vcpus_pause_signalled.store(paused, Ordering::SeqCst);
+        }
+
         info!(
-            "Starting vCPUs: desired = {}, allocated = {}, present = {}",
+            "Starting vCPUs: desired = {}, allocated = {}, present = {}, paused = {}",
             desired_vcpus,
             self.vcpus.len(),
-            self.present_vcpus()
+            self.present_vcpus(),
+            self.vcpus_pause_signalled.load(Ordering::SeqCst)
         );
 
         // This reuses any inactive vCPUs as well as any that were newly created
@@ -1101,26 +1111,16 @@ impl CpuManager {
     }
 
     // Starts all the vCPUs that the VM is booting with. Blocks until all vCPUs are running.
-    pub fn start_boot_vcpus(&mut self) -> Result<()> {
-        self.activate_vcpus(self.boot_vcpus(), false)
+    pub fn start_boot_vcpus(&mut self, paused: bool) -> Result<()> {
+        self.activate_vcpus(self.boot_vcpus(), false, Some(paused))
     }
 
     pub fn start_restored_vcpus(&mut self) -> Result<()> {
-        let vcpu_numbers = self.vcpus.len() as u8;
-        let vcpu_thread_barrier = Arc::new(Barrier::new((vcpu_numbers + 1) as usize));
-        // Restore the vCPUs in "paused" state.
-        self.vcpus_pause_signalled.store(true, Ordering::SeqCst);
+        self.activate_vcpus(self.vcpus.len() as u8, false, Some(true))
+            .map_err(|e| {
+                Error::StartRestoreVcpu(anyhow!("Failed to start restored vCPUs: {:#?}", e))
+            })?;
 
-        for vcpu_id in 0..vcpu_numbers {
-            let vcpu = Arc::clone(&self.vcpus[vcpu_id as usize]);
-
-            self.start_vcpu(vcpu, vcpu_id, vcpu_thread_barrier.clone(), false)
-                .map_err(|e| {
-                    Error::StartRestoreVcpu(anyhow!("Failed to start restored vCPUs: {:#?}", e))
-                })?;
-        }
-        // Unblock all restored CPU threads.
-        vcpu_thread_barrier.wait();
         Ok(())
     }
 
@@ -1136,7 +1136,7 @@ impl CpuManager {
         match desired_vcpus.cmp(&self.present_vcpus()) {
             cmp::Ordering::Greater => {
                 self.create_vcpus(desired_vcpus, None)?;
-                self.activate_vcpus(desired_vcpus, true)?;
+                self.activate_vcpus(desired_vcpus, true, None)?;
                 Ok(true)
             }
             cmp::Ordering::Less => {
