@@ -5062,11 +5062,9 @@ mod parallel {
             assert!(orig_balloon == 2147483648);
 
             // Two steps to verify if the 'deflate_on_oom' parameter works.
-            // 1st: run a command in guest to eat up memory heavily, which
-            // will consume much more memory than $(total_mem - balloon_size)
-            // to trigger an oom.
+            // 1st: run a command to trigger an OOM in the guest.
             guest
-                .ssh_command("stress --vm 25 --vm-keep --vm-bytes 1G --timeout 20")
+                .ssh_command("echo f | sudo tee /proc/sysrq-trigger")
                 .unwrap();
 
             // Give some time for the OOM to happen in the guest and be reported
