@@ -6,6 +6,8 @@
 pub mod fdt;
 /// Layout for this aarch64 system.
 pub mod layout;
+/// Module for system registers definition
+pub mod regs;
 /// Module for loading UEFI binary.
 pub mod uefi;
 
