@@ -58,3 +58,10 @@ name = "serial"
 path = "fuzz_targets/serial.rs"
 test = false
 doc = false
+
+
+[[bin]]
+name = "cmos"
+path = "fuzz_targets/cmos.rs"
+test = false
+doc = false
