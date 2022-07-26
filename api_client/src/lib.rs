@@ -131,7 +131,7 @@ fn parse_http_response(socket: &mut dyn Read) -> Result<Option<String>, Error> {
             }
         }
     }
-    let body_string = content_length.and(Some(String::from(&res[body_offset.unwrap()..])));
+    let body_string = content_length.and(body_offset.map(|o| String::from(&res[o..])));
     let status_code = get_status_code(&res)?;
 
     if status_code.is_server_error() {
