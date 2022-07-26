@@ -103,8 +103,18 @@ option as well.
     --disk path=tdx_guest_img
 ```
 
-### Guest kernel disables serial ports
+### Guest kernel limitations
+
+#### Serial ports disabled
 
 The latest guest kernel that can be found in the latest image
 `td-guest-rhel8.5.raw` disabled the support for serial ports. This means adding
 `console=ttyS0` will have no effect and will not print any log from the guest.
+
+#### PCI hotplug through ACPI
+
+Unless you run the guest kernel with the parameter `tdx_disable_filter`, ACPI
+devices responsible for handling PCI hotplug (PCI hotplug controller, PCI
+Express Bus and Generic Event Device) will not be allowed, therefore the
+corresponding drivers will not be loaded and the PCI hotplug feature will not
+be supported.
