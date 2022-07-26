@@ -178,6 +178,7 @@ version = "0.0.0"
 dependencies = [
  "block_util",
  "cloud-hypervisor",
+ "devices",
  "libc",
  "libfuzzer-sys",
  "qcow",
@@ -185,6 +186,7 @@ dependencies = [
  "vhdx",
  "virtio-devices",
  "virtio-queue",
+ "vm-device",
  "vm-memory",
  "vm-virtio",
  "vmm-sys-util",
