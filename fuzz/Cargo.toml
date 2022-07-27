@@ -36,20 +36,20 @@ versionize_derive = { git = "https://github.com/cloud-hypervisor/versionize_deri
 members = ["."]
 
 [[bin]]
-name = "qcow"
-path = "fuzz_targets/qcow.rs"
-test = false
-doc = false
-
-[[bin]]
 name = "block"
 path = "fuzz_targets/block.rs"
 test = false
 doc = false
 
 [[bin]]
-name = "vhdx"
-path = "fuzz_targets/vhdx.rs"
+name = "cmos"
+path = "fuzz_targets/cmos.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "qcow"
+path = "fuzz_targets/qcow.rs"
 test = false
 doc = false
 
@@ -59,9 +59,9 @@ path = "fuzz_targets/serial.rs"
 test = false
 doc = false
 
-
 [[bin]]
-name = "cmos"
-path = "fuzz_targets/cmos.rs"
+name = "vhdx"
+path = "fuzz_targets/vhdx.rs"
 test = false
 doc = false
+
