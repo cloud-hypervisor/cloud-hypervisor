@@ -289,18 +289,13 @@ impl From<FpuState> for FloatingPointUnit {
 
 impl From<LapicState> for MshvLapicState {
     fn from(s: LapicState) -> Self {
-        match s {
-            LapicState::Mshv(s) => s,
-            /* Needed in case other hypervisors are enabled */
-            #[allow(unreachable_patterns)]
-            _ => panic!("LapicState is not valid"),
-        }
+        Self { regs: s.regs }
     }
 }
 
 impl From<MshvLapicState> for LapicState {
     fn from(s: MshvLapicState) -> Self {
-        LapicState::Mshv(s)
+        Self { regs: s.regs }
     }
 }
 

@@ -252,34 +252,51 @@ pub struct FpuState {
     pub mxcsr: u32,
 }
 
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub enum LapicState {
-    #[cfg(feature = "kvm")]
-    Kvm(kvm_bindings::kvm_lapic_state),
-    #[cfg(feature = "mshv")]
-    Mshv(mshv_bindings::LapicState),
+#[derive(Debug, Clone)]
+pub struct LapicState {
+    pub(crate) regs: [::std::os::raw::c_char; 1024usize],
 }
 
-#[cfg(any(feature = "kvm", feature = "mshv"))]
+impl Default for LapicState {
+    fn default() -> Self {
+        // SAFETY: this is plain old data structure
+        unsafe { ::std::mem::zeroed() }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for LapicState {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let regs: Vec<::std::os::raw::c_char> = Vec::deserialize(deserializer)?;
+        let mut val = LapicState::default();
+        // This panics if the source and destination have different lengths.
+        val.regs.copy_from_slice(&regs[..]);
+        Ok(val)
+    }
+}
+
+impl serde::Serialize for LapicState {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let regs = &self.regs[..];
+        regs.serialize(serializer)
+    }
+}
+
 impl LapicState {
     pub fn get_klapic_reg(&self, reg_offset: usize) -> u32 {
         use byteorder::{LittleEndian, ReadBytesExt};
         use std::io::Cursor;
         use std::mem;
 
-        let sliceu8 = match self {
-            #[cfg(feature = "kvm")]
-            LapicState::Kvm(s) => unsafe {
-                // This array is only accessed as parts of a u32 word, so interpret it as a u8 array.
-                // Cursors are only readable on arrays of u8, not i8(c_char).
-                mem::transmute::<&[i8], &[u8]>(&s.regs[reg_offset..])
-            },
-            #[cfg(feature = "mshv")]
-            LapicState::Mshv(s) => unsafe {
-                // This array is only accessed as parts of a u32 word, so interpret it as a u8 array.
-                // Cursors are only readable on arrays of u8, not i8(c_char).
-                mem::transmute::<&[i8], &[u8]>(&s.regs[reg_offset..])
-            },
+        let sliceu8 = unsafe {
+            // This array is only accessed as parts of a u32 word, so interpret it as a u8 array.
+            // Cursors are only readable on arrays of u8, not i8(c_char).
+            mem::transmute::<&[i8], &[u8]>(&self.regs[reg_offset..])
         };
 
         let mut reader = Cursor::new(sliceu8);
@@ -294,19 +311,10 @@ impl LapicState {
         use std::io::Cursor;
         use std::mem;
 
-        let sliceu8 = match self {
-            #[cfg(feature = "kvm")]
-            LapicState::Kvm(s) => unsafe {
-                // This array is only accessed as parts of a u32 word, so interpret it as a u8 array.
-                // Cursors are only readable on arrays of u8, not i8(c_char).
-                mem::transmute::<&mut [i8], &mut [u8]>(&mut s.regs[reg_offset..])
-            },
-            #[cfg(feature = "mshv")]
-            LapicState::Mshv(s) => unsafe {
-                // This array is only accessed as parts of a u32 word, so interpret it as a u8 array.
-                // Cursors are only readable on arrays of u8, not i8(c_char).
-                mem::transmute::<&mut [i8], &mut [u8]>(&mut s.regs[reg_offset..])
-            },
+        let sliceu8 = unsafe {
+            // This array is only accessed as parts of a u32 word, so interpret it as a u8 array.
+            // Cursors are only readable on arrays of u8, not i8(c_char).
+            mem::transmute::<&mut [i8], &mut [u8]>(&mut self.regs[reg_offset..])
         };
 
         let mut writer = Cursor::new(sliceu8);
