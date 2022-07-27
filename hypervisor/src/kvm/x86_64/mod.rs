@@ -298,18 +298,13 @@ impl From<FpuState> for kvm_fpu {
 
 impl From<LapicState> for kvm_lapic_state {
     fn from(s: LapicState) -> Self {
-        match s {
-            LapicState::Kvm(s) => s,
-            /* Needed in case other hypervisors are enabled */
-            #[allow(unreachable_patterns)]
-            _ => panic!("LapicState is not valid"),
-        }
+        Self { regs: s.regs }
     }
 }
 
 impl From<kvm_lapic_state> for LapicState {
     fn from(s: kvm_lapic_state) -> Self {
-        LapicState::Kvm(s)
+        Self { regs: s.regs }
     }
 }
 
