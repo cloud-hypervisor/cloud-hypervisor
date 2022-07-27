@@ -23,10 +23,10 @@ pipeline{
 						}
 					}
 				}
-				stage ('Check for fuzzer cargo files only changes') {
+				stage ('Check for fuzzer files only changes') {
 					when {
 						expression {
-							return fuzzCargoFileOnly()
+							return fuzzFileOnly()
 						}
 					}
 					steps {
@@ -416,13 +416,13 @@ def boolean docsFileOnly() {
     ) != 0
 }
 
-def boolean fuzzCargoFileOnly() {
+def boolean fuzzFileOnly() {
     if (env.CHANGE_TARGET == null) {
         return false;
     }
 
     return sh(
         returnStatus: true,
-        script: "git diff --name-only origin/${env.CHANGE_TARGET}... | grep -v -E 'fuzz\\/Cargo.(toml|lock)'"
+        script: "git diff --name-only origin/${env.CHANGE_TARGET}... | grep -v -E 'fuzz/'"
     ) != 0
 }
