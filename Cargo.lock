@@ -520,7 +520,7 @@ dependencies = [
 [[package]]
 name = "mshv-bindings"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/mshv?branch=main#7ac1b80bff7220171c9a626b23b51620ca774468"
+source = "git+https://github.com/rust-vmm/mshv?branch=main#e38ea5d64b4584289861d559b05db3c5c8765fa3"
 dependencies = [
  "libc",
  "serde",
@@ -532,7 +532,7 @@ dependencies = [
 [[package]]
 name = "mshv-ioctls"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/mshv?branch=main#7ac1b80bff7220171c9a626b23b51620ca774468"
+source = "git+https://github.com/rust-vmm/mshv?branch=main#e38ea5d64b4584289861d559b05db3c5c8765fa3"
 dependencies = [
  "libc",
  "mshv-bindings",
@@ -826,9 +826,9 @@ dependencies = [
 
 [[package]]
 name = "redox_syscall"
-version = "0.2.15"
+version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "534cfe58d6a18cc17120fbf4635d53d14691c1fe4d951064df9bd326178d7d5a"
+checksum = "fb5a58c1855b4b6819d59012155603f0b22ad30cad752600aadfcb695265519a"
 dependencies = [
  "bitflags",
 ]
