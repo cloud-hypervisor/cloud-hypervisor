@@ -13,7 +13,7 @@ use crate::aarch64::gic::KvmGicV3Its;
 #[cfg(target_arch = "aarch64")]
 pub use crate::aarch64::{
     check_required_kvm_extensions, gic::Gicv3ItsState as GicState, is_system_register, VcpuInit,
-    VcpuKvmState, MPIDR_EL1,
+    VcpuKvmState,
 };
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::gic::Vgic;
@@ -1638,15 +1638,6 @@ impl cpu::Vcpu for KvmVcpu {
             .map_err(|e| cpu::HypervisorCpuError::GetRegList(e.into()))
     }
     ///
-    /// Read the MPIDR - Multiprocessor Affinity Register.
-    ///
-    #[cfg(target_arch = "aarch64")]
-    fn read_mpidr(&self) -> cpu::Result<u64> {
-        self.fd
-            .get_one_reg(MPIDR_EL1)
-            .map_err(|e| cpu::HypervisorCpuError::GetSysRegister(e.into()))
-    }
-    ///
     /// Gets the value of a system register
     ///
     #[cfg(target_arch = "aarch64")]
@@ -1853,7 +1844,6 @@ impl cpu::Vcpu for KvmVcpu {
     fn state(&self) -> cpu::Result<CpuState> {
         let mut state = VcpuKvmState {
             mp_state: self.get_mp_state()?.into(),
-            mpidr: self.read_mpidr()?,
             ..Default::default()
         };
         // Get core registers

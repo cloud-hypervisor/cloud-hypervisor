@@ -12,12 +12,8 @@ pub mod gic;
 
 use crate::kvm::{KvmError, KvmResult};
 use kvm_bindings::{
-    kvm_mp_state, kvm_one_reg, kvm_regs, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG,
-    KVM_REG_ARM64_SYSREG_CRM_MASK, KVM_REG_ARM64_SYSREG_CRM_SHIFT, KVM_REG_ARM64_SYSREG_CRN_MASK,
-    KVM_REG_ARM64_SYSREG_CRN_SHIFT, KVM_REG_ARM64_SYSREG_OP0_MASK, KVM_REG_ARM64_SYSREG_OP0_SHIFT,
-    KVM_REG_ARM64_SYSREG_OP1_MASK, KVM_REG_ARM64_SYSREG_OP1_SHIFT, KVM_REG_ARM64_SYSREG_OP2_MASK,
-    KVM_REG_ARM64_SYSREG_OP2_SHIFT, KVM_REG_ARM_COPROC_MASK, KVM_REG_ARM_CORE, KVM_REG_SIZE_MASK,
-    KVM_REG_SIZE_U32, KVM_REG_SIZE_U64,
+    kvm_mp_state, kvm_one_reg, kvm_regs, KVM_REG_ARM_COPROC_MASK, KVM_REG_ARM_CORE,
+    KVM_REG_SIZE_MASK, KVM_REG_SIZE_U32, KVM_REG_SIZE_U64,
 };
 pub use kvm_bindings::{
     kvm_one_reg as Register, kvm_regs as StandardRegisters, kvm_vcpu_init as VcpuInit, RegList,
@@ -85,32 +81,6 @@ macro_rules! arm64_core_reg_id {
     };
 }
 
-// This macro computes the ID of a specific ARM64 system register similar to how
-// the kernel C macro does.
-// https://elixir.bootlin.com/linux/v4.20.17/source/arch/arm64/include/uapi/asm/kvm.h#L203
-#[macro_export]
-macro_rules! arm64_sys_reg {
-    ($name: tt, $op0: tt, $op1: tt, $crn: tt, $crm: tt, $op2: tt) => {
-        pub const $name: u64 = KVM_REG_ARM64 as u64
-            | KVM_REG_SIZE_U64 as u64
-            | KVM_REG_ARM64_SYSREG as u64
-            | ((($op0 as u64) << KVM_REG_ARM64_SYSREG_OP0_SHIFT)
-                & KVM_REG_ARM64_SYSREG_OP0_MASK as u64)
-            | ((($op1 as u64) << KVM_REG_ARM64_SYSREG_OP1_SHIFT)
-                & KVM_REG_ARM64_SYSREG_OP1_MASK as u64)
-            | ((($crn as u64) << KVM_REG_ARM64_SYSREG_CRN_SHIFT)
-                & KVM_REG_ARM64_SYSREG_CRN_MASK as u64)
-            | ((($crm as u64) << KVM_REG_ARM64_SYSREG_CRM_SHIFT)
-                & KVM_REG_ARM64_SYSREG_CRM_MASK as u64)
-            | ((($op2 as u64) << KVM_REG_ARM64_SYSREG_OP2_SHIFT)
-                & KVM_REG_ARM64_SYSREG_OP2_MASK as u64);
-    };
-}
-
-// Constant imported from the Linux kernel:
-// https://elixir.bootlin.com/linux/v4.20.17/source/arch/arm64/include/asm/sysreg.h#L135
-arm64_sys_reg!(MPIDR_EL1, 3, 0, 0, 0, 5);
-
 /// Specifies whether a particular register is a system register or not.
 /// The kernel splits the registers on aarch64 in core registers and system registers.
 /// So, below we get the system registers by checking that they are not core registers.
@@ -149,8 +119,4 @@ pub struct VcpuKvmState {
     pub mp_state: kvm_mp_state,
     pub core_regs: kvm_regs,
     pub sys_regs: Vec<kvm_one_reg>,
-    // We will be using the mpidr for passing it to the VmState.
-    // The VmState will give this away for saving restoring the icc and redistributor
-    // registers.
-    pub mpidr: u64,
 }

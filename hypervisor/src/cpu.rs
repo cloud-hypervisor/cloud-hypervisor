@@ -366,11 +366,6 @@ pub trait Vcpu: Send + Sync {
     #[cfg(target_arch = "aarch64")]
     fn get_reg_list(&self, reg_list: &mut RegList) -> Result<()>;
     ///
-    /// Read the MPIDR - Multiprocessor Affinity Register.
-    ///
-    #[cfg(target_arch = "aarch64")]
-    fn read_mpidr(&self) -> Result<u64>;
-    ///
     /// Gets the value of a system register
     ///
     #[cfg(target_arch = "aarch64")]

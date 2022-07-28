@@ -4,7 +4,12 @@
 
 use crate::arch::aarch64::gic::{Error, Result};
 use crate::device::HypervisorDeviceError;
-use crate::kvm::kvm_bindings::{kvm_device_attr, KVM_DEV_ARM_VGIC_GRP_REDIST_REGS};
+use crate::kvm::kvm_bindings::{
+    kvm_device_attr, KVM_DEV_ARM_VGIC_GRP_REDIST_REGS, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG,
+    KVM_REG_ARM64_SYSREG_OP0_MASK, KVM_REG_ARM64_SYSREG_OP0_SHIFT, KVM_REG_ARM64_SYSREG_OP2_MASK,
+    KVM_REG_ARM64_SYSREG_OP2_SHIFT, KVM_REG_SIZE_U64,
+};
+use crate::kvm::Register;
 use crate::kvm::VcpuKvmState;
 use crate::CpuState;
 use kvm_ioctls::DeviceFd;
@@ -33,6 +38,12 @@ const GICR_ICFGR0: u32 = GICR_SGI_OFFSET + 0x0C00;
 
 const KVM_DEV_ARM_VGIC_V3_MPIDR_SHIFT: u32 = 32;
 const KVM_DEV_ARM_VGIC_V3_MPIDR_MASK: u64 = 0xffffffff << KVM_DEV_ARM_VGIC_V3_MPIDR_SHIFT as u64;
+
+const KVM_ARM64_SYSREG_MPIDR_EL1: u64 = KVM_REG_ARM64 as u64
+    | KVM_REG_SIZE_U64 as u64
+    | KVM_REG_ARM64_SYSREG as u64
+    | (((3_u64) << KVM_REG_ARM64_SYSREG_OP0_SHIFT) & KVM_REG_ARM64_SYSREG_OP0_MASK as u64)
+    | (((5_u64) << KVM_REG_ARM64_SYSREG_OP2_SHIFT) & KVM_REG_ARM64_SYSREG_OP2_MASK as u64);
 
 /// This is how we represent the registers of a distributor.
 /// It is relrvant their offset from the base address of the
@@ -196,8 +207,14 @@ pub fn construct_gicr_typers(vcpu_states: &[CpuState]) -> Vec<u64> {
                 0
             }
         };
+        // state.sys_regs is a big collection of system registers, including MIPDR_EL1
+        let mpidr: Vec<Register> = state
+            .sys_regs
+            .into_iter()
+            .filter(|reg| reg.id == KVM_ARM64_SYSREG_MPIDR_EL1)
+            .collect();
         //calculate affinity
-        let mut cpu_affid = state.mpidr & 1095233437695;
+        let mut cpu_affid = mpidr[0].addr & 1095233437695;
         cpu_affid = ((cpu_affid & 0xFF00000000) >> 8) | (cpu_affid & 0xFFFFFF);
         gicr_typers.push((cpu_affid << 32) | (1 << 24) | (index as u64) << 8 | (last << 4));
     }
