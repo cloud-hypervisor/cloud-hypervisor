@@ -967,6 +967,13 @@ impl VfioCommon {
             }
         }
 
+        // Filter out PCI Express capability registers and functionality (e.g. SR-IOV)
+        // (This is offset 0x80+ so register 0x20+)
+        // See https://github.com/cloud-hypervisor/cloud-hypervisor/issues/4375
+        if reg_idx >= 0x20 {
+            return None;
+        }
+
         // Make sure to write to the device's PCI config space after MSI/MSI-X
         // interrupts have been enabled/disabled. In case of MSI, when the
         // interrupts are enabled through VFIO (using VFIO_DEVICE_SET_IRQS),
@@ -999,6 +1006,13 @@ impl VfioCommon {
         } else {
             0xffff_ffff
         };
+
+        // Filter out PCI Express capability registers and functionality (e.g. SR-IOV)
+        // (This is offset 0x80+ so register 0x20+)
+        // See https://github.com/cloud-hypervisor/cloud-hypervisor/issues/4375
+        if reg_idx >= 0x20 {
+            return 0;
+        }
 
         // The config register read comes from the VFIO device itself.
         self.vfio_wrapper.read_config_dword((reg_idx * 4) as u32) & mask
