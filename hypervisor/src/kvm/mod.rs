@@ -1626,24 +1626,6 @@ impl cpu::Vcpu for KvmVcpu {
             .map_err(|e| cpu::HypervisorCpuError::VcpuInit(e.into()))
     }
     ///
-    /// Sets the value of one register for this vCPU.
-    ///
-    #[cfg(target_arch = "aarch64")]
-    fn set_reg(&self, reg_id: u64, data: u64) -> cpu::Result<()> {
-        self.fd
-            .set_one_reg(reg_id, data)
-            .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))
-    }
-    ///
-    /// Gets the value of one register for this vCPU.
-    ///
-    #[cfg(target_arch = "aarch64")]
-    fn get_reg(&self, reg_id: u64) -> cpu::Result<u64> {
-        self.fd
-            .get_one_reg(reg_id)
-            .map_err(|e| cpu::HypervisorCpuError::GetRegister(e.into()))
-    }
-    ///
     /// Gets a list of the guest registers that are supported for the
     /// KVM_GET_ONE_REG/KVM_SET_ONE_REG calls.
     ///
@@ -1683,17 +1665,19 @@ impl cpu::Vcpu for KvmVcpu {
 
         // Get the register index of the PSTATE (Processor State) register.
         let pstate = offset__of!(user_pt_regs, pstate) + kreg_off;
-        self.set_reg(
-            arm64_core_reg_id!(KVM_REG_SIZE_U64, pstate),
-            PSTATE_FAULT_BITS_64,
-        )
-        .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
+        self.fd
+            .set_one_reg(
+                arm64_core_reg_id!(KVM_REG_SIZE_U64, pstate),
+                PSTATE_FAULT_BITS_64,
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
 
         // Other vCPUs are powered off initially awaiting PSCI wakeup.
         if cpu_id == 0 {
             // Setting the PC (Processor Counter) to the current program address (kernel address).
             let pc = offset__of!(user_pt_regs, pc) + kreg_off;
-            self.set_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, pc), boot_ip as u64)
+            self.fd
+                .set_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, pc), boot_ip as u64)
                 .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
 
             // Last mandatory thing to set -> the address pointing to the FDT (also called DTB).
@@ -1701,7 +1685,8 @@ impl cpu::Vcpu for KvmVcpu {
             // not exceed 2 megabytes in size." -> https://www.kernel.org/doc/Documentation/arm64/booting.txt.
             // We are choosing to place it the end of DRAM. See `get_fdt_addr`.
             let regs0 = offset__of!(user_pt_regs, regs) + kreg_off;
-            self.set_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, regs0), fdt_start)
+            self.fd
+                .set_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, regs0), fdt_start)
                 .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
         }
         Ok(())

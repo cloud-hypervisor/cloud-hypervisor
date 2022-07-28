@@ -2491,11 +2491,6 @@ mod tests {
         assert_eq!(state.regs.pstate, 0x3C5);
 
         assert!(vcpu.set_regs(&state).is_ok());
-        let off = offset__of!(user_pt_regs, pstate);
-        let pstate = vcpu
-            .get_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off))
-            .expect("Failed to call kvm get one reg");
-        assert_eq!(state.regs.pstate, pstate);
     }
 
     #[test]

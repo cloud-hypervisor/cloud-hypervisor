@@ -360,16 +360,6 @@ pub trait Vcpu: Send + Sync {
     #[cfg(target_arch = "aarch64")]
     fn vcpu_init(&self, kvi: &VcpuInit) -> Result<()>;
     ///
-    /// Sets the value of one register for this vCPU.
-    ///
-    #[cfg(target_arch = "aarch64")]
-    fn set_reg(&self, reg_id: u64, data: u64) -> Result<()>;
-    ///
-    /// Sets the value of one register for this vCPU.
-    ///
-    #[cfg(target_arch = "aarch64")]
-    fn get_reg(&self, reg_id: u64) -> Result<u64>;
-    ///
     /// Gets a list of the guest registers that are supported for the
     /// KVM_GET_ONE_REG/KVM_SET_ONE_REG calls.
     ///
