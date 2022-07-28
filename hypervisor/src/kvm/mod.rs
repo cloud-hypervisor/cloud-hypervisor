@@ -1654,53 +1654,6 @@ impl cpu::Vcpu for KvmVcpu {
             .map_err(|e| cpu::HypervisorCpuError::GetRegList(e.into()))
     }
     ///
-    /// Save the state of the system registers.
-    ///
-    #[cfg(target_arch = "aarch64")]
-    fn get_sys_regs(&self) -> cpu::Result<Vec<Register>> {
-        // Call KVM_GET_REG_LIST to get all registers available to the guest. For ArmV8 there are
-        // around 500 registers.
-        let mut state: Vec<Register> = Vec::new();
-        let mut reg_list = RegList::new(500).unwrap();
-        self.fd
-            .get_reg_list(&mut reg_list)
-            .map_err(|e| cpu::HypervisorCpuError::GetRegList(e.into()))?;
-
-        // At this point reg_list should contain: core registers and system registers.
-        // The register list contains the number of registers and their ids. We will be needing to
-        // call KVM_GET_ONE_REG on each id in order to save all of them. We carve out from the list
-        // the core registers which are represented in the kernel by kvm_regs structure and for which
-        // we can calculate the id based on the offset in the structure.
-        reg_list.retain(|regid| is_system_register(*regid));
-
-        // Now, for the rest of the registers left in the previously fetched register list, we are
-        // simply calling KVM_GET_ONE_REG.
-        let indices = reg_list.as_slice();
-        for index in indices.iter() {
-            state.push(kvm_bindings::kvm_one_reg {
-                id: *index,
-                addr: self
-                    .fd
-                    .get_one_reg(*index)
-                    .map_err(|e| cpu::HypervisorCpuError::GetSysRegister(e.into()))?,
-            });
-        }
-
-        Ok(state)
-    }
-    ///
-    /// Restore the state of the system registers.
-    ///
-    #[cfg(target_arch = "aarch64")]
-    fn set_sys_regs(&self, state: &[Register]) -> cpu::Result<()> {
-        for reg in state {
-            self.fd
-                .set_one_reg(reg.id, reg.addr)
-                .map_err(|e| cpu::HypervisorCpuError::SetSysRegister(e.into()))?;
-        }
-        Ok(())
-    }
-    ///
     /// Read the MPIDR - Multiprocessor Affinity Register.
     ///
     #[cfg(target_arch = "aarch64")]
@@ -1886,8 +1839,41 @@ impl cpu::Vcpu for KvmVcpu {
             mpidr: self.read_mpidr()?,
             ..Default::default()
         };
+        // Get core registers
         state.core_regs = self.get_regs()?;
-        state.sys_regs = self.get_sys_regs()?;
+
+        // Get systerm register
+        // Call KVM_GET_REG_LIST to get all registers available to the guest.
+        // For ArmV8 there are around 500 registers.
+        let mut sys_regs: Vec<Register> = Vec::new();
+        let mut reg_list = RegList::new(500).unwrap();
+        self.fd
+            .get_reg_list(&mut reg_list)
+            .map_err(|e| cpu::HypervisorCpuError::GetRegList(e.into()))?;
+
+        // At this point reg_list should contain: core registers and system
+        // registers.
+        // The register list contains the number of registers and their ids. We
+        // will be needing to call KVM_GET_ONE_REG on each id in order to save
+        // all of them. We carve out from the list  the core registers which are
+        // represented in the kernel by kvm_regs structure and for which we can
+        // calculate the id based on the offset in the structure.
+        reg_list.retain(|regid| is_system_register(*regid));
+
+        // Now, for the rest of the registers left in the previously fetched
+        // register list, we are simply calling KVM_GET_ONE_REG.
+        let indices = reg_list.as_slice();
+        for index in indices.iter() {
+            sys_regs.push(kvm_bindings::kvm_one_reg {
+                id: *index,
+                addr: self
+                    .fd
+                    .get_one_reg(*index)
+                    .map_err(|e| cpu::HypervisorCpuError::GetSysRegister(e.into()))?,
+            });
+        }
+
+        state.sys_regs = sys_regs;
 
         Ok(state.into())
     }
@@ -1983,8 +1969,15 @@ impl cpu::Vcpu for KvmVcpu {
     #[cfg(target_arch = "aarch64")]
     fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
         let state: VcpuKvmState = state.clone().into();
+        // Set core registers
         self.set_regs(&state.core_regs)?;
-        self.set_sys_regs(&state.sys_regs)?;
+        // Set system registers
+        for reg in &state.sys_regs {
+            self.fd
+                .set_one_reg(reg.id, reg.addr)
+                .map_err(|e| cpu::HypervisorCpuError::SetSysRegister(e.into()))?;
+        }
+
         self.set_mp_state(state.mp_state.into())?;
 
         Ok(())

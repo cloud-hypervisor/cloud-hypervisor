@@ -2411,9 +2411,9 @@ mod tests {
 #[cfg(test)]
 mod tests {
     use arch::layout;
-    use hypervisor::kvm::aarch64::{is_system_register, MPIDR_EL1};
+    use hypervisor::kvm::aarch64::is_system_register;
     use hypervisor::kvm::kvm_bindings::{
-        kvm_one_reg, kvm_regs, kvm_vcpu_init, user_pt_regs, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG,
+        kvm_regs, kvm_vcpu_init, user_pt_regs, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG,
         KVM_REG_ARM_CORE, KVM_REG_SIZE_U64,
     };
     use hypervisor::{arm64_core_reg_id, offset__of};
@@ -2496,50 +2496,6 @@ mod tests {
             .get_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off))
             .expect("Failed to call kvm get one reg");
         assert_eq!(state.regs.pstate, pstate);
-    }
-
-    #[test]
-    fn test_save_restore_system_regs() {
-        let hv = hypervisor::new().unwrap();
-        let vm = hv.create_vm().unwrap();
-        let vcpu = vm.create_vcpu(0, None).unwrap();
-        let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
-        vm.get_preferred_target(&mut kvi).unwrap();
-
-        // Must fail when vcpu is not initialized yet.
-        let mut state: Vec<kvm_one_reg> = Vec::new();
-        let res = vcpu.get_sys_regs();
-        assert!(res.is_err());
-        assert_eq!(
-            format!("{}", res.as_ref().unwrap_err()),
-            "Failed to retrieve list of registers: Exec format error (os error 8)"
-        );
-
-        state.push(kvm_one_reg {
-            id: MPIDR_EL1,
-            addr: 0x00,
-        });
-        let res = vcpu.set_sys_regs(&state);
-        assert!(res.is_err());
-        assert_eq!(
-            format!("{}", res.unwrap_err()),
-            "Failed to set system register: Exec format error (os error 8)"
-        );
-
-        vcpu.vcpu_init(&kvi).unwrap();
-        let res = vcpu.get_sys_regs();
-        assert!(res.is_ok());
-        state = res.unwrap();
-
-        let initial_mpidr: u64 = vcpu.read_mpidr().expect("Fail to read mpidr");
-        assert!(state.contains(&kvm_one_reg {
-            id: MPIDR_EL1,
-            addr: initial_mpidr
-        }));
-
-        assert!(vcpu.set_sys_regs(&state).is_ok());
-        let mpidr: u64 = vcpu.read_mpidr().expect("Fail to read mpidr");
-        assert_eq!(initial_mpidr, mpidr);
     }
 
     #[test]
