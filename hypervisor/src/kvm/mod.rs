@@ -80,7 +80,9 @@ pub use kvm_bindings::{
 };
 #[cfg(target_arch = "aarch64")]
 use kvm_bindings::{
-    kvm_regs, user_fpsimd_state, user_pt_regs, KVM_NR_SPSR, KVM_REG_ARM64, KVM_REG_ARM_CORE,
+    kvm_regs, user_fpsimd_state, user_pt_regs, KVM_NR_SPSR, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG,
+    KVM_REG_ARM64_SYSREG_CRM_MASK, KVM_REG_ARM64_SYSREG_CRN_MASK, KVM_REG_ARM64_SYSREG_OP0_MASK,
+    KVM_REG_ARM64_SYSREG_OP1_MASK, KVM_REG_ARM64_SYSREG_OP2_MASK, KVM_REG_ARM_CORE,
     KVM_REG_SIZE_U128, KVM_REG_SIZE_U32, KVM_REG_SIZE_U64,
 };
 pub use kvm_ioctls;
@@ -1642,6 +1644,36 @@ impl cpu::Vcpu for KvmVcpu {
     fn read_mpidr(&self) -> cpu::Result<u64> {
         self.fd
             .get_one_reg(MPIDR_EL1)
+            .map_err(|e| cpu::HypervisorCpuError::GetSysRegister(e.into()))
+    }
+    ///
+    /// Gets the value of a system register
+    ///
+    #[cfg(target_arch = "aarch64")]
+    fn get_sys_reg(&self, sys_reg: u32) -> cpu::Result<u64> {
+        //
+        // Arm Architecture Reference Manual defines the encoding of
+        // AArch64 system registers, see
+        // https://developer.arm.com/documentation/ddi0487 (chapter D12).
+        // While KVM defines another ID for each AArch64 system register,
+        // which is used in calling `KVM_G/SET_ONE_REG` to access a system
+        // register of a guest.
+        // A mapping exists between the Arm standard encoding and the KVM ID.
+        // This function takes the standard u32 ID as input parameter, converts
+        // it to the corresponding KVM ID, and call `KVM_GET_ONE_REG` API to
+        // get the value of the system parameter.
+        //
+        let id: u64 = KVM_REG_ARM64 as u64
+            | KVM_REG_SIZE_U64 as u64
+            | KVM_REG_ARM64_SYSREG as u64
+            | ((((sys_reg) >> 5)
+                & (KVM_REG_ARM64_SYSREG_OP0_MASK
+                    | KVM_REG_ARM64_SYSREG_OP1_MASK
+                    | KVM_REG_ARM64_SYSREG_CRN_MASK
+                    | KVM_REG_ARM64_SYSREG_CRM_MASK
+                    | KVM_REG_ARM64_SYSREG_OP2_MASK)) as u64);
+        self.fd
+            .get_one_reg(id)
             .map_err(|e| cpu::HypervisorCpuError::GetSysRegister(e.into()))
     }
     ///
