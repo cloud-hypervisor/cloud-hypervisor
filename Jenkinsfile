@@ -212,7 +212,6 @@ pipeline{
 					when {
 						beforeAgent true
 						allOf {
-							branch 'main'
 							expression {
 								return runWorkers
 							}
