@@ -2410,7 +2410,7 @@ mod tests {
 #[cfg(target_arch = "aarch64")]
 #[cfg(test)]
 mod tests {
-    use arch::layout;
+    use arch::{aarch64::regs, layout};
     use hypervisor::kvm::aarch64::is_system_register;
     use hypervisor::kvm::kvm_bindings::{
         kvm_regs, kvm_vcpu_init, user_pt_regs, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG,
@@ -2445,10 +2445,10 @@ mod tests {
         vm.get_preferred_target(&mut kvi).unwrap();
 
         // Must fail when vcpu is not initialized yet.
-        assert!(vcpu.read_mpidr().is_err());
+        assert!(vcpu.get_sys_reg(regs::MPIDR_EL1).is_err());
 
         vcpu.vcpu_init(&kvi).unwrap();
-        assert_eq!(vcpu.read_mpidr().unwrap(), 0x80000000);
+        assert_eq!(vcpu.get_sys_reg(regs::MPIDR_EL1).unwrap(), 0x80000000);
     }
 
     #[test]
