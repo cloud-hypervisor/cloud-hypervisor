@@ -9,9 +9,7 @@
 //
 
 #[cfg(target_arch = "aarch64")]
-use crate::aarch64::VcpuInit;
-#[cfg(target_arch = "aarch64")]
-use crate::aarch64::{RegList, Register, StandardRegisters};
+use crate::aarch64::{RegList, StandardRegisters, VcpuInit};
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{
     CpuIdEntry, FpuState, LapicState, MsrEntry, SpecialRegisters, StandardRegisters,
@@ -377,16 +375,6 @@ pub trait Vcpu: Send + Sync {
     ///
     #[cfg(target_arch = "aarch64")]
     fn get_reg_list(&self, reg_list: &mut RegList) -> Result<()>;
-    ///
-    /// Save the state of the system registers.
-    ///
-    #[cfg(target_arch = "aarch64")]
-    fn get_sys_regs(&self) -> Result<Vec<Register>>;
-    ///
-    /// Restore the state of the system registers.
-    ///
-    #[cfg(target_arch = "aarch64")]
-    fn set_sys_regs(&self, state: &[Register]) -> Result<()>;
     ///
     /// Read the MPIDR - Multiprocessor Affinity Register.
     ///
