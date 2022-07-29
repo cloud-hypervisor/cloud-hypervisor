@@ -179,8 +179,11 @@ dependencies = [
  "block_util",
  "cloud-hypervisor",
  "devices",
+ "epoll",
  "libc",
  "libfuzzer-sys",
+ "micro_http",
+ "once_cell",
  "qcow",
  "seccompiler",
  "vhdx",
@@ -189,6 +192,7 @@ dependencies = [
  "vm-device",
  "vm-memory",
  "vm-virtio",
+ "vmm",
  "vmm-sys-util",
 ]
 
@@ -444,7 +448,7 @@ dependencies = [
 [[package]]
 name = "micro_http"
 version = "0.1.0"
-source = "git+https://github.com/firecracker-microvm/micro-http?branch=main#9517a300370a158a7af0996b7eebf040d171e1a4"
+source = "git+https://github.com/firecracker-microvm/micro-http?branch=main#863b0370ba7e57f7df5b908ada9e5b44809ccae9"
 dependencies = [
  "libc",
  "vmm-sys-util",
