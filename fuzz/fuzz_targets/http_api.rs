@@ -14,13 +14,8 @@ use vmm::{EpollContext, EpollDispatch};
 use vmm_sys_util::eventfd::EventFd;
 
 // Need to be ordered for test case reproducibility
-static ROUTES: Lazy<Vec<&Box<dyn EndpointHandler + Sync + Send>>> = Lazy::new(|| {
-    let mut keys: Vec<&String> = HTTP_ROUTES.routes.keys().collect();
-    keys.sort();
-    keys.iter()
-        .map(|k| HTTP_ROUTES.routes.get(*k).unwrap())
-        .collect()
-});
+static ROUTES: Lazy<Vec<&Box<dyn EndpointHandler + Sync + Send>>> =
+    Lazy::new(|| HTTP_ROUTES.routes.values().collect());
 
 fuzz_target!(|bytes| {
     if bytes.len() < 2 {
