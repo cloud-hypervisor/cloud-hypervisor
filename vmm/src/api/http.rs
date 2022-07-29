@@ -12,7 +12,7 @@ use micro_http::{Body, HttpServer, MediaType, Method, Request, Response, StatusC
 use once_cell::sync::Lazy;
 use seccompiler::{apply_filter, SeccompAction};
 use serde_json::Error as SerdeError;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::os::unix::io::{IntoRawFd, RawFd};
 use std::os::unix::net::UnixListener;
@@ -122,7 +122,7 @@ pub trait EndpointHandler {
 /// An HTTP routes structure.
 pub struct HttpRoutes {
     /// routes is a hash table mapping endpoint URIs to their endpoint handlers.
-    pub routes: HashMap<String, Box<dyn EndpointHandler + Sync + Send>>,
+    pub routes: BTreeMap<String, Box<dyn EndpointHandler + Sync + Send>>,
 }
 
 macro_rules! endpoint {
@@ -134,7 +134,7 @@ macro_rules! endpoint {
 /// HTTP_ROUTES contain all the cloud-hypervisor HTTP routes.
 pub static HTTP_ROUTES: Lazy<HttpRoutes> = Lazy::new(|| {
     let mut r = HttpRoutes {
-        routes: HashMap::new(),
+        routes: BTreeMap::new(),
     };
 
     r.routes.insert(
