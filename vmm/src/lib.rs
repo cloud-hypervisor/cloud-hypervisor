@@ -215,7 +215,7 @@ impl EpollContext {
         Ok(EpollContext { epoll_file })
     }
 
-    fn add_event<T>(&mut self, fd: &T, token: EpollDispatch) -> result::Result<(), io::Error>
+    pub fn add_event<T>(&mut self, fd: &T, token: EpollDispatch) -> result::Result<(), io::Error>
     where
         T: AsRawFd,
     {
