@@ -29,7 +29,7 @@ mkdir /tmp/shared_dir
 _Run virtiofsd_
 ```bash
 ./virtiofsd \
-    -d \
+    --log-level debug \
     --socket-path=/tmp/virtiofs \
     --shared-dir=/tmp/shared_dir \
     --cache=never
