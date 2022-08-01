@@ -408,6 +408,7 @@ impl VfioCommon {
         let mut bars = Vec::new();
         let mut bar_id = VFIO_PCI_BAR0_REGION_INDEX as u32;
 
+
         // Going through all regular regions to compute the BAR size.
         // We're not saving the BAR address to restore it, because we
         // are going to allocate a guest address for each BAR and write
@@ -688,6 +689,9 @@ impl VfioCommon {
             let cap_id = self.vfio_wrapper.read_config_byte(cap_next.into());
 
             match PciCapabilityId::from(cap_id) {
+//                PciCapabilityId::PciExpress => {
+//                    info!("Found PCI Express Capability steak");
+//                }
                 PciCapabilityId::MessageSignalledInterrupts => {
                     if let Some(irq_info) = self.vfio_wrapper.get_irq_info(VFIO_PCI_MSI_IRQ_INDEX) {
                         if irq_info.count > 0 {
@@ -967,6 +971,14 @@ impl VfioCommon {
             }
         }
 
+        // Filter out PCI Express capability registers and functionality (e.g. SR-IOV)
+        // (This is offset 0x80+ so register 0x20+)
+        // See https://github.com/cloud-hypervisor/cloud-hypervisor/issues/4375
+//        if reg_idx >= 0x20 {
+ //           error!("steak {} {}", idx, data);
+  //          return None;
+   //     }
+
         // Make sure to write to the device's PCI config space after MSI/MSI-X
         // interrupts have been enabled/disabled. In case of MSI, when the
         // interrupts are enabled through VFIO (using VFIO_DEVICE_SET_IRQS),
@@ -1000,6 +1012,9 @@ impl VfioCommon {
             0xffff_ffff
         };
 
+//        if reg_idx >= 0x20 {
+ //           return 0;
+  //      }
         // The config register read comes from the VFIO device itself.
         self.vfio_wrapper.read_config_dword((reg_idx * 4) as u32) & mask
     }

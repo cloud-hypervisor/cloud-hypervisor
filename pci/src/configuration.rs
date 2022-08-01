@@ -244,6 +244,116 @@ impl From<u8> for PciCapabilityId {
     }
 }
 
+/// Types of PCI Express capabilities.
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
+#[allow(dead_code)]
+#[allow(non_camel_case_types)]
+pub enum PciExpressCapabilityId {
+    NullCapability = 0x00,
+    AdvancedErrorReporting = 0x01,
+    VirtualChannelMultiFunctionVirtualChannelNotPresent = 0x02,
+    DeviceSerialNumber = 0x03,
+    PowerBudgeting = 0x04,
+    RootComplexLinkDeclaration = 0x05,
+    RootComplexInternalLinkControl = 0x06,
+    RootComplexEventCollectorEndpointAssociation = 0007,
+    MultiFunctionVirtualChannel = 0x08,
+    VirtualChannelMultiFunctionVirtualChannelPresent = 0x09,
+    RootComplexRegisterBlock = 0x0a,
+    VendorSpecificExtendedCapability = 0x0b,
+    ConfigurationAccessCorrelation = 0x0c,
+    AccessControlServices = 0x0d,
+    AlternativeRoutingIdentificationIntepretation = 0x0e,
+    AddressTranslationServices = 0x0f,
+    SingleRootIoVirtualization = 0x10,
+    DeprecatedMultiRootIoVirtualzation = 0x11,
+    Multicast = 0x12,
+    PageRequestInterface = 0x13,
+    ReservedForAmd = 0x14,
+    ResizeableBar = 0x15,
+    DynamicPowerAllocation = 0x16,
+    ThpRequester = 0x17,
+    LatencyToleranceReporting = 0x18,
+    SecondaryPciExpress = 0x19,
+    ProtocolMultiplexing = 0x1a,
+    ProcessAddressSpaceId = 0x1b,
+    LnRequestor = 0x1c,
+    DownstreamPortContainment = 0x1d,
+    L1PmSubstates = 0x1e,
+    PrecisionTimeMeasurement = 0x1f,
+    PciExpressOverMphy = 0x20,
+    FRSQueueing = 0x21,
+    ReadinessTimeReporting = 0x22,
+    DesignatedVendorSpecificExtendedCapability = 0x23,
+    VfResizeableBar = 0x24,
+    DataLinkFeature = 0x25,
+    PhysicalLayerSixteenGts = 0x26,
+    LaneMargeningAtTheReceiver = 0x27,
+    HierarchyId = 0x28,
+    NativePcieEnclosureManagement = 0x29,
+    PhysicalLayerThirtyTwoGts = 0x2a,
+    AlternateProtocol = 0x2b,
+    SystemFirmwareIntermediary = 0x2c,
+    ShadowFunctions = 0x2d,
+    DataObjectExchange = 0x2e,
+    Reserved = 0x2f,
+}
+
+impl From<u8> for PciExpressCapabilityId {
+    fn from(c: u8) -> Self {
+        match c {
+            0x00 => PciExpressCapabilityId::NullCapability,
+            0x01 => PciExpressCapabilityId::AdvancedErrorReporting,
+            0x02 => PciExpressCapabilityId::VirtualChannelMultiFunctionVirtualChannelNotPresent,
+            0x03 => PciExpressCapabilityId::DeviceSerialNumber,
+            0x04 => PciExpressCapabilityId::PowerBudgeting,
+            0x05 => PciExpressCapabilityId::RootComplexLinkDeclaration,
+            0x06 => PciExpressCapabilityId::RootComplexInternalLinkControl,
+            0x07 => PciExpressCapabilityId::RootComplexEventCollectorEndpointAssociation,
+            0x08 => PciExpressCapabilityId::MultiFunctionVirtualChannel,
+            0x09 => PciExpressCapabilityId::VirtualChannelMultiFunctionVirtualChannelPresent,
+            0x0a => PciExpressCapabilityId::RootComplexRegisterBlock,
+            0x0b => PciExpressCapabilityId::VendorSpecificExtendedCapability,
+            0x0c => PciExpressCapabilityId::ConfigurationAccessCorrelation,
+            0x0d => PciExpressCapabilityId::AccessControlServices,
+            0x0e => PciExpressCapabilityId::AlternativeRoutingIdentificationIntepretation,
+            0x0f => PciExpressCapabilityId::AddressTranslationServices,
+            0x10 => PciExpressCapabilityId::SingleRootIoVirtualization,
+            0x11 => PciExpressCapabilityId::DeprecatedMultiRootIoVirtualzation,
+            0x12 => PciExpressCapabilityId::Multicast,
+            0x13 => PciExpressCapabilityId::PageRequestInterface,
+            0x14 => PciExpressCapabilityId::ReservedForAmd,
+            0x15 => PciExpressCapabilityId::ResizeableBar,
+            0x16 => PciExpressCapabilityId::DynamicPowerAllocation,
+            0x17 => PciExpressCapabilityId::ThpRequester,
+            0x18 => PciExpressCapabilityId::LatencyToleranceReporting,
+            0x19 => PciExpressCapabilityId::SecondaryPciExpress,
+            0x1a => PciExpressCapabilityId::ProtocolMultiplexing,
+            0x1b => PciExpressCapabilityId::ProcessAddressSpaceId,
+            0x1c => PciExpressCapabilityId::LnRequestor,
+            0x1d => PciExpressCapabilityId::DownstreamPortContainment,
+            0x1e => PciExpressCapabilityId::L1PmSubstates,
+            0x1f => PciExpressCapabilityId::PrecisionTimeMeasurement,
+            0x20 => PciExpressCapabilityId::PciExpressOverMphy,
+            0x21 => PciExpressCapabilityId::FRSQueueing,
+            0x22 => PciExpressCapabilityId::ReadinessTimeReporting,
+            0x23 => PciExpressCapabilityId::DesignatedVendorSpecificExtendedCapability,
+            0x24 => PciExpressCapabilityId::VfResizeableBar,
+            0x25 => PciExpressCapabilityId::DataLinkFeature,
+            0x26 => PciExpressCapabilityId::PhysicalLayerSixteenGts,
+            0x27 => PciExpressCapabilityId::LaneMargeningAtTheReceiver,
+            0x28 => PciExpressCapabilityId::HierarchyId,
+            0x29 => PciExpressCapabilityId::NativePcieEnclosureManagement,
+            0x2a => PciExpressCapabilityId::PhysicalLayerThirtyTwoGts,
+            0x2b => PciExpressCapabilityId::AlternateProtocol,
+            0x2c => PciExpressCapabilityId::SystemFirmwareIntermediary,
+            0x2d => PciExpressCapabilityId::ShadowFunctions,
+            0x2e => PciExpressCapabilityId::DataObjectExchange,
+            _ => PciExpressCapabilityId::Reserved,
+        }
+    }
+}
+
 /// A PCI capability list. Devices can optionally specify capabilities in their configuration space.
 pub trait PciCapability {
     fn bytes(&self) -> &[u8];
@@ -393,6 +503,7 @@ pub enum Error {
     RomBarInUse(usize),
     RomBarInvalid(usize),
     RomBarSizeInvalid(u64),
+    PciExpressCapabilityUnsupported,
 }
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -424,6 +535,7 @@ impl Display for Error {
             RomBarInUse(b) => write!(f, "rom bar {} already used", b),
             RomBarInvalid(b) => write!(f, "rom bar {} invalid, max {}", b, NUM_BAR_REGS - 1),
             RomBarSizeInvalid(s) => write!(f, "rom bar address {} not a power of two", s),
+            PciExpressCapabilityUnsupported => write!(f, "PCI Express capability unsupported"),
         }
     }
 }
@@ -746,6 +858,16 @@ impl PciConfiguration {
         if end_offset > CAPABILITY_MAX_OFFSET {
             return Err(Error::CapabilitySpaceFull(total_len));
         }
+        info!("PCI Capability {:?}\n", cap_data.id());
+        // steak
+//        match cap_data.id() {
+ //           PciCapabilityId::PciExpress => {
+  //              info!("PCI Capability ID was PCI Express\n");
+       //         return Err(Error::PciExpressCapabilityUnsupported(cap_data.id.unwrap()));
+   //         }
+    //        _ => {}
+     //   }
+
         self.registers[STATUS_REG] |= STATUS_REG_CAPABILITIES_USED_MASK;
         self.write_byte_internal(tail_offset, cap_offset as u8, false);
         self.write_byte_internal(cap_offset, cap_data.id() as u8, false);
@@ -762,6 +884,10 @@ impl PciConfiguration {
             PciCapabilityId::MsiX => {
                 self.msix_cap_reg_idx = Some(cap_offset / 4);
                 self.writable_bits[self.msix_cap_reg_idx.unwrap()] = MSIX_CAPABILITY_REGISTER_MASK;
+            }
+            PciCapabilityId::PciExpress => {
+                let pcie_cap_reg_idx = Some(cap_offset / 4);
+                info!("PCI Express ecap {}", pcie_cap_reg_idx.unwrap())
             }
             _ => {}
         }
