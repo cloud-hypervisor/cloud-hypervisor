@@ -811,9 +811,6 @@ components:
           default: false
         vhost_socket:
           type: string
-        poll_queue:
-          type: boolean
-          default: true
         rate_limiter_config:
             $ref: '#/components/schemas/RateLimiterConfig'
         pci_segment:

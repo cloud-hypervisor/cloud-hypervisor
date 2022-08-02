@@ -959,8 +959,6 @@ pub struct DiskConfig {
     #[serde(default)]
     pub vhost_user: bool,
     pub vhost_socket: Option<String>,
-    #[serde(default = "default_diskconfig_poll_queue")]
-    pub poll_queue: bool,
     #[serde(default)]
     pub rate_limiter_config: Option<RateLimiterConfig>,
     #[serde(default)]
@@ -980,10 +978,6 @@ fn default_diskconfig_queue_size() -> u16 {
     DEFAULT_QUEUE_SIZE_VUBLK
 }
 
-fn default_diskconfig_poll_queue() -> bool {
-    true
-}
-
 impl Default for DiskConfig {
     fn default() -> Self {
         Self {
@@ -995,7 +989,6 @@ impl Default for DiskConfig {
             queue_size: default_diskconfig_queue_size(),
             vhost_user: false,
             vhost_socket: None,
-            poll_queue: default_diskconfig_poll_queue(),
             id: None,
             disable_io_uring: false,
             rate_limiter_config: None,
@@ -1008,7 +1001,7 @@ impl DiskConfig {
     pub const SYNTAX: &'static str = "Disk parameters \
          \"path=<disk_image_path>,readonly=on|off,direct=on|off,iommu=on|off,\
          num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,\
-         vhost_user=on|off,socket=<vhost_user_socket_path>,poll_queue=on|off,\
+         vhost_user=on|off,socket=<vhost_user_socket_path>,\
          bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,\
          ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,\
          id=<device_id>,pci_segment=<segment_id>\"";
@@ -1024,7 +1017,6 @@ impl DiskConfig {
             .add("num_queues")
             .add("vhost_user")
             .add("socket")
-            .add("poll_queue")
             .add("bw_size")
             .add("bw_one_time_burst")
             .add("bw_refill_time")
@@ -1066,11 +1058,6 @@ impl DiskConfig {
             .unwrap_or(Toggle(false))
             .0;
         let vhost_socket = parser.get("socket");
-        let poll_queue = parser
-            .convert::<Toggle>("poll_queue")
-            .map_err(Error::ParseDisk)?
-            .unwrap_or_else(|| Toggle(default_diskconfig_poll_queue()))
-            .0;
         let id = parser.get("id");
         let disable_io_uring = parser
             .convert::<Toggle>("_disable_io_uring")
@@ -1132,10 +1119,6 @@ impl DiskConfig {
             None
         };
 
-        if parser.is_set("poll_queue") && !vhost_user {
-            warn!("poll_queue parameter currently only has effect when used vhost_user=true");
-        }
-
         Ok(DiskConfig {
             path,
             readonly,
@@ -1145,7 +1128,6 @@ impl DiskConfig {
             queue_size,
             vhost_user,
             vhost_socket,
-            poll_queue,
             rate_limiter_config,
             id,
             disable_io_uring,
@@ -2898,22 +2880,6 @@ mod tests {
             DiskConfig::parse("path=/path/to_file")?,
             DiskConfig {
                 path: Some(PathBuf::from("/path/to_file")),
-                ..Default::default()
-            }
-        );
-        assert_eq!(
-            DiskConfig::parse("path=/path/to_file,poll_queue=false")?,
-            DiskConfig {
-                path: Some(PathBuf::from("/path/to_file")),
-                poll_queue: false,
-                ..Default::default()
-            }
-        );
-        assert_eq!(
-            DiskConfig::parse("path=/path/to_file,poll_queue=true")?,
-            DiskConfig {
-                path: Some(PathBuf::from("/path/to_file")),
-                poll_queue: true,
                 ..Default::default()
             }
         );
