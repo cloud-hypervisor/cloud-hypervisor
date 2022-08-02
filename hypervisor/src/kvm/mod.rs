@@ -1641,6 +1641,58 @@ impl cpu::Vcpu for KvmVcpu {
         }
 
         // Watchpoints
+        #[cfg(target_arch = "aarch64")]
+        {
+            for (i, watchpoint) in _watchpoints.iter().enumerate() {
+                // DBGWVR_EL1 (Debug Watchpoint Value Registers, D13.3.12):
+                // bit 2~63: VA[2:63]
+                dbg.arch.dbg_wvr[i] = watchpoint.0 .0;
+                // DBGWCR_EL1 (Debug Watchpoint Control Registers, D13.3.11):
+                // bit 0: 1 (Enabled)
+                debug!("set_guest_debug: wvr = 0x{:x}", dbg.arch.dbg_wvr[i]);
+                dbg.arch.dbg_wcr[i] = 0b1u64;
+                // bit 1~2: 0b11 (PAC = EL1/EL0)
+                dbg.arch.dbg_wcr[i] |= 0b110u64;
+                // bit 3~4: LCS
+                // 0b01: Watch loading
+                // 0b10: Watch saving
+                // 0b11: Watch loading & saving
+                debug!("set_guest_debug: kind = {:#?}", watchpoint.2);
+                dbg.arch.dbg_wcr[i] |= match watchpoint.2 {
+                    WatchKind::Read => 0b01000u64,
+                    WatchKind::Write => 0b10000u64,
+                    WatchKind::ReadWrite => 0b11000u64,
+                };
+
+                // Length to watch
+                let len: u64 = watchpoint.1;
+                debug!("set_guest_debug: len = {}", len);
+                if len <= 8 {
+                    // If the watched length is no more than 8, it is set in
+                    // bit 5~12: BAS
+                    let bas = ((1u64 << len) - 1) << 5;
+                    dbg.arch.dbg_wcr[i] |= bas;
+                    debug!("set_guest_debug: bas = 0x{:x}", bas);
+                } else {
+                    // If the watched length is more than 8 (must be power of 2),
+                    // it is set in MASK:
+                    // bit 24~28: length in address bits
+                    if len.is_power_of_two() {
+                        let mask = len.trailing_zeros() as u64;
+                        dbg.arch.dbg_wcr[i] |= mask << 24;
+                        dbg.arch.dbg_wvr[i] &= !((1u64 << mask) - 1);
+                        debug!("set_guest_debug: mask = {}", mask);
+                        debug!("set_guest_debug: wvr = 0x{:x}", dbg.arch.dbg_wvr[i]);
+                    } else {
+                        return Err(cpu::HypervisorCpuError::SetDebugRegs(anyhow!(
+                            "Watched memory length must be power of 2: {}",
+                            len
+                        )));
+                    }
+                }
+            }
+        }
+
         self.fd
             .set_guest_debug(&dbg)
             .map_err(|e| cpu::HypervisorCpuError::SetDebugRegs(e.into()))
