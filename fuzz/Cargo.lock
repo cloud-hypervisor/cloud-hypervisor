@@ -283,9 +283,9 @@ dependencies = [
 
 [[package]]
 name = "fdt"
-version = "0.1.3"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b643857cf70949306b81d7e92cb9d47add673868edac9863c4a49c42feaf3f1e"
+checksum = "964f5becd44d069dca0beea2b4bc05639ae7bf3b3f5369c295aff360bb57cca2"
 
 [[package]]
 name = "fnv"
