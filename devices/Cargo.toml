@@ -6,7 +6,7 @@ edition = "2021"
 
 [dependencies]
 acpi_tables = { path = "../acpi_tables" }
-anyhow = "1.0.58"
+anyhow = "1.0.59"
 arch = { path = "../arch" }
 bitflags = "1.3.2"
 byteorder = "1.4.3"
