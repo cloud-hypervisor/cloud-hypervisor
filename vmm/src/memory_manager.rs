@@ -805,23 +805,6 @@ impl MemoryManager {
                     .ok_or(Error::MemoryRangeAllocation)?;
             }
         }
-
-        // Allocate SubRegion and Reserved address ranges.
-        for region in self.arch_mem_regions.iter() {
-            if region.r_type == RegionType::Ram {
-                // Ignore the RAM type since ranges have already been allocated
-                // based on the GuestMemory regions.
-                continue;
-            }
-            self.ram_allocator
-                .allocate(
-                    Some(GuestAddress(region.base)),
-                    region.size as GuestUsize,
-                    None,
-                )
-                .ok_or(Error::MemoryRangeAllocation)?;
-        }
-
         Ok(())
     }
 
