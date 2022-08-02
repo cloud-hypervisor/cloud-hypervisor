@@ -51,6 +51,8 @@ use devices::gic::GIC_V3_ITS_SNAPSHOT_ID;
 #[cfg(target_arch = "aarch64")]
 use devices::interrupt_controller::{self, InterruptController};
 use devices::AcpiNotificationFlags;
+#[cfg(feature = "gdb")]
+use gdbstub::target::ext::breakpoints::WatchKind;
 #[cfg(all(target_arch = "aarch64", feature = "gdb"))]
 use gdbstub_arch::arm::reg::Aarch64CoreRegs as CoreRegs;
 #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
@@ -2494,13 +2496,18 @@ impl Vm {
         use GdbRequestPayload::*;
         match gdb_request {
             SetSingleStep(single_step) => {
-                self.set_guest_debug(cpu_id, &[], *single_step)
+                self.set_guest_debug(cpu_id, &[], &[], *single_step)
                     .map_err(Error::Debug)?;
             }
-            SetHwBreakPoint(addrs) => {
-                self.set_guest_debug(cpu_id, addrs, false)
+            SetHwBreakPoint(breakpoints, watchpoints) => {
+                self.set_guest_debug(cpu_id, breakpoints, watchpoints, false)
                     .map_err(Error::Debug)?;
             }
+            SetHwWatchPoint(breakpoints, watchpoints) => {
+                self.set_guest_debug(cpu_id, breakpoints, watchpoints, false)
+                    .map_err(Error::Debug)?;
+            }
+
             Pause => {
                 self.debug_pause().map_err(Error::Debug)?;
             }
@@ -2906,13 +2913,16 @@ impl Debuggable for Vm {
     fn set_guest_debug(
         &self,
         cpu_id: usize,
-        addrs: &[GuestAddress],
+        breakpoints: &[GuestAddress],
+        watchpoints: &[(GuestAddress, u64, WatchKind)],
         singlestep: bool,
     ) -> std::result::Result<(), DebuggableError> {
-        self.cpu_manager
-            .lock()
-            .unwrap()
-            .set_guest_debug(cpu_id, addrs, singlestep)
+        self.cpu_manager.lock().unwrap().set_guest_debug(
+            cpu_id,
+            breakpoints,
+            watchpoints,
+            singlestep,
+        )
     }
 
     fn debug_pause(&mut self) -> std::result::Result<(), DebuggableError> {

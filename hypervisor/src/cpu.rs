@@ -18,8 +18,8 @@ use crate::arch::x86::{
 use crate::kvm::{TdxExitDetails, TdxExitStatus};
 use crate::CpuState;
 use crate::MpState;
+use gdbstub::target::ext::breakpoints::WatchKind;
 use thiserror::Error;
-use vm_memory::GuestAddress;
 
 #[derive(Error, Debug)]
 ///
@@ -349,7 +349,12 @@ pub trait Vcpu: Send + Sync {
     ///
     /// Sets debug registers to set hardware breakpoints and/or enable single step.
     ///
-    fn set_guest_debug(&self, _addrs: &[GuestAddress], _singlestep: bool) -> Result<()> {
+    fn set_guest_debug(
+        &self,
+        _breakpoints: &[vm_memory::GuestAddress],
+        _watchpoints: &[(vm_memory::GuestAddress, u64, WatchKind)],
+        _singlestep: bool,
+    ) -> Result<()> {
         Err(HypervisorCpuError::SetDebugRegs(anyhow!("unimplemented")))
     }
     ///

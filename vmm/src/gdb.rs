@@ -19,7 +19,10 @@ use gdbstub::{
                 },
                 BaseOps,
             },
-            breakpoints::{Breakpoints, BreakpointsOps, HwBreakpoint, HwBreakpointOps},
+            breakpoints::{
+                Breakpoints, BreakpointsOps, HwBreakpoint, HwBreakpointOps, HwWatchpoint,
+                HwWatchpointOps, WatchKind,
+            },
         },
         Target, TargetError, TargetResult,
     },
@@ -55,7 +58,8 @@ pub trait Debuggable: vm_migration::Pausable {
     fn set_guest_debug(
         &self,
         cpu_id: usize,
-        addrs: &[GuestAddress],
+        breakpoints: &[GuestAddress],
+        watchpoints: &[(GuestAddress, u64, WatchKind)],
         singlestep: bool,
     ) -> Result<(), DebuggableError>;
     fn debug_pause(&mut self) -> std::result::Result<(), DebuggableError>;
@@ -107,7 +111,8 @@ pub enum GdbRequestPayload {
     Pause,
     Resume,
     SetSingleStep(bool),
-    SetHwBreakPoint(Vec<GuestAddress>),
+    SetHwBreakPoint(Vec<GuestAddress>, Vec<(GuestAddress, u64, WatchKind)>),
+    SetHwWatchPoint(Vec<GuestAddress>, Vec<(GuestAddress, u64, WatchKind)>),
     ActiveVcpus,
 }
 
@@ -126,6 +131,7 @@ pub struct GdbStub {
     gdb_event: vmm_sys_util::eventfd::EventFd,
     vm_event: vmm_sys_util::eventfd::EventFd,
     hw_breakpoints: Vec<GuestAddress>,
+    hw_watchpoints: Vec<(GuestAddress, u64, WatchKind)>,
     single_step: bool,
 }
 
@@ -140,6 +146,7 @@ impl GdbStub {
             gdb_event,
             vm_event,
             hw_breakpoints: Default::default(),
+            hw_watchpoints: Default::default(),
             single_step: false,
         }
     }
@@ -376,6 +383,11 @@ impl Breakpoints for GdbStub {
     fn support_hw_breakpoint(&mut self) -> Option<HwBreakpointOps<Self>> {
         Some(self)
     }
+
+    #[inline(always)]
+    fn support_hw_watchpoint(&mut self) -> Option<HwWatchpointOps<Self>> {
+        Some(self)
+    }
 }
 
 impl HwBreakpoint for GdbStub {
@@ -392,7 +404,10 @@ impl HwBreakpoint for GdbStub {
 
         self.hw_breakpoints.push(GuestAddress(addr));
 
-        let payload = GdbRequestPayload::SetHwBreakPoint(self.hw_breakpoints.clone());
+        let payload = GdbRequestPayload::SetHwBreakPoint(
+            self.hw_breakpoints.clone(),
+            self.hw_watchpoints.clone(),
+        );
         match self.vm_request(payload, 0) {
             Ok(_) => Ok(true),
             Err(e) => {
@@ -411,11 +426,69 @@ impl HwBreakpoint for GdbStub {
             Some(pos) => self.hw_breakpoints.remove(pos),
         };
 
-        let payload = GdbRequestPayload::SetHwBreakPoint(self.hw_breakpoints.clone());
+        let payload = GdbRequestPayload::SetHwBreakPoint(
+            self.hw_breakpoints.clone(),
+            self.hw_watchpoints.clone(),
+        );
         match self.vm_request(payload, 0) {
             Ok(_) => Ok(true),
             Err(e) => {
                 error!("Failed to request SetHwBreakPoint: {:?}", e);
+                Err(TargetError::NonFatal)
+            }
+        }
+    }
+}
+
+impl HwWatchpoint for GdbStub {
+    fn add_hw_watchpoint(
+        &mut self,
+        addr: <Self::Arch as Arch>::Usize,
+        len: <Self::Arch as Arch>::Usize,
+        kind: WatchKind,
+    ) -> TargetResult<bool, Self> {
+        // FIXME: The max number of watchpoints is to be confirmed:
+        // - Do WP and BP share the same limit?
+        // - Do WP and BP have limit of each own?
+        if self.hw_watchpoints.len() >= 4 {
+            error!("Not allowed to set more than 4 HW watchpoints");
+            return Ok(false);
+        }
+
+        self.hw_watchpoints.push((GuestAddress(addr), len, kind));
+
+        let payload = GdbRequestPayload::SetHwWatchPoint(
+            self.hw_breakpoints.clone(),
+            self.hw_watchpoints.clone(),
+        );
+        match self.vm_request(payload, 0) {
+            Ok(_) => Ok(true),
+            Err(e) => {
+                error!("Failed to request SetHwWatchPoint: {:?}", e);
+                Err(TargetError::NonFatal)
+            }
+        }
+    }
+
+    fn remove_hw_watchpoint(
+        &mut self,
+        addr: <Self::Arch as Arch>::Usize,
+        _len: <Self::Arch as Arch>::Usize,
+        _kind: WatchKind,
+    ) -> TargetResult<bool, Self> {
+        match self.hw_watchpoints.iter().position(|&w| w.0 .0 == addr) {
+            None => return Ok(false),
+            Some(pos) => self.hw_watchpoints.remove(pos),
+        };
+
+        let payload = GdbRequestPayload::SetHwWatchPoint(
+            self.hw_breakpoints.clone(),
+            self.hw_watchpoints.clone(),
+        );
+        match self.vm_request(payload, 0) {
+            Ok(_) => Ok(true),
+            Err(e) => {
+                error!("Failed to request SetHwWatchPoint: {:?}", e);
                 Err(TargetError::NonFatal)
             }
         }
@@ -519,9 +592,10 @@ pub fn gdb_thread(mut gdbstub: GdbStub, path: &std::path::Path) {
                     error!("Failed to disable single step: {:?}", e);
                 }
 
-                if let Err(e) =
-                    gdbstub.vm_request(GdbRequestPayload::SetHwBreakPoint(Vec::new()), 0)
-                {
+                if let Err(e) = gdbstub.vm_request(
+                    GdbRequestPayload::SetHwBreakPoint(Vec::new(), Vec::new()),
+                    0,
+                ) {
                     error!("Failed to remove breakpoints: {:?}", e);
                 }
 

@@ -383,6 +383,7 @@ dependencies = [
  "anyhow",
  "byteorder",
  "env_logger",
+ "gdbstub",
  "iced-x86",
  "kvm-bindings",
  "kvm-ioctls",

@@ -34,6 +34,8 @@ use arch::aarch64::regs;
 use arch::EntryPoint;
 use arch::NumaNodes;
 use devices::interrupt_controller::InterruptController;
+#[cfg(feature = "gdb")]
+use gdbstub::target::ext::breakpoints::WatchKind;
 #[cfg(all(target_arch = "aarch64", feature = "gdb"))]
 use gdbstub_arch::arm::reg::Aarch64CoreRegs as CoreRegs;
 #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
@@ -2096,14 +2098,15 @@ impl Debuggable for CpuManager {
     fn set_guest_debug(
         &self,
         cpu_id: usize,
-        addrs: &[GuestAddress],
+        breakpoints: &[GuestAddress],
+        watchpoints: &[(GuestAddress, u64, WatchKind)],
         singlestep: bool,
     ) -> std::result::Result<(), DebuggableError> {
         self.vcpus[cpu_id]
             .lock()
             .unwrap()
             .vcpu
-            .set_guest_debug(addrs, singlestep)
+            .set_guest_debug(breakpoints, watchpoints, singlestep)
             .map_err(DebuggableError::SetDebug)
     }
 

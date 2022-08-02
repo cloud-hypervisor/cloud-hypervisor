@@ -24,6 +24,7 @@ use crate::vm::{self, InterruptSourceConfig, VmOps};
 use crate::HypervisorType;
 #[cfg(target_arch = "aarch64")]
 use crate::{arm64_core_reg_id, offset__of};
+use gdbstub::target::ext::breakpoints::WatchKind;
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
 use std::any::Any;
 use std::collections::HashMap;
@@ -1588,13 +1589,14 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     fn set_guest_debug(
         &self,
-        addrs: &[vm_memory::GuestAddress],
+        breakpoints: &[vm_memory::GuestAddress],
+        _watchpoints: &[(vm_memory::GuestAddress, u64, WatchKind)],
         singlestep: bool,
     ) -> cpu::Result<()> {
-        if addrs.len() > 4 {
+        if breakpoints.len() > 4 {
             return Err(cpu::HypervisorCpuError::SetDebugRegs(anyhow!(
                 "Support 4 breakpoints at most but {} addresses are passed",
-                addrs.len()
+                breakpoints.len()
             )));
         }
 
@@ -1609,6 +1611,7 @@ impl cpu::Vcpu for KvmVcpu {
             dbg.control |= KVM_GUESTDBG_SINGLESTEP;
         }
 
+        // Breakpoints
         #[cfg(target_arch = "x86_64")]
         {
             // Set bits 9 and 10.
@@ -1616,7 +1619,7 @@ impl cpu::Vcpu for KvmVcpu {
             // bit 10: always 1.
             dbg.arch.debugreg[7] = 0x0600;
 
-            for (i, addr) in addrs.iter().enumerate() {
+            for (i, addr) in breakpoints.iter().enumerate() {
                 dbg.arch.debugreg[i] = addr.0;
                 // Set global breakpoint enable flag
                 dbg.arch.debugreg[7] |= 2 << (i * 2);
@@ -1624,7 +1627,7 @@ impl cpu::Vcpu for KvmVcpu {
         }
         #[cfg(target_arch = "aarch64")]
         {
-            for (i, addr) in addrs.iter().enumerate() {
+            for (i, addr) in breakpoints.iter().enumerate() {
                 // DBGBCR_EL1 (Debug Breakpoint Control Registers, D13.3.2):
                 // bit 0: 1 (Enabled)
                 // bit 1~2: 0b11 (PMC = EL1/EL0)
@@ -1636,6 +1639,8 @@ impl cpu::Vcpu for KvmVcpu {
                 dbg.arch.dbg_bvr[i] = (!0u64 >> 11) & addr.0;
             }
         }
+
+        // Watchpoints
         self.fd
             .set_guest_debug(&dbg)
             .map_err(|e| cpu::HypervisorCpuError::SetDebugRegs(e.into()))
