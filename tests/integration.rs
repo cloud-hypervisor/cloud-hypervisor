@@ -4935,7 +4935,6 @@ mod parallel {
     }
 
     #[test]
-    #[cfg(target_arch = "x86_64")]
     fn test_virtio_block_topology() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
@@ -4943,28 +4942,40 @@ mod parallel {
         let kernel_path = direct_kernel_boot_path();
         let test_disk_path = guest.tmp_dir.as_path().join("test.img");
 
-        Command::new("qemu-img")
-            .args(&[
-                "create",
-                "-f",
-                "raw",
-                test_disk_path.to_str().unwrap(),
-                "16M",
-            ])
-            .output()
-            .expect("qemu-img command failed");
-        let out = Command::new("losetup")
-            .args(&[
-                "--show",
-                "--find",
-                "--sector-size=4096",
-                test_disk_path.to_str().unwrap(),
-            ])
-            .output()
-            .expect("failed to create loop device")
-            .stdout;
-        let _tmp = String::from_utf8_lossy(&out);
-        let loop_dev = _tmp.trim();
+        let output = exec_host_command_output(
+            format!(
+                "qemu-img create -f raw {} 16M",
+                test_disk_path.to_str().unwrap()
+            )
+            .as_str(),
+        );
+        if !output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            panic!(
+                "qemu-img command failed\nstdout\n{}\nstderr\n{}",
+                stdout, stderr
+            );
+        }
+
+        let output = exec_host_command_output(
+            format!(
+                "losetup --show --find --sector-size=4096 {}",
+                test_disk_path.to_str().unwrap()
+            )
+            .as_str(),
+        );
+        if !output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            panic!(
+                "failed to create loop device\nstdout\n{}\nstderr\n{}",
+                stdout, stderr
+            );
+        }
+
+        let tmp = String::from_utf8_lossy(&output.stdout);
+        let loop_dev = tmp.trim();
 
         let mut child = GuestCommand::new(&guest)
             .args(&["--cpus", "boot=1"])
