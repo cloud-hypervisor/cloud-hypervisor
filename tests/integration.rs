@@ -4104,25 +4104,30 @@ mod parallel {
             DIRECT_KERNEL_BOOT_CMDLINE,
         );
 
-        curl_command(
-            &api_socket,
-            "PUT",
-            "http://localhost/api/v1/vm.create",
-            Some(&http_body),
-        );
-
-        // Then boot it
-        curl_command(&api_socket, "PUT", "http://localhost/api/v1/vm.boot", None);
-
         let r = std::panic::catch_unwind(|| {
+            curl_command(
+                &api_socket,
+                "PUT",
+                "http://localhost/api/v1/vm.create",
+                Some(&http_body),
+            );
+
+            // Then boot it
+            curl_command(&api_socket, "PUT", "http://localhost/api/v1/vm.boot", None);
+
             guest.wait_vm_boot(None).unwrap();
 
             // Check that the VM booted as expected
             assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
 
-            // Shutdown without powering off to prevent filesystem corruption
+            // Sync and shutdown without powering off to prevent filesystem
+            // corruption.
+            guest.ssh_command("sync").unwrap();
             guest.ssh_command("sudo shutdown -H now").unwrap();
+
+            // Wait for the guest to be fully shutdown
+            thread::sleep(std::time::Duration::new(20, 0));
 
             // Then shut it down
             curl_command(
@@ -4194,8 +4199,13 @@ mod parallel {
             assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
 
-            // Shutdown without powering off to prevent filesystem corruption
+            // Sync and shutdown without powering off to prevent filesystem
+            // corruption.
+            guest.ssh_command("sync").unwrap();
             guest.ssh_command("sudo shutdown -H now").unwrap();
+
+            // Wait for the guest to be fully shutdown
+            thread::sleep(std::time::Duration::new(20, 0));
 
             // Then delete it
             curl_command(
