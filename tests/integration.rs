@@ -7851,6 +7851,9 @@ mod live_migration {
             ],
         };
 
+        let boot_vcpus = if numa { 6 } else { 2 };
+        let max_vcpus = if numa { 12 } else { 4 };
+
         let pmem_temp_file = TempFile::new().unwrap();
         pmem_temp_file.as_file().set_len(128 << 20).unwrap();
         std::process::Command::new("mkfs.ext4")
@@ -7868,7 +7871,10 @@ mod live_migration {
         let src_api_socket = temp_api_path(&guest.tmp_dir);
         let mut src_vm_cmd = GuestCommand::new_with_binary_path(&guest, &src_vm_path);
         src_vm_cmd
-            .args(&["--cpus", "boot=6,max=12"])
+            .args(&[
+                "--cpus",
+                format!("boot={},max={}", boot_vcpus, max_vcpus).as_str(),
+            ])
             .args(memory_param)
             .args(&["--kernel", kernel_path.to_str().unwrap()])
             .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
@@ -7898,7 +7904,7 @@ mod live_migration {
 
             // Make sure the source VM is functaionl
             // Check the number of vCPUs
-            assert_eq!(guest.get_cpu_count().unwrap_or_default(), 6);
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
 
             // Check the guest RAM
             if balloon {
@@ -8103,7 +8109,7 @@ mod live_migration {
         // Post live-migration check to make sure the destination VM is funcational
         let r = std::panic::catch_unwind(|| {
             // Perform same checks to validate VM has been properly migrated
-            assert_eq!(guest.get_cpu_count().unwrap_or_default(), 6);
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
             #[cfg(target_arch = "x86_64")]
             if numa {
                 assert!(guest.get_total_memory().unwrap_or_default() > 6_720_000);
@@ -8145,7 +8151,7 @@ mod live_migration {
                     resize_zone_command(&dest_api_socket, "mem2", "4G");
                     // Resize to the maximum amount of CPUs and check each NUMA
                     // node has been assigned the right CPUs set.
-                    resize_command(&dest_api_socket, Some(12), None, None, None);
+                    resize_command(&dest_api_socket, Some(max_vcpus), None, None, None);
                     thread::sleep(std::time::Duration::new(5, 0));
 
                     guest.check_numa_common(
