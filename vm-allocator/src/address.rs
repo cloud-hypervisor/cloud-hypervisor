@@ -125,19 +125,42 @@ impl AddressAllocator {
     fn first_available_range(
         &self,
         req_size: GuestUsize,
+        region: Option<(GuestAddress, GuestUsize)>,
         alignment: GuestUsize,
     ) -> Option<GuestAddress> {
         let reversed_ranges: Vec<(&GuestAddress, &GuestUsize)> = self.ranges.iter().rev().collect();
+        let (region_base, region_end) = if let Some((in_region_base, in_region_size)) = region {
+            if in_region_size < 1 {
+                return None;
+            }
+            let region_end = in_region_base.checked_add(in_region_size)?;
+            (in_region_base, region_end)
+        } else {
+            (self.base, self.end.unchecked_add(1))
+        };
 
         for (idx, (address, _size)) in reversed_ranges.iter().enumerate() {
             let next_range_idx = idx + 1;
-            let prev_end_address = if next_range_idx >= reversed_ranges.len() {
+            let mut gap_end = **address;
+            let mut gap_start = if next_range_idx >= reversed_ranges.len() {
                 self.base
             } else {
                 reversed_ranges[next_range_idx]
                     .0
                     .unchecked_add(*(reversed_ranges[next_range_idx].1))
             };
+            if gap_end <= region_base {
+                break;
+            }
+            if gap_start >= region_end {
+                continue;
+            }
+            if region_base >= gap_start {
+                gap_start = region_base;
+            }
+            if region_end <= gap_end {
+                gap_end = region_end;
+            }
 
             // If we have enough space between this range and the previous one,
             // we return the start of this range minus the requested size.
@@ -145,12 +168,12 @@ impl AddressAllocator {
             // we will tend to always allocate new ranges there as well. In other words,
             // ranges accumulate at the end of the address space.
             if let Some(size_delta) =
-                address.checked_sub(self.align_address(prev_end_address, alignment).raw_value())
+                gap_end.checked_sub(self.align_address(gap_start, alignment).raw_value())
             {
                 let adjust = if alignment > 1 { alignment - 1 } else { 0 };
                 if size_delta.raw_value() >= req_size {
                     return Some(
-                        self.align_address(address.unchecked_sub(req_size + adjust), alignment),
+                        self.align_address(gap_end.unchecked_sub(req_size + adjust), alignment),
                     );
                 }
             }
@@ -162,10 +185,11 @@ impl AddressAllocator {
     /// Allocates a range of addresses from the managed region. Returns `Some(allocated_address)`
     /// when successful, or `None` if an area of `size` can't be allocated or if alignment isn't
     /// a power of two.
-    pub fn allocate(
+    pub fn allocate_in_region(
         &mut self,
         address: Option<GuestAddress>,
         size: GuestUsize,
+        region: Option<(GuestAddress, GuestUsize)>,
         align_size: Option<GuestUsize>,
     ) -> Option<GuestAddress> {
         if size == 0 {
@@ -184,12 +208,24 @@ impl AddressAllocator {
                     return None;
                 }
             },
-            None => self.first_available_range(size, alignment)?,
+            None => self.first_available_range(size, region, alignment)?,
         };
 
         self.ranges.insert(new_addr, size);
 
         Some(new_addr)
+    }
+
+    /// Allocates a range of addresses from the managed region. Returns `Some(allocated_address)`
+    /// when successful, or `None` if an area of `size` can't be allocated or if alignment isn't
+    /// a power of two.
+    pub fn allocate(
+        &mut self,
+        address: Option<GuestAddress>,
+        size: GuestUsize,
+        align_size: Option<GuestUsize>,
+    ) -> Option<GuestAddress> {
+        self.allocate_in_region(address, size, None, align_size)
     }
 
     /// Free an already allocated address range.
