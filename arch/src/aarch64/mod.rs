@@ -150,6 +150,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Bui
     gic_device: &Arc<Mutex<dyn Vgic>>,
     numa_nodes: &NumaNodes,
     pmu_supported: bool,
+    kernel_size: u64,
 ) -> super::Result<()> {
     let fdt_final = fdt::create_fdt(
         guest_mem,
@@ -163,6 +164,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Bui
         numa_nodes,
         virtio_iommu_bdf,
         pmu_supported,
+        kernel_size,
     )
     .map_err(|_| Error::SetupFdt)?;
 

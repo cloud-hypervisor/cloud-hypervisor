@@ -58,6 +58,9 @@ const GIC_FDT_IRQ_PPI_CPU_MASK: u32 = 0xff << GIC_FDT_IRQ_PPI_CPU_SHIFT;
 const IRQ_TYPE_EDGE_RISING: u32 = 1;
 const IRQ_TYPE_LEVEL_HI: u32 = 4;
 
+// Memory size for storing kernel image
+pub const KERNEL_RESERVE_MEM_SIZE: u64 = 0x400_0000;
+
 // PMU PPI interrupt number
 pub const AARCH64_PMU_IRQ: u32 = 7;
 
@@ -97,6 +100,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     numa_nodes: &NumaNodes,
     virtio_iommu_bdf: Option<u32>,
     pmu_supported: bool,
+    kernel_size: u64,
 ) -> FdtWriterResult<Vec<u8>> {
     // Allocate stuff necessary for the holding the blob.
     let mut fdt = FdtWriter::new().unwrap();
@@ -117,7 +121,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     fdt.property_u32("interrupt-parent", GIC_PHANDLE)?;
     create_cpu_nodes(&mut fdt, &vcpu_mpidr, vcpu_topology, numa_nodes)?;
     create_memory_node(&mut fdt, guest_mem, numa_nodes)?;
-    create_chosen_node(&mut fdt, cmdline, initrd)?;
+    create_chosen_node(&mut fdt, cmdline, initrd, numa_nodes, guest_mem, kernel_size)?;
     create_gic_node(&mut fdt, gic_device)?;
     create_timer_node(&mut fdt)?;
     if pmu_supported {
@@ -225,6 +229,46 @@ fn create_cpu_nodes(
     Ok(())
 }
 
+// Find the top contiguous memory range that equals KERNEL_RESERVE_MEM_SIZE and return
+// its base address
+pub fn find_kernel_memory_base(numa_nodes: &NumaNodes, guest_mem: &GuestMemoryMmap) -> u64 {
+    let mut top: u64 = 0;
+    let mut base: u64 = 0;
+    if numa_nodes.len() > 1 {
+        for idx in 0..numa_nodes.len() {
+            let node = numa_nodes.get(&(idx as u32));
+            for region in node.unwrap().memory_regions.iter() {
+                let start_addr: u64 = region.start_addr().raw_value();
+                let size: u64 = region.size() as u64;
+                if size > KERNEL_RESERVE_MEM_SIZE && start_addr > base {
+                    base = start_addr;
+                    top = start_addr + size;
+                }
+            }
+        }
+    } else {
+        let last_addr = guest_mem.last_addr().raw_value();
+        if last_addr - super::layout::RAM_START.raw_value() < KERNEL_RESERVE_MEM_SIZE {
+            return 0;
+        }
+        if last_addr < super::layout::MEM_32BIT_RESERVED_START.raw_value() {
+            top = last_addr + 1;
+        } else {
+            if last_addr - super::layout::RAM_64BIT_START.raw_value() >= KERNEL_RESERVE_MEM_SIZE {
+                top = last_addr + 1;
+            } else {
+                top = super::layout::MEM_32BIT_RESERVED_START.raw_value();
+            }
+        }
+    }
+
+    if top != 0 {
+        top -= KERNEL_RESERVE_MEM_SIZE;
+    }
+
+    top
+}
+
 fn create_memory_node(
     fdt: &mut FdtWriter,
     guest_mem: &GuestMemoryMmap,
@@ -300,9 +344,18 @@ fn create_chosen_node(
     fdt: &mut FdtWriter,
     cmdline: &str,
     initrd: &Option<InitramfsConfig>,
+    numa_nodes: &NumaNodes,
+    guest_mem: &GuestMemoryMmap,
+    kernel_size: u64,
 ) -> FdtWriterResult<()> {
     let chosen_node = fdt.begin_node("chosen")?;
     fdt.property_string("bootargs", cmdline)?;
+
+    if kernel_size != 0 {
+        let kernel_start = find_kernel_memory_base(numa_nodes, guest_mem);
+        fdt.property_u64("linux,kernel-start", kernel_start)?;
+        fdt.property_u64("linux,kernel-size", kernel_size)?;
+    }
 
     if let Some(initrd_config) = initrd {
         let initrd_start = initrd_config.address.raw_value() as u64;
