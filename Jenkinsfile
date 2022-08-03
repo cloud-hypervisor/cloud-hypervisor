@@ -103,6 +103,9 @@ pipeline{
 							return runWorkers
 						}
 					}
+					environment {
+        					AZURE_CONNECTION_STRING = credentials('46b4e7d6-315f-4cc1-8333-b58780863b9b')
+					}
 					stages {
 						stage ('Checkout') {
 							steps {
@@ -121,6 +124,42 @@ pipeline{
 							steps {
 								sh "sudo modprobe openvswitch"
 								sh "scripts/dev_cli.sh tests --integration --libc musl"
+							}
+						}
+						stage ('Install azure-cli') {
+							steps {
+								installAzureCli("bionic", "arm64")
+							}
+						}
+						stage ('Download Windows image') {
+							steps {
+								sh '''#!/bin/bash -x
+									IMG_BASENAME=windows-11-iot-enterprise-aarch64.raw
+									IMG_PATH=$HOME/workloads/$IMG_BASENAME
+									IMG_GZ_PATH=$HOME/workloads/$IMG_BASENAME.gz
+									IMG_GZ_BLOB_NAME=windows-11-iot-enterprise-aarch64-9-min.raw.gz
+									cp "scripts/$IMG_BASENAME.sha1" "$HOME/workloads/"
+									pushd "$HOME/workloads"
+									if sha1sum "$IMG_BASENAME.sha1" --check; then
+										exit
+									fi
+									popd
+									mkdir -p "$HOME/workloads"
+									az storage blob download \
+										--container-name private-images \
+										--file "$IMG_GZ_PATH" \
+										--name "$IMG_GZ_BLOB_NAME" \
+										--connection-string "$AZURE_CONNECTION_STRING"
+									gzip -d $IMG_GZ_PATH
+								'''
+							}
+						}
+						stage ('Run Windows guest integration tests') {
+							options {
+								timeout(time: 1, unit: 'HOURS')
+							}
+							steps {
+								sh "scripts/dev_cli.sh tests --integration-windows --libc musl"
 							}
 						}
 					}
@@ -267,7 +306,7 @@ pipeline{
 						}
 						stage ('Install azure-cli') {
 							steps {
-								installAzureCli()
+								installAzureCli("jammy", "amd64")
 							}
 						}
 						stage ('Download assets') {
@@ -397,10 +436,10 @@ def cancelPreviousBuilds() {
 		}
 }
 
-def installAzureCli() {
+def installAzureCli(distro, arch) {
 	sh "sudo apt install -y ca-certificates curl apt-transport-https lsb-release gnupg"
 	sh "curl -sL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null"
-	sh "echo \"deb [arch=amd64] https://packages.microsoft.com/repos/azure-cli/ jammy main\" | sudo tee /etc/apt/sources.list.d/azure-cli.list"
+	sh "echo \"deb [arch=${arch}] https://packages.microsoft.com/repos/azure-cli/ ${distro} main\" | sudo tee /etc/apt/sources.list.d/azure-cli.list"
 	sh "sudo apt update"
 	sh "sudo apt install -y azure-cli"
 }
