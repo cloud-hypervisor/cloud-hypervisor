@@ -24,7 +24,6 @@ use std::process::{Child, Command, Stdio};
 use std::string::String;
 use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
-#[cfg(target_arch = "x86_64")]
 use std::sync::Mutex;
 use std::thread;
 use test_infra::*;
@@ -59,6 +58,8 @@ mod aarch64 {
     pub const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-arm64-custom-20210929-0.vhd";
     pub const FOCAL_IMAGE_NAME_VHDX: &str = "focal-server-cloudimg-arm64-custom-20210929-0.vhdx";
     pub const JAMMY_IMAGE_NAME: &str = "jammy-server-cloudimg-arm64-custom-20220329-0.raw";
+    pub const WINDOWS_IMAGE_NAME: &str = "windows-11-iot-enterprise-aarch64.raw";
+    pub const OVMF_NAME: &str = "CLOUDHV_EFI.fd";
     pub const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'GICv3.*uart-pl011' /proc/interrupts || true";
     pub const GREP_PMU_IRQ_CMD: &str = "grep -c 'GICv3.*arm-pmu' /proc/interrupts || true";
 }
@@ -175,12 +176,11 @@ fn direct_kernel_boot_path() -> PathBuf {
     kernel_path
 }
 
-#[cfg(target_arch = "aarch64")]
 fn edk2_path() -> PathBuf {
     let mut workload_path = dirs::home_dir().unwrap();
     workload_path.push("workloads");
     let mut edk2_path = workload_path;
-    edk2_path.push("CLOUDHV_EFI.fd");
+    edk2_path.push(OVMF_NAME);
 
     edk2_path
 }
@@ -6795,7 +6795,6 @@ mod sequential {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
 mod windows {
     use crate::*;
     use once_cell::sync::Lazy;
@@ -7096,14 +7095,10 @@ mod windows {
     fn test_windows_guest() {
         let windows_guest = WindowsGuest::new();
 
-        let mut ovmf_path = dirs::home_dir().unwrap();
-        ovmf_path.push("workloads");
-        ovmf_path.push(OVMF_NAME);
-
         let mut child = GuestCommand::new(windows_guest.guest())
             .args(&["--cpus", "boot=2,kvm_hyperv=on"])
             .args(&["--memory", "size=4G"])
-            .args(&["--kernel", ovmf_path.to_str().unwrap()])
+            .args(&["--kernel", edk2_path().to_str().unwrap()])
             .args(&["--serial", "tty"])
             .args(&["--console", "off"])
             .default_disks()
@@ -7139,6 +7134,7 @@ mod windows {
     }
 
     #[test]
+    #[cfg(not(target_arch = "aarch64"))]
     fn test_windows_guest_multiple_queues() {
         let windows_guest = WindowsGuest::new();
 
@@ -7205,6 +7201,7 @@ mod windows {
 
     #[test]
     #[cfg(not(feature = "mshv"))]
+    #[cfg(not(target_arch = "aarch64"))]
     #[ignore = "See #4327"]
     fn test_windows_guest_snapshot_restore() {
         let windows_guest = WindowsGuest::new();
@@ -7294,6 +7291,7 @@ mod windows {
 
     #[test]
     #[cfg(not(feature = "mshv"))]
+    #[cfg(not(target_arch = "aarch64"))]
     fn test_windows_guest_cpu_hotplug() {
         let windows_guest = WindowsGuest::new();
 
@@ -7368,6 +7366,7 @@ mod windows {
 
     #[test]
     #[cfg(not(feature = "mshv"))]
+    #[cfg(not(target_arch = "aarch64"))]
     fn test_windows_guest_ram_hotplug() {
         let windows_guest = WindowsGuest::new();
 
@@ -7442,6 +7441,7 @@ mod windows {
 
     #[test]
     #[cfg(not(feature = "mshv"))]
+    #[cfg(not(target_arch = "aarch64"))]
     fn test_windows_guest_netdev_hotplug() {
         let windows_guest = WindowsGuest::new();
 
@@ -7514,6 +7514,7 @@ mod windows {
 
     #[test]
     #[cfg(not(feature = "mshv"))]
+    #[cfg(not(target_arch = "aarch64"))]
     fn test_windows_guest_disk_hotplug() {
         let windows_guest = WindowsGuest::new();
 
@@ -7608,6 +7609,7 @@ mod windows {
 
     #[test]
     #[cfg(not(feature = "mshv"))]
+    #[cfg(not(target_arch = "aarch64"))]
     fn test_windows_guest_disk_hotplug_multi() {
         let windows_guest = WindowsGuest::new();
 
@@ -7737,6 +7739,7 @@ mod windows {
 
     #[test]
     #[cfg(not(feature = "mshv"))]
+    #[cfg(not(target_arch = "aarch64"))]
     fn test_windows_guest_netdev_multi() {
         let windows_guest = WindowsGuest::new();
 
