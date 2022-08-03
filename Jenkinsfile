@@ -295,7 +295,7 @@ pipeline{
 					}
 				}
 				stage ('Worker build - Live Migration') {
-					agent { node { label 'jammy-small' } }
+					agent { node { label 'jammy' } }
 					when {
 						beforeAgent true
 						expression {
