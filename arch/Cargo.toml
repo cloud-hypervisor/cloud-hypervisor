@@ -17,7 +17,7 @@ linux-loader = { version = "0.4.0", features = ["elf", "bzimage", "pe"] }
 log = "0.4.17"
 serde = { version = "1.0.142", features = ["rc", "derive"] }
 thiserror = "1.0.32"
-uuid = "1.1.1"
+uuid = "1.1.2"
 versionize = "0.1.6"
 versionize_derive = "0.1.4"
 vm-memory = { version = "0.8.0", features = ["backend-mmap", "backend-bitmap"] }
@@ -25,5 +25,5 @@ vm-migration = { path = "../vm-migration" }
 vmm-sys-util = { version = "0.10.0", features = ["with-serde"] }
 
 [target.'cfg(target_arch = "aarch64")'.dependencies]
-fdt_parser = { version = "0.1.3", package = 'fdt'}
+fdt_parser = { version = "0.1.4", package = "fdt" }
 vm-fdt = { git = "https://github.com/rust-vmm/vm-fdt", branch = "main" }

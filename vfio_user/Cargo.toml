@@ -7,12 +7,12 @@ edition = "2021"
 [dependencies]
 libc = "0.2.127"
 log = "0.4.17"
-serde = {version = ">=1.0.27", features = ["rc"] }
-serde_derive = ">=1.0.27"
-serde_json = ">=1.0.9"
+serde = { version = "1.0.142", features = ["rc"] }
+serde_derive = "1.0.142"
+serde_json = "1.0.83"
 thiserror = "1.0.32"
 vm-memory = { version = "0.8.0", features = ["backend-mmap", "backend-atomic"] }
-vmm-sys-util = ">=0.3.1"
+vmm-sys-util = "0.10.0"
 
 [dependencies.vfio-bindings]
 version = "0.3.1"
