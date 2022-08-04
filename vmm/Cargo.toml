@@ -12,7 +12,7 @@ fwdebug = ["devices/fwdebug"]
 gdb = ["kvm", "gdbstub", "gdbstub_arch"]
 guest_debug = ["kvm"]
 kvm = ["hypervisor/kvm", "vfio-ioctls/kvm", "vm-device/kvm", "pci/kvm"]
-mshv = ["hypervisor/mshv", "virtio-devices/mshv", "vfio-ioctls/mshv", "vm-device/mshv", "pci/mshv"]
+mshv = ["hypervisor/mshv", "vfio-ioctls/mshv", "vm-device/mshv", "pci/mshv"]
 tdx = ["arch/tdx", "hypervisor/tdx"]
 
 [dependencies]

@@ -6,7 +6,6 @@ edition = "2021"
 
 [features]
 default = []
-mshv = []
 
 [dependencies]
 anyhow = "1.0.59"
