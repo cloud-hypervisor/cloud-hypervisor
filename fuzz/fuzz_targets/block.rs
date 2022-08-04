@@ -9,8 +9,7 @@ use libfuzzer_sys::fuzz_target;
 use seccompiler::SeccompAction;
 use std::ffi;
 use std::fs::File;
-use std::io::{self, Cursor, Read, Seek, SeekFrom};
-use std::mem::size_of;
+use std::io;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -23,56 +22,15 @@ use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
 const MEM_SIZE: u64 = 256 * 1024 * 1024;
-const DESC_SIZE: u64 = 16; // Bytes in one virtio descriptor.
 const QUEUE_SIZE: u16 = 16; // Max entries in the queue.
-const CMD_SIZE: usize = 16; // Bytes in the command.
 
 fuzz_target!(|bytes| {
-    let size_u64 = size_of::<u64>();
+    if bytes.len() as u64 > MEM_SIZE {
+        return;
+    }
+
     let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), MEM_SIZE as usize)]).unwrap();
-
-    // The fuzz data is interpreted as:
-    // starting index 8 bytes
-    // command location 8 bytes
-    // command 16 bytes
-    // descriptors circular buffer 16 bytes * 3
-    if bytes.len() < 4 * size_u64 {
-        // Need an index to start.
-        return;
-    }
-
-    let mut data_image = Cursor::new(bytes);
-
-    let first_index = read_u64(&mut data_image);
-    if first_index > MEM_SIZE / DESC_SIZE {
-        return;
-    }
-    let first_offset = first_index * DESC_SIZE;
-    if first_offset as usize + size_u64 > bytes.len() {
-        return;
-    }
-
-    let command_addr = read_u64(&mut data_image);
-    if command_addr > MEM_SIZE - CMD_SIZE as u64 {
-        return;
-    }
-    if mem
-        .write_slice(
-            &bytes[2 * size_u64..(2 * size_u64) + CMD_SIZE],
-            GuestAddress(command_addr as u64),
-        )
-        .is_err()
-    {
-        return;
-    }
-
-    data_image.seek(SeekFrom::Start(first_offset)).unwrap();
-    let desc_table = read_u64(&mut data_image);
-
-    if mem
-        .write_slice(&bytes[32..], GuestAddress(desc_table as u64))
-        .is_err()
-    {
+    if mem.write_slice(bytes, GuestAddress(0 as u64)).is_err() {
         return;
     }
 
@@ -117,12 +75,6 @@ fuzz_target!(|bytes| {
 
     block.reset(); // Ensure the virtio-block device thread is killed and joined
 });
-
-fn read_u64<T: Read>(readable: &mut T) -> u64 {
-    let mut buf = [0u8; size_of::<u64>()];
-    readable.read_exact(&mut buf[..]).unwrap();
-    u64::from_le_bytes(buf)
-}
 
 fn memfd_create(name: &ffi::CStr, flags: u32) -> Result<RawFd, io::Error> {
     let res = unsafe { libc::syscall(libc::SYS_memfd_create, name.as_ptr(), flags) };
