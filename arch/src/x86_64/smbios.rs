@@ -61,6 +61,7 @@ pub type Result<T> = result::Result<T, Error>;
 const SM3_MAGIC_IDENT: &[u8; 5usize] = b"_SM3_";
 const BIOS_INFORMATION: u8 = 0;
 const SYSTEM_INFORMATION: u8 = 1;
+const OEM_STRINGS: u8 = 11;
 const END_OF_TABLE: u8 = 127;
 const PCI_SUPPORTED: u64 = 1 << 7;
 const IS_VIRTUAL_MACHINE: u8 = 1 << 4;
@@ -128,6 +129,16 @@ pub struct SmbiosSysInfo {
 #[repr(C)]
 #[repr(packed)]
 #[derive(Default, Copy, Clone)]
+struct SmbiosOemStrings {
+    r#type: u8,
+    length: u8,
+    handle: u16,
+    count: u8,
+}
+
+#[repr(C)]
+#[repr(packed)]
+#[derive(Default, Copy, Clone)]
 pub struct SmbiosEndOfTable {
     pub typ: u8,
     pub length: u8,
@@ -138,6 +149,7 @@ pub struct SmbiosEndOfTable {
 unsafe impl ByteValued for Smbios30Entrypoint {}
 unsafe impl ByteValued for SmbiosBiosInfo {}
 unsafe impl ByteValued for SmbiosSysInfo {}
+unsafe impl ByteValued for SmbiosOemStrings {}
 unsafe impl ByteValued for SmbiosEndOfTable {}
 
 fn write_and_incr<T: ByteValued>(
@@ -168,6 +180,7 @@ pub fn setup_smbios(
     mem: &GuestMemoryMmap,
     serial_number: Option<&str>,
     uuid: Option<&str>,
+    oem_strings: Option<&[&str]>,
 ) -> Result<u64> {
     let physptr = GuestAddress(SMBIOS_START)
         .checked_add(mem::size_of::<Smbios30Entrypoint>() as u64)
@@ -217,6 +230,25 @@ pub fn setup_smbios(
         if let Some(serial_number) = serial_number {
             curptr = write_string(mem, serial_number, curptr)?;
         }
+        curptr = write_and_incr(mem, 0u8, curptr)?;
+    }
+
+    if let Some(oem_strings) = oem_strings {
+        handle += 1;
+
+        let smbios_oemstrings = SmbiosOemStrings {
+            r#type: OEM_STRINGS,
+            length: mem::size_of::<SmbiosOemStrings>() as u8,
+            handle,
+            count: oem_strings.len() as u8,
+        };
+
+        curptr = write_and_incr(mem, smbios_oemstrings, curptr)?;
+
+        for s in oem_strings {
+            curptr = write_string(mem, s, curptr)?;
+        }
+
         curptr = write_and_incr(mem, 0u8, curptr)?;
     }
 
@@ -280,7 +312,7 @@ mod tests {
     fn entrypoint_checksum() {
         let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(SMBIOS_START), 4096)]).unwrap();
 
-        setup_smbios(&mem, None, None).unwrap();
+        setup_smbios(&mem, None, None, None).unwrap();
 
         let smbios_ep: Smbios30Entrypoint = mem.read_obj(GuestAddress(SMBIOS_START)).unwrap();
 
