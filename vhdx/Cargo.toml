@@ -10,6 +10,6 @@ byteorder = "1.4.3"
 crc32c = "0.6.3"
 libc = "0.2.126"
 log = "0.4.17"
-remain = "0.2.3"
+remain = "0.2.4"
 thiserror = "1.0"
 uuid = { version = "1.1.2", features = ["v4"] }
