@@ -12,6 +12,7 @@ use std::fmt::{self, Display};
 use std::mem;
 use std::result;
 use std::slice;
+use uuid::Uuid;
 use vm_memory::ByteValued;
 use vm_memory::{Address, Bytes, GuestAddress};
 
@@ -27,6 +28,8 @@ pub enum Error {
     WriteSmbiosEp,
     /// Failure to write additional data to memory
     WriteData,
+    /// Failure to parse uuid, uuid format may be error
+    ParseUuid(uuid::Error),
 }
 
 impl std::error::Error for Error {}
@@ -36,11 +39,16 @@ impl Display for Error {
         use self::Error::*;
 
         let description = match self {
-            NotEnoughMemory => "There was too little guest memory to store the SMBIOS table",
-            AddressOverflow => "The SMBIOS table has too little address space to be stored",
-            Clear => "Failure while zeroing out the memory for the SMBIOS table",
-            WriteSmbiosEp => "Failure to write SMBIOS entrypoint structure",
-            WriteData => "Failure to write additional data to memory",
+            NotEnoughMemory => {
+                "There was too little guest memory to store the SMBIOS table".to_string()
+            }
+            AddressOverflow => {
+                "The SMBIOS table has too little address space to be stored".to_string()
+            }
+            Clear => "Failure while zeroing out the memory for the SMBIOS table".to_string(),
+            WriteSmbiosEp => "Failure to write SMBIOS entrypoint structure".to_string(),
+            WriteData => "Failure to write additional data to memory".to_string(),
+            ParseUuid(e) => format!("Failure to parse uuid: {}", e),
         };
 
         write!(f, "SMBIOS error: {}", description)
@@ -161,7 +169,11 @@ fn write_string(
     Ok(curptr)
 }
 
-pub fn setup_smbios(mem: &GuestMemoryMmap, serial_number: Option<&str>) -> Result<u64> {
+pub fn setup_smbios(
+    mem: &GuestMemoryMmap,
+    serial_number: Option<&str>,
+    uuid: Option<&str>,
+) -> Result<u64> {
     let physptr = GuestAddress(SMBIOS_START)
         .checked_add(mem::size_of::<Smbios30Entrypoint>() as u64)
         .ok_or(Error::NotEnoughMemory)?;
@@ -188,6 +200,12 @@ pub fn setup_smbios(mem: &GuestMemoryMmap, serial_number: Option<&str>) -> Resul
 
     {
         handle += 1;
+
+        let uuid_number = uuid
+            .map(Uuid::parse_str)
+            .transpose()
+            .map_err(Error::ParseUuid)?
+            .unwrap_or(Uuid::nil());
         let smbios_sysinfo = SmbiosSysInfo {
             typ: SYSTEM_INFORMATION,
             length: mem::size_of::<SmbiosSysInfo>() as u8,
@@ -195,6 +213,7 @@ pub fn setup_smbios(mem: &GuestMemoryMmap, serial_number: Option<&str>) -> Resul
             manufacturer: 1, // First string written in this section
             product_name: 2, // Second string written in this section
             serial_number: serial_number.map(|_| 3).unwrap_or_default(), // 3rd string
+            uuid: uuid_number.to_bytes_le(), // set uuid
             ..Default::default()
         };
         curptr = write_and_incr(mem, smbios_sysinfo, curptr)?;
@@ -266,7 +285,7 @@ mod tests {
     fn entrypoint_checksum() {
         let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(SMBIOS_START), 4096)]).unwrap();
 
-        setup_smbios(&mem, None).unwrap();
+        setup_smbios(&mem, None, None).unwrap();
 
         let smbios_ep: Smbios30Entrypoint = mem.read_obj(GuestAddress(SMBIOS_START)).unwrap();
 

@@ -819,13 +819,14 @@ pub fn configure_system(
     rsdp_addr: Option<GuestAddress>,
     sgx_epc_region: Option<SgxEpcRegion>,
     serial_number: Option<&str>,
+    uuid: Option<&str>,
 ) -> super::Result<()> {
     // Write EBDA address to location where ACPICA expects to find it
     guest_mem
         .write_obj((layout::EBDA_START.0 >> 4) as u16, layout::EBDA_POINTER)
         .map_err(Error::EbdaSetup)?;
 
-    let size = smbios::setup_smbios(guest_mem, serial_number).map_err(Error::SmbiosSetup)?;
+    let size = smbios::setup_smbios(guest_mem, serial_number, uuid).map_err(Error::SmbiosSetup)?;
 
     // Place the MP table after the SMIOS table aligned to 16 bytes
     let offset = GuestAddress(layout::SMBIOS_START).unchecked_add(size);
@@ -1178,6 +1179,7 @@ mod tests {
             Some(layout::RSDP_POINTER),
             None,
             None,
+            None,
         );
         assert!(config_err.is_err());
 
@@ -1191,7 +1193,17 @@ mod tests {
             .collect();
         let gm = GuestMemoryMmap::from_ranges(&ram_regions).unwrap();
 
-        configure_system(&gm, GuestAddress(0), &None, no_vcpus, None, None, None).unwrap();
+        configure_system(
+            &gm,
+            GuestAddress(0),
+            &None,
+            no_vcpus,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
         // Now assigning some memory that is equal to the start of the 32bit memory hole.
         let mem_size = 3328 << 20;
@@ -1202,9 +1214,29 @@ mod tests {
             .map(|r| (r.0, r.1))
             .collect();
         let gm = GuestMemoryMmap::from_ranges(&ram_regions).unwrap();
-        configure_system(&gm, GuestAddress(0), &None, no_vcpus, None, None, None).unwrap();
+        configure_system(
+            &gm,
+            GuestAddress(0),
+            &None,
+            no_vcpus,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
-        configure_system(&gm, GuestAddress(0), &None, no_vcpus, None, None, None).unwrap();
+        configure_system(
+            &gm,
+            GuestAddress(0),
+            &None,
+            no_vcpus,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
         // Now assigning some memory that falls after the 32bit memory hole.
         let mem_size = 3330 << 20;
@@ -1215,9 +1247,29 @@ mod tests {
             .map(|r| (r.0, r.1))
             .collect();
         let gm = GuestMemoryMmap::from_ranges(&ram_regions).unwrap();
-        configure_system(&gm, GuestAddress(0), &None, no_vcpus, None, None, None).unwrap();
+        configure_system(
+            &gm,
+            GuestAddress(0),
+            &None,
+            no_vcpus,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
-        configure_system(&gm, GuestAddress(0), &None, no_vcpus, None, None, None).unwrap();
+        configure_system(
+            &gm,
+            GuestAddress(0),
+            &None,
+            no_vcpus,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
     }
 
     #[test]
