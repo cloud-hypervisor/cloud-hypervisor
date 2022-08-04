@@ -3092,6 +3092,42 @@ mod parallel {
     }
 
     #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_dmi_uuid() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+
+        let mut child = GuestCommand::new(&guest)
+            .args(&["--cpus", "boot=1"])
+            .args(&["--memory", "size=512M"])
+            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(&["--platform", "uuid=1e8aa28a-435d-4027-87f4-40dceff1fa0a"])
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            assert_eq!(
+                guest
+                    .ssh_command("sudo cat /sys/class/dmi/id/product_uuid")
+                    .unwrap()
+                    .trim(),
+                "1e8aa28a-435d-4027-87f4-40dceff1fa0a"
+            );
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
     fn test_virtio_fs() {
         _test_virtio_fs(&prepare_virtiofsd, false, None)
     }
