@@ -9,7 +9,7 @@ build = "build.rs"
 clap = { version = "3.2.16", features = ["wrap_help","cargo"] }
 dirs = "4.0.0"
 serde = { version = "1.0.142", features = ["rc", "derive"] }
-serde_json = "1.0.82"
+serde_json = "1.0.83"
 test_infra = { path = "../test_infra" }
 thiserror = "1.0.31"
 wait-timeout = "0.2.0"
