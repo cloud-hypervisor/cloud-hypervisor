@@ -42,7 +42,7 @@ seccompiler = "0.2.0"
 serde = { version = "1.0.142", features = ["rc", "derive"] }
 serde_json = "1.0.83"
 signal-hook = "0.3.14"
-thiserror = "1.0.31"
+thiserror = "1.0.32"
 uuid = "1.1.2"
 versionize = "0.1.6"
 versionize_derive = "0.1.4"

@@ -16,7 +16,7 @@ libc = "0.2.127"
 linux-loader = { version = "0.4.0", features = ["elf", "bzimage", "pe"] }
 log = "0.4.17"
 serde = { version = "1.0.142", features = ["rc", "derive"] }
-thiserror = "1.0.31"
+thiserror = "1.0.32"
 uuid = "1.1.1"
 versionize = "0.1.6"
 versionize_derive = "0.1.4"
