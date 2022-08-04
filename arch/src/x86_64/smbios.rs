@@ -125,10 +125,20 @@ pub struct SmbiosSysInfo {
     pub family: u8,
 }
 
+#[repr(C)]
+#[repr(packed)]
+#[derive(Default, Copy, Clone)]
+pub struct SmbiosEndOfTable {
+    pub typ: u8,
+    pub length: u8,
+    pub handle: u16,
+}
+
 // SAFETY: These data structures only contain a series of integers
 unsafe impl ByteValued for Smbios30Entrypoint {}
 unsafe impl ByteValued for SmbiosBiosInfo {}
 unsafe impl ByteValued for SmbiosSysInfo {}
+unsafe impl ByteValued for SmbiosEndOfTable {}
 
 fn write_and_incr<T: ByteValued>(
     mem: &GuestMemoryMmap,
@@ -212,13 +222,13 @@ pub fn setup_smbios(
 
     {
         handle += 1;
-        let smbios_sysinfo = SmbiosSysInfo {
+        let smbios_end = SmbiosEndOfTable {
             typ: END_OF_TABLE,
-            length: mem::size_of::<SmbiosSysInfo>() as u8,
+            length: mem::size_of::<SmbiosEndOfTable>() as u8,
             handle,
-            ..Default::default()
         };
-        curptr = write_and_incr(mem, smbios_sysinfo, curptr)?;
+        curptr = write_and_incr(mem, smbios_end, curptr)?;
+        curptr = write_and_incr(mem, 0u8, curptr)?;
         curptr = write_and_incr(mem, 0u8, curptr)?;
     }
 
