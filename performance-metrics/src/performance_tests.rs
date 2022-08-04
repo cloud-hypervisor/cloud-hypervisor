@@ -312,7 +312,7 @@ fn measure_virtio_net_latency(guest: &Guest, test_timeout: u32) -> Result<Vec<f6
         .ssh_command(&format!("{} -s &> /dev/null &", ethr_remote_path))
         .map_err(InfraError::SshCommand)?;
 
-    thread::sleep(Duration::new(1, 0));
+    thread::sleep(Duration::new(10, 0));
 
     // Start the ethr client on the host
     let log_file = guest
