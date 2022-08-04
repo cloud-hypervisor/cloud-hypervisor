@@ -639,6 +639,8 @@ components:
             format: int16
         serial_number:
           type: string
+        uuid:
+          type: string
 
     MemoryZoneConfig:
       required:
