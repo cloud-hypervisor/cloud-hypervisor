@@ -114,6 +114,8 @@ fuzz_target!(|bytes| {
     queue_evt.write(77).unwrap(); // Rings the doorbell, any byte will do.
 
     wait_queue_event_processed(queue_evt);
+
+    block.reset(); // Ensure the virtio-block device thread is killed and joined
 });
 
 fn read_u64<T: Read>(readable: &mut T) -> u64 {
