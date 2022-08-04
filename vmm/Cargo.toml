@@ -40,7 +40,7 @@ pci = { path = "../pci" }
 qcow = { path = "../qcow" }
 seccompiler = "0.2.0"
 serde = { version = "1.0.142", features = ["rc", "derive"] }
-serde_json = "1.0.82"
+serde_json = "1.0.83"
 signal-hook = "0.3.14"
 thiserror = "1.0.31"
 uuid = "1.1.2"

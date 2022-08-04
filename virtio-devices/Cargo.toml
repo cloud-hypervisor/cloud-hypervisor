@@ -24,7 +24,7 @@ pci = { path = "../pci" }
 rate_limiter = { path = "../rate_limiter" }
 seccompiler = "0.2.0"
 serde = { version="1.0.142", features=["derive"] }
-serde_json = "1.0.82"
+serde_json = "1.0.83"
 thiserror = "1.0.31"
 versionize = "0.1.6"
 versionize_derive = "0.1.4"
