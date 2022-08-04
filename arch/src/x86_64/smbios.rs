@@ -75,8 +75,9 @@ fn compute_checksum<T: Copy>(v: &T) -> u8 {
     (!checksum).wrapping_add(1)
 }
 
+#[repr(C)]
 #[repr(packed)]
-#[derive(Default, Copy)]
+#[derive(Default, Copy, Clone)]
 pub struct Smbios30Entrypoint {
     pub signature: [u8; 5usize],
     pub checksum: u8,
@@ -90,14 +91,9 @@ pub struct Smbios30Entrypoint {
     pub physptr: u64,
 }
 
-impl Clone for Smbios30Entrypoint {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
+#[repr(C)]
 #[repr(packed)]
-#[derive(Default, Copy)]
+#[derive(Default, Copy, Clone)]
 pub struct SmbiosBiosInfo {
     pub typ: u8,
     pub length: u8,
@@ -112,14 +108,9 @@ pub struct SmbiosBiosInfo {
     pub characteristics_ext2: u8,
 }
 
-impl Clone for SmbiosBiosInfo {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
+#[repr(C)]
 #[repr(packed)]
-#[derive(Default, Copy)]
+#[derive(Default, Copy, Clone)]
 pub struct SmbiosSysInfo {
     pub typ: u8,
     pub length: u8,
@@ -132,12 +123,6 @@ pub struct SmbiosSysInfo {
     pub wake_up_type: u8,
     pub sku: u8,
     pub family: u8,
-}
-
-impl Clone for SmbiosSysInfo {
-    fn clone(&self) -> Self {
-        *self
-    }
 }
 
 // SAFETY: These data structures only contain a series of integers
