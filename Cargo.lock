@@ -50,6 +50,7 @@ dependencies = [
  "log",
  "serde",
  "thiserror",
+ "uuid",
  "versionize",
  "versionize_derive",
  "vm-fdt",
