@@ -634,6 +634,8 @@ pub struct PlatformConfig {
     pub iommu_segments: Option<Vec<u16>>,
     #[serde(default)]
     pub serial_number: Option<String>,
+    #[serde(default)]
+    pub uuid: Option<String>,
 }
 
 impl PlatformConfig {
@@ -642,6 +644,7 @@ impl PlatformConfig {
         parser.add("num_pci_segments");
         parser.add("iommu_segments");
         parser.add("serial_number");
+        parser.add("uuid");
         parser.parse(platform).map_err(Error::ParsePlatform)?;
 
         let num_pci_segments: u16 = parser
@@ -655,10 +658,12 @@ impl PlatformConfig {
         let serial_number = parser
             .convert("serial_number")
             .map_err(Error::ParsePlatform)?;
+        let uuid = parser.convert("uuid").map_err(Error::ParsePlatform)?;
         Ok(PlatformConfig {
             num_pci_segments,
             iommu_segments,
             serial_number,
+            uuid,
         })
     }
 
@@ -687,6 +692,7 @@ impl Default for PlatformConfig {
             num_pci_segments: DEFAULT_NUM_PCI_SEGMENTS,
             iommu_segments: None,
             serial_number: None,
+            uuid: None,
         }
     }
 }
