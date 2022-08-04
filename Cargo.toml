@@ -28,7 +28,7 @@ option_parser = { path = "option_parser" }
 seccompiler = "0.2.0"
 serde_json = "1.0.83"
 signal-hook = "0.3.14"
-thiserror = "1.0.31"
+thiserror = "1.0.32"
 vmm = { path = "vmm" }
 vmm-sys-util = "0.10.0"
 vm-memory = "0.8.0"

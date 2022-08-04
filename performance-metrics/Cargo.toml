@@ -11,7 +11,7 @@ dirs = "4.0.0"
 serde = { version = "1.0.142", features = ["rc", "derive"] }
 serde_json = "1.0.83"
 test_infra = { path = "../test_infra" }
-thiserror = "1.0.31"
+thiserror = "1.0.32"
 wait-timeout = "0.2.0"
 
 [build-dependencies]
