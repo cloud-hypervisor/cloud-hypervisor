@@ -250,7 +250,7 @@ pub fn setup_smbios(
             .map_err(|_| Error::WriteSmbiosEp)?;
     }
 
-    Ok(curptr.unchecked_offset_from(physptr))
+    Ok(curptr.unchecked_offset_from(physptr) + std::mem::size_of::<Smbios30Entrypoint>() as u64)
 }
 
 #[cfg(test)]
