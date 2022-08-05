@@ -39,7 +39,7 @@ use versionize_derive::Versionize;
 use virtio_devices::BlocksState;
 #[cfg(target_arch = "x86_64")]
 use vm_allocator::GsiApic;
-use vm_allocator::{AddressAllocator, SystemAllocator};
+use vm_allocator::SystemAllocator;
 use vm_device::BusDevice;
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::guest_memory::FileOffset;
@@ -176,7 +176,6 @@ pub struct MemoryManager {
     memory_zones: MemoryZones,
     log_dirty: bool, // Enable dirty logging for created RAM regions
     arch_mem_regions: Vec<ArchMemRegion>,
-    ram_allocator: AddressAllocator,
     dynamic: bool,
 
     // Keep track of calls to create_userspace_mapping() for guest RAM.
@@ -800,8 +799,10 @@ impl MemoryManager {
                     virtio_mem,
                     file_offset,
                 });
-                self.ram_allocator
-                    .allocate(Some(region.start_addr()), region.len(), None)
+                self.allocator
+                    .lock()
+                    .unwrap()
+                    .allocate_addresses(Some(region.start_addr()), region.len(), None)
                     .ok_or(Error::MemoryRangeAllocation)?;
             }
         }
@@ -987,6 +988,8 @@ impl MemoryManager {
         // Both MMIO and PIO address spaces start at address 0.
         let allocator = Arc::new(Mutex::new(
             SystemAllocator::new(
+                GuestAddress(0),
+                mmio_address_space_size, // TODO this will intersect with everything, but not everything is managed by system allocater yet
                 #[cfg(target_arch = "x86_64")]
                 {
                     GuestAddress(0)
@@ -1031,7 +1034,6 @@ impl MemoryManager {
         // If running on SGX the start of device area and RAM area may diverge but
         // at this point they are next to each other.
         let end_of_ram_area = start_of_device_area.unchecked_sub(1);
-        let ram_allocator = AddressAllocator::new(GuestAddress(0), start_of_device_area.0).unwrap();
 
         let mut memory_manager = MemoryManager {
             boot_guest_memory,
@@ -1062,7 +1064,6 @@ impl MemoryManager {
             acpi_address,
             log_dirty: dynamic, // Cannot log dirty pages on a TD
             arch_mem_regions,
-            ram_allocator,
             dynamic,
         };
 
@@ -1406,8 +1407,10 @@ impl MemoryManager {
         }
 
         // Tell the allocator
-        self.ram_allocator
-            .allocate(Some(start_addr), size as GuestUsize, None)
+        self.allocator
+            .lock()
+            .unwrap()
+            .allocate_addresses(Some(start_addr), size as GuestUsize, None)
             .ok_or(Error::MemoryRangeAllocation)?;
 
         // Update the slot so that it can be queried via the I/O port

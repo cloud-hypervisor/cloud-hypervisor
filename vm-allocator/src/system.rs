@@ -51,6 +51,7 @@ fn pagesize() -> usize {
 ///
 /// ```
 pub struct SystemAllocator {
+    phys_address_space: AddressAllocator,
     #[cfg(target_arch = "x86_64")]
     io_address_space: AddressAllocator,
     platform_mmio_address_space: AddressAllocator,
@@ -62,6 +63,8 @@ impl SystemAllocator {
     /// Creates a new `SystemAllocator` for managing addresses and irq numvers.
     /// Can return `None` if `base` + `size` overflows a u64
     ///
+    /// * `phys_address_space_base` - The starting address of the physical address space.
+    /// * `phys_address_space_size` - The size of the entire physical address space.
     /// * `io_base` - (X86) The starting address of IO memory.
     /// * `io_size` - (X86) The size of IO memory.
     /// * `platform_mmio_base` - The starting address of platform MMIO memory.
@@ -71,6 +74,8 @@ impl SystemAllocator {
     /// * `apics` - (X86) Vector of APIC's.
     ///
     pub fn new(
+        phys_address_space_base: GuestAddress,
+        phys_address_space_size: GuestUsize,
         #[cfg(target_arch = "x86_64")] io_base: GuestAddress,
         #[cfg(target_arch = "x86_64")] io_size: GuestUsize,
         platform_mmio_base: GuestAddress,
@@ -79,7 +84,14 @@ impl SystemAllocator {
         mmio_hole_size: GuestUsize,
         #[cfg(target_arch = "x86_64")] apics: Vec<GsiApic>,
     ) -> Option<Self> {
+        let mut phys_address_space = AddressAllocator::new(phys_address_space_base, phys_address_space_size)?;
+
+        /* reserve the memory ranges managed by other allocators */
+        phys_address_space.allocate(Some(platform_mmio_base), platform_mmio_size, None);
+        phys_address_space.allocate(Some(mmio_hole_base), mmio_hole_size, None);
+
         Some(SystemAllocator {
+            phys_address_space,
             #[cfg(target_arch = "x86_64")]
             io_address_space: AddressAllocator::new(io_base, io_size)?,
             platform_mmio_address_space: AddressAllocator::new(
@@ -102,6 +114,20 @@ impl SystemAllocator {
     /// Reserves the next available GSI.
     pub fn allocate_gsi(&mut self) -> Option<u32> {
         self.gsi_allocator.allocate_gsi().ok()
+    }
+
+    /// Reserves a section of `size` bytes of ram address space.
+    pub fn allocate_addresses(
+        &mut self,
+        address: Option<GuestAddress>,
+        size: GuestUsize,
+        align_size: Option<GuestUsize>,
+    ) -> Option<GuestAddress> {
+        self.phys_address_space.allocate(
+            address,
+            size,
+            Some(align_size.unwrap_or(pagesize() as u64)),
+        )
     }
 
     #[cfg(target_arch = "x86_64")]
