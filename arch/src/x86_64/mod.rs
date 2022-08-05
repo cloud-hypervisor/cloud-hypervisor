@@ -820,14 +820,15 @@ pub fn configure_system(
     sgx_epc_region: Option<SgxEpcRegion>,
     serial_number: Option<&str>,
     uuid: Option<&str>,
+    oem_strings: Option<&[&str]>,
 ) -> super::Result<()> {
     // Write EBDA address to location where ACPICA expects to find it
     guest_mem
         .write_obj((layout::EBDA_START.0 >> 4) as u16, layout::EBDA_POINTER)
         .map_err(Error::EbdaSetup)?;
 
-    let size =
-        smbios::setup_smbios(guest_mem, serial_number, uuid, None).map_err(Error::SmbiosSetup)?;
+    let size = smbios::setup_smbios(guest_mem, serial_number, uuid, oem_strings)
+        .map_err(Error::SmbiosSetup)?;
 
     // Place the MP table after the SMIOS table aligned to 16 bytes
     let offset = GuestAddress(layout::SMBIOS_START).unchecked_add(size);
@@ -1181,6 +1182,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert!(config_err.is_err());
 
@@ -1199,6 +1201,7 @@ mod tests {
             GuestAddress(0),
             &None,
             no_vcpus,
+            None,
             None,
             None,
             None,
@@ -1224,6 +1227,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         )
         .unwrap();
 
@@ -1232,6 +1236,7 @@ mod tests {
             GuestAddress(0),
             &None,
             no_vcpus,
+            None,
             None,
             None,
             None,
@@ -1257,6 +1262,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         )
         .unwrap();
 
@@ -1265,6 +1271,7 @@ mod tests {
             GuestAddress(0),
             &None,
             no_vcpus,
+            None,
             None,
             None,
             None,
