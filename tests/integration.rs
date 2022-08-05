@@ -6627,7 +6627,6 @@ mod sequential {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
 mod windows {
     use crate::*;
     use once_cell::sync::Lazy;
@@ -6652,6 +6651,12 @@ mod windows {
         fn new() -> Self {
             let disk = WindowsDiskConfig::new(WINDOWS_IMAGE_NAME.to_string());
             let guest = Guest::new(Box::new(disk));
+            #[cfg(target_arch = "aarch64")]
+            let auth = PasswordAuth {
+                username: String::from("cloud"),
+                password: String::from("Cloud123"),
+            };
+            #[cfg(target_arch = "x86_64")]
             let auth = PasswordAuth {
                 username: String::from("administrator"),
                 password: String::from("Admin123"),
@@ -6971,6 +6976,7 @@ mod windows {
     }
 
     #[test]
+    #[cfg(not(target_arch = "aarch64"))]
     fn test_windows_guest_multiple_queues() {
         let windows_guest = WindowsGuest::new();
 
@@ -7037,6 +7043,7 @@ mod windows {
 
     #[test]
     #[cfg(not(feature = "mshv"))]
+    #[cfg(not(target_arch = "aarch64"))]
     #[ignore = "See #4327"]
     fn test_windows_guest_snapshot_restore() {
         let windows_guest = WindowsGuest::new();
@@ -7126,6 +7133,7 @@ mod windows {
 
     #[test]
     #[cfg(not(feature = "mshv"))]
+    #[cfg(not(target_arch = "aarch64"))]
     fn test_windows_guest_cpu_hotplug() {
         let windows_guest = WindowsGuest::new();
 
@@ -7200,6 +7208,7 @@ mod windows {
 
     #[test]
     #[cfg(not(feature = "mshv"))]
+    #[cfg(not(target_arch = "aarch64"))]
     fn test_windows_guest_ram_hotplug() {
         let windows_guest = WindowsGuest::new();
 
@@ -7274,6 +7283,7 @@ mod windows {
 
     #[test]
     #[cfg(not(feature = "mshv"))]
+    #[cfg(not(target_arch = "aarch64"))]
     fn test_windows_guest_netdev_hotplug() {
         let windows_guest = WindowsGuest::new();
 
@@ -7346,6 +7356,7 @@ mod windows {
 
     #[test]
     #[cfg(not(feature = "mshv"))]
+    #[cfg(not(target_arch = "aarch64"))]
     fn test_windows_guest_disk_hotplug() {
         let windows_guest = WindowsGuest::new();
 
@@ -7440,6 +7451,7 @@ mod windows {
 
     #[test]
     #[cfg(not(feature = "mshv"))]
+    #[cfg(not(target_arch = "aarch64"))]
     fn test_windows_guest_disk_hotplug_multi() {
         let windows_guest = WindowsGuest::new();
 
@@ -7569,6 +7581,7 @@ mod windows {
 
     #[test]
     #[cfg(not(feature = "mshv"))]
+    #[cfg(not(target_arch = "aarch64"))]
     fn test_windows_guest_netdev_multi() {
         let windows_guest = WindowsGuest::new();
 
