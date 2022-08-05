@@ -2032,8 +2032,16 @@ mod parallel {
                 &event_path
             ));
 
+            // It's been observed on the Bionic image that udev and snapd
+            // services can cause some delay in the VM's shutdown. Disabling
+            // them improves the reliability of this test.
+            let _ = guest.ssh_command("sudo systemctl disable udev");
+            let _ = guest.ssh_command("sudo systemctl stop udev");
+            let _ = guest.ssh_command("sudo systemctl disable snapd");
+            let _ = guest.ssh_command("sudo systemctl stop snapd");
+
             guest.ssh_command("sudo poweroff").unwrap();
-            thread::sleep(std::time::Duration::new(5, 0));
+            thread::sleep(std::time::Duration::new(10, 0));
             let latest_events = [
                 &MetaEvent {
                     event: "shutdown".to_string(),
