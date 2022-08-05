@@ -1027,7 +1027,7 @@ impl DeviceManager {
             .lock()
             .unwrap()
             .allocate_platform_mmio_addresses(None, DEVICE_MANAGER_ACPI_SIZE as u64, None)
-            .ok_or(DeviceManagerError::AllocateIoPort)?;
+            .ok_or(DeviceManagerError::AllocateMmioAddress)?;
 
         let mut pci_irq_slots = [0; 32];
         PciSegment::reserve_legacy_interrupts_for_pci_devices(
