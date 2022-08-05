@@ -1127,6 +1127,18 @@ impl Vm {
             .as_ref()
             .and_then(|p| p.uuid.clone());
 
+        let oem_strings = self
+            .config
+            .lock()
+            .unwrap()
+            .platform
+            .as_ref()
+            .and_then(|p| p.oem_strings.clone());
+
+        let oem_strings = oem_strings
+            .as_deref()
+            .map(|strings| strings.iter().map(|s| s.as_ref()).collect::<Vec<&str>>());
+
         arch::configure_system(
             &mem,
             arch::layout::CMDLINE_START,
@@ -1136,6 +1148,7 @@ impl Vm {
             sgx_epc_region,
             serial_number.as_deref(),
             uuid.as_deref(),
+            oem_strings.as_deref(),
         )
         .map_err(Error::ConfigureSystem)?;
         Ok(())
