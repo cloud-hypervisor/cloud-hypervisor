@@ -101,6 +101,9 @@ impl VfioUserPciDevice {
             client: client.clone(),
         };
 
+        let dwords = [0; 1024];
+        let shadowed = [false; 1024];
+
         let mut common = VfioCommon {
             mmio_regions: Vec::new(),
             configuration,
@@ -112,6 +115,8 @@ impl VfioUserPciDevice {
             msi_interrupt_manager,
             legacy_interrupt_group,
             vfio_wrapper: Arc::new(vfio_wrapper) as Arc<dyn Vfio>,
+            dwords,
+            shadowed,
         };
 
         // No need to parse capabilities from the device if on the restore path.

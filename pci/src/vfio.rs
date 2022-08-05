@@ -6,7 +6,8 @@
 use crate::{
     msi_num_enabled_vectors, BarReprogrammingParams, MsiCap, MsiConfig, MsixCap, MsixConfig,
     PciBarConfiguration, PciBarRegionType, PciBdf, PciCapabilityId, PciClassCode, PciConfiguration,
-    PciDevice, PciDeviceError, PciHeaderType, PciSubclass, MSIX_TABLE_ENTRY_SIZE,
+    PciDevice, PciDeviceError, PciExpressCapabilityId, PciHeaderType, PciSubclass,
+    MSIX_TABLE_ENTRY_SIZE,
 };
 use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
@@ -290,6 +291,8 @@ pub(crate) trait Vfio: Send + Sync {
     }
 
     fn read_config(&self, offset: u32, data: &mut [u8]) {
+        // TODO(sdake) If the offset is stored within the shadow
+        // TODO(sdake) than return the shadow instead.
         self.region_read(VFIO_PCI_CONFIG_REGION_INDEX, offset.into(), data.as_mut());
     }
 
@@ -396,6 +399,8 @@ pub(crate) struct VfioCommon {
     pub(crate) msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
     pub(crate) legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
     pub(crate) vfio_wrapper: Arc<dyn Vfio>,
+    pub dwords: [u32; 1024],
+    pub shadowed: [bool; 1024],
 }
 
 impl VfioCommon {
@@ -716,6 +721,83 @@ impl VfioCommon {
         }
     }
 
+    // PCI Express Spec 4.0r1.0 section 7.6.1
+    // Parse the PCI extended capabilities present in PCI Express
+    // and explicity allow capabilities supported by cloud-hypervisor,
+    // This function builds a map of the dword headers by index, such that
+    // further reads on these index values in read_shadow_dword() return a PCI
+    // capabilities header potentially with offset modified.
+    //
+    // PCI Express Capability headers are read-only as per specification.
+    fn parse_extended_capabilities(&mut self) {
+        let mut header_offset = PCI_CONFIG_EXTENDED_CAPABILITY_OFFSET;
+        let mut final_headers = Vec::new();
+        let mut final_offset = Vec::new();
+
+        while {
+            let header = self.vfio_wrapper.read_config_dword(header_offset);
+            let header_cap: u16 = (header & 0x0000_ffff).try_into().unwrap();
+            let cap: PciExpressCapabilityId = header_cap.into();
+            info!(
+                "Capability {:#06x}@{:#06x} = {:?}",
+                header_cap, header_offset, cap
+            );
+
+            //
+            // Only match PCIE capabilities explicitly tested with real hardware
+            // If your VFIO device has an unlisted capability that you
+            // would like to enable, please submit a PR. Many capabilities
+            // could be added to this allowlist without direct cloud-hypervisor
+            // support, although what these capabilites are, are unknown.
+            match cap {
+                PciExpressCapabilityId::VirtualChannelMultiFunctionVirtualChannelNotPresent => {
+                    final_headers.push(header);
+                    final_offset.push(header_offset);
+                }
+                PciExpressCapabilityId::PowerBudgeting => {
+                    final_headers.push(header);
+                    final_offset.push(header_offset);
+                }
+                PciExpressCapabilityId::AdvancedErrorReporting => {
+                    final_headers.push(header);
+                    final_offset.push(header_offset);
+                }
+                PciExpressCapabilityId::VendorSpecificExtendedCapability => {
+                    final_headers.push(header);
+                    final_offset.push(header_offset);
+                }
+                PciExpressCapabilityId::AlternativeRoutingIdentificationIntepretation => {
+                    final_headers.push(header);
+                    final_offset.push(header_offset);
+                }
+                PciExpressCapabilityId::LatencyToleranceReporting => {
+                    final_headers.push(header);
+                    final_offset.push(header_offset);
+                }
+                _ => {
+                    info!("Rejecting capability {:?} for device", cap);
+                }
+            }
+
+            header_offset = (header & 0xfff0_0000) >> 20;
+            header_offset != 0 && header_cap != 0
+        } {}
+
+        // Rewrite the offsets of the accepted headers with the next header's offset
+        // Then write out the final headers.
+        // Then terminate the final header with an offset of 0x0fff
+        let len = final_headers.len() - 1;
+
+        // ya, not great.
+        for i in 0..len {
+            final_headers[i] &= 0x0000_ffff;
+            if i != len {
+                final_headers[i] |= final_offset[i+1] << 20;
+            }
+            self.write_shadow_dword(final_offset[i].try_into().unwrap(), final_headers[i]);
+        }
+    }
+
     pub(crate) fn enable_intx(&mut self) -> Result<(), VfioPciError> {
         if let Some(intx) = &mut self.interrupt.intx {
             if !intx.enabled {
@@ -1000,8 +1082,7 @@ impl VfioCommon {
             0xffff_ffff
         };
 
-        // The config register read comes from the VFIO device itself.
-        self.vfio_wrapper.read_config_dword((reg_idx * 4) as u32) & mask
+        self.read_shadow_dword(((reg_idx * 4) as u32).try_into().unwrap()) & mask
     }
 
     fn state(&self) -> VfioCommonState {
@@ -1050,6 +1131,24 @@ impl VfioCommon {
         }
 
         Ok(())
+    }
+
+    pub fn write_shadow_dword(&mut self, offset: usize, value: u32) {
+        let idx = offset / 4;
+
+        self.dwords[idx] = value;
+        self.shadowed[idx] = true;
+    }
+
+    pub fn read_shadow_dword(&mut self, offset: usize) -> u32 {
+        let idx = offset / 4;
+
+        if self.shadowed[idx] {
+            self.dwords[idx]
+        } else {
+            self.vfio_wrapper
+                .read_config_dword(offset.try_into().unwrap())
+        }
     }
 }
 
@@ -1160,6 +1259,9 @@ impl VfioPciDevice {
         let device = Arc::new(device);
         device.reset();
 
+        let dwords = [0; 1024];
+        let shadowed = [false; 1024];
+
         let configuration = PciConfiguration::new(
             0,
             0,
@@ -1186,6 +1288,8 @@ impl VfioPciDevice {
             msi_interrupt_manager,
             legacy_interrupt_group,
             vfio_wrapper: Arc::new(vfio_wrapper) as Arc<dyn Vfio>,
+            dwords,
+            shadowed,
         };
 
         // No need to parse capabilities from the device if on the restore path.
@@ -1193,6 +1297,7 @@ impl VfioPciDevice {
         // called.
         if !restoring {
             common.parse_capabilities(bdf);
+            common.parse_extended_capabilities();
             common.initialize_legacy_interrupt()?;
         }
 
@@ -1497,10 +1602,22 @@ impl BusDevice for VfioPciDevice {
     }
 }
 
+// TODO(sdake) examine prefetch bit as described on page 704 implementation notes.
+// TODO(sdake) The host sets the prefetch bit, the guest disables the prefetch bit. Explore why.
+// TODO(sdake) According to the PCIE specification, there is a limit of 1GB of prefetch space
+// TODO(sdake) available. Dual baseboard A100-SXM4 may burn through that 1GB limit within the guest.
+
+// TODO(sdake) 7.5.3.2 specifies version verification the software
+// TODO(sdake) must undergo to ensure PCIE compatability. See bits 3:0
+
 // First BAR offset in the PCI config space.
 const PCI_CONFIG_BAR_OFFSET: u32 = 0x10;
 // Capability register offset in the PCI config space.
+// Defined in PCI Express 4.0r1.0 September 27, 2017 section 7.5.1.1.11
 const PCI_CONFIG_CAPABILITY_OFFSET: u32 = 0x34;
+// Extended capability register offset in the PCI config sapce.
+// Defined in PCI Express 4.0r1.0 September 27, 2017 section 7.6.1.
+const PCI_CONFIG_EXTENDED_CAPABILITY_OFFSET: u32 = 0x100;
 // IO BAR when first BAR bit is 1.
 const PCI_CONFIG_IO_BAR: u32 = 0x1;
 // 64-bit memory bar flag.
