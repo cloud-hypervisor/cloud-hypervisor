@@ -37,7 +37,7 @@ use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_bindings::bindings::virtio_blk::*;
 use virtio_queue::{Queue, QueueOwnedT, QueueT};
-use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic};
+use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryError};
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
@@ -71,6 +71,8 @@ pub enum Error {
     QueueAddUsed(virtio_queue::Error),
     /// Failed creating an iterator over the queue
     QueueIterator(virtio_queue::Error),
+    /// Failed to update request status
+    RequestStatus(GuestMemoryError),
 }
 
 pub type Result<T> = result::Result<T, Error>;
@@ -156,12 +158,10 @@ impl BlockEpollHandler {
             {
                 self.request_list.insert(desc_chain.head_index(), request);
             } else {
-                // We use unwrap because the request parsing process already
-                // checked that the status_addr was valid.
                 desc_chain
                     .memory()
                     .write_obj(VIRTIO_BLK_S_OK, request.status_addr)
-                    .unwrap();
+                    .map_err(Error::RequestStatus)?;
 
                 // If no asynchronous operation has been submitted, we can
                 // simply return the used descriptor.
@@ -223,9 +223,8 @@ impl BlockEpollHandler {
                 return Err(Error::AsyncRequestFailure);
             };
 
-            // We use unwrap because the request parsing process already
-            // checked that the status_addr was valid.
-            mem.write_obj(status, request.status_addr).unwrap();
+            mem.write_obj(status, request.status_addr)
+                .map_err(Error::RequestStatus)?;
 
             queue
                 .add_used(mem.deref(), desc_index as u16, len)
