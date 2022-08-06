@@ -3136,6 +3136,63 @@ mod parallel {
     }
 
     #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_dmi_oem_strings() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+
+        let s1 = "io.systemd.credential:xx=yy";
+        let s2 = "This is a test string";
+
+        let oem_strings = format!("oem_strings=[{},{}]", s1, s2);
+
+        let mut child = GuestCommand::new(&guest)
+            .args(&["--cpus", "boot=1"])
+            .args(&["--memory", "size=512M"])
+            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(&["--platform", &oem_strings])
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            assert_eq!(
+                guest
+                    .ssh_command("sudo dmidecode --oem-string count")
+                    .unwrap()
+                    .trim(),
+                "2"
+            );
+
+            assert_eq!(
+                guest
+                    .ssh_command("sudo dmidecode --oem-string 1")
+                    .unwrap()
+                    .trim(),
+                s1
+            );
+
+            assert_eq!(
+                guest
+                    .ssh_command("sudo dmidecode --oem-string 2")
+                    .unwrap()
+                    .trim(),
+                s2
+            );
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
     fn test_virtio_fs() {
         _test_virtio_fs(&prepare_virtiofsd, false, None)
     }
