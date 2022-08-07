@@ -6933,7 +6933,7 @@ mod windows {
         let windows_guest = WindowsGuest::new();
 
         #[cfg(target_arch = "aarch64")]
-        let mut ovmf_path = edk2_path();
+        let ovmf_path = edk2_path();
         #[cfg(target_arch = "x86_64")]
         let mut ovmf_path = dirs::home_dir()
             .unwrap()
