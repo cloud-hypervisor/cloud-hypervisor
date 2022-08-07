@@ -24,7 +24,6 @@ use std::process::{Child, Command, Stdio};
 use std::string::String;
 use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
-#[cfg(target_arch = "x86_64")]
 use std::sync::Mutex;
 use std::thread;
 use test_infra::*;
