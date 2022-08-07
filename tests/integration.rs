@@ -6935,12 +6935,12 @@ mod windows {
         #[cfg(target_arch = "aarch64")]
         let ovmf_path = edk2_path();
         #[cfg(target_arch = "x86_64")]
-        let mut ovmf_path = dirs::home_dir()
-            .unwrap()
-            .ovmf_path
-            .push("workloads")
-            .ovmf_path
-            .push(OVMF_NAME);
+        let ovmf_path = {
+            let mut _tmp = dirs::home_dir().unwrap();
+            _tmp.push("workloads");
+            _tmp.push(OVMF_NAME);
+            _tmp
+        };
 
         let mut child = GuestCommand::new(windows_guest.guest())
             .args(&["--cpus", "boot=2,kvm_hyperv=on"])
