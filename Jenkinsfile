@@ -294,6 +294,44 @@ pipeline{
 						}
 					}
 				}
+				stage ('Worker build - Aarch64 Windows guest') {
+					agent { node { label 'bionic-arm64' } }
+					when {
+						beforeAgent true
+						expression {
+							return runWorkers
+						}
+					}
+					environment {
+        					AZURE_CONNECTION_STRING = credentials('46b4e7d6-315f-4cc1-8333-b58780863b9b')
+					}
+					stages {
+						stage ('Checkout') {
+							steps {
+								checkout scm
+							}
+						}
+						stage ('Install azure-cli') {
+							steps {
+								installAzureCli()
+							}
+						}
+						stage ('Download assets') {
+							steps {
+								sh "mkdir ${env.HOME}/workloads"
+								sh 'az storage blob download --container-name private-images --file "$HOME/workloads/windows-11-iot-enterprise-aarch64.raw" --name windows-11-iot-enterprise-aarch64.raw  --connection-string "$AZURE_CONNECTION_STRING"'
+							}
+						}
+						stage ('Run Aarch64 Windows guest integration tests') {
+							options {
+								timeout(time: 1, unit: 'HOURS')
+							}
+							steps {
+								sh "scripts/dev_cli.sh tests --integration-windows"
+							}
+						}
+					}
+				}
 				stage ('Worker build - Live Migration') {
 					agent { node { label 'jammy' } }
 					when {
