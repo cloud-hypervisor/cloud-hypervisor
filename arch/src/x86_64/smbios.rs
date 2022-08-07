@@ -96,7 +96,7 @@ struct Smbios30Entrypoint {
 #[repr(packed)]
 #[derive(Default, Copy, Clone)]
 struct SmbiosBiosInfo {
-    typ: u8,
+    r#type: u8,
     length: u8,
     handle: u16,
     vendor: u8,
@@ -113,7 +113,7 @@ struct SmbiosBiosInfo {
 #[repr(packed)]
 #[derive(Default, Copy, Clone)]
 struct SmbiosSysInfo {
-    typ: u8,
+    r#type: u8,
     length: u8,
     handle: u16,
     manufacturer: u8,
@@ -140,7 +140,7 @@ struct SmbiosOemStrings {
 #[repr(packed)]
 #[derive(Default, Copy, Clone)]
 struct SmbiosEndOfTable {
-    typ: u8,
+    r#type: u8,
     length: u8,
     handle: u16,
 }
@@ -191,7 +191,7 @@ pub fn setup_smbios(
     {
         handle += 1;
         let smbios_biosinfo = SmbiosBiosInfo {
-            typ: BIOS_INFORMATION,
+            r#type: BIOS_INFORMATION,
             length: mem::size_of::<SmbiosBiosInfo>() as u8,
             handle,
             vendor: 1,  // First string written in this section
@@ -215,7 +215,7 @@ pub fn setup_smbios(
             .map_err(Error::ParseUuid)?
             .unwrap_or(Uuid::nil());
         let smbios_sysinfo = SmbiosSysInfo {
-            typ: SYSTEM_INFORMATION,
+            r#type: SYSTEM_INFORMATION,
             length: mem::size_of::<SmbiosSysInfo>() as u8,
             handle,
             manufacturer: 1, // First string written in this section
@@ -255,7 +255,7 @@ pub fn setup_smbios(
     {
         handle += 1;
         let smbios_end = SmbiosEndOfTable {
-            typ: END_OF_TABLE,
+            r#type: END_OF_TABLE,
             length: mem::size_of::<SmbiosEndOfTable>() as u8,
             handle,
         };
