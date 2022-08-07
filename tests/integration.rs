@@ -59,6 +59,7 @@ mod aarch64 {
     pub const FOCAL_IMAGE_NAME_VHDX: &str = "focal-server-cloudimg-arm64-custom-20210929-0.vhdx";
     pub const JAMMY_IMAGE_NAME: &str = "jammy-server-cloudimg-arm64-custom-20220329-0.raw";
     pub const WINDOWS_IMAGE_NAME: &str = "windows-11-iot-enterprise-aarch64.raw";
+    pub const OVMF_NAME: &str = "CLOUDHV_EFI.fd";
     pub const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'GICv3.*uart-pl011' /proc/interrupts || true";
     pub const GREP_PMU_IRQ_CMD: &str = "grep -c 'GICv3.*arm-pmu' /proc/interrupts || true";
 }
@@ -175,12 +176,11 @@ fn direct_kernel_boot_path() -> PathBuf {
     kernel_path
 }
 
-#[cfg(target_arch = "aarch64")]
 fn edk2_path() -> PathBuf {
     let mut workload_path = dirs::home_dir().unwrap();
     workload_path.push("workloads");
     let mut edk2_path = workload_path;
-    edk2_path.push("CLOUDHV_EFI.fd");
+    edk2_path.push(OVMF_NAME);
 
     edk2_path
 }
@@ -6932,16 +6932,7 @@ mod windows {
     fn test_windows_guest() {
         let windows_guest = WindowsGuest::new();
 
-        let ovmf_path;
-        #[cfg(target_arch = "aarch64")]
-        ovmf_path = edk2_path();
-        #[cfg(target_arch = "x86_64")]
-        ovmf_path = {
-            let mut _tmp = dirs::home_dir().unwrap();
-            _tmp.push("workloads");
-            _tmp.push(OVMF_NAME);
-            _tmp
-        };
+        let ovmf_path = edk2_path();
 
         let mut child = GuestCommand::new(windows_guest.guest())
             .args(&["--cpus", "boot=2,kvm_hyperv=on"])
