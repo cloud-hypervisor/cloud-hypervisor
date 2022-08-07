@@ -79,51 +79,51 @@ fn compute_checksum<T: Copy>(v: &T) -> u8 {
 #[repr(C)]
 #[repr(packed)]
 #[derive(Default, Copy, Clone)]
-pub struct Smbios30Entrypoint {
-    pub signature: [u8; 5usize],
-    pub checksum: u8,
-    pub length: u8,
-    pub majorver: u8,
-    pub minorver: u8,
-    pub docrev: u8,
-    pub revision: u8,
-    pub reserved: u8,
-    pub max_size: u32,
-    pub physptr: u64,
+struct Smbios30Entrypoint {
+    signature: [u8; 5usize],
+    checksum: u8,
+    length: u8,
+    majorver: u8,
+    minorver: u8,
+    docrev: u8,
+    revision: u8,
+    reserved: u8,
+    max_size: u32,
+    physptr: u64,
 }
 
 #[repr(C)]
 #[repr(packed)]
 #[derive(Default, Copy, Clone)]
-pub struct SmbiosBiosInfo {
-    pub typ: u8,
-    pub length: u8,
-    pub handle: u16,
-    pub vendor: u8,
-    pub version: u8,
-    pub start_addr: u16,
-    pub release_date: u8,
-    pub rom_size: u8,
-    pub characteristics: u64,
-    pub characteristics_ext1: u8,
-    pub characteristics_ext2: u8,
+struct SmbiosBiosInfo {
+    typ: u8,
+    length: u8,
+    handle: u16,
+    vendor: u8,
+    version: u8,
+    start_addr: u16,
+    release_date: u8,
+    rom_size: u8,
+    characteristics: u64,
+    characteristics_ext1: u8,
+    characteristics_ext2: u8,
 }
 
 #[repr(C)]
 #[repr(packed)]
 #[derive(Default, Copy, Clone)]
-pub struct SmbiosSysInfo {
-    pub typ: u8,
-    pub length: u8,
-    pub handle: u16,
-    pub manufacturer: u8,
-    pub product_name: u8,
-    pub version: u8,
-    pub serial_number: u8,
-    pub uuid: [u8; 16usize],
-    pub wake_up_type: u8,
-    pub sku: u8,
-    pub family: u8,
+struct SmbiosSysInfo {
+    typ: u8,
+    length: u8,
+    handle: u16,
+    manufacturer: u8,
+    product_name: u8,
+    version: u8,
+    serial_number: u8,
+    uuid: [u8; 16usize],
+    wake_up_type: u8,
+    sku: u8,
+    family: u8,
 }
 
 #[repr(C)]
@@ -139,10 +139,10 @@ struct SmbiosOemStrings {
 #[repr(C)]
 #[repr(packed)]
 #[derive(Default, Copy, Clone)]
-pub struct SmbiosEndOfTable {
-    pub typ: u8,
-    pub length: u8,
-    pub handle: u16,
+struct SmbiosEndOfTable {
+    typ: u8,
+    length: u8,
+    handle: u16,
 }
 
 // SAFETY: These data structures only contain a series of integers
