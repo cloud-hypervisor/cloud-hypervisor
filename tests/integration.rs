@@ -6932,10 +6932,11 @@ mod windows {
     fn test_windows_guest() {
         let windows_guest = WindowsGuest::new();
 
+        let ovmf_path;
         #[cfg(target_arch = "aarch64")]
-        let ovmf_path = edk2_path();
+        ovmf_path = edk2_path();
         #[cfg(target_arch = "x86_64")]
-        let ovmf_path = {
+        ovmf_path = {
             let mut _tmp = dirs::home_dir().unwrap();
             _tmp.push("workloads");
             _tmp.push(OVMF_NAME);
