@@ -6932,12 +6932,10 @@ mod windows {
     fn test_windows_guest() {
         let windows_guest = WindowsGuest::new();
 
-        let ovmf_path = edk2_path();
-
         let mut child = GuestCommand::new(windows_guest.guest())
             .args(&["--cpus", "boot=2,kvm_hyperv=on"])
             .args(&["--memory", "size=4G"])
-            .args(&["--kernel", ovmf_path.to_str().unwrap()])
+            .args(&["--kernel", edk2_path().to_str().unwrap()])
             .args(&["--serial", "tty"])
             .args(&["--console", "off"])
             .default_disks()
