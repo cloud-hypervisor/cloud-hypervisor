@@ -6943,7 +6943,6 @@ mod windows {
             .ovmf_path
             .push(OVMF_NAME);
 
-
         let mut child = GuestCommand::new(windows_guest.guest())
             .args(&["--cpus", "boot=2,kvm_hyperv=on"])
             .args(&["--memory", "size=4G"])
