@@ -6,14 +6,14 @@
 use crate::{
     msi_num_enabled_vectors, BarReprogrammingParams, MsiCap, MsiConfig, MsixCap, MsixConfig,
     PciBarConfiguration, PciBarPrefetchable, PciBarRegionType, PciBdf, PciCapabilityId,
-    PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciSubclass,
-    MSIX_TABLE_ENTRY_SIZE,
+    PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciExpressCapabilityId,
+    PciHeaderType, PciSubclass, MSIX_TABLE_ENTRY_SIZE,
 };
 use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
 use hypervisor::HypervisorVmError;
 use std::any::Any;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io;
 use std::os::unix::io::AsRawFd;
 use std::ptr::null_mut;
@@ -390,6 +390,11 @@ struct VfioCommonState {
 
 impl VersionMapped for VfioCommonState {}
 
+pub(crate) struct ConfigPatch {
+    mask: u32,
+    patch: u32,
+}
+
 pub(crate) struct VfioCommon {
     pub(crate) configuration: PciConfiguration,
     pub(crate) mmio_regions: Vec<MmioRegion>,
@@ -397,6 +402,7 @@ pub(crate) struct VfioCommon {
     pub(crate) msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
     pub(crate) legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
     pub(crate) vfio_wrapper: Arc<dyn Vfio>,
+    pub(crate) patches: HashMap<usize, ConfigPatch>,
 }
 
 impl VfioCommon {
@@ -694,6 +700,9 @@ impl VfioCommon {
             .vfio_wrapper
             .read_config_byte(PCI_CONFIG_CAPABILITY_OFFSET);
 
+        let mut pci_express_cap_found = false;
+        let mut power_management_cap_found = false;
+
         while cap_next != 0 {
             let cap_id = self.vfio_wrapper.read_config_byte(cap_next.into());
 
@@ -719,10 +728,49 @@ impl VfioCommon {
                         }
                     }
                 }
+                PciCapabilityId::PciExpress => pci_express_cap_found = true,
+                PciCapabilityId::PowerManagement => power_management_cap_found = true,
                 _ => {}
             };
 
             cap_next = self.vfio_wrapper.read_config_byte((cap_next + 1).into());
+        }
+
+        if pci_express_cap_found && power_management_cap_found {
+            self.parse_extended_capabilities();
+        }
+    }
+
+    fn parse_extended_capabilities(&mut self) {
+        let mut current_offset = PCI_CONFIG_EXTENDED_CAPABILITY_OFFSET;
+
+        loop {
+            let ext_cap_hdr = self.vfio_wrapper.read_config_dword(current_offset);
+
+            let cap_id: u16 = (ext_cap_hdr & 0xffff) as u16;
+            let cap_next: u16 = ((ext_cap_hdr >> 20) & 0xfff) as u16;
+
+            match PciExpressCapabilityId::from(cap_id) {
+                PciExpressCapabilityId::AlternativeRoutingIdentificationIntepretation
+                | PciExpressCapabilityId::ResizeableBar
+                | PciExpressCapabilityId::SingleRootIoVirtualization => {
+                    let reg_idx = (current_offset / 4) as usize;
+                    self.patches.insert(
+                        reg_idx,
+                        ConfigPatch {
+                            mask: 0x0000_ffff,
+                            patch: PciExpressCapabilityId::NullCapability as u32,
+                        },
+                    );
+                }
+                _ => {}
+            }
+
+            if cap_next == 0 {
+                break;
+            }
+
+            current_offset = cap_next.into();
         }
     }
 
@@ -1011,7 +1059,13 @@ impl VfioCommon {
         };
 
         // The config register read comes from the VFIO device itself.
-        self.vfio_wrapper.read_config_dword((reg_idx * 4) as u32) & mask
+        let mut value = self.vfio_wrapper.read_config_dword((reg_idx * 4) as u32) & mask;
+
+        if let Some(config_patch) = self.patches.get(&reg_idx) {
+            value = (value & !config_patch.mask) | config_patch.patch;
+        }
+
+        value
     }
 
     fn state(&self) -> VfioCommonState {
@@ -1196,6 +1250,7 @@ impl VfioPciDevice {
             msi_interrupt_manager,
             legacy_interrupt_group,
             vfio_wrapper: Arc::new(vfio_wrapper) as Arc<dyn Vfio>,
+            patches: HashMap::new(),
         };
 
         // No need to parse capabilities from the device if on the restore path.
@@ -1511,6 +1566,8 @@ impl BusDevice for VfioPciDevice {
 const PCI_CONFIG_BAR_OFFSET: u32 = 0x10;
 // Capability register offset in the PCI config space.
 const PCI_CONFIG_CAPABILITY_OFFSET: u32 = 0x34;
+// Extended capabilities register offset in the PCI config space.
+const PCI_CONFIG_EXTENDED_CAPABILITY_OFFSET: u32 = 0x100;
 // IO BAR when first BAR bit is 1.
 const PCI_CONFIG_IO_BAR: u32 = 0x1;
 // 64-bit memory bar flag.

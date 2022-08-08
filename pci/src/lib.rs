@@ -17,7 +17,7 @@ mod vfio_user;
 pub use self::bus::{PciBus, PciConfigIo, PciConfigMmio, PciRoot, PciRootError};
 pub use self::configuration::{
     PciBarConfiguration, PciBarPrefetchable, PciBarRegionType, PciCapability, PciCapabilityId,
-    PciClassCode, PciConfiguration, PciHeaderType, PciMassStorageSubclass,
+    PciClassCode, PciConfiguration, PciExpressCapabilityId, PciHeaderType, PciMassStorageSubclass,
     PciNetworkControllerSubclass, PciProgrammingInterface, PciSerialBusSubClass, PciSubclass,
 };
 pub use self::device::{
