@@ -5,8 +5,9 @@
 
 use crate::{
     msi_num_enabled_vectors, BarReprogrammingParams, MsiCap, MsiConfig, MsixCap, MsixConfig,
-    PciBarConfiguration, PciBarRegionType, PciBdf, PciCapabilityId, PciClassCode, PciConfiguration,
-    PciDevice, PciDeviceError, PciExpressCapabilityId, PciHeaderType, PciSubclass,
+    PciBarConfiguration, PciBarPrefetchable, PciBarRegionType, PciBdf, PciCapabilityId,
+    PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciExpressCapabilityId,
+    PciHeaderType, PciSubclass,
     MSIX_TABLE_ENTRY_SIZE,
 };
 use anyhow::anyhow;
@@ -421,7 +422,7 @@ impl VfioCommon {
             let mut region_size: u64 = 0;
             let mut region_type = PciBarRegionType::Memory32BitRegion;
             let mut flags: u32 = 0;
-
+            let mut prefetchable = PciBarPrefetchable::NotPrefetchable;
             let mut restored_bar_addr = None;
             if let Some(resources) = &resources {
                 for resource in resources {
@@ -470,6 +471,13 @@ impl VfioCommon {
                     )
                 } else {
                     false
+                };
+
+                if matches!(
+                    flags & PCI_CONFIG_BAR_PREFETCHABLE,
+                    PCI_CONFIG_BAR_PREFETCHABLE
+                ) {
+                    prefetchable = PciBarPrefetchable::Prefetchable
                 };
 
                 // To get size write all 1s
@@ -571,7 +579,8 @@ impl VfioCommon {
                 .set_index(bar_id as usize)
                 .set_address(bar_addr.raw_value())
                 .set_size(region_size)
-                .set_region_type(region_type);
+                .set_region_type(region_type)
+                .set_prefetchable(prefetchable);
 
             if bar_id == VFIO_PCI_ROM_REGION_INDEX {
                 self.configuration
@@ -1620,6 +1629,8 @@ const PCI_CONFIG_CAPABILITY_OFFSET: u32 = 0x34;
 const PCI_CONFIG_EXTENDED_CAPABILITY_OFFSET: u32 = 0x100;
 // IO BAR when first BAR bit is 1.
 const PCI_CONFIG_IO_BAR: u32 = 0x1;
+// Prefetchable BAR bit
+const PCI_CONFIG_BAR_PREFETCHABLE: u32 = 0x8;
 // 64-bit memory bar flag.
 const PCI_CONFIG_MEMORY_BAR_64BIT: u32 = 0x4;
 // PCI config register size (4 bytes).
