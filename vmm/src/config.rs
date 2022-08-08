@@ -2738,6 +2738,25 @@ mod tests {
                 ..Default::default()
             }
         );
+        assert_eq!(
+            CpusConfig::parse("boot=2,affinity=[0@[0,2],1@[1,3]]")?,
+            CpusConfig {
+                boot_vcpus: 2,
+                max_vcpus: 2,
+                affinity: Some(vec![
+                    CpuAffinity {
+                        vcpu: 0,
+                        host_cpus: vec![0, 2],
+                    },
+                    CpuAffinity {
+                        vcpu: 1,
+                        host_cpus: vec![1, 3],
+                    }
+                ]),
+                ..Default::default()
+            },
+        );
+
         Ok(())
     }
 
