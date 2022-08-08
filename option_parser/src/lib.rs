@@ -334,3 +334,27 @@ impl FromStr for StringList {
         Ok(StringList(string_list))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_option_parser() {
+        let mut parser = OptionParser::new();
+        parser
+            .add("size")
+            .add("mergeable")
+            .add("hotplug_method")
+            .add("hotplug_size");
+
+        assert!(parser.parse("size=128M,hanging_param").is_err());
+        assert!(parser.parse("size=128M,too_many_equals=foo=bar").is_err());
+        assert!(parser.parse("size=128M,file=/dev/shm").is_err());
+        assert!(parser.parse("size=128M").is_ok());
+
+        assert_eq!(parser.get("size"), Some("128M".to_owned()));
+        assert!(!parser.is_set("mergeable"));
+        assert!(parser.is_set("size"));
+    }
+}
