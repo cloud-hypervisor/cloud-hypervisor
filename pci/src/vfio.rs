@@ -1611,11 +1611,6 @@ impl BusDevice for VfioPciDevice {
     }
 }
 
-// TODO(sdake) examine prefetch bit as described on page 704 implementation notes.
-// TODO(sdake) The host sets the prefetch bit, the guest disables the prefetch bit. Explore why.
-// TODO(sdake) According to the PCIE specification, there is a limit of 1GB of prefetch space
-// TODO(sdake) available. Dual baseboard A100-SXM4 may burn through that 1GB limit within the guest.
-
 // TODO(sdake) 7.5.3.2 specifies version verification the software
 // TODO(sdake) must undergo to ensure PCIE compatability. See bits 3:0
 
