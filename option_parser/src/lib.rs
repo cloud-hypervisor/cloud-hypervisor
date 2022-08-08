@@ -40,25 +40,37 @@ type OptionParserResult<T> = std::result::Result<T, OptionParserError>;
 
 fn split_commas_outside_brackets(s: &str) -> OptionParserResult<Vec<String>> {
     let mut list: Vec<String> = Vec::new();
-    let mut opened_brackets: usize = 0;
-    for element in s.trim().split(',') {
-        if opened_brackets > 0 {
-            if let Some(last) = list.last_mut() {
-                *last = format!("{},{}", last, element);
-            } else {
-                return Err(OptionParserError::InvalidSyntax(s.to_owned()));
-            }
-        } else {
-            list.push(element.to_string());
-        }
+    let mut opened_brackets = 0;
+    let mut current = String::new();
 
-        opened_brackets += element.matches('[').count();
-        let closing_brackets = element.matches(']').count();
-        if closing_brackets > opened_brackets {
-            return Err(OptionParserError::InvalidSyntax(s.to_owned()));
-        } else {
-            opened_brackets -= closing_brackets;
+    for c in s.trim().chars() {
+        match c {
+            '[' => {
+                opened_brackets += 1;
+                current.push('[');
+            }
+            ']' => {
+                opened_brackets -= 1;
+                if opened_brackets < 0 {
+                    return Err(OptionParserError::InvalidSyntax(s.to_owned()));
+                }
+                current.push(']');
+            }
+            ',' => {
+                if opened_brackets > 0 {
+                    current.push(',')
+                } else {
+                    list.push(current);
+                    current = String::new();
+                }
+            }
+            c => current.push(c),
         }
+    }
+    list.push(current);
+
+    if opened_brackets != 0 {
+        return Err(OptionParserError::InvalidSyntax(s.to_owned()));
     }
 
     Ok(list)
