@@ -5059,23 +5059,39 @@ mod parallel {
             );
         }
 
-        let output = exec_host_command_output(
-            format!(
-                "losetup --show --find --sector-size=4096 {}",
-                test_disk_path.to_str().unwrap()
-            )
-            .as_str(),
-        );
-        if !output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            panic!(
-                "failed to create loop device\nstdout\n{}\nstderr\n{}",
-                stdout, stderr
+        // losetup can sometimes fail with the following error:
+        // "failed to set up loop device: Resource temporarily unavailable"
+        // Let's retry a few times before to give up on this test.
+        let num_retries = 5;
+        let mut losetup_output = None;
+        for i in 0..num_retries {
+            thread::sleep(std::time::Duration::new(5, 0));
+            let output = exec_host_command_output(
+                format!(
+                    "losetup --show --find --sector-size=4096 {}",
+                    test_disk_path.to_str().unwrap()
+                )
+                .as_str(),
             );
+            if output.status.success() {
+                losetup_output = Some(output);
+                break;
+            } else {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+
+                if i < num_retries - 1 {
+                    println!("'losetup' iteration {} failed: {}", i, stderr);
+                } else {
+                    panic!(
+                        "failed to create loop device\nstdout\n{}\nstderr\n{}",
+                        stdout, stderr
+                    );
+                }
+            }
         }
 
-        let tmp = String::from_utf8_lossy(&output.stdout);
+        let tmp = String::from_utf8_lossy(&(losetup_output.as_ref().unwrap().stdout));
         let loop_dev = tmp.trim();
 
         let mut child = GuestCommand::new(&guest)
