@@ -11,6 +11,7 @@ use crate::{
 use anyhow::anyhow;
 use hypervisor::HypervisorVmError;
 use std::any::Any;
+use std::collections::HashMap;
 use std::os::unix::prelude::AsRawFd;
 use std::ptr::null_mut;
 use std::sync::{Arc, Barrier, Mutex};
@@ -112,6 +113,7 @@ impl VfioUserPciDevice {
             msi_interrupt_manager,
             legacy_interrupt_group,
             vfio_wrapper: Arc::new(vfio_wrapper) as Arc<dyn Vfio>,
+            patches: HashMap::new(),
         };
 
         // No need to parse capabilities from the device if on the restore path.
