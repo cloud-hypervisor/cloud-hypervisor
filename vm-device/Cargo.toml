@@ -10,7 +10,7 @@ kvm = ["vfio-ioctls/kvm"]
 mshv = ["vfio-ioctls/mshv"]
 
 [dependencies]
-anyhow = "1.0.59"
+anyhow = "1.0.60"
 hypervisor = { path = "../hypervisor" }
 thiserror = "1.0.32"
 serde = { version = "1.0.142", features = ["rc", "derive"] }
