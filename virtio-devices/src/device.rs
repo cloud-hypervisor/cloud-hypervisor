@@ -219,7 +219,6 @@ pub struct VirtioCommon {
     pub acked_features: u64,
     pub kill_evt: Option<EventFd>,
     pub interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
-    pub queue_evts: Option<Vec<EventFd>>,
     pub pause_evt: Option<EventFd>,
     pub paused: Arc<AtomicBool>,
     pub paused_sync: Option<Arc<Barrier>>,
@@ -278,16 +277,6 @@ impl VirtioCommon {
         // but clone it to pass into the thread.
         self.interrupt_cb = Some(interrupt_cb.clone());
 
-        let mut tmp_queue_evts: Vec<EventFd> = Vec::new();
-        for (_, _, queue_evt) in queues.iter() {
-            // Save the queue EventFD as we need to return it on reset
-            // but clone it to pass into the thread.
-            tmp_queue_evts.push(queue_evt.try_clone().map_err(|e| {
-                error!("failed to clone queue EventFd: {}", e);
-                ActivateError::BadActivate
-            })?);
-        }
-        self.queue_evts = Some(tmp_queue_evts);
         Ok(())
     }
 
