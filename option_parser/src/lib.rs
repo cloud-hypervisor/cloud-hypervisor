@@ -346,15 +346,37 @@ mod tests {
             .add("size")
             .add("mergeable")
             .add("hotplug_method")
-            .add("hotplug_size");
+            .add("hotplug_size")
+            .add("topology");
 
         assert!(parser.parse("size=128M,hanging_param").is_err());
         assert!(parser.parse("size=128M,too_many_equals=foo=bar").is_err());
         assert!(parser.parse("size=128M,file=/dev/shm").is_err());
-        assert!(parser.parse("size=128M").is_ok());
 
+        assert!(parser.parse("size=128M").is_ok());
         assert_eq!(parser.get("size"), Some("128M".to_owned()));
         assert!(!parser.is_set("mergeable"));
         assert!(parser.is_set("size"));
+
+        assert!(parser.parse("size=128M,mergeable=on").is_ok());
+        assert_eq!(parser.get("size"), Some("128M".to_owned()));
+        assert_eq!(parser.get("mergeable"), Some("on".to_owned()));
+
+        assert!(parser
+            .parse("size=128M,mergeable=on,topology=[1,2]")
+            .is_ok());
+        assert_eq!(parser.get("size"), Some("128M".to_owned()));
+        assert_eq!(parser.get("mergeable"), Some("on".to_owned()));
+        assert_eq!(parser.get("topology"), Some("[1,2]".to_owned()));
+
+        assert!(parser
+            .parse("size=128M,mergeable=on,topology=[[1,2],[3,4]]")
+            .is_ok());
+        assert_eq!(parser.get("size"), Some("128M".to_owned()));
+        assert_eq!(parser.get("mergeable"), Some("on".to_owned()));
+        assert_eq!(parser.get("topology"), Some("[[1,2],[3,4]]".to_owned()));
+
+        assert!(parser.parse("topology=[").is_err());
+        assert!(parser.parse("topology=[[[]]]]").is_err())
     }
 }
