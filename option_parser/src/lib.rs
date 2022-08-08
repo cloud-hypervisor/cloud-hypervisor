@@ -305,8 +305,13 @@ impl<S: FromStr, T: TupleValue> FromStr for Tuple<S, T> {
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         let mut list: Vec<(S, T)> = Vec::new();
 
-        let tuples_list = split_commas(s.trim().trim_matches(|c| c == '[' || c == ']'))
-            .map_err(TupleError::SplitOutsideBrackets)?;
+        let body = s
+            .trim()
+            .strip_prefix('[')
+            .and_then(|s| s.strip_suffix(']'))
+            .ok_or_else(|| TupleError::InvalidValue(s.to_string()))?;
+
+        let tuples_list = split_commas(body).map_err(TupleError::SplitOutsideBrackets)?;
         for tuple in tuples_list.iter() {
             let items: Vec<&str> = tuple.split('@').collect();
 
