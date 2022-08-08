@@ -5,8 +5,9 @@
 
 use crate::{
     msi_num_enabled_vectors, BarReprogrammingParams, MsiCap, MsiConfig, MsixCap, MsixConfig,
-    PciBarConfiguration, PciBarRegionType, PciBdf, PciCapabilityId, PciClassCode, PciConfiguration,
-    PciDevice, PciDeviceError, PciHeaderType, PciSubclass, MSIX_TABLE_ENTRY_SIZE,
+    PciBarConfiguration, PciBarPrefetchable, PciBarRegionType, PciBdf, PciCapabilityId,
+    PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciSubclass,
+    MSIX_TABLE_ENTRY_SIZE,
 };
 use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
@@ -566,7 +567,8 @@ impl VfioCommon {
                 .set_index(bar_id as usize)
                 .set_address(bar_addr.raw_value())
                 .set_size(region_size)
-                .set_region_type(region_type);
+                .set_region_type(region_type)
+                .set_prefetchable(PciBarPrefetchable::Prefetchable);
 
             if bar_id == VFIO_PCI_ROM_REGION_INDEX {
                 self.configuration
