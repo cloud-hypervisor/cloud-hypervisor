@@ -999,6 +999,12 @@ impl PciBarConfiguration {
         self
     }
 
+    #[must_use]
+    pub fn set_prefetchable(mut self, prefetchable: PciBarPrefetchable) -> Self {
+        self.prefetchable = prefetchable;
+        self
+    }
+
     pub fn idx(&self) -> usize {
         self.idx
     }
