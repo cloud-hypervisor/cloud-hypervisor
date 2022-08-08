@@ -31,7 +31,7 @@ impl fmt::Display for OptionParserError {
             OptionParserError::UnknownOption(s) => write!(f, "unknown option: {}", s),
             OptionParserError::InvalidSyntax(s) => write!(f, "invalid syntax:{}", s),
             OptionParserError::Conversion(field, value) => {
-                write!(f, "unable to parse {} for {}", value, field)
+                write!(f, "unable to convert {} for {}", value, field)
             }
         }
     }
