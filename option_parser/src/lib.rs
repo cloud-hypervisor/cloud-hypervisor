@@ -38,7 +38,7 @@ impl fmt::Display for OptionParserError {
 }
 type OptionParserResult<T> = std::result::Result<T, OptionParserError>;
 
-fn split_commas_outside_brackets(s: &str) -> OptionParserResult<Vec<String>> {
+fn split_commas(s: &str) -> OptionParserResult<Vec<String>> {
     let mut list: Vec<String> = Vec::new();
     let mut opened_brackets = 0;
     let mut current = String::new();
@@ -88,7 +88,7 @@ impl OptionParser {
             return Ok(());
         }
 
-        for option in split_commas_outside_brackets(input)?.iter() {
+        for option in split_commas(input)?.iter() {
             let parts: Vec<&str> = option.splitn(2, '=').collect();
 
             match self.options.get_mut(parts[0]) {
@@ -303,9 +303,8 @@ impl<S: FromStr, T: TupleValue> FromStr for Tuple<S, T> {
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         let mut list: Vec<(S, T)> = Vec::new();
 
-        let tuples_list =
-            split_commas_outside_brackets(s.trim().trim_matches(|c| c == '[' || c == ']'))
-                .map_err(TupleError::SplitOutsideBrackets)?;
+        let tuples_list = split_commas(s.trim().trim_matches(|c| c == '[' || c == ']'))
+            .map_err(TupleError::SplitOutsideBrackets)?;
         for tuple in tuples_list.iter() {
             let items: Vec<&str> = tuple.split('@').collect();
 
