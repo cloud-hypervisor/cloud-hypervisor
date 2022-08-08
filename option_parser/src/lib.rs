@@ -41,6 +41,7 @@ type OptionParserResult<T> = std::result::Result<T, OptionParserError>;
 fn split_commas(s: &str) -> OptionParserResult<Vec<String>> {
     let mut list: Vec<String> = Vec::new();
     let mut opened_brackets = 0;
+    let mut in_quotes = false;
     let mut current = String::new();
 
     for c in s.trim().chars() {
@@ -56,8 +57,9 @@ fn split_commas(s: &str) -> OptionParserResult<Vec<String>> {
                 }
                 current.push(']');
             }
+            '"' => in_quotes = !in_quotes,
             ',' => {
-                if opened_brackets > 0 {
+                if opened_brackets > 0 || in_quotes {
                     current.push(',')
                 } else {
                     list.push(current);
@@ -69,7 +71,7 @@ fn split_commas(s: &str) -> OptionParserResult<Vec<String>> {
     }
     list.push(current);
 
-    if opened_brackets != 0 {
+    if opened_brackets != 0 || in_quotes {
         return Err(OptionParserError::InvalidSyntax(s.to_owned()));
     }
 
@@ -358,7 +360,8 @@ mod tests {
             .add("mergeable")
             .add("hotplug_method")
             .add("hotplug_size")
-            .add("topology");
+            .add("topology")
+            .add("cmdline");
 
         assert!(parser.parse("size=128M,hanging_param").is_err());
         assert!(parser.parse("size=128M,too_many_equals=foo=bar").is_err());
@@ -388,6 +391,14 @@ mod tests {
         assert_eq!(parser.get("topology"), Some("[[1,2],[3,4]]".to_owned()));
 
         assert!(parser.parse("topology=[").is_err());
-        assert!(parser.parse("topology=[[[]]]]").is_err())
+        assert!(parser.parse("topology=[[[]]]]").is_err());
+
+        assert!(parser.parse("cmdline=\"console=ttyS0,9600n8\"").is_ok());
+        assert_eq!(
+            parser.get("cmdline"),
+            Some("console=ttyS0,9600n8".to_owned())
+        );
+        assert!(parser.parse("cmdline=\"").is_err());
+        assert!(parser.parse("cmdline=\"\"\"").is_err());
     }
 }
