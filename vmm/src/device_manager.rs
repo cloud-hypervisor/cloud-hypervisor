@@ -608,7 +608,7 @@ impl DeviceRelocation for AddressManager {
                     self.allocator
                         .lock()
                         .unwrap()
-                        .allocate_mmio_hole_addresses(
+                        .allocate_addresses(
                             Some(GuestAddress(new_base)),
                             len as GuestUsize,
                             Some(len),
