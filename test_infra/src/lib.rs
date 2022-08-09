@@ -14,7 +14,7 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::net::TcpStream;
 use std::os::unix::fs::PermissionsExt;
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::str::FromStr;
@@ -82,6 +82,8 @@ impl GuestNetworkConfig {
 
             // Reply on epoll w/ timeout to wait for guest connections faithfully
             let epoll_fd = epoll::create(true).expect("Cannot create epoll fd");
+            // Use 'File' to enforce closing on 'epoll_fd'
+            let _epoll_file = unsafe { fs::File::from_raw_fd(epoll_fd) };
             epoll::ctl(
                 epoll_fd,
                 epoll::ControlOptions::EPOLL_CTL_ADD,
