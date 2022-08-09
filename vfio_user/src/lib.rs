@@ -552,8 +552,7 @@ impl Client {
                 cap_size,
                 reply.header.message_size - size_of::<DeviceGetRegionInfo>() as u32
             );
-            let mut cap_data = Vec::with_capacity(cap_size as usize);
-            cap_data.resize(cap_data.capacity(), 0u8);
+            let mut cap_data = vec![0; cap_size as usize];
             self.stream
                 .read_exact(cap_data.as_mut_slice())
                 .map_err(Error::StreamRead)?;
@@ -770,13 +769,9 @@ impl Client {
     }
 
     pub fn region(&self, region_index: u32) -> Option<&Region> {
-        for region in &self.regions {
-            if region.index == region_index {
-                return Some(region);
-            }
-        }
-
-        None
+        self.regions
+            .iter()
+            .find(|&region| region.index == region_index)
     }
 
     pub fn resettable(&self) -> bool {
