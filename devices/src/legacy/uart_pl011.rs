@@ -372,7 +372,7 @@ impl BusDevice for Pl011 {
                 UARTIFLS => self.ifl,
                 UARTIMSC => self.int_enabled,
                 UARTRIS => self.int_level,
-                UARTMIS => (self.int_level & self.int_enabled),
+                UARTMIS => self.int_level & self.int_enabled,
                 UARTDMACR => self.dmacr,
                 UARTDEBUG => self.debug,
                 _ => {
