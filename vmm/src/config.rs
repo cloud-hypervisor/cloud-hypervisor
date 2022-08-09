@@ -175,6 +175,8 @@ pub enum ValidationError {
     InvalidIdentifier(String),
     /// Placing the device behind a virtual IOMMU is not supported
     IommuNotSupported,
+    /// Duplicated device path (device added twice)
+    DuplicateDevicePath(String),
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -270,6 +272,7 @@ impl fmt::Display for ValidationError {
             IommuNotSupported => {
                 write!(f, "Device does not support being placed behind IOMMU")
             }
+            DuplicateDevicePath(p) => write!(f, "Duplicated device path: {}", p),
         }
     }
 }
@@ -2464,7 +2467,14 @@ impl VmConfig {
         }
 
         if let Some(devices) = &self.devices {
+            let mut device_paths = BTreeSet::new();
             for device in devices {
+                if !device_paths.insert(device.path.to_string_lossy()) {
+                    return Err(ValidationError::DuplicateDevicePath(
+                        device.path.to_string_lossy().to_string(),
+                    ));
+                }
+
                 device.validate(self)?;
                 self.iommu |= device.iommu;
 
@@ -3657,7 +3667,7 @@ mod tests {
             Err(ValidationError::OnIommuSegment(1))
         );
 
-        let mut invalid_config = valid_config;
+        let mut invalid_config = valid_config.clone();
         invalid_config.memory.shared = true;
         invalid_config.platform = Some(PlatformConfig {
             num_pci_segments: 16,
@@ -3672,5 +3682,31 @@ mod tests {
             invalid_config.validate(),
             Err(ValidationError::IommuNotSupportedOnSegment(1))
         );
+
+        let mut still_valid_config = valid_config.clone();
+        still_valid_config.devices = Some(vec![
+            DeviceConfig {
+                path: "/device1".into(),
+                ..Default::default()
+            },
+            DeviceConfig {
+                path: "/device2".into(),
+                ..Default::default()
+            },
+        ]);
+        assert!(still_valid_config.validate().is_ok());
+
+        let mut invalid_config = valid_config;
+        invalid_config.devices = Some(vec![
+            DeviceConfig {
+                path: "/device1".into(),
+                ..Default::default()
+            },
+            DeviceConfig {
+                path: "/device1".into(),
+                ..Default::default()
+            },
+        ]);
+        assert!(invalid_config.validate().is_err());
     }
 }
