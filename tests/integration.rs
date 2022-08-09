@@ -1951,7 +1951,7 @@ fn check_guest_watchdog_one_reboot(
 }
 
 mod parallel {
-    use std::io::SeekFrom;
+    use std::{fs::OpenOptions, io::SeekFrom};
 
     use crate::*;
 
@@ -5035,6 +5035,135 @@ mod parallel {
         handle_child_output(r, &output);
     }
 
+    #[allow(clippy::useless_conversion)]
+    fn create_loop_device(backing_file_path: &str, block_size: u32, num_retries: usize) -> String {
+        const LOOP_CONFIGURE: u64 = 0x4c0a;
+        const LOOP_CTL_GET_FREE: u64 = 0x4c82;
+        const LOOP_CTL_PATH: &str = "/dev/loop-control";
+        const LOOP_DEVICE_PREFIX: &str = "/dev/loop";
+
+        #[repr(C)]
+        struct LoopInfo64 {
+            lo_device: u64,
+            lo_inode: u64,
+            lo_rdevice: u64,
+            lo_offset: u64,
+            lo_sizelimit: u64,
+            lo_number: u32,
+            lo_encrypt_type: u32,
+            lo_encrypt_key_size: u32,
+            lo_flags: u32,
+            lo_file_name: [u8; 64],
+            lo_crypt_name: [u8; 64],
+            lo_encrypt_key: [u8; 32],
+            lo_init: [u64; 2],
+        }
+
+        impl Default for LoopInfo64 {
+            fn default() -> Self {
+                LoopInfo64 {
+                    lo_device: 0,
+                    lo_inode: 0,
+                    lo_rdevice: 0,
+                    lo_offset: 0,
+                    lo_sizelimit: 0,
+                    lo_number: 0,
+                    lo_encrypt_type: 0,
+                    lo_encrypt_key_size: 0,
+                    lo_flags: 0,
+                    lo_file_name: [0; 64],
+                    lo_crypt_name: [0; 64],
+                    lo_encrypt_key: [0; 32],
+                    lo_init: [0; 2],
+                }
+            }
+        }
+
+        #[derive(Default)]
+        #[repr(C)]
+        struct LoopConfig {
+            fd: u32,
+            block_size: u32,
+            info: LoopInfo64,
+            _reserved: [u64; 8],
+        }
+
+        // Open loop-control device
+        let loop_ctl_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(LOOP_CTL_PATH)
+            .unwrap();
+
+        // Request a free loop device
+        let loop_device_number = unsafe {
+            libc::ioctl(
+                loop_ctl_file.as_raw_fd(),
+                LOOP_CTL_GET_FREE.try_into().unwrap(),
+            )
+        };
+        if loop_device_number < 0 {
+            panic!("Couldn't find a free loop device");
+        }
+
+        // Create loop device path
+        let loop_device_path = format!("{}{}", LOOP_DEVICE_PREFIX, loop_device_number);
+
+        // Open loop device
+        let loop_device_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&loop_device_path)
+            .unwrap();
+
+        // Open backing file
+        let backing_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(backing_file_path)
+            .unwrap();
+
+        let loop_config = LoopConfig {
+            fd: backing_file.as_raw_fd() as u32,
+            block_size,
+            ..Default::default()
+        };
+
+        for i in 0..num_retries {
+            let ret = unsafe {
+                libc::ioctl(
+                    loop_device_file.as_raw_fd(),
+                    LOOP_CONFIGURE.try_into().unwrap(),
+                    &loop_config,
+                )
+            };
+            if ret != 0 {
+                if i < num_retries - 1 {
+                    println!(
+                        "Iteration {}: Failed to configure the loop device {}: {}",
+                        i,
+                        loop_device_path,
+                        std::io::Error::last_os_error()
+                    );
+                } else {
+                    panic!(
+                        "Failed {} times trying to configure the loop device {}: {}",
+                        num_retries,
+                        loop_device_path,
+                        std::io::Error::last_os_error()
+                    );
+                }
+            } else {
+                break;
+            }
+
+            // Wait for a bit before retrying
+            thread::sleep(std::time::Duration::new(5, 0));
+        }
+
+        loop_device_path
+    }
+
     #[test]
     fn test_virtio_block_topology() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -5059,24 +5188,7 @@ mod parallel {
             );
         }
 
-        let output = exec_host_command_output(
-            format!(
-                "losetup --show --find --sector-size=4096 {}",
-                test_disk_path.to_str().unwrap()
-            )
-            .as_str(),
-        );
-        if !output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            panic!(
-                "failed to create loop device\nstdout\n{}\nstderr\n{}",
-                stdout, stderr
-            );
-        }
-
-        let tmp = String::from_utf8_lossy(&output.stdout);
-        let loop_dev = tmp.trim();
+        let loop_dev = create_loop_device(test_disk_path.to_str().unwrap(), 4096, 5);
 
         let mut child = GuestCommand::new(&guest)
             .args(&["--cpus", "boot=1"])
@@ -5095,7 +5207,7 @@ mod parallel {
                     guest.disk_config.disk(DiskType::CloudInit).unwrap()
                 )
                 .as_str(),
-                format!("path={}", loop_dev).as_str(),
+                format!("path={}", &loop_dev).as_str(),
             ])
             .default_net()
             .capture_output()
@@ -5143,7 +5255,7 @@ mod parallel {
         handle_child_output(r, &output);
 
         Command::new("losetup")
-            .args(&["-d", loop_dev])
+            .args(&["-d", &loop_dev])
             .output()
             .expect("loop device not found");
     }
