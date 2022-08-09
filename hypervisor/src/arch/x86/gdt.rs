@@ -51,7 +51,7 @@ fn get_limit(entry: u64) -> u32 {
     // Perform manual limit scaling if G flag is set
     match get_g(entry) {
         0 => limit,
-        _ => ((limit << 12) | 0xFFF), // G flag is either 0 or 1
+        _ => (limit << 12) | 0xFFF, // G flag is either 0 or 1
     }
 }
 
