@@ -19,6 +19,11 @@ panic = "abort"
 [profile.dev]
 panic = "abort"
 
+[profile.release-small]
+inherits = "release"
+opt-level = "s"
+codegen-units = 1
+
 [dependencies]
 anyhow = "1.0.60"
 api_client = { path = "api_client" }
