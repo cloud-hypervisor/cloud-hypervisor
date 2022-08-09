@@ -1487,16 +1487,11 @@ impl Write for QcowFile {
             let offset = self.file_offset_write(curr_addr)?;
             let count = self.limit_range_cluster(curr_addr, write_count - nwritten);
 
-            if let Err(e) = self.raw_file.file_mut().seek(SeekFrom::Start(offset)) {
-                return Err(e);
-            }
-            if let Err(e) = self
+            self.raw_file.file_mut().seek(SeekFrom::Start(offset))?;
+            let count = self
                 .raw_file
                 .file_mut()
-                .write(&buf[nwritten..(nwritten + count)])
-            {
-                return Err(e);
-            }
+                .write(&buf[nwritten..(nwritten + count)])?;
 
             nwritten += count;
         }
