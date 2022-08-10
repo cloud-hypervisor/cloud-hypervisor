@@ -6,30 +6,31 @@ use super::{vnet_hdr_len, MacAddr, Tap, TapError};
 use std::net::Ipv4Addr;
 use std::path::Path;
 use std::{fs, io};
+use thiserror::Error;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
-    /// Failed to convert an hexadecimal string into an integer.
+    #[error("Failed to convert an hexadecimal string into an integer: {0}")]
     ConvertHexStringToInt(std::num::ParseIntError),
-    /// Error related to the multiqueue support (no support TAP side).
+    #[error("Error related to the multiqueue support (no support TAP side).")]
     MultiQueueNoTapSupport,
-    /// Error related to the multiqueue support (no support device side).
+    #[error("Error related to the multiqueue support (no support device side).")]
     MultiQueueNoDeviceSupport,
-    /// Failed to read the TAP flags from sysfs.
+    #[error("Failed to read the TAP flags from sysfs: {0}")]
     ReadSysfsTunFlags(io::Error),
-    /// Open tap device failed.
+    #[error("Open tap device failed: {0}")]
     TapOpen(TapError),
-    /// Setting tap IP failed.
+    #[error("Setting tap IP failed: {0}")]
     TapSetIp(TapError),
-    /// Setting tap netmask failed.
+    #[error("Setting tap netmask failed: {0}")]
     TapSetNetmask(TapError),
-    /// Setting MAC address failed
+    #[error("Setting MAC address failed: {0}")]
     TapSetMac(TapError),
-    /// Getting MAC address failed
+    #[error("Getting MAC address failed: {0}")]
     TapGetMac(TapError),
-    /// Setting vnet header size failed.
+    #[error("Setting vnet header size failed: {0}")]
     TapSetVnetHdrSize(TapError),
-    /// Enabling tap interface failed.
+    #[error("Enabling tap interface failed: {0}")]
     TapEnable(TapError),
 }
 

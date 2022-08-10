@@ -610,6 +610,7 @@ dependencies = [
  "rate_limiter",
  "serde",
  "serde_json",
+ "thiserror",
  "versionize",
  "versionize_derive",
  "virtio-bindings",
