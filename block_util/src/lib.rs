@@ -32,6 +32,7 @@ use std::path::Path;
 use std::result;
 use std::sync::Arc;
 use std::sync::MutexGuard;
+use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_bindings::bindings::virtio_blk::*;
@@ -48,25 +49,25 @@ type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 const SECTOR_SHIFT: u8 = 9;
 pub const SECTOR_SIZE: u64 = 0x01 << SECTOR_SHIFT;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
-    /// Guest gave us bad memory addresses.
+    #[error("Guest gave us bad memory addresses.")]
     GuestMemory(GuestMemoryError),
-    /// Guest gave us offsets that would have overflowed a usize.
+    #[error("Guest gave us offsets that would have overflowed a usize.")]
     CheckedOffset(GuestAddress, usize),
-    /// Guest gave us a write only descriptor that protocol says to read from.
+    #[error("Guest gave us a write only descriptor that protocol says to read from.")]
     UnexpectedWriteOnlyDescriptor,
-    /// Guest gave us a read only descriptor that protocol says to write to.
+    #[error("Guest gave us a read only descriptor that protocol says to write to.")]
     UnexpectedReadOnlyDescriptor,
-    /// Guest gave us too few descriptors in a descriptor chain.
+    #[error("Guest gave us too few descriptors in a descriptor chain.")]
     DescriptorChainTooShort,
-    /// Guest gave us a descriptor that was too short to use.
+    #[error("Guest gave us a descriptor that was too short to use.")]
     DescriptorLengthTooSmall,
-    /// Getting a block's metadata fails for any reason.
+    #[error("Getting a block's metadata fails for any reason.")]
     GetFileMetadata,
-    /// The requested operation would cause a seek beyond disk end.
+    #[error("The requested operation would cause a seek beyond disk end.")]
     InvalidOffset,
-    /// The requested operation does not support multiple descriptors.
+    #[error("The requested operation does not support multiple descriptors.")]
     TooManyDescriptors,
 }
 
@@ -102,20 +103,31 @@ pub fn build_disk_image_id(disk_path: &Path) -> Vec<u8> {
     default_disk_image_id
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum ExecuteError {
+    #[error("Bad request: {0}")]
     BadRequest(Error),
+    #[error("Falied to flush: {0}")]
     Flush(io::Error),
+    #[error("Failed to read: {0}")]
     Read(GuestMemoryError),
+    #[error("Failed to seek: {0}")]
     Seek(io::Error),
+    #[error("Failed to write: {0}")]
     Write(GuestMemoryError),
+    #[error("Unsupported request: {0}")]
     Unsupported(u32),
+    #[error("Failed to submit io uring: {0}")]
     SubmitIoUring(io::Error),
+    #[error("Failed to get guest address: {0}")]
     GetHostAddress(GuestMemoryError),
+    #[error("Failed to async read: {0}")]
     AsyncRead(AsyncIoError),
+    #[error("Failed to async write: {0}")]
     AsyncWrite(AsyncIoError),
+    #[error("failed to async flush: {0}")]
     AsyncFlush(AsyncIoError),
-    /// Failed allocating a temporary buffer.
+    #[error("Failed allocating a temporary buffer: {0}")]
     TemporaryBufferAllocation(io::Error),
 }
 
