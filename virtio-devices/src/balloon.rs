@@ -28,6 +28,7 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc, Arc, Barrier, Mutex,
 };
+use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_queue::{Queue, QueueT};
@@ -62,35 +63,35 @@ const VIRTIO_BALLOON_F_DEFLATE_ON_OOM: u64 = 2;
 // pages.
 const VIRTIO_BALLOON_F_REPORTING: u64 = 5;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
-    // Guest gave us bad memory addresses.
+    #[error("Guest gave us bad memory addresses.: {0}")]
     GuestMemory(GuestMemoryError),
-    // Guest gave us a write only descriptor that protocol says to read from.
+    #[error("Guest gave us a write only descriptor that protocol says to read from.")]
     UnexpectedWriteOnlyDescriptor,
-    // Guest sent us invalid request.
+    #[error("Guest sent us invalid request.")]
     InvalidRequest,
-    // Fallocate fail.
+    #[error("Fallocate fail.: {0}")]
     FallocateFail(std::io::Error),
-    // Madvise fail.
+    #[error("Madvise fail.: {0}")]
     MadviseFail(std::io::Error),
-    // Failed to EventFd write.
+    #[error("Failed to EventFd write.: {0}")]
     EventFdWriteFail(std::io::Error),
-    // Failed to EventFd try_clone.
+    #[error("Failed to EventFd try_clone.: {0}")]
     EventFdTryCloneFail(std::io::Error),
-    // Failed to MpscRecv.
+    #[error("Failed to MpscRecv.: {0}")]
     MpscRecvFail(mpsc::RecvError),
-    // Resize invalid argument
+    #[error("Resize invalid argument: {0}")]
     ResizeInval(String),
-    // Invalid queue index
+    #[error("Invalid queue index: {0}")]
     InvalidQueueIndex(usize),
-    // Fail tp signal
+    #[error("Fail tp signal: {0}")]
     FailedSignal(io::Error),
-    /// Descriptor chain is too short
+    #[error("Descriptor chain is too short")]
     DescriptorChainTooShort,
-    /// Failed adding used index
+    #[error("Failed adding used index: {0}")]
     QueueAddUsed(virtio_queue::Error),
-    /// Failed creating an iterator over the queue
+    #[error("Failed creating an iterator over the queue: {0}")]
     QueueIterator(virtio_queue::Error),
 }
 
