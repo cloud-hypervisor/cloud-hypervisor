@@ -1968,8 +1968,8 @@ const DEVICE_MANAGER_SNAPSHOT_ID: &str = "device-manager";
 mod unit_tests {
     use super::*;
     use config::{
-        CmdlineConfig, ConsoleConfig, ConsoleOutputMode, CpusConfig, HotplugMethod, KernelConfig,
-        MemoryConfig, RngConfig, VmConfig,
+        CmdlineConfig, ConsoleConfig, ConsoleOutputMode, CpusConfig, HotplugMethod, MemoryConfig,
+        PayloadConfig, RngConfig, VmConfig,
     };
 
     fn create_dummy_vmm() -> Vmm {
@@ -2010,13 +2010,15 @@ mod unit_tests {
                 prefault: false,
                 zones: None,
             },
-            kernel: Some(KernelConfig {
-                path: PathBuf::from("/path/to/kernel"),
-            }),
-            initramfs: None,
+            kernel: None,
             cmdline: CmdlineConfig {
-                args: String::from(""),
+                args: String::default(),
             },
+            initramfs: None,
+            payload: Some(PayloadConfig {
+                kernel: Some(PathBuf::from("/path/to/kernel")),
+                ..Default::default()
+            }),
             disks: None,
             net: None,
             rng: RngConfig {
