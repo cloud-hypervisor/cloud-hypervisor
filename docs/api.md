@@ -1,21 +1,21 @@
 - [Cloud Hypervisor API](#cloud-hypervisor-api)
-  * [External API](#external-api)
-    + [REST API](#rest-api)
-      - [Location and availability](#location-and-availability)
-      - [Endpoints](#endpoints)
-		* [Virtual Machine Manager (VMM) Actions](#virtual-machine-manager-vmm-actions)
-		* [Virtual Machine (VM) Actions](#virtual-machine-vm-actions)
-      - [REST API Examples](#rest-api-examples)
-        * [Create a Virtual Machine](#create-a-virtual-machine)
-	    * [Boot a Virtual Machine](#boot-a-virtual-machine)
-        * [Dump a Virtual Machine Information](#dump-a-virtual-machine-information)
-        * [Reboot a Virtual Machine](#reboot-a-virtual-machine)
-        * [Shut a Virtual Machine Down](#shut-a-virtual-machine-down)
-    + [Command Line Interface](#command-line-interface)
-    + [REST API and CLI Architectural Relationship](#rest-api-and-cli-architectural-relationship)
-  * [Internal API](#internal-api)
-    + [Goals and Design](#goals-and-design)
-  * [End to End Example](#end-to-end-example)
+  - [External API](#external-api)
+    - [REST API](#rest-api)
+    - [Location and availability](#location-and-availability)
+    - [Endpoints](#endpoints)
+      - [Virtual Machine Manager (VMM) Actions](#virtual-machine-manager-vmm-actions)
+      - [Virtual Machine (VM) Actions](#virtual-machine-vm-actions)
+    - [REST API Examples](#rest-api-examples)
+      - [Create a Virtual Machine](#create-a-virtual-machine)
+      - [Boot a Virtual Machine](#boot-a-virtual-machine)
+      - [Dump a Virtual Machine Information](#dump-a-virtual-machine-information)
+      - [Reboot a Virtual Machine](#reboot-a-virtual-machine)
+      - [Shut a Virtual Machine Down](#shut-a-virtual-machine-down)
+    - [Command Line Interface](#command-line-interface)
+    - [REST API and CLI Architectural Relationship](#rest-api-and-cli-architectural-relationship)
+  - [Internal API](#internal-api)
+    - [Goals and Design](#goals-and-design)
+  - [End to End Example](#end-to-end-example)
 
 # Cloud Hypervisor API
 
@@ -71,40 +71,40 @@ The Cloud Hypervisor API exposes the following actions through its endpoints:
 
 #### Virtual Machine Manager (VMM) Actions
 
-Action                              | Endpoint        | Request Body | Response Body              | Prerequisites
-------------------------------------|-----------------|--------------|----------------------------|---------------------------
-Check for the REST API availability | `/vmm.ping`     | N/A          | `/schemas/VmmPingResponse` | N/A
-Shut the VMM down                   | `/vmm.shutdown` | N/A          | N/A                        | The VMM is running
+| Action                              | Endpoint        | Request Body | Response Body              | Prerequisites      |
+| ----------------------------------- | --------------- | ------------ | -------------------------- | ------------------ |
+| Check for the REST API availability | `/vmm.ping`     | N/A          | `/schemas/VmmPingResponse` | N/A                |
+| Shut the VMM down                   | `/vmm.shutdown` | N/A          | N/A                        | The VMM is running |
 
 #### Virtual Machine (VM) Actions
 
-Action                             | Endpoint             | Request Body              | Response Body            | Prerequisites
------------------------------------|----------------------|---------------------------|--------------------------|---------------------------
-Create the VM                      | `/vm.create`         | `/schemas/VmConfig`       | N/A                      | The VM is not created yet
-Delete the VM                      | `/vm.delete`         | N/A                       | N/A                      | N/A
-Boot the VM                        | `/vm.boot`           | N/A                       | N/A                      | The VM is created but not booted
-Shut the VM down                   | `/vm.shutdown`       | N/A                       | N/A                      | The VM is booted
-Reboot the VM                      | `/vm.reboot`         | N/A                       | N/A                      | The VM is booted
-Trigger power button of the VM     | `/vm.power-button`   | N/A                       | N/A                      | The VM is booted
-Pause the VM                       | `/vm.pause`          | N/A                       | N/A                      | The VM is booted
-Resume the VM                      | `/vm.resume`         | N/A                       | N/A                      | The VM is paused
-Task a snapshot of the VM          | `/vm.snapshot`       | `/schemas/VmSnapshotConfig`| N/A                     | The VM is paused
-Perform a coredump of the VM       | `/vm.coredump`       | `/schemas/VmCoredumpData` | N/A                      | The VM is paused
-Restore the VM from a snapshot     | `/vm.restore`        | `/schemas/RestoreConfig`  | N/A                      | The VM is created but not booted
-Add/remove CPUs to/from the VM     | `/vm.resize`         | `/schemas/VmResize`       | N/A                      | The VM is booted
-Add/remove memory from the VM      | `/vm.resize`         | `/schemas/VmResize`       | N/A                      | The VM is booted
-Add/remove memory from a zone      | `/vm.resize-zone`    | `/schemas/VmResizeZone`   | N/A                      | The VM is booted
-Dump the VM information            | `/vm.info`           | N/A                       | `/schemas/VmInfo`        | The VM is created
-Add VFIO PCI device to the VM      | `/vm.add-device`     | `/schemas/VmAddDevice`    | `/schemas/PciDeviceInfo` | The VM is booted
-Add disk device to the VM          | `/vm.add-disk`       | `/schemas/DiskConfig`     | `/schemas/PciDeviceInfo` | The VM is booted
-Add fs device to the VM            | `/vm.add-fs`         | `/schemas/FsConfig`       | `/schemas/PciDeviceInfo` | The VM is booted
-Add pmem device to the VM          | `/vm.add-pmem`       | `/schemas/PmemConfig`     | `/schemas/PciDeviceInfo` | The VM is booted
-Add network device to the VM       | `/vm.add-net`        | `/schemas/NetConfig`      | `/schemas/PciDeviceInfo` | The VM is booted
-Add userspace PCI device to the VM | `/vm.add-user-device`| `/schemas/VmAddUserDevice`| `/schemas/PciDeviceInfo` | The VM is booted
-Add vdpa device to the VM          | `/vm.add-vdpa`       | `/schemas/VdpaConfig`     | `/schemas/PciDeviceInfo` | The VM is booted
-Add vsock device to the VM         | `/vm.add-vsock`      | `/schemas/VsockConfig`    | `/schemas/PciDeviceInfo` | The VM is booted
-Remove device from the VM          | `/vm.remove-device`  | `/schemas/VmRemoveDevice` | N/A                      | The VM is booted
-Dump the VM counters               | `/vm.counters`       | N/A                       | `/schemas/VmCounters`    | The VM is booted
+| Action                             | Endpoint              | Request Body                | Response Body            | Prerequisites                    |
+| ---------------------------------- | --------------------- | --------------------------- | ------------------------ | -------------------------------- |
+| Create the VM                      | `/vm.create`          | `/schemas/VmConfig`         | N/A                      | The VM is not created yet        |
+| Delete the VM                      | `/vm.delete`          | N/A                         | N/A                      | N/A                              |
+| Boot the VM                        | `/vm.boot`            | N/A                         | N/A                      | The VM is created but not booted |
+| Shut the VM down                   | `/vm.shutdown`        | N/A                         | N/A                      | The VM is booted                 |
+| Reboot the VM                      | `/vm.reboot`          | N/A                         | N/A                      | The VM is booted                 |
+| Trigger power button of the VM     | `/vm.power-button`    | N/A                         | N/A                      | The VM is booted                 |
+| Pause the VM                       | `/vm.pause`           | N/A                         | N/A                      | The VM is booted                 |
+| Resume the VM                      | `/vm.resume`          | N/A                         | N/A                      | The VM is paused                 |
+| Task a snapshot of the VM          | `/vm.snapshot`        | `/schemas/VmSnapshotConfig` | N/A                      | The VM is paused                 |
+| Perform a coredump of the VM       | `/vm.coredump`        | `/schemas/VmCoredumpData`   | N/A                      | The VM is paused                 |
+| Restore the VM from a snapshot     | `/vm.restore`         | `/schemas/RestoreConfig`    | N/A                      | The VM is created but not booted |
+| Add/remove CPUs to/from the VM     | `/vm.resize`          | `/schemas/VmResize`         | N/A                      | The VM is booted                 |
+| Add/remove memory from the VM      | `/vm.resize`          | `/schemas/VmResize`         | N/A                      | The VM is booted                 |
+| Add/remove memory from a zone      | `/vm.resize-zone`     | `/schemas/VmResizeZone`     | N/A                      | The VM is booted                 |
+| Dump the VM information            | `/vm.info`            | N/A                         | `/schemas/VmInfo`        | The VM is created                |
+| Add VFIO PCI device to the VM      | `/vm.add-device`      | `/schemas/VmAddDevice`      | `/schemas/PciDeviceInfo` | The VM is booted                 |
+| Add disk device to the VM          | `/vm.add-disk`        | `/schemas/DiskConfig`       | `/schemas/PciDeviceInfo` | The VM is booted                 |
+| Add fs device to the VM            | `/vm.add-fs`          | `/schemas/FsConfig`         | `/schemas/PciDeviceInfo` | The VM is booted                 |
+| Add pmem device to the VM          | `/vm.add-pmem`        | `/schemas/PmemConfig`       | `/schemas/PciDeviceInfo` | The VM is booted                 |
+| Add network device to the VM       | `/vm.add-net`         | `/schemas/NetConfig`        | `/schemas/PciDeviceInfo` | The VM is booted                 |
+| Add userspace PCI device to the VM | `/vm.add-user-device` | `/schemas/VmAddUserDevice`  | `/schemas/PciDeviceInfo` | The VM is booted                 |
+| Add vdpa device to the VM          | `/vm.add-vdpa`        | `/schemas/VdpaConfig`       | `/schemas/PciDeviceInfo` | The VM is booted                 |
+| Add vsock device to the VM         | `/vm.add-vsock`       | `/schemas/VsockConfig`      | `/schemas/PciDeviceInfo` | The VM is booted                 |
+| Remove device from the VM          | `/vm.remove-device`   | `/schemas/VmRemoveDevice`   | N/A                      | The VM is booted                 |
+| Dump the VM counters               | `/vm.counters`        | N/A                         | `/schemas/VmCounters`    | The VM is booted                 |
 
 ### REST API Examples
 
