@@ -33,6 +33,7 @@ use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
 use std::{collections::HashMap, convert::TryInto};
+use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_bindings::bindings::virtio_blk::*;
@@ -53,25 +54,25 @@ const COMPLETION_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
 // New 'wake up' event from the rate limiter
 const RATE_LIMITER_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
-    /// Failed to parse the request.
+    #[error("Failed to parse the request: {0}")]
     RequestParsing(block_util::Error),
-    /// Failed to execute the request.
+    #[error("Failed to execute the request: {0}")]
     RequestExecuting(block_util::ExecuteError),
-    /// Failed to complete the request.
+    #[error("Failed to complete the request: {0}")]
     RequestCompleting(block_util::Error),
-    /// Missing the expected entry in the list of requests.
+    #[error("Missing the expected entry in the list of requests")]
     MissingEntryRequestList,
-    /// The asynchronous request returned with failure.
+    #[error("The asynchronous request returned with failure")]
     AsyncRequestFailure,
-    /// Failed synchronizing the file
+    #[error("Failed synchronizing the file: {0}")]
     Fsync(AsyncIoError),
-    /// Failed adding used index
+    #[error("Failed adding used index: {0}")]
     QueueAddUsed(virtio_queue::Error),
-    /// Failed creating an iterator over the queue
+    #[error("Failed creating an iterator over the queue: {0}")]
     QueueIterator(virtio_queue::Error),
-    /// Failed to update request status
+    #[error("Failed to update request status: {0}")]
     RequestStatus(GuestMemoryError),
 }
 
