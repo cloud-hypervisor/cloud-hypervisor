@@ -20,6 +20,7 @@ extern crate log;
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 use std::io;
+use thiserror::Error;
 
 #[macro_use]
 mod device;
@@ -77,33 +78,23 @@ const VIRTIO_F_ORDER_PLATFORM: u32 = 36;
 const VIRTIO_F_SR_IOV: u32 = 37;
 const VIRTIO_F_NOTIFICATION_DATA: u32 = 38;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum ActivateError {
-    EpollCtl(std::io::Error),
+    #[error("Failed to activate virtio device.")]
     BadActivate,
-    /// Queue number is not correct
-    BadQueueNum,
-    /// Failed to clone Kill event fd
-    CloneKillEventFd,
-    /// Failed to clone exit event fd
+    #[error("Failed to clone exit event fd: {0}")]
     CloneExitEventFd(std::io::Error),
-    // Failed to spawn thread
+    #[error("Failed to spawn thread: {0}")]
     ThreadSpawn(std::io::Error),
-    /// Failed to create Vhost-user interrupt eventfd
-    VhostIrqCreate,
-    /// Failed to setup vhost-user-fs daemon.
+    #[error("Failed to setup vhost-user-fs daemon: {0}")]
     VhostUserFsSetup(vhost_user::Error),
-    /// Failed to setup vhost-user-net daemon.
-    VhostUserNetSetup(vhost_user::Error),
-    /// Failed to setup vhost-user-blk daemon.
+    #[error("Failed to setup vhost-user-blk daemon: {0}")]
     VhostUserBlkSetup(vhost_user::Error),
-    /// Failed to reset vhost-user daemon.
-    VhostUserReset(vhost_user::Error),
-    /// Cannot create seccomp filter
+    #[error("Failed to create seccomp filter: {0}")]
     CreateSeccompFilter(seccompiler::Error),
-    /// Cannot create rate limiter
+    #[error("Failed to create rate limiter: {0}")]
     CreateRateLimiter(std::io::Error),
-    /// Failed activating the vDPA device
+    #[error("Failed to activate the vDPA device: {0}")]
     ActivateVdpa(vdpa::Error),
 }
 
@@ -111,17 +102,23 @@ pub type ActivateResult = std::result::Result<(), ActivateError>;
 
 pub type DeviceEventT = u16;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
+    #[error("Failed to single used queue: {0}")]
     FailedSignalingUsedQueue(io::Error),
+    #[error("I/O Error: {0}")]
     IoError(io::Error),
-    VdpaUpdateMemory(vdpa::Error),
+    #[error("Failed to update memory vhost-user: {0}")]
     VhostUserUpdateMemory(vhost_user::Error),
+    #[error("Failed to add memory region vhost-user: {0}")]
     VhostUserAddMemoryRegion(vhost_user::Error),
+    #[error("Failed to set shared memory region.")]
     SetShmRegionsNotSupported,
+    #[error("Failed to process net queue: {0}")]
     NetQueuePair(::net_util::NetQueuePairError),
-    ApplySeccompFilter(seccompiler::Error),
+    #[error("Failed to : {0}")]
     QueueAddUsed(virtio_queue::Error),
+    #[error("Failed to : {0}")]
     QueueIterator(virtio_queue::Error),
 }
 
