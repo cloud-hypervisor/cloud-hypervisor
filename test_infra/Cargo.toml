@@ -7,7 +7,7 @@ edition = "2021"
 [dependencies]
 dirs = "4.0.0"
 epoll = "4.3.1"
-libc = "0.2.127"
+libc = "0.2.129"
 once_cell = "1.13.0"
 ssh2 = { version = "0.9.3", features = ["vendored-openssl"] }
 vmm-sys-util = "0.10.0"
