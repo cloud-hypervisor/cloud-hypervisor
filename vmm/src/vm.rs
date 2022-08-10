@@ -494,12 +494,19 @@ impl Vm {
         restoring: bool,
         timestamp: Instant,
     ) -> Result<Self> {
+        let boot_id_list = config
+            .lock()
+            .unwrap()
+            .validate()
+            .map_err(Error::ConfigValidation)?;
+
         let kernel = config
             .lock()
             .unwrap()
-            .kernel
+            .payload
             .as_ref()
-            .map(|k| File::open(&k.path))
+            .map(|p| p.kernel.as_ref().map(File::open))
+            .unwrap_or_default()
             .transpose()
             .map_err(Error::KernelFile)?;
 
@@ -509,12 +516,6 @@ impl Vm {
         } else {
             None
         };
-
-        let boot_id_list = config
-            .lock()
-            .unwrap()
-            .validate()
-            .map_err(Error::ConfigValidation)?;
 
         info!("Booting VM from config: {:?}", &config);
 
@@ -593,9 +594,10 @@ impl Vm {
         let initramfs = config
             .lock()
             .unwrap()
-            .initramfs
+            .payload
             .as_ref()
-            .map(|i| File::open(&i.path))
+            .map(|p| p.initramfs.as_ref().map(File::open))
+            .unwrap_or_default()
             .transpose()
             .map_err(Error::InitramfsFile)?;
 
@@ -932,9 +934,16 @@ impl Vm {
         #[cfg(target_arch = "aarch64")] device_manager: &Arc<Mutex<DeviceManager>>,
     ) -> Result<Cmdline> {
         let mut cmdline = Cmdline::new(arch::CMDLINE_MAX_SIZE);
-        cmdline
-            .insert_str(&config.lock().unwrap().cmdline.args)
-            .map_err(Error::CmdLineInsertStr)?;
+        if let Some(s) = config
+            .lock()
+            .unwrap()
+            .payload
+            .as_ref()
+            .map(|p| p.cmdline.as_ref())
+            .unwrap_or_default()
+        {
+            cmdline.insert_str(s).map_err(Error::CmdLineInsertStr)?;
+        }
 
         #[cfg(target_arch = "aarch64")]
         for entry in device_manager.lock().unwrap().cmdline_additions() {

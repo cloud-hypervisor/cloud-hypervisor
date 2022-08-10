@@ -2248,6 +2248,16 @@ impl RestoreConfig {
     }
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PayloadConfig {
+    #[serde(default)]
+    pub kernel: Option<PathBuf>,
+    #[serde(default)]
+    pub cmdline: Option<String>,
+    #[serde(default)]
+    pub initramfs: Option<PathBuf>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct VmConfig {
     #[serde(default)]
@@ -2259,6 +2269,8 @@ pub struct VmConfig {
     pub initramfs: Option<InitramfsConfig>,
     #[serde(default)]
     pub cmdline: CmdlineConfig,
+    #[serde(default)]
+    pub payload: Option<PayloadConfig>,
     pub disks: Option<Vec<DiskConfig>>,
     pub net: Option<Vec<NetConfig>>,
     #[serde(default)]
@@ -2312,13 +2324,28 @@ impl VmConfig {
     pub fn validate(&mut self) -> ValidationResult<BTreeSet<String>> {
         let mut id_list = BTreeSet::new();
 
+        if self.kernel.is_some() {
+            warn!("The \"VmConfig\" members \"kernel\", \"cmdline\" and \"initramfs\" are deprecated. Use \"payload\" member instead.");
+            self.payload = Some(PayloadConfig {
+                kernel: self.kernel.take().map(|k| k.path),
+                cmdline: if self.cmdline.args.is_empty() {
+                    None
+                } else {
+                    Some(self.cmdline.args.drain(..).collect())
+                },
+                initramfs: self.initramfs.take().map(|i| i.path),
+            })
+        }
+
         #[cfg(not(feature = "tdx"))]
-        self.kernel.as_ref().ok_or(ValidationError::KernelMissing)?;
+        self.payload
+            .as_ref()
+            .ok_or(ValidationError::KernelMissing)?;
 
         #[cfg(feature = "tdx")]
         {
             let tdx_enabled = self.tdx.is_some();
-            if !tdx_enabled && self.kernel.is_none() {
+            if !tdx_enabled && self.payload.is_none() {
                 return Err(ValidationError::KernelMissing);
             }
             if tdx_enabled && (self.cpus.max_vcpus != self.cpus.boot_vcpus) {
@@ -2644,19 +2671,15 @@ impl VmConfig {
             numa = Some(numa_config_list);
         }
 
-        let mut kernel: Option<KernelConfig> = None;
-        if let Some(k) = vm_params.kernel {
-            kernel = Some(KernelConfig {
-                path: PathBuf::from(k),
-            });
-        }
-
-        let mut initramfs: Option<InitramfsConfig> = None;
-        if let Some(k) = vm_params.initramfs {
-            initramfs = Some(InitramfsConfig {
-                path: PathBuf::from(k),
-            });
-        }
+        let payload = if vm_params.kernel.is_some() {
+            Some(PayloadConfig {
+                kernel: vm_params.kernel.map(PathBuf::from),
+                initramfs: vm_params.initramfs.map(PathBuf::from),
+                cmdline: vm_params.cmdline.map(|s| s.to_string()),
+            })
+        } else {
+            None
+        };
 
         #[cfg(feature = "tdx")]
         let tdx = vm_params.tdx.map(TdxConfig::parse).transpose()?;
@@ -2667,9 +2690,10 @@ impl VmConfig {
         let mut config = VmConfig {
             cpus: CpusConfig::parse(vm_params.cpus)?,
             memory: MemoryConfig::parse(vm_params.memory, vm_params.memory_zones)?,
-            kernel,
-            initramfs,
-            cmdline: CmdlineConfig::parse(vm_params.cmdline)?,
+            kernel: None,
+            initramfs: None,
+            cmdline: CmdlineConfig::default(),
+            payload,
             disks,
             net,
             rng,
@@ -3257,13 +3281,15 @@ mod tests {
                 prefault: false,
                 zones: None,
             },
-            kernel: Some(KernelConfig {
-                path: PathBuf::from("/path/to/kernel"),
-            }),
-            initramfs: None,
+            kernel: None,
             cmdline: CmdlineConfig {
-                args: String::from(""),
+                args: String::default(),
             },
+            initramfs: None,
+            payload: Some(PayloadConfig {
+                kernel: Some(PathBuf::from("/path/to/kernel")),
+                ..Default::default()
+            }),
             disks: None,
             net: None,
             rng: RngConfig {
@@ -3310,7 +3336,7 @@ mod tests {
         );
 
         let mut invalid_config = valid_config.clone();
-        invalid_config.kernel = None;
+        invalid_config.payload = None;
         assert_eq!(
             invalid_config.validate(),
             Err(ValidationError::KernelMissing)
