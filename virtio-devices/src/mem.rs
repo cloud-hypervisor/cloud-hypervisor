@@ -32,6 +32,7 @@ use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex};
+use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_queue::{DescriptorChain, Queue, QueueT};
@@ -103,41 +104,41 @@ const QUEUE_AVAIL_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
 // Virtio features
 const VIRTIO_MEM_F_ACPI_PXM: u8 = 0;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
-    // Guest gave us bad memory addresses.
+    #[error("Guest gave us bad memory addresses: {0}")]
     GuestMemory(GuestMemoryError),
-    // Guest gave us a write only descriptor that protocol says to read from.
+    #[error("Guest gave us a write only descriptor that protocol says to read from.")]
     UnexpectedWriteOnlyDescriptor,
-    // Guest gave us a read only descriptor that protocol says to write to.
+    #[error("Guest gave us a read only descriptor that protocol says to write to.")]
     UnexpectedReadOnlyDescriptor,
-    // Guest gave us too few descriptors in a descriptor chain.
+    #[error("Guest gave us too few descriptors in a descriptor chain.")]
     DescriptorChainTooShort,
-    // Guest gave us a buffer that was too short to use.
+    #[error("Guest gave us a buffer that was too short to use.")]
     BufferLengthTooSmall,
-    // Guest sent us invalid request.
+    #[error("Guest sent us invalid request.")]
     InvalidRequest,
-    // Failed to EventFd write.
+    #[error("Failed to EventFd write: {0}")]
     EventFdWriteFail(std::io::Error),
-    // Failed to EventFd try_clone.
+    #[error("Failed to EventFd try_clone: {0}")]
     EventFdTryCloneFail(std::io::Error),
-    // Failed to MpscRecv.
+    #[error("Failed to MpscRecv: {0}")]
     MpscRecvFail(mpsc::RecvError),
-    // Resize invalid argument
+    #[error("Resize invalid argument: {0}")]
     ResizeError(anyhow::Error),
-    // Fail to resize trigger
+    #[error("Fail to resize trigger: {0}")]
     ResizeTriggerFail(DeviceError),
-    // Invalid configuration
+    #[error("Invalid configuration: {0}")]
     ValidateError(anyhow::Error),
-    // Failed discarding memory range
+    #[error("Failed discarding memory range: {0}")]
     DiscardMemoryRange(std::io::Error),
-    // Failed DMA mapping.
+    #[error("Failed DMA mapping: {0}")]
     DmaMap(std::io::Error),
-    // Failed DMA unmapping.
+    #[error("Failed DMA unmapping: {0}")]
     DmaUnmap(std::io::Error),
-    // Invalid DMA mapping handler
+    #[error("Invalid DMA mapping handler.")]
     InvalidDmaMappingHandler,
-    // Not activated by the guest
+    #[error("Not activated by the guest.")]
     NotActivatedByGuest,
 }
 
