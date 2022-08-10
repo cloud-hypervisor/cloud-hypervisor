@@ -1242,15 +1242,24 @@ impl<'a> GuestCommand<'a> {
 
             let fd = child.stdout.as_ref().unwrap().as_raw_fd();
             let pipesize = unsafe { libc::fcntl(fd, libc::F_SETPIPE_SZ, PIPE_SIZE) };
+            if pipesize == -1 {
+                return Err(io::Error::last_os_error());
+            }
             let fd = child.stderr.as_ref().unwrap().as_raw_fd();
             let pipesize1 = unsafe { libc::fcntl(fd, libc::F_SETPIPE_SZ, PIPE_SIZE) };
+            if pipesize1 == -1 {
+                return Err(io::Error::last_os_error());
+            }
 
             if pipesize >= PIPE_SIZE && pipesize1 >= PIPE_SIZE {
                 Ok(child)
             } else {
                 Err(std::io::Error::new(
                     std::io::ErrorKind::Other,
-                    "resizing pipe w/ 'fnctl' failed!",
+                    format!(
+                        "resizing pipe w/ 'fnctl' failed: stdout pipesize {}, stderr pipesize {}",
+                        pipesize, pipesize1
+                    ),
                 ))
             }
         } else {
