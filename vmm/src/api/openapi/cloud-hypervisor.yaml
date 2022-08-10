@@ -499,21 +499,28 @@ components:
           type: string
       description: Information about a PCI device
 
+    PayloadConfig:
+      type: object
+      properties:
+        kernel:
+          type: string
+        cmdline:
+          type: string
+        initramfs:
+          type: string
+      description: Payloads to boot in guest
+
     VmConfig:
       required:
-        - kernel
+        - payload
       type: object
       properties:
         cpus:
           $ref: "#/components/schemas/CpusConfig"
         memory:
           $ref: "#/components/schemas/MemoryConfig"
-        kernel:
-          $ref: "#/components/schemas/KernelConfig"
-        initramfs:
-          $ref: "#/components/schemas/InitramfsConfig"
-        cmdline:
-          $ref: "#/components/schemas/CmdLineConfig"
+        payload:
+          $ref: "#/components/schemas/PayloadConfig"
         disks:
           type: array
           items:
@@ -720,31 +727,6 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/MemoryZoneConfig"
-
-    KernelConfig:
-      required:
-        - path
-      type: object
-      properties:
-        path:
-          type: string
-
-    InitramfsConfig:
-      nullable: true
-      required:
-        - path
-      type: object
-      properties:
-        path:
-          type: string
-
-    CmdLineConfig:
-      required:
-        - args
-      type: object
-      properties:
-        args:
-          type: string
 
     TokenBucket:
       required:
