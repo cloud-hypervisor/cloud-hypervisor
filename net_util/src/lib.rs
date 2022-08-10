@@ -18,6 +18,7 @@ use std::io::Error as IoError;
 use std::os::raw::c_uint;
 use std::os::unix::io::{FromRawFd, RawFd};
 use std::{io, mem, net};
+use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_bindings::bindings::virtio_net::{
@@ -35,9 +36,9 @@ pub use open_tap::{open_tap, Error as OpenTapError};
 pub use queue_pair::{NetCounters, NetQueuePair, NetQueuePairError, RxVirtio, TxVirtio};
 pub use tap::{Error as TapError, Tap};
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
-    /// Failed to create a socket.
+    #[error("Failed to create a socket: {0}")]
     CreateSocket(IoError),
 }
 

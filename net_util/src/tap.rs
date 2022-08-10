@@ -15,24 +15,26 @@ use std::io::{Error as IoError, Read, Result as IoResult, Write};
 use std::net;
 use std::os::raw::*;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use thiserror::Error;
 use vmm_sys_util::ioctl::{ioctl_with_mut_ref, ioctl_with_ref, ioctl_with_val};
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
-    /// Couldn't open /dev/net/tun.
+    #[error("Couldn't open /dev/net/tun: {0}")]
     OpenTun(IoError),
-    /// Unable to configure tap interface.
+    #[error("Unable to configure tap interface: {0}")]
     ConfigureTap(IoError),
-    /// Unable to retrieve features.
+    #[error("Unable to retrieve features: {0}")]
     GetFeatures(IoError),
-    /// Missing multiqueue support in the kernel.
+    #[error("Missing multiqueue support in the kernel.")]
     MultiQueueKernelSupport,
-    /// ioctl failed.
+    #[error("ioctl failed: {0}")]
     IoctlError(IoError),
-    /// Failed to create a socket.
+    #[error("Failed to create a socket: {0}")]
     NetUtil(NetUtilError),
+    #[error("Invalid interface name.")]
     InvalidIfname,
-    /// Error parsing MAC data
+    #[error("Error parsing MAC data: {0}")]
     MacParsing(IoError),
 }
 

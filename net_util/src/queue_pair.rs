@@ -10,6 +10,7 @@ use std::num::Wrapping;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use thiserror::Error;
 use virtio_queue::{Queue, QueueOwnedT, QueueT};
 use vm_memory::{Bytes, GuestMemory};
 use vm_virtio::{AccessPlatform, Translatable};
@@ -285,31 +286,31 @@ pub struct NetCounters {
     pub rx_frames: Arc<AtomicU64>,
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum NetQueuePairError {
-    /// No memory configured
+    #[error("No memory configured.")]
     NoMemoryConfigured,
-    /// Error registering listener
+    #[error("Error registering listener: {0}")]
     RegisterListener(io::Error),
-    /// Error unregistering listener
+    #[error("Error unregistering listener: {0}")]
     UnregisterListener(io::Error),
-    /// Error writing to the TAP device
+    #[error("Error writing to the TAP device: {0}")]
     WriteTap(io::Error),
-    /// Error reading from the TAP device
+    #[error("Error reading from the TAP device: {0}")]
     ReadTap(io::Error),
-    /// Error related to guest memory
+    #[error("Error related to guest memory: {0}")]
     GuestMemory(vm_memory::GuestMemoryError),
-    /// Returned an error while iterating through the queue
+    #[error("Returned an error while iterating through the queue: {0}")]
     QueueIteratorFailed(virtio_queue::Error),
-    /// Descriptor chain is too short
+    #[error("Descriptor chain is too short.")]
     DescriptorChainTooShort,
-    /// Descriptor chain does not contain valid descriptors
+    #[error("Descriptor chain does not contain valid descriptors.")]
     DescriptorChainInvalid,
-    /// Failed to determine if queue needed notification
+    #[error("Failed to determine if queue needed notification: {0}")]
     QueueNeedsNotification(virtio_queue::Error),
-    /// Failed to enable notification on the queue
+    #[error("Failed to enable notification on the queue: {0}")]
     QueueEnableNotification(virtio_queue::Error),
-    /// Failed to add used index to the queue
+    #[error("Failed to add used index to the queue: {0}")]
     QueueAddUsed(virtio_queue::Error),
 }
 
