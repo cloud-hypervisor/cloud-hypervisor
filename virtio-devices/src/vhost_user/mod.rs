@@ -12,6 +12,7 @@ use std::io;
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::sync::{atomic::AtomicBool, Arc, Barrier, Mutex};
+use thiserror::Error;
 use versionize::Versionize;
 use vhost::vhost_user::message::{
     VhostUserInflight, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
@@ -38,109 +39,109 @@ pub use self::fs::*;
 pub use self::net::Net;
 pub use self::vu_common_ctrl::VhostUserConfig;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
-    /// Failed accepting connection.
+    #[error("Failed accepting connection: {0}")]
     AcceptConnection(io::Error),
-    /// Invalid available address.
+    #[error("Invalid available address.")]
     AvailAddress,
-    /// Queue number  is not correct
+    #[error("Queue number  is not correct.")]
     BadQueueNum,
-    /// Failed binding vhost-user socket.
+    #[error("Failed binding vhost-user socket: {0}")]
     BindSocket(io::Error),
-    /// Creating kill eventfd failed.
+    #[error("Creating kill eventfd failed: {0}")]
     CreateKillEventFd(io::Error),
-    /// Cloning kill eventfd failed.
+    #[error("Cloning kill eventfd failed: {0}")]
     CloneKillEventFd(io::Error),
-    /// Invalid descriptor table address.
+    #[error("Invalid descriptor table address.")]
     DescriptorTableAddress,
-    /// Signal used queue failed.
+    #[error("Signal used queue failed: {0}")]
     FailedSignalingUsedQueue(io::Error),
-    /// Failed to read vhost eventfd.
+    #[error("Failed to read vhost eventfd: {0}")]
     MemoryRegions(MmapError),
-    /// Failed removing socket path
+    #[error("Failed removing socket path: {0}")]
     RemoveSocketPath(io::Error),
-    /// Failed to create master.
+    #[error("Failed to create master: {0}")]
     VhostUserCreateMaster(VhostError),
-    /// Failed to open vhost device.
+    #[error("Failed to open vhost device: {0}")]
     VhostUserOpen(VhostError),
-    /// Connection to socket failed.
+    #[error("Connection to socket failed.")]
     VhostUserConnect,
-    /// Get features failed.
+    #[error("Get features failed: {0}")]
     VhostUserGetFeatures(VhostError),
-    /// Get queue max number failed.
+    #[error("Get queue max number failed: {0}")]
     VhostUserGetQueueMaxNum(VhostError),
-    /// Get protocol features failed.
+    #[error("Get protocol features failed: {0}")]
     VhostUserGetProtocolFeatures(VhostError),
-    /// Get vring base failed.
+    #[error("Get vring base failed: {0}")]
     VhostUserGetVringBase(VhostError),
-    /// Vhost-user Backend not support vhost-user protocol.
+    #[error("Vhost-user Backend not support vhost-user protocol.")]
     VhostUserProtocolNotSupport,
-    /// Set owner failed.
+    #[error("Set owner failed: {0}")]
     VhostUserSetOwner(VhostError),
-    /// Reset owner failed.
+    #[error("Reset owner failed: {0}")]
     VhostUserResetOwner(VhostError),
-    /// Set features failed.
+    #[error("Set features failed: {0}")]
     VhostUserSetFeatures(VhostError),
-    /// Set protocol features failed.
+    #[error("Set protocol features failed: {0}")]
     VhostUserSetProtocolFeatures(VhostError),
-    /// Set mem table failed.
+    #[error("Set mem table failed: {0}")]
     VhostUserSetMemTable(VhostError),
-    /// Set vring num failed.
+    #[error("Set vring num failed: {0}")]
     VhostUserSetVringNum(VhostError),
-    /// Set vring addr failed.
+    #[error("Set vring addr failed: {0}")]
     VhostUserSetVringAddr(VhostError),
-    /// Set vring base failed.
+    #[error("Set vring base failed: {0}")]
     VhostUserSetVringBase(VhostError),
-    /// Set vring call failed.
+    #[error("Set vring call failed: {0}")]
     VhostUserSetVringCall(VhostError),
-    /// Set vring kick failed.
+    #[error("Set vring kick failed: {0}")]
     VhostUserSetVringKick(VhostError),
-    /// Set vring enable failed.
+    #[error("Set vring enable failed: {0}")]
     VhostUserSetVringEnable(VhostError),
-    /// Failed to create vhost eventfd.
+    #[error("Failed to create vhost eventfd: {0}")]
     VhostIrqCreate(io::Error),
-    /// Failed to read vhost eventfd.
+    #[error("Failed to read vhost eventfd: {0}")]
     VhostIrqRead(io::Error),
-    /// Failed to read vhost eventfd.
+    #[error("Failed to read vhost eventfd: {0}")]
     VhostUserMemoryRegion(MmapError),
-    /// Failed to create the master request handler from slave.
+    #[error("Failed to create the master request handler from slave: {0}")]
     MasterReqHandlerCreation(vhost::vhost_user::Error),
-    /// Set slave request fd failed.
+    #[error("Set slave request fd failed: {0}")]
     VhostUserSetSlaveRequestFd(vhost::Error),
-    /// Add memory region failed.
+    #[error("Add memory region failed: {0}")]
     VhostUserAddMemReg(VhostError),
-    /// Failed getting the configuration.
+    #[error("Failed getting the configuration: {0}")]
     VhostUserGetConfig(VhostError),
-    /// Failed setting the configuration.
+    #[error("Failed setting the configuration: {0}")]
     VhostUserSetConfig(VhostError),
-    /// Failed getting inflight shm log.
+    #[error("Failed getting inflight shm log: {0}")]
     VhostUserGetInflight(VhostError),
-    /// Failed setting inflight shm log.
+    #[error("Failed setting inflight shm log: {0}")]
     VhostUserSetInflight(VhostError),
-    /// Failed setting the log base.
+    #[error("Failed setting the log base: {0}")]
     VhostUserSetLogBase(VhostError),
-    /// Invalid used address.
+    #[error("Invalid used address.")]
     UsedAddress,
-    /// Invalid features provided from vhost-user backend
+    #[error("Invalid features provided from vhost-user backe.")]
     InvalidFeatures,
-    /// Missing file descriptor for the region.
+    #[error("Missing file descriptor for the region.")]
     MissingRegionFd,
-    /// Missing IrqFd
+    #[error("Missing IrqFd.")]
     MissingIrqFd,
-    /// Failed getting the available index.
+    #[error("Failed getting the available index: {0}")]
     GetAvailableIndex(QueueError),
-    /// Migration is not supported by this vhost-user device.
+    #[error("Migration is not supported by this vhost-user device.")]
     MigrationNotSupported,
-    /// Failed creating memfd.
+    #[error("Failed creating memfd: {0}")]
     MemfdCreate(io::Error),
-    /// Failed truncating the file size to the expected size.
+    #[error("Failed truncating the file size to the expected size: {0}")]
     SetFileSize(io::Error),
-    /// Failed to set the seals on the file.
+    #[error("Failed to set the seals on the file: {0}")]
     SetSeals(io::Error),
-    /// Failed creating new mmap region
+    #[error("Failed creating new mmap region: {0}")]
     NewMmapRegion(MmapRegionError),
-    /// Could not find the shm log region
+    #[error("Could not find the shm log region.")]
     MissingShmLogRegion,
 }
 type Result<T> = std::result::Result<T, Error>;
