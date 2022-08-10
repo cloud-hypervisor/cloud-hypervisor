@@ -32,6 +32,7 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 use std::vec::Vec;
 use std::{collections::HashMap, convert::TryInto};
+use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_bindings::bindings::virtio_net::*;
@@ -138,15 +139,13 @@ pub const RX_RATE_LIMITER_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 5;
 // New 'wake up' event from the tx rate limiter
 pub const TX_RATE_LIMITER_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 6;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
-    /// Failed to open taps.
+    #[error("Failed to open taps: {0}")]
     OpenTap(OpenTapError),
-
-    // Using existing tap
+    #[error("Using existing tap: {0}")]
     TapError(TapError),
-
-    // Error calling dup() on tap fd
+    #[error("Error calling dup() on tap fd: {0}")]
     DuplicateTapFd(std::io::Error),
 }
 
