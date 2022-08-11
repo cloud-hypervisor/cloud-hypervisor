@@ -14,6 +14,8 @@ rust-version = "1.60"
 
 [profile.release]
 lto = true
+codegen-units = 1
+opt-level = "s"
 
 [dependencies]
 anyhow = "1.0.65"
