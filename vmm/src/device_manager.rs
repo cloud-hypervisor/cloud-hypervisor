@@ -1411,6 +1411,10 @@ impl DeviceManager {
 
         #[cfg(target_arch = "x86_64")]
         {
+            let shutdown_pio_address: u16 = 0x600;
+
+            // TODO: Remove the entry for 0x3c0 once all firmwares will have been
+            // updated with the new value.
             self.address_manager
                 .allocator
                 .lock()
@@ -1419,15 +1423,30 @@ impl DeviceManager {
                 .ok_or(DeviceManagerError::AllocateIoPort)?;
 
             self.address_manager
+                .allocator
+                .lock()
+                .unwrap()
+                .allocate_io_addresses(Some(GuestAddress(shutdown_pio_address.into())), 0x8, None)
+                .ok_or(DeviceManagerError::AllocateIoPort)?;
+
+            // TODO: Remove the entry for 0x3c0 once all firmwares will have been
+            // updated with the new value.
+            self.address_manager
                 .io_bus
-                .insert(shutdown_device, 0x3c0, 0x4)
+                .insert(shutdown_device.clone(), 0x3c0, 0x4)
                 .map_err(DeviceManagerError::BusError)?;
+
+            self.address_manager
+                .io_bus
+                .insert(shutdown_device, shutdown_pio_address.into(), 0x4)
+                .map_err(DeviceManagerError::BusError)?;
+
             self.acpi_platform_addresses.sleep_control_reg_address =
-                Some(GenericAddress::io_port_address::<u8>(0x3c0));
+                Some(GenericAddress::io_port_address::<u8>(shutdown_pio_address));
             self.acpi_platform_addresses.sleep_status_reg_address =
-                Some(GenericAddress::io_port_address::<u8>(0x3c0));
+                Some(GenericAddress::io_port_address::<u8>(shutdown_pio_address));
             self.acpi_platform_addresses.reset_reg_address =
-                Some(GenericAddress::io_port_address::<u8>(0x3c0));
+                Some(GenericAddress::io_port_address::<u8>(shutdown_pio_address));
         }
 
         let ged_irq = self
@@ -1476,6 +1495,10 @@ impl DeviceManager {
 
         #[cfg(target_arch = "x86_64")]
         {
+            let pm_timer_pio_address: u16 = 0x608;
+
+            // TODO: Remove the entry for 0xb008 once all firmwares will have been
+            // updated with the new value.
             self.address_manager
                 .allocator
                 .lock()
@@ -1484,12 +1507,26 @@ impl DeviceManager {
                 .ok_or(DeviceManagerError::AllocateIoPort)?;
 
             self.address_manager
+                .allocator
+                .lock()
+                .unwrap()
+                .allocate_io_addresses(Some(GuestAddress(pm_timer_pio_address.into())), 0x4, None)
+                .ok_or(DeviceManagerError::AllocateIoPort)?;
+
+            // TODO: Remove the entry for 0xb008 once all firmwares will have been
+            // updated with the new value.
+            self.address_manager
                 .io_bus
-                .insert(pm_timer_device, 0xb008, 0x4)
+                .insert(pm_timer_device.clone(), 0xb008, 0x4)
+                .map_err(DeviceManagerError::BusError)?;
+
+            self.address_manager
+                .io_bus
+                .insert(pm_timer_device, pm_timer_pio_address.into(), 0x4)
                 .map_err(DeviceManagerError::BusError)?;
 
             self.acpi_platform_addresses.pm_timer_address =
-                Some(GenericAddress::io_port_address::<u32>(0xb008));
+                Some(GenericAddress::io_port_address::<u32>(pm_timer_pio_address));
         }
 
         Ok(Some(ged_device))
