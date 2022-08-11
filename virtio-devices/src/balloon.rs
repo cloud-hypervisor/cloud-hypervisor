@@ -343,33 +343,26 @@ impl EpollHelperHandler for BalloonEpollHandler {
                     EpollHelperError::HandleEvent(anyhow!("Failed to get resize event: {:?}", e))
                 })?;
 
-                let mut signal_error = false;
-                let r = {
-                    let mut config = self.config.lock().unwrap();
-                    config.num_pages =
-                        (self.resize_receiver.get_size() >> VIRTIO_BALLOON_PFN_SHIFT) as u32;
-                    if let Err(e) = self.signal(VirtioInterruptType::Config) {
-                        signal_error = true;
-                        Err(e)
-                    } else {
-                        Ok(())
-                    }
-                };
-                let ret_err = anyhow!("{:?}", r);
-                if let Err(e) = &r {
-                    // This error will send back to resize caller.
-                    error!("Handle resize event get error: {:?}", e);
-                }
+                let mut config = self.config.lock().unwrap();
+                config.num_pages =
+                    (self.resize_receiver.get_size() >> VIRTIO_BALLOON_PFN_SHIFT) as u32;
+                self.signal(VirtioInterruptType::Config).map_err(|e| {
+                    let ret_err = anyhow!("Handle resize event get error: {:?}", e);
+                    self.resize_receiver
+                        .send(Err(e))
+                        .map_err(|e| {
+                            error!("Sending \"resize\" generated error: {:?}", e);
+                        })
+                        .ok();
+                    EpollHelperError::HandleEvent(ret_err)
+                })?;
 
-                if let Err(e) = self.resize_receiver.send(r) {
-                    return Err(EpollHelperError::HandleEvent(anyhow!(
+                self.resize_receiver.send(Ok(())).map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!(
                         "Sending \"resize\" generated error: {:?}",
                         e
-                    )));
-                }
-                if signal_error {
-                    return Err(EpollHelperError::HandleEvent(ret_err));
-                }
+                    ))
+                })?;
             }
             INFLATE_QUEUE_EVENT => {
                 self.inflate_queue_evt.read().map_err(|e| {
