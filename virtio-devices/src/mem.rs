@@ -736,30 +736,35 @@ impl EpollHelperHandler for MemEpollHandler {
                     EpollHelperError::HandleEvent(anyhow!("Failed to get resize event: {:?}", e))
                 })?;
 
-                let size = self.resize.size();
                 let mut config = self.config.lock().unwrap();
-                let mut signal_error = false;
-                let mut r = config.resize(size);
-                r = match r {
-                    Err(e) => Err(e),
-                    _ => match self.signal(VirtioInterruptType::Config) {
-                        Err(e) => {
-                            signal_error = true;
-                            Err(Error::ResizeTriggerFail(e))
-                        }
-                        _ => Ok(()),
-                    },
-                };
-                let ret_err = anyhow!("{:?}", r);
-                if let Err(e) = self.resize.send(r) {
-                    return Err(EpollHelperError::HandleEvent(anyhow!(
-                        "Sending \"resize\" response: {:?}",
-                        e
-                    )));
+                if let Err(e) = config.resize(self.resize.size()) {
+                    self.resize.send(Err(e)).map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Sending \"resize\" response: {:?}",
+                            e
+                        ))
+                    })?;
+                    return Ok(());
                 }
-                if signal_error {
-                    return Err(EpollHelperError::HandleEvent(anyhow!(ret_err)));
-                }
+
+                self.signal(VirtioInterruptType::Config).map_err(|e| {
+                    let e = Error::ResizeTriggerFail(e);
+                    let ret_err = anyhow!("{:?}", e);
+                    self.resize
+                        .send(Err(e))
+                        .map_err(|e| {
+                            EpollHelperError::HandleEvent(anyhow!(
+                                "Sending \"resize\" response: {:?}",
+                                e
+                            ))
+                        })
+                        .ok();
+                    EpollHelperError::HandleEvent(ret_err)
+                })?;
+
+                self.resize.send(Ok(())).map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!("Sending \"resize\" response: {:?}", e))
+                })?;
             }
             QUEUE_AVAIL_EVENT => {
                 self.queue_evt.read().map_err(|e| {
