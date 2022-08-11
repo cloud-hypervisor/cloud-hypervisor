@@ -30,6 +30,11 @@ jobs:
           override: true
           components: rustfmt, clippy
 
+      - name: Debug Check (default features)
+        run: |
+          git rev-list origin/main..$GITHUB_SHA | xargs -t -I % sh -c 'git checkout %; cargo check --tests --all --target=${{ matrix.target }}'
+          git checkout $GITHUB_SHA
+
       - name: Formatting (rustfmt)
         run: cargo fmt -- --check
 
