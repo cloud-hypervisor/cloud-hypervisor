@@ -2048,15 +2048,15 @@ impl Vm {
         if self.config.lock().unwrap().is_tdx_enabled() {
             return None;
         }
-
         let mem = self.memory_manager.lock().unwrap().guest_memory().memory();
-
+        let tpm_enabled = self.config.lock().unwrap().tpm.is_some();
         let rsdp_addr = crate::acpi::create_acpi_tables(
             &mem,
             &self.device_manager,
             &self.cpu_manager,
             &self.memory_manager,
             &self.numa_nodes,
+            tpm_enabled,
         );
         info!("Created ACPI tables: rsdp_addr = 0x{:x}", rsdp_addr.0);
 
