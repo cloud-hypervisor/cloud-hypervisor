@@ -4145,6 +4145,28 @@ fn numa_node_id_from_memory_zone_id(numa_nodes: &NumaNodes, memory_zone_id: &str
 
     None
 }
+struct VTPMDevice {}
+
+impl Aml for VTPMDevice {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        aml::Device::new(
+            "TPM2".into(),
+            vec![
+                &aml::Name::new("_HID".into(), &"MSFT0101"),
+                &aml::Name::new("_STA".into(), &(0xF as usize)),
+                &aml::Name::new(
+                    "_CRS".into(),
+                    &aml::ResourceTemplate::new(vec![&aml::Memory32Fixed::new(
+                        true,
+                        layout::VTPM_START.0 as u32,
+                        layout::VTPM_SIZE as u32,
+                    )]),
+                 ),
+            ]
+        ).to_aml_bytes()
+    }
+}
+
 
 impl Aml for DeviceManager {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
@@ -4306,6 +4328,11 @@ impl Aml for DeviceManager {
             ],
         )
         .append_aml_bytes(bytes);
+
+         // // Add vtpm device:
+         let vtpm_acpi = VTPMDevice {};
+         let vtpm_dsdt_data = vtpm_acpi.to_aml_bytes();
+         bytes.extend_from_slice(vtpm_dsdt_data.as_slice());
 
         self.ged_notification_device
             .as_ref()

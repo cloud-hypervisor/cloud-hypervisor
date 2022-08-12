@@ -260,6 +260,18 @@ fn create_mcfg_table(pci_segments: &[PciSegment]) -> Sdt {
     mcfg
 }
 
+fn create_tpm2_table() -> Sdt {
+    let mut tpm = Sdt::new(*b"TPM2", 52, 3, *b"CLOUDH", *b"CHTPM2  ", 1);
+
+    tpm.write(36, 0 as u16); //Platform Class
+    tpm.write(38, 0 as u16); // Reserved Space
+    tpm.write(40, 0xfed4_0040 as u64); // Address of Control Area
+    tpm.write(48, 7 as u32); //Start Method
+
+    tpm.update_checksum();
+    tpm
+}
+
 fn create_srat_table(numa_nodes: &NumaNodes) -> Sdt {
     let mut srat = Sdt::new(*b"SRAT", 36, 3, *b"CLOUDH", *b"CHSRAT  ", 1);
     // SRAT reserved 12 bytes
@@ -716,6 +728,18 @@ pub fn create_acpi_tables(
         prev_tbl_len = dbg2.len() as u64;
         prev_tbl_off = dbg2_offset;
     }
+
+    // TPM2 Table
+    let tpm2 = create_tpm2_table();
+    let tpm2_offset = prev_tbl_off.checked_add(prev_tbl_len as u64).unwrap();
+    guest_mem
+        .write_slice(tpm2.as_slice(), tpm2_offset)
+        .expect("Error writing TPM2 table");
+    tables.push(tpm2_offset.0);
+
+
+    prev_tbl_len = tpm2.len() as u64;
+    prev_tbl_off = tpm2_offset;
 
     // SRAT and SLIT
     // Only created if the NUMA nodes list is not empty.
