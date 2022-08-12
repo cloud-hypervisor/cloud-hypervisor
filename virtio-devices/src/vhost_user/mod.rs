@@ -256,30 +256,39 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
 }
 
 impl<S: VhostUserMasterReqHandler> EpollHelperHandler for VhostUserEpollHandler<S> {
-    fn handle_event(&mut self, helper: &mut EpollHelper, event: &epoll::Event) -> bool {
+    fn handle_event(
+        &mut self,
+        helper: &mut EpollHelper,
+        event: &epoll::Event,
+    ) -> std::result::Result<(), EpollHelperError> {
         let ev_type = event.data as u16;
         match ev_type {
             HUP_CONNECTION_EVENT => {
-                if let Err(e) = self.reconnect(helper) {
-                    error!("failed to reconnect vhost-user backend: {:?}", e);
-                    return true;
-                }
+                self.reconnect(helper).map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!(
+                        "failed to reconnect vhost-user backend: {:?}",
+                        e
+                    ))
+                })?;
             }
             SLAVE_REQ_EVENT => {
                 if let Some(slave_req_handler) = self.slave_req_handler.as_mut() {
-                    if let Err(e) = slave_req_handler.handle_request() {
-                        error!("Failed to handle request from vhost-user backend: {:?}", e);
-                        return true;
-                    }
+                    slave_req_handler.handle_request().map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to handle request from vhost-user backend: {:?}",
+                            e
+                        ))
+                    })?;
                 }
             }
             _ => {
-                error!("Unknown event for vhost-user thread");
-                return true;
+                return Err(EpollHelperError::HandleEvent(anyhow!(
+                    "Unknown event for vhost-user thread"
+                )));
             }
         }
 
-        false
+        Ok(())
     }
 }
 

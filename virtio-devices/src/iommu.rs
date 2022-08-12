@@ -11,6 +11,7 @@ use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::GuestMemoryMmap;
 use crate::{DmaRemapping, VirtioInterrupt, VirtioInterruptType};
+use anyhow::anyhow;
 use seccompiler::SeccompAction;
 use std::collections::BTreeMap;
 use std::fmt::{self, Display};
@@ -725,37 +726,49 @@ impl IommuEpollHandler {
 }
 
 impl EpollHelperHandler for IommuEpollHandler {
-    fn handle_event(&mut self, _helper: &mut EpollHelper, event: &epoll::Event) -> bool {
+    fn handle_event(
+        &mut self,
+        _helper: &mut EpollHelper,
+        event: &epoll::Event,
+    ) -> result::Result<(), EpollHelperError> {
         let ev_type = event.data as u16;
         match ev_type {
             REQUEST_Q_EVENT => {
-                if let Err(e) = self.queue_evts[0].read() {
-                    error!("Failed to get queue event: {:?}", e);
-                    return true;
-                } else if self.request_queue() {
-                    if let Err(e) = self.signal_used_queue(0) {
-                        error!("Failed to signal used queue: {:?}", e);
-                        return true;
-                    }
+                self.queue_evts[0].read().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
+                })?;
+
+                if self.request_queue() {
+                    self.signal_used_queue(0).map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to signal used queue: {:?}",
+                            e
+                        ))
+                    })?;
                 }
             }
             EVENT_Q_EVENT => {
-                if let Err(e) = self.queue_evts[1].read() {
-                    error!("Failed to get queue event: {:?}", e);
-                    return true;
-                } else if self.event_queue() {
-                    if let Err(e) = self.signal_used_queue(1) {
-                        error!("Failed to signal used queue: {:?}", e);
-                        return true;
-                    }
+                self.queue_evts[1].read().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
+                })?;
+
+                if self.event_queue() {
+                    self.signal_used_queue(1).map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to signal used queue: {:?}",
+                            e
+                        ))
+                    })?;
                 }
             }
             _ => {
-                error!("Unexpected event: {}", ev_type);
-                return true;
+                return Err(EpollHelperError::HandleEvent(anyhow!(
+                    "Unexpected event: {}",
+                    ev_type
+                )));
             }
         }
-        false
+        Ok(())
     }
 }
 

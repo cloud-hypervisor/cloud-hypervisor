@@ -15,6 +15,7 @@ use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::GuestMemoryMmap;
 use crate::VirtioInterrupt;
+use anyhow::anyhow;
 use net_util::CtrlQueue;
 use net_util::{
     build_net_config_space, build_net_config_space_with_mq, open_tap,
@@ -84,44 +85,55 @@ impl NetCtrlEpollHandler {
 }
 
 impl EpollHelperHandler for NetCtrlEpollHandler {
-    fn handle_event(&mut self, _helper: &mut EpollHelper, event: &epoll::Event) -> bool {
+    fn handle_event(
+        &mut self,
+        _helper: &mut EpollHelper,
+        event: &epoll::Event,
+    ) -> result::Result<(), EpollHelperError> {
         let ev_type = event.data as u16;
         match ev_type {
             CTRL_QUEUE_EVENT => {
                 let mem = self.mem.memory();
-                if let Err(e) = self.queue_evt.read() {
-                    error!("Failed to get control queue event: {:?}", e);
-                    return true;
-                }
-                if let Err(e) =
-                    self.ctrl_q
-                        .process(mem.deref(), &mut self.queue, self.access_platform.as_ref())
-                {
-                    error!("Failed to process control queue: {:?}", e);
-                    return true;
-                } else {
-                    match self.queue.needs_notification(mem.deref()) {
-                        Ok(true) => {
-                            if let Err(e) = self.signal_used_queue(self.queue_index) {
-                                error!("Error signalling that control queue was used: {:?}", e);
-                                return true;
-                            }
-                        }
-                        Ok(false) => {}
-                        Err(e) => {
-                            error!("Error getting notification state of control queue: {}", e);
-                            return true;
-                        }
+                self.queue_evt.read().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!(
+                        "Failed to get control queue event: {:?}",
+                        e
+                    ))
+                })?;
+                self.ctrl_q
+                    .process(mem.deref(), &mut self.queue, self.access_platform.as_ref())
+                    .map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to process control queue: {:?}",
+                            e
+                        ))
+                    })?;
+                match self.queue.needs_notification(mem.deref()) {
+                    Ok(true) => {
+                        self.signal_used_queue(self.queue_index).map_err(|e| {
+                            EpollHelperError::HandleEvent(anyhow!(
+                                "Error signalling that control queue was used: {:?}",
+                                e
+                            ))
+                        })?;
                     }
-                }
+                    Ok(false) => {}
+                    Err(e) => {
+                        return Err(EpollHelperError::HandleEvent(anyhow!(
+                            "Error getting notification state of control queue: {}",
+                            e
+                        )));
+                    }
+                };
             }
             _ => {
-                error!("Unknown event for virtio-net control queue");
-                return true;
+                return Err(EpollHelperError::HandleEvent(anyhow!(
+                    "Unknown event for virtio-net control queue"
+                )));
             }
         }
 
-        false
+        Ok(())
     }
 }
 
@@ -290,15 +302,18 @@ impl NetEpollHandler {
 }
 
 impl EpollHelperHandler for NetEpollHandler {
-    fn handle_event(&mut self, _helper: &mut EpollHelper, event: &epoll::Event) -> bool {
+    fn handle_event(
+        &mut self,
+        _helper: &mut EpollHelper,
+        event: &epoll::Event,
+    ) -> result::Result<(), EpollHelperError> {
         let ev_type = event.data as u16;
         match ev_type {
             RX_QUEUE_EVENT => {
                 self.driver_awake = true;
-                if let Err(e) = self.handle_rx_event() {
-                    error!("Error processing RX queue: {:?}", e);
-                    return true;
-                }
+                self.handle_rx_event().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!("Error processing RX queue: {:?}", e))
+                })?;
             }
             TX_QUEUE_EVENT => {
                 let queue_evt = &self.queue_evt_pair[1];
@@ -306,22 +321,22 @@ impl EpollHelperHandler for NetEpollHandler {
                     error!("Failed to get tx queue event: {:?}", e);
                 }
                 self.driver_awake = true;
-                if let Err(e) = self.handle_tx_event() {
-                    error!("Error processing TX queue: {:?}", e);
-                    return true;
-                }
+                self.handle_tx_event().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!("Error processing TX queue: {:?}", e))
+                })?;
             }
             TX_TAP_EVENT => {
-                if let Err(e) = self.handle_tx_event() {
-                    error!("Error processing TX queue (TAP event): {:?}", e);
-                    return true;
-                }
+                self.handle_tx_event().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!(
+                        "Error processing TX queue (TAP event): {:?}",
+                        e
+                    ))
+                })?;
             }
             RX_TAP_EVENT => {
-                if let Err(e) = self.handle_rx_tap_event() {
-                    error!("Error processing tap queue: {:?}", e);
-                    return true;
-                }
+                self.handle_rx_tap_event().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!("Error processing tap queue: {:?}", e))
+                })?;
             }
             RX_RATE_LIMITER_EVENT => {
                 if let Some(rate_limiter) = &mut self.net.rx_rate_limiter {
@@ -336,20 +351,25 @@ impl EpollHelperHandler for NetEpollHandler {
                                     epoll::Events::EPOLLIN,
                                     u64::from(self.net.tap_rx_event_id),
                                 ) {
-                                    error!("Error register_listener with `RX_RATE_LIMITER_EVENT`: {:?}", e);
-                                    return true;
+                                    return Err(EpollHelperError::HandleEvent(anyhow!(
+                                        "Error register_listener with `RX_RATE_LIMITER_EVENT`: {:?}",
+                                        e
+                                    )));
                                 }
                                 self.net.rx_tap_listening = true;
                             }
                         }
                         Err(e) => {
-                            error!("Error from 'rate_limiter.event_handler()': {:?}", e);
-                            return true;
+                            return Err(EpollHelperError::HandleEvent(anyhow!(
+                                "Error from 'rate_limiter.event_handler()': {:?}",
+                                e
+                            )));
                         }
                     }
                 } else {
-                    error!("Unexpected RX_RATE_LIMITER_EVENT");
-                    return true;
+                    return Err(EpollHelperError::HandleEvent(anyhow!(
+                        "Unexpected RX_RATE_LIMITER_EVENT"
+                    )));
                 }
             }
             TX_RATE_LIMITER_EVENT => {
@@ -360,26 +380,33 @@ impl EpollHelperHandler for NetEpollHandler {
                         Ok(_) => {
                             self.driver_awake = true;
                             if let Err(e) = self.process_tx() {
-                                error!("Error processing TX queue: {:?}", e);
-                                return true;
+                                return Err(EpollHelperError::HandleEvent(anyhow!(
+                                    "Error processing TX queue: {:?}",
+                                    e
+                                )));
                             }
                         }
                         Err(e) => {
-                            error!("Error from 'rate_limiter.event_handler()': {:?}", e);
-                            return true;
+                            return Err(EpollHelperError::HandleEvent(anyhow!(
+                                "Error from 'rate_limiter.event_handler()': {:?}",
+                                e
+                            )));
                         }
                     }
                 } else {
-                    error!("Unexpected TX_RATE_LIMITER_EVENT");
-                    return true;
+                    return Err(EpollHelperError::HandleEvent(anyhow!(
+                        "Unexpected TX_RATE_LIMITER_EVENT"
+                    )));
                 }
             }
             _ => {
-                error!("Unknown event: {}", ev_type);
-                return true;
+                return Err(EpollHelperError::HandleEvent(anyhow!(
+                    "Unexpected event: {}",
+                    ev_type
+                )));
             }
         }
-        false
+        Ok(())
     }
 }
 

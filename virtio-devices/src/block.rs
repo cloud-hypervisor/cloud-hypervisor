@@ -18,6 +18,7 @@ use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::GuestMemoryMmap;
 use crate::VirtioInterrupt;
+use anyhow::anyhow;
 use block_util::{
     async_io::AsyncIo, async_io::AsyncIoError, async_io::DiskFile, build_disk_image_id, Request,
     RequestType, VirtioBlockConfig,
@@ -277,14 +278,17 @@ impl BlockEpollHandler {
 }
 
 impl EpollHelperHandler for BlockEpollHandler {
-    fn handle_event(&mut self, _helper: &mut EpollHelper, event: &epoll::Event) -> bool {
+    fn handle_event(
+        &mut self,
+        _helper: &mut EpollHelper,
+        event: &epoll::Event,
+    ) -> result::Result<(), EpollHelperError> {
         let ev_type = event.data as u16;
         match ev_type {
             QUEUE_AVAIL_EVENT => {
-                if let Err(e) = self.queue_evt.read() {
-                    error!("Failed to get queue event: {:?}", e);
-                    return true;
-                }
+                self.queue_evt.read().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
+                })?;
 
                 let rate_limit_reached =
                     self.rate_limiter.as_ref().map_or(false, |r| r.is_blocked());
@@ -295,36 +299,43 @@ impl EpollHelperHandler for BlockEpollHandler {
                         Ok(needs_notification) => {
                             if needs_notification {
                                 if let Err(e) = self.signal_used_queue() {
-                                    error!("Failed to signal used queue: {:?}", e);
-                                    return true;
+                                    return Err(EpollHelperError::HandleEvent(anyhow!(
+                                        "Failed to signal used queue: {:?}",
+                                        e
+                                    )));
                                 }
                             }
                         }
                         Err(e) => {
-                            error!("Failed to process queue (submit): {:?}", e);
-                            return true;
+                            return Err(EpollHelperError::HandleEvent(anyhow!(
+                                "Failed to process queue (submit): {:?}",
+                                e
+                            )));
                         }
                     }
                 }
             }
             COMPLETION_EVENT => {
-                if let Err(e) = self.disk_image.notifier().read() {
-                    error!("Failed to get queue event: {:?}", e);
-                    return true;
-                }
+                self.disk_image.notifier().read().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
+                })?;
 
                 match self.process_queue_complete() {
                     Ok(needs_notification) => {
                         if needs_notification {
                             if let Err(e) = self.signal_used_queue() {
-                                error!("Failed to signal used queue: {:?}", e);
-                                return true;
+                                return Err(EpollHelperError::HandleEvent(anyhow!(
+                                    "Failed to signal used queue: {:?}",
+                                    e
+                                )));
                             }
                         }
                     }
                     Err(e) => {
-                        error!("Failed to process queue (complete): {:?}", e);
-                        return true;
+                        return Err(EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to process queue (complete): {:?}",
+                            e
+                        )));
                     }
                 }
             }
@@ -337,28 +348,35 @@ impl EpollHelperHandler for BlockEpollHandler {
                             Ok(needs_notification) => {
                                 if needs_notification {
                                     if let Err(e) = self.signal_used_queue() {
-                                        error!("Failed to signal used queue: {:?}", e);
-                                        return true;
+                                        return Err(EpollHelperError::HandleEvent(anyhow!(
+                                            "Failed to signal used queue: {:?}",
+                                            e
+                                        )));
                                     }
                                 }
                             }
                             Err(e) => {
-                                error!("Failed to process queue (submit): {:?}", e);
-                                return true;
+                                return Err(EpollHelperError::HandleEvent(anyhow!(
+                                    "Failed to process queue (submit): {:?}",
+                                    e
+                                )));
                             }
                         }
                     }
                 } else {
-                    error!("Unexpected 'RATE_LIMITER_EVENT' when rate_limiter is not enabled.");
-                    return true;
+                    return Err(EpollHelperError::HandleEvent(anyhow!(
+                        "Unexpected 'RATE_LIMITER_EVENT' when rate_limiter is not enabled."
+                    )));
                 }
             }
             _ => {
-                error!("Unexpected event: {}", ev_type);
-                return true;
+                return Err(EpollHelperError::HandleEvent(anyhow!(
+                    "Unexpected event: {}",
+                    ev_type
+                )));
             }
         }
-        false
+        Ok(())
     }
 }
 
