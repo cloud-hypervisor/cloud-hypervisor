@@ -647,11 +647,7 @@ impl VirtioDevice for Block {
                 Thread::VirtioBlock,
                 &mut epoll_threads,
                 &self.exit_evt,
-                move || {
-                    if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
-                        error!("Error running worker: {:?}", e);
-                    }
-                },
+                move || handler.run(paused, paused_sync.unwrap()),
             )?;
         }
 

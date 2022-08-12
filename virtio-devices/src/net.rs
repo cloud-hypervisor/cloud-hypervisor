@@ -655,11 +655,7 @@ impl VirtioDevice for Net {
                 Thread::VirtioNetCtl,
                 &mut epoll_threads,
                 &self.exit_evt,
-                move || {
-                    if let Err(e) = ctrl_handler.run_ctrl(paused, paused_sync.unwrap()) {
-                        error!("Error running worker: {:?}", e);
-                    }
-                },
+                move || ctrl_handler.run_ctrl(paused, paused_sync.unwrap()),
             )?;
             self.ctrl_queue_epoll_thread = Some(epoll_threads.remove(0));
         }
@@ -736,11 +732,7 @@ impl VirtioDevice for Net {
                 Thread::VirtioNet,
                 &mut epoll_threads,
                 &self.exit_evt,
-                move || {
-                    if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
-                        error!("Error running worker: {:?}", e);
-                    }
-                },
+                move || handler.run(paused, paused_sync.unwrap()),
             )?;
         }
 
