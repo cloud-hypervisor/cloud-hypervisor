@@ -121,28 +121,35 @@ impl WatchdogEpollHandler {
 }
 
 impl EpollHelperHandler for WatchdogEpollHandler {
-    fn handle_event(&mut self, _helper: &mut EpollHelper, event: &epoll::Event) -> bool {
+    fn handle_event(
+        &mut self,
+        _helper: &mut EpollHelper,
+        event: &epoll::Event,
+    ) -> result::Result<(), EpollHelperError> {
         let ev_type = event.data as u16;
         match ev_type {
             QUEUE_AVAIL_EVENT => {
-                if let Err(e) = self.queue_evt.read() {
-                    error!("Failed to get queue event: {:?}", e);
-                    return true;
-                } else if self.process_queue() {
-                    if let Err(e) = self.signal_used_queue() {
-                        error!("Failed to signal used queue: {:?}", e);
-                        return true;
-                    }
+                self.queue_evt.read().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
+                })?;
+
+                if self.process_queue() {
+                    self.signal_used_queue().map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to signal used queue: {:?}",
+                            e
+                        ))
+                    })?;
                 }
             }
             TIMER_EXPIRED_EVENT => {
                 // When reading from the timerfd you get 8 bytes indicating
                 // the number of times this event has elapsed since the last read.
                 let mut buf = vec![0; 8];
-                if let Err(e) = self.timer.read_exact(&mut buf) {
-                    error!("Error reading from timer fd: {:}", e);
-                    return true;
-                }
+                self.timer.read_exact(&mut buf).map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!("Error reading from timer fd: {:}", e))
+                })?;
+
                 if let Some(last_ping_time) = self.last_ping_time.lock().unwrap().as_ref() {
                     let now = Instant::now();
                     let gap = now.duration_since(*last_ping_time).as_secs();
@@ -151,14 +158,15 @@ impl EpollHelperHandler for WatchdogEpollHandler {
                         self.reset_evt.write(1).ok();
                     }
                 }
-                return false;
             }
             _ => {
-                error!("Unexpected event: {}", ev_type);
-                return true;
+                return Err(EpollHelperError::HandleEvent(anyhow!(
+                    "Unexpected event: {}",
+                    ev_type
+                )));
             }
         }
-        false
+        Ok(())
     }
 }
 

@@ -16,6 +16,7 @@ use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::{GuestMemoryMmap, MmapRegion};
 use crate::{VirtioInterrupt, VirtioInterruptType};
+use anyhow::anyhow;
 use seccompiler::SeccompAction;
 use std::fmt::{self, Display};
 use std::fs::File;
@@ -241,26 +242,35 @@ impl PmemEpollHandler {
 }
 
 impl EpollHelperHandler for PmemEpollHandler {
-    fn handle_event(&mut self, _helper: &mut EpollHelper, event: &epoll::Event) -> bool {
+    fn handle_event(
+        &mut self,
+        _helper: &mut EpollHelper,
+        event: &epoll::Event,
+    ) -> result::Result<(), EpollHelperError> {
         let ev_type = event.data as u16;
         match ev_type {
             QUEUE_AVAIL_EVENT => {
-                if let Err(e) = self.queue_evt.read() {
-                    error!("Failed to get queue event: {:?}", e);
-                    return true;
-                } else if self.process_queue() {
-                    if let Err(e) = self.signal_used_queue() {
-                        error!("Failed to signal used queue: {:?}", e);
-                        return true;
-                    }
+                self.queue_evt.read().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
+                })?;
+
+                if self.process_queue() {
+                    self.signal_used_queue().map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to signal used queue: {:?}",
+                            e
+                        ))
+                    })?;
                 }
             }
             _ => {
-                error!("Unexpected event: {}", ev_type);
-                return true;
+                return Err(EpollHelperError::HandleEvent(anyhow!(
+                    "Unexpected event: {}",
+                    ev_type
+                )));
             }
         }
-        false
+        Ok(())
     }
 }
 

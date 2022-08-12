@@ -18,6 +18,7 @@ use crate::{
     VirtioDeviceType, VirtioInterrupt, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
     VIRTIO_F_VERSION_1,
 };
+use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
 use seccompiler::SeccompAction;
 use std::io;
@@ -330,14 +331,18 @@ impl BalloonEpollHandler {
 }
 
 impl EpollHelperHandler for BalloonEpollHandler {
-    fn handle_event(&mut self, _helper: &mut EpollHelper, event: &epoll::Event) -> bool {
+    fn handle_event(
+        &mut self,
+        _helper: &mut EpollHelper,
+        event: &epoll::Event,
+    ) -> result::Result<(), EpollHelperError> {
         let ev_type = event.data as u16;
         match ev_type {
             RESIZE_EVENT => {
-                if let Err(e) = self.resize_receiver.evt.read() {
-                    error!("Failed to get resize event: {:?}", e);
-                    return true;
-                }
+                self.resize_receiver.evt.read().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get resize event: {:?}", e))
+                })?;
+
                 let mut signal_error = false;
                 let r = {
                     let mut config = self.config.lock().unwrap();
@@ -350,57 +355,78 @@ impl EpollHelperHandler for BalloonEpollHandler {
                         Ok(())
                     }
                 };
+                let ret_err = anyhow!("{:?}", r);
                 if let Err(e) = &r {
                     // This error will send back to resize caller.
                     error!("Handle resize event get error: {:?}", e);
                 }
+
                 if let Err(e) = self.resize_receiver.send(r) {
-                    error!("Sending \"resize\" generated error: {:?}", e);
-                    return true;
+                    return Err(EpollHelperError::HandleEvent(anyhow!(
+                        "Sending \"resize\" generated error: {:?}",
+                        e
+                    )));
                 }
                 if signal_error {
-                    return true;
+                    return Err(EpollHelperError::HandleEvent(ret_err));
                 }
             }
             INFLATE_QUEUE_EVENT => {
-                if let Err(e) = self.inflate_queue_evt.read() {
-                    error!("Failed to get inflate queue event: {:?}", e);
-                    return true;
-                } else if let Err(e) = self.process_queue(0) {
-                    error!("Failed to signal used inflate queue: {:?}", e);
-                    return true;
-                }
+                self.inflate_queue_evt.read().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!(
+                        "Failed to get inflate queue event: {:?}",
+                        e
+                    ))
+                })?;
+                self.process_queue(0).map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!(
+                        "Failed to signal used inflate queue: {:?}",
+                        e
+                    ))
+                })?;
             }
             DEFLATE_QUEUE_EVENT => {
-                if let Err(e) = self.deflate_queue_evt.read() {
-                    error!("Failed to get deflate queue event: {:?}", e);
-                    return true;
-                } else if let Err(e) = self.process_queue(1) {
-                    error!("Failed to signal used deflate queue: {:?}", e);
-                    return true;
-                }
+                self.deflate_queue_evt.read().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!(
+                        "Failed to get deflate queue event: {:?}",
+                        e
+                    ))
+                })?;
+                self.process_queue(1).map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!(
+                        "Failed to signal used deflate queue: {:?}",
+                        e
+                    ))
+                })?;
             }
             REPORTING_QUEUE_EVENT => {
                 if let Some(reporting_queue_evt) = self.reporting_queue_evt.as_ref() {
-                    if let Err(e) = reporting_queue_evt.read() {
-                        error!("Failed to get reporting queue event: {:?}", e);
-                        return true;
-                    } else if let Err(e) = self.process_reporting_queue(2) {
-                        error!("Failed to signal used inflate queue: {:?}", e);
-                        return true;
-                    }
+                    reporting_queue_evt.read().map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to get reporting queue event: {:?}",
+                            e
+                        ))
+                    })?;
+                    self.process_reporting_queue(2).map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to signal used inflate queue: {:?}",
+                            e
+                        ))
+                    })?;
                 } else {
-                    error!("Invalid reporting queue event as no eventfd registered");
-                    return true;
+                    return Err(EpollHelperError::HandleEvent(anyhow!(
+                        "Invalid reporting queue event as no eventfd registered"
+                    )));
                 }
             }
             _ => {
-                error!("Unknown event for virtio-balloon");
-                return true;
+                return Err(EpollHelperError::HandleEvent(anyhow!(
+                    "Unknown event for virtio-balloon"
+                )));
             }
         }
 
-        false
+        Ok(())
     }
 }
 

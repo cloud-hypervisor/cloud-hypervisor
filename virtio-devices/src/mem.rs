@@ -724,54 +724,65 @@ impl MemEpollHandler {
 }
 
 impl EpollHelperHandler for MemEpollHandler {
-    fn handle_event(&mut self, _helper: &mut EpollHelper, event: &epoll::Event) -> bool {
+    fn handle_event(
+        &mut self,
+        _helper: &mut EpollHelper,
+        event: &epoll::Event,
+    ) -> result::Result<(), EpollHelperError> {
         let ev_type = event.data as u16;
         match ev_type {
             RESIZE_EVENT => {
-                if let Err(e) = self.resize.evt.read() {
-                    error!("Failed to get resize event: {:?}", e);
-                    return true;
-                } else {
-                    let size = self.resize.size();
-                    let mut config = self.config.lock().unwrap();
-                    let mut signal_error = false;
-                    let mut r = config.resize(size);
-                    r = match r {
-                        Err(e) => Err(e),
-                        _ => match self.signal(VirtioInterruptType::Config) {
-                            Err(e) => {
-                                signal_error = true;
-                                Err(Error::ResizeTriggerFail(e))
-                            }
-                            _ => Ok(()),
-                        },
-                    };
-                    if let Err(e) = self.resize.send(r) {
-                        error!("Sending \"resize\" response: {:?}", e);
-                        return true;
-                    }
-                    if signal_error {
-                        return true;
-                    }
+                self.resize.evt.read().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get resize event: {:?}", e))
+                })?;
+
+                let size = self.resize.size();
+                let mut config = self.config.lock().unwrap();
+                let mut signal_error = false;
+                let mut r = config.resize(size);
+                r = match r {
+                    Err(e) => Err(e),
+                    _ => match self.signal(VirtioInterruptType::Config) {
+                        Err(e) => {
+                            signal_error = true;
+                            Err(Error::ResizeTriggerFail(e))
+                        }
+                        _ => Ok(()),
+                    },
+                };
+                let ret_err = anyhow!("{:?}", r);
+                if let Err(e) = self.resize.send(r) {
+                    return Err(EpollHelperError::HandleEvent(anyhow!(
+                        "Sending \"resize\" response: {:?}",
+                        e
+                    )));
+                }
+                if signal_error {
+                    return Err(EpollHelperError::HandleEvent(anyhow!(ret_err)));
                 }
             }
             QUEUE_AVAIL_EVENT => {
-                if let Err(e) = self.queue_evt.read() {
-                    error!("Failed to get queue event: {:?}", e);
-                    return true;
-                } else if self.process_queue() {
-                    if let Err(e) = self.signal(VirtioInterruptType::Queue(0)) {
-                        error!("Failed to signal used queue: {:?}", e);
-                        return true;
-                    }
+                self.queue_evt.read().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
+                })?;
+
+                if self.process_queue() {
+                    self.signal(VirtioInterruptType::Queue(0)).map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to signal used queue: {:?}",
+                            e
+                        ))
+                    })?;
                 }
             }
             _ => {
-                error!("Unexpected event: {}", ev_type);
-                return true;
+                return Err(EpollHelperError::HandleEvent(anyhow!(
+                    "Unexpected event: {}",
+                    ev_type
+                )));
             }
         }
-        false
+        Ok(())
     }
 }
 

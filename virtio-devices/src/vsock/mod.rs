@@ -353,7 +353,7 @@ mod tests {
             let event = epoll::Event::new(events, TX_QUEUE_EVENT as u64);
             let mut epoll_helper =
                 EpollHelper::new(&self.handler.kill_evt, &self.handler.pause_evt).unwrap();
-            self.handler.handle_event(&mut epoll_helper, &event);
+            self.handler.handle_event(&mut epoll_helper, &event).ok();
         }
         pub fn signal_rxq_event(&mut self) {
             self.handler.queue_evts[0].write(1).unwrap();
@@ -361,7 +361,7 @@ mod tests {
             let event = epoll::Event::new(events, RX_QUEUE_EVENT as u64);
             let mut epoll_helper =
                 EpollHelper::new(&self.handler.kill_evt, &self.handler.pause_evt).unwrap();
-            self.handler.handle_event(&mut epoll_helper, &event);
+            self.handler.handle_event(&mut epoll_helper, &event).ok();
         }
     }
 }

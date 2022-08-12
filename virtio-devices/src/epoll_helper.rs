@@ -13,6 +13,7 @@ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;
+use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
 
 pub struct EpollHelper {
@@ -20,13 +21,20 @@ pub struct EpollHelper {
     epoll_file: File,
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum EpollHelperError {
+    #[error("Failed to create Fd: {0}")]
     CreateFd(std::io::Error),
+    #[error("Failed to epoll_ctl: {0}")]
     Ctl(std::io::Error),
+    #[error("IO error: {0}")]
     IoError(std::io::Error),
+    #[error("Failed to epoll_wait: {0}")]
     Wait(std::io::Error),
+    #[error("Failed to get virtio-queue index: {0}")]
     QueueRingIndex(virtio_queue::Error),
+    #[error("Failed to handle virtio device events: {0}")]
+    HandleEvent(anyhow::Error),
 }
 
 pub const EPOLL_HELPER_EVENT_PAUSE: u16 = 0;
@@ -34,8 +42,11 @@ pub const EPOLL_HELPER_EVENT_KILL: u16 = 1;
 pub const EPOLL_HELPER_EVENT_LAST: u16 = 15;
 
 pub trait EpollHelperHandler {
-    // Return true if the loop execution should be stopped
-    fn handle_event(&mut self, helper: &mut EpollHelper, event: &epoll::Event) -> bool;
+    fn handle_event(
+        &mut self,
+        helper: &mut EpollHelper,
+        event: &epoll::Event,
+    ) -> Result<(), EpollHelperError>;
 }
 
 impl EpollHelper {
@@ -155,9 +166,7 @@ impl EpollHelper {
                         let _ = self.pause_evt.read();
                     }
                     _ => {
-                        if handler.handle_event(self, event) {
-                            return Ok(());
-                        }
+                        handler.handle_event(self, event)?;
                     }
                 }
             }

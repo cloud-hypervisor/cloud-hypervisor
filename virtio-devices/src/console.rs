@@ -11,6 +11,7 @@ use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::GuestMemoryMmap;
 use crate::VirtioInterrupt;
+use anyhow::anyhow;
 use libc::{EFD_NONBLOCK, TIOCGWINSZ};
 use seccompiler::SeccompAction;
 use std::cmp;
@@ -233,57 +234,76 @@ impl ConsoleEpollHandler {
 }
 
 impl EpollHelperHandler for ConsoleEpollHandler {
-    fn handle_event(&mut self, _helper: &mut EpollHelper, event: &epoll::Event) -> bool {
+    fn handle_event(
+        &mut self,
+        _helper: &mut EpollHelper,
+        event: &epoll::Event,
+    ) -> result::Result<(), EpollHelperError> {
         let ev_type = event.data as u16;
         match ev_type {
             INPUT_QUEUE_EVENT => {
-                if let Err(e) = self.input_queue_evt.read() {
-                    error!("Failed to get queue event: {:?}", e);
-                    return true;
-                } else if self.process_input_queue() {
-                    if let Err(e) = self.signal_used_queue(0) {
-                        error!("Failed to signal used queue: {:?}", e);
-                        return true;
-                    }
+                self.input_queue_evt.read().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
+                })?;
+                if self.process_input_queue() {
+                    self.signal_used_queue(0).map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to signal used queue: {:?}",
+                            e
+                        ))
+                    })?;
                 }
             }
             OUTPUT_QUEUE_EVENT => {
-                if let Err(e) = self.output_queue_evt.read() {
-                    error!("Failed to get queue event: {:?}", e);
-                    return true;
-                } else if self.process_output_queue() {
-                    if let Err(e) = self.signal_used_queue(1) {
-                        error!("Failed to signal used queue: {:?}", e);
-                        return true;
-                    }
+                self.output_queue_evt.read().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
+                })?;
+                if self.process_output_queue() {
+                    self.signal_used_queue(1).map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to signal used queue: {:?}",
+                            e
+                        ))
+                    })?;
                 }
             }
             INPUT_EVENT => {
-                if let Err(e) = self.input_evt.read() {
-                    error!("Failed to get input event: {:?}", e);
-                    return true;
-                } else if self.process_input_queue() {
-                    if let Err(e) = self.signal_used_queue(0) {
-                        error!("Failed to signal used queue: {:?}", e);
-                        return true;
-                    }
+                self.input_evt.read().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get input event: {:?}", e))
+                })?;
+                if self.process_input_queue() {
+                    self.signal_used_queue(0).map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to signal used queue: {:?}",
+                            e
+                        ))
+                    })?;
                 }
             }
             CONFIG_EVENT => {
-                if let Err(e) = self.config_evt.read() {
-                    error!("Failed to get config event: {:?}", e);
-                    return true;
-                } else if let Err(e) = self.interrupt_cb.trigger(VirtioInterruptType::Config) {
-                    error!("Failed to signal console driver: {:?}", e);
-                    return true;
-                }
+                self.config_evt.read().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get config event: {:?}", e))
+                })?;
+                self.interrupt_cb
+                    .trigger(VirtioInterruptType::Config)
+                    .map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to signal console driver: {:?}",
+                            e
+                        ))
+                    })?;
             }
             RESIZE_EVENT => {
-                if let Err(e) = self.resize_pipe.as_ref().unwrap().read_exact(&mut [0]) {
-                    error!("Failed to get resize event: {:?}", e);
-                    return true;
-                }
-
+                self.resize_pipe
+                    .as_ref()
+                    .unwrap()
+                    .read_exact(&mut [0])
+                    .map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to get resize event: {:?}",
+                            e
+                        ))
+                    })?;
                 self.resizer.update_console_size();
             }
             FILE_EVENT => {
@@ -295,19 +315,22 @@ impl EpollHelperHandler for ConsoleEpollHandler {
                     }
 
                     if self.process_input_queue() {
-                        if let Err(e) = self.signal_used_queue(0) {
-                            error!("Failed to signal used queue: {:?}", e);
-                            return true;
-                        }
+                        self.signal_used_queue(0).map_err(|e| {
+                            EpollHelperError::HandleEvent(anyhow!(
+                                "Failed to signal used queue: {:?}",
+                                e
+                            ))
+                        })?;
                     }
                 }
             }
             _ => {
-                error!("Unknown event for virtio-console");
-                return true;
+                return Err(EpollHelperError::HandleEvent(anyhow!(
+                    "Unknown event for virtio-console"
+                )));
             }
         }
-        false
+        Ok(())
     }
 }
 
