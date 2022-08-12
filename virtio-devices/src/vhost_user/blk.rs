@@ -324,11 +324,7 @@ impl VirtioDevice for Blk {
             Thread::VirtioVhostBlock,
             &mut epoll_threads,
             &self.exit_evt,
-            move || {
-                if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
-                    error!("Error running worker: {:?}", e);
-                }
-            },
+            move || handler.run(paused, paused_sync.unwrap()),
         )?;
         self.epoll_thread = Some(epoll_threads.remove(0));
 

@@ -4,6 +4,7 @@
 //
 
 use crate::{
+    epoll_helper::EpollHelperError,
     seccomp_filters::{get_seccomp_filter, Thread},
     ActivateError,
 };
@@ -23,7 +24,7 @@ pub(crate) fn spawn_virtio_thread<F>(
     f: F,
 ) -> Result<(), ActivateError>
 where
-    F: FnOnce(),
+    F: FnOnce() -> std::result::Result<(), EpollHelperError>,
     F: Send + 'static,
 {
     let seccomp_filter = get_seccomp_filter(seccomp_action, thread_type)
@@ -44,12 +45,18 @@ where
                     return;
                 }
             }
-            std::panic::catch_unwind(AssertUnwindSafe(f))
-                .or_else(|_| {
+            match std::panic::catch_unwind(AssertUnwindSafe(f)) {
+                Err(_) => {
                     error!("{} thread panicked", thread_name);
-                    thread_exit_evt.write(1)
-                })
-                .ok();
+                    thread_exit_evt.write(1).ok();
+                }
+                Ok(r) => {
+                    if let Err(e) = r {
+                        error!("Error running worker: {:?}", e);
+                        thread_exit_evt.write(1).ok();
+                    }
+                }
+            };
         })
         .map(|thread| epoll_threads.push(thread))
         .map_err(|e| {

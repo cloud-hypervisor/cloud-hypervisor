@@ -467,11 +467,7 @@ where
             Thread::VirtioVsock,
             &mut epoll_threads,
             &self.exit_evt,
-            move || {
-                if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
-                    error!("Error running worker: {:?}", e);
-                }
-            },
+            move || handler.run(paused, paused_sync.unwrap()),
         )?;
 
         self.common.epoll_threads = Some(epoll_threads);
