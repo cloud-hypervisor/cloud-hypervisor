@@ -6,7 +6,7 @@ edition = "2021"
 build = "build.rs"
 
 [dependencies]
-clap = { version = "3.2.16", features = ["wrap_help","cargo"] }
+clap = { version = "3.2.17", features = ["wrap_help","cargo"] }
 dirs = "4.0.0"
 serde = { version = "1.0.143", features = ["rc", "derive"] }
 serde_json = "1.0.83"
@@ -15,4 +15,4 @@ thiserror = "1.0.32"
 wait-timeout = "0.2.0"
 
 [build-dependencies]
-clap = { version = "3.2.16", features = ["cargo"] }
+clap = { version = "3.2.17", features = ["cargo"] }
