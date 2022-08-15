@@ -991,6 +991,52 @@ impl Vm {
     }
 
     #[cfg(target_arch = "x86_64")]
+    fn load_firmware(
+        mut firmware: File,
+        memory_manager: &Arc<Mutex<MemoryManager>>,
+    ) -> Result<EntryPoint> {
+        // Not an ELF header - assume raw binary data / firmware
+        let size = firmware
+            .seek(SeekFrom::End(0))
+            .map_err(Error::FirmwareFile)?;
+
+        // The OVMF firmware is as big as you might expect and it's 4MiB so limit to that
+        if size > 4 << 20 {
+            return Err(Error::FirmwareTooLarge);
+        }
+
+        // Loaded at the end of the 4GiB
+        let load_address = GuestAddress(4 << 30)
+            .checked_sub(size)
+            .ok_or(Error::FirmwareTooLarge)?;
+
+        info!(
+            "Loading RAW firmware at 0x{:x} (size: {})",
+            load_address.raw_value(),
+            size
+        );
+
+        memory_manager
+            .lock()
+            .unwrap()
+            .add_ram_region(load_address, size as usize)
+            .map_err(Error::AllocateFirmwareMemory)?;
+
+        firmware
+            .seek(SeekFrom::Start(0))
+            .map_err(Error::FirmwareFile)?;
+        memory_manager
+            .lock()
+            .unwrap()
+            .guest_memory()
+            .memory()
+            .read_exact_from(load_address, &mut firmware, size as usize)
+            .map_err(Error::FirmwareLoad)?;
+
+        Ok(EntryPoint { entry_addr: None })
+    }
+
+    #[cfg(target_arch = "x86_64")]
     fn load_kernel(
         mut kernel: File,
         cmdline: Cmdline,
@@ -1011,45 +1057,7 @@ impl Vm {
         ) {
             Ok(entry_addr) => entry_addr,
             Err(e) => match e {
-                Elf(InvalidElfMagicNumber) => {
-                    // Not an ELF header - assume raw binary data / firmware
-                    let size = kernel.seek(SeekFrom::End(0)).map_err(Error::FirmwareFile)?;
-
-                    // The OVMF firmware is as big as you might expect and it's 4MiB so limit to that
-                    if size > 4 << 20 {
-                        return Err(Error::FirmwareTooLarge);
-                    }
-
-                    // Loaded at the end of the 4GiB
-                    let load_address = GuestAddress(4 << 30)
-                        .checked_sub(size)
-                        .ok_or(Error::FirmwareTooLarge)?;
-
-                    info!(
-                        "Loading RAW firmware at 0x{:x} (size: {})",
-                        load_address.raw_value(),
-                        size
-                    );
-
-                    memory_manager
-                        .lock()
-                        .unwrap()
-                        .add_ram_region(load_address, size as usize)
-                        .map_err(Error::AllocateFirmwareMemory)?;
-
-                    kernel
-                        .seek(SeekFrom::Start(0))
-                        .map_err(Error::FirmwareFile)?;
-                    memory_manager
-                        .lock()
-                        .unwrap()
-                        .guest_memory()
-                        .memory()
-                        .read_exact_from(load_address, &mut kernel, size as usize)
-                        .map_err(Error::FirmwareLoad)?;
-
-                    return Ok(EntryPoint { entry_addr: None });
-                }
+                Elf(InvalidElfMagicNumber) => return Self::load_firmware(kernel, &memory_manager),
                 _ => {
                     return Err(Error::KernelLoad(e));
                 }
