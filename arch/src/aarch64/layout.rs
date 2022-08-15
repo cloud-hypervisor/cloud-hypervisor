@@ -98,6 +98,11 @@ pub const RAM_START: GuestAddress = GuestAddress(0x4000_0000);
 pub const MEM_32BIT_RESERVED_START: GuestAddress = GuestAddress(0xfc00_0000);
 pub const MEM_32BIT_RESERVED_SIZE: u64 = 0x0400_0000;
 
+/// TPM Address Range
+/// This Address range is specific to CRB Interface
+pub const TPM_START: GuestAddress = GuestAddress(0xfed4_0000);
+pub const TPM_SIZE: u64 = 0x1000;
+
 /// Start of 64-bit RAM.
 pub const RAM_64BIT_START: GuestAddress = GuestAddress(0x1_0000_0000);
 
