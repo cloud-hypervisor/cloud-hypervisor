@@ -172,6 +172,9 @@ pub enum DeviceManagerError {
     /// Cannot create virtio-vsock device
     CreateVirtioVsock(io::Error),
 
+    /// Cannot create tpm device
+    CreateTpmDevice(anyhow::Error),
+
     /// Failed to convert Path to &str for the vDPA device.
     CreateVdpaConvertPath,
 
@@ -1187,6 +1190,11 @@ impl DeviceManager {
             console_resize_pipe,
         )?;
 
+        if let Some(tpm) = self.config.clone().lock().unwrap().tpm.as_ref() {
+            let tpm_dev = self.add_tpm_device(tpm.socket.clone())?;
+            self.bus_devices
+                .push(Arc::clone(&tpm_dev) as Arc<Mutex<dyn BusDevice>>)
+        }
         self.legacy_interrupt_manager = Some(legacy_interrupt_manager);
 
         virtio_devices.append(&mut self.make_virtio_devices()?);
@@ -1984,6 +1992,29 @@ impl DeviceManager {
             self.add_virtio_console_device(virtio_devices, console_pty, console_resize_pipe)?;
 
         Ok(Arc::new(Console { console_resizer }))
+    }
+
+    fn add_tpm_device(
+        &mut self,
+        tpm_path: PathBuf,
+    ) -> DeviceManagerResult<Arc<Mutex<devices::tpm::Tpm>>> {
+        // Create TPM Device
+        let tpm = devices::tpm::Tpm::new(tpm_path.to_str().unwrap().to_string()).map_err(|e| {
+            DeviceManagerError::CreateTpmDevice(anyhow!("Failed to create TPM Device : {:?}", e))
+        })?;
+        let tpm = Arc::new(Mutex::new(tpm));
+
+        // Add TPM Device to mmio
+        self.address_manager
+            .mmio_bus
+            .insert(
+                tpm.clone(),
+                arch::layout::TPM_START.0,
+                arch::layout::TPM_SIZE,
+            )
+            .map_err(DeviceManagerError::BusError)?;
+
+        Ok(tpm)
     }
 
     fn make_virtio_devices(&mut self) -> DeviceManagerResult<Vec<MetaVirtioDevice>> {
