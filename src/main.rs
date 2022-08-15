@@ -193,10 +193,17 @@ fn create_app<'a>(
                 .group("vm-config"),
         )
         .arg(
+            Arg::new("firmware")
+                .long("firmware")
+                .help("Path to firmware that is loaded in an architectural specific way")
+                .takes_value(true)
+                .group("vm-config"),
+        )
+        .arg(
             Arg::new("kernel")
                 .long("kernel")
                 .help(
-                    "Path to loaded kernel. This may be a kernel or firmware that supports a PVH \
+                    "Path to kernel to load. This may be a kernel or firmware that supports a PVH \
                 entry point (e.g. vmlinux) or architecture equivalent",
                 )
                 .takes_value(true)
@@ -567,16 +574,15 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
     )
     .map_err(Error::StartVmmThread)?;
 
+    let payload_present =
+        cmd_arguments.is_present("kernel") || cmd_arguments.is_present("firmware");
+
     // Can't test for "vm-config" group as some have default values. The kernel (or tdx if enabled)
     // is the only required option for booting the VM.
     #[cfg(feature = "tdx")]
-    let tdx_or_kernel_present =
-        cmd_arguments.is_present("kernel") || cmd_arguments.is_present("tdx");
+    let payload_present = payload_present || cmd_arguments.is_present("tdx");
 
-    #[cfg(not(feature = "tdx"))]
-    let tdx_or_kernel_present = cmd_arguments.is_present("kernel");
-
-    if tdx_or_kernel_present {
+    if payload_present {
         let vm_params = config::VmParams::from_arg_matches(&cmd_arguments);
         let vm_config = config::VmConfig::parse(vm_params).map_err(Error::ParsingConfig)?;
 

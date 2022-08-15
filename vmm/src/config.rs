@@ -343,6 +343,7 @@ pub struct VmParams<'a> {
     pub cpus: &'a str,
     pub memory: &'a str,
     pub memory_zones: Option<Vec<&'a str>>,
+    pub firmware: Option<&'a str>,
     pub kernel: Option<&'a str>,
     pub initramfs: Option<&'a str>,
     pub cmdline: Option<&'a str>,
@@ -377,11 +378,10 @@ impl<'a> VmParams<'a> {
         let memory_zones: Option<Vec<&str>> = args.values_of("memory-zone").map(|x| x.collect());
         let rng = args.value_of("rng").unwrap();
         let serial = args.value_of("serial").unwrap();
-
+        let firmware = args.value_of("firmware");
         let kernel = args.value_of("kernel");
         let initramfs = args.value_of("initramfs");
         let cmdline = args.value_of("cmdline");
-
         let disks: Option<Vec<&str>> = args.values_of("disk").map(|x| x.collect());
         let net: Option<Vec<&str>> = args.values_of("net").map(|x| x.collect());
         let console = args.value_of("console").unwrap();
@@ -405,6 +405,7 @@ impl<'a> VmParams<'a> {
             cpus,
             memory,
             memory_zones,
+            firmware,
             kernel,
             initramfs,
             cmdline,
@@ -2251,6 +2252,8 @@ impl RestoreConfig {
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct PayloadConfig {
     #[serde(default)]
+    pub firmware: Option<PathBuf>,
+    #[serde(default)]
     pub kernel: Option<PathBuf>,
     #[serde(default)]
     pub cmdline: Option<String>,
@@ -2334,6 +2337,7 @@ impl VmConfig {
                     Some(self.cmdline.args.drain(..).collect())
                 },
                 initramfs: self.initramfs.take().map(|i| i.path),
+                ..Default::default()
             })
         }
 
@@ -2671,11 +2675,12 @@ impl VmConfig {
             numa = Some(numa_config_list);
         }
 
-        let payload = if vm_params.kernel.is_some() {
+        let payload = if vm_params.kernel.is_some() || vm_params.firmware.is_some() {
             Some(PayloadConfig {
                 kernel: vm_params.kernel.map(PathBuf::from),
                 initramfs: vm_params.initramfs.map(PathBuf::from),
                 cmdline: vm_params.cmdline.map(|s| s.to_string()),
+                firmware: vm_params.firmware.map(PathBuf::from),
             })
         } else {
             None
