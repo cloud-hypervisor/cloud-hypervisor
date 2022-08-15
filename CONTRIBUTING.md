@@ -17,6 +17,23 @@ We follow the [Rust Style](https://github.com/rust-dev-tools/fmt-rfcs/blob/maste
 convention and enforce it through the Continuous Integration (CI) process calling into `rustfmt`
 for each submitted Pull Request (PR).
 
+## Basic Checks
+
+Please consider creating the following hook as `.git/hooks/pre-commit` in order
+to ensure basic correctness of your code. You can extend this further if you
+have specific features that you regularly develop against.
+
+```sh
+#!/bin/sh
+
+cargo fmt -- --check || exit 1
+cargo check --locked --all --all-targets --tests || exit 1
+cargo clippy --locked --all --all-targets --tests -- -D warnings || exit 1
+```
+
+You will need to `chmod +x .git/hooks/pre-commit` to have it run on every
+commit you make.
+
 ## Certificate of Origin
 
 In order to get a clear contribution chain of trust we use the [signed-off-by language](https://01.org/community/signed-process)
