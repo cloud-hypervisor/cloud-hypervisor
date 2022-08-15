@@ -474,7 +474,7 @@ pub struct Vm {
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
     stop_on_boot: bool,
     #[cfg(target_arch = "x86_64")]
-    load_kernel_handle: Option<thread::JoinHandle<Result<EntryPoint>>>,
+    load_payload_handle: Option<thread::JoinHandle<Result<EntryPoint>>>,
 }
 
 impl Vm {
@@ -511,8 +511,8 @@ impl Vm {
             .map_err(Error::KernelFile)?;
 
         #[cfg(target_arch = "x86_64")]
-        let load_kernel_handle = if !restoring {
-            Self::load_kernel_async(&kernel, &memory_manager, &config)?
+        let load_payload_handle = if !restoring {
+            Self::load_payload_async(&kernel, &memory_manager, &config)?
         } else {
             None
         };
@@ -622,7 +622,7 @@ impl Vm {
             hypervisor,
             stop_on_boot,
             #[cfg(target_arch = "x86_64")]
-            load_kernel_handle,
+            load_payload_handle,
         })
     }
 
@@ -1079,7 +1079,7 @@ impl Vm {
     }
 
     #[cfg(target_arch = "x86_64")]
-    fn load_kernel_async(
+    fn load_payload_async(
         kernel: &Option<File>,
         memory_manager: &Arc<Mutex<MemoryManager>>,
         config: &Arc<Mutex<VmConfig>>,
@@ -1098,7 +1098,7 @@ impl Vm {
                 let memory_manager = memory_manager.clone();
 
                 std::thread::Builder::new()
-                    .name("kernel_loader".into())
+                    .name("payload_loader".into())
                     .spawn(move || {
                         let cmdline = Self::generate_cmdline(&config)?;
                         Self::load_kernel(kernel, cmdline, memory_manager)
@@ -2080,7 +2080,7 @@ impl Vm {
 
     #[cfg(target_arch = "x86_64")]
     fn entry_point(&mut self) -> Result<Option<EntryPoint>> {
-        self.load_kernel_handle
+        self.load_payload_handle
             .take()
             .map(|handle| handle.join().map_err(Error::KernelLoadThreadJoin)?)
             .transpose()
