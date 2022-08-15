@@ -8961,8 +8961,6 @@ mod live_migration {
             migration_guest
                 .ssh_command("nc -vz 172.100.0.1 12345")
                 .unwrap();
-
-            cleanup_ovs_dpdk();
         });
 
         // Clean-up the destination VM and OVS VM, and make sure they terminated correctly
@@ -8972,6 +8970,8 @@ mod live_migration {
         handle_child_output(r, &dest_output);
         let ovs_output = ovs_child.wait_with_output().unwrap();
         handle_child_output(Ok(()), &ovs_output);
+
+        cleanup_ovs_dpdk();
     }
 
     #[test]
