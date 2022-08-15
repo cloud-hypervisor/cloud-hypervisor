@@ -11,11 +11,11 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-use crate::config::NumaConfig;
 use crate::config::{
     add_to_config, DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, PmemConfig,
     UserDeviceConfig, ValidationError, VdpaConfig, VmConfig, VsockConfig,
 };
+use crate::config::{NumaConfig, PayloadConfig};
 #[cfg(feature = "guest_debug")]
 use crate::coredump::{
     CpuElf64Writable, DumpState, Elf64Writable, GuestDebuggable, GuestDebuggableError, NoteDescType,
@@ -299,6 +299,10 @@ pub enum Error {
     #[error("Error joining kernel loading thread")]
     KernelLoadThreadJoin(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
 
+    #[cfg(target_arch = "x86_64")]
+    #[error("Payload configuration is not bootable")]
+    InvalidPayload,
+
     #[cfg(feature = "guest_debug")]
     #[error("Error coredumping VM: {0:?}")]
     Coredump(GuestDebuggableError),
@@ -500,19 +504,9 @@ impl Vm {
             .validate()
             .map_err(Error::ConfigValidation)?;
 
-        let kernel = config
-            .lock()
-            .unwrap()
-            .payload
-            .as_ref()
-            .map(|p| p.kernel.as_ref().map(File::open))
-            .unwrap_or_default()
-            .transpose()
-            .map_err(Error::KernelFile)?;
-
         #[cfg(target_arch = "x86_64")]
         let load_payload_handle = if !restoring {
-            Self::load_payload_async(&kernel, &memory_manager, &config)?
+            Self::load_payload_async(&memory_manager, &config)?
         } else {
             None
         };
@@ -590,6 +584,17 @@ impl Vm {
         .map_err(Error::CpuManager)?;
 
         let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO as i32) } != 0;
+
+        #[cfg(any(target_arch = "aarch64", feature = "tdx"))]
+        let kernel = config
+            .lock()
+            .unwrap()
+            .payload
+            .as_ref()
+            .map(|p| p.kernel.as_ref().map(File::open))
+            .unwrap_or_default()
+            .transpose()
+            .map_err(Error::KernelFile)?;
 
         let initramfs = config
             .lock()
@@ -930,18 +935,11 @@ impl Vm {
     }
 
     fn generate_cmdline(
-        config: &Arc<Mutex<VmConfig>>,
+        payload: &PayloadConfig,
         #[cfg(target_arch = "aarch64")] device_manager: &Arc<Mutex<DeviceManager>>,
     ) -> Result<Cmdline> {
         let mut cmdline = Cmdline::new(arch::CMDLINE_MAX_SIZE);
-        if let Some(s) = config
-            .lock()
-            .unwrap()
-            .payload
-            .as_ref()
-            .map(|p| p.cmdline.as_ref())
-            .unwrap_or_default()
-        {
+        if let Some(s) = payload.cmdline.as_ref() {
             cmdline.insert_str(s).map_err(Error::CmdLineInsertStr)?;
         }
 
@@ -1080,7 +1078,6 @@ impl Vm {
 
     #[cfg(target_arch = "x86_64")]
     fn load_payload_async(
-        kernel: &Option<File>,
         memory_manager: &Arc<Mutex<MemoryManager>>,
         config: &Arc<Mutex<VmConfig>>,
     ) -> Result<Option<thread::JoinHandle<Result<EntryPoint>>>> {
@@ -1090,18 +1087,31 @@ impl Vm {
             return Ok(None);
         }
 
-        kernel
+        config
+            .lock()
+            .unwrap()
+            .payload
             .as_ref()
-            .map(|kernel| {
-                let kernel = kernel.try_clone().unwrap();
-                let config = config.clone();
+            .map(|payload| {
                 let memory_manager = memory_manager.clone();
+                let payload = payload.clone();
 
                 std::thread::Builder::new()
                     .name("payload_loader".into())
                     .spawn(move || {
-                        let cmdline = Self::generate_cmdline(&config)?;
-                        Self::load_kernel(kernel, cmdline, memory_manager)
+                        let kernel = payload
+                            .kernel
+                            .as_ref()
+                            .map(File::open)
+                            .transpose()
+                            .map_err(Error::KernelFile)?;
+
+                        if let Some(kernel) = kernel {
+                            let cmdline = Self::generate_cmdline(&payload)?;
+                            Self::load_kernel(kernel, cmdline, memory_manager)
+                        } else {
+                            Err(Error::InvalidPayload)
+                        }
                     })
                     .map_err(Error::KernelLoadThreadSpawn)
             })
@@ -1173,7 +1183,10 @@ impl Vm {
 
     #[cfg(target_arch = "aarch64")]
     fn configure_system(&mut self, _rsdp_addr: GuestAddress) -> Result<()> {
-        let cmdline = Self::generate_cmdline(&self.config, &self.device_manager)?;
+        let cmdline = Self::generate_cmdline(
+            self.config.lock().unwrap().payload.as_ref().unwrap(),
+            &self.device_manager,
+        )?;
         let vcpu_mpidrs = self.cpu_manager.lock().unwrap().get_mpidrs();
         let vcpu_topology = self.cpu_manager.lock().unwrap().get_vcpu_topology();
         let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
@@ -1908,7 +1921,9 @@ impl Vm {
                 }
                 TdvfSectionType::PayloadParam => {
                     info!("Copying payload parameters to guest memory");
-                    let cmdline = Self::generate_cmdline(&self.config)?;
+                    let cmdline = Self::generate_cmdline(
+                        self.config.lock().unwrap().payload.as_ref().unwrap(),
+                    )?;
                     mem.write_slice(cmdline.as_str().as_bytes(), GuestAddress(section.address))
                         .unwrap();
                 }
