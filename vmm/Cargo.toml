@@ -29,7 +29,7 @@ event_monitor = { path = "../event_monitor" }
 gdbstub = { version = "0.6.2", optional = true }
 gdbstub_arch = { version = "0.2.3", optional = true }
 hypervisor = { path = "../hypervisor" }
-libc = "0.2.129"
+libc = "0.2.131"
 linux-loader = { version = "0.4.0", features = ["elf", "bzimage", "pe"] }
 log = "0.4.17"
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "main" }
