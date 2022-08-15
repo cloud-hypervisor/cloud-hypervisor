@@ -171,6 +171,9 @@ pub enum DeviceManagerError {
     /// Cannot create virtio-vsock device
     CreateVirtioVsock(io::Error),
 
+    /// Cannot create vtpm device
+    CreateVtpmDevice(anyhow::Error),
+
     /// Failed to convert Path to &str for the vDPA device.
     CreateVdpaConvertPath,
 
@@ -1178,6 +1181,15 @@ impl DeviceManager {
             console_resize_pipe,
         )?;
 
+        let vtpm_path = self.config.lock().unwrap().vtpm_socket.clone();
+        if vtpm_path.is_some() {
+
+            let vtpm = self.add_vtpm_device(
+                &legacy_interrupt_manager,
+                vtpm_path.unwrap().vtpm_sock_path.to_str().unwrap()
+            )?;
+            self.bus_devices.push(Arc::clone(&vtpm) as Arc<Mutex<dyn BusDevice>>);
+        }
         self.legacy_interrupt_manager = Some(legacy_interrupt_manager);
 
         virtio_devices.append(&mut self.make_virtio_devices()?);
@@ -2005,6 +2017,28 @@ impl DeviceManager {
             self.add_virtio_console_device(virtio_devices, console_pty, console_resize_pipe)?;
 
         Ok(Arc::new(Console { console_resizer }))
+    }
+
+    fn add_vtpm_device(
+        &mut self,
+        _interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
+        vtpm_socket: &str,
+    ) -> DeviceManagerResult<Arc<Mutex<devices::tpm::TPM>>> {
+
+
+        // Create VTPM Device
+        let vtpm =devices::tpm::TPM::new(
+            vtpm_socket.to_string()
+        ).map_err(|e| DeviceManagerError::CreateVtpmDevice(anyhow!("Failed to create vTPM Device : {:?}", e)))?;
+        let vtpm = Arc::new(Mutex::new(vtpm));
+
+        // Add VTPM Device to mmio
+        self.address_manager
+            .mmio_bus
+            .insert(vtpm.clone(), arch::layout::VTPM_START.0, arch::layout::VTPM_SIZE)
+            .map_err(DeviceManagerError::BusError)?;
+
+        Ok(vtpm)
     }
 
     fn make_virtio_devices(&mut self) -> DeviceManagerResult<Vec<MetaVirtioDevice>> {
