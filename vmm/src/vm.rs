@@ -1037,7 +1037,7 @@ impl Vm {
     #[cfg(target_arch = "x86_64")]
     fn load_kernel(
         mut kernel: File,
-        cmdline: Cmdline,
+        cmdline: Option<Cmdline>,
         memory_manager: Arc<Mutex<MemoryManager>>,
     ) -> Result<EntryPoint> {
         use linux_loader::loader::{elf::Error::InvalidElfMagicNumber, Error::Elf};
@@ -1062,8 +1062,10 @@ impl Vm {
             },
         };
 
-        linux_loader::loader::load_cmdline(mem.deref(), arch::layout::CMDLINE_START, &cmdline)
-            .map_err(Error::LoadCmdLine)?;
+        if let Some(cmdline) = cmdline {
+            linux_loader::loader::load_cmdline(mem.deref(), arch::layout::CMDLINE_START, &cmdline)
+                .map_err(Error::LoadCmdLine)?;
+        }
 
         if let PvhEntryPresent(entry_addr) = entry_addr.pvh_boot_cap {
             // Use the PVH kernel entry point to boot the guest
@@ -1081,18 +1083,22 @@ impl Vm {
         payload: &PayloadConfig,
         memory_manager: Arc<Mutex<MemoryManager>>,
     ) -> Result<EntryPoint> {
-        let kernel = payload
-            .kernel
-            .as_ref()
-            .map(File::open)
-            .transpose()
-            .map_err(Error::KernelFile)?;
-
-        if let Some(kernel) = kernel {
-            let cmdline = Self::generate_cmdline(payload)?;
-            Self::load_kernel(kernel, cmdline, memory_manager)
-        } else {
-            Err(Error::InvalidPayload)
+        match (
+            &payload.firmware,
+            &payload.kernel,
+            &payload.initramfs,
+            &payload.cmdline,
+        ) {
+            (Some(firmware), None, None, None) => {
+                let firmware = File::open(firmware).map_err(Error::FirmwareFile)?;
+                Self::load_kernel(firmware, None, memory_manager)
+            }
+            (None, Some(kernel), _, _) => {
+                let kernel = File::open(kernel).map_err(Error::KernelFile)?;
+                let cmdline = Self::generate_cmdline(payload)?;
+                Self::load_kernel(kernel, Some(cmdline), memory_manager)
+            }
+            _ => Err(Error::InvalidPayload),
         }
     }
 
