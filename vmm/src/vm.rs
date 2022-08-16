@@ -1077,6 +1077,26 @@ impl Vm {
     }
 
     #[cfg(target_arch = "x86_64")]
+    fn load_payload(
+        payload: &PayloadConfig,
+        memory_manager: Arc<Mutex<MemoryManager>>,
+    ) -> Result<EntryPoint> {
+        let kernel = payload
+            .kernel
+            .as_ref()
+            .map(File::open)
+            .transpose()
+            .map_err(Error::KernelFile)?;
+
+        if let Some(kernel) = kernel {
+            let cmdline = Self::generate_cmdline(payload)?;
+            Self::load_kernel(kernel, cmdline, memory_manager)
+        } else {
+            Err(Error::InvalidPayload)
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
     fn load_payload_async(
         memory_manager: &Arc<Mutex<MemoryManager>>,
         config: &Arc<Mutex<VmConfig>>,
@@ -1098,21 +1118,7 @@ impl Vm {
 
                 std::thread::Builder::new()
                     .name("payload_loader".into())
-                    .spawn(move || {
-                        let kernel = payload
-                            .kernel
-                            .as_ref()
-                            .map(File::open)
-                            .transpose()
-                            .map_err(Error::KernelFile)?;
-
-                        if let Some(kernel) = kernel {
-                            let cmdline = Self::generate_cmdline(&payload)?;
-                            Self::load_kernel(kernel, cmdline, memory_manager)
-                        } else {
-                            Err(Error::InvalidPayload)
-                        }
-                    })
+                    .spawn(move || Self::load_payload(&payload, memory_manager))
                     .map_err(Error::KernelLoadThreadSpawn)
             })
             .transpose()
