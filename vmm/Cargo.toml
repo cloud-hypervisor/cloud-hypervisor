@@ -17,7 +17,7 @@ tdx = ["arch/tdx", "hypervisor/tdx"]
 
 [dependencies]
 acpi_tables = { path = "../acpi_tables" }
-anyhow = "1.0.61"
+anyhow = "1.0.62"
 arc-swap = "1.5.1"
 arch = { path = "../arch" }
 bitflags = "1.3.2"
@@ -34,7 +34,7 @@ linux-loader = { version = "0.4.0", features = ["elf", "bzimage", "pe"] }
 log = "0.4.17"
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "main" }
 net_util = { path = "../net_util" }
-once_cell = "1.13.0"
+once_cell = "1.13.1"
 option_parser = { path = "../option_parser" }
 pci = { path = "../pci" }
 qcow = { path = "../qcow" }
