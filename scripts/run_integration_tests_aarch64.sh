@@ -272,7 +272,14 @@ fi
 
 # Run all test cases related to live migration
 if [ $RES -eq 0 ]; then
-    time cargo test $features "live_migration::$test_filter" --target $BUILD_TARGET -- --test-threads=1 ${test_binary_args[*]}
+    time cargo test $features "live_migration_parallel::$test_filter" --target $BUILD_TARGET -- ${test_binary_args[*]}
+    RES=$?
+else
+    exit $RES
+fi
+
+if [ $RES -eq 0 ]; then
+    time cargo test $features "live_migration_sequential::$test_filter" --target $BUILD_TARGET -- --test-threads=1 ${test_binary_args[*]}
     RES=$?
 else
     exit $RES
