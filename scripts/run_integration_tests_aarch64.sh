@@ -250,13 +250,13 @@ echo 6144 | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
 # Run all direct kernel boot (Device Tree) test cases in mod `parallel`
-time cargo test $features "parallel::$test_filter" --target $BUILD_TARGET -- ${test_binary_args[*]}
+time cargo test $features "common_parallel::$test_filter" --target $BUILD_TARGET -- ${test_binary_args[*]}
 RES=$?
 
 # Run some tests in sequence since the result could be affected by other tests
 # running in parallel.
 if [ $RES -eq 0 ]; then
-    time cargo test $features "sequential::$test_filter" --target $BUILD_TARGET -- --test-threads=1 ${test_binary_args[*]}
+    time cargo test $features "common_sequential::$test_filter" --target $BUILD_TARGET -- --test-threads=1 ${test_binary_args[*]}
     RES=$?
 else
     exit $RES

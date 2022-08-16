@@ -1950,7 +1950,7 @@ fn check_guest_watchdog_one_reboot(
     }
 }
 
-mod parallel {
+mod common_parallel {
     use std::{fs::OpenOptions, io::SeekFrom};
 
     use crate::*;
@@ -6786,7 +6786,7 @@ mod parallel {
     }
 }
 
-mod sequential {
+mod common_sequential {
     use crate::*;
 
     #[test]
