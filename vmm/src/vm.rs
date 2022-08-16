@@ -989,7 +989,7 @@ impl Vm {
     }
 
     #[cfg(target_arch = "x86_64")]
-    fn load_firmware(
+    fn load_legacy_firmware(
         mut firmware: File,
         memory_manager: &Arc<Mutex<MemoryManager>>,
     ) -> Result<EntryPoint> {
@@ -1055,7 +1055,9 @@ impl Vm {
         ) {
             Ok(entry_addr) => entry_addr,
             Err(e) => match e {
-                Elf(InvalidElfMagicNumber) => return Self::load_firmware(kernel, &memory_manager),
+                Elf(InvalidElfMagicNumber) => {
+                    return Self::load_legacy_firmware(kernel, &memory_manager)
+                }
                 _ => {
                     return Err(Error::KernelLoad(e));
                 }
