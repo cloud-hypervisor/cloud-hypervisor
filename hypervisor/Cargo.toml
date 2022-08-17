@@ -11,7 +11,7 @@ mshv = ["mshv-ioctls", "mshv-bindings"]
 tdx = []
 
 [dependencies]
-anyhow = "1.0.61"
+anyhow = "1.0.62"
 byteorder = "1.4.3"
 thiserror = "1.0.32"
 libc = "0.2.131"
@@ -23,7 +23,7 @@ mshv-ioctls = { git = "https://github.com/rust-vmm/mshv", branch = "main", optio
 serde = { version = "1.0.143", features = ["rc", "derive"] }
 serde_with = { version = "2.0.0", default-features = false, features = ["macros"] }
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
-vm-memory = { version = "0.8.0", features = ["backend-mmap", "backend-atomic"] }
+vm-memory = { version = "0.9.0", features = ["backend-mmap", "backend-atomic"] }
 vmm-sys-util = { version = "0.10.0", features = ["with-serde"] }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies.iced-x86]
