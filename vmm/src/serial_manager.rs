@@ -15,6 +15,7 @@ use std::fs::File;
 use std::io::Read;
 use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::panic::AssertUnwindSafe;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::{io, result, thread};
 use thiserror::Error;
@@ -84,6 +85,7 @@ pub struct SerialManager {
     in_file: File,
     kill_evt: EventFd,
     handle: Option<thread::JoinHandle<()>>,
+    pty_write_out: Option<Arc<AtomicBool>>,
 }
 
 impl SerialManager {
@@ -147,11 +149,12 @@ impl SerialManager {
         )
         .map_err(Error::Epoll)?;
 
+        let mut pty_write_out = None;
         if mode == ConsoleOutputMode::Pty {
+            let write_out = Arc::new(AtomicBool::new(false));
+            pty_write_out = Some(write_out.clone());
             let writer = in_file.try_clone().map_err(Error::FileClone)?;
-            let mut buffer = SerialBuffer::new(Box::new(writer));
-            buffer.add_out_fd(in_file.as_raw_fd());
-            buffer.add_epoll_fd(epoll_fd);
+            let buffer = SerialBuffer::new(Box::new(writer), write_out);
             serial.as_ref().lock().unwrap().set_out(Box::new(buffer));
         }
 
@@ -164,7 +167,34 @@ impl SerialManager {
             in_file,
             kill_evt,
             handle: None,
+            pty_write_out,
         }))
+    }
+
+    // This function should be called when the other end of the PTY is
+    // connected. It verifies if this is the first time it's been invoked
+    // after the connection happened, and if that's the case it flushes
+    // all output from the serial to the PTY. Otherwise, it's a no-op.
+    fn trigger_pty_flush(
+        #[cfg(target_arch = "x86_64")] serial: &Arc<Mutex<Serial>>,
+        #[cfg(target_arch = "aarch64")] serial: &Arc<Mutex<Pl011>>,
+        pty_write_out: Option<&Arc<AtomicBool>>,
+    ) -> Result<()> {
+        if let Some(pty_write_out) = &pty_write_out {
+            if pty_write_out.load(Ordering::Acquire) {
+                return Ok(());
+            }
+
+            pty_write_out.store(true, Ordering::Release);
+
+            serial
+                .lock()
+                .unwrap()
+                .flush_output()
+                .map_err(Error::FlushOutput)?;
+        }
+
+        Ok(())
     }
 
     pub fn start_thread(&mut self, exit_evt: EventFd) -> Result<()> {
@@ -177,6 +207,15 @@ impl SerialManager {
         let epoll_fd = self.epoll_file.as_raw_fd();
         let mut in_file = self.in_file.try_clone().map_err(Error::FileClone)?;
         let serial = self.serial.clone();
+        let pty_write_out = self.pty_write_out.clone();
+
+        // In case of PTY, we want to be able to detect a connection on the
+        // other end of the PTY. This is done by detecting there's no event
+        // triggered on the epoll, which is the reason why we want the
+        // epoll_wait() function to return after the timeout expired.
+        // In case of TTY, we don't expect to detect such behavior, which is
+        // why we can afford to block until an actual event is triggered.
+        let timeout = if pty_write_out.is_some() { 500 } else { -1 };
 
         let thread = thread::Builder::new()
             .name("serial-manager".to_string())
@@ -189,7 +228,7 @@ impl SerialManager {
                         vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
 
                     loop {
-                        let num_events = match epoll::wait(epoll_fd, -1, &mut events[..]) {
+                        let num_events = match epoll::wait(epoll_fd, timeout, &mut events[..]) {
                             Ok(res) => res,
                             Err(e) => {
                                 if e.kind() == io::ErrorKind::Interrupted {
@@ -200,11 +239,21 @@ impl SerialManager {
                                     // returns an error of type EINTR, but this should not
                                     // be considered as a regular error. Instead it is more
                                     // appropriate to retry, by calling into epoll_wait().
-                                    continue;
+                                    0
+                                } else {
+                                    return Err(Error::Epoll(e));
                                 }
-                                return Err(Error::Epoll(e));
                             }
                         };
+
+                        if num_events == 0 {
+                            // This very specific case happens when the serial is connected
+                            // to a PTY. We know EPOLLHUP is always present when there's nothing
+                            // connected at the other end of the PTY. That's why getting no event
+                            // means we can flush the output of the serial through the PTY.
+                            Self::trigger_pty_flush(&serial, pty_write_out.as_ref())?;
+                            continue;
+                        }
 
                         for event in events.iter().take(num_events) {
                             let dispatch_event: EpollDispatch = event.data.into();
@@ -214,14 +263,6 @@ impl SerialManager {
                                     warn!("Unknown serial manager loop event: {}", event);
                                 }
                                 EpollDispatch::File => {
-                                    if event.events & libc::EPOLLOUT as u32 != 0 {
-                                        serial
-                                            .as_ref()
-                                            .lock()
-                                            .unwrap()
-                                            .flush_output()
-                                            .map_err(Error::FlushOutput)?;
-                                    }
                                     if event.events & libc::EPOLLIN as u32 != 0 {
                                         let mut input = [0u8; 64];
                                         let count =
@@ -238,6 +279,20 @@ impl SerialManager {
                                             .unwrap()
                                             .queue_input_bytes(&input[..count])
                                             .map_err(Error::QueueInput)?;
+                                    }
+                                    if event.events & libc::EPOLLHUP as u32 != 0 {
+                                        if let Some(pty_write_out) = &pty_write_out {
+                                            pty_write_out.store(false, Ordering::Release);
+                                        }
+                                        // It's really important to sleep here as this will prevent
+                                        // the current thread from consuming 100% of the CPU cycles
+                                        // when waiting for someone to connect to the PTY.
+                                        std::thread::sleep(std::time::Duration::from_millis(500));
+                                    } else {
+                                        // If the EPOLLHUP flag is not up on the associated event, we
+                                        // can assume the other end of the PTY is connected and therefore
+                                        // we can flush the output of the serial to it.
+                                        Self::trigger_pty_flush(&serial, pty_write_out.as_ref())?;
                                     }
                                 }
                                 EpollDispatch::Kill => {

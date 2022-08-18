@@ -777,7 +777,6 @@ struct DeviceManagerState {
 #[derive(Debug)]
 pub struct PtyPair {
     pub main: File,
-    pub sub: File,
     pub path: PathBuf,
 }
 
@@ -785,7 +784,6 @@ impl Clone for PtyPair {
     fn clone(&self) -> Self {
         PtyPair {
             main: self.main.try_clone().unwrap(),
-            sub: self.sub.try_clone().unwrap(),
             path: self.path.clone(),
         }
     }
@@ -1915,7 +1913,7 @@ impl DeviceManager {
                     let file = main.try_clone().unwrap();
                     assert!(resize_pipe.is_none());
                     self.listen_for_sigwinch_on_tty(&sub).unwrap();
-                    self.console_pty = Some(Arc::new(Mutex::new(PtyPair { main, sub, path })));
+                    self.console_pty = Some(Arc::new(Mutex::new(PtyPair { main, path })));
                     Endpoint::FilePair(file.try_clone().unwrap(), file)
                 }
             }
@@ -2016,7 +2014,7 @@ impl DeviceManager {
                     self.set_raw_mode(&mut sub)
                         .map_err(DeviceManagerError::SetPtyRaw)?;
                     self.config.lock().unwrap().serial.file = Some(path.clone());
-                    self.serial_pty = Some(Arc::new(Mutex::new(PtyPair { main, sub, path })));
+                    self.serial_pty = Some(Arc::new(Mutex::new(PtyPair { main, path })));
                 }
                 None
             }

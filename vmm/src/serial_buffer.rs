@@ -3,173 +3,95 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::serial_manager::EpollDispatch;
-
-use std::io::Write;
-use std::os::unix::io::RawFd;
+use std::{
+    collections::VecDeque,
+    io::Write,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 
 // Circular buffer implementation for serial output.
 // Read from head; push to tail
 pub(crate) struct SerialBuffer {
-    buffer: Vec<u8>,
-    head: usize,
-    tail: usize,
+    buffer: VecDeque<u8>,
     out: Box<dyn Write + Send>,
-    buffering: bool,
-    out_fd: Option<RawFd>,
-    epoll_fd: Option<RawFd>,
+    write_out: Arc<AtomicBool>,
 }
 
-const MAX_BUFFER_SIZE: usize = 16 << 10;
-
 impl SerialBuffer {
-    pub(crate) fn new(out: Box<dyn Write + Send>) -> Self {
+    pub(crate) fn new(out: Box<dyn Write + Send>, write_out: Arc<AtomicBool>) -> Self {
         Self {
-            buffer: vec![],
-            head: 0,
-            tail: 0,
+            buffer: VecDeque::new(),
             out,
-            buffering: false,
-            out_fd: None,
-            epoll_fd: None,
+            write_out,
         }
     }
+}
 
-    pub(crate) fn add_out_fd(&mut self, out_fd: RawFd) {
-        self.out_fd = Some(out_fd);
-    }
+impl Write for SerialBuffer {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
+        // Simply fill the buffer if we're not allowed to write to the out
+        // device.
+        if !self.write_out.load(Ordering::Acquire) {
+            self.buffer.extend(buf);
+            return Ok(buf.len());
+        }
 
-    pub(crate) fn add_epoll_fd(&mut self, epoll_fd: RawFd) {
-        self.epoll_fd = Some(epoll_fd);
-    }
+        // In case we're allowed to write to the out device, we flush the
+        // content of the buffer.
+        self.flush()?;
 
-    pub fn flush_buffer(&mut self) -> Result<(), std::io::Error> {
-        if self.tail <= self.head {
-            // The buffer to be written is in two parts
-            let buf = &self.buffer[self.head..];
-            match self.out.write(buf) {
-                Ok(bytes_written) => {
-                    if bytes_written == buf.len() {
-                        self.head = 0;
-                        // Can now proceed to write the other part of the buffer
-                    } else {
-                        self.head += bytes_written;
-                        self.out.flush()?;
-                        return Ok(());
+        // If after flushing the buffer, it's still not empty, that means
+        // only a subset of the bytes was written and we should fill the buffer
+        // with what's coming from the serial.
+        if !self.buffer.is_empty() {
+            self.buffer.extend(buf);
+            return Ok(buf.len());
+        }
+
+        // We reach this point if we're allowed to write to the out device
+        // and we know there's nothing left in the buffer.
+        let mut offset = 0;
+        loop {
+            match self.out.write(&buf[offset..]) {
+                Ok(written_bytes) => {
+                    if written_bytes < buf.len() - offset {
+                        offset += written_bytes;
+                        continue;
                     }
                 }
                 Err(e) => {
                     if !matches!(e.kind(), std::io::ErrorKind::WouldBlock) {
                         return Err(e);
                     }
-                    self.add_out_poll()?;
-                    return Ok(());
+                    self.buffer.extend(&buf[offset..]);
                 }
             }
+            break;
         }
 
-        let buf = &self.buffer[self.head..self.tail];
-        match self.out.write(buf) {
-            Ok(bytes_written) => {
-                if bytes_written == buf.len() {
-                    self.buffer.clear();
-                    self.buffer.shrink_to_fit();
-                    self.head = 0;
-                    self.tail = 0;
-                    self.remove_out_poll()?;
-                } else {
-                    self.head += bytes_written;
-                }
-                self.out.flush()?;
-            }
-            Err(e) => {
-                if !matches!(e.kind(), std::io::ErrorKind::WouldBlock) {
-                    return Err(e);
-                }
-                self.add_out_poll()?;
-            }
-        }
-
-        Ok(())
-    }
-
-    fn add_out_poll(&mut self) -> Result<(), std::io::Error> {
-        if self.out_fd.is_some() && self.epoll_fd.is_some() && !self.buffering {
-            self.buffering = true;
-            let out_fd = self.out_fd.as_ref().unwrap();
-            let epoll_fd = self.epoll_fd.as_ref().unwrap();
-            epoll::ctl(
-                *epoll_fd,
-                epoll::ControlOptions::EPOLL_CTL_MOD,
-                *out_fd,
-                epoll::Event::new(
-                    epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
-                    EpollDispatch::File as u64,
-                ),
-            )?;
-        }
-        Ok(())
-    }
-
-    fn remove_out_poll(&mut self) -> Result<(), std::io::Error> {
-        if self.out_fd.is_some() && self.epoll_fd.is_some() && self.buffering {
-            self.buffering = false;
-            let out_fd = self.out_fd.as_ref().unwrap();
-            let epoll_fd = self.epoll_fd.as_ref().unwrap();
-            epoll::ctl(
-                *epoll_fd,
-                epoll::ControlOptions::EPOLL_CTL_MOD,
-                *out_fd,
-                epoll::Event::new(epoll::Events::EPOLLIN, EpollDispatch::File as u64),
-            )?;
-        }
-        Ok(())
-    }
-}
-impl Write for SerialBuffer {
-    fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
-        // The serial output only writes one byte at a time
-        for v in buf {
-            if self.buffer.is_empty() {
-                // This case exists to avoid allocating the buffer if it's not needed
-                if let Err(e) = self.out.write(&[*v]) {
-                    if !matches!(e.kind(), std::io::ErrorKind::WouldBlock) {
-                        return Err(e);
-                    }
-                    self.add_out_poll()?;
-                    self.buffer.push(*v);
-                    self.tail += 1;
-                } else {
-                    self.out.flush()?;
-                }
-            } else {
-                // Buffer is completely full, lose the oldest byte by moving head forward
-                if self.head == self.tail {
-                    self.head = self.tail + 1;
-                    if self.head == MAX_BUFFER_SIZE {
-                        self.head = 0;
-                    }
-                }
-
-                if self.buffer.len() < MAX_BUFFER_SIZE {
-                    self.buffer.push(*v);
-                } else {
-                    self.buffer[self.tail] = *v;
-                }
-
-                self.tail += 1;
-                if self.tail == MAX_BUFFER_SIZE {
-                    self.tail = 0;
-                }
-
-                self.flush_buffer()?;
-            }
-        }
+        // Make sure we flush anything that might have been written to the
+        // out device.
+        self.out.flush()?;
 
         Ok(buf.len())
     }
 
+    // This function flushes the content of the buffer to the out device if
+    // it is allowed to, otherwise this is a no-op.
     fn flush(&mut self) -> Result<(), std::io::Error> {
-        self.flush_buffer()
+        if !self.write_out.load(Ordering::Acquire) {
+            return Ok(());
+        }
+
+        while let Some(byte) = self.buffer.pop_front() {
+            if self.out.write_all(&[byte]).is_err() {
+                self.buffer.push_front(byte);
+                break;
+            }
+        }
+        self.out.flush()
     }
 }
