@@ -993,6 +993,8 @@ impl Vm {
         mut firmware: File,
         memory_manager: &Arc<Mutex<MemoryManager>>,
     ) -> Result<EntryPoint> {
+        warn!("Loading of legacy (non-PVH) firmware is deprecated and will be removed in a future version.");
+
         // Not an ELF header - assume raw binary data / firmware
         let size = firmware
             .seek(SeekFrom::End(0))
