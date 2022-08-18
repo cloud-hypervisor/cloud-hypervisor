@@ -58,17 +58,13 @@ impl RngEpollHandler {
             // Drivers can only read from the random device.
             if desc.is_write_only() {
                 // Fill the read with data from the random device on the host.
-                if desc_chain
-                    .memory()
-                    .read_from(
-                        desc.addr()
-                            .translate_gva(self.access_platform.as_ref(), desc.len() as usize),
-                        &mut self.random_file,
-                        desc.len() as usize,
-                    )
-                    .is_ok()
-                {
-                    len = desc.len();
+                if let Ok(number_of_bytes) = desc_chain.memory().read_from(
+                    desc.addr()
+                        .translate_gva(self.access_platform.as_ref(), desc.len() as usize),
+                    &mut self.random_file,
+                    desc.len() as usize,
+                ) {
+                    len = number_of_bytes as u32;
                 }
             }
 
