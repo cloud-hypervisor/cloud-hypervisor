@@ -342,29 +342,28 @@ impl EpollHelperHandler for NetEpollHandler {
                 if let Some(rate_limiter) = &mut self.net.rx_rate_limiter {
                     // Upon rate limiter event, call the rate limiter handler and register the
                     // TAP fd for further processing if some RX buffers are available
-                    match rate_limiter.event_handler() {
-                        Ok(_) => {
-                            if !self.net.rx_tap_listening && self.net.rx_desc_avail {
-                                if let Err(e) = net_util::register_listener(
-                                    self.net.epoll_fd.unwrap(),
-                                    self.net.tap.as_raw_fd(),
-                                    epoll::Events::EPOLLIN,
-                                    u64::from(self.net.tap_rx_event_id),
-                                ) {
-                                    return Err(EpollHelperError::HandleEvent(anyhow!(
-                                        "Error register_listener with `RX_RATE_LIMITER_EVENT`: {:?}",
-                                        e
-                                    )));
-                                }
-                                self.net.rx_tap_listening = true;
-                            }
-                        }
-                        Err(e) => {
-                            return Err(EpollHelperError::HandleEvent(anyhow!(
-                                "Error from 'rate_limiter.event_handler()': {:?}",
+                    rate_limiter.event_handler().map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Error from 'rate_limiter.event_handler()': {:?}",
+                            e
+                        ))
+                    })?;
+
+                    if !self.net.rx_tap_listening && self.net.rx_desc_avail {
+                        net_util::register_listener(
+                            self.net.epoll_fd.unwrap(),
+                            self.net.tap.as_raw_fd(),
+                            epoll::Events::EPOLLIN,
+                            u64::from(self.net.tap_rx_event_id),
+                        )
+                        .map_err(|e| {
+                            EpollHelperError::HandleEvent(anyhow!(
+                                "Error register_listener with `RX_RATE_LIMITER_EVENT`: {:?}",
                                 e
-                            )));
-                        }
+                            ))
+                        })?;
+
+                        self.net.rx_tap_listening = true;
                     }
                 } else {
                     return Err(EpollHelperError::HandleEvent(anyhow!(
@@ -376,23 +375,17 @@ impl EpollHelperHandler for NetEpollHandler {
                 if let Some(rate_limiter) = &mut self.net.tx_rate_limiter {
                     // Upon rate limiter event, call the rate limiter handler
                     // and restart processing the queue.
-                    match rate_limiter.event_handler() {
-                        Ok(_) => {
-                            self.driver_awake = true;
-                            if let Err(e) = self.process_tx() {
-                                return Err(EpollHelperError::HandleEvent(anyhow!(
-                                    "Error processing TX queue: {:?}",
-                                    e
-                                )));
-                            }
-                        }
-                        Err(e) => {
-                            return Err(EpollHelperError::HandleEvent(anyhow!(
-                                "Error from 'rate_limiter.event_handler()': {:?}",
-                                e
-                            )));
-                        }
-                    }
+                    rate_limiter.event_handler().map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Error from 'rate_limiter.event_handler()': {:?}",
+                            e
+                        ))
+                    })?;
+
+                    self.driver_awake = true;
+                    self.process_tx().map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!("Error processing TX queue: {:?}", e))
+                    })?;
                 } else {
                     return Err(EpollHelperError::HandleEvent(anyhow!(
                         "Unexpected TX_RATE_LIMITER_EVENT"
