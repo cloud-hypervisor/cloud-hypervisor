@@ -59,7 +59,7 @@ pub const UEFI_START: GuestAddress = GuestAddress(0);
 pub const UEFI_SIZE: u64 = 0x040_0000;
 
 /// Below this address will reside the GIC, above this address will reside the MMIO devices.
-pub const MAPPED_IO_START: GuestAddress = GuestAddress(0x0900_0000);
+const MAPPED_IO_START: GuestAddress = GuestAddress(0x0900_0000);
 
 /// See kernel file arch/arm64/include/uapi/asm/kvm.h for the GIC related definitions.
 /// 0x08ff_0000 ~ 0x0900_0000 is reserved for GICv3 Distributor
@@ -73,7 +73,7 @@ pub const GIC_V3_REDIST_SIZE: u64 = 0x02_0000;
 pub const GIC_V3_ITS_SIZE: u64 = 0x02_0000;
 
 /// Space 0x0900_0000 ~ 0x0905_0000 is reserved for legacy devices.
-pub const LEGACY_SERIAL_MAPPED_IO_START: GuestAddress = GuestAddress(0x0900_0000);
+pub const LEGACY_SERIAL_MAPPED_IO_START: GuestAddress = MAPPED_IO_START;
 pub const LEGACY_RTC_MAPPED_IO_START: GuestAddress = GuestAddress(0x0901_0000);
 pub const LEGACY_GPIO_MAPPED_IO_START: GuestAddress = GuestAddress(0x0902_0000);
 
