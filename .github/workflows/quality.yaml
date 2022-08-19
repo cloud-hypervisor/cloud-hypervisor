@@ -21,7 +21,10 @@ jobs:
             experimental: true
     steps:
       - name: Code checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
       - name: Install Rust toolchain (${{ matrix.rust }})
         uses: actions-rs/toolchain@v1
         with:
@@ -32,8 +35,8 @@ jobs:
 
       - name: Debug Check (default features)
         run: |
-          git rev-list origin/main..$GITHUB_SHA | xargs -t -I % sh -c 'git checkout %; cargo check --tests --all --target=${{ matrix.target }}'
-          git checkout $GITHUB_SHA
+          git rev-list origin/${{ github.base_ref }}..${{ github.sha }} | xargs -t -I % sh -c 'git checkout %; cargo check --tests --all --target=${{ matrix.target }}'
+          git checkout ${{ github.sha }}
 
       - name: Formatting (rustfmt)
         run: cargo fmt -- --check
