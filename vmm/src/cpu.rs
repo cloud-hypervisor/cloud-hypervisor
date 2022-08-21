@@ -155,11 +155,7 @@ pub enum Error {
     #[error("Error during CPU debug: {0}")]
     CpuDebug(#[source] hypervisor::HypervisorCpuError),
 
-    #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
-    #[error("Error translating virtual address: {0}")]
-    TranslateVirtualAddress(#[source] hypervisor::HypervisorCpuError),
-
-    #[cfg(all(target_arch = "aarch64", feature = "gdb"))]
+    #[cfg(feature = "gdb")]
     #[error("Error translating virtual address: {0}")]
     TranslateVirtualAddress(#[source] anyhow::Error),
 
@@ -1505,7 +1501,7 @@ impl CpuManager {
             .unwrap()
             .vcpu
             .translate_gva(gva, /* flags: unused */ 0)
-            .map_err(Error::TranslateVirtualAddress)?;
+            .map_err(|e| Error::TranslateVirtualAddress(e.into()))?;
         Ok(gpa)
     }
 
