@@ -8927,51 +8927,43 @@ mod live_migration {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_live_upgrade_basic() {
             _test_live_migration(true, false, false, false, false)
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_live_upgrade_local() {
             _test_live_migration(true, false, true, false, false)
         }
 
         #[test]
         #[cfg(not(feature = "mshv"))]
-        #[cfg(target_arch = "x86_64")]
         fn test_live_upgrade_numa() {
             _test_live_migration(true, true, false, false, false)
         }
 
         #[test]
         #[cfg(not(feature = "mshv"))]
-        #[cfg(target_arch = "x86_64")]
         fn test_live_upgrade_numa_local() {
             _test_live_migration(true, true, true, false, false)
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_live_upgrade_watchdog() {
             _test_live_migration(true, false, false, true, false)
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_live_upgrade_watchdog_local() {
             _test_live_migration(true, false, true, true, false)
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_live_upgrade_balloon() {
             _test_live_migration(true, false, false, false, true)
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_live_upgrade_balloon_local() {
             _test_live_migration(true, false, true, false, true)
         }
