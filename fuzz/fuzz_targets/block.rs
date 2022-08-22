@@ -1,6 +1,10 @@
 // Copyright 2018 The Chromium OS Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+//
+// Copyright © 2022 Intel Corporation
+//
+// SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 #![no_main]
 
@@ -16,7 +20,6 @@ use std::sync::Arc;
 use virtio_devices::{Block, VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
 use vm_memory::{bitmap::AtomicBitmap, Bytes, GuestAddress, GuestMemoryAtomic};
-use vmm::{EpollContext, EpollDispatch};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
@@ -61,6 +64,9 @@ fuzz_target!(|bytes| {
     )
     .unwrap();
 
+    // Kick the 'queue' event before activate the block device
+    queue_evt.write(1).unwrap();
+
     block
         .activate(
             guest_memory,
@@ -69,11 +75,8 @@ fuzz_target!(|bytes| {
         )
         .ok();
 
-    queue_evt.write(77).unwrap(); // Rings the doorbell, any byte will do.
-
-    wait_queue_event_processed(queue_evt);
-
-    block.reset(); // Ensure the virtio-block device thread is killed and joined
+    // Wait for the events to finish and block device worker thread to return
+    block.reset();
 });
 
 fn memfd_create(name: &ffi::CStr, flags: u32) -> Result<RawFd, io::Error> {
@@ -91,31 +94,5 @@ pub struct NoopVirtioInterrupt {}
 impl VirtioInterrupt for NoopVirtioInterrupt {
     fn trigger(&self, _int_type: VirtioInterruptType) -> std::result::Result<(), std::io::Error> {
         Ok(())
-    }
-}
-
-fn wait_queue_event_processed(queue_evt: EventFd) {
-    let mut epoll = EpollContext::new().unwrap();
-    epoll.add_event(&queue_evt, EpollDispatch::Api).unwrap();
-
-    let epoll_fd = epoll.as_raw_fd();
-    let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); 1];
-
-    loop {
-        let num_events = match epoll::wait(epoll_fd, 0, &mut events[..]) {
-            Ok(res) => res,
-            Err(e) => {
-                if e.kind() == io::ErrorKind::Interrupted {
-                    continue;
-                }
-
-                println!("Warning: Unexpected epoll::wait() error!");
-                break;
-            }
-        };
-
-        if num_events == 0 {
-            break;
-        }
     }
 }
