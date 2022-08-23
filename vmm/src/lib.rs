@@ -273,6 +273,8 @@ pub fn start_vmm_thread(
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
 ) -> Result<thread::JoinHandle<Result<()>>> {
     #[cfg(feature = "gdb")]
+    let gdb_hw_breakpoints = hypervisor.get_guest_debug_hw_bps();
+    #[cfg(feature = "gdb")]
     let (gdb_sender, gdb_receiver) = std::sync::mpsc::channel();
     #[cfg(feature = "gdb")]
     let gdb_debug_event = debug_event.try_clone().map_err(Error::EventFdClone)?;
@@ -344,7 +346,12 @@ pub fn start_vmm_thread(
 
     #[cfg(feature = "gdb")]
     if let Some(debug_path) = debug_path {
-        let target = gdb::GdbStub::new(gdb_sender, gdb_debug_event, gdb_vm_debug_event);
+        let target = gdb::GdbStub::new(
+            gdb_sender,
+            gdb_debug_event,
+            gdb_vm_debug_event,
+            gdb_hw_breakpoints,
+        );
         thread::Builder::new()
             .name("gdb".to_owned())
             .spawn(move || gdb::gdb_thread(target, &debug_path))
