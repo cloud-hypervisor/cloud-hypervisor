@@ -1605,13 +1605,6 @@ impl cpu::Vcpu for KvmVcpu {
         addrs: &[vm_memory::GuestAddress],
         singlestep: bool,
     ) -> cpu::Result<()> {
-        if addrs.len() > 4 {
-            return Err(cpu::HypervisorCpuError::SetDebugRegs(anyhow!(
-                "Support 4 breakpoints at most but {} addresses are passed",
-                addrs.len()
-            )));
-        }
-
         let mut dbg = kvm_guest_debug {
             #[cfg(target_arch = "x86_64")]
             control: KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_HW_BP,
@@ -1623,6 +1616,9 @@ impl cpu::Vcpu for KvmVcpu {
             dbg.control |= KVM_GUESTDBG_SINGLESTEP;
         }
 
+        // Set the debug registers.
+        // Here we assume that the number of addresses do not exceed what
+        // `Hypervisor::get_guest_debug_hw_bps()` specifies.
         #[cfg(target_arch = "x86_64")]
         {
             // Set bits 9 and 10.
