@@ -1076,6 +1076,20 @@ impl hypervisor::Hypervisor for KvmHypervisor {
 
         Ok(data)
     }
+
+    ///
+    /// Get the number of supported hardware breakpoints
+    ///
+    fn get_guest_debug_hw_bps(&self) -> usize {
+        #[cfg(target_arch = "x86_64")]
+        {
+            4
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            self.kvm.get_guest_debug_hw_bps() as usize
+        }
+    }
 }
 /// Vcpu struct for KVM
 pub struct KvmVcpu {

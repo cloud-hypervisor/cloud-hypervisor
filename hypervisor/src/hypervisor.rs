@@ -117,7 +117,7 @@ pub trait Hypervisor: Send + Sync {
     }
     #[cfg(target_arch = "aarch64")]
     ///
-    /// Retrieve AArch64 host maximum IPA size supported by KVM.
+    /// Retrieve AArch64 host maximum IPA size supported by KVM
     ///
     fn get_host_ipa_limit(&self) -> i32;
     ///
@@ -125,4 +125,10 @@ pub trait Hypervisor: Send + Sync {
     ///
     #[cfg(feature = "tdx")]
     fn tdx_capabilities(&self) -> Result<TdxCapabilities>;
+    ///
+    /// Get the number of supported hardware breakpoints
+    ///
+    fn get_guest_debug_hw_bps(&self) -> usize {
+        unimplemented!()
+    }
 }
