@@ -953,6 +953,15 @@ impl Vm {
     }
 
     #[cfg(target_arch = "aarch64")]
+    fn load_firmware(&self, mut firmware: &File) -> Result<()> {
+        let uefi_flash = self.device_manager.lock().as_ref().unwrap().uefi_flash();
+        let mem = uefi_flash.memory();
+        arch::aarch64::uefi::load_uefi(mem.deref(), arch::layout::UEFI_START, &mut firmware)
+            .map_err(Error::UefiLoad)?;
+        Ok(())
+    }
+
+    #[cfg(target_arch = "aarch64")]
     fn load_kernel(&mut self) -> Result<EntryPoint> {
         let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
         let mem = guest_memory.memory();
@@ -963,30 +972,21 @@ impl Vm {
             &mut kernel,
             None,
         ) {
-            Ok(entry_addr) => entry_addr,
+            Ok(entry_addr) => entry_addr.kernel_load,
             // Try to load the binary as kernel PE file at first.
             // If failed, retry to load it as UEFI binary.
             // As the UEFI binary is formatless, it must be the last option to try.
             Err(linux_loader::loader::Error::Pe(InvalidImageMagicNumber)) => {
-                let uefi_flash = self.device_manager.lock().as_ref().unwrap().uefi_flash();
-                let mem = uefi_flash.memory();
-                arch::aarch64::uefi::load_uefi(mem.deref(), arch::layout::UEFI_START, &mut kernel)
-                    .map_err(Error::UefiLoad)?;
-
-                // The entry point offset in UEFI image is always 0.
-                return Ok(EntryPoint {
-                    entry_addr: arch::layout::UEFI_START,
-                });
+                self.load_firmware(kernel)?;
+                arch::layout::UEFI_START
             }
             Err(e) => {
                 return Err(Error::KernelLoad(e));
             }
         };
 
-        let entry_point_addr: GuestAddress = entry_addr.kernel_load;
-
         Ok(EntryPoint {
-            entry_addr: entry_point_addr,
+            entry_addr: entry_addr,
         })
     }
 
