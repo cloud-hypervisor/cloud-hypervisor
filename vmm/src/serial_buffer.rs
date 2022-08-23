@@ -12,6 +12,8 @@ use std::{
     },
 };
 
+const MAX_BUFFER_SIZE: usize = 1 << 20;
+
 // Circular buffer implementation for serial output.
 // Read from head; push to tail
 pub(crate) struct SerialBuffer {
@@ -28,6 +30,22 @@ impl SerialBuffer {
             write_out,
         }
     }
+
+    fn fill_buffer(&mut self, buf: &[u8]) {
+        if buf.len() >= MAX_BUFFER_SIZE {
+            let offset = buf.len() - MAX_BUFFER_SIZE;
+            self.buffer = VecDeque::from(buf[offset..].to_vec());
+            return;
+        }
+
+        let num_allowed_bytes = MAX_BUFFER_SIZE - buf.len();
+        if self.buffer.len() > num_allowed_bytes {
+            let num_bytes_to_remove = self.buffer.len() - num_allowed_bytes;
+            self.buffer.drain(..num_bytes_to_remove);
+        }
+
+        self.buffer.extend(buf);
+    }
 }
 
 impl Write for SerialBuffer {
@@ -35,7 +53,7 @@ impl Write for SerialBuffer {
         // Simply fill the buffer if we're not allowed to write to the out
         // device.
         if !self.write_out.load(Ordering::Acquire) {
-            self.buffer.extend(buf);
+            self.fill_buffer(buf);
             return Ok(buf.len());
         }
 
@@ -47,7 +65,7 @@ impl Write for SerialBuffer {
         // only a subset of the bytes was written and we should fill the buffer
         // with what's coming from the serial.
         if !self.buffer.is_empty() {
-            self.buffer.extend(buf);
+            self.fill_buffer(buf);
             return Ok(buf.len());
         }
 
@@ -66,7 +84,7 @@ impl Write for SerialBuffer {
                     if !matches!(e.kind(), std::io::ErrorKind::WouldBlock) {
                         return Err(e);
                     }
-                    self.buffer.extend(&buf[offset..]);
+                    self.fill_buffer(&buf[offset..]);
                 }
             }
             break;
