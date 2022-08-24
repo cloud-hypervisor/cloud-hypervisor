@@ -20,6 +20,7 @@ use std::{
     thread,
     time::Duration,
 };
+use test_infra::FioOps;
 use thiserror::Error;
 
 #[derive(Error, Debug)]

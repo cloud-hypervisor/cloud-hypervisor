@@ -1114,6 +1114,8 @@ dependencies = [
  "epoll",
  "libc",
  "once_cell",
+ "serde",
+ "serde_json",
  "ssh2",
  "vmm-sys-util",
  "wait-timeout",
