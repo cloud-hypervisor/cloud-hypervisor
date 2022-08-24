@@ -9438,3 +9438,79 @@ mod aarch64_acpi {
         _test_virtio_iommu(true)
     }
 }
+
+mod rate_limiter {
+    use super::*;
+
+    // Check if the 'measured' rate is within the expected 'difference' (in percentage)
+    // compared to given 'limit' rate.
+    fn check_rate_limit(measured: f64, limit: f64, difference: f64) -> bool {
+        let upper_limit = limit * (1_f64 + difference);
+        let lower_limit = limit * (1_f64 - difference);
+
+        if measured > lower_limit && measured < upper_limit {
+            return true;
+        }
+
+        eprintln!(
+            "\n\n==== check_rate_limit failed! ====\n\nmeasured={}, , lower_limit={}, upper_limit={}\n\n",
+            measured, lower_limit, upper_limit
+        );
+
+        false
+    }
+
+    fn _test_rate_limiter_net(rx: bool) {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+
+        let test_timeout = 10;
+        let num_queues = 2;
+        let queue_size = 256;
+        let bw_size = 10485760_u64; // bytes
+        let bw_refill_time = 100; // ms
+        let limit_bps = (bw_size * 8 * 1000) as f64 / bw_refill_time as f64;
+
+        let net_params = format!(
+            "tap=,mac={},ip={},mask=255.255.255.0,num_queues={},queue_size={},bw_size={},bw_refill_time={}",
+            guest.network.guest_mac,
+            guest.network.host_ip,
+            num_queues,
+            queue_size,
+            bw_size,
+            bw_refill_time,
+        );
+
+        let mut child = GuestCommand::new(&guest)
+            .args(&["--cpus", &format!("boot={}", num_queues / 2)])
+            .args(&["--memory", "size=4G"])
+            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .args(&["--net", net_params.as_str()])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+            let measured_bps =
+                measure_virtio_net_throughput(test_timeout, num_queues / 2, &guest, rx).unwrap();
+            assert!(check_rate_limit(measured_bps, limit_bps, 0.1));
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_rate_limiter_net_rx() {
+        _test_rate_limiter_net(true);
+    }
+
+    #[test]
+    fn test_rate_limiter_net_tx() {
+        _test_rate_limiter_net(false);
+    }
+}
