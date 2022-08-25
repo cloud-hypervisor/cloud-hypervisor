@@ -70,7 +70,6 @@ pub mod memory_manager;
 pub mod migration;
 mod pci_segment;
 pub mod seccomp_filters;
-mod serial_buffer;
 mod serial_manager;
 mod sigwinch_listener;
 pub mod vm;

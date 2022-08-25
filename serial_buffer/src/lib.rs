@@ -16,14 +16,14 @@ const MAX_BUFFER_SIZE: usize = 1 << 20;
 
 // Circular buffer implementation for serial output.
 // Read from head; push to tail
-pub(crate) struct SerialBuffer {
+pub struct SerialBuffer {
     buffer: VecDeque<u8>,
     out: Box<dyn Write + Send>,
     write_out: Arc<AtomicBool>,
 }
 
 impl SerialBuffer {
-    pub(crate) fn new(out: Box<dyn Write + Send>, write_out: Arc<AtomicBool>) -> Self {
+    pub fn new(out: Box<dyn Write + Send>, write_out: Arc<AtomicBool>) -> Self {
         Self {
             buffer: VecDeque::new(),
             out,
