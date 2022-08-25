@@ -24,6 +24,7 @@ rate_limiter = { path = "../rate_limiter" }
 seccompiler = "0.2.0"
 serde = { version = "1.0.144", features = ["derive"] }
 serde_json = "1.0.85"
+serial_buffer = { path = "../serial_buffer" }
 thiserror = "1.0.32"
 versionize = "0.1.6"
 versionize_derive = "0.1.4"
