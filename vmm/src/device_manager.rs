@@ -483,7 +483,7 @@ const DEVICE_MANAGER_ACPI_SIZE: usize = 0x10;
 const TIOCSPTLCK: libc::c_int = 0x4004_5431;
 const TIOCGTPEER: libc::c_int = 0x5441;
 
-pub fn create_pty(non_blocking: bool) -> io::Result<(File, File, PathBuf)> {
+pub fn create_pty() -> io::Result<(File, File, PathBuf)> {
     // Try to use /dev/pts/ptmx first then fall back to /dev/ptmx
     // This is done to try and use the devpts filesystem that
     // could be available for use in the process's namespace first.
@@ -492,7 +492,7 @@ pub fn create_pty(non_blocking: bool) -> io::Result<(File, File, PathBuf)> {
     // See https://www.kernel.org/doc/Documentation/filesystems/devpts.txt
     // for further details.
 
-    let custom_flags = libc::O_NOCTTY | if non_blocking { libc::O_NONBLOCK } else { 0 };
+    let custom_flags = libc::O_NONBLOCK;
     let main = match OpenOptions::new()
         .read(true)
         .write(true)
@@ -1864,7 +1864,7 @@ impl DeviceManager {
         self.modify_mode(f.as_raw_fd(), |t| unsafe { cfmakeraw(t) })
     }
 
-    fn listen_for_sigwinch_on_tty(&mut self, pty: &File) -> std::io::Result<()> {
+    fn listen_for_sigwinch_on_tty(&mut self, pty_main: File, pty_sub: File) -> std::io::Result<()> {
         let seccomp_filter = get_seccomp_filter(
             &self.seccomp_action,
             Thread::PtyForeground,
@@ -1872,7 +1872,7 @@ impl DeviceManager {
         )
         .unwrap();
 
-        match start_sigwinch_listener(seccomp_filter, pty) {
+        match start_sigwinch_listener(seccomp_filter, pty_main, pty_sub) {
             Ok(pipe) => {
                 self.console_resize_pipe = Some(Arc::new(pipe));
             }
@@ -1903,18 +1903,19 @@ impl DeviceManager {
                     let file = pty.main.try_clone().unwrap();
                     self.console_pty = Some(Arc::new(Mutex::new(pty)));
                     self.console_resize_pipe = resize_pipe.map(Arc::new);
-                    Endpoint::FilePair(file.try_clone().unwrap(), file)
+                    Endpoint::PtyPair(file.try_clone().unwrap(), file)
                 } else {
                     let (main, mut sub, path) =
-                        create_pty(false).map_err(DeviceManagerError::ConsolePtyOpen)?;
+                        create_pty().map_err(DeviceManagerError::ConsolePtyOpen)?;
                     self.set_raw_mode(&mut sub)
                         .map_err(DeviceManagerError::SetPtyRaw)?;
                     self.config.lock().unwrap().console.file = Some(path.clone());
                     let file = main.try_clone().unwrap();
                     assert!(resize_pipe.is_none());
-                    self.listen_for_sigwinch_on_tty(&sub).unwrap();
+                    self.listen_for_sigwinch_on_tty(main.try_clone().unwrap(), sub)
+                        .unwrap();
                     self.console_pty = Some(Arc::new(Mutex::new(PtyPair { main, path })));
-                    Endpoint::FilePair(file.try_clone().unwrap(), file)
+                    Endpoint::PtyPair(file.try_clone().unwrap(), file)
                 }
             }
             ConsoleOutputMode::Tty => {
@@ -2010,7 +2011,7 @@ impl DeviceManager {
                     self.serial_pty = Some(Arc::new(Mutex::new(pty)));
                 } else {
                     let (main, mut sub, path) =
-                        create_pty(true).map_err(DeviceManagerError::SerialPtyOpen)?;
+                        create_pty().map_err(DeviceManagerError::SerialPtyOpen)?;
                     self.set_raw_mode(&mut sub)
                         .map_err(DeviceManagerError::SetPtyRaw)?;
                     self.config.lock().unwrap().serial.file = Some(path.clone());

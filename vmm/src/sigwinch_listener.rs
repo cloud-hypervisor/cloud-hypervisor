@@ -57,8 +57,10 @@ fn unblock_all_signals() -> io::Result<()> {
     Ok(())
 }
 
-fn sigwinch_listener_main(seccomp_filter: BpfProgram, tx: File, tty: &File) -> ! {
+fn sigwinch_listener_main(seccomp_filter: BpfProgram, tx: File, pty: File) -> ! {
     TX.with(|opt| opt.replace(Some(tx)));
+
+    let pty_fd = pty.into_raw_fd();
 
     unsafe {
         close(STDIN_FILENO);
@@ -78,10 +80,13 @@ fn sigwinch_listener_main(seccomp_filter: BpfProgram, tx: File, tty: &File) -> !
         assert_ne!(setsid(), -1);
 
         // Set the tty to be this process's controlling terminal.
-        assert_ne!(ioctl(tty.as_raw_fd(), TIOCSCTTY, 0), -1);
+        assert_ne!(ioctl(pty_fd, TIOCSCTTY, 0), -1);
 
         // Become the foreground process group of the tty.
-        assert_ne!(tcsetpgrp(tty.as_raw_fd(), getpgrp()), -1);
+        assert_ne!(tcsetpgrp(pty_fd, getpgrp()), -1);
+
+        // Close the PTY fd
+        assert_ne!(close(pty_fd), -1);
     }
 
     notify();
@@ -109,7 +114,11 @@ fn sigwinch_listener_main(seccomp_filter: BpfProgram, tx: File, tty: &File) -> !
     exit(0);
 }
 
-pub fn start_sigwinch_listener(seccomp_filter: BpfProgram, pty: &File) -> io::Result<File> {
+pub fn start_sigwinch_listener(
+    seccomp_filter: BpfProgram,
+    pty_main: File,
+    pty_sub: File,
+) -> io::Result<File> {
     let mut pipe = [-1; 2];
     if unsafe { pipe2(pipe.as_mut_ptr(), O_CLOEXEC) } == -1 {
         return Err(io::Error::last_os_error());
@@ -125,7 +134,8 @@ pub fn start_sigwinch_listener(seccomp_filter: BpfProgram, pty: &File) -> io::Re
         -1 => return Err(io::Error::last_os_error()),
         0 => {
             drop(rx);
-            sigwinch_listener_main(seccomp_filter, tx, pty);
+            drop(pty_main);
+            sigwinch_listener_main(seccomp_filter, tx, pty_sub);
         }
         _ => (),
     }
