@@ -239,7 +239,7 @@ impl SerialManager {
                                     // returns an error of type EINTR, but this should not
                                     // be considered as a regular error. Instead it is more
                                     // appropriate to retry, by calling into epoll_wait().
-                                    0
+                                    continue;
                                 } else {
                                     return Err(Error::Epoll(e));
                                 }
