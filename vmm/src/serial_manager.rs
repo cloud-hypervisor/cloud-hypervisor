@@ -5,12 +5,12 @@
 
 use crate::config::ConsoleOutputMode;
 use crate::device_manager::PtyPair;
-use crate::serial_buffer::SerialBuffer;
 #[cfg(target_arch = "aarch64")]
 use devices::legacy::Pl011;
 #[cfg(target_arch = "x86_64")]
 use devices::legacy::Serial;
 use libc::EFD_NONBLOCK;
+use serial_buffer::SerialBuffer;
 use std::fs::File;
 use std::io::Read;
 use std::os::unix::io::{AsRawFd, FromRawFd};

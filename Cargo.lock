@@ -1012,6 +1012,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "serial_buffer"
+version = "0.1.0"
+
+[[package]]
 name = "signal-hook"
 version = "0.3.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1344,6 +1348,7 @@ dependencies = [
  "seccompiler",
  "serde",
  "serde_json",
+ "serial_buffer",
  "thiserror",
  "versionize",
  "versionize_derive",
@@ -1459,6 +1464,7 @@ dependencies = [
  "seccompiler",
  "serde",
  "serde_json",
+ "serial_buffer",
  "signal-hook",
  "thiserror",
  "uuid",
