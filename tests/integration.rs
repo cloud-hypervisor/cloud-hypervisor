@@ -7134,7 +7134,6 @@ mod windows {
     }
 
     #[test]
-    #[cfg(not(target_arch = "aarch64"))]
     fn test_windows_guest_multiple_queues() {
         let windows_guest = WindowsGuest::new();
 
@@ -7201,7 +7200,6 @@ mod windows {
 
     #[test]
     #[cfg(not(feature = "mshv"))]
-    #[cfg(not(target_arch = "aarch64"))]
     #[ignore = "See #4327"]
     fn test_windows_guest_snapshot_restore() {
         let windows_guest = WindowsGuest::new();
@@ -7441,7 +7439,6 @@ mod windows {
 
     #[test]
     #[cfg(not(feature = "mshv"))]
-    #[cfg(not(target_arch = "aarch64"))]
     fn test_windows_guest_netdev_hotplug() {
         let windows_guest = WindowsGuest::new();
 
@@ -7514,7 +7511,6 @@ mod windows {
 
     #[test]
     #[cfg(not(feature = "mshv"))]
-    #[cfg(not(target_arch = "aarch64"))]
     fn test_windows_guest_disk_hotplug() {
         let windows_guest = WindowsGuest::new();
 
