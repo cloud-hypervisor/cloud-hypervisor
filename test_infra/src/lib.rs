@@ -1367,6 +1367,8 @@ pub enum FioOps {
     RandomRead,
     Write,
     RandomWrite,
+    ReadWrite,
+    RandRW,
 }
 
 impl fmt::Display for FioOps {
@@ -1376,6 +1378,8 @@ impl fmt::Display for FioOps {
             FioOps::RandomRead => write!(f, "randread"),
             FioOps::Write => write!(f, "write"),
             FioOps::RandomWrite => write!(f, "randwrite"),
+            FioOps::ReadWrite => write!(f, "rw"),
+            FioOps::RandRW => write!(f, "randrw"),
         }
     }
 }
@@ -1393,9 +1397,10 @@ pub fn parse_fio_output(output: &str, fio_ops: &FioOps, num_jobs: u32) -> Result
             "'fio' parse error: Unexpected number of 'fio' jobs."
         );
 
-        let read = match fio_ops {
-            FioOps::Read | FioOps::RandomRead => true,
-            FioOps::Write | FioOps::RandomWrite => false,
+        let (read, write) = match fio_ops {
+            FioOps::Read | FioOps::RandomRead => (true, false),
+            FioOps::Write | FioOps::RandomWrite => (false, true),
+            FioOps::ReadWrite | FioOps::RandRW => (true, true),
         };
 
         let mut total_bps = 0_f64;
@@ -1410,7 +1415,8 @@ pub fn parse_fio_output(output: &str, fio_ops: &FioOps, num_jobs: u32) -> Result
                     as f64
                     / 1000_f64;
                 total_bps += bytes as f64 / runtime as f64;
-            } else {
+            }
+            if write {
                 let bytes = j["write"]["io_bytes"]
                     .as_u64()
                     .expect("'fio' parse error: missing entry 'write.io_bytes'");
