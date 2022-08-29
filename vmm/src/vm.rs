@@ -301,7 +301,6 @@ pub enum Error {
     #[error("Error joining kernel loading thread")]
     KernelLoadThreadJoin(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
 
-    #[cfg(target_arch = "x86_64")]
     #[error("Payload configuration is not bootable")]
     InvalidPayload,
 
@@ -458,7 +457,7 @@ pub fn physical_bits(max_phys_bits: u8) -> u8 {
 }
 
 pub struct Vm {
-    #[cfg(any(target_arch = "aarch64", feature = "tdx"))]
+    #[cfg(feature = "tdx")]
     kernel: Option<File>,
     initramfs: Option<File>,
     threads: Vec<thread::JoinHandle<()>>,
@@ -587,7 +586,7 @@ impl Vm {
 
         let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO as i32) } != 0;
 
-        #[cfg(any(target_arch = "aarch64", feature = "tdx"))]
+        #[cfg(feature = "tdx")]
         let kernel = config
             .lock()
             .unwrap()
@@ -609,7 +608,7 @@ impl Vm {
             .map_err(Error::InitramfsFile)?;
 
         Ok(Vm {
-            #[cfg(any(target_arch = "aarch64", feature = "tdx"))]
+            #[cfg(feature = "tdx")]
             kernel,
             initramfs,
             device_manager,
@@ -965,24 +964,42 @@ impl Vm {
     fn load_kernel(&mut self) -> Result<EntryPoint> {
         let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
         let mem = guest_memory.memory();
-        let mut kernel = self.kernel.as_ref().unwrap();
-        let entry_addr = match linux_loader::loader::pe::PE::load(
-            mem.deref(),
-            Some(arch::layout::KERNEL_START),
-            &mut kernel,
-            None,
-        ) {
-            Ok(entry_addr) => entry_addr.kernel_load,
-            // Try to load the binary as kernel PE file at first.
-            // If failed, retry to load it as UEFI binary.
-            // As the UEFI binary is formatless, it must be the last option to try.
-            Err(linux_loader::loader::Error::Pe(InvalidImageMagicNumber)) => {
-                self.load_firmware(kernel)?;
+        let payload = self
+            .config
+            .lock()
+            .unwrap()
+            .payload
+            .as_ref()
+            .unwrap()
+            .clone();
+        let entry_addr = match (payload.firmware, payload.kernel) {
+            (None, Some(kernel)) => {
+                let mut kernel = File::open(kernel).map_err(Error::KernelFile)?;
+                match linux_loader::loader::pe::PE::load(
+                    mem.deref(),
+                    Some(arch::layout::KERNEL_START),
+                    &mut kernel,
+                    None,
+                ) {
+                    Ok(entry_addr) => entry_addr.kernel_load,
+                    // Try to load the binary as kernel PE file at first.
+                    // If failed, retry to load it as UEFI binary.
+                    // As the UEFI binary is formatless, it must be the last option to try.
+                    Err(linux_loader::loader::Error::Pe(InvalidImageMagicNumber)) => {
+                        self.load_firmware(&kernel)?;
+                        arch::layout::UEFI_START
+                    }
+                    Err(e) => {
+                        return Err(Error::KernelLoad(e));
+                    }
+                }
+            }
+            (Some(firmware), None) => {
+                let firmware = File::open(firmware).map_err(Error::FirmwareFile)?;
+                self.load_firmware(&firmware)?;
                 arch::layout::UEFI_START
             }
-            Err(e) => {
-                return Err(Error::KernelLoad(e));
-            }
+            _ => return Err(Error::InvalidPayload),
         };
 
         Ok(EntryPoint {
@@ -2121,11 +2138,21 @@ impl Vm {
 
     #[cfg(target_arch = "aarch64")]
     fn entry_point(&mut self) -> Result<Option<EntryPoint>> {
-        Ok(if self.kernel.as_ref().is_some() {
-            Some(self.load_kernel()?)
-        } else {
-            None
-        })
+        let payload = self
+            .config
+            .lock()
+            .unwrap()
+            .payload
+            .as_ref()
+            .unwrap()
+            .clone();
+        Ok(
+            if payload.kernel.as_ref().is_some() || payload.firmware.as_ref().is_some() {
+                Some(self.load_kernel()?)
+            } else {
+                None
+            },
+        )
     }
 
     pub fn boot(&mut self) -> Result<()> {
