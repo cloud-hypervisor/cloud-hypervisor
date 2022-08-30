@@ -9513,4 +9513,104 @@ mod rate_limiter {
     fn test_rate_limiter_net_tx() {
         _test_rate_limiter_net(false);
     }
+
+    fn _test_rate_limiter_block(bandwidth: bool) {
+        let test_timeout = 10;
+        let num_queues = 1;
+        let fio_ops = FioOps::RandRW;
+
+        let bw_size = if bandwidth {
+            10485760_u64 // bytes
+        } else {
+            100_u64 // I/O
+        };
+        let bw_refill_time = 100; // ms
+        let limit_rate = (bw_size * 1000) as f64 / bw_refill_time as f64;
+
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+        let api_socket = temp_api_path(&guest.tmp_dir);
+        let test_img_dir = TempDir::new_with_prefix("/var/tmp/ch").unwrap();
+        let blk_rate_limiter_test_img =
+            String::from(test_img_dir.as_path().join("blk.img").to_str().unwrap());
+
+        // Create the test block image
+        assert!(exec_host_command_output(&format!(
+            "dd if=/dev/zero of={} bs=1M count=1024",
+            blk_rate_limiter_test_img
+        ))
+        .status
+        .success());
+
+        let test_blk_params = if bandwidth {
+            format!(
+                "path={},bw_size={},bw_refill_time={}",
+                blk_rate_limiter_test_img, bw_size, bw_refill_time
+            )
+        } else {
+            format!(
+                "path={},ops_size={},ops_refill_time={}",
+                blk_rate_limiter_test_img, bw_size, bw_refill_time
+            )
+        };
+
+        let mut child = GuestCommand::new(&guest)
+            .args(&["--cpus", &format!("boot={}", num_queues)])
+            .args(&["--memory", "size=4G"])
+            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(&[
+                "--disk",
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                )
+                .as_str(),
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                )
+                .as_str(),
+                test_blk_params.as_str(),
+            ])
+            .default_net()
+            .args(&["--api-socket", &api_socket])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            let fio_command = format!(
+                "sudo fio --filename=/dev/vdc --name=test --output-format=json \
+                --direct=1 --bs=4k --ioengine=io_uring --iodepth=64 \
+                --rw={} --runtime={} --numjobs={}",
+                fio_ops, test_timeout, num_queues
+            );
+            let output = guest.ssh_command(&fio_command).unwrap();
+
+            // Parse fio output
+            let measured_rate = if bandwidth {
+                parse_fio_output(&output, &fio_ops, num_queues).unwrap()
+            } else {
+                parse_fio_output_iops(&output, &fio_ops, num_queues).unwrap()
+            };
+            assert!(check_rate_limit(measured_rate, limit_rate, 0.1));
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_rate_limiter_block_bandwidth() {
+        _test_rate_limiter_block(true)
+    }
+
+    #[test]
+    fn test_rate_limiter_block_iops() {
+        _test_rate_limiter_block(false)
+    }
 }
