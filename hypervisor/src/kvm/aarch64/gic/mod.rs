@@ -4,7 +4,7 @@ mod dist_regs;
 mod icc_regs;
 mod redist_regs;
 
-use crate::arch::aarch64::gic::{Error, Result, Vgic};
+use crate::arch::aarch64::gic::{Error, Result, Vgic, VgicConfig};
 use crate::device::HypervisorDeviceError;
 use crate::kvm::{kvm_bindings, KvmVm};
 use crate::{CpuState, Vm};
@@ -133,9 +133,7 @@ impl KvmGicV3Its {
     /// Setup the device-specific attributes
     fn init_device_attributes(&mut self, vm: &KvmVm, nr_irqs: u32) -> Result<()> {
         // GicV3 part attributes
-        /* Setting up the distributor attribute.
-         We are placing the GIC below 1GB so we need to substract the size of the distributor.
-        */
+        /* Setting up the distributor attribute. */
         Self::set_device_attribute(
             &self.device,
             kvm_bindings::KVM_DEV_ARM_VGIC_GRP_ADDR,
@@ -144,9 +142,7 @@ impl KvmGicV3Its {
             0,
         )?;
 
-        /* Setting up the redistributors' attribute.
-        We are calculating here the start of the redistributors address. We have one per CPU.
-        */
+        /* Setting up the redistributors' attribute. */
         Self::set_device_attribute(
             &self.device,
             kvm_bindings::KVM_DEV_ARM_VGIC_GRP_ADDR,
@@ -248,37 +244,26 @@ impl KvmGicV3Its {
 
     /// Method to initialize the GIC device
     #[allow(clippy::new_ret_no_self)]
-    pub fn new(
-        vm: &dyn Vm,
-        vcpu_count: u64,
-        dist_addr: u64,
-        dist_size: u64,
-        redist_size: u64,
-        msi_size: u64,
-        nr_irqs: u32,
-    ) -> Result<KvmGicV3Its> {
+    pub fn new(vm: &dyn Vm, config: VgicConfig) -> Result<KvmGicV3Its> {
         // This is inside KVM module
         let vm = vm.as_any().downcast_ref::<KvmVm>().expect("Wrong VM type?");
 
         let vgic = Self::create_device(vm)?;
-        let redists_size: u64 = redist_size * vcpu_count;
-        let redists_addr: u64 = dist_addr - redists_size;
-        let msi_addr: u64 = redists_addr - msi_size;
 
         let mut gic_device = KvmGicV3Its {
             device: vgic,
             its_device: None,
-            gicr_typers: vec![0; vcpu_count.try_into().unwrap()],
-            dist_addr,
-            dist_size,
-            redists_addr,
-            redists_size,
-            msi_addr,
-            msi_size,
-            vcpu_count,
+            gicr_typers: vec![0; config.vcpu_count.try_into().unwrap()],
+            dist_addr: config.dist_addr,
+            dist_size: config.dist_size,
+            redists_addr: config.redists_addr,
+            redists_size: config.redists_size,
+            msi_addr: config.msi_addr,
+            msi_size: config.msi_size,
+            vcpu_count: config.vcpu_count,
         };
 
-        gic_device.init_device_attributes(vm, nr_irqs)?;
+        gic_device.init_device_attributes(vm, config.nr_irqs)?;
 
         Ok(gic_device)
     }
@@ -500,23 +485,30 @@ mod tests {
     use crate::aarch64::gic::{
         get_dist_regs, get_icc_regs, get_redist_regs, set_dist_regs, set_icc_regs, set_redist_regs,
     };
+    use crate::arch::aarch64::gic::VgicConfig;
     use crate::kvm::KvmGicV3Its;
+
+    fn create_test_vgic_config() -> VgicConfig {
+        VgicConfig {
+            vcpu_count: 1,
+            dist_addr: 0x0900_0000 - 0x01_0000,
+            dist_size: 0x01_0000,
+            // dist_addr - redists_size
+            redists_addr: 0x0900_0000 - 0x01_0000 - 0x02_0000,
+            redists_size: 0x02_0000,
+            // redists_addr - msi_size
+            msi_addr: 0x0900_0000 - 0x01_0000 - 0x02_0000 - 0x02_0000,
+            msi_size: 0x02_0000,
+            nr_irqs: 256,
+        }
+    }
 
     #[test]
     fn test_create_gic() {
         let hv = crate::new().unwrap();
         let vm = hv.create_vm().unwrap();
 
-        assert!(KvmGicV3Its::new(
-            &*vm,
-            1,
-            0x0900_0000 - 0x01_0000,
-            0x01_0000,
-            0x02_0000,
-            0x02_0000,
-            256
-        )
-        .is_ok());
+        assert!(KvmGicV3Its::new(&*vm, create_test_vgic_config()).is_ok());
     }
 
     #[test]
@@ -524,16 +516,7 @@ mod tests {
         let hv = crate::new().unwrap();
         let vm = hv.create_vm().unwrap();
         let _ = vm.create_vcpu(0, None).unwrap();
-        let gic = KvmGicV3Its::new(
-            &*vm,
-            1,
-            0x0900_0000 - 0x01_0000,
-            0x01_0000,
-            0x02_0000,
-            0x02_0000,
-            256,
-        )
-        .expect("Cannot create gic");
+        let gic = KvmGicV3Its::new(&*vm, create_test_vgic_config()).expect("Cannot create gic");
 
         let res = get_dist_regs(&gic.device);
         assert!(res.is_ok());
@@ -549,16 +532,7 @@ mod tests {
         let hv = crate::new().unwrap();
         let vm = hv.create_vm().unwrap();
         let _ = vm.create_vcpu(0, None).unwrap();
-        let gic = KvmGicV3Its::new(
-            &*vm,
-            1,
-            0x0900_0000 - 0x01_0000,
-            0x01_0000,
-            0x02_0000,
-            0x02_0000,
-            256,
-        )
-        .expect("Cannot create gic");
+        let gic = KvmGicV3Its::new(&*vm, create_test_vgic_config()).expect("Cannot create gic");
 
         let gicr_typer = vec![123];
         let res = get_redist_regs(&gic.device, &gicr_typer);
@@ -575,16 +549,7 @@ mod tests {
         let hv = crate::new().unwrap();
         let vm = hv.create_vm().unwrap();
         let _ = vm.create_vcpu(0, None).unwrap();
-        let gic = KvmGicV3Its::new(
-            &*vm,
-            1,
-            0x0900_0000 - 0x01_0000,
-            0x01_0000,
-            0x02_0000,
-            0x02_0000,
-            256,
-        )
-        .expect("Cannot create gic");
+        let gic = KvmGicV3Its::new(&*vm, create_test_vgic_config()).expect("Cannot create gic");
 
         let gicr_typer = vec![123];
         let res = get_icc_regs(&gic.device, &gicr_typer);
@@ -602,14 +567,7 @@ mod tests {
         let vm = hv.create_vm().unwrap();
         let _ = vm.create_vcpu(0, None).unwrap();
         let gic = vm
-            .create_vgic(
-                1,
-                0x0900_0000 - 0x01_0000,
-                0x01_0000,
-                0x02_0000,
-                0x02_0000,
-                256,
-            )
+            .create_vgic(create_test_vgic_config())
             .expect("Cannot create gic");
 
         assert!(gic.lock().unwrap().save_data_tables().is_ok());

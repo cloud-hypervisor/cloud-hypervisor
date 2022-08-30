@@ -1218,11 +1218,11 @@ impl DeviceManager {
         #[cfg(target_arch = "aarch64")]
         {
             let vcpus = self.config.lock().unwrap().cpus.boot_vcpus;
-            let msi_start = arch::layout::GIC_V3_DIST_START.raw_value()
-                - arch::layout::GIC_V3_REDIST_SIZE * (vcpus as u64)
-                - arch::layout::GIC_V3_ITS_SIZE;
-            let msi_end = msi_start + arch::layout::GIC_V3_ITS_SIZE - 1;
-            (msi_start, msi_end)
+            let vgic_config = gic::Gic::create_default_config(vcpus.into());
+            (
+                vgic_config.msi_addr,
+                vgic_config.msi_addr + vgic_config.msi_size - 1,
+            )
         }
         #[cfg(target_arch = "x86_64")]
         (0xfee0_0000, 0xfeef_ffff)
