@@ -32,7 +32,11 @@ jobs:
 
       - name: Debug Check (default features)
         run: |
-          git rev-list origin/main..$GITHUB_SHA | xargs -t -I % sh -c 'git checkout %; cargo check --tests --all --target=${{ matrix.target }}'
+          git --version
+          git log --oneline -n 30
+          git checkout $GITHUB_SHA
+          git log --oneline -n 30
+          git rev-list origin/main..HEAD | xargs -t -I % sh -c 'git checkout %; cargo check --tests --all --target=${{ matrix.target }}'
           git checkout $GITHUB_SHA
 
       - name: Formatting (rustfmt)

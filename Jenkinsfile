@@ -2,7 +2,7 @@ def runWorkers = true
 pipeline{
 	agent none
 	stages {
-		stage ('Early checks') {
+		stage ('Early checks test') {
 			agent { node { label 'built-in' } }
 			stages {
 				stage ('Checkout') {
