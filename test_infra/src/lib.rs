@@ -1440,6 +1440,62 @@ pub fn parse_fio_output(output: &str, fio_ops: &FioOps, num_jobs: u32) -> Result
     })
 }
 
+pub fn parse_fio_output_iops(output: &str, fio_ops: &FioOps, num_jobs: u32) -> Result<f64, Error> {
+    std::panic::catch_unwind(|| {
+        let v: Value =
+            serde_json::from_str(output).expect("'fio' parse error: invalid json output");
+        let jobs = v["jobs"]
+            .as_array()
+            .expect("'fio' parse error: missing entry 'jobs'");
+        assert_eq!(
+            jobs.len(),
+            num_jobs as usize,
+            "'fio' parse error: Unexpected number of 'fio' jobs."
+        );
+
+        let (read, write) = match fio_ops {
+            FioOps::Read | FioOps::RandomRead => (true, false),
+            FioOps::Write | FioOps::RandomWrite => (false, true),
+            FioOps::ReadWrite | FioOps::RandRW => (true, true),
+        };
+
+        let mut total_iops = 0_f64;
+        for j in jobs {
+            if read {
+                let ios = j["read"]["total_ios"]
+                    .as_u64()
+                    .expect("'fio' parse error: missing entry 'read.total_ios'");
+                let runtime = j["read"]["runtime"]
+                    .as_u64()
+                    .expect("'fio' parse error: missing entry 'read.runtime'")
+                    as f64
+                    / 1000_f64;
+                total_iops += ios as f64 / runtime as f64;
+            }
+            if write {
+                let ios = j["write"]["total_ios"]
+                    .as_u64()
+                    .expect("'fio' parse error: missing entry 'write.total_ios'");
+                let runtime = j["write"]["runtime"]
+                    .as_u64()
+                    .expect("'fio' parse error: missing entry 'write.runtime'")
+                    as f64
+                    / 1000_f64;
+                total_iops += ios as f64 / runtime as f64;
+            }
+        }
+
+        total_iops
+    })
+    .map_err(|_| {
+        eprintln!(
+            "=============== Fio output ===============\n\n{}\n\n===========end============\n\n",
+            output
+        );
+        Error::FioOutputParse
+    })
+}
+
 // Wait the child process for a given timeout
 fn child_wait_timeout(child: &mut Child, timeout: u64) -> Result<(), WaitTimeoutError> {
     match child.wait_timeout(Duration::from_secs(timeout)) {
