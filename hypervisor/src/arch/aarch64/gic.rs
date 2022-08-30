@@ -16,6 +16,18 @@ pub enum Error {
 }
 pub type Result<T> = result::Result<T, Error>;
 
+#[derive(Debug)]
+pub struct VgicConfig {
+    pub vcpu_count: u64,
+    pub dist_addr: u64,
+    pub dist_size: u64,
+    pub redists_addr: u64,
+    pub redists_size: u64,
+    pub msi_addr: u64,
+    pub msi_size: u64,
+    pub nr_irqs: u32,
+}
+
 /// Hypervisor agnostic interface for a virtualized GIC
 pub trait Vgic: Send + Sync {
     /// Returns the fdt compatibility property of the device
