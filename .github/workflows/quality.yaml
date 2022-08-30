@@ -35,7 +35,9 @@ jobs:
 
       - name: Debug Check (default features)
         run: |
-          git rev-list origin/${{ github.base_ref }}..${{ github.sha }} | xargs -t -I % sh -c 'git checkout %; cargo check --tests --all --target=${{ matrix.target }}'
+          set -e
+          commits=$(git rev-list origin/${{ github.base_ref }}..${{ github.sha }})
+          for commit in $commits; do git checkout $commit; cargo check --tests --all --target=${{ matrix.target }}; done
           git checkout ${{ github.sha }}
 
       - name: Formatting (rustfmt)
