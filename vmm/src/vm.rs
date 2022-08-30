@@ -47,7 +47,7 @@ use arch::EntryPoint;
 use arch::PciSpaceInfo;
 use arch::{NumaNode, NumaNodes};
 #[cfg(target_arch = "aarch64")]
-use devices::gic::GIC_V3_ITS_SNAPSHOT_ID;
+use devices::gic::{Gic, GIC_V3_ITS_SNAPSHOT_ID};
 #[cfg(target_arch = "aarch64")]
 use devices::interrupt_controller::{self, InterruptController};
 use devices::AcpiNotificationFlags;
@@ -1262,6 +1262,7 @@ impl Vm {
             .as_ref()
             .map(|(v, _)| *v);
 
+        let vcpu_count = self.cpu_manager.lock().unwrap().boot_vcpus() as u64;
         let vgic = self
             .device_manager
             .lock()
@@ -1272,7 +1273,7 @@ impl Vm {
             .unwrap()
             .create_vgic(
                 &self.memory_manager.lock().as_ref().unwrap().vm,
-                self.cpu_manager.lock().unwrap().boot_vcpus() as u64,
+                Gic::create_default_config(vcpu_count),
             )
             .map_err(|_| {
                 Error::ConfigureSystem(arch::Error::PlatformSpecific(
@@ -2306,6 +2307,7 @@ impl Vm {
         // Creating a GIC device here, as the GIC will not be created when
         // restoring the device manager. Note that currently only the bare GICv3
         // without ITS is supported.
+        let vcpu_count = vcpu_numbers.try_into().unwrap();
         self.device_manager
             .lock()
             .unwrap()
@@ -2313,7 +2315,7 @@ impl Vm {
             .unwrap()
             .lock()
             .unwrap()
-            .create_vgic(&self.vm, vcpu_numbers.try_into().unwrap())
+            .create_vgic(&self.vm, Gic::create_default_config(vcpu_count))
             .map_err(|e| MigratableError::Restore(anyhow!("Could not create GIC: {:#?}", e)))?;
 
         // PMU interrupt sticks to PPI, so need to be added by 16 to get real irq number.
@@ -3407,14 +3409,7 @@ mod tests {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().unwrap();
         let gic = vm
-            .create_vgic(
-                1,
-                0x0900_0000 - 0x01_0000,
-                0x01_0000,
-                0x02_0000,
-                0x02_0000,
-                256,
-            )
+            .create_vgic(Gic::create_default_config(1))
             .expect("Cannot create gic");
         assert!(create_fdt(
             &mem,

@@ -74,18 +74,9 @@ impl Gic {
     pub fn create_vgic(
         &mut self,
         vm: &Arc<dyn hypervisor::Vm>,
-        vcpu_count: u64,
+        config: VgicConfig,
     ) -> Result<Arc<Mutex<dyn Vgic>>> {
-        let vgic = vm
-            .create_vgic(
-                vcpu_count,
-                layout::GIC_V3_DIST_START.raw_value(),
-                layout::GIC_V3_DIST_SIZE,
-                layout::GIC_V3_REDIST_SIZE,
-                layout::GIC_V3_ITS_SIZE,
-                layout::IRQ_NUM,
-            )
-            .map_err(Error::CreateGic)?;
+        let vgic = vm.create_vgic(config).map_err(Error::CreateGic)?;
         self.vgic = Some(vgic.clone());
         Ok(vgic.clone())
     }

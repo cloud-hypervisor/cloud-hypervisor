@@ -11,7 +11,7 @@
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::VcpuInit;
 #[cfg(target_arch = "aarch64")]
-use crate::arch::aarch64::gic::Vgic;
+use crate::arch::aarch64::gic::{Vgic, VgicConfig};
 #[cfg(feature = "tdx")]
 use crate::arch::x86::CpuIdEntry;
 use crate::cpu::Vcpu;
@@ -273,15 +273,7 @@ pub trait Vm: Send + Sync + Any {
     /// Creates a new KVM vCPU file descriptor and maps the memory corresponding
     fn create_vcpu(&self, id: u8, vm_ops: Option<Arc<dyn VmOps>>) -> Result<Arc<dyn Vcpu>>;
     #[cfg(target_arch = "aarch64")]
-    fn create_vgic(
-        &self,
-        vcpu_count: u64,
-        dist_addr: u64,
-        dist_size: u64,
-        redist_size: u64,
-        msi_size: u64,
-        nr_irqs: u32,
-    ) -> Result<Arc<Mutex<dyn Vgic>>>;
+    fn create_vgic(&self, config: VgicConfig) -> Result<Arc<Mutex<dyn Vgic>>>;
 
     /// Registers an event to be signaled whenever a certain address is written to.
     fn register_ioevent(

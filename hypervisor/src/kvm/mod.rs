@@ -16,7 +16,7 @@ pub use crate::aarch64::{
     VcpuKvmState,
 };
 #[cfg(target_arch = "aarch64")]
-use crate::arch::aarch64::gic::Vgic;
+use crate::arch::aarch64::gic::{Vgic, VgicConfig};
 use crate::cpu;
 use crate::hypervisor;
 use crate::vec_with_array_field;
@@ -414,25 +414,9 @@ impl vm::Vm for KvmVm {
     ///
     /// Creates a virtual GIC device.
     ///
-    fn create_vgic(
-        &self,
-        vcpu_count: u64,
-        dist_addr: u64,
-        dist_size: u64,
-        redist_size: u64,
-        msi_size: u64,
-        nr_irqs: u32,
-    ) -> vm::Result<Arc<Mutex<dyn Vgic>>> {
-        let gic_device = KvmGicV3Its::new(
-            self,
-            vcpu_count,
-            dist_addr,
-            dist_size,
-            redist_size,
-            msi_size,
-            nr_irqs,
-        )
-        .map_err(|e| vm::HypervisorVmError::CreateVgic(anyhow!("Vgic error {:?}", e)))?;
+    fn create_vgic(&self, config: VgicConfig) -> vm::Result<Arc<Mutex<dyn Vgic>>> {
+        let gic_device = KvmGicV3Its::new(self, config)
+            .map_err(|e| vm::HypervisorVmError::CreateVgic(anyhow!("Vgic error {:?}", e)))?;
         Ok(Arc::new(Mutex::new(gic_device)))
     }
     ///
