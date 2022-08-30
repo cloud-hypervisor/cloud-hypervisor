@@ -293,11 +293,9 @@ pub enum Error {
     #[error("Error debugging VM: {0:?}")]
     Debug(DebuggableError),
 
-    #[cfg(target_arch = "x86_64")]
     #[error("Error spawning kernel loading thread")]
     KernelLoadThreadSpawn(std::io::Error),
 
-    #[cfg(target_arch = "x86_64")]
     #[error("Error joining kernel loading thread")]
     KernelLoadThreadJoin(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
 
@@ -478,7 +476,6 @@ pub struct Vm {
     exit_evt: EventFd,
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
     stop_on_boot: bool,
-    #[cfg(target_arch = "x86_64")]
     load_payload_handle: Option<thread::JoinHandle<Result<EntryPoint>>>,
 }
 
@@ -505,7 +502,6 @@ impl Vm {
             .validate()
             .map_err(Error::ConfigValidation)?;
 
-        #[cfg(target_arch = "x86_64")]
         let load_payload_handle = if !restoring {
             Self::load_payload_async(&memory_manager, &config)?
         } else {
@@ -627,7 +623,6 @@ impl Vm {
             exit_evt,
             hypervisor,
             stop_on_boot,
-            #[cfg(target_arch = "x86_64")]
             load_payload_handle,
         })
     }
@@ -952,8 +947,8 @@ impl Vm {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn load_firmware(&self, mut firmware: &File) -> Result<()> {
-        let uefi_flash = self.memory_manager.lock().as_ref().unwrap().uefi_flash();
+    fn load_firmware(mut firmware: &File, memory_manager: Arc<Mutex<MemoryManager>>) -> Result<()> {
+        let uefi_flash = memory_manager.lock().as_ref().unwrap().uefi_flash();
         let mem = uefi_flash.memory();
         arch::aarch64::uefi::load_uefi(mem.deref(), arch::layout::UEFI_START, &mut firmware)
             .map_err(Error::UefiLoad)?;
@@ -961,20 +956,15 @@ impl Vm {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn load_kernel(&mut self) -> Result<EntryPoint> {
-        let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
+    fn load_kernel(
+        firmware: Option<File>,
+        kernel: Option<File>,
+        memory_manager: Arc<Mutex<MemoryManager>>,
+    ) -> Result<EntryPoint> {
+        let guest_memory = memory_manager.lock().as_ref().unwrap().guest_memory();
         let mem = guest_memory.memory();
-        let payload = self
-            .config
-            .lock()
-            .unwrap()
-            .payload
-            .as_ref()
-            .unwrap()
-            .clone();
-        let entry_addr = match (payload.firmware, payload.kernel) {
-            (None, Some(kernel)) => {
-                let mut kernel = File::open(kernel).map_err(Error::KernelFile)?;
+        let entry_addr = match (firmware, kernel) {
+            (None, Some(mut kernel)) => {
                 match linux_loader::loader::pe::PE::load(
                     mem.deref(),
                     Some(arch::layout::KERNEL_START),
@@ -986,7 +976,7 @@ impl Vm {
                     // If failed, retry to load it as UEFI binary.
                     // As the UEFI binary is formatless, it must be the last option to try.
                     Err(linux_loader::loader::Error::Pe(InvalidImageMagicNumber)) => {
-                        self.load_firmware(&kernel)?;
+                        Self::load_firmware(&kernel, memory_manager)?;
                         arch::layout::UEFI_START
                     }
                     Err(e) => {
@@ -995,16 +985,13 @@ impl Vm {
                 }
             }
             (Some(firmware), None) => {
-                let firmware = File::open(firmware).map_err(Error::FirmwareFile)?;
-                self.load_firmware(&firmware)?;
+                Self::load_firmware(&firmware, memory_manager)?;
                 arch::layout::UEFI_START
             }
             _ => return Err(Error::InvalidPayload),
         };
 
-        Ok(EntryPoint {
-            entry_addr: entry_addr,
-        })
+        Ok(EntryPoint { entry_addr })
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -1125,7 +1112,24 @@ impl Vm {
         }
     }
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(target_arch = "aarch64")]
+    fn load_payload(
+        payload: &PayloadConfig,
+        memory_manager: Arc<Mutex<MemoryManager>>,
+    ) -> Result<EntryPoint> {
+        match (&payload.firmware, &payload.kernel) {
+            (Some(firmware), None) => {
+                let firmware = File::open(firmware).map_err(Error::FirmwareFile)?;
+                Self::load_kernel(Some(firmware), None, memory_manager)
+            }
+            (None, Some(kernel)) => {
+                let kernel = File::open(kernel).map_err(Error::KernelFile)?;
+                Self::load_kernel(None, Some(kernel), memory_manager)
+            }
+            _ => Err(Error::InvalidPayload),
+        }
+    }
+
     fn load_payload_async(
         memory_manager: &Arc<Mutex<MemoryManager>>,
         config: &Arc<Mutex<VmConfig>>,
@@ -2128,31 +2132,11 @@ impl Vm {
         Some(rsdp_addr)
     }
 
-    #[cfg(target_arch = "x86_64")]
     fn entry_point(&mut self) -> Result<Option<EntryPoint>> {
         self.load_payload_handle
             .take()
             .map(|handle| handle.join().map_err(Error::KernelLoadThreadJoin)?)
             .transpose()
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    fn entry_point(&mut self) -> Result<Option<EntryPoint>> {
-        let payload = self
-            .config
-            .lock()
-            .unwrap()
-            .payload
-            .as_ref()
-            .unwrap()
-            .clone();
-        Ok(
-            if payload.kernel.as_ref().is_some() || payload.firmware.as_ref().is_some() {
-                Some(self.load_kernel()?)
-            } else {
-                None
-            },
-        )
     }
 
     pub fn boot(&mut self) -> Result<()> {
