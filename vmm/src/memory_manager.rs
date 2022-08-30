@@ -19,6 +19,8 @@ use arch::x86_64::{SgxEpcRegion, SgxEpcSection};
 use arch::{layout, RegionType};
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
+#[cfg(target_arch = "aarch64")]
+use hypervisor::HypervisorVmError;
 #[cfg(target_arch = "x86_64")]
 use libc::{MAP_NORESERVE, MAP_POPULATE, MAP_SHARED, PROT_READ, PROT_WRITE};
 use serde::{Deserialize, Serialize};
@@ -185,6 +187,8 @@ pub struct MemoryManager {
     guest_ram_mappings: Vec<GuestRamMapping>,
 
     pub acpi_address: Option<GuestAddress>,
+    #[cfg(target_arch = "aarch64")]
+    uefi_flash: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
 }
 
 #[derive(Debug)]
@@ -314,6 +318,10 @@ pub enum Error {
 
     /// Failed to allocate MMIO address
     AllocateMmioAddress,
+
+    #[cfg(target_arch = "aarch64")]
+    /// Failed to create UEFI flash
+    CreateUefiFlash(HypervisorVmError),
 }
 
 const ENABLE_FLAG: usize = 0;
@@ -825,6 +833,36 @@ impl MemoryManager {
         Ok(())
     }
 
+    #[cfg(target_arch = "aarch64")]
+    fn add_uefi_flash(&mut self) -> Result<(), Error> {
+        // On AArch64, the UEFI binary requires a flash device at address 0.
+        // 4 MiB memory is mapped to simulate the flash.
+        let uefi_mem_slot = self.allocate_memory_slot();
+        let uefi_region = GuestRegionMmap::new(
+            MmapRegion::new(arch::layout::UEFI_SIZE as usize).unwrap(),
+            arch::layout::UEFI_START,
+        )
+        .unwrap();
+        let uefi_mem_region = self.vm.make_user_memory_region(
+            uefi_mem_slot,
+            uefi_region.start_addr().raw_value(),
+            uefi_region.len() as u64,
+            uefi_region.as_ptr() as u64,
+            false,
+            false,
+        );
+        self.vm
+            .create_user_memory_region(uefi_mem_region)
+            .map_err(Error::CreateUefiFlash)?;
+
+        let uefi_flash =
+            GuestMemoryAtomic::new(GuestMemoryMmap::from_regions(vec![uefi_region]).unwrap());
+
+        self.uefi_flash = Some(uefi_flash);
+
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         vm: Arc<dyn hypervisor::Vm>,
@@ -1081,9 +1119,15 @@ impl MemoryManager {
             arch_mem_regions,
             ram_allocator,
             dynamic,
+            #[cfg(target_arch = "aarch64")]
+            uefi_flash: None,
         };
 
         memory_manager.allocate_address_space()?;
+
+        #[cfg(target_arch = "aarch64")]
+        memory_manager.add_uefi_flash()?;
+
         #[cfg(target_arch = "x86_64")]
         if let Some(sgx_epc_config) = sgx_epc_config {
             memory_manager.setup_sgx(sgx_epc_config)?;
@@ -1855,6 +1899,11 @@ impl MemoryManager {
 
     pub fn num_guest_ram_mappings(&self) -> u32 {
         self.guest_ram_mappings.len() as u32
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    pub fn uefi_flash(&self) -> GuestMemoryAtomic<GuestMemoryMmap> {
+        self.uefi_flash.as_ref().unwrap().clone()
     }
 
     #[cfg(feature = "guest_debug")]

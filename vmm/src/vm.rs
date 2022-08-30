@@ -953,7 +953,7 @@ impl Vm {
 
     #[cfg(target_arch = "aarch64")]
     fn load_firmware(&self, mut firmware: &File) -> Result<()> {
-        let uefi_flash = self.device_manager.lock().as_ref().unwrap().uefi_flash();
+        let uefi_flash = self.memory_manager.lock().as_ref().unwrap().uefi_flash();
         let mem = uefi_flash.memory();
         arch::aarch64::uefi::load_uefi(mem.deref(), arch::layout::UEFI_START, &mut firmware)
             .map_err(Error::UefiLoad)?;
