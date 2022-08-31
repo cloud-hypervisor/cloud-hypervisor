@@ -24,32 +24,22 @@ use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
-const MEM_SIZE: u64 = 256 * 1024 * 1024;
+const QUEUE_DATA_SIZE: usize = 28;
+const MEM_SIZE: usize = 256 * 1024 * 1024;
 const QUEUE_SIZE: u16 = 16; // Max entries in the queue.
 
 fuzz_target!(|bytes| {
-    if bytes.len() as u64 > MEM_SIZE {
+    if bytes.len() < QUEUE_DATA_SIZE || bytes.len() > (QUEUE_DATA_SIZE + MEM_SIZE) {
         return;
     }
 
-    let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), MEM_SIZE as usize)]).unwrap();
-    if mem.write_slice(bytes, GuestAddress(0 as u64)).is_err() {
-        return;
-    }
+    let queue_data = &bytes[..QUEUE_DATA_SIZE];
+    let mem_bytes = &bytes[QUEUE_DATA_SIZE..];
 
-    let guest_memory = GuestMemoryAtomic::new(mem);
-
-    let mut q = Queue::new(QUEUE_SIZE).unwrap();
-    q.set_ready(true);
-    q.set_size(QUEUE_SIZE / 2);
-
-    let evt = EventFd::new(0).unwrap();
-    let queue_evt = unsafe { EventFd::from_raw_fd(libc::dup(evt.as_raw_fd())) };
-
+    // Create a virtio-block device backed by a synchronous raw file
     let shm = memfd_create(&ffi::CString::new("fuzz").unwrap(), 0).unwrap();
     let disk_file: File = unsafe { File::from_raw_fd(shm) };
     let qcow_disk = Box::new(RawFileDiskSync::new(disk_file)) as Box<dyn DiskFile>;
-
     let mut block = Block::new(
         "tmp".to_owned(),
         qcow_disk,
@@ -63,6 +53,19 @@ fuzz_target!(|bytes| {
         EventFd::new(EFD_NONBLOCK).unwrap(),
     )
     .unwrap();
+
+    // Setup the virt queue with the input bytes
+    let q = setup_virt_queue(queue_data.try_into().unwrap());
+
+    // Setup the guest memory with the input bytes
+    let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).unwrap();
+    if mem.write_slice(mem_bytes, GuestAddress(0 as u64)).is_err() {
+        return;
+    }
+    let guest_memory = GuestMemoryAtomic::new(mem);
+
+    let evt = EventFd::new(0).unwrap();
+    let queue_evt = unsafe { EventFd::from_raw_fd(libc::dup(evt.as_raw_fd())) };
 
     // Kick the 'queue' event before activate the block device
     queue_evt.write(1).unwrap();
@@ -95,4 +98,27 @@ impl VirtioInterrupt for NoopVirtioInterrupt {
     fn trigger(&self, _int_type: VirtioInterruptType) -> std::result::Result<(), std::io::Error> {
         Ok(())
     }
+}
+
+fn setup_virt_queue(bytes: &[u8; QUEUE_DATA_SIZE]) -> Queue {
+    let mut q = Queue::new(QUEUE_SIZE).unwrap();
+    q.set_next_avail(bytes[0] as u16); // 'u8' is enough given the 'QUEUE_SIZE' is small
+    q.set_next_used(bytes[1] as u16);
+    q.set_event_idx(bytes[2] % 2 != 0);
+    q.set_size(bytes[3] as u16 % QUEUE_SIZE);
+    q.set_desc_table_address(
+        Some(u32::from_le_bytes(bytes[4..8].try_into().unwrap())),
+        Some(u32::from_le_bytes(bytes[8..12].try_into().unwrap())),
+    );
+    q.set_avail_ring_address(
+        Some(u32::from_le_bytes(bytes[12..16].try_into().unwrap())),
+        Some(u32::from_le_bytes(bytes[16..20].try_into().unwrap())),
+    );
+    q.set_used_ring_address(
+        Some(u32::from_le_bytes(bytes[20..24].try_into().unwrap())),
+        Some(u32::from_le_bytes(bytes[24..28].try_into().unwrap())),
+    );
+    q.set_ready(true);
+
+    q
 }
