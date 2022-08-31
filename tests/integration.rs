@@ -6433,13 +6433,13 @@ mod common_parallel {
             guest2.ssh_command("nc -vz 172.100.0.1 12345").unwrap();
         });
 
-        cleanup_ovs_dpdk();
-
         let _ = child1.kill();
         let _ = child2.kill();
 
         let output = child1.wait_with_output().unwrap();
         child2.wait().unwrap();
+
+        cleanup_ovs_dpdk();
 
         handle_child_output(r, &output);
     }
