@@ -8871,11 +8871,12 @@ mod live_migration {
         let _ = dest_child.kill();
         let _ = ovs_child.kill();
         let dest_output = dest_child.wait_with_output().unwrap();
-        handle_child_output(r, &dest_output);
         let ovs_output = ovs_child.wait_with_output().unwrap();
-        handle_child_output(Ok(()), &ovs_output);
 
         cleanup_ovs_dpdk();
+
+        handle_child_output(r, &dest_output);
+        handle_child_output(Ok(()), &ovs_output);
     }
 
     mod live_migration_parallel {
