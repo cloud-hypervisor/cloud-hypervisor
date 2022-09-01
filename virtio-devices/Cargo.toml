@@ -14,7 +14,7 @@ block_util = { path = "../block_util" }
 byteorder = "1.4.3"
 epoll = "4.3.1"
 event_monitor = { path = "../event_monitor" }
-io-uring = "0.5.3"
+io-uring = "0.5.4"
 libc = "0.2.132"
 log = "0.4.17"
 net_gen = { path = "../net_gen" }
@@ -25,7 +25,7 @@ seccompiler = "0.2.0"
 serde = { version = "1.0.144", features = ["derive"] }
 serde_json = "1.0.85"
 serial_buffer = { path = "../serial_buffer" }
-thiserror = "1.0.32"
+thiserror = "1.0.33"
 versionize = "0.1.6"
 versionize_derive = "0.1.4"
 vhost = { version = "0.4.0", features = ["vhost-user-master", "vhost-user-slave", "vhost-kern", "vhost-vdpa"] }
