@@ -12,7 +12,7 @@ io-uring = "0.5.3"
 libc = "0.2.132"
 log = "0.4.17"
 qcow = { path = "../qcow" }
-thiserror = "1.0.32"
+thiserror = "1.0.33"
 versionize = "0.1.6"
 versionize_derive = "0.1.4"
 vhdx = { path = "../vhdx" }
