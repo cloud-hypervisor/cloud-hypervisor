@@ -347,11 +347,6 @@ impl Aml for PciSegment {
                     &aml::AddressSpace::new_bus_number(0x0u16, 0x0u16),
                     #[cfg(target_arch = "x86_64")]
                     &aml::Io::new(0xcf8, 0xcf8, 1, 0x8),
-                    &aml::Memory32Fixed::new(
-                        true,
-                        self.mmio_config_address as u32,
-                        layout::PCI_MMIO_CONFIG_SIZE_PER_SEGMENT as u32,
-                    ),
                     &aml::AddressSpace::new_memory(
                         aml::AddressSpaceCachable::NotCacheable,
                         true,
