@@ -130,9 +130,9 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
 name = "clap"
-version = "3.2.19"
+version = "3.2.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68d43934757334b5c0519ff882e1ab9647ac0258b47c24c4f490d78e42697fd5"
+checksum = "23b71c3ce99b7611011217b366d923f1d0a7e07a92bb2dbf1e84508c673ca3bd"
 dependencies = [
  "atty",
  "bitflags",
@@ -569,7 +569,7 @@ dependencies = [
 [[package]]
 name = "mshv-bindings"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/mshv?branch=main#fb07da88c3cd21cb3bff1c07c622dcd42fb186fa"
+source = "git+https://github.com/rust-vmm/mshv?branch=main#b7cd8a097c833c1f9676f0b44dc3fdaad34c1582"
 dependencies = [
  "libc",
  "serde",
@@ -581,7 +581,7 @@ dependencies = [
 [[package]]
 name = "mshv-ioctls"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/mshv?branch=main#fb07da88c3cd21cb3bff1c07c622dcd42fb186fa"
+source = "git+https://github.com/rust-vmm/mshv?branch=main#b7cd8a097c833c1f9676f0b44dc3fdaad34c1582"
 dependencies = [
  "libc",
  "mshv-bindings",
