@@ -111,13 +111,15 @@ impl Aml for AcpiGedDevice {
                 &aml::Name::new("_UID".into(), &aml::ZERO),
                 &aml::Name::new(
                     "_CRS".into(),
-                    &aml::ResourceTemplate::new(vec![&aml::Interrupt::new(
-                        true,
-                        true,
-                        false,
-                        false,
-                        self.ged_irq,
-                    )]),
+                    &aml::ResourceTemplate::new(vec![
+                        &aml::Interrupt::new(true, true, false, false, self.ged_irq),
+                        &aml::AddressSpace::new_memory(
+                            aml::AddressSpaceCachable::NotCacheable,
+                            true,
+                            self.address.0 as u64,
+                            self.address.0 + GED_DEVICE_ACPI_SIZE as u64 - 1,
+                        ),
+                    ]),
                 ),
                 &aml::OpRegion::new(
                     "GDST".into(),
