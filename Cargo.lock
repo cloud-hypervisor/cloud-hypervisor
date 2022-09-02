@@ -436,9 +436,9 @@ dependencies = [
 
 [[package]]
 name = "io-uring"
-version = "0.5.4"
+version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d992a6bb226bed74667d449c7dcaac62bc63e09b19d08a269e26860def3bf54"
+checksum = "f307526c6df4dfab4067c60bc7160324d2ef41eb0dc5a64fd25d96be17ea032c"
 dependencies = [
  "bitflags",
  "libc",
@@ -569,7 +569,7 @@ dependencies = [
 [[package]]
 name = "mshv-bindings"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/mshv?branch=main#fb07da88c3cd21cb3bff1c07c622dcd42fb186fa"
+source = "git+https://github.com/rust-vmm/mshv?branch=main#b7cd8a097c833c1f9676f0b44dc3fdaad34c1582"
 dependencies = [
  "libc",
  "serde",
@@ -581,7 +581,7 @@ dependencies = [
 [[package]]
 name = "mshv-ioctls"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/mshv?branch=main#fb07da88c3cd21cb3bff1c07c622dcd42fb186fa"
+source = "git+https://github.com/rust-vmm/mshv?branch=main#b7cd8a097c833c1f9676f0b44dc3fdaad34c1582"
 dependencies = [
  "libc",
  "mshv-bindings",
