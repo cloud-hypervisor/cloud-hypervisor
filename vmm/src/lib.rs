@@ -1419,8 +1419,6 @@ impl Vmm {
         let vm_config = vm.get_config();
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         let common_cpuid = {
-            #[cfg(feature = "tdx")]
-            let tdx_enabled = vm_config.lock().unwrap().tdx.is_some();
             let phys_bits = vm::physical_bits(vm_config.lock().unwrap().cpus.max_phys_bits);
             arch::generate_common_cpuid(
                 hypervisor,
@@ -1429,7 +1427,7 @@ impl Vmm {
                 phys_bits,
                 vm_config.lock().unwrap().cpus.kvm_hyperv,
                 #[cfg(feature = "tdx")]
-                tdx_enabled,
+                vm_config.lock().unwrap().is_tdx_enabled(),
             )
             .map_err(|e| {
                 MigratableError::MigrateReceive(anyhow!("Error generating common cpuid': {:?}", e))
@@ -1612,8 +1610,6 @@ impl Vmm {
         let dest_cpuid = &{
             let vm_config = &src_vm_config.lock().unwrap();
 
-            #[cfg(feature = "tdx")]
-            let tdx_enabled = vm_config.tdx.is_some();
             let phys_bits = vm::physical_bits(vm_config.cpus.max_phys_bits);
             arch::generate_common_cpuid(
                 self.hypervisor.clone(),
@@ -1622,7 +1618,7 @@ impl Vmm {
                 phys_bits,
                 vm_config.cpus.kvm_hyperv,
                 #[cfg(feature = "tdx")]
-                tdx_enabled,
+                vm_config.is_tdx_enabled(),
             )
             .map_err(|e| {
                 MigratableError::MigrateReceive(anyhow!("Error generating common cpuid: {:?}", e))
@@ -2053,8 +2049,6 @@ mod unit_tests {
             sgx_epc: None,
             numa: None,
             watchdog: false,
-            #[cfg(feature = "tdx")]
-            tdx: None,
             #[cfg(feature = "gdb")]
             gdb: false,
             platform: None,

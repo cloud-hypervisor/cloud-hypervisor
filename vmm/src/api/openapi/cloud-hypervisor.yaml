@@ -559,8 +559,6 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SgxEpcConfig"
-        tdx:
-          $ref: "#/components/schemas/TdxConfig"
         numa:
           type: array
           items:
@@ -650,6 +648,9 @@ components:
           type: array
           items:
             type: string
+        tdx:
+          type: boolean
+          default: false
 
     MemoryZoneConfig:
       required:
@@ -1005,15 +1006,6 @@ components:
         prefault:
           type: boolean
           default: false
-
-    TdxConfig:
-      required:
-        - firmware
-      type: object
-      properties:
-        firmware:
-          type: string
-          description: Path to the firmware that will be used to boot the TDx guest up.
 
     NumaDistance:
       required:
