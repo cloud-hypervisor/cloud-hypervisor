@@ -105,18 +105,17 @@ impl BusDevice for AcpiGedDevice {
 impl Aml for AcpiGedDevice {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         aml::Device::new(
-            "_SB_.GED_".into(),
+            "_SB_.GEC_".into(),
             vec![
-                &aml::Name::new("_HID".into(), &"ACPI0013"),
-                &aml::Name::new("_UID".into(), &aml::ZERO),
+                &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0A06")),
+                &aml::Name::new("_UID".into(), &"Generic Event Controller"),
                 &aml::Name::new(
                     "_CRS".into(),
-                    &aml::ResourceTemplate::new(vec![&aml::Interrupt::new(
+                    &aml::ResourceTemplate::new(vec![&aml::AddressSpace::new_memory(
+                        aml::AddressSpaceCachable::NotCacheable,
                         true,
-                        true,
-                        false,
-                        false,
-                        self.ged_irq,
+                        self.address.0 as u64,
+                        self.address.0 + GED_DEVICE_ACPI_SIZE as u64 - 1,
                     )]),
                 ),
                 &aml::OpRegion::new(
@@ -132,8 +131,8 @@ impl Aml for AcpiGedDevice {
                     vec![aml::FieldEntry::Named(*b"GDAT", 8)],
                 ),
                 &aml::Method::new(
-                    "_EVT".into(),
-                    1,
+                    "ESCN".into(),
+                    0,
                     true,
                     vec![
                         &aml::Store::new(&aml::Local(0), &aml::Path::new("GDAT")),
@@ -161,6 +160,30 @@ impl Aml for AcpiGedDevice {
                             )],
                         ),
                     ],
+                ),
+            ],
+        )
+        .append_aml_bytes(bytes);
+        aml::Device::new(
+            "_SB_.GED_".into(),
+            vec![
+                &aml::Name::new("_HID".into(), &"ACPI0013"),
+                &aml::Name::new("_UID".into(), &aml::ZERO),
+                &aml::Name::new(
+                    "_CRS".into(),
+                    &aml::ResourceTemplate::new(vec![&aml::Interrupt::new(
+                        true,
+                        true,
+                        false,
+                        false,
+                        self.ged_irq,
+                    )]),
+                ),
+                &aml::Method::new(
+                    "_EVT".into(),
+                    1,
+                    true,
+                    vec![&aml::MethodCall::new("\\_SB_.GEC_.ESCN".into(), vec![])],
                 ),
             ],
         )
