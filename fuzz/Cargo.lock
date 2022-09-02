@@ -118,6 +118,9 @@ name = "cc"
 version = "1.0.73"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2fff2a6927b3bb87f9595d67196a70493f627687a71d87a0d692242c33f58c11"
+dependencies = [
+ "jobserver",
+]
 
 [[package]]
 name = "cfg-if"
@@ -386,6 +389,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c8af84674fe1f223a982c933a0ee1086ac4d4052aa0fb8060c12c6ad838e754"
 
 [[package]]
+name = "jobserver"
+version = "0.1.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af25a77299a7f711a01975c35a6a424eb6862092cc2d6c72c4ed6cbc56dfc1fa"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "kvm-bindings"
 version = "0.5.0"
 source = "git+https://github.com/cloud-hypervisor/kvm-bindings?branch=ch-v0.5.0-tdx#52e56d0e8ef0f6ea32fc0492e6a175b73617a49f"
@@ -419,9 +431,9 @@ checksum = "8371e4e5341c3a96db127eb2465ac681ced4c433e01dd0e938adbef26ba93ba5"
 
 [[package]]
 name = "libfuzzer-sys"
-version = "0.4.3"
+version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "336244aaeab6a12df46480dc585802aa743a72d66b11937844c61bbca84c991d"
+checksum = "ae185684fe19814afd066da15a7cc41e126886c21282934225d9fc847582da58"
 dependencies = [
  "arbitrary",
  "cc",
