@@ -1458,10 +1458,12 @@ fn _test_virtio_vsock(hotplug: bool) {
         }
 
         // Validate vsock works as expected.
-        guest.check_vsock(socket.as_str());
+        guest.check_vsock_host_to_guest(socket.as_str());
+        guest.check_vsock_guest_to_host(socket.as_str());
         guest.reboot_linux(0, None);
         // Validate vsock still works after a reboot.
-        guest.check_vsock(socket.as_str());
+        guest.check_vsock_host_to_guest(socket.as_str());
+        guest.check_vsock_guest_to_host(socket.as_str());
 
         if hotplug {
             assert!(remote_command(&api_socket, "remove-device", Some("test0")));

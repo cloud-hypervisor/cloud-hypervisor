@@ -1010,7 +1010,7 @@ impl Guest {
         Ok(false)
     }
 
-    pub fn check_vsock(&self, socket: &str) {
+    pub fn check_vsock_host_to_guest(&self, socket: &str) {
         // Listen from guest on vsock CID=3 PORT=16
         // SOCKET-LISTEN:<domain>:<protocol>:<local-address>
         let guest_ip = self.network.guest_ip.clone();
@@ -1034,6 +1034,35 @@ impl Guest {
         assert_eq!(
             self.ssh_command("cat vsock_log").unwrap().trim(),
             "HelloWorld!"
+        );
+    }
+
+    pub fn check_vsock_guest_to_host(&self, socket: &str) {
+        // Listen on UNIX socket and send data from guest to vsock CID=2 PORT=17
+        let guest_ip = self.network.guest_ip.clone();
+
+        let socket_string = String::from(socket);
+        let listen_socat = thread::spawn(move || {
+            exec_host_command_output(&format!("socat - UNIX-LISTEN:{}_17", socket_string))
+        });
+
+        // Make sure socat is listening, which might take a few second on slow systems
+        thread::sleep(std::time::Duration::new(10, 0));
+
+        let _ = ssh_command_ip(
+            "socat SYSTEM:\"echo Hello from guest!\" SOCKET-CONNECT:40:0:x00x00x11x00x00x00x02x00x00x00x00x00x00x00 2>&1",
+            &guest_ip,
+            DEFAULT_SSH_RETRIES,
+            DEFAULT_SSH_TIMEOUT,
+        )
+        .unwrap();
+
+        // Wait for the thread to terminate and receive the output.
+        let msg = listen_socat.join().unwrap();
+
+        assert_eq!(
+            String::from_utf8_lossy(&msg.stdout).trim(),
+            "Hello from guest!"
         );
     }
 
@@ -1105,7 +1134,8 @@ impl Guest {
             .unwrap();
         // Check vsock
         if let Some(socket) = socket {
-            self.check_vsock(socket.as_str());
+            self.check_vsock_host_to_guest(socket.as_str());
+            self.check_vsock_guest_to_host(socket.as_str());
         }
         // Check if the console is usable
         if let Some(console_text) = console_text {
