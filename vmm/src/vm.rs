@@ -286,6 +286,10 @@ pub enum Error {
     FinalizeTdx(#[source] hypervisor::HypervisorVmError),
 
     #[cfg(feature = "tdx")]
+    #[error("TDX firmware missing")]
+    TdxFirmwareMissing,
+
+    #[cfg(feature = "tdx")]
     #[error("Invalid TDX payload type")]
     InvalidPayloadType,
 
@@ -515,7 +519,9 @@ impl Vm {
             Self::create_numa_nodes(config.lock().unwrap().numa.clone(), &memory_manager)?;
 
         #[cfg(feature = "tdx")]
-        let force_iommu = config.lock().unwrap().tdx.is_some();
+        let tdx_enabled = config.lock().unwrap().is_tdx_enabled();
+        #[cfg(feature = "tdx")]
+        let force_iommu = tdx_enabled;
         #[cfg(not(feature = "tdx"))]
         let force_iommu = false;
 
@@ -559,8 +565,6 @@ impl Vm {
         });
 
         let exit_evt_clone = exit_evt.try_clone().map_err(Error::EventFdClone)?;
-        #[cfg(feature = "tdx")]
-        let tdx_enabled = config.lock().unwrap().tdx.is_some();
         let cpus_config = { &config.lock().unwrap().cpus.clone() };
         let cpu_manager = cpu::CpuManager::new(
             cpus_config,
@@ -723,7 +727,7 @@ impl Vm {
         let timestamp = Instant::now();
 
         #[cfg(feature = "tdx")]
-        let tdx_enabled = config.lock().unwrap().tdx.is_some();
+        let tdx_enabled = config.lock().unwrap().is_tdx_enabled();
         hypervisor.check_required_extensions().unwrap();
         #[cfg(feature = "tdx")]
         let vm = hypervisor
@@ -1136,7 +1140,7 @@ impl Vm {
     ) -> Result<Option<thread::JoinHandle<Result<EntryPoint>>>> {
         // Kernel with TDX is loaded in a different manner
         #[cfg(feature = "tdx")]
-        if config.lock().unwrap().tdx.is_some() {
+        if config.lock().unwrap().is_tdx_enabled() {
             return Ok(None);
         }
 
@@ -1784,10 +1788,19 @@ impl Vm {
     #[cfg(feature = "tdx")]
     fn extract_tdvf_sections(&mut self) -> Result<Vec<TdvfSection>> {
         use arch::x86_64::tdx::*;
+
+        let firmware_path = self
+            .config
+            .lock()
+            .unwrap()
+            .payload
+            .as_ref()
+            .unwrap()
+            .firmware
+            .clone()
+            .ok_or(Error::TdxFirmwareMissing)?;
         // The TDVF file contains a table of section as well as code
-        let mut firmware_file =
-            File::open(&self.config.lock().unwrap().tdx.as_ref().unwrap().firmware)
-                .map_err(Error::LoadTdvf)?;
+        let mut firmware_file = File::open(firmware_path).map_err(Error::LoadTdvf)?;
 
         // For all the sections allocate some RAM backing them
         parse_tdvf_sections(&mut firmware_file).map_err(Error::ParseTdvf)
@@ -1882,9 +1895,17 @@ impl Vm {
         }
 
         // The TDVF file contains a table of section as well as code
-        let mut firmware_file =
-            File::open(&self.config.lock().unwrap().tdx.as_ref().unwrap().firmware)
-                .map_err(Error::LoadTdvf)?;
+        let firmware_path = self
+            .config
+            .lock()
+            .unwrap()
+            .payload
+            .as_ref()
+            .unwrap()
+            .firmware
+            .clone()
+            .ok_or(Error::TdxFirmwareMissing)?;
+        let mut firmware_file = File::open(firmware_path).map_err(Error::LoadTdvf)?;
 
         // The guest memory at this point now has all the required regions so it
         // is safe to copy from the TDVF file into it.
@@ -2115,7 +2136,7 @@ impl Vm {
 
     fn create_acpi_tables(&self) -> Option<GuestAddress> {
         #[cfg(feature = "tdx")]
-        if self.config.lock().unwrap().tdx.is_some() {
+        if self.config.lock().unwrap().is_tdx_enabled() {
             return None;
         }
 
@@ -2166,10 +2187,13 @@ impl Vm {
         // finish.
         let entry_point = self.entry_point()?;
 
+        #[cfg(feature = "tdx")]
+        let tdx_enabled = self.config.lock().unwrap().is_tdx_enabled();
+
         // The initial TDX configuration must be done before the vCPUs are
         // created
         #[cfg(feature = "tdx")]
-        if self.config.lock().unwrap().tdx.is_some() {
+        if tdx_enabled {
             self.init_tdx()?;
         }
 
@@ -2181,7 +2205,7 @@ impl Vm {
             .map_err(Error::CpuManager)?;
 
         #[cfg(feature = "tdx")]
-        let sections = if self.config.lock().unwrap().tdx.is_some() {
+        let sections = if tdx_enabled {
             self.extract_tdvf_sections()?
         } else {
             Vec::new()
@@ -2189,7 +2213,7 @@ impl Vm {
 
         // Configuring the TDX regions requires that the vCPUs are created.
         #[cfg(feature = "tdx")]
-        let hob_address = if self.config.lock().unwrap().tdx.is_some() {
+        let hob_address = if tdx_enabled {
             // TDX sections are written to memory.
             self.populate_tdx_sections(&sections)?
         } else {
@@ -2716,8 +2740,11 @@ impl Snapshottable for Vm {
         event!("vm", "snapshotting");
 
         #[cfg(feature = "tdx")]
+        let tdx_enabled = self.config.lock().unwrap().is_tdx_enabled();
+
+        #[cfg(feature = "tdx")]
         {
-            if self.config.lock().unwrap().tdx.is_some() {
+            if tdx_enabled {
                 return Err(MigratableError::Snapshot(anyhow!(
                     "Snapshot not possible with TDX VM"
                 )));
@@ -2733,8 +2760,6 @@ impl Snapshottable for Vm {
 
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         let common_cpuid = {
-            #[cfg(feature = "tdx")]
-            let tdx_enabled = self.config.lock().unwrap().tdx.is_some();
             let phys_bits = physical_bits(self.config.lock().unwrap().cpus.max_phys_bits);
             arch::generate_common_cpuid(
                 self.hypervisor.clone(),

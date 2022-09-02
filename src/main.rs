@@ -400,15 +400,6 @@ fn create_app<'a>(
             .group("vmm-config"),
     );
 
-    #[cfg(feature = "tdx")]
-    let app = app.arg(
-        Arg::new("tdx")
-            .long("tdx")
-            .help("TDX Support: firmware=<tdvf path>")
-            .takes_value(true)
-            .group("vm-config"),
-    );
-
     app
 }
 
@@ -577,11 +568,6 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
     let payload_present =
         cmd_arguments.is_present("kernel") || cmd_arguments.is_present("firmware");
 
-    // Can't test for "vm-config" group as some have default values. The kernel (or tdx if enabled)
-    // is the only required option for booting the VM.
-    #[cfg(feature = "tdx")]
-    let payload_present = payload_present || cmd_arguments.is_present("tdx");
-
     if payload_present {
         let vm_params = config::VmParams::from_arg_matches(&cmd_arguments);
         let vm_config = config::VmConfig::parse(vm_params).map_err(Error::ParsingConfig)?;
@@ -744,8 +730,6 @@ mod unit_tests {
             sgx_epc: None,
             numa: None,
             watchdog: false,
-            #[cfg(feature = "tdx")]
-            tdx: None,
             #[cfg(feature = "gdb")]
             gdb: false,
             platform: None,

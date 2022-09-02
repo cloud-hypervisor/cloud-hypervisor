@@ -153,6 +153,9 @@ pub enum ValidationError {
     /// CPU Hotplug is not permitted with TDX
     #[cfg(feature = "tdx")]
     TdxNoCpuHotplug,
+    /// Missing firmware for TDX
+    #[cfg(feature = "tdx")]
+    TdxFirmwareMissing,
     /// Insuffient vCPUs for queues
     TooManyQueues,
     /// Need shared memory for vfio-user
@@ -218,6 +221,10 @@ impl fmt::Display for ValidationError {
             #[cfg(feature = "tdx")]
             TdxNoCpuHotplug => {
                 write!(f, "CPU hotplug is not permitted with TDX")
+            }
+            #[cfg(feature = "tdx")]
+            TdxFirmwareMissing => {
+                write!(f, "No TDX firmware specified")
             }
             TooManyQueues => {
                 write!(f, "Number of vCPUs is insufficient for number of queues")
@@ -363,8 +370,6 @@ pub struct VmParams<'a> {
     pub sgx_epc: Option<Vec<&'a str>>,
     pub numa: Option<Vec<&'a str>>,
     pub watchdog: bool,
-    #[cfg(feature = "tdx")]
-    pub tdx: Option<&'a str>,
     #[cfg(feature = "gdb")]
     pub gdb: bool,
     pub platform: Option<&'a str>,
@@ -397,8 +402,6 @@ impl<'a> VmParams<'a> {
         let numa: Option<Vec<&str>> = args.values_of("numa").map(|x| x.collect());
         let watchdog = args.is_present("watchdog");
         let platform = args.value_of("platform");
-        #[cfg(feature = "tdx")]
-        let tdx = args.value_of("tdx");
         #[cfg(feature = "gdb")]
         let gdb = args.is_present("gdb");
         VmParams {
@@ -425,8 +428,6 @@ impl<'a> VmParams<'a> {
             sgx_epc,
             numa,
             watchdog,
-            #[cfg(feature = "tdx")]
-            tdx,
             #[cfg(feature = "gdb")]
             gdb,
             platform,
@@ -642,16 +643,22 @@ pub struct PlatformConfig {
     pub uuid: Option<String>,
     #[serde(default)]
     pub oem_strings: Option<Vec<String>>,
+    #[cfg(feature = "tdx")]
+    #[serde(default)]
+    pub tdx: bool,
 }
 
 impl PlatformConfig {
     pub fn parse(platform: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
-        parser.add("num_pci_segments");
-        parser.add("iommu_segments");
-        parser.add("serial_number");
-        parser.add("uuid");
-        parser.add("oem_strings");
+        parser
+            .add("num_pci_segments")
+            .add("iommu_segments")
+            .add("serial_number")
+            .add("uuid")
+            .add("oem_strings");
+        #[cfg(feature = "tdx")]
+        parser.add("tdx");
         parser.parse(platform).map_err(Error::ParsePlatform)?;
 
         let num_pci_segments: u16 = parser
@@ -670,12 +677,20 @@ impl PlatformConfig {
             .convert::<StringList>("oem_strings")
             .map_err(Error::ParsePlatform)?
             .map(|v| v.0);
+        #[cfg(feature = "tdx")]
+        let tdx = parser
+            .convert::<Toggle>("tdx")
+            .map_err(Error::ParsePlatform)?
+            .unwrap_or(Toggle(false))
+            .0;
         Ok(PlatformConfig {
             num_pci_segments,
             iommu_segments,
             serial_number,
             uuid,
             oem_strings,
+            #[cfg(feature = "tdx")]
+            tdx,
         })
     }
 
@@ -706,6 +721,8 @@ impl Default for PlatformConfig {
             serial_number: None,
             uuid: None,
             oem_strings: None,
+            #[cfg(feature = "tdx")]
+            tdx: false,
         }
     }
 }
@@ -2083,26 +2100,6 @@ impl VsockConfig {
     }
 }
 
-#[cfg(feature = "tdx")]
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
-pub struct TdxConfig {
-    pub firmware: PathBuf,
-}
-
-#[cfg(feature = "tdx")]
-impl TdxConfig {
-    pub fn parse(tdx: &str) -> Result<Self> {
-        let mut parser = OptionParser::new();
-        parser.add("firmware");
-        parser.parse(tdx).map_err(Error::ParseTdx)?;
-        let firmware = parser
-            .get("firmware")
-            .map(PathBuf::from)
-            .ok_or(Error::FirmwarePathMissing)?;
-        Ok(TdxConfig { firmware })
-    }
-}
-
 #[cfg(target_arch = "x86_64")]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct SgxEpcConfig {
@@ -2296,8 +2293,6 @@ pub struct VmConfig {
     pub numa: Option<Vec<NumaConfig>>,
     #[serde(default)]
     pub watchdog: bool,
-    #[cfg(feature = "tdx")]
-    pub tdx: Option<TdxConfig>,
     #[cfg(feature = "gdb")]
     pub gdb: bool,
     pub platform: Option<PlatformConfig>,
@@ -2341,16 +2336,16 @@ impl VmConfig {
             })
         }
 
-        #[cfg(not(feature = "tdx"))]
         self.payload
             .as_ref()
             .ok_or(ValidationError::KernelMissing)?;
 
         #[cfg(feature = "tdx")]
         {
-            let tdx_enabled = self.tdx.is_some();
-            if !tdx_enabled && self.payload.is_none() {
-                return Err(ValidationError::KernelMissing);
+            let tdx_enabled = self.platform.as_ref().map(|p| p.tdx).unwrap_or(false);
+            // At this point we know payload isn't None.
+            if tdx_enabled && self.payload.as_ref().unwrap().firmware.is_none() {
+                return Err(ValidationError::TdxFirmwareMissing);
             }
             if tdx_enabled && (self.cpus.max_vcpus != self.cpus.boot_vcpus) {
                 return Err(ValidationError::TdxNoCpuHotplug);
@@ -2686,9 +2681,6 @@ impl VmConfig {
             None
         };
 
-        #[cfg(feature = "tdx")]
-        let tdx = vm_params.tdx.map(TdxConfig::parse).transpose()?;
-
         #[cfg(feature = "gdb")]
         let gdb = vm_params.gdb;
 
@@ -2716,14 +2708,17 @@ impl VmConfig {
             sgx_epc,
             numa,
             watchdog: vm_params.watchdog,
-            #[cfg(feature = "tdx")]
-            tdx,
             #[cfg(feature = "gdb")]
             gdb,
             platform,
         };
         config.validate().map_err(Error::Validation)?;
         Ok(config)
+    }
+
+    #[cfg(feature = "tdx")]
+    pub fn is_tdx_enabled(&self) -> bool {
+        self.platform.as_ref().map(|p| p.tdx).unwrap_or(false)
     }
 }
 
@@ -3323,8 +3318,6 @@ mod tests {
             sgx_epc: None,
             numa: None,
             watchdog: false,
-            #[cfg(feature = "tdx")]
-            tdx: None,
             #[cfg(feature = "gdb")]
             gdb: false,
             platform: None,
