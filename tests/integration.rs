@@ -7571,7 +7571,7 @@ mod windows {
             // Unmount disk device
             let cmd_success = remote_command(&api_socket, "remove-device", Some("_disk2"));
             assert!(cmd_success);
-            thread::sleep(std::time::Duration::new(5, 0));
+            thread::sleep(std::time::Duration::new(20, 0));
             // Verify the device has been removed
             let disk_num = 1;
             assert_eq!(windows_guest.disk_count(), disk_num);
@@ -7690,9 +7690,9 @@ mod windows {
                 let disk_id = it[0].as_str();
                 let cmd_success = remote_command(&api_socket, "remove-device", Some(disk_id));
                 assert!(cmd_success);
-                thread::sleep(std::time::Duration::new(5, 0));
             }
 
+            thread::sleep(std::time::Duration::new(20, 0));
             // Verify the devices have been removed
             let disk_num = 1;
             assert_eq!(windows_guest.disk_count(), disk_num);
