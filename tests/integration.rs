@@ -7511,6 +7511,7 @@ mod windows {
 
     #[test]
     #[cfg(not(feature = "mshv"))]
+    #[cfg(not(target_arch = "aarch64"))]
     fn test_windows_guest_disk_hotplug() {
         let windows_guest = WindowsGuest::new();
 
