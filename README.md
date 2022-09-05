@@ -4,6 +4,7 @@
     - [Architectures](#architectures)
     - [Guest OS](#guest-os)
 - [2. Getting Started](#2-getting-started)
+  - [Host OS](#host-os)
   - [Preparation](#preparation)
   - [Install prerequisites](#install-prerequisites)
   - [Clone and build](#clone-and-build)
@@ -71,6 +72,12 @@ Cloud Hypervisor supports `64-bit Linux` and Windows 10/Windows Server 2019.
 Below sections describe how to build and run Cloud Hypervisor on the `x86_64`
 platform. For getting started on the `AArch64` platform, please refer to the
 [Arm64 documentation](docs/arm64.md).
+
+## Host OS
+
+Based on required KVM functionality the minimum host kernel version is 4.11.
+For adequate peformance the minimum recommended host kernel vesion is 5.6. The
+majority of the CI currently tests with kernel version 5.15.
 
 ## Preparation
 
