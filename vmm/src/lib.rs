@@ -56,7 +56,6 @@ use vmm_sys_util::terminal::Terminal;
 
 mod acpi;
 pub mod api;
-mod clone3;
 pub mod config;
 #[cfg(feature = "guest_debug")]
 mod coredump;
@@ -71,7 +70,6 @@ pub mod migration;
 mod pci_segment;
 pub mod seccomp_filters;
 mod serial_manager;
-mod sigwinch_listener;
 pub mod vm;
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
@@ -555,7 +553,6 @@ impl Vmm {
                     activate_evt,
                     None,
                     None,
-                    None,
                 )?;
 
                 self.vm = Some(vm);
@@ -678,20 +675,15 @@ impl Vmm {
 
     fn vm_reboot(&mut self) -> result::Result<(), VmError> {
         // First we stop the current VM
-        let (config, serial_pty, console_pty, console_resize_pipe) =
-            if let Some(mut vm) = self.vm.take() {
-                let config = vm.get_config();
-                let serial_pty = vm.serial_pty();
-                let console_pty = vm.console_pty();
-                let console_resize_pipe = vm
-                    .console_resize_pipe()
-                    .as_ref()
-                    .map(|pipe| pipe.try_clone().unwrap());
-                vm.shutdown()?;
-                (config, serial_pty, console_pty, console_resize_pipe)
-            } else {
-                return Err(VmError::VmNotCreated);
-            };
+        let (config, serial_pty, console_pty) = if let Some(mut vm) = self.vm.take() {
+            let config = vm.get_config();
+            let serial_pty = vm.serial_pty();
+            let console_pty = vm.console_pty();
+            vm.shutdown()?;
+            (config, serial_pty, console_pty)
+        } else {
+            return Err(VmError::VmNotCreated);
+        };
 
         let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
         let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
@@ -724,7 +716,6 @@ impl Vmm {
             activate_evt,
             serial_pty,
             console_pty,
-            console_resize_pipe,
         )?;
 
         // And we boot it
