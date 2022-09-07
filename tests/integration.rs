@@ -8358,13 +8358,7 @@ mod live_migration {
     // 4. The destination VM is functional (including various virtio-devices are working properly) after
     //    live migration;
     // Note: This test does not use vsock as we can't create two identical vsock on the same host.
-    fn _test_live_migration(
-        upgrade_test: bool,
-        numa: bool,
-        local: bool,
-        watchdog: bool,
-        balloon: bool,
-    ) {
+    fn _test_live_migration(upgrade_test: bool, numa: bool, local: bool, balloon: bool) {
         assert!(
             !(numa && balloon),
             "Invalid inputs: 'numa' and 'balloon' cannot be tested at the same time."
@@ -8455,9 +8449,6 @@ mod live_migration {
                 "--pmem",
                 format!("file={}", pmem_temp_file.as_path().to_str().unwrap(),).as_str(),
             ]);
-        if watchdog {
-            src_vm_cmd.args(&["--watchdog"]);
-        }
         let mut src_child = src_vm_cmd.capture_output().spawn().unwrap();
 
         // Start the destination VM
@@ -8544,33 +8535,6 @@ mod live_migration {
                     Some(net_params.as_str()),
                 ));
                 thread::sleep(std::time::Duration::new(10, 0));
-            }
-
-            if watchdog {
-                let mut expected_reboot_count = 1;
-
-                // Enable the watchdog with a 15s timeout
-                enable_guest_watchdog(&guest, 15);
-
-                // Reboot and check that systemd has activated the watchdog
-                guest.ssh_command("sudo reboot").unwrap();
-                guest.wait_vm_boot(None).unwrap();
-                expected_reboot_count += 1;
-                assert_eq!(get_reboot_count(&guest), expected_reboot_count);
-                assert_eq!(
-                    guest
-                        .ssh_command("sudo journalctl | grep -c -- \"Watchdog started\"")
-                        .unwrap()
-                        .trim()
-                        .parse::<u32>()
-                        .unwrap_or_default(),
-                    2
-                );
-
-                // Allow some normal time to elapse to check we don't get spurious reboots
-                thread::sleep(std::time::Duration::new(40, 0));
-                // Check no reboot
-                assert_eq!(get_reboot_count(&guest), expected_reboot_count);
             }
 
             // Start the live-migration
@@ -8666,34 +8630,6 @@ mod live_migration {
                 }
             }
 
-            if watchdog {
-                let mut expected_reboot_count = 2;
-
-                // Allow some normal time to elapse to check we don't get spurious reboots
-                thread::sleep(std::time::Duration::new(40, 0));
-                // Check no reboot
-                assert_eq!(get_reboot_count(&guest), expected_reboot_count);
-
-                // Trigger a panic (sync first). We need to do this inside a screen with a delay so the SSH command returns.
-                guest.ssh_command("screen -dmS reboot sh -c \"sleep 5; echo s | tee /proc/sysrq-trigger; echo c | sudo tee /proc/sysrq-trigger\"").unwrap();
-                // Allow some time for the watchdog to trigger (max 30s) and reboot to happen
-                guest.wait_vm_boot(Some(50)).unwrap();
-                // Check a reboot is triggerred by the watchdog
-                expected_reboot_count += 1;
-                assert_eq!(get_reboot_count(&guest), expected_reboot_count);
-
-                #[cfg(target_arch = "x86_64")]
-                {
-                    // Now pause the VM and remain offline for 30s
-                    assert!(remote_command(&dest_api_socket, "pause", None));
-                    thread::sleep(std::time::Duration::new(30, 0));
-                    assert!(remote_command(&dest_api_socket, "resume", None));
-
-                    // Check no reboot
-                    assert_eq!(get_reboot_count(&guest), expected_reboot_count);
-                }
-            }
-
             if balloon {
                 let total_memory = guest.get_total_memory().unwrap_or_default();
                 assert!(total_memory > 4_800_000);
@@ -8708,6 +8644,208 @@ mod live_migration {
                 let total_memory = guest.get_total_memory().unwrap_or_default();
                 assert!(total_memory > 4_800_000);
                 assert!(total_memory < 5_760_000);
+            }
+        });
+
+        // Clean-up the destination VM and make sure it terminated correctly
+        let _ = dest_child.kill();
+        let dest_output = dest_child.wait_with_output().unwrap();
+        handle_child_output(r, &dest_output);
+
+        // Check the destination VM has the expected 'concole_text' from its output
+        let r = std::panic::catch_unwind(|| {
+            assert!(String::from_utf8_lossy(&dest_output.stdout).contains(&console_text));
+        });
+        handle_child_output(r, &dest_output);
+    }
+
+    fn _test_live_migration_watchdog(upgrade_test: bool, local: bool) {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+        let kernel_path = direct_kernel_boot_path();
+        let console_text = String::from("On a branch floating down river a cricket, singing.");
+        let net_id = "net123";
+        let net_params = format!(
+            "id={},tap=,mac={},ip={},mask=255.255.255.0",
+            net_id, guest.network.guest_mac, guest.network.host_ip
+        );
+
+        let memory_param: &[&str] = if local {
+            &["--memory", "size=4G,shared=on"]
+        } else {
+            &["--memory", "size=4G"]
+        };
+
+        let boot_vcpus = 2;
+        let max_vcpus = 4;
+
+        let pmem_temp_file = TempFile::new().unwrap();
+        pmem_temp_file.as_file().set_len(128 << 20).unwrap();
+        std::process::Command::new("mkfs.ext4")
+            .arg(pmem_temp_file.as_path())
+            .output()
+            .expect("Expect creating disk image to succeed");
+        let pmem_path = String::from("/dev/pmem0");
+
+        // Start the source VM
+        let src_vm_path = if !upgrade_test {
+            clh_command("cloud-hypervisor")
+        } else {
+            cloud_hypervisor_release_path()
+        };
+        let src_api_socket = temp_api_path(&guest.tmp_dir);
+        let mut src_vm_cmd = GuestCommand::new_with_binary_path(&guest, &src_vm_path);
+        src_vm_cmd
+            .args(&[
+                "--cpus",
+                format!("boot={},max={}", boot_vcpus, max_vcpus).as_str(),
+            ])
+            .args(memory_param)
+            .args(&["--kernel", kernel_path.to_str().unwrap()])
+            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .args(&["--net", net_params.as_str()])
+            .args(&["--api-socket", &src_api_socket])
+            .args(&[
+                "--pmem",
+                format!("file={}", pmem_temp_file.as_path().to_str().unwrap(),).as_str(),
+            ])
+            .args(&["--watchdog"]);
+        let mut src_child = src_vm_cmd.capture_output().spawn().unwrap();
+
+        // Start the destination VM
+        let mut dest_api_socket = temp_api_path(&guest.tmp_dir);
+        dest_api_socket.push_str(".dest");
+        let mut dest_child = GuestCommand::new(&guest)
+            .args(&["--api-socket", &dest_api_socket])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            // Make sure the source VM is functaionl
+            // Check the number of vCPUs
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+            // Check the guest RAM
+            assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+            // Check the guest virtio-devices, e.g. block, rng, console, and net
+            guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
+            // x86_64: Following what's done in the `test_snapshot_restore`, we need
+            // to make sure that removing and adding back the virtio-net device does
+            // not break the live-migration support for virtio-pci.
+            #[cfg(target_arch = "x86_64")]
+            {
+                assert!(remote_command(
+                    &src_api_socket,
+                    "remove-device",
+                    Some(net_id),
+                ));
+                thread::sleep(std::time::Duration::new(10, 0));
+
+                // Plug the virtio-net device again
+                assert!(remote_command(
+                    &src_api_socket,
+                    "add-net",
+                    Some(net_params.as_str()),
+                ));
+                thread::sleep(std::time::Duration::new(10, 0));
+            }
+
+            // Enable watchdog and ensure its functional
+            let mut expected_reboot_count = 1;
+            // Enable the watchdog with a 15s timeout
+            enable_guest_watchdog(&guest, 15);
+            // Reboot and check that systemd has activated the watchdog
+            guest.ssh_command("sudo reboot").unwrap();
+            guest.wait_vm_boot(None).unwrap();
+            expected_reboot_count += 1;
+            assert_eq!(get_reboot_count(&guest), expected_reboot_count);
+            assert_eq!(
+                guest
+                    .ssh_command("sudo journalctl | grep -c -- \"Watchdog started\"")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                2
+            );
+            // Allow some normal time to elapse to check we don't get spurious reboots
+            thread::sleep(std::time::Duration::new(40, 0));
+            // Check no reboot
+            assert_eq!(get_reboot_count(&guest), expected_reboot_count);
+
+            // Start the live-migration
+            let migration_socket = String::from(
+                guest
+                    .tmp_dir
+                    .as_path()
+                    .join("live-migration.sock")
+                    .to_str()
+                    .unwrap(),
+            );
+
+            assert!(
+                start_live_migration(&migration_socket, &src_api_socket, &dest_api_socket, local),
+                "Unsuccessful command: 'send-migration' or 'receive-migration'."
+            );
+        });
+
+        // Check and report any errors occured during the live-migration
+        if r.is_err() {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Error occured during live-migration",
+            );
+        }
+
+        // Check the source vm has been terminated successful (give it '3s' to settle)
+        thread::sleep(std::time::Duration::new(3, 0));
+        if !src_child.try_wait().unwrap().map_or(false, |s| s.success()) {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "source VM was not terminated successfully.",
+            );
+        };
+
+        // Post live-migration check to make sure the destination VM is funcational
+        let r = std::panic::catch_unwind(|| {
+            // Perform same checks to validate VM has been properly migrated
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+            assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+
+            guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
+
+            // Perform checks on watchdog
+            let mut expected_reboot_count = 2;
+
+            // Allow some normal time to elapse to check we don't get spurious reboots
+            thread::sleep(std::time::Duration::new(40, 0));
+            // Check no reboot
+            assert_eq!(get_reboot_count(&guest), expected_reboot_count);
+
+            // Trigger a panic (sync first). We need to do this inside a screen with a delay so the SSH command returns.
+            guest.ssh_command("screen -dmS reboot sh -c \"sleep 5; echo s | tee /proc/sysrq-trigger; echo c | sudo tee /proc/sysrq-trigger\"").unwrap();
+            // Allow some time for the watchdog to trigger (max 30s) and reboot to happen
+            guest.wait_vm_boot(Some(50)).unwrap();
+            // Check a reboot is triggerred by the watchdog
+            expected_reboot_count += 1;
+            assert_eq!(get_reboot_count(&guest), expected_reboot_count);
+
+            #[cfg(target_arch = "x86_64")]
+            {
+                // Now pause the VM and remain offline for 30s
+                assert!(remote_command(&dest_api_socket, "pause", None));
+                thread::sleep(std::time::Duration::new(30, 0));
+                assert!(remote_command(&dest_api_socket, "resume", None));
+
+                // Check no reboot
+                assert_eq!(get_reboot_count(&guest), expected_reboot_count);
             }
         });
 
@@ -8825,86 +8963,86 @@ mod live_migration {
         use super::*;
         #[test]
         fn test_live_migration_basic() {
-            _test_live_migration(false, false, false, false, false)
+            _test_live_migration(false, false, false, false)
         }
 
         #[test]
         fn test_live_migration_local() {
-            _test_live_migration(false, false, true, false, false)
+            _test_live_migration(false, false, true, false)
         }
 
         #[test]
         #[cfg(not(feature = "mshv"))]
         fn test_live_migration_numa() {
-            _test_live_migration(false, true, false, false, false)
+            _test_live_migration(false, true, false, false)
         }
 
         #[test]
         #[cfg(not(feature = "mshv"))]
         fn test_live_migration_numa_local() {
-            _test_live_migration(false, true, true, false, false)
+            _test_live_migration(false, true, true, false)
         }
 
         #[test]
         fn test_live_migration_watchdog() {
-            _test_live_migration(false, false, false, true, false)
+            _test_live_migration_watchdog(false, false)
         }
 
         #[test]
         fn test_live_migration_watchdog_local() {
-            _test_live_migration(false, false, true, true, false)
+            _test_live_migration_watchdog(false, true)
         }
 
         #[test]
         fn test_live_migration_balloon() {
-            _test_live_migration(false, false, false, false, true)
+            _test_live_migration(false, false, false, true)
         }
 
         #[test]
         fn test_live_migration_balloon_local() {
-            _test_live_migration(false, false, true, false, true)
+            _test_live_migration(false, false, true, true)
         }
 
         #[test]
         fn test_live_upgrade_basic() {
-            _test_live_migration(true, false, false, false, false)
+            _test_live_migration(true, false, false, false)
         }
 
         #[test]
         fn test_live_upgrade_local() {
-            _test_live_migration(true, false, true, false, false)
+            _test_live_migration(true, false, true, false)
         }
 
         #[test]
         #[cfg(not(feature = "mshv"))]
         fn test_live_upgrade_numa() {
-            _test_live_migration(true, true, false, false, false)
+            _test_live_migration(true, true, false, false)
         }
 
         #[test]
         #[cfg(not(feature = "mshv"))]
         fn test_live_upgrade_numa_local() {
-            _test_live_migration(true, true, true, false, false)
+            _test_live_migration(true, true, true, false)
         }
 
         #[test]
         fn test_live_upgrade_watchdog() {
-            _test_live_migration(true, false, false, true, false)
+            _test_live_migration_watchdog(true, false)
         }
 
         #[test]
         fn test_live_upgrade_watchdog_local() {
-            _test_live_migration(true, false, true, true, false)
+            _test_live_migration_watchdog(true, true)
         }
 
         #[test]
         fn test_live_upgrade_balloon() {
-            _test_live_migration(true, false, false, false, true)
+            _test_live_migration(true, false, false, true)
         }
 
         #[test]
         fn test_live_upgrade_balloon_local() {
-            _test_live_migration(true, false, true, false, true)
+            _test_live_migration(true, false, true, true)
         }
     }
 
