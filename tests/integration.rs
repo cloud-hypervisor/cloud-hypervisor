@@ -8230,6 +8230,82 @@ mod vfio {
 mod live_migration {
     use crate::*;
 
+    fn start_live_migration(
+        migration_socket: &str,
+        src_api_socket: &str,
+        dest_api_socket: &str,
+        local: bool,
+    ) -> bool {
+        // Start to receive migration from the destintion VM
+        let mut receive_migration = Command::new(clh_command("ch-remote"))
+            .args(&[
+                &format!("--api-socket={}", dest_api_socket),
+                "receive-migration",
+                &format! {"unix:{}", migration_socket},
+            ])
+            .stderr(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        // Give it '1s' to make sure the 'migration_socket' file is properly created
+        thread::sleep(std::time::Duration::new(1, 0));
+        // Start to send migration from the source VM
+
+        let mut args = [
+            format!("--api-socket={}", &src_api_socket),
+            "send-migration".to_string(),
+            format! {"unix:{}", migration_socket},
+        ]
+        .to_vec();
+
+        if local {
+            args.insert(2, "--local".to_string());
+        }
+
+        let mut send_migration = Command::new(clh_command("ch-remote"))
+            .args(&args)
+            .stderr(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+
+        // The 'send-migration' command should be executed successfully within the given timeout
+        let send_success = if let Some(status) = send_migration
+            .wait_timeout(std::time::Duration::from_secs(30))
+            .unwrap()
+        {
+            status.success()
+        } else {
+            false
+        };
+
+        if !send_success {
+            let _ = send_migration.kill();
+            let output = send_migration.wait_with_output().unwrap();
+            eprintln!("\n\n==== Start 'send_migration' output ====\n\n---stdout---\n{}\n\n---stderr---\n{}\n\n==== End 'send_migration' output ====\n\n",
+                    String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        }
+
+        // The 'receive-migration' command should be executed successfully within the given timeout
+        let receive_success = if let Some(status) = receive_migration
+            .wait_timeout(std::time::Duration::from_secs(30))
+            .unwrap()
+        {
+            status.success()
+        } else {
+            false
+        };
+
+        if !receive_success {
+            let _ = receive_migration.kill();
+            let output = receive_migration.wait_with_output().unwrap();
+            eprintln!("\n\n==== Start 'receive_migration' output ====\n\n---stdout---\n{}\n\n---stderr---\n{}\n\n==== End 'receive_migration' output ====\n\n",
+                    String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        }
+
+        send_success && receive_success
+    }
+
     // This test exercises the local live-migration between two Cloud Hypervisor VMs on the
     // same host. It ensures the following behaviors:
     // 1. The source VM is up and functional (including various virtio-devices are working properly);
@@ -8462,74 +8538,9 @@ mod live_migration {
                     .to_str()
                     .unwrap(),
             );
-            // Start to receive migration from the destintion VM
-            let mut receive_migration = Command::new(clh_command("ch-remote"))
-                .args(&[
-                    &format!("--api-socket={}", &dest_api_socket),
-                    "receive-migration",
-                    &format! {"unix:{}", migration_socket},
-                ])
-                .stderr(Stdio::piped())
-                .stdout(Stdio::piped())
-                .spawn()
-                .unwrap();
-            // Give it '1s' to make sure the 'migration_socket' file is properly created
-            thread::sleep(std::time::Duration::new(1, 0));
-            // Start to send migration from the source VM
 
-            let mut args = [
-                format!("--api-socket={}", &src_api_socket),
-                "send-migration".to_string(),
-                format! {"unix:{}", migration_socket},
-            ]
-            .to_vec();
-
-            if local {
-                args.insert(2, "--local".to_string());
-            }
-
-            let mut send_migration = Command::new(clh_command("ch-remote"))
-                .args(&args)
-                .stderr(Stdio::piped())
-                .stdout(Stdio::piped())
-                .spawn()
-                .unwrap();
-
-            // The 'send-migration' command should be executed successfully within the given timeout
-            let success = if let Some(status) = send_migration
-                .wait_timeout(std::time::Duration::from_secs(30))
-                .unwrap()
-            {
-                status.success()
-            } else {
-                false
-            };
-
-            if !success {
-                let _ = send_migration.kill();
-                let output = send_migration.wait_with_output().unwrap();
-                eprintln!("\n\n==== Start 'send_migration' output ====\n\n---stdout---\n{}\n\n---stderr---\n{}\n\n==== End 'send_migration' output ====\n\n",
-                    String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
-            }
-
-            // The 'receive-migration' command should be executed successfully within the given timeout
-            let success = if let Some(status) = receive_migration
-                .wait_timeout(std::time::Duration::from_secs(30))
-                .unwrap()
-            {
-                status.success()
-            } else {
-                false
-            };
-
-            if !success {
-                let _ = receive_migration.kill();
-                let output = receive_migration.wait_with_output().unwrap();
-                eprintln!("\n\n==== Start 'receive_migration' output ====\n\n---stdout---\n{}\n\n---stderr---\n{}\n\n==== End 'receive_migration' output ====\n\n",
-                    String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
-            }
             assert!(
-                success,
+                start_live_migration(&migration_socket, &src_api_socket, &dest_api_socket, local),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
             );
         });
@@ -8724,73 +8735,9 @@ mod live_migration {
                     .to_str()
                     .unwrap(),
             );
-            // Start to receive migration from the destintion VM
-            let mut receive_migration = Command::new(clh_command("ch-remote"))
-                .args(&[
-                    &format!("--api-socket={}", &dest_api_socket),
-                    "receive-migration",
-                    &format! {"unix:{}", migration_socket},
-                ])
-                .stderr(Stdio::piped())
-                .stdout(Stdio::piped())
-                .spawn()
-                .unwrap();
-            // Give it '1s' to make sure the 'migration_socket' file is properly created
-            thread::sleep(std::time::Duration::new(1, 0));
-            // Start to send migration from the source VM
-            let mut args = [
-                format!("--api-socket={}", &src_api_socket),
-                "send-migration".to_string(),
-                format! {"unix:{}", migration_socket},
-            ]
-            .to_vec();
 
-            if local {
-                args.insert(2, "--local".to_string());
-            }
-
-            let mut send_migration = Command::new(clh_command("ch-remote"))
-                .args(&args)
-                .stderr(Stdio::piped())
-                .stdout(Stdio::piped())
-                .spawn()
-                .unwrap();
-
-            // The 'send-migration' command should be executed successfully within the given timeout
-            let success = if let Some(status) = send_migration
-                .wait_timeout(std::time::Duration::from_secs(30))
-                .unwrap()
-            {
-                status.success()
-            } else {
-                false
-            };
-
-            if !success {
-                let _ = send_migration.kill();
-                let output = send_migration.wait_with_output().unwrap();
-                eprintln!("\n\n==== Start 'send_migration' output ====\n\n---stdout---\n{}\n\n---stderr---\n{}\n\n==== End 'send_migration' output ====\n\n",
-                    String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
-            }
-
-            // The 'receive-migration' command should be executed successfully within the given timeout
-            let success = if let Some(status) = receive_migration
-                .wait_timeout(std::time::Duration::from_secs(30))
-                .unwrap()
-            {
-                status.success()
-            } else {
-                false
-            };
-
-            if !success {
-                let _ = receive_migration.kill();
-                let output = receive_migration.wait_with_output().unwrap();
-                eprintln!("\n\n==== Start 'receive_migration' output ====\n\n---stdout---\n{}\n\n---stderr---\n{}\n\n==== End 'receive_migration' output ====\n\n",
-                    String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
-            }
             assert!(
-                success,
+                start_live_migration(&migration_socket, &src_api_socket, &dest_api_socket, local),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
             );
         });
