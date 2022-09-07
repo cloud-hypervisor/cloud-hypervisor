@@ -8306,6 +8306,50 @@ mod live_migration {
         send_success && receive_success
     }
 
+    fn print_and_panic(src_vm: Child, dest_vm: Child, ovs_vm: Option<Child>, message: &str) -> ! {
+        let mut src_vm = src_vm;
+        let mut dest_vm = dest_vm;
+
+        let _ = src_vm.kill();
+        let src_output = src_vm.wait_with_output().unwrap();
+        eprintln!(
+            "\n\n==== Start 'source_vm' stdout ====\n\n{}\n\n==== End 'source_vm' stdout ====",
+            String::from_utf8_lossy(&src_output.stdout)
+        );
+        eprintln!(
+            "\n\n==== Start 'source_vm' stderr ====\n\n{}\n\n==== End 'source_vm' stderr ====",
+            String::from_utf8_lossy(&src_output.stderr)
+        );
+        let _ = dest_vm.kill();
+        let dest_output = dest_vm.wait_with_output().unwrap();
+        eprintln!(
+                "\n\n==== Start 'destination_vm' stdout ====\n\n{}\n\n==== End 'destination_vm' stdout ====",
+                String::from_utf8_lossy(&dest_output.stdout)
+            );
+        eprintln!(
+                "\n\n==== Start 'destination_vm' stderr ====\n\n{}\n\n==== End 'destination_vm' stderr ====",
+                String::from_utf8_lossy(&dest_output.stderr)
+            );
+
+        if let Some(ovs_vm) = ovs_vm {
+            let mut ovs_vm = ovs_vm;
+            let _ = ovs_vm.kill();
+            let ovs_output = ovs_vm.wait_with_output().unwrap();
+            eprintln!(
+                "\n\n==== Start 'ovs_vm' stdout ====\n\n{}\n\n==== End 'ovs_vm' stdout ====",
+                String::from_utf8_lossy(&ovs_output.stdout)
+            );
+            eprintln!(
+                "\n\n==== Start 'ovs_vm' stderr ====\n\n{}\n\n==== End 'ovs_vm' stderr ====",
+                String::from_utf8_lossy(&ovs_output.stderr)
+            );
+
+            cleanup_ovs_dpdk();
+        }
+
+        panic!("Test failed: {}", message)
+    }
+
     // This test exercises the local live-migration between two Cloud Hypervisor VMs on the
     // same host. It ensures the following behaviors:
     // 1. The source VM is up and functional (including various virtio-devices are working properly);
@@ -8545,37 +8589,14 @@ mod live_migration {
             );
         });
 
-        let print_and_panic = |src_vm: Child, dest_vm: Child, message: &str| -> ! {
-            let mut src_vm = src_vm;
-            let mut dest_vm = dest_vm;
-
-            let _ = src_vm.kill();
-            let src_output = src_vm.wait_with_output().unwrap();
-            eprintln!(
-                "\n\n==== Start 'source_vm' stdout ====\n\n{}\n\n==== End 'source_vm' stdout ====",
-                String::from_utf8_lossy(&src_output.stdout)
-            );
-            eprintln!(
-                "\n\n==== Start 'source_vm' stderr ====\n\n{}\n\n==== End 'source_vm' stderr ====",
-                String::from_utf8_lossy(&src_output.stderr)
-            );
-            let _ = dest_vm.kill();
-            let dest_output = dest_vm.wait_with_output().unwrap();
-            eprintln!(
-                    "\n\n==== Start 'destination_vm' stdout ====\n\n{}\n\n==== End 'destination_vm' stdout ====",
-                    String::from_utf8_lossy(&dest_output.stdout)
-                );
-            eprintln!(
-                    "\n\n==== Start 'destination_vm' stderr ====\n\n{}\n\n==== End 'destination_vm' stderr ====",
-                    String::from_utf8_lossy(&dest_output.stderr)
-                );
-
-            panic!("Test failed: {}", message)
-        };
-
         // Check and report any errors occured during the live-migration
         if r.is_err() {
-            print_and_panic(src_child, dest_child, "Error occured during live-migration");
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Error occured during live-migration",
+            );
         }
 
         // Check the source vm has been terminated successful (give it '3s' to settle)
@@ -8584,6 +8605,7 @@ mod live_migration {
             print_and_panic(
                 src_child,
                 dest_child,
+                None,
                 "source VM was not terminated successfully.",
             );
         };
@@ -8742,53 +8764,12 @@ mod live_migration {
             );
         });
 
-        let print_and_panic = |src_vm: Child, dest_vm: Child, ovs_vm: Child, message: &str| -> ! {
-            let mut src_vm = src_vm;
-            let mut dest_vm = dest_vm;
-            let mut ovs_vm = ovs_vm;
-
-            let _ = src_vm.kill();
-            let src_output = src_vm.wait_with_output().unwrap();
-            eprintln!(
-                "\n\n==== Start 'source_vm' stdout ====\n\n{}\n\n==== End 'source_vm' stdout ====",
-                String::from_utf8_lossy(&src_output.stdout)
-            );
-            eprintln!(
-                "\n\n==== Start 'source_vm' stderr ====\n\n{}\n\n==== End 'source_vm' stderr ====",
-                String::from_utf8_lossy(&src_output.stderr)
-            );
-            let _ = dest_vm.kill();
-            let dest_output = dest_vm.wait_with_output().unwrap();
-            eprintln!(
-                    "\n\n==== Start 'destination_vm' stdout ====\n\n{}\n\n==== End 'destination_vm' stdout ====",
-                    String::from_utf8_lossy(&dest_output.stdout)
-                );
-            eprintln!(
-                    "\n\n==== Start 'destination_vm' stderr ====\n\n{}\n\n==== End 'destination_vm' stderr ====",
-                    String::from_utf8_lossy(&dest_output.stderr)
-                );
-            let _ = ovs_vm.kill();
-            let ovs_output = ovs_vm.wait_with_output().unwrap();
-            eprintln!(
-                "\n\n==== Start 'ovs_vm' stdout ====\n\n{}\n\n==== End 'ovs_vm' stdout ====",
-                String::from_utf8_lossy(&ovs_output.stdout)
-            );
-            eprintln!(
-                "\n\n==== Start 'ovs_vm' stderr ====\n\n{}\n\n==== End 'ovs_vm' stderr ====",
-                String::from_utf8_lossy(&ovs_output.stderr)
-            );
-
-            cleanup_ovs_dpdk();
-
-            panic!("Test failed: {}", message)
-        };
-
         // Check and report any errors occured during the live-migration
         if r.is_err() {
             print_and_panic(
                 src_child,
                 dest_child,
-                ovs_child,
+                Some(ovs_child),
                 "Error occured during live-migration",
             );
         }
@@ -8799,7 +8780,7 @@ mod live_migration {
             print_and_panic(
                 src_child,
                 dest_child,
-                ovs_child,
+                Some(ovs_child),
                 "source VM was not terminated successfully.",
             );
         };
