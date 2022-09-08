@@ -1,0 +1,10 @@
+[package]
+name = "vtpm"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+log = "0.4.14"
+byteorder = "1.4.3"
+thiserror = "1.0.30"
+anyhow = "1.0.56"
