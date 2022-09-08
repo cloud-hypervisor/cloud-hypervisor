@@ -400,6 +400,31 @@ pipeline{
 						}
 					}
 				}
+				stage ('Worker build - Rate Limiter') {
+					agent { node { label 'focal-metrics' } }
+					when {
+						branch 'main'
+						beforeAgent true
+						expression {
+							return runWorkers
+						}
+					}
+					stages {
+						stage ('Checkout') {
+							steps {
+								checkout scm
+							}
+						}
+						stage ('Run rate-limiter integration tests') {
+							options {
+								timeout(time: 10, unit: 'MINUTES')
+							}
+							steps {
+								sh "scripts/dev_cli.sh tests --integration-rate-limiter"
+							}
+						}
+					}
+				}
 			}
 		}
 	}
