@@ -31,6 +31,7 @@ seccompiler = "0.3.0"
 serde_json = "1.0.87"
 signal-hook = "0.3.14"
 thiserror = "1.0.37"
+tpm = { path = "tpm"}
 tracer = { path = "tracer" }
 vmm = { path = "vmm" }
 vmm-sys-util = "0.10.0"

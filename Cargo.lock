@@ -173,6 +173,7 @@ dependencies = [
  "signal-hook",
  "test_infra",
  "thiserror",
+ "tpm",
  "tracer",
  "vm-memory",
  "vmm",
@@ -1157,6 +1158,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "tpm"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "byteorder",
+ "log",
+ "thiserror",
 ]
 
 [[package]]
