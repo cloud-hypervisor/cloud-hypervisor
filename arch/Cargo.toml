@@ -13,7 +13,7 @@ anyhow = "1.0.64"
 byteorder = "1.4.3"
 hypervisor = { path = "../hypervisor" }
 libc = "0.2.132"
-linux-loader = { version = "0.4.0", features = ["elf", "bzimage", "pe"] }
+linux-loader = { version = "0.5.0", features = ["elf", "bzimage", "pe"] }
 log = "0.4.17"
 serde = { version = "1.0.144", features = ["rc", "derive"] }
 thiserror = "1.0.34"
