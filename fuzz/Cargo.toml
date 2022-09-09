@@ -20,7 +20,7 @@ qcow = { path = "../qcow" }
 seccompiler = "0.2.0"
 vhdx = { path = "../vhdx" }
 virtio-devices = { path = "../virtio-devices" }
-virtio-queue = "0.5.0"
+virtio-queue = "0.6.0"
 vmm = { path = "../vmm" }
 vmm-sys-util = "0.10.0"
 vm-memory = "0.8.0"
