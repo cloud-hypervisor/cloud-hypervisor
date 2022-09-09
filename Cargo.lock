@@ -1166,8 +1166,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "byteorder",
+ "libc",
  "log",
  "thiserror",
+ "vmm-sys-util",
 ]
 
 [[package]]
