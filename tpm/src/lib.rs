@@ -3,6 +3,11 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#[macro_use]
+extern crate log;
+
+pub mod socket;
+
 use anyhow::anyhow;
 use byteorder::{BigEndian, ReadBytesExt};
 use std::convert::TryInto;
