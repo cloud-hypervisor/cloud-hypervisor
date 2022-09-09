@@ -6,6 +6,7 @@
 #[macro_use]
 extern crate log;
 
+pub mod emulator;
 pub mod socket;
 
 use anyhow::anyhow;
