@@ -9,6 +9,7 @@
   - [Install prerequisites](#install-prerequisites)
   - [Clone and build](#clone-and-build)
     - [Containerized builds and tests](#containerized-builds-and-tests)
+- [Use Prebuilt Binaries](#use-prebuilt-binaries)
   - [Run](#run)
     - [Cloud image](#cloud-image)
     - [Custom kernel and disk image](#custom-kernel-and-disk-image)
@@ -151,6 +152,15 @@ $ ./scripts/dev_cli.sh tests --unit
 
 Run the `./scripts/dev_cli.sh --help` command to view all the supported
 development script commands and their related options.
+
+## Use Prebuilt Binaries
+
+Cloud Hypervisor packages targeting some popular Linux distributions are available
+thanks to the [Open Build Service](https://build.opensuse.org). The
+[OBS README](https://github.com/cloud-hypervisor/obs-packaging) explains how to
+enable the repository in a supported Linux distribution and install Cloud Hypervisor
+and accompanying packages. Please report any packaging issues in the
+[obs-packaging](https://github.com/cloud-hypervisor/obs-packaging) repository.
 
 ## Run
 
