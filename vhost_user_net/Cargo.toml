@@ -12,7 +12,7 @@ libc = "0.2.132"
 log = "0.4.17"
 net_util = { path = "../net_util" }
 option_parser = { path = "../option_parser" }
-vhost = { version = "0.4.0", features = ["vhost-user-slave"] }
+vhost = { version = "0.5.0", features = ["vhost-user-slave"] }
 vhost-user-backend = "0.6.0"
 virtio-bindings = "0.1.0"
 vm-memory = "0.8.0"

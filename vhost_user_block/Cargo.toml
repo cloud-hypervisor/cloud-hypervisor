@@ -13,7 +13,7 @@ libc = "0.2.132"
 log = "0.4.17"
 option_parser = { path = "../option_parser" }
 qcow = { path = "../qcow" }
-vhost = { version = "0.4.0", features = ["vhost-user-slave"] }
+vhost = { version = "0.5.0", features = ["vhost-user-slave"] }
 vhost-user-backend = "0.6.0"
 virtio-bindings = "0.1.0"
 virtio-queue = "0.5.0"
