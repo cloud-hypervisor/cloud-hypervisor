@@ -14,7 +14,7 @@ block_util = { path = "../block_util" }
 byteorder = "1.4.3"
 epoll = "4.3.1"
 event_monitor = { path = "../event_monitor" }
-io-uring = "0.5.5"
+io-uring = "0.5.6"
 libc = "0.2.132"
 log = "0.4.17"
 net_gen = { path = "../net_gen" }
