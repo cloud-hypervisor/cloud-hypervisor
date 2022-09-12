@@ -162,7 +162,7 @@ struct PmemEpollHandler {
 }
 
 impl PmemEpollHandler {
-    fn process_queue(&mut self) -> bool {
+    fn process_queue(&mut self) -> result::Result<bool, Error> {
         let mut used_descs = false;
         while let Some(mut desc_chain) = self.queue.pop_descriptor_chain(self.mem.memory()) {
             let len = match Request::parse(&mut desc_chain, self.access_platform.as_ref()) {
@@ -201,7 +201,7 @@ impl PmemEpollHandler {
             used_descs = true;
         }
 
-        used_descs
+        Ok(used_descs)
     }
 
     fn signal_used_queue(&self) -> result::Result<(), DeviceError> {
@@ -239,7 +239,11 @@ impl EpollHelperHandler for PmemEpollHandler {
                     EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
                 })?;
 
-                if self.process_queue() {
+                let needs_notification = self.process_queue().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!("Failed to process queue : {:?}", e))
+                })?;
+
+                if needs_notification {
                     self.signal_used_queue().map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
                             "Failed to signal used queue: {:?}",
