@@ -58,6 +58,12 @@ test = false
 doc = false
 
 [[bin]]
+name = "pmem"
+path = "fuzz_targets/pmem.rs"
+test = false
+doc = false
+
+[[bin]]
 name = "qcow"
 path = "fuzz_targets/qcow.rs"
 test = false
