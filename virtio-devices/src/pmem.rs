@@ -18,7 +18,6 @@ use crate::{GuestMemoryMmap, MmapRegion};
 use crate::{VirtioInterrupt, VirtioInterruptType};
 use anyhow::anyhow;
 use seccompiler::SeccompAction;
-use std::fmt::{self, Display};
 use std::fs::File;
 use std::io;
 use std::mem::size_of;
@@ -26,6 +25,7 @@ use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};
+use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_queue::{DescriptorChain, Queue, QueueT};
@@ -76,35 +76,20 @@ struct VirtioPmemResp {
 // SAFETY: it only has data and has no implicit padding.
 unsafe impl ByteValued for VirtioPmemResp {}
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 enum Error {
-    /// Guest gave us bad memory addresses.
+    #[error("Bad guest memory addresses: {0}")]
     GuestMemory(GuestMemoryError),
-    /// Guest gave us a write only descriptor that protocol says to read from.
+    #[error("Unexpected write-only descriptor")]
     UnexpectedWriteOnlyDescriptor,
-    /// Guest gave us a read only descriptor that protocol says to write to.
+    #[error("Unexpected read-only descriptor")]
     UnexpectedReadOnlyDescriptor,
-    /// Guest gave us too few descriptors in a descriptor chain.
+    #[error("Descriptor chain too short")]
     DescriptorChainTooShort,
-    /// Guest gave us a buffer that was too short to use.
+    #[error("Buffer length too small")]
     BufferLengthTooSmall,
-    /// Guest sent us invalid request.
+    #[error("Invalid request")]
     InvalidRequest,
-}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use self::Error::*;
-
-        match self {
-            BufferLengthTooSmall => write!(f, "buffer length too small"),
-            DescriptorChainTooShort => write!(f, "descriptor chain too short"),
-            GuestMemory(e) => write!(f, "bad guest memory address: {}", e),
-            InvalidRequest => write!(f, "invalid request"),
-            UnexpectedReadOnlyDescriptor => write!(f, "unexpected read-only descriptor"),
-            UnexpectedWriteOnlyDescriptor => write!(f, "unexpected write-only descriptor"),
-        }
-    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
