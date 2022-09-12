@@ -90,6 +90,8 @@ enum Error {
     BufferLengthTooSmall,
     #[error("Invalid request")]
     InvalidRequest,
+    #[error("Failed adding used index: {0}")]
+    QueueAddUsed(virtio_queue::Error),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -197,7 +199,7 @@ impl PmemEpollHandler {
 
             self.queue
                 .add_used(desc_chain.memory(), desc_chain.head_index(), len)
-                .unwrap();
+                .map_err(Error::QueueAddUsed)?;
             used_descs = true;
         }
 
