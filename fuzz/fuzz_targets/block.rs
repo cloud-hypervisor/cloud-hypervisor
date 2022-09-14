@@ -24,9 +24,18 @@ use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
-const QUEUE_DATA_SIZE: usize = 28;
+const QUEUE_DATA_SIZE: usize = 4;
 const MEM_SIZE: usize = 256 * 1024 * 1024;
-const QUEUE_SIZE: u16 = 16; // Max entries in the queue.
+// Max entries in the queue.
+const QUEUE_SIZE: u16 = 256;
+// Guest physical address for descriptor table.
+const DESC_TABLE_ADDR: u64 = 0;
+const DESC_TABLE_SIZE: u64 = 16_u64 * QUEUE_SIZE as u64;
+// Guest physical address for available ring
+const AVAIL_RING_ADDR: u64 = DESC_TABLE_ADDR + DESC_TABLE_SIZE;
+const AVAIL_RING_SIZE: u64 = 6_u64 + 2 * QUEUE_SIZE as u64;
+// Guest physical address for used ring (requires to 4-bytes aligned)
+const USED_RING_ADDR: u64 = (AVAIL_RING_ADDR + AVAIL_RING_SIZE + 3) & !3_u64;
 
 fuzz_target!(|bytes| {
     if bytes.len() < QUEUE_DATA_SIZE || bytes.len() > (QUEUE_DATA_SIZE + MEM_SIZE) {
@@ -106,18 +115,13 @@ fn setup_virt_queue(bytes: &[u8; QUEUE_DATA_SIZE]) -> Queue {
     q.set_next_used(bytes[1] as u16);
     q.set_event_idx(bytes[2] % 2 != 0);
     q.set_size(bytes[3] as u16 % QUEUE_SIZE);
-    q.set_desc_table_address(
-        Some(u32::from_le_bytes(bytes[4..8].try_into().unwrap())),
-        Some(u32::from_le_bytes(bytes[8..12].try_into().unwrap())),
-    );
-    q.set_avail_ring_address(
-        Some(u32::from_le_bytes(bytes[12..16].try_into().unwrap())),
-        Some(u32::from_le_bytes(bytes[16..20].try_into().unwrap())),
-    );
-    q.set_used_ring_address(
-        Some(u32::from_le_bytes(bytes[20..24].try_into().unwrap())),
-        Some(u32::from_le_bytes(bytes[24..28].try_into().unwrap())),
-    );
+
+    q.try_set_desc_table_address(GuestAddress(DESC_TABLE_ADDR))
+        .unwrap();
+    q.try_set_avail_ring_address(GuestAddress(AVAIL_RING_ADDR))
+        .unwrap();
+    q.try_set_used_ring_address(GuestAddress(USED_RING_ADDR))
+        .unwrap();
     q.set_ready(true);
 
     q
