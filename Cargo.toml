@@ -16,7 +16,7 @@ rust-version = "1.60"
 lto = true
 
 [dependencies]
-anyhow = "1.0.64"
+anyhow = "1.0.65"
 api_client = { path = "api_client" }
 clap = { version = "3.2.21", features = ["wrap_help","cargo"] }
 epoll = "4.3.1"
