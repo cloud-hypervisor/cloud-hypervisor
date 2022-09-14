@@ -167,7 +167,7 @@ dependencies = [
  "libc",
  "log",
  "option_parser",
- "seccompiler",
+ "seccompiler 0.2.0",
  "serde_json",
  "signal-hook",
  "thiserror",
@@ -189,7 +189,7 @@ dependencies = [
  "micro_http",
  "once_cell",
  "qcow",
- "seccompiler",
+ "seccompiler 0.3.0",
  "vhdx",
  "virtio-devices",
  "virtio-queue",
@@ -608,6 +608,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "seccompiler"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f6575e3c2b3a0fe2ef3e53855b6a8dead7c29f783da5e123d378c8c6a89017e"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "semver"
 version = "1.0.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -890,7 +899,7 @@ dependencies = [
  "net_util",
  "pci",
  "rate_limiter",
- "seccompiler",
+ "seccompiler 0.2.0",
  "serde",
  "serde_json",
  "serial_buffer",
@@ -1004,7 +1013,7 @@ dependencies = [
  "option_parser",
  "pci",
  "qcow",
- "seccompiler",
+ "seccompiler 0.2.0",
  "serde",
  "serde_json",
  "serial_buffer",
