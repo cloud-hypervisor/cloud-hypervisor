@@ -16,9 +16,9 @@ rust-version = "1.60"
 lto = true
 
 [dependencies]
-anyhow = "1.0.64"
+anyhow = "1.0.65"
 api_client = { path = "api_client" }
-clap = { version = "3.2.20", features = ["wrap_help","cargo"] }
+clap = { version = "3.2.21", features = ["wrap_help","cargo"] }
 epoll = "4.3.1"
 event_monitor = { path = "event_monitor" }
 hypervisor = { path = "hypervisor" }
@@ -34,7 +34,7 @@ vmm-sys-util = "0.10.0"
 vm-memory = "0.8.0"
 
 [build-dependencies]
-clap = { version = "3.2.20", features = ["cargo"] }
+clap = { version = "3.2.21", features = ["cargo"] }
 
 # List of patched crates
 [patch.crates-io]
