@@ -17,7 +17,7 @@ libfuzzer-sys = "0.4.4"
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "main" }
 once_cell = "1.14.0"
 qcow = { path = "../qcow" }
-seccompiler = "0.2.0"
+seccompiler = "0.3.0"
 vhdx = { path = "../vhdx" }
 virtio-devices = { path = "../virtio-devices" }
 virtio-queue = "0.6.0"
