@@ -17,7 +17,7 @@ tdx = ["arch/tdx", "hypervisor/tdx"]
 
 [dependencies]
 acpi_tables = { path = "../acpi_tables" }
-anyhow = "1.0.64"
+anyhow = "1.0.65"
 arc-swap = "1.5.1"
 arch = { path = "../arch" }
 bitflags = "1.3.2"
@@ -51,7 +51,7 @@ vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", defau
 vfio_user = { path = "../vfio_user" }
 vhdx = { path = "../vhdx" }
 virtio-devices = { path = "../virtio-devices" }
-virtio-queue = "0.5.0"
+virtio-queue = "0.6.0"
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
 vm-memory = { version = "0.8.0", features = ["backend-mmap", "backend-atomic", "backend-bitmap"] }
