@@ -432,14 +432,14 @@ pipeline{
 		regression {
 			script {
 				if (env.BRANCH_NAME == 'main') {
-					slackSend (color: '#ff0000', message: '"main" branch build is now failing')
+					slackSend (color: '#ff0000', message: '"main" branch build is now failing', channel: '#jenkins-ci')
 				}
 			}
 		}
 		fixed {
 			script {
 				if (env.BRANCH_NAME == 'main') {
-					slackSend (color: '#00ff00', message: '"main" branch build is now fixed')
+					slackSend (color: '#00ff00', message: '"main" branch build is now fixed', channel: '#jenkins-ci')
 				}
 			}
 		}
