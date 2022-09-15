@@ -80,3 +80,9 @@ name = "vhdx"
 path = "fuzz_targets/vhdx.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "watchdog"
+path = "fuzz_targets/watchdog.rs"
+test = false
+doc = false
