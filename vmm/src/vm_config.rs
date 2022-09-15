@@ -556,6 +556,11 @@ pub fn default_console() -> ConsoleConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct TpmConfig {
+    pub socket: PathBuf,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct VmConfig {
     #[serde(default)]
     pub cpus: CpusConfig,
@@ -587,4 +592,5 @@ pub struct VmConfig {
     #[cfg(feature = "guest_debug")]
     pub gdb: bool,
     pub platform: Option<PlatformConfig>,
+    pub tpm: Option<TpmConfig>,
 }
