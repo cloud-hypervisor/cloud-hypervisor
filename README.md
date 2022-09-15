@@ -9,7 +9,7 @@
   - [Install prerequisites](#install-prerequisites)
   - [Clone and build](#clone-and-build)
     - [Containerized builds and tests](#containerized-builds-and-tests)
-- [Use Prebuilt Binaries](#use-prebuilt-binaries)
+  - [Use Prebuilt Binaries](#use-prebuilt-binaries)
   - [Run](#run)
     - [Cloud image](#cloud-image)
     - [Custom kernel and disk image](#custom-kernel-and-disk-image)
