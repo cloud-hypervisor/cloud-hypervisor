@@ -24,6 +24,7 @@ use std::result;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
 use std::time::Instant;
+use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_queue::{Queue, QueueT};
@@ -47,6 +48,16 @@ const WATCHDOG_TIMER_INTERVAL: i64 = 15;
 // Number of seconds since last ping to trigger reboot
 const WATCHDOG_TIMEOUT: u64 = WATCHDOG_TIMER_INTERVAL as u64 + 5;
 
+#[derive(Error, Debug)]
+enum Error {
+    #[error("Error programming timer fd: {0}")]
+    TimerfdSetup(io::Error),
+    #[error("Descriptor chain too short")]
+    DescriptorChainTooShort,
+    #[error("Failed adding used index: {0}")]
+    QueueAddUsed(virtio_queue::Error),
+}
+
 struct WatchdogEpollHandler {
     mem: GuestMemoryAtomic<GuestMemoryMmap>,
     queue: Queue,
@@ -62,12 +73,12 @@ struct WatchdogEpollHandler {
 impl WatchdogEpollHandler {
     // The main queue is very simple - the driver "pings" the device by passing it a (write-only)
     // descriptor. In response the device writes a 1 into the descriptor and returns it to the driver
-    fn process_queue(&mut self) -> bool {
+    fn process_queue(&mut self) -> result::Result<bool, Error> {
         let queue = &mut self.queue;
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
-            let desc = desc_chain.next().unwrap();
+            let desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
 
             let mut len = 0;
 
@@ -79,9 +90,8 @@ impl WatchdogEpollHandler {
                         "First ping received. Starting timer (every {} seconds)",
                         WATCHDOG_TIMER_INTERVAL
                     );
-                    if let Err(e) = timerfd_setup(&self.timer, WATCHDOG_TIMER_INTERVAL) {
-                        error!("Error programming timer fd: {:?}", e);
-                    }
+                    timerfd_setup(&self.timer, WATCHDOG_TIMER_INTERVAL)
+                        .map_err(Error::TimerfdSetup)?;
                 }
                 self.last_ping_time.lock().unwrap().replace(Instant::now());
             }
@@ -92,9 +102,11 @@ impl WatchdogEpollHandler {
 
         let mem = self.mem.memory();
         for &(desc_index, len) in &used_desc_heads[..used_count] {
-            queue.add_used(mem.deref(), desc_index, len).unwrap();
+            queue
+                .add_used(mem.deref(), desc_index, len)
+                .map_err(Error::QueueAddUsed)?;
         }
-        used_count > 0
+        Ok(used_count > 0)
     }
 
     fn signal_used_queue(&self) -> result::Result<(), DeviceError> {
@@ -133,7 +145,10 @@ impl EpollHelperHandler for WatchdogEpollHandler {
                     EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
                 })?;
 
-                if self.process_queue() {
+                let needs_notification = self.process_queue().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!("Failed to process queue : {:?}", e))
+                })?;
+                if needs_notification {
                     self.signal_used_queue().map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
                             "Failed to signal used queue: {:?}",
