@@ -571,6 +571,8 @@ components:
           default: false
         platform:
           $ref: "#/components/schemas/PlatformConfig"
+        vtpm_socket:
+          type: string
       description: Virtual machine configuration
 
     CpuAffinity:

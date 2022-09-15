@@ -379,6 +379,15 @@ fn create_app<'a>(
                 .takes_value(true)
                 .possible_values(&["true", "false", "log"])
                 .default_value("true"),
+        )
+        .arg(
+            Arg::new("vtpm-socket")
+                .long("vtpm-socket")
+                .takes_value(true)
+                .help("vTPM Socket from swtpm (UNIX domain socket): path=</path/to/a/file>")
+                .min_values(1)
+                .group("vmm-config"),
+
         );
 
     #[cfg(target_arch = "x86_64")]
@@ -733,6 +742,7 @@ mod unit_tests {
             #[cfg(feature = "gdb")]
             gdb: false,
             platform: None,
+            vtpm_socket: None,
         };
 
         assert_eq!(expected_vm_config, result_vm_config);
@@ -1643,6 +1653,30 @@ mod unit_tests {
                 r#"{
                     "payload": {"kernel": "/path/to/kernel"},
                     "vsock": {"cid": 123, "socket": "/path/to/sock/1", "iommu": false}
+                }"#,
+                true,
+            ),
+        ]
+        .iter()
+        .for_each(|(cli, openapi, equal)| {
+            compare_vm_config_cli_vs_json(cli, openapi, *equal);
+        });
+    }
+
+    #[test]
+    fn test_valid_vm_config_vtpm_socket() {
+        vec![
+            (
+                vec![
+                    "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
+                    "--vtpm-socket",
+                    "/path/to/vtpm/sock",
+                ],
+                r#"{
+                    "payload": {"kernel": "/path/to/kernel"},
+                    "vtpm_socket": {"path": "/path/to/vtpm/sock"}
                 }"#,
                 true,
             ),

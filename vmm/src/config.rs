@@ -373,6 +373,7 @@ pub struct VmParams<'a> {
     #[cfg(feature = "gdb")]
     pub gdb: bool,
     pub platform: Option<&'a str>,
+    pub vtpm_socket: Option<&'a str>,
 }
 
 impl<'a> VmParams<'a> {
@@ -404,6 +405,8 @@ impl<'a> VmParams<'a> {
         let platform = args.value_of("platform");
         #[cfg(feature = "gdb")]
         let gdb = args.is_present("gdb");
+        let vtpm_socket: Option<&str> = args.value_of("vtpm-socket");
+
         VmParams {
             cpus,
             memory,
@@ -431,6 +434,7 @@ impl<'a> VmParams<'a> {
             #[cfg(feature = "gdb")]
             gdb,
             platform,
+            vtpm_socket
         }
     }
 }
@@ -2247,6 +2251,11 @@ impl RestoreConfig {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct VtpmSockConfig {
+    pub vtpm_sock_path: PathBuf,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct PayloadConfig {
     #[serde(default)]
@@ -2297,6 +2306,7 @@ pub struct VmConfig {
     #[cfg(feature = "gdb")]
     pub gdb: bool,
     pub platform: Option<PlatformConfig>,
+    pub vtpm_socket: Option<VtpmSockConfig>,
 }
 
 impl VmConfig {
@@ -2682,6 +2692,13 @@ impl VmConfig {
             None
         };
 
+        let mut vtpm_socket: Option<VtpmSockConfig> = None;
+        if let Some(vtpm_socket_path) = &vm_params.vtpm_socket {
+            vtpm_socket = Some(VtpmSockConfig{
+                vtpm_sock_path: PathBuf::from(vtpm_socket_path)
+            });
+        }
+
         #[cfg(feature = "gdb")]
         let gdb = vm_params.gdb;
 
@@ -2712,6 +2729,7 @@ impl VmConfig {
             #[cfg(feature = "gdb")]
             gdb,
             platform,
+            vtpm_socket,
         };
         config.validate().map_err(Error::Validation)?;
         Ok(config)
@@ -3322,6 +3340,7 @@ mod tests {
             #[cfg(feature = "gdb")]
             gdb: false,
             platform: None,
+            vtpm_socket: None,
         };
 
         assert!(valid_config.validate().is_ok());

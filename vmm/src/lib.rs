@@ -2052,6 +2052,7 @@ mod unit_tests {
             #[cfg(feature = "gdb")]
             gdb: false,
             platform: None,
+            vtpm_socket: None,
         }))
     }
 
