@@ -2099,6 +2099,7 @@ mod unit_tests {
             #[cfg(feature = "guest_debug")]
             gdb: false,
             platform: None,
+            tpm: None,
         }))
     }
 

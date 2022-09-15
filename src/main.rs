@@ -362,6 +362,14 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
                 .num_args(1)
                 .value_parser(["true", "false", "log"])
                 .default_value("true"),
+        )
+        .arg(
+            Arg::new("tpm")
+                .long("tpm")
+                .num_args(1)
+                .help(config::TpmConfig::SYNTAX)
+                .group("vmm-config"),
+
         );
 
     #[cfg(target_arch = "x86_64")]
@@ -713,6 +721,7 @@ mod unit_tests {
             #[cfg(feature = "guest_debug")]
             gdb: false,
             platform: None,
+            tpm: None,
         };
 
         assert_eq!(expected_vm_config, result_vm_config);
@@ -1627,6 +1636,28 @@ mod unit_tests {
                 true,
             ),
         ]
+        .iter()
+        .for_each(|(cli, openapi, equal)| {
+            compare_vm_config_cli_vs_json(cli, openapi, *equal);
+        });
+    }
+
+    #[test]
+    fn test_valid_vm_config_tpm_socket() {
+        vec![(
+            vec![
+                "cloud-hypervisor",
+                "--kernel",
+                "/path/to/kernel",
+                "--tpm",
+                "socket=/path/to/tpm/sock",
+            ],
+            r#"{
+                    "payload": {"kernel": "/path/to/kernel"},
+                    "tpm": {"socket": "/path/to/tpm/sock"}
+                }"#,
+            true,
+        )]
         .iter()
         .for_each(|(cli, openapi, equal)| {
             compare_vm_config_cli_vs_json(cli, openapi, *equal);

@@ -95,6 +95,10 @@ pub enum Error {
     ParseVdpa(OptionParserError),
     /// Missing path for vDPA device
     ParseVdpaPathMissing,
+    /// Failed parsing TPM device
+    ParseTpm(OptionParserError),
+    /// Missing path for TPM device
+    ParseTpmPathMissing,
 }
 
 #[derive(Debug, PartialEq, Eq, Error)]
@@ -331,6 +335,8 @@ impl fmt::Display for Error {
             ParsePlatform(o) => write!(f, "Error parsing --platform: {}", o),
             ParseVdpa(o) => write!(f, "Error parsing --vdpa: {}", o),
             ParseVdpaPathMissing => write!(f, "Error parsing --vdpa: path missing"),
+            ParseTpm(o) => write!(f, "Error parsing --tpm: {}", o),
+            ParseTpmPathMissing => write!(f, "Error parsing --tpm: path missing"),
         }
     }
 }
@@ -372,6 +378,7 @@ pub struct VmParams<'a> {
     #[cfg(feature = "guest_debug")]
     pub gdb: bool,
     pub platform: Option<&'a str>,
+    pub tpm: Option<&'a str>,
 }
 
 impl<'a> VmParams<'a> {
@@ -423,6 +430,7 @@ impl<'a> VmParams<'a> {
         let platform = args.get_one::<String>("platform").map(|x| x as &str);
         #[cfg(feature = "guest_debug")]
         let gdb = args.contains_id("gdb");
+        let tpm: Option<&str> = args.get_one::<String>("tpm").map(|x| x as &str);
         VmParams {
             cpus,
             memory,
@@ -450,6 +458,7 @@ impl<'a> VmParams<'a> {
             #[cfg(feature = "guest_debug")]
             gdb,
             platform,
+            tpm,
         }
     }
 }
@@ -1751,6 +1760,21 @@ impl RestoreConfig {
     }
 }
 
+impl TpmConfig {
+    pub const SYNTAX: &'static str = "TPM device \
+        \"(UNIX Domain Socket from swtpm) socket=</path/to/a/socket>\"";
+    pub fn parse(tpm: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        parser.add("socket");
+        parser.parse(tpm).map_err(Error::ParseTpm)?;
+        let socket = parser
+            .get("socket")
+            .map(PathBuf::from)
+            .ok_or(Error::ParseTpmPathMissing)?;
+        Ok(TpmConfig { socket })
+    }
+}
+
 impl VmConfig {
     fn validate_identifier(
         id_list: &mut BTreeSet<String>,
@@ -2137,6 +2161,14 @@ impl VmConfig {
             None
         };
 
+        let mut tpm: Option<TpmConfig> = None;
+        if let Some(tc) = vm_params.tpm {
+            let tpm_conf = TpmConfig::parse(tc)?;
+            tpm = Some(TpmConfig {
+                socket: tpm_conf.socket,
+            });
+        }
+
         #[cfg(feature = "guest_debug")]
         let gdb = vm_params.gdb;
 
@@ -2164,6 +2196,7 @@ impl VmConfig {
             #[cfg(feature = "guest_debug")]
             gdb,
             platform,
+            tpm,
         };
         config.validate().map_err(Error::Validation)?;
         Ok(config)
@@ -2689,6 +2722,19 @@ mod tests {
     }
 
     #[test]
+    fn test_tpm_parsing() -> Result<()> {
+        // path is required
+        assert!(TpmConfig::parse("").is_err());
+        assert_eq!(
+            TpmConfig::parse("socket=/var/run/tpm.sock")?,
+            TpmConfig {
+                socket: PathBuf::from("/var/run/tpm.sock"),
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
     fn test_vsock_parsing() -> Result<()> {
         // socket and cid is required
         assert!(VsockConfig::parse("").is_err());
@@ -2771,6 +2817,7 @@ mod tests {
             #[cfg(feature = "guest_debug")]
             gdb: false,
             platform: None,
+            tpm: None,
         };
 
         assert!(valid_config.validate().is_ok());
