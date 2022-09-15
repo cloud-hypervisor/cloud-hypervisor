@@ -20,6 +20,7 @@ use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};
+use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_queue::{Queue, QueueT};
@@ -35,6 +36,14 @@ const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE];
 // New descriptors are pending on the virtio queue.
 const QUEUE_AVAIL_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 
+#[derive(Error, Debug)]
+enum Error {
+    #[error("Descriptor chain too short")]
+    DescriptorChainTooShort,
+    #[error("Failed adding used index: {0}")]
+    QueueAddUsed(virtio_queue::Error),
+}
+
 struct RngEpollHandler {
     mem: GuestMemoryAtomic<GuestMemoryMmap>,
     queue: Queue,
@@ -47,12 +56,12 @@ struct RngEpollHandler {
 }
 
 impl RngEpollHandler {
-    fn process_queue(&mut self) -> bool {
+    fn process_queue(&mut self) -> result::Result<bool, Error> {
         let queue = &mut self.queue;
 
         let mut used_descs = false;
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
-            let desc = desc_chain.next().unwrap();
+            let desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
             let mut len = 0;
 
             // Drivers can only read from the random device.
@@ -70,11 +79,11 @@ impl RngEpollHandler {
 
             queue
                 .add_used(desc_chain.memory(), desc_chain.head_index(), len)
-                .unwrap();
+                .map_err(Error::QueueAddUsed)?;
             used_descs = true;
         }
 
-        used_descs
+        Ok(used_descs)
     }
 
     fn signal_used_queue(&self) -> result::Result<(), DeviceError> {
@@ -111,7 +120,10 @@ impl EpollHelperHandler for RngEpollHandler {
                 self.queue_evt.read().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
                 })?;
-                if self.process_queue() {
+                let needs_notification = self.process_queue().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!("Failed to process queue : {:?}", e))
+                })?;
+                if needs_notification {
                     self.signal_used_queue().map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
                             "Failed to signal used queue: {:?}",
