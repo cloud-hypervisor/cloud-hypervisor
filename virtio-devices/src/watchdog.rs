@@ -56,6 +56,8 @@ enum Error {
     DescriptorChainTooShort,
     #[error("Failed adding used index: {0}")]
     QueueAddUsed(virtio_queue::Error),
+    #[error("Unexpected available descriptor")]
+    UnexpectedAvailDescriptor,
 }
 
 struct WatchdogEpollHandler {
@@ -96,7 +98,9 @@ impl WatchdogEpollHandler {
                 self.last_ping_time.lock().unwrap().replace(Instant::now());
             }
 
-            used_desc_heads[used_count] = (desc_chain.head_index(), len);
+            *used_desc_heads
+                .get_mut(used_count)
+                .ok_or(Error::UnexpectedAvailDescriptor)? = (desc_chain.head_index(), len);
             used_count += 1;
         }
 
