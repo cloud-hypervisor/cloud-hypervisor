@@ -42,9 +42,6 @@ jobs:
       - name: Build (default features + tdx)
         run: cargo rustc --locked --bin cloud-hypervisor --features "tdx" -- -D warnings
 
-      - name: Build (default features + amx)
-        run: cargo rustc --locked --bin cloud-hypervisor --features "amx" -- -D warnings
-
       - name: Build (default features + gdb)
         run: cargo rustc --locked --bin cloud-hypervisor --features "gdb" -- -D warnings
 
