@@ -363,9 +363,6 @@ pub enum DeviceManagerError {
     /// Cannot create virtio-mem device
     CreateVirtioMem(io::Error),
 
-    /// Cannot generate a ResizeSender from the Resize object.
-    CreateResizeSender(virtio_devices::mem::Error),
-
     /// Cannot find a memory range for virtio-mem memory
     VirtioMemRangeAllocation,
 
@@ -2723,9 +2720,9 @@ impl DeviceManager {
         let mut devices = Vec::new();
 
         let mm = self.memory_manager.clone();
-        let mm = mm.lock().unwrap();
-        for (memory_zone_id, memory_zone) in mm.memory_zones().iter() {
-            if let Some(virtio_mem_zone) = memory_zone.virtio_mem_zone() {
+        let mut mm = mm.lock().unwrap();
+        for (memory_zone_id, memory_zone) in mm.memory_zones_mut().iter_mut() {
+            if let Some(virtio_mem_zone) = memory_zone.virtio_mem_zone_mut() {
                 info!("Creating virtio-mem device: id = {}", memory_zone_id);
 
                 let node_id = numa_node_id_from_memory_zone_id(&self.numa_nodes, memory_zone_id)
@@ -2735,10 +2732,6 @@ impl DeviceManager {
                     virtio_devices::Mem::new(
                         memory_zone_id.clone(),
                         virtio_mem_zone.region(),
-                        virtio_mem_zone
-                            .resize_handler()
-                            .new_resize_sender()
-                            .map_err(DeviceManagerError::CreateResizeSender)?,
                         self.seccomp_action.clone(),
                         node_id,
                         virtio_mem_zone.hotplugged_size(),
@@ -2750,6 +2743,11 @@ impl DeviceManager {
                     )
                     .map_err(DeviceManagerError::CreateVirtioMem)?,
                 ));
+
+                // Update the virtio-mem zone so that it has a handle onto the
+                // virtio-mem device, which will be used for triggering a resize
+                // if needed.
+                virtio_mem_zone.set_virtio_device(Arc::clone(&virtio_mem_device));
 
                 self.virtio_mem_devices.push(Arc::clone(&virtio_mem_device));
 

@@ -87,7 +87,7 @@ struct HotPlugState {
 
 pub struct VirtioMemZone {
     region: Arc<GuestRegionMmap>,
-    resize_handler: virtio_devices::Resize,
+    virtio_device: Option<Arc<Mutex<virtio_devices::Mem>>>,
     hotplugged_size: u64,
     hugepages: bool,
     blocks_state: Arc<Mutex<BlocksState>>,
@@ -97,8 +97,8 @@ impl VirtioMemZone {
     pub fn region(&self) -> &Arc<GuestRegionMmap> {
         &self.region
     }
-    pub fn resize_handler(&self) -> &virtio_devices::Resize {
-        &self.resize_handler
+    pub fn set_virtio_device(&mut self, virtio_device: Arc<Mutex<virtio_devices::Mem>>) {
+        self.virtio_device = Some(virtio_device);
     }
     pub fn hotplugged_size(&self) -> u64 {
         self.hotplugged_size
@@ -129,6 +129,9 @@ impl MemoryZone {
     }
     pub fn virtio_mem_zone(&self) -> &Option<VirtioMemZone> {
         &self.virtio_mem_zone
+    }
+    pub fn virtio_mem_zone_mut(&mut self) -> Option<&mut VirtioMemZone> {
+        self.virtio_mem_zone.as_mut()
     }
 }
 
@@ -579,8 +582,7 @@ impl MemoryManager {
                             let region_size = region.len();
                             memory_zone.virtio_mem_zone = Some(VirtioMemZone {
                                 region,
-                                resize_handler: virtio_devices::Resize::new(hotplugged_size)
-                                    .map_err(Error::EventFdFail)?,
+                                virtio_device: None,
                                 hotplugged_size,
                                 hugepages: zone_config.hugepages,
                                 blocks_state: Arc::new(Mutex::new(BlocksState::new(region_size))),
@@ -1002,8 +1004,7 @@ impl MemoryManager {
                             let region_size = region.len();
                             memory_zone.virtio_mem_zone = Some(VirtioMemZone {
                                 region,
-                                resize_handler: virtio_devices::Resize::new(hotplugged_size)
-                                    .map_err(Error::EventFdFail)?,
+                                virtio_device: None,
                                 hotplugged_size,
                                 hugepages: zone.hugepages,
                                 blocks_state: Arc::new(Mutex::new(BlocksState::new(region_size))),
@@ -1628,10 +1629,13 @@ impl MemoryManager {
     pub fn virtio_mem_resize(&mut self, id: &str, size: u64) -> Result<(), Error> {
         if let Some(memory_zone) = self.memory_zones.get_mut(id) {
             if let Some(virtio_mem_zone) = &mut memory_zone.virtio_mem_zone {
-                virtio_mem_zone
-                    .resize_handler()
-                    .work(size)
-                    .map_err(Error::VirtioMemResizeFail)?;
+                if let Some(virtio_mem_device) = virtio_mem_zone.virtio_device.as_ref() {
+                    virtio_mem_device
+                        .lock()
+                        .unwrap()
+                        .resize(size)
+                        .map_err(Error::VirtioMemResizeFail)?;
+                }
 
                 // Keep the hotplugged_size up to date.
                 virtio_mem_zone.hotplugged_size = size;
@@ -1819,6 +1823,10 @@ impl MemoryManager {
 
     pub fn memory_zones(&self) -> &MemoryZones {
         &self.memory_zones
+    }
+
+    pub fn memory_zones_mut(&mut self) -> &mut MemoryZones {
+        &mut self.memory_zones
     }
 
     pub fn memory_range_table(

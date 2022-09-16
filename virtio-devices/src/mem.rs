@@ -22,14 +22,13 @@ use crate::thread_helper::spawn_virtio_thread;
 use crate::{GuestMemoryMmap, GuestRegionMmap};
 use crate::{VirtioInterrupt, VirtioInterruptType};
 use anyhow::anyhow;
-use libc::EFD_NONBLOCK;
 use seccompiler::SeccompAction;
 use std::collections::BTreeMap;
 use std::io;
 use std::mem::size_of;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex};
 use thiserror::Error;
@@ -96,10 +95,8 @@ const VIRTIO_MEM_REQ_UNPLUG_ALL: u16 = 2;
 // request information about the plugged state of memory blocks
 const VIRTIO_MEM_REQ_STATE: u16 = 3;
 
-// Get resize event.
-const RESIZE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 // New descriptors are pending on the virtio queue.
-const QUEUE_AVAIL_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
+const QUEUE_AVAIL_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 
 // Virtio features
 const VIRTIO_MEM_F_ACPI_PXM: u8 = 0;
@@ -328,78 +325,6 @@ impl Request {
     }
 }
 
-pub struct ResizeSender {
-    hotplugged_size: Arc<AtomicU64>,
-    activated: Arc<AtomicBool>,
-    tx: mpsc::Sender<Result<(), Error>>,
-    evt: EventFd,
-}
-
-impl ResizeSender {
-    fn size(&self) -> u64 {
-        self.hotplugged_size.load(Ordering::Acquire)
-    }
-
-    fn send(&self, r: Result<(), Error>) -> Result<(), mpsc::SendError<Result<(), Error>>> {
-        self.tx.send(r)
-    }
-}
-
-impl Clone for ResizeSender {
-    fn clone(&self) -> Self {
-        ResizeSender {
-            hotplugged_size: self.hotplugged_size.clone(),
-            activated: self.activated.clone(),
-            tx: self.tx.clone(),
-            evt: self
-                .evt
-                .try_clone()
-                .expect("Failed cloning EventFd from ResizeSender"),
-        }
-    }
-}
-
-pub struct Resize {
-    hotplugged_size: Arc<AtomicU64>,
-    activated: Arc<AtomicBool>,
-    tx: mpsc::Sender<Result<(), Error>>,
-    rx: mpsc::Receiver<Result<(), Error>>,
-    evt: EventFd,
-}
-
-impl Resize {
-    pub fn new(hotplugged_size: u64) -> io::Result<Self> {
-        let (tx, rx) = mpsc::channel();
-
-        Ok(Resize {
-            hotplugged_size: Arc::new(AtomicU64::new(hotplugged_size)),
-            activated: Arc::new(AtomicBool::default()),
-            tx,
-            rx,
-            evt: EventFd::new(EFD_NONBLOCK)?,
-        })
-    }
-
-    pub fn new_resize_sender(&self) -> Result<ResizeSender, Error> {
-        Ok(ResizeSender {
-            hotplugged_size: self.hotplugged_size.clone(),
-            activated: self.activated.clone(),
-            tx: self.tx.clone(),
-            evt: self.evt.try_clone().map_err(Error::EventFdTryCloneFail)?,
-        })
-    }
-
-    pub fn work(&self, desired_size: u64) -> Result<(), Error> {
-        if !self.activated.load(Ordering::Acquire) {
-            return Err(Error::NotActivatedByGuest);
-        }
-
-        self.hotplugged_size.store(desired_size, Ordering::Release);
-        self.evt.write(1).map_err(Error::EventFdWriteFail)?;
-        self.rx.recv().map_err(Error::MpscRecvFail)?
-    }
-}
-
 #[derive(Clone, Versionize)]
 pub struct BlocksState {
     bitmap: Vec<bool>,
@@ -468,7 +393,6 @@ struct MemEpollHandler {
     host_fd: Option<RawFd>,
     blocks_state: Arc<Mutex<BlocksState>>,
     config: Arc<Mutex<VirtioMemConfig>>,
-    resize: ResizeSender,
     queue: Queue,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     queue_evt: EventFd,
@@ -715,7 +639,6 @@ impl MemEpollHandler {
         paused_sync: Arc<Barrier>,
     ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
-        helper.add_event(self.resize.evt.as_raw_fd(), RESIZE_EVENT)?;
         helper.add_event(self.queue_evt.as_raw_fd(), QUEUE_AVAIL_EVENT)?;
         helper.run(paused, paused_sync, self)?;
 
@@ -731,41 +654,6 @@ impl EpollHelperHandler for MemEpollHandler {
     ) -> result::Result<(), EpollHelperError> {
         let ev_type = event.data as u16;
         match ev_type {
-            RESIZE_EVENT => {
-                self.resize.evt.read().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to get resize event: {:?}", e))
-                })?;
-
-                let mut config = self.config.lock().unwrap();
-                if let Err(e) = config.resize(self.resize.size()) {
-                    self.resize.send(Err(e)).map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!(
-                            "Sending \"resize\" response: {:?}",
-                            e
-                        ))
-                    })?;
-                    return Ok(());
-                }
-
-                self.signal(VirtioInterruptType::Config).map_err(|e| {
-                    let e = Error::ResizeTriggerFail(e);
-                    let ret_err = anyhow!("{:?}", e);
-                    self.resize
-                        .send(Err(e))
-                        .map_err(|e| {
-                            EpollHelperError::HandleEvent(anyhow!(
-                                "Sending \"resize\" response: {:?}",
-                                e
-                            ))
-                        })
-                        .ok();
-                    EpollHelperError::HandleEvent(ret_err)
-                })?;
-
-                self.resize.send(Ok(())).map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Sending \"resize\" response: {:?}", e))
-                })?;
-            }
             QUEUE_AVAIL_EVENT => {
                 self.queue_evt.read().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
@@ -810,7 +698,6 @@ impl VersionMapped for MemState {}
 pub struct Mem {
     common: VirtioCommon,
     id: String,
-    resize: ResizeSender,
     host_addr: u64,
     host_fd: Option<RawFd>,
     config: Arc<Mutex<VirtioMemConfig>>,
@@ -819,6 +706,7 @@ pub struct Mem {
     dma_mapping_handlers: Arc<Mutex<BTreeMap<VirtioMemMappingSource, Arc<dyn ExternalDmaMapping>>>>,
     blocks_state: Arc<Mutex<BlocksState>>,
     exit_evt: EventFd,
+    interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
 }
 
 impl Mem {
@@ -827,7 +715,6 @@ impl Mem {
     pub fn new(
         id: String,
         region: &Arc<GuestRegionMmap>,
-        resize: ResizeSender,
         seccomp_action: SeccompAction,
         numa_node_id: Option<u16>,
         initial_size: u64,
@@ -899,7 +786,6 @@ impl Mem {
                 ..Default::default()
             },
             id,
-            resize,
             host_addr: region.as_ptr() as u64,
             host_fd,
             config: Arc::new(Mutex::new(config)),
@@ -908,7 +794,25 @@ impl Mem {
             dma_mapping_handlers: Arc::new(Mutex::new(BTreeMap::new())),
             blocks_state,
             exit_evt,
+            interrupt_cb: None,
         })
+    }
+
+    pub fn resize(&mut self, size: u64) -> result::Result<(), Error> {
+        let mut config = self.config.lock().unwrap();
+        config.resize(size).map_err(|e| {
+            Error::ResizeError(anyhow!("Failed to update virtio configuration: {:?}", e))
+        })?;
+
+        if let Some(interrupt_cb) = self.interrupt_cb.as_ref() {
+            interrupt_cb
+                .trigger(VirtioInterruptType::Config)
+                .map_err(|e| {
+                    Error::ResizeError(anyhow!("Failed to signal the guest about resize: {:?}", e))
+                })
+        } else {
+            Ok(())
+        }
     }
 
     pub fn add_dma_mapping_handler(
@@ -1022,13 +926,14 @@ impl VirtioDevice for Mem {
 
         let (_, queue, queue_evt) = queues.remove(0);
 
+        self.interrupt_cb = Some(interrupt_cb.clone());
+
         let mut handler = MemEpollHandler {
             mem,
             host_addr: self.host_addr,
             host_fd: self.host_fd,
             blocks_state: Arc::clone(&self.blocks_state),
             config: self.config.clone(),
-            resize: self.resize.clone(),
             queue,
             interrupt_cb,
             queue_evt,
@@ -1067,14 +972,11 @@ impl VirtioDevice for Mem {
         )?;
         self.common.epoll_threads = Some(epoll_threads);
 
-        self.resize.activated.store(true, Ordering::Release);
-
         event!("virtio-device", "activated", "id", &self.id);
         Ok(())
     }
 
     fn reset(&mut self) -> Option<Arc<dyn VirtioInterrupt>> {
-        self.resize.activated.store(false, Ordering::Release);
         let result = self.common.reset();
         event!("virtio-device", "reset", "id", &self.id);
         result
