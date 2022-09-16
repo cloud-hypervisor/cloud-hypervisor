@@ -286,6 +286,7 @@ pub fn performance_boot_time(control: &PerformanceTestControl) -> f64 {
             .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args(&["--console", "off"])
+            .args(&["-v"])
             .default_disks();
 
         measure_boot_time(c, control.test_timeout).unwrap()
@@ -313,6 +314,7 @@ pub fn performance_boot_time_pmem(control: &PerformanceTestControl) -> f64 {
             .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(&["--cmdline", "root=/dev/pmem0p1 console=ttyS0 quiet rw"])
             .args(&["--console", "off"])
+            .args(&["-v"])
             .args(&[
                 "--pmem",
                 format!(
