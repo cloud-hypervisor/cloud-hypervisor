@@ -49,9 +49,6 @@ jobs:
       - name: Clippy (default features)
         run: cargo clippy --locked --all --all-targets --tests -- -D warnings
 
-      - name: Clippy (default features + amx)
-        run: cargo clippy --locked --all --all-targets --tests --features "amx" -- -D warnings
-
       - name: Clippy (default features + gdb)
         run: cargo clippy --locked --all --all-targets --tests --features "gdb" -- -D warnings
 

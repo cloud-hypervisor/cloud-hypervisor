@@ -56,7 +56,6 @@ wait-timeout = "0.2.0"
 default = ["common", "kvm"]
 # Common features for all hypervisors
 common = ["fwdebug"]
-amx = ["vmm/amx"]
 cmos = ["vmm/cmos"]
 fwdebug = ["vmm/fwdebug"]
 gdb = ["vmm/gdb"]

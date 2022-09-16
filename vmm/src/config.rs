@@ -472,7 +472,7 @@ pub struct CpuAffinity {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CpuFeatures {
-    #[cfg(all(feature = "amx", target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     #[serde(default)]
     pub amx: bool,
 }
@@ -593,7 +593,7 @@ impl CpusConfig {
         let mut features = CpuFeatures::default();
         for s in features_list.0 {
             match <std::string::String as AsRef<str>>::as_ref(&s) {
-                #[cfg(all(feature = "amx", target_arch = "x86_64"))]
+                #[cfg(target_arch = "x86_64")]
                 "amx" => {
                     features.amx = true;
                     Ok(())

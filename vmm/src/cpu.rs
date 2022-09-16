@@ -161,7 +161,7 @@ pub enum Error {
     #[error("Error translating virtual address: {0}")]
     TranslateVirtualAddress(#[source] anyhow::Error),
 
-    #[cfg(all(feature = "amx", target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     #[error("Error setting up AMX: {0}")]
     AmxEnable(#[source] anyhow::Error),
 }
@@ -636,7 +636,7 @@ impl CpuManager {
             )
             .map_err(Error::CommonCpuId)?
         };
-        #[cfg(all(feature = "amx", target_arch = "x86_64"))]
+        #[cfg(target_arch = "x86_64")]
         if config.features.amx {
             const ARCH_GET_XCOMP_GUEST_PERM: usize = 0x1024;
             const ARCH_REQ_XCOMP_GUEST_PERM: usize = 0x1025;
