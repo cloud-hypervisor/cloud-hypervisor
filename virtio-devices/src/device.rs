@@ -172,28 +172,6 @@ pub trait VirtioDevice: Send {
         }
     }
 
-    /// Helper to allow common implementation of write_config
-    fn write_config_helper(&self, config: &mut [u8], offset: u64, data: &[u8]) {
-        let config_len = config.len() as u64;
-        let data_len = data.len() as u64;
-        if offset + data_len > config_len {
-            error!(
-                    "Out-of-bound access to configuration: config_len = {} offset = {:x} length = {} for {}",
-                    config_len,
-                    offset,
-                    data_len,
-                    self.device_type()
-                );
-            return;
-        }
-
-        if let Some(end) = offset.checked_add(config.len() as u64) {
-            let mut offset_config =
-                &mut config[offset as usize..std::cmp::min(end, config_len) as usize];
-            offset_config.write_all(data).unwrap();
-        }
-    }
-
     /// Set the access platform trait to let the device perform address
     /// translations if needed.
     fn set_access_platform(&mut self, _access_platform: Arc<dyn AccessPlatform>) {}
