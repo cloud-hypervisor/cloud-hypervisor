@@ -473,6 +473,7 @@ pub struct CpuAffinity {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CpuFeatures {
     #[cfg(all(feature = "amx", target_arch = "x86_64"))]
+    #[serde(default)]
     pub amx: bool,
 }
 
