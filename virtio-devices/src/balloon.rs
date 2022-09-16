@@ -13,22 +13,18 @@
 // limitations under the License.
 
 use crate::{
-    seccomp_filters::Thread, thread_helper::spawn_virtio_thread, ActivateError, ActivateResult,
-    EpollHelper, EpollHelperError, EpollHelperHandler, GuestMemoryMmap, VirtioCommon, VirtioDevice,
+    seccomp_filters::Thread, thread_helper::spawn_virtio_thread, ActivateResult, EpollHelper,
+    EpollHelperError, EpollHelperHandler, GuestMemoryMmap, VirtioCommon, VirtioDevice,
     VirtioDeviceType, VirtioInterrupt, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
     VIRTIO_F_VERSION_1,
 };
 use anyhow::anyhow;
-use libc::EFD_NONBLOCK;
 use seccompiler::SeccompAction;
-use std::io;
+use std::io::{self, Write};
 use std::mem::size_of;
 use std::os::unix::io::AsRawFd;
 use std::result;
-use std::sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering},
-    mpsc, Arc, Barrier, Mutex,
-};
+use std::sync::{atomic::AtomicBool, Arc, Barrier};
 use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
@@ -46,14 +42,12 @@ const QUEUE_SIZE: u16 = 128;
 const REPORTING_QUEUE_SIZE: u16 = 32;
 const MIN_NUM_QUEUES: usize = 2;
 
-// Resize event.
-const RESIZE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 // Inflate virtio queue event.
-const INFLATE_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
+const INFLATE_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 // Deflate virtio queue event.
-const DEFLATE_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
+const DEFLATE_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
 // Reporting virtio queue event.
-const REPORTING_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 4;
+const REPORTING_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
 
 // Size of a PFN in the balloon interface.
 const VIRTIO_BALLOON_PFN_SHIFT: u64 = 12;
@@ -78,12 +72,6 @@ pub enum Error {
     MadviseFail(std::io::Error),
     #[error("Failed to EventFd write.: {0}")]
     EventFdWriteFail(std::io::Error),
-    #[error("Failed to EventFd try_clone.: {0}")]
-    EventFdTryCloneFail(std::io::Error),
-    #[error("Failed to MpscRecv.: {0}")]
-    MpscRecvFail(mpsc::RecvError),
-    #[error("Resize invalid argument: {0}")]
-    ResizeInval(String),
     #[error("Invalid queue index: {0}")]
     InvalidQueueIndex(usize),
     #[error("Fail tp signal: {0}")]
@@ -112,60 +100,8 @@ const CONFIG_ACTUAL_SIZE: usize = 4;
 // SAFETY: it only has data and has no implicit padding.
 unsafe impl ByteValued for VirtioBalloonConfig {}
 
-struct VirtioBalloonResizeReceiver {
-    size: Arc<AtomicU64>,
-    tx: mpsc::Sender<Result<(), Error>>,
-    evt: EventFd,
-}
-
-impl VirtioBalloonResizeReceiver {
-    fn get_size(&self) -> u64 {
-        self.size.load(Ordering::Acquire)
-    }
-
-    fn send(&self, r: Result<(), Error>) -> Result<(), mpsc::SendError<Result<(), Error>>> {
-        self.tx.send(r)
-    }
-}
-
-struct VirtioBalloonResize {
-    size: Arc<AtomicU64>,
-    tx: mpsc::Sender<Result<(), Error>>,
-    rx: mpsc::Receiver<Result<(), Error>>,
-    evt: EventFd,
-}
-
-impl VirtioBalloonResize {
-    pub fn new(size: u64) -> io::Result<Self> {
-        let (tx, rx) = mpsc::channel();
-
-        Ok(Self {
-            size: Arc::new(AtomicU64::new(size)),
-            tx,
-            rx,
-            evt: EventFd::new(EFD_NONBLOCK)?,
-        })
-    }
-
-    pub fn get_receiver(&self) -> Result<VirtioBalloonResizeReceiver, Error> {
-        Ok(VirtioBalloonResizeReceiver {
-            size: self.size.clone(),
-            tx: self.tx.clone(),
-            evt: self.evt.try_clone().map_err(Error::EventFdTryCloneFail)?,
-        })
-    }
-
-    pub fn work(&self, size: u64) -> Result<(), Error> {
-        self.size.store(size, Ordering::Release);
-        self.evt.write(1).map_err(Error::EventFdWriteFail)?;
-        self.rx.recv().map_err(Error::MpscRecvFail)?
-    }
-}
-
 struct BalloonEpollHandler {
     mem: GuestMemoryAtomic<GuestMemoryMmap>,
-    config: Arc<Mutex<VirtioBalloonConfig>>,
-    resize_receiver: VirtioBalloonResizeReceiver,
     queues: Vec<Queue>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     inflate_queue_evt: EventFd,
@@ -318,7 +254,6 @@ impl BalloonEpollHandler {
         paused_sync: Arc<Barrier>,
     ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
-        helper.add_event(self.resize_receiver.evt.as_raw_fd(), RESIZE_EVENT)?;
         helper.add_event(self.inflate_queue_evt.as_raw_fd(), INFLATE_QUEUE_EVENT)?;
         helper.add_event(self.deflate_queue_evt.as_raw_fd(), DEFLATE_QUEUE_EVENT)?;
         if let Some(reporting_queue_evt) = self.reporting_queue_evt.as_ref() {
@@ -338,32 +273,6 @@ impl EpollHelperHandler for BalloonEpollHandler {
     ) -> result::Result<(), EpollHelperError> {
         let ev_type = event.data as u16;
         match ev_type {
-            RESIZE_EVENT => {
-                self.resize_receiver.evt.read().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to get resize event: {:?}", e))
-                })?;
-
-                let mut config = self.config.lock().unwrap();
-                config.num_pages =
-                    (self.resize_receiver.get_size() >> VIRTIO_BALLOON_PFN_SHIFT) as u32;
-                self.signal(VirtioInterruptType::Config).map_err(|e| {
-                    let ret_err = anyhow!("Handle resize event get error: {:?}", e);
-                    self.resize_receiver
-                        .send(Err(e))
-                        .map_err(|e| {
-                            error!("Sending \"resize\" generated error: {:?}", e);
-                        })
-                        .ok();
-                    EpollHelperError::HandleEvent(ret_err)
-                })?;
-
-                self.resize_receiver.send(Ok(())).map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!(
-                        "Sending \"resize\" generated error: {:?}",
-                        e
-                    ))
-                })?;
-            }
             INFLATE_QUEUE_EVENT => {
                 self.inflate_queue_evt.read().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!(
@@ -436,10 +345,10 @@ impl VersionMapped for BalloonState {}
 pub struct Balloon {
     common: VirtioCommon,
     id: String,
-    resize: VirtioBalloonResize,
-    config: Arc<Mutex<VirtioBalloonConfig>>,
+    config: VirtioBalloonConfig,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
+    interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
 }
 
 impl Balloon {
@@ -477,34 +386,42 @@ impl Balloon {
                 ..Default::default()
             },
             id,
-            resize: VirtioBalloonResize::new(size)?,
-            config: Arc::new(Mutex::new(config)),
+            config,
             seccomp_action,
             exit_evt,
+            interrupt_cb: None,
         })
     }
 
-    pub fn resize(&self, size: u64) -> Result<(), Error> {
-        self.resize.work(size)
+    pub fn resize(&mut self, size: u64) -> Result<(), Error> {
+        self.config.num_pages = (size >> VIRTIO_BALLOON_PFN_SHIFT) as u32;
+
+        if let Some(interrupt_cb) = &self.interrupt_cb {
+            interrupt_cb
+                .trigger(VirtioInterruptType::Config)
+                .map_err(Error::FailedSignal)
+        } else {
+            Ok(())
+        }
     }
 
     // Get the actual size of the virtio-balloon.
     pub fn get_actual(&self) -> u64 {
-        (self.config.lock().unwrap().actual as u64) << VIRTIO_BALLOON_PFN_SHIFT
+        (self.config.actual as u64) << VIRTIO_BALLOON_PFN_SHIFT
     }
 
     fn state(&self) -> BalloonState {
         BalloonState {
             avail_features: self.common.avail_features,
             acked_features: self.common.acked_features,
-            config: *(self.config.lock().unwrap()),
+            config: self.config,
         }
     }
 
     fn set_state(&mut self, state: &BalloonState) {
         self.common.avail_features = state.avail_features;
         self.common.acked_features = state.acked_features;
-        *(self.config.lock().unwrap()) = state.config;
+        self.config = state.config;
     }
 }
 
@@ -535,7 +452,7 @@ impl VirtioDevice for Balloon {
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
-        self.read_config_from_slice(self.config.lock().unwrap().as_slice(), offset, data);
+        self.read_config_from_slice(self.config.as_slice(), offset, data);
     }
 
     fn write_config(&mut self, offset: u64, data: &[u8]) {
@@ -549,7 +466,25 @@ impl VirtioDevice for Balloon {
             return;
         }
 
-        self.write_config_helper(self.config.lock().unwrap().as_mut_slice(), offset, data);
+        let config = self.config.as_mut_slice();
+        let config_len = config.len() as u64;
+        let data_len = data.len() as u64;
+        if offset + data_len > config_len {
+            error!(
+                    "Out-of-bound access to configuration: config_len = {} offset = {:x} length = {} for {}",
+                    config_len,
+                    offset,
+                    data_len,
+                    self.device_type()
+                );
+            return;
+        }
+
+        if let Some(end) = offset.checked_add(config.len() as u64) {
+            let mut offset_config =
+                &mut config[offset as usize..std::cmp::min(end, config_len) as usize];
+            offset_config.write_all(data).unwrap();
+        }
     }
 
     fn activate(
@@ -577,13 +512,10 @@ impl VirtioDevice for Balloon {
                 None
             };
 
+        self.interrupt_cb = Some(interrupt_cb.clone());
+
         let mut handler = BalloonEpollHandler {
             mem,
-            config: self.config.clone(),
-            resize_receiver: self.resize.get_receiver().map_err(|e| {
-                error!("failed to clone resize EventFd: {:?}", e);
-                ActivateError::BadActivate
-            })?,
             queues: virtqueues,
             interrupt_cb,
             inflate_queue_evt,
