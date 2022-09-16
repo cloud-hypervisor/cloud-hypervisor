@@ -69,7 +69,7 @@ impl RawFile {
 
     fn round_up(&self, offset: u64) -> u64 {
         let align: u64 = self.alignment.try_into().unwrap();
-        ((offset / (align + 1)) + 1) * align
+        ((offset + align - 1) / align) * align
     }
 
     fn round_down(&self, offset: u64) -> u64 {
