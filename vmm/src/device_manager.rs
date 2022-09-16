@@ -74,6 +74,7 @@ use std::path::PathBuf;
 use std::result;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
+use tracer::trace_scoped;
 use vfio_ioctls::{VfioContainer, VfioDevice, VfioDeviceFd};
 use virtio_devices::transport::VirtioTransport;
 use virtio_devices::transport::{VirtioPciDevice, VirtioPciDeviceActivator};
@@ -958,6 +959,8 @@ impl DeviceManager {
         boot_id_list: BTreeSet<String>,
         timestamp: Instant,
     ) -> DeviceManagerResult<Arc<Mutex<Self>>> {
+        trace_scoped!("DeviceManager::new");
+
         let device_tree = Arc::new(Mutex::new(DeviceTree::new()));
 
         let num_pci_segments =
@@ -1120,6 +1123,8 @@ impl DeviceManager {
         console_pty: Option<PtyPair>,
         console_resize_pipe: Option<File>,
     ) -> DeviceManagerResult<()> {
+        trace_scoped!("create_devices");
+
         let mut virtio_devices: Vec<MetaVirtioDevice> = Vec::new();
 
         let interrupt_controller = self.add_interrupt_controller()?;

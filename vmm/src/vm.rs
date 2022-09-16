@@ -86,6 +86,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 use std::{result, str, thread};
 use thiserror::Error;
+use tracer::trace_scoped;
 use vm_device::Bus;
 #[cfg(target_arch = "x86_64")]
 use vm_device::BusDevice;
@@ -500,6 +501,8 @@ impl Vm {
         restoring: bool,
         timestamp: Instant,
     ) -> Result<Self> {
+        trace_scoped!("Vm::new_from_memory_manager");
+
         let boot_id_list = config
             .lock()
             .unwrap()
@@ -724,6 +727,8 @@ impl Vm {
         console_pty: Option<PtyPair>,
         console_resize_pipe: Option<File>,
     ) -> Result<Self> {
+        trace_scoped!("Vm::new");
+
         let timestamp = Instant::now();
 
         #[cfg(feature = "tdx")]
@@ -1097,6 +1102,7 @@ impl Vm {
         payload: &PayloadConfig,
         memory_manager: Arc<Mutex<MemoryManager>>,
     ) -> Result<EntryPoint> {
+        trace_scoped!("load_payload");
         match (
             &payload.firmware,
             &payload.kernel,
@@ -1163,6 +1169,7 @@ impl Vm {
 
     #[cfg(target_arch = "x86_64")]
     fn configure_system(&mut self, rsdp_addr: GuestAddress) -> Result<()> {
+        trace_scoped!("configure_system");
         info!("Configuring system");
         let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
 
@@ -2155,6 +2162,8 @@ impl Vm {
     }
 
     fn entry_point(&mut self) -> Result<Option<EntryPoint>> {
+        trace_scoped!("entry_point");
+
         self.load_payload_handle
             .take()
             .map(|handle| handle.join().map_err(Error::KernelLoadThreadJoin)?)
@@ -2162,6 +2171,7 @@ impl Vm {
     }
 
     pub fn boot(&mut self) -> Result<()> {
+        trace_scoped!("Vm::boot");
         info!("Booting VM");
         event!("vm", "booting");
         let current_state = self.get_state()?;

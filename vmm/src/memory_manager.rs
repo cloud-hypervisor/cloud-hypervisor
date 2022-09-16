@@ -36,6 +36,7 @@ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
 use std::result;
 use std::sync::{Arc, Barrier, Mutex};
+use tracer::trace_scoped;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_devices::BlocksState;
@@ -876,6 +877,8 @@ impl MemoryManager {
         existing_memory_files: Option<HashMap<u32, File>>,
         #[cfg(target_arch = "x86_64")] sgx_epc_config: Option<Vec<SgxEpcConfig>>,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
+        trace_scoped!("MemoryManager::new");
+
         let user_provided_zones = config.size == 0;
 
         let mmio_address_space_size = mmio_address_space_size(phys_bits);
