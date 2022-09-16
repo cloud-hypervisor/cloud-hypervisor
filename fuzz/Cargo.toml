@@ -40,6 +40,12 @@ versionize_derive = { git = "https://github.com/cloud-hypervisor/versionize_deri
 members = ["."]
 
 [[bin]]
+name = "balloon"
+path = "fuzz_targets/balloon.rs"
+test = false
+doc = false
+
+[[bin]]
 name = "block"
 path = "fuzz_targets/block.rs"
 test = false
