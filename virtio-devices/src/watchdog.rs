@@ -18,7 +18,6 @@ use anyhow::anyhow;
 use seccompiler::SeccompAction;
 use std::fs::File;
 use std::io::{self, Read};
-use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::result;
 use std::sync::atomic::AtomicBool;
@@ -75,8 +74,7 @@ impl WatchdogEpollHandler {
     // descriptor. In response the device writes a 1 into the descriptor and returns it to the driver
     fn process_queue(&mut self) -> result::Result<bool, Error> {
         let queue = &mut self.queue;
-        let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
-        let mut used_count = 0;
+        let mut used_descs = false;
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
             let desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
 
@@ -96,17 +94,13 @@ impl WatchdogEpollHandler {
                 self.last_ping_time.lock().unwrap().replace(Instant::now());
             }
 
-            used_desc_heads[used_count] = (desc_chain.head_index(), len);
-            used_count += 1;
+            queue
+                .add_used(desc_chain.memory(), desc_chain.head_index(), len)
+                .map_err(Error::QueueAddUsed)?;
+            used_descs = true;
         }
 
-        let mem = self.mem.memory();
-        for &(desc_index, len) in &used_desc_heads[..used_count] {
-            queue
-                .add_used(mem.deref(), desc_index, len)
-                .map_err(Error::QueueAddUsed)?;
-        }
-        Ok(used_count > 0)
+        Ok(used_descs)
     }
 
     fn signal_used_queue(&self) -> result::Result<(), DeviceError> {
