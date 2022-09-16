@@ -306,25 +306,25 @@ impl Pl011 {
         let elapsed = self.timestamp.elapsed();
 
         match self.debug {
-            0x00..=0x1f => info!(
+            0x00..=0x1f => warn!(
                 "[Debug I/O port: Firmware code: 0x{:x}] {}.{:>06} seconds",
                 self.debug,
                 elapsed.as_secs(),
                 elapsed.as_micros()
             ),
-            0x20..=0x3f => info!(
+            0x20..=0x3f => warn!(
                 "[Debug I/O port: Bootloader code: 0x{:x}] {}.{:>06} seconds",
                 self.debug,
                 elapsed.as_secs(),
                 elapsed.as_micros()
             ),
-            0x40..=0x5f => info!(
+            0x40..=0x5f => warn!(
                 "[Debug I/O port: Kernel code: 0x{:x}] {}.{:>06} seconds",
                 self.debug,
                 elapsed.as_secs(),
                 elapsed.as_micros()
             ),
-            0x60..=0x7f => info!(
+            0x60..=0x7f => warn!(
                 "[Debug I/O port: Userspace code: 0x{:x}] {}.{:>06} seconds",
                 self.debug,
                 elapsed.as_secs(),
