@@ -69,6 +69,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, io, result, thread};
 use thiserror::Error;
+use tracer::trace_scoped;
 use vm_device::BusDevice;
 #[cfg(feature = "guest_debug")]
 use vm_memory::ByteValued;
@@ -1127,6 +1128,8 @@ impl CpuManager {
     }
 
     pub fn create_boot_vcpus(&mut self, entry_point: Option<EntryPoint>) -> Result<()> {
+        trace_scoped!("create_boot_vcpus");
+
         self.create_vcpus(self.boot_vcpus(), entry_point)
     }
 

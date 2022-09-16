@@ -46,6 +46,7 @@ use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};
 use std::{result, thread};
 use thiserror::Error;
+use tracer::trace_scoped;
 use vm_memory::bitmap::AtomicBitmap;
 use vm_migration::{protocol::*, Migratable};
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -524,50 +525,56 @@ impl Vmm {
     }
 
     fn vm_boot(&mut self) -> result::Result<(), VmError> {
-        // If we don't have a config, we can not boot a VM.
-        if self.vm_config.is_none() {
-            return Err(VmError::VmMissingConfig);
-        };
+        tracer::start();
+        let r = {
+            trace_scoped!("vm_boot");
+            // If we don't have a config, we can not boot a VM.
+            if self.vm_config.is_none() {
+                return Err(VmError::VmMissingConfig);
+            };
 
-        // Create a new VM if we don't have one yet.
-        if self.vm.is_none() {
-            let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
-            let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
-            #[cfg(feature = "gdb")]
-            let vm_debug_evt = self
-                .vm_debug_evt
-                .try_clone()
-                .map_err(VmError::EventFdClone)?;
-            let activate_evt = self
-                .activate_evt
-                .try_clone()
-                .map_err(VmError::EventFdClone)?;
+            // Create a new VM if we don't have one yet.
+            if self.vm.is_none() {
+                let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
+                let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
+                #[cfg(feature = "gdb")]
+                let vm_debug_evt = self
+                    .vm_debug_evt
+                    .try_clone()
+                    .map_err(VmError::EventFdClone)?;
+                let activate_evt = self
+                    .activate_evt
+                    .try_clone()
+                    .map_err(VmError::EventFdClone)?;
 
-            if let Some(ref vm_config) = self.vm_config {
-                let vm = Vm::new(
-                    Arc::clone(vm_config),
-                    exit_evt,
-                    reset_evt,
-                    #[cfg(feature = "gdb")]
-                    vm_debug_evt,
-                    &self.seccomp_action,
-                    self.hypervisor.clone(),
-                    activate_evt,
-                    None,
-                    None,
-                    None,
-                )?;
+                if let Some(ref vm_config) = self.vm_config {
+                    let vm = Vm::new(
+                        Arc::clone(vm_config),
+                        exit_evt,
+                        reset_evt,
+                        #[cfg(feature = "gdb")]
+                        vm_debug_evt,
+                        &self.seccomp_action,
+                        self.hypervisor.clone(),
+                        activate_evt,
+                        None,
+                        None,
+                        None,
+                    )?;
 
-                self.vm = Some(vm);
+                    self.vm = Some(vm);
+                }
             }
-        }
 
-        // Now we can boot the VM.
-        if let Some(ref mut vm) = self.vm {
-            vm.boot()
-        } else {
-            Err(VmError::VmNotCreated)
-        }
+            // Now we can boot the VM.
+            if let Some(ref mut vm) = self.vm {
+                vm.boot()
+            } else {
+                Err(VmError::VmNotCreated)
+            }
+        };
+        tracer::end();
+        r
     }
 
     fn vm_pause(&mut self) -> result::Result<(), VmError> {
