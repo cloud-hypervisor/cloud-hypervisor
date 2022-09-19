@@ -70,6 +70,12 @@ test = false
 doc = false
 
 [[bin]]
+name = "rng"
+path = "fuzz_targets/rng.rs"
+test = false
+doc = false
+
+[[bin]]
 name = "serial"
 path = "fuzz_targets/serial.rs"
 test = false
