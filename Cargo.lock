@@ -273,9 +273,9 @@ dependencies = [
 
 [[package]]
 name = "env_logger"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b2cf0344971ee6c64c31be0d530793fba457d322dfec2810c453d0ef228f9c3"
+checksum = "c90bf5f19754d10198ccb95b70664fc925bd1fc090a0fd9a6ebc54acc8cd6272"
 dependencies = [
  "atty",
  "humantime",
@@ -602,7 +602,7 @@ dependencies = [
 [[package]]
 name = "mshv-bindings"
 version = "0.1.1"
-source = "git+https://github.com/rust-vmm/mshv?branch=main#0106c24a2632a591a87c7bdb2c96f4f2bcc2d9eb"
+source = "git+https://github.com/rust-vmm/mshv?branch=main#bf8543087576d48ad2d752c9c583e4d5c9deec71"
 dependencies = [
  "libc",
  "serde",
@@ -614,7 +614,7 @@ dependencies = [
 [[package]]
 name = "mshv-ioctls"
 version = "0.1.1"
-source = "git+https://github.com/rust-vmm/mshv?branch=main#0106c24a2632a591a87c7bdb2c96f4f2bcc2d9eb"
+source = "git+https://github.com/rust-vmm/mshv?branch=main#bf8543087576d48ad2d752c9c583e4d5c9deec71"
 dependencies = [
  "libc",
  "mshv-bindings",
