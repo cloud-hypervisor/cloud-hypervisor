@@ -6,7 +6,6 @@ edition = "2021"
 
 [features]
 default = []
-cmos = ["devices/cmos"]
 fwdebug = ["devices/fwdebug"]
 gdb = ["kvm", "gdbstub", "gdbstub_arch"]
 guest_debug = ["kvm"]
