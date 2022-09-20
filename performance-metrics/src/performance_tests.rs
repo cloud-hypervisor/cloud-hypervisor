@@ -92,12 +92,12 @@ pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
     );
 
     let mut child = GuestCommand::new(&guest)
-        .args(&["--cpus", &format!("boot={}", num_queues)])
-        .args(&["--memory", "size=4G"])
-        .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-        .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        .args(["--cpus", &format!("boot={}", num_queues)])
+        .args(["--memory", "size=4G"])
+        .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
         .default_disks()
-        .args(&["--net", net_params.as_str()])
+        .args(["--net", net_params.as_str()])
         .capture_output()
         .verbosity(VerbosityLevel::Warn)
         .set_print_cmd(false)
@@ -133,12 +133,12 @@ pub fn performance_net_latency(control: &PerformanceTestControl) -> f64 {
     );
 
     let mut child = GuestCommand::new(&guest)
-        .args(&["--cpus", &format!("boot={}", num_queues)])
-        .args(&["--memory", "size=4G"])
-        .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-        .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        .args(["--cpus", &format!("boot={}", num_queues)])
+        .args(["--memory", "size=4G"])
+        .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
         .default_disks()
-        .args(&["--net", net_params.as_str()])
+        .args(["--net", net_params.as_str()])
         .capture_output()
         .verbosity(VerbosityLevel::Warn)
         .set_print_cmd(false)
@@ -278,14 +278,14 @@ pub fn performance_boot_time(control: &PerformanceTestControl) -> f64 {
         let mut cmd = GuestCommand::new(&guest);
 
         let c = cmd
-            .args(&[
+            .args([
                 "--cpus",
                 &format!("boot={}", control.num_boot_vcpus.unwrap_or(1)),
             ])
-            .args(&["--memory", "size=1G"])
-            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args(&["--console", "off"])
+            .args(["--memory", "size=1G"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--console", "off"])
             .default_disks();
 
         measure_boot_time(c, control.test_timeout).unwrap()
@@ -305,15 +305,15 @@ pub fn performance_boot_time_pmem(control: &PerformanceTestControl) -> f64 {
         let guest = performance_test_new_guest(Box::new(focal));
         let mut cmd = GuestCommand::new(&guest);
         let c = cmd
-            .args(&[
+            .args([
                 "--cpus",
                 &format!("boot={}", control.num_boot_vcpus.unwrap_or(1)),
             ])
-            .args(&["--memory", "size=1G,hugepages=on"])
-            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(&["--cmdline", "root=/dev/pmem0p1 console=ttyS0 quiet rw"])
-            .args(&["--console", "off"])
-            .args(&[
+            .args(["--memory", "size=1G,hugepages=on"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", "root=/dev/pmem0p1 console=ttyS0 quiet rw"])
+            .args(["--console", "off"])
+            .args([
                 "--pmem",
                 format!(
                     "file={}",
@@ -349,11 +349,11 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
         .to_string();
 
     let mut child = GuestCommand::new(&guest)
-        .args(&["--cpus", &format!("boot={}", num_queues)])
-        .args(&["--memory", "size=4G"])
-        .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-        .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-        .args(&[
+        .args(["--cpus", &format!("boot={}", num_queues)])
+        .args(["--memory", "size=4G"])
+        .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        .args([
             "--disk",
             format!(
                 "path={}",
@@ -368,7 +368,7 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
             format!("path={}", BLK_IO_TEST_IMG).as_str(),
         ])
         .default_net()
-        .args(&["--api-socket", &api_socket])
+        .args(["--api-socket", &api_socket])
         .capture_output()
         .verbosity(VerbosityLevel::Warn)
         .set_print_cmd(false)

@@ -85,9 +85,9 @@ fn prepare_virtiofsd(tmp_dir: &TempDir, shared_dir: &str) -> (std::process::Chil
 
     // Start the daemon
     let child = Command::new(virtiofsd_path.as_str())
-        .args(&["--shared-dir", shared_dir])
-        .args(&["--socket-path", virtiofsd_socket_path.as_str()])
-        .args(&["--cache", "never"])
+        .args(["--shared-dir", shared_dir])
+        .args(["--socket-path", virtiofsd_socket_path.as_str()])
+        .args(["--cache", "never"])
         .spawn()
         .unwrap();
 
@@ -114,7 +114,7 @@ fn prepare_vubd(
 
     // Start the daemon
     let child = Command::new(clh_command("vhost_user_block"))
-        .args(&[
+        .args([
             "--block-backend",
             format!(
                 "path={},socket={},num_queues={},readonly={},direct={}",
@@ -221,7 +221,7 @@ fn prepare_vhost_user_net_daemon(
     };
 
     let mut command = Command::new(clh_command("vhost_user_net"));
-    command.args(&["--net-backend", net_params.as_str()]);
+    command.args(["--net-backend", net_params.as_str()]);
 
     (command, vunet_socket_path)
 }
@@ -248,7 +248,7 @@ fn curl_command(api_socket: &str, method: &str, url: &str, http_body: Option<&st
 
 fn remote_command(api_socket: &str, command: &str, arg: Option<&str>) -> bool {
     let mut cmd = Command::new(clh_command("ch-remote"));
-    cmd.args(&[&format!("--api-socket={}", api_socket), command]);
+    cmd.args([&format!("--api-socket={}", api_socket), command]);
 
     if let Some(arg) = arg {
         cmd.arg(arg);
@@ -266,7 +266,7 @@ fn remote_command(api_socket: &str, command: &str, arg: Option<&str>) -> bool {
 
 fn remote_command_w_output(api_socket: &str, command: &str, arg: Option<&str>) -> (bool, Vec<u8>) {
     let mut cmd = Command::new(clh_command("ch-remote"));
-    cmd.args(&[&format!("--api-socket={}", api_socket), command]);
+    cmd.args([&format!("--api-socket={}", api_socket), command]);
 
     if let Some(arg) = arg {
         cmd.arg(arg);
@@ -285,7 +285,7 @@ fn resize_command(
     event_file: Option<&str>,
 ) -> bool {
     let mut cmd = Command::new(clh_command("ch-remote"));
-    cmd.args(&[&format!("--api-socket={}", api_socket), "resize"]);
+    cmd.args([&format!("--api-socket={}", api_socket), "resize"]);
 
     if let Some(desired_vcpus) = desired_vcpus {
         cmd.arg(format!("--cpus={}", desired_vcpus));
@@ -320,7 +320,7 @@ fn resize_command(
 
 fn resize_zone_command(api_socket: &str, id: &str, desired_size: &str) -> bool {
     let mut cmd = Command::new(clh_command("ch-remote"));
-    cmd.args(&[
+    cmd.args([
         &format!("--api-socket={}", api_socket),
         "resize-zone",
         &format!("--id={}", id),
@@ -371,13 +371,13 @@ fn setup_ovs_dpdk_guests(
     };
 
     let mut child1 = GuestCommand::new_with_binary_path(guest1, &clh_path)
-                    .args(&["--cpus", "boot=2"])
-                    .args(&["--memory", "size=0,shared=on"])
-                    .args(&["--memory-zone", "id=mem0,size=1G,shared=on,host_numa_node=0"])
-                    .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-                    .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+                    .args(["--cpus", "boot=2"])
+                    .args(["--memory", "size=0,shared=on"])
+                    .args(["--memory-zone", "id=mem0,size=1G,shared=on,host_numa_node=0"])
+                    .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+                    .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                     .default_disks()
-                    .args(&["--net", guest1.default_net_string().as_str(), "vhost_user=true,socket=/tmp/dpdkvhostclient1,num_queues=2,queue_size=256,vhost_mode=server"])
+                    .args(["--net", guest1.default_net_string().as_str(), "vhost_user=true,socket=/tmp/dpdkvhostclient1,num_queues=2,queue_size=256,vhost_mode=server"])
                     .capture_output()
                     .spawn()
                     .unwrap();
@@ -421,14 +421,14 @@ fn setup_ovs_dpdk_guests(
     }
 
     let mut child2 = GuestCommand::new_with_binary_path(guest2, &clh_path)
-                    .args(&["--api-socket", api_socket])
-                    .args(&["--cpus", "boot=2"])
-                    .args(&["--memory", "size=0,shared=on"])
-                    .args(&["--memory-zone", "id=mem0,size=1G,shared=on,host_numa_node=0"])
-                    .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-                    .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+                    .args(["--api-socket", api_socket])
+                    .args(["--cpus", "boot=2"])
+                    .args(["--memory", "size=0,shared=on"])
+                    .args(["--memory-zone", "id=mem0,size=1G,shared=on,host_numa_node=0"])
+                    .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+                    .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                     .default_disks()
-                    .args(&["--net", guest2.default_net_string().as_str(), "vhost_user=true,socket=/tmp/dpdkvhostclient2,num_queues=2,queue_size=256,vhost_mode=server"])
+                    .args(["--net", guest2.default_net_string().as_str(), "vhost_user=true,socket=/tmp/dpdkvhostclient2,num_queues=2,queue_size=256,vhost_mode=server"])
                     .capture_output()
                     .spawn()
                     .unwrap();
@@ -584,16 +584,16 @@ fn test_cpu_topology(threads_per_core: u8, cores_per_package: u8, packages: u8, 
     }
 
     let mut child = GuestCommand::new(&guest)
-        .args(&[
+        .args([
             "--cpus",
             &format!(
                 "boot={},topology={}:{}:1:{}",
                 total_vcpus, threads_per_core, cores_per_package, packages
             ),
         ])
-        .args(&["--memory", "size=512M"])
-        .args(&["--kernel", kernel_path])
-        .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        .args(["--memory", "size=512M"])
+        .args(["--kernel", kernel_path])
+        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
         .default_disks()
         .default_net()
         .capture_output()
@@ -658,23 +658,23 @@ fn _test_guest_numa_nodes(acpi: bool) {
     };
 
     let mut child = GuestCommand::new(&guest)
-        .args(&["--cpus", "boot=6,max=12"])
-        .args(&["--memory", "size=0,hotplug_method=virtio-mem"])
-        .args(&[
+        .args(["--cpus", "boot=6,max=12"])
+        .args(["--memory", "size=0,hotplug_method=virtio-mem"])
+        .args([
             "--memory-zone",
             "id=mem0,size=1G,hotplug_size=3G",
             "id=mem1,size=2G,hotplug_size=3G",
             "id=mem2,size=3G,hotplug_size=3G",
         ])
-        .args(&[
+        .args([
             "--numa",
             "guest_numa_id=0,cpus=[0-2,9],distances=[1@15,2@20],memory_zones=mem0",
             "guest_numa_id=1,cpus=[3-4,6-8],distances=[0@20,2@25],memory_zones=mem1",
             "guest_numa_id=2,cpus=[5,10-11],distances=[0@25,1@30],memory_zones=mem2",
         ])
-        .args(&["--kernel", kernel_path.to_str().unwrap()])
-        .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-        .args(&["--api-socket", &api_socket])
+        .args(["--kernel", kernel_path.to_str().unwrap()])
+        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        .args(["--api-socket", &api_socket])
         .capture_output()
         .default_disks()
         .default_net()
@@ -736,14 +736,14 @@ fn _test_power_button(acpi: bool) {
         direct_kernel_boot_path()
     };
 
-    cmd.args(&["--cpus", "boot=1"])
-        .args(&["--memory", "size=512M"])
-        .args(&["--kernel", kernel_path.to_str().unwrap()])
-        .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+    cmd.args(["--cpus", "boot=1"])
+        .args(["--memory", "size=512M"])
+        .args(["--kernel", kernel_path.to_str().unwrap()])
+        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
         .capture_output()
         .default_disks()
         .default_net()
-        .args(&["--api-socket", &api_socket]);
+        .args(["--api-socket", &api_socket]);
 
     let child = cmd.spawn().unwrap();
 
@@ -806,13 +806,13 @@ fn test_vhost_user_net(
 
     let mut ch_command = GuestCommand::new(&guest);
     ch_command
-        .args(&["--cpus", format!("boot={}", num_queues / 2).as_str()])
-        .args(&["--memory", "size=512M,hotplug_size=2048M,shared=on"])
-        .args(&["--kernel", kernel_path.to_str().unwrap()])
-        .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        .args(["--cpus", format!("boot={}", num_queues / 2).as_str()])
+        .args(["--memory", "size=512M,hotplug_size=2048M,shared=on"])
+        .args(["--kernel", kernel_path.to_str().unwrap()])
+        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
         .default_disks()
-        .args(&["--net", net_params.as_str()])
-        .args(&["--api-socket", &api_socket])
+        .args(["--net", net_params.as_str()])
+        .args(["--api-socket", &api_socket])
         .capture_output();
 
     let mut daemon_child: std::process::Child;
@@ -940,11 +940,11 @@ fn test_vhost_user_blk(
     };
 
     let mut child = GuestCommand::new(&guest)
-        .args(&["--cpus", format!("boot={}", num_queues).as_str()])
-        .args(&["--memory", "size=512M,hotplug_size=2048M,shared=on"])
-        .args(&["--kernel", kernel_path.to_str().unwrap()])
-        .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-        .args(&[
+        .args(["--cpus", format!("boot={}", num_queues).as_str()])
+        .args(["--memory", "size=512M,hotplug_size=2048M,shared=on"])
+        .args(["--kernel", kernel_path.to_str().unwrap()])
+        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        .args([
             "--disk",
             format!(
                 "path={}",
@@ -959,7 +959,7 @@ fn test_vhost_user_blk(
             blk_params.as_str(),
         ])
         .default_net()
-        .args(&["--api-socket", &api_socket])
+        .args(["--api-socket", &api_socket])
         .capture_output()
         .spawn()
         .unwrap();
@@ -1093,11 +1093,11 @@ fn test_boot_from_vhost_user_blk(
     };
 
     let mut child = GuestCommand::new(&guest)
-        .args(&["--cpus", format!("boot={}", num_queues).as_str()])
-        .args(&["--memory", "size=512M,shared=on"])
-        .args(&["--kernel", kernel_path.to_str().unwrap()])
-        .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-        .args(&[
+        .args(["--cpus", format!("boot={}", num_queues).as_str()])
+        .args(["--memory", "size=512M,shared=on"])
+        .args(["--kernel", kernel_path.to_str().unwrap()])
+        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        .args([
             "--disk",
             blk_boot_params.as_str(),
             format!(
@@ -1167,15 +1167,15 @@ fn _test_virtio_fs(
 
     let mut guest_command = GuestCommand::new(&guest);
     guest_command
-        .args(&["--cpus", "boot=1"])
-        .args(&["--memory", "size=512M,hotplug_size=2048M,shared=on"])
-        .args(&["--kernel", kernel_path.to_str().unwrap()])
-        .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        .args(["--cpus", "boot=1"])
+        .args(["--memory", "size=512M,hotplug_size=2048M,shared=on"])
+        .args(["--kernel", kernel_path.to_str().unwrap()])
+        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
         .default_disks()
         .default_net()
-        .args(&["--api-socket", &api_socket]);
+        .args(["--api-socket", &api_socket]);
     if pci_segment.is_some() {
-        guest_command.args(&["--platform", "num_pci_segments=16"]);
+        guest_command.args(["--platform", "num_pci_segments=16"]);
     }
 
     let fs_params = format!(
@@ -1189,7 +1189,7 @@ fn _test_virtio_fs(
     );
 
     if !hotplug {
-        guest_command.args(&["--fs", fs_params.as_str()]);
+        guest_command.args(["--fs", fs_params.as_str()]);
     }
 
     let mut child = guest_command.capture_output().spawn().unwrap();
@@ -1342,13 +1342,13 @@ fn test_virtio_pmem(discard_writes: bool, specify_size: bool) {
         .expect("Expect creating disk image to succeed");
 
     let mut child = GuestCommand::new(&guest)
-        .args(&["--cpus", "boot=1"])
-        .args(&["--memory", "size=512M"])
-        .args(&["--kernel", kernel_path.to_str().unwrap()])
-        .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        .args(["--cpus", "boot=1"])
+        .args(["--memory", "size=512M"])
+        .args(["--kernel", kernel_path.to_str().unwrap()])
+        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
         .default_disks()
         .default_net()
-        .args(&[
+        .args([
             "--pmem",
             format!(
                 "file={}{}{}",
@@ -1422,16 +1422,16 @@ fn _test_virtio_vsock(hotplug: bool) {
     let api_socket = temp_api_path(&guest.tmp_dir);
 
     let mut cmd = GuestCommand::new(&guest);
-    cmd.args(&["--api-socket", &api_socket]);
-    cmd.args(&["--cpus", "boot=1"]);
-    cmd.args(&["--memory", "size=512M"]);
-    cmd.args(&["--kernel", kernel_path.to_str().unwrap()]);
-    cmd.args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE]);
+    cmd.args(["--api-socket", &api_socket]);
+    cmd.args(["--cpus", "boot=1"]);
+    cmd.args(["--memory", "size=512M"]);
+    cmd.args(["--kernel", kernel_path.to_str().unwrap()]);
+    cmd.args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE]);
     cmd.default_disks();
     cmd.default_net();
 
     if !hotplug {
-        cmd.args(&["--vsock", format!("cid=3,socket={}", socket).as_str()]);
+        cmd.args(["--vsock", format!("cid=3,socket={}", socket).as_str()]);
     }
 
     let mut child = cmd.capture_output().spawn().unwrap();
@@ -1496,13 +1496,13 @@ fn test_memory_mergeable(mergeable: bool) {
     let focal1 = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
     let guest1 = Guest::new(Box::new(focal1));
     let mut child1 = GuestCommand::new(&guest1)
-        .args(&["--cpus", "boot=1"])
-        .args(&["--memory", format!("size=512M,{}", memory_param).as_str()])
-        .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-        .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        .args(["--cpus", "boot=1"])
+        .args(["--memory", format!("size=512M,{}", memory_param).as_str()])
+        .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
         .default_disks()
-        .args(&["--net", guest1.default_net_string().as_str()])
-        .args(&["--serial", "tty", "--console", "off"])
+        .args(["--net", guest1.default_net_string().as_str()])
+        .args(["--serial", "tty", "--console", "off"])
         .capture_output()
         .spawn()
         .unwrap();
@@ -1522,13 +1522,13 @@ fn test_memory_mergeable(mergeable: bool) {
     let focal2 = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
     let guest2 = Guest::new(Box::new(focal2));
     let mut child2 = GuestCommand::new(&guest2)
-        .args(&["--cpus", "boot=1"])
-        .args(&["--memory", format!("size=512M,{}", memory_param).as_str()])
-        .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-        .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        .args(["--cpus", "boot=1"])
+        .args(["--memory", format!("size=512M,{}", memory_param).as_str()])
+        .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
         .default_disks()
-        .args(&["--net", guest2.default_net_string().as_str()])
-        .args(&["--serial", "tty", "--console", "off"])
+        .args(["--net", guest2.default_net_string().as_str()])
+        .args(["--serial", "tty", "--console", "off"])
         .capture_output()
         .spawn()
         .unwrap();
@@ -1774,11 +1774,11 @@ fn _test_virtio_iommu(acpi: bool) {
     };
 
     let mut child = GuestCommand::new(&guest)
-        .args(&["--cpus", "boot=1"])
-        .args(&["--memory", "size=512M"])
-        .args(&["--kernel", kernel_path.to_str().unwrap()])
-        .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-        .args(&[
+        .args(["--cpus", "boot=1"])
+        .args(["--memory", "size=512M"])
+        .args(["--kernel", kernel_path.to_str().unwrap()])
+        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        .args([
             "--disk",
             format!(
                 "path={},iommu=on",
@@ -1791,7 +1791,7 @@ fn _test_virtio_iommu(acpi: bool) {
             )
             .as_str(),
         ])
-        .args(&["--net", guest.default_net_string_w_iommu().as_str()])
+        .args(["--net", guest.default_net_string_w_iommu().as_str()])
         .capture_output()
         .spawn()
         .unwrap();
@@ -1920,13 +1920,13 @@ mod common_parallel {
         let event_path = temp_event_monitor_path(&guest.tmp_dir);
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", fw_path.as_str()])
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", fw_path.as_str()])
             .default_disks()
             .default_net()
-            .args(&["--serial", "tty", "--console", "off"])
-            .args(&["--event-monitor", format!("path={}", event_path).as_str()])
+            .args(["--serial", "tty", "--console", "off"])
+            .args(["--event-monitor", format!("path={}", event_path).as_str()])
             .capture_output()
             .spawn()
             .unwrap();
@@ -2004,10 +2004,10 @@ mod common_parallel {
         let bionic = UbuntuDiskConfig::new(BIONIC_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(bionic));
         let mut cmd = GuestCommand::new(&guest);
-        cmd.args(&["--cpus", "boot=2,max=4"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        cmd.args(["--cpus", "boot=2,max=4"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .capture_output()
             .default_disks()
             .default_net();
@@ -2069,10 +2069,10 @@ mod common_parallel {
         let guest = Guest::new(Box::new(focal));
         let max_phys_bits: u8 = 36;
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", &format!("max_phys_bits={}", max_phys_bits)])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--cpus", &format!("max_phys_bits={}", max_phys_bits)])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
             .capture_output()
@@ -2115,10 +2115,10 @@ mod common_parallel {
         );
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=2,affinity=[0@[0,2],1@[1,3]]"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--cpus", "boot=2,affinity=[0@[0,2],1@[1,3]]"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
             .capture_output()
@@ -2146,12 +2146,12 @@ mod common_parallel {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
         let mut cmd = GuestCommand::new(&guest);
-        cmd.args(&["--cpus", "boot=48"])
-            .args(&["--memory", "size=5120M"])
-            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args(&["--serial", "tty"])
-            .args(&["--console", "off"])
+        cmd.args(["--cpus", "boot=48"])
+            .args(["--memory", "size=5120M"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--serial", "tty"])
+            .args(["--console", "off"])
             .capture_output()
             .default_disks()
             .default_net();
@@ -2185,10 +2185,10 @@ mod common_parallel {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
         let mut cmd = GuestCommand::new(&guest);
-        cmd.args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=128G"])
-            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        cmd.args(["--cpus", "boot=1"])
+            .args(["--memory", "size=128G"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .capture_output()
             .default_disks()
             .default_net();
@@ -2222,17 +2222,17 @@ mod common_parallel {
         let kernel_path = direct_kernel_boot_path();
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=0,hotplug_method=virtio-mem"])
-            .args(&[
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=0,hotplug_method=virtio-mem"])
+            .args([
                 "--memory-zone",
                 "id=mem0,size=1G,hotplug_size=2G",
                 "id=mem1,size=1G,file=/dev/shm",
                 "id=mem2,size=1G,host_numa_node=0,hotplug_size=2G",
             ])
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args(&["--api-socket", &api_socket])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--api-socket", &api_socket])
             .capture_output()
             .default_disks()
             .default_net()
@@ -2313,12 +2313,12 @@ mod common_parallel {
         let api_socket = temp_api_path(&guest.tmp_dir);
         let mut cmd = GuestCommand::new(&guest);
 
-        cmd.args(&["--cpus", "boot=1"])
-            .args(&["--api-socket", &api_socket])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args(&["--platform", "num_pci_segments=16,iommu_segments=[1]"])
+        cmd.args(["--cpus", "boot=1"])
+            .args(["--api-socket", &api_socket])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--platform", "num_pci_segments=16,iommu_segments=[1]"])
             .default_disks()
             .capture_output()
             .default_net();
@@ -2367,10 +2367,10 @@ mod common_parallel {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
         let mut cmd = GuestCommand::new(&guest);
-        cmd.args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        cmd.args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .capture_output()
             .default_disks()
             .default_net();
@@ -2407,10 +2407,10 @@ mod common_parallel {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
         let mut cmd = GuestCommand::new(&guest);
-        cmd.args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        cmd.args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .capture_output()
             .default_disks()
             .default_net();
@@ -2466,12 +2466,12 @@ mod common_parallel {
         );
 
         let mut cmd = GuestCommand::new(&guest);
-        cmd.args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args(&["--platform", "num_pci_segments=16"])
-            .args(&[
+        cmd.args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--platform", "num_pci_segments=16"])
+            .args([
                 "--disk",
                 format!(
                     "path={}",
@@ -2555,10 +2555,10 @@ mod common_parallel {
         let kernel_path = direct_kernel_boot_path();
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
             .capture_output()
@@ -2606,11 +2606,11 @@ mod common_parallel {
         let kernel_path = direct_kernel_boot_path();
 
         let mut cloud_child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=4"])
-            .args(&["--memory", "size=512M,shared=on"])
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args(&[
+            .args(["--cpus", "boot=4"])
+            .args(["--memory", "size=512M,shared=on"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args([
                 "--disk",
                 format!(
                     "path={}",
@@ -2706,9 +2706,9 @@ mod common_parallel {
         std::process::Command::new("qemu-img")
             .arg("convert")
             .arg("-p")
-            .args(&["-f", "raw"])
-            .args(&["-O", "vpc"])
-            .args(&["-o", "subformat=fixed"])
+            .args(["-f", "raw"])
+            .args(["-O", "vpc"])
+            .args(["-o", "subformat=fixed"])
             .arg(raw_file_path.to_str().unwrap())
             .arg(vhd_file_path.to_str().unwrap())
             .output()
@@ -2731,8 +2731,8 @@ mod common_parallel {
         std::process::Command::new("qemu-img")
             .arg("convert")
             .arg("-p")
-            .args(&["-f", "raw"])
-            .args(&["-O", "vhdx"])
+            .args(["-f", "raw"])
+            .args(["-O", "vhdx"])
             .arg(raw_file_path.to_str().unwrap())
             .arg(vhdx_file_path.to_str().unwrap())
             .output()
@@ -2758,7 +2758,7 @@ mod common_parallel {
         // Generate a 100 MiB dynamic VHDX file
         std::process::Command::new("qemu-img")
             .arg("create")
-            .args(&["-f", "vhdx"])
+            .args(["-f", "vhdx"])
             .arg(vhdx_path)
             .arg(VIRTUAL_DISK_SIZE.to_string())
             .output()
@@ -2772,11 +2772,11 @@ mod common_parallel {
         let kernel_path = direct_kernel_boot_path();
 
         let mut cloud_child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args(&[
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args([
                 "--disk",
                 format!(
                     "path={}",
@@ -2851,10 +2851,10 @@ mod common_parallel {
         .expect("copying of OS disk failed");
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
-            .args(&[
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .args([
                 "--disk",
                 format!("path={},direct=on", os_path.as_path().to_str().unwrap()).as_str(),
                 format!(
@@ -2958,10 +2958,10 @@ mod common_parallel {
         let guest = Guest::new(Box::new(focal));
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
             .capture_output()
@@ -3004,11 +3004,11 @@ mod common_parallel {
         let guest = Guest::new(Box::new(focal));
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args(&["--platform", "serial_number=a=b;c=d"])
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--platform", "serial_number=a=b;c=d"])
             .default_disks()
             .default_net()
             .capture_output()
@@ -3040,11 +3040,11 @@ mod common_parallel {
         let guest = Guest::new(Box::new(focal));
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args(&["--platform", "uuid=1e8aa28a-435d-4027-87f4-40dceff1fa0a"])
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--platform", "uuid=1e8aa28a-435d-4027-87f4-40dceff1fa0a"])
             .default_disks()
             .default_net()
             .capture_output()
@@ -3081,11 +3081,11 @@ mod common_parallel {
         let oem_strings = format!("oem_strings=[{},{}]", s1, s2);
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args(&["--platform", &oem_strings])
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--platform", &oem_strings])
             .default_disks()
             .default_net()
             .capture_output()
@@ -3171,10 +3171,10 @@ mod common_parallel {
         let kernel_path = direct_kernel_boot_path();
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&[
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args([
                 "--disk",
                 format!(
                     "path={}",
@@ -3183,7 +3183,7 @@ mod common_parallel {
                 .as_str(),
             ])
             .default_net()
-            .args(&[
+            .args([
                 "--pmem",
                 format!(
                     "file={},size={}",
@@ -3194,7 +3194,7 @@ mod common_parallel {
                 )
                 .as_str(),
             ])
-            .args(&[
+            .args([
                 "--cmdline",
                 DIRECT_KERNEL_BOOT_CMDLINE
                     .replace("vda1", "pmem0p1")
@@ -3226,12 +3226,12 @@ mod common_parallel {
         let kernel_path = direct_kernel_boot_path();
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
-            .args(&[
+            .args([
                 "--net",
                 guest.default_net_string().as_str(),
                 "tap=,mac=8a:6b:6f:5a:de:ac,ip=192.168.3.1,mask=255.255.255.0",
@@ -3307,13 +3307,13 @@ mod common_parallel {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
-            .args(&["--serial", "off"])
+            .args(["--serial", "off"])
             .capture_output()
             .spawn()
             .unwrap();
@@ -3349,10 +3349,10 @@ mod common_parallel {
         #[cfg(target_arch = "aarch64")]
         let console_str: &str = "console=ttyAMA0";
 
-        cmd.args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(&[
+        cmd.args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args([
                 "--cmdline",
                 DIRECT_KERNEL_BOOT_CMDLINE
                     .replace("console=hvc0 ", console_str)
@@ -3360,8 +3360,8 @@ mod common_parallel {
             ])
             .default_disks()
             .default_net()
-            .args(&["--serial", "null"])
-            .args(&["--console", "off"])
+            .args(["--serial", "null"])
+            .args(["--console", "off"])
             .capture_output();
 
         let mut child = cmd.spawn().unwrap();
@@ -3405,10 +3405,10 @@ mod common_parallel {
         let console_str: &str = "console=ttyAMA0";
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&[
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args([
                 "--cmdline",
                 DIRECT_KERNEL_BOOT_CMDLINE
                     .replace("console=hvc0 ", console_str)
@@ -3416,8 +3416,8 @@ mod common_parallel {
             ])
             .default_disks()
             .default_net()
-            .args(&["--serial", "tty"])
-            .args(&["--console", "off"])
+            .args(["--serial", "tty"])
+            .args(["--console", "off"])
             .capture_output()
             .spawn()
             .unwrap();
@@ -3463,10 +3463,10 @@ mod common_parallel {
         let console_str: &str = "console=ttyAMA0";
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(&[
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args([
                 "--cmdline",
                 DIRECT_KERNEL_BOOT_CMDLINE
                     .replace("console=hvc0 ", console_str)
@@ -3474,7 +3474,7 @@ mod common_parallel {
             ])
             .default_disks()
             .default_net()
-            .args(&[
+            .args([
                 "--serial",
                 format!("file={}", serial_path.to_str().unwrap()).as_str(),
             ])
@@ -3532,15 +3532,15 @@ mod common_parallel {
         let cmdline = DIRECT_KERNEL_BOOT_CMDLINE.to_owned() + serial_option;
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(&["--cmdline", &cmdline])
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", &cmdline])
             .default_disks()
             .default_net()
-            .args(&["--serial", "null"])
-            .args(&["--console", "pty"])
-            .args(&["--api-socket", &api_socket])
+            .args(["--serial", "null"])
+            .args(["--console", "pty"])
+            .args(["--api-socket", &api_socket])
             .spawn()
             .unwrap();
 
@@ -3614,14 +3614,14 @@ mod common_parallel {
         let kernel_path = direct_kernel_boot_path();
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
-            .args(&["--console", "tty"])
-            .args(&["--serial", "null"])
+            .args(["--console", "tty"])
+            .args(["--serial", "null"])
             .capture_output()
             .spawn()
             .unwrap();
@@ -3657,13 +3657,13 @@ mod common_parallel {
 
         let console_path = guest.tmp_dir.as_path().join("/tmp/console-output");
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
-            .args(&[
+            .args([
                 "--console",
                 format!("file={}", console_path.to_str().unwrap()).as_str(),
             ])
@@ -3765,10 +3765,10 @@ mod common_parallel {
         let vfio_tap3 = "vfio-tap3";
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=4"])
-            .args(&["--memory", "size=2G,hugepages=on,shared=on"])
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&[
+            .args(["--cpus", "boot=4"])
+            .args(["--memory", "size=2G,hugepages=on,shared=on"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args([
                 "--disk",
                 format!(
                     "path={}",
@@ -3783,7 +3783,7 @@ mod common_parallel {
                 format!("path={}", vfio_disk_path.to_str().unwrap()).as_str(),
                 format!("path={},iommu=on", blk_file_path.to_str().unwrap()).as_str(),
             ])
-            .args(&[
+            .args([
                 "--cmdline",
                 format!(
                     "{} kvm-intel.nested=1 vfio_iommu_type1.allow_unsafe_interrupts",
@@ -3791,7 +3791,7 @@ mod common_parallel {
                 )
                 .as_str(),
             ])
-            .args(&[
+            .args([
                 "--net",
                 format!("tap={},mac={}", vfio_tap0, guest.network.guest_mac).as_str(),
                 format!(
@@ -3975,10 +3975,10 @@ mod common_parallel {
         let kernel_path = direct_kernel_boot_path();
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&[
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args([
                 "--cmdline",
                 format!("{} acpi=off", DIRECT_KERNEL_BOOT_CMDLINE).as_str(),
             ])
@@ -4012,10 +4012,10 @@ mod common_parallel {
                 let guest = Guest::new(disk_config);
 
                 let mut cmd = GuestCommand::new(&guest);
-                cmd.args(&["--cpus", "boot=1"])
-                    .args(&["--memory", "size=512M"])
-                    .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-                    .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+                cmd.args(["--cpus", "boot=1"])
+                    .args(["--memory", "size=512M"])
+                    .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+                    .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                     .default_disks()
                     .default_net()
                     .capture_output();
@@ -4067,7 +4067,7 @@ mod common_parallel {
         let api_socket = temp_api_path(&guest.tmp_dir);
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--api-socket", &api_socket])
+            .args(["--api-socket", &api_socket])
             .capture_output()
             .spawn()
             .unwrap();
@@ -4121,7 +4121,7 @@ mod common_parallel {
         let api_socket = temp_api_path(&guest.tmp_dir);
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--api-socket", &api_socket])
+            .args(["--api-socket", &api_socket])
             .capture_output()
             .spawn()
             .unwrap();
@@ -4199,7 +4199,7 @@ mod common_parallel {
         let api_socket = temp_api_path(&guest.tmp_dir);
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--api-socket", &api_socket])
+            .args(["--api-socket", &api_socket])
             .capture_output()
             .spawn()
             .unwrap();
@@ -4285,7 +4285,7 @@ mod common_parallel {
         let api_socket = temp_api_path(&guest.tmp_dir);
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--api-socket", &api_socket])
+            .args(["--api-socket", &api_socket])
             .capture_output()
             .spawn()
             .unwrap();
@@ -4378,12 +4378,12 @@ mod common_parallel {
         let kernel_path = edk2_path();
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
-            .args(&[
+            .args([
                 "--net",
                 guest.default_net_string().as_str(),
                 "tap=,mac=8a:6b:6f:5a:de:ac,ip=192.168.3.1,mask=255.255.255.0",
@@ -4477,13 +4477,13 @@ mod common_parallel {
         let kernel_path = direct_kernel_boot_path();
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=2,max=4"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--cpus", "boot=2,max=4"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
-            .args(&["--api-socket", &api_socket])
+            .args(["--api-socket", &api_socket])
             .capture_output()
             .spawn()
             .unwrap();
@@ -4565,14 +4565,14 @@ mod common_parallel {
         let kernel_path = direct_kernel_boot_path();
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=2,max=4"])
-            .args(&["--memory", "size=512M,hotplug_size=8192M"])
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--cpus", "boot=2,max=4"])
+            .args(["--memory", "size=512M,hotplug_size=8192M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
-            .args(&["--balloon", "size=0"])
-            .args(&["--api-socket", &api_socket])
+            .args(["--balloon", "size=0"])
+            .args(["--api-socket", &api_socket])
             .capture_output()
             .spawn()
             .unwrap();
@@ -4646,16 +4646,16 @@ mod common_parallel {
         let kernel_path = direct_kernel_boot_path();
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=2,max=4"])
-            .args(&[
+            .args(["--cpus", "boot=2,max=4"])
+            .args([
                 "--memory",
                 "size=512M,hotplug_method=virtio-mem,hotplug_size=8192M",
             ])
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
-            .args(&["--api-socket", &api_socket])
+            .args(["--api-socket", &api_socket])
             .capture_output()
             .spawn()
             .unwrap();
@@ -4721,13 +4721,13 @@ mod common_parallel {
         let kernel_path = direct_kernel_boot_path();
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=2,max=4"])
-            .args(&["--memory", "size=512M,hotplug_size=8192M"])
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--cpus", "boot=2,max=4"])
+            .args(["--memory", "size=512M,hotplug_size=8192M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
-            .args(&["--api-socket", &api_socket])
+            .args(["--api-socket", &api_socket])
             .capture_output()
             .spawn()
             .unwrap();
@@ -4782,13 +4782,13 @@ mod common_parallel {
         let guest_memory_size_kb = 512 * 1024;
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=1"])
-            .args(&[
+            .args(["--cpus", "boot=1"])
+            .args([
                 "--memory",
                 format!("size={}K", guest_memory_size_kb).as_str(),
             ])
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .capture_output()
             .spawn()
@@ -4824,11 +4824,11 @@ mod common_parallel {
         let api_socket = temp_api_path(&guest.tmp_dir);
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--api-socket", &api_socket])
-            .args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--api-socket", &api_socket])
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
             .capture_output()
@@ -5125,11 +5125,11 @@ mod common_parallel {
         let loop_dev = create_loop_device(test_disk_path.to_str().unwrap(), 4096, 5);
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args(&[
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args([
                 "--disk",
                 format!(
                     "path={}",
@@ -5189,7 +5189,7 @@ mod common_parallel {
         handle_child_output(r, &output);
 
         Command::new("losetup")
-            .args(&["-d", &loop_dev])
+            .args(["-d", &loop_dev])
             .output()
             .expect("loop device not found");
     }
@@ -5205,12 +5205,12 @@ mod common_parallel {
 
         //Let's start a 4G guest with balloon occupied 2G memory
         let mut child = GuestCommand::new(&guest)
-            .args(&["--api-socket", &api_socket])
-            .args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=4G"])
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args(&["--balloon", "size=2G,deflate_on_oom=on"])
+            .args(["--api-socket", &api_socket])
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=4G"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--balloon", "size=2G,deflate_on_oom=on"])
             .default_disks()
             .default_net()
             .capture_output()
@@ -5262,11 +5262,11 @@ mod common_parallel {
 
         //Let's start a 4G guest with balloon occupied 2G memory
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=4G"])
-            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args(&["--balloon", "size=0,free_page_reporting=on"])
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=4G"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--balloon", "size=0,free_page_reporting=on"])
             .default_disks()
             .default_net()
             .capture_output()
@@ -5345,17 +5345,17 @@ mod common_parallel {
 
         let mut cmd = GuestCommand::new(&guest);
 
-        cmd.args(&["--api-socket", &api_socket])
-            .args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        cmd.args(["--api-socket", &api_socket])
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
             .capture_output();
 
         if pci_segment.is_some() {
-            cmd.args(&["--platform", "num_pci_segments=16"]);
+            cmd.args(["--platform", "num_pci_segments=16"]);
         }
 
         let mut child = cmd.spawn().unwrap();
@@ -5483,16 +5483,16 @@ mod common_parallel {
         // Boot without network
         let mut cmd = GuestCommand::new(&guest);
 
-        cmd.args(&["--api-socket", &api_socket])
-            .args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        cmd.args(["--api-socket", &api_socket])
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .capture_output();
 
         if pci_segment.is_some() {
-            cmd.args(&["--platform", "num_pci_segments=16"]);
+            cmd.args(["--platform", "num_pci_segments=16"]);
         }
 
         let mut child = cmd.spawn().unwrap();
@@ -5635,9 +5635,9 @@ mod common_parallel {
 
         kernels.iter().for_each(|k_path| {
             let mut child = GuestCommand::new(&guest)
-                .args(&["--kernel", k_path.to_str().unwrap()])
-                .args(&["--initramfs", initramfs_path.to_str().unwrap()])
-                .args(&["--cmdline", &cmdline])
+                .args(["--kernel", k_path.to_str().unwrap()])
+                .args(["--initramfs", initramfs_path.to_str().unwrap()])
+                .args(["--cmdline", &cmdline])
                 .capture_output()
                 .spawn()
                 .unwrap();
@@ -5683,16 +5683,16 @@ mod common_parallel {
         let event_path = temp_event_monitor_path(&guest.tmp_dir);
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--api-socket", &api_socket_source])
-            .args(&["--event-monitor", format!("path={}", event_path).as_str()])
-            .args(&["--cpus", "boot=4"])
-            .args(&[
+            .args(["--api-socket", &api_socket_source])
+            .args(["--event-monitor", format!("path={}", event_path).as_str()])
+            .args(["--cpus", "boot=4"])
+            .args([
                 "--memory",
                 "size=4G,hotplug_method=virtio-mem,hotplug_size=32G",
             ])
-            .args(&["--balloon", "size=0"])
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&[
+            .args(["--balloon", "size=0"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args([
                 "--disk",
                 format!(
                     "path={}",
@@ -5701,9 +5701,9 @@ mod common_parallel {
                 .as_str(),
                 cloudinit_params.as_str(),
             ])
-            .args(&["--net", net_params.as_str()])
-            .args(&["--vsock", format!("cid=3,socket={}", socket).as_str()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--net", net_params.as_str()])
+            .args(["--vsock", format!("cid=3,socket={}", socket).as_str()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .capture_output()
             .spawn()
             .unwrap();
@@ -5834,12 +5834,12 @@ mod common_parallel {
 
         // Restore the VM from the snapshot
         let mut child = GuestCommand::new(&guest)
-            .args(&["--api-socket", &api_socket_restored])
-            .args(&[
+            .args(["--api-socket", &api_socket_restored])
+            .args([
                 "--event-monitor",
                 format!("path={}", event_path_restored).as_str(),
             ])
-            .args(&[
+            .args([
                 "--restore",
                 format!("source_url=file://{}", snapshot_dir).as_str(),
             ])
@@ -5927,13 +5927,13 @@ mod common_parallel {
         let api_socket = temp_api_path(&guest.tmp_dir);
 
         let mut cmd = GuestCommand::new(&guest);
-        cmd.args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        cmd.args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
-            .args(&["--net", guest.default_net_string().as_str()])
-            .args(&["--api-socket", &api_socket])
+            .args(["--net", guest.default_net_string().as_str()])
+            .args(["--api-socket", &api_socket])
             .capture_output();
 
         let mut child = cmd.spawn().unwrap();
@@ -5966,12 +5966,12 @@ mod common_parallel {
         let api_socket = temp_api_path(&guest.tmp_dir);
 
         let mut cmd = GuestCommand::new(&guest);
-        cmd.args(&["--cpus", "boot=4"])
-            .args(&["--memory", "size=4G"])
-            .args(&["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+        cmd.args(["--cpus", "boot=4"])
+            .args(["--memory", "size=4G"])
+            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
             .default_disks()
-            .args(&["--net", guest.default_net_string().as_str()])
-            .args(&["--api-socket", &api_socket])
+            .args(["--net", guest.default_net_string().as_str()])
+            .args(["--api-socket", &api_socket])
             .capture_output();
 
         let mut child = cmd.spawn().unwrap();
@@ -6017,14 +6017,14 @@ mod common_parallel {
         let kernel_path = direct_kernel_boot_path();
 
         let mut cmd = GuestCommand::new(&guest);
-        cmd.args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        cmd.args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
-            .args(&["--net", guest.default_net_string().as_str()])
-            .args(&["--watchdog"])
-            .args(&["--api-socket", &api_socket])
+            .args(["--net", guest.default_net_string().as_str()])
+            .args(["--watchdog"])
+            .args(["--api-socket", &api_socket])
             .capture_output();
 
         let mut child = cmd.spawn().unwrap();
@@ -6104,12 +6104,12 @@ mod common_parallel {
         .unwrap();
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", &format!("boot={}", num_queue_pairs)])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--cpus", &format!("boot={}", num_queue_pairs)])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
-            .args(&[
+            .args([
                 "--net",
                 &format!(
                     "fd=[{},{}],mac={},num_queues={}",
@@ -6227,12 +6227,12 @@ mod common_parallel {
 
         let mut guest_command = GuestCommand::new(&guest);
         guest_command
-            .args(&["--cpus", "boot=2"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--cpus", "boot=2"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
-            .args(&["--api-socket", &api_socket]);
+            .args(["--api-socket", &api_socket]);
 
         let net_params = format!(
             "fd=[{},{}],mac={},num_queues=4",
@@ -6240,7 +6240,7 @@ mod common_parallel {
         );
 
         if !hotplug {
-            guest_command.args(&["--net", &net_params]);
+            guest_command.args(["--net", &net_params]);
         }
 
         let mut child = guest_command.capture_output().spawn().unwrap();
@@ -6372,8 +6372,8 @@ mod common_parallel {
         let api_socket_restored = format!("{}.2", temp_api_path(&guest2.tmp_dir));
         // Restore the VM from the snapshot
         let mut child2 = GuestCommand::new(&guest2)
-            .args(&["--api-socket", &api_socket_restored])
-            .args(&[
+            .args(["--api-socket", &api_socket_restored])
+            .args([
                 "--restore",
                 format!("source_url=file://{}", snapshot_dir).as_str(),
             ])
@@ -6439,7 +6439,7 @@ mod common_parallel {
 
         // Start the SPDK nvmf_tgt daemon to present NVMe device as a VFIO user device
         Command::new("/usr/local/bin/spdk-nvme/nvmf_tgt")
-            .args(&["-i", "0", "-m", "0x1"])
+            .args(["-i", "0", "-m", "0x1"])
             .spawn()
             .unwrap();
         thread::sleep(std::time::Duration::new(2, 0));
@@ -6483,11 +6483,11 @@ mod common_parallel {
 
         let api_socket = temp_api_path(&guest.tmp_dir);
         let mut child = GuestCommand::new(&guest)
-            .args(&["--api-socket", &api_socket])
-            .args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M,shared=on,hugepages=on"])
-            .args(&["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
-            .args(&["--serial", "tty", "--console", "off"])
+            .args(["--api-socket", &api_socket])
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M,shared=on,hugepages=on"])
+            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .args(["--serial", "tty", "--console", "off"])
             .default_disks()
             .default_net()
             .capture_output()
@@ -6573,15 +6573,15 @@ mod common_parallel {
         let kernel_path = direct_kernel_boot_path();
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=2"])
-            .args(&["--memory", "size=512M,hugepages=on"])
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--cpus", "boot=2"])
+            .args(["--memory", "size=512M,hugepages=on"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
-            .args(&["--vdpa", "path=/dev/vhost-vdpa-0,num_queues=1"])
-            .args(&["--platform", "num_pci_segments=2,iommu_segments=1"])
-            .args(&["--api-socket", &api_socket])
+            .args(["--vdpa", "path=/dev/vhost-vdpa-0,num_queues=1"])
+            .args(["--platform", "num_pci_segments=2,iommu_segments=1"])
+            .args(["--api-socket", &api_socket])
             .capture_output()
             .spawn()
             .unwrap();
@@ -6694,13 +6694,13 @@ mod common_parallel {
         let kernel_path = direct_kernel_boot_path();
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=2"])
-            .args(&["--memory", "size=512M,hugepages=on"])
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--cpus", "boot=2"])
+            .args(["--memory", "size=512M,hugepages=on"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
-            .args(&["--vdpa", "path=/dev/vhost-vdpa-2,num_queues=2"])
+            .args(["--vdpa", "path=/dev/vhost-vdpa-2,num_queues=2"])
             .capture_output()
             .spawn()
             .unwrap();
@@ -6887,7 +6887,7 @@ mod windows {
 
             // Create an image file
             let out = Command::new("qemu-img")
-                .args(&[
+                .args([
                     "create",
                     "-f",
                     "raw",
@@ -6901,7 +6901,7 @@ mod windows {
 
             // Associate image to a loop device
             let out = Command::new("losetup")
-                .args(&["--show", "-f", img.to_str().unwrap()])
+                .args(["--show", "-f", img.to_str().unwrap()])
                 .output()
                 .expect("failed to create loop device")
                 .stdout;
@@ -6912,7 +6912,7 @@ mod windows {
             // Create a partition table
             // echo 'type=7' | sudo sfdisk "${LOOP}"
             let mut child = Command::new("sfdisk")
-                .args(&[loop_dev])
+                .args([loop_dev])
                 .stdin(Stdio::piped())
                 .spawn()
                 .unwrap();
@@ -6925,7 +6925,7 @@ mod windows {
 
             // Disengage the loop device
             let out = Command::new("losetup")
-                .args(&["-d", loop_dev])
+                .args(["-d", loop_dev])
                 .output()
                 .expect("loop device not found")
                 .stdout;
@@ -6933,7 +6933,7 @@ mod windows {
 
             // Re-associate loop device pointing to the partition only
             let out = Command::new("losetup")
-                .args(&[
+                .args([
                     "--show",
                     "--offset",
                     (512 * 2048).to_string().as_str(),
@@ -6954,7 +6954,7 @@ mod windows {
                 _ => panic!("Unknown filesystem type '{}'", fs),
             };
             let out = Command::new(fs_cmd)
-                .args(&[&loop_dev])
+                .args([&loop_dev])
                 .output()
                 .unwrap_or_else(|_| panic!("{} failed", fs_cmd))
                 .stdout;
@@ -6962,7 +6962,7 @@ mod windows {
 
             // Disengage the loop device
             let out = Command::new("losetup")
-                .args(&["-d", loop_dev])
+                .args(["-d", loop_dev])
                 .output()
                 .unwrap_or_else(|_| panic!("loop device '{}' not found", loop_dev))
                 .stdout;
@@ -7030,7 +7030,7 @@ mod windows {
     fn vcpu_threads_count(pid: u32) -> u8 {
         // ps -T -p 12345 | grep vcpu | wc -l
         let out = Command::new("ps")
-            .args(&["-T", "-p", format!("{}", pid).as_str()])
+            .args(["-T", "-p", format!("{}", pid).as_str()])
             .output()
             .expect("ps command failed")
             .stdout;
@@ -7040,7 +7040,7 @@ mod windows {
     fn netdev_ctrl_threads_count(pid: u32) -> u8 {
         // ps -T -p 12345 | grep "_net[0-9]*_ctrl" | wc -l
         let out = Command::new("ps")
-            .args(&["-T", "-p", format!("{}", pid).as_str()])
+            .args(["-T", "-p", format!("{}", pid).as_str()])
             .output()
             .expect("ps command failed")
             .stdout;
@@ -7054,7 +7054,7 @@ mod windows {
     fn disk_ctrl_threads_count(pid: u32) -> u8 {
         // ps -T -p 15782  | grep "_disk[0-9]*_q0" | wc -l
         let out = Command::new("ps")
-            .args(&["-T", "-p", format!("{}", pid).as_str()])
+            .args(["-T", "-p", format!("{}", pid).as_str()])
             .output()
             .expect("ps command failed")
             .stdout;
@@ -7070,11 +7070,11 @@ mod windows {
         let windows_guest = WindowsGuest::new();
 
         let mut child = GuestCommand::new(windows_guest.guest())
-            .args(&["--cpus", "boot=2,kvm_hyperv=on"])
-            .args(&["--memory", "size=4G"])
-            .args(&["--kernel", edk2_path().to_str().unwrap()])
-            .args(&["--serial", "tty"])
-            .args(&["--console", "off"])
+            .args(["--cpus", "boot=2,kvm_hyperv=on"])
+            .args(["--memory", "size=4G"])
+            .args(["--kernel", edk2_path().to_str().unwrap()])
+            .args(["--serial", "tty"])
+            .args(["--console", "off"])
             .default_disks()
             .default_net()
             .capture_output()
@@ -7116,12 +7116,12 @@ mod windows {
         ovmf_path.push(OVMF_NAME);
 
         let mut child = GuestCommand::new(windows_guest.guest())
-            .args(&["--cpus", "boot=4,kvm_hyperv=on"])
-            .args(&["--memory", "size=4G"])
-            .args(&["--kernel", ovmf_path.to_str().unwrap()])
-            .args(&["--serial", "tty"])
-            .args(&["--console", "off"])
-            .args(&[
+            .args(["--cpus", "boot=4,kvm_hyperv=on"])
+            .args(["--memory", "size=4G"])
+            .args(["--kernel", ovmf_path.to_str().unwrap()])
+            .args(["--serial", "tty"])
+            .args(["--console", "off"])
+            .args([
                 "--disk",
                 format!(
                     "path={},num_queues=4",
@@ -7133,7 +7133,7 @@ mod windows {
                 )
                 .as_str(),
             ])
-            .args(&[
+            .args([
                 "--net",
                 format!(
                     "tap=,mac={},ip={},mask=255.255.255.0,num_queues=8",
@@ -7186,12 +7186,12 @@ mod windows {
         let api_socket_source = format!("{}.1", temp_api_path(&tmp_dir));
 
         let mut child = GuestCommand::new(windows_guest.guest())
-            .args(&["--api-socket", &api_socket_source])
-            .args(&["--cpus", "boot=2,kvm_hyperv=on"])
-            .args(&["--memory", "size=4G"])
-            .args(&["--kernel", ovmf_path.to_str().unwrap()])
-            .args(&["--serial", "tty"])
-            .args(&["--console", "off"])
+            .args(["--api-socket", &api_socket_source])
+            .args(["--cpus", "boot=2,kvm_hyperv=on"])
+            .args(["--memory", "size=4G"])
+            .args(["--kernel", ovmf_path.to_str().unwrap()])
+            .args(["--serial", "tty"])
+            .args(["--console", "off"])
             .default_disks()
             .default_net()
             .capture_output()
@@ -7232,8 +7232,8 @@ mod windows {
 
         // Restore the VM from the snapshot
         let mut child = GuestCommand::new(windows_guest.guest())
-            .args(&["--api-socket", &api_socket_restored])
-            .args(&[
+            .args(["--api-socket", &api_socket_restored])
+            .args([
                 "--restore",
                 format!("source_url=file://{}", snapshot_dir).as_str(),
             ])
@@ -7275,12 +7275,12 @@ mod windows {
         let api_socket = temp_api_path(&tmp_dir);
 
         let mut child = GuestCommand::new(windows_guest.guest())
-            .args(&["--api-socket", &api_socket])
-            .args(&["--cpus", "boot=2,max=8,kvm_hyperv=on"])
-            .args(&["--memory", "size=4G"])
-            .args(&["--kernel", ovmf_path.to_str().unwrap()])
-            .args(&["--serial", "tty"])
-            .args(&["--console", "off"])
+            .args(["--api-socket", &api_socket])
+            .args(["--cpus", "boot=2,max=8,kvm_hyperv=on"])
+            .args(["--memory", "size=4G"])
+            .args(["--kernel", ovmf_path.to_str().unwrap()])
+            .args(["--serial", "tty"])
+            .args(["--console", "off"])
             .default_disks()
             .default_net()
             .capture_output()
@@ -7350,12 +7350,12 @@ mod windows {
         let api_socket = temp_api_path(&tmp_dir);
 
         let mut child = GuestCommand::new(windows_guest.guest())
-            .args(&["--api-socket", &api_socket])
-            .args(&["--cpus", "boot=2,kvm_hyperv=on"])
-            .args(&["--memory", "size=2G,hotplug_size=5G"])
-            .args(&["--kernel", ovmf_path.to_str().unwrap()])
-            .args(&["--serial", "tty"])
-            .args(&["--console", "off"])
+            .args(["--api-socket", &api_socket])
+            .args(["--cpus", "boot=2,kvm_hyperv=on"])
+            .args(["--memory", "size=2G,hotplug_size=5G"])
+            .args(["--kernel", ovmf_path.to_str().unwrap()])
+            .args(["--serial", "tty"])
+            .args(["--console", "off"])
             .default_disks()
             .default_net()
             .capture_output()
@@ -7424,12 +7424,12 @@ mod windows {
         let api_socket = temp_api_path(&tmp_dir);
 
         let mut child = GuestCommand::new(windows_guest.guest())
-            .args(&["--api-socket", &api_socket])
-            .args(&["--cpus", "boot=2,kvm_hyperv=on"])
-            .args(&["--memory", "size=4G"])
-            .args(&["--kernel", ovmf_path.to_str().unwrap()])
-            .args(&["--serial", "tty"])
-            .args(&["--console", "off"])
+            .args(["--api-socket", &api_socket])
+            .args(["--cpus", "boot=2,kvm_hyperv=on"])
+            .args(["--memory", "size=4G"])
+            .args(["--kernel", ovmf_path.to_str().unwrap()])
+            .args(["--serial", "tty"])
+            .args(["--console", "off"])
             .default_disks()
             .default_net()
             .capture_output()
@@ -7497,12 +7497,12 @@ mod windows {
         let api_socket = temp_api_path(&tmp_dir);
 
         let mut child = GuestCommand::new(windows_guest.guest())
-            .args(&["--api-socket", &api_socket])
-            .args(&["--cpus", "boot=2,kvm_hyperv=on"])
-            .args(&["--memory", "size=4G"])
-            .args(&["--kernel", ovmf_path.to_str().unwrap()])
-            .args(&["--serial", "tty"])
-            .args(&["--console", "off"])
+            .args(["--api-socket", &api_socket])
+            .args(["--cpus", "boot=2,kvm_hyperv=on"])
+            .args(["--memory", "size=4G"])
+            .args(["--kernel", ovmf_path.to_str().unwrap()])
+            .args(["--serial", "tty"])
+            .args(["--console", "off"])
             .default_disks()
             .default_net()
             .capture_output()
@@ -7592,12 +7592,12 @@ mod windows {
         let api_socket = temp_api_path(&tmp_dir);
 
         let mut child = GuestCommand::new(windows_guest.guest())
-            .args(&["--api-socket", &api_socket])
-            .args(&["--cpus", "boot=2,kvm_hyperv=on"])
-            .args(&["--memory", "size=2G"])
-            .args(&["--kernel", ovmf_path.to_str().unwrap()])
-            .args(&["--serial", "tty"])
-            .args(&["--console", "off"])
+            .args(["--api-socket", &api_socket])
+            .args(["--cpus", "boot=2,kvm_hyperv=on"])
+            .args(["--memory", "size=2G"])
+            .args(["--kernel", ovmf_path.to_str().unwrap()])
+            .args(["--serial", "tty"])
+            .args(["--console", "off"])
             .default_disks()
             .default_net()
             .capture_output()
@@ -7722,15 +7722,15 @@ mod windows {
         let api_socket = temp_api_path(&tmp_dir);
 
         let mut child = GuestCommand::new(windows_guest.guest())
-            .args(&["--api-socket", &api_socket])
-            .args(&["--cpus", "boot=2,kvm_hyperv=on"])
-            .args(&["--memory", "size=4G"])
-            .args(&["--kernel", ovmf_path.to_str().unwrap()])
-            .args(&["--serial", "tty"])
-            .args(&["--console", "off"])
+            .args(["--api-socket", &api_socket])
+            .args(["--cpus", "boot=2,kvm_hyperv=on"])
+            .args(["--memory", "size=4G"])
+            .args(["--kernel", ovmf_path.to_str().unwrap()])
+            .args(["--serial", "tty"])
+            .args(["--console", "off"])
             .default_disks()
             // The multi net dev config is borrowed from test_multiple_network_interfaces
-            .args(&[
+            .args([
                 "--net",
                 windows_guest.guest().default_net_string().as_str(),
                 "tap=,mac=8a:6b:6f:5a:de:ac,ip=192.168.3.1,mask=255.255.255.0",
@@ -7782,13 +7782,13 @@ mod sgx {
         kernel_path.push("vmlinux_w_sgx");
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
-            .args(&["--sgx-epc", "id=epc0,size=64M"])
+            .args(["--sgx-epc", "id=epc0,size=64M"])
             .capture_output()
             .spawn()
             .unwrap();
@@ -7893,10 +7893,10 @@ mod vfio {
         let vfio_tap3 = "vfio-tap3";
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=4"])
-            .args(&["--memory", "size=2G,hugepages=on,shared=on"])
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&[
+            .args(["--cpus", "boot=4"])
+            .args(["--memory", "size=2G,hugepages=on,shared=on"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args([
                 "--disk",
                 format!(
                     "path={}",
@@ -7911,7 +7911,7 @@ mod vfio {
                 format!("path={}", vfio_disk_path.to_str().unwrap()).as_str(),
                 format!("path={},iommu=on", blk_file_path.to_str().unwrap()).as_str(),
             ])
-            .args(&[
+            .args([
                 "--cmdline",
                 format!(
                     "{} kvm-intel.nested=1 vfio_iommu_type1.allow_unsafe_interrupts",
@@ -7919,7 +7919,7 @@ mod vfio {
                 )
                 .as_str(),
             ])
-            .args(&[
+            .args([
                 "--net",
                 format!("tap={},mac={}", vfio_tap0, guest.network.guest_mac).as_str(),
                 format!(
@@ -8101,14 +8101,14 @@ mod vfio {
         let api_socket = temp_api_path(&guest.tmp_dir);
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=4"])
-            .args(&[
+            .args(["--cpus", "boot=4"])
+            .args([
                 "--memory",
                 format!("size=4G,hotplug_size=4G,hotplug_method={}", hotplug_method).as_str(),
             ])
-            .args(&["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
-            .args(&["--device", "path=/sys/bus/pci/devices/0000:31:00.0/"])
-            .args(&["--api-socket", &api_socket])
+            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .args(["--device", "path=/sys/bus/pci/devices/0000:31:00.0/"])
+            .args(["--api-socket", &api_socket])
             .default_disks()
             .default_net()
             .capture_output()
@@ -8155,10 +8155,10 @@ mod vfio {
         let api_socket = temp_api_path(&guest.tmp_dir);
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=4"])
-            .args(&["--memory", "size=4G"])
-            .args(&["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
-            .args(&["--api-socket", &api_socket])
+            .args(["--cpus", "boot=4"])
+            .args(["--memory", "size=4G"])
+            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .args(["--api-socket", &api_socket])
             .default_disks()
             .default_net()
             .capture_output()
@@ -8197,11 +8197,11 @@ mod vfio {
         let api_socket = temp_api_path(&guest.tmp_dir);
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=4"])
-            .args(&["--memory", "size=4G"])
-            .args(&["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
-            .args(&["--device", "path=/sys/bus/pci/devices/0000:31:00.0/"])
-            .args(&["--api-socket", &api_socket])
+            .args(["--cpus", "boot=4"])
+            .args(["--memory", "size=4G"])
+            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .args(["--device", "path=/sys/bus/pci/devices/0000:31:00.0/"])
+            .args(["--api-socket", &api_socket])
             .default_disks()
             .default_net()
             .capture_output()
@@ -8238,7 +8238,7 @@ mod live_migration {
     ) -> bool {
         // Start to receive migration from the destintion VM
         let mut receive_migration = Command::new(clh_command("ch-remote"))
-            .args(&[
+            .args([
                 &format!("--api-socket={}", dest_api_socket),
                 "receive-migration",
                 &format! {"unix:{}", migration_socket},
@@ -8395,17 +8395,17 @@ mod live_migration {
         let src_api_socket = temp_api_path(&guest.tmp_dir);
         let mut src_vm_cmd = GuestCommand::new_with_binary_path(&guest, &src_vm_path);
         src_vm_cmd
-            .args(&[
+            .args([
                 "--cpus",
                 format!("boot={},max={}", boot_vcpus, max_vcpus).as_str(),
             ])
             .args(memory_param)
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
-            .args(&["--net", net_params.as_str()])
-            .args(&["--api-socket", &src_api_socket])
-            .args(&[
+            .args(["--net", net_params.as_str()])
+            .args(["--api-socket", &src_api_socket])
+            .args([
                 "--pmem",
                 format!("file={}", pmem_temp_file.as_path().to_str().unwrap(),).as_str(),
             ]);
@@ -8415,7 +8415,7 @@ mod live_migration {
         let mut dest_api_socket = temp_api_path(&guest.tmp_dir);
         dest_api_socket.push_str(".dest");
         let mut dest_child = GuestCommand::new(&guest)
-            .args(&["--api-socket", &dest_api_socket])
+            .args(["--api-socket", &dest_api_socket])
             .capture_output()
             .spawn()
             .unwrap();
@@ -8559,17 +8559,17 @@ mod live_migration {
         let src_api_socket = temp_api_path(&guest.tmp_dir);
         let mut src_vm_cmd = GuestCommand::new_with_binary_path(&guest, &src_vm_path);
         src_vm_cmd
-            .args(&[
+            .args([
                 "--cpus",
                 format!("boot={},max={}", boot_vcpus, max_vcpus).as_str(),
             ])
             .args(memory_param)
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
-            .args(&["--net", net_params.as_str()])
-            .args(&["--api-socket", &src_api_socket])
-            .args(&[
+            .args(["--net", net_params.as_str()])
+            .args(["--api-socket", &src_api_socket])
+            .args([
                 "--pmem",
                 format!("file={}", pmem_temp_file.as_path().to_str().unwrap(),).as_str(),
             ]);
@@ -8579,7 +8579,7 @@ mod live_migration {
         let mut dest_api_socket = temp_api_path(&guest.tmp_dir);
         dest_api_socket.push_str(".dest");
         let mut dest_child = GuestCommand::new(&guest)
-            .args(&["--api-socket", &dest_api_socket])
+            .args(["--api-socket", &dest_api_socket])
             .capture_output()
             .spawn()
             .unwrap();
@@ -8760,17 +8760,17 @@ mod live_migration {
         let src_api_socket = temp_api_path(&guest.tmp_dir);
         let mut src_vm_cmd = GuestCommand::new_with_binary_path(&guest, &src_vm_path);
         src_vm_cmd
-            .args(&[
+            .args([
                 "--cpus",
                 format!("boot={},max={}", boot_vcpus, max_vcpus).as_str(),
             ])
             .args(memory_param)
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
-            .args(&["--net", net_params.as_str()])
-            .args(&["--api-socket", &src_api_socket])
-            .args(&[
+            .args(["--net", net_params.as_str()])
+            .args(["--api-socket", &src_api_socket])
+            .args([
                 "--pmem",
                 format!("file={}", pmem_temp_file.as_path().to_str().unwrap(),).as_str(),
             ]);
@@ -8780,7 +8780,7 @@ mod live_migration {
         let mut dest_api_socket = temp_api_path(&guest.tmp_dir);
         dest_api_socket.push_str(".dest");
         let mut dest_child = GuestCommand::new(&guest)
-            .args(&["--api-socket", &dest_api_socket])
+            .args(["--api-socket", &dest_api_socket])
             .capture_output()
             .spawn()
             .unwrap();
@@ -8985,28 +8985,28 @@ mod live_migration {
         let src_api_socket = temp_api_path(&guest.tmp_dir);
         let mut src_vm_cmd = GuestCommand::new_with_binary_path(&guest, &src_vm_path);
         src_vm_cmd
-            .args(&[
+            .args([
                 "--cpus",
                 format!("boot={},max={}", boot_vcpus, max_vcpus).as_str(),
             ])
             .args(memory_param)
-            .args(&["--kernel", kernel_path.to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
-            .args(&["--net", net_params.as_str()])
-            .args(&["--api-socket", &src_api_socket])
-            .args(&[
+            .args(["--net", net_params.as_str()])
+            .args(["--api-socket", &src_api_socket])
+            .args([
                 "--pmem",
                 format!("file={}", pmem_temp_file.as_path().to_str().unwrap(),).as_str(),
             ])
-            .args(&["--watchdog"]);
+            .args(["--watchdog"]);
         let mut src_child = src_vm_cmd.capture_output().spawn().unwrap();
 
         // Start the destination VM
         let mut dest_api_socket = temp_api_path(&guest.tmp_dir);
         dest_api_socket.push_str(".dest");
         let mut dest_child = GuestCommand::new(&guest)
-            .args(&["--api-socket", &dest_api_socket])
+            .args(["--api-socket", &dest_api_socket])
             .capture_output()
             .spawn()
             .unwrap();
@@ -9166,7 +9166,7 @@ mod live_migration {
         let mut dest_api_socket = temp_api_path(&migration_guest.tmp_dir);
         dest_api_socket.push_str(".dest");
         let mut dest_child = GuestCommand::new(&migration_guest)
-            .args(&["--api-socket", &dest_api_socket])
+            .args(["--api-socket", &dest_api_socket])
             .capture_output()
             .spawn()
             .unwrap();
@@ -9482,12 +9482,12 @@ mod rate_limiter {
         );
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", &format!("boot={}", num_queues / 2)])
-            .args(&["--memory", "size=4G"])
-            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--cpus", &format!("boot={}", num_queues / 2)])
+            .args(["--memory", "size=4G"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
-            .args(&["--net", net_params.as_str()])
+            .args(["--net", net_params.as_str()])
             .capture_output()
             .spawn()
             .unwrap();
@@ -9555,11 +9555,11 @@ mod rate_limiter {
         };
 
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", &format!("boot={}", num_queues)])
-            .args(&["--memory", "size=4G"])
-            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args(&[
+            .args(["--cpus", &format!("boot={}", num_queues)])
+            .args(["--memory", "size=4G"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args([
                 "--disk",
                 format!(
                     "path={}",
@@ -9574,7 +9574,7 @@ mod rate_limiter {
                 test_blk_params.as_str(),
             ])
             .default_net()
-            .args(&["--api-socket", &api_socket])
+            .args(["--api-socket", &api_socket])
             .capture_output()
             .spawn()
             .unwrap();
