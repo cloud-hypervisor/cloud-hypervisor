@@ -5,7 +5,7 @@ authors = ["The Chromium OS Authors"]
 edition = "2021"
 
 [dependencies]
-libc = "0.2.132"
+libc = "0.2.133"
 vm-memory = "0.9.0"
 
 [target.'cfg(target_arch = "aarch64")'.dependencies]

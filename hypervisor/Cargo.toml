@@ -14,7 +14,7 @@ tdx = []
 anyhow = "1.0.65"
 byteorder = "1.4.3"
 thiserror = "1.0.35"
-libc = "0.2.132"
+libc = "0.2.133"
 log = "0.4.17"
 kvm-ioctls = { version = "0.11.0", optional = true }
 kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch-v0.5.0-tdx", features = ["with-serde", "fam-wrappers"], optional  = true }
@@ -32,4 +32,4 @@ default-features = false
 features = ["std", "decoder", "op_code_info", "instr_info", "fast_fmt"]
 
 [dev-dependencies]
-env_logger = "0.9.0"
+env_logger = "0.9.1"
