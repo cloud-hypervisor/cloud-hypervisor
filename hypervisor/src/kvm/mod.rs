@@ -822,7 +822,7 @@ impl vm::Vm for KvmVm {
         tdx_command(
             &self.fd.as_raw_fd(),
             TdxCommand::InitMemRegion,
-            if measure { 1 } else { 0 },
+            u32::from(measure),
             &data as *const _ as u64,
         )
         .map_err(vm::HypervisorVmError::InitMemRegionTdx)

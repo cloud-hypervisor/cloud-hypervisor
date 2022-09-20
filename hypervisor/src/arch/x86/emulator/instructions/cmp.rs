@@ -38,11 +38,7 @@ fn calc_rflags_cpazso(op0: u64, op1: u64, op_size: usize) -> u64 {
     // AF cares about the lowest 4 bits (nibble). msb_shift is 3 in this case.
     let af = ((cout >> 3) & 0x1) << AF_SHIFT;
 
-    let zf = if result & (!0u64 >> (63 - msb_shift)) == 0 {
-        1
-    } else {
-        0
-    } << ZF_SHIFT;
+    let zf = u64::from(result & (!0u64 >> (63 - msb_shift)) == 0) << ZF_SHIFT;
 
     let sf = ((result >> msb_shift) & 0x1) << SF_SHIFT;
 
