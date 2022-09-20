@@ -231,7 +231,7 @@ impl CpuidPatch {
     ) {
         let mut entry_found = false;
         for entry in cpuid.iter_mut() {
-            if entry.function == function && (index == None || index.unwrap() == entry.index) {
+            if entry.function == function && (index.is_none() || index.unwrap() == entry.index) {
                 entry_found = true;
                 match reg {
                     CpuidReg::EAX => {

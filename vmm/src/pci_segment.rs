@@ -282,9 +282,9 @@ impl Aml for PciDsmMethod {
         let uuid = Uuid::parse_str("E5C937D0-3553-4D7A-9117-EA4D19C3434D").unwrap();
         let (uuid_d1, uuid_d2, uuid_d3, uuid_d4) = uuid.as_fields();
         let mut uuid_buf = vec![];
-        uuid_buf.extend(&uuid_d1.to_le_bytes());
-        uuid_buf.extend(&uuid_d2.to_le_bytes());
-        uuid_buf.extend(&uuid_d3.to_le_bytes());
+        uuid_buf.extend(uuid_d1.to_le_bytes());
+        uuid_buf.extend(uuid_d2.to_le_bytes());
+        uuid_buf.extend(uuid_d3.to_le_bytes());
         uuid_buf.extend(uuid_d4);
         aml::Method::new(
             "_DSM".into(),

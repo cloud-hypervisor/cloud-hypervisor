@@ -377,7 +377,7 @@ fn create_app<'a>(
             Arg::new("seccomp")
                 .long("seccomp")
                 .takes_value(true)
-                .possible_values(&["true", "false", "log"])
+                .possible_values(["true", "false", "log"])
                 .default_value("true"),
         );
 

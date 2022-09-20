@@ -2078,7 +2078,7 @@ impl Vm {
 
     fn setup_signal_handler(&mut self) -> Result<()> {
         let console = self.device_manager.lock().unwrap().console().clone();
-        let signals = Signals::new(&Vm::HANDLED_SIGNALS);
+        let signals = Signals::new(Vm::HANDLED_SIGNALS);
         match signals {
             Ok(signals) => {
                 self.signals = Some(signals.handle());
@@ -2938,7 +2938,7 @@ impl Transportable for Vm {
             self.memory_manager
                 .lock()
                 .unwrap()
-                .send(&*memory_manager_snapshot.clone(), destination_url)?;
+                .send(&memory_manager_snapshot.clone(), destination_url)?;
         } else {
             return Err(MigratableError::Restore(anyhow!(
                 "Missing memory manager snapshot"

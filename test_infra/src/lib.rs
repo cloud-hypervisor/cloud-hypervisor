@@ -90,7 +90,7 @@ impl GuestNetworkConfig {
 
         match (|| -> Result<(), WaitForBootError> {
             let listener =
-                TcpListener::bind(&listen_addr.as_str()).map_err(WaitForBootError::Listen)?;
+                TcpListener::bind(listen_addr.as_str()).map_err(WaitForBootError::Listen)?;
             listener
                 .set_nonblocking(true)
                 .expect("Cannot set non-blocking for tcp listener");
@@ -228,7 +228,7 @@ impl Drop for WindowsDiskConfig {
 
         // losetup -d <loopback_device>
         std::process::Command::new("losetup")
-            .args(&["-d", self.loopback_device.as_str()])
+            .args(["-d", self.loopback_device.as_str()])
             .output()
             .expect("Expect removing loopback device to succeed");
     }
@@ -300,8 +300,8 @@ impl DiskConfig for UbuntuDiskConfig {
             .expect("Expected writing out network-config to succeed");
 
         std::process::Command::new("mkdosfs")
-            .args(&["-n", "cidata"])
-            .args(&["-C", cloudinit_file_path.as_str()])
+            .args(["-n", "cidata"])
+            .args(["-C", cloudinit_file_path.as_str()])
             .arg("8192")
             .output()
             .expect("Expect creating disk image to succeed");
@@ -311,8 +311,8 @@ impl DiskConfig for UbuntuDiskConfig {
             .for_each(|x| {
                 std::process::Command::new("mcopy")
                     .arg("-o")
-                    .args(&["-i", cloudinit_file_path.as_str()])
-                    .args(&["-s", cloud_init_directory.join(x).to_str().unwrap(), "::"])
+                    .args(["-i", cloudinit_file_path.as_str()])
+                    .args(["-s", cloud_init_directory.join(x).to_str().unwrap(), "::"])
                     .output()
                     .expect("Expect copying files to disk image to succeed");
             });
@@ -396,7 +396,7 @@ impl DiskConfig for WindowsDiskConfig {
         std::process::Command::new("dmsetup")
             .arg("create")
             .arg(windows_snapshot_cow.as_str())
-            .args(&[
+            .args([
                 "--table",
                 format!("0 {} linear {} 0", cow_file_blk_size, self.loopback_device).as_str(),
             ])
@@ -415,7 +415,7 @@ impl DiskConfig for WindowsDiskConfig {
         std::process::Command::new("dmsetup")
             .arg("create")
             .arg(windows_snapshot.as_str())
-            .args(&[
+            .args([
                 "--table",
                 format!(
                     "0 {} snapshot /dev/mapper/windows-base /dev/mapper/{} P 8",
@@ -723,14 +723,14 @@ pub fn ssh_command_ip(
 
 pub fn exec_host_command_status(command: &str) -> ExitStatus {
     std::process::Command::new("bash")
-        .args(&["-c", command])
+        .args(["-c", command])
         .status()
         .unwrap_or_else(|_| panic!("Expected '{}' to run", command))
 }
 
 pub fn exec_host_command_output(command: &str) -> Output {
     std::process::Command::new("bash")
-        .args(&["-c", command])
+        .args(["-c", command])
         .output()
         .unwrap_or_else(|_| panic!("Expected '{}' to run", command))
 }
@@ -1293,7 +1293,7 @@ impl<'a> GuestCommand<'a> {
 
     pub fn default_disks(&mut self) -> &mut Self {
         if self.guest.disk_config.disk(DiskType::CloudInit).is_some() {
-            self.args(&[
+            self.args([
                 "--disk",
                 format!(
                     "path={}",
@@ -1310,7 +1310,7 @@ impl<'a> GuestCommand<'a> {
                 .as_str(),
             ])
         } else {
-            self.args(&[
+            self.args([
                 "--disk",
                 format!(
                     "path={}",
@@ -1325,7 +1325,7 @@ impl<'a> GuestCommand<'a> {
     }
 
     pub fn default_net(&mut self) -> &mut Self {
-        self.args(&["--net", self.guest.default_net_string().as_str()])
+        self.args(["--net", self.guest.default_net_string().as_str()])
     }
 }
 
@@ -1536,7 +1536,7 @@ pub fn measure_virtio_net_throughput(
     let mut clients = Vec::new();
     for n in 0..queue_pairs {
         let mut cmd = Command::new("iperf3");
-        cmd.args(&[
+        cmd.args([
             "-J", // Output in JSON format
             "-c",
             &guest.network.guest_ip,
@@ -1548,7 +1548,7 @@ pub fn measure_virtio_net_throughput(
         // For measuring the guest transmit throughput (as a sender),
         // use reverse mode of the iperf3 client on the host
         if !receive {
-            cmd.args(&["-R"]);
+            cmd.args(["-R"]);
         }
         let client = cmd
             .stderr(Stdio::piped())
@@ -1650,7 +1650,7 @@ pub fn measure_virtio_net_latency(guest: &Guest, test_timeout: u32) -> Result<Ve
         .unwrap()
         .to_string();
     let mut c = Command::new(ethr_path)
-        .args(&[
+        .args([
             "-c",
             &guest.network.guest_ip,
             "-t",

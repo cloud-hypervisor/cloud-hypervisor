@@ -415,7 +415,7 @@ impl Vmm {
     }
 
     fn setup_signal_handler(&mut self) -> Result<()> {
-        let signals = Signals::new(&Self::HANDLED_SIGNALS);
+        let signals = Signals::new(Self::HANDLED_SIGNALS);
         match signals {
             Ok(signals) => {
                 self.signals = Some(signals.handle());
