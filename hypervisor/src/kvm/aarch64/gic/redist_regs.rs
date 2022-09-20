@@ -200,13 +200,7 @@ pub fn construct_gicr_typers(vcpu_states: &[CpuState]) -> Vec<u64> {
     let mut gicr_typers: Vec<u64> = Vec::new();
     for (index, state) in vcpu_states.iter().enumerate() {
         let state: VcpuKvmState = state.clone().into();
-        let last = {
-            if index == vcpu_states.len() - 1 {
-                1
-            } else {
-                0
-            }
-        };
+        let last = (index == vcpu_states.len() - 1) as u64;
         // state.sys_regs is a big collection of system registers, including MIPDR_EL1
         let mpidr: Vec<Register> = state
             .sys_regs

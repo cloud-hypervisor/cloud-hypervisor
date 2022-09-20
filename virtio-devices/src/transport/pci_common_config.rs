@@ -166,13 +166,7 @@ impl VirtioPciCommonConfig {
             0x16 => self.queue_select,
             0x18 => self.with_queue(queues, |q| q.size()).unwrap_or(0),
             0x1a => self.msix_queues.lock().unwrap()[self.queue_select as usize],
-            0x1c => {
-                if self.with_queue(queues, |q| q.ready()).unwrap_or(false) {
-                    1
-                } else {
-                    0
-                }
-            }
+            0x1c => u16::from(self.with_queue(queues, |q| q.ready()).unwrap_or(false)),
             0x1e => self.queue_select, // notify_off
             _ => {
                 warn!("invalid virtio register word read: 0x{:x}", offset);
