@@ -3271,10 +3271,10 @@ mod common_parallel {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
         let mut child = GuestCommand::new(&guest)
-            .args(&["--cpus", "boot=1"])
-            .args(&["--memory", "size=512M"])
-            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
             .capture_output()
@@ -9383,12 +9383,12 @@ mod aarch64_acpi {
             let guest = Guest::new(disk_config);
 
             let mut child = GuestCommand::new(&guest)
-                .args(&["--cpus", "boot=1"])
-                .args(&["--memory", "size=512M"])
-                .args(&["--kernel", edk2_path().to_str().unwrap()])
+                .args(["--cpus", "boot=1"])
+                .args(["--memory", "size=512M"])
+                .args(["--kernel", edk2_path().to_str().unwrap()])
                 .default_disks()
                 .default_net()
-                .args(&["--serial", "tty", "--console", "off"])
+                .args(["--serial", "tty", "--console", "off"])
                 .capture_output()
                 .spawn()
                 .unwrap();
