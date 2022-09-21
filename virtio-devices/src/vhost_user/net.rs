@@ -24,7 +24,7 @@ use virtio_bindings::bindings::virtio_net::{
     VIRTIO_NET_F_CSUM, VIRTIO_NET_F_CTRL_VQ, VIRTIO_NET_F_GUEST_CSUM, VIRTIO_NET_F_GUEST_ECN,
     VIRTIO_NET_F_GUEST_TSO4, VIRTIO_NET_F_GUEST_TSO6, VIRTIO_NET_F_GUEST_UFO,
     VIRTIO_NET_F_HOST_ECN, VIRTIO_NET_F_HOST_TSO4, VIRTIO_NET_F_HOST_TSO6, VIRTIO_NET_F_HOST_UFO,
-    VIRTIO_NET_F_MAC, VIRTIO_NET_F_MRG_RXBUF,
+    VIRTIO_NET_F_MAC, VIRTIO_NET_F_MRG_RXBUF, VIRTIO_NET_F_MTU,
 };
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use virtio_queue::{Queue, QueueT};
@@ -70,6 +70,7 @@ impl Net {
     pub fn new(
         id: String,
         mac_addr: MacAddr,
+        mtu: Option<u16>,
         vu_cfg: VhostUserConfig,
         server: bool,
         seccomp_action: SeccompAction,
@@ -126,8 +127,12 @@ impl Net {
             | 1 << VIRTIO_F_VERSION_1
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
 
+        if mtu.is_some() {
+            avail_features |= 1u64 << VIRTIO_NET_F_MTU;
+        }
+
         let mut config = VirtioNetConfig::default();
-        build_net_config_space(&mut config, mac_addr, num_queues, &mut avail_features);
+        build_net_config_space(&mut config, mac_addr, num_queues, mtu, &mut avail_features);
 
         let mut vu =
             VhostUserHandle::connect_vhost_user(server, &vu_cfg.socket, num_queues as u64, false)?;

@@ -66,6 +66,8 @@ const SIOCGIFFLAGS: u64 = 0x8913;
 const SIOCGIFHWADDR: u64 = 0x8927;
 const SIOCSIFFLAGS: u64 = 0x8914;
 const SIOCSIFADDR: u64 = 0x8916;
+const SIOCGIFMTU: u64 = 0x8921;
+const SIOCSIFMTU: u64 = 0x8922;
 const SIOCSIFHWADDR: u64 = 0x8924;
 const SIOCSIFNETMASK: u64 = 0x891c;
 
@@ -252,9 +254,11 @@ fn create_vmm_ioctl_seccomp_rule_common(
         and![Cond::new(1, ArgLen::Dword, Eq, FIONBIO)?],
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCGIFFLAGS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCGIFHWADDR)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, SIOCGIFMTU)?],
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCSIFADDR)?],
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCSIFFLAGS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCSIFHWADDR)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, SIOCSIFMTU)?],
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCSIFNETMASK)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TCSETS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TCGETS)?],

@@ -297,6 +297,37 @@ impl Tap {
         Ok(())
     }
 
+    pub fn mtu(&self) -> Result<i32> {
+        let sock = create_unix_socket().map_err(Error::NetUtil)?;
+
+        let ifreq = self.get_ifreq();
+
+        // ioctl is safe. Called with a valid sock fd, and we check the return.
+        let ret = unsafe { ioctl_with_ref(&sock, net_gen::sockios::SIOCGIFMTU as c_ulong, &ifreq) };
+        if ret < 0 {
+            return Err(Error::IoctlError(IoError::last_os_error()));
+        }
+
+        let mtu = unsafe { ifreq.ifr_ifru.ifru_mtu };
+
+        Ok(mtu)
+    }
+
+    pub fn set_mtu(&self, mtu: i32) -> Result<()> {
+        let sock = create_unix_socket().map_err(Error::NetUtil)?;
+
+        let mut ifreq = self.get_ifreq();
+        ifreq.ifr_ifru.ifru_mtu = mtu;
+
+        // ioctl is safe. Called with a valid sock fd, and we check the return.
+        let ret = unsafe { ioctl_with_ref(&sock, net_gen::sockios::SIOCSIFMTU as c_ulong, &ifreq) };
+        if ret < 0 {
+            return Err(Error::IoctlError(IoError::last_os_error()));
+        }
+
+        Ok(())
+    }
+
     /// Set the offload flags for the tap interface.
     pub fn set_offload(&self, flags: c_uint) -> Result<()> {
         // ioctl is safe. Called with a valid tap fd, and we check the return.

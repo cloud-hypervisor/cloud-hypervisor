@@ -30,6 +30,8 @@ pub enum Error {
     TapGetMac(TapError),
     #[error("Setting vnet header size failed: {0}")]
     TapSetVnetHdrSize(TapError),
+    #[error("Setting MTU failed: {0}")]
+    TapSetMtu(TapError),
     #[error("Enabling tap interface failed: {0}")]
     TapEnable(TapError),
 }
@@ -63,6 +65,7 @@ pub fn open_tap(
     ip_addr: Option<Ipv4Addr>,
     netmask: Option<Ipv4Addr>,
     host_mac: &mut Option<MacAddr>,
+    mtu: Option<u16>,
     num_rx_q: usize,
     flags: Option<i32>,
 ) -> Result<Vec<Tap>> {
@@ -94,6 +97,9 @@ pub fn open_tap(
                 tap.set_mac_addr(*mac).map_err(Error::TapSetMac)?
             } else {
                 *host_mac = Some(tap.get_mac_addr().map_err(Error::TapGetMac)?)
+            }
+            if let Some(mtu) = mtu {
+                tap.set_mtu(mtu as i32).map_err(Error::TapSetMtu)?;
             }
             tap.enable().map_err(Error::TapEnable)?;
 

@@ -2411,9 +2411,9 @@ mod common_parallel {
             .args(["--memory", "size=512M"])
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--net", guest.default_net_string_w_mtu(3000).as_str()])
             .capture_output()
-            .default_disks()
-            .default_net();
+            .default_disks();
 
         let mut child = cmd.spawn().unwrap();
 
@@ -2433,6 +2433,13 @@ mod common_parallel {
                     .unwrap()
                     .trim(),
                 "success"
+            );
+            assert_eq!(
+                guest
+                    .ssh_command(format!("cat /sys/class/net/{}/mtu", iface).as_str())
+                    .unwrap()
+                    .trim(),
+                "3000"
             );
         });
 
@@ -6098,6 +6105,7 @@ mod common_parallel {
             Some(std::net::Ipv4Addr::from_str(&guest.network.host_ip).unwrap()),
             None,
             &mut None,
+            None,
             num_queue_pairs,
             Some(libc::O_RDWR | libc::O_NONBLOCK),
         )

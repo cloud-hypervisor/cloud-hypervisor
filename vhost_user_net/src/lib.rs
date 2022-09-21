@@ -133,6 +133,7 @@ impl VhostUserNetBackend {
             Some(ip_addr),
             Some(netmask),
             &mut Some(host_mac),
+            None,
             num_queues / 2,
             None,
         )

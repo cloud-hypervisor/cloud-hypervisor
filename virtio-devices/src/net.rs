@@ -49,6 +49,9 @@ use vmm_sys_util::eventfd::EventFd;
 // Event available on the control queue.
 const CTRL_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 
+// Following the VIRTIO specification, the MTU should be at least 1280.
+pub const MIN_MTU: u16 = 1280;
+
 pub struct NetCtrlEpollHandler {
     pub mem: GuestMemoryAtomic<GuestMemoryMmap>,
     pub kill_evt: EventFd,
@@ -428,7 +431,7 @@ impl VersionMapped for NetState {}
 impl Net {
     /// Create a new virtio network device with the given TAP interface.
     #[allow(clippy::too_many_arguments)]
-    pub fn new_with_tap(
+    fn new_with_tap(
         id: String,
         taps: Vec<Tap>,
         guest_mac: Option<MacAddr>,
@@ -439,6 +442,11 @@ impl Net {
         rate_limiter_config: Option<RateLimiterConfig>,
         exit_evt: EventFd,
     ) -> Result<Self> {
+        let mut mtu = None;
+        if !taps.is_empty() {
+            mtu = Some(taps[0].mtu().map_err(Error::TapError)? as u16);
+        }
+
         let mut avail_features = 1 << VIRTIO_NET_F_CSUM
             | 1 << VIRTIO_NET_F_CTRL_GUEST_OFFLOADS
             | 1 << VIRTIO_NET_F_GUEST_CSUM
@@ -453,6 +461,9 @@ impl Net {
             | 1 << VIRTIO_RING_F_EVENT_IDX
             | 1 << VIRTIO_F_VERSION_1;
 
+        if mtu.is_some() {
+            avail_features |= 1u64 << VIRTIO_NET_F_MTU;
+        }
         if iommu {
             avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
         }
@@ -462,9 +473,9 @@ impl Net {
 
         let mut config = VirtioNetConfig::default();
         if let Some(mac) = guest_mac {
-            build_net_config_space(&mut config, mac, num_queues, &mut avail_features);
+            build_net_config_space(&mut config, mac, num_queues, mtu, &mut avail_features);
         } else {
-            build_net_config_space_with_mq(&mut config, num_queues, &mut avail_features);
+            build_net_config_space_with_mq(&mut config, num_queues, mtu, &mut avail_features);
         }
 
         Ok(Net {
@@ -497,6 +508,7 @@ impl Net {
         netmask: Option<Ipv4Addr>,
         guest_mac: Option<MacAddr>,
         host_mac: &mut Option<MacAddr>,
+        mtu: Option<u16>,
         iommu: bool,
         num_queues: usize,
         queue_size: u16,
@@ -504,8 +516,16 @@ impl Net {
         rate_limiter_config: Option<RateLimiterConfig>,
         exit_evt: EventFd,
     ) -> Result<Self> {
-        let taps = open_tap(if_name, ip_addr, netmask, host_mac, num_queues / 2, None)
-            .map_err(Error::OpenTap)?;
+        let taps = open_tap(
+            if_name,
+            ip_addr,
+            netmask,
+            host_mac,
+            mtu,
+            num_queues / 2,
+            None,
+        )
+        .map_err(Error::OpenTap)?;
 
         Self::new_with_tap(
             id,
