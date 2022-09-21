@@ -796,6 +796,13 @@ impl Guest {
         )
     }
 
+    pub fn default_net_string_w_mtu(&self, mtu: u16) -> String {
+        format!(
+            "tap=,mac={},ip={},mask=255.255.255.0,mtu={}",
+            self.network.guest_mac, self.network.host_ip, mtu
+        )
+    }
+
     pub fn ssh_command(&self, command: &str) -> Result<String, SshCommandError> {
         ssh_command_ip(
             command,

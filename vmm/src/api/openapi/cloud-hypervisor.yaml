@@ -819,6 +819,11 @@ components:
           default: "255.255.255.0"
         mac:
           type: string
+        host_mac:
+          type: string
+        mtu:
+          type: integer
+          default: 1280
         iommu:
           type: boolean
           default: false

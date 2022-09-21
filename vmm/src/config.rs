@@ -180,6 +180,8 @@ pub enum ValidationError {
     IommuNotSupported,
     /// Duplicated device path (device added twice)
     DuplicateDevicePath(String),
+    /// Provided MTU is lower than what the VIRTIO specification expects
+    InvalidMtu(u16),
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -280,6 +282,13 @@ impl fmt::Display for ValidationError {
                 write!(f, "Device does not support being placed behind IOMMU")
             }
             DuplicateDevicePath(p) => write!(f, "Duplicated device path: {}", p),
+            &InvalidMtu(mtu) => {
+                write!(
+                    f,
+                    "Provided MTU {} is lower than 1280 (expected by VIRTIO specification)",
+                    mtu
+                )
+            }
         }
     }
 }
@@ -1238,6 +1247,8 @@ pub struct NetConfig {
     pub mac: MacAddr,
     #[serde(default)]
     pub host_mac: Option<MacAddr>,
+    #[serde(default = "default_netconfig_mtu")]
+    pub mtu: u16,
     #[serde(default)]
     pub iommu: bool,
     #[serde(default = "default_netconfig_num_queues")]
@@ -1275,6 +1286,10 @@ fn default_netconfig_mac() -> MacAddr {
     MacAddr::local_random()
 }
 
+fn default_netconfig_mtu() -> u16 {
+    virtio_devices::net::MIN_MTU
+}
+
 fn default_netconfig_num_queues() -> usize {
     DEFAULT_NUM_QUEUES_VUNET
 }
@@ -1291,6 +1306,7 @@ impl Default for NetConfig {
             mask: default_netconfig_mask(),
             mac: default_netconfig_mac(),
             host_mac: None,
+            mtu: default_netconfig_mtu(),
             iommu: false,
             num_queues: default_netconfig_num_queues(),
             queue_size: default_netconfig_queue_size(),
@@ -1322,6 +1338,7 @@ impl NetConfig {
             .add("mask")
             .add("mac")
             .add("host_mac")
+            .add("mtu")
             .add("iommu")
             .add("queue_size")
             .add("num_queues")
@@ -1353,6 +1370,10 @@ impl NetConfig {
             .map_err(Error::ParseNetwork)?
             .unwrap_or_else(default_netconfig_mac);
         let host_mac = parser.convert("host_mac").map_err(Error::ParseNetwork)?;
+        let mtu = parser
+            .convert("mtu")
+            .map_err(Error::ParseNetwork)?
+            .unwrap_or_else(default_netconfig_mtu);
         let iommu = parser
             .convert::<Toggle>("iommu")
             .map_err(Error::ParseNetwork)?
@@ -1442,6 +1463,7 @@ impl NetConfig {
             mask,
             mac,
             host_mac,
+            mtu,
             iommu,
             num_queues,
             queue_size,
@@ -1491,6 +1513,10 @@ impl NetConfig {
                     return Err(ValidationError::OnIommuSegment(self.pci_segment));
                 }
             }
+        }
+
+        if self.mtu < virtio_devices::net::MIN_MTU {
+            return Err(ValidationError::InvalidMtu(self.mtu));
         }
 
         Ok(())

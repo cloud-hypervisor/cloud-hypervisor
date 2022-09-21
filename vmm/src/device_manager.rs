@@ -2241,6 +2241,7 @@ impl DeviceManager {
                 match virtio_devices::vhost_user::Net::new(
                     id.clone(),
                     net_cfg.mac,
+                    Some(net_cfg.mtu),
                     vu_cfg,
                     server,
                     self.seccomp_action.clone(),
@@ -2271,6 +2272,7 @@ impl DeviceManager {
                         None,
                         Some(net_cfg.mac),
                         &mut net_cfg.host_mac,
+                        None,
                         self.force_iommu | net_cfg.iommu,
                         net_cfg.num_queues,
                         net_cfg.queue_size,
@@ -2307,6 +2309,7 @@ impl DeviceManager {
                         Some(net_cfg.mask),
                         Some(net_cfg.mac),
                         &mut net_cfg.host_mac,
+                        Some(net_cfg.mtu),
                         self.force_iommu | net_cfg.iommu,
                         net_cfg.num_queues,
                         net_cfg.queue_size,
