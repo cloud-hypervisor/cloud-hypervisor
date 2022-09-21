@@ -55,6 +55,9 @@ jobs:
       - name: Clippy (default features + guest_debug)
         run: cargo clippy --locked --all --all-targets --tests --features "guest_debug" -- -D warnings
 
+      - name: Clippy (default features + tracing)
+        run: cargo clippy --locked --all --all-targets --tests --features "tracing" -- -D warnings
+
       - name: Clippy (common + mshv)
         run: cargo clippy --locked --all --all-targets --no-default-features --tests --features "common,mshv" -- -D warnings
 
