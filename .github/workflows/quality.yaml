@@ -14,10 +14,14 @@ jobs:
           - stable
         target:
           - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
         experimental: [false]
         include:
           - rust: beta
             target: x86_64-unknown-linux-gnu
+            experimental: true
+          - rust: beta
+            target: aarch64-unknown-linux-gnu
             experimental: true
     steps:
       - name: Code checkout
@@ -34,6 +38,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Debug Check (default features)
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         run: |
           set -e
           commits=$(git rev-list origin/${{ github.base_ref }}..${{ github.sha }})
@@ -44,22 +49,48 @@ jobs:
         run: cargo fmt -- --check
 
       - name: Clippy (common + kvm)
-        run: cargo clippy --locked --all --all-targets --no-default-features --tests --features "common,kvm" -- -D warnings
+        uses: actions-rs/cargo@v1
+        with:
+          use-cross: true
+          command: clippy
+          args: --locked --all --all-targets --no-default-features --tests --features "common,kvm" -- -D warnings
 
       - name: Clippy (default features)
-        run: cargo clippy --locked --all --all-targets --tests -- -D warnings
+        uses: actions-rs/cargo@v1
+        with:
+          use-cross: true
+          command: clippy
+          args: --locked --all --all-targets --tests -- -D warnings
 
       - name: Clippy (default features + gdb)
-        run: cargo clippy --locked --all --all-targets --tests --features "gdb" -- -D warnings
+        uses: actions-rs/cargo@v1
+        with:
+          use-cross: true
+          command: clippy
+          args: --locked --all --all-targets --tests --features "gdb" -- -D warnings
 
       - name: Clippy (default features + guest_debug)
-        run: cargo clippy --locked --all --all-targets --tests --features "guest_debug" -- -D warnings
+        uses: actions-rs/cargo@v1
+        with:
+          use-cross: true
+          command: clippy
+          args: --locked --all --all-targets --tests --features "guest_debug" -- -D warnings
 
       - name: Clippy (common + mshv)
-        run: cargo clippy --locked --all --all-targets --no-default-features --tests --features "common,mshv" -- -D warnings
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        uses: actions-rs/cargo@v1
+        with:
+          use-cross: true
+          command: clippy
+          args: --locked --all --all-targets --no-default-features --tests --features "common,mshv" -- -D warnings
 
       - name: Clippy (common + mshv + kvm)
-        run: cargo clippy --locked --all --all-targets --no-default-features --tests --features "common,mshv,kvm" -- -D warnings
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        uses: actions-rs/cargo@v1
+        with:
+          use-cross: true
+          command: clippy
+          args: --locked --all --all-targets --no-default-features --tests --features "common,mshv,kvm" -- -D warnings
 
       - name: Check build did not modify any files
         run: test -z "$(git status --porcelain)"
