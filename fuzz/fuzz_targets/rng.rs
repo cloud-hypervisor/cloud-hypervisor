@@ -104,7 +104,7 @@ fuzz_target!(|bytes| {
     .ok();
 
     // Wait for the events to finish and rng device worker thread to return
-    rng.reset();
+    rng.wait_for_epoll_threads();
 });
 
 pub struct NoopVirtioInterrupt {}

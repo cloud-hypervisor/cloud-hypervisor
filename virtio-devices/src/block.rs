@@ -537,6 +537,11 @@ impl Block {
         );
         self.writeback.store(writeback, Ordering::Release);
     }
+
+    #[cfg(fuzzing)]
+    pub fn wait_for_epoll_threads(&mut self) {
+        self.common.wait_for_epoll_threads();
+    }
 }
 
 impl Drop for Block {

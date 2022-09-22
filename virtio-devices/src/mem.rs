@@ -883,6 +883,11 @@ impl Mem {
         *(self.config.lock().unwrap()) = state.config;
         *(self.blocks_state.lock().unwrap()) = state.blocks_state.clone();
     }
+
+    #[cfg(fuzzing)]
+    pub fn wait_for_epoll_threads(&mut self) {
+        self.common.wait_for_epoll_threads();
+    }
 }
 
 impl Drop for Mem {
