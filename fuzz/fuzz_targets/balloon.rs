@@ -16,8 +16,8 @@ use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
 const QUEUE_DATA_SIZE: usize = 4;
-const MEM_SIZE: usize = 256 * 1024 * 1024;
-const BALLOON_SIZE: u64 = 128 * 1024 * 1024;
+const MEM_SIZE: usize = 1 * 1024 * 1024;
+const BALLOON_SIZE: u64 = 512 * 1024;
 // Number of queues
 const QUEUE_NUM: usize = 3;
 // Max entries in the queue.
