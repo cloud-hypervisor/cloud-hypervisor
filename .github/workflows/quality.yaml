@@ -92,5 +92,13 @@ jobs:
           command: clippy
           args: --locked --all --all-targets --no-default-features --tests --features "common,mshv,kvm" -- -D warnings
 
+      - name: Clippy (common + kvm + tdx)
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        uses: actions-rs/cargo@v1
+        with:
+          use-cross: true
+          command: clippy
+          args: --locked --all --all-targets --no-default-features --tests --features "common,tdx,kvm" -- -D warnings
+
       - name: Check build did not modify any files
         run: test -z "$(git status --porcelain)"
