@@ -286,8 +286,17 @@ impl VirtioCommon {
     pub fn wait_for_epoll_threads(&mut self) {
         if let Some(mut threads) = self.epoll_threads.take() {
             for t in threads.drain(..) {
-                if let Err(e) = t.join() {
-                    error!("Error joining thread: {:?}", e);
+                let mut counter = 0;
+                while counter < 5 {
+                    if t.is_finished() {
+                        if let Err(e) = t.join() {
+                            error!("Error joining thread: {:?}", e);
+                        }
+                        break;
+                    } else {
+                        std::thread::sleep(std::time::Duration::from_millis(500));
+                        counter += 1;
+                    }
                 }
             }
         }
