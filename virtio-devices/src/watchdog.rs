@@ -248,6 +248,11 @@ impl Watchdog {
             self.last_ping_time.lock().unwrap().replace(Instant::now());
         }
     }
+
+    #[cfg(fuzzing)]
+    pub fn wait_for_epoll_threads(&mut self) {
+        self.common.wait_for_epoll_threads();
+    }
 }
 
 impl Drop for Watchdog {

@@ -69,7 +69,7 @@ fuzz_target!(|bytes| {
         .ok();
 
     // Wait for the events to finish and watchdog device worker thread to return
-    watchdog.reset();
+    watchdog.wait_for_epoll_threads();
 });
 
 pub struct NoopVirtioInterrupt {}
