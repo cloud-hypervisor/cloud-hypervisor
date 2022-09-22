@@ -67,7 +67,7 @@ fuzz_target!(|bytes| {
     .ok();
 
     // Wait for the events to finish and pmem device worker thread to return
-    pmem.reset();
+    pmem.wait_for_epoll_threads();
 });
 
 fn memfd_create_with_size(name: &ffi::CStr, flags: u32, size: usize) -> Result<RawFd, io::Error> {

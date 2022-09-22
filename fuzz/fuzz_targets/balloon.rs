@@ -104,7 +104,7 @@ fuzz_target!(|bytes| {
         .ok();
 
     // Wait for the events to finish and balloon device worker thread to return
-    balloon.reset();
+    balloon.wait_for_epoll_threads();
 });
 
 pub struct NoopVirtioInterrupt {}

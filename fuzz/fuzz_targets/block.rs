@@ -88,7 +88,7 @@ fuzz_target!(|bytes| {
         .ok();
 
     // Wait for the events to finish and block device worker thread to return
-    block.reset();
+    block.wait_for_epoll_threads();
 });
 
 fn memfd_create(name: &ffi::CStr, flags: u32) -> Result<RawFd, io::Error> {

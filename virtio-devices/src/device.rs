@@ -258,7 +258,6 @@ impl VirtioCommon {
         Ok(())
     }
 
-    #[cfg(not(fuzzing))]
     pub fn reset(&mut self) -> Option<Arc<dyn VirtioInterrupt>> {
         // We first must resume the virtio thread if it was paused.
         if self.pause_evt.take().is_some() {
@@ -282,9 +281,9 @@ impl VirtioCommon {
         Some(self.interrupt_cb.take().unwrap())
     }
 
-    #[cfg(fuzzing)]
     // Wait for the worker thread to finish and return
-    pub fn reset(&mut self) -> Option<Arc<dyn VirtioInterrupt>> {
+    #[cfg(fuzzing)]
+    pub fn wait_for_epoll_threads(&mut self) {
         if let Some(mut threads) = self.epoll_threads.take() {
             for t in threads.drain(..) {
                 if let Err(e) = t.join() {
@@ -292,8 +291,6 @@ impl VirtioCommon {
                 }
             }
         }
-
-        None
     }
 
     pub fn dup_eventfds(&self) -> (EventFd, EventFd) {

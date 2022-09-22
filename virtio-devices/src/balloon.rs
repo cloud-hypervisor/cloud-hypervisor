@@ -423,6 +423,11 @@ impl Balloon {
         self.common.acked_features = state.acked_features;
         self.config = state.config;
     }
+
+    #[cfg(fuzzing)]
+    pub fn wait_for_epoll_threads(&mut self) {
+        self.common.wait_for_epoll_threads();
+    }
 }
 
 impl Drop for Balloon {
