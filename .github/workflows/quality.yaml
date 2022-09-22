@@ -2,7 +2,27 @@ name: Cloud Hypervisor Quality Checks
 on: [pull_request, create]
 
 jobs:
+  add-label:
+    name: "Add label to PR"
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Label issue
+        uses: andymckay/labeler@master
+        with:
+          add-labels: "gh-quality-check-ok"
+
+  clear-label:
+    name: "Clear label on PR"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Label issue
+        uses: andymckay/labeler@master
+        with:
+          remove-labels: "gh-quality-check-ok"
+
   build:
+    needs: clear-label
     if: github.event_name == 'pull_request'
     name: Quality (clippy, rustfmt)
     runs-on: ubuntu-latest
