@@ -20,6 +20,7 @@
   - [Hot Plug](#hot-plug)
   - [Device Model](#device-model)
   - [TODO](#todo)
+  - [Roadmap](#roadmap)
 - [4. `rust-vmm` project dependency](#4-rust-vmm-project-dependency)
   - [Firecracker and crosvm](#firecracker-and-crosvm)
 - [5. Community](#5-community)
@@ -325,6 +326,10 @@ We are not tracking the Cloud Hypervisor TODO list from a specific git tracked
 file but through
 [github issues](https://github.com/cloud-hypervisor/cloud-hypervisor/issues/new)
 instead.
+
+## Roadmap
+
+The project roadmap is tracked through a [GitHub project](https://github.com/orgs/cloud-hypervisor/projects/6).
 
 # 4. `rust-vmm` project dependency
 
