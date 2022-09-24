@@ -1306,7 +1306,7 @@ impl Vm {
 
         arch::configure_system(
             &mem,
-            cmdline.as_str(),
+            cmdline.as_cstring().unwrap().to_str().unwrap(),
             vcpu_mpidrs,
             vcpu_topology,
             device_info,
@@ -1992,8 +1992,11 @@ impl Vm {
                     let cmdline = Self::generate_cmdline(
                         self.config.lock().unwrap().payload.as_ref().unwrap(),
                     )?;
-                    mem.write_slice(cmdline.as_str().as_bytes(), GuestAddress(section.address))
-                        .unwrap();
+                    mem.write_slice(
+                        cmdline.as_cstring().unwrap().as_bytes_with_nul(),
+                        GuestAddress(section.address),
+                    )
+                    .unwrap();
                 }
                 _ => {}
             }

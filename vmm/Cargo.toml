@@ -29,7 +29,7 @@ gdbstub = { version = "0.6.3", optional = true }
 gdbstub_arch = { version = "0.2.4", optional = true }
 hypervisor = { path = "../hypervisor" }
 libc = "0.2.133"
-linux-loader = { version = "0.5.0", features = ["elf", "bzimage", "pe"] }
+linux-loader = { version = "0.6.0", features = ["elf", "bzimage", "pe"] }
 log = "0.4.17"
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "main" }
 net_util = { path = "../net_util" }
