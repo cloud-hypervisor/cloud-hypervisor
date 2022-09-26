@@ -36,8 +36,8 @@ jobs:
       - name: Build (default features)
         run: cargo rustc --locked --bin cloud-hypervisor -- -D warnings
 
-      - name: Build (common + kvm)
-        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "common,kvm"  -- -D warnings
+      - name: Build (kvm)
+        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "kvm"  -- -D warnings
 
       - name: Build (default features + tdx)
         run: cargo rustc --locked --bin cloud-hypervisor --features "tdx" -- -D warnings
@@ -48,11 +48,11 @@ jobs:
       - name: Build (default features + guest_debug)
         run: cargo rustc --locked --bin cloud-hypervisor --features "guest_debug" -- -D warnings
 
-      - name: Build (common + mshv)
-        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "common,mshv"  -- -D warnings
+      - name: Build (mshv)
+        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "mshv"  -- -D warnings
 
-      - name: Build (common + mshv + kvm)
-        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "common,mshv,kvm"  -- -D warnings
+      - name: Build (mshv + kvm)
+        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "mshv,kvm"  -- -D warnings
 
       - name: Release Build (default features)
         run: cargo build --locked --all --release --target=${{ matrix.target }}

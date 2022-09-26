@@ -1560,9 +1560,7 @@ impl DeviceManager {
                 .io_bus
                 .insert(cmos, 0x70, 0x2)
                 .map_err(DeviceManagerError::BusError)?;
-        }
-        #[cfg(feature = "fwdebug")]
-        {
+
             let fwdebug = Arc::new(Mutex::new(devices::legacy::FwDebugDevice::new()));
 
             self.bus_devices

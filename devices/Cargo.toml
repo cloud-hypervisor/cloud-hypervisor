@@ -25,4 +25,3 @@ arch = { path = "../arch" }
 
 [features]
 default = []
-fwdebug = []

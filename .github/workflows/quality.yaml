@@ -48,12 +48,12 @@ jobs:
       - name: Formatting (rustfmt)
         run: cargo fmt -- --check
 
-      - name: Clippy (common + kvm)
+      - name: Clippy (kvm)
         uses: actions-rs/cargo@v1
         with:
           use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
           command: clippy
-          args: --locked --all --all-targets --no-default-features --tests --features "common,kvm" -- -D warnings
+          args: --locked --all --all-targets --no-default-features --tests --features "kvm" -- -D warnings
 
       - name: Clippy (default features)
         uses: actions-rs/cargo@v1
@@ -83,29 +83,29 @@ jobs:
           command: clippy
           args: --locked --all --all-targets --tests --features "tracing" -- -D warnings
 
-      - name: Clippy (common + mshv)
+      - name: Clippy (mshv)
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         uses: actions-rs/cargo@v1
         with:
           use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
           command: clippy
-          args: --locked --all --all-targets --no-default-features --tests --features "common,mshv" -- -D warnings
+          args: --locked --all --all-targets --no-default-features --tests --features "mshv" -- -D warnings
 
-      - name: Clippy (common + mshv + kvm)
+      - name: Clippy (mshv + kvm)
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         uses: actions-rs/cargo@v1
         with:
           use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
           command: clippy
-          args: --locked --all --all-targets --no-default-features --tests --features "common,mshv,kvm" -- -D warnings
+          args: --locked --all --all-targets --no-default-features --tests --features "mshv,kvm" -- -D warnings
 
-      - name: Clippy (common + kvm + tdx)
+      - name: Clippy (kvm + tdx)
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         uses: actions-rs/cargo@v1
         with:
           use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
           command: clippy
-          args: --locked --all --all-targets --no-default-features --tests --features "common,tdx,kvm" -- -D warnings
+          args: --locked --all --all-targets --no-default-features --tests --features "tdx,kvm" -- -D warnings
 
       - name: Check build did not modify any files
         run: test -z "$(git status --porcelain)"
