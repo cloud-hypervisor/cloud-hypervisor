@@ -133,7 +133,7 @@ impl VhostUserNetBackend {
             Some(ip_addr),
             Some(netmask),
             &mut Some(host_mac),
-            None,
+            Some(1280),
             num_queues / 2,
             None,
         )
@@ -182,6 +182,7 @@ impl VhostUserBackendMut<VringRwLock<GuestMemoryAtomic<GuestMemoryMmap>>, Atomic
             | 1 << VIRTIO_NET_F_CTRL_VQ
             | 1 << VIRTIO_NET_F_MQ
             | 1 << VIRTIO_NET_F_MAC
+            | 1 << VIRTIO_NET_F_MTU
             | 1 << VIRTIO_F_NOTIFY_ON_EMPTY
             | 1 << VIRTIO_F_VERSION_1
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()

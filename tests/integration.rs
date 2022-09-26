@@ -843,6 +843,22 @@ fn test_vhost_user_net(
             assert_eq!(String::from_utf8_lossy(&mac_count.stdout).trim(), "1");
         }
 
+        #[cfg(target_arch = "aarch64")]
+        let iface = "enp0s4";
+        #[cfg(target_arch = "x86_64")]
+        let iface = "ens4";
+
+        // Validates the vhost-user-net backend allows MTU configuration by
+        // checking the value is 1280 instead of 1500 that would have been set
+        // by default.
+        assert_eq!(
+            guest
+                .ssh_command(format!("cat /sys/class/net/{}/mtu", iface).as_str())
+                .unwrap()
+                .trim(),
+            "1280"
+        );
+
         // 1 network interface + default localhost ==> 2 interfaces
         // It's important to note that this test is fully exercising the
         // vhost-user-net implementation and the associated backend since
