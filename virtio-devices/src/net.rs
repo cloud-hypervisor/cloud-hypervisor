@@ -442,10 +442,9 @@ impl Net {
         rate_limiter_config: Option<RateLimiterConfig>,
         exit_evt: EventFd,
     ) -> Result<Self> {
-        let mut mtu = None;
-        if !taps.is_empty() {
-            mtu = Some(taps[0].mtu().map_err(Error::TapError)? as u16);
-        }
+        assert!(!taps.is_empty());
+
+        let mtu = taps[0].mtu().map_err(Error::TapError)? as u16;
 
         let mut avail_features = 1 << VIRTIO_NET_F_CSUM
             | 1 << VIRTIO_NET_F_CTRL_GUEST_OFFLOADS
@@ -458,12 +457,10 @@ impl Net {
             | 1 << VIRTIO_NET_F_HOST_TSO4
             | 1 << VIRTIO_NET_F_HOST_TSO6
             | 1 << VIRTIO_NET_F_HOST_UFO
+            | 1 << VIRTIO_NET_F_MTU
             | 1 << VIRTIO_RING_F_EVENT_IDX
             | 1 << VIRTIO_F_VERSION_1;
 
-        if mtu.is_some() {
-            avail_features |= 1u64 << VIRTIO_NET_F_MTU;
-        }
         if iommu {
             avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
         }
@@ -473,9 +470,9 @@ impl Net {
 
         let mut config = VirtioNetConfig::default();
         if let Some(mac) = guest_mac {
-            build_net_config_space(&mut config, mac, num_queues, mtu, &mut avail_features);
+            build_net_config_space(&mut config, mac, num_queues, Some(mtu), &mut avail_features);
         } else {
-            build_net_config_space_with_mq(&mut config, num_queues, mtu, &mut avail_features);
+            build_net_config_space_with_mq(&mut config, num_queues, Some(mtu), &mut avail_features);
         }
 
         Ok(Net {
@@ -545,6 +542,7 @@ impl Net {
         id: String,
         fds: &[RawFd],
         guest_mac: Option<MacAddr>,
+        mtu: Option<u16>,
         iommu: bool,
         queue_size: u16,
         seccomp_action: SeccompAction,
@@ -563,6 +561,12 @@ impl Net {
             }
             let tap = Tap::from_tap_fd(fd, num_queue_pairs).map_err(Error::TapError)?;
             taps.push(tap);
+        }
+
+        assert!(!taps.is_empty());
+
+        if let Some(mtu) = mtu {
+            taps[0].set_mtu(mtu as i32).map_err(Error::TapError)?;
         }
 
         Self::new_with_tap(

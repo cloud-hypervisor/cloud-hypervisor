@@ -823,7 +823,6 @@ components:
           type: string
         mtu:
           type: integer
-          default: 1280
         iommu:
           type: boolean
           default: false
