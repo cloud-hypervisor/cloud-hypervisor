@@ -8,7 +8,7 @@
 mod cmos;
 #[cfg(target_arch = "x86_64")]
 mod debug_port;
-#[cfg(feature = "fwdebug")]
+#[cfg(target_arch = "x86_64")]
 mod fwdebug;
 #[cfg(target_arch = "aarch64")]
 mod gpio_pl061;
@@ -22,7 +22,7 @@ mod uart_pl011;
 pub use self::cmos::Cmos;
 #[cfg(target_arch = "x86_64")]
 pub use self::debug_port::DebugPort;
-#[cfg(feature = "fwdebug")]
+#[cfg(target_arch = "x86_64")]
 pub use self::fwdebug::FwDebugDevice;
 pub use self::i8042::I8042Device;
 pub use self::serial::Serial;
