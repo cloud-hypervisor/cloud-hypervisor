@@ -1247,8 +1247,8 @@ pub struct NetConfig {
     pub mac: MacAddr,
     #[serde(default)]
     pub host_mac: Option<MacAddr>,
-    #[serde(default = "default_netconfig_mtu")]
-    pub mtu: u16,
+    #[serde(default)]
+    pub mtu: Option<u16>,
     #[serde(default)]
     pub iommu: bool,
     #[serde(default = "default_netconfig_num_queues")]
@@ -1286,10 +1286,6 @@ fn default_netconfig_mac() -> MacAddr {
     MacAddr::local_random()
 }
 
-fn default_netconfig_mtu() -> u16 {
-    virtio_devices::net::MIN_MTU
-}
-
 fn default_netconfig_num_queues() -> usize {
     DEFAULT_NUM_QUEUES_VUNET
 }
@@ -1306,7 +1302,7 @@ impl Default for NetConfig {
             mask: default_netconfig_mask(),
             mac: default_netconfig_mac(),
             host_mac: None,
-            mtu: default_netconfig_mtu(),
+            mtu: None,
             iommu: false,
             num_queues: default_netconfig_num_queues(),
             queue_size: default_netconfig_queue_size(),
@@ -1372,8 +1368,7 @@ impl NetConfig {
         let host_mac = parser.convert("host_mac").map_err(Error::ParseNetwork)?;
         let mtu = parser
             .convert("mtu")
-            .map_err(Error::ParseNetwork)?
-            .unwrap_or_else(default_netconfig_mtu);
+            .map_err(Error::ParseNetwork)?;
         let iommu = parser
             .convert::<Toggle>("iommu")
             .map_err(Error::ParseNetwork)?
@@ -1515,8 +1510,10 @@ impl NetConfig {
             }
         }
 
-        if self.mtu < virtio_devices::net::MIN_MTU {
-            return Err(ValidationError::InvalidMtu(self.mtu));
+        if let Some(mtu) = self.mtu {
+            if mtu < virtio_devices::net::MIN_MTU {
+                return Err(ValidationError::InvalidMtu(mtu));
+            }
         }
 
         Ok(())
