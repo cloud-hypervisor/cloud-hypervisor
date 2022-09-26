@@ -202,23 +202,25 @@ fn prepare_vhost_user_net_daemon(
     tmp_dir: &TempDir,
     ip: &str,
     tap: Option<&str>,
+    mtu: Option<u16>,
     num_queues: usize,
     client_mode: bool,
 ) -> (std::process::Command, String) {
     let vunet_socket_path = String::from(tmp_dir.as_path().join("vunet.sock").to_str().unwrap());
 
     // Start the daemon
-    let net_params = if let Some(tap_str) = tap {
-        format!(
-            "tap={},ip={},mask=255.255.255.0,socket={},num_queues={},queue_size=1024,client={}",
-            tap_str, ip, vunet_socket_path, num_queues, client_mode
-        )
-    } else {
-        format!(
-            "ip={},mask=255.255.255.0,socket={},num_queues={},queue_size=1024,client={}",
-            ip, vunet_socket_path, num_queues, client_mode
-        )
-    };
+    let mut net_params = format!(
+        "ip={},mask=255.255.255.0,socket={},num_queues={},queue_size=1024,client={}",
+        ip, vunet_socket_path, num_queues, client_mode
+    );
+
+    if let Some(tap) = tap {
+        net_params.push_str(format!(",tap={}", tap).as_str());
+    }
+
+    if let Some(mtu) = mtu {
+        net_params.push_str(format!(",mtu={}", mtu).as_str());
+    }
 
     let mut command = Command::new(clh_command("vhost_user_net"));
     command.args(["--net-backend", net_params.as_str()]);
@@ -757,8 +759,14 @@ fn _test_power_button(acpi: bool) {
     handle_child_output(r, &output);
 }
 
-type PrepareNetDaemon =
-    dyn Fn(&TempDir, &str, Option<&str>, usize, bool) -> (std::process::Command, String);
+type PrepareNetDaemon = dyn Fn(
+    &TempDir,
+    &str,
+    Option<&str>,
+    Option<u16>,
+    usize,
+    bool,
+) -> (std::process::Command, String);
 
 fn test_vhost_user_net(
     tap: Option<&str>,
@@ -779,16 +787,19 @@ fn test_vhost_user_net(
         None
     };
 
+    let mtu = Some(3000);
+
     let (mut daemon_command, vunet_socket_path) = prepare_daemon(
         &guest.tmp_dir,
         &guest.network.host_ip,
         tap,
+        mtu,
         num_queues,
         client_mode_daemon,
     );
 
     let net_params = format!(
-        "vhost_user=true,mac={},socket={},num_queues={},queue_size=1024{},vhost_mode={}",
+        "vhost_user=true,mac={},socket={},num_queues={},queue_size=1024{},vhost_mode={},mtu=3000",
         guest.network.guest_mac,
         vunet_socket_path,
         num_queues,
@@ -842,6 +853,19 @@ fn test_vhost_user_net(
             let mac_count = exec_host_command_output(&format!("ip link | grep -c {}", host_mac));
             assert_eq!(String::from_utf8_lossy(&mac_count.stdout).trim(), "1");
         }
+
+        #[cfg(target_arch = "aarch64")]
+        let iface = "enp0s4";
+        #[cfg(target_arch = "x86_64")]
+        let iface = "ens4";
+
+        assert_eq!(
+            guest
+                .ssh_command(format!("cat /sys/class/net/{}/mtu", iface).as_str())
+                .unwrap()
+                .trim(),
+            "3000"
+        );
 
         // 1 network interface + default localhost ==> 2 interfaces
         // It's important to note that this test is fully exercising the

@@ -1366,9 +1366,7 @@ impl NetConfig {
             .map_err(Error::ParseNetwork)?
             .unwrap_or_else(default_netconfig_mac);
         let host_mac = parser.convert("host_mac").map_err(Error::ParseNetwork)?;
-        let mtu = parser
-            .convert("mtu")
-            .map_err(Error::ParseNetwork)?;
+        let mtu = parser.convert("mtu").map_err(Error::ParseNetwork)?;
         let iommu = parser
             .convert::<Toggle>("iommu")
             .map_err(Error::ParseNetwork)?

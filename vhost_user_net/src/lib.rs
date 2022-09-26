@@ -119,10 +119,12 @@ pub struct VhostUserNetBackend {
 }
 
 impl VhostUserNetBackend {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         ip_addr: Ipv4Addr,
         host_mac: MacAddr,
         netmask: Ipv4Addr,
+        mtu: Option<u16>,
         num_queues: usize,
         queue_size: u16,
         ifname: Option<&str>,
@@ -133,7 +135,7 @@ impl VhostUserNetBackend {
             Some(ip_addr),
             Some(netmask),
             &mut Some(host_mac),
-            None,
+            mtu,
             num_queues / 2,
             None,
         )
@@ -182,6 +184,7 @@ impl VhostUserBackendMut<VringRwLock<GuestMemoryAtomic<GuestMemoryMmap>>, Atomic
             | 1 << VIRTIO_NET_F_CTRL_VQ
             | 1 << VIRTIO_NET_F_MQ
             | 1 << VIRTIO_NET_F_MAC
+            | 1 << VIRTIO_NET_F_MTU
             | 1 << VIRTIO_F_NOTIFY_ON_EMPTY
             | 1 << VIRTIO_F_VERSION_1
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
@@ -273,6 +276,7 @@ pub struct VhostUserNetBackendConfig {
     pub ip: Ipv4Addr,
     pub host_mac: MacAddr,
     pub mask: Ipv4Addr,
+    pub mtu: Option<u16>,
     pub socket: String,
     pub num_queues: usize,
     pub queue_size: u16,
@@ -289,6 +293,7 @@ impl VhostUserNetBackendConfig {
             .add("ip")
             .add("host_mac")
             .add("mask")
+            .add("mtu")
             .add("queue_size")
             .add("num_queues")
             .add("socket")
@@ -309,6 +314,7 @@ impl VhostUserNetBackendConfig {
             .convert("mask")
             .map_err(Error::FailedConfigParse)?
             .unwrap_or_else(|| Ipv4Addr::new(255, 255, 255, 0));
+        let mtu = parser.convert("mtu").map_err(Error::FailedConfigParse)?;
         let queue_size = parser
             .convert("queue_size")
             .map_err(Error::FailedConfigParse)?
@@ -328,6 +334,7 @@ impl VhostUserNetBackendConfig {
             ip,
             host_mac,
             mask,
+            mtu,
             socket,
             num_queues,
             queue_size,
@@ -355,6 +362,7 @@ pub fn start_net_backend(backend_command: &str) {
             backend_config.ip,
             backend_config.host_mac,
             backend_config.mask,
+            backend_config.mtu,
             backend_config.num_queues,
             backend_config.queue_size,
             tap,
