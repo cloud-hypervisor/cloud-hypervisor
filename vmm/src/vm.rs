@@ -23,7 +23,7 @@ use crate::coredump::{
 use crate::cpu;
 use crate::device_manager::{Console, DeviceManager, DeviceManagerError, PtyPair};
 use crate::device_tree::DeviceTree;
-#[cfg(feature = "gdb")]
+#[cfg(feature = "guest_debug")]
 use crate::gdb::{Debuggable, DebuggableError, GdbRequestPayload, GdbResponsePayload};
 use crate::memory_manager::{
     Error as MemoryManagerError, MemoryManager, MemoryManagerSnapshotData,
@@ -51,9 +51,9 @@ use devices::gic::{Gic, GIC_V3_ITS_SNAPSHOT_ID};
 #[cfg(target_arch = "aarch64")]
 use devices::interrupt_controller::{self, InterruptController};
 use devices::AcpiNotificationFlags;
-#[cfg(all(target_arch = "aarch64", feature = "gdb"))]
+#[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
-#[cfg(all(target_arch = "x86_64", feature = "gdb"))]
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
 use hypervisor::{HypervisorVmError, VmOps};
 use linux_loader::cmdline::Cmdline;
@@ -294,7 +294,7 @@ pub enum Error {
     #[error("Invalid TDX payload type")]
     InvalidPayloadType,
 
-    #[cfg(feature = "gdb")]
+    #[cfg(feature = "guest_debug")]
     #[error("Error debugging VM: {0:?}")]
     Debug(DebuggableError),
 
@@ -494,7 +494,7 @@ impl Vm {
         vm: Arc<dyn hypervisor::Vm>,
         exit_evt: EventFd,
         reset_evt: EventFd,
-        #[cfg(feature = "gdb")] vm_debug_evt: EventFd,
+        #[cfg(feature = "guest_debug")] vm_debug_evt: EventFd,
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         activate_evt: EventFd,
@@ -528,9 +528,9 @@ impl Vm {
         #[cfg(not(feature = "tdx"))]
         let force_iommu = false;
 
-        #[cfg(feature = "gdb")]
+        #[cfg(feature = "guest_debug")]
         let stop_on_boot = config.lock().unwrap().gdb;
-        #[cfg(not(feature = "gdb"))]
+        #[cfg(not(feature = "guest_debug"))]
         let stop_on_boot = false;
 
         let device_manager = DeviceManager::new(
@@ -576,7 +576,7 @@ impl Vm {
             vm.clone(),
             exit_evt_clone,
             reset_evt,
-            #[cfg(feature = "gdb")]
+            #[cfg(feature = "guest_debug")]
             vm_debug_evt,
             hypervisor.clone(),
             seccomp_action.clone(),
@@ -719,7 +719,7 @@ impl Vm {
         config: Arc<Mutex<VmConfig>>,
         exit_evt: EventFd,
         reset_evt: EventFd,
-        #[cfg(feature = "gdb")] vm_debug_evt: EventFd,
+        #[cfg(feature = "guest_debug")] vm_debug_evt: EventFd,
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         activate_evt: EventFd,
@@ -778,7 +778,7 @@ impl Vm {
             vm,
             exit_evt,
             reset_evt,
-            #[cfg(feature = "gdb")]
+            #[cfg(feature = "guest_debug")]
             vm_debug_evt,
             seccomp_action,
             hypervisor,
@@ -804,7 +804,7 @@ impl Vm {
         vm_config: Arc<Mutex<VmConfig>>,
         exit_evt: EventFd,
         reset_evt: EventFd,
-        #[cfg(feature = "gdb")] vm_debug_evt: EventFd,
+        #[cfg(feature = "guest_debug")] vm_debug_evt: EventFd,
         source_url: Option<&str>,
         prefault: bool,
         seccomp_action: &SeccompAction,
@@ -849,7 +849,7 @@ impl Vm {
             vm,
             exit_evt,
             reset_evt,
-            #[cfg(feature = "gdb")]
+            #[cfg(feature = "guest_debug")]
             vm_debug_evt,
             seccomp_action,
             hypervisor,
@@ -864,7 +864,7 @@ impl Vm {
         config: Arc<Mutex<VmConfig>>,
         exit_evt: EventFd,
         reset_evt: EventFd,
-        #[cfg(feature = "gdb")] vm_debug_evt: EventFd,
+        #[cfg(feature = "guest_debug")] vm_debug_evt: EventFd,
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         activate_evt: EventFd,
@@ -906,7 +906,7 @@ impl Vm {
             vm,
             exit_evt,
             reset_evt,
-            #[cfg(feature = "gdb")]
+            #[cfg(feature = "guest_debug")]
             vm_debug_evt,
             seccomp_action,
             hypervisor,
@@ -2574,7 +2574,7 @@ impl Vm {
         self.memory_manager.lock().unwrap().snapshot_data()
     }
 
-    #[cfg(feature = "gdb")]
+    #[cfg(feature = "guest_debug")]
     pub fn debug_request(
         &mut self,
         gdb_request: &GdbRequestPayload,
@@ -2991,7 +2991,7 @@ impl Migratable for Vm {
     }
 }
 
-#[cfg(feature = "gdb")]
+#[cfg(feature = "guest_debug")]
 impl Debuggable for Vm {
     fn set_guest_debug(
         &self,

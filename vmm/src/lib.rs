@@ -64,7 +64,7 @@ mod coredump;
 pub mod cpu;
 pub mod device_manager;
 pub mod device_tree;
-#[cfg(feature = "gdb")]
+#[cfg(feature = "guest_debug")]
 mod gdb;
 pub mod interrupt;
 pub mod memory_manager;
@@ -154,17 +154,17 @@ pub enum Error {
     #[error("Error creation API server's socket {0:?}")]
     CreateApiServerSocket(#[source] io::Error),
 
-    #[cfg(feature = "gdb")]
+    #[cfg(feature = "guest_debug")]
     #[error("Failed to start the GDB thread: {0}")]
     GdbThreadSpawn(io::Error),
 
     /// GDB request receive error
-    #[cfg(feature = "gdb")]
+    #[cfg(feature = "guest_debug")]
     #[error("Error receiving GDB request: {0}")]
     GdbRequestRecv(#[source] RecvError),
 
     /// GDB response send error
-    #[cfg(feature = "gdb")]
+    #[cfg(feature = "guest_debug")]
     #[error("Error sending GDB request: {0}")]
     GdbResponseSend(#[source] SendError<gdb::GdbResponse>),
 
@@ -266,19 +266,19 @@ pub fn start_vmm_thread(
     api_event: EventFd,
     api_sender: Sender<ApiRequest>,
     api_receiver: Receiver<ApiRequest>,
-    #[cfg(feature = "gdb")] debug_path: Option<PathBuf>,
-    #[cfg(feature = "gdb")] debug_event: EventFd,
-    #[cfg(feature = "gdb")] vm_debug_event: EventFd,
+    #[cfg(feature = "guest_debug")] debug_path: Option<PathBuf>,
+    #[cfg(feature = "guest_debug")] debug_event: EventFd,
+    #[cfg(feature = "guest_debug")] vm_debug_event: EventFd,
     seccomp_action: &SeccompAction,
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
 ) -> Result<thread::JoinHandle<Result<()>>> {
-    #[cfg(feature = "gdb")]
+    #[cfg(feature = "guest_debug")]
     let gdb_hw_breakpoints = hypervisor.get_guest_debug_hw_bps();
-    #[cfg(feature = "gdb")]
+    #[cfg(feature = "guest_debug")]
     let (gdb_sender, gdb_receiver) = std::sync::mpsc::channel();
-    #[cfg(feature = "gdb")]
+    #[cfg(feature = "guest_debug")]
     let gdb_debug_event = debug_event.try_clone().map_err(Error::EventFdClone)?;
-    #[cfg(feature = "gdb")]
+    #[cfg(feature = "guest_debug")]
     let gdb_vm_debug_event = vm_debug_event.try_clone().map_err(Error::EventFdClone)?;
 
     let http_api_event = api_event.try_clone().map_err(Error::EventFdClone)?;
@@ -303,9 +303,9 @@ pub fn start_vmm_thread(
                 let mut vmm = Vmm::new(
                     vmm_version.to_string(),
                     api_event,
-                    #[cfg(feature = "gdb")]
+                    #[cfg(feature = "guest_debug")]
                     debug_event,
-                    #[cfg(feature = "gdb")]
+                    #[cfg(feature = "guest_debug")]
                     vm_debug_event,
                     vmm_seccomp_action,
                     hypervisor,
@@ -316,7 +316,7 @@ pub fn start_vmm_thread(
 
                 vmm.control_loop(
                     Arc::new(api_receiver),
-                    #[cfg(feature = "gdb")]
+                    #[cfg(feature = "guest_debug")]
                     Arc::new(gdb_receiver),
                 )
             })
@@ -344,7 +344,7 @@ pub fn start_vmm_thread(
         )?;
     }
 
-    #[cfg(feature = "gdb")]
+    #[cfg(feature = "guest_debug")]
     if let Some(debug_path) = debug_path {
         let target = gdb::GdbStub::new(
             gdb_sender,
@@ -374,9 +374,9 @@ pub struct Vmm {
     exit_evt: EventFd,
     reset_evt: EventFd,
     api_evt: EventFd,
-    #[cfg(feature = "gdb")]
+    #[cfg(feature = "guest_debug")]
     debug_evt: EventFd,
-    #[cfg(feature = "gdb")]
+    #[cfg(feature = "guest_debug")]
     vm_debug_evt: EventFd,
     version: String,
     vm: Option<Vm>,
@@ -462,8 +462,8 @@ impl Vmm {
     fn new(
         vmm_version: String,
         api_evt: EventFd,
-        #[cfg(feature = "gdb")] debug_evt: EventFd,
-        #[cfg(feature = "gdb")] vm_debug_evt: EventFd,
+        #[cfg(feature = "guest_debug")] debug_evt: EventFd,
+        #[cfg(feature = "guest_debug")] vm_debug_evt: EventFd,
         seccomp_action: SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         exit_evt: EventFd,
@@ -488,7 +488,7 @@ impl Vmm {
             .add_event(&api_evt, EpollDispatch::Api)
             .map_err(Error::Epoll)?;
 
-        #[cfg(feature = "gdb")]
+        #[cfg(feature = "guest_debug")]
         epoll
             .add_event(&debug_evt, EpollDispatch::Debug)
             .map_err(Error::Epoll)?;
@@ -498,9 +498,9 @@ impl Vmm {
             exit_evt,
             reset_evt,
             api_evt,
-            #[cfg(feature = "gdb")]
+            #[cfg(feature = "guest_debug")]
             debug_evt,
-            #[cfg(feature = "gdb")]
+            #[cfg(feature = "guest_debug")]
             vm_debug_evt,
             version: vmm_version,
             vm: None,
@@ -537,7 +537,7 @@ impl Vmm {
             if self.vm.is_none() {
                 let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
                 let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
-                #[cfg(feature = "gdb")]
+                #[cfg(feature = "guest_debug")]
                 let vm_debug_evt = self
                     .vm_debug_evt
                     .try_clone()
@@ -552,7 +552,7 @@ impl Vmm {
                         Arc::clone(vm_config),
                         exit_evt,
                         reset_evt,
-                        #[cfg(feature = "gdb")]
+                        #[cfg(feature = "guest_debug")]
                         vm_debug_evt,
                         &self.seccomp_action,
                         self.hypervisor.clone(),
@@ -633,7 +633,7 @@ impl Vmm {
 
         let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
         let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
-        #[cfg(feature = "gdb")]
+        #[cfg(feature = "guest_debug")]
         let debug_evt = self
             .vm_debug_evt
             .try_clone()
@@ -648,7 +648,7 @@ impl Vmm {
             vm_config,
             exit_evt,
             reset_evt,
-            #[cfg(feature = "gdb")]
+            #[cfg(feature = "guest_debug")]
             debug_evt,
             Some(source_url),
             restore_cfg.prefault,
@@ -702,7 +702,7 @@ impl Vmm {
 
         let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
         let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
-        #[cfg(feature = "gdb")]
+        #[cfg(feature = "guest_debug")]
         let debug_evt = self
             .vm_debug_evt
             .try_clone()
@@ -724,7 +724,7 @@ impl Vmm {
             config,
             exit_evt,
             reset_evt,
-            #[cfg(feature = "gdb")]
+            #[cfg(feature = "guest_debug")]
             debug_evt,
             &self.seccomp_action,
             self.hypervisor.clone(),
@@ -1146,7 +1146,7 @@ impl Vmm {
         let reset_evt = self.reset_evt.try_clone().map_err(|e| {
             MigratableError::MigrateReceive(anyhow!("Error cloning reset EventFd: {}", e))
         })?;
-        #[cfg(feature = "gdb")]
+        #[cfg(feature = "guest_debug")]
         let debug_evt = self.vm_debug_evt.try_clone().map_err(|e| {
             MigratableError::MigrateReceive(anyhow!("Error cloning debug EventFd: {}", e))
         })?;
@@ -1159,7 +1159,7 @@ impl Vmm {
             self.vm_config.clone().unwrap(),
             exit_evt,
             reset_evt,
-            #[cfg(feature = "gdb")]
+            #[cfg(feature = "guest_debug")]
             debug_evt,
             &self.seccomp_action,
             self.hypervisor.clone(),
@@ -1642,7 +1642,7 @@ impl Vmm {
     fn control_loop(
         &mut self,
         api_receiver: Arc<Receiver<ApiRequest>>,
-        #[cfg(feature = "gdb")] gdb_receiver: Arc<Receiver<gdb::GdbRequest>>,
+        #[cfg(feature = "guest_debug")] gdb_receiver: Arc<Receiver<gdb::GdbRequest>>,
     ) -> Result<()> {
         const EPOLL_EVENTS_LEN: usize = 100;
 
@@ -1929,7 +1929,7 @@ impl Vmm {
                             }
                         }
                     }
-                    #[cfg(feature = "gdb")]
+                    #[cfg(feature = "guest_debug")]
                     EpollDispatch::Debug => {
                         // Consume the events.
                         for _ in 0..self.debug_evt.read().map_err(Error::EventFdRead)? {
@@ -1949,7 +1949,7 @@ impl Vmm {
                                 .map_err(Error::GdbResponseSend)?;
                         }
                     }
-                    #[cfg(not(feature = "gdb"))]
+                    #[cfg(not(feature = "guest_debug"))]
                     EpollDispatch::Debug => {}
                 }
             }
@@ -1985,9 +1985,9 @@ mod unit_tests {
         Vmm::new(
             "dummy".to_string(),
             EventFd::new(EFD_NONBLOCK).unwrap(),
-            #[cfg(feature = "gdb")]
+            #[cfg(feature = "guest_debug")]
             EventFd::new(EFD_NONBLOCK).unwrap(),
-            #[cfg(feature = "gdb")]
+            #[cfg(feature = "guest_debug")]
             EventFd::new(EFD_NONBLOCK).unwrap(),
             SeccompAction::Allow,
             hypervisor::new().unwrap(),
@@ -2056,7 +2056,7 @@ mod unit_tests {
             sgx_epc: None,
             numa: None,
             watchdog: false,
-            #[cfg(feature = "gdb")]
+            #[cfg(feature = "guest_debug")]
             gdb: false,
             platform: None,
         }))

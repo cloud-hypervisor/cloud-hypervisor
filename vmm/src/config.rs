@@ -379,7 +379,7 @@ pub struct VmParams<'a> {
     pub sgx_epc: Option<Vec<&'a str>>,
     pub numa: Option<Vec<&'a str>>,
     pub watchdog: bool,
-    #[cfg(feature = "gdb")]
+    #[cfg(feature = "guest_debug")]
     pub gdb: bool,
     pub platform: Option<&'a str>,
 }
@@ -411,7 +411,7 @@ impl<'a> VmParams<'a> {
         let numa: Option<Vec<&str>> = args.values_of("numa").map(|x| x.collect());
         let watchdog = args.is_present("watchdog");
         let platform = args.value_of("platform");
-        #[cfg(feature = "gdb")]
+        #[cfg(feature = "guest_debug")]
         let gdb = args.is_present("gdb");
         VmParams {
             cpus,
@@ -437,7 +437,7 @@ impl<'a> VmParams<'a> {
             sgx_epc,
             numa,
             watchdog,
-            #[cfg(feature = "gdb")]
+            #[cfg(feature = "guest_debug")]
             gdb,
             platform,
         }
@@ -2315,7 +2315,7 @@ pub struct VmConfig {
     pub numa: Option<Vec<NumaConfig>>,
     #[serde(default)]
     pub watchdog: bool,
-    #[cfg(feature = "gdb")]
+    #[cfg(feature = "guest_debug")]
     pub gdb: bool,
     pub platform: Option<PlatformConfig>,
 }
@@ -2703,7 +2703,7 @@ impl VmConfig {
             None
         };
 
-        #[cfg(feature = "gdb")]
+        #[cfg(feature = "guest_debug")]
         let gdb = vm_params.gdb;
 
         let mut config = VmConfig {
@@ -2730,7 +2730,7 @@ impl VmConfig {
             sgx_epc,
             numa,
             watchdog: vm_params.watchdog,
-            #[cfg(feature = "gdb")]
+            #[cfg(feature = "guest_debug")]
             gdb,
             platform,
         };
@@ -3340,7 +3340,7 @@ mod tests {
             sgx_epc: None,
             numa: None,
             watchdog: false,
-            #[cfg(feature = "gdb")]
+            #[cfg(feature = "guest_debug")]
             gdb: false,
             platform: None,
         };
