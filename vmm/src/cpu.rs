@@ -19,7 +19,7 @@ use crate::coredump::{
     NT_PRSTATUS,
 };
 use crate::device_manager::DeviceManager;
-#[cfg(feature = "gdb")]
+#[cfg(feature = "guest_debug")]
 use crate::gdb::{get_raw_tid, Debuggable, DebuggableError};
 use crate::memory_manager::MemoryManager;
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
@@ -29,18 +29,18 @@ use crate::GuestMemoryMmap;
 use crate::CPU_MANAGER_SNAPSHOT_ID;
 use acpi_tables::{aml, aml::Aml, sdt::Sdt};
 use anyhow::anyhow;
-#[cfg(all(target_arch = "aarch64", feature = "gdb"))]
+#[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 use arch::aarch64::regs;
 use arch::EntryPoint;
 use arch::NumaNodes;
 #[cfg(target_arch = "aarch64")]
 use devices::gic::Gic;
 use devices::interrupt_controller::InterruptController;
-#[cfg(all(target_arch = "aarch64", feature = "gdb"))]
+#[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
-#[cfg(all(target_arch = "x86_64", feature = "gdb"))]
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use gdbstub_arch::x86::reg::{X86SegmentRegs, X86_64CoreRegs as CoreRegs};
-#[cfg(all(target_arch = "aarch64", feature = "gdb"))]
+#[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 use hypervisor::aarch64::StandardRegisters;
 #[cfg(feature = "guest_debug")]
 use hypervisor::arch::x86::msr_index;
@@ -48,7 +48,7 @@ use hypervisor::arch::x86::msr_index;
 use hypervisor::arch::x86::CpuIdEntry;
 #[cfg(feature = "guest_debug")]
 use hypervisor::arch::x86::MsrEntry;
-#[cfg(all(target_arch = "x86_64", feature = "gdb"))]
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use hypervisor::arch::x86::{SpecialRegisters, StandardRegisters};
 #[cfg(target_arch = "aarch64")]
 use hypervisor::kvm::kvm_bindings;
@@ -73,7 +73,7 @@ use tracer::trace_scoped;
 use vm_device::BusDevice;
 #[cfg(feature = "guest_debug")]
 use vm_memory::ByteValued;
-#[cfg(feature = "gdb")]
+#[cfg(feature = "guest_debug")]
 use vm_memory::{Bytes, GuestAddressSpace};
 use vm_memory::{GuestAddress, GuestMemoryAtomic};
 use vm_migration::{
@@ -83,7 +83,7 @@ use vm_migration::{
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::{register_signal_handler, SIGRTMIN};
 
-#[cfg(all(target_arch = "aarch64", feature = "gdb"))]
+#[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 /// Extract the specified bits of a 64-bit integer.
 /// For example, to extrace 2 bits from offset 1 (zero based) of `6u64`,
 /// following expression should return 3 (`0b11`):
@@ -154,11 +154,11 @@ pub enum Error {
     #[error("Error initializing PMU: {0}")]
     InitPmu(#[source] hypervisor::HypervisorCpuError),
 
-    #[cfg(feature = "gdb")]
+    #[cfg(feature = "guest_debug")]
     #[error("Error during CPU debug: {0}")]
     CpuDebug(#[source] hypervisor::HypervisorCpuError),
 
-    #[cfg(feature = "gdb")]
+    #[cfg(feature = "guest_debug")]
     #[error("Error translating virtual address: {0}")]
     TranslateVirtualAddress(#[source] anyhow::Error),
 
@@ -448,7 +448,7 @@ pub struct CpuManager {
     exit_evt: EventFd,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     reset_evt: EventFd,
-    #[cfg(feature = "gdb")]
+    #[cfg(feature = "guest_debug")]
     vm_debug_evt: EventFd,
     vcpu_states: Vec<VcpuState>,
     selected_cpu: u8,
@@ -601,7 +601,7 @@ impl CpuManager {
         vm: Arc<dyn hypervisor::Vm>,
         exit_evt: EventFd,
         reset_evt: EventFd,
-        #[cfg(feature = "gdb")] vm_debug_evt: EventFd,
+        #[cfg(feature = "guest_debug")] vm_debug_evt: EventFd,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         seccomp_action: SeccompAction,
         vm_ops: Arc<dyn VmOps>,
@@ -723,7 +723,7 @@ impl CpuManager {
             vcpu_states,
             exit_evt,
             reset_evt,
-            #[cfg(feature = "gdb")]
+            #[cfg(feature = "guest_debug")]
             vm_debug_evt,
             selected_cpu: 0,
             vcpus: Vec::with_capacity(usize::from(config.max_vcpus)),
@@ -837,7 +837,7 @@ impl CpuManager {
     ) -> Result<()> {
         let reset_evt = self.reset_evt.try_clone().unwrap();
         let exit_evt = self.exit_evt.try_clone().unwrap();
-        #[cfg(feature = "gdb")]
+        #[cfg(feature = "guest_debug")]
         let vm_debug_evt = self.vm_debug_evt.try_clone().unwrap();
         let panic_exit_evt = self.exit_evt.try_clone().unwrap();
         let vcpu_kill_signalled = self.vcpus_kill_signalled.clone();
@@ -974,7 +974,7 @@ impl CpuManager {
                                     #[cfg(feature = "kvm")]
                                     VmExit::Debug => {
                                         info!("VmExit::Debug");
-                                        #[cfg(feature = "gdb")]
+                                        #[cfg(feature = "guest_debug")]
                                         {
                                             vcpu_pause_signalled.store(true, Ordering::SeqCst);
                                             let raw_tid = get_raw_tid(vcpu_id as usize);
@@ -1457,7 +1457,7 @@ impl CpuManager {
         pptt
     }
 
-    #[cfg(feature = "gdb")]
+    #[cfg(feature = "guest_debug")]
     fn get_regs(&self, cpu_id: u8) -> Result<StandardRegisters> {
         self.vcpus[usize::from(cpu_id)]
             .lock()
@@ -1467,7 +1467,7 @@ impl CpuManager {
             .map_err(Error::CpuDebug)
     }
 
-    #[cfg(feature = "gdb")]
+    #[cfg(feature = "guest_debug")]
     fn set_regs(&self, cpu_id: u8, regs: &StandardRegisters) -> Result<()> {
         self.vcpus[usize::from(cpu_id)]
             .lock()
@@ -1477,7 +1477,7 @@ impl CpuManager {
             .map_err(Error::CpuDebug)
     }
 
-    #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
+    #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
     fn get_sregs(&self, cpu_id: u8) -> Result<SpecialRegisters> {
         self.vcpus[usize::from(cpu_id)]
             .lock()
@@ -1487,7 +1487,7 @@ impl CpuManager {
             .map_err(Error::CpuDebug)
     }
 
-    #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
+    #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
     fn set_sregs(&self, cpu_id: u8, sregs: &SpecialRegisters) -> Result<()> {
         self.vcpus[usize::from(cpu_id)]
             .lock()
@@ -1497,7 +1497,7 @@ impl CpuManager {
             .map_err(Error::CpuDebug)
     }
 
-    #[cfg(all(target_arch = "x86_64", feature = "gdb"))]
+    #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
     fn translate_gva(&self, cpu_id: u8, gva: u64) -> Result<u64> {
         let (gpa, _) = self.vcpus[usize::from(cpu_id)]
             .lock()
@@ -1524,7 +1524,7 @@ impl CpuManager {
     /// - FEAT_LVA
     /// - FEAT_LPA2
     ///
-    #[cfg(all(target_arch = "aarch64", feature = "gdb"))]
+    #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
     fn translate_gva(&self, cpu_id: u8, gva: u64) -> Result<u64> {
         let tcr_el1: u64 = self.vcpus[usize::from(cpu_id)]
             .lock()
@@ -2090,7 +2090,7 @@ impl Snapshottable for CpuManager {
 impl Transportable for CpuManager {}
 impl Migratable for CpuManager {}
 
-#[cfg(feature = "gdb")]
+#[cfg(feature = "guest_debug")]
 impl Debuggable for CpuManager {
     #[cfg(feature = "kvm")]
     fn set_guest_debug(

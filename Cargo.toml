@@ -55,7 +55,6 @@ wait-timeout = "0.2.0"
 
 [features]
 default = ["kvm"]
-gdb = ["vmm/gdb"]
 guest_debug = ["vmm/guest_debug"]
 kvm = ["vmm/kvm"]
 mshv = ["vmm/mshv"]

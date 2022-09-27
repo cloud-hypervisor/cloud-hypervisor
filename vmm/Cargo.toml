@@ -6,8 +6,7 @@ edition = "2021"
 
 [features]
 default = []
-gdb = ["kvm", "gdbstub", "gdbstub_arch"]
-guest_debug = ["kvm"]
+guest_debug = ["kvm", "gdbstub", "gdbstub_arch"]
 kvm = ["hypervisor/kvm", "vfio-ioctls/kvm", "vm-device/kvm", "pci/kvm"]
 mshv = ["hypervisor/mshv", "vfio-ioctls/mshv", "vm-device/mshv", "pci/mshv"]
 tdx = ["arch/tdx", "hypervisor/tdx"]

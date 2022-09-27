@@ -62,13 +62,6 @@ jobs:
           command: clippy
           args: --locked --all --all-targets --tests -- -D warnings
 
-      - name: Clippy (default features + gdb)
-        uses: actions-rs/cargo@v1
-        with:
-          use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
-          command: clippy
-          args: --locked --all --all-targets --tests --features "gdb" -- -D warnings
-
       - name: Clippy (default features + guest_debug)
         uses: actions-rs/cargo@v1
         with:

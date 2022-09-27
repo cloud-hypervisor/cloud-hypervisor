@@ -29,7 +29,7 @@ use vmm_sys_util::terminal::Terminal;
 enum Error {
     #[error("Failed to create API EventFd: {0}")]
     CreateApiEventFd(#[source] std::io::Error),
-    #[cfg(feature = "gdb")]
+    #[cfg(feature = "guest_debug")]
     #[error("Failed to create Debug EventFd: {0}")]
     CreateDebugEventFd(#[source] std::io::Error),
     #[error("Failed to open hypervisor interface (is hypervisor interface available?): {0}")]
@@ -58,10 +58,10 @@ enum Error {
     BareEventMonitor,
     #[error("Error doing event monitor I/O: {0}")]
     EventMonitorIo(std::io::Error),
-    #[cfg(feature = "gdb")]
+    #[cfg(feature = "guest_debug")]
     #[error("Error parsing --gdb: {0}")]
     ParsingGdb(option_parser::OptionParserError),
-    #[cfg(feature = "gdb")]
+    #[cfg(feature = "guest_debug")]
     #[error("Error parsing --gdb: path required")]
     BareGdb,
     #[error("Error creating log file: {0}")]
@@ -391,7 +391,7 @@ fn create_app<'a>(
             .group("vm-config"),
     );
 
-    #[cfg(feature = "gdb")]
+    #[cfg(feature = "guest_debug")]
     let app = app.arg(
         Arg::new("gdb")
             .long("gdb")
@@ -528,7 +528,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
 
     let hypervisor = hypervisor::new().map_err(Error::CreateHypervisor)?;
 
-    #[cfg(feature = "gdb")]
+    #[cfg(feature = "guest_debug")]
     let gdb_socket_path = if let Some(gdb_config) = cmd_arguments.value_of("gdb") {
         let mut parser = OptionParser::new();
         parser.add("path");
@@ -542,9 +542,9 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
     } else {
         None
     };
-    #[cfg(feature = "gdb")]
+    #[cfg(feature = "guest_debug")]
     let debug_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateDebugEventFd)?;
-    #[cfg(feature = "gdb")]
+    #[cfg(feature = "guest_debug")]
     let vm_debug_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateDebugEventFd)?;
 
     let vmm_thread = vmm::start_vmm_thread(
@@ -554,11 +554,11 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         api_evt.try_clone().unwrap(),
         http_sender,
         api_request_receiver,
-        #[cfg(feature = "gdb")]
+        #[cfg(feature = "guest_debug")]
         gdb_socket_path,
-        #[cfg(feature = "gdb")]
+        #[cfg(feature = "guest_debug")]
         debug_evt.try_clone().unwrap(),
-        #[cfg(feature = "gdb")]
+        #[cfg(feature = "guest_debug")]
         vm_debug_evt.try_clone().unwrap(),
         &seccomp_action,
         hypervisor,
@@ -730,7 +730,7 @@ mod unit_tests {
             sgx_epc: None,
             numa: None,
             watchdog: false,
-            #[cfg(feature = "gdb")]
+            #[cfg(feature = "guest_debug")]
             gdb: false,
             platform: None,
         };
