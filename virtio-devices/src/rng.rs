@@ -40,6 +40,10 @@ const QUEUE_AVAIL_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 enum Error {
     #[error("Descriptor chain too short")]
     DescriptorChainTooShort,
+    #[error("Invalid descriptor")]
+    InvalidDescriptor,
+    #[error("Failed read from guest memory: {0}")]
+    GuestMemoryRead(vm_memory::guest_memory::Error),
     #[error("Failed adding used index: {0}")]
     QueueAddUsed(virtio_queue::Error),
 }
@@ -62,23 +66,25 @@ impl RngEpollHandler {
         let mut used_descs = false;
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
             let desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
-            let mut len = 0;
 
-            // Drivers can only read from the random device.
-            if desc.is_write_only() {
-                // Fill the read with data from the random device on the host.
-                if let Ok(number_of_bytes) = desc_chain.memory().read_from(
+            // The descriptor must be write-only and non-zero length
+            if !(desc.is_write_only() && desc.len() > 0) {
+                return Err(Error::InvalidDescriptor);
+            }
+
+            // Fill the read with data from the random device on the host.
+            let len = desc_chain
+                .memory()
+                .read_from(
                     desc.addr()
                         .translate_gva(self.access_platform.as_ref(), desc.len() as usize),
                     &mut self.random_file,
                     desc.len() as usize,
-                ) {
-                    len = number_of_bytes as u32;
-                }
-            }
+                )
+                .map_err(Error::GuestMemoryRead)?;
 
             queue
-                .add_used(desc_chain.memory(), desc_chain.head_index(), len)
+                .add_used(desc_chain.memory(), desc_chain.head_index(), len as u32)
                 .map_err(Error::QueueAddUsed)?;
             used_descs = true;
         }
