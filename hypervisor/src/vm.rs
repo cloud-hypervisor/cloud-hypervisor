@@ -326,19 +326,25 @@ pub trait Vm: Send + Sync + Any {
     fn get_dirty_log(&self, slot: u32, base_gpa: u64, memory_size: u64) -> Result<Vec<u64>>;
     #[cfg(feature = "tdx")]
     /// Initalize TDX on this VM
-    fn tdx_init(&self, cpuid: &[CpuIdEntry], max_vcpus: u32) -> Result<()>;
+    fn tdx_init(&self, _cpuid: &[CpuIdEntry], _max_vcpus: u32) -> Result<()> {
+        unimplemented!()
+    }
     #[cfg(feature = "tdx")]
     /// Finalize the configuration of TDX on this VM
-    fn tdx_finalize(&self) -> Result<()>;
+    fn tdx_finalize(&self) -> Result<()> {
+        unimplemented!()
+    }
     #[cfg(feature = "tdx")]
     /// Initalize a TDX memory region for this VM
     fn tdx_init_memory_region(
         &self,
-        host_address: u64,
-        guest_address: u64,
-        size: u64,
-        measure: bool,
-    ) -> Result<()>;
+        _host_address: u64,
+        _guest_address: u64,
+        _size: u64,
+        _measure: bool,
+    ) -> Result<()> {
+        unimplemented!()
+    }
     /// Downcast to the underlying hypervisor VM type
     fn as_any(&self) -> &dyn Any;
 }
