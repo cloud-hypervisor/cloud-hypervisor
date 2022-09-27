@@ -124,7 +124,9 @@ pub trait Hypervisor: Send + Sync {
     /// Retrieve TDX capabilities
     ///
     #[cfg(feature = "tdx")]
-    fn tdx_capabilities(&self) -> Result<TdxCapabilities>;
+    fn tdx_capabilities(&self) -> Result<TdxCapabilities> {
+        unimplemented!()
+    }
     ///
     /// Get the number of supported hardware breakpoints
     ///

@@ -406,7 +406,9 @@ pub trait Vcpu: Send + Sync {
     /// Initialize TDX support on the vCPU
     ///
     #[cfg(feature = "tdx")]
-    fn tdx_init(&self, hob_address: u64) -> Result<()>;
+    fn tdx_init(&self, _hob_address: u64) -> Result<()> {
+        unimplemented!()
+    }
     ///
     /// Set the "immediate_exit" state
     ///
@@ -415,12 +417,16 @@ pub trait Vcpu: Send + Sync {
     ///
     /// Returns the details about TDX exit reason
     ///
-    fn get_tdx_exit_details(&mut self) -> Result<TdxExitDetails>;
+    fn get_tdx_exit_details(&mut self) -> Result<TdxExitDetails> {
+        unimplemented!()
+    }
     #[cfg(feature = "tdx")]
     ///
     /// Set the status code for TDX exit
     ///
-    fn set_tdx_status(&mut self, status: TdxExitStatus);
+    fn set_tdx_status(&mut self, _status: TdxExitStatus) {
+        unimplemented!()
+    }
     #[cfg(target_arch = "x86_64")]
     ///
     /// Return the list of initial MSR entries for a VCPU
