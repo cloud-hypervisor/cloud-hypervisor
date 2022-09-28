@@ -10,7 +10,7 @@ cargo_args=("")
 
 if [[ $hypervisor = "mshv" ]]; then
     cargo_args+=("--no-default-features")
-    cargo_args+=("--features common,$hypervisor")
+    cargo_args+=("--features $hypervisor")
 elif [[ $(uname -m) = "x86_64" ]]; then
     cargo_args+=("--features tdx")
 fi

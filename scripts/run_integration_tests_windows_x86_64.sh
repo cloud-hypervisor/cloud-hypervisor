@@ -9,7 +9,7 @@ process_common_args "$@"
 features=""
 
 if [ "$hypervisor" = "mshv" ] ;  then
-    features="--no-default-features --features mshv,common"
+    features="--no-default-features --features mshv"
 fi
 WIN_IMAGE_FILE="/root/workloads/windows-server-2019.raw"
 
