@@ -15,7 +15,7 @@ process_common_args "$@"
 features=""
 
 if [ "$hypervisor" = "mshv" ] ;  then
-    features="--no-default-features --features mshv,common"
+    features="--no-default-features --features mshv"
 fi
 
 cp scripts/sha1sums-x86_64 $WORKLOADS_DIR
