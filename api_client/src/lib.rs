@@ -143,13 +143,13 @@ fn parse_http_response(socket: &mut dyn Read) -> Result<Option<String>, Error> {
 
 /// Make an API request using the fully qualified command name.
 /// For example, full_command could be "vm.create" or "vmm.ping".
-pub fn simple_api_full_command_with_fds<T: Read + Write + ScmSocket>(
+pub fn simple_api_full_command_with_fds_and_response<T: Read + Write + ScmSocket>(
     socket: &mut T,
     method: &str,
     full_command: &str,
     request_body: Option<&str>,
     request_fds: Vec<RawFd>,
-) -> Result<(), Error> {
+) -> Result<Option<String>, Error> {
     socket
         .send_with_fds(
             &[format!(
@@ -177,9 +177,28 @@ pub fn simple_api_full_command_with_fds<T: Read + Write + ScmSocket>(
 
     socket.flush().map_err(Error::Socket)?;
 
-    if let Some(body) = parse_http_response(socket)? {
-        println!("{}", body);
+    parse_http_response(socket)
+}
+
+pub fn simple_api_full_command_with_fds<T: Read + Write + ScmSocket>(
+    socket: &mut T,
+    method: &str,
+    full_command: &str,
+    request_body: Option<&str>,
+    request_fds: Vec<RawFd>,
+) -> Result<(), Error> {
+    let response = simple_api_full_command_with_fds_and_response(
+        socket,
+        method,
+        full_command,
+        request_body,
+        request_fds,
+    )?;
+
+    if response.is_some() {
+        println!("{}", response.unwrap());
     }
+
     Ok(())
 }
 
@@ -190,6 +209,21 @@ pub fn simple_api_full_command<T: Read + Write + ScmSocket>(
     request_body: Option<&str>,
 ) -> Result<(), Error> {
     simple_api_full_command_with_fds(socket, method, full_command, request_body, Vec::new())
+}
+
+pub fn simple_api_full_command_and_response<T: Read + Write + ScmSocket>(
+    socket: &mut T,
+    method: &str,
+    full_command: &str,
+    request_body: Option<&str>,
+) -> Result<Option<String>, Error> {
+    simple_api_full_command_with_fds_and_response(
+        socket,
+        method,
+        full_command,
+        request_body,
+        Vec::new(),
+    )
 }
 
 pub fn simple_api_command_with_fds<T: Read + Write + ScmSocket>(
