@@ -25,7 +25,8 @@
   - [Firecracker and crosvm](#firecracker-and-crosvm)
 - [5. Community](#5-community)
   - [Contribute](#contribute)
-  - [Join us](#join-us)
+  - [Slack](#slack)
+  - [Mailing list](#mailing-list)
   - [Security issues](#security-issues)
 
 # 1. What is Cloud Hypervisor?
@@ -392,10 +393,17 @@ reviews, bug reports, feature requests, project improvement suggestions, etc,
 are all equal and welcome means of contribution. See the
 [CONTRIBUTING](CONTRIBUTING.md) document for more details.
 
-## Join us
+## Slack
 
 Get an [invite to our Slack channel](https://join.slack.com/t/cloud-hypervisor/shared_invite/enQtNjY3MTE3MDkwNDQ4LWQ1MTA1ZDVmODkwMWQ1MTRhYzk4ZGNlN2UwNTI3ZmFlODU0OTcwOWZjMTkwZDExYWE3YjFmNzgzY2FmNDAyMjI)
 and [join us on Slack](https://cloud-hypervisor.slack.com/).
+
+## Mailing list
+
+Please report bugs using the [GitHub issue
+tracker](https://github.com/cloud-hypervisor/cloud-hypervisor/issues) but for
+broader community discussions you may use our [mailing
+list](https://lists.cloudhypervisor.org/g/dev/).
 
 ## Security issues
 
