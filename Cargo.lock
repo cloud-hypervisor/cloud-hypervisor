@@ -156,7 +156,7 @@ dependencies = [
 
 [[package]]
 name = "cloud-hypervisor"
-version = "26.0.0"
+version = "27.0.0"
 dependencies = [
  "anyhow",
  "api_client",
@@ -1426,9 +1426,9 @@ dependencies = [
 
 [[package]]
 name = "virtio-queue"
-version = "0.6.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e2b7bea73248006630c9611a61ac3b8e44eece09342801fe1faec583b7a9f02"
+checksum = "435dd49c7b38419729afd43675850c7b5dc4728f2fabd70c7a9079a331e4f8c6"
 dependencies = [
  "log",
  "virtio-bindings",
