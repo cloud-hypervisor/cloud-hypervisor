@@ -24,7 +24,7 @@ clap = { version = "3.2.22", features = ["wrap_help","cargo"] }
 epoll = "4.3.1"
 event_monitor = { path = "event_monitor" }
 hypervisor = { path = "hypervisor" }
-libc = "0.2.133"
+libc = "0.2.134"
 log = { version = "0.4.17", features = ["std"] }
 option_parser = { path = "option_parser" }
 seccompiler = "0.3.0"

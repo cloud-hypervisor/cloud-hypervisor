@@ -5,6 +5,6 @@ authors = ["The Cloud Hypervisor Authors"]
 edition = "2021"
 
 [dependencies]
-libc = "0.2.133"
+libc = "0.2.134"
 serde = { version = "1.0.145", features = ["rc", "derive"] }
 serde_json = "1.0.85"
