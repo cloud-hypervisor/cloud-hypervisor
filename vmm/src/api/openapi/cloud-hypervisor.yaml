@@ -502,6 +502,8 @@ components:
     PayloadConfig:
       type: object
       properties:
+        firmware:
+          type: string
         kernel:
           type: string
         cmdline:
