@@ -90,10 +90,8 @@ use tracer::trace_scoped;
 use vm_device::Bus;
 #[cfg(target_arch = "x86_64")]
 use vm_device::BusDevice;
-#[cfg(target_arch = "x86_64")]
-use vm_memory::Address;
 #[cfg(feature = "tdx")]
-use vm_memory::{ByteValued, GuestMemory, GuestMemoryRegion};
+use vm_memory::{Address, ByteValued, GuestMemory, GuestMemoryRegion};
 use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::protocol::{Request, Response, Status};
 use vm_migration::{
@@ -1004,82 +1002,24 @@ impl Vm {
     }
 
     #[cfg(target_arch = "x86_64")]
-    fn load_legacy_firmware(
-        mut firmware: File,
-        memory_manager: &Arc<Mutex<MemoryManager>>,
-    ) -> Result<EntryPoint> {
-        warn!("Loading of legacy (non-PVH) firmware is deprecated and will be removed in a future version.");
-
-        // Not an ELF header - assume raw binary data / firmware
-        let size = firmware
-            .seek(SeekFrom::End(0))
-            .map_err(Error::FirmwareFile)?;
-
-        // The OVMF firmware is as big as you might expect and it's 4MiB so limit to that
-        if size > 4 << 20 {
-            return Err(Error::FirmwareTooLarge);
-        }
-
-        // Loaded at the end of the 4GiB
-        let load_address = GuestAddress(4 << 30)
-            .checked_sub(size)
-            .ok_or(Error::FirmwareTooLarge)?;
-
-        info!(
-            "Loading RAW firmware at 0x{:x} (size: {})",
-            load_address.raw_value(),
-            size
-        );
-
-        memory_manager
-            .lock()
-            .unwrap()
-            .add_ram_region(load_address, size as usize)
-            .map_err(Error::AllocateFirmwareMemory)?;
-
-        firmware
-            .seek(SeekFrom::Start(0))
-            .map_err(Error::FirmwareFile)?;
-        memory_manager
-            .lock()
-            .unwrap()
-            .guest_memory()
-            .memory()
-            .read_exact_from(load_address, &mut firmware, size as usize)
-            .map_err(Error::FirmwareLoad)?;
-
-        Ok(EntryPoint { entry_addr: None })
-    }
-
-    #[cfg(target_arch = "x86_64")]
     fn load_kernel(
         mut kernel: File,
         cmdline: Option<Cmdline>,
         memory_manager: Arc<Mutex<MemoryManager>>,
     ) -> Result<EntryPoint> {
-        use linux_loader::loader::{elf::Error::InvalidElfMagicNumber, Error::Elf};
         info!("Loading kernel");
 
         let mem = {
             let guest_memory = memory_manager.lock().as_ref().unwrap().guest_memory();
             guest_memory.memory()
         };
-        let entry_addr = match linux_loader::loader::elf::Elf::load(
+        let entry_addr = linux_loader::loader::elf::Elf::load(
             mem.deref(),
             None,
             &mut kernel,
             Some(arch::layout::HIGH_RAM_START),
-        ) {
-            Ok(entry_addr) => entry_addr,
-            Err(e) => match e {
-                Elf(InvalidElfMagicNumber) => {
-                    return Self::load_legacy_firmware(kernel, &memory_manager)
-                }
-                _ => {
-                    return Err(Error::KernelLoad(e));
-                }
-            },
-        };
+        )
+        .map_err(Error::KernelLoad)?;
 
         if let Some(cmdline) = cmdline {
             linux_loader::loader::load_cmdline(mem.deref(), arch::layout::CMDLINE_START, &cmdline)
