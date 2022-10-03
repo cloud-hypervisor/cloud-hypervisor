@@ -1400,28 +1400,12 @@ impl DeviceManager {
         {
             let shutdown_pio_address: u16 = 0x600;
 
-            // TODO: Remove the entry for 0x3c0 once all firmwares will have been
-            // updated with the new value.
-            self.address_manager
-                .allocator
-                .lock()
-                .unwrap()
-                .allocate_io_addresses(Some(GuestAddress(0x3c0)), 0x8, None)
-                .ok_or(DeviceManagerError::AllocateIoPort)?;
-
             self.address_manager
                 .allocator
                 .lock()
                 .unwrap()
                 .allocate_io_addresses(Some(GuestAddress(shutdown_pio_address.into())), 0x8, None)
                 .ok_or(DeviceManagerError::AllocateIoPort)?;
-
-            // TODO: Remove the entry for 0x3c0 once all firmwares will have been
-            // updated with the new value.
-            self.address_manager
-                .io_bus
-                .insert(shutdown_device.clone(), 0x3c0, 0x4)
-                .map_err(DeviceManagerError::BusError)?;
 
             self.address_manager
                 .io_bus
@@ -1484,28 +1468,12 @@ impl DeviceManager {
         {
             let pm_timer_pio_address: u16 = 0x608;
 
-            // TODO: Remove the entry for 0xb008 once all firmwares will have been
-            // updated with the new value.
-            self.address_manager
-                .allocator
-                .lock()
-                .unwrap()
-                .allocate_io_addresses(Some(GuestAddress(0xb008)), 0x4, None)
-                .ok_or(DeviceManagerError::AllocateIoPort)?;
-
             self.address_manager
                 .allocator
                 .lock()
                 .unwrap()
                 .allocate_io_addresses(Some(GuestAddress(pm_timer_pio_address.into())), 0x4, None)
                 .ok_or(DeviceManagerError::AllocateIoPort)?;
-
-            // TODO: Remove the entry for 0xb008 once all firmwares will have been
-            // updated with the new value.
-            self.address_manager
-                .io_bus
-                .insert(pm_timer_device.clone(), 0xb008, 0x4)
-                .map_err(DeviceManagerError::BusError)?;
 
             self.address_manager
                 .io_bus
