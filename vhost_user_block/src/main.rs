@@ -26,11 +26,11 @@ fn main() {
             Arg::new("block-backend")
                 .long("block-backend")
                 .help(vhost_user_block::SYNTAX)
-                .takes_value(true)
+                .num_args(1)
                 .required(true),
         )
         .get_matches();
 
-    let backend_command = cmd_arguments.value_of("block-backend").unwrap();
+    let backend_command = cmd_arguments.get_one::<String>("block-backend").unwrap();
     start_block_backend(backend_command);
 }

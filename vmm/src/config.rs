@@ -387,32 +387,52 @@ pub struct VmParams<'a> {
 impl<'a> VmParams<'a> {
     pub fn from_arg_matches(args: &'a ArgMatches) -> Self {
         // These .unwrap()s cannot fail as there is a default value defined
-        let cpus = args.value_of("cpus").unwrap();
-        let memory = args.value_of("memory").unwrap();
-        let memory_zones: Option<Vec<&str>> = args.values_of("memory-zone").map(|x| x.collect());
-        let rng = args.value_of("rng").unwrap();
-        let serial = args.value_of("serial").unwrap();
-        let firmware = args.value_of("firmware");
-        let kernel = args.value_of("kernel");
-        let initramfs = args.value_of("initramfs");
-        let cmdline = args.value_of("cmdline");
-        let disks: Option<Vec<&str>> = args.values_of("disk").map(|x| x.collect());
-        let net: Option<Vec<&str>> = args.values_of("net").map(|x| x.collect());
-        let console = args.value_of("console").unwrap();
-        let balloon = args.value_of("balloon");
-        let fs: Option<Vec<&str>> = args.values_of("fs").map(|x| x.collect());
-        let pmem: Option<Vec<&str>> = args.values_of("pmem").map(|x| x.collect());
-        let devices: Option<Vec<&str>> = args.values_of("device").map(|x| x.collect());
-        let user_devices: Option<Vec<&str>> = args.values_of("user-device").map(|x| x.collect());
-        let vdpa: Option<Vec<&str>> = args.values_of("vdpa").map(|x| x.collect());
-        let vsock: Option<&str> = args.value_of("vsock");
+        let cpus = args.get_one::<String>("cpus").unwrap();
+        let memory = args.get_one::<String>("memory").unwrap();
+        let memory_zones: Option<Vec<&str>> = args
+            .get_many::<String>("memory-zone")
+            .map(|x| x.map(|y| y as &str).collect());
+        let rng = args.get_one::<String>("rng").unwrap();
+        let serial = args.get_one::<String>("serial").unwrap();
+        let firmware = args.get_one::<String>("firmware").map(|x| x as &str);
+        let kernel = args.get_one::<String>("kernel").map(|x| x as &str);
+        let initramfs = args.get_one::<String>("initramfs").map(|x| x as &str);
+        let cmdline = args.get_one::<String>("cmdline").map(|x| x as &str);
+        let disks: Option<Vec<&str>> = args
+            .get_many::<String>("disk")
+            .map(|x| x.map(|y| y as &str).collect());
+        let net: Option<Vec<&str>> = args
+            .get_many::<String>("net")
+            .map(|x| x.map(|y| y as &str).collect());
+        let console = args.get_one::<String>("console").unwrap();
+        let balloon = args.get_one::<String>("balloon").map(|x| x as &str);
+        let fs: Option<Vec<&str>> = args
+            .get_many::<String>("fs")
+            .map(|x| x.map(|y| y as &str).collect());
+        let pmem: Option<Vec<&str>> = args
+            .get_many::<String>("pmem")
+            .map(|x| x.map(|y| y as &str).collect());
+        let devices: Option<Vec<&str>> = args
+            .get_many::<String>("device")
+            .map(|x| x.map(|y| y as &str).collect());
+        let user_devices: Option<Vec<&str>> = args
+            .get_many::<String>("user-device")
+            .map(|x| x.map(|y| y as &str).collect());
+        let vdpa: Option<Vec<&str>> = args
+            .get_many::<String>("vdpa")
+            .map(|x| x.map(|y| y as &str).collect());
+        let vsock: Option<&str> = args.get_one::<String>("vsock").map(|x| x as &str);
         #[cfg(target_arch = "x86_64")]
-        let sgx_epc: Option<Vec<&str>> = args.values_of("sgx-epc").map(|x| x.collect());
-        let numa: Option<Vec<&str>> = args.values_of("numa").map(|x| x.collect());
-        let watchdog = args.is_present("watchdog");
-        let platform = args.value_of("platform");
+        let sgx_epc: Option<Vec<&str>> = args
+            .get_many::<String>("sgx-epc")
+            .map(|x| x.map(|y| y as &str).collect());
+        let numa: Option<Vec<&str>> = args
+            .get_many::<String>("numa")
+            .map(|x| x.map(|y| y as &str).collect());
+        let watchdog = args.get_flag("watchdog");
+        let platform = args.get_one::<String>("platform").map(|x| x as &str);
         #[cfg(feature = "guest_debug")]
-        let gdb = args.is_present("gdb");
+        let gdb = args.contains_id("gdb");
         VmParams {
             cpus,
             memory,

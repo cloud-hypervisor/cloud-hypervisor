@@ -23,11 +23,11 @@ fn main() {
             Arg::new("net-backend")
                 .long("net-backend")
                 .help(vhost_user_net::SYNTAX)
-                .takes_value(true)
+                .num_args(1)
                 .required(true),
         )
         .get_matches();
 
-    let backend_command = cmd_arguments.value_of("net-backend").unwrap();
+    let backend_command = cmd_arguments.get_one::<String>("net-backend").unwrap();
     start_net_backend(backend_command);
 }

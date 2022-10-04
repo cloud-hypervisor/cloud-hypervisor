@@ -10,7 +10,7 @@ extern crate clap;
 
 mod performance_tests;
 
-use clap::{Arg, Command as ClapCommand};
+use clap::{Arg, ArgAction, Command as ClapCommand};
 use performance_tests::*;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -503,29 +503,28 @@ fn main() {
             Arg::new("test-filter")
                 .long("test-filter")
                 .help("Filter metrics tests to run based on provided keywords")
-                .multiple_occurrences(true)
-                .takes_value(true)
+                .num_args(1)
                 .required(false),
         )
         .arg(
             Arg::new("list-tests")
                 .long("list-tests")
                 .help("Print the list of availale metrics tests")
-                .multiple_occurrences(true)
-                .takes_value(false)
+                .num_args(0)
+                .action(ArgAction::SetTrue)
                 .required(false),
         )
         .arg(
             Arg::new("report-file")
                 .long("report-file")
                 .help("Report file. Standard error is used if not specified")
-                .takes_value(true),
+                .num_args(1),
         )
         .arg(
             Arg::new("iterations")
                 .long("iterations")
                 .help("Override number of test iterations")
-                .takes_value(true),
+                .num_args(1),
         )
         .get_matches();
 
@@ -537,7 +536,7 @@ fn main() {
         .filter(|t| !(cfg!(target_arch = "aarch64") && t.name == "virtio_net_latency_us"))
         .collect();
 
-    if cmd_arguments.is_present("list-tests") {
+    if cmd_arguments.get_flag("list-tests") {
         for test in test_list.iter() {
             println!("\"{}\" ({})", test.name, test.control);
         }
@@ -545,7 +544,7 @@ fn main() {
         return;
     }
 
-    let test_filter = match cmd_arguments.values_of("test-filter") {
+    let test_filter = match cmd_arguments.get_many::<String>("test-filter") {
         Some(s) => s.collect(),
         None => Vec::new(),
     };
@@ -557,7 +556,7 @@ fn main() {
 
     let overrides = Arc::new(PerformanceTestOverrides {
         test_iterations: cmd_arguments
-            .value_of("iterations")
+            .get_one::<String>("iterations")
             .map(|s| s.parse())
             .transpose()
             .unwrap_or_default(),
@@ -580,7 +579,7 @@ fn main() {
     cleanup_tests();
 
     let mut report_file: Box<dyn std::io::Write + Send> =
-        if let Some(file) = cmd_arguments.value_of("report-file") {
+        if let Some(file) = cmd_arguments.get_one::<String>("report-file") {
             Box::new(
                 std::fs::File::create(std::path::Path::new(file))
                     .map_err(|e| {

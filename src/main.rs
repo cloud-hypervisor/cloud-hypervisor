@@ -8,7 +8,7 @@ extern crate clap;
 #[macro_use]
 extern crate event_monitor;
 
-use clap::{Arg, ArgGroup, ArgMatches, Command};
+use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command};
 use libc::EFD_NONBLOCK;
 use log::LevelFilter;
 use option_parser::OptionParser;
@@ -124,11 +124,7 @@ fn prepare_default_values() -> (String, String, String) {
     (default_vcpus, default_memory, default_rng)
 }
 
-fn create_app<'a>(
-    default_vcpus: &'a str,
-    default_memory: &'a str,
-    default_rng: &'a str,
-) -> Command<'a> {
+fn create_app(default_vcpus: String, default_memory: String, default_rng: String) -> Command {
     let app = Command::new("cloud-hypervisor")
         // 'BUILT_VERSION' is set by the build script 'build.rs' at
         // compile time
@@ -157,7 +153,7 @@ fn create_app<'a>(
                 .help(
                     "num_pci_segments=<num_pci_segments>,iommu_segments=<list_of_segments>,serial_number=<dmi_device_serial_number>,uuid=<dmi_device_uuid>,oem_strings=<list_of_strings>",
                 )
-                .takes_value(true)
+                .num_args(1)
                 .group("vm-config"),
         )
         .arg(
@@ -188,15 +184,14 @@ fn create_app<'a>(
                      hotplugged_size=<hotplugged_memory_size>,\
                      prefault=on|off\"",
                 )
-                .takes_value(true)
-                .min_values(1)
+                .num_args(1..)
                 .group("vm-config"),
         )
         .arg(
             Arg::new("firmware")
                 .long("firmware")
                 .help("Path to firmware that is loaded in an architectural specific way")
-                .takes_value(true)
+                .num_args(1)
                 .group("vm-config"),
         )
         .arg(
@@ -206,37 +201,35 @@ fn create_app<'a>(
                     "Path to kernel to load. This may be a kernel or firmware that supports a PVH \
                 entry point (e.g. vmlinux) or architecture equivalent",
                 )
-                .takes_value(true)
+                .num_args(1)
                 .group("vm-config"),
         )
         .arg(
             Arg::new("initramfs")
                 .long("initramfs")
                 .help("Path to initramfs image")
-                .takes_value(true)
+                .num_args(1)
                 .group("vm-config"),
         )
         .arg(
             Arg::new("cmdline")
                 .long("cmdline")
                 .help("Kernel command line")
-                .takes_value(true)
+                .num_args(1)
                 .group("vm-config"),
         )
         .arg(
             Arg::new("disk")
                 .long("disk")
                 .help(config::DiskConfig::SYNTAX)
-                .takes_value(true)
-                .min_values(1)
+                .num_args(1..)
                 .group("vm-config"),
         )
         .arg(
             Arg::new("net")
                 .long("net")
                 .help(config::NetConfig::SYNTAX)
-                .takes_value(true)
-                .min_values(1)
+                .num_args(1..)
                 .group("vm-config"),
         )
         .arg(
@@ -252,23 +245,21 @@ fn create_app<'a>(
             Arg::new("balloon")
                 .long("balloon")
                 .help(config::BalloonConfig::SYNTAX)
-                .takes_value(true)
+                .num_args(1)
                 .group("vm-config"),
         )
         .arg(
             Arg::new("fs")
                 .long("fs")
                 .help(config::FsConfig::SYNTAX)
-                .takes_value(true)
-                .min_values(1)
+                .num_args(1..)
                 .group("vm-config"),
         )
         .arg(
             Arg::new("pmem")
                 .long("pmem")
                 .help(config::PmemConfig::SYNTAX)
-                .takes_value(true)
-                .min_values(1)
+                .num_args(1..)
                 .group("vm-config"),
         )
         .arg(
@@ -291,53 +282,49 @@ fn create_app<'a>(
             Arg::new("device")
                 .long("device")
                 .help(config::DeviceConfig::SYNTAX)
-                .takes_value(true)
-                .min_values(1)
+                .num_args(1..)
                 .group("vm-config"),
         )
         .arg(
             Arg::new("user-device")
                 .long("user-device")
                 .help(config::UserDeviceConfig::SYNTAX)
-                .takes_value(true)
-                .min_values(1)
+                .num_args(1..)
                 .group("vm-config"),
         )
         .arg(
             Arg::new("vdpa")
                 .long("vdpa")
                 .help(config::VdpaConfig::SYNTAX)
-                .takes_value(true)
-                .min_values(1)
+                .num_args(1..)
                 .group("vm-config"),
         )
         .arg(
             Arg::new("vsock")
                 .long("vsock")
                 .help(config::VsockConfig::SYNTAX)
-                .takes_value(true)
-                .number_of_values(1)
+                .num_args(1)
                 .group("vm-config"),
         )
         .arg(
             Arg::new("numa")
                 .long("numa")
                 .help(config::NumaConfig::SYNTAX)
-                .takes_value(true)
-                .min_values(1)
+                .num_args(1..)
                 .group("vm-config"),
         )
         .arg(
             Arg::new("watchdog")
                 .long("watchdog")
                 .help("Enable virtio-watchdog")
-                .takes_value(false)
+                .num_args(0)
+                .action(ArgAction::SetTrue)
                 .group("vm-config"),
         )
         .arg(
             Arg::new("v")
                 .short('v')
-                .multiple_occurrences(true)
+                .action(ArgAction::Count)
                 .help("Sets the level of debugging output")
                 .group("logging"),
         )
@@ -345,39 +332,35 @@ fn create_app<'a>(
             Arg::new("log-file")
                 .long("log-file")
                 .help("Log file. Standard error is used if not specified")
-                .takes_value(true)
-                .min_values(1)
+                .num_args(1)
                 .group("logging"),
         )
         .arg(
             Arg::new("api-socket")
                 .long("api-socket")
                 .help("HTTP API socket (UNIX domain socket): path=</path/to/a/file> or fd=<fd>.")
-                .takes_value(true)
-                .min_values(1)
+                .num_args(1)
                 .group("vmm-config"),
         )
         .arg(
             Arg::new("event-monitor")
                 .long("event-monitor")
                 .help("File to report events on: path=</path/to/a/file> or fd=<fd>")
-                .takes_value(true)
-                .min_values(1)
+                .num_args(1)
                 .group("vmm-config"),
         )
         .arg(
             Arg::new("restore")
                 .long("restore")
                 .help(config::RestoreConfig::SYNTAX)
-                .takes_value(true)
-                .min_values(1)
+                .num_args(1)
                 .group("vmm-config"),
         )
         .arg(
             Arg::new("seccomp")
                 .long("seccomp")
-                .takes_value(true)
-                .possible_values(["true", "false", "log"])
+                .num_args(1)
+                .value_parser(["true", "false", "log"])
                 .default_value("true"),
         );
 
@@ -386,8 +369,7 @@ fn create_app<'a>(
         Arg::new("sgx-epc")
             .long("sgx-epc")
             .help(config::SgxEpcConfig::SYNTAX)
-            .takes_value(true)
-            .min_values(1)
+            .num_args(1..)
             .group("vm-config"),
     );
 
@@ -396,7 +378,7 @@ fn create_app<'a>(
         Arg::new("gdb")
             .long("gdb")
             .help("GDB socket (UNIX domain socket): path=</path/to/a/file>")
-            .takes_value(true)
+            .num_args(1)
             .group("vmm-config"),
     );
 
@@ -404,7 +386,7 @@ fn create_app<'a>(
 }
 
 fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
-    let log_level = match cmd_arguments.occurrences_of("v") {
+    let log_level = match cmd_arguments.get_count("v") {
         0 => LevelFilter::Warn,
         1 => LevelFilter::Info,
         2 => LevelFilter::Debug,
@@ -412,7 +394,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
     };
 
     let log_file: Box<dyn std::io::Write + Send> = if let Some(file) =
-        cmd_arguments.value_of("log-file")
+        cmd_arguments.get_one::<String>("log-file")
     {
         Box::new(std::fs::File::create(std::path::Path::new(file)).map_err(Error::LogFileCreation)?)
     } else {
@@ -427,7 +409,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
     .map_err(Error::LoggerSetup)?;
 
     let (api_socket_path, api_socket_fd) =
-        if let Some(socket_config) = cmd_arguments.value_of("api-socket") {
+        if let Some(socket_config) = cmd_arguments.get_one::<String>("api-socket") {
             let mut parser = OptionParser::new();
             parser.add("path").add("fd");
             parser.parse(socket_config).unwrap_or_default();
@@ -441,7 +423,9 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
                 (Some(path), None)
             } else {
                 (
-                    cmd_arguments.value_of("api-socket").map(|s| s.to_string()),
+                    cmd_arguments
+                        .get_one::<String>("api-socket")
+                        .map(|s| s.to_string()),
                     None,
                 )
             }
@@ -449,7 +433,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
             (None, None)
         };
 
-    if let Some(monitor_config) = cmd_arguments.value_of("event-monitor") {
+    if let Some(monitor_config) = cmd_arguments.get_one::<String>("event-monitor") {
         let mut parser = OptionParser::new();
         parser.add("path").add("fd");
         parser
@@ -478,8 +462,8 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
     let api_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateApiEventFd)?;
 
     let http_sender = api_request_sender.clone();
-    let seccomp_action = if let Some(seccomp_value) = cmd_arguments.value_of("seccomp") {
-        match seccomp_value {
+    let seccomp_action = if let Some(seccomp_value) = cmd_arguments.get_one::<String>("seccomp") {
+        match seccomp_value as &str {
             "true" => SeccompAction::Trap,
             "false" => SeccompAction::Allow,
             "log" => SeccompAction::Log,
@@ -529,7 +513,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
     let hypervisor = hypervisor::new().map_err(Error::CreateHypervisor)?;
 
     #[cfg(feature = "guest_debug")]
-    let gdb_socket_path = if let Some(gdb_config) = cmd_arguments.value_of("gdb") {
+    let gdb_socket_path = if let Some(gdb_config) = cmd_arguments.get_one::<String>("gdb") {
         let mut parser = OptionParser::new();
         parser.add("path");
         parser.parse(gdb_config).map_err(Error::ParsingGdb)?;
@@ -566,7 +550,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
     .map_err(Error::StartVmmThread)?;
 
     let payload_present =
-        cmd_arguments.is_present("kernel") || cmd_arguments.is_present("firmware");
+        cmd_arguments.contains_id("kernel") || cmd_arguments.contains_id("firmware");
 
     if payload_present {
         let vm_params = config::VmParams::from_arg_matches(&cmd_arguments);
@@ -581,7 +565,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         )
         .map_err(Error::VmCreate)?;
         vmm::api::vm_boot(api_evt.try_clone().unwrap(), sender).map_err(Error::VmBoot)?;
-    } else if let Some(restore_params) = cmd_arguments.value_of("restore") {
+    } else if let Some(restore_params) = cmd_arguments.get_one::<String>("restore") {
         vmm::api::vm_restore(
             api_evt.try_clone().unwrap(),
             api_request_sender,
@@ -603,7 +587,7 @@ fn main() {
     let _ = unsafe { libc::umask(0o077) };
 
     let (default_vcpus, default_memory, default_rng) = prepare_default_values();
-    let cmd_arguments = create_app(&default_vcpus, &default_memory, &default_rng).get_matches();
+    let cmd_arguments = create_app(default_vcpus, default_memory, default_rng).get_matches();
     let exit_code = match start_vmm(cmd_arguments) {
         Ok(path) => {
             path.map(|s| std::fs::remove_file(s).ok());
@@ -638,7 +622,7 @@ mod unit_tests {
     fn get_vm_config_from_vec(args: &[&str]) -> VmConfig {
         let (default_vcpus, default_memory, default_rng) = prepare_default_values();
         let cmd_arguments =
-            create_app(&default_vcpus, &default_memory, &default_rng).get_matches_from(args);
+            create_app(default_vcpus, default_memory, default_rng).get_matches_from(args);
 
         let vm_params = VmParams::from_arg_matches(&cmd_arguments);
 

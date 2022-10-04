@@ -9,7 +9,7 @@ extern crate clap;
 use api_client::simple_api_command;
 use api_client::simple_api_command_with_fds;
 use api_client::Error as ApiClientError;
-use clap::{Arg, ArgMatches, Command};
+use clap::{Arg, ArgAction, ArgMatches, Command};
 use option_parser::{ByteSized, ByteSizedParseError};
 use std::fmt;
 use std::io::Read;
@@ -328,8 +328,8 @@ fn create_api_command(socket: &mut UnixStream, path: &str) -> Result<(), Error> 
 }
 
 fn do_command(matches: &ArgMatches) -> Result<(), Error> {
-    let mut socket =
-        UnixStream::connect(matches.value_of("api-socket").unwrap()).map_err(Error::Connect)?;
+    let mut socket = UnixStream::connect(matches.get_one::<String>("api-socket").unwrap())
+        .map_err(Error::Connect)?;
 
     match matches.subcommand_name() {
         Some("info") => {
@@ -343,27 +343,30 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
             matches
                 .subcommand_matches("resize")
                 .unwrap()
-                .value_of("cpus"),
+                .get_one::<String>("cpus")
+                .map(|x| x as &str),
             matches
                 .subcommand_matches("resize")
                 .unwrap()
-                .value_of("memory"),
+                .get_one::<String>("memory")
+                .map(|x| x as &str),
             matches
                 .subcommand_matches("resize")
                 .unwrap()
-                .value_of("balloon"),
+                .get_one::<String>("balloon")
+                .map(|x| x as &str),
         ),
         Some("resize-zone") => resize_zone_api_command(
             &mut socket,
             matches
                 .subcommand_matches("resize-zone")
                 .unwrap()
-                .value_of("id")
+                .get_one::<String>("id")
                 .unwrap(),
             matches
                 .subcommand_matches("resize-zone")
                 .unwrap()
-                .value_of("size")
+                .get_one::<String>("size")
                 .unwrap(),
         ),
         Some("add-device") => add_device_api_command(
@@ -371,7 +374,7 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
             matches
                 .subcommand_matches("add-device")
                 .unwrap()
-                .value_of("device_config")
+                .get_one::<String>("device_config")
                 .unwrap(),
         ),
         Some("remove-device") => remove_device_api_command(
@@ -379,7 +382,7 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
             matches
                 .subcommand_matches("remove-device")
                 .unwrap()
-                .value_of("id")
+                .get_one::<String>("id")
                 .unwrap(),
         ),
         Some("add-disk") => add_disk_api_command(
@@ -387,7 +390,7 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
             matches
                 .subcommand_matches("add-disk")
                 .unwrap()
-                .value_of("disk_config")
+                .get_one::<String>("disk_config")
                 .unwrap(),
         ),
         Some("add-fs") => add_fs_api_command(
@@ -395,7 +398,7 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
             matches
                 .subcommand_matches("add-fs")
                 .unwrap()
-                .value_of("fs_config")
+                .get_one::<String>("fs_config")
                 .unwrap(),
         ),
         Some("add-pmem") => add_pmem_api_command(
@@ -403,7 +406,7 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
             matches
                 .subcommand_matches("add-pmem")
                 .unwrap()
-                .value_of("pmem_config")
+                .get_one::<String>("pmem_config")
                 .unwrap(),
         ),
         Some("add-net") => add_net_api_command(
@@ -411,7 +414,7 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
             matches
                 .subcommand_matches("add-net")
                 .unwrap()
-                .value_of("net_config")
+                .get_one::<String>("net_config")
                 .unwrap(),
         ),
         Some("add-user-device") => add_user_device_api_command(
@@ -419,7 +422,7 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
             matches
                 .subcommand_matches("add-user-device")
                 .unwrap()
-                .value_of("device_config")
+                .get_one::<String>("device_config")
                 .unwrap(),
         ),
         Some("add-vdpa") => add_vdpa_api_command(
@@ -427,7 +430,7 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
             matches
                 .subcommand_matches("add-vdpa")
                 .unwrap()
-                .value_of("vdpa_config")
+                .get_one::<String>("vdpa_config")
                 .unwrap(),
         ),
         Some("add-vsock") => add_vsock_api_command(
@@ -435,7 +438,7 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
             matches
                 .subcommand_matches("add-vsock")
                 .unwrap()
-                .value_of("vsock_config")
+                .get_one::<String>("vsock_config")
                 .unwrap(),
         ),
         Some("snapshot") => snapshot_api_command(
@@ -443,7 +446,7 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
             matches
                 .subcommand_matches("snapshot")
                 .unwrap()
-                .value_of("snapshot_config")
+                .get_one::<String>("snapshot_config")
                 .unwrap(),
         ),
         Some("restore") => restore_api_command(
@@ -451,7 +454,7 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
             matches
                 .subcommand_matches("restore")
                 .unwrap()
-                .value_of("restore_config")
+                .get_one::<String>("restore_config")
                 .unwrap(),
         ),
         Some("coredump") => coredump_api_command(
@@ -459,7 +462,7 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
             matches
                 .subcommand_matches("coredump")
                 .unwrap()
-                .value_of("coredump_config")
+                .get_one::<String>("coredump_config")
                 .unwrap(),
         ),
         Some("send-migration") => send_migration_api_command(
@@ -467,19 +470,19 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
             matches
                 .subcommand_matches("send-migration")
                 .unwrap()
-                .value_of("send_migration_config")
+                .get_one::<String>("send_migration_config")
                 .unwrap(),
             matches
                 .subcommand_matches("send-migration")
                 .unwrap()
-                .is_present("send_migration_local"),
+                .get_flag("send_migration_local"),
         ),
         Some("receive-migration") => receive_migration_api_command(
             &mut socket,
             matches
                 .subcommand_matches("receive-migration")
                 .unwrap()
-                .value_of("receive_migration_config")
+                .get_one::<String>("receive_migration_config")
                 .unwrap(),
         ),
         Some("create") => create_api_command(
@@ -487,7 +490,7 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
             matches
                 .subcommand_matches("create")
                 .unwrap()
-                .value_of("path")
+                .get_one::<String>("path")
                 .unwrap(),
         ),
         Some(c) => simple_api_command(&mut socket, "PUT", c, None).map_err(Error::ApiClient),
@@ -504,8 +507,7 @@ fn main() {
             Arg::new("api-socket")
                 .long("api-socket")
                 .help("HTTP API socket path (UNIX domain socket).")
-                .takes_value(true)
-                .number_of_values(1)
+                .num_args(1)
                 .required(true),
         )
         .subcommand(
@@ -587,22 +589,19 @@ fn main() {
                     Arg::new("cpus")
                         .long("cpus")
                         .help("New vCPUs count")
-                        .takes_value(true)
-                        .number_of_values(1),
+                        .num_args(1),
                 )
                 .arg(
                     Arg::new("memory")
                         .long("memory")
                         .help("New memory size in bytes (supports K/M/G suffix)")
-                        .takes_value(true)
-                        .number_of_values(1),
+                        .num_args(1),
                 )
                 .arg(
                     Arg::new("balloon")
                         .long("balloon")
                         .help("New balloon size in bytes (supports K/M/G suffix)")
-                        .takes_value(true)
-                        .number_of_values(1),
+                        .num_args(1),
                 ),
         )
         .subcommand(
@@ -612,15 +611,13 @@ fn main() {
                     Arg::new("id")
                         .long("id")
                         .help("Memory zone identifier")
-                        .takes_value(true)
-                        .number_of_values(1),
+                        .num_args(1),
                 )
                 .arg(
                     Arg::new("size")
                         .long("size")
                         .help("New memory zone size in bytes (supports K/M/G suffix)")
-                        .takes_value(true)
-                        .number_of_values(1),
+                        .num_args(1),
                 ),
         )
         .subcommand(Command::new("resume").about("Resume the VM"))
@@ -661,7 +658,8 @@ fn main() {
                 .arg(
                     Arg::new("send_migration_local")
                         .long("local")
-                        .takes_value(false),
+                        .num_args(0)
+                        .action(ArgAction::SetTrue),
                 ),
         )
         .subcommand(
