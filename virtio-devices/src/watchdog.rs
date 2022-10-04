@@ -55,6 +55,10 @@ enum Error {
     DescriptorChainTooShort,
     #[error("Failed adding used index: {0}")]
     QueueAddUsed(virtio_queue::Error),
+    #[error("Invalid descriptor")]
+    InvalidDescriptor,
+    #[error("Failed to write to guest memory: {0}")]
+    GuestMemoryWrite(vm_memory::guest_memory::Error),
 }
 
 struct WatchdogEpollHandler {
@@ -78,24 +82,27 @@ impl WatchdogEpollHandler {
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
             let desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
 
-            let mut len = 0;
-
-            if desc.is_write_only() && desc_chain.memory().write_obj(1u8, desc.addr()).is_ok() {
-                len = desc.len();
-                // If this is the first "ping" then setup the timer
-                if self.last_ping_time.lock().unwrap().is_none() {
-                    info!(
-                        "First ping received. Starting timer (every {} seconds)",
-                        WATCHDOG_TIMER_INTERVAL
-                    );
-                    timerfd_setup(&self.timer, WATCHDOG_TIMER_INTERVAL)
-                        .map_err(Error::TimerfdSetup)?;
-                }
-                self.last_ping_time.lock().unwrap().replace(Instant::now());
+            if !(desc.is_write_only() && desc.len() > 0) {
+                return Err(Error::InvalidDescriptor);
             }
 
+            desc_chain
+                .memory()
+                .write_obj(1u8, desc.addr())
+                .map_err(Error::GuestMemoryWrite)?;
+
+            // If this is the first "ping" then setup the timer
+            if self.last_ping_time.lock().unwrap().is_none() {
+                info!(
+                    "First ping received. Starting timer (every {} seconds)",
+                    WATCHDOG_TIMER_INTERVAL
+                );
+                timerfd_setup(&self.timer, WATCHDOG_TIMER_INTERVAL).map_err(Error::TimerfdSetup)?;
+            }
+            self.last_ping_time.lock().unwrap().replace(Instant::now());
+
             queue
-                .add_used(desc_chain.memory(), desc_chain.head_index(), len)
+                .add_used(desc_chain.memory(), desc_chain.head_index(), desc.len())
                 .map_err(Error::QueueAddUsed)?;
             used_descs = true;
         }
