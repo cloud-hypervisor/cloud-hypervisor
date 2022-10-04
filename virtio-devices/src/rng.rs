@@ -42,8 +42,8 @@ enum Error {
     DescriptorChainTooShort,
     #[error("Invalid descriptor")]
     InvalidDescriptor,
-    #[error("Failed read from guest memory: {0}")]
-    GuestMemoryRead(vm_memory::guest_memory::Error),
+    #[error("Failed to write to guest memory: {0}")]
+    GuestMemoryWrite(vm_memory::guest_memory::Error),
     #[error("Failed adding used index: {0}")]
     QueueAddUsed(virtio_queue::Error),
 }
@@ -81,7 +81,7 @@ impl RngEpollHandler {
                     &mut self.random_file,
                     desc.len() as usize,
                 )
-                .map_err(Error::GuestMemoryRead)?;
+                .map_err(Error::GuestMemoryWrite)?;
 
             queue
                 .add_used(desc_chain.memory(), desc_chain.head_index(), len as u32)
