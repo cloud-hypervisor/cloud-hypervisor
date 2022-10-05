@@ -74,6 +74,7 @@ pub mod seccomp_filters;
 mod serial_manager;
 mod sigwinch_listener;
 pub mod vm;
+pub mod vm_config;
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 type GuestRegionMmap = vm_memory::GuestRegionMmap<AtomicBitmap>;
