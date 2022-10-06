@@ -194,21 +194,6 @@ impl Default for VhostMode {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct KernelConfig {
-    pub path: PathBuf,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct InitramfsConfig {
-    pub path: PathBuf,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
-pub struct CmdlineConfig {
-    pub args: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct DiskConfig {
     pub path: Option<PathBuf>,
     #[serde(default)]
@@ -553,12 +538,6 @@ pub struct VmConfig {
     pub cpus: CpusConfig,
     #[serde(default)]
     pub memory: MemoryConfig,
-    pub kernel: Option<KernelConfig>,
-    #[serde(default)]
-    pub initramfs: Option<InitramfsConfig>,
-    #[serde(default)]
-    pub cmdline: CmdlineConfig,
-    #[serde(default)]
     pub payload: Option<PayloadConfig>,
     pub disks: Option<Vec<DiskConfig>>,
     pub net: Option<Vec<NetConfig>>,
