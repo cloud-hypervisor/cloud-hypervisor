@@ -378,9 +378,9 @@ checksum = "1ea37f355c05dde75b84bba2d767906ad522e97cd9e2eef2be7a4ab7fb442c06"
 
 [[package]]
 name = "io-uring"
-version = "0.5.6"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a645fd8e7048c2f54050f7d0d4de8f624ada437e043bc7d72609bd08d70120b"
+checksum = "6d32c9c053ad47572e11da8bce622ed4c9ae9dedac5b7f678a2e876d1494d4c4"
 dependencies = [
  "bitflags",
  "libc",
