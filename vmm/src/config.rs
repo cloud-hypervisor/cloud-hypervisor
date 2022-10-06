@@ -18,11 +18,6 @@ use std::str::FromStr;
 use thiserror::Error;
 use virtio_devices::{RateLimiterConfig, TokenBucketConfig};
 
-pub const DEFAULT_VCPUS: u8 = 1;
-pub const DEFAULT_MEMORY_MB: u64 = 512;
-
-pub const DEFAULT_RNG_SOURCE: &str = "/dev/urandom";
-
 const MAX_NUM_PCI_SEGMENTS: u16 = 16;
 
 /// Errors associated with VM configuration parameters.
@@ -433,12 +428,6 @@ impl<'a> VmParams<'a> {
     }
 }
 
-impl Default for HotplugMethod {
-    fn default() -> Self {
-        HotplugMethod::Acpi
-    }
-}
-
 #[derive(Debug)]
 pub enum ParseHotplugMethodError {
     InvalidValue(String),
@@ -565,20 +554,6 @@ impl CpusConfig {
     }
 }
 
-impl Default for CpusConfig {
-    fn default() -> Self {
-        CpusConfig {
-            boot_vcpus: DEFAULT_VCPUS,
-            max_vcpus: DEFAULT_VCPUS,
-            topology: None,
-            kvm_hyperv: false,
-            max_phys_bits: DEFAULT_MAX_PHYS_BITS,
-            affinity: None,
-            features: CpuFeatures::default(),
-        }
-    }
-}
-
 impl PlatformConfig {
     pub fn parse(platform: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -641,20 +616,6 @@ impl PlatformConfig {
         }
 
         Ok(())
-    }
-}
-
-impl Default for PlatformConfig {
-    fn default() -> Self {
-        PlatformConfig {
-            num_pci_segments: DEFAULT_NUM_PCI_SEGMENTS,
-            iommu_segments: None,
-            serial_number: None,
-            uuid: None,
-            oem_strings: None,
-            #[cfg(feature = "tdx")]
-            tdx: false,
-        }
     }
 }
 
@@ -823,23 +784,6 @@ impl MemoryConfig {
     }
 }
 
-impl Default for MemoryConfig {
-    fn default() -> Self {
-        MemoryConfig {
-            size: DEFAULT_MEMORY_MB << 20,
-            mergeable: false,
-            hotplug_method: HotplugMethod::Acpi,
-            hotplug_size: None,
-            hotplugged_size: None,
-            shared: false,
-            hugepages: false,
-            hugepage_size: None,
-            prefault: false,
-            zones: None,
-        }
-    }
-}
-
 impl CmdlineConfig {
     pub fn parse(cmdline: Option<&str>) -> Result<Self> {
         let args = cmdline
@@ -847,25 +791,6 @@ impl CmdlineConfig {
             .unwrap_or_else(String::new);
 
         Ok(CmdlineConfig { args })
-    }
-}
-
-impl Default for DiskConfig {
-    fn default() -> Self {
-        Self {
-            path: None,
-            readonly: false,
-            direct: false,
-            iommu: false,
-            num_queues: default_diskconfig_num_queues(),
-            queue_size: default_diskconfig_queue_size(),
-            vhost_user: false,
-            vhost_socket: None,
-            id: None,
-            disable_io_uring: false,
-            rate_limiter_config: None,
-            pci_segment: 0,
-        }
     }
 }
 
@@ -1032,12 +957,6 @@ impl DiskConfig {
     }
 }
 
-impl Default for VhostMode {
-    fn default() -> Self {
-        VhostMode::Client
-    }
-}
-
 #[derive(Debug)]
 pub enum ParseVhostModeError {
     InvalidValue(String),
@@ -1051,29 +970,6 @@ impl FromStr for VhostMode {
             "client" => Ok(VhostMode::Client),
             "server" => Ok(VhostMode::Server),
             _ => Err(ParseVhostModeError::InvalidValue(s.to_owned())),
-        }
-    }
-}
-
-impl Default for NetConfig {
-    fn default() -> Self {
-        Self {
-            tap: default_netconfig_tap(),
-            ip: default_netconfig_ip(),
-            mask: default_netconfig_mask(),
-            mac: default_netconfig_mac(),
-            host_mac: None,
-            mtu: None,
-            iommu: false,
-            num_queues: default_netconfig_num_queues(),
-            queue_size: default_netconfig_queue_size(),
-            vhost_user: false,
-            vhost_socket: None,
-            vhost_mode: VhostMode::Client,
-            id: None,
-            fds: None,
-            rate_limiter_config: None,
-            pci_segment: 0,
         }
     }
 }
@@ -1300,15 +1196,6 @@ impl RngConfig {
     }
 }
 
-impl Default for RngConfig {
-    fn default() -> Self {
-        RngConfig {
-            src: PathBuf::from(DEFAULT_RNG_SOURCE),
-            iommu: false,
-        }
-    }
-}
-
 impl BalloonConfig {
     pub const SYNTAX: &'static str =
         "Balloon parameters \"size=<balloon_size>,deflate_on_oom=on|off,\
@@ -1344,19 +1231,6 @@ impl BalloonConfig {
             deflate_on_oom,
             free_page_reporting,
         })
-    }
-}
-
-impl Default for FsConfig {
-    fn default() -> Self {
-        Self {
-            tag: "".to_owned(),
-            socket: PathBuf::new(),
-            num_queues: default_fsconfig_num_queues(),
-            queue_size: default_fsconfig_queue_size(),
-            id: None,
-            pci_segment: 0,
-        }
     }
 }
 
