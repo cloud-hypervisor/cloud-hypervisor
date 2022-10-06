@@ -596,28 +596,22 @@ impl MemEpollHandler {
 
         while let Some(mut desc_chain) = self.queue.pop_descriptor_chain(self.mem.memory()) {
             let r = Request::parse(&mut desc_chain)?;
-            let len = match r.req.req_type {
-                VIRTIO_MEM_REQ_PLUG => {
-                    let resp_type = self.state_change_request(r.req.addr, r.req.nb_blocks, true);
-                    r.send_response(desc_chain.memory(), resp_type, 0u16)?
-                }
-                VIRTIO_MEM_REQ_UNPLUG => {
-                    let resp_type = self.state_change_request(r.req.addr, r.req.nb_blocks, false);
-                    r.send_response(desc_chain.memory(), resp_type, 0u16)?
-                }
-                VIRTIO_MEM_REQ_UNPLUG_ALL => {
-                    let resp_type = self.unplug_all();
-                    r.send_response(desc_chain.memory(), resp_type, 0u16)?
-                }
-                VIRTIO_MEM_REQ_STATE => {
-                    let (resp_type, resp_state) = self.state_request(r.req.addr, r.req.nb_blocks);
-                    r.send_response(desc_chain.memory(), resp_type, resp_state)?
-                }
+            let (resp_type, resp_state) = match r.req.req_type {
+                VIRTIO_MEM_REQ_PLUG => (
+                    self.state_change_request(r.req.addr, r.req.nb_blocks, true),
+                    0u16,
+                ),
+                VIRTIO_MEM_REQ_UNPLUG => (
+                    self.state_change_request(r.req.addr, r.req.nb_blocks, false),
+                    0u16,
+                ),
+                VIRTIO_MEM_REQ_UNPLUG_ALL => (self.unplug_all(), 0u16),
+                VIRTIO_MEM_REQ_STATE => self.state_request(r.req.addr, r.req.nb_blocks),
                 _ => {
                     return Err(Error::UnkownRequestType(r.req.req_type));
                 }
             };
-
+            let len = r.send_response(desc_chain.memory(), resp_type, resp_state)?;
             self.queue
                 .add_used(desc_chain.memory(), desc_chain.head_index(), len)
                 .unwrap();
