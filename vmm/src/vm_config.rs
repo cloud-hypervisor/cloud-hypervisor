@@ -53,6 +53,22 @@ pub struct CpusConfig {
     pub features: CpuFeatures,
 }
 
+pub const DEFAULT_VCPUS: u8 = 1;
+
+impl Default for CpusConfig {
+    fn default() -> Self {
+        CpusConfig {
+            boot_vcpus: DEFAULT_VCPUS,
+            max_vcpus: DEFAULT_VCPUS,
+            topology: None,
+            kvm_hyperv: false,
+            max_phys_bits: DEFAULT_MAX_PHYS_BITS,
+            affinity: None,
+            features: CpuFeatures::default(),
+        }
+    }
+}
+
 pub const DEFAULT_NUM_PCI_SEGMENTS: u16 = 1;
 pub fn default_platformconfig_num_pci_segments() -> u16 {
     DEFAULT_NUM_PCI_SEGMENTS
@@ -73,6 +89,20 @@ pub struct PlatformConfig {
     #[cfg(feature = "tdx")]
     #[serde(default)]
     pub tdx: bool,
+}
+
+impl Default for PlatformConfig {
+    fn default() -> Self {
+        PlatformConfig {
+            num_pci_segments: DEFAULT_NUM_PCI_SEGMENTS,
+            iommu_segments: None,
+            serial_number: None,
+            uuid: None,
+            oem_strings: None,
+            #[cfg(feature = "tdx")]
+            tdx: false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -103,6 +133,12 @@ pub enum HotplugMethod {
     VirtioMem,
 }
 
+impl Default for HotplugMethod {
+    fn default() -> Self {
+        HotplugMethod::Acpi
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct MemoryConfig {
     pub size: u64,
@@ -126,10 +162,35 @@ pub struct MemoryConfig {
     pub zones: Option<Vec<MemoryZoneConfig>>,
 }
 
+pub const DEFAULT_MEMORY_MB: u64 = 512;
+
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        MemoryConfig {
+            size: DEFAULT_MEMORY_MB << 20,
+            mergeable: false,
+            hotplug_method: HotplugMethod::Acpi,
+            hotplug_size: None,
+            hotplugged_size: None,
+            shared: false,
+            hugepages: false,
+            hugepage_size: None,
+            prefault: false,
+            zones: None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub enum VhostMode {
     Client,
     Server,
+}
+
+impl Default for VhostMode {
+    fn default() -> Self {
+        VhostMode::Client
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -183,6 +244,25 @@ pub fn default_diskconfig_num_queues() -> usize {
 pub const DEFAULT_QUEUE_SIZE_VUBLK: u16 = 128;
 pub fn default_diskconfig_queue_size() -> u16 {
     DEFAULT_QUEUE_SIZE_VUBLK
+}
+
+impl Default for DiskConfig {
+    fn default() -> Self {
+        Self {
+            path: None,
+            readonly: false,
+            direct: false,
+            iommu: false,
+            num_queues: default_diskconfig_num_queues(),
+            queue_size: default_diskconfig_queue_size(),
+            vhost_user: false,
+            vhost_socket: None,
+            id: None,
+            disable_io_uring: false,
+            rate_limiter_config: None,
+            pci_segment: 0,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -246,11 +326,45 @@ pub fn default_netconfig_queue_size() -> u16 {
     DEFAULT_QUEUE_SIZE_VUNET
 }
 
+impl Default for NetConfig {
+    fn default() -> Self {
+        Self {
+            tap: default_netconfig_tap(),
+            ip: default_netconfig_ip(),
+            mask: default_netconfig_mask(),
+            mac: default_netconfig_mac(),
+            host_mac: None,
+            mtu: None,
+            iommu: false,
+            num_queues: default_netconfig_num_queues(),
+            queue_size: default_netconfig_queue_size(),
+            vhost_user: false,
+            vhost_socket: None,
+            vhost_mode: VhostMode::Client,
+            id: None,
+            fds: None,
+            rate_limiter_config: None,
+            pci_segment: 0,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct RngConfig {
     pub src: PathBuf,
     #[serde(default)]
     pub iommu: bool,
+}
+
+pub const DEFAULT_RNG_SOURCE: &str = "/dev/urandom";
+
+impl Default for RngConfig {
+    fn default() -> Self {
+        RngConfig {
+            src: PathBuf::from(DEFAULT_RNG_SOURCE),
+            iommu: false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -284,6 +398,19 @@ pub fn default_fsconfig_num_queues() -> usize {
 
 pub fn default_fsconfig_queue_size() -> u16 {
     1024
+}
+
+impl Default for FsConfig {
+    fn default() -> Self {
+        Self {
+            tag: "".to_owned(),
+            socket: PathBuf::new(),
+            num_queues: default_fsconfig_num_queues(),
+            queue_size: default_fsconfig_queue_size(),
+            id: None,
+            pci_segment: 0,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
