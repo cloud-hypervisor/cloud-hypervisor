@@ -804,16 +804,6 @@ impl MemoryConfig {
     }
 }
 
-impl CmdlineConfig {
-    pub fn parse(cmdline: Option<&str>) -> Result<Self> {
-        let args = cmdline
-            .map(std::string::ToString::to_string)
-            .unwrap_or_else(String::new);
-
-        Ok(CmdlineConfig { args })
-    }
-}
-
 impl DiskConfig {
     pub const SYNTAX: &'static str = "Disk parameters \
          \"path=<disk_image_path>,readonly=on|off,direct=on|off,iommu=on|off,\
@@ -1788,20 +1778,6 @@ impl VmConfig {
     pub fn validate(&mut self) -> ValidationResult<BTreeSet<String>> {
         let mut id_list = BTreeSet::new();
 
-        if self.kernel.is_some() {
-            warn!("The \"VmConfig\" members \"kernel\", \"cmdline\" and \"initramfs\" are deprecated. Use \"payload\" member instead.");
-            self.payload = Some(PayloadConfig {
-                kernel: self.kernel.take().map(|k| k.path),
-                cmdline: if self.cmdline.args.is_empty() {
-                    None
-                } else {
-                    Some(self.cmdline.args.drain(..).collect())
-                },
-                initramfs: self.initramfs.take().map(|i| i.path),
-                ..Default::default()
-            })
-        }
-
         self.payload
             .as_ref()
             .ok_or(ValidationError::KernelMissing)?;
@@ -2153,9 +2129,6 @@ impl VmConfig {
         let mut config = VmConfig {
             cpus: CpusConfig::parse(vm_params.cpus)?,
             memory: MemoryConfig::parse(vm_params.memory, vm_params.memory_zones)?,
-            kernel: None,
-            initramfs: None,
-            cmdline: CmdlineConfig::default(),
             payload,
             disks,
             net,
@@ -2748,11 +2721,6 @@ mod tests {
                 prefault: false,
                 zones: None,
             },
-            kernel: None,
-            cmdline: CmdlineConfig {
-                args: String::default(),
-            },
-            initramfs: None,
             payload: Some(PayloadConfig {
                 kernel: Some(PathBuf::from("/path/to/kernel")),
                 ..Default::default()

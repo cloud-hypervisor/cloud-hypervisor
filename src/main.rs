@@ -615,8 +615,8 @@ mod unit_tests {
     use crate::{create_app, prepare_default_values};
     use std::path::PathBuf;
     use vmm::config::{
-        CmdlineConfig, ConsoleConfig, ConsoleOutputMode, CpuFeatures, CpusConfig, MemoryConfig,
-        PayloadConfig, RngConfig, VmConfig, VmParams,
+        ConsoleConfig, ConsoleOutputMode, CpuFeatures, CpusConfig, MemoryConfig, PayloadConfig,
+        RngConfig, VmConfig, VmParams,
     };
 
     fn get_vm_config_from_vec(args: &[&str]) -> VmConfig {
@@ -677,11 +677,6 @@ mod unit_tests {
                 prefault: false,
                 zones: None,
             },
-            kernel: None,
-            cmdline: CmdlineConfig {
-                args: String::default(),
-            },
-            initramfs: None,
             payload: Some(PayloadConfig {
                 kernel: Some(PathBuf::from("/path/to/kernel")),
                 ..Default::default()
