@@ -137,6 +137,8 @@ pub enum Error {
     InvalidDmaMappingHandler,
     #[error("Not activated by the guest.")]
     NotActivatedByGuest,
+    #[error("Unknown request type: {0}")]
+    UnkownRequestType(u16),
 }
 
 #[repr(C)]
@@ -309,19 +311,20 @@ impl Request {
         })
     }
 
-    fn send_response(&self, mem: &GuestMemoryMmap, resp_type: u16, state: u16) -> u32 {
+    fn send_response(
+        &self,
+        mem: &GuestMemoryMmap,
+        resp_type: u16,
+        state: u16,
+    ) -> Result<u32, Error> {
         let resp = VirtioMemResp {
             resp_type,
             state,
             ..Default::default()
         };
-        match mem.write_obj(resp, self.status_addr) {
-            Ok(_) => size_of::<VirtioMemResp>() as u32,
-            Err(e) => {
-                error!("bad guest memory address: {}", e);
-                0
-            }
-        }
+        mem.write_obj(resp, self.status_addr)
+            .map_err(Error::GuestMemory)?;
+        Ok(size_of::<VirtioMemResp>() as u32)
     }
 }
 
@@ -588,40 +591,31 @@ impl MemEpollHandler {
         })
     }
 
-    fn process_queue(&mut self) -> bool {
+    fn process_queue(&mut self) -> Result<bool, Error> {
         let mut used_descs = false;
 
         while let Some(mut desc_chain) = self.queue.pop_descriptor_chain(self.mem.memory()) {
-            let len = match Request::parse(&mut desc_chain) {
-                Err(e) => {
-                    error!("failed parse VirtioMemReq: {:?}", e);
-                    0
+            let r = Request::parse(&mut desc_chain)?;
+            let len = match r.req.req_type {
+                VIRTIO_MEM_REQ_PLUG => {
+                    let resp_type = self.state_change_request(r.req.addr, r.req.nb_blocks, true);
+                    r.send_response(desc_chain.memory(), resp_type, 0u16)?
                 }
-                Ok(r) => match r.req.req_type {
-                    VIRTIO_MEM_REQ_PLUG => {
-                        let resp_type =
-                            self.state_change_request(r.req.addr, r.req.nb_blocks, true);
-                        r.send_response(desc_chain.memory(), resp_type, 0u16)
-                    }
-                    VIRTIO_MEM_REQ_UNPLUG => {
-                        let resp_type =
-                            self.state_change_request(r.req.addr, r.req.nb_blocks, false);
-                        r.send_response(desc_chain.memory(), resp_type, 0u16)
-                    }
-                    VIRTIO_MEM_REQ_UNPLUG_ALL => {
-                        let resp_type = self.unplug_all();
-                        r.send_response(desc_chain.memory(), resp_type, 0u16)
-                    }
-                    VIRTIO_MEM_REQ_STATE => {
-                        let (resp_type, resp_state) =
-                            self.state_request(r.req.addr, r.req.nb_blocks);
-                        r.send_response(desc_chain.memory(), resp_type, resp_state)
-                    }
-                    _ => {
-                        error!("VirtioMemReq unknown request type {:?}", r.req.req_type);
-                        0
-                    }
-                },
+                VIRTIO_MEM_REQ_UNPLUG => {
+                    let resp_type = self.state_change_request(r.req.addr, r.req.nb_blocks, false);
+                    r.send_response(desc_chain.memory(), resp_type, 0u16)?
+                }
+                VIRTIO_MEM_REQ_UNPLUG_ALL => {
+                    let resp_type = self.unplug_all();
+                    r.send_response(desc_chain.memory(), resp_type, 0u16)?
+                }
+                VIRTIO_MEM_REQ_STATE => {
+                    let (resp_type, resp_state) = self.state_request(r.req.addr, r.req.nb_blocks);
+                    r.send_response(desc_chain.memory(), resp_type, resp_state)?
+                }
+                _ => {
+                    return Err(Error::UnkownRequestType(r.req.req_type));
+                }
             };
 
             self.queue
@@ -630,7 +624,7 @@ impl MemEpollHandler {
             used_descs = true;
         }
 
-        used_descs
+        Ok(used_descs)
     }
 
     fn run(
@@ -659,7 +653,10 @@ impl EpollHelperHandler for MemEpollHandler {
                     EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
                 })?;
 
-                if self.process_queue() {
+                let needs_notification = self.process_queue().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!("Failed to process queue : {:?}", e))
+                })?;
+                if needs_notification {
                     self.signal(VirtioInterruptType::Queue(0)).map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
                             "Failed to signal used queue: {:?}",
