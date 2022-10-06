@@ -235,15 +235,16 @@ pub struct DiskConfig {
     pub pci_segment: u16,
 }
 
-pub const DEFAULT_NUM_QUEUES_VUBLK: usize = 1;
+pub const DEFAULT_DISK_NUM_QUEUES: usize = 1;
 
 pub fn default_diskconfig_num_queues() -> usize {
-    DEFAULT_NUM_QUEUES_VUBLK
+    DEFAULT_DISK_NUM_QUEUES
 }
 
-pub const DEFAULT_QUEUE_SIZE_VUBLK: u16 = 128;
+pub const DEFAULT_DISK_QUEUE_SIZE: u16 = 128;
+
 pub fn default_diskconfig_queue_size() -> u16 {
-    DEFAULT_QUEUE_SIZE_VUBLK
+    DEFAULT_DISK_QUEUE_SIZE
 }
 
 impl Default for DiskConfig {
@@ -316,14 +317,16 @@ pub fn default_netconfig_mac() -> MacAddr {
     MacAddr::local_random()
 }
 
-pub const DEFAULT_NUM_QUEUES_VUNET: usize = 2;
+pub const DEFAULT_NET_NUM_QUEUES: usize = 2;
+
 pub fn default_netconfig_num_queues() -> usize {
-    DEFAULT_NUM_QUEUES_VUNET
+    DEFAULT_NET_NUM_QUEUES
 }
 
-pub const DEFAULT_QUEUE_SIZE_VUNET: u16 = 256;
+pub const DEFAULT_NET_QUEUE_SIZE: u16 = 256;
+
 pub fn default_netconfig_queue_size() -> u16 {
-    DEFAULT_QUEUE_SIZE_VUNET
+    DEFAULT_NET_QUEUE_SIZE
 }
 
 impl Default for NetConfig {
