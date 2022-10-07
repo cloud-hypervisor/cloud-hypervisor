@@ -1414,22 +1414,6 @@ impl ConsoleConfig {
 
         Ok(Self { file, mode, iommu })
     }
-
-    pub fn default_serial() -> Self {
-        ConsoleConfig {
-            file: None,
-            mode: ConsoleOutputMode::Null,
-            iommu: false,
-        }
-    }
-
-    pub fn default_console() -> Self {
-        ConsoleConfig {
-            file: None,
-            mode: ConsoleOutputMode::Tty,
-            iommu: false,
-        }
-    }
 }
 
 impl DeviceConfig {

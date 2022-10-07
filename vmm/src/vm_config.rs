@@ -532,6 +532,22 @@ pub struct PayloadConfig {
     pub initramfs: Option<PathBuf>,
 }
 
+pub fn default_serial() -> ConsoleConfig {
+    ConsoleConfig {
+        file: None,
+        mode: ConsoleOutputMode::Null,
+        iommu: false,
+    }
+}
+
+pub fn default_console() -> ConsoleConfig {
+    ConsoleConfig {
+        file: None,
+        mode: ConsoleOutputMode::Tty,
+        iommu: false,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct VmConfig {
     #[serde(default)]
@@ -546,9 +562,9 @@ pub struct VmConfig {
     pub balloon: Option<BalloonConfig>,
     pub fs: Option<Vec<FsConfig>>,
     pub pmem: Option<Vec<PmemConfig>>,
-    #[serde(default = "ConsoleConfig::default_serial")]
+    #[serde(default = "default_serial")]
     pub serial: ConsoleConfig,
-    #[serde(default = "ConsoleConfig::default_console")]
+    #[serde(default = "default_console")]
     pub console: ConsoleConfig,
     pub devices: Option<Vec<DeviceConfig>>,
     pub user_devices: Option<Vec<UserDeviceConfig>>,
