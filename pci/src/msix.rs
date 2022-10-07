@@ -35,7 +35,7 @@ enum Error {
     UpdateInterruptRoute(io::Error),
 }
 
-#[derive(Debug, Clone, Versionize)]
+#[derive(Debug, Clone, Versionize, Eq, PartialEq)]
 pub struct MsixTableEntry {
     pub msg_addr_lo: u32,
     pub msg_addr_hi: u32,
@@ -258,7 +258,7 @@ impl MsixConfig {
         let modulo_offset = offset % MSIX_TABLE_ENTRIES_MODULO;
 
         // Store the value of the entry before modification
-        let mut old_entry: Option<MsixTableEntry> = None;
+        let old_entry = self.table_entries[index].clone();
 
         match data.len() {
             4 => {
@@ -268,7 +268,6 @@ impl MsixConfig {
                     0x4 => self.table_entries[index].msg_addr_hi = value,
                     0x8 => self.table_entries[index].msg_data = value,
                     0xc => {
-                        old_entry = Some(self.table_entries[index].clone());
                         self.table_entries[index].vector_ctl = value;
                     }
                     _ => error!("invalid offset"),
@@ -284,7 +283,6 @@ impl MsixConfig {
                         self.table_entries[index].msg_addr_hi = (value >> 32) as u32;
                     }
                     0x8 => {
-                        old_entry = Some(self.table_entries[index].clone());
                         self.table_entries[index].msg_data = (value & 0xffff_ffffu64) as u32;
                         self.table_entries[index].vector_ctl = (value >> 32) as u32;
                     }
@@ -296,10 +294,18 @@ impl MsixConfig {
             _ => error!("invalid data length"),
         };
 
-        // Update interrupt routes
-        if self.enabled && !self.masked {
-            let table_entry = &self.table_entries[index];
+        let table_entry = &self.table_entries[index];
 
+        // Optimisation to avoid excessive updates
+        if &old_entry == table_entry {
+            return;
+        }
+
+        // Update interrupt routes
+        // Optimisation: only update routes if the entry is not masked;
+        // this is safe because if the entry is masked (starts masked as per spec)
+        // in the table then it won't be triggered. (See: #4273)
+        if self.enabled && !self.masked && !table_entry.masked() {
             let config = MsiIrqSourceConfig {
                 high_addr: table_entry.msg_addr_hi,
                 low_addr: table_entry.msg_addr_lo,
@@ -323,15 +329,15 @@ impl MsixConfig {
         // has been injected, the pending bit in the PBA needs to be cleared.
         // All of this is valid only if MSI-X has not been masked for the whole
         // device.
-        if let Some(old_entry) = old_entry {
-            // Check if bit has been flipped
-            if !self.masked()
-                && old_entry.masked()
-                && !self.table_entries[index].masked()
-                && self.get_pba_bit(index as u16) == 1
-            {
-                self.inject_msix_and_clear_pba(index);
-            }
+
+        // Check if bit has been flipped
+        if !self.masked()
+            && self.enabled()
+            && old_entry.masked()
+            && !table_entry.masked()
+            && self.get_pba_bit(index as u16) == 1
+        {
+            self.inject_msix_and_clear_pba(index);
         }
     }
 
