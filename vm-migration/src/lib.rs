@@ -54,6 +54,9 @@ pub enum MigratableError {
     #[error("Failed to retrieve dirty ranges for migratable component: {0}")]
     DirtyLog(#[source] anyhow::Error),
 
+    #[error("Failed to start migration for migratable component: {0}")]
+    StartMigration(#[source] anyhow::Error),
+
     #[error("Failed to complete migration for migratable component: {0}")]
     CompleteMigration(#[source] anyhow::Error),
 }
