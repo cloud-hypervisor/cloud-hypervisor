@@ -36,7 +36,7 @@ use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
 };
-use vm_device::{BusDevice, Resource};
+use vm_device::{BusDevice, PciBarType, Resource};
 use vm_memory::{Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, Le32};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
@@ -882,11 +882,22 @@ impl PciDevice for VirtioPciDevice {
         let device = device_clone.lock().unwrap();
 
         let mut settings_bar_addr = None;
-        if let Some(resources) = &resources {
+        let mut use_64bit_bar = self.use_64bit_bar;
+        if let Some(resources) = resources {
             for resource in resources {
-                if let Resource::PciBar { index, base, .. } = resource {
-                    if *index == VIRTIO_COMMON_BAR_INDEX {
-                        settings_bar_addr = Some(GuestAddress(*base));
+                if let Resource::PciBar {
+                    index, base, type_, ..
+                } = resource
+                {
+                    if index == VIRTIO_COMMON_BAR_INDEX {
+                        settings_bar_addr = Some(GuestAddress(base));
+                        use_64bit_bar = match type_ {
+                            PciBarType::Io => {
+                                return Err(PciDeviceError::InvalidResource(resource))
+                            }
+                            PciBarType::Mmio32 => false,
+                            PciBarType::Mmio64 => true,
+                        };
                         break;
                     }
                 }
@@ -899,7 +910,7 @@ impl PciDevice for VirtioPciDevice {
 
         // Allocate the virtio-pci capability BAR.
         // See http://docs.oasis-open.org/virtio/virtio/v1.0/cs04/virtio-v1.0-cs04.html#x1-740004
-        let (virtio_pci_bar_addr, region_type) = if self.use_64bit_bar {
+        let (virtio_pci_bar_addr, region_type) = if use_64bit_bar {
             let region_type = PciBarRegionType::Memory64BitRegion;
             let addr = mmio_allocator
                 .allocate(
