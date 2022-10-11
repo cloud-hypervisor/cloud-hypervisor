@@ -8,7 +8,7 @@ license = "Apache-2.0"
 [dependencies]
 byteorder = "1.4.3"
 crc32c = "0.6.3"
-libc = "0.2.134"
+libc = "0.2.135"
 log = "0.4.17"
 remain = "0.2.4"
 thiserror = "1.0.37"
