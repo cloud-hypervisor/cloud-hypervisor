@@ -1276,8 +1276,7 @@ dependencies = [
 [[package]]
 name = "vhost"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79243657c76e5c90dcbf60187c842614f6dfc7123972c55bb3bcc446792aca93"
+source = "git+https://github.com/rust-vmm/vhost?branch=main#f87156b77662af63b9fc9f116a213dd69e16007b"
 dependencies = [
  "bitflags",
  "libc",
