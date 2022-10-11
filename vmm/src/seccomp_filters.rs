@@ -108,6 +108,8 @@ const VHOST_VDPA_SET_VRING_ENABLE: u64 = 0x4008af75;
 const VHOST_VDPA_GET_VRING_NUM: u64 = 0x8002af76;
 const VHOST_VDPA_SET_CONFIG_CALL: u64 = 0x4004af77;
 const VHOST_VDPA_GET_IOVA_RANGE: u64 = 0x8010af78;
+const VHOST_VDPA_GET_CONFIG_SIZE: u64 = 0x8004af79;
+const VHOST_VDPA_SUSPEND: u64 = 0xaf7d;
 
 // See include/uapi/linux/kvm.h in the kernel code.
 #[cfg(feature = "kvm")]
@@ -318,6 +320,8 @@ fn create_vmm_ioctl_seccomp_rule_common(
         and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_GET_VRING_NUM)?],
         and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_SET_CONFIG_CALL)?],
         and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_GET_IOVA_RANGE)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_GET_CONFIG_SIZE)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_SUSPEND)?],
     ];
 
     let hypervisor_rules = create_vmm_ioctl_seccomp_rule_hypervisor(hypervisor_type)?;
