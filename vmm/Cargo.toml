@@ -11,6 +11,7 @@ guest_debug = ["kvm", "gdbstub", "gdbstub_arch"]
 io_uring = ["block/io_uring"]
 kvm = ["hypervisor/kvm", "vfio-ioctls/kvm", "vm-device/kvm", "pci/kvm"]
 mshv = ["hypervisor/mshv", "vfio-ioctls/mshv", "vm-device/mshv", "pci/mshv"]
+sev_snp = ["arch/sev_snp", "hypervisor/sev_snp"]
 tdx = ["arch/tdx", "hypervisor/tdx"]
 tracing = ["tracer/tracing"]
 

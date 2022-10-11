@@ -78,6 +78,9 @@ pub enum Error {
     ParseNuma(OptionParserError),
     /// Failed validating configuration
     Validation(ValidationError),
+    #[cfg(feature = "sev_snp")]
+    /// Failed parsing SEV-SNP config
+    ParseSevSnp(OptionParserError),
     #[cfg(feature = "tdx")]
     /// Failed parsing TDX config
     ParseTdx(OptionParserError),
@@ -327,6 +330,8 @@ impl fmt::Display for Error {
             }
             ParseUserDevice(o) => write!(f, "Error parsing --user-device: {o}"),
             Validation(v) => write!(f, "Error validating configuration: {v}"),
+            #[cfg(feature = "sev_snp")]
+            ParseSevSnp(o) => write!(f, "Error parsing --sev_snp: {o}"),
             #[cfg(feature = "tdx")]
             ParseTdx(o) => write!(f, "Error parsing --tdx: {o}"),
             #[cfg(feature = "tdx")]
@@ -518,6 +523,8 @@ impl PlatformConfig {
             .add("oem_strings");
         #[cfg(feature = "tdx")]
         parser.add("tdx");
+        #[cfg(feature = "sev_snp")]
+        parser.add("sev_snp");
         parser.parse(platform).map_err(Error::ParsePlatform)?;
 
         let num_pci_segments: u16 = parser
@@ -542,6 +549,12 @@ impl PlatformConfig {
             .map_err(Error::ParsePlatform)?
             .unwrap_or(Toggle(false))
             .0;
+        #[cfg(feature = "sev_snp")]
+        let sev_snp = parser
+            .convert::<Toggle>("sev_snp")
+            .map_err(Error::ParsePlatform)?
+            .unwrap_or(Toggle(false))
+            .0;
         Ok(PlatformConfig {
             num_pci_segments,
             iommu_segments,
@@ -550,6 +563,8 @@ impl PlatformConfig {
             oem_strings,
             #[cfg(feature = "tdx")]
             tdx,
+            #[cfg(feature = "sev_snp")]
+            sev_snp,
         })
     }
 
@@ -2182,6 +2197,11 @@ impl VmConfig {
     #[cfg(feature = "tdx")]
     pub fn is_tdx_enabled(&self) -> bool {
         self.platform.as_ref().map(|p| p.tdx).unwrap_or(false)
+    }
+
+    #[cfg(feature = "sev_snp")]
+    pub fn is_sev_snp_enabled(&self) -> bool {
+        self.platform.as_ref().map(|p| p.sev_snp).unwrap_or(false)
     }
 }
 
