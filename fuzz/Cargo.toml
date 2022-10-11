@@ -64,6 +64,12 @@ test = false
 doc = false
 
 [[bin]]
+name = "mem"
+path = "fuzz_targets/mem.rs"
+test = false
+doc = false
+
+[[bin]]
 name = "pmem"
 path = "fuzz_targets/pmem.rs"
 test = false
