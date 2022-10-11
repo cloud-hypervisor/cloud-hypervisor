@@ -1289,7 +1289,7 @@ impl MemoryManager {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn create_ram_region(
+    pub fn create_ram_region(
         backing_file: &Option<PathBuf>,
         file_offset: u64,
         start_addr: GuestAddress,
