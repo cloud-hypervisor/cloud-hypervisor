@@ -12,7 +12,7 @@ tdx = []
 anyhow = "1.0.65"
 byteorder = "1.4.3"
 hypervisor = { path = "../hypervisor" }
-libc = "0.2.134"
+libc = "0.2.135"
 linux-loader = { version = "0.6.0", features = ["elf", "bzimage", "pe"] }
 log = "0.4.17"
 serde = { version = "1.0.145", features = ["rc", "derive"] }
