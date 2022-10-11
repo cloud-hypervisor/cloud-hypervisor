@@ -6,6 +6,7 @@ edition = "2021"
 
 [features]
 default = []
+sev_snp = []
 tdx = []
 
 [dependencies]

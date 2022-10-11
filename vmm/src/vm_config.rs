@@ -89,6 +89,9 @@ pub struct PlatformConfig {
     #[cfg(feature = "tdx")]
     #[serde(default)]
     pub tdx: bool,
+    #[cfg(feature = "sev_snp")]
+    #[serde(default)]
+    pub sev_snp: bool,
 }
 
 impl Default for PlatformConfig {
@@ -101,6 +104,8 @@ impl Default for PlatformConfig {
             oem_strings: None,
             #[cfg(feature = "tdx")]
             tdx: false,
+            #[cfg(feature = "sev_snp")]
+            sev_snp: false,
         }
     }
 }
