@@ -85,7 +85,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub struct Vdpa {
     common: VirtioCommon,
     id: String,
-    vhost: VhostKernVdpa<GuestMemoryAtomic<GuestMemoryMmap>>,
+    vhost: Option<VhostKernVdpa<GuestMemoryAtomic<GuestMemoryMmap>>>,
     iova_range: VhostVdpaIovaRange,
     enabled_queues: BTreeMap<usize, bool>,
     backend_features: u64,
@@ -123,7 +123,7 @@ impl Vdpa {
                 ..Default::default()
             },
             id,
-            vhost,
+            vhost: Some(vhost),
             iova_range,
             enabled_queues: BTreeMap::new(),
             backend_features,
@@ -131,9 +131,13 @@ impl Vdpa {
     }
 
     fn enable_vrings(&mut self, enable: bool) -> Result<()> {
+        assert!(self.vhost.is_some());
+
         for (queue_index, enabled) in self.enabled_queues.iter_mut() {
             if *enabled != enable {
                 self.vhost
+                    .as_ref()
+                    .unwrap()
                     .set_vring_enable(*queue_index, enable)
                     .map_err(Error::SetVringEnable)?;
                 *enabled = enable;
@@ -150,9 +154,13 @@ impl Vdpa {
         queues: Vec<(usize, Queue, EventFd)>,
     ) -> Result<()> {
         self.vhost
+            .as_ref()
+            .unwrap()
             .set_features(self.common.acked_features)
             .map_err(Error::SetFeatures)?;
         self.vhost
+            .as_mut()
+            .unwrap()
             .set_backend_features(self.backend_features)
             .map_err(Error::SetBackendFeatures)?;
 
@@ -160,6 +168,8 @@ impl Vdpa {
             let queue_max_size = queue.max_size();
             let queue_size = queue.size();
             self.vhost
+                .as_ref()
+                .unwrap()
                 .set_vring_num(*queue_index, queue_size)
                 .map_err(Error::SetVringNum)?;
 
@@ -183,9 +193,13 @@ impl Vdpa {
             };
 
             self.vhost
+                .as_ref()
+                .unwrap()
                 .set_vring_addr(*queue_index, &config_data)
                 .map_err(Error::SetVringAddr)?;
             self.vhost
+                .as_ref()
+                .unwrap()
                 .set_vring_base(
                     *queue_index,
                     queue
@@ -199,11 +213,15 @@ impl Vdpa {
                 virtio_interrupt.notifier(VirtioInterruptType::Queue(*queue_index as u16))
             {
                 self.vhost
+                    .as_ref()
+                    .unwrap()
                     .set_vring_call(*queue_index, &eventfd)
                     .map_err(Error::SetVringCall)?;
             }
 
             self.vhost
+                .as_ref()
+                .unwrap()
                 .set_vring_kick(*queue_index, queue_evt)
                 .map_err(Error::SetVringKick)?;
         }
@@ -211,6 +229,8 @@ impl Vdpa {
         // Setup the config eventfd if there is one
         if let Some(eventfd) = virtio_interrupt.notifier(VirtioInterruptType::Config) {
             self.vhost
+                .as_ref()
+                .unwrap()
                 .set_config_call(&eventfd)
                 .map_err(Error::SetConfigCall)?;
         }
@@ -218,6 +238,8 @@ impl Vdpa {
         self.enable_vrings(true)?;
 
         self.vhost
+            .as_ref()
+            .unwrap()
             .set_status(
                 (DEVICE_ACKNOWLEDGE | DEVICE_DRIVER | DEVICE_DRIVER_OK | DEVICE_FEATURES_OK) as u8,
             )
@@ -227,7 +249,11 @@ impl Vdpa {
     fn reset_vdpa(&mut self) -> Result<()> {
         self.enable_vrings(false)?;
 
-        self.vhost.set_status(0).map_err(Error::SetStatus)
+        self.vhost
+            .as_ref()
+            .unwrap()
+            .set_status(0)
+            .map_err(Error::SetStatus)
     }
 
     fn dma_map(&self, iova: u64, size: u64, host_vaddr: *const u8, readonly: bool) -> Result<()> {
@@ -236,7 +262,10 @@ impl Vdpa {
             return Err(Error::InvalidIovaRange(iova, iova_last));
         }
 
+        assert!(self.vhost.is_some());
         self.vhost
+            .as_ref()
+            .unwrap()
             .dma_map(iova, size, host_vaddr, readonly)
             .map_err(Error::DmaMap)
     }
@@ -247,7 +276,12 @@ impl Vdpa {
             return Err(Error::InvalidIovaRange(iova, iova_last));
         }
 
-        self.vhost.dma_unmap(iova, size).map_err(Error::DmaUnmap)
+        assert!(self.vhost.is_some());
+        self.vhost
+            .as_ref()
+            .unwrap()
+            .dma_unmap(iova, size)
+            .map_err(Error::DmaUnmap)
     }
 }
 
@@ -269,13 +303,15 @@ impl VirtioDevice for Vdpa {
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
-        if let Err(e) = self.vhost.get_config(offset as u32, data) {
+        assert!(self.vhost.is_some());
+        if let Err(e) = self.vhost.as_ref().unwrap().get_config(offset as u32, data) {
             error!("Failed reading virtio config: {}", e);
         }
     }
 
     fn write_config(&mut self, offset: u64, data: &[u8]) {
-        if let Err(e) = self.vhost.set_config(offset as u32, data) {
+        assert!(self.vhost.is_some());
+        if let Err(e) = self.vhost.as_ref().unwrap().set_config(offset as u32, data) {
             error!("Failed writing virtio config: {}", e);
         }
     }
