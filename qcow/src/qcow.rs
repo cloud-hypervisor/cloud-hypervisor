@@ -255,10 +255,10 @@ impl QcowHeader {
         let cluster_bits: u32 = DEFAULT_CLUSTER_BITS;
         let cluster_size: u32 = 0x01 << cluster_bits;
         // L2 blocks are always one cluster long. They contain cluster_size/sizeof(u64) addresses.
-        let l2_size: u32 = cluster_size / size_of::<u64>() as u32;
+        let entries_per_cluster: u32 = cluster_size / size_of::<u64>() as u32;
         let num_clusters: u32 = div_round_up_u64(size, u64::from(cluster_size)) as u32;
-        let num_l2_clusters: u32 = div_round_up_u32(num_clusters, l2_size);
-        let l1_clusters: u32 = div_round_up_u32(num_l2_clusters, cluster_size);
+        let num_l2_clusters: u32 = div_round_up_u32(num_clusters, entries_per_cluster);
+        let l1_clusters: u32 = div_round_up_u32(num_l2_clusters, entries_per_cluster);
         let header_clusters = div_round_up_u32(size_of::<QcowHeader>() as u32, cluster_size);
         QcowHeader {
             magic: QCOW_MAGIC,
@@ -473,10 +473,10 @@ impl QcowFile {
             QcowFile::rebuild_refcounts(&mut raw_file, header)?;
         }
 
-        let l2_size = cluster_size / size_of::<u64>() as u64;
+        let entries_per_cluster = cluster_size / size_of::<u64>() as u64;
         let num_clusters = div_round_up_u64(header.size, cluster_size);
-        let num_l2_clusters = div_round_up_u64(num_clusters, l2_size);
-        let l1_clusters = div_round_up_u64(num_l2_clusters, cluster_size);
+        let num_l2_clusters = div_round_up_u64(num_clusters, entries_per_cluster);
+        let l1_clusters = div_round_up_u64(num_l2_clusters, entries_per_cluster);
         let header_clusters = div_round_up_u64(size_of::<QcowHeader>() as u64, cluster_size);
         if num_l2_clusters > MAX_RAM_POINTER_TABLE_SIZE {
             return Err(Error::TooManyL1Entries(num_l2_clusters));
@@ -705,7 +705,8 @@ impl QcowFile {
             header: QcowHeader,
             cluster_size: u64,
         ) -> Result<()> {
-            let l1_clusters = div_round_up_u64(u64::from(header.l1_size), cluster_size);
+            let entries_per_cluster = cluster_size / size_of::<u64>() as u64;
+            let l1_clusters = div_round_up_u64(u64::from(header.l1_size), entries_per_cluster);
             let l1_table_offset = header.l1_table_offset;
             for i in 0..l1_clusters {
                 add_ref(refcounts, cluster_size, l1_table_offset + i * cluster_size)?;
@@ -872,7 +873,7 @@ impl QcowFile {
         let pointers_per_cluster = cluster_size / size_of::<u64>() as u64;
         let data_clusters = div_round_up_u64(header.size, cluster_size);
         let l2_clusters = div_round_up_u64(data_clusters, pointers_per_cluster);
-        let l1_clusters = div_round_up_u64(l2_clusters, cluster_size);
+        let l1_clusters = div_round_up_u64(l2_clusters, pointers_per_cluster);
         let header_clusters = div_round_up_u64(size_of::<QcowHeader>() as u64, cluster_size);
         let max_clusters = data_clusters + l2_clusters + l1_clusters + header_clusters;
         let mut max_valid_cluster_index = max_clusters;
