@@ -73,4 +73,4 @@ write_files:
         #!/bin/bash
         set -e
 
-        echo -n "@DEFAULT_TCP_LISTENER_MESSAGE" | nc -w0 @HOST_IP @TCP_LISTENER_PORT
+        echo -n "@DEFAULT_TCP_LISTENER_MESSAGE" > /dev/tcp/@HOST_IP/@TCP_LISTENER_PORT
