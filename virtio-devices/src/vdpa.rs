@@ -9,6 +9,7 @@ use crate::{
     VIRTIO_F_IOMMU_PLATFORM,
 };
 use std::{
+    collections::BTreeMap,
     io, result,
     sync::{atomic::Ordering, Arc, Mutex},
 };
@@ -86,7 +87,7 @@ pub struct Vdpa {
     id: String,
     vhost: VhostKernVdpa<GuestMemoryAtomic<GuestMemoryMmap>>,
     iova_range: VhostVdpaIovaRange,
-    enabled_num_queues: Option<usize>,
+    enabled_queues: BTreeMap<usize, bool>,
     backend_features: u64,
 }
 
@@ -124,19 +125,20 @@ impl Vdpa {
             id,
             vhost,
             iova_range,
-            enabled_num_queues: None,
+            enabled_queues: BTreeMap::new(),
             backend_features,
         })
     }
 
-    fn enable_vrings(&mut self, num_queues: usize, enable: bool) -> Result<()> {
-        for queue_index in 0..num_queues {
-            self.vhost
-                .set_vring_enable(queue_index, enable)
-                .map_err(Error::SetVringEnable)?;
+    fn enable_vrings(&mut self, enable: bool) -> Result<()> {
+        for (queue_index, enabled) in self.enabled_queues.iter_mut() {
+            if *enabled != enable {
+                self.vhost
+                    .set_vring_enable(*queue_index, enable)
+                    .map_err(Error::SetVringEnable)?;
+                *enabled = enable;
+            }
         }
-
-        self.enabled_num_queues = if enable { Some(num_queues) } else { None };
 
         Ok(())
     }
@@ -213,7 +215,7 @@ impl Vdpa {
                 .map_err(Error::SetConfigCall)?;
         }
 
-        self.enable_vrings(queues.len(), true)?;
+        self.enable_vrings(true)?;
 
         self.vhost
             .set_status(
@@ -223,9 +225,7 @@ impl Vdpa {
     }
 
     fn reset_vdpa(&mut self) -> Result<()> {
-        if let Some(num_queues) = self.enabled_num_queues {
-            self.enable_vrings(num_queues, false)?;
-        }
+        self.enable_vrings(false)?;
 
         self.vhost.set_status(0).map_err(Error::SetStatus)
     }
