@@ -1085,7 +1085,7 @@ impl Guest {
     }
 
     pub fn reboot_linux(&self, current_reboot_count: u32, custom_timeout: Option<i32>) {
-        let list_boots_cmd = "sudo journalctl --list-boots | wc -l";
+        let list_boots_cmd = "sudo last | grep -c reboot";
         let boot_count = self
             .ssh_command(list_boots_cmd)
             .unwrap()
