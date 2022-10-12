@@ -2852,6 +2852,7 @@ impl DeviceManager {
                 device_path,
                 self.memory_manager.lock().unwrap().guest_memory(),
                 vdpa_cfg.num_queues as u16,
+                self.restoring,
             )
             .map_err(DeviceManagerError::CreateVdpa)?,
         ));
@@ -2865,7 +2866,7 @@ impl DeviceManager {
         self.device_tree
             .lock()
             .unwrap()
-            .insert(id.clone(), device_node!(id));
+            .insert(id.clone(), device_node!(id, vdpa_device));
 
         Ok(MetaVirtioDevice {
             virtio_device: vdpa_device as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
