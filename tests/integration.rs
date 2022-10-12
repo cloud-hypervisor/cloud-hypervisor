@@ -1882,11 +1882,8 @@ fn _test_virtio_iommu(acpi: bool) {
 }
 
 fn get_reboot_count(guest: &Guest) -> u32 {
-    // Ensure that the current boot journal is written so reboot counts are valid
-    guest.ssh_command("sudo journalctl --sync").unwrap();
-
     guest
-        .ssh_command("sudo journalctl --list-boots | wc -l")
+        .ssh_command("sudo last | grep -c reboot")
         .unwrap()
         .trim()
         .parse::<u32>()
