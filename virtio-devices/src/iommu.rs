@@ -14,7 +14,6 @@ use crate::{DmaRemapping, VirtioInterrupt, VirtioInterruptType};
 use anyhow::anyhow;
 use seccompiler::SeccompAction;
 use std::collections::BTreeMap;
-use std::fmt::{self, Display};
 use std::io;
 use std::mem::size_of;
 use std::ops::Bound::Included;
@@ -22,6 +21,7 @@ use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex, RwLock};
+use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_queue::{DescriptorChain, Queue, QueueT};
@@ -282,76 +282,42 @@ unsafe impl ByteValued for VirtioIommuProbeProperty {}
 unsafe impl ByteValued for VirtioIommuProbeResvMem {}
 unsafe impl ByteValued for VirtioIommuFault {}
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 enum Error {
-    /// Guest gave us bad memory addresses.
+    #[error("Guest gave us bad memory addresses: {0}.")]
     GuestMemory(GuestMemoryError),
-    /// Guest gave us a write only descriptor that protocol says to read from.
+    #[error("Guest gave us a write only descriptor that protocol says to read from.")]
     UnexpectedWriteOnlyDescriptor,
-    /// Guest gave us a read only descriptor that protocol says to write to.
+    #[error("Guest gave us a read only descriptor that protocol says to write to.")]
     UnexpectedReadOnlyDescriptor,
-    /// Guest gave us too few descriptors in a descriptor chain.
+    #[error("Guest gave us too few descriptors in a descriptor chain.")]
     DescriptorChainTooShort,
-    /// Guest gave us a buffer that was too short to use.
+    #[error("Guest gave us a buffer that was too short to use.")]
     BufferLengthTooSmall,
-    /// Guest sent us invalid request.
+    #[error("Guest sent us invalid request.")]
     InvalidRequest,
-    /// Guest sent us invalid ATTACH request.
+    #[error("Guest sent us invalid ATTACH request.")]
     InvalidAttachRequest,
-    /// Guest sent us invalid DETACH request.
+    #[error("Guest sent us invalid DETACH request.")]
     InvalidDetachRequest,
-    /// Guest sent us invalid MAP request.
+    #[error("Guest sent us invalid MAP request.")]
     InvalidMapRequest,
-    /// Invalid to map because the domain is in bypass mode.
+    #[error("Invalid to map because the domain is in bypass mode.")]
     InvalidMapRequestBypassDomain,
-    /// Invalid to map because the domain is missing.
+    #[error("Invalid to map because the domain is missing.")]
     InvalidMapRequestMissingDomain,
-    /// Guest sent us invalid UNMAP request.
+    #[error("Guest sent us invalid UNMAP request.")]
     InvalidUnmapRequest,
-    /// Invalid to unmap because the domain is in bypass mode.
+    #[error("Invalid to unmap because the domain is in bypass mode.")]
     InvalidUnmapRequestBypassDomain,
-    /// Invalid to unmap because the domain is missing.
+    #[error("Invalid to unmap because the domain is missing.")]
     InvalidUnmapRequestMissingDomain,
-    /// Guest sent us invalid PROBE request.
+    #[error("Guest sent us invalid PROBE request.")]
     InvalidProbeRequest,
-    /// Failed to performing external mapping.
+    #[error("Failed to performing external mapping: {0}.")]
     ExternalMapping(io::Error),
-    /// Failed to performing external unmapping.
+    #[error("Failed to performing external unmapping: {0}.")]
     ExternalUnmapping(io::Error),
-}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use self::Error::*;
-
-        match self {
-            BufferLengthTooSmall => write!(f, "buffer length too small"),
-            DescriptorChainTooShort => write!(f, "descriptor chain too short"),
-            GuestMemory(e) => write!(f, "bad guest memory address: {}", e),
-            InvalidRequest => write!(f, "invalid request"),
-            InvalidAttachRequest => write!(f, "invalid attach request"),
-            InvalidDetachRequest => write!(f, "invalid detach request"),
-            InvalidMapRequest => write!(f, "invalid map request"),
-            InvalidMapRequestBypassDomain => {
-                write!(f, "invalid map request because domain in bypass mode")
-            }
-            InvalidMapRequestMissingDomain => {
-                write!(f, "invalid map request because missing domain")
-            }
-            InvalidUnmapRequest => write!(f, "invalid unmap request"),
-            InvalidUnmapRequestBypassDomain => {
-                write!(f, "invalid unmap request because domain in bypass mode")
-            }
-            InvalidUnmapRequestMissingDomain => {
-                write!(f, "invalid unmap request because missing domain")
-            }
-            InvalidProbeRequest => write!(f, "invalid probe request"),
-            UnexpectedReadOnlyDescriptor => write!(f, "unexpected read-only descriptor"),
-            UnexpectedWriteOnlyDescriptor => write!(f, "unexpected write-only descriptor"),
-            ExternalMapping(e) => write!(f, "failed performing external mapping: {}", e),
-            ExternalUnmapping(e) => write!(f, "failed performing external unmapping: {}", e),
-        }
-    }
 }
 
 struct Request {}
