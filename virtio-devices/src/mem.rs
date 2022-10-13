@@ -139,6 +139,8 @@ pub enum Error {
     NotActivatedByGuest,
     #[error("Unknown request type: {0}")]
     UnkownRequestType(u16),
+    #[error("Failed adding used index: {0}")]
+    QueueAddUsed(virtio_queue::Error),
 }
 
 #[repr(C)]
@@ -614,7 +616,7 @@ impl MemEpollHandler {
             let len = r.send_response(desc_chain.memory(), resp_type, resp_state)?;
             self.queue
                 .add_used(desc_chain.memory(), desc_chain.head_index(), len)
-                .unwrap();
+                .map_err(Error::QueueAddUsed)?;
             used_descs = true;
         }
 
