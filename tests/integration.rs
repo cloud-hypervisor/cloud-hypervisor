@@ -9302,13 +9302,11 @@ mod live_migration {
         }
 
         #[test]
-        #[ignore = "See #4749"]
         fn test_live_migration_watchdog() {
             _test_live_migration_watchdog(false, false)
         }
 
         #[test]
-        #[ignore = "See #4749"]
         fn test_live_migration_watchdog_local() {
             _test_live_migration_watchdog(false, true)
         }
@@ -9346,13 +9344,11 @@ mod live_migration {
         }
 
         #[test]
-        #[ignore = "See #4749"]
         fn test_live_upgrade_watchdog() {
             _test_live_migration_watchdog(true, false)
         }
 
         #[test]
-        #[ignore = "See #4749"]
         fn test_live_upgrade_watchdog_local() {
             _test_live_migration_watchdog(true, true)
         }
