@@ -5,24 +5,21 @@
     - [Guest OS](#guest-os)
 - [2. Getting Started](#2-getting-started)
   - [Host OS](#host-os)
-  - [Preparation](#preparation)
-  - [Install prerequisites](#install-prerequisites)
-  - [Clone and build](#clone-and-build)
-    - [Containerized builds and tests](#containerized-builds-and-tests)
-  - [Use Prebuilt Binaries](#use-prebuilt-binaries)
-  - [Run](#run)
-    - [Cloud image](#cloud-image)
-    - [Custom kernel and disk image](#custom-kernel-and-disk-image)
-      - [Building your kernel](#building-your-kernel)
+  - [Use Pre-built Binaries](#use-pre-built-binaries)
+  - [Packages](#packages)
+  - [Building from Source](#building-from-source)
+  - [Booting Linux](#booting-linux)
+    - [Firmware Booting](#firmware-booting)
+    - [Custom Kernel and Disk Image](#custom-kernel-and-disk-image)
+      - [Building your Kernel](#building-your-kernel)
       - [Disk image](#disk-image)
       - [Booting the guest VM](#booting-the-guest-vm)
 - [3. Status](#3-status)
   - [Hot Plug](#hot-plug)
   - [Device Model](#device-model)
-  - [TODO](#todo)
   - [Roadmap](#roadmap)
-- [4. `rust-vmm` project dependency](#4-rust-vmm-project-dependency)
-  - [Firecracker and crosvm](#firecracker-and-crosvm)
+- [4. Relationship with _Rust VMM_ Project](#4-relationship-with-rust-vmm-project)
+  - [Differences with Firecracker and crosvm](#differences-with-firecracker-and-crosvm)
 - [5. Community](#5-community)
   - [Contribute](#contribute)
   - [Slack](#slack)
@@ -32,18 +29,18 @@
 # 1. What is Cloud Hypervisor?
 
 Cloud Hypervisor is an open source Virtual Machine Monitor (VMM) that runs on
-top of [KVM](https://www.kernel.org/doc/Documentation/virtual/kvm/api.txt)
-hypervisor and Microsoft Hypervisor (MSHV).
+top of the [KVM](https://www.kernel.org/doc/Documentation/virtual/kvm/api.txt)
+hypervisor and the Microsoft Hypervisor (MSHV).
 
-The project focuses on exclusively running modern, cloud workloads, on top of
-a limited set of hardware architectures and platforms. Cloud workloads refers
-to those that are usually run by customers inside a cloud provider. For our
-purposes this means modern operating systems with most I/O handled by
-paravirtualised devices (i.e. virtio), no requirement for legacy devices, and
+The project focuses on running modern, _Cloud Workloads_, on specific, common,
+hardware architectures. In this case _Cloud Workloads_ refers to those that are
+run by customers inside a Cloud Service Provider. This means modern operating
+systems with most I/O handled by
+paravirtualised devices (e.g. _virtio_), no requirement for legacy devices, and
 64-bit CPUs.
 
 Cloud Hypervisor is implemented in [Rust](https://www.rust-lang.org/) and is
-based on the [rust-vmm](https://github.com/rust-vmm) crates.
+based on the [Rust VMM](https://github.com/rust-vmm) crates.
 
 ## Objectives
 
@@ -63,7 +60,7 @@ based on the [rust-vmm](https://github.com/rust-vmm) crates.
 ### Architectures
 
 Cloud Hypervisor supports the `x86-64` and `AArch64` architectures. There are
-some small differences in functionality between the two architectures
+minor differences in functionality between the two architectures
 (see [#1125](https://github.com/cloud-hypervisor/cloud-hypervisor/issues/1125)).
 
 ### Guest OS
@@ -72,157 +69,121 @@ Cloud Hypervisor supports `64-bit Linux` and Windows 10/Windows Server 2019.
 
 # 2. Getting Started
 
-Below sections describe how to build and run Cloud Hypervisor on the `x86_64`
-platform. For getting started on the `AArch64` platform, please refer to the
-[Arm64 documentation](docs/arm64.md).
+The following sections describe how to build and run Cloud Hypervisor on the
+`x86-64` platform. For getting started on the `AArch64` platform, please refer
+to the
+[AArch64 documentation](docs/arm64.md).
 
 ## Host OS
 
-Based on required KVM functionality the minimum host kernel version is 4.11.
-For adequate peformance the minimum recommended host kernel vesion is 5.6. The
+For required KVM functionality the minimum host kernel version is 4.11.  For
+adequate performance the minimum recommended host kernel version is 5.6. The
 majority of the CI currently tests with kernel version 5.15.
 
-## Preparation
+## Use Pre-built Binaries
 
-We create a folder to build and run `cloud-hypervisor` at `$HOME/cloud-hypervisor`
+The recommended approach to getting started with Cloud Hypervisor is by using a
+pre-built binary. Binaries are available for the [latest
+release](https://github.com/cloud-hypervisor/cloud-hypervisor/releases/latest).
+Use `cloud-hypervisor-static` for `x86-64` or `cloud-hypervisor-static-aarch64`
+for `AArch64` platform.
 
-```shell
-$ export CLOUDH=$HOME/cloud-hypervisor
-$ mkdir $CLOUDH
-```
+## Packages
 
-## Install prerequisites
-
-You need to install some prerequisite packages in order to build and test Cloud
-Hypervisor. Here, all the steps are based on Ubuntu, for other Linux
-distributions please replace the package manager and package name.
-
-```shell
-# Install build-essential, git, and qemu-utils
-$ sudo apt install git build-essential qemu-utils
-# Install rust tool chain
-$ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-# If you want to build statically linked binary please add musl target
-$ rustup target add x86_64-unknown-linux-musl
-```
-
-## Clone and build
-
-First you need to clone and build the cloud-hypervisor repo:
-
-```shell
-$ pushd $CLOUDH
-$ git clone https://github.com/cloud-hypervisor/cloud-hypervisor.git
-$ cd cloud-hypervisor
-$ cargo build --release
-
-# We need to give the cloud-hypervisor binary the NET_ADMIN capabilities for it to set TAP interfaces up on the host.
-$ sudo setcap cap_net_admin+ep ./target/release/cloud-hypervisor
-
-# If you want to build statically linked binary
-$ cargo build --release --target=x86_64-unknown-linux-musl --all
-$ popd
-```
-
-This will build a `cloud-hypervisor` binary under
-`$CLOUDH/cloud-hypervisor/target/release/cloud-hypervisor`.
-
-### Containerized builds and tests
-
-If you want to build and test Cloud Hypervisor without having to install all the
-required dependencies (The rust toolchain, cargo tools, etc), you can also use
-Cloud Hypervisor's development script: `dev_cli.sh`. Please note that upon its
-first invocation, this script will pull a fairly large container image.
-
-For example, to build the Cloud Hypervisor release binary:
-
-```shell
-$ pushd $CLOUDH
-$ cd cloud-hypervisor
-$ ./scripts/dev_cli.sh build --release
-```
-
-With `dev_cli.sh`, one can also run the Cloud Hypervisor CI locally. This can be
-very convenient for debugging CI errors without having to fully rely on the
-Cloud Hypervisor CI infrastructure.
-
-For example, to run the Cloud Hypervisor unit tests:
-
-```shell
-$ ./scripts/dev_cli.sh tests --unit
-```
-
-Run the `./scripts/dev_cli.sh --help` command to view all the supported
-development script commands and their related options.
-
-## Use Prebuilt Binaries
-
-Cloud Hypervisor packages targeting some popular Linux distributions are available
-thanks to the [Open Build Service](https://build.opensuse.org). The
-[OBS README](https://github.com/cloud-hypervisor/obs-packaging) explains how to
+For convenience, packages are also available targeting some popular Linux
+distributions. This is thanks to the [Open Build
+Service](https://build.opensuse.org). The [OBS
+README](https://github.com/cloud-hypervisor/obs-packaging) explains how to
 enable the repository in a supported Linux distribution and install Cloud Hypervisor
 and accompanying packages. Please report any packaging issues in the
 [obs-packaging](https://github.com/cloud-hypervisor/obs-packaging) repository.
 
-## Run
+## Building from Source
 
-You can run a guest VM by either using an existing cloud image or booting into
-your own kernel and disk image.
+Please see the [instructions for building from source](docs/building.md) if you
+do not wish to use the pre-built binaries.
 
-### Cloud image
+## Booting Linux
 
-Cloud Hypervisor supports booting disk images containing all needed
-components to run cloud workloads, a.k.a. cloud images. To do that we rely on
-the [Rust Hypervisor
-Firmware](https://github.com/cloud-hypervisor/rust-hypervisor-firmware) project
-to provide an ELF formatted KVM firmware for `cloud-hypervisor` to directly
-boot into.
+The instructions below are for the `x86-64` platform. For `AArch64` please see
+the [AArch64 specific documentation](docs/arm64.md).
 
-We need to get the latest `rust-hypervisor-firmware` release and also a working
-cloud image. Here we will use a Ubuntu image:
+Cloud Hypervisor supports direct kernel boot (if the kernel is built with PVH
+support) or booting via a firmware (either [Rust Hypervisor
+Firmware](https://github.com/cloud-hypervisor/rust-hypervisor-firmware) or an
+edk2 UEFI firmware called `CLOUDHV`.)
+
+Binary builds of the firmware files are available for the latest release of
+[Rust Hyperivor
+Firmware](https://github.com/cloud-hypervisor/rust-hypervisor-firmware/releases/latest)
+and [our edk2
+repository](https://github.com/cloud-hypervisor/edk2/releases/latest)
+
+The choice of firmware depends on your guest OS choice; some experimentation
+may be required.
+
+### Firmware Booting
+
+Cloud Hypervisor supports booting disk images containing all needed components
+to run cloud workloads, a.k.a. cloud images. 
+
+The following sample commands will download an Ubuntu Cloud image, converting
+it into a format that Cloud Hypervisor can use and a firmware to boot the image
+with.
 
 ```shell
-$ pushd $CLOUDH
 $ wget https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img
 $ qemu-img convert -p -f qcow2 -O raw focal-server-cloudimg-amd64.img focal-server-cloudimg-amd64.raw
 $ wget https://github.com/cloud-hypervisor/rust-hypervisor-firmware/releases/download/0.4.1/hypervisor-fw
-$ popd
 ```
 
+The Ubuntu cloud images do not ship with a default password so it necessary to
+use a `cloud-init` disk image to customise the image on the first boot. A basic
+`cloud-init` image is generated by this [script](scripts/create-cloud-init.sh).
+This seeds the image with a default username/password of `cloud/cloud123`. It
+is only necessary to add this disk image on the first boot.
+
 ```shell
-$ pushd $CLOUDH
-$ sudo setcap cap_net_admin+ep ./cloud-hypervisor/target/release/cloud-hypervisor
-$ ./cloud-hypervisor/target/release/cloud-hypervisor \
+$ sudo setcap cap_net_admin+ep ./cloud-hypervisor
+$ ./create-cloud-init.sh
+$ .cloud-hypervisor \
 	--kernel ./hypervisor-fw \
-	--disk path=focal-server-cloudimg-amd64.raw \
+	--disk path=focal-server-cloudimg-amd64.raw path=/tmp/ubuntu-cloudinit.img
 	--cpus boot=4 \
 	--memory size=1024M \
 	--net "tap=,mac=,ip=,mask="
-$ popd
 ```
 
-Multiple arguments can be given to the `--disk` parameter.
+If access to the firmware messages or interaction with the boot loader (e.g.
+GRUB) is required then it necessary to switch to the serial console instead of
+`virtio-console`.
 
-### Custom kernel and disk image
+```shell
+$ .cloud-hypervisor \
+	--kernel ./hypervisor-fw \
+	--disk path=focal-server-cloudimg-amd64.raw path=/tmp/ubuntu-cloudinit.img
+	--cpus boot=4 \
+	--memory size=1024M \
+	--net "tap=,mac=,ip=,mask=" \
+	--serial tty \
+	--console off
+```
 
-#### Building your kernel
+### Custom Kernel and Disk Image
 
-Cloud Hypervisor also supports direct kernel boot into a `vmlinux` ELF kernel.
-In order to support virtio-watchdog we have our own development branch. You are
-of course able to use your own kernel but these instructions will continue with
-the version that we develop and test against.
+#### Building your Kernel
+
+Cloud Hypervisor also supports direct kernel boot into a `vmlinux` ELF kernel (compiled with PVH support). In order to support development there is a custom branch; however provided the required options are enabled any recent kernel will suffice.
 
 To build the kernel:
 
 ```shell
-
 # Clone the Cloud Hypervisor Linux branch
-$ pushd $CLOUDH
 $ git clone --depth 1 https://github.com/cloud-hypervisor/linux.git -b ch-5.15.12 linux-cloud-hypervisor
 $ pushd linux-cloud-hypervisor
-
 # Use the cloud-hypervisor kernel config to build your kernel
-$ cp $CLOUDH/cloud-hypervisor/resources/linux-config-x86_64 .config
+$ wget https://raw.githubusercontent.com/cloud-hypervisor/cloud-hypervisor/main/resources/linux-config-x86_64
+$ cp linux-config-x86_64 .config
 $ KCFLAGS="-Wa,-mx86-used-note=no" make bzImage -j `nproc`
 $ popd
 ```
@@ -232,42 +193,34 @@ The `vmlinux` kernel image will then be located at
 
 #### Disk image
 
-For the disk image, we will use a Ubuntu cloud image that contains a root
-partition:
+For the disk image the same Ubuntu image as before can be used. This contains
+an `ext4` root filesystem.
 
 ```shell
-$ pushd $CLOUDH
 $ wget https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img
 $ qemu-img convert -p -f qcow2 -O raw focal-server-cloudimg-amd64.img focal-server-cloudimg-amd64.raw
-$ popd
 ```
 
 #### Booting the guest VM
 
-Now we can directly boot into our custom kernel and make it use the Ubuntu root
-partition. If we want to have 4 vCPUs and 1024 MBytes of memory:
+These sample commands boot the disk image using the custom kernel whilst also
+supplying the desired kernel command line.
 
 ```shell
-$ pushd $CLOUDH
-$ sudo setcap cap_net_admin+ep ./cloud-hypervisor/target/release/cloud-hypervisor
-$ ./cloud-hypervisor/target/release/cloud-hypervisor \
+$ sudo setcap cap_net_admin+ep ./cloud-hypervisor
+$ ./create-cloud-init.sh
+$ ./cloud-hypervisor \
 	--kernel ./linux-cloud-hypervisor/arch/x86/boot/compressed/vmlinux.bin \
-	--disk path=focal-server-cloudimg-amd64.raw \
+	--disk path=focal-server-cloudimg-amd64.raw path=/tmp/ubuntu-cloudinit.img\
 	--cmdline "console=hvc0 root=/dev/vda1 rw" \
 	--cpus boot=4 \
 	--memory size=1024M \
 	--net "tap=,mac=,ip=,mask="
 ```
 
-The above example use the `virtio-console` device as the guest console, and this
-device may not be enabled soon enough by the guest kernel to get early kernel
-debug messages.
+If earlier kernel messages are required the serial console should be used instead of `virtio-console`.
 
-When in need for earlier debug messages, using the legacy serial device based
-console is preferred:
-
-```
-$ ./cloud-hypervisor/target/release/cloud-hypervisor \
+```cloud-hypervisor \
 	--kernel ./linux-cloud-hypervisor/arch/x86/boot/compressed/vmlinux.bin \
 	--console off \
 	--serial tty \
@@ -280,8 +233,8 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 
 # 3. Status
 
-Cloud Hypervisor is under active development. The following stability guarantees
-are currently made:
+Cloud Hypervisor is under active development. The following stability
+guarantees are currently made:
 
 * The API (including command line options) will not be removed or changed in a
   breaking way without a minimum of 2 major releases notice. Where possible
@@ -299,16 +252,18 @@ Currently the following items are **not** guaranteed across updates:
 * The following features are considered experimental and may change
   substantially between releases: TDX, vfio-user, vDPA.
 
-As of 2022-04-05, the following cloud images are supported:
+Further details can be found in the [release documentation](docs/releases.md).
 
-- [Ubuntu Bionic](https://cloud-images.ubuntu.com/bionic/current/) (cloudimg)
-- [Ubuntu Focal](https://cloud-images.ubuntu.com/focal/current/) (cloudimg)
-- [Ubuntu Jammy](https://cloud-images.ubuntu.com/jammy/current/) (cloudimg)
+As of 2022-10-13, the following cloud images are supported:
+
+- [Ubuntu Bionic](https://cloud-images.ubuntu.com/bionic/current/) (bionic-server-cloudimg-amd64.img)
+- [Ubuntu Focal](https://cloud-images.ubuntu.com/focal/current/) (focal-server-cloudimg-amd64.img)
+- [Ubuntu Jammy](https://cloud-images.ubuntu.com/jammy/current/) (jammy-server-cloudimg-amd64.img )
+- [Fedora 36](https://fedora.mirrorservice.org/fedora/linux/releases/36/Cloud/x86_64/images/) (Fedora-Cloud-Base-36-1.5.x86_64.raw.xz)
 
 Direct kernel boot to userspace should work with a rootfs from most
-distributions.
-
-Further details can be found in the [release documentation](docs/releases.md).
+distributions although you may need to enable exotic filesystem types in the
+reference kernel configuration (e.g. XFS or btrfs.)
 
 ## Hot Plug
 
@@ -321,18 +276,12 @@ Cloud Hypervisor supports hotplug of CPUs, passthrough devices (VFIO),
 Details of the device model can be found in this
 [documentation](docs/device_model.md).
 
-## TODO
-
-We are not tracking the Cloud Hypervisor TODO list from a specific git tracked
-file but through
-[github issues](https://github.com/cloud-hypervisor/cloud-hypervisor/issues/new)
-instead.
-
 ## Roadmap
 
-The project roadmap is tracked through a [GitHub project](https://github.com/orgs/cloud-hypervisor/projects/6).
+The project roadmap is tracked through a [GitHub
+project](https://github.com/orgs/cloud-hypervisor/projects/6).
 
-# 4. `rust-vmm` project dependency
+# 4. Relationship with _Rust VMM_ Project
 
 In order to satisfy the design goal of having a high-performance,
 security-focused hypervisor the decision was made to use the
@@ -341,39 +290,26 @@ focus on memory and thread safety makes it an ideal candidate for implementing
 VMMs.
 
 Instead of implementing the VMM components from scratch, Cloud Hypervisor is
-importing the [rust-vmm](https://github.com/rust-vmm) crates, and sharing code
+importing the [Rust VMM](https://github.com/rust-vmm) crates, and sharing code
 and architecture together with other VMMs like e.g. Amazon's
 [Firecracker](https://firecracker-microvm.github.io/) and Google's
 [crosvm](https://chromium.googlesource.com/chromiumos/platform/crosvm/).
 
-Cloud Hypervisor embraces the rust-vmm project goals, which is to be able to
-share and re-use as many virtualization crates as possible. As such, the Cloud
-Hypervisor relationship with the rust-vmm project is twofold:
+Cloud Hypervisor embraces the _Rust VMM_ project's goals, which is to be able
+to share and re-use as many virtualization crates as possible.
 
-1. It will use as much of the rust-vmm code as possible. Any new rust-vmm crate
-   that's relevant to the project goals will be integrated as soon as possible.
-2. As it is likely that the rust-vmm project will lack some of the features that
-   Cloud Hypervisor needs (e.g. ACPI, VFIO, vhost-user, etc), we will be using
-   the Cloud Hypervisor VMM to implement and test them, and contribute them back
-   to the rust-vmm project.
-
-## Firecracker and crosvm
+## Differences with Firecracker and crosvm
 
 A large part of the Cloud Hypervisor code is based on either the Firecracker or
-the crosvm projects implementations. Both of these are VMMs written in Rust with
-a focus on safety and security, like Cloud Hypervisor.
+the crosvm project's implementations. Both of these are VMMs written in Rust
+with a focus on safety and security, like Cloud Hypervisor.
 
-However we want to emphasize that the Cloud Hypervisor project is neither a fork
-nor a reimplementation of any of those projects. The goals and use cases we're
-trying to meet are different. We're aiming at supporting cloud workloads, i.e.
-those modern, full Linux distribution images currently being run by Cloud
-Service Provider (CSP) tenants.
+The goal of the Cloud Hypervisor project differs from the aforementioned
+projects in that it aims to be a general purpose VMM for _Cloud Workloads_ and
+not limited to container/serverless or client workloads.
 
-Our primary target is not to support client or serverless use cases, and as such
-our code base already diverges from the crosvm and Firecracker ones. As we add
-more features to support our use cases, we believe that the divergence will
-increase while at the same time sharing as much of the fundamental
-virtualization code through the rust-vmm project crates as possible.
+The Cloud Hypervisor community thanks the communities of both the Firecracker
+and crosvm projects for their excellent work.
 
 # 5. Community
 
@@ -383,12 +319,12 @@ repository.
 
 ## Contribute
 
-We are working on building a global, diverse and collaborative community around
-the Cloud Hypervisor project. Anyone who is interested in
+The project strongly believes in building a global, diverse and collaborative
+community around the Cloud Hypervisor project. Anyone who is interested in
 [contributing](CONTRIBUTING.md) to the project is welcome to participate.
 
-We believe that contributing to a open source project like Cloud Hypervisor
-covers a lot more than just sending code. Testing, documentation, pull request
+Contributing to a open source project like Cloud Hypervisor covers a lot more
+than just sending code. Testing, documentation, pull request
 reviews, bug reports, feature requests, project improvement suggestions, etc,
 are all equal and welcome means of contribution. See the
 [CONTRIBUTING](CONTRIBUTING.md) document for more details.
