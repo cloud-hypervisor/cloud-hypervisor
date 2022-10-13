@@ -318,6 +318,8 @@ enum Error {
     ExternalMapping(io::Error),
     #[error("Failed to performing external unmapping: {0}.")]
     ExternalUnmapping(io::Error),
+    #[error("Failed adding used index: {0}")]
+    QueueAddUsed(virtio_queue::Error),
 }
 
 struct Request {}
@@ -639,29 +641,24 @@ struct IommuEpollHandler {
 }
 
 impl IommuEpollHandler {
-    fn request_queue(&mut self) -> bool {
+    fn request_queue(&mut self) -> Result<bool, Error> {
         let mut used_descs = false;
         while let Some(mut desc_chain) = self.queues[0].pop_descriptor_chain(self.mem.memory()) {
-            let len = match Request::parse(
+            let len = Request::parse(
                 &mut desc_chain,
                 &self.mapping,
                 &self.ext_mapping.lock().unwrap(),
                 self.msi_iova_space,
-            ) {
-                Ok(len) => len as u32,
-                Err(e) => {
-                    error!("failed parsing descriptor: {}", e);
-                    0
-                }
-            };
+            )?;
 
             self.queues[0]
-                .add_used(desc_chain.memory(), desc_chain.head_index(), len)
-                .unwrap();
+                .add_used(desc_chain.memory(), desc_chain.head_index(), len as u32)
+                .map_err(Error::QueueAddUsed)?;
+
             used_descs = true;
         }
 
-        used_descs
+        Ok(used_descs)
     }
 
     fn event_queue(&mut self) -> bool {
@@ -704,7 +701,13 @@ impl EpollHelperHandler for IommuEpollHandler {
                     EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
                 })?;
 
-                if self.request_queue() {
+                let needs_notification = self.request_queue().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!(
+                        "Failed to process request queue : {:?}",
+                        e
+                    ))
+                })?;
+                if needs_notification {
                     self.signal_used_queue(0).map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
                             "Failed to signal used queue: {:?}",
