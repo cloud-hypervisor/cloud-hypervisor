@@ -2769,17 +2769,6 @@ impl Snapshottable for Vm {
         self.load_clock_from_snapshot(&snapshot)
             .map_err(|e| MigratableError::Restore(anyhow!("Error restoring clock: {:?}", e)))?;
 
-        if let Some(memory_manager_snapshot) = snapshot.snapshots.get(MEMORY_MANAGER_SNAPSHOT_ID) {
-            self.memory_manager
-                .lock()
-                .unwrap()
-                .restore(*memory_manager_snapshot.clone())?;
-        } else {
-            return Err(MigratableError::Restore(anyhow!(
-                "Missing memory manager snapshot"
-            )));
-        }
-
         if let Some(device_manager_snapshot) = snapshot.snapshots.get(DEVICE_MANAGER_SNAPSHOT_ID) {
             self.device_manager
                 .lock()
