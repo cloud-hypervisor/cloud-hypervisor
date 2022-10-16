@@ -48,12 +48,12 @@ pub enum HypervisorCpuError {
     ///
     /// Setting floating point registers error
     ///
-    #[error("Failed to set special register: {0}")]
+    #[error("Failed to set floating point registers: {0}")]
     SetFloatingPointRegs(#[source] anyhow::Error),
     ///
     /// Getting floating point register error
     ///
-    #[error("Failed to get special register: {0}")]
+    #[error("Failed to get floating points registers: {0}")]
     GetFloatingPointRegs(#[source] anyhow::Error),
     ///
     /// Setting Cpuid error
