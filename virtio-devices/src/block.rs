@@ -416,72 +416,92 @@ impl Block {
         seccomp_action: SeccompAction,
         rate_limiter_config: Option<RateLimiterConfig>,
         exit_evt: EventFd,
+        snapshot: Option<Snapshot>,
     ) -> io::Result<Self> {
-        let disk_size = disk_image.size().map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("Failed getting disk size: {}", e),
-            )
-        })?;
-        if disk_size % SECTOR_SIZE != 0 {
-            warn!(
-                "Disk size {} is not a multiple of sector size {}; \
+        let (disk_nsectors, avail_features, acked_features, config) =
+            if let Some(snapshot) = snapshot {
+                let state: BlockState = snapshot.to_versioned_state(&id).map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("Failed retrieving state from snapshot: {}", e),
+                    )
+                })?;
+                (
+                    state.disk_nsectors,
+                    state.avail_features,
+                    state.acked_features,
+                    state.config,
+                )
+            } else {
+                let disk_size = disk_image.size().map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("Failed getting disk size: {}", e),
+                    )
+                })?;
+                if disk_size % SECTOR_SIZE != 0 {
+                    warn!(
+                        "Disk size {} is not a multiple of sector size {}; \
                  the remainder will not be visible to the guest.",
-                disk_size, SECTOR_SIZE
-            );
-        }
+                        disk_size, SECTOR_SIZE
+                    );
+                }
 
-        let mut avail_features = (1u64 << VIRTIO_F_VERSION_1)
-            | (1u64 << VIRTIO_BLK_F_FLUSH)
-            | (1u64 << VIRTIO_BLK_F_CONFIG_WCE)
-            | (1u64 << VIRTIO_BLK_F_BLK_SIZE)
-            | (1u64 << VIRTIO_BLK_F_TOPOLOGY);
+                let mut avail_features = (1u64 << VIRTIO_F_VERSION_1)
+                    | (1u64 << VIRTIO_BLK_F_FLUSH)
+                    | (1u64 << VIRTIO_BLK_F_CONFIG_WCE)
+                    | (1u64 << VIRTIO_BLK_F_BLK_SIZE)
+                    | (1u64 << VIRTIO_BLK_F_TOPOLOGY);
 
-        if iommu {
-            avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
-        }
+                if iommu {
+                    avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
+                }
 
-        if is_disk_read_only {
-            avail_features |= 1u64 << VIRTIO_BLK_F_RO;
-        }
+                if is_disk_read_only {
+                    avail_features |= 1u64 << VIRTIO_BLK_F_RO;
+                }
 
-        let topology = disk_image.topology();
-        info!("Disk topology: {:?}", topology);
+                let topology = disk_image.topology();
+                info!("Disk topology: {:?}", topology);
 
-        let logical_block_size = if topology.logical_block_size > 512 {
-            topology.logical_block_size
-        } else {
-            512
-        };
+                let logical_block_size = if topology.logical_block_size > 512 {
+                    topology.logical_block_size
+                } else {
+                    512
+                };
 
-        // Calculate the exponent that maps physical block to logical block
-        let mut physical_block_exp = 0;
-        let mut size = logical_block_size;
-        while size < topology.physical_block_size {
-            physical_block_exp += 1;
-            size <<= 1;
-        }
+                // Calculate the exponent that maps physical block to logical block
+                let mut physical_block_exp = 0;
+                let mut size = logical_block_size;
+                while size < topology.physical_block_size {
+                    physical_block_exp += 1;
+                    size <<= 1;
+                }
 
-        let disk_nsectors = disk_size / SECTOR_SIZE;
-        let mut config = VirtioBlockConfig {
-            capacity: disk_nsectors,
-            writeback: 1,
-            blk_size: topology.logical_block_size as u32,
-            physical_block_exp,
-            min_io_size: (topology.minimum_io_size / logical_block_size) as u16,
-            opt_io_size: (topology.optimal_io_size / logical_block_size) as u32,
-            ..Default::default()
-        };
+                let disk_nsectors = disk_size / SECTOR_SIZE;
+                let mut config = VirtioBlockConfig {
+                    capacity: disk_nsectors,
+                    writeback: 1,
+                    blk_size: topology.logical_block_size as u32,
+                    physical_block_exp,
+                    min_io_size: (topology.minimum_io_size / logical_block_size) as u16,
+                    opt_io_size: (topology.optimal_io_size / logical_block_size) as u32,
+                    ..Default::default()
+                };
 
-        if num_queues > 1 {
-            avail_features |= 1u64 << VIRTIO_BLK_F_MQ;
-            config.num_queues = num_queues as u16;
-        }
+                if num_queues > 1 {
+                    avail_features |= 1u64 << VIRTIO_BLK_F_MQ;
+                    config.num_queues = num_queues as u16;
+                }
+
+                (disk_nsectors, avail_features, 0, config)
+            };
 
         Ok(Block {
             common: VirtioCommon {
                 device_type: VirtioDeviceType::Block as u32,
                 avail_features,
+                acked_features,
                 paused_sync: Some(Arc::new(Barrier::new(num_queues + 1))),
                 queue_sizes: vec![queue_size; num_queues],
                 min_queues: 1,
@@ -508,14 +528,6 @@ impl Block {
             acked_features: self.common.acked_features,
             config: self.config,
         }
-    }
-
-    fn set_state(&mut self, state: &BlockState) {
-        self.disk_path = state.disk_path.clone().into();
-        self.disk_nsectors = state.disk_nsectors;
-        self.common.avail_features = state.avail_features;
-        self.common.acked_features = state.acked_features;
-        self.config = state.config;
     }
 
     fn update_writeback(&mut self) {
@@ -709,11 +721,6 @@ impl Snapshottable for Block {
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_versioned_state(&self.id(), &self.state())
-    }
-
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.set_state(&snapshot.to_versioned_state(&self.id)?);
-        Ok(())
     }
 }
 impl Transportable for Block {}

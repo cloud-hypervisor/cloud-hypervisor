@@ -236,6 +236,18 @@ impl Snapshot {
     }
 }
 
+pub fn snapshot_from_id(snapshot: Option<&Snapshot>, id: &str) -> Option<Snapshot> {
+    if let Some(snapshot) = snapshot {
+        if let Some(snapshot) = snapshot.snapshots.get(id) {
+            Some(*snapshot.clone())
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
 /// A snapshottable component can be snapshotted.
 pub trait Snapshottable: Pausable {
     /// The snapshottable component id.

@@ -940,6 +940,8 @@ pub struct DeviceManager {
 
     // Addresses for ACPI platform devices e.g. ACPI PM timer, sleep/reset registers
     acpi_platform_addresses: AcpiPlatformAddresses,
+
+    snapshot: Option<Snapshot>,
 }
 
 impl DeviceManager {
@@ -958,6 +960,7 @@ impl DeviceManager {
         restoring: bool,
         boot_id_list: BTreeSet<String>,
         timestamp: Instant,
+        snapshot: Option<Snapshot>,
     ) -> DeviceManagerResult<Arc<Mutex<Self>>> {
         trace_scoped!("DeviceManager::new");
 
@@ -1085,6 +1088,7 @@ impl DeviceManager {
             timestamp,
             pending_activations: Arc::new(Mutex::new(Vec::default())),
             acpi_platform_addresses: AcpiPlatformAddresses::default(),
+            snapshot,
         };
 
         let device_manager = Arc::new(Mutex::new(device_manager));
@@ -2031,6 +2035,8 @@ impl DeviceManager {
 
         info!("Creating virtio-block device: {:?}", disk_cfg);
 
+        let snapshot = vm_migration::snapshot_from_id(self.snapshot.as_ref(), id.as_str());
+
         let (virtio_device, migratable_device) = if disk_cfg.vhost_user {
             let socket = disk_cfg.vhost_socket.as_ref().unwrap().clone();
             let vu_cfg = VhostUserConfig {
@@ -2048,6 +2054,7 @@ impl DeviceManager {
                         .try_clone()
                         .map_err(DeviceManagerError::EventFd)?,
                     self.force_iommu,
+                    snapshot,
                 ) {
                     Ok(vub_device) => vub_device,
                     Err(e) => {
@@ -2143,6 +2150,7 @@ impl DeviceManager {
                     self.exit_evt
                         .try_clone()
                         .map_err(DeviceManagerError::EventFd)?,
+                    snapshot,
                 )
                 .map_err(DeviceManagerError::CreateVirtioBlock)?,
             ));

@@ -73,6 +73,7 @@ impl Blk {
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
         iommu: bool,
+        _snapshot: Option<Snapshot>,
     ) -> Result<Blk> {
         let num_queues = vu_cfg.num_queues;
 

@@ -497,6 +497,7 @@ impl Vm {
         activate_evt: EventFd,
         restoring: bool,
         timestamp: Instant,
+        snapshot: Option<&Snapshot>,
     ) -> Result<Self> {
         trace_scoped!("Vm::new_from_memory_manager");
 
@@ -544,6 +545,7 @@ impl Vm {
             restoring,
             boot_id_list,
             timestamp,
+            vm_migration::snapshot_from_id(snapshot, DEVICE_MANAGER_SNAPSHOT_ID),
         )
         .map_err(Error::DeviceManager)?;
 
@@ -581,6 +583,7 @@ impl Vm {
             #[cfg(feature = "tdx")]
             tdx_enabled,
             &numa_nodes,
+            vm_migration::snapshot_from_id(snapshot, CPU_MANAGER_SNAPSHOT_ID),
         )
         .map_err(Error::CpuManager)?;
 
@@ -782,6 +785,7 @@ impl Vm {
             activate_evt,
             false,
             timestamp,
+            None,
         )?;
 
         // The device manager must create the devices from here as it is part
