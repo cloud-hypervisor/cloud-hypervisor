@@ -1232,6 +1232,7 @@ impl Vmm {
             activate_evt,
             true,
             timestamp,
+            Some(&snapshot),
         )
         .map_err(|e| {
             MigratableError::MigrateReceive(anyhow!("Error creating VM from snapshot: {:?}", e))

@@ -276,6 +276,7 @@ mod tests {
                     false,
                     seccompiler::SeccompAction::Trap,
                     EventFd::new(EFD_NONBLOCK).unwrap(),
+                    None,
                 )
                 .unwrap(),
             }

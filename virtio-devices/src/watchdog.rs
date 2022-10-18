@@ -213,26 +213,44 @@ impl Watchdog {
         reset_evt: EventFd,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
+        state: Option<WatchdogState>,
     ) -> io::Result<Watchdog> {
-        let avail_features = 1u64 << VIRTIO_F_VERSION_1;
+        let mut last_ping_time = None;
+        let (avail_features, acked_features) = if let Some(state) = state {
+            info!("Restoring virtio-watchdog {}", id);
+
+            // When restoring enable the watchdog if it was previously enabled.
+            // We reset the timer to ensure that we don't unnecessarily reboot
+            // due to the offline time.
+            if state.enabled {
+                last_ping_time = Some(Instant::now());
+            }
+
+            (state.avail_features, state.acked_features)
+        } else {
+            (1u64 << VIRTIO_F_VERSION_1, 0)
+        };
+
         let timer_fd = timerfd_create().map_err(|e| {
             error!("Failed to create timer fd {}", e);
             e
         })?;
         let timer = unsafe { File::from_raw_fd(timer_fd) };
+
         Ok(Watchdog {
             common: VirtioCommon {
                 device_type: VirtioDeviceType::Watchdog as u32,
                 queue_sizes: QUEUE_SIZES.to_vec(),
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 avail_features,
+                acked_features,
                 min_queues: 1,
                 ..Default::default()
             },
             id,
             seccomp_action,
             reset_evt,
-            last_ping_time: Arc::new(Mutex::new(None)),
+            last_ping_time: Arc::new(Mutex::new(last_ping_time)),
             timer,
             exit_evt,
         })
@@ -243,16 +261,6 @@ impl Watchdog {
             avail_features: self.common.avail_features,
             acked_features: self.common.acked_features,
             enabled: self.last_ping_time.lock().unwrap().is_some(),
-        }
-    }
-
-    fn set_state(&mut self, state: &WatchdogState) {
-        self.common.avail_features = state.avail_features;
-        self.common.acked_features = state.acked_features;
-        // When restoring enable the watchdog if it was previously enabled. We reset the timer
-        // to ensure that we don't unnecessarily reboot due to the offline time.
-        if state.enabled {
-            self.last_ping_time.lock().unwrap().replace(Instant::now());
         }
     }
 
@@ -408,11 +416,6 @@ impl Snapshottable for Watchdog {
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_versioned_state(&self.id, &self.state())
-    }
-
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.set_state(&snapshot.to_versioned_state(&self.id)?);
-        Ok(())
     }
 }
 

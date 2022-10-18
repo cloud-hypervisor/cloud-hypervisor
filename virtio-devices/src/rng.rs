@@ -174,13 +174,22 @@ impl Rng {
         iommu: bool,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
+        state: Option<RngState>,
     ) -> io::Result<Rng> {
         let random_file = File::open(path)?;
-        let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
 
-        if iommu {
-            avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
-        }
+        let (avail_features, acked_features) = if let Some(state) = state {
+            info!("Restoring virtio-rng {}", id);
+            (state.avail_features, state.acked_features)
+        } else {
+            let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
+
+            if iommu {
+                avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
+            }
+
+            (avail_features, 0)
+        };
 
         Ok(Rng {
             common: VirtioCommon {
@@ -188,6 +197,7 @@ impl Rng {
                 queue_sizes: QUEUE_SIZES.to_vec(),
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 avail_features,
+                acked_features,
                 min_queues: 1,
                 ..Default::default()
             },
@@ -203,11 +213,6 @@ impl Rng {
             avail_features: self.common.avail_features,
             acked_features: self.common.acked_features,
         }
-    }
-
-    fn set_state(&mut self, state: &RngState) {
-        self.common.avail_features = state.avail_features;
-        self.common.acked_features = state.acked_features;
     }
 
     #[cfg(fuzzing)]
@@ -318,11 +323,6 @@ impl Snapshottable for Rng {
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_versioned_state(&self.id, &self.state())
-    }
-
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.set_state(&snapshot.to_versioned_state(&self.id)?);
-        Ok(())
     }
 }
 

@@ -94,7 +94,7 @@ use vm_memory::{Address, ByteValued, GuestMemory, GuestMemoryRegion};
 use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::protocol::{Request, Response, Status};
 use vm_migration::{
-    protocol::MemoryRangeTable, Migratable, MigratableError, Pausable, Snapshot,
+    protocol::MemoryRangeTable, snapshot_from_id, Migratable, MigratableError, Pausable, Snapshot,
     SnapshotDataSection, Snapshottable, Transportable,
 };
 use vmm_sys_util::eventfd::EventFd;
@@ -497,6 +497,7 @@ impl Vm {
         activate_evt: EventFd,
         restoring: bool,
         timestamp: Instant,
+        snapshot: Option<&Snapshot>,
     ) -> Result<Self> {
         trace_scoped!("Vm::new_from_memory_manager");
 
@@ -544,6 +545,7 @@ impl Vm {
             restoring,
             boot_id_list,
             timestamp,
+            snapshot_from_id(snapshot, DEVICE_MANAGER_SNAPSHOT_ID),
         )
         .map_err(Error::DeviceManager)?;
 
@@ -769,6 +771,7 @@ impl Vm {
             activate_evt,
             false,
             timestamp,
+            None,
         )?;
 
         // The device manager must create the devices from here as it is part
@@ -835,6 +838,7 @@ impl Vm {
             activate_evt,
             true,
             timestamp,
+            Some(snapshot),
         )
     }
 

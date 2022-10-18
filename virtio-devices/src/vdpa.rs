@@ -64,6 +64,8 @@ pub enum Error {
     ResetOwner(vhost::Error),
     #[error("Failed to set backend specific features: {0}")]
     SetBackendFeatures(vhost::Error),
+    #[error("Failed to set backend configuration: {0}")]
+    SetConfig(vhost::Error),
     #[error("Failed to set eventfd notifying about a configuration change: {0}")]
     SetConfigCall(vhost::Error),
     #[error("Failed to set virtio features: {0}")]
@@ -107,14 +109,11 @@ impl VersionMapped for VdpaState {}
 pub struct Vdpa {
     common: VirtioCommon,
     id: String,
-    mem: GuestMemoryAtomic<GuestMemoryMmap>,
-    device_path: String,
     vhost: Option<VhostKernVdpa<GuestMemoryAtomic<GuestMemoryMmap>>>,
     iova_range: VhostVdpaIovaRange,
     enabled_queues: BTreeMap<usize, bool>,
     backend_features: u64,
     migrating: bool,
-    buffered_maps: Vec<(u64, u64, u64, bool)>,
 }
 
 impl Vdpa {
@@ -123,61 +122,77 @@ impl Vdpa {
         device_path: &str,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
         num_queues: u16,
-        restoring: bool,
+        state: Option<VdpaState>,
     ) -> Result<Self> {
-        if restoring {
-            return Ok(Vdpa {
-                common: VirtioCommon {
-                    queue_sizes: vec![1024; num_queues as usize],
-                    min_queues: num_queues,
-                    ..Default::default()
-                },
-                id,
-                mem,
-                device_path: device_path.to_string(),
-                vhost: None,
-                iova_range: VhostVdpaIovaRange { first: 0, last: 0 },
-                enabled_queues: BTreeMap::new(),
-                backend_features: 0,
-                migrating: false,
-                buffered_maps: Vec::new(),
-            });
-        }
-
-        let mut vhost =
-            VhostKernVdpa::new(device_path, mem.clone()).map_err(Error::CreateVhostVdpa)?;
+        let mut vhost = VhostKernVdpa::new(device_path, mem).map_err(Error::CreateVhostVdpa)?;
         vhost.set_owner().map_err(Error::SetOwner)?;
-        let device_type = vhost.get_device_id().map_err(Error::GetDeviceId)?;
-        let queue_size = vhost.get_vring_num().map_err(Error::GetVringNum)?;
-        let avail_features = vhost.get_features().map_err(Error::GetFeatures)?;
-        let backend_features = vhost
-            .get_backend_features()
-            .map_err(Error::GetBackendFeatures)?;
-        vhost.set_backend_features_acked(backend_features);
 
-        let iova_range = vhost.get_iova_range().map_err(Error::GetIovaRange)?;
+        let (
+            device_type,
+            avail_features,
+            acked_features,
+            queue_sizes,
+            iova_range,
+            backend_features,
+        ) = if let Some(state) = state {
+            info!("Restoring vDPA {}", id);
 
-        if avail_features & (1u64 << VIRTIO_F_IOMMU_PLATFORM) == 0 {
-            return Err(Error::MissingAccessPlatformVirtioFeature);
-        }
+            vhost.set_backend_features_acked(state.backend_features);
+            vhost
+                .set_config(0, state.config.as_slice())
+                .map_err(Error::SetConfig)?;
+
+            (
+                state.device_type,
+                state.avail_features,
+                state.acked_features,
+                state.queue_sizes,
+                VhostVdpaIovaRange {
+                    first: state.iova_range_first,
+                    last: state.iova_range_last,
+                },
+                state.backend_features,
+            )
+        } else {
+            let device_type = vhost.get_device_id().map_err(Error::GetDeviceId)?;
+            let queue_size = vhost.get_vring_num().map_err(Error::GetVringNum)?;
+            let avail_features = vhost.get_features().map_err(Error::GetFeatures)?;
+            let backend_features = vhost
+                .get_backend_features()
+                .map_err(Error::GetBackendFeatures)?;
+            vhost.set_backend_features_acked(backend_features);
+
+            let iova_range = vhost.get_iova_range().map_err(Error::GetIovaRange)?;
+
+            if avail_features & (1u64 << VIRTIO_F_IOMMU_PLATFORM) == 0 {
+                return Err(Error::MissingAccessPlatformVirtioFeature);
+            }
+
+            (
+                device_type,
+                avail_features,
+                0,
+                vec![queue_size; num_queues as usize],
+                iova_range,
+                backend_features,
+            )
+        };
 
         Ok(Vdpa {
             common: VirtioCommon {
                 device_type,
-                queue_sizes: vec![queue_size; num_queues as usize],
+                queue_sizes,
                 avail_features,
+                acked_features,
                 min_queues: num_queues,
                 ..Default::default()
             },
             id,
-            mem,
-            device_path: device_path.to_string(),
             vhost: Some(vhost),
             iova_range,
             enabled_queues: BTreeMap::new(),
             backend_features,
             migrating: false,
-            buffered_maps: Vec::new(),
         })
     }
 
@@ -318,12 +333,6 @@ impl Vdpa {
         host_vaddr: *const u8,
         readonly: bool,
     ) -> Result<()> {
-        if self.vhost.is_none() {
-            self.buffered_maps
-                .push((iova, size, host_vaddr as u64, readonly));
-            return Ok(());
-        }
-
         let iova_last = iova + size - 1;
         if iova < self.iova_range.first || iova_last > self.iova_range.last {
             return Err(Error::InvalidIovaRange(iova, iova_last));
@@ -372,33 +381,6 @@ impl Vdpa {
             config,
             backend_features: self.backend_features,
         })
-    }
-
-    fn set_state(&mut self, state: &VdpaState) -> Result<()> {
-        self.common.avail_features = state.avail_features;
-        self.common.acked_features = state.acked_features;
-        self.common.device_type = state.device_type;
-        self.common.queue_sizes = state.queue_sizes.clone();
-        self.iova_range = VhostVdpaIovaRange {
-            first: state.iova_range_first,
-            last: state.iova_range_last,
-        };
-        self.backend_features = state.backend_features;
-
-        let mut vhost = VhostKernVdpa::new(self.device_path.as_str(), self.mem.clone())
-            .map_err(Error::CreateVhostVdpa)?;
-        vhost.set_owner().map_err(Error::SetOwner)?;
-        vhost.set_backend_features_acked(self.backend_features);
-        self.vhost = Some(vhost);
-
-        self.write_config(0, state.config.as_slice());
-
-        let maps: Vec<(u64, u64, u64, bool)> = self.buffered_maps.drain(..).collect();
-        for (iova, size, host_vaddr, readonly) in maps {
-            self.dma_map(iova, size, host_vaddr as *const u8, readonly)?;
-        }
-
-        Ok(())
     }
 }
 
@@ -513,14 +495,6 @@ impl Snapshottable for Vdpa {
         self.vhost.take();
 
         Ok(snapshot)
-    }
-
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.set_state(&snapshot.to_versioned_state(&self.id)?)
-            .map_err(|e| {
-                MigratableError::Restore(anyhow!("Error restoring vDPA device: {:?}", e))
-            })?;
-        Ok(())
     }
 }
 

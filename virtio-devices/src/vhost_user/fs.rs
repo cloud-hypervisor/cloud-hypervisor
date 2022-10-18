@@ -315,102 +315,107 @@ impl Fs {
         queue_size: u16,
         cache: Option<(VirtioSharedMemoryList, MmapRegion)>,
         seccomp_action: SeccompAction,
-        restoring: bool,
         exit_evt: EventFd,
         iommu: bool,
+        state: Option<State>,
     ) -> Result<Fs> {
         let mut slave_req_support = false;
 
         // Calculate the actual number of queues needed.
         let num_queues = NUM_QUEUE_OFFSET + req_num_queues;
 
-        if restoring {
-            // We need 'queue_sizes' to report a number of queues that will be
-            // enough to handle all the potential queues. VirtioPciDevice::new()
-            // will create the actual queues based on this information.
-            return Ok(Fs {
-                common: VirtioCommon {
-                    device_type: VirtioDeviceType::Fs as u32,
-                    queue_sizes: vec![queue_size; num_queues],
-                    paused_sync: Some(Arc::new(Barrier::new(2))),
-                    min_queues: 1,
-                    ..Default::default()
-                },
-                vu_common: VhostUserCommon {
-                    socket_path: path.to_string(),
-                    vu_num_queues: num_queues,
-                    ..Default::default()
-                },
-                id,
-                config: VirtioFsConfig::default(),
-                cache,
-                slave_req_support,
-                seccomp_action,
-                guest_memory: None,
-                epoll_thread: None,
-                exit_evt,
-                iommu,
-            });
-        }
-
         // Connect to the vhost-user socket.
         let mut vu = VhostUserHandle::connect_vhost_user(false, path, num_queues as u64, false)?;
 
-        // Filling device and vring features VMM supports.
-        let avail_features = DEFAULT_VIRTIO_FEATURES;
+        let (
+            avail_features,
+            acked_features,
+            acked_protocol_features,
+            vu_num_queues,
+            config,
+            slave_req_support,
+        ) = if let Some(state) = state {
+            info!("Restoring vhost-user-fs {}", id);
 
-        let mut avail_protocol_features = VhostUserProtocolFeatures::MQ
-            | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
-            | VhostUserProtocolFeatures::REPLY_ACK
-            | VhostUserProtocolFeatures::INFLIGHT_SHMFD
-            | VhostUserProtocolFeatures::LOG_SHMFD;
-        let slave_protocol_features =
-            VhostUserProtocolFeatures::SLAVE_REQ | VhostUserProtocolFeatures::SLAVE_SEND_FD;
-        if cache.is_some() {
-            avail_protocol_features |= slave_protocol_features;
-        }
+            vu.set_protocol_features_vhost_user(
+                state.acked_features,
+                state.acked_protocol_features,
+            )?;
 
-        let (acked_features, acked_protocol_features) =
-            vu.negotiate_features_vhost_user(avail_features, avail_protocol_features)?;
+            (
+                state.avail_features,
+                state.acked_features,
+                state.acked_protocol_features,
+                state.vu_num_queues,
+                state.config,
+                state.slave_req_support,
+            )
+        } else {
+            // Filling device and vring features VMM supports.
+            let avail_features = DEFAULT_VIRTIO_FEATURES;
 
-        let backend_num_queues =
-            if acked_protocol_features & VhostUserProtocolFeatures::MQ.bits() != 0 {
-                vu.socket_handle()
-                    .get_queue_num()
-                    .map_err(Error::VhostUserGetQueueMaxNum)? as usize
-            } else {
-                DEFAULT_QUEUE_NUMBER
-            };
+            let mut avail_protocol_features = VhostUserProtocolFeatures::MQ
+                | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
+                | VhostUserProtocolFeatures::REPLY_ACK
+                | VhostUserProtocolFeatures::INFLIGHT_SHMFD
+                | VhostUserProtocolFeatures::LOG_SHMFD;
+            let slave_protocol_features =
+                VhostUserProtocolFeatures::SLAVE_REQ | VhostUserProtocolFeatures::SLAVE_SEND_FD;
+            if cache.is_some() {
+                avail_protocol_features |= slave_protocol_features;
+            }
 
-        if num_queues > backend_num_queues {
-            error!(
+            let (acked_features, acked_protocol_features) =
+                vu.negotiate_features_vhost_user(avail_features, avail_protocol_features)?;
+
+            let backend_num_queues =
+                if acked_protocol_features & VhostUserProtocolFeatures::MQ.bits() != 0 {
+                    vu.socket_handle()
+                        .get_queue_num()
+                        .map_err(Error::VhostUserGetQueueMaxNum)? as usize
+                } else {
+                    DEFAULT_QUEUE_NUMBER
+                };
+
+            if num_queues > backend_num_queues {
+                error!(
                 "vhost-user-fs requested too many queues ({}) since the backend only supports {}\n",
                 num_queues, backend_num_queues
             );
-            return Err(Error::BadQueueNum);
-        }
+                return Err(Error::BadQueueNum);
+            }
 
-        if acked_protocol_features & slave_protocol_features.bits()
-            == slave_protocol_features.bits()
-        {
-            slave_req_support = true;
-        }
+            if acked_protocol_features & slave_protocol_features.bits()
+                == slave_protocol_features.bits()
+            {
+                slave_req_support = true;
+            }
 
-        // Create virtio-fs device configuration.
-        let mut config = VirtioFsConfig::default();
-        let tag_bytes_vec = tag.to_string().into_bytes();
-        config.tag[..tag_bytes_vec.len()].copy_from_slice(tag_bytes_vec.as_slice());
-        config.num_request_queues = req_num_queues as u32;
+            // Create virtio-fs device configuration.
+            let mut config = VirtioFsConfig::default();
+            let tag_bytes_vec = tag.to_string().into_bytes();
+            config.tag[..tag_bytes_vec.len()].copy_from_slice(tag_bytes_vec.as_slice());
+            config.num_request_queues = req_num_queues as u32;
 
-        Ok(Fs {
-            common: VirtioCommon {
-                device_type: VirtioDeviceType::Fs as u32,
-                avail_features: acked_features,
+            (
+                acked_features,
                 // If part of the available features that have been acked, the
                 // PROTOCOL_FEATURES bit must be already set through the VIRTIO
                 // acked features as we know the guest would never ack it, thus
                 // the feature would be lost.
-                acked_features: acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits(),
+                acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits(),
+                acked_protocol_features,
+                num_queues,
+                config,
+                slave_req_support,
+            )
+        };
+
+        Ok(Fs {
+            common: VirtioCommon {
+                device_type: VirtioDeviceType::Fs as u32,
+                avail_features,
+                acked_features,
                 queue_sizes: vec![queue_size; num_queues],
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 min_queues: 1,
@@ -420,7 +425,7 @@ impl Fs {
                 vu: Some(Arc::new(Mutex::new(vu))),
                 acked_protocol_features,
                 socket_path: path.to_string(),
-                vu_num_queues: num_queues,
+                vu_num_queues,
                 ..Default::default()
             },
             id,
@@ -443,25 +448,6 @@ impl Fs {
             acked_protocol_features: self.vu_common.acked_protocol_features,
             vu_num_queues: self.vu_common.vu_num_queues,
             slave_req_support: self.slave_req_support,
-        }
-    }
-
-    fn set_state(&mut self, state: &State) {
-        self.common.avail_features = state.avail_features;
-        self.common.acked_features = state.acked_features;
-        self.config = state.config;
-        self.vu_common.acked_protocol_features = state.acked_protocol_features;
-        self.vu_common.vu_num_queues = state.vu_num_queues;
-        self.slave_req_support = state.slave_req_support;
-
-        if let Err(e) = self
-            .vu_common
-            .restore_backend_connection(self.common.acked_features)
-        {
-            error!(
-                "Failed restoring connection with vhost-user backend: {:?}",
-                e
-            );
         }
     }
 }
@@ -662,11 +648,6 @@ impl Snapshottable for Fs {
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         self.vu_common.snapshot(&self.id(), &self.state())
-    }
-
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.set_state(&snapshot.to_versioned_state(&self.id)?);
-        Ok(())
     }
 }
 impl Transportable for Fs {}

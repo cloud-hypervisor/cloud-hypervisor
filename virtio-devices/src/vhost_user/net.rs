@@ -74,115 +74,123 @@ impl Net {
         vu_cfg: VhostUserConfig,
         server: bool,
         seccomp_action: SeccompAction,
-        restoring: bool,
         exit_evt: EventFd,
         iommu: bool,
+        state: Option<State>,
     ) -> Result<Net> {
         let mut num_queues = vu_cfg.num_queues;
-
-        if restoring {
-            // We need 'queue_sizes' to report a number of queues that will be
-            // enough to handle all the potential queues. Including the control
-            // queue (with +1) will guarantee that. VirtioPciDevice::new() will
-            // create the actual queues based on this information.
-            return Ok(Net {
-                common: VirtioCommon {
-                    device_type: VirtioDeviceType::Net as u32,
-                    queue_sizes: vec![vu_cfg.queue_size; num_queues + 1],
-                    paused_sync: Some(Arc::new(Barrier::new(2))),
-                    min_queues: DEFAULT_QUEUE_NUMBER as u16,
-                    ..Default::default()
-                },
-                vu_common: VhostUserCommon {
-                    socket_path: vu_cfg.socket,
-                    vu_num_queues: num_queues,
-                    server,
-                    ..Default::default()
-                },
-                id,
-                config: VirtioNetConfig::default(),
-                guest_memory: None,
-                ctrl_queue_epoll_thread: None,
-                epoll_thread: None,
-                seccomp_action,
-                exit_evt,
-                iommu,
-            });
-        }
-
-        // Filling device and vring features VMM supports.
-        let mut avail_features = 1 << VIRTIO_NET_F_CSUM
-            | 1 << VIRTIO_NET_F_GUEST_CSUM
-            | 1 << VIRTIO_NET_F_GUEST_TSO4
-            | 1 << VIRTIO_NET_F_GUEST_TSO6
-            | 1 << VIRTIO_NET_F_GUEST_ECN
-            | 1 << VIRTIO_NET_F_GUEST_UFO
-            | 1 << VIRTIO_NET_F_HOST_TSO4
-            | 1 << VIRTIO_NET_F_HOST_TSO6
-            | 1 << VIRTIO_NET_F_HOST_ECN
-            | 1 << VIRTIO_NET_F_HOST_UFO
-            | 1 << VIRTIO_NET_F_MRG_RXBUF
-            | 1 << VIRTIO_NET_F_CTRL_VQ
-            | 1 << VIRTIO_F_RING_EVENT_IDX
-            | 1 << VIRTIO_F_VERSION_1
-            | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
-
-        if mtu.is_some() {
-            avail_features |= 1u64 << VIRTIO_NET_F_MTU;
-        }
-
-        let mut config = VirtioNetConfig::default();
-        build_net_config_space(&mut config, mac_addr, num_queues, mtu, &mut avail_features);
 
         let mut vu =
             VhostUserHandle::connect_vhost_user(server, &vu_cfg.socket, num_queues as u64, false)?;
 
-        let avail_protocol_features = VhostUserProtocolFeatures::MQ
-            | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
-            | VhostUserProtocolFeatures::REPLY_ACK
-            | VhostUserProtocolFeatures::INFLIGHT_SHMFD
-            | VhostUserProtocolFeatures::LOG_SHMFD;
+        let (avail_features, acked_features, acked_protocol_features, vu_num_queues, config) =
+            if let Some(state) = state {
+                info!("Restoring vhost-user-net {}", id);
 
-        let (mut acked_features, acked_protocol_features) =
-            vu.negotiate_features_vhost_user(avail_features, avail_protocol_features)?;
+                // The backend acknowledged features must not contain
+                // VIRTIO_NET_F_MAC since we don't expect the backend
+                // to handle it.
+                let backend_acked_features = state.acked_features & !(1 << VIRTIO_NET_F_MAC);
 
-        let backend_num_queues =
-            if acked_protocol_features & VhostUserProtocolFeatures::MQ.bits() != 0 {
-                vu.socket_handle()
-                    .get_queue_num()
-                    .map_err(Error::VhostUserGetQueueMaxNum)? as usize
+                vu.set_protocol_features_vhost_user(
+                    backend_acked_features,
+                    state.acked_protocol_features,
+                )?;
+
+                // If the control queue feature has been negotiated, let's
+                // increase the number of queues.
+                if state.acked_features & (1 << VIRTIO_NET_F_CTRL_VQ) != 0 {
+                    num_queues += 1;
+                }
+
+                (
+                    state.avail_features,
+                    state.acked_features,
+                    state.acked_protocol_features,
+                    state.vu_num_queues,
+                    state.config,
+                )
             } else {
-                DEFAULT_QUEUE_NUMBER
-            };
+                // Filling device and vring features VMM supports.
+                let mut avail_features = 1 << VIRTIO_NET_F_CSUM
+                    | 1 << VIRTIO_NET_F_GUEST_CSUM
+                    | 1 << VIRTIO_NET_F_GUEST_TSO4
+                    | 1 << VIRTIO_NET_F_GUEST_TSO6
+                    | 1 << VIRTIO_NET_F_GUEST_ECN
+                    | 1 << VIRTIO_NET_F_GUEST_UFO
+                    | 1 << VIRTIO_NET_F_HOST_TSO4
+                    | 1 << VIRTIO_NET_F_HOST_TSO6
+                    | 1 << VIRTIO_NET_F_HOST_ECN
+                    | 1 << VIRTIO_NET_F_HOST_UFO
+                    | 1 << VIRTIO_NET_F_MRG_RXBUF
+                    | 1 << VIRTIO_NET_F_CTRL_VQ
+                    | 1 << VIRTIO_F_RING_EVENT_IDX
+                    | 1 << VIRTIO_F_VERSION_1
+                    | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
 
-        if num_queues > backend_num_queues {
-            error!("vhost-user-net requested too many queues ({}) since the backend only supports {}\n",
+                if mtu.is_some() {
+                    avail_features |= 1u64 << VIRTIO_NET_F_MTU;
+                }
+
+                let mut config = VirtioNetConfig::default();
+                build_net_config_space(&mut config, mac_addr, num_queues, mtu, &mut avail_features);
+
+                let avail_protocol_features = VhostUserProtocolFeatures::MQ
+                    | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
+                    | VhostUserProtocolFeatures::REPLY_ACK
+                    | VhostUserProtocolFeatures::INFLIGHT_SHMFD
+                    | VhostUserProtocolFeatures::LOG_SHMFD;
+
+                let (mut acked_features, acked_protocol_features) =
+                    vu.negotiate_features_vhost_user(avail_features, avail_protocol_features)?;
+
+                let backend_num_queues =
+                    if acked_protocol_features & VhostUserProtocolFeatures::MQ.bits() != 0 {
+                        vu.socket_handle()
+                            .get_queue_num()
+                            .map_err(Error::VhostUserGetQueueMaxNum)?
+                            as usize
+                    } else {
+                        DEFAULT_QUEUE_NUMBER
+                    };
+
+                if num_queues > backend_num_queues {
+                    error!("vhost-user-net requested too many queues ({}) since the backend only supports {}\n",
                 num_queues, backend_num_queues);
-            return Err(Error::BadQueueNum);
-        }
+                    return Err(Error::BadQueueNum);
+                }
 
-        // If the control queue feature has been negotiated, let's increase
-        // the number of queues.
-        let vu_num_queues = num_queues;
-        if acked_features & (1 << VIRTIO_NET_F_CTRL_VQ) != 0 {
-            num_queues += 1;
-        }
+                // If the control queue feature has been negotiated, let's increase
+                // the number of queues.
+                let vu_num_queues = num_queues;
+                if acked_features & (1 << VIRTIO_NET_F_CTRL_VQ) != 0 {
+                    num_queues += 1;
+                }
 
-        // Make sure the virtio feature to set the MAC address is exposed to
-        // the guest, even if it hasn't been negotiated with the backend.
-        acked_features |= 1 << VIRTIO_NET_F_MAC;
+                // Make sure the virtio feature to set the MAC address is exposed to
+                // the guest, even if it hasn't been negotiated with the backend.
+                acked_features |= 1 << VIRTIO_NET_F_MAC;
+
+                (
+                    acked_features,
+                    // If part of the available features that have been acked,
+                    // the PROTOCOL_FEATURES bit must be already set through
+                    // the VIRTIO acked features as we know the guest would
+                    // never ack it, thus the feature would be lost.
+                    acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits(),
+                    acked_protocol_features,
+                    vu_num_queues,
+                    config,
+                )
+            };
 
         Ok(Net {
             id,
             common: VirtioCommon {
                 device_type: VirtioDeviceType::Net as u32,
                 queue_sizes: vec![vu_cfg.queue_size; num_queues],
-                avail_features: acked_features,
-                // If part of the available features that have been acked, the
-                // PROTOCOL_FEATURES bit must be already set through the VIRTIO
-                // acked features as we know the guest would never ack it, thus
-                // the feature would be lost.
-                acked_features: acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits(),
+                avail_features,
+                acked_features,
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 min_queues: DEFAULT_QUEUE_NUMBER as u16,
                 ..Default::default()
@@ -212,28 +220,6 @@ impl Net {
             config: self.config,
             acked_protocol_features: self.vu_common.acked_protocol_features,
             vu_num_queues: self.vu_common.vu_num_queues,
-        }
-    }
-
-    fn set_state(&mut self, state: &State) {
-        self.common.avail_features = state.avail_features;
-        self.common.acked_features = state.acked_features;
-        self.config = state.config;
-        self.vu_common.acked_protocol_features = state.acked_protocol_features;
-        self.vu_common.vu_num_queues = state.vu_num_queues;
-
-        // The backend acknowledged features must not contain VIRTIO_NET_F_MAC
-        // since we don't expect the backend to handle it.
-        let backend_acked_features = self.common.acked_features & !(1 << VIRTIO_NET_F_MAC);
-
-        if let Err(e) = self
-            .vu_common
-            .restore_backend_connection(backend_acked_features)
-        {
-            error!(
-                "Failed restoring connection with vhost-user backend: {:?}",
-                e
-            );
         }
     }
 }
@@ -424,11 +410,6 @@ impl Snapshottable for Net {
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         self.vu_common.snapshot(&self.id(), &self.state())
-    }
-
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.set_state(&snapshot.to_versioned_state(&self.id)?);
-        Ok(())
     }
 }
 impl Transportable for Net {}
