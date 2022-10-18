@@ -601,7 +601,7 @@ fn get_win_size(tty: &dyn AsRawFd) -> (u16, u16) {
 impl VersionMapped for ConsoleState {}
 
 impl Console {
-    /// Create a new virtio console device that gets random data from /dev/urandom.
+    /// Create a new virtio console device
     pub fn new(
         id: String,
         endpoint: Endpoint,
@@ -609,20 +609,37 @@ impl Console {
         iommu: bool,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
+        state: Option<ConsoleState>,
     ) -> io::Result<(Console, Arc<ConsoleResizer>)> {
-        let mut avail_features = 1u64 << VIRTIO_F_VERSION_1 | 1u64 << VIRTIO_CONSOLE_F_SIZE;
+        let (avail_features, acked_features, config, in_buffer) = if let Some(state) = state {
+            info!("Restoring virtio-console {}", id);
+            (
+                state.avail_features,
+                state.acked_features,
+                state.config,
+                state.in_buffer.into(),
+            )
+        } else {
+            let mut avail_features = 1u64 << VIRTIO_F_VERSION_1 | 1u64 << VIRTIO_CONSOLE_F_SIZE;
+            if iommu {
+                avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
+            }
 
-        if iommu {
-            avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
-        }
+            (
+                avail_features,
+                0,
+                VirtioConsoleConfig::default(),
+                VecDeque::new(),
+            )
+        };
 
         let config_evt = EventFd::new(EFD_NONBLOCK).unwrap();
-        let console_config = Arc::new(Mutex::new(VirtioConsoleConfig::default()));
+        let console_config = Arc::new(Mutex::new(config));
         let resizer = Arc::new(ConsoleResizer {
             config_evt,
             config: console_config.clone(),
             tty: endpoint.out_file().as_ref().map(|t| t.try_clone().unwrap()),
-            acked_features: AtomicU64::new(0),
+            acked_features: AtomicU64::new(acked_features),
         });
 
         resizer.update_console_size();
@@ -633,6 +650,7 @@ impl Console {
                     device_type: VirtioDeviceType::Console as u32,
                     queue_sizes: QUEUE_SIZES.to_vec(),
                     avail_features,
+                    acked_features,
                     paused_sync: Some(Arc::new(Barrier::new(2))),
                     min_queues: NUM_QUEUES as u16,
                     ..Default::default()
@@ -643,7 +661,7 @@ impl Console {
                 resize_pipe,
                 endpoint,
                 seccomp_action,
-                in_buffer: Arc::new(Mutex::new(VecDeque::new())),
+                in_buffer: Arc::new(Mutex::new(in_buffer)),
                 exit_evt,
             },
             resizer,
@@ -657,13 +675,6 @@ impl Console {
             config: *(self.config.lock().unwrap()),
             in_buffer: self.in_buffer.lock().unwrap().clone().into(),
         }
-    }
-
-    fn set_state(&mut self, state: &ConsoleState) {
-        self.common.avail_features = state.avail_features;
-        self.common.acked_features = state.acked_features;
-        *(self.config.lock().unwrap()) = state.config;
-        *(self.in_buffer.lock().unwrap()) = state.in_buffer.clone().into();
     }
 }
 
@@ -785,11 +796,6 @@ impl Snapshottable for Console {
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_versioned_state(&self.id, &self.state())
-    }
-
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.set_state(&snapshot.to_versioned_state(&self.id)?);
-        Ok(())
     }
 }
 impl Transportable for Console {}

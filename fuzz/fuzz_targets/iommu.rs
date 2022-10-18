@@ -64,6 +64,7 @@ fuzz_target!(|bytes| {
         SeccompAction::Allow,
         EventFd::new(EFD_NONBLOCK).unwrap(),
         ((MEM_SIZE - IOVA_SPACE_SIZE) as u64, (MEM_SIZE - 1) as u64),
+        None,
     )
     .unwrap();
 

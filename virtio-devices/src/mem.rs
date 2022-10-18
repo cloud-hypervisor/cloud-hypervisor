@@ -714,6 +714,7 @@ impl Mem {
         hugepages: bool,
         exit_evt: EventFd,
         blocks_state: Arc<Mutex<BlocksState>>,
+        state: Option<MemState>,
     ) -> io::Result<Mem> {
         let region_len = region.len();
 
@@ -727,43 +728,51 @@ impl Mem {
             ));
         }
 
-        let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
+        let (avail_features, acked_features, config) = if let Some(state) = state {
+            info!("Restoring virtio-mem {}", id);
+            *(blocks_state.lock().unwrap()) = state.blocks_state.clone();
+            (state.avail_features, state.acked_features, state.config)
+        } else {
+            let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
 
-        let mut config = VirtioMemConfig {
-            block_size: VIRTIO_MEM_DEFAULT_BLOCK_SIZE,
-            addr: region.start_addr().raw_value(),
-            region_size: region.len(),
-            usable_region_size: region.len(),
-            plugged_size: 0,
-            requested_size: 0,
-            ..Default::default()
-        };
+            let mut config = VirtioMemConfig {
+                block_size: VIRTIO_MEM_DEFAULT_BLOCK_SIZE,
+                addr: region.start_addr().raw_value(),
+                region_size: region.len(),
+                usable_region_size: region.len(),
+                plugged_size: 0,
+                requested_size: 0,
+                ..Default::default()
+            };
 
-        if initial_size != 0 {
-            config.resize(initial_size).map_err(|e| {
+            if initial_size != 0 {
+                config.resize(initial_size).map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::Other,
+                        format!(
+                            "Failed to resize virtio-mem configuration to {}: {:?}",
+                            initial_size, e
+                        ),
+                    )
+                })?;
+            }
+
+            if let Some(node_id) = numa_node_id {
+                avail_features |= 1u64 << VIRTIO_MEM_F_ACPI_PXM;
+                config.node_id = node_id;
+            }
+
+            // Make sure the virtio-mem configuration complies with the
+            // specification.
+            config.validate().map_err(|e| {
                 io::Error::new(
                     io::ErrorKind::Other,
-                    format!(
-                        "Failed to resize virtio-mem configuration to {}: {:?}",
-                        initial_size, e
-                    ),
+                    format!("Invalid virtio-mem configuration: {:?}", e),
                 )
             })?;
-        }
 
-        if let Some(node_id) = numa_node_id {
-            avail_features |= 1u64 << VIRTIO_MEM_F_ACPI_PXM;
-            config.node_id = node_id;
-        }
-
-        // Make sure the virtio-mem configuration complies with the
-        // specification.
-        config.validate().map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("Invalid virtio-mem configuration: {:?}", e),
-            )
-        })?;
+            (avail_features, 0, config)
+        };
 
         let host_fd = region
             .file_offset()
@@ -773,6 +782,7 @@ impl Mem {
             common: VirtioCommon {
                 device_type: VirtioDeviceType::Mem as u32,
                 avail_features,
+                acked_features,
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 queue_sizes: QUEUE_SIZES.to_vec(),
                 min_queues: 1,
@@ -868,13 +878,6 @@ impl Mem {
             config: *(self.config.lock().unwrap()),
             blocks_state: self.blocks_state.lock().unwrap().clone(),
         }
-    }
-
-    fn set_state(&mut self, state: &MemState) {
-        self.common.avail_features = state.avail_features;
-        self.common.acked_features = state.acked_features;
-        *(self.config.lock().unwrap()) = state.config;
-        *(self.blocks_state.lock().unwrap()) = state.blocks_state.clone();
     }
 
     #[cfg(fuzzing)]
@@ -998,11 +1001,6 @@ impl Snapshottable for Mem {
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_versioned_state(&self.id(), &self.state())
-    }
-
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.set_state(&snapshot.to_versioned_state(&self.id)?);
-        Ok(())
     }
 }
 impl Transportable for Mem {}

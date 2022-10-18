@@ -127,6 +127,7 @@ fn create_dummy_pmem() -> Pmem {
         false,
         SeccompAction::Allow,
         EventFd::new(EFD_NONBLOCK).unwrap(),
+        None,
     )
     .unwrap()
 }

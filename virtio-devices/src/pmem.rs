@@ -299,17 +299,24 @@ impl Pmem {
         iommu: bool,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
+        state: Option<PmemState>,
     ) -> io::Result<Pmem> {
-        let config = VirtioPmemConfig {
-            start: addr.raw_value().to_le(),
-            size: (_region.size() as u64).to_le(),
+        let (avail_features, acked_features, config) = if let Some(state) = state {
+            info!("Restoring virtio-pmem {}", id);
+            (state.avail_features, state.acked_features, state.config)
+        } else {
+            let config = VirtioPmemConfig {
+                start: addr.raw_value().to_le(),
+                size: (_region.size() as u64).to_le(),
+            };
+
+            let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
+
+            if iommu {
+                avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
+            }
+            (avail_features, 0, config)
         };
-
-        let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
-
-        if iommu {
-            avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
-        }
 
         Ok(Pmem {
             common: VirtioCommon {
@@ -317,6 +324,7 @@ impl Pmem {
                 queue_sizes: QUEUE_SIZES.to_vec(),
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 avail_features,
+                acked_features,
                 min_queues: 1,
                 ..Default::default()
             },
@@ -336,12 +344,6 @@ impl Pmem {
             acked_features: self.common.acked_features,
             config: self.config,
         }
-    }
-
-    fn set_state(&mut self, state: &PmemState) {
-        self.common.avail_features = state.avail_features;
-        self.common.acked_features = state.acked_features;
-        self.config = state.config;
     }
 
     #[cfg(fuzzing)]
@@ -460,11 +462,6 @@ impl Snapshottable for Pmem {
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_versioned_state(&self.id, &self.state())
-    }
-
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.set_state(&snapshot.to_versioned_state(&self.id)?);
-        Ok(())
     }
 }
 

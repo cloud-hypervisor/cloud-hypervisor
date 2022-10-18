@@ -850,7 +850,7 @@ type EndpointsState = Vec<(u32, u32)>;
 type DomainsState = Vec<(u32, (Vec<(u64, Mapping)>, bool))>;
 
 #[derive(Versionize)]
-struct IommuState {
+pub struct IommuState {
     avail_features: u64,
     acked_features: u64,
     endpoints: EndpointsState,
@@ -865,7 +865,37 @@ impl Iommu {
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
         msi_iova_space: (u64, u64),
+        state: Option<IommuState>,
     ) -> io::Result<(Self, Arc<IommuMapping>)> {
+        let (avail_features, acked_features, endpoints, domains) = if let Some(state) = state {
+            info!("Restoring virtio-iommu {}", id);
+            (
+                state.avail_features,
+                state.acked_features,
+                state.endpoints.into_iter().collect(),
+                state
+                    .domains
+                    .into_iter()
+                    .map(|(k, v)| {
+                        (
+                            k,
+                            Domain {
+                                mappings: v.0.into_iter().collect(),
+                                bypass: v.1,
+                            },
+                        )
+                    })
+                    .collect(),
+            )
+        } else {
+            let avail_features = 1u64 << VIRTIO_F_VERSION_1
+                | 1u64 << VIRTIO_IOMMU_F_MAP_UNMAP
+                | 1u64 << VIRTIO_IOMMU_F_PROBE
+                | 1u64 << VIRTIO_IOMMU_F_BYPASS_CONFIG;
+
+            (avail_features, 0, BTreeMap::new(), BTreeMap::new())
+        };
+
         let config = VirtioIommuConfig {
             page_size_mask: VIRTIO_IOMMU_PAGE_SIZE_MASK,
             probe_size: PROBE_PROP_SIZE,
@@ -873,8 +903,8 @@ impl Iommu {
         };
 
         let mapping = Arc::new(IommuMapping {
-            endpoints: Arc::new(RwLock::new(BTreeMap::new())),
-            domains: Arc::new(RwLock::new(BTreeMap::new())),
+            endpoints: Arc::new(RwLock::new(endpoints)),
+            domains: Arc::new(RwLock::new(domains)),
             bypass: AtomicBool::new(true),
         });
 
@@ -884,10 +914,8 @@ impl Iommu {
                 common: VirtioCommon {
                     device_type: VirtioDeviceType::Iommu as u32,
                     queue_sizes: QUEUE_SIZES.to_vec(),
-                    avail_features: 1u64 << VIRTIO_F_VERSION_1
-                        | 1u64 << VIRTIO_IOMMU_F_MAP_UNMAP
-                        | 1u64 << VIRTIO_IOMMU_F_PROBE
-                        | 1u64 << VIRTIO_IOMMU_F_BYPASS_CONFIG,
+                    avail_features,
+                    acked_features,
                     paused_sync: Some(Arc::new(Barrier::new(2))),
                     min_queues: NUM_QUEUES as u16,
                     ..Default::default()
@@ -925,26 +953,6 @@ impl Iommu {
                 .map(|(k, v)| (k, (v.mappings.into_iter().collect(), v.bypass)))
                 .collect(),
         }
-    }
-
-    fn set_state(&mut self, state: &IommuState) {
-        self.common.avail_features = state.avail_features;
-        self.common.acked_features = state.acked_features;
-        *(self.mapping.endpoints.write().unwrap()) = state.endpoints.clone().into_iter().collect();
-        *(self.mapping.domains.write().unwrap()) = state
-            .domains
-            .clone()
-            .into_iter()
-            .map(|(k, v)| {
-                (
-                    k,
-                    Domain {
-                        mappings: v.0.into_iter().collect(),
-                        bypass: v.1,
-                    },
-                )
-            })
-            .collect();
     }
 
     fn update_bypass(&mut self) {
@@ -1087,11 +1095,6 @@ impl Snapshottable for Iommu {
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_versioned_state(&self.id, &self.state())
-    }
-
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.set_state(&snapshot.to_versioned_state(&self.id)?);
-        Ok(())
     }
 }
 impl Transportable for Iommu {}

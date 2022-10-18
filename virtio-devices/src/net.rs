@@ -445,45 +445,70 @@ impl Net {
         seccomp_action: SeccompAction,
         rate_limiter_config: Option<RateLimiterConfig>,
         exit_evt: EventFd,
+        state: Option<NetState>,
     ) -> Result<Self> {
         assert!(!taps.is_empty());
 
         let mtu = taps[0].mtu().map_err(Error::TapError)? as u16;
 
-        let mut avail_features = 1 << VIRTIO_NET_F_CSUM
-            | 1 << VIRTIO_NET_F_CTRL_GUEST_OFFLOADS
-            | 1 << VIRTIO_NET_F_GUEST_CSUM
-            | 1 << VIRTIO_NET_F_GUEST_ECN
-            | 1 << VIRTIO_NET_F_GUEST_TSO4
-            | 1 << VIRTIO_NET_F_GUEST_TSO6
-            | 1 << VIRTIO_NET_F_GUEST_UFO
-            | 1 << VIRTIO_NET_F_HOST_ECN
-            | 1 << VIRTIO_NET_F_HOST_TSO4
-            | 1 << VIRTIO_NET_F_HOST_TSO6
-            | 1 << VIRTIO_NET_F_HOST_UFO
-            | 1 << VIRTIO_NET_F_MTU
-            | 1 << VIRTIO_RING_F_EVENT_IDX
-            | 1 << VIRTIO_F_VERSION_1;
-
-        if iommu {
-            avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
-        }
-
-        avail_features |= 1 << VIRTIO_NET_F_CTRL_VQ;
-        let queue_num = num_queues + 1;
-
-        let mut config = VirtioNetConfig::default();
-        if let Some(mac) = guest_mac {
-            build_net_config_space(&mut config, mac, num_queues, Some(mtu), &mut avail_features);
+        let (avail_features, acked_features, config, queue_sizes) = if let Some(state) = state {
+            info!("Restoring virtio-net {}", id);
+            (
+                state.avail_features,
+                state.acked_features,
+                state.config,
+                state.queue_size,
+            )
         } else {
-            build_net_config_space_with_mq(&mut config, num_queues, Some(mtu), &mut avail_features);
-        }
+            let mut avail_features = 1 << VIRTIO_NET_F_CSUM
+                | 1 << VIRTIO_NET_F_CTRL_GUEST_OFFLOADS
+                | 1 << VIRTIO_NET_F_GUEST_CSUM
+                | 1 << VIRTIO_NET_F_GUEST_ECN
+                | 1 << VIRTIO_NET_F_GUEST_TSO4
+                | 1 << VIRTIO_NET_F_GUEST_TSO6
+                | 1 << VIRTIO_NET_F_GUEST_UFO
+                | 1 << VIRTIO_NET_F_HOST_ECN
+                | 1 << VIRTIO_NET_F_HOST_TSO4
+                | 1 << VIRTIO_NET_F_HOST_TSO6
+                | 1 << VIRTIO_NET_F_HOST_UFO
+                | 1 << VIRTIO_NET_F_MTU
+                | 1 << VIRTIO_RING_F_EVENT_IDX
+                | 1 << VIRTIO_F_VERSION_1;
+
+            if iommu {
+                avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
+            }
+
+            avail_features |= 1 << VIRTIO_NET_F_CTRL_VQ;
+            let queue_num = num_queues + 1;
+
+            let mut config = VirtioNetConfig::default();
+            if let Some(mac) = guest_mac {
+                build_net_config_space(
+                    &mut config,
+                    mac,
+                    num_queues,
+                    Some(mtu),
+                    &mut avail_features,
+                );
+            } else {
+                build_net_config_space_with_mq(
+                    &mut config,
+                    num_queues,
+                    Some(mtu),
+                    &mut avail_features,
+                );
+            }
+
+            (avail_features, 0, config, vec![queue_size; queue_num])
+        };
 
         Ok(Net {
             common: VirtioCommon {
                 device_type: VirtioDeviceType::Net as u32,
                 avail_features,
-                queue_sizes: vec![queue_size; queue_num],
+                acked_features,
+                queue_sizes,
                 paused_sync: Some(Arc::new(Barrier::new((num_queues / 2) + 1))),
                 min_queues: 2,
                 ..Default::default()
@@ -516,6 +541,7 @@ impl Net {
         seccomp_action: SeccompAction,
         rate_limiter_config: Option<RateLimiterConfig>,
         exit_evt: EventFd,
+        state: Option<NetState>,
     ) -> Result<Self> {
         let taps = open_tap(
             if_name,
@@ -538,6 +564,7 @@ impl Net {
             seccomp_action,
             rate_limiter_config,
             exit_evt,
+            state,
         )
     }
 
@@ -552,6 +579,7 @@ impl Net {
         seccomp_action: SeccompAction,
         rate_limiter_config: Option<RateLimiterConfig>,
         exit_evt: EventFd,
+        state: Option<NetState>,
     ) -> Result<Self> {
         let mut taps: Vec<Tap> = Vec::new();
         let num_queue_pairs = fds.len();
@@ -583,6 +611,7 @@ impl Net {
             seccomp_action,
             rate_limiter_config,
             exit_evt,
+            state,
         )
     }
 
@@ -593,13 +622,6 @@ impl Net {
             config: self.config,
             queue_size: self.common.queue_sizes.clone(),
         }
-    }
-
-    fn set_state(&mut self, state: &NetState) {
-        self.common.avail_features = state.avail_features;
-        self.common.acked_features = state.acked_features;
-        self.config = state.config;
-        self.common.queue_sizes = state.queue_size.clone();
     }
 }
 
@@ -819,11 +841,6 @@ impl Snapshottable for Net {
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_versioned_state(&self.id, &self.state())
-    }
-
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.set_state(&snapshot.to_versioned_state(&self.id)?);
-        Ok(())
     }
 }
 impl Transportable for Net {}

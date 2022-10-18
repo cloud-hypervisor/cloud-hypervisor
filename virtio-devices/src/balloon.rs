@@ -360,26 +360,39 @@ impl Balloon {
         free_page_reporting: bool,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
+        state: Option<BalloonState>,
     ) -> io::Result<Self> {
         let mut queue_sizes = vec![QUEUE_SIZE; MIN_NUM_QUEUES];
-        let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
-        if deflate_on_oom {
-            avail_features |= 1u64 << VIRTIO_BALLOON_F_DEFLATE_ON_OOM;
-        }
+
+        let (avail_features, acked_features, config) = if let Some(state) = state {
+            info!("Restoring virtio-balloon {}", id);
+            (state.avail_features, state.acked_features, state.config)
+        } else {
+            let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
+            if deflate_on_oom {
+                avail_features |= 1u64 << VIRTIO_BALLOON_F_DEFLATE_ON_OOM;
+            }
+            if free_page_reporting {
+                avail_features |= 1u64 << VIRTIO_BALLOON_F_REPORTING;
+            }
+
+            let config = VirtioBalloonConfig {
+                num_pages: (size >> VIRTIO_BALLOON_PFN_SHIFT) as u32,
+                ..Default::default()
+            };
+
+            (avail_features, 0, config)
+        };
+
         if free_page_reporting {
-            avail_features |= 1u64 << VIRTIO_BALLOON_F_REPORTING;
             queue_sizes.push(REPORTING_QUEUE_SIZE);
         }
-
-        let config = VirtioBalloonConfig {
-            num_pages: (size >> VIRTIO_BALLOON_PFN_SHIFT) as u32,
-            ..Default::default()
-        };
 
         Ok(Balloon {
             common: VirtioCommon {
                 device_type: VirtioDeviceType::Balloon as u32,
                 avail_features,
+                acked_features,
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 queue_sizes,
                 min_queues: MIN_NUM_QUEUES as u16,
@@ -416,12 +429,6 @@ impl Balloon {
             acked_features: self.common.acked_features,
             config: self.config,
         }
-    }
-
-    fn set_state(&mut self, state: &BalloonState) {
-        self.common.avail_features = state.avail_features;
-        self.common.acked_features = state.acked_features;
-        self.config = state.config;
     }
 
     #[cfg(fuzzing)]
@@ -572,11 +579,6 @@ impl Snapshottable for Balloon {
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_versioned_state(&self.id(), &self.state())
-    }
-
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.set_state(&snapshot.to_versioned_state(&self.id)?);
-        Ok(())
     }
 }
 impl Transportable for Balloon {}

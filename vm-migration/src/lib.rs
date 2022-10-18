@@ -236,6 +236,23 @@ impl Snapshot {
     }
 }
 
+pub fn snapshot_from_id(snapshot: Option<&Snapshot>, id: &str) -> Option<Snapshot> {
+    snapshot.and_then(|s| s.snapshots.get(id).map(|s| *s.clone()))
+}
+
+pub fn versioned_state_from_id<T>(
+    snapshot: Option<&Snapshot>,
+    id: &str,
+) -> Result<Option<T>, MigratableError>
+where
+    T: Versionize + VersionMapped,
+{
+    snapshot
+        .and_then(|s| s.snapshots.get(id).map(|s| *s.clone()))
+        .map(|s| s.to_versioned_state(id))
+        .transpose()
+}
+
 /// A snapshottable component can be snapshotted.
 pub trait Snapshottable: Pausable {
     /// The snapshottable component id.

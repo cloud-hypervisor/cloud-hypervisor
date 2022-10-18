@@ -69,112 +69,113 @@ impl Blk {
     pub fn new(
         id: String,
         vu_cfg: VhostUserConfig,
-        restoring: bool,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
         iommu: bool,
+        state: Option<State>,
     ) -> Result<Blk> {
         let num_queues = vu_cfg.num_queues;
-
-        if restoring {
-            // We need 'queue_sizes' to report a number of queues that will be
-            // enough to handle all the potential queues. VirtioPciDevice::new()
-            // will create the actual queues based on this information.
-            return Ok(Blk {
-                common: VirtioCommon {
-                    device_type: VirtioDeviceType::Block as u32,
-                    queue_sizes: vec![vu_cfg.queue_size; num_queues],
-                    paused_sync: Some(Arc::new(Barrier::new(2))),
-                    min_queues: DEFAULT_QUEUE_NUMBER as u16,
-                    ..Default::default()
-                },
-                vu_common: VhostUserCommon {
-                    socket_path: vu_cfg.socket,
-                    vu_num_queues: num_queues,
-                    ..Default::default()
-                },
-                id,
-                config: VirtioBlockConfig::default(),
-                guest_memory: None,
-                epoll_thread: None,
-                seccomp_action,
-                exit_evt,
-                iommu,
-            });
-        }
 
         let mut vu =
             VhostUserHandle::connect_vhost_user(false, &vu_cfg.socket, num_queues as u64, false)?;
 
-        // Filling device and vring features VMM supports.
-        let mut avail_features = 1 << VIRTIO_BLK_F_SIZE_MAX
-            | 1 << VIRTIO_BLK_F_SEG_MAX
-            | 1 << VIRTIO_BLK_F_GEOMETRY
-            | 1 << VIRTIO_BLK_F_RO
-            | 1 << VIRTIO_BLK_F_BLK_SIZE
-            | 1 << VIRTIO_BLK_F_FLUSH
-            | 1 << VIRTIO_BLK_F_TOPOLOGY
-            | 1 << VIRTIO_BLK_F_CONFIG_WCE
-            | 1 << VIRTIO_BLK_F_DISCARD
-            | 1 << VIRTIO_BLK_F_WRITE_ZEROES
-            | DEFAULT_VIRTIO_FEATURES;
+        let (avail_features, acked_features, acked_protocol_features, vu_num_queues, config) =
+            if let Some(state) = state {
+                info!("Restoring vhost-user-block {}", id);
 
-        if num_queues > 1 {
-            avail_features |= 1 << VIRTIO_BLK_F_MQ;
-        }
+                vu.set_protocol_features_vhost_user(
+                    state.acked_features,
+                    state.acked_protocol_features,
+                )?;
 
-        let avail_protocol_features = VhostUserProtocolFeatures::CONFIG
-            | VhostUserProtocolFeatures::MQ
-            | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
-            | VhostUserProtocolFeatures::REPLY_ACK
-            | VhostUserProtocolFeatures::INFLIGHT_SHMFD
-            | VhostUserProtocolFeatures::LOG_SHMFD;
-
-        let (acked_features, acked_protocol_features) =
-            vu.negotiate_features_vhost_user(avail_features, avail_protocol_features)?;
-
-        let backend_num_queues =
-            if acked_protocol_features & VhostUserProtocolFeatures::MQ.bits() != 0 {
-                vu.socket_handle()
-                    .get_queue_num()
-                    .map_err(Error::VhostUserGetQueueMaxNum)? as usize
+                (
+                    state.avail_features,
+                    state.acked_features,
+                    state.acked_protocol_features,
+                    state.vu_num_queues,
+                    state.config,
+                )
             } else {
-                DEFAULT_QUEUE_NUMBER
-            };
+                // Filling device and vring features VMM supports.
+                let mut avail_features = 1 << VIRTIO_BLK_F_SIZE_MAX
+                    | 1 << VIRTIO_BLK_F_SEG_MAX
+                    | 1 << VIRTIO_BLK_F_GEOMETRY
+                    | 1 << VIRTIO_BLK_F_RO
+                    | 1 << VIRTIO_BLK_F_BLK_SIZE
+                    | 1 << VIRTIO_BLK_F_FLUSH
+                    | 1 << VIRTIO_BLK_F_TOPOLOGY
+                    | 1 << VIRTIO_BLK_F_CONFIG_WCE
+                    | 1 << VIRTIO_BLK_F_DISCARD
+                    | 1 << VIRTIO_BLK_F_WRITE_ZEROES
+                    | DEFAULT_VIRTIO_FEATURES;
 
-        if num_queues > backend_num_queues {
-            error!("vhost-user-blk requested too many queues ({}) since the backend only supports {}\n",
+                if num_queues > 1 {
+                    avail_features |= 1 << VIRTIO_BLK_F_MQ;
+                }
+
+                let avail_protocol_features = VhostUserProtocolFeatures::CONFIG
+                    | VhostUserProtocolFeatures::MQ
+                    | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
+                    | VhostUserProtocolFeatures::REPLY_ACK
+                    | VhostUserProtocolFeatures::INFLIGHT_SHMFD
+                    | VhostUserProtocolFeatures::LOG_SHMFD;
+
+                let (acked_features, acked_protocol_features) =
+                    vu.negotiate_features_vhost_user(avail_features, avail_protocol_features)?;
+
+                let backend_num_queues =
+                    if acked_protocol_features & VhostUserProtocolFeatures::MQ.bits() != 0 {
+                        vu.socket_handle()
+                            .get_queue_num()
+                            .map_err(Error::VhostUserGetQueueMaxNum)?
+                            as usize
+                    } else {
+                        DEFAULT_QUEUE_NUMBER
+                    };
+
+                if num_queues > backend_num_queues {
+                    error!("vhost-user-blk requested too many queues ({}) since the backend only supports {}\n",
                 num_queues, backend_num_queues);
-            return Err(Error::BadQueueNum);
-        }
+                    return Err(Error::BadQueueNum);
+                }
 
-        let config_len = mem::size_of::<VirtioBlockConfig>();
-        let config_space: Vec<u8> = vec![0u8; config_len as usize];
-        let (_, config_space) = vu
-            .socket_handle()
-            .get_config(
-                VHOST_USER_CONFIG_OFFSET,
-                config_len as u32,
-                VhostUserConfigFlags::WRITABLE,
-                config_space.as_slice(),
-            )
-            .map_err(Error::VhostUserGetConfig)?;
-        let mut config = VirtioBlockConfig::default();
-        if let Some(backend_config) = VirtioBlockConfig::from_slice(config_space.as_slice()) {
-            config = *backend_config;
-            config.num_queues = num_queues as u16;
-        }
+                let config_len = mem::size_of::<VirtioBlockConfig>();
+                let config_space: Vec<u8> = vec![0u8; config_len as usize];
+                let (_, config_space) = vu
+                    .socket_handle()
+                    .get_config(
+                        VHOST_USER_CONFIG_OFFSET,
+                        config_len as u32,
+                        VhostUserConfigFlags::WRITABLE,
+                        config_space.as_slice(),
+                    )
+                    .map_err(Error::VhostUserGetConfig)?;
+                let mut config = VirtioBlockConfig::default();
+                if let Some(backend_config) = VirtioBlockConfig::from_slice(config_space.as_slice())
+                {
+                    config = *backend_config;
+                    config.num_queues = num_queues as u16;
+                }
+
+                (
+                    acked_features,
+                    // If part of the available features that have been acked,
+                    // the PROTOCOL_FEATURES bit must be already set through
+                    // the VIRTIO acked features as we know the guest would
+                    // never ack it, thus the feature would be lost.
+                    acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits(),
+                    acked_protocol_features,
+                    num_queues,
+                    config,
+                )
+            };
 
         Ok(Blk {
             common: VirtioCommon {
                 device_type: VirtioDeviceType::Block as u32,
                 queue_sizes: vec![vu_cfg.queue_size; num_queues],
-                avail_features: acked_features,
-                // If part of the available features that have been acked, the
-                // PROTOCOL_FEATURES bit must be already set through the VIRTIO
-                // acked features as we know the guest would never ack it, thus
-                // the feature would be lost.
-                acked_features: acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits(),
+                avail_features,
+                acked_features,
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 min_queues: DEFAULT_QUEUE_NUMBER as u16,
                 ..Default::default()
@@ -183,7 +184,7 @@ impl Blk {
                 vu: Some(Arc::new(Mutex::new(vu))),
                 acked_protocol_features,
                 socket_path: vu_cfg.socket,
-                vu_num_queues: num_queues,
+                vu_num_queues,
                 ..Default::default()
             },
             id,
@@ -203,24 +204,6 @@ impl Blk {
             config: self.config,
             acked_protocol_features: self.vu_common.acked_protocol_features,
             vu_num_queues: self.vu_common.vu_num_queues,
-        }
-    }
-
-    fn set_state(&mut self, state: &State) {
-        self.common.avail_features = state.avail_features;
-        self.common.acked_features = state.acked_features;
-        self.config = state.config;
-        self.vu_common.acked_protocol_features = state.acked_protocol_features;
-        self.vu_common.vu_num_queues = state.vu_num_queues;
-
-        if let Err(e) = self
-            .vu_common
-            .restore_backend_connection(self.common.acked_features)
-        {
-            error!(
-                "Failed restoring connection with vhost-user backend: {:?}",
-                e
-            );
         }
     }
 }
@@ -391,11 +374,6 @@ impl Snapshottable for Blk {
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         self.vu_common.snapshot(&self.id(), &self.state())
-    }
-
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.set_state(&snapshot.to_versioned_state(&self.id)?);
-        Ok(())
     }
 }
 impl Transportable for Blk {}
