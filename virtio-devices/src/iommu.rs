@@ -964,6 +964,11 @@ impl Iommu {
     pub fn add_external_mapping(&mut self, device_id: u32, mapping: Arc<dyn ExternalDmaMapping>) {
         self.ext_mapping.lock().unwrap().insert(device_id, mapping);
     }
+
+    #[cfg(fuzzing)]
+    pub fn wait_for_epoll_threads(&mut self) {
+        self.common.wait_for_epoll_threads();
+    }
 }
 
 impl Drop for Iommu {
