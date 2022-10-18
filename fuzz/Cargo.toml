@@ -13,7 +13,7 @@ block_util = { path = "../block_util" }
 devices = { path = "../devices" }
 epoll = "4.3.1"
 libc = "0.2.135"
-libfuzzer-sys = "0.4.4"
+libfuzzer-sys = "0.4.5"
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "main" }
 once_cell = "1.15.0"
 qcow = { path = "../qcow" }
