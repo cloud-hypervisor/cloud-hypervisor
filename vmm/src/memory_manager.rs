@@ -30,7 +30,7 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::ffi;
 use std::fs::{File, OpenOptions};
-use std::io;
+use std::io::{self, Read};
 use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
@@ -1976,6 +1976,48 @@ impl MemoryManager {
         }
 
         debug!("coredump total bytes {}", total_bytes);
+        Ok(())
+    }
+
+    pub fn receive_memory_regions<F>(
+        &mut self,
+        ranges: &MemoryRangeTable,
+        fd: &mut F,
+    ) -> std::result::Result<(), MigratableError>
+    where
+        F: Read,
+    {
+        let guest_memory = self.guest_memory();
+        let mem = guest_memory.memory();
+
+        for range in ranges.regions() {
+            let mut offset: u64 = 0;
+            // Here we are manually handling the retry in case we can't the
+            // whole region at once because we can't use the implementation
+            // from vm-memory::GuestMemory of read_exact_from() as it is not
+            // following the correct behavior. For more info about this issue
+            // see: https://github.com/rust-vmm/vm-memory/issues/174
+            loop {
+                let bytes_read = mem
+                    .read_from(
+                        GuestAddress(range.gpa + offset),
+                        fd,
+                        (range.length - offset) as usize,
+                    )
+                    .map_err(|e| {
+                        MigratableError::MigrateReceive(anyhow!(
+                            "Error receiving memory from socket: {}",
+                            e
+                        ))
+                    })?;
+                offset += bytes_read as u64;
+
+                if offset == range.length {
+                    break;
+                }
+            }
+        }
+
         Ok(())
     }
 }
