@@ -811,15 +811,7 @@ impl Vm {
         let timestamp = Instant::now();
 
         hypervisor.check_required_extensions().unwrap();
-        let vm = hypervisor.create_vm().unwrap();
-
-        #[cfg(target_arch = "x86_64")]
-        {
-            vm.set_identity_map_address(KVM_IDENTITY_MAP_START.0)
-                .unwrap();
-            vm.set_tss_address(KVM_TSS_START.0 as usize).unwrap();
-            vm.enable_split_irq().unwrap();
-        }
+        let vm = Self::restore_hypervisor_vm(&hypervisor)?;
 
         let memory_manager = if let Some(memory_manager_snapshot) =
             snapshot.snapshots.get(MEMORY_MANAGER_SNAPSHOT_ID)
@@ -853,7 +845,25 @@ impl Vm {
             activate_evt,
             true,
             timestamp,
+            Some(snapshot),
         )
+    }
+
+    pub fn restore_hypervisor_vm(
+        hypervisor: &Arc<dyn hypervisor::Hypervisor>,
+    ) -> Result<Arc<dyn hypervisor::Vm>> {
+        hypervisor.check_required_extensions().unwrap();
+        let vm = hypervisor.create_vm().unwrap();
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            vm.set_identity_map_address(KVM_IDENTITY_MAP_START.0)
+                .unwrap();
+            vm.set_tss_address(KVM_TSS_START.0 as usize).unwrap();
+            vm.enable_split_irq().unwrap();
+        }
+
+        Ok(vm)
     }
 
     fn load_initramfs(&mut self, guest_mem: &GuestMemoryMmap) -> Result<arch::InitramfsConfig> {
