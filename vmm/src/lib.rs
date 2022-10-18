@@ -20,12 +20,15 @@ use crate::config::{
 };
 #[cfg(feature = "guest_debug")]
 use crate::coredump::GuestDebuggable;
+use crate::memory_manager::MemoryManager;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use crate::migration::get_vm_snapshot;
 use crate::migration::{recv_vm_config, recv_vm_state};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::vm::{Error as VmError, Vm, VmState};
 use anyhow::anyhow;
+#[cfg(target_arch = "x86_64")]
+use arch::layout::{KVM_IDENTITY_MAP_START, KVM_TSS_START};
 use libc::{EFD_NONBLOCK, SIGINT, SIGTERM};
 use memory_manager::MemoryManagerSnapshotData;
 use pci::PciBdf;
@@ -44,9 +47,11 @@ use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use std::{result, thread};
 use thiserror::Error;
 use tracer::trace_scoped;
+use vm::physical_bits;
 use vm_memory::bitmap::AtomicBitmap;
 use vm_migration::{protocol::*, Migratable};
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -1119,7 +1124,7 @@ impl Vmm {
         req: &Request,
         socket: &mut T,
         existing_memory_files: Option<HashMap<u32, File>>,
-    ) -> std::result::Result<Vm, MigratableError>
+    ) -> std::result::Result<Arc<Mutex<MemoryManager>>, MigratableError>
     where
         T: Read + Write,
     {
@@ -1141,6 +1146,65 @@ impl Vmm {
             &vm_migration_config.common_cpuid,
         )?;
 
+        let config = vm_migration_config.vm_config.clone();
+        self.vm_config = Some(vm_migration_config.vm_config);
+
+        self.hypervisor.check_required_extensions().unwrap();
+        let vm = self.hypervisor.create_vm().unwrap();
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            vm.set_identity_map_address(KVM_IDENTITY_MAP_START.0)
+                .unwrap();
+            vm.set_tss_address(KVM_TSS_START.0 as usize).unwrap();
+            vm.enable_split_irq().unwrap();
+        }
+
+        let phys_bits = physical_bits(config.lock().unwrap().cpus.max_phys_bits);
+
+        let memory_manager = MemoryManager::new(
+            vm.clone(),
+            &config.lock().unwrap().memory.clone(),
+            None,
+            phys_bits,
+            #[cfg(feature = "tdx")]
+            false,
+            Some(&vm_migration_config.memory_manager_data),
+            existing_memory_files,
+            #[cfg(target_arch = "x86_64")]
+            None,
+        )
+        .map_err(|e| {
+            MigratableError::MigrateReceive(anyhow!(
+                "Error creating MemoryManager from snapshot: {:?}",
+                e
+            ))
+        })?;
+
+        Response::ok().write_to(socket)?;
+
+        Ok(memory_manager)
+    }
+
+    fn vm_receive_state<T>(
+        &mut self,
+        req: &Request,
+        socket: &mut T,
+        mm: Arc<Mutex<MemoryManager>>,
+    ) -> std::result::Result<(), MigratableError>
+    where
+        T: Read + Write,
+    {
+        // Read in state data
+        let mut data: Vec<u8> = Vec::new();
+        data.resize_with(req.length() as usize, Default::default);
+        socket
+            .read_exact(&mut data)
+            .map_err(MigratableError::MigrateSocket)?;
+        let snapshot: Snapshot = serde_json::from_slice(&data).map_err(|e| {
+            MigratableError::MigrateReceive(anyhow!("Error deserialising snapshot: {}", e))
+        })?;
+
         let exit_evt = self.exit_evt.try_clone().map_err(|e| {
             MigratableError::MigrateReceive(anyhow!("Error cloning exit EventFd: {}", e))
         })?;
@@ -1155,9 +1219,12 @@ impl Vmm {
             MigratableError::MigrateReceive(anyhow!("Error cloning activate EventFd: {}", e))
         })?;
 
-        self.vm_config = Some(vm_migration_config.vm_config);
-        let vm = Vm::new_from_migration(
+        let timestamp = Instant::now();
+        let hypervisor_vm = mm.lock().unwrap().vm.clone();
+        let mut vm = Vm::new_from_memory_manager(
             self.vm_config.clone().unwrap(),
+            mm,
+            hypervisor_vm,
             exit_evt,
             reset_evt,
             #[cfg(feature = "guest_debug")]
@@ -1165,35 +1232,11 @@ impl Vmm {
             &self.seccomp_action,
             self.hypervisor.clone(),
             activate_evt,
-            &vm_migration_config.memory_manager_data,
-            existing_memory_files,
+            true,
+            timestamp,
         )
         .map_err(|e| {
             MigratableError::MigrateReceive(anyhow!("Error creating VM from snapshot: {:?}", e))
-        })?;
-
-        Response::ok().write_to(socket)?;
-
-        Ok(vm)
-    }
-
-    fn vm_receive_state<T>(
-        &mut self,
-        req: &Request,
-        socket: &mut T,
-        mut vm: Vm,
-    ) -> std::result::Result<(), MigratableError>
-    where
-        T: Read + Write,
-    {
-        // Read in state data
-        let mut data: Vec<u8> = Vec::new();
-        data.resize_with(req.length() as usize, Default::default);
-        socket
-            .read_exact(&mut data)
-            .map_err(MigratableError::MigrateSocket)?;
-        let snapshot: Snapshot = serde_json::from_slice(&data).map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error deserialising snapshot: {}", e))
         })?;
 
         // Create VM
@@ -1212,7 +1255,7 @@ impl Vmm {
         &mut self,
         req: &Request,
         socket: &mut T,
-        vm: &mut Vm,
+        memory_manager: &mut MemoryManager,
     ) -> std::result::Result<(), MigratableError>
     where
         T: Read + Write,
@@ -1221,10 +1264,12 @@ impl Vmm {
         let table = MemoryRangeTable::read_from(socket, req.length())?;
 
         // And then read the memory itself
-        vm.receive_memory_regions(&table, socket).map_err(|e| {
-            Response::error().write_to(socket).ok();
-            e
-        })?;
+        memory_manager
+            .receive_memory_regions(&table, socket)
+            .map_err(|e| {
+                Response::error().write_to(socket).ok();
+                e
+            })?;
         Response::ok().write_to(socket)?;
         Ok(())
     }
@@ -1258,7 +1303,7 @@ impl Vmm {
         })?;
 
         let mut started = false;
-        let mut vm: Option<Vm> = None;
+        let mut memory_manager: Option<Arc<Mutex<MemoryManager>>> = None;
         let mut existing_memory_files = None;
         loop {
             let req = Request::read_from(&mut socket)?;
@@ -1278,7 +1323,7 @@ impl Vmm {
                         Response::error().write_to(&mut socket)?;
                         continue;
                     }
-                    vm = Some(self.vm_receive_config(
+                    memory_manager = Some(self.vm_receive_config(
                         &req,
                         &mut socket,
                         existing_memory_files.take(),
@@ -1292,8 +1337,8 @@ impl Vmm {
                         Response::error().write_to(&mut socket)?;
                         continue;
                     }
-                    if let Some(vm) = vm.take() {
-                        self.vm_receive_state(&req, &mut socket, vm)?;
+                    if let Some(mm) = memory_manager.take() {
+                        self.vm_receive_state(&req, &mut socket, mm)?;
                     } else {
                         warn!("Configuration not sent yet");
                         Response::error().write_to(&mut socket)?;
@@ -1307,8 +1352,8 @@ impl Vmm {
                         Response::error().write_to(&mut socket)?;
                         continue;
                     }
-                    if let Some(ref mut vm) = vm.as_mut() {
-                        self.vm_receive_memory(&req, &mut socket, vm)?;
+                    if let Some(mm) = memory_manager.as_ref() {
+                        self.vm_receive_memory(&req, &mut socket, &mut mm.lock().unwrap())?;
                     } else {
                         warn!("Configuration not sent yet");
                         Response::error().write_to(&mut socket)?;

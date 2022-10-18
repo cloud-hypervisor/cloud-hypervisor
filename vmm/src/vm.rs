@@ -72,8 +72,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fs::{File, OpenOptions};
-use std::io::{self, Read, Write};
-use std::io::{Seek, SeekFrom};
+use std::io::{self, Seek, SeekFrom, Write};
 #[cfg(feature = "tdx")]
 use std::mem;
 #[cfg(feature = "guest_debug")]
@@ -486,7 +485,7 @@ impl Vm {
     pub const HANDLED_SIGNALS: [i32; 1] = [SIGWINCH];
 
     #[allow(clippy::too_many_arguments)]
-    fn new_from_memory_manager(
+    pub fn new_from_memory_manager(
         config: Arc<Mutex<VmConfig>>,
         memory_manager: Arc<Mutex<MemoryManager>>,
         vm: Arc<dyn hypervisor::Vm>,
@@ -843,63 +842,6 @@ impl Vm {
 
         Vm::new_from_memory_manager(
             vm_config,
-            memory_manager,
-            vm,
-            exit_evt,
-            reset_evt,
-            #[cfg(feature = "guest_debug")]
-            vm_debug_evt,
-            seccomp_action,
-            hypervisor,
-            activate_evt,
-            true,
-            timestamp,
-        )
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn new_from_migration(
-        config: Arc<Mutex<VmConfig>>,
-        exit_evt: EventFd,
-        reset_evt: EventFd,
-        #[cfg(feature = "guest_debug")] vm_debug_evt: EventFd,
-        seccomp_action: &SeccompAction,
-        hypervisor: Arc<dyn hypervisor::Hypervisor>,
-        activate_evt: EventFd,
-        memory_manager_data: &MemoryManagerSnapshotData,
-        existing_memory_files: Option<HashMap<u32, File>>,
-    ) -> Result<Self> {
-        let timestamp = Instant::now();
-
-        hypervisor.check_required_extensions().unwrap();
-        let vm = hypervisor.create_vm().unwrap();
-
-        #[cfg(target_arch = "x86_64")]
-        {
-            vm.set_identity_map_address(KVM_IDENTITY_MAP_START.0)
-                .unwrap();
-            vm.set_tss_address(KVM_TSS_START.0 as usize).unwrap();
-            vm.enable_split_irq().unwrap();
-        }
-
-        let phys_bits = physical_bits(config.lock().unwrap().cpus.max_phys_bits);
-
-        let memory_manager = MemoryManager::new(
-            vm.clone(),
-            &config.lock().unwrap().memory.clone(),
-            None,
-            phys_bits,
-            #[cfg(feature = "tdx")]
-            false,
-            Some(memory_manager_data),
-            existing_memory_files,
-            #[cfg(target_arch = "x86_64")]
-            None,
-        )
-        .map_err(Error::MemoryManager)?;
-
-        Vm::new_from_memory_manager(
-            config,
             memory_manager,
             vm,
             exit_evt,
@@ -2350,48 +2292,6 @@ impl Vm {
     /// Gets the actual size of the balloon.
     pub fn balloon_size(&self) -> u64 {
         self.device_manager.lock().unwrap().balloon_size()
-    }
-
-    pub fn receive_memory_regions<F>(
-        &mut self,
-        ranges: &MemoryRangeTable,
-        fd: &mut F,
-    ) -> std::result::Result<(), MigratableError>
-    where
-        F: Read,
-    {
-        let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
-        let mem = guest_memory.memory();
-
-        for range in ranges.regions() {
-            let mut offset: u64 = 0;
-            // Here we are manually handling the retry in case we can't the
-            // whole region at once because we can't use the implementation
-            // from vm-memory::GuestMemory of read_exact_from() as it is not
-            // following the correct behavior. For more info about this issue
-            // see: https://github.com/rust-vmm/vm-memory/issues/174
-            loop {
-                let bytes_read = mem
-                    .read_from(
-                        GuestAddress(range.gpa + offset),
-                        fd,
-                        (range.length - offset) as usize,
-                    )
-                    .map_err(|e| {
-                        MigratableError::MigrateReceive(anyhow!(
-                            "Error receiving memory from socket: {}",
-                            e
-                        ))
-                    })?;
-                offset += bytes_read as u64;
-
-                if offset == range.length {
-                    break;
-                }
-            }
-        }
-
-        Ok(())
     }
 
     pub fn send_memory_fds(
