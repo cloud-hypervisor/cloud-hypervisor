@@ -22,7 +22,7 @@ macro_rules! align {
     }};
 }
 
-const VIRTIO_MEM_DATA_SIZE: usize = 2;
+const VIRTIO_MEM_DATA_SIZE: usize = 1;
 const QUEUE_DATA_SIZE: usize = 4;
 // The size of the guest memory for the virtio-mem region
 const MEM_SIZE: usize = 128 * 1024 * 1024;
@@ -124,8 +124,7 @@ impl VirtioInterrupt for NoopVirtioInterrupt {
 
 // Create a dummy virtio-mem device for fuzzing purpose only
 fn create_dummy_virtio_mem(bytes: &[u8; VIRTIO_MEM_DATA_SIZE]) -> (Mem, Arc<GuestRegionMmap>) {
-    let hugepages = bytes[0] % 2 != 0;
-    let numa_id = if bytes[1] % 2 != 0 { Some(0) } else { None };
+    let numa_id = if bytes[0] % 2 != 0 { Some(0) } else { None };
 
     let region = vmm::memory_manager::MemoryManager::create_ram_region(
         &None,
@@ -134,7 +133,7 @@ fn create_dummy_virtio_mem(bytes: &[u8; VIRTIO_MEM_DATA_SIZE]) -> (Mem, Arc<Gues
         MEM_SIZE,
         false,
         false,
-        hugepages,
+        false,
         None,
         numa_id,
         None,
@@ -150,7 +149,7 @@ fn create_dummy_virtio_mem(bytes: &[u8; VIRTIO_MEM_DATA_SIZE]) -> (Mem, Arc<Gues
             SeccompAction::Allow,
             numa_id.map(|i| i as u16),
             0,
-            hugepages,
+            false,
             EventFd::new(EFD_NONBLOCK).unwrap(),
             blocks_state.clone(),
         )
