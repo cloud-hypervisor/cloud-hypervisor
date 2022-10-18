@@ -730,25 +730,12 @@ impl Vm {
 
         #[cfg(feature = "tdx")]
         let tdx_enabled = config.lock().unwrap().is_tdx_enabled();
-        hypervisor.check_required_extensions().unwrap();
-        #[cfg(feature = "tdx")]
-        let vm = hypervisor
-            .create_vm_with_type(if tdx_enabled {
-                2 // KVM_X86_TDX_VM
-            } else {
-                0 // KVM_X86_LEGACY_VM
-            })
-            .unwrap();
-        #[cfg(not(feature = "tdx"))]
-        let vm = hypervisor.create_vm().unwrap();
 
-        #[cfg(target_arch = "x86_64")]
-        {
-            vm.set_identity_map_address(KVM_IDENTITY_MAP_START.0)
-                .unwrap();
-            vm.set_tss_address(KVM_TSS_START.0 as usize).unwrap();
-            vm.enable_split_irq().unwrap();
-        }
+        let vm = Self::create_hypervisor_vm(
+            &hypervisor,
+            #[cfg(feature = "tdx")]
+            tdx_enabled,
+        )?;
 
         let phys_bits = physical_bits(config.lock().unwrap().cpus.max_phys_bits);
 
@@ -810,16 +797,11 @@ impl Vm {
     ) -> Result<Self> {
         let timestamp = Instant::now();
 
-        hypervisor.check_required_extensions().unwrap();
-        let vm = hypervisor.create_vm().unwrap();
-
-        #[cfg(target_arch = "x86_64")]
-        {
-            vm.set_identity_map_address(KVM_IDENTITY_MAP_START.0)
-                .unwrap();
-            vm.set_tss_address(KVM_TSS_START.0 as usize).unwrap();
-            vm.enable_split_irq().unwrap();
-        }
+        let vm = Self::create_hypervisor_vm(
+            &hypervisor,
+            #[cfg(feature = "tdx")]
+            false,
+        )?;
 
         let memory_manager = if let Some(memory_manager_snapshot) =
             snapshot.snapshots.get(MEMORY_MANAGER_SNAPSHOT_ID)
@@ -854,6 +836,34 @@ impl Vm {
             true,
             timestamp,
         )
+    }
+
+    pub fn create_hypervisor_vm(
+        hypervisor: &Arc<dyn hypervisor::Hypervisor>,
+        #[cfg(feature = "tdx")] tdx_enabled: bool,
+    ) -> Result<Arc<dyn hypervisor::Vm>> {
+        hypervisor.check_required_extensions().unwrap();
+
+        #[cfg(feature = "tdx")]
+        let vm = hypervisor
+            .create_vm_with_type(if tdx_enabled {
+                2 // KVM_X86_TDX_VM
+            } else {
+                0 // KVM_X86_LEGACY_VM
+            })
+            .unwrap();
+        #[cfg(not(feature = "tdx"))]
+        let vm = hypervisor.create_vm().unwrap();
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            vm.set_identity_map_address(KVM_IDENTITY_MAP_START.0)
+                .unwrap();
+            vm.set_tss_address(KVM_TSS_START.0 as usize).unwrap();
+            vm.enable_split_irq().unwrap();
+        }
+
+        Ok(vm)
     }
 
     fn load_initramfs(&mut self, guest_mem: &GuestMemoryMmap) -> Result<arch::InitramfsConfig> {

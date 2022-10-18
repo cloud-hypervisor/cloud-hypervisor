@@ -27,8 +27,6 @@ use crate::migration::{recv_vm_config, recv_vm_state};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::vm::{Error as VmError, Vm, VmState};
 use anyhow::anyhow;
-#[cfg(target_arch = "x86_64")]
-use arch::layout::{KVM_IDENTITY_MAP_START, KVM_TSS_START};
 use libc::{EFD_NONBLOCK, SIGINT, SIGTERM};
 use memory_manager::MemoryManagerSnapshotData;
 use pci::PciBdf;
@@ -51,7 +49,6 @@ use std::time::Instant;
 use std::{result, thread};
 use thiserror::Error;
 use tracer::trace_scoped;
-use vm::physical_bits;
 use vm_memory::bitmap::AtomicBitmap;
 use vm_migration::{protocol::*, Migratable};
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -1149,21 +1146,22 @@ impl Vmm {
         let config = vm_migration_config.vm_config.clone();
         self.vm_config = Some(vm_migration_config.vm_config);
 
-        self.hypervisor.check_required_extensions().unwrap();
-        let vm = self.hypervisor.create_vm().unwrap();
+        let vm = Vm::create_hypervisor_vm(
+            &self.hypervisor,
+            #[cfg(feature = "tdx")]
+            false,
+        )
+        .map_err(|e| {
+            MigratableError::MigrateReceive(anyhow!(
+                "Error creating hypervisor VM from snapshot: {:?}",
+                e
+            ))
+        })?;
 
-        #[cfg(target_arch = "x86_64")]
-        {
-            vm.set_identity_map_address(KVM_IDENTITY_MAP_START.0)
-                .unwrap();
-            vm.set_tss_address(KVM_TSS_START.0 as usize).unwrap();
-            vm.enable_split_irq().unwrap();
-        }
-
-        let phys_bits = physical_bits(config.lock().unwrap().cpus.max_phys_bits);
+        let phys_bits = vm::physical_bits(config.lock().unwrap().cpus.max_phys_bits);
 
         let memory_manager = MemoryManager::new(
-            vm.clone(),
+            vm,
             &config.lock().unwrap().memory.clone(),
             None,
             phys_bits,
