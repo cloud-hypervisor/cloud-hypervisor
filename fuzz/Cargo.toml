@@ -65,6 +65,12 @@ test = false
 doc = false
 
 [[bin]]
+name = "iommu"
+path = "fuzz_targets/iommu.rs"
+test = false
+doc = false
+
+[[bin]]
 name = "mem"
 path = "fuzz_targets/mem.rs"
 test = false
