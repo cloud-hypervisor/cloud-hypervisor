@@ -630,9 +630,11 @@ impl Request {
 
 struct IommuEpollHandler {
     mem: GuestMemoryAtomic<GuestMemoryMmap>,
-    queues: Vec<Queue>,
+    request_queue: Queue,
+    _event_queue: Queue,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
-    queue_evts: Vec<EventFd>,
+    request_queue_evt: EventFd,
+    event_queue_evt: EventFd,
     kill_evt: EventFd,
     pause_evt: EventFd,
     mapping: Arc<IommuMapping>,
@@ -643,7 +645,8 @@ struct IommuEpollHandler {
 impl IommuEpollHandler {
     fn request_queue(&mut self) -> Result<bool, Error> {
         let mut used_descs = false;
-        while let Some(mut desc_chain) = self.queues[0].pop_descriptor_chain(self.mem.memory()) {
+        while let Some(mut desc_chain) = self.request_queue.pop_descriptor_chain(self.mem.memory())
+        {
             let len = Request::parse(
                 &mut desc_chain,
                 &self.mapping,
@@ -651,7 +654,7 @@ impl IommuEpollHandler {
                 self.msi_iova_space,
             )?;
 
-            self.queues[0]
+            self.request_queue
                 .add_used(desc_chain.memory(), desc_chain.head_index(), len as u32)
                 .map_err(Error::QueueAddUsed)?;
 
@@ -680,8 +683,8 @@ impl IommuEpollHandler {
         paused_sync: Arc<Barrier>,
     ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
-        helper.add_event(self.queue_evts[0].as_raw_fd(), REQUEST_Q_EVENT)?;
-        helper.add_event(self.queue_evts[1].as_raw_fd(), EVENT_Q_EVENT)?;
+        helper.add_event(self.request_queue_evt.as_raw_fd(), REQUEST_Q_EVENT)?;
+        helper.add_event(self.event_queue_evt.as_raw_fd(), EVENT_Q_EVENT)?;
         helper.run(paused, paused_sync, self)?;
 
         Ok(())
@@ -697,7 +700,7 @@ impl EpollHelperHandler for IommuEpollHandler {
         let ev_type = event.data as u16;
         match ev_type {
             REQUEST_Q_EVENT => {
-                self.queue_evts[0].read().map_err(|e| {
+                self.request_queue_evt.read().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
                 })?;
 
@@ -717,7 +720,7 @@ impl EpollHelperHandler for IommuEpollHandler {
                 }
             }
             EVENT_Q_EVENT => {
-                self.queue_evts[1].read().map_err(|e| {
+                self.event_queue_evt.read().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
                 })?;
 
@@ -1033,23 +1036,21 @@ impl VirtioDevice for Iommu {
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        queues: Vec<(usize, Queue, EventFd)>,
+        mut queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
         self.common.activate(&queues, &interrupt_cb)?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
-        let mut virtqueues = Vec::new();
-        let mut queue_evts = Vec::new();
-        for (_, queue, queue_evt) in queues {
-            virtqueues.push(queue);
-            queue_evts.push(queue_evt);
-        }
+        let (_, request_queue, request_queue_evt) = queues.remove(0);
+        let (_, _event_queue, event_queue_evt) = queues.remove(0);
 
         let mut handler = IommuEpollHandler {
             mem,
-            queues: virtqueues,
+            request_queue,
+            _event_queue,
             interrupt_cb,
-            queue_evts,
+            request_queue_evt,
+            event_queue_evt,
             kill_evt,
             pause_evt,
             mapping: self.mapping.clone(),
