@@ -173,8 +173,8 @@ struct NetEpollHandler {
     kill_evt: EventFd,
     pause_evt: EventFd,
     queue_index_base: u16,
-    queue_pair: Vec<Queue>,
-    queue_evt_pair: Vec<EventFd>,
+    queue_pair: (Queue, Queue),
+    queue_evt_pair: (EventFd, EventFd),
     // Always generate interrupts until the driver has signalled to the device.
     // This mitigates a problem with interrupts from tap events being "lost" upon
     // a restore as the vCPU thread isn't ready to handle the interrupt. This causes
@@ -193,7 +193,7 @@ impl NetEpollHandler {
     }
 
     fn handle_rx_event(&mut self) -> result::Result<(), DeviceError> {
-        let queue_evt = &self.queue_evt_pair[0];
+        let queue_evt = &self.queue_evt_pair.0;
         if let Err(e) = queue_evt.read() {
             error!("Failed to get rx queue event: {:?}", e);
         }
@@ -224,7 +224,7 @@ impl NetEpollHandler {
     fn process_tx(&mut self) -> result::Result<(), DeviceError> {
         if self
             .net
-            .process_tx(&self.mem.memory(), &mut self.queue_pair[1])
+            .process_tx(&self.mem.memory(), &mut self.queue_pair.1)
             .map_err(DeviceError::NetQueuePair)?
             || !self.driver_awake
         {
@@ -253,7 +253,7 @@ impl NetEpollHandler {
     fn handle_rx_tap_event(&mut self) -> result::Result<(), DeviceError> {
         if self
             .net
-            .process_rx(&self.mem.memory(), &mut self.queue_pair[0])
+            .process_rx(&self.mem.memory(), &mut self.queue_pair.0)
             .map_err(DeviceError::NetQueuePair)?
             || !self.driver_awake
         {
@@ -271,8 +271,8 @@ impl NetEpollHandler {
         paused_sync: Arc<Barrier>,
     ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
-        helper.add_event(self.queue_evt_pair[0].as_raw_fd(), RX_QUEUE_EVENT)?;
-        helper.add_event(self.queue_evt_pair[1].as_raw_fd(), TX_QUEUE_EVENT)?;
+        helper.add_event(self.queue_evt_pair.0.as_raw_fd(), RX_QUEUE_EVENT)?;
+        helper.add_event(self.queue_evt_pair.1.as_raw_fd(), TX_QUEUE_EVENT)?;
         if let Some(rate_limiter) = &self.net.rx_rate_limiter {
             helper.add_event(rate_limiter.as_raw_fd(), RX_RATE_LIMITER_EVENT)?;
         }
@@ -283,10 +283,14 @@ impl NetEpollHandler {
         let mem = self.mem.memory();
         // If there are some already available descriptors on the RX queue,
         // then we can start the thread while listening onto the TAP.
-        if self.queue_pair[0]
+        if self
+            .queue_pair
+            .0
             .used_idx(mem.deref(), Ordering::Acquire)
             .map_err(EpollHelperError::QueueRingIndex)?
-            < self.queue_pair[0]
+            < self
+                .queue_pair
+                .0
                 .avail_idx(mem.deref(), Ordering::Acquire)
                 .map_err(EpollHelperError::QueueRingIndex)?
         {
@@ -319,7 +323,7 @@ impl EpollHelperHandler for NetEpollHandler {
                 })?;
             }
             TX_QUEUE_EVENT => {
-                let queue_evt = &self.queue_evt_pair[1];
+                let queue_evt = &self.queue_evt_pair.1;
                 if let Err(e) = queue_evt.read() {
                     error!("Failed to get tx queue event: {:?}", e);
                 }
@@ -686,11 +690,11 @@ impl VirtioDevice for Net {
 
             let (_, queue_0, queue_evt_0) = queues.remove(0);
             let (_, queue_1, queue_evt_1) = queues.remove(0);
-            let mut queue_pair = vec![queue_0, queue_1];
-            queue_pair[0].set_event_idx(event_idx);
-            queue_pair[1].set_event_idx(event_idx);
+            let mut queue_pair = (queue_0, queue_1);
+            queue_pair.0.set_event_idx(event_idx);
+            queue_pair.1.set_event_idx(event_idx);
 
-            let queue_evt_pair = vec![queue_evt_0, queue_evt_1];
+            let queue_evt_pair = (queue_evt_0, queue_evt_1);
 
             let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
