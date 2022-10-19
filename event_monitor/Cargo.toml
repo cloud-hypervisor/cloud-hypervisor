@@ -7,4 +7,4 @@ edition = "2021"
 [dependencies]
 libc = "0.2.135"
 serde = { version = "1.0.145", features = ["rc", "derive"] }
-serde_json = "1.0.86"
+serde_json = "1.0.87"
