@@ -905,6 +905,7 @@ impl Iommu {
                         | 1u64 << VIRTIO_IOMMU_F_PROBE
                         | 1u64 << VIRTIO_IOMMU_F_BYPASS_CONFIG,
                     paused_sync: Some(Arc::new(Barrier::new(2))),
+                    min_queues: NUM_QUEUES as u16,
                     ..Default::default()
                 },
                 config,
