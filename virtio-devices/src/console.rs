@@ -77,7 +77,8 @@ unsafe impl ByteValued for VirtioConsoleConfig {}
 
 struct ConsoleEpollHandler {
     mem: GuestMemoryAtomic<GuestMemoryMmap>,
-    queues: Vec<Queue>,
+    input_queue: Queue,
+    output_queue: Queue,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     in_buffer: Arc<Mutex<VecDeque<u8>>>,
     resizer: Arc<ConsoleResizer>,
@@ -145,7 +146,8 @@ impl ConsoleEpollHandler {
     #[allow(clippy::too_many_arguments)]
     fn new(
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
-        queues: Vec<Queue>,
+        input_queue: Queue,
+        output_queue: Queue,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         in_buffer: Arc<Mutex<VecDeque<u8>>>,
         resizer: Arc<ConsoleResizer>,
@@ -176,7 +178,8 @@ impl ConsoleEpollHandler {
 
         ConsoleEpollHandler {
             mem,
-            queues,
+            input_queue,
+            output_queue,
             interrupt_cb,
             in_buffer,
             resizer,
@@ -203,7 +206,7 @@ impl ConsoleEpollHandler {
      */
     fn process_input_queue(&mut self) -> bool {
         let mut in_buffer = self.in_buffer.lock().unwrap();
-        let recv_queue = &mut self.queues[0]; //receiveq
+        let recv_queue = &mut self.input_queue; //receiveq
         let mut used_descs = false;
 
         if in_buffer.is_empty() {
@@ -246,7 +249,7 @@ impl ConsoleEpollHandler {
      * to the referenced address.
      */
     fn process_output_queue(&mut self) -> bool {
-        let trans_queue = &mut self.queues[1]; //transmitq
+        let trans_queue = &mut self.output_queue; //transmitq
         let mut used_descs = false;
 
         while let Some(mut desc_chain) = trans_queue.pop_descriptor_chain(self.mem.memory()) {
@@ -714,17 +717,13 @@ impl VirtioDevice for Console {
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
         let input_evt = EventFd::new(EFD_NONBLOCK).unwrap();
 
-        let mut virtqueues = Vec::new();
-        let (_, queue, queue_evt) = queues.remove(0);
-        virtqueues.push(queue);
-        let input_queue_evt = queue_evt;
-        let (_, queue, queue_evt) = queues.remove(0);
-        virtqueues.push(queue);
-        let output_queue_evt = queue_evt;
+        let (_, input_queue, input_queue_evt) = queues.remove(0);
+        let (_, output_queue, output_queue_evt) = queues.remove(0);
 
         let mut handler = ConsoleEpollHandler::new(
             mem,
-            virtqueues,
+            input_queue,
+            output_queue,
             interrupt_cb,
             self.in_buffer.clone(),
             Arc::clone(&self.resizer),
