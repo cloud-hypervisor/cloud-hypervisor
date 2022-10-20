@@ -47,7 +47,7 @@ const REQUEST_Q_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 /// New descriptors are pending on the event queue.
 /// "eventq" lets the device report any fault or other asynchronous event to
 /// the guest driver.
-const EVENT_Q_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
+const _EVENT_Q_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
 
 /// PROBE properties size.
 /// This is the minimal size to provide at least one RESV_MEM property.
@@ -634,7 +634,7 @@ struct IommuEpollHandler {
     _event_queue: Queue,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     request_queue_evt: EventFd,
-    event_queue_evt: EventFd,
+    _event_queue_evt: EventFd,
     kill_evt: EventFd,
     pause_evt: EventFd,
     mapping: Arc<IommuMapping>,
@@ -664,10 +664,6 @@ impl IommuEpollHandler {
         Ok(used_descs)
     }
 
-    fn event_queue(&mut self) -> bool {
-        false
-    }
-
     fn signal_used_queue(&self, queue_index: u16) -> result::Result<(), DeviceError> {
         self.interrupt_cb
             .trigger(VirtioInterruptType::Queue(queue_index))
@@ -684,7 +680,6 @@ impl IommuEpollHandler {
     ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.request_queue_evt.as_raw_fd(), REQUEST_Q_EVENT)?;
-        helper.add_event(self.event_queue_evt.as_raw_fd(), EVENT_Q_EVENT)?;
         helper.run(paused, paused_sync, self)?;
 
         Ok(())
@@ -712,20 +707,6 @@ impl EpollHelperHandler for IommuEpollHandler {
                 })?;
                 if needs_notification {
                     self.signal_used_queue(0).map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to signal used queue: {:?}",
-                            e
-                        ))
-                    })?;
-                }
-            }
-            EVENT_Q_EVENT => {
-                self.event_queue_evt.read().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
-                })?;
-
-                if self.event_queue() {
-                    self.signal_used_queue(1).map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
                             "Failed to signal used queue: {:?}",
                             e
@@ -1043,7 +1024,7 @@ impl VirtioDevice for Iommu {
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
         let (_, request_queue, request_queue_evt) = queues.remove(0);
-        let (_, _event_queue, event_queue_evt) = queues.remove(0);
+        let (_, _event_queue, _event_queue_evt) = queues.remove(0);
 
         let mut handler = IommuEpollHandler {
             mem,
@@ -1051,7 +1032,7 @@ impl VirtioDevice for Iommu {
             _event_queue,
             interrupt_cb,
             request_queue_evt,
-            event_queue_evt,
+            _event_queue_evt,
             kill_evt,
             pause_evt,
             mapping: self.mapping.clone(),
