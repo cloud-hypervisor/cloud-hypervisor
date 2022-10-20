@@ -51,23 +51,23 @@ pub const SECTOR_SIZE: u64 = 0x01 << SECTOR_SHIFT;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Guest gave us bad memory addresses.")]
+    #[error("Guest gave us bad memory addresses")]
     GuestMemory(GuestMemoryError),
-    #[error("Guest gave us offsets that would have overflowed a usize.")]
+    #[error("Guest gave us offsets that would have overflowed a usize")]
     CheckedOffset(GuestAddress, usize),
-    #[error("Guest gave us a write only descriptor that protocol says to read from.")]
+    #[error("Guest gave us a write only descriptor that protocol says to read from")]
     UnexpectedWriteOnlyDescriptor,
-    #[error("Guest gave us a read only descriptor that protocol says to write to.")]
+    #[error("Guest gave us a read only descriptor that protocol says to write to")]
     UnexpectedReadOnlyDescriptor,
-    #[error("Guest gave us too few descriptors in a descriptor chain.")]
+    #[error("Guest gave us too few descriptors in a descriptor chain")]
     DescriptorChainTooShort,
-    #[error("Guest gave us a descriptor that was too short to use.")]
+    #[error("Guest gave us a descriptor that was too short to use")]
     DescriptorLengthTooSmall,
-    #[error("Getting a block's metadata fails for any reason.")]
+    #[error("Getting a block's metadata fails for any reason")]
     GetFileMetadata,
-    #[error("The requested operation would cause a seek beyond disk end.")]
+    #[error("The requested operation would cause a seek beyond disk end")]
     InvalidOffset,
-    #[error("The requested operation does not support multiple descriptors.")]
+    #[error("The requested operation does not support multiple descriptors")]
     TooManyDescriptors,
 }
 

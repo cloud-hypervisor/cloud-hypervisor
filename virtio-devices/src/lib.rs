@@ -80,7 +80,7 @@ const VIRTIO_F_NOTIFICATION_DATA: u32 = 38;
 
 #[derive(Error, Debug)]
 pub enum ActivateError {
-    #[error("Failed to activate virtio device.")]
+    #[error("Failed to activate virtio device")]
     BadActivate,
     #[error("Failed to clone exit event fd: {0}")]
     CloneExitEventFd(std::io::Error),
@@ -112,7 +112,7 @@ pub enum Error {
     VhostUserUpdateMemory(vhost_user::Error),
     #[error("Failed to add memory region vhost-user: {0}")]
     VhostUserAddMemoryRegion(vhost_user::Error),
-    #[error("Failed to set shared memory region.")]
+    #[error("Failed to set shared memory region")]
     SetShmRegionsNotSupported,
     #[error("Failed to process net queue: {0}")]
     NetQueuePair(::net_util::NetQueuePairError),

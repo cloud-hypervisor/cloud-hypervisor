@@ -12,9 +12,9 @@ use thiserror::Error;
 pub enum Error {
     #[error("Failed to convert an hexadecimal string into an integer: {0}")]
     ConvertHexStringToInt(std::num::ParseIntError),
-    #[error("Error related to the multiqueue support (no support TAP side).")]
+    #[error("Error related to the multiqueue support (no support TAP side)")]
     MultiQueueNoTapSupport,
-    #[error("Error related to the multiqueue support (no support device side).")]
+    #[error("Error related to the multiqueue support (no support device side)")]
     MultiQueueNoDeviceSupport,
     #[error("Failed to read the TAP flags from sysfs: {0}")]
     ReadSysfsTunFlags(io::Error),
