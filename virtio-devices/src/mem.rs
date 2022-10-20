@@ -105,15 +105,15 @@ const VIRTIO_MEM_F_ACPI_PXM: u8 = 0;
 pub enum Error {
     #[error("Guest gave us bad memory addresses: {0}")]
     GuestMemory(GuestMemoryError),
-    #[error("Guest gave us a write only descriptor that protocol says to read from.")]
+    #[error("Guest gave us a write only descriptor that protocol says to read from")]
     UnexpectedWriteOnlyDescriptor,
-    #[error("Guest gave us a read only descriptor that protocol says to write to.")]
+    #[error("Guest gave us a read only descriptor that protocol says to write to")]
     UnexpectedReadOnlyDescriptor,
-    #[error("Guest gave us too few descriptors in a descriptor chain.")]
+    #[error("Guest gave us too few descriptors in a descriptor chain")]
     DescriptorChainTooShort,
-    #[error("Guest gave us a buffer that was too short to use.")]
+    #[error("Guest gave us a buffer that was too short to use")]
     BufferLengthTooSmall,
-    #[error("Guest sent us invalid request.")]
+    #[error("Guest sent us invalid request")]
     InvalidRequest,
     #[error("Failed to EventFd write: {0}")]
     EventFdWriteFail(std::io::Error),
@@ -133,9 +133,9 @@ pub enum Error {
     DmaMap(std::io::Error),
     #[error("Failed DMA unmapping: {0}")]
     DmaUnmap(std::io::Error),
-    #[error("Invalid DMA mapping handler.")]
+    #[error("Invalid DMA mapping handler")]
     InvalidDmaMappingHandler,
-    #[error("Not activated by the guest.")]
+    #[error("Not activated by the guest")]
     NotActivatedByGuest,
     #[error("Unknown request type: {0}")]
     UnkownRequestType(u16),

@@ -26,13 +26,13 @@ pub enum Error {
     ConfigureTap(IoError),
     #[error("Unable to retrieve features: {0}")]
     GetFeatures(IoError),
-    #[error("Missing multiqueue support in the kernel.")]
+    #[error("Missing multiqueue support in the kernel")]
     MultiQueueKernelSupport,
     #[error("ioctl failed: {0}")]
     IoctlError(IoError),
     #[error("Failed to create a socket: {0}")]
     NetUtil(NetUtilError),
-    #[error("Invalid interface name.")]
+    #[error("Invalid interface name")]
     InvalidIfname,
     #[error("Error parsing MAC data: {0}")]
     MacParsing(IoError),

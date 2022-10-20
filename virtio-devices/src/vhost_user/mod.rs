@@ -43,9 +43,9 @@ pub use self::vu_common_ctrl::VhostUserConfig;
 pub enum Error {
     #[error("Failed accepting connection: {0}")]
     AcceptConnection(io::Error),
-    #[error("Invalid available address.")]
+    #[error("Invalid available address")]
     AvailAddress,
-    #[error("Queue number  is not correct.")]
+    #[error("Queue number  is not correct")]
     BadQueueNum,
     #[error("Failed binding vhost-user socket: {0}")]
     BindSocket(io::Error),
@@ -53,7 +53,7 @@ pub enum Error {
     CreateKillEventFd(io::Error),
     #[error("Cloning kill eventfd failed: {0}")]
     CloneKillEventFd(io::Error),
-    #[error("Invalid descriptor table address.")]
+    #[error("Invalid descriptor table address")]
     DescriptorTableAddress,
     #[error("Signal used queue failed: {0}")]
     FailedSignalingUsedQueue(io::Error),
@@ -65,7 +65,7 @@ pub enum Error {
     VhostUserCreateMaster(VhostError),
     #[error("Failed to open vhost device: {0}")]
     VhostUserOpen(VhostError),
-    #[error("Connection to socket failed.")]
+    #[error("Connection to socket failed")]
     VhostUserConnect,
     #[error("Get features failed: {0}")]
     VhostUserGetFeatures(VhostError),
@@ -75,7 +75,7 @@ pub enum Error {
     VhostUserGetProtocolFeatures(VhostError),
     #[error("Get vring base failed: {0}")]
     VhostUserGetVringBase(VhostError),
-    #[error("Vhost-user Backend not support vhost-user protocol.")]
+    #[error("Vhost-user Backend not support vhost-user protocol")]
     VhostUserProtocolNotSupport,
     #[error("Set owner failed: {0}")]
     VhostUserSetOwner(VhostError),
@@ -121,17 +121,17 @@ pub enum Error {
     VhostUserSetInflight(VhostError),
     #[error("Failed setting the log base: {0}")]
     VhostUserSetLogBase(VhostError),
-    #[error("Invalid used address.")]
+    #[error("Invalid used address")]
     UsedAddress,
-    #[error("Invalid features provided from vhost-user backe.")]
+    #[error("Invalid features provided from vhost-user backe")]
     InvalidFeatures,
-    #[error("Missing file descriptor for the region.")]
+    #[error("Missing file descriptor for the region")]
     MissingRegionFd,
-    #[error("Missing IrqFd.")]
+    #[error("Missing IrqFd")]
     MissingIrqFd,
     #[error("Failed getting the available index: {0}")]
     GetAvailableIndex(QueueError),
-    #[error("Migration is not supported by this vhost-user device.")]
+    #[error("Migration is not supported by this vhost-user device")]
     MigrationNotSupported,
     #[error("Failed creating memfd: {0}")]
     MemfdCreate(io::Error),
@@ -141,7 +141,7 @@ pub enum Error {
     SetSeals(io::Error),
     #[error("Failed creating new mmap region: {0}")]
     NewMmapRegion(MmapRegionError),
-    #[error("Could not find the shm log region.")]
+    #[error("Could not find the shm log region")]
     MissingShmLogRegion,
 }
 type Result<T> = std::result::Result<T, Error>;

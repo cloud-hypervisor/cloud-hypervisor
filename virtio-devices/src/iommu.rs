@@ -284,39 +284,39 @@ unsafe impl ByteValued for VirtioIommuFault {}
 
 #[derive(Error, Debug)]
 enum Error {
-    #[error("Guest gave us bad memory addresses: {0}.")]
+    #[error("Guest gave us bad memory addresses: {0}")]
     GuestMemory(GuestMemoryError),
-    #[error("Guest gave us a write only descriptor that protocol says to read from.")]
+    #[error("Guest gave us a write only descriptor that protocol says to read from")]
     UnexpectedWriteOnlyDescriptor,
-    #[error("Guest gave us a read only descriptor that protocol says to write to.")]
+    #[error("Guest gave us a read only descriptor that protocol says to write to")]
     UnexpectedReadOnlyDescriptor,
-    #[error("Guest gave us too few descriptors in a descriptor chain.")]
+    #[error("Guest gave us too few descriptors in a descriptor chain")]
     DescriptorChainTooShort,
-    #[error("Guest gave us a buffer that was too short to use.")]
+    #[error("Guest gave us a buffer that was too short to use")]
     BufferLengthTooSmall,
-    #[error("Guest sent us invalid request.")]
+    #[error("Guest sent us invalid request")]
     InvalidRequest,
-    #[error("Guest sent us invalid ATTACH request.")]
+    #[error("Guest sent us invalid ATTACH request")]
     InvalidAttachRequest,
-    #[error("Guest sent us invalid DETACH request.")]
+    #[error("Guest sent us invalid DETACH request")]
     InvalidDetachRequest,
-    #[error("Guest sent us invalid MAP request.")]
+    #[error("Guest sent us invalid MAP request")]
     InvalidMapRequest,
-    #[error("Invalid to map because the domain is in bypass mode.")]
+    #[error("Invalid to map because the domain is in bypass mode")]
     InvalidMapRequestBypassDomain,
-    #[error("Invalid to map because the domain is missing.")]
+    #[error("Invalid to map because the domain is missing")]
     InvalidMapRequestMissingDomain,
-    #[error("Guest sent us invalid UNMAP request.")]
+    #[error("Guest sent us invalid UNMAP request")]
     InvalidUnmapRequest,
-    #[error("Invalid to unmap because the domain is in bypass mode.")]
+    #[error("Invalid to unmap because the domain is in bypass mode")]
     InvalidUnmapRequestBypassDomain,
-    #[error("Invalid to unmap because the domain is missing.")]
+    #[error("Invalid to unmap because the domain is missing")]
     InvalidUnmapRequestMissingDomain,
-    #[error("Guest sent us invalid PROBE request.")]
+    #[error("Guest sent us invalid PROBE request")]
     InvalidProbeRequest,
-    #[error("Failed to performing external mapping: {0}.")]
+    #[error("Failed to performing external mapping: {0}")]
     ExternalMapping(io::Error),
-    #[error("Failed to performing external unmapping: {0}.")]
+    #[error("Failed to performing external unmapping: {0}")]
     ExternalUnmapping(io::Error),
     #[error("Failed adding used index: {0}")]
     QueueAddUsed(virtio_queue::Error),

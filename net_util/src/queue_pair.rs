@@ -288,7 +288,7 @@ pub struct NetCounters {
 
 #[derive(Error, Debug)]
 pub enum NetQueuePairError {
-    #[error("No memory configured.")]
+    #[error("No memory configured")]
     NoMemoryConfigured,
     #[error("Error registering listener: {0}")]
     RegisterListener(io::Error),
@@ -302,9 +302,9 @@ pub enum NetQueuePairError {
     GuestMemory(vm_memory::GuestMemoryError),
     #[error("Returned an error while iterating through the queue: {0}")]
     QueueIteratorFailed(virtio_queue::Error),
-    #[error("Descriptor chain is too short.")]
+    #[error("Descriptor chain is too short")]
     DescriptorChainTooShort,
-    #[error("Descriptor chain does not contain valid descriptors.")]
+    #[error("Descriptor chain does not contain valid descriptors")]
     DescriptorChainInvalid,
     #[error("Failed to determine if queue needed notification: {0}")]
     QueueNeedsNotification(virtio_queue::Error),

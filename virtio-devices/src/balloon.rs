@@ -62,9 +62,9 @@ const VIRTIO_BALLOON_F_REPORTING: u64 = 5;
 pub enum Error {
     #[error("Guest gave us bad memory addresses.: {0}")]
     GuestMemory(GuestMemoryError),
-    #[error("Guest gave us a write only descriptor that protocol says to read from.")]
+    #[error("Guest gave us a write only descriptor that protocol says to read from")]
     UnexpectedWriteOnlyDescriptor,
-    #[error("Guest sent us invalid request.")]
+    #[error("Guest sent us invalid request")]
     InvalidRequest,
     #[error("Fallocate fail.: {0}")]
     FallocateFail(std::io::Error),
