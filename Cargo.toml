@@ -18,7 +18,7 @@ codegen-units = 1
 opt-level = "s"
 
 [dependencies]
-anyhow = "1.0.65"
+anyhow = "1.0.66"
 api_client = { path = "api_client" }
 clap = { version = "4.0.17", features = ["wrap_help","cargo","string"] }
 epoll = "4.3.1"

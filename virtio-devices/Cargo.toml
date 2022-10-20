@@ -8,7 +8,7 @@ edition = "2021"
 default = []
 
 [dependencies]
-anyhow = "1.0.65"
+anyhow = "1.0.66"
 arc-swap = "1.5.1"
 block_util = { path = "../block_util" }
 byteorder = "1.4.3"
