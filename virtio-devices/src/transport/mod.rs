@@ -5,7 +5,7 @@
 use vmm_sys_util::eventfd::EventFd;
 mod pci_common_config;
 mod pci_device;
-pub use pci_common_config::VirtioPciCommonConfig;
+pub use pci_common_config::{VirtioPciCommonConfig, VIRTIO_PCI_COMMON_CONFIG_ID};
 pub use pci_device::{VirtioPciDevice, VirtioPciDeviceActivator};
 
 pub trait VirtioTransport {
