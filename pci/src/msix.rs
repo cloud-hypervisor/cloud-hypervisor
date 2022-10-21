@@ -26,9 +26,10 @@ const MSIX_ENABLE_BIT: u8 = 15;
 const FUNCTION_MASK_MASK: u16 = (1 << FUNCTION_MASK_BIT) as u16;
 const MSIX_ENABLE_MASK: u16 = (1 << MSIX_ENABLE_BIT) as u16;
 pub const MSIX_TABLE_ENTRY_SIZE: usize = 16;
+pub const MSIX_CONFIG_ID: &str = "msix_config";
 
 #[derive(Debug)]
-enum Error {
+pub enum Error {
     /// Failed enabling the interrupt route.
     EnableInterruptRoute(io::Error),
     /// Failed updating the interrupt route.
@@ -61,7 +62,7 @@ impl Default for MsixTableEntry {
 }
 
 #[derive(Versionize)]
-struct MsixConfigState {
+pub struct MsixConfigState {
     table_entries: Vec<MsixTableEntry>,
     pba_entries: Vec<u64>,
     masked: bool,
@@ -84,23 +85,62 @@ impl MsixConfig {
         msix_vectors: u16,
         interrupt_source_group: Arc<dyn InterruptSourceGroup>,
         devid: u32,
-    ) -> Self {
+        state: Option<MsixConfigState>,
+    ) -> result::Result<Self, Error> {
         assert!(msix_vectors <= MAX_MSIX_VECTORS_PER_DEVICE);
 
-        let mut table_entries: Vec<MsixTableEntry> = Vec::new();
-        table_entries.resize_with(msix_vectors as usize, Default::default);
-        let mut pba_entries: Vec<u64> = Vec::new();
-        let num_pba_entries: usize = ((msix_vectors as usize) / BITS_PER_PBA_ENTRY) + 1;
-        pba_entries.resize_with(num_pba_entries, Default::default);
+        let (table_entries, pba_entries, masked, enabled) = if let Some(state) = state {
+            if state.enabled && !state.masked {
+                for (idx, table_entry) in state.table_entries.iter().enumerate() {
+                    if table_entry.masked() {
+                        continue;
+                    }
 
-        MsixConfig {
+                    let config = MsiIrqSourceConfig {
+                        high_addr: table_entry.msg_addr_hi,
+                        low_addr: table_entry.msg_addr_lo,
+                        data: table_entry.msg_data,
+                        devid,
+                    };
+
+                    interrupt_source_group
+                        .update(
+                            idx as InterruptIndex,
+                            InterruptSourceConfig::MsiIrq(config),
+                            state.masked,
+                        )
+                        .map_err(Error::UpdateInterruptRoute)?;
+
+                    interrupt_source_group
+                        .enable()
+                        .map_err(Error::EnableInterruptRoute)?;
+                }
+            }
+
+            (
+                state.table_entries,
+                state.pba_entries,
+                state.masked,
+                state.enabled,
+            )
+        } else {
+            let mut table_entries: Vec<MsixTableEntry> = Vec::new();
+            table_entries.resize_with(msix_vectors as usize, Default::default);
+            let mut pba_entries: Vec<u64> = Vec::new();
+            let num_pba_entries: usize = ((msix_vectors as usize) / BITS_PER_PBA_ENTRY) + 1;
+            pba_entries.resize_with(num_pba_entries, Default::default);
+
+            (table_entries, pba_entries, true, false)
+        };
+
+        Ok(MsixConfig {
             table_entries,
             pba_entries,
             devid,
             interrupt_source_group,
-            masked: true,
-            enabled: false,
-        }
+            masked,
+            enabled,
+        })
     }
 
     fn state(&self) -> MsixConfigState {
@@ -426,7 +466,7 @@ impl Pausable for MsixConfig {}
 
 impl Snapshottable for MsixConfig {
     fn id(&self) -> String {
-        String::from("msix_config")
+        String::from(MSIX_CONFIG_ID)
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {

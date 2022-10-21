@@ -663,7 +663,9 @@ impl VfioCommon {
             msix_cap.table_size(),
             interrupt_source_group.clone(),
             bdf.into(),
-        );
+            None,
+        )
+        .unwrap();
 
         self.interrupt.msix = Some(VfioMsix {
             bar: msix_config,
@@ -1234,6 +1236,7 @@ impl VfioPciDevice {
             PciHeaderType::Device,
             0,
             0,
+            None,
             None,
         );
 

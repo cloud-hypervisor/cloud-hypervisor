@@ -88,6 +88,7 @@ impl VfioUserPciDevice {
             0,
             0,
             None,
+            None,
         );
         let resettable = client.lock().unwrap().resettable();
         if resettable {

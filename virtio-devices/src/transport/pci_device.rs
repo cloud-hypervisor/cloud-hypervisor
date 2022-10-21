@@ -6,15 +6,13 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use super::VirtioPciCommonConfig;
-use crate::transport::VirtioTransport;
+use crate::transport::{VirtioPciCommonConfig, VirtioTransport, VIRTIO_PCI_COMMON_CONFIG_ID};
 use crate::GuestMemoryMmap;
 use crate::{
     ActivateResult, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
     DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED, DEVICE_FEATURES_OK,
     DEVICE_INIT,
 };
-use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
 use pci::{
     BarReprogrammingParams, MsixCap, MsixConfig, PciBarConfiguration, PciBarRegionType,
@@ -30,7 +28,7 @@ use std::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use virtio_queue::{Error as QueueError, Queue, QueueT};
+use virtio_queue::{Queue, QueueT};
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{
@@ -44,14 +42,10 @@ use vm_migration::{
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::{errno::Result, eventfd::EventFd};
 
+use super::pci_common_config::VirtioPciCommonConfigState;
+
 /// Vector value used to disable MSI for a queue.
 const VIRTQ_MSI_NO_VECTOR: u16 = 0xffff;
-
-#[derive(Debug)]
-enum Error {
-    /// Failed to retrieve queue ring's index.
-    QueueRingIndex(QueueError),
-}
 
 #[allow(clippy::enum_variant_names)]
 enum PciCapabilityType {
@@ -280,7 +274,7 @@ struct QueueState {
 }
 
 #[derive(Versionize)]
-struct VirtioPciDeviceState {
+pub struct VirtioPciDeviceState {
     device_activated: bool,
     queues: Vec<QueueState>,
     interrupt_status: usize,
@@ -390,9 +384,51 @@ impl VirtioPciDevice {
         use_64bit_bar: bool,
         dma_handler: Option<Arc<dyn ExternalDmaMapping>>,
         pending_activations: Arc<Mutex<Vec<VirtioPciDeviceActivator>>>,
+        snapshot: Option<Snapshot>,
     ) -> Result<Self> {
-        let device_clone = device.clone();
-        let mut locked_device = device_clone.lock().unwrap();
+        let state: Option<VirtioPciDeviceState> = snapshot
+            .as_ref()
+            .map(|s| s.to_versioned_state(&id))
+            .transpose()
+            .map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Failed to get VirtioPciDeviceState from Snapshot: {}", e),
+                )
+            })?;
+
+        let msix_state =
+            vm_migration::versioned_state_from_id(snapshot.as_ref(), pci::MSIX_CONFIG_ID).map_err(
+                |e| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("Failed to get MsixConfigState from Snapshot: {}", e),
+                    )
+                },
+            )?;
+
+        let common_config_state =
+            vm_migration::versioned_state_from_id(snapshot.as_ref(), VIRTIO_PCI_COMMON_CONFIG_ID)
+                .map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!(
+                        "Failed to get VirtioPciCommonConfigState from Snapshot: {}",
+                        e
+                    ),
+                )
+            })?;
+
+        let pci_configuration_state =
+            vm_migration::versioned_state_from_id(snapshot.as_ref(), pci::PCI_CONFIGURATION_ID)
+                .map_err(|e| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("Failed to get PciConfigurationState from Snapshot: {}", e),
+                    )
+                })?;
+
+        let mut locked_device = device.lock().unwrap();
         let mut queue_evts = Vec::new();
         for _ in locked_device.queue_max_sizes().iter() {
             queue_evts.push(EventFd::new(EFD_NONBLOCK)?)
@@ -403,7 +439,7 @@ impl VirtioPciDevice {
             locked_device.set_access_platform(access_platform.clone());
         }
 
-        let queues = locked_device
+        let mut queues: Vec<Queue> = locked_device
             .queue_max_sizes()
             .iter()
             .map(|&s| Queue::new(s).unwrap())
@@ -417,11 +453,15 @@ impl VirtioPciDevice {
         })?;
 
         let (msix_config, msix_config_clone) = if msix_num > 0 {
-            let msix_config = Arc::new(Mutex::new(MsixConfig::new(
-                msix_num,
-                interrupt_source_group.clone(),
-                pci_device_bdf,
-            )));
+            let msix_config = Arc::new(Mutex::new(
+                MsixConfig::new(
+                    msix_num,
+                    interrupt_source_group.clone(),
+                    pci_device_bdf,
+                    msix_state,
+                )
+                .unwrap(),
+            ));
             let msix_config_clone = msix_config.clone();
             (Some(msix_config), Some(msix_config_clone))
         } else {
@@ -454,26 +494,74 @@ impl VirtioPciDevice {
             VIRTIO_PCI_VENDOR_ID,
             pci_device_id,
             msix_config_clone,
+            pci_configuration_state,
         );
+
+        let common_config = if let Some(common_config_state) = common_config_state {
+            VirtioPciCommonConfig::new(common_config_state, access_platform)
+        } else {
+            VirtioPciCommonConfig::new(
+                VirtioPciCommonConfigState {
+                    driver_status: 0,
+                    config_generation: 0,
+                    device_feature_select: 0,
+                    driver_feature_select: 0,
+                    queue_select: 0,
+                    msix_config: VIRTQ_MSI_NO_VECTOR,
+                    msix_queues: vec![VIRTQ_MSI_NO_VECTOR; num_queues],
+                },
+                access_platform,
+            )
+        };
+
+        let (device_activated, interrupt_status) = if let Some(state) = state {
+            // Update virtqueues indexes for both available and used rings.
+            for (i, queue) in queues.iter_mut().enumerate() {
+                queue.set_size(state.queues[i].size);
+                queue.set_ready(state.queues[i].ready);
+                queue
+                    .try_set_desc_table_address(GuestAddress(state.queues[i].desc_table))
+                    .unwrap();
+                queue
+                    .try_set_avail_ring_address(GuestAddress(state.queues[i].avail_ring))
+                    .unwrap();
+                queue
+                    .try_set_used_ring_address(GuestAddress(state.queues[i].used_ring))
+                    .unwrap();
+                queue.set_next_avail(
+                    queue
+                        .used_idx(memory.memory().deref(), Ordering::Acquire)
+                        .unwrap()
+                        .0,
+                );
+                queue.set_next_used(
+                    queue
+                        .used_idx(memory.memory().deref(), Ordering::Acquire)
+                        .unwrap()
+                        .0,
+                );
+            }
+
+            (state.device_activated, state.interrupt_status)
+        } else {
+            (false, 0)
+        };
+
+        // Dropping the MutexGuard to unlock the VirtioDevice. This is required
+        // in the context of a restore given the device might require some
+        // activation, meaning it will require locking. Dropping the lock
+        // prevents from a subtle deadlock.
+        std::mem::drop(locked_device);
 
         let mut virtio_pci_device = VirtioPciDevice {
             id,
             configuration,
-            common_config: VirtioPciCommonConfig {
-                access_platform,
-                driver_status: 0,
-                config_generation: 0,
-                device_feature_select: 0,
-                driver_feature_select: 0,
-                queue_select: 0,
-                msix_config: Arc::new(AtomicU16::new(VIRTQ_MSI_NO_VECTOR)),
-                msix_queues: Arc::new(Mutex::new(vec![VIRTQ_MSI_NO_VECTOR; num_queues])),
-            },
+            common_config,
             msix_config,
             msix_num,
             device,
-            device_activated: Arc::new(AtomicBool::new(false)),
-            interrupt_status: Arc::new(AtomicUsize::new(0)),
+            device_activated: Arc::new(AtomicBool::new(device_activated)),
+            interrupt_status: Arc::new(AtomicUsize::new(interrupt_status)),
             virtio_interrupt: None,
             queues,
             queue_evts,
@@ -497,6 +585,20 @@ impl VirtioPciDevice {
             )));
         }
 
+        // In case of a restore, we can activate the device, as we know at
+        // this point the virtqueues are in the right state and the device is
+        // ready to be activated, which will spawn each virtio worker thread.
+        if virtio_pci_device.device_activated.load(Ordering::SeqCst)
+            && virtio_pci_device.is_driver_ready()
+        {
+            virtio_pci_device.activate().map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Failed activating the device: {}", e),
+                )
+            })?;
+        }
+
         Ok(virtio_pci_device)
     }
 
@@ -517,42 +619,6 @@ impl VirtioPciDevice {
                 })
                 .collect(),
         }
-    }
-
-    fn set_state(&mut self, state: &VirtioPciDeviceState) -> std::result::Result<(), Error> {
-        self.device_activated
-            .store(state.device_activated, Ordering::Release);
-        self.interrupt_status
-            .store(state.interrupt_status, Ordering::Release);
-
-        // Update virtqueues indexes for both available and used rings.
-        for (i, queue) in self.queues.iter_mut().enumerate() {
-            queue.set_size(state.queues[i].size);
-            queue.set_ready(state.queues[i].ready);
-            queue
-                .try_set_desc_table_address(GuestAddress(state.queues[i].desc_table))
-                .unwrap();
-            queue
-                .try_set_avail_ring_address(GuestAddress(state.queues[i].avail_ring))
-                .unwrap();
-            queue
-                .try_set_used_ring_address(GuestAddress(state.queues[i].used_ring))
-                .unwrap();
-            queue.set_next_avail(
-                queue
-                    .used_idx(self.memory.memory().deref(), Ordering::Acquire)
-                    .map_err(Error::QueueRingIndex)?
-                    .0,
-            );
-            queue.set_next_used(
-                queue
-                    .used_idx(self.memory.memory().deref(), Ordering::Acquire)
-                    .map_err(Error::QueueRingIndex)?
-                    .0,
-            );
-        }
-
-        Ok(())
     }
 
     /// Gets the list of queue events that must be triggered whenever the VM writes to
@@ -883,6 +949,7 @@ impl PciDevice for VirtioPciDevice {
 
         let mut settings_bar_addr = None;
         let mut use_64bit_bar = self.use_64bit_bar;
+        let restoring = resources.is_some();
         if let Some(resources) = resources {
             for resource in resources {
                 if let Resource::PciBar {
@@ -939,14 +1006,16 @@ impl PciDevice for VirtioPciDevice {
             .set_address(virtio_pci_bar_addr.raw_value())
             .set_size(CAPABILITY_BAR_SIZE)
             .set_region_type(region_type);
-        self.configuration.add_pci_bar(&bar).map_err(|e| {
-            PciDeviceError::IoRegistrationFailed(virtio_pci_bar_addr.raw_value(), e)
-        })?;
+        if !restoring {
+            self.configuration.add_pci_bar(&bar).map_err(|e| {
+                PciDeviceError::IoRegistrationFailed(virtio_pci_bar_addr.raw_value(), e)
+            })?;
+
+            // Once the BARs are allocated, the capabilities can be added to the PCI configuration.
+            self.add_pci_capabilities(VIRTIO_COMMON_BAR_INDEX as u8)?;
+        }
 
         bars.push(bar);
-
-        // Once the BARs are allocated, the capabilities can be added to the PCI configuration.
-        self.add_pci_capabilities(VIRTIO_COMMON_BAR_INDEX as u8)?;
 
         // Allocate a dedicated BAR if there are some shared memory regions.
         if let Some(shm_list) = device.get_shm_regions() {
@@ -954,24 +1023,26 @@ impl PciDevice for VirtioPciDevice {
                 .set_index(VIRTIO_SHM_BAR_INDEX)
                 .set_address(shm_list.addr.raw_value())
                 .set_size(shm_list.len);
-            self.configuration
-                .add_pci_bar(&bar)
-                .map_err(|e| PciDeviceError::IoRegistrationFailed(shm_list.addr.raw_value(), e))?;
+            if !restoring {
+                self.configuration.add_pci_bar(&bar).map_err(|e| {
+                    PciDeviceError::IoRegistrationFailed(shm_list.addr.raw_value(), e)
+                })?;
+
+                for (idx, shm) in shm_list.region_list.iter().enumerate() {
+                    let shm_cap = VirtioPciCap64::new(
+                        PciCapabilityType::SharedMemoryConfig,
+                        VIRTIO_SHM_BAR_INDEX as u8,
+                        idx as u8,
+                        shm.offset,
+                        shm.len,
+                    );
+                    self.configuration
+                        .add_capability(&shm_cap)
+                        .map_err(PciDeviceError::CapabilitiesSetup)?;
+                }
+            }
 
             bars.push(bar);
-
-            for (idx, shm) in shm_list.region_list.iter().enumerate() {
-                let shm_cap = VirtioPciCap64::new(
-                    PciCapabilityType::SharedMemoryConfig,
-                    VIRTIO_SHM_BAR_INDEX as u8,
-                    idx as u8,
-                    shm.offset,
-                    shm.len,
-                );
-                self.configuration
-                    .add_capability(&shm_cap)
-                    .map_err(PciDeviceError::CapabilitiesSetup)?;
-            }
         }
 
         self.bar_regions = bars.clone();
@@ -1185,58 +1256,6 @@ impl Snapshottable for VirtioPciDevice {
         }
 
         Ok(virtio_pci_dev_snapshot)
-    }
-
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        if let Some(virtio_pci_dev_section) =
-            snapshot.snapshot_data.get(&format!("{}-section", self.id))
-        {
-            // Restore MSI-X
-            if let Some(msix_config) = &self.msix_config {
-                let id = msix_config.lock().unwrap().id();
-                if let Some(msix_snapshot) = snapshot.snapshots.get(&id) {
-                    msix_config
-                        .lock()
-                        .unwrap()
-                        .restore(*msix_snapshot.clone())?;
-                }
-            }
-
-            // Restore VirtioPciCommonConfig
-            if let Some(virtio_config_snapshot) = snapshot.snapshots.get(&self.common_config.id()) {
-                self.common_config
-                    .restore(*virtio_config_snapshot.clone())?;
-            }
-
-            // Restore PciConfiguration
-            if let Some(pci_config_snapshot) = snapshot.snapshots.get(&self.configuration.id()) {
-                self.configuration.restore(*pci_config_snapshot.clone())?;
-            }
-
-            // First restore the status of the virtqueues.
-            self.set_state(&virtio_pci_dev_section.to_versioned_state()?)
-                .map_err(|e| {
-                    MigratableError::Restore(anyhow!(
-                        "Could not restore VIRTIO_PCI_DEVICE state {:?}",
-                        e
-                    ))
-                })?;
-
-            // Then we can activate the device, as we know at this point that
-            // the virtqueues are in the right state and the device is ready
-            // to be activated, which will spawn each virtio worker thread.
-            if self.device_activated.load(Ordering::SeqCst) && self.is_driver_ready() {
-                self.activate().map_err(|e| {
-                    MigratableError::Restore(anyhow!("Failed activating the device: {:?}", e))
-                })?;
-            }
-
-            return Ok(());
-        }
-
-        Err(MigratableError::Restore(anyhow!(
-            "Could not find VIRTIO_PCI_DEVICE snapshot section"
-        )))
     }
 }
 impl Transportable for VirtioPciDevice {}

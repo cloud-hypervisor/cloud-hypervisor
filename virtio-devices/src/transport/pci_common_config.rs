@@ -16,6 +16,8 @@ use virtio_queue::{Queue, QueueT};
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, VersionMapped};
 use vm_virtio::AccessPlatform;
 
+pub const VIRTIO_PCI_COMMON_CONFIG_ID: &str = "virtio_pci_common_config";
+
 #[derive(Clone, Versionize)]
 pub struct VirtioPciCommonConfigState {
     pub driver_status: u8,
@@ -63,6 +65,22 @@ pub struct VirtioPciCommonConfig {
 }
 
 impl VirtioPciCommonConfig {
+    pub fn new(
+        state: VirtioPciCommonConfigState,
+        access_platform: Option<Arc<dyn AccessPlatform>>,
+    ) -> Self {
+        VirtioPciCommonConfig {
+            access_platform,
+            driver_status: state.driver_status,
+            config_generation: state.config_generation,
+            device_feature_select: state.device_feature_select,
+            driver_feature_select: state.driver_feature_select,
+            queue_select: state.queue_select,
+            msix_config: Arc::new(AtomicU16::new(state.msix_config)),
+            msix_queues: Arc::new(Mutex::new(state.msix_queues)),
+        }
+    }
+
     fn state(&self) -> VirtioPciCommonConfigState {
         VirtioPciCommonConfigState {
             driver_status: self.driver_status,
@@ -73,16 +91,6 @@ impl VirtioPciCommonConfig {
             msix_config: self.msix_config.load(Ordering::Acquire),
             msix_queues: self.msix_queues.lock().unwrap().clone(),
         }
-    }
-
-    fn set_state(&mut self, state: &VirtioPciCommonConfigState) {
-        self.driver_status = state.driver_status;
-        self.config_generation = state.config_generation;
-        self.device_feature_select = state.device_feature_select;
-        self.driver_feature_select = state.driver_feature_select;
-        self.queue_select = state.queue_select;
-        self.msix_config.store(state.msix_config, Ordering::Release);
-        *(self.msix_queues.lock().unwrap()) = state.msix_queues.clone();
     }
 
     pub fn read(
@@ -309,16 +317,11 @@ impl Pausable for VirtioPciCommonConfig {}
 
 impl Snapshottable for VirtioPciCommonConfig {
     fn id(&self) -> String {
-        String::from("virtio_pci_common_config")
+        String::from(VIRTIO_PCI_COMMON_CONFIG_ID)
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_versioned_state(&self.id(), &self.state())
-    }
-
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.set_state(&snapshot.to_versioned_state(&self.id())?);
-        Ok(())
     }
 }
 

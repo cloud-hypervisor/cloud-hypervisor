@@ -32,6 +32,8 @@ const CAPABILITY_MAX_OFFSET: usize = 192;
 
 const INTERRUPT_LINE_PIN_REG: usize = 15;
 
+pub const PCI_CONFIGURATION_ID: &str = "pci_configuration";
+
 /// Represents the types of PCI headers allowed in the configuration registers.
 #[derive(Copy, Clone)]
 pub enum PciHeaderType {
@@ -394,7 +396,7 @@ fn decode_64_bits_bar_size(bar_size_hi: u32, bar_size_lo: u32) -> Option<u64> {
     None
 }
 
-#[derive(Default, Clone, Copy, Versionize)]
+#[derive(Debug, Default, Clone, Copy, Versionize)]
 struct PciBar {
     addr: u32,
     size: u32,
@@ -403,7 +405,7 @@ struct PciBar {
 }
 
 #[derive(Versionize)]
-struct PciConfigurationState {
+pub struct PciConfigurationState {
     registers: Vec<u32>,
     writable_bits: Vec<u32>,
     bars: Vec<PciBar>,
@@ -553,46 +555,78 @@ impl PciConfiguration {
         subsystem_vendor_id: u16,
         subsystem_id: u16,
         msix_config: Option<Arc<Mutex<MsixConfig>>>,
+        state: Option<PciConfigurationState>,
     ) -> Self {
-        let mut registers = [0u32; NUM_CONFIGURATION_REGISTERS];
-        let mut writable_bits = [0u32; NUM_CONFIGURATION_REGISTERS];
-        registers[0] = u32::from(device_id) << 16 | u32::from(vendor_id);
-        // TODO(dverkamp): Status should be write-1-to-clear
-        writable_bits[1] = 0x0000_ffff; // Status (r/o), command (r/w)
-        let pi = if let Some(pi) = programming_interface {
-            pi.get_register_value()
+        let (
+            registers,
+            writable_bits,
+            bars,
+            rom_bar_addr,
+            rom_bar_size,
+            rom_bar_used,
+            last_capability,
+            msix_cap_reg_idx,
+        ) = if let Some(state) = state {
+            (
+                state.registers.try_into().unwrap(),
+                state.writable_bits.try_into().unwrap(),
+                state.bars.try_into().unwrap(),
+                state.rom_bar_addr,
+                state.rom_bar_size,
+                state.rom_bar_used,
+                state.last_capability,
+                state.msix_cap_reg_idx,
+            )
         } else {
-            0
-        };
-        registers[2] = u32::from(class_code.get_register_value()) << 24
-            | u32::from(subclass.get_register_value()) << 16
-            | u32::from(pi) << 8
-            | u32::from(revision_id);
-        writable_bits[3] = 0x0000_00ff; // Cacheline size (r/w)
-        match header_type {
-            PciHeaderType::Device => {
-                registers[3] = 0x0000_0000; // Header type 0 (device)
-                writable_bits[15] = 0x0000_00ff; // Interrupt line (r/w)
-            }
-            PciHeaderType::Bridge => {
-                registers[3] = 0x0001_0000; // Header type 1 (bridge)
-                writable_bits[9] = 0xfff0_fff0; // Memory base and limit
-                writable_bits[15] = 0xffff_00ff; // Bridge control (r/w), interrupt line (r/w)
-            }
-        };
-        registers[11] = u32::from(subsystem_id) << 16 | u32::from(subsystem_vendor_id);
+            let mut registers = [0u32; NUM_CONFIGURATION_REGISTERS];
+            let mut writable_bits = [0u32; NUM_CONFIGURATION_REGISTERS];
+            registers[0] = u32::from(device_id) << 16 | u32::from(vendor_id);
+            // TODO(dverkamp): Status should be write-1-to-clear
+            writable_bits[1] = 0x0000_ffff; // Status (r/o), command (r/w)
+            let pi = if let Some(pi) = programming_interface {
+                pi.get_register_value()
+            } else {
+                0
+            };
+            registers[2] = u32::from(class_code.get_register_value()) << 24
+                | u32::from(subclass.get_register_value()) << 16
+                | u32::from(pi) << 8
+                | u32::from(revision_id);
+            writable_bits[3] = 0x0000_00ff; // Cacheline size (r/w)
+            match header_type {
+                PciHeaderType::Device => {
+                    registers[3] = 0x0000_0000; // Header type 0 (device)
+                    writable_bits[15] = 0x0000_00ff; // Interrupt line (r/w)
+                }
+                PciHeaderType::Bridge => {
+                    registers[3] = 0x0001_0000; // Header type 1 (bridge)
+                    writable_bits[9] = 0xfff0_fff0; // Memory base and limit
+                    writable_bits[15] = 0xffff_00ff; // Bridge control (r/w), interrupt line (r/w)
+                }
+            };
+            registers[11] = u32::from(subsystem_id) << 16 | u32::from(subsystem_vendor_id);
 
-        let bars = [PciBar::default(); NUM_BAR_REGS];
+            (
+                registers,
+                writable_bits,
+                [PciBar::default(); NUM_BAR_REGS],
+                0,
+                0,
+                false,
+                None,
+                None,
+            )
+        };
 
         PciConfiguration {
             registers,
             writable_bits,
             bars,
-            rom_bar_addr: 0,
-            rom_bar_size: 0,
-            rom_bar_used: false,
-            last_capability: None,
-            msix_cap_reg_idx: None,
+            rom_bar_addr,
+            rom_bar_size,
+            rom_bar_used,
+            last_capability,
+            msix_cap_reg_idx,
             msix_config,
         }
     }
@@ -1046,7 +1080,7 @@ impl Pausable for PciConfiguration {}
 
 impl Snapshottable for PciConfiguration {
     fn id(&self) -> String {
-        String::from("pci_configuration")
+        String::from(PCI_CONFIGURATION_ID)
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
@@ -1178,6 +1212,7 @@ mod tests {
             0xABCD,
             0x2468,
             None,
+            None,
         );
 
         // Add two capabilities with different contents.
@@ -1233,6 +1268,7 @@ mod tests {
             PciHeaderType::Device,
             0xABCD,
             0x2468,
+            None,
             None,
         );
 
