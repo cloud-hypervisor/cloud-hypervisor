@@ -3515,6 +3515,7 @@ impl DeviceManager {
                 pci_segment_id > 0 || device_type != VirtioDeviceType::Block as u32,
                 dma_handler,
                 self.pending_activations.clone(),
+                vm_migration::snapshot_from_id(self.snapshot.as_ref(), id.as_str()),
             )
             .map_err(DeviceManagerError::VirtioDevice)?,
         ));
