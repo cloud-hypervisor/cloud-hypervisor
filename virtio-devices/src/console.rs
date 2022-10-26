@@ -27,7 +27,7 @@ use std::sync::{Arc, Barrier, Mutex};
 use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use virtio_queue::{Queue, QueueOwnedT, QueueT};
+use virtio_queue::{Queue, QueueT};
 use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -57,6 +57,12 @@ const VIRTIO_CONSOLE_F_SIZE: u64 = 0;
 enum Error {
     #[error("Descriptor chain too short")]
     DescriptorChainTooShort,
+    #[error("Failed to read from guest memory: {0}")]
+    GuestMemoryRead(vm_memory::guest_memory::Error),
+    #[error("Failed to write to guest memory: {0}")]
+    GuestMemoryWrite(vm_memory::guest_memory::Error),
+    #[error("Failed to flush output: {0}")]
+    OutputFlush(io::Error),
     #[error("Failed to add used index: {0}")]
     QueueAddUsed(virtio_queue::Error),
 }
@@ -227,15 +233,14 @@ impl ConsoleEpollHandler {
             let len = cmp::min(desc.len() as u32, in_buffer.len() as u32);
             let source_slice = in_buffer.drain(..len as usize).collect::<Vec<u8>>();
 
-            if let Err(e) = desc_chain.memory().write_slice(
-                &source_slice[..],
-                desc.addr()
-                    .translate_gva(self.access_platform.as_ref(), desc.len() as usize),
-            ) {
-                error!("Failed to write slice: {:?}", e);
-                recv_queue.go_to_previous_position();
-                break;
-            }
+            desc_chain
+                .memory()
+                .write_slice(
+                    &source_slice[..],
+                    desc.addr()
+                        .translate_gva(self.access_platform.as_ref(), desc.len() as usize),
+                )
+                .map_err(Error::GuestMemoryWrite)?;
 
             recv_queue
                 .add_used(desc_chain.memory(), desc_chain.head_index(), len)
@@ -264,13 +269,16 @@ impl ConsoleEpollHandler {
         while let Some(mut desc_chain) = trans_queue.pop_descriptor_chain(self.mem.memory()) {
             let desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
             if let Some(out) = &mut self.out {
-                let _ = desc_chain.memory().write_to(
-                    desc.addr()
-                        .translate_gva(self.access_platform.as_ref(), desc.len() as usize),
-                    out,
-                    desc.len() as usize,
-                );
-                let _ = out.flush();
+                desc_chain
+                    .memory()
+                    .write_to(
+                        desc.addr()
+                            .translate_gva(self.access_platform.as_ref(), desc.len() as usize),
+                        out,
+                        desc.len() as usize,
+                    )
+                    .map_err(Error::GuestMemoryRead)?;
+                out.flush().map_err(Error::OutputFlush)?;
             }
             trans_queue
                 .add_used(desc_chain.memory(), desc_chain.head_index(), desc.len())
