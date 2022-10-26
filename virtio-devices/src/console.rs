@@ -41,14 +41,12 @@ const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE; NUM_QUEUES];
 // New descriptors are pending on the virtio queue.
 const INPUT_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 const OUTPUT_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
-// Some input from the VMM is ready to be injected into the VM.
-const INPUT_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
 // Console configuration change event is triggered.
-const CONFIG_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 4;
+const CONFIG_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
 // File written to (input ready)
-const FILE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 5;
+const FILE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 4;
 // Console resized
-const RESIZE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 6;
+const RESIZE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 5;
 
 //Console size feature bit
 const VIRTIO_CONSOLE_F_SIZE: u64 = 0;
@@ -100,7 +98,6 @@ struct ConsoleEpollHandler {
     endpoint: Endpoint,
     input_queue_evt: EventFd,
     output_queue_evt: EventFd,
-    input_evt: EventFd,
     config_evt: EventFd,
     resize_pipe: Option<File>,
     kill_evt: EventFd,
@@ -169,7 +166,6 @@ impl ConsoleEpollHandler {
         endpoint: Endpoint,
         input_queue_evt: EventFd,
         output_queue_evt: EventFd,
-        input_evt: EventFd,
         config_evt: EventFd,
         resize_pipe: Option<File>,
         kill_evt: EventFd,
@@ -201,7 +197,6 @@ impl ConsoleEpollHandler {
             endpoint,
             input_queue_evt,
             output_queue_evt,
-            input_evt,
             config_evt,
             resize_pipe,
             kill_evt,
@@ -306,7 +301,6 @@ impl ConsoleEpollHandler {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.input_queue_evt.as_raw_fd(), INPUT_QUEUE_EVENT)?;
         helper.add_event(self.output_queue_evt.as_raw_fd(), OUTPUT_QUEUE_EVENT)?;
-        helper.add_event(self.input_evt.as_raw_fd(), INPUT_EVENT)?;
         helper.add_event(self.config_evt.as_raw_fd(), CONFIG_EVENT)?;
         if let Some(resize_pipe) = self.resize_pipe.as_ref() {
             helper.add_event(resize_pipe.as_raw_fd(), RESIZE_EVENT)?;
@@ -413,25 +407,6 @@ impl EpollHelperHandler for ConsoleEpollHandler {
                 })?;
                 if needs_notification {
                     self.signal_used_queue(1).map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to signal used queue: {:?}",
-                            e
-                        ))
-                    })?;
-                }
-            }
-            INPUT_EVENT => {
-                self.input_evt.read().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to get input event: {:?}", e))
-                })?;
-                let needs_notification = self.process_input_queue().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!(
-                        "Failed to process input queue : {:?}",
-                        e
-                    ))
-                })?;
-                if needs_notification {
-                    self.signal_used_queue(0).map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
                             "Failed to signal used queue: {:?}",
                             e
@@ -767,7 +742,6 @@ impl VirtioDevice for Console {
         }
 
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
-        let input_evt = EventFd::new(EFD_NONBLOCK).unwrap();
 
         let (_, input_queue, input_queue_evt) = queues.remove(0);
         let (_, output_queue, output_queue_evt) = queues.remove(0);
@@ -782,7 +756,6 @@ impl VirtioDevice for Console {
             self.endpoint.clone(),
             input_queue_evt,
             output_queue_evt,
-            input_evt,
             self.resizer.config_evt.try_clone().unwrap(),
             self.resize_pipe.as_ref().map(|p| p.try_clone().unwrap()),
             kill_evt,
