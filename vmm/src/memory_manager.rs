@@ -1252,9 +1252,8 @@ impl MemoryManager {
                 }
             }
             None => {
-                let fd = Self::memfd_create(
-                    &ffi::CString::new("ch_ram").unwrap(),
-                    if hugepages {
+                let flags = libc::MFD_CLOEXEC
+                    | if hugepages {
                         libc::MFD_HUGETLB
                             | if let Some(hugepage_size) = hugepage_size {
                                 /*
@@ -1274,9 +1273,9 @@ impl MemoryManager {
                             }
                     } else {
                         0
-                    },
-                )
-                .map_err(Error::SharedFileCreate)?;
+                    };
+                let fd = Self::memfd_create(&ffi::CString::new("ch_ram").unwrap(), flags)
+                    .map_err(Error::SharedFileCreate)?;
 
                 let f = unsafe { File::from_raw_fd(fd) };
                 f.set_len(size as u64).map_err(Error::SharedFileSetLen)?;
