@@ -24,6 +24,7 @@ use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
+use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_queue::{Queue, QueueOwnedT, QueueT};
@@ -51,6 +52,14 @@ const RESIZE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 6;
 
 //Console size feature bit
 const VIRTIO_CONSOLE_F_SIZE: u64 = 0;
+
+#[derive(Error, Debug)]
+enum Error {
+    #[error("Descriptor chain too short")]
+    DescriptorChainTooShort,
+    #[error("Failed to add used index: {0}")]
+    QueueAddUsed(virtio_queue::Error),
+}
 
 #[derive(Copy, Clone, Debug, Versionize)]
 #[repr(C, packed)]
@@ -204,17 +213,17 @@ impl ConsoleEpollHandler {
      * driver in the receive queue for incoming data. Here,
      * we place the input data to these empty buffers.
      */
-    fn process_input_queue(&mut self) -> bool {
+    fn process_input_queue(&mut self) -> Result<bool, Error> {
         let mut in_buffer = self.in_buffer.lock().unwrap();
         let recv_queue = &mut self.input_queue; //receiveq
         let mut used_descs = false;
 
         if in_buffer.is_empty() {
-            return false;
+            return Ok(false);
         }
 
         while let Some(mut desc_chain) = recv_queue.pop_descriptor_chain(self.mem.memory()) {
-            let desc = desc_chain.next().unwrap();
+            let desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
             let len = cmp::min(desc.len() as u32, in_buffer.len() as u32);
             let source_slice = in_buffer.drain(..len as usize).collect::<Vec<u8>>();
 
@@ -230,7 +239,7 @@ impl ConsoleEpollHandler {
 
             recv_queue
                 .add_used(desc_chain.memory(), desc_chain.head_index(), len)
-                .unwrap();
+                .map_err(Error::QueueAddUsed)?;
             used_descs = true;
 
             if in_buffer.is_empty() {
@@ -238,7 +247,7 @@ impl ConsoleEpollHandler {
             }
         }
 
-        used_descs
+        Ok(used_descs)
     }
 
     /*
@@ -248,12 +257,12 @@ impl ConsoleEpollHandler {
      * we read data from the transmit queue and flush them
      * to the referenced address.
      */
-    fn process_output_queue(&mut self) -> bool {
+    fn process_output_queue(&mut self) -> Result<bool, Error> {
         let trans_queue = &mut self.output_queue; //transmitq
         let mut used_descs = false;
 
         while let Some(mut desc_chain) = trans_queue.pop_descriptor_chain(self.mem.memory()) {
-            let desc = desc_chain.next().unwrap();
+            let desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
             if let Some(out) = &mut self.out {
                 let _ = desc_chain.memory().write_to(
                     desc.addr()
@@ -265,11 +274,11 @@ impl ConsoleEpollHandler {
             }
             trans_queue
                 .add_used(desc_chain.memory(), desc_chain.head_index(), desc.len())
-                .unwrap();
+                .map_err(Error::QueueAddUsed)?;
             used_descs = true;
         }
 
-        used_descs
+        Ok(used_descs)
     }
 
     fn signal_used_queue(&self, queue_index: u16) -> result::Result<(), DeviceError> {
@@ -369,7 +378,13 @@ impl EpollHelperHandler for ConsoleEpollHandler {
                 self.input_queue_evt.read().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
                 })?;
-                if self.process_input_queue() {
+                let needs_notification = self.process_input_queue().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!(
+                        "Failed to process input queue : {:?}",
+                        e
+                    ))
+                })?;
+                if needs_notification {
                     self.signal_used_queue(0).map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
                             "Failed to signal used queue: {:?}",
@@ -382,7 +397,13 @@ impl EpollHelperHandler for ConsoleEpollHandler {
                 self.output_queue_evt.read().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
                 })?;
-                if self.process_output_queue() {
+                let needs_notification = self.process_output_queue().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!(
+                        "Failed to process output queue : {:?}",
+                        e
+                    ))
+                })?;
+                if needs_notification {
                     self.signal_used_queue(1).map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
                             "Failed to signal used queue: {:?}",
@@ -395,7 +416,13 @@ impl EpollHelperHandler for ConsoleEpollHandler {
                 self.input_evt.read().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!("Failed to get input event: {:?}", e))
                 })?;
-                if self.process_input_queue() {
+                let needs_notification = self.process_input_queue().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!(
+                        "Failed to process input queue : {:?}",
+                        e
+                    ))
+                })?;
+                if needs_notification {
                     self.signal_used_queue(0).map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
                             "Failed to signal used queue: {:?}",
@@ -439,7 +466,13 @@ impl EpollHelperHandler for ConsoleEpollHandler {
                             in_buffer.extend(&input[..count]);
                         }
 
-                        if self.process_input_queue() {
+                        let needs_notification = self.process_input_queue().map_err(|e| {
+                            EpollHelperError::HandleEvent(anyhow!(
+                                "Failed to process input queue : {:?}",
+                                e
+                            ))
+                        })?;
+                        if needs_notification {
                             self.signal_used_queue(0).map_err(|e| {
                                 EpollHelperError::HandleEvent(anyhow!(
                                     "Failed to signal used queue: {:?}",
