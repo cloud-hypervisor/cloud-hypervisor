@@ -2100,7 +2100,7 @@ impl DeviceManager {
                 ImageType::FixedVhd => {
                     // Use asynchronous backend relying on io_uring if the
                     // syscalls are supported.
-                    if self.io_uring_is_supported() && !disk_cfg.disable_io_uring {
+                    if !disk_cfg.disable_io_uring && self.io_uring_is_supported() {
                         info!("Using asynchronous fixed VHD disk file (io_uring)");
                         Box::new(
                             FixedVhdDiskAsync::new(file)
@@ -2117,7 +2117,7 @@ impl DeviceManager {
                 ImageType::Raw => {
                     // Use asynchronous backend relying on io_uring if the
                     // syscalls are supported.
-                    if self.io_uring_is_supported() && !disk_cfg.disable_io_uring {
+                    if !disk_cfg.disable_io_uring && self.io_uring_is_supported() {
                         info!("Using asynchronous RAW disk file (io_uring)");
                         Box::new(RawFileDisk::new(file)) as Box<dyn DiskFile>
                     } else {
