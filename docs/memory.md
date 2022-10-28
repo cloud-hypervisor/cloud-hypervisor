@@ -16,7 +16,6 @@ struct MemoryConfig {
     hotplug_method: HotplugMethod,
     hotplug_size: Option<u64>,
     hotplugged_size: Option<u64>,
-    shared: bool,
     hugepages: bool,
     hugepage_size: Option<u64>,
     prefault: bool,
@@ -25,7 +24,7 @@ struct MemoryConfig {
 ```
 
 ```
---memory <memory>	Memory parameters "size=<guest_memory_size>,mergeable=on|off,shared=on|off,hugepages=on|off,hugepage_size=<hugepage_size>,hotplug_method=acpi|virtio-mem,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>,prefault=on|off" [default: size=512M]
+--memory <memory>	Memory parameters "size=<guest_memory_size>,mergeable=on|off,hugepages=on|off,hugepage_size=<hugepage_size>,hotplug_method=acpi|virtio-mem,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>,prefault=on|off" [default: size=512M]
 ```
 
 ### `size`
@@ -105,24 +104,6 @@ _Example_
 --memory size=1G,hotplug_method=virtio-mem,hotplug_size=1G,hotplugged_size=512M
 ```
 
-### `shared`
-
-Specifies if the memory must be `mmap(2)` with `MAP_SHARED` flag.
-
-By sharing a memory mapping, one can share the guest RAM with other processes
-running on the host. One can use this option when running vhost-user devices
-as part of the VM device model, as they will be driven by standalone daemons
-needing access to the guest RAM content.
-
-By default this option is turned off, which results in performing `mmap(2)`
-with `MAP_PRIVATE` flag.
-
-_Example_
-
-```
---memory size=1G,shared=on
-```
-
 ### `hugepages` and `hugepage_size`
 
 Specifies if the memory must be created and `mmap(2)` with `MAP_HUGETLB` and size
@@ -182,7 +163,6 @@ struct MemoryZoneConfig {
     id: String,
     size: u64,
     file: Option<PathBuf>,
-    shared: bool,
     hugepages: bool,
     hugepage_size: Option<u64>,
     host_numa_node: Option<u32>,
@@ -193,7 +173,7 @@ struct MemoryZoneConfig {
 ```
 
 ```
---memory-zone <memory-zone>	User defined memory zone parameters "size=<guest_memory_region_size>,file=<backing_file>,shared=on|off,hugepages=on|off,hugepage_size=<hugepage_size>,host_numa_node=<node_id>,id=<zone_identifier>,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>,prefault=on|off"
+--memory-zone <memory-zone>	User defined memory zone parameters "size=<guest_memory_region_size>,file=<backing_file>,hugepages=on|off,hugepage_size=<hugepage_size>,host_numa_node=<node_id>,id=<zone_identifier>,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>,prefault=on|off"
 ```
 
 This parameter expects one or more occurences, allowing for a list of memory
@@ -260,25 +240,6 @@ _Example_
 ```
 --memory size=0
 --memory-zone id=mem0,size=1G,file=/foo/bar
-```
-
-### `shared`
-
-Specifies if the memory zone must be `mmap(2)` with `MAP_SHARED` flag.
-
-By sharing a memory zone mapping, one can share part of the guest RAM with
-other processes running on the host. One can use this option when running
-vhost-user devices as part of the VM device model, as they will be driven
-by standalone daemons needing access to the guest RAM content.
-
-By default this option is turned off, which result in performing `mmap(2)`
-with `MAP_PRIVATE` flag.
-
-_Example_
-
-```
---memory size=0
---memory-zone id=mem0,size=1G,shared=on
 ```
 
 ### `hugepages` and `hugepage_size`

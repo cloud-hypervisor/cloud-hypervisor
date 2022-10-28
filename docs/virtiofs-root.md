@@ -70,7 +70,7 @@ sudo cloud-hypervisor \
     --cpus boot=1,max=1 \
     --kernel vmlinux \
     --fs tag=/dev/root,socket=$PWD/virtiofs-rootfs.sock \
-    --memory size=2G,shared=on \
+    --memory size=2G \
     --cmdline "console=hvc0 rootfstype=virtiofs root=/dev/root ro debug" \
     --api-socket $PWD/ch.sock \
     --rng \
