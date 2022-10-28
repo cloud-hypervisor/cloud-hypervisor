@@ -667,11 +667,6 @@ impl MemoryConfig {
             .convert::<ByteSized>("hotplugged_size")
             .map_err(Error::ParseMemory)?
             .map(|v| v.0);
-        let _shared = parser
-            .convert::<Toggle>("shared")
-            .map_err(Error::ParseMemory)?
-            .unwrap_or(Toggle(false))
-            .0;
         let hugepages = parser
             .convert::<Toggle>("hugepages")
             .map_err(Error::ParseMemory)?
@@ -686,6 +681,10 @@ impl MemoryConfig {
             .map_err(Error::ParseMemory)?
             .unwrap_or(Toggle(false))
             .0;
+
+        if parser.is_set("shared") {
+            warn!("The \"shared\" option has no effect. Memory is always mapped as shared.");
+        }
 
         let zones: Option<Vec<MemoryZoneConfig>> = if let Some(memory_zones) = &memory_zones {
             let mut zones = Vec::new();
@@ -711,11 +710,6 @@ impl MemoryConfig {
                     .unwrap_or(ByteSized(DEFAULT_MEMORY_MB << 20))
                     .0;
                 let file = parser.get("file").map(PathBuf::from);
-                let _shared = parser
-                    .convert::<Toggle>("shared")
-                    .map_err(Error::ParseMemoryZone)?
-                    .unwrap_or(Toggle(false))
-                    .0;
                 let hugepages = parser
                     .convert::<Toggle>("hugepages")
                     .map_err(Error::ParseMemoryZone)?
@@ -742,6 +736,12 @@ impl MemoryConfig {
                     .map_err(Error::ParseMemoryZone)?
                     .unwrap_or(Toggle(false))
                     .0;
+
+                if parser.is_set("shared") {
+                    warn!(
+                        "The \"shared\" option has no effect. Memory is always mapped as shared."
+                    );
+                }
 
                 zones.push(MemoryZoneConfig {
                     id,
