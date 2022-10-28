@@ -1294,7 +1294,7 @@ impl MemoryManager {
         start_addr: GuestAddress,
         size: usize,
         prefault: bool,
-        shared: bool,
+        _shared: bool,
         hugepages: bool,
         hugepage_size: Option<u64>,
         host_numa_node: Option<u32>,
@@ -1306,12 +1306,8 @@ impl MemoryManager {
             Self::open_memory_file(backing_file, file_offset, size, hugepages, hugepage_size)?
         };
 
-        let mut mmap_flags = libc::MAP_NORESERVE
-            | if shared {
-                libc::MAP_SHARED
-            } else {
-                libc::MAP_PRIVATE
-            };
+        let mut mmap_flags = libc::MAP_NORESERVE | libc::MAP_SHARED;
+
         if prefault {
             mmap_flags |= libc::MAP_POPULATE;
         }
