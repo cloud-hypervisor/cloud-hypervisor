@@ -109,8 +109,6 @@ pub enum ValidationError {
     CpusMaxLowerThanBoot,
     /// Both socket and path specified
     DiskSocketAndPath,
-    /// Using vhost user requires shared memory
-    VhostUserRequiresSharedMemory,
     /// No socket provided for vhost_use
     VhostUserMissingSocket,
     /// Trying to use IOMMU without PCI
@@ -142,8 +140,6 @@ pub enum ValidationError {
     TdxFirmwareMissing,
     /// Insuffient vCPUs for queues
     TooManyQueues,
-    /// Need shared memory for vfio-user
-    UserDevicesRequireSharedMemory,
     /// Memory zone is reused across NUMA nodes
     MemoryZoneReused(String, u32, u32),
     /// Invalid number of PCI segments
@@ -179,9 +175,6 @@ impl fmt::Display for ValidationError {
             ConsoleFileMissing => write!(f, "Path missing when using file console mode"),
             CpusMaxLowerThanBoot => write!(f, "Max CPUs lower than boot CPUs"),
             DiskSocketAndPath => write!(f, "Disk path and vhost socket both provided"),
-            VhostUserRequiresSharedMemory => {
-                write!(f, "Using vhost-user requires using shared memory")
-            }
             VhostUserMissingSocket => write!(f, "No socket provided when using vhost-user"),
             IommuUnsupported => write!(f, "Using an IOMMU without PCI support is unsupported"),
             VfioUnsupported => write!(f, "Using VFIO without PCI support is unsupported"),
@@ -214,9 +207,6 @@ impl fmt::Display for ValidationError {
             }
             TooManyQueues => {
                 write!(f, "Number of vCPUs is insufficient for number of queues")
-            }
-            UserDevicesRequireSharedMemory => {
-                write!(f, "Using user devices requires using shared memory")
             }
             MemoryZoneReused(s, u1, u2) => {
                 write!(
@@ -677,7 +667,7 @@ impl MemoryConfig {
             .convert::<ByteSized>("hotplugged_size")
             .map_err(Error::ParseMemory)?
             .map(|v| v.0);
-        let shared = parser
+        let _shared = parser
             .convert::<Toggle>("shared")
             .map_err(Error::ParseMemory)?
             .unwrap_or(Toggle(false))
@@ -721,7 +711,7 @@ impl MemoryConfig {
                     .unwrap_or(ByteSized(DEFAULT_MEMORY_MB << 20))
                     .0;
                 let file = parser.get("file").map(PathBuf::from);
-                let shared = parser
+                let _shared = parser
                     .convert::<Toggle>("shared")
                     .map_err(Error::ParseMemoryZone)?
                     .unwrap_or(Toggle(false))
@@ -757,7 +747,6 @@ impl MemoryConfig {
                     id,
                     size,
                     file,
-                    shared,
                     hugepages,
                     hugepage_size,
                     host_numa_node,
@@ -777,7 +766,6 @@ impl MemoryConfig {
             hotplug_method,
             hotplug_size,
             hotplugged_size,
-            shared,
             hugepages,
             hugepage_size,
             prefault,
@@ -1800,9 +1788,6 @@ impl VmConfig {
                 if disk.vhost_socket.as_ref().and(disk.path.as_ref()).is_some() {
                     return Err(ValidationError::DiskSocketAndPath);
                 }
-                if disk.vhost_user && !self.memory.shared {
-                    return Err(ValidationError::VhostUserRequiresSharedMemory);
-                }
                 if disk.vhost_user && disk.vhost_socket.is_none() {
                     return Err(ValidationError::VhostUserMissingSocket);
                 }
@@ -1815,9 +1800,6 @@ impl VmConfig {
 
         if let Some(nets) = &self.net {
             for net in nets {
-                if net.vhost_user && !self.memory.shared {
-                    return Err(ValidationError::VhostUserRequiresSharedMemory);
-                }
                 net.validate(self)?;
                 self.iommu |= net.iommu;
 
@@ -1826,9 +1808,6 @@ impl VmConfig {
         }
 
         if let Some(fses) = &self.fs {
-            if !fses.is_empty() && !self.memory.shared {
-                return Err(ValidationError::VhostUserRequiresSharedMemory);
-            }
             for fs in fses {
                 fs.validate(self)?;
 
@@ -1881,10 +1860,6 @@ impl VmConfig {
         }
 
         if let Some(user_devices) = &self.user_devices {
-            if !user_devices.is_empty() && !self.memory.shared {
-                return Err(ValidationError::UserDevicesRequireSharedMemory);
-            }
-
             for user_device in user_devices {
                 user_device.validate(self)?;
 
@@ -2699,7 +2674,6 @@ mod tests {
                 hotplug_method: HotplugMethod::Acpi,
                 hotplug_size: None,
                 hotplugged_size: None,
-                shared: false,
                 hugepages: false,
                 hugepage_size: None,
                 prefault: false,
@@ -2801,7 +2775,6 @@ mod tests {
         );
 
         let mut invalid_config = valid_config.clone();
-        invalid_config.memory.shared = true;
         invalid_config.disks = Some(vec![DiskConfig {
             vhost_user: true,
             ..Default::default()
@@ -2811,35 +2784,13 @@ mod tests {
             Err(ValidationError::VhostUserMissingSocket)
         );
 
-        let mut invalid_config = valid_config.clone();
-        invalid_config.disks = Some(vec![DiskConfig {
-            vhost_user: true,
-            vhost_socket: Some("/path/to/sock".to_owned()),
-            ..Default::default()
-        }]);
-        assert_eq!(
-            invalid_config.validate(),
-            Err(ValidationError::VhostUserRequiresSharedMemory)
-        );
-
         let mut still_valid_config = valid_config.clone();
         still_valid_config.disks = Some(vec![DiskConfig {
             vhost_user: true,
             vhost_socket: Some("/path/to/sock".to_owned()),
             ..Default::default()
         }]);
-        still_valid_config.memory.shared = true;
         assert!(still_valid_config.validate().is_ok());
-
-        let mut invalid_config = valid_config.clone();
-        invalid_config.net = Some(vec![NetConfig {
-            vhost_user: true,
-            ..Default::default()
-        }]);
-        assert_eq!(
-            invalid_config.validate(),
-            Err(ValidationError::VhostUserRequiresSharedMemory)
-        );
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.net = Some(vec![NetConfig {
@@ -2847,7 +2798,6 @@ mod tests {
             vhost_socket: Some("/path/to/sock".to_owned()),
             ..Default::default()
         }]);
-        still_valid_config.memory.shared = true;
         assert!(still_valid_config.validate().is_ok());
 
         let mut invalid_config = valid_config.clone();
@@ -2859,19 +2809,6 @@ mod tests {
             invalid_config.validate(),
             Err(ValidationError::VnetReservedFd)
         );
-
-        let mut invalid_config = valid_config.clone();
-        invalid_config.fs = Some(vec![FsConfig {
-            ..Default::default()
-        }]);
-        assert_eq!(
-            invalid_config.validate(),
-            Err(ValidationError::VhostUserRequiresSharedMemory)
-        );
-
-        let mut still_valid_config = valid_config.clone();
-        still_valid_config.memory.shared = true;
-        assert!(still_valid_config.validate().is_ok());
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.memory.hugepages = true;
@@ -3080,7 +3017,6 @@ mod tests {
         );
 
         let mut invalid_config = valid_config.clone();
-        invalid_config.memory.shared = true;
         invalid_config.platform = Some(PlatformConfig {
             num_pci_segments: 16,
             iommu_segments: Some(vec![1, 2, 3]),
@@ -3111,7 +3047,6 @@ mod tests {
         );
 
         let mut invalid_config = valid_config.clone();
-        invalid_config.memory.shared = true;
         invalid_config.platform = Some(PlatformConfig {
             num_pci_segments: 16,
             iommu_segments: Some(vec![1, 2, 3]),

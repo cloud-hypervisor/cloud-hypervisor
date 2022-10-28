@@ -1600,21 +1600,6 @@ impl Vmm {
             send_data_migration.destination_url, send_data_migration.local
         );
 
-        if !self
-            .vm_config
-            .as_ref()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .memory
-            .shared
-            && send_data_migration.local
-        {
-            return Err(MigratableError::MigrateSend(anyhow!(
-                "Local migration requires shared memory enabled"
-            )));
-        }
-
         if let Some(vm) = self.vm.as_mut() {
             Self::send_migration(
                 vm,
@@ -2058,7 +2043,6 @@ mod unit_tests {
                 hotplug_method: HotplugMethod::Acpi,
                 hotplug_size: None,
                 hotplugged_size: None,
-                shared: true,
                 hugepages: false,
                 hugepage_size: None,
                 prefault: false,

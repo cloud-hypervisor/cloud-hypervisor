@@ -671,7 +671,6 @@ mod unit_tests {
                 hotplug_method: HotplugMethod::Acpi,
                 hotplug_size: None,
                 hotplugged_size: None,
-                shared: false,
                 hugepages: false,
                 hugepage_size: None,
                 prefault: false,

@@ -171,7 +171,6 @@ pub struct MemoryManager {
     boot_ram: u64,
     current_ram: u64,
     next_hotplug_slot: usize,
-    shared: bool,
     hugepages: bool,
     hugepage_size: Option<u64>,
     prefault: bool,
@@ -493,7 +492,6 @@ impl MemoryManager {
                         Some(pf) => pf,
                         None => zone.prefault,
                     },
-                    zone.shared,
                     zone.hugepages,
                     zone.hugepage_size,
                     zone.host_numa_node,
@@ -570,7 +568,6 @@ impl MemoryManager {
                             Some(pf) => pf,
                             None => zone_config.prefault,
                         },
-                        zone_config.shared,
                         zone_config.hugepages,
                         zone_config.hugepage_size,
                         zone_config.host_numa_node,
@@ -694,7 +691,6 @@ impl MemoryManager {
                 id: String::from(DEFAULT_MEMORY_ZONE),
                 size: config.size,
                 file: None,
-                shared: config.shared,
                 hugepages: config.hugepages,
                 hugepage_size: config.hugepage_size,
                 host_numa_node: None,
@@ -724,10 +720,10 @@ impl MemoryManager {
             for zone in zones.iter() {
                 total_ram_size += zone.size;
 
-                if zone.shared && zone.file.is_some() && zone.host_numa_node.is_some() {
+                if zone.file.is_some() && zone.host_numa_node.is_some() {
                     error!(
                         "Invalid to set host NUMA policy for a memory zone \
-                        backed by a regular file and mapped as 'shared'"
+                        backed by a regular file"
                     );
                     return Err(Error::InvalidSharedMemoryZoneWithHostNuma);
                 }
@@ -992,7 +988,6 @@ impl MemoryManager {
                                     Some(pf) => pf,
                                     None => zone.prefault,
                                 },
-                                zone.shared,
                                 zone.hugepages,
                                 zone.hugepage_size,
                                 zone.host_numa_node,
@@ -1108,7 +1103,6 @@ impl MemoryManager {
             boot_ram,
             current_ram,
             next_hotplug_slot,
-            shared: config.shared,
             hugepages: config.hugepages,
             hugepage_size: config.hugepage_size,
             prefault: config.prefault,
@@ -1294,7 +1288,6 @@ impl MemoryManager {
         start_addr: GuestAddress,
         size: usize,
         prefault: bool,
-        _shared: bool,
         hugepages: bool,
         hugepage_size: Option<u64>,
         host_numa_node: Option<u32>,
@@ -1408,7 +1401,6 @@ impl MemoryManager {
             start_addr,
             size,
             self.prefault,
-            self.shared,
             self.hugepages,
             self.hugepage_size,
             None,

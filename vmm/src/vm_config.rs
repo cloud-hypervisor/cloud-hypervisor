@@ -112,8 +112,6 @@ pub struct MemoryZoneConfig {
     #[serde(default)]
     pub file: Option<PathBuf>,
     #[serde(default)]
-    pub shared: bool,
-    #[serde(default)]
     pub hugepages: bool,
     #[serde(default)]
     pub hugepage_size: Option<u64>,
@@ -151,8 +149,6 @@ pub struct MemoryConfig {
     #[serde(default)]
     pub hotplugged_size: Option<u64>,
     #[serde(default)]
-    pub shared: bool,
-    #[serde(default)]
     pub hugepages: bool,
     #[serde(default)]
     pub hugepage_size: Option<u64>,
@@ -172,7 +168,6 @@ impl Default for MemoryConfig {
             hotplug_method: HotplugMethod::Acpi,
             hotplug_size: None,
             hotplugged_size: None,
-            shared: false,
             hugepages: false,
             hugepage_size: None,
             prefault: false,
