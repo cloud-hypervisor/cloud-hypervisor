@@ -818,7 +818,7 @@ fn test_vhost_user_net(
     let mut ch_command = GuestCommand::new(&guest);
     ch_command
         .args(["--cpus", format!("boot={}", num_queues / 2).as_str()])
-        .args(["--memory", "size=512M,hotplug_size=2048M,shared=on"])
+        .args(["--memory", "size=512M,hotplug_size=2048M"])
         .args(["--kernel", kernel_path.to_str().unwrap()])
         .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
         .default_disks()
@@ -965,7 +965,7 @@ fn test_vhost_user_blk(
 
     let mut child = GuestCommand::new(&guest)
         .args(["--cpus", format!("boot={}", num_queues).as_str()])
-        .args(["--memory", "size=512M,hotplug_size=2048M,shared=on"])
+        .args(["--memory", "size=512M,hotplug_size=2048M"])
         .args(["--kernel", kernel_path.to_str().unwrap()])
         .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
         .args([
@@ -1118,7 +1118,7 @@ fn test_boot_from_vhost_user_blk(
 
     let mut child = GuestCommand::new(&guest)
         .args(["--cpus", format!("boot={}", num_queues).as_str()])
-        .args(["--memory", "size=512M,shared=on"])
+        .args(["--memory", "size=512M"])
         .args(["--kernel", kernel_path.to_str().unwrap()])
         .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
         .args([
@@ -1192,7 +1192,7 @@ fn _test_virtio_fs(
     let mut guest_command = GuestCommand::new(&guest);
     guest_command
         .args(["--cpus", "boot=1"])
-        .args(["--memory", "size=512M,hotplug_size=2048M,shared=on"])
+        .args(["--memory", "size=512M,hotplug_size=2048M"])
         .args(["--kernel", kernel_path.to_str().unwrap()])
         .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
         .default_disks()
@@ -2635,7 +2635,7 @@ mod common_parallel {
 
         let mut cloud_child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=4"])
-            .args(["--memory", "size=512M,shared=on"])
+            .args(["--memory", "size=512M"])
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args([
@@ -3794,7 +3794,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=4"])
-            .args(["--memory", "size=2G,hugepages=on,shared=on"])
+            .args(["--memory", "size=2G,hugepages=on"])
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args([
                 "--disk",
@@ -6514,7 +6514,7 @@ mod common_parallel {
         let mut child = GuestCommand::new(&guest)
             .args(["--api-socket", &api_socket])
             .args(["--cpus", "boot=1"])
-            .args(["--memory", "size=512M,shared=on,hugepages=on"])
+            .args(["--memory", "size=512M,hugepages=on"])
             .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
             .args(["--serial", "tty", "--console", "off"])
             .default_disks()
@@ -7923,7 +7923,7 @@ mod vfio {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=4"])
-            .args(["--memory", "size=2G,hugepages=on,shared=on"])
+            .args(["--memory", "size=2G,hugepages=on"])
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args([
                 "--disk",
