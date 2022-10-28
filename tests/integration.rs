@@ -6793,6 +6793,7 @@ mod common_sequential {
     use crate::*;
 
     #[test]
+    #[ignore]
     fn test_memory_mergeable_on() {
         test_memory_mergeable(true)
     }
