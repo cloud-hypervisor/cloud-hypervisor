@@ -1222,7 +1222,7 @@ impl MemoryManager {
         size: usize,
         hugepages: bool,
         hugepage_size: Option<u64>,
-    ) -> Result<(File, u64), Error> {
+    ) -> Result<FileOffset, Error> {
         let (f, f_off) = match backing_file {
             Some(ref file) => {
                 if file.is_dir() {
@@ -1284,7 +1284,7 @@ impl MemoryManager {
             }
         };
 
-        Ok((f, f_off))
+        Ok(FileOffset::new(f, f_off))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1300,10 +1300,16 @@ impl MemoryManager {
         host_numa_node: Option<u32>,
         existing_memory_file: Option<File>,
     ) -> Result<Arc<GuestRegionMmap>, Error> {
-        let (f, f_off) = if let Some(f) = existing_memory_file {
-            (f, file_offset)
+        let fo = if let Some(f) = existing_memory_file {
+            Some(FileOffset::new(f, file_offset))
         } else {
-            Self::open_memory_file(backing_file, file_offset, size, hugepages, hugepage_size)?
+            Some(Self::open_memory_file(
+                backing_file,
+                file_offset,
+                size,
+                hugepages,
+                hugepage_size,
+            )?)
         };
 
         let mut mmap_flags = libc::MAP_NORESERVE
@@ -1317,13 +1323,8 @@ impl MemoryManager {
         }
 
         let region = GuestRegionMmap::new(
-            MmapRegion::build(
-                Some(FileOffset::new(f, f_off)),
-                size,
-                libc::PROT_READ | libc::PROT_WRITE,
-                mmap_flags,
-            )
-            .map_err(Error::GuestMemoryRegion)?,
+            MmapRegion::build(fo, size, libc::PROT_READ | libc::PROT_WRITE, mmap_flags)
+                .map_err(Error::GuestMemoryRegion)?,
             start_addr,
         )
         .map_err(Error::GuestMemory)?;
