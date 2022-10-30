@@ -1299,28 +1299,34 @@ impl MemoryManager {
         host_numa_node: Option<u32>,
         existing_memory_file: Option<File>,
     ) -> Result<Arc<GuestRegionMmap>, Error> {
+        let mut mmap_flags = libc::MAP_NORESERVE;
+
+        // The duplication of mmap_flags ORing here is unfortunate but it also makes
+        // the complexity of the handling clear.
         let fo = if let Some(f) = existing_memory_file {
+            // It must be MAP_SHARED as we wouldn't already have an FD
+            mmap_flags |= libc::MAP_SHARED;
             Some(FileOffset::new(f, file_offset))
         } else if let Some(backing_file) = backing_file {
+            if shared {
+                mmap_flags |= libc::MAP_SHARED;
+            } else {
+                mmap_flags |= libc::MAP_PRIVATE;
+            }
             Some(Self::open_backing_file(backing_file, file_offset, size)?)
         } else if shared || hugepages {
+            // For hugepages we must also MAP_SHARED otherwise we will trigger #4805
+            // because the MAP_PRIVATE will trigger CoW against the backing file with
+            // the VFIO pinning
+            mmap_flags |= libc::MAP_SHARED;
             Some(Self::create_anonymous_file(size, hugepages, hugepage_size)?)
         } else {
+            mmap_flags |= libc::MAP_PRIVATE | libc::MAP_ANONYMOUS;
             None
         };
 
-        let mut mmap_flags = libc::MAP_NORESERVE
-            | if shared {
-                libc::MAP_SHARED
-            } else {
-                libc::MAP_PRIVATE
-            };
         if prefault {
             mmap_flags |= libc::MAP_POPULATE;
-        }
-
-        if fo.is_none() {
-            mmap_flags |= libc::MAP_ANONYMOUS;
         }
 
         let region = GuestRegionMmap::new(
