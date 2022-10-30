@@ -1216,75 +1216,74 @@ impl MemoryManager {
         }
     }
 
-    fn open_memory_file(
-        backing_file: &Option<PathBuf>,
-        file_offset: u64,
+    fn create_anonymous_file(
         size: usize,
         hugepages: bool,
         hugepage_size: Option<u64>,
     ) -> Result<FileOffset, Error> {
-        let (f, f_off) = match backing_file {
-            Some(ref file) => {
-                if file.is_dir() {
-                    // Override file offset as it does not apply in this case.
-                    info!(
-                        "Ignoring file offset since the backing file is a \
-                        temporary file created from the specified directory."
-                    );
-                    let fs_str = format!("{}{}", file.display(), "/tmpfile_XXXXXX");
-                    let fs = ffi::CString::new(fs_str).unwrap();
-                    let mut path = fs.as_bytes_with_nul().to_owned();
-                    let path_ptr = path.as_mut_ptr() as *mut _;
-                    let fd = unsafe { libc::mkstemp(path_ptr) };
-                    unsafe { libc::unlink(path_ptr) };
-                    let f = unsafe { File::from_raw_fd(fd) };
-                    f.set_len(size as u64).map_err(Error::SharedFileSetLen)?;
+        let fd = Self::memfd_create(
+            &ffi::CString::new("ch_ram").unwrap(),
+            libc::MFD_CLOEXEC
+                | if hugepages {
+                    libc::MFD_HUGETLB
+                        | if let Some(hugepage_size) = hugepage_size {
+                            /*
+                             * From the Linux kernel:
+                             * Several system calls take a flag to request "hugetlb" huge pages.
+                             * Without further specification, these system calls will use the
+                             * system's default huge page size.  If a system supports multiple
+                             * huge page sizes, the desired huge page size can be specified in
+                             * bits [26:31] of the flag arguments.  The value in these 6 bits
+                             * will encode the log2 of the huge page size.
+                             */
 
-                    (f, 0)
+                            hugepage_size.trailing_zeros() << 26
+                        } else {
+                            // Use the system default huge page size
+                            0
+                        }
                 } else {
-                    let f = OpenOptions::new()
-                        .read(true)
-                        .write(true)
-                        .open(file)
-                        .map_err(Error::SharedFileCreate)?;
+                    0
+                },
+        )
+        .map_err(Error::SharedFileCreate)?;
 
-                    (f, file_offset)
-                }
-            }
-            None => {
-                let flags = libc::MFD_CLOEXEC
-                    | if hugepages {
-                        libc::MFD_HUGETLB
-                            | if let Some(hugepage_size) = hugepage_size {
-                                /*
-                                 * From the Linux kernel:
-                                 * Several system calls take a flag to request "hugetlb" huge pages.
-                                 * Without further specification, these system calls will use the
-                                 * system's default huge page size.  If a system supports multiple
-                                 * huge page sizes, the desired huge page size can be specified in
-                                 * bits [26:31] of the flag arguments.  The value in these 6 bits
-                                 * will encode the log2 of the huge page size.
-                                 */
+        let f = unsafe { File::from_raw_fd(fd) };
+        f.set_len(size as u64).map_err(Error::SharedFileSetLen)?;
 
-                                hugepage_size.trailing_zeros() << 26
-                            } else {
-                                // Use the system default huge page size
-                                0
-                            }
-                    } else {
-                        0
-                    };
-                let fd = Self::memfd_create(&ffi::CString::new("ch_ram").unwrap(), flags)
-                    .map_err(Error::SharedFileCreate)?;
+        Ok(FileOffset::new(f, 0))
+    }
 
-                let f = unsafe { File::from_raw_fd(fd) };
-                f.set_len(size as u64).map_err(Error::SharedFileSetLen)?;
+    fn open_backing_file(
+        backing_file: &PathBuf,
+        file_offset: u64,
+        size: usize,
+    ) -> Result<FileOffset, Error> {
+        if backing_file.is_dir() {
+            // Override file offset as it does not apply in this case.
+            info!(
+                "Ignoring file offset since the backing file is a \
+                        temporary file created from the specified directory."
+            );
+            let fs_str = format!("{}{}", backing_file.display(), "/tmpfile_XXXXXX");
+            let fs = ffi::CString::new(fs_str).unwrap();
+            let mut path = fs.as_bytes_with_nul().to_owned();
+            let path_ptr = path.as_mut_ptr() as *mut _;
+            let fd = unsafe { libc::mkstemp(path_ptr) };
+            unsafe { libc::unlink(path_ptr) };
+            let f = unsafe { File::from_raw_fd(fd) };
+            f.set_len(size as u64).map_err(Error::SharedFileSetLen)?;
 
-                (f, 0)
-            }
-        };
+            Ok(FileOffset::new(f, 0))
+        } else {
+            let f = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(backing_file)
+                .map_err(Error::SharedFileCreate)?;
 
-        Ok(FileOffset::new(f, f_off))
+            Ok(FileOffset::new(f, file_offset))
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1302,14 +1301,10 @@ impl MemoryManager {
     ) -> Result<Arc<GuestRegionMmap>, Error> {
         let fo = if let Some(f) = existing_memory_file {
             Some(FileOffset::new(f, file_offset))
+        } else if let Some(backing_file) = backing_file {
+            Some(Self::open_backing_file(backing_file, file_offset, size)?)
         } else {
-            Some(Self::open_memory_file(
-                backing_file,
-                file_offset,
-                size,
-                hugepages,
-                hugepage_size,
-            )?)
+            Some(Self::create_anonymous_file(size, hugepages, hugepage_size)?)
         };
 
         let mut mmap_flags = libc::MAP_NORESERVE
