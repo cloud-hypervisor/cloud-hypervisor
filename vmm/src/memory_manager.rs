@@ -1303,8 +1303,10 @@ impl MemoryManager {
             Some(FileOffset::new(f, file_offset))
         } else if let Some(backing_file) = backing_file {
             Some(Self::open_backing_file(backing_file, file_offset, size)?)
-        } else {
+        } else if shared || hugepages {
             Some(Self::create_anonymous_file(size, hugepages, hugepage_size)?)
+        } else {
+            None
         };
 
         let mut mmap_flags = libc::MAP_NORESERVE
@@ -1315,6 +1317,10 @@ impl MemoryManager {
             };
         if prefault {
             mmap_flags |= libc::MAP_POPULATE;
+        }
+
+        if fo.is_none() {
+            mmap_flags |= libc::MAP_ANONYMOUS;
         }
 
         let region = GuestRegionMmap::new(
