@@ -566,15 +566,15 @@ pub fn block_io_uring_is_supported() -> bool {
         return false;
     }
 
-    // Check IORING_OP_READ is supported
-    if !probe.is_supported(opcode::Read::CODE) {
-        info!("{} IORING_OP_READ operation not supported", error_msg);
+    // Check IORING_OP_READV is supported
+    if !probe.is_supported(opcode::Readv::CODE) {
+        info!("{} IORING_OP_READV operation not supported", error_msg);
         return false;
     }
 
-    // Check IORING_OP_WRITE is supported
-    if !probe.is_supported(opcode::Write::CODE) {
-        info!("{} IORING_OP_WRITE operation not supported", error_msg);
+    // Check IORING_OP_WRITEV is supported
+    if !probe.is_supported(opcode::Writev::CODE) {
+        info!("{} IORING_OP_WRITEV operation not supported", error_msg);
         return false;
     }
 
