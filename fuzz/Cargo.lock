@@ -584,9 +584,9 @@ dependencies = [
 
 [[package]]
 name = "remain"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06df529c0d271b27ac4a2c260f5ce2914b60bd44702cecec7b9f271adbdde23b"
+checksum = "1a81bc6a3aaeb180f767bd2bda8c03bac5b93b3b69a783c66f35d16a4df276cf"
 dependencies = [
  "proc-macro2",
  "quote",
