@@ -117,6 +117,9 @@ needing access to the guest RAM content.
 By default this option is turned off, which results in performing `mmap(2)`
 with `MAP_PRIVATE` flag.
 
+If `hugepages=on` then the value of this field is ignored as huge pages always
+requires `MAP_SHARED`.
+
 _Example_
 
 ```
@@ -139,6 +142,9 @@ specified size for the VMM to use. Failure to do so may result in strange VMM
 behaviour, e.g. error with `ReadKernelImage` is common. If there is a strange
 error with `hugepages` enabled, just disable it or check whether there are enough
 huge pages.
+
+If `hugepages=on` then the value of `shared` is ignored as huge pages always
+requires `MAP_SHARED`.
 
 By default this option is turned off.
 
@@ -271,6 +277,9 @@ other processes running on the host. One can use this option when running
 vhost-user devices as part of the VM device model, as they will be driven
 by standalone daemons needing access to the guest RAM content.
 
+If `hugepages=on` then the value of this field is ignored as huge pages always
+requires `MAP_SHARED`.
+
 By default this option is turned off, which result in performing `mmap(2)`
 with `MAP_PRIVATE` flag.
 
@@ -297,6 +306,9 @@ specified size for the VMM to use. Failure to do so may result in strange VMM
 behaviour, e.g. error with `ReadKernelImage` is common. If there is a strange
 error with `hugepages` enabled, just disable it or check whether there are enough
 huge pages.
+
+If `hugepages=on` then the value of `shared` is ignored as huge pages always
+requires `MAP_SHARED`.
 
 By default this option is turned off.
 
