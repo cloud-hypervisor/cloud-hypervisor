@@ -180,7 +180,10 @@ impl fmt::Display for ValidationError {
             CpusMaxLowerThanBoot => write!(f, "Max CPUs lower than boot CPUs"),
             DiskSocketAndPath => write!(f, "Disk path and vhost socket both provided"),
             VhostUserRequiresSharedMemory => {
-                write!(f, "Using vhost-user requires using shared memory")
+                write!(
+                    f,
+                    "Using vhost-user requires using shared memory or huge pages"
+                )
             }
             VhostUserMissingSocket => write!(f, "No socket provided when using vhost-user"),
             IommuUnsupported => write!(f, "Using an IOMMU without PCI support is unsupported"),
@@ -216,7 +219,10 @@ impl fmt::Display for ValidationError {
                 write!(f, "Number of vCPUs is insufficient for number of queues")
             }
             UserDevicesRequireSharedMemory => {
-                write!(f, "Using user devices requires using shared memory")
+                write!(
+                    f,
+                    "Using user devices requires using shared memory or huge pages"
+                )
             }
             MemoryZoneReused(s, u1, u2) => {
                 write!(
@@ -1756,6 +1762,23 @@ impl VmConfig {
         Ok(())
     }
 
+    pub fn backed_by_shared_memory(&self) -> bool {
+        if self.memory.shared || self.memory.hugepages {
+            return true;
+        }
+
+        if self.memory.size == 0 {
+            for zone in self.memory.zones.as_ref().unwrap() {
+                if !zone.shared && !zone.hugepages {
+                    return false;
+                }
+            }
+            true
+        } else {
+            false
+        }
+    }
+
     // Also enables virtio-iommu if the config needs it
     // Returns the list of unique identifiers provided through the
     // configuration.
@@ -1800,7 +1823,7 @@ impl VmConfig {
                 if disk.vhost_socket.as_ref().and(disk.path.as_ref()).is_some() {
                     return Err(ValidationError::DiskSocketAndPath);
                 }
-                if disk.vhost_user && !self.memory.shared {
+                if disk.vhost_user && !self.backed_by_shared_memory() {
                     return Err(ValidationError::VhostUserRequiresSharedMemory);
                 }
                 if disk.vhost_user && disk.vhost_socket.is_none() {
@@ -1815,7 +1838,7 @@ impl VmConfig {
 
         if let Some(nets) = &self.net {
             for net in nets {
-                if net.vhost_user && !self.memory.shared {
+                if net.vhost_user && !self.backed_by_shared_memory() {
                     return Err(ValidationError::VhostUserRequiresSharedMemory);
                 }
                 net.validate(self)?;
@@ -1826,7 +1849,7 @@ impl VmConfig {
         }
 
         if let Some(fses) = &self.fs {
-            if !fses.is_empty() && !self.memory.shared {
+            if !fses.is_empty() && !self.backed_by_shared_memory() {
                 return Err(ValidationError::VhostUserRequiresSharedMemory);
             }
             for fs in fses {
@@ -1881,7 +1904,7 @@ impl VmConfig {
         }
 
         if let Some(user_devices) = &self.user_devices {
-            if !user_devices.is_empty() && !self.memory.shared {
+            if !user_devices.is_empty() && !self.backed_by_shared_memory() {
                 return Err(ValidationError::UserDevicesRequireSharedMemory);
             }
 
