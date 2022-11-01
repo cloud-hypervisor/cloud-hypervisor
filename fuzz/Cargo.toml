@@ -59,6 +59,12 @@ test = false
 doc = false
 
 [[bin]]
+name = "console"
+path = "fuzz_targets/console.rs"
+test = false
+doc = false
+
+[[bin]]
 name = "http_api"
 path = "fuzz_targets/http_api.rs"
 test = false
