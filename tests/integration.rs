@@ -1839,7 +1839,7 @@ fn _test_virtio_iommu(acpi: bool) {
         // contains "0000:00:02.0" which is the first disk.
         //
         // Verify the iommu group of the first disk.
-        let iommu_group = if acpi { 0 } else { 1 };
+        let iommu_group = !acpi as i32;
         assert_eq!(
             guest
                 .ssh_command(
@@ -2873,7 +2873,7 @@ mod common_parallel {
         let mut os_path = os_dir.as_path().to_path_buf();
         os_path.push("osdisk.img");
         rate_limited_copy(
-            &guest.disk_config.disk(DiskType::OperatingSystem).unwrap(),
+            guest.disk_config.disk(DiskType::OperatingSystem).unwrap(),
             os_path.as_path(),
         )
         .expect("copying of OS disk failed");
@@ -3216,7 +3216,7 @@ mod common_parallel {
                 format!(
                     "file={},size={}",
                     guest.disk_config.disk(DiskType::OperatingSystem).unwrap(),
-                    fs::metadata(&guest.disk_config.disk(DiskType::OperatingSystem).unwrap())
+                    fs::metadata(guest.disk_config.disk(DiskType::OperatingSystem).unwrap())
                         .unwrap()
                         .len()
                 )
@@ -3763,7 +3763,7 @@ mod common_parallel {
         // We copy our cloudinit into the vfio mount point, for the nested
         // cloud-hypervisor guest to use.
         rate_limited_copy(
-            &guest.disk_config.disk(DiskType::CloudInit).unwrap(),
+            guest.disk_config.disk(DiskType::CloudInit).unwrap(),
             &cloud_init_vfio_base_path,
         )
         .expect("copying of cloud-init disk failed");
@@ -6222,7 +6222,7 @@ mod common_parallel {
         );
 
         let tap_index =
-            fs::read_to_string(&format!("/sys/class/net/{}/ifindex", guest_macvtap_name)).unwrap();
+            fs::read_to_string(format!("/sys/class/net/{}/ifindex", guest_macvtap_name)).unwrap();
         let tap_device = format!("/dev/tap{}", tap_index.trim());
 
         assert!(
@@ -7892,7 +7892,7 @@ mod vfio {
         // We copy our cloudinit into the vfio mount point, for the nested
         // cloud-hypervisor guest to use.
         rate_limited_copy(
-            &guest.disk_config.disk(DiskType::CloudInit).unwrap(),
+            guest.disk_config.disk(DiskType::CloudInit).unwrap(),
             &cloud_init_vfio_base_path,
         )
         .expect("copying of cloud-init disk failed");

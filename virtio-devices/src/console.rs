@@ -225,7 +225,7 @@ impl ConsoleEpollHandler {
 
         while let Some(mut desc_chain) = recv_queue.pop_descriptor_chain(self.mem.memory()) {
             let desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
-            let len = cmp::min(desc.len() as u32, in_buffer.len() as u32);
+            let len = cmp::min(desc.len(), in_buffer.len() as u32);
             let source_slice = in_buffer.drain(..len as usize).collect::<Vec<u8>>();
 
             desc_chain

@@ -790,7 +790,7 @@ impl MemoryManager {
             for (region, virtio_mem) in regions {
                 let slot = self.create_userspace_mapping(
                     region.start_addr().raw_value(),
-                    region.len() as u64,
+                    region.len(),
                     region.as_ptr() as u64,
                     self.mergeable,
                     false,
@@ -1430,7 +1430,7 @@ impl MemoryManager {
         // Map it into the guest
         let slot = self.create_userspace_mapping(
             region.start_addr().0,
-            region.len() as u64,
+            region.len(),
             region.as_ptr() as u64,
             self.mergeable,
             false,
@@ -1487,7 +1487,7 @@ impl MemoryManager {
         slot.active = true;
         slot.inserting = true;
         slot.base = region.start_addr().0;
-        slot.length = region.len() as u64;
+        slot.length = region.len();
 
         self.next_hotplug_slot += 1;
 
@@ -1872,7 +1872,7 @@ impl MemoryManager {
 
                 table.push(MemoryRange {
                     gpa: region.start_addr().raw_value(),
-                    length: region.len() as u64,
+                    length: region.len(),
                 });
             }
         }
@@ -2265,7 +2265,7 @@ impl Aml for MemoryManager {
                         &aml::ResourceTemplate::new(vec![&aml::AddressSpace::new_memory(
                             aml::AddressSpaceCachable::NotCacheable,
                             true,
-                            acpi_address.0 as u64,
+                            acpi_address.0,
                             acpi_address.0 + MEMORY_MANAGER_ACPI_SIZE as u64 - 1,
                         )]),
                     ),
@@ -2343,8 +2343,8 @@ impl Aml for MemoryManager {
         #[cfg(target_arch = "x86_64")]
         {
             if let Some(sgx_epc_region) = &self.sgx_epc_region {
-                let min = sgx_epc_region.start().raw_value() as u64;
-                let max = min + sgx_epc_region.size() as u64 - 1;
+                let min = sgx_epc_region.start().raw_value();
+                let max = min + sgx_epc_region.size() - 1;
                 // SGX EPC region
                 aml::Device::new(
                     "_SB_.EPC_".into(),

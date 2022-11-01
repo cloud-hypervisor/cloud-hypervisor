@@ -126,7 +126,7 @@ impl CpuSegment {
 
         CpuSegment {
             selector: reg.selector as u32,
-            limit: reg.limit as u32,
+            limit: reg.limit,
             flags,
             pad: 0,
             base: reg.base,

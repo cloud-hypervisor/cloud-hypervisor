@@ -599,7 +599,7 @@ fn main() {
         }
     };
 
-    let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO as i32) } != 0;
+    let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO) } != 0;
     if on_tty {
         // Don't forget to set the terminal in canonical mode
         // before to exit.

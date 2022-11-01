@@ -1421,7 +1421,7 @@ pub fn parse_fio_output(output: &str, fio_ops: &FioOps, num_jobs: u32) -> Result
                     .expect("'fio' parse error: missing entry 'read.runtime'")
                     as f64
                     / 1000_f64;
-                total_bps += bytes as f64 / runtime as f64;
+                total_bps += bytes as f64 / runtime;
             }
             if write {
                 let bytes = j["write"]["io_bytes"]
@@ -1432,7 +1432,7 @@ pub fn parse_fio_output(output: &str, fio_ops: &FioOps, num_jobs: u32) -> Result
                     .expect("'fio' parse error: missing entry 'write.runtime'")
                     as f64
                     / 1000_f64;
-                total_bps += bytes as f64 / runtime as f64;
+                total_bps += bytes as f64 / runtime;
             }
         }
 
@@ -1477,7 +1477,7 @@ pub fn parse_fio_output_iops(output: &str, fio_ops: &FioOps, num_jobs: u32) -> R
                     .expect("'fio' parse error: missing entry 'read.runtime'")
                     as f64
                     / 1000_f64;
-                total_iops += ios as f64 / runtime as f64;
+                total_iops += ios as f64 / runtime;
             }
             if write {
                 let ios = j["write"]["total_ios"]
@@ -1488,7 +1488,7 @@ pub fn parse_fio_output_iops(output: &str, fio_ops: &FioOps, num_jobs: u32) -> R
                     .expect("'fio' parse error: missing entry 'write.runtime'")
                     as f64
                     / 1000_f64;
-                total_iops += ios as f64 / runtime as f64;
+                total_iops += ios as f64 / runtime;
             }
         }
 

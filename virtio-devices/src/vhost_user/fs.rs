@@ -232,20 +232,13 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
                         pwrite64(
                             fd.as_raw_fd(),
                             ptr as *const c_void,
-                            len as usize,
+                            len,
                             foffset as off64_t,
                         )
                     }
                 } else {
                     debug!("read: foffset={}, len={}", foffset, len);
-                    unsafe {
-                        pread64(
-                            fd.as_raw_fd(),
-                            ptr as *mut c_void,
-                            len as usize,
-                            foffset as off64_t,
-                        )
-                    }
+                    unsafe { pread64(fd.as_raw_fd(), ptr as *mut c_void, len, foffset as off64_t) }
                 };
 
                 if ret < 0 {

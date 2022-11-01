@@ -56,7 +56,7 @@ fn get_op<T: CpuStateManager>(
         OpKind::Immediate16 => insn.immediate16() as u64,
         OpKind::Immediate32 => insn.immediate32() as u64,
         OpKind::Immediate32to64 => insn.immediate32to64() as u64,
-        OpKind::Immediate64 => insn.immediate64() as u64,
+        OpKind::Immediate64 => insn.immediate64(),
         k => return Err(PlatformError::InvalidOperand(anyhow!("{:?}", k))),
     };
 

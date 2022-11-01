@@ -26,7 +26,7 @@ impl DiskFile for QcowDiskSync {
     fn size(&mut self) -> DiskFileResult<u64> {
         let mut file = self.qcow_file.lock().unwrap();
 
-        Ok(file.seek(SeekFrom::End(0)).map_err(DiskFileError::Size)? as u64)
+        file.seek(SeekFrom::End(0)).map_err(DiskFileError::Size)
     }
 
     fn new_async_io(&self, _ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {

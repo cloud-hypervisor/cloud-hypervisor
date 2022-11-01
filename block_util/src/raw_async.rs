@@ -23,10 +23,9 @@ impl RawFileDisk {
 
 impl DiskFile for RawFileDisk {
     fn size(&mut self) -> DiskFileResult<u64> {
-        Ok(self
-            .file
+        self.file
             .seek(SeekFrom::End(0))
-            .map_err(DiskFileError::Size)? as u64)
+            .map_err(DiskFileError::Size)
     }
 
     fn new_async_io(&self, ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {

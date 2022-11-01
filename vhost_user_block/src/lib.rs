@@ -234,7 +234,7 @@ impl VhostUserBlkBackend {
             }
         };
 
-        let nsectors = (image.lock().unwrap().seek(SeekFrom::End(0)).unwrap() as u64) / SECTOR_SIZE;
+        let nsectors = (image.lock().unwrap().seek(SeekFrom::End(0)).unwrap()) / SECTOR_SIZE;
         let config = VirtioBlockConfig {
             capacity: nsectors,
             blk_size: BLK_SIZE,
@@ -305,7 +305,7 @@ impl VhostUserBackendMut<VringRwLock<GuestMemoryAtomic<GuestMemoryMmap>>, Atomic
     }
 
     fn max_queue_size(&self) -> usize {
-        self.queue_size as usize
+        self.queue_size
     }
 
     fn features(&self) -> u64 {

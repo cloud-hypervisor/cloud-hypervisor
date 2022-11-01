@@ -246,7 +246,7 @@ impl VirtioMemConfig {
                 size,
                 self.region_size
             )));
-        } else if size % (self.block_size as u64) != 0 {
+        } else if size % self.block_size != 0 {
             return Err(Error::ResizeError(anyhow!(
                 "new size 0x{:x} is not aligned on block_size 0x{:x}",
                 size,
