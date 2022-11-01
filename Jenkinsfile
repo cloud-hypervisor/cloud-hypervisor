@@ -93,6 +93,38 @@ pipeline {
                                 sh 'scripts/dev_cli.sh tests --integration'
                             }
                         }
+                        stage('Run live-migration integration tests') {
+                            options {
+                                timeout(time: 1, unit: 'HOURS')
+                            }
+                            steps {
+                                sh 'sudo modprobe openvswitch'
+                                sh 'scripts/dev_cli.sh tests --integration-live-migration'
+                            }
+                        }
+                        stage('Run unit tests for musl') {
+                            steps {
+                                sh 'scripts/dev_cli.sh tests --unit --libc musl'
+                            }
+                        }
+                        stage('Run integration tests for musl') {
+                            options {
+                                timeout(time: 1, unit: 'HOURS')
+                            }
+                            steps {
+                                sh 'sudo modprobe openvswitch'
+                                sh 'scripts/dev_cli.sh tests --integration --libc musl'
+                            }
+                        }
+                        stage('Run live-migration integration tests for musl') {
+                            options {
+                                timeout(time: 1, unit: 'HOURS')
+                            }
+                            steps {
+                                sh 'sudo modprobe openvswitch'
+                                sh 'scripts/dev_cli.sh tests --integration-live-migration --libc musl'
+                            }
+                        }
                     }
                 }
                 stage('AArch64 worker build') {
@@ -170,41 +202,6 @@ pipeline {
                         }
                     }
                 }
-                stage('Worker build (musl)') {
-                    agent { node { label 'jammy' } }
-                    when {
-                        beforeAgent true
-                        expression {
-                            return runWorkers
-                        }
-                    }
-                    stages {
-                        stage('Checkout') {
-                            steps {
-                                checkout scm
-                            }
-                        }
-                        stage('Prepare environment') {
-                            steps {
-                                sh 'scripts/prepare_vdpa.sh'
-                            }
-                        }
-                        stage('Run unit tests for musl') {
-                            steps {
-                                sh 'scripts/dev_cli.sh tests --unit --libc musl'
-                            }
-                        }
-                        stage('Run integration tests for musl') {
-                            options {
-                                timeout(time: 1, unit: 'HOURS')
-                            }
-                            steps {
-                                sh 'sudo modprobe openvswitch'
-                                sh 'scripts/dev_cli.sh tests --integration --libc musl'
-                            }
-                        }
-                    }
-                }
                 stage('Worker build - Windows guest') {
                     agent { node { label 'jammy' } }
                     when {
@@ -247,40 +244,6 @@ pipeline {
                             }
                             steps {
                                 sh 'scripts/dev_cli.sh tests --integration-windows --libc musl'
-                            }
-                        }
-                    }
-                }
-                stage('Worker build - Live Migration') {
-                    agent { node { label 'jammy' } }
-                    when {
-                        beforeAgent true
-                        expression {
-                            return runWorkers
-                        }
-                    }
-                    stages {
-                        stage('Checkout') {
-                            steps {
-                                checkout scm
-                            }
-                        }
-                        stage('Run live-migration integration tests') {
-                            options {
-                                timeout(time: 1, unit: 'HOURS')
-                            }
-                            steps {
-                                sh 'sudo modprobe openvswitch'
-                                sh 'scripts/dev_cli.sh tests --integration-live-migration'
-                            }
-                        }
-                        stage('Run live-migration integration tests for musl') {
-                            options {
-                                timeout(time: 1, unit: 'HOURS')
-                            }
-                            steps {
-                                sh 'sudo modprobe openvswitch'
-                                sh 'scripts/dev_cli.sh tests --integration-live-migration --libc musl'
                             }
                         }
                     }
