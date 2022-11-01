@@ -22,10 +22,9 @@ impl RawFileDiskSync {
 
 impl DiskFile for RawFileDiskSync {
     fn size(&mut self) -> DiskFileResult<u64> {
-        Ok(self
-            .file
+        self.file
             .seek(SeekFrom::End(0))
-            .map_err(DiskFileError::Size)? as u64)
+            .map_err(DiskFileError::Size)
     }
 
     fn new_async_io(&self, _ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
@@ -118,7 +117,7 @@ impl AsyncIo for RawFileSync {
         }
 
         if let Some(user_data) = user_data {
-            self.completion_list.push((user_data, result as i32));
+            self.completion_list.push((user_data, result));
             self.eventfd.write(1).unwrap();
         }
 

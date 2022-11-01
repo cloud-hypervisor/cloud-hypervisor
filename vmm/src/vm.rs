@@ -586,7 +586,7 @@ impl Vm {
         )
         .map_err(Error::CpuManager)?;
 
-        let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO as i32) } != 0;
+        let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO) } != 0;
 
         #[cfg(feature = "tdx")]
         let kernel = config
@@ -3336,7 +3336,7 @@ pub fn test_vm() {
         let mem_region = vm.make_user_memory_region(
             index as u32,
             region.start_addr().raw_value(),
-            region.len() as u64,
+            region.len(),
             region.as_ptr() as u64,
             false,
             false,

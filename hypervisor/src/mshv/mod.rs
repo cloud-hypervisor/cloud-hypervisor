@@ -1093,7 +1093,7 @@ impl vm::Vm for MshvVm {
             flags,
             guest_pfn: guest_phys_addr >> PAGE_SHIFT,
             size: memory_size,
-            userspace_addr: userspace_addr as u64,
+            userspace_addr,
         }
         .into()
     }

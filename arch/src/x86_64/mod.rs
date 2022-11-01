@@ -764,11 +764,11 @@ pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, Region
         .checked_add(layout::MEM_32BIT_DEVICES_SIZE)
         .expect("32-bit reserved region is too large");
 
-    let requested_memory_size = GuestAddress(size as u64);
+    let requested_memory_size = GuestAddress(size);
     let mut regions = Vec::new();
 
     // case1: guest memory fits before the gap
-    if size as u64 <= layout::MEM_32BIT_RESERVED_START.raw_value() {
+    if size <= layout::MEM_32BIT_RESERVED_START.raw_value() {
         regions.push((GuestAddress(0), size as usize, RegionType::Ram));
     // case2: guest memory extends beyond the gap
     } else {
@@ -865,7 +865,7 @@ fn configure_pvh(
     start_info.0.magic = XEN_HVM_START_MAGIC_VALUE;
     start_info.0.version = 1; // pvh has version 1
     start_info.0.nr_modules = 0;
-    start_info.0.cmdline_paddr = cmdline_addr.raw_value() as u64;
+    start_info.0.cmdline_paddr = cmdline_addr.raw_value();
     start_info.0.memmap_paddr = layout::MEMMAP_START.raw_value();
 
     if let Some(rsdp_addr) = rsdp_addr {
@@ -934,7 +934,7 @@ fn configure_pvh(
         add_memmap_entry(
             &mut memmap,
             sgx_epc_region.start().raw_value(),
-            sgx_epc_region.size() as u64,
+            sgx_epc_region.size(),
             E820_RESERVED,
         );
     }
@@ -1126,7 +1126,7 @@ fn update_cpuid_sgx(
     for (i, epc_section) in epc_sections.iter().enumerate() {
         let subleaf_idx = i + 2;
         let start = epc_section.start().raw_value();
-        let size = epc_section.size() as u64;
+        let size = epc_section.size();
         let eax = (start & 0xffff_f000) as u32 | 0x1;
         let ebx = (start >> 32) as u32;
         let ecx = (size & 0xffff_f000) as u32 | (leaf.ecx & 0xf);

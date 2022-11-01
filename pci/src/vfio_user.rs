@@ -276,12 +276,7 @@ impl VfioUserPciDevice {
         self.client
             .lock()
             .unwrap()
-            .dma_map(
-                offset,
-                region.start_addr().raw_value(),
-                region.len() as u64,
-                fd,
-            )
+            .dma_map(offset, region.start_addr().raw_value(), region.len(), fd)
             .map_err(VfioUserPciDeviceError::DmaMap)
     }
 
@@ -292,7 +287,7 @@ impl VfioUserPciDevice {
         self.client
             .lock()
             .unwrap()
-            .dma_unmap(region.start_addr().raw_value(), region.len() as u64)
+            .dma_unmap(region.start_addr().raw_value(), region.len())
             .map_err(VfioUserPciDeviceError::DmaUnmap)
     }
 }

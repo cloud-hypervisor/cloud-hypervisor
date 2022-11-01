@@ -3059,7 +3059,7 @@ impl DeviceManager {
                     vfio_container
                         .vfio_dma_map(
                             region.start_addr().raw_value(),
-                            region.len() as u64,
+                            region.len(),
                             region.as_ptr() as u64,
                         )
                         .map_err(DeviceManagerError::VfioDmaMap)?;
@@ -3576,7 +3576,7 @@ impl DeviceManager {
             vfio_container
                 .vfio_dma_map(
                     new_region.start_addr().raw_value(),
-                    new_region.len() as u64,
+                    new_region.len(),
                     new_region.as_ptr() as u64,
                 )
                 .map_err(DeviceManagerError::UpdateMemoryForVfioPciDevice)?;
@@ -4197,7 +4197,7 @@ impl Aml for DeviceManager {
                     &aml::ResourceTemplate::new(vec![&aml::AddressSpace::new_memory(
                         aml::AddressSpaceCachable::NotCacheable,
                         true,
-                        self.acpi_address.0 as u64,
+                        self.acpi_address.0,
                         self.acpi_address.0 + DEVICE_MANAGER_ACPI_SIZE as u64 - 1,
                     )]),
                 ),

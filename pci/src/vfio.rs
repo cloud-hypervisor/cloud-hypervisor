@@ -413,7 +413,7 @@ impl VfioCommon {
         resources: Option<Vec<Resource>>,
     ) -> Result<Vec<PciBarConfiguration>, PciDeviceError> {
         let mut bars = Vec::new();
-        let mut bar_id = VFIO_PCI_BAR0_REGION_INDEX as u32;
+        let mut bar_id = VFIO_PCI_BAR0_REGION_INDEX;
 
         // Going through all regular regions to compute the BAR size.
         // We're not saving the BAR address to restore it, because we
@@ -526,7 +526,7 @@ impl VfioCommon {
                     }
 
                     // Invert and add 1 to to find size
-                    region_size = (!combined_size + 1) as u64;
+                    region_size = !combined_size + 1;
                 } else {
                     region_type = PciBarRegionType::Memory32BitRegion;
 
@@ -599,7 +599,7 @@ impl VfioCommon {
                 start: bar_addr,
                 length: region_size,
                 type_: region_type,
-                index: bar_id as u32,
+                index: bar_id,
                 user_memory_regions: Vec::new(),
             });
 

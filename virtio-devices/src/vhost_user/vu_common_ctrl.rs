@@ -68,7 +68,7 @@ impl VhostUserHandle {
 
             let vhost_user_net_reg = VhostUserMemoryRegionInfo {
                 guest_phys_addr: region.start_addr().raw_value(),
-                memory_size: region.len() as u64,
+                memory_size: region.len(),
                 userspace_addr: region.as_ptr() as u64,
                 mmap_offset,
                 mmap_handle,
@@ -92,7 +92,7 @@ impl VhostUserHandle {
 
         let region = VhostUserMemoryRegionInfo {
             guest_phys_addr: region.start_addr().raw_value(),
-            memory_size: region.len() as u64,
+            memory_size: region.len(),
             userspace_addr: region.as_ptr() as u64,
             mmap_offset,
             mmap_handle,

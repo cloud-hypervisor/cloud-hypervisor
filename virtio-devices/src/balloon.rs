@@ -151,7 +151,7 @@ impl BalloonEpollHandler {
                 libc::fallocate64(
                     f_off.file().as_raw_fd(),
                     libc::FALLOC_FL_PUNCH_HOLE | libc::FALLOC_FL_KEEP_SIZE,
-                    (offset as u64 + f_off.start()) as libc::off64_t,
+                    (offset + f_off.start()) as libc::off64_t,
                     range_len as libc::off64_t,
                 )
             };

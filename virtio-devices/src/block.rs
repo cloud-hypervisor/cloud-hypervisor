@@ -229,7 +229,7 @@ impl BlockEpollHandler {
                 .map_err(Error::RequestStatus)?;
 
             queue
-                .add_used(mem.deref(), desc_index as u16, len)
+                .add_used(mem.deref(), desc_index, len)
                 .map_err(Error::QueueAddUsed)?;
             used_descs = true;
         }

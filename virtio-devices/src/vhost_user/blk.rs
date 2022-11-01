@@ -140,7 +140,7 @@ impl Blk {
                 }
 
                 let config_len = mem::size_of::<VirtioBlockConfig>();
-                let config_space: Vec<u8> = vec![0u8; config_len as usize];
+                let config_space: Vec<u8> = vec![0u8; config_len];
                 let (_, config_space) = vu
                     .socket_handle()
                     .get_config(

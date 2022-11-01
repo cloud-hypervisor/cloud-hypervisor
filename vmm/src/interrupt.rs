@@ -270,7 +270,7 @@ impl InterruptManager for LegacyUserspaceInterruptManager {
     fn create_group(&self, config: Self::GroupConfig) -> Result<Arc<dyn InterruptSourceGroup>> {
         Ok(Arc::new(LegacyUserspaceInterruptGroup::new(
             self.ioapic.clone(),
-            config.irq as u32,
+            config.irq,
         )))
     }
 

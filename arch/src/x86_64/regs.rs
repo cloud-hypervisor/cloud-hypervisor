@@ -124,7 +124,7 @@ pub fn configure_segments_and_sregs(
     mem: &GuestMemoryMmap,
     sregs: &mut SpecialRegisters,
 ) -> Result<()> {
-    let gdt_table: [u64; BOOT_GDT_MAX as usize] = {
+    let gdt_table: [u64; BOOT_GDT_MAX] = {
         // Configure GDT entries as specified by PVH boot protocol
         [
             gdt_entry(0, 0, 0),               // NULL

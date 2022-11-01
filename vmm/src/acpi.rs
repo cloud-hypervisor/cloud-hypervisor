@@ -274,7 +274,7 @@ fn create_srat_table(numa_nodes: &NumaNodes) -> Sdt {
     assert_eq!(std::mem::size_of::<MemoryAffinity>(), 40);
 
     for (node_id, node) in numa_nodes.iter() {
-        let proximity_domain = *node_id as u32;
+        let proximity_domain = *node_id;
 
         for region in &node.memory_regions {
             srat.append(MemoryAffinity::from_region(
@@ -346,7 +346,7 @@ fn create_slit_table(numa_nodes: &NumaNodes) -> Sdt {
             let dist: u8 = if *node_id == *i {
                 10
             } else if let Some(distance) = distances.get(i) {
-                *distance as u8
+                *distance
             } else {
                 20
             };

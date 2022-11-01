@@ -114,7 +114,7 @@ impl Aml for AcpiGedDevice {
                     &aml::ResourceTemplate::new(vec![&aml::AddressSpace::new_memory(
                         aml::AddressSpaceCachable::NotCacheable,
                         true,
-                        self.address.0 as u64,
+                        self.address.0,
                         self.address.0 + GED_DEVICE_ACPI_SIZE as u64 - 1,
                     )]),
                 ),

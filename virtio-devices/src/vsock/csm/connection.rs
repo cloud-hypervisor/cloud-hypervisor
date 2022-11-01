@@ -647,7 +647,7 @@ where
     /// buffer.
     ///
     fn peer_avail_credit(&self) -> usize {
-        (Wrapping(self.peer_buf_alloc as u32) - (self.rx_cnt - self.peer_fwd_cnt)).0 as usize
+        (Wrapping(self.peer_buf_alloc) - (self.rx_cnt - self.peer_fwd_cnt)).0 as usize
     }
 
     /// Prepare a packet header for transmission to our peer.
@@ -1118,7 +1118,7 @@ mod tests {
         // CONN_TX_BUF_SIZE - CONN_CREDIT_UPDATE_THRESHOLD, we initialize
         // fwd_cnt at 6 bytes below the threshold.
         let initial_fwd_cnt =
-            csm_defs::CONN_TX_BUF_SIZE as u32 - csm_defs::CONN_CREDIT_UPDATE_THRESHOLD as u32 - 6;
+            csm_defs::CONN_TX_BUF_SIZE - csm_defs::CONN_CREDIT_UPDATE_THRESHOLD - 6;
         ctx.conn.fwd_cnt = Wrapping(initial_fwd_cnt);
 
         // Use a 4-byte packet for triggering the credit update threshold.

@@ -881,7 +881,7 @@ mod tests {
             peer_port: u32,
             data: &[u8],
         ) -> &mut VsockPacket {
-            assert!(data.len() <= self.pkt.buf().unwrap().len() as usize);
+            assert!(data.len() <= self.pkt.buf().unwrap().len());
             self.init_pkt(local_port, peer_port, uapi::VSOCK_OP_RW)
                 .set_len(data.len() as u32);
             self.pkt.buf_mut().unwrap()[..data.len()].copy_from_slice(data);

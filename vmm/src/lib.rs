@@ -424,7 +424,7 @@ impl Vmm {
             Ok(signals) => {
                 self.signals = Some(signals.handle());
                 let exit_evt = self.exit_evt.try_clone().map_err(Error::EventFdClone)?;
-                let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO as i32) } != 0;
+                let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO) } != 0;
 
                 let signal_handler_seccomp_filter = get_seccomp_filter(
                     &self.seccomp_action,
@@ -1451,7 +1451,7 @@ impl Vmm {
         send_data_migration: VmSendMigrationData,
     ) -> result::Result<(), MigratableError> {
         let path = Self::socket_url_to_path(&send_data_migration.destination_url)?;
-        let mut socket = UnixStream::connect(&path).map_err(|e| {
+        let mut socket = UnixStream::connect(path).map_err(|e| {
             MigratableError::MigrateSend(anyhow!("Error connecting to UNIX socket: {}", e))
         })?;
 
