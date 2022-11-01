@@ -148,7 +148,6 @@ impl EpollHelper {
         .map_err(EpollHelperError::Ctl)
     }
 
-    #[cfg(not(fuzzing))]
     pub fn run(
         &mut self,
         paused: Arc<AtomicBool>,
@@ -158,6 +157,7 @@ impl EpollHelper {
         self.run_with_timeout(paused, paused_sync, handler, -1, false)
     }
 
+    #[cfg(not(fuzzing))]
     pub fn run_with_timeout(
         &mut self,
         paused: Arc<AtomicBool>,
@@ -245,11 +245,13 @@ impl EpollHelper {
     #[cfg(fuzzing)]
     // Require to have a 'queue_evt' being kicked before calling
     // and return when no epoll events are active
-    pub fn run(
+    pub fn run_with_timeout(
         &mut self,
         paused: Arc<AtomicBool>,
         paused_sync: Arc<Barrier>,
         handler: &mut dyn EpollHelperHandler,
+        _timeout: i32,
+        _enable_event_list: bool,
     ) -> std::result::Result<(), EpollHelperError> {
         const EPOLL_EVENTS_LEN: usize = 100;
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
