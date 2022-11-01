@@ -692,6 +692,11 @@ impl Console {
             in_buffer: self.in_buffer.lock().unwrap().clone().into(),
         }
     }
+
+    #[cfg(fuzzing)]
+    pub fn wait_for_epoll_threads(&mut self) {
+        self.common.wait_for_epoll_threads();
+    }
 }
 
 impl Drop for Console {
