@@ -131,7 +131,7 @@ See also the [links](#Links) section for a more extended SAC documentation.
 
 ## Network
 
-This section illustrates the Windows specific corner points for the VM network configuration. For the extended networking guide, including bridging for multiple VMs, follow [networking.md](networking.md).
+This section illustrates the Windows specific aspects of the VM network configuration.
 
 ### Basic Networking
 
