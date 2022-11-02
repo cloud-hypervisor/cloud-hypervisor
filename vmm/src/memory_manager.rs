@@ -1336,6 +1336,19 @@ impl MemoryManager {
         )
         .map_err(Error::GuestMemory)?;
 
+        if region.file_offset().is_none() {
+            info!(
+                "Anonymous mapping at 0x{:x} (size = 0x{:x})",
+                region.as_ptr() as u64,
+                size
+            );
+            let ret = unsafe { libc::madvise(region.as_ptr() as _, size, libc::MADV_HUGEPAGE) };
+            if ret != 0 {
+                let e = io::Error::last_os_error();
+                warn!("Failed to mark pages as THP eligible: {}", e);
+            }
+        }
+
         // Apply NUMA policy if needed.
         if let Some(node) = host_numa_node {
             let addr = region.deref().as_ptr();
