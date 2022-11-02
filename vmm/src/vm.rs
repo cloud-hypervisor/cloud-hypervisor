@@ -127,6 +127,9 @@ pub enum Error {
     #[error("Cannot modify the kernel command line: {0}")]
     CmdLineInsertStr(#[source] linux_loader::cmdline::Error),
 
+    #[error("Cannot create the kernel command line: {0}")]
+    CmdLineCreate(#[source] linux_loader::cmdline::Error),
+
     #[error("Cannot configure system: {0}")]
     ConfigureSystem(#[source] arch::Error),
 
@@ -897,7 +900,7 @@ impl Vm {
         payload: &PayloadConfig,
         #[cfg(target_arch = "aarch64")] device_manager: &Arc<Mutex<DeviceManager>>,
     ) -> Result<Cmdline> {
-        let mut cmdline = Cmdline::new(arch::CMDLINE_MAX_SIZE);
+        let mut cmdline = Cmdline::new(arch::CMDLINE_MAX_SIZE).map_err(Error::CmdLineCreate)?;
         if let Some(s) = payload.cmdline.as_ref() {
             cmdline.insert_str(s).map_err(Error::CmdLineInsertStr)?;
         }

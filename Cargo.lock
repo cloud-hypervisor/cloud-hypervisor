@@ -529,9 +529,9 @@ dependencies = [
 
 [[package]]
 name = "linux-loader"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62a2f912deca034ec34b0a43a390059ea98daac40e440ebe8bea88f3315fe168"
+checksum = "f8242360c7d79a7713a28043c994b815e9820b0e97e44b228ec9bd913c16bdfe"
 dependencies = [
  "vm-memory",
 ]
