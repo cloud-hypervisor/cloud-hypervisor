@@ -87,8 +87,6 @@ use std::{result, str, thread};
 use thiserror::Error;
 use tracer::trace_scoped;
 use vm_device::Bus;
-#[cfg(target_arch = "x86_64")]
-use vm_device::BusDevice;
 #[cfg(feature = "tdx")]
 use vm_memory::{Address, ByteValued, GuestMemory, GuestMemoryRegion};
 use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
@@ -365,8 +363,6 @@ struct VmOpsHandler {
     #[cfg(target_arch = "x86_64")]
     io_bus: Arc<Bus>,
     mmio_bus: Arc<Bus>,
-    #[cfg(target_arch = "x86_64")]
-    pci_config_io: Arc<Mutex<dyn BusDevice>>,
 }
 
 impl VmOps for VmOpsHandler {
@@ -408,17 +404,6 @@ impl VmOps for VmOpsHandler {
 
     #[cfg(target_arch = "x86_64")]
     fn pio_read(&self, port: u64, data: &mut [u8]) -> result::Result<(), HypervisorVmError> {
-        use pci::{PCI_CONFIG_IO_PORT, PCI_CONFIG_IO_PORT_SIZE};
-
-        if (PCI_CONFIG_IO_PORT..(PCI_CONFIG_IO_PORT + PCI_CONFIG_IO_PORT_SIZE)).contains(&port) {
-            self.pci_config_io.lock().unwrap().read(
-                PCI_CONFIG_IO_PORT,
-                port - PCI_CONFIG_IO_PORT,
-                data,
-            );
-            return Ok(());
-        }
-
         if let Err(vm_device::BusError::MissingAddressRange) = self.io_bus.read(port, data) {
             info!("Guest PIO read to unregistered address 0x{:x}", port);
         }
@@ -427,17 +412,6 @@ impl VmOps for VmOpsHandler {
 
     #[cfg(target_arch = "x86_64")]
     fn pio_write(&self, port: u64, data: &[u8]) -> result::Result<(), HypervisorVmError> {
-        use pci::{PCI_CONFIG_IO_PORT, PCI_CONFIG_IO_PORT_SIZE};
-
-        if (PCI_CONFIG_IO_PORT..(PCI_CONFIG_IO_PORT + PCI_CONFIG_IO_PORT_SIZE)).contains(&port) {
-            self.pci_config_io.lock().unwrap().write(
-                PCI_CONFIG_IO_PORT,
-                port - PCI_CONFIG_IO_PORT,
-                data,
-            );
-            return Ok(());
-        }
-
         match self.io_bus.write(port, data) {
             Err(vm_device::BusError::MissingAddressRange) => {
                 info!("Guest PIO write to unregistered address 0x{:x}", port);
@@ -534,50 +508,25 @@ impl Vm {
         #[cfg(not(feature = "guest_debug"))]
         let stop_on_boot = false;
 
-        let device_manager = DeviceManager::new(
-            hypervisor.hypervisor_type(),
-            vm.clone(),
-            config.clone(),
-            memory_manager.clone(),
-            &exit_evt,
-            &reset_evt,
-            seccomp_action.clone(),
-            numa_nodes.clone(),
-            &activate_evt,
-            force_iommu,
-            restoring,
-            boot_id_list,
-            timestamp,
-            snapshot_from_id(snapshot, DEVICE_MANAGER_SNAPSHOT_ID),
-        )
-        .map_err(Error::DeviceManager)?;
-
         let memory = memory_manager.lock().unwrap().guest_memory();
         #[cfg(target_arch = "x86_64")]
-        let io_bus = Arc::clone(device_manager.lock().unwrap().io_bus());
-        let mmio_bus = Arc::clone(device_manager.lock().unwrap().mmio_bus());
+        let io_bus = Arc::new(Bus::new());
+        let mmio_bus = Arc::new(Bus::new());
 
-        #[cfg(target_arch = "x86_64")]
-        let pci_config_io =
-            device_manager.lock().unwrap().pci_config_io() as Arc<Mutex<dyn BusDevice>>;
         let vm_ops: Arc<dyn VmOps> = Arc::new(VmOpsHandler {
             memory,
             #[cfg(target_arch = "x86_64")]
-            io_bus,
-            mmio_bus,
-            #[cfg(target_arch = "x86_64")]
-            pci_config_io,
+            io_bus: io_bus.clone(),
+            mmio_bus: mmio_bus.clone(),
         });
 
-        let exit_evt_clone = exit_evt.try_clone().map_err(Error::EventFdClone)?;
         let cpus_config = { &config.lock().unwrap().cpus.clone() };
         let cpu_manager = cpu::CpuManager::new(
             cpus_config,
-            &device_manager,
             &memory_manager,
             vm.clone(),
-            exit_evt_clone,
-            reset_evt,
+            exit_evt.try_clone().map_err(Error::EventFdClone)?,
+            reset_evt.try_clone().map_err(Error::EventFdClone)?,
             #[cfg(feature = "guest_debug")]
             vm_debug_evt,
             hypervisor.clone(),
@@ -588,6 +537,34 @@ impl Vm {
             &numa_nodes,
         )
         .map_err(Error::CpuManager)?;
+
+        #[cfg(feature = "tdx")]
+        let dynamic = !tdx_enabled;
+        #[cfg(not(feature = "tdx"))]
+        let dynamic = true;
+
+        let device_manager = DeviceManager::new(
+            #[cfg(target_arch = "x86_64")]
+            io_bus,
+            mmio_bus,
+            hypervisor.hypervisor_type(),
+            vm.clone(),
+            config.clone(),
+            memory_manager.clone(),
+            cpu_manager.clone(),
+            exit_evt.try_clone().map_err(Error::EventFdClone)?,
+            reset_evt,
+            seccomp_action.clone(),
+            numa_nodes.clone(),
+            &activate_evt,
+            force_iommu,
+            restoring,
+            boot_id_list,
+            timestamp,
+            snapshot_from_id(snapshot, DEVICE_MANAGER_SNAPSHOT_ID),
+            dynamic,
+        )
+        .map_err(Error::DeviceManager)?;
 
         let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO) } != 0;
 
