@@ -508,45 +508,25 @@ impl Vm {
         #[cfg(not(feature = "guest_debug"))]
         let stop_on_boot = false;
 
-        let device_manager = DeviceManager::new(
-            hypervisor.hypervisor_type(),
-            vm.clone(),
-            config.clone(),
-            memory_manager.clone(),
-            &exit_evt,
-            &reset_evt,
-            seccomp_action.clone(),
-            numa_nodes.clone(),
-            &activate_evt,
-            force_iommu,
-            restoring,
-            boot_id_list,
-            timestamp,
-            snapshot_from_id(snapshot, DEVICE_MANAGER_SNAPSHOT_ID),
-        )
-        .map_err(Error::DeviceManager)?;
-
         let memory = memory_manager.lock().unwrap().guest_memory();
         #[cfg(target_arch = "x86_64")]
-        let io_bus = Arc::clone(device_manager.lock().unwrap().io_bus());
-        let mmio_bus = Arc::clone(device_manager.lock().unwrap().mmio_bus());
+        let io_bus = Arc::new(Bus::new());
+        let mmio_bus = Arc::new(Bus::new());
 
         let vm_ops: Arc<dyn VmOps> = Arc::new(VmOpsHandler {
             memory,
             #[cfg(target_arch = "x86_64")]
-            io_bus,
-            mmio_bus,
+            io_bus: io_bus.clone(),
+            mmio_bus: mmio_bus.clone(),
         });
 
-        let exit_evt_clone = exit_evt.try_clone().map_err(Error::EventFdClone)?;
         let cpus_config = { &config.lock().unwrap().cpus.clone() };
         let cpu_manager = cpu::CpuManager::new(
             cpus_config,
-            &device_manager,
             &memory_manager,
             vm.clone(),
-            exit_evt_clone,
-            reset_evt,
+            exit_evt.try_clone().map_err(Error::EventFdClone)?,
+            reset_evt.try_clone().map_err(Error::EventFdClone)?,
             #[cfg(feature = "guest_debug")]
             vm_debug_evt,
             hypervisor.clone(),
@@ -557,6 +537,34 @@ impl Vm {
             &numa_nodes,
         )
         .map_err(Error::CpuManager)?;
+
+        #[cfg(feature = "tdx")]
+        let dynamic = !tdx_enabled;
+        #[cfg(not(feature = "tdx"))]
+        let dynamic = true;
+
+        let device_manager = DeviceManager::new(
+            #[cfg(target_arch = "x86_64")]
+            io_bus,
+            mmio_bus,
+            hypervisor.hypervisor_type(),
+            vm.clone(),
+            config.clone(),
+            memory_manager.clone(),
+            cpu_manager.clone(),
+            exit_evt.try_clone().map_err(Error::EventFdClone)?,
+            reset_evt,
+            seccomp_action.clone(),
+            numa_nodes.clone(),
+            &activate_evt,
+            force_iommu,
+            restoring,
+            boot_id_list,
+            timestamp,
+            snapshot_from_id(snapshot, DEVICE_MANAGER_SNAPSHOT_ID),
+            dynamic,
+        )
+        .map_err(Error::DeviceManager)?;
 
         // SAFETY: trivially safe
         let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO) } != 0;

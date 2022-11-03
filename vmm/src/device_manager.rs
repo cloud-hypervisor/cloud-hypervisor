@@ -13,6 +13,7 @@ use crate::config::{
     ConsoleOutputMode, DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig,
     VdpaConfig, VhostMode, VmConfig, VsockConfig,
 };
+use crate::cpu::{CpuManager, CPU_MANAGER_ACPI_SIZE};
 use crate::device_tree::{DeviceNode, DeviceTree};
 use crate::interrupt::LegacyUserspaceInterruptManager;
 use crate::interrupt::MsiInterruptManager;
@@ -849,6 +850,9 @@ pub struct DeviceManager {
     // Memory Manager
     memory_manager: Arc<Mutex<MemoryManager>>,
 
+    // CPU Manager
+    cpu_manager: Arc<Mutex<CpuManager>>,
+
     // The virtio devices on the system
     virtio_devices: Vec<MetaVirtioDevice>,
 
@@ -951,12 +955,15 @@ pub struct DeviceManager {
 impl DeviceManager {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        #[cfg(target_arch = "x86_64")] io_bus: Arc<Bus>,
+        mmio_bus: Arc<Bus>,
         hypervisor_type: HypervisorType,
         vm: Arc<dyn hypervisor::Vm>,
         config: Arc<Mutex<VmConfig>>,
         memory_manager: Arc<Mutex<MemoryManager>>,
-        exit_evt: &EventFd,
-        reset_evt: &EventFd,
+        cpu_manager: Arc<Mutex<CpuManager>>,
+        exit_evt: EventFd,
+        reset_evt: EventFd,
         seccomp_action: SeccompAction,
         numa_nodes: NumaNodes,
         activate_evt: &EventFd,
@@ -965,6 +972,7 @@ impl DeviceManager {
         boot_id_list: BTreeSet<String>,
         timestamp: Instant,
         snapshot: Option<Snapshot>,
+        dynamic: bool,
     ) -> DeviceManagerResult<Arc<Mutex<Self>>> {
         trace_scoped!("DeviceManager::new");
 
@@ -997,8 +1005,8 @@ impl DeviceManager {
         let address_manager = Arc::new(AddressManager {
             allocator: memory_manager.lock().unwrap().allocator(),
             #[cfg(target_arch = "x86_64")]
-            io_bus: Arc::new(Bus::new()),
-            mmio_bus: Arc::new(Bus::new()),
+            io_bus,
+            mmio_bus,
             vm: vm.clone(),
             device_tree: Arc::clone(&device_tree),
             pci_mmio_allocators,
@@ -1044,6 +1052,26 @@ impl DeviceManager {
             )?);
         }
 
+        if dynamic {
+            let acpi_address = address_manager
+                .allocator
+                .lock()
+                .unwrap()
+                .allocate_platform_mmio_addresses(None, CPU_MANAGER_ACPI_SIZE as u64, None)
+                .ok_or(DeviceManagerError::AllocateMmioAddress)?;
+
+            address_manager
+                .mmio_bus
+                .insert(
+                    cpu_manager.clone(),
+                    acpi_address.0,
+                    CPU_MANAGER_ACPI_SIZE as u64,
+                )
+                .map_err(DeviceManagerError::BusError)?;
+
+            cpu_manager.lock().unwrap().set_acpi_address(acpi_address);
+        }
+
         let device_manager = DeviceManager {
             hypervisor_type,
             address_manager: Arc::clone(&address_manager),
@@ -1054,6 +1082,7 @@ impl DeviceManager {
             ged_notification_device: None,
             config,
             memory_manager,
+            cpu_manager,
             virtio_devices: Vec::new(),
             bus_devices: Vec::new(),
             device_id_cnt: Wrapping(0),
@@ -1066,8 +1095,8 @@ impl DeviceManager {
             iommu_attached_devices: None,
             pci_segments,
             device_tree,
-            exit_evt: exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
-            reset_evt: reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
+            exit_evt,
+            reset_evt,
             #[cfg(target_arch = "aarch64")]
             id_to_dev_info: HashMap::new(),
             seccomp_action,
@@ -1136,6 +1165,11 @@ impl DeviceManager {
         let mut virtio_devices: Vec<MetaVirtioDevice> = Vec::new();
 
         let interrupt_controller = self.add_interrupt_controller()?;
+
+        self.cpu_manager
+            .lock()
+            .unwrap()
+            .set_interrupt_controller(interrupt_controller.clone());
 
         // Now we can create the legacy interrupt manager, which needs the freshly
         // formed IOAPIC device.
