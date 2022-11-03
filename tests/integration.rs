@@ -5693,6 +5693,11 @@ mod common_parallel {
         _test_snapshot_restore(true);
     }
 
+    #[test]
+    fn test_snapshot_restore_basic() {
+        _test_snapshot_restore(false);
+    }
+
     fn _test_snapshot_restore(use_hotplug: bool) {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
