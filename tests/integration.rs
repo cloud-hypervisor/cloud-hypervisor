@@ -5689,7 +5689,11 @@ mod common_parallel {
     // through each ssh command. There's no need to perform a dedicated test to
     // verify the migration went well for virtio-net.
     #[test]
-    fn test_snapshot_restore() {
+    fn test_snapshot_restore_hotplug_virtiomem() {
+        _test_snapshot_restore(true);
+    }
+
+    fn _test_snapshot_restore(use_hotplug: bool) {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
         let kernel_path = direct_kernel_boot_path();
@@ -5701,6 +5705,11 @@ mod common_parallel {
             "id={},tap=,mac={},ip={},mask=255.255.255.0",
             net_id, guest.network.guest_mac, guest.network.host_ip
         );
+        let mut mem_params = "size=4G";
+
+        if use_hotplug {
+            mem_params = "size=4G,hotplug_method=virtio-mem,hotplug_size=32G"
+        }
 
         let cloudinit_params = format!(
             "path={},iommu=on",
@@ -5714,10 +5723,7 @@ mod common_parallel {
             .args(["--api-socket", &api_socket_source])
             .args(["--event-monitor", format!("path={}", event_path).as_str()])
             .args(["--cpus", "boot=4"])
-            .args([
-                "--memory",
-                "size=4G,hotplug_method=virtio-mem,hotplug_size=32G",
-            ])
+            .args(["--memory", mem_params])
             .args(["--balloon", "size=0"])
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args([
@@ -5747,28 +5753,30 @@ mod common_parallel {
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
             // Check the guest RAM
             assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
-            // Increase guest RAM with virtio-mem
-            resize_command(
-                &api_socket_source,
-                None,
-                Some(6 << 30),
-                None,
-                Some(&event_path),
-            );
-            thread::sleep(std::time::Duration::new(5, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
-            // Use balloon to remove RAM from the VM
-            resize_command(
-                &api_socket_source,
-                None,
-                None,
-                Some(1 << 30),
-                Some(&event_path),
-            );
-            thread::sleep(std::time::Duration::new(5, 0));
-            let total_memory = guest.get_total_memory().unwrap_or_default();
-            assert!(total_memory > 4_800_000);
-            assert!(total_memory < 5_760_000);
+            if use_hotplug {
+                // Increase guest RAM with virtio-mem
+                resize_command(
+                    &api_socket_source,
+                    None,
+                    Some(6 << 30),
+                    None,
+                    Some(&event_path),
+                );
+                thread::sleep(std::time::Duration::new(5, 0));
+                assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
+                // Use balloon to remove RAM from the VM
+                resize_command(
+                    &api_socket_source,
+                    None,
+                    None,
+                    Some(1 << 30),
+                    Some(&event_path),
+                );
+                thread::sleep(std::time::Duration::new(5, 0));
+                let total_memory = guest.get_total_memory().unwrap_or_default();
+                assert!(total_memory > 4_800_000);
+                assert!(total_memory < 5_760_000);
+            }
             // Check the guest virtio-devices, e.g. block, rng, vsock, console, and net
             guest.check_devices_common(Some(&socket), Some(&console_text), None);
 
@@ -5921,18 +5929,22 @@ mod common_parallel {
             // Perform same checks to validate VM has been properly restored
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
             let total_memory = guest.get_total_memory().unwrap_or_default();
-            assert!(total_memory > 4_800_000);
-            assert!(total_memory < 5_760_000);
-            // Deflate balloon to restore entire RAM to the VM
-            resize_command(&api_socket_restored, None, None, Some(0), None);
-            thread::sleep(std::time::Duration::new(5, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
-            // Decrease guest RAM with virtio-mem
-            resize_command(&api_socket_restored, None, Some(5 << 30), None, None);
-            thread::sleep(std::time::Duration::new(5, 0));
-            let total_memory = guest.get_total_memory().unwrap_or_default();
-            assert!(total_memory > 4_800_000);
-            assert!(total_memory < 5_760_000);
+            if !use_hotplug {
+                assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+            } else {
+                assert!(total_memory > 4_800_000);
+                assert!(total_memory < 5_760_000);
+                // Deflate balloon to restore entire RAM to the VM
+                resize_command(&api_socket_restored, None, None, Some(0), None);
+                thread::sleep(std::time::Duration::new(5, 0));
+                assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
+                // Decrease guest RAM with virtio-mem
+                resize_command(&api_socket_restored, None, Some(5 << 30), None, None);
+                thread::sleep(std::time::Duration::new(5, 0));
+                let total_memory = guest.get_total_memory().unwrap_or_default();
+                assert!(total_memory > 4_800_000);
+                assert!(total_memory < 5_760_000);
+            }
 
             guest.check_devices_common(Some(&socket), Some(&console_text), None);
         });
