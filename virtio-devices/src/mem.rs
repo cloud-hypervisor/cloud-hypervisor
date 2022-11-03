@@ -260,6 +260,12 @@ impl VirtioMemConfig {
     }
 
     fn is_valid_range(&self, addr: u64, size: u64) -> bool {
+        // Ensure no overflow from adding 'addr' and 'size' whose value are both
+        // controlled by the guest driver
+        if addr.checked_add(size).is_none() {
+            return false;
+        }
+
         // Start address must be aligned on block_size, the size must be
         // greater than 0, and all blocks covered by the request must be
         // in the usable region.
