@@ -18,7 +18,6 @@ use crate::coredump::{
     GuestDebuggableError, NoteDescType, X86_64ElfPrStatus, X86_64UserRegs, COREDUMP_NAME_SIZE,
     NT_PRSTATUS,
 };
-use crate::device_manager::DeviceManager;
 #[cfg(feature = "guest_debug")]
 use crate::gdb::{get_raw_tid, Debuggable, DebuggableError};
 use crate::memory_manager::MemoryManager;
@@ -596,7 +595,6 @@ impl CpuManager {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: &CpusConfig,
-        device_manager: &Arc<Mutex<DeviceManager>>,
         memory_manager: &Arc<Mutex<MemoryManager>>,
         vm: Arc<dyn hypervisor::Vm>,
         exit_evt: EventFd,
@@ -669,8 +667,6 @@ impl CpuManager {
             }
         }
 
-        let device_manager = device_manager.lock().unwrap();
-
         let proximity_domain_per_cpu: BTreeMap<u8, u32> = {
             let mut cpu_list = Vec::new();
             for (proximity_domain, numa_node) in numa_nodes.iter() {
@@ -697,23 +693,10 @@ impl CpuManager {
         #[cfg(not(feature = "tdx"))]
         let dynamic = true;
 
-        let acpi_address = if dynamic {
-            Some(
-                device_manager
-                    .allocator()
-                    .lock()
-                    .unwrap()
-                    .allocate_platform_mmio_addresses(None, CPU_MANAGER_ACPI_SIZE as u64, None)
-                    .ok_or(Error::AllocateMmmioAddress)?,
-            )
-        } else {
-            None
-        };
-
-        let cpu_manager = Arc::new(Mutex::new(CpuManager {
+        Ok(Arc::new(Mutex::new(CpuManager {
             hypervisor_type,
             config: config.clone(),
-            interrupt_controller: device_manager.interrupt_controller().clone(),
+            interrupt_controller: None,
             vm_memory: guest_memory,
             #[cfg(target_arch = "x86_64")]
             cpuid,
@@ -729,24 +712,11 @@ impl CpuManager {
             vcpus: Vec::with_capacity(usize::from(config.max_vcpus)),
             seccomp_action,
             vm_ops,
-            acpi_address,
+            acpi_address: None,
             proximity_domain_per_cpu,
             affinity,
             dynamic,
-        }));
-
-        if let Some(acpi_address) = acpi_address {
-            device_manager
-                .mmio_bus()
-                .insert(
-                    cpu_manager.clone(),
-                    acpi_address.0,
-                    CPU_MANAGER_ACPI_SIZE as u64,
-                )
-                .map_err(Error::BusError)?;
-        }
-
-        Ok(cpu_manager)
+        })))
     }
 
     fn create_vcpu(
@@ -1670,6 +1640,17 @@ impl CpuManager {
         descaddr |= gva & (page_size - 1);
 
         Ok(descaddr)
+    }
+
+    pub(crate) fn set_acpi_address(&mut self, acpi_address: GuestAddress) {
+        self.acpi_address = Some(acpi_address);
+    }
+
+    pub(crate) fn set_interrupt_controller(
+        &mut self,
+        interrupt_controller: Arc<Mutex<dyn InterruptController>>,
+    ) {
+        self.interrupt_controller = Some(interrupt_controller);
     }
 }
 
