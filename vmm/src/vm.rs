@@ -2087,12 +2087,15 @@ impl Vm {
             self.init_tdx()?;
         }
 
-        // Create and configure vcpus
-        self.cpu_manager
-            .lock()
-            .unwrap()
-            .create_boot_vcpus(entry_point)
-            .map_err(Error::CpuManager)?;
+        // Configure the vcpus that have been created
+        let vcpus = self.cpu_manager.lock().unwrap().vcpus();
+        for vcpu in vcpus {
+            self.cpu_manager
+                .lock()
+                .unwrap()
+                .configure_vcpu(vcpu, entry_point, None)
+                .map_err(Error::CpuManager)?;
+        }
 
         #[cfg(feature = "tdx")]
         let sections = if tdx_enabled {
