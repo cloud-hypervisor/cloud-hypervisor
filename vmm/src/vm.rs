@@ -538,6 +538,12 @@ impl Vm {
         )
         .map_err(Error::CpuManager)?;
 
+        cpu_manager
+            .lock()
+            .unwrap()
+            .create_boot_vcpus()
+            .map_err(Error::CpuManager)?;
+
         #[cfg(feature = "tdx")]
         let dynamic = !tdx_enabled;
         #[cfg(not(feature = "tdx"))]
