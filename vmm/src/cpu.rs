@@ -291,6 +291,7 @@ pub struct Vcpu {
     #[cfg(target_arch = "aarch64")]
     mpidr: u64,
     saved_state: Option<CpuState>,
+    configured: bool,
 }
 
 impl Vcpu {
@@ -316,6 +317,7 @@ impl Vcpu {
             #[cfg(target_arch = "aarch64")]
             mpidr: 0,
             saved_state: None,
+            configured: false,
         })
     }
 
@@ -719,15 +721,28 @@ impl CpuManager {
         })))
     }
 
-    fn create_vcpu(
-        &mut self,
-        cpu_id: u8,
+    fn create_vcpu(&mut self, cpu_id: u8) -> Result<Arc<Mutex<Vcpu>>> {
+        info!("Creating vCPU: cpu_id = {}", cpu_id);
+
+        let vcpu = Arc::new(Mutex::new(Vcpu::new(
+            cpu_id,
+            &self.vm,
+            Some(self.vm_ops.clone()),
+        )?));
+
+        // Adding vCPU to the CpuManager's vCPU list.
+        self.vcpus.push(vcpu.clone());
+
+        Ok(vcpu)
+    }
+
+    fn configure_vcpu(
+        &self,
+        vcpu: Arc<Mutex<Vcpu>>,
         entry_point: Option<EntryPoint>,
         snapshot: Option<Snapshot>,
     ) -> Result<()> {
-        info!("Creating vCPU: cpu_id = {}", cpu_id);
-
-        let mut vcpu = Vcpu::new(cpu_id, &self.vm, Some(self.vm_ops.clone()))?;
+        let mut vcpu = vcpu.lock().unwrap();
 
         if let Some(snapshot) = snapshot {
             // AArch64 vCPUs should be initialized after created.
@@ -750,15 +765,13 @@ impl CpuManager {
                 .expect("Failed to configure vCPU");
         }
 
-        // Adding vCPU to the CpuManager's vCPU list.
-        let vcpu = Arc::new(Mutex::new(vcpu));
-        self.vcpus.push(vcpu);
+        vcpu.configured = true;
 
         Ok(())
     }
 
     /// Only create new vCPUs if there aren't any inactive ones to reuse
-    fn create_vcpus(&mut self, desired_vcpus: u8, entry_point: Option<EntryPoint>) -> Result<()> {
+    fn create_vcpus(&mut self, desired_vcpus: u8) -> Result<()> {
         info!(
             "Request to create new vCPUs: desired = {}, max = {}, allocated = {}, present = {}",
             desired_vcpus,
@@ -773,7 +786,18 @@ impl CpuManager {
 
         // Only create vCPUs in excess of all the allocated vCPUs.
         for cpu_id in self.vcpus.len() as u8..desired_vcpus {
-            self.create_vcpu(cpu_id, entry_point, None)?;
+            self.create_vcpu(cpu_id)?;
+        }
+
+        Ok(())
+    }
+
+    fn configure_vcpus(&mut self, entry_point: Option<EntryPoint>) -> Result<()> {
+        for vcpu in self.vcpus.clone() {
+            if vcpu.lock().unwrap().configured {
+                continue;
+            }
+            self.configure_vcpu(vcpu, entry_point, None)?;
         }
 
         Ok(())
@@ -1100,7 +1124,8 @@ impl CpuManager {
     pub fn create_boot_vcpus(&mut self, entry_point: Option<EntryPoint>) -> Result<()> {
         trace_scoped!("create_boot_vcpus");
 
-        self.create_vcpus(self.boot_vcpus(), entry_point)
+        self.create_vcpus(self.boot_vcpus())?;
+        self.configure_vcpus(entry_point)
     }
 
     // Starts all the vCPUs that the VM is booting with. Blocks until all vCPUs are running.
@@ -1128,7 +1153,8 @@ impl CpuManager {
 
         match desired_vcpus.cmp(&self.present_vcpus()) {
             cmp::Ordering::Greater => {
-                self.create_vcpus(desired_vcpus, None)?;
+                self.create_vcpus(desired_vcpus)?;
+                self.configure_vcpus(None)?;
                 self.activate_vcpus(desired_vcpus, true, None)?;
                 Ok(true)
             }
@@ -2060,8 +2086,13 @@ impl Snapshottable for CpuManager {
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
         for (cpu_id, snapshot) in snapshot.snapshots.iter() {
             info!("Restoring VCPU {}", cpu_id);
-            self.create_vcpu(cpu_id.parse::<u8>().unwrap(), None, Some(*snapshot.clone()))
+            let vcpu = self
+                .create_vcpu(cpu_id.parse::<u8>().unwrap())
                 .map_err(|e| MigratableError::Restore(anyhow!("Could not create vCPU {:?}", e)))?;
+            self.configure_vcpu(vcpu, None, Some(*snapshot.clone()))
+                .map_err(|e| {
+                    MigratableError::Restore(anyhow!("Could not configure vCPU {:?}", e))
+                })?
         }
 
         Ok(())
