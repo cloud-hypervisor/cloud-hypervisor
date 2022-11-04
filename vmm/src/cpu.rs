@@ -792,7 +792,7 @@ impl CpuManager {
         Ok(())
     }
 
-    fn configure_vcpus(&mut self, entry_point: Option<EntryPoint>) -> Result<()> {
+    pub fn configure_vcpus(&mut self, entry_point: Option<EntryPoint>) -> Result<()> {
         for vcpu in self.vcpus.clone() {
             if vcpu.lock().unwrap().configured {
                 continue;
@@ -1121,11 +1121,10 @@ impl CpuManager {
         Ok(())
     }
 
-    pub fn create_boot_vcpus(&mut self, entry_point: Option<EntryPoint>) -> Result<()> {
+    pub fn create_boot_vcpus(&mut self) -> Result<()> {
         trace_scoped!("create_boot_vcpus");
 
-        self.create_vcpus(self.boot_vcpus())?;
-        self.configure_vcpus(entry_point)
+        self.create_vcpus(self.boot_vcpus())
     }
 
     // Starts all the vCPUs that the VM is booting with. Blocks until all vCPUs are running.
@@ -2085,10 +2084,9 @@ impl Snapshottable for CpuManager {
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
         for (cpu_id, snapshot) in snapshot.snapshots.iter() {
+            let cpu_id = cpu_id.parse::<usize>().unwrap();
             info!("Restoring VCPU {}", cpu_id);
-            let vcpu = self
-                .create_vcpu(cpu_id.parse::<u8>().unwrap())
-                .map_err(|e| MigratableError::Restore(anyhow!("Could not create vCPU {:?}", e)))?;
+            let vcpu = self.vcpus[cpu_id].clone();
             self.configure_vcpu(vcpu, None, Some(*snapshot.clone()))
                 .map_err(|e| {
                     MigratableError::Restore(anyhow!("Could not configure vCPU {:?}", e))
