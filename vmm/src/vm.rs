@@ -11,6 +11,8 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
+#[cfg(feature = "pci_support")]
+
 use crate::config::{
     add_to_config, DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, PmemConfig,
     UserDeviceConfig, ValidationError, VdpaConfig, VmConfig, VsockConfig,
@@ -1203,7 +1205,35 @@ impl Vm {
                 ))
             })?;
 
-        arch::configure_system(
+        let pci_space: Option<(u64, u64)> = if cfg!(feature = "pci_support") {
+            let pci_space_start: GuestAddress = self
+                .memory_manager
+                .lock()
+                .as_ref()
+                .unwrap()
+                .start_of_device_area();
+
+            let pci_space_end: GuestAddress = self
+                .memory_manager
+                .lock()
+                .as_ref()
+                .unwrap()
+                .end_of_device_area();
+
+            let pci_space_size = pci_space_end
+                .checked_offset_from(pci_space_start)
+                .ok_or(Error::MemOverflow)?
+                + 1;
+
+            Some((pci_space_start.0, pci_space_size))
+        } else {
+            None
+        };
+
+        // Call `configure_system` and pass the GIC devices out, so that
+        // we can register the GIC device to the device manager.
+        let gic_device = arch::configure_system(
+            &self.memory_manager.lock().as_ref().unwrap().vm,
             &mem,
             cmdline.as_cstring().unwrap().to_str().unwrap(),
             vcpu_mpidrs,
@@ -1412,7 +1442,13 @@ impl Vm {
         Err(Error::ResizeZone)
     }
 
-    pub fn add_device(&mut self, mut device_cfg: DeviceConfig) -> Result<PciDeviceInfo> {
+    #[cfg(not(feature = "pci_support"))]
+    pub fn add_device(&mut self, mut _device_cfg: DeviceConfig) -> Result<PciDeviceInfo> {
+        Err(Error::NoPciSupport)
+    }
+
+    #[cfg(feature = "pci_support")]
+    pub fn add_device(&mut self, mut _device_cfg: DeviceConfig) -> Result<PciDeviceInfo> {
         let pci_device_info = self
             .device_manager
             .lock()
@@ -1460,68 +1496,82 @@ impl Vm {
         Ok(pci_device_info)
     }
 
-    pub fn remove_device(&mut self, id: String) -> Result<()> {
-        self.device_manager
-            .lock()
-            .unwrap()
-            .remove_device(id.clone())
-            .map_err(Error::DeviceManager)?;
+    pub fn remove_device(&mut self, _id: String) -> Result<()> {
+        if cfg!(feature = "pci_support") {
+            #[cfg(feature = "pci_support")]
+            {
+                self.device_manager
+                    .lock()
+                    .unwrap()
+                    .remove_device(_id.clone())
+                    .map_err(Error::DeviceManager)?;
 
-        // Update VmConfig by removing the device. This is important to
-        // ensure the device would not be created in case of a reboot.
-        let mut config = self.config.lock().unwrap();
+                // Update VmConfig by removing the device. This is important to
+                // ensure the device would not be created in case of a reboot.
+                {
+                    let mut config = self.config.lock().unwrap();
+                    // Remove if VFIO device
+                    if let Some(devices) = config.devices.as_mut() {
+                        devices.retain(|dev| dev.id.as_ref() != Some(&id));
+                    }
 
-        // Remove if VFIO device
-        if let Some(devices) = config.devices.as_mut() {
-            devices.retain(|dev| dev.id.as_ref() != Some(&id));
-        }
+                    // Remove if VFIO user device
+                    if let Some(user_devices) = config.user_devices.as_mut() {
+                        user_devices.retain(|dev| dev.id.as_ref() != Some(&id));
+                    }
 
-        // Remove if VFIO user device
-        if let Some(user_devices) = config.user_devices.as_mut() {
-            user_devices.retain(|dev| dev.id.as_ref() != Some(&id));
-        }
+                    // Remove if disk device
+                    if let Some(disks) = config.disks.as_mut() {
+                        disks.retain(|dev| dev.id.as_ref() != Some(&id));
+                    }
 
-        // Remove if disk device
-        if let Some(disks) = config.disks.as_mut() {
-            disks.retain(|dev| dev.id.as_ref() != Some(&id));
-        }
+                    // Remove if fs device
+                    if let Some(fs) = config.fs.as_mut() {
+                        fs.retain(|dev| dev.id.as_ref() != Some(&id));
+                    }
 
-        // Remove if fs device
-        if let Some(fs) = config.fs.as_mut() {
-            fs.retain(|dev| dev.id.as_ref() != Some(&id));
-        }
+                    // Remove if net device
+                    if let Some(net) = config.net.as_mut() {
+                        net.retain(|dev| dev.id.as_ref() != Some(&id));
+                    }
 
-        // Remove if net device
-        if let Some(net) = config.net.as_mut() {
-            net.retain(|dev| dev.id.as_ref() != Some(&id));
-        }
+                    // Remove if pmem device
+                    if let Some(pmem) = config.pmem.as_mut() {
+                        pmem.retain(|dev| dev.id.as_ref() != Some(&id));
+                    }
 
-        // Remove if pmem device
-        if let Some(pmem) = config.pmem.as_mut() {
-            pmem.retain(|dev| dev.id.as_ref() != Some(&id));
-        }
+                    // Remove if vDPA device
+                    if let Some(vdpa) = config.vdpa.as_mut() {
+                        vdpa.retain(|dev| dev.id.as_ref() != Some(&id));
+                    }
 
-        // Remove if vDPA device
-        if let Some(vdpa) = config.vdpa.as_mut() {
-            vdpa.retain(|dev| dev.id.as_ref() != Some(&id));
-        }
+                    // Remove if vsock device
+                    if let Some(vsock) = config.vsock.as_ref() {
+                        if vsock.id.as_ref() == Some(&id) {
+                            config.vsock = None;
+                        }
+                    }
+                }
 
-        // Remove if vsock device
-        if let Some(vsock) = config.vsock.as_ref() {
-            if vsock.id.as_ref() == Some(&id) {
-                config.vsock = None;
+                self.device_manager
+                    .lock()
+                    .unwrap()
+                    .notify_hotplug(HotPlugNotificationFlags::PCI_DEVICES_CHANGED)
+                    .map_err(Error::DeviceManager)?;
             }
+            Ok(())
+        } else {
+            Err(Error::NoPciSupport)
         }
-
-        self.device_manager
-            .lock()
-            .unwrap()
-            .notify_hotplug(AcpiNotificationFlags::PCI_DEVICES_CHANGED)
-            .map_err(Error::DeviceManager)?;
-        Ok(())
     }
 
-    pub fn add_disk(&mut self, mut disk_cfg: DiskConfig) -> Result<PciDeviceInfo> {
+    #[cfg(not(feature = "pci_support"))]
+    pub fn add_disk(&mut self, mut _disk_cfg: DiskConfig) -> Result<PciDeviceInfo> {
+        Err(Error::NoPciSupport)
+    }
+
+    #[cfg(feature = "pci_support")]
+    pub fn add_disk(&mut self, mut _disk_cfg: DiskConfig) -> Result<PciDeviceInfo> {
         let pci_device_info = self
             .device_manager
             .lock()
@@ -1545,7 +1595,14 @@ impl Vm {
         Ok(pci_device_info)
     }
 
-    pub fn add_fs(&mut self, mut fs_cfg: FsConfig) -> Result<PciDeviceInfo> {
+
+    #[cfg(not(feature = "pci_support"))]
+    pub fn add_fs(&mut self, mut _fs_cfg: FsConfig) -> Result<PciDeviceInfo> {
+        Err(Error::NoPciSupport)
+    }
+
+    #[cfg(feature = "pci_support")]
+    pub fn add_fs(&mut self, mut _fs_cfg: FsConfig) -> Result<PciDeviceInfo> {
         let pci_device_info = self
             .device_manager
             .lock()
@@ -1569,7 +1626,13 @@ impl Vm {
         Ok(pci_device_info)
     }
 
-    pub fn add_pmem(&mut self, mut pmem_cfg: PmemConfig) -> Result<PciDeviceInfo> {
+    #[cfg(not(feature = "pci_support"))]
+    pub fn add_pmem(&mut self, mut _pmem_cfg: PmemConfig) -> Result<PciDeviceInfo> {
+        Err(Error::NoPciSupport)
+    }
+
+    #[cfg(feature = "pci_support")]
+    pub fn add_pmem(&mut self, mut _pmem_cfg: PmemConfig) -> Result<PciDeviceInfo> {
         let pci_device_info = self
             .device_manager
             .lock()
@@ -1593,7 +1656,13 @@ impl Vm {
         Ok(pci_device_info)
     }
 
-    pub fn add_net(&mut self, mut net_cfg: NetConfig) -> Result<PciDeviceInfo> {
+    #[cfg(not(feature = "pci_support"))]
+    pub fn add_net(&mut self, mut _net_cfg: NetConfig) -> Result<PciDeviceInfo> {
+        Err(Error::NoPciSupport)
+    }
+
+    #[cfg(feature = "pci_support")]
+    pub fn add_net(&mut self, mut _net_cfg: NetConfig) -> Result<PciDeviceInfo> {
         let pci_device_info = self
             .device_manager
             .lock()
@@ -1617,7 +1686,18 @@ impl Vm {
         Ok(pci_device_info)
     }
 
-    pub fn add_vdpa(&mut self, mut vdpa_cfg: VdpaConfig) -> Result<PciDeviceInfo> {
+
+    #[cfg(not(feature = "pci_support"))]
+    pub fn add_vsock(&mut self, mut _vsock_cfg: VsockConfig) -> Result<PciDeviceInfo> {
+        Err(Error::NoPciSupport)
+    }
+
+    #[cfg(feature = "pci_support")]
+    pub fn add_vsock(&mut self, mut _vsock_cfg: VsockConfig) -> Result<PciDeviceInfo> {
+        if self.config.lock().unwrap().vsock.is_some() {
+            return Err(Error::TooManyVsockDevices);
+        }
+
         let pci_device_info = self
             .device_manager
             .lock()

@@ -13,6 +13,8 @@ use crate::config::{
     ConsoleOutputMode, DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig,
     VdpaConfig, VhostMode, VmConfig, VsockConfig,
 };
+#[cfg(feature = "pci_support")]
+
 use crate::device_tree::{DeviceNode, DeviceTree};
 use crate::interrupt::LegacyUserspaceInterruptManager;
 use crate::interrupt::MsiInterruptManager;
@@ -22,6 +24,8 @@ use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::serial_manager::{Error as SerialManagerError, SerialManager};
 use crate::sigwinch_listener::start_sigwinch_listener;
 use crate::GuestRegionMmap;
+arent of af3c6c34 (vmm: Remove mmio and pci differentiation)
+#[cfg(feature = "pci_support")]
 use crate::PciDeviceInfo;
 use crate::{device_node, DEVICE_MANAGER_SNAPSHOT_ID};
 use acpi_tables::sdt::GenericAddress;
@@ -49,6 +53,8 @@ use devices::legacy::Serial;
 use devices::{
     interrupt_controller, interrupt_controller::InterruptController, AcpiNotificationFlags,
 };
+#[cfg(feature = "mmio_support")]
+use hypervisor::vm::DataMatch;
 use hypervisor::{HypervisorType, IoEventAddress};
 use libc::{
     cfmakeraw, isatty, tcgetattr, tcsetattr, termios, MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED,
@@ -56,6 +62,7 @@ use libc::{
 };
 #[cfg(target_arch = "x86_64")]
 use pci::PciConfigIo;
+#[cfg(feature = "pci_support")]
 use pci::{
     DeviceRelocation, PciBarRegionType, PciBdf, PciDevice, VfioPciDevice, VfioUserDmaMapping,
     VfioUserPciDevice, VfioUserPciDeviceError,
@@ -76,9 +83,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tracer::trace_scoped;
 use vfio_ioctls::{VfioContainer, VfioDevice, VfioDeviceFd};
+
 use virtio_devices::transport::VirtioTransport;
 use virtio_devices::transport::{VirtioPciDevice, VirtioPciDeviceActivator};
 use virtio_devices::vhost_user::VhostUserConfig;
+
+#[cfg(feature = "pci_support")]
 use virtio_devices::{
     AccessPlatformMapping, ActivateError, VdpaDmaMapping, VirtioMemMappingSource,
 };
@@ -86,6 +96,7 @@ use virtio_devices::{Endpoint, IommuMapping};
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::dma_mapping::vfio::VfioDmaMapping;
 use vm_device::dma_mapping::ExternalDmaMapping;
+
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, LegacyIrqGroupConfig, MsiIrqGroupConfig,
 };
@@ -99,14 +110,19 @@ use vm_migration::{
     protocol::MemoryRangeTable, snapshot_from_id, versioned_state_from_id, Migratable,
     MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable, Transportable,
 };
+
 use vm_virtio::AccessPlatform;
-use vm_virtio::VirtioDeviceType;
+#[cfg(feature = "pci_support")]
+use vm_virtio::{VirtioDeviceType, VirtioIommuRemapping};
+
 use vmm_sys_util::eventfd::EventFd;
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(feature = "mmio_support", target_arch = "aarch64"))]
 const MMIO_LEN: u64 = 0x1000;
 
-// Singleton devices / devices the user cannot name
+#[cfg(all(feature = "pci_support", feature = "kvm"))]
+const VFIO_DEVICE_NAME_PREFIX: &str = "_vfio";
+
 #[cfg(target_arch = "x86_64")]
 const IOAPIC_DEVICE_NAME: &str = "__ioapic";
 const SERIAL_DEVICE_NAME: &str = "__serial";
@@ -128,6 +144,12 @@ const VSOCK_DEVICE_NAME_PREFIX: &str = "_vsock";
 const WATCHDOG_DEVICE_NAME: &str = "__watchdog";
 const VFIO_DEVICE_NAME_PREFIX: &str = "_vfio";
 const VFIO_USER_DEVICE_NAME_PREFIX: &str = "_vfio_user";
+
+#[cfg(feature = "pci_support")]
+const IOMMU_DEVICE_NAME: &str = "_iommu";
+#[cfg(feature = "mmio_support")]
+const VIRTIO_MMIO_DEVICE_NAME_PREFIX: &str = "_virtio-mmio";
+#[cfg(feature = "pci_support")]
 const VIRTIO_PCI_DEVICE_NAME_PREFIX: &str = "_virtio-pci";
 
 /// Errors associated with device manager
@@ -212,9 +234,11 @@ pub enum DeviceManagerError {
     Irq(vmm_sys_util::errno::Error),
 
     /// Cannot allocate PCI BARs
+    #[cfg(feature = "pci_support")]
     AllocateBars(pci::PciDeviceError),
 
     /// Could not free the BARs associated with a PCI device.
+    #[cfg(feature = "pci_support")]
     FreePciBars(pci::PciDeviceError),
 
     /// Cannot register ioevent.
@@ -227,6 +251,7 @@ pub enum DeviceManagerError {
     VirtioDevice(vmm_sys_util::errno::Error),
 
     /// Cannot add PCI device
+    #[cfg(feature = "pci_support")]
     AddPciDevice(pci::PciRootError),
 
     /// Cannot open persistent memory file
@@ -260,12 +285,15 @@ pub enum DeviceManagerError {
     GetPtyPeer(vmm_sys_util::errno::Error),
 
     /// Cannot create a VFIO device
+    #[cfg(feature = "pci_support")]
     VfioCreate(vfio_ioctls::VfioError),
 
     /// Cannot create a VFIO PCI device
+    #[cfg(feature = "pci_support")]
     VfioPciCreate(pci::VfioPciError),
 
     /// Failed to map VFIO MMIO region.
+    #[cfg(feature = "pci_support")]
     VfioMapRegion(pci::VfioPciError),
 
     /// Failed to DMA map VFIO device.
@@ -328,7 +356,8 @@ pub enum DeviceManagerError {
     /// Missing PCI device.
     MissingPciDevice,
 
-    /// Failed to remove a PCI device from the PCI bus.
+    /// Failed removing a PCI device from the PCI bus.
+    #[cfg(feature = "pci_support")]
     RemoveDeviceFromPciBus(pci::PciRootError),
 
     /// Failed to remove a bus device from the IO bus.
@@ -338,21 +367,27 @@ pub enum DeviceManagerError {
     RemoveDeviceFromMmioBus(vm_device::BusError),
 
     /// Failed to find the device corresponding to a specific PCI b/d/f.
+    #[cfg(feature = "pci_support")]
     UnknownPciBdf(u32),
 
     /// Not allowed to remove this type of device from the VM.
+    #[cfg(feature = "pci_support")]
     RemovalNotAllowed(vm_virtio::VirtioDeviceType),
 
     /// Failed to find device corresponding to the given identifier.
+    #[cfg(feature = "pci_support")]
     UnknownDeviceId(String),
 
     /// Failed to find an available PCI device ID.
+    #[cfg(feature = "pci_support")]
     NextPciDeviceId(pci::PciRootError),
 
     /// Could not reserve the PCI device ID.
+    #[cfg(feature = "pci_support")]
     GetPciDeviceId(pci::PciRootError),
 
     /// Could not give the PCI device ID back.
+    #[cfg(feature = "pci_support")]
     PutPciDeviceId(pci::PciRootError),
 
     /// No disk path was specified when one was expected
@@ -368,7 +403,9 @@ pub enum DeviceManagerError {
     VirtioMemRangeAllocation,
 
     /// Failed to update guest memory for VFIO PCI device.
+    #[cfg(feature = "pci_support")]
     UpdateMemoryForVfioPciDevice(vfio_ioctls::VfioError),
+
 
     /// Trying to use a directory for pmem but no size specified
     PmemWithDirectorySizeMissing,
@@ -386,6 +423,7 @@ pub enum DeviceManagerError {
     MissingVirtioPmemResources,
 
     /// Missing PCI b/d/f from the DeviceNode.
+    #[cfg(feature = "pci_support")]
     MissingDeviceNodePciBdf,
 
     /// No support for device passthrough
@@ -548,10 +586,12 @@ pub(crate) struct AddressManager {
     pub(crate) io_bus: Arc<Bus>,
     pub(crate) mmio_bus: Arc<Bus>,
     vm: Arc<dyn hypervisor::Vm>,
+    #[cfg(feature = "pci_support")]
     device_tree: Arc<Mutex<DeviceTree>>,
     pci_mmio_allocators: Vec<Arc<Mutex<AddressAllocator>>>,
 }
 
+#[cfg(feature = "pci_support")]
 impl DeviceRelocation for AddressManager {
     fn move_bar(
         &self,
@@ -862,6 +902,10 @@ pub struct DeviceManager {
 
     pci_segments: Vec<PciSegment>,
 
+    // Keep a reference to the PCI bus
+    #[cfg(feature = "pci_support")]
+    pci_bus: Option<Arc<Mutex<PciBus>>>,
+
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     // MSI Interrupt Manager
     msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
@@ -871,6 +915,7 @@ pub struct DeviceManager {
     legacy_interrupt_manager: Option<Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>>,
 
     // Passthrough device handle
+    #[cfg(feature = "pci_support")]
     passthrough_device: Option<VfioDeviceFd>,
 
     // VFIO container
@@ -878,7 +923,9 @@ pub struct DeviceManager {
     // DeviceManager to be reused.
     vfio_container: Option<Arc<VfioContainer>>,
 
+
     // Paravirtualized IOMMU
+    #[cfg(feature = "pci_support")]
     iommu_device: Option<Arc<Mutex<virtio_devices::Iommu>>>,
     iommu_mapping: Option<Arc<IommuMapping>>,
 
@@ -886,7 +933,9 @@ pub struct DeviceManager {
     // It contains the virtual IOMMU PCI BDF along with the list of PCI BDF
     // representing the devices attached to the virtual IOMMU. This is useful
     // information for filling the ACPI VIOT table.
+    #[cfg(feature = "pci_support")]
     iommu_attached_devices: Option<(PciBdf, Vec<PciBdf>)>,
+
 
     // Tree of devices, representing the dependencies between devices.
     // Useful for introspection, snapshot and restore.
@@ -999,6 +1048,7 @@ impl DeviceManager {
             io_bus: Arc::new(Bus::new()),
             mmio_bus: Arc::new(Bus::new()),
             vm: vm.clone(),
+            #[cfg(feature = "pci_support")]
             device_tree: Arc::clone(&device_tree),
             pci_mmio_allocators,
         });
@@ -1056,13 +1106,21 @@ impl DeviceManager {
             virtio_devices: Vec::new(),
             bus_devices: Vec::new(),
             device_id_cnt: Wrapping(0),
+            #[cfg(feature = "pci_support")]
             msi_interrupt_manager,
+            #[cfg(feature = "pci_support")]
             legacy_interrupt_manager: None,
+            #[cfg(feature = "pci_support")]
             passthrough_device: None,
+            #[cfg(feature = "pci_support")]
             vfio_container: None,
+            #[cfg(feature = "pci_support")]
             iommu_device: None,
+            #[cfg(feature = "pci_support")]
             iommu_mapping: None,
+            #[cfg(feature = "pci_support")]
             iommu_attached_devices: None,
+            #[cfg(feature = "pci_support")]
             pci_segments,
             device_tree,
             exit_evt: exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
@@ -1189,9 +1247,14 @@ impl DeviceManager {
 
         self.legacy_interrupt_manager = Some(legacy_interrupt_manager);
 
+        #[cfg(any(feature = "pci_support", feature = "mmio_support"))]
         virtio_devices.append(&mut self.make_virtio_devices()?);
 
-        self.add_pci_devices(virtio_devices.clone())?;
+        if cfg!(feature = "pci_support") {
+            self.add_pci_devices(virtio_devices.clone())?;
+        } else if cfg!(feature = "mmio_support") {
+            self.add_mmio_devices(virtio_devices.clone(), &legacy_interrupt_manager)?;
+        }
 
         self.virtio_devices = virtio_devices;
 
@@ -1235,9 +1298,12 @@ impl DeviceManager {
         &mut self,
         virtio_devices: Vec<MetaVirtioDevice>,
     ) -> DeviceManagerResult<()> {
-        let iommu_id = String::from(IOMMU_DEVICE_NAME);
 
-        let iommu_device = if self.config.lock().unwrap().iommu {
+        #[cfg(feature = "pci_support")]
+        {
+            let iommu_id = String::from(IOMMU_DEVICE_NAME);
+
+            let iommu_device = if self.config.lock().unwrap().iommu {
             let (device, mapping) = virtio_devices::Iommu::new(
                 iommu_id.clone(),
                 self.seccomp_action.clone(),
@@ -1252,77 +1318,92 @@ impl DeviceManager {
             let device = Arc::new(Mutex::new(device));
             self.iommu_device = Some(Arc::clone(&device));
             self.iommu_mapping = Some(mapping);
+                // Fill the device tree with a new node. In case of restore, we
+                // know there is nothing to do, so we can simply override the
+                // existing entry.
+                self.device_tree
+                    .lock()
+                    .unwrap()
+                    .insert(iommu_id.clone(), device_node!(iommu_id, device));
+                Some(device)
+            } else {
+                None
+            };
 
-            // Fill the device tree with a new node. In case of restore, we
-            // know there is nothing to do, so we can simply override the
-            // existing entry.
-            self.device_tree
-                .lock()
-                .unwrap()
-                .insert(iommu_id.clone(), device_node!(iommu_id, device));
+            let interrupt_manager = Arc::clone(&self.msi_interrupt_manager);
+            let mut iommu_attached_devices = Vec::new();
+            {
+                for handle in virtio_devices {
+                    let mapping: Option<Arc<IommuMapping>> = if handle.iommu {
+                        self.iommu_mapping.clone()
+                    } else {
+                        None
+                    };
 
-            Some(device)
-        } else {
-            None
-        };
+                    let dev_id = self.add_virtio_pci_device(
+                        handle.virtio_device,
+                        &mapping,
+                        handle.id,
+                        handle.pci_segment,
+                        handle.dma_handler,
+                    )?;
 
-        let mut iommu_attached_devices = Vec::new();
-        {
-            for handle in virtio_devices {
-                let mapping: Option<Arc<IommuMapping>> = if handle.iommu {
-                    self.iommu_mapping.clone()
-                } else {
-                    None
-                };
-
-                let dev_id = self.add_virtio_pci_device(
-                    handle.virtio_device,
-                    &mapping,
-                    handle.id,
-                    handle.pci_segment,
-                    handle.dma_handler,
-                )?;
-
-                if handle.iommu {
-                    iommu_attached_devices.push(dev_id);
+                    if handle.iommu {
+                        iommu_attached_devices.push(dev_id);
+                    }
                 }
-            }
 
-            let mut vfio_iommu_device_ids = self.add_vfio_devices()?;
-            iommu_attached_devices.append(&mut vfio_iommu_device_ids);
+                let mut vfio_iommu_device_ids = self.add_vfio_devices()?;
+                iommu_attached_devices.append(&mut vfio_iommu_device_ids);
 
-            let mut vfio_user_iommu_device_ids = self.add_user_devices()?;
-            iommu_attached_devices.append(&mut vfio_user_iommu_device_ids);
+                let mut vfio_user_iommu_device_ids = self.add_user_devices()?;
+                iommu_attached_devices.append(&mut vfio_user_iommu_device_ids);
 
-            // Add all devices from forced iommu segments
-            if let Some(platform_config) = self.config.lock().unwrap().platform.as_ref() {
-                if let Some(iommu_segments) = platform_config.iommu_segments.as_ref() {
-                    for segment in iommu_segments {
-                        for device in 0..32 {
-                            let bdf = PciBdf::new(*segment, 0, device, 0);
-                            if !iommu_attached_devices.contains(&bdf) {
-                                iommu_attached_devices.push(bdf);
+                // Add all devices from forced iommu segments
+                if let Some(platform_config) = self.config.lock().unwrap().platform.as_ref() {
+                    if let Some(iommu_segments) = platform_config.iommu_segments.as_ref() {
+                        for segment in iommu_segments {
+                            for device in 0..32 {
+                                let bdf = PciBdf::new(*segment, 0, device, 0);
+                                if !iommu_attached_devices.contains(&bdf) {
+                                    iommu_attached_devices.push(bdf);
+                                }
                             }
                         }
                     }
                 }
+
+                if let Some(iommu_device) = iommu_device {
+                    let dev_id = self.add_virtio_pci_device(iommu_device, &None, iommu_id, 0, None)?;
+                    self.iommu_attached_devices = Some((dev_id, iommu_attached_devices));
+                }
             }
 
-            if let Some(iommu_device) = iommu_device {
-                let dev_id = self.add_virtio_pci_device(iommu_device, &None, iommu_id, 0, None)?;
-                self.iommu_attached_devices = Some((dev_id, iommu_attached_devices));
+            for segment in &self.pci_segments {
+                #[cfg(target_arch = "x86_64")]
+                if let Some(pci_config_io) = segment.pci_config_io.as_ref() {
+                    self.bus_devices
+                        .push(Arc::clone(pci_config_io) as Arc<Mutex<dyn BusDevice>>);
+                }
+
+                self.bus_devices
+                    .push(Arc::clone(&segment.pci_config_mmio) as Arc<Mutex<dyn BusDevice>>);
             }
         }
+        Ok(())
+    }
 
-        for segment in &self.pci_segments {
-            #[cfg(target_arch = "x86_64")]
-            if let Some(pci_config_io) = segment.pci_config_io.as_ref() {
-                self.bus_devices
-                    .push(Arc::clone(pci_config_io) as Arc<Mutex<dyn BusDevice>>);
+    #[allow(unused_variables, unused_mut)]
+    fn add_mmio_devices(
+        &mut self,
+        virtio_devices: Vec<(VirtioDeviceArc, bool, String)>,
+        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
+    ) -> DeviceManagerResult<()> {
+        #[cfg(feature = "mmio_support")]
+        {
+            for (device, _, id) in virtio_devices {
+                self.add_virtio_mmio_device(id, device, interrupt_manager)?;
             }
-
-            self.bus_devices
-                .push(Arc::clone(&segment.pci_config_mmio) as Arc<Mutex<dyn BusDevice>>);
         }
 
         Ok(())
@@ -2938,6 +3019,7 @@ impl DeviceManager {
         Ok(devices)
     }
 
+    #[cfg(feature = "pci_support")]
     fn next_device_name(&mut self, prefix: &str) -> DeviceManagerResult<String> {
         let start_id = self.device_id_cnt;
         loop {
@@ -2961,6 +3043,8 @@ impl DeviceManager {
         Err(DeviceManagerError::NoAvailableDeviceName)
     }
 
+    #[cfg(feature = "pci_support")]
+    #[cfg_attr(not(feature = "kvm"), allow(unused_variables))]
     fn add_passthrough_device(
         &mut self,
         device_cfg: &mut DeviceConfig,
@@ -2980,6 +3064,13 @@ impl DeviceManager {
     }
 
     fn create_vfio_container(&self) -> DeviceManagerResult<Arc<VfioContainer>> {
+    #[cfg(all(feature = "pci_support", feature = "kvm"))]
+    fn add_vfio_device(
+        &mut self,
+        pci: &mut PciBus,
+        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+        device_cfg: &mut DeviceConfig,
+    ) -> DeviceManagerResult<(u32, String)> {
         let passthrough_device = self
             .passthrough_device
             .as_ref()
@@ -3149,6 +3240,7 @@ impl DeviceManager {
         Ok((pci_device_bdf, vfio_name))
     }
 
+    #[cfg(feature = "pci_support")]
     fn add_pci_device(
         &mut self,
         bus_device: Arc<Mutex<dyn BusDevice>>,
@@ -3205,6 +3297,7 @@ impl DeviceManager {
         Ok(new_resources)
     }
 
+    #[cfg(feature = "pci_support")]
     fn add_vfio_devices(&mut self) -> DeviceManagerResult<Vec<PciBdf>> {
         let mut iommu_attached_device_ids = Vec::new();
         let mut devices = self.config.lock().unwrap().devices.clone();
@@ -3346,6 +3439,7 @@ impl DeviceManager {
         Ok(vec![])
     }
 
+    #[cfg(feature = "pci_support")]
     fn add_virtio_pci_device(
         &mut self,
         virtio_device: Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
@@ -3511,6 +3605,159 @@ impl DeviceManager {
                 (pci_segment_id, pci_device_bdf, None)
             },
         )
+
+    #[cfg(feature = "mmio_support")]
+    fn add_virtio_mmio_device(
+        &mut self,
+        virtio_device_id: String,
+        virtio_device: VirtioDeviceArc,
+        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
+    ) -> DeviceManagerResult<()> {
+        let id = format!("{}-{}", VIRTIO_MMIO_DEVICE_NAME_PREFIX, virtio_device_id);
+
+        // Create the new virtio-mmio node that will be added later to the
+        // device tree.
+        let mut node = device_node!(id);
+        node.children = vec![virtio_device_id.clone()];
+
+        // Look for the id in the device tree. If it can be found, that means
+        // the device is being restored, otherwise it's created from scratch.
+        let (mmio_range, mmio_irq) = if let Some(node) = self.device_tree.lock().unwrap().get(&id) {
+            debug!("Restoring virtio-mmio {} resources", id);
+
+            let mut mmio_range: Option<(u64, u64)> = None;
+            let mut mmio_irq: Option<u32> = None;
+            for resource in node.resources.iter() {
+                match resource {
+                    Resource::MmioAddressRange { base, size } => {
+                        if mmio_range.is_some() {
+                            return Err(DeviceManagerError::ResourceAlreadyExists);
+                        }
+
+                        mmio_range = Some((*base, *size));
+                    }
+                    Resource::LegacyIrq(irq) => {
+                        if mmio_irq.is_some() {
+                            return Err(DeviceManagerError::ResourceAlreadyExists);
+                        }
+
+                        mmio_irq = Some(*irq);
+                    }
+                    _ => {
+                        error!("Unexpected resource {:?} for {}", resource, id);
+                    }
+                }
+            }
+
+            if mmio_range.is_none() || mmio_irq.is_none() {
+                return Err(DeviceManagerError::MissingVirtioMmioResources);
+            }
+
+            (mmio_range, mmio_irq)
+        } else {
+            (None, None)
+        };
+
+        // Update the existing virtio node by setting the parent.
+        if let Some(node) = self.device_tree.lock().unwrap().get_mut(&virtio_device_id) {
+            node.parent = Some(id.clone());
+        } else {
+            return Err(DeviceManagerError::MissingNode);
+        }
+
+        let (mmio_base, mmio_size) = if let Some((base, size)) = mmio_range {
+            self.address_manager
+                .allocator
+                .lock()
+                .unwrap()
+                .allocate_mmio_addresses(Some(GuestAddress(base)), size, Some(size))
+                .ok_or(DeviceManagerError::MmioRangeAllocation)?;
+
+            (base, size)
+        } else {
+            let size = MMIO_LEN;
+            let base = self
+                .address_manager
+                .allocator
+                .lock()
+                .unwrap()
+                .allocate_mmio_addresses(None, size, Some(size))
+                .ok_or(DeviceManagerError::MmioRangeAllocation)?;
+
+            (base.raw_value(), size)
+        };
+
+        let irq_num = if let Some(irq) = mmio_irq {
+            irq
+        } else {
+            self.address_manager
+                .allocator
+                .lock()
+                .unwrap()
+                .allocate_irq()
+                .ok_or(DeviceManagerError::AllocateIrq)?
+        };
+
+        #[cfg(target_arch = "aarch64")]
+        {
+            let device_type = virtio_device.lock().unwrap().device_type();
+            self.id_to_dev_info.insert(
+                (DeviceType::Virtio(device_type), virtio_device_id),
+                MMIODeviceInfo {
+                    addr: mmio_base,
+                    len: mmio_size,
+                    irq: irq_num,
+                },
+            );
+        }
+
+        let memory = self.memory_manager.lock().unwrap().guest_memory();
+        let mut mmio_device =
+            virtio_devices::transport::MmioDevice::new(id.clone(), memory, virtio_device)
+                .map_err(DeviceManagerError::VirtioDevice)?;
+
+        for (i, (event, addr)) in mmio_device.ioeventfds(mmio_base).iter().enumerate() {
+            let io_addr = IoEventAddress::Mmio(*addr);
+            self.address_manager
+                .vm
+                .register_ioevent(event, &io_addr, Some(DataMatch::DataMatch32(i as u32)))
+                .map_err(|e| DeviceManagerError::RegisterIoevent(e.into()))?;
+        }
+
+        let interrupt_group = interrupt_manager
+            .create_group(LegacyIrqGroupConfig {
+                irq: irq_num as InterruptIndex,
+            })
+            .map_err(DeviceManagerError::CreateInterruptGroup)?;
+
+        mmio_device.assign_interrupt(interrupt_group);
+
+        let mmio_device_arc = Arc::new(Mutex::new(mmio_device));
+        self.bus_devices
+            .push(Arc::clone(&mmio_device_arc) as Arc<Mutex<dyn BusDevice>>);
+        self.address_manager
+            .mmio_bus
+            .insert(mmio_device_arc.clone(), mmio_base, MMIO_LEN)
+            .map_err(DeviceManagerError::BusError)?;
+
+        #[cfg(target_arch = "x86_64")]
+        self.cmdline_additions.push(format!(
+            "virtio_mmio.device={}K@0x{:08x}:{}",
+            mmio_size / 1024,
+            mmio_base,
+            irq_num
+        ));
+
+        // Update the device tree with correct resource information.
+        node.resources.push(Resource::MmioAddressRange {
+            base: mmio_base,
+            size: mmio_size,
+        });
+        node.resources.push(Resource::LegacyIrq(irq_num));
+        node.migratable = Some(Arc::clone(&mmio_device_arc) as Arc<Mutex<dyn Migratable>>);
+        self.device_tree.lock().unwrap().insert(id, node);
+
+        Ok(())
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -3596,6 +3843,17 @@ impl DeviceManager {
                         .unwrap()
                         .dma_map(new_region)
                         .map_err(DeviceManagerError::UpdateMemoryForVfioUserPciDevice)?;
+        #[cfg(feature = "pci_support")]
+        {
+            for (_, any_device) in self.pci_devices.iter() {
+                if let Ok(vfio_pci_device) =
+                    Arc::clone(any_device).downcast::<Mutex<VfioPciDevice>>()
+                {
+                    vfio_pci_device
+                        .lock()
+                        .unwrap()
+                        .update_memory(_new_region)
+                        .map_err(DeviceManagerError::UpdateMemoryForVfioPciDevice)?;
                 }
             }
         }
@@ -3626,6 +3884,7 @@ impl DeviceManager {
             .map_err(DeviceManagerError::HotPlugNotification);
     }
 
+    #[cfg(feature = "pci_support")]
     pub fn add_device(
         &mut self,
         device_cfg: &mut DeviceConfig,
@@ -3664,6 +3923,7 @@ impl DeviceManager {
         })
     }
 
+    #[cfg(feature = "pci_support")]
     pub fn remove_device(&mut self, id: String) -> DeviceManagerResult<()> {
         // The node can be directly a PCI node in case the 'id' refers to a
         // VFIO device or a virtio-pci one.
@@ -3684,6 +3944,18 @@ impl DeviceManager {
             device_tree
                 .get(parent)
                 .ok_or(DeviceManagerError::MissingNode)?
+
+            Err(DeviceManagerError::UnknownDeviceId(id))
+        }
+    }
+
+    #[cfg(feature = "pci_support")]
+    pub fn eject_device(&mut self, device_id: u8) -> DeviceManagerResult<()> {
+        // Retrieve the PCI bus.
+        let pci = if let Some(pci_bus) = &self.pci_bus {
+            Arc::clone(&pci_bus)
+        } else {
+            return Err(DeviceManagerError::NoPciBus);
         };
 
         let pci_device_bdf: PciBdf = pci_device_node
@@ -3916,6 +4188,7 @@ impl DeviceManager {
         Ok(())
     }
 
+    #[cfg(feature = "pci_support")]
     fn hotplug_virtio_pci_device(
         &mut self,
         handle: MetaVirtioDevice,
@@ -3961,6 +4234,7 @@ impl DeviceManager {
             .unwrap_or_default()
     }
 
+    #[cfg(feature = "pci_support")]
     pub fn add_disk(&mut self, disk_cfg: &mut DiskConfig) -> DeviceManagerResult<PciDeviceInfo> {
         self.validate_identifier(&disk_cfg.id)?;
 
@@ -3972,6 +4246,7 @@ impl DeviceManager {
         self.hotplug_virtio_pci_device(device)
     }
 
+    #[cfg(feature = "pci_support")]
     pub fn add_fs(&mut self, fs_cfg: &mut FsConfig) -> DeviceManagerResult<PciDeviceInfo> {
         self.validate_identifier(&fs_cfg.id)?;
 
@@ -3979,6 +4254,7 @@ impl DeviceManager {
         self.hotplug_virtio_pci_device(device)
     }
 
+    #[cfg(feature = "pci_support")]
     pub fn add_pmem(&mut self, pmem_cfg: &mut PmemConfig) -> DeviceManagerResult<PciDeviceInfo> {
         self.validate_identifier(&pmem_cfg.id)?;
 
@@ -3990,6 +4266,7 @@ impl DeviceManager {
         self.hotplug_virtio_pci_device(device)
     }
 
+    #[cfg(feature = "pci_support")]
     pub fn add_net(&mut self, net_cfg: &mut NetConfig) -> DeviceManagerResult<PciDeviceInfo> {
         self.validate_identifier(&net_cfg.id)?;
 
@@ -4012,6 +4289,7 @@ impl DeviceManager {
         self.hotplug_virtio_pci_device(device)
     }
 
+    #[cfg(feature = "pci_support")]
     pub fn add_vsock(&mut self, vsock_cfg: &mut VsockConfig) -> DeviceManagerResult<PciDeviceInfo> {
         self.validate_identifier(&vsock_cfg.id)?;
 
@@ -4459,17 +4737,28 @@ impl Migratable for DeviceManager {
     }
 }
 
+#[cfg(feature = "pci_support")]
 const PCIU_FIELD_OFFSET: u64 = 0;
+#[cfg(feature = "pci_support")]
 const PCID_FIELD_OFFSET: u64 = 4;
+#[cfg(feature = "pci_support")]
 const B0EJ_FIELD_OFFSET: u64 = 8;
+<<<<<<< HEAD
 const PSEG_FIELD_OFFSET: u64 = 12;
+=======
+
+#[cfg(feature = "pci_support")]
+>>>>>>> parent of af3c6c34 (vmm: Remove mmio and pci differentiation)
 const PCIU_FIELD_SIZE: usize = 4;
+#[cfg(feature = "pci_support")]
 const PCID_FIELD_SIZE: usize = 4;
+#[cfg(feature = "pci_support")]
 const B0EJ_FIELD_SIZE: usize = 4;
 const PSEG_FIELD_SIZE: usize = 4;
 
 impl BusDevice for DeviceManager {
     fn read(&mut self, base: u64, offset: u64, data: &mut [u8]) {
+        #[cfg(feature = "pci_support")]
         match offset {
             PCIU_FIELD_OFFSET => {
                 assert!(data.len() == PCIU_FIELD_SIZE);
@@ -4513,7 +4802,12 @@ impl BusDevice for DeviceManager {
         )
     }
 
+<<<<<<< HEAD
     fn write(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<std::sync::Barrier>> {
+=======
+    fn write(&mut self, base: u64, offset: u64, data: &[u8]) {
+        #[cfg(feature = "pci_support")]
+>>>>>>> parent of af3c6c34 (vmm: Remove mmio and pci differentiation)
         match offset {
             B0EJ_FIELD_OFFSET => {
                 assert!(data.len() == B0EJ_FIELD_SIZE);

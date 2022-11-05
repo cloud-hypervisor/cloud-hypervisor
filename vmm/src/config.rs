@@ -1859,6 +1859,15 @@ impl VmConfig {
             }
         }
 
+        if cfg!(not(feature = "pci_support")) {
+            if self.iommu {
+                return Err(ValidationError::IommuUnsupported);
+            }
+            if self.devices.is_some() {
+                return Err(ValidationError::VfioUnsupported);
+            }
+        }
+
         if let Some(pmems) = &self.pmem {
             for pmem in pmems {
                 pmem.validate(self)?;

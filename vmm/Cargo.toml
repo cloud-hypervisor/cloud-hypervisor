@@ -6,11 +6,20 @@ edition = "2021"
 
 [features]
 default = []
+pci_support = ["pci", "vfio-ioctls", "virtio-devices/pci_support"]
+mmio_support = ["virtio-devices/mmio_support"]
 guest_debug = ["kvm", "gdbstub", "gdbstub_arch"]
 kvm = ["hypervisor/kvm", "vfio-ioctls/kvm", "vm-device/kvm", "pci/kvm"]
 mshv = ["hypervisor/mshv", "vfio-ioctls/mshv", "vm-device/mshv", "pci/mshv"]
 tdx = ["arch/tdx", "hypervisor/tdx"]
 tracing = ["tracer/tracing"]
+acpi = ["acpi_tables","devices/acpi", "arch/acpi"]
+
+cmos = ["devices/cmos"]
+fwdebug = ["devices/fwdebug"]
+kvm = ["hypervisor/kvm"]
+io_uring = ["virtio-devices/io_uring"]
+>>>>>>> parent of af3c6c34 (vmm: Remove mmio and pci differentiation)
 
 [dependencies]
 acpi_tables = { path = "../acpi_tables" }
@@ -33,7 +42,7 @@ micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch
 net_util = { path = "../net_util" }
 once_cell = "1.15.0"
 option_parser = { path = "../option_parser" }
-pci = { path = "../pci" }
+pci = {path = "../pci", optional = true}
 qcow = { path = "../qcow" }
 seccompiler = "0.3.0"
 serde = { version = "1.0.147", features = ["rc", "derive"] }
@@ -45,7 +54,7 @@ tracer = { path = "../tracer" }
 uuid = "1.2.1"
 versionize = "0.1.6"
 versionize_derive = "0.1.4"
-vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
+vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false, optional = true }
 vfio_user = { path = "../vfio_user" }
 vhdx = { path = "../vhdx" }
 virtio-devices = { path = "../virtio-devices", features = ["pci_support"] }
