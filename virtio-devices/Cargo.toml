@@ -7,6 +7,10 @@ edition = "2021"
 [features]
 default = []
 
+pci_support = ["pci"]
+mmio_support = []
+io_uring = ["block_util/io_uring"]
+
 [dependencies]
 anyhow = "1.0.66"
 arc-swap = "1.5.1"
@@ -19,7 +23,7 @@ libc = "0.2.137"
 log = "0.4.17"
 net_gen = { path = "../net_gen" }
 net_util = { path = "../net_util" }
-pci = { path = "../pci" }
+pci = { path = "../pci", optional = true }
 rate_limiter = { path = "../rate_limiter" }
 seccompiler = "0.3.0"
 serde = { version = "1.0.147", features = ["derive"] }

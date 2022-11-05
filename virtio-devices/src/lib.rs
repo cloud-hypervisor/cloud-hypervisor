@@ -16,6 +16,17 @@
 extern crate event_monitor;
 #[macro_use]
 extern crate log;
+#[cfg(feature = "pci_support")]
+extern crate pci;
+extern crate serde;
+#[macro_use]
+extern crate serde_derive;
+extern crate serde_json;
+extern crate vhost_rs;
+extern crate virtio_bindings;
+extern crate vm_device;
+extern crate vm_memory;
+
 
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
@@ -79,6 +90,13 @@ const VIRTIO_F_SR_IOV: u32 = 37;
 const VIRTIO_F_NOTIFICATION_DATA: u32 = 38;
 
 #[derive(Error, Debug)]
+#[allow(dead_code)]
+const INTERRUPT_STATUS_USED_RING: u32 = 0x1;
+#[allow(dead_code)]
+const INTERRUPT_STATUS_CONFIG_CHANGED: u32 = 0x2;
+#[cfg(feature = "pci_support")]
+const VIRTIO_MSI_NO_VECTOR: u16 = 0xffff;
+
 pub enum ActivateError {
     #[error("Failed to activate virtio device")]
     BadActivate,

@@ -6,6 +6,13 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+
+#[cfg(feature = "pci_support")]
+extern crate pci;
+extern crate vm_allocator;
+extern crate vm_memory;
+extern crate vmm_sys_util;
+parent of cc8b553e (virtio-devices: Remove mmio and pci differentiation)
 use super::VirtioPciCommonConfig;
 use crate::transport::VirtioTransport;
 use crate::GuestMemoryMmap;
