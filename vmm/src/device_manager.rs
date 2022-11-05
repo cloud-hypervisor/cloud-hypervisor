@@ -4743,12 +4743,8 @@ const PCIU_FIELD_OFFSET: u64 = 0;
 const PCID_FIELD_OFFSET: u64 = 4;
 #[cfg(feature = "pci_support")]
 const B0EJ_FIELD_OFFSET: u64 = 8;
-<<<<<<< HEAD
 const PSEG_FIELD_OFFSET: u64 = 12;
-=======
-
 #[cfg(feature = "pci_support")]
->>>>>>> parent of af3c6c34 (vmm: Remove mmio and pci differentiation)
 const PCIU_FIELD_SIZE: usize = 4;
 #[cfg(feature = "pci_support")]
 const PCID_FIELD_SIZE: usize = 4;
@@ -4802,12 +4798,8 @@ impl BusDevice for DeviceManager {
         )
     }
 
-<<<<<<< HEAD
     fn write(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<std::sync::Barrier>> {
-=======
-    fn write(&mut self, base: u64, offset: u64, data: &[u8]) {
         #[cfg(feature = "pci_support")]
->>>>>>> parent of af3c6c34 (vmm: Remove mmio and pci differentiation)
         match offset {
             B0EJ_FIELD_OFFSET => {
                 assert!(data.len() == B0EJ_FIELD_SIZE);
