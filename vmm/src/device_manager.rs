@@ -548,7 +548,7 @@ pub(crate) struct AddressManager {
     #[cfg(target_arch = "x86_64")]
     pub(crate) io_bus: Arc<Bus>,
     pub(crate) mmio_bus: Arc<Bus>,
-    vm: Arc<dyn hypervisor::Vm>,
+    pub(crate) vm: Arc<dyn hypervisor::Vm>,
     device_tree: Arc<Mutex<DeviceTree>>,
     pci_mmio_allocators: Vec<Arc<Mutex<AddressAllocator>>>,
 }
@@ -1370,6 +1370,7 @@ impl DeviceManager {
             gic::Gic::new(
                 self.config.lock().unwrap().cpus.boot_vcpus,
                 Arc::clone(&self.msi_interrupt_manager),
+                self.address_manager.vm.clone(),
             )
             .map_err(DeviceManagerError::CreateInterruptController)?,
         ));
