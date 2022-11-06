@@ -39,8 +39,9 @@ pub struct Gic {
 
 impl Gic {
     pub fn new(
-        _vcpu_count: u8,
+        vcpu_count: u8,
         interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+        vm: Arc<dyn hypervisor::Vm>,
     ) -> Result<Gic> {
         let interrupt_source_group = interrupt_manager
             .create_group(MsiIrqGroupConfig {
@@ -49,45 +50,19 @@ impl Gic {
             })
             .map_err(Error::CreateInterruptSourceGroup)?;
 
-        Ok(Gic {
+        let vgic = vm
+            .create_vgic(Gic::create_default_config(vcpu_count as u64))
+            .map_err(Error::CreateGic)?;
+
+        let gic = Gic {
             interrupt_source_group,
-            vgic: None,
-        })
+            vgic: Some(vgic),
+        };
+        gic.enable()?;
+
+        Ok(gic)
     }
 
-    /// Default config implied by arch::layout
-    pub fn create_default_config(vcpu_count: u64) -> VgicConfig {
-        let redists_size = layout::GIC_V3_REDIST_SIZE * vcpu_count;
-        let redists_addr = layout::GIC_V3_DIST_START.raw_value() - redists_size;
-        VgicConfig {
-            vcpu_count,
-            dist_addr: layout::GIC_V3_DIST_START.raw_value(),
-            dist_size: layout::GIC_V3_DIST_SIZE,
-            redists_addr,
-            redists_size,
-            msi_addr: redists_addr - layout::GIC_V3_ITS_SIZE,
-            msi_size: layout::GIC_V3_ITS_SIZE,
-            nr_irqs: layout::IRQ_NUM,
-        }
-    }
-
-    pub fn create_vgic(
-        &mut self,
-        vm: &Arc<dyn hypervisor::Vm>,
-        config: VgicConfig,
-    ) -> Result<Arc<Mutex<dyn Vgic>>> {
-        let vgic = vm.create_vgic(config).map_err(Error::CreateGic)?;
-        self.vgic = Some(vgic.clone());
-        Ok(vgic.clone())
-    }
-
-    pub fn set_gicr_typers(&mut self, vcpu_states: &[CpuState]) {
-        let vgic = self.vgic.as_ref().unwrap().clone();
-        vgic.lock().unwrap().set_gicr_typers(vcpu_states);
-    }
-}
-
-impl InterruptController for Gic {
     fn enable(&self) -> Result<()> {
         // Set irqfd for legacy interrupts
         self.interrupt_source_group
@@ -113,6 +88,33 @@ impl InterruptController for Gic {
         Ok(())
     }
 
+    /// Default config implied by arch::layout
+    pub fn create_default_config(vcpu_count: u64) -> VgicConfig {
+        let redists_size = layout::GIC_V3_REDIST_SIZE * vcpu_count;
+        let redists_addr = layout::GIC_V3_DIST_START.raw_value() - redists_size;
+        VgicConfig {
+            vcpu_count,
+            dist_addr: layout::GIC_V3_DIST_START.raw_value(),
+            dist_size: layout::GIC_V3_DIST_SIZE,
+            redists_addr,
+            redists_size,
+            msi_addr: redists_addr - layout::GIC_V3_ITS_SIZE,
+            msi_size: layout::GIC_V3_ITS_SIZE,
+            nr_irqs: layout::IRQ_NUM,
+        }
+    }
+
+    pub fn get_vgic(&mut self) -> Result<Arc<Mutex<dyn Vgic>>> {
+        Ok(self.vgic.clone().unwrap())
+    }
+
+    pub fn set_gicr_typers(&mut self, vcpu_states: &[CpuState]) {
+        let vgic = self.vgic.as_ref().unwrap().clone();
+        vgic.lock().unwrap().set_gicr_typers(vcpu_states);
+    }
+}
+
+impl InterruptController for Gic {
     // This should be called anytime an interrupt needs to be injected into the
     // running guest.
     fn service_irq(&mut self, irq: usize) -> Result<()> {
