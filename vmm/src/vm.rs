@@ -47,9 +47,9 @@ use arch::EntryPoint;
 use arch::PciSpaceInfo;
 use arch::{NumaNode, NumaNodes};
 #[cfg(target_arch = "aarch64")]
-use devices::gic::{Gic, GIC_V3_ITS_SNAPSHOT_ID};
+use devices::gic::GIC_V3_ITS_SNAPSHOT_ID;
 #[cfg(target_arch = "aarch64")]
-use devices::interrupt_controller::{self, InterruptController};
+use devices::interrupt_controller;
 use devices::AcpiNotificationFlags;
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
@@ -445,7 +445,7 @@ pub struct Vm {
     state: RwLock<VmState>,
     cpu_manager: Arc<Mutex<cpu::CpuManager>>,
     memory_manager: Arc<Mutex<MemoryManager>>,
-    #[cfg_attr(not(feature = "kvm"), allow(dead_code))]
+    #[cfg_attr(any(not(feature = "kvm"), target_arch = "aarch64"), allow(dead_code))]
     // The hypervisor abstracted virtual machine.
     vm: Arc<dyn hypervisor::Vm>,
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
@@ -1156,7 +1156,6 @@ impl Vm {
             .as_ref()
             .map(|(v, _)| *v);
 
-        let vcpu_count = self.cpu_manager.lock().unwrap().boot_vcpus() as u64;
         let vgic = self
             .device_manager
             .lock()
@@ -1165,10 +1164,7 @@ impl Vm {
             .unwrap()
             .lock()
             .unwrap()
-            .create_vgic(
-                &self.memory_manager.lock().as_ref().unwrap().vm,
-                Gic::create_default_config(vcpu_count),
-            )
+            .get_vgic()
             .map_err(|_| {
                 Error::ConfigureSystem(arch::Error::PlatformSpecific(
                     arch::aarch64::Error::SetupGic,
@@ -1201,17 +1197,6 @@ impl Vm {
             pmu_supported,
         )
         .map_err(Error::ConfigureSystem)?;
-
-        // Activate gic device
-        self.device_manager
-            .lock()
-            .unwrap()
-            .get_interrupt_controller()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .enable()
-            .map_err(Error::EnableInterruptController)?;
 
         Ok(())
     }
@@ -2224,22 +2209,6 @@ impl Vm {
         vm_snapshot: &Snapshot,
     ) -> std::result::Result<(), MigratableError> {
         let saved_vcpu_states = self.cpu_manager.lock().unwrap().get_saved_states();
-        // The number of vCPUs is the same as the number of saved vCPU states.
-        let vcpu_numbers = saved_vcpu_states.len();
-
-        // Creating a GIC device here, as the GIC will not be created when
-        // restoring the device manager. Note that currently only the bare GICv3
-        // without ITS is supported.
-        let vcpu_count = vcpu_numbers.try_into().unwrap();
-        self.device_manager
-            .lock()
-            .unwrap()
-            .get_interrupt_controller()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .create_vgic(&self.vm, Gic::create_default_config(vcpu_count))
-            .map_err(|e| MigratableError::Restore(anyhow!("Could not create GIC: {:#?}", e)))?;
 
         // PMU interrupt sticks to PPI, so need to be added by 16 to get real irq number.
         self.cpu_manager
@@ -2273,22 +2242,6 @@ impl Vm {
                 "Missing GicV3Its snapshot"
             )));
         }
-
-        // Activate gic device
-        self.device_manager
-            .lock()
-            .unwrap()
-            .get_interrupt_controller()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .enable()
-            .map_err(|e| {
-                MigratableError::Restore(anyhow!(
-                    "Could not enable interrupt controller routing: {:#?}",
-                    e
-                ))
-            })?;
 
         Ok(())
     }
@@ -3241,6 +3194,7 @@ mod tests {
     use arch::aarch64::fdt::create_fdt;
     use arch::aarch64::layout;
     use arch::{DeviceType, MmioDeviceInfo};
+    use devices::gic::Gic;
 
     const LEN: u64 = 4096;
 
