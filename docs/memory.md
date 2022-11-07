@@ -20,12 +20,13 @@ struct MemoryConfig {
     hugepages: bool,
     hugepage_size: Option<u64>,
     prefault: bool,
+    thp: bool
     zones: Option<Vec<MemoryZoneConfig>>,
 }
 ```
 
 ```
---memory <memory>	Memory parameters "size=<guest_memory_size>,mergeable=on|off,shared=on|off,hugepages=on|off,hugepage_size=<hugepage_size>,hotplug_method=acpi|virtio-mem,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>,prefault=on|off" [default: size=512M]
+--memory <memory>	Memory parameters "size=<guest_memory_size>,mergeable=on|off,shared=on|off,hugepages=on|off,hugepage_size=<hugepage_size>,hotplug_method=acpi|virtio-mem,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>,prefault=on|off,thp=on|off" [default: size=512M,thp=on]
 ```
 
 ### `size`
@@ -175,6 +176,25 @@ _Example_
 
 ```
 --memory size=1G,prefault=on
+```
+
+### `thp`
+
+Specifies if private anonymous memory for the guest (i.e. `shared=off` and no
+backing file) should be labelled `MADV_HUGEPAGE` with `madvise(2)` indicating
+to the kernel that this memory may be backed with huge pages transparently.
+
+The use of transparent huge pages can improve the performance of the guest as
+there will fewer virtualisation related page faults. Unlike using
+`hugepages=on` a specific number of huge pages do not need to be allocated by
+the kernel.
+
+By default this option is turned on.
+
+_Example_
+
+```
+--memory size=1G,thp=on
 ```
 
 ## Advanced Parameters
