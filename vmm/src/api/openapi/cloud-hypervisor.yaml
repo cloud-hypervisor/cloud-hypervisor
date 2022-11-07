@@ -726,6 +726,9 @@ components:
         prefault:
           type: boolean
           default: false
+        thp:
+          type: boolean
+          default: true
         zones:
           type: array
           items:
