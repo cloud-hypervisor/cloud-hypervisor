@@ -175,6 +175,7 @@ pub struct MemoryManager {
     hugepages: bool,
     hugepage_size: Option<u64>,
     prefault: bool,
+    thp: bool,
     #[cfg(target_arch = "x86_64")]
     sgx_epc_region: Option<SgxEpcRegion>,
     user_provided_zones: bool,
@@ -442,6 +443,7 @@ impl MemoryManager {
         ram_regions: &[(GuestAddress, usize)],
         zones: &[MemoryZoneConfig],
         prefault: Option<bool>,
+        thp: bool,
     ) -> Result<(Vec<Arc<GuestRegionMmap>>, MemoryZones), Error> {
         let mut zones = zones.to_owned();
         let mut mem_regions = Vec::new();
@@ -498,6 +500,7 @@ impl MemoryManager {
                     zone.hugepage_size,
                     zone.host_numa_node,
                     None,
+                    thp,
                 )?;
 
                 // Add region to the list of regions associated with the
@@ -550,6 +553,7 @@ impl MemoryManager {
         zones_config: &[MemoryZoneConfig],
         prefault: Option<bool>,
         mut existing_memory_files: HashMap<u32, File>,
+        thp: bool,
     ) -> Result<(Vec<Arc<GuestRegionMmap>>, MemoryZones), Error> {
         let mut memory_regions = Vec::new();
         let mut memory_zones = HashMap::new();
@@ -575,6 +579,7 @@ impl MemoryManager {
                         zone_config.hugepage_size,
                         zone_config.host_numa_node,
                         existing_memory_files.remove(&guest_ram_mapping.slot),
+                        thp,
                     )?;
                     memory_regions.push(Arc::clone(&region));
                     if let Some(memory_zone) = memory_zones.get_mut(&guest_ram_mapping.zone_id) {
@@ -911,6 +916,7 @@ impl MemoryManager {
                 &zones,
                 prefault,
                 existing_memory_files.unwrap_or_default(),
+                config.thp,
             )?;
             let guest_memory =
                 GuestMemoryMmap::from_arc_regions(regions).map_err(Error::GuestMemory)?;
@@ -948,7 +954,7 @@ impl MemoryManager {
                 .collect();
 
             let (mem_regions, mut memory_zones) =
-                Self::create_memory_regions_from_zones(&ram_regions, &zones, prefault)?;
+                Self::create_memory_regions_from_zones(&ram_regions, &zones, prefault, config.thp)?;
 
             let mut guest_memory =
                 GuestMemoryMmap::from_arc_regions(mem_regions).map_err(Error::GuestMemory)?;
@@ -997,6 +1003,7 @@ impl MemoryManager {
                                 zone.hugepage_size,
                                 zone.host_numa_node,
                                 None,
+                                config.thp,
                             )?;
 
                             guest_memory = guest_memory
@@ -1125,6 +1132,7 @@ impl MemoryManager {
             dynamic,
             #[cfg(target_arch = "aarch64")]
             uefi_flash: None,
+            thp: config.thp,
         };
 
         memory_manager.allocate_address_space()?;
@@ -1298,6 +1306,7 @@ impl MemoryManager {
         hugepage_size: Option<u64>,
         host_numa_node: Option<u32>,
         existing_memory_file: Option<File>,
+        thp: bool,
     ) -> Result<Arc<GuestRegionMmap>, Error> {
         let mut mmap_flags = libc::MAP_NORESERVE;
 
@@ -1336,7 +1345,7 @@ impl MemoryManager {
         )
         .map_err(Error::GuestMemory)?;
 
-        if region.file_offset().is_none() {
+        if region.file_offset().is_none() && thp {
             info!(
                 "Anonymous mapping at 0x{:x} (size = 0x{:x})",
                 region.as_ptr() as u64,
@@ -1438,6 +1447,7 @@ impl MemoryManager {
             self.hugepage_size,
             None,
             None,
+            self.thp,
         )?;
 
         // Map it into the guest

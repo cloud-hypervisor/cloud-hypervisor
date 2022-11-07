@@ -137,6 +137,7 @@ fn create_dummy_virtio_mem(bytes: &[u8; VIRTIO_MEM_DATA_SIZE]) -> (Mem, Arc<Gues
         None,
         numa_id,
         None,
+        false,
     )
     .unwrap();
 
