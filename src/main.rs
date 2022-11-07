@@ -166,7 +166,7 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
                      hotplug_method=acpi|virtio-mem,\
                      hotplug_size=<hotpluggable_memory_size>,\
                      hotplugged_size=<hotplugged_memory_size>,\
-                     prefault=on|off\"",
+                     prefault=on|off,thp=on|off\"",
                 )
                 .default_value(default_memory)
                 .group("vm-config"),
@@ -676,6 +676,7 @@ mod unit_tests {
                 hugepage_size: None,
                 prefault: false,
                 zones: None,
+                thp: true,
             },
             payload: Some(PayloadConfig {
                 kernel: Some(PathBuf::from("/path/to/kernel")),

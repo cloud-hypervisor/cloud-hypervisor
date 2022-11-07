@@ -658,7 +658,8 @@ impl MemoryConfig {
             .add("shared")
             .add("hugepages")
             .add("hugepage_size")
-            .add("prefault");
+            .add("prefault")
+            .add("thp");
         parser.parse(memory).map_err(Error::ParseMemory)?;
 
         let size = parser
@@ -701,6 +702,11 @@ impl MemoryConfig {
             .convert::<Toggle>("prefault")
             .map_err(Error::ParseMemory)?
             .unwrap_or(Toggle(false))
+            .0;
+        let thp = parser
+            .convert::<Toggle>("thp")
+            .map_err(Error::ParseMemory)?
+            .unwrap_or(Toggle(true))
             .0;
 
         let zones: Option<Vec<MemoryZoneConfig>> = if let Some(memory_zones) = &memory_zones {
@@ -788,6 +794,7 @@ impl MemoryConfig {
             hugepage_size,
             prefault,
             zones,
+            thp,
         })
     }
 
@@ -2727,6 +2734,7 @@ mod tests {
                 hugepage_size: None,
                 prefault: false,
                 zones: None,
+                thp: true,
             },
             payload: Some(PayloadConfig {
                 kernel: Some(PathBuf::from("/path/to/kernel")),

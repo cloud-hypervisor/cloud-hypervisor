@@ -139,6 +139,10 @@ impl Default for HotplugMethod {
     }
 }
 
+fn default_memoryconfig_thp() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct MemoryConfig {
     pub size: u64,
@@ -160,6 +164,8 @@ pub struct MemoryConfig {
     pub prefault: bool,
     #[serde(default)]
     pub zones: Option<Vec<MemoryZoneConfig>>,
+    #[serde(default = "default_memoryconfig_thp")]
+    pub thp: bool,
 }
 
 pub const DEFAULT_MEMORY_MB: u64 = 512;
@@ -177,6 +183,7 @@ impl Default for MemoryConfig {
             hugepage_size: None,
             prefault: false,
             zones: None,
+            thp: true,
         }
     }
 }

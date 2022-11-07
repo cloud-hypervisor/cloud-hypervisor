@@ -2062,6 +2062,7 @@ mod unit_tests {
                 hugepage_size: None,
                 prefault: false,
                 zones: None,
+                thp: true,
             },
             payload: Some(PayloadConfig {
                 kernel: Some(PathBuf::from("/path/to/kernel")),
