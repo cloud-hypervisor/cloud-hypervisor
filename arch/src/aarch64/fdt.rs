@@ -51,8 +51,6 @@ const SIZE_CELLS: u32 = 0x2;
 // Look for "The 1st cell..."
 const GIC_FDT_IRQ_TYPE_SPI: u32 = 0;
 const GIC_FDT_IRQ_TYPE_PPI: u32 = 1;
-const GIC_FDT_IRQ_PPI_CPU_SHIFT: u32 = 8;
-const GIC_FDT_IRQ_PPI_CPU_MASK: u32 = 0xff << GIC_FDT_IRQ_PPI_CPU_SHIFT;
 
 // From https://elixir.bootlin.com/linux/v4.9.62/source/include/dt-bindings/interrupt-controller/irq.h#L17
 const IRQ_TYPE_EDGE_RISING: u32 = 1;
@@ -121,7 +119,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     create_gic_node(&mut fdt, gic_device)?;
     create_timer_node(&mut fdt)?;
     if pmu_supported {
-        create_pmu_node(&mut fdt, vcpu_mpidr.len())?;
+        create_pmu_node(&mut fdt)?;
     }
     create_clock_node(&mut fdt)?;
     create_psci_node(&mut fdt)?;
@@ -541,16 +539,9 @@ fn create_devices_node<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Buil
     Ok(())
 }
 
-fn create_pmu_node(fdt: &mut FdtWriter, cpu_nums: usize) -> FdtWriterResult<()> {
-    let num_cpus = cpu_nums as u64 as u32;
+fn create_pmu_node(fdt: &mut FdtWriter) -> FdtWriterResult<()> {
     let compatible = "arm,armv8-pmuv3";
-    let cpu_mask: u32 =
-        (((1 << num_cpus) - 1) << GIC_FDT_IRQ_PPI_CPU_SHIFT) & GIC_FDT_IRQ_PPI_CPU_MASK;
-    let irq = [
-        GIC_FDT_IRQ_TYPE_PPI,
-        AARCH64_PMU_IRQ,
-        cpu_mask | IRQ_TYPE_LEVEL_HI,
-    ];
+    let irq = [GIC_FDT_IRQ_TYPE_PPI, AARCH64_PMU_IRQ, IRQ_TYPE_LEVEL_HI];
 
     let pmu_node = fdt.begin_node("pmu")?;
     fdt.property_string("compatible", compatible)?;
