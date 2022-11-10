@@ -631,6 +631,8 @@ impl Drop for Net {
             // Ignore the result because there is nothing we can do about it.
             let _ = kill_evt.write(1);
         }
+        // Needed to ensure all references to tap FDs are dropped (#4868)
+        self.common.wait_for_epoll_threads();
     }
 }
 
