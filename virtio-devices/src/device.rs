@@ -282,7 +282,6 @@ impl VirtioCommon {
     }
 
     // Wait for the worker thread to finish and return
-    #[cfg(fuzzing)]
     pub fn wait_for_epoll_threads(&mut self) {
         if let Some(mut threads) = self.epoll_threads.take() {
             for t in threads.drain(..) {
