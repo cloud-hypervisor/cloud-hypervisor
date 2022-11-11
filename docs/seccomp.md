@@ -64,5 +64,5 @@ it will log every system call issued by the process. It is important to use
 `-f` option in order to trace each and every thread belonging to the process.
 
 ```
-strace -f ./cloud-hypervisor ...
+strace --decode-pids=comm -f ./cloud-hypervisor ...
 ```
