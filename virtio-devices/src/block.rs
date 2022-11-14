@@ -219,7 +219,8 @@ impl BlockEpollHandler {
                 (VIRTIO_BLK_S_OK, result as u32)
             } else {
                 error!(
-                    "Request failed: {:?}",
+                    "Request failed: {:x?} {:?}",
+                    request,
                     io::Error::from_raw_os_error(-result)
                 );
                 return Err(Error::AsyncRequestFailure);
