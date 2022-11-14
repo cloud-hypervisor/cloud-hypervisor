@@ -703,7 +703,6 @@ impl cpu::Vcpu for MshvVcpu {
             msr!(msr_index::MSR_LSTAR),
             msr!(msr_index::MSR_KERNEL_GS_BASE),
             msr!(msr_index::MSR_SYSCALL_MASK),
-            msr!(msr_index::MSR_IA32_TSC),
             msr_data!(msr_index::MSR_MTRRdefType, MTRR_ENABLE | MTRR_MEM_TYPE_WB),
         ]
         .to_vec()
