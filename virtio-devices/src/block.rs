@@ -103,6 +103,7 @@ struct BlockEpollHandler {
     request_list: HashMap<u16, Request>,
     rate_limiter: Option<RateLimiter>,
     access_platform: Option<Arc<dyn AccessPlatform>>,
+    read_only: bool,
 }
 
 impl BlockEpollHandler {
@@ -114,6 +115,27 @@ impl BlockEpollHandler {
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
             let mut request = Request::parse(&mut desc_chain, self.access_platform.as_ref())
                 .map_err(Error::RequestParsing)?;
+
+            // For virtio spec compliance
+            // "A device MUST set the status byte to VIRTIO_BLK_S_IOERR for a write request
+            // if the VIRTIO_BLK_F_RO feature if offered, and MUST NOT write any data."
+            if self.read_only
+                && (request.request_type == RequestType::Out
+                    || request.request_type == RequestType::Flush)
+            {
+                desc_chain
+                    .memory()
+                    .write_obj(VIRTIO_BLK_S_IOERR, request.status_addr)
+                    .map_err(Error::RequestStatus)?;
+
+                // If no asynchronous operation has been submitted, we can
+                // simply return the used descriptor.
+                queue
+                    .add_used(desc_chain.memory(), desc_chain.head_index(), 0)
+                    .map_err(Error::QueueAddUsed)?;
+                used_descs = true;
+                continue;
+            }
 
             if let Some(rate_limiter) = &mut self.rate_limiter {
                 // If limiter.consume() fails it means there is no more TokenType::Ops
@@ -390,6 +412,7 @@ pub struct Block {
     seccomp_action: SeccompAction,
     rate_limiter_config: Option<RateLimiterConfig>,
     exit_evt: EventFd,
+    read_only: bool,
 }
 
 #[derive(Versionize)]
@@ -410,7 +433,7 @@ impl Block {
         id: String,
         mut disk_image: Box<dyn DiskFile>,
         disk_path: PathBuf,
-        is_disk_read_only: bool,
+        read_only: bool,
         iommu: bool,
         num_queues: usize,
         queue_size: u16,
@@ -452,7 +475,7 @@ impl Block {
                 avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
             }
 
-            if is_disk_read_only {
+            if read_only {
                 avail_features |= 1u64 << VIRTIO_BLK_F_RO;
             }
 
@@ -512,6 +535,7 @@ impl Block {
             seccomp_action,
             rate_limiter_config,
             exit_evt,
+            read_only,
         })
     }
 
@@ -644,6 +668,7 @@ impl VirtioDevice for Block {
                 request_list: HashMap::with_capacity(queue_size.into()),
                 rate_limiter,
                 access_platform: self.common.access_platform.clone(),
+                read_only: self.read_only,
             };
 
             let paused = self.common.paused.clone();
