@@ -231,6 +231,7 @@ impl Write for RawFile {
                 return Err(io::Error::last_os_error());
             }
 
+            // SAFETY: tmp_ptr is at least rounded_len long
             let tmp_buf = unsafe { slice::from_raw_parts_mut(tmp_ptr, rounded_len) };
 
             // This can eventually replaced with read_at once its interface
