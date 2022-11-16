@@ -1188,6 +1188,7 @@ impl MemoryManager {
     }
 
     fn memfd_create(name: &ffi::CStr, flags: u32) -> Result<RawFd, io::Error> {
+        // SAFETY: FFI call with correct arguments
         let res = unsafe { libc::syscall(libc::SYS_memfd_create, name.as_ptr(), flags) };
 
         if res < 0 {
@@ -1205,6 +1206,7 @@ impl MemoryManager {
         maxnode: u64,
         flags: u32,
     ) -> Result<(), io::Error> {
+        // SAFETY: FFI call with correct arguments
         let res = unsafe {
             libc::syscall(
                 libc::SYS_mbind,
@@ -1256,6 +1258,7 @@ impl MemoryManager {
         )
         .map_err(Error::SharedFileCreate)?;
 
+        // SAFETY: fd is valid
         let f = unsafe { File::from_raw_fd(fd) };
         f.set_len(size as u64).map_err(Error::SharedFileSetLen)?;
 
@@ -1277,8 +1280,14 @@ impl MemoryManager {
             let fs = ffi::CString::new(fs_str).unwrap();
             let mut path = fs.as_bytes_with_nul().to_owned();
             let path_ptr = path.as_mut_ptr() as *mut _;
+            // SAFETY: FFI call
             let fd = unsafe { libc::mkstemp(path_ptr) };
+            if fd == -1 {
+                return Err(Error::SharedFileCreate(std::io::Error::last_os_error()));
+            }
+            // SAFETY: FFI call
             unsafe { libc::unlink(path_ptr) };
+            // SAFETY: fd is valid
             let f = unsafe { File::from_raw_fd(fd) };
             f.set_len(size as u64).map_err(Error::SharedFileSetLen)?;
 
@@ -1351,6 +1360,7 @@ impl MemoryManager {
                 region.as_ptr() as u64,
                 size
             );
+            // SAFETY: FFI call with corect arguments
             let ret = unsafe { libc::madvise(region.as_ptr() as _, size, libc::MADV_HUGEPAGE) };
             if ret != 0 {
                 let e = io::Error::last_os_error();
@@ -1573,7 +1583,7 @@ impl MemoryManager {
 
         // Mark the pages as mergeable if explicitly asked for.
         if mergeable {
-            // Safe because the address and size are valid since the
+            // SAFETY: the address and size are valid since the
             // mmap succeeded.
             let ret = unsafe {
                 libc::madvise(
@@ -1628,7 +1638,7 @@ impl MemoryManager {
         // Mark the pages as unmergeable if there were previously marked as
         // mergeable.
         if mergeable {
-            // Safe because the address and size are valid as the region was
+            // SAFETY: the address and size are valid as the region was
             // previously advised.
             let ret = unsafe {
                 libc::madvise(
@@ -1797,6 +1807,7 @@ impl MemoryManager {
             // device does not work that way, it provides a file descriptor
             // which is not matching the mapping size, as it's a just a way to
             // let KVM know that an EPC section is being created for the guest.
+            // SAFETY: FFI call with correct arguments
             let host_addr = unsafe {
                 libc::mmap(
                     std::ptr::null_mut(),
@@ -1845,12 +1856,14 @@ impl MemoryManager {
 
     pub fn is_hardlink(f: &File) -> bool {
         let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
+        // SAFETY: FFI call with correct arguments
         let ret = unsafe { libc::fstat(f.as_raw_fd(), stat.as_mut_ptr()) };
         if ret != 0 {
             error!("Couldn't fstat the backing file");
             return false;
         }
 
+        // SAFETY: stat is valid
         unsafe { (*stat.as_ptr()).st_nlink as usize > 0 }
     }
 

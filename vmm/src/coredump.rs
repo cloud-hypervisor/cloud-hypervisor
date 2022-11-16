@@ -74,6 +74,7 @@ pub struct X86_64UserRegs {
     pub gs: u64,
 }
 
+// SAFETY: This is just a series of bytes
 unsafe impl ByteValued for X86_64UserRegs {}
 
 #[repr(C)]
@@ -169,6 +170,7 @@ pub struct CpuState {
     pub kernel_gs_base: u64,
 }
 
+// SAFETY: This is just a series of bytes
 unsafe impl ByteValued for CpuState {}
 
 pub enum NoteDescType {

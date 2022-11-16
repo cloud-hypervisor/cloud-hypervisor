@@ -110,8 +110,11 @@ impl SerialManager {
             }
             ConsoleOutputMode::Tty => {
                 // If running on an interactive TTY then accept input
+                // SAFETY: trivially safe
                 if unsafe { libc::isatty(libc::STDIN_FILENO) == 1 } {
+                    // SAFETY: STDIN_FILENO is a valid fd
                     let stdin_clone = unsafe { File::from_raw_fd(libc::dup(libc::STDIN_FILENO)) };
+                    // SAFETY: FFI calls with correct arguments
                     let ret = unsafe {
                         let mut flags = libc::fcntl(stdin_clone.as_raw_fd(), libc::F_GETFL);
                         flags |= libc::O_NONBLOCK;
@@ -159,6 +162,7 @@ impl SerialManager {
         }
 
         // Use 'File' to enforce closing on 'epoll_fd'
+        // SAFETY: epoll_fd is valid
         let epoll_file = unsafe { File::from_raw_fd(epoll_fd) };
 
         Ok(Some(SerialManager {
