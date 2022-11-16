@@ -267,19 +267,31 @@ struct VirtioIommuFault {
     address: u64,
 }
 
-// SAFETY: these data structures only contain integers and have no implicit padding
+// SAFETY: data structure only contain integers and have no implicit padding
 unsafe impl ByteValued for VirtioIommuRange32 {}
+// SAFETY: data structure only contain integers and have no implicit padding
 unsafe impl ByteValued for VirtioIommuRange64 {}
+// SAFETY: data structure only contain integers and have no implicit padding
 unsafe impl ByteValued for VirtioIommuConfig {}
+// SAFETY: data structure only contain integers and have no implicit padding
 unsafe impl ByteValued for VirtioIommuReqHead {}
+// SAFETY: data structure only contain integers and have no implicit padding
 unsafe impl ByteValued for VirtioIommuReqTail {}
+// SAFETY: data structure only contain integers and have no implicit padding
 unsafe impl ByteValued for VirtioIommuReqAttach {}
+// SAFETY: data structure only contain integers and have no implicit padding
 unsafe impl ByteValued for VirtioIommuReqDetach {}
+// SAFETY: data structure only contain integers and have no implicit padding
 unsafe impl ByteValued for VirtioIommuReqMap {}
+// SAFETY: data structure only contain integers and have no implicit padding
 unsafe impl ByteValued for VirtioIommuReqUnmap {}
+// SAFETY: data structure only contain integers and have no implicit padding
 unsafe impl ByteValued for VirtioIommuReqProbe {}
+// SAFETY: data structure only contain integers and have no implicit padding
 unsafe impl ByteValued for VirtioIommuProbeProperty {}
+// SAFETY: data structure only contain integers and have no implicit padding
 unsafe impl ByteValued for VirtioIommuProbeResvMem {}
+// SAFETY: data structure only contain integers and have no implicit padding
 unsafe impl ByteValued for VirtioIommuFault {}
 
 #[derive(Error, Debug)]

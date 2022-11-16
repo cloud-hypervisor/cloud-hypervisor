@@ -417,6 +417,7 @@ impl MemEpollHandler {
     fn discard_memory_range(&self, offset: u64, size: u64) -> Result<(), Error> {
         // Use fallocate if the memory region is backed by a file.
         if let Some(fd) = self.host_fd {
+            // SAFETY: FFI call with valid arguments
             let res = unsafe {
                 libc::fallocate64(
                     fd,
@@ -435,6 +436,7 @@ impl MemEpollHandler {
         // Only use madvise if the memory region is not allocated with
         // hugepages.
         if !self.hugepages {
+            // SAFETY: FFI call with valid arguments
             let res = unsafe {
                 libc::madvise(
                     (self.host_addr + offset) as *mut libc::c_void,

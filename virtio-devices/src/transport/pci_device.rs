@@ -666,8 +666,8 @@ impl VirtioPciDevice {
                     .unwrap();
             }
         } else {
-            // Safe since we know self.cap_pci_cfg_info.cap.cap.offset is 32bits long.
             let bar_offset: u32 =
+                // SAFETY: we know self.cap_pci_cfg_info.cap.cap.offset is 32bits long.
                 unsafe { std::mem::transmute(self.cap_pci_cfg_info.cap.cap.offset) };
             self.read_bar(0, bar_offset as u64, data)
         }
@@ -687,8 +687,8 @@ impl VirtioPciDevice {
             right[..data_len].copy_from_slice(data);
             None
         } else {
-            // Safe since we know self.cap_pci_cfg_info.cap.cap.offset is 32bits long.
             let bar_offset: u32 =
+                // SAFETY: we know self.cap_pci_cfg_info.cap.cap.offset is 32bits long.
                 unsafe { std::mem::transmute(self.cap_pci_cfg_info.cap.cap.offset) };
             self.write_bar(0, bar_offset as u64, data)
         }

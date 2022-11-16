@@ -607,6 +607,7 @@ fn get_win_size(tty: &dyn AsRawFd) -> (u16, u16) {
     }
     let ws: WindowSize = WindowSize::default();
 
+    // SAFETY: FFI call with correct arguments
     unsafe {
         libc::ioctl(tty.as_raw_fd(), TIOCGWINSZ, &ws);
     }

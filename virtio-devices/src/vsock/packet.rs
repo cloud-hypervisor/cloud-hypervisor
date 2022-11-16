@@ -239,7 +239,7 @@ impl VsockPacket {
     /// Provides in-place, byte-slice, access to the vsock packet header.
     ///
     pub fn hdr(&self) -> &[u8] {
-        // This is safe since bound checks have already been performed when creating the packet
+        // SAFETY: bound checks have already been performed when creating the packet
         // from the virtq descriptor.
         unsafe { std::slice::from_raw_parts(self.hdr as *const u8, VSOCK_PKT_HDR_SIZE) }
     }
@@ -247,7 +247,7 @@ impl VsockPacket {
     /// Provides in-place, byte-slice, mutable access to the vsock packet header.
     ///
     pub fn hdr_mut(&mut self) -> &mut [u8] {
-        // This is safe since bound checks have already been performed when creating the packet
+        // SAFETY: bound checks have already been performed when creating the packet
         // from the virtq descriptor.
         unsafe { std::slice::from_raw_parts_mut(self.hdr, VSOCK_PKT_HDR_SIZE) }
     }
@@ -261,7 +261,7 @@ impl VsockPacket {
     ///            is stored in the packet header, and accessible via `VsockPacket::len()`.
     pub fn buf(&self) -> Option<&[u8]> {
         self.buf.map(|ptr| {
-            // This is safe since bound checks have already been performed when creating the packet
+            // SAFETY: bound checks have already been performed when creating the packet
             // from the virtq descriptor.
             unsafe { std::slice::from_raw_parts(ptr as *const u8, self.buf_size) }
         })
@@ -276,7 +276,7 @@ impl VsockPacket {
     ///            is stored in the packet header, and accessible via `VsockPacket::len()`.
     pub fn buf_mut(&mut self) -> Option<&mut [u8]> {
         self.buf.map(|ptr| {
-            // This is safe since bound checks have already been performed when creating the packet
+            // SAFETY: bound checks have already been performed when creating the packet
             // from the virtq descriptor.
             unsafe { std::slice::from_raw_parts_mut(ptr, self.buf_size) }
         })
@@ -383,6 +383,7 @@ impl VsockPacket {
 }
 
 #[cfg(test)]
+#[allow(clippy::undocumented_unsafe_blocks)]
 mod tests {
     use super::super::tests::TestContext;
     use super::*;

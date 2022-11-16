@@ -235,6 +235,7 @@ impl Watchdog {
             error!("Failed to create timer fd {}", e);
             e
         })?;
+        // SAFETY: timer_fd is a valid fd
         let timer = unsafe { File::from_raw_fd(timer_fd) };
 
         Ok(Watchdog {
@@ -280,6 +281,7 @@ impl Drop for Watchdog {
 }
 
 fn timerfd_create() -> Result<RawFd, io::Error> {
+    // SAFETY: FFI call, trivially safe
     let res = unsafe { libc::timerfd_create(libc::CLOCK_MONOTONIC, 0) };
     if res < 0 {
         Err(io::Error::last_os_error())
@@ -301,6 +303,7 @@ fn timerfd_setup(timer: &File, secs: i64) -> Result<(), io::Error> {
     };
 
     let res =
+        // SAFETY: FFI call with correct arguments
         unsafe { libc::timerfd_settime(timer.as_raw_fd(), 0, &periodic, std::ptr::null_mut()) };
 
     if res < 0 {
