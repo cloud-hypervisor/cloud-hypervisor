@@ -257,6 +257,7 @@ impl MemoryRangeTable {
             length as usize / (std::mem::size_of::<MemoryRange>()),
             Default::default,
         );
+        // SAFETY: the slice is construted with the correct arguments
         fd.read_exact(unsafe {
             std::slice::from_raw_parts_mut(
                 data.as_ptr() as *mut MemoryRange as *mut u8,
@@ -273,6 +274,7 @@ impl MemoryRangeTable {
     }
 
     pub fn write_to(&self, fd: &mut dyn Write) -> Result<(), MigratableError> {
+        // SAFETY: the slice is construted with the correct arguments
         fd.write_all(unsafe {
             std::slice::from_raw_parts(
                 self.data.as_ptr() as *const MemoryRange as *const u8,
