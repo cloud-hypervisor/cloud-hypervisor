@@ -98,6 +98,7 @@ impl Sdt {
     /// Write a value at the given offset
     pub fn write<T>(&mut self, offset: usize, value: T) {
         assert!((offset + (std::mem::size_of::<T>() - 1)) < self.data.len());
+        // SAFETY: The assertion above makes sure we don't do out of bounds write.
         unsafe {
             *(((self.data.as_mut_ptr() as usize) + offset) as *mut T) = value;
         }
