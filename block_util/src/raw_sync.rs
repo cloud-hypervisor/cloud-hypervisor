@@ -68,6 +68,7 @@ impl AsyncIo for RawFileSync {
         iovecs: Vec<libc::iovec>,
         user_data: u64,
     ) -> AsyncIoResult<()> {
+        // SAFETY: FFI call with valid arguments
         let result = unsafe {
             libc::preadv(
                 self.fd as libc::c_int,
@@ -92,6 +93,7 @@ impl AsyncIo for RawFileSync {
         iovecs: Vec<libc::iovec>,
         user_data: u64,
     ) -> AsyncIoResult<()> {
+        // SAFETY: FFI call with valid arguments
         let result = unsafe {
             libc::pwritev(
                 self.fd as libc::c_int,
@@ -111,6 +113,7 @@ impl AsyncIo for RawFileSync {
     }
 
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()> {
+        // SAFETY: FFI call
         let result = unsafe { libc::fsync(self.fd as libc::c_int) };
         if result < 0 {
             return Err(AsyncIoError::Fsync(std::io::Error::last_os_error()));
