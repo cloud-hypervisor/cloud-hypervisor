@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#![allow(clippy::undocumented_unsafe_blocks)]
+
 use once_cell::sync::Lazy;
 use serde_json::Value;
 use ssh2::Session;
