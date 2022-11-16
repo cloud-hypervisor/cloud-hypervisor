@@ -190,16 +190,25 @@ struct DeviceReset {
     header: Header,
 }
 
-// SAFETY: these data structures only contain a sereis of integers
+// SAFETY: data structure only contain a sereis of integers
 unsafe impl ByteValued for Header {}
+// SAFETY: data structure only contain a sereis of integers
 unsafe impl ByteValued for Version {}
+// SAFETY: data structure only contain a sereis of integers
 unsafe impl ByteValued for DmaMap {}
+// SAFETY: data structure only contain a sereis of integers
 unsafe impl ByteValued for DmaUnmap {}
+// SAFETY: data structure only contain a sereis of integers
 unsafe impl ByteValued for DeviceGetInfo {}
+// SAFETY: data structure only contain a sereis of integers
 unsafe impl ByteValued for DeviceGetRegionInfo {}
+// SAFETY: data structure only contain a sereis of integers
 unsafe impl ByteValued for RegionAccess {}
+// SAFETY: data structure only contain a sereis of integers
 unsafe impl ByteValued for GetIrqInfo {}
+// SAFETY: data structure only contain a sereis of integers
 unsafe impl ByteValued for SetIrqs {}
+// SAFETY: data structure only contain a sereis of integers
 unsafe impl ByteValued for DeviceReset {}
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -591,8 +600,9 @@ impl Client {
                 break;
             }
 
-            // Safe because the `cap_data_ptr` is valid and the `cap_offset` is checked above
+            // SAFETY: `cap_data_ptr` is valid and the `cap_offset` is checked above
             let cap_ptr = unsafe { cap_data_ptr.offset(cap_offset as isize) };
+            // SAFETY: `cap_ptr` is valid
             let cap_header = unsafe { &*(cap_ptr as *const vfio_info_cap_header) };
             match cap_header.id as u32 {
                 VFIO_REGION_INFO_CAP_SPARSE_MMAP => {
@@ -604,7 +614,7 @@ impl Client {
                         );
                         break;
                     }
-                    // Safe because the `cap_ptr` is valid and its size is also checked above
+                    // SAFETY: `cap_ptr` is valid and its size is also checked above
                     let sparse_mmap = unsafe {
                         &*(cap_ptr as *mut u8 as *const vfio_region_info_cap_sparse_mmap)
                     };
@@ -616,8 +626,8 @@ impl Client {
                         cap_offset, mmap_cap_size, area_num, mmap_area_size, cap_size);
                         break;
                     }
-                    // Safe because the `sparse_mmap` is valid and its size is also checked above
                     let areas =
+                        // SAFETY: `sparse_mmap` is valid and its size is also checked above
                         unsafe { sparse_mmap.areas.as_slice(sparse_mmap.nr_areas as usize) };
                     for area in areas.iter() {
                         sparse_areas.push(*area);
