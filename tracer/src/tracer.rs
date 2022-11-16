@@ -30,6 +30,7 @@ impl Tracer {
 
     fn end(&self) {
         let end = Instant::now();
+        // SAFETY: FFI call
         let path = format!("cloud-hypervisor-{}.trace", unsafe { libc::getpid() });
         let mut file = File::create(&path).unwrap();
 
@@ -105,11 +106,14 @@ struct TraceEvent {
 
 pub fn trace_point_log(event: &'static str) {
     let trace_event = TraceEvent {
+        // SAFETY: start has been initialised as part of initialising the value of TRACER
         timestamp: Instant::now().duration_since(unsafe { TRACER.get().unwrap().start }),
         event,
         end_timestamp: None,
+        // SAFETY: thread_depth accesses current thread only specific data
         depth: unsafe { TRACER.get().unwrap().thread_depth() },
     };
+    // SAFETY: add_event accesses current thread only specific data
     unsafe {
         TRACER.get_mut().unwrap().add_event(trace_event);
     }
@@ -122,6 +126,7 @@ pub struct TraceBlock {
 
 impl TraceBlock {
     pub fn new(event: &'static str) -> Self {
+        // SAFETY: increase_thread_depth accesses current thread only specific data
         unsafe {
             TRACER.get_mut().unwrap().increase_thread_depth();
         }
@@ -134,16 +139,16 @@ impl TraceBlock {
 
 impl Drop for TraceBlock {
     fn drop(&mut self) {
+        // SAFETY: start has been initialised as part of initialising the value of TRACER
+        let start = unsafe { TRACER.get().unwrap().start };
         let trace_event = TraceEvent {
-            timestamp: self
-                .start
-                .duration_since(unsafe { TRACER.get().unwrap().start }),
+            timestamp: self.start.duration_since(start),
             event: self.event,
-            end_timestamp: Some(
-                Instant::now().duration_since(unsafe { TRACER.get().unwrap().start }),
-            ),
+            end_timestamp: Some(Instant::now().duration_since(start)),
+            // SAFETY: thread_depth() returns a number local to the current thread
             depth: unsafe { TRACER.get().unwrap().thread_depth() },
         };
+        // SAFETY: add_event and decrease_thread_depth access current thread only specific data
         unsafe {
             TRACER.get_mut().unwrap().add_event(trace_event);
             TRACER.get_mut().unwrap().decrease_thread_depth();
@@ -166,9 +171,11 @@ macro_rules! trace_scoped {
 }
 
 pub fn end() {
+    // SAFETY: this is called after all other threads end
     unsafe { TRACER.get().unwrap().end() }
 }
 
 pub fn start() {
+    // SAFETY: this is called before other threads start
     unsafe { TRACER.set(Tracer::new()).unwrap() }
 }
