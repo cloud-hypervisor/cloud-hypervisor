@@ -270,6 +270,8 @@ struct MetadataTableHeader {
 
 impl MetadataTableHeader {
     pub fn new(buffer: &[u8]) -> Result<MetadataTableHeader> {
+        assert!(buffer.len() == std::mem::size_of::<MetadataTableHeader>());
+        // SAFETY: the assertion above makes sure the buffer size is correct.
         let metadata_table_header = unsafe { *(buffer.as_ptr() as *mut MetadataTableHeader) };
 
         if metadata_table_header.signature != METADATA_SIGN {
@@ -301,6 +303,8 @@ pub struct MetadataTableEntry {
 impl MetadataTableEntry {
     /// Parse one metadata entry from the buffer
     fn new(buffer: &[u8]) -> Result<MetadataTableEntry> {
+        assert!(buffer.len() == std::mem::size_of::<MetadataTableEntry>());
+        // SAFETY: the assertion above makes sure the buffer size is correct.
         let mut metadata_table_entry = unsafe { *(buffer.as_ptr() as *mut MetadataTableEntry) };
 
         let uuid = crate::uuid_from_guid(buffer);
