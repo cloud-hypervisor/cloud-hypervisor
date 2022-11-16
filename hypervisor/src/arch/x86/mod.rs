@@ -272,6 +272,7 @@ impl LapicState {
         use std::io::Cursor;
         use std::mem;
 
+        // SAFETY: plain old data type
         let sliceu8 = unsafe {
             // This array is only accessed as parts of a u32 word, so interpret it as a u8 array.
             // Cursors are only readable on arrays of u8, not i8(c_char).
@@ -290,6 +291,7 @@ impl LapicState {
         use std::io::Cursor;
         use std::mem;
 
+        // SAFETY: plain old data type
         let sliceu8 = unsafe {
             // This array is only accessed as parts of a u32 word, so interpret it as a u8 array.
             // Cursors are only readable on arrays of u8, not i8(c_char).
