@@ -2066,6 +2066,7 @@ impl cpu::Vcpu for KvmVcpu {
     #[cfg(feature = "tdx")]
     fn get_tdx_exit_details(&mut self) -> cpu::Result<TdxExitDetails> {
         let kvm_run = self.fd.get_kvm_run();
+        // SAFETY: accessing a union field in a valid structure
         let tdx_vmcall = unsafe { &mut kvm_run.__bindgen_anon_1.tdx.u.vmcall };
 
         tdx_vmcall.status_code = TDG_VP_VMCALL_INVALID_OPERAND;
@@ -2089,6 +2090,7 @@ impl cpu::Vcpu for KvmVcpu {
     #[cfg(feature = "tdx")]
     fn set_tdx_status(&mut self, status: TdxExitStatus) {
         let kvm_run = self.fd.get_kvm_run();
+        // SAFETY: accessing a union field in a valid structure
         let tdx_vmcall = unsafe { &mut kvm_run.__bindgen_anon_1.tdx.u.vmcall };
 
         tdx_vmcall.status_code = match status {
