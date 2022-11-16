@@ -19,7 +19,7 @@ use libc::{sysconf, _SC_PAGESIZE};
 /// Safe wrapper for `sysconf(_SC_PAGESIZE)`.
 #[inline(always)]
 fn pagesize() -> usize {
-    // Trivially safe
+    // SAFETY: FFI call. Trivially safe.
     unsafe { sysconf(_SC_PAGESIZE) as usize }
 }
 
