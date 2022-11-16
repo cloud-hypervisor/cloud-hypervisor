@@ -81,7 +81,7 @@ impl AsyncIo for RawFileAsync {
     ) -> AsyncIoResult<()> {
         let (submitter, mut sq, _) = self.io_uring.split();
 
-        // Safe because we know the file descriptor is valid and we
+        // SAFETY: we know the file descriptor is valid and we
         // relied on vm-memory to provide the buffer address.
         let _ = unsafe {
             sq.push(
@@ -109,7 +109,7 @@ impl AsyncIo for RawFileAsync {
     ) -> AsyncIoResult<()> {
         let (submitter, mut sq, _) = self.io_uring.split();
 
-        // Safe because we know the file descriptor is valid and we
+        // SAFETY: we know the file descriptor is valid and we
         // relied on vm-memory to provide the buffer address.
         let _ = unsafe {
             sq.push(
@@ -133,7 +133,7 @@ impl AsyncIo for RawFileAsync {
         if let Some(user_data) = user_data {
             let (submitter, mut sq, _) = self.io_uring.split();
 
-            // Safe because we know the file descriptor is valid.
+            // SAFETY: we know the file descriptor is valid.
             let _ = unsafe {
                 sq.push(
                     &opcode::Fsync::new(types::Fd(self.fd))
@@ -148,6 +148,7 @@ impl AsyncIo for RawFileAsync {
             sq.sync();
             submitter.submit().map_err(AsyncIoError::Fsync)?;
         } else {
+            // SAFETY: FFI call with a valid fd
             unsafe { libc::fsync(self.fd) };
         }
 
