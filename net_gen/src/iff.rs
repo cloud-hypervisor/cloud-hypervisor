@@ -1187,6 +1187,7 @@ pub struct ifreq {
 
 impl Default for ifreq {
     fn default() -> Self {
+        // SAFETY: all zeros is a valid pattern for this data type
         unsafe { std::mem::zeroed() }
     }
 }
