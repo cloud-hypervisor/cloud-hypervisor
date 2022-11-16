@@ -181,6 +181,7 @@ impl VfioUserPciDevice {
                 };
 
                 for s in mmaps.iter() {
+                    // SAFETY: FFI call with correct arguments
                     let host_addr = unsafe {
                         libc::mmap(
                             null_mut(),
@@ -247,6 +248,7 @@ impl VfioUserPciDevice {
                 }
 
                 // Remove mmaps
+                // SAFETY: FFI call with correct arguments
                 let ret = unsafe {
                     libc::munmap(
                         user_memory_region.host_addr as *mut libc::c_void,
