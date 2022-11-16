@@ -125,9 +125,11 @@ struct MemmapTableEntryWrapper(hvm_memmap_table_entry);
 #[derive(Copy, Clone, Default)]
 struct ModlistEntryWrapper(hvm_modlist_entry);
 
-// SAFETY: These data structures only contain a series of integers
+// SAFETY: data structure only contain a series of integers
 unsafe impl ByteValued for StartInfoWrapper {}
+// SAFETY: data structure only contain a series of integers
 unsafe impl ByteValued for MemmapTableEntryWrapper {}
+// SAFETY: data structure only contain a series of integers
 unsafe impl ByteValued for ModlistEntryWrapper {}
 
 // This is a workaround to the Rust enforcement specifying that any implementation of a foreign
@@ -661,6 +663,7 @@ pub fn generate_common_cpuid(
     // Copy CPU identification string
     for i in 0x8000_0002..=0x8000_0004 {
         cpuid.retain(|c| c.function != i);
+        // SAFETY: call cpuid with valid leaves
         let leaf = unsafe { std::arch::x86_64::__cpuid(i) };
         cpuid.push(CpuIdEntry {
             function: i,
@@ -1011,6 +1014,7 @@ pub fn initramfs_load_addr(
 }
 
 pub fn get_host_cpu_phys_bits() -> u8 {
+    // SAFETY: call cpuid with valid leaves
     unsafe {
         let leaf = x86_64::__cpuid(0x8000_0000);
 
@@ -1121,6 +1125,7 @@ fn update_cpuid_sgx(
 
     // Get host CPUID for leaf 0x12, subleaf 0x2. This is to retrieve EPC
     // properties such as confidentiality and integrity.
+    // SAFETY: call cpuid with valid leaves
     let leaf = unsafe { std::arch::x86_64::__cpuid_count(0x12, 0x2) };
 
     for (i, epc_section) in epc_sections.iter().enumerate() {

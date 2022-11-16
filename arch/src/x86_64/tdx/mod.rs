@@ -80,7 +80,7 @@ pub fn parse_tdvf_sections(file: &mut File) -> Result<Vec<TdvfSection>, TdvfErro
         .map_err(TdvfError::ReadDescriptor)?;
 
     let mut descriptor: TdvfDescriptor = Default::default();
-    // Safe as we read exactly the size of the descriptor header
+    // SAFETY: we read exactly the size of the descriptor header
     file.read_exact(unsafe {
         std::slice::from_raw_parts_mut(
             &mut descriptor as *mut _ as *mut u8,
@@ -107,7 +107,7 @@ pub fn parse_tdvf_sections(file: &mut File) -> Result<Vec<TdvfSection>, TdvfErro
     let mut sections = Vec::new();
     sections.resize_with(descriptor.num_sections as usize, TdvfSection::default);
 
-    // Safe as we read exactly the advertised sections
+    // SAFETY: we read exactly the advertised sections
     file.read_exact(unsafe {
         std::slice::from_raw_parts_mut(
             sections.as_mut_ptr() as *mut u8,
@@ -211,12 +211,17 @@ struct TdPayload {
     payload_info: PayloadInfo,
 }
 
-// SAFETY: These data structures only contain a series of integers
+// SAFETY: data structure only contain a series of integers
 unsafe impl ByteValued for HobHeader {}
+// SAFETY: data structure only contain a series of integers
 unsafe impl ByteValued for HobHandoffInfoTable {}
+// SAFETY: data structure only contain a series of integers
 unsafe impl ByteValued for HobResourceDescriptor {}
+// SAFETY: data structure only contain a series of integers
 unsafe impl ByteValued for HobGuidType {}
+// SAFETY: data structure only contain a series of integers
 unsafe impl ByteValued for PayloadInfo {}
+// SAFETY: data structure only contain a series of integers
 unsafe impl ByteValued for TdPayload {}
 
 pub struct TdHob {
