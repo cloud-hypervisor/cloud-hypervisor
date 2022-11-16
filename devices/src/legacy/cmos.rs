@@ -97,7 +97,7 @@ impl BusDevice for Cmos {
                 let day;
                 let month;
                 let year;
-                // The clock_gettime and gmtime_r calls are safe as long as the structs they are
+                // SAFETY: The clock_gettime and gmtime_r calls are safe as long as the structs they are
                 // given are large enough, and neither of them fail. It is safe to zero initialize
                 // the tm and timespec struct because it contains only plain data.
                 let update_in_progress = unsafe {
