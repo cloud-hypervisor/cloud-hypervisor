@@ -34,22 +34,22 @@ jobs:
           override: true
 
       - name: Build (default features)
-        run: cargo rustc --locked --bin cloud-hypervisor -- -D warnings
+        run: cargo rustc --locked --bin cloud-hypervisor -- -D warnings -D clippy::undocumented_unsafe_blocks
 
       - name: Build (kvm)
-        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "kvm"  -- -D warnings
+        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "kvm"  -- -D warnings -D clippy::undocumented_unsafe_blocks
 
       - name: Build (default features + tdx)
-        run: cargo rustc --locked --bin cloud-hypervisor --features "tdx" -- -D warnings
+        run: cargo rustc --locked --bin cloud-hypervisor --features "tdx" -- -D warnings -D clippy::undocumented_unsafe_blocks
 
       - name: Build (default features + guest_debug)
-        run: cargo rustc --locked --bin cloud-hypervisor --features "guest_debug" -- -D warnings
+        run: cargo rustc --locked --bin cloud-hypervisor --features "guest_debug" -- -D warnings -D clippy::undocumented_unsafe_blocks
 
       - name: Build (mshv)
-        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "mshv"  -- -D warnings
+        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "mshv"  -- -D warnings -D clippy::undocumented_unsafe_blocks
 
       - name: Build (mshv + kvm)
-        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "mshv,kvm"  -- -D warnings
+        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "mshv,kvm"  -- -D warnings -D clippy::undocumented_unsafe_blocks
 
       - name: Release Build (default features)
         run: cargo build --locked --all --release --target=${{ matrix.target }}

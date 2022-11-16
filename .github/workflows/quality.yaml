@@ -53,28 +53,28 @@ jobs:
         with:
           use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
           command: clippy
-          args: --locked --all --all-targets --no-default-features --tests --features "kvm" -- -D warnings
+          args: --locked --all --all-targets --no-default-features --tests --features "kvm" -- -D warnings -D clippy::undocumented_unsafe_blocks
 
       - name: Clippy (default features)
         uses: actions-rs/cargo@v1
         with:
           use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
           command: clippy
-          args: --locked --all --all-targets --tests -- -D warnings
+          args: --locked --all --all-targets --tests -- -D warnings -D clippy::undocumented_unsafe_blocks
 
       - name: Clippy (default features + guest_debug)
         uses: actions-rs/cargo@v1
         with:
           use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
           command: clippy
-          args: --locked --all --all-targets --tests --features "guest_debug" -- -D warnings
+          args: --locked --all --all-targets --tests --features "guest_debug" -- -D warnings -D clippy::undocumented_unsafe_blocks
 
       - name: Clippy (default features + tracing)
         uses: actions-rs/cargo@v1
         with:
           use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
           command: clippy
-          args: --locked --all --all-targets --tests --features "tracing" -- -D warnings
+          args: --locked --all --all-targets --tests --features "tracing" -- -D warnings -D clippy::undocumented_unsafe_blocks
 
       - name: Clippy (mshv)
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
@@ -82,7 +82,7 @@ jobs:
         with:
           use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
           command: clippy
-          args: --locked --all --all-targets --no-default-features --tests --features "mshv" -- -D warnings
+          args: --locked --all --all-targets --no-default-features --tests --features "mshv" -- -D warnings -D clippy::undocumented_unsafe_blocks
 
       - name: Clippy (mshv + kvm)
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
@@ -90,7 +90,7 @@ jobs:
         with:
           use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
           command: clippy
-          args: --locked --all --all-targets --no-default-features --tests --features "mshv,kvm" -- -D warnings
+          args: --locked --all --all-targets --no-default-features --tests --features "mshv,kvm" -- -D warnings -D clippy::undocumented_unsafe_blocks
 
       - name: Clippy (kvm + tdx)
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
@@ -98,7 +98,7 @@ jobs:
         with:
           use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
           command: clippy
-          args: --locked --all --all-targets --no-default-features --tests --features "tdx,kvm" -- -D warnings
+          args: --locked --all --all-targets --no-default-features --tests --features "tdx,kvm" -- -D warnings -D clippy::undocumented_unsafe_blocks
 
       - name: Check build did not modify any files
         run: test -z "$(git status --porcelain)"
