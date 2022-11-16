@@ -1784,6 +1784,7 @@ impl DeviceManager {
         // SAFETY: The following pair are safe because termios gets totally overwritten by tcgetattr
         // and we check the return result.
         let mut termios: termios = unsafe { zeroed() };
+        // SAFETY: see above
         let ret = unsafe { tcgetattr(fd, &mut termios as *mut _) };
         if ret < 0 {
             return vmm_sys_util::errno::errno_result();

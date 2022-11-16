@@ -589,6 +589,7 @@ impl Vm {
         )
         .map_err(Error::CpuManager)?;
 
+        // SAFETY: trivially safe
         let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO) } != 0;
 
         #[cfg(feature = "tdx")]

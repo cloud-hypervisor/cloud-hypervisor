@@ -45,11 +45,14 @@ extern "C" fn sigwinch_handler(_signo: c_int, _info: *mut siginfo_t, _unused: *m
 
 fn unblock_all_signals() -> io::Result<()> {
     let mut set = MaybeUninit::uninit();
+    // SAFETY: set is a correct structure for sigemptyset
     if unsafe { sigemptyset(set.as_mut_ptr()) } == -1 {
         return Err(io::Error::last_os_error());
     }
+    // SAFETY: set is initialized above
     let set = unsafe { set.assume_init() };
 
+    // SAFETY: all arguments are correct
     if unsafe { sigprocmask(SIG_SETMASK, &set, null_mut()) } == -1 {
         return Err(io::Error::last_os_error());
     }
@@ -62,6 +65,7 @@ fn sigwinch_listener_main(seccomp_filter: BpfProgram, tx: File, pty: File) -> ! 
 
     let pty_fd = pty.into_raw_fd();
 
+    // SAFETY: FFI calls
     unsafe {
         close(STDIN_FILENO);
         close(STDOUT_FILENO);
@@ -75,6 +79,7 @@ fn sigwinch_listener_main(seccomp_filter: BpfProgram, tx: File, pty: File) -> ! 
 
     register_signal_handler(SIGWINCH, sigwinch_handler).unwrap();
 
+    // SAFETY: FFI calls
     unsafe {
         // Create a new session (and therefore a new process group).
         assert_ne!(setsid(), -1);
@@ -99,6 +104,7 @@ fn sigwinch_listener_main(seccomp_filter: BpfProgram, tx: File, pty: File) -> ! 
             revents: 0,
         };
 
+        // SAFETY: FFI call with valid arguments
         while unsafe { poll(&mut pollfd, 1, -1) } == -1 {
             let e = io::Error::last_os_error();
             assert!(
@@ -120,16 +126,20 @@ pub fn start_sigwinch_listener(
     pty_sub: File,
 ) -> io::Result<File> {
     let mut pipe = [-1; 2];
+    // SAFETY: FFI call with valid arguments
     if unsafe { pipe2(pipe.as_mut_ptr(), O_CLOEXEC) } == -1 {
         return Err(io::Error::last_os_error());
     }
 
+    // SAFETY: pipe[0] is valid
     let mut rx = unsafe { File::from_raw_fd(pipe[0]) };
+    // SAFETY: pipe[1] is valid
     let tx = unsafe { File::from_raw_fd(pipe[1]) };
 
     let mut args = clone_args::default();
     args.flags |= CLONE_CLEAR_SIGHAND;
 
+    // SAFETY: FFI call
     match unsafe { clone3(&mut args, size_of::<clone_args>()) } {
         -1 => return Err(io::Error::last_os_error()),
         0 => {

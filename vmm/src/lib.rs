@@ -424,6 +424,7 @@ impl Vmm {
             Ok(signals) => {
                 self.signals = Some(signals.handle());
                 let exit_evt = self.exit_evt.try_clone().map_err(Error::EventFdClone)?;
+                // SAFETY: trivially safe
                 let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO) } != 0;
 
                 let signal_handler_seccomp_filter = get_seccomp_filter(

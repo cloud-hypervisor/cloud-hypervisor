@@ -562,6 +562,7 @@ impl VcpuState {
     fn signal_thread(&self) {
         if let Some(handle) = self.handle.as_ref() {
             loop {
+                // SAFETY: FFI call with correct arguments
                 unsafe {
                     libc::pthread_kill(handle.as_pthread_t() as _, SIGRTMIN());
                 }
@@ -644,7 +645,7 @@ impl CpuManager {
             const XFEATURE_XTILEDATA: usize = 18;
             const XFEATURE_XTILEDATA_MASK: usize = 1 << XFEATURE_XTILEDATA;
 
-            // This is safe as the syscall is only modifing kernel internal
+            // SAFETY: the syscall is only modifing kernel internal
             // data structures that the kernel is itself expected to safeguard.
             let amx_tile = unsafe {
                 libc::syscall(
@@ -657,9 +658,9 @@ impl CpuManager {
             if amx_tile != 0 {
                 return Err(Error::AmxEnable(anyhow!("Guest AMX usage not supported")));
             } else {
-                // This is safe as the mask being modified (not marked mutable as it is
-                // modified in unsafe only which is permitted) isn't in use elsewhere.
                 let mask: usize = 0;
+                // SAFETY: the mask being modified (not marked mutable as it is
+                // modified in unsafe only which is permitted) isn't in use elsewhere.
                 let result = unsafe {
                     libc::syscall(libc::SYS_arch_prctl, ARCH_GET_XCOMP_GUEST_PERM, &mask)
                 };
@@ -851,9 +852,12 @@ impl CpuManager {
 
         // Prepare the CPU set the current vCPU is expected to run onto.
         let cpuset = self.affinity.get(&vcpu_id).map(|host_cpus| {
+            // SAFETY: all zeros is a valid pattern
             let mut cpuset: libc::cpu_set_t = unsafe { std::mem::zeroed() };
+            // SAFETY: FFI call, trivially safe
             unsafe { libc::CPU_ZERO(&mut cpuset) };
             for host_cpu in host_cpus {
+                // SAFETY: FFI call, trivially safe
                 unsafe { libc::CPU_SET(*host_cpu as usize, &mut cpuset) };
             }
             cpuset
@@ -875,6 +879,7 @@ impl CpuManager {
                 .spawn(move || {
                     // Schedule the thread to run on the expected CPU set
                     if let Some(cpuset) = cpuset.as_ref() {
+                        // SAFETY: FFI call with correct arguments
                         let ret = unsafe {
                             libc::sched_setaffinity(
                                 0,
@@ -1698,6 +1703,7 @@ impl Cpu {
 
         let mut mat_data: Vec<u8> = Vec::new();
         mat_data.resize(std::mem::size_of_val(&lapic), 0);
+        // SAFETY: mat_data is large enough to hold lapic
         unsafe { *(mat_data.as_mut_ptr() as *mut LocalApic) = lapic };
 
         mat_data
