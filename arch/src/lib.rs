@@ -99,7 +99,7 @@ pub use x86_64::{
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
 fn pagesize() -> usize {
-    // Trivially safe
+    // SAFETY: Trivially safe
     unsafe { libc::sysconf(libc::_SC_PAGESIZE) as usize }
 }
 

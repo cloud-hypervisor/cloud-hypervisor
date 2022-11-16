@@ -67,7 +67,7 @@ const PCI_SUPPORTED: u64 = 1 << 7;
 const IS_VIRTUAL_MACHINE: u8 = 1 << 4;
 
 fn compute_checksum<T: Copy>(v: &T) -> u8 {
-    // Safe because we are only reading the bytes within the size of the `T` reference `v`.
+    // SAFETY: we are only reading the bytes within the size of the `T` reference `v`.
     let v_slice = unsafe { slice::from_raw_parts(v as *const T as *const u8, mem::size_of::<T>()) };
     let mut checksum: u8 = 0;
     for i in v_slice.iter() {
@@ -145,11 +145,15 @@ struct SmbiosEndOfTable {
     handle: u16,
 }
 
-// SAFETY: These data structures only contain a series of integers
+// SAFETY: data structure only contain a series of integers
 unsafe impl ByteValued for Smbios30Entrypoint {}
+// SAFETY: data structure only contain a series of integers
 unsafe impl ByteValued for SmbiosBiosInfo {}
+// SAFETY: data structure only contain a series of integers
 unsafe impl ByteValued for SmbiosSysInfo {}
+// SAFETY: data structure only contain a series of integers
 unsafe impl ByteValued for SmbiosOemStrings {}
+// SAFETY: data structure only contain a series of integers
 unsafe impl ByteValued for SmbiosEndOfTable {}
 
 fn write_and_incr<T: ByteValued>(
