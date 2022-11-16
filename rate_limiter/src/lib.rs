@@ -343,6 +343,7 @@ impl RateLimiter {
         let timer_fd = TimerFd::new()?;
         // Note: vmm_sys_util::TimerFd::new() open the fd w/o O_NONBLOCK. We manually add this flag
         // so that `Self::event_handler` won't be blocked with `vmm_sys_util::TimerFd::wait()`.
+        // SAFETY: FFI calls.
         let ret = unsafe {
             let fd = timer_fd.as_raw_fd();
             let mut flags = libc::fcntl(fd, libc::F_GETFL);
