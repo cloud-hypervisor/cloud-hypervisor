@@ -87,6 +87,7 @@ impl EpollHelper {
         // Create the epoll file descriptor
         let epoll_fd = epoll::create(true).map_err(EpollHelperError::CreateFd)?;
         // Use 'File' to enforce closing on 'epoll_fd'
+        // SAFETY: epoll_fd is a valid fd
         let epoll_file = unsafe { File::from_raw_fd(epoll_fd) };
 
         let mut helper = Self {

@@ -128,8 +128,8 @@ impl BalloonEpollHandler {
         let hva = memory
             .get_host_address(range_base)
             .map_err(Error::GuestMemory)?;
-        // Need unsafe to do syscall madvise
         let res =
+            // SAFETY: Need unsafe to do syscall madvise
             unsafe { libc::madvise(hva as *mut libc::c_void, range_len as libc::size_t, advice) };
         if res != 0 {
             return Err(Error::MadviseFail(io::Error::last_os_error()));
@@ -147,6 +147,7 @@ impl BalloonEpollHandler {
         ))?;
         if let Some(f_off) = region.file_offset() {
             let offset = range_base.0 - region.start_addr().0;
+            // SAFETY: FFI call with valid arguments
             let res = unsafe {
                 libc::fallocate64(
                     f_off.file().as_raw_fd(),

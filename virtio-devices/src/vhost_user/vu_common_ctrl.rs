@@ -451,7 +451,7 @@ impl VhostUserHandle {
         )
         .map_err(Error::MemfdCreate)?;
 
-        // Safe because we checked the file descriptor is valid
+        // SAFETY: we checked the file descriptor is valid
         let file = unsafe { File::from_raw_fd(fd) };
         // The size of the memory mapping corresponds to the size of a bitmap
         // covering all guest pages for addresses from 0 to the last physical
@@ -465,6 +465,7 @@ impl VhostUserHandle {
         file.set_len(mmap_size).map_err(Error::SetFileSize)?;
 
         // Set the seals
+        // SAFETY: FFI call with valid arguments
         let res = unsafe {
             libc::fcntl(
                 file.as_raw_fd(),
@@ -569,6 +570,7 @@ impl VhostUserHandle {
             // Be careful with the size, as it was based on u8, meaning we must
             // divide it by 8.
             let len = region.size() / 8;
+            // SAFETY: region is of size len
             let bitmap = unsafe {
                 // Cast the pointer to u64
                 let ptr = region.as_ptr() as *const u64;
@@ -582,6 +584,7 @@ impl VhostUserHandle {
 }
 
 fn memfd_create(name: &ffi::CStr, flags: u32) -> std::result::Result<RawFd, std::io::Error> {
+    // SAFETY: FFI call with valid arguments
     let res = unsafe { libc::syscall(libc::SYS_memfd_create, name.as_ptr(), flags) };
 
     if res < 0 {

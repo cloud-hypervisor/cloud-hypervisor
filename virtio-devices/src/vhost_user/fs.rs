@@ -95,6 +95,7 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
 
             let addr = self.mmap_cache_addr + offset;
             let flags = fs.flags[i];
+            // SAFETY: FFI call with valid arguments
             let ret = unsafe {
                 libc::mmap(
                     addr as *mut libc::c_void,
@@ -136,6 +137,7 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
             }
 
             let addr = self.mmap_cache_addr + offset;
+            // SAFETY: FFI call with valid arguments
             let ret = unsafe {
                 libc::mmap(
                     addr as *mut libc::c_void,
@@ -172,6 +174,7 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
 
             let addr = self.mmap_cache_addr + offset;
             let ret =
+                // SAFETY: FFI call with valid arguments
                 unsafe { libc::msync(addr as *mut libc::c_void, len as usize, libc::MS_SYNC) };
             if ret == -1 {
                 return Err(io::Error::last_os_error());
@@ -228,6 +231,7 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
                     == VhostUserFSSlaveMsgFlags::MAP_W
                 {
                     debug!("write: foffset={}, len={}", foffset, len);
+                    // SAFETY: FFI call with valid arguments
                     unsafe {
                         pwrite64(
                             fd.as_raw_fd(),
@@ -238,6 +242,7 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
                     }
                 } else {
                     debug!("read: foffset={}, len={}", foffset, len);
+                    // SAFETY: FFI call with valid arguments
                     unsafe { pread64(fd.as_raw_fd(), ptr as *mut c_void, len, foffset as off64_t) }
                 };
 
@@ -279,6 +284,7 @@ impl Default for VirtioFsConfig {
     }
 }
 
+// SAFETY: only a series of integers
 unsafe impl ByteValued for VirtioFsConfig {}
 
 pub struct Fs {

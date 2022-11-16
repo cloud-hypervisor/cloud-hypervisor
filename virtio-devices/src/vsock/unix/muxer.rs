@@ -334,6 +334,7 @@ impl VsockMuxer {
         // device activation time.
         let epoll_fd = epoll::create(true).map_err(Error::EpollFdCreate)?;
         // Use 'File' to enforce closing on 'epoll_fd'
+        // SAFETY: epoll_fd is a valid fd
         let epoll_file = unsafe { File::from_raw_fd(epoll_fd) };
 
         // Open/bind/listen on the host Unix socket, so we can accept host-initiated
