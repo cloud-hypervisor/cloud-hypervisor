@@ -133,7 +133,7 @@ impl Emulator {
         let mut res: PtmResult = 0;
 
         let mut fds = [-1, -1];
-        // Safe because return value of the unsafe call is checked
+        // SAFETY: FFI calls and return value of the unsafe call is checked
         unsafe {
             let ret = libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, fds.as_mut_ptr());
             if ret == -1 {
@@ -289,7 +289,7 @@ impl Emulator {
     /// Function to write to data socket and read the response from it
     fn unix_tx_bufs(&mut self) -> Result<()> {
         let isselftest: bool;
-        // Safe as type "sockaddr_storage" is valid with an all-zero byte-pattern value
+        // SAFETY: type "sockaddr_storage" is valid with an all-zero byte-pattern value
         let mut addr: sockaddr_storage = unsafe { mem::zeroed() };
         let mut len = mem::size_of::<sockaddr_storage>() as socklen_t;
 
@@ -307,7 +307,7 @@ impl Emulator {
                 iov_len: cmd.input.len(),
             }; 1];
 
-            // Safe because all zero values from the unsafe method are updated before usage
+            // SAFETY: all zero values from the unsafe method are updated before usage
             let mut msghdr: libc::msghdr = unsafe { mem::zeroed() };
             msghdr.msg_name = ptr::null_mut();
             msghdr.msg_namelen = 0;
@@ -316,7 +316,7 @@ impl Emulator {
             msghdr.msg_control = ptr::null_mut();
             msghdr.msg_controllen = 0;
             msghdr.msg_flags = 0;
-            // Safe as the return value of the unsafe method is checked
+            // SAFETY: FFI call and the return value of the unsafe method is checked
             unsafe {
                 let ret = libc::sendmsg(self.data_fd, &msghdr, 0);
                 if ret == -1 {
@@ -328,7 +328,7 @@ impl Emulator {
             }
 
             cmd.output.fill(0);
-            // Safe as return value from unsafe method is checked
+            // SAFETY: FFI calls and return value from unsafe method is checked
             unsafe {
                 let ret = libc::recvfrom(
                     self.data_fd,
