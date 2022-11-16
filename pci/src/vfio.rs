@@ -1422,6 +1422,7 @@ impl VfioPciDevice {
                 )?;
 
                 for area in sparse_areas.iter() {
+                    // SAFETY: FFI call with correct arguments
                     let host_addr = unsafe {
                         libc::mmap(
                             null_mut(),
@@ -1488,6 +1489,7 @@ impl VfioPciDevice {
                     error!("Could not remove the userspace memory region: {}", e);
                 }
 
+                // SAFETY: FFI call with correct arguments
                 let ret = unsafe {
                     libc::munmap(
                         user_memory_region.host_addr as *mut libc::c_void,
