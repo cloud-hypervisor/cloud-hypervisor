@@ -453,6 +453,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
                 .convert("fd")
                 .map_err(Error::ParsingEventMonitor)?
                 .unwrap();
+            // SAFETY: fd is valid
             unsafe { File::from_raw_fd(fd) }
         } else if parser.is_set("path") {
             std::fs::OpenOptions::new()
@@ -592,6 +593,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
 
 fn main() {
     // Ensure all created files (.e.g sockets) are only accessible by this user
+    // SAFETY: trivially safe
     let _ = unsafe { libc::umask(0o077) };
 
     let (default_vcpus, default_memory, default_rng) = prepare_default_values();
@@ -607,6 +609,7 @@ fn main() {
         }
     };
 
+    // SAFETY: trivially safe
     let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO) } != 0;
     if on_tty {
         // Don't forget to set the terminal in canonical mode
