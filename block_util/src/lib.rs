@@ -381,7 +381,7 @@ impl Request {
             let iov_base = if (origin_ptr as u64) % SECTOR_SIZE != 0 {
                 let layout =
                     Layout::from_size_align(*data_len as usize, SECTOR_SIZE as usize).unwrap();
-                // Safe because layout has non-zero size
+                // SAFETY: layout has non-zero size
                 let aligned_ptr = unsafe { alloc_zeroed(layout) };
                 if aligned_ptr.is_null() {
                     return Err(ExecuteError::TemporaryBufferAllocation(
@@ -392,7 +392,7 @@ impl Request {
                 // We need to perform the copy beforehand in case we're writing
                 // data out.
                 if request_type == RequestType::Out {
-                    // Safe because destination buffer has been allocated with
+                    // SAFETY: destination buffer has been allocated with
                     // the proper size.
                     unsafe {
                         std::ptr::copy(origin_ptr as *const u8, aligned_ptr, *data_len as usize)
@@ -467,7 +467,7 @@ impl Request {
             // We need to perform the copy after the data has been read inside
             // the aligned buffer in case we're reading data in.
             if self.request_type == RequestType::In {
-                // Safe because origin buffer has been allocated with the
+                // SAFETY: origin buffer has been allocated with the
                 // proper size.
                 unsafe {
                     std::ptr::copy(
@@ -479,7 +479,7 @@ impl Request {
             }
 
             // Free the temporary aligned buffer.
-            // Safe because aligned_ptr was allocated by alloc_zeroed with the same
+            // SAFETY: aligned_ptr was allocated by alloc_zeroed with the same
             // layout
             unsafe {
                 dealloc(
@@ -528,8 +528,9 @@ pub struct VirtioBlockGeometry {
     pub sectors: u8,
 }
 
-// SAFETY: these data structures only contain a series of integers
+// SAFETY: data structure only contain a series of integers
 unsafe impl ByteValued for VirtioBlockConfig {}
+// SAFETY: data structure only contain a series of integers
 unsafe impl ByteValued for VirtioBlockGeometry {}
 
 /// Check if io_uring for block device can be used on the current system, as
@@ -596,6 +597,7 @@ where
         // Convert libc::iovec into IoSliceMut
         let mut slices = Vec::new();
         for iovec in iovecs.iter() {
+            // SAFETY: on Linux IoSliceMut wraps around libc::iovec
             slices.push(IoSliceMut::new(unsafe { std::mem::transmute(*iovec) }));
         }
 
@@ -628,6 +630,7 @@ where
         // Convert libc::iovec into IoSlice
         let mut slices = Vec::new();
         for iovec in iovecs.iter() {
+            // SAFETY: on Linux IoSliceMut wraps around libc::iovec
             slices.push(IoSlice::new(unsafe { std::mem::transmute(*iovec) }));
         }
 
