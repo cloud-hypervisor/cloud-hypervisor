@@ -121,7 +121,7 @@ impl LocalTime {
             tm_zone: std::ptr::null(),
         };
 
-        // Safe because the parameters are valid.
+        // SAFETY: the parameters are valid.
         unsafe {
             libc::clock_gettime(libc::CLOCK_REALTIME, &mut timespec);
             libc::localtime_r(&timespec.tv_sec, &mut tm);
@@ -179,7 +179,7 @@ impl Default for TimestampUs {
 #[allow(dead_code)]
 pub fn timestamp_cycles() -> u64 {
     #[cfg(target_arch = "x86_64")]
-    // Safe because there's nothing that can go wrong with this call.
+    // SAFETY: there's nothing that can go wrong with this call.
     unsafe {
         std::arch::x86_64::_rdtsc() as u64
     }
@@ -199,7 +199,7 @@ pub fn get_time(clock_type: ClockType) -> u64 {
         tv_sec: 0,
         tv_nsec: 0,
     };
-    // Safe because the parameters are valid.
+    // SAFETY: the parameters are valid.
     unsafe { libc::clock_gettime(clock_type.into(), &mut time_struct) };
     seconds_to_nanoseconds(time_struct.tv_sec).unwrap() as u64 + (time_struct.tv_nsec as u64)
 }
