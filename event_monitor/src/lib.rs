@@ -16,8 +16,10 @@ static mut MONITOR: Option<(File, Instant)> = None;
 /// This function must only be called once from the main process before any threads
 /// are created to avoid race conditions
 pub fn set_monitor(file: File) -> Result<(), std::io::Error> {
+    // SAFETY: there is only one caller of this function, so MONITOR is written to only once
     assert!(unsafe { MONITOR.is_none() });
     let fd = file.as_raw_fd();
+    // SAFETY: FFI call to configure the fd
     let ret = unsafe {
         let mut flags = libc::fcntl(fd, libc::F_GETFL);
         flags |= libc::O_NONBLOCK;
@@ -26,6 +28,7 @@ pub fn set_monitor(file: File) -> Result<(), std::io::Error> {
     if ret < 0 {
         return Err(std::io::Error::last_os_error());
     }
+    // SAFETY: MONITOR is None. Nobody else can hold a reference to it.
     unsafe {
         MONITOR = Some((file, Instant::now()));
     };
@@ -41,6 +44,7 @@ struct Event<'a> {
 }
 
 pub fn event_log(source: &str, event: &str, properties: Option<&HashMap<Cow<str>, Cow<str>>>) {
+    // SAFETY: MONITOR is always in a valid state (None or Some).
     if let Some((file, start)) = unsafe { MONITOR.as_ref() } {
         let e = Event {
             timestamp: start.elapsed(),
