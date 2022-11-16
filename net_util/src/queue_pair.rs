@@ -83,6 +83,7 @@ impl TxVirtio {
             }
 
             let len = if !iovecs.is_empty() {
+                // SAFETY: FFI call with correct arguments
                 let result = unsafe {
                     libc::writev(
                         tap.as_raw_fd() as libc::c_int,
@@ -217,6 +218,7 @@ impl RxVirtio {
             }
 
             let len = if !iovecs.is_empty() {
+                // SAFETY: FFI call with correct arguments
                 let result = unsafe {
                     libc::readv(
                         tap.as_raw_fd() as libc::c_int,
