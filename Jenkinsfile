@@ -127,7 +127,6 @@ pipeline {
                         }
                     }
                 }
-                /* Temporarily turn off AArch64 integration test in Jenkins for server maintainance
                 stage('AArch64 worker build') {
                     agent { node { label 'bionic-arm64' } }
                     when {
@@ -203,7 +202,6 @@ pipeline {
                         }
                     }
                 }
-                */
                 stage('Worker build - Windows guest') {
                     agent { node { label 'jammy' } }
                     when {
