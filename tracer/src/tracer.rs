@@ -52,9 +52,10 @@ impl Tracer {
     }
 
     fn add_event(&mut self, event: TraceEvent) {
-        let thread_name = std::thread::current().name().unwrap_or("").to_string();
+        let current = std::thread::current();
+        let thread_name = current.name().unwrap_or("");
         let mut events = self.events.lock().unwrap();
-        if let Some(thread_events) = events.get_mut(&thread_name) {
+        if let Some(thread_events) = events.get_mut(thread_name) {
             thread_events.push(event);
         } else {
             events.insert(thread_name.to_string(), vec![event]);
@@ -62,18 +63,20 @@ impl Tracer {
     }
 
     fn increase_thread_depth(&mut self) {
-        let thread_name = std::thread::current().name().unwrap_or("").to_string();
-        if let Some(depth) = self.thread_depths.get_mut(&thread_name) {
+        let current = std::thread::current();
+        let thread_name = current.name().unwrap_or("");
+        if let Some(depth) = self.thread_depths.get_mut(thread_name) {
             depth.fetch_add(1, Ordering::SeqCst);
         } else {
             self.thread_depths
-                .insert(thread_name, Arc::new(AtomicU64::new(0)));
+                .insert(thread_name.to_string(), Arc::new(AtomicU64::new(0)));
         }
     }
 
     fn decrease_thread_depth(&mut self) {
-        let thread_name = std::thread::current().name().unwrap_or("").to_string();
-        if let Some(depth) = self.thread_depths.get_mut(&thread_name) {
+        let current = std::thread::current();
+        let thread_name = current.name().unwrap_or("");
+        if let Some(depth) = self.thread_depths.get_mut(thread_name) {
             depth.fetch_sub(1, Ordering::SeqCst);
         } else {
             panic!("Unmatched decreas for thread: {}", thread_name);
@@ -81,9 +84,10 @@ impl Tracer {
     }
 
     fn thread_depth(&self) -> u64 {
-        let thread_name = std::thread::current().name().unwrap_or("").to_string();
+        let current = std::thread::current();
+        let thread_name = current.name().unwrap_or("");
         self.thread_depths
-            .get(&thread_name)
+            .get(thread_name)
             .map(|v| v.load(Ordering::SeqCst))
             .unwrap_or_default()
     }
