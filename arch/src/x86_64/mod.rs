@@ -672,6 +672,24 @@ pub fn generate_common_cpuid(
         });
     }
 
+    // Forward host L2 cache info.
+    // The Function 0x2 0x4 and 0x8000_0005 are related to cache. They are
+    // all the same value with KVM_GET_SUPPORTED_CPUID.
+    // Only function 0x8000_0006 is returned as 0.
+    for i in [0x8000_0006] {
+        if let Some(leaf) = get_host_cpu_cache_info(i) {
+            cpuid.retain(|c| c.function != i);
+            cpuid.push(CpuIdEntry {
+                function: i,
+                eax: leaf.eax,
+                ebx: leaf.ebx,
+                ecx: leaf.ecx,
+                edx: leaf.edx,
+                ..Default::default()
+            });
+        }
+    }
+
     if kvm_hyperv {
         // Remove conflicting entries
         cpuid.retain(|c| c.function != 0x4000_0000);
@@ -1008,6 +1026,19 @@ pub fn initramfs_load_addr(
 
     let aligned_addr: u64 = ((lowmem_size - initramfs_size) & !(crate::pagesize() - 1)) as u64;
     Ok(aligned_addr)
+}
+
+/// Returns the host cache info.
+///
+/// Return None if CPU does not support.
+fn get_host_cpu_cache_info(func: u32) -> Option<std::arch::x86_64::CpuidResult> {
+    // This function is the same as the x86_cpu_get_cache_cpuid of QEMU, but 0x8000001d
+    // is used for all AMD cache information leaves. So it is not support.
+    let leaf = unsafe { std::arch::x86_64::__cpuid(func & 0xffff_fff0) };
+    if func > leaf.eax {
+        return None;
+    }
+    Some(unsafe { std::arch::x86_64::__cpuid(func) })
 }
 
 pub fn get_host_cpu_phys_bits() -> u8 {
