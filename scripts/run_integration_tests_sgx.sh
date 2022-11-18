@@ -11,6 +11,33 @@ if [[ "$hypervisor" = "mshv" ]]; then
     exit 1
 fi
 
+WORKLOADS_DIR="$HOME/workloads"
+mkdir -p "$WORKLOADS_DIR"
+
+FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/rust-hypervisor-firmware/releases/latest | grep "browser_download_url" | grep -o 'https://.*[^ "]')
+FW="$WORKLOADS_DIR/hypervisor-fw"
+pushd $WORKLOADS_DIR
+rm -f $FW
+time wget --quiet $FW_URL || exit 1
+popd
+
+JAMMY_OS_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20220329-0.qcow2"
+JAMMY_OS_IMAGE_URL="https://cloud-hypervisor.azureedge.net/$JAMMY_OS_IMAGE_NAME"
+JAMMY_OS_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_IMAGE_NAME"
+if [ ! -f "$JAMMY_OS_IMAGE" ]; then
+    pushd $WORKLOADS_DIR
+    time wget --quiet $JAMMY_OS_IMAGE_URL || exit 1
+    popd
+fi
+
+JAMMY_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20220329-0.raw"
+JAMMY_OS_RAW_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_RAW_IMAGE_NAME"
+if [ ! -f "$JAMMY_OS_RAW_IMAGE" ]; then
+    pushd $WORKLOADS_DIR
+    time qemu-img convert -p -f qcow2 -O raw $JAMMY_OS_IMAGE_NAME $JAMMY_OS_RAW_IMAGE_NAME || exit 1
+    popd
+fi
+
 # For now these values are default for kvm
 features=""
 
