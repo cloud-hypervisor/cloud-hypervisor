@@ -88,7 +88,7 @@ Ubuntu distributions.
 
 ```bash
 apt update
-apt install fio iperf iperf3 socat stress
+apt install fio iperf iperf3 socat stress cpuid
 ```
 
 ### Remove counterproductive packages
