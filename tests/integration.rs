@@ -7774,19 +7774,14 @@ mod sgx {
 
     #[test]
     fn test_sgx() {
-        let focal = UbuntuDiskConfig::new(FOCAL_SGX_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(focal));
-        let mut workload_path = dirs::home_dir().unwrap();
-        workload_path.push("workloads");
-
-        let mut kernel_path = workload_path;
-        kernel_path.push("vmlinux_w_sgx");
+        let jammy_image = JAMMY_IMAGE_NAME.to_string();
+        let jammy = UbuntuDiskConfig::new(jammy_image);
+        let guest = Guest::new(Box::new(jammy));
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
             .default_disks()
             .default_net()
             .args(["--sgx-epc", "id=epc0,size=64M"])
@@ -7808,18 +7803,6 @@ mod sgx {
                     .trim(),
                 "0x0000000004000000"
             );
-
-            // Run a test relying on SGX enclaves and check if it runs
-            // successfully.
-            assert!(guest
-                .ssh_command("cd /linux-sgx/SampleCode/LocalAttestation/bin/ && sudo ./app")
-                .unwrap()
-                .trim()
-                .contains(
-                    "succeed to load enclaves.\nsucceed to \
-                        establish secure channel.\nSucceed to exchange \
-                        secure message...\nSucceed to close Session..."
-                ));
         });
 
         let _ = child.kill();
