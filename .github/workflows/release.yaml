@@ -35,8 +35,6 @@ jobs:
             toolchain: "1.62"
             command: build
             args: --all --release --no-default-features --features "kvm,mshv" --target=x86_64-unknown-linux-musl
-      - name: Strip cloud-hypervisor binaries
-        run: strip target/*/release/cloud-hypervisor
       - name: Install Rust toolchain (aarch64-unknown-linux-musl)
         uses: actions-rs/toolchain@v1
         with:
