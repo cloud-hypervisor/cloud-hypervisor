@@ -633,6 +633,20 @@ pub fn generate_common_cpuid(
                     }
                 }
             }
+            // Copy host L2 cache details if not populated by KVM
+            0x8000_0006 => {
+                if entry.eax == 0 && entry.ebx == 0 && entry.ecx == 0 && entry.edx == 0 {
+                    // SAFETY: cpuid called with valid leaves
+                    if unsafe { std::arch::x86_64::__cpuid(0x8000_0000).eax } >= 0x8000_0006 {
+                        // SAFETY: cpuid called with valid leaves
+                        let leaf = unsafe { std::arch::x86_64::__cpuid(0x8000_0006) };
+                        entry.eax = leaf.eax;
+                        entry.ebx = leaf.ebx;
+                        entry.ecx = leaf.ecx;
+                        entry.edx = leaf.edx;
+                    }
+                }
+            }
             // Set CPU physical bits
             0x8000_0008 => {
                 entry.eax = (entry.eax & 0xffff_ff00) | (phys_bits as u32 & 0xff);
