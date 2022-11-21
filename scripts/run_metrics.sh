@@ -100,10 +100,6 @@ if [[ "${BUILD_TARGET}" == "${TEST_ARCH}-unknown-linux-musl" ]]; then
 fi
 
 cargo build --all --release $features --target $BUILD_TARGET
-strip target/$BUILD_TARGET/release/cloud-hypervisor
-strip target/$BUILD_TARGET/release/vhost_user_net
-strip target/$BUILD_TARGET/release/ch-remote
-strip target/$BUILD_TARGET/release/performance-metrics
 
 # setup hugepages
 echo 6144 | sudo tee /proc/sys/vm/nr_hugepages

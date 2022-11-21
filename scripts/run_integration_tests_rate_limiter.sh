@@ -78,9 +78,6 @@ if [[ "${BUILD_TARGET}" == "x86_64-unknown-linux-musl" ]]; then
 fi
 
 cargo build --all --release $features --target $BUILD_TARGET
-strip target/$BUILD_TARGET/release/cloud-hypervisor
-strip target/$BUILD_TARGET/release/vhost_user_net
-strip target/$BUILD_TARGET/release/ch-remote
 
 export RUST_BACKTRACE=1
 time cargo test $features "rate_limiter::$test_filter" -- --test-threads=1 ${test_binary_args[*]}

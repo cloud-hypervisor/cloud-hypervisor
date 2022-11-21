@@ -235,9 +235,6 @@ export RUST_BACKTRACE=1
 
 # Test without ACPI
 cargo build --all --release $features --target $BUILD_TARGET
-strip target/$BUILD_TARGET/release/cloud-hypervisor
-strip target/$BUILD_TARGET/release/vhost_user_net
-strip target/$BUILD_TARGET/release/ch-remote
 
 # Enable KSM with some reasonable parameters so that it won't take too long
 # for the memory to be merged between two processes.
