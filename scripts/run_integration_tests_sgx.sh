@@ -50,7 +50,6 @@ CFLAGS="-I /usr/include/x86_64-linux-musl/ -idirafter /usr/include/"
 fi
 
 cargo build --all --release $features --target $BUILD_TARGET
-strip target/$BUILD_TARGET/release/cloud-hypervisor
 
 export RUST_BACKTRACE=1
 

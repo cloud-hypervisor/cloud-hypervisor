@@ -45,7 +45,6 @@ dmsetup create windows-snapshot-base --table "0 $img_blk_size snapshot-origin /d
 dmsetup mknodes
 
 cargo build --all --release $features --target $BUILD_TARGET
-strip target/$BUILD_TARGET/release/cloud-hypervisor
 
 export RUST_BACKTRACE=1
 

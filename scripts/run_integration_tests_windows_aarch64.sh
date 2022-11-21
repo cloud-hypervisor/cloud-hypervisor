@@ -47,7 +47,6 @@ dmsetup mknodes
 export RUST_BACKTRACE=1
 
 cargo build --all --release $features --target $BUILD_TARGET
-strip target/$BUILD_TARGET/release/cloud-hypervisor
 
 # Only run with 1 thread to avoid tests interfering with one another because
 # Windows has a static IP configured

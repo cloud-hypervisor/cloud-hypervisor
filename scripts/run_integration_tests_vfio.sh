@@ -44,8 +44,6 @@ CFLAGS="-I /usr/include/x86_64-linux-musl/ -idirafter /usr/include/"
 fi
 
 cargo build --all --release $features --target $BUILD_TARGET
-strip target/$BUILD_TARGET/release/cloud-hypervisor
-strip target/$BUILD_TARGET/release/ch-remote
 
 # We always copy a fresh version of our binary for our L2 guest.
 cp target/$BUILD_TARGET/release/cloud-hypervisor $VFIO_DIR

@@ -87,9 +87,6 @@ if [[ "${BUILD_TARGET}" == "x86_64-unknown-linux-musl" ]]; then
 fi
 
 cargo build --all --release $features --target $BUILD_TARGET
-strip target/$BUILD_TARGET/release/cloud-hypervisor
-strip target/$BUILD_TARGET/release/vhost_user_net
-strip target/$BUILD_TARGET/release/ch-remote
 
 # Test ovs-dpdk relies on hugepages
 echo 6144 | sudo tee /proc/sys/vm/nr_hugepages
