@@ -186,7 +186,7 @@ impl RxVirtio {
                         .translate_gva(access_platform, desc.len() as usize),
                     10,
                 )
-                .unwrap();
+                .ok_or(NetQueuePairError::DescriptorInvalidHeader)?;
             let mut next_desc = Some(desc);
 
             let mut iovecs = Vec::new();
@@ -314,6 +314,8 @@ pub enum NetQueuePairError {
     QueueEnableNotification(virtio_queue::Error),
     #[error("Failed to add used index to the queue: {0}")]
     QueueAddUsed(virtio_queue::Error),
+    #[error("Descriptor with invalid virtio-net header")]
+    DescriptorInvalidHeader,
 }
 
 pub struct NetQueuePair {
