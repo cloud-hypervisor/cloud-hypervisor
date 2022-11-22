@@ -305,6 +305,7 @@ impl Tap {
         unsafe { Self::ioctl_with_ref(&sock, net_gen::sockios::SIOCSIFNETMASK as c_ulong, &ifreq) }
     }
 
+    #[cfg(not(fuzzing))]
     pub fn mtu(&self) -> Result<i32> {
         let sock = create_unix_socket().map_err(Error::NetUtil)?;
 
@@ -317,6 +318,12 @@ impl Tap {
         let mtu = unsafe { ifreq.ifr_ifru.ifru_mtu };
 
         Ok(mtu)
+    }
+
+    #[cfg(fuzzing)]
+    pub fn mtu(&self) -> Result<i32> {
+        // Consistent with the `virtio_devices::net::MIN_MTU`
+        Ok(1280)
     }
 
     pub fn set_mtu(&self, mtu: i32) -> Result<()> {
@@ -382,6 +389,11 @@ impl Tap {
 
     pub fn get_if_name(&self) -> Vec<u8> {
         self.if_name.clone()
+    }
+
+    #[cfg(fuzzing)]
+    pub fn new_for_fuzzing(tap_file: File, if_name: Vec<u8>) -> Self {
+        Tap { tap_file, if_name }
     }
 }
 

@@ -435,7 +435,7 @@ impl VersionMapped for NetState {}
 impl Net {
     /// Create a new virtio network device with the given TAP interface.
     #[allow(clippy::too_many_arguments)]
-    fn new_with_tap(
+    pub fn new_with_tap(
         id: String,
         taps: Vec<Tap>,
         guest_mac: Option<MacAddr>,
@@ -623,6 +623,11 @@ impl Net {
             queue_size: self.common.queue_sizes.clone(),
         }
     }
+
+    #[cfg(fuzzing)]
+    pub fn wait_for_epoll_threads(&mut self) {
+        self.common.wait_for_epoll_threads();
+    }
 }
 
 impl Drop for Net {
@@ -735,6 +740,7 @@ impl VirtioDevice for Net {
                 .map_err(ActivateError::CreateRateLimiter)?;
 
             let tap = taps.remove(0);
+            #[cfg(not(fuzzing))]
             tap.set_offload(virtio_features_to_tap_offload(self.common.acked_features))
                 .map_err(|e| {
                     error!("Error programming tap offload: {:?}", e);
