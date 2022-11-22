@@ -54,8 +54,6 @@ use libc::{
     cfmakeraw, isatty, tcgetattr, tcsetattr, termios, MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED,
     O_TMPFILE, PROT_READ, PROT_WRITE, TCSANOW,
 };
-#[cfg(target_arch = "x86_64")]
-use pci::PciConfigIo;
 use pci::{
     DeviceRelocation, PciBarRegionType, PciBdf, PciDevice, VfioPciDevice, VfioUserDmaMapping,
     VfioUserPciDevice, VfioUserPciDeviceError,
@@ -3562,12 +3560,6 @@ impl DeviceManager {
         self.interrupt_controller
             .as_ref()
             .map(|ic| ic.clone() as Arc<Mutex<dyn InterruptController>>)
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    // Used to provide a fast path for handling PIO exits
-    pub fn pci_config_io(&self) -> Arc<Mutex<PciConfigIo>> {
-        Arc::clone(self.pci_segments[0].pci_config_io.as_ref().unwrap())
     }
 
     pub(crate) fn pci_segments(&self) -> &Vec<PciSegment> {
