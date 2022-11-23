@@ -1996,7 +1996,7 @@ mod common_parallel {
             let _ = guest.ssh_command("sudo systemctl stop snapd");
 
             guest.ssh_command("sudo poweroff").unwrap();
-            thread::sleep(std::time::Duration::new(10, 0));
+            thread::sleep(std::time::Duration::new(20, 0));
             let latest_events = [
                 &MetaEvent {
                     event: "shutdown".to_string(),
