@@ -16,5 +16,5 @@ thiserror = "1.0.37"
 serde = { version = "1.0.147", features = ["rc", "derive"] }
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
 vm-memory = { version = "0.9.0", features = ["backend-mmap"] }
-vmm-sys-util = "0.10.0"
+vmm-sys-util = "0.11.0"
 

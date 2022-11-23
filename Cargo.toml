@@ -35,7 +35,7 @@ thiserror = "1.0.37"
 tpm = { path = "tpm"}
 tracer = { path = "tracer" }
 vmm = { path = "vmm" }
-vmm-sys-util = "0.10.0"
+vmm-sys-util = "0.11.0"
 vm-memory = "0.9.0"
 
 [build-dependencies]
