@@ -232,6 +232,26 @@ impl EpollContext {
 
         Ok(())
     }
+
+    #[cfg(fuzzing)]
+    pub fn add_event_custom<T>(
+        &mut self,
+        fd: &T,
+        id: u64,
+        evts: epoll::Events,
+    ) -> result::Result<(), io::Error>
+    where
+        T: AsRawFd,
+    {
+        epoll::ctl(
+            self.epoll_file.as_raw_fd(),
+            epoll::ControlOptions::EPOLL_CTL_ADD,
+            fd.as_raw_fd(),
+            epoll::Event::new(evts, id),
+        )?;
+
+        Ok(())
+    }
 }
 
 impl AsRawFd for EpollContext {
