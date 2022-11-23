@@ -2022,8 +2022,10 @@ mod common_parallel {
 
     #[test]
     fn test_multi_cpu() {
-        let bionic = UbuntuDiskConfig::new(BIONIC_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(bionic));
+        let jammy_image = JAMMY_IMAGE_NAME.to_string();
+        let jammy = UbuntuDiskConfig::new(jammy_image);
+        let guest = Guest::new(Box::new(jammy));
+
         let mut cmd = GuestCommand::new(&guest);
         cmd.args(["--cpus", "boot=2,max=4"])
             .args(["--memory", "size=512M"])
@@ -2040,18 +2042,11 @@ mod common_parallel {
 
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
 
-            #[cfg(target_arch = "x86_64")]
             assert_eq!(
                 guest
-                    .ssh_command(r#"dmesg | grep "smpboot: Allowing" | sed "s/\[\ *[0-9.]*\] //""#)
-                    .unwrap()
-                    .trim(),
-                "smpboot: Allowing 4 CPUs, 2 hotplug CPUs"
-            );
-            #[cfg(target_arch = "aarch64")]
-            assert_eq!(
-                guest
-                    .ssh_command(r#"dmesg | grep "smp: Brought up" | sed "s/\[\ *[0-9.]*\] //""#)
+                    .ssh_command(
+                        r#"sudo dmesg | grep "smp: Brought up" | sed "s/\[\ *[0-9.]*\] //""#
+                    )
                     .unwrap()
                     .trim(),
                 "smp: Brought up 1 node, 2 CPUs"
