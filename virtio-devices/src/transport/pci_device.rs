@@ -13,6 +13,7 @@ use crate::{
     DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED, DEVICE_FEATURES_OK,
     DEVICE_INIT,
 };
+use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
 use pci::{
     BarReprogrammingParams, MsixCap, MsixConfig, PciBarConfiguration, PciBarRegionType,
@@ -23,9 +24,9 @@ use std::any::Any;
 use std::cmp;
 use std::io::Write;
 use std::ops::Deref;
-use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
+use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_queue::{Queue, QueueT};
@@ -40,7 +41,7 @@ use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
 };
 use vm_virtio::AccessPlatform;
-use vmm_sys_util::{errno::Result, eventfd::EventFd};
+use vmm_sys_util::eventfd::EventFd;
 
 use super::pci_common_config::VirtioPciCommonConfigState;
 
@@ -311,6 +312,13 @@ impl VirtioPciDeviceActivator {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum VirtioPciDeviceError {
+    #[error("Failed creating VirtioPciDevice: {0}")]
+    CreateVirtioPciDevice(#[source] anyhow::Error),
+}
+pub type Result<T> = std::result::Result<T, VirtioPciDeviceError>;
+
 pub struct VirtioPciDevice {
     id: String,
 
@@ -389,7 +397,12 @@ impl VirtioPciDevice {
         let mut locked_device = device.lock().unwrap();
         let mut queue_evts = Vec::new();
         for _ in locked_device.queue_max_sizes().iter() {
-            queue_evts.push(EventFd::new(EFD_NONBLOCK)?)
+            queue_evts.push(EventFd::new(EFD_NONBLOCK).map_err(|e| {
+                VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
+                    "Failed creating eventfd: {}",
+                    e
+                ))
+            })?)
         }
         let num_queues = locked_device.queue_max_sizes().len();
 
@@ -405,18 +418,25 @@ impl VirtioPciDevice {
 
         let pci_device_id = VIRTIO_PCI_DEVICE_ID_BASE + locked_device.device_type() as u16;
 
-        let interrupt_source_group = interrupt_manager.create_group(MsiIrqGroupConfig {
-            base: 0,
-            count: msix_num as InterruptIndex,
-        })?;
+        let interrupt_source_group = interrupt_manager
+            .create_group(MsiIrqGroupConfig {
+                base: 0,
+                count: msix_num as InterruptIndex,
+            })
+            .map_err(|e| {
+                VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
+                    "Failed creating MSI interrupt group: {}",
+                    e
+                ))
+            })?;
 
         let msix_state =
             vm_migration::versioned_state_from_id(snapshot.as_ref(), pci::MSIX_CONFIG_ID).map_err(
                 |e| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("Failed to get MsixConfigState from Snapshot: {}", e),
-                    )
+                    VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
+                        "Failed to get MsixConfigState from Snapshot: {}",
+                        e
+                    ))
                 },
             )?;
 
@@ -454,10 +474,10 @@ impl VirtioPciDevice {
         let pci_configuration_state =
             vm_migration::versioned_state_from_id(snapshot.as_ref(), pci::PCI_CONFIGURATION_ID)
                 .map_err(|e| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("Failed to get PciConfigurationState from Snapshot: {}", e),
-                    )
+                    VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
+                        "Failed to get PciConfigurationState from Snapshot: {}",
+                        e
+                    ))
                 })?;
 
         let configuration = PciConfiguration::new(
@@ -477,13 +497,10 @@ impl VirtioPciDevice {
         let common_config_state =
             vm_migration::versioned_state_from_id(snapshot.as_ref(), VIRTIO_PCI_COMMON_CONFIG_ID)
                 .map_err(|e| {
-                std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!(
-                        "Failed to get VirtioPciCommonConfigState from Snapshot: {}",
-                        e
-                    ),
-                )
+                VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
+                    "Failed to get VirtioPciCommonConfigState from Snapshot: {}",
+                    e
+                ))
             })?;
 
         let common_config = if let Some(common_config_state) = common_config_state {
@@ -508,10 +525,10 @@ impl VirtioPciDevice {
             .map(|s| s.to_versioned_state(&id))
             .transpose()
             .map_err(|e| {
-                std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Failed to get VirtioPciDeviceState from Snapshot: {}", e),
-                )
+                VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
+                    "Failed to get VirtioPciDeviceState from Snapshot: {}",
+                    e
+                ))
             })?;
 
         let (device_activated, interrupt_status) = if let Some(state) = state {
@@ -592,10 +609,10 @@ impl VirtioPciDevice {
             && virtio_pci_device.is_driver_ready()
         {
             virtio_pci_device.activate().map_err(|e| {
-                std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Failed activating the device: {}", e),
-                )
+                VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
+                    "Failed activating the device: {}",
+                    e
+                ))
             })?;
         }
 
@@ -1079,7 +1096,11 @@ impl PciDevice for VirtioPciDevice {
         Ok(())
     }
 
-    fn move_bar(&mut self, old_base: u64, new_base: u64) -> result::Result<(), std::io::Error> {
+    fn move_bar(
+        &mut self,
+        old_base: u64,
+        new_base: u64,
+    ) -> std::result::Result<(), std::io::Error> {
         // We only update our idea of the bar in order to support free_bars() above.
         // The majority of the reallocation is done inside DeviceManager.
         for bar in self.bar_regions.iter_mut() {
@@ -1236,11 +1257,11 @@ impl BusDevice for VirtioPciDevice {
 }
 
 impl Pausable for VirtioPciDevice {
-    fn pause(&mut self) -> result::Result<(), MigratableError> {
+    fn pause(&mut self) -> std::result::Result<(), MigratableError> {
         Ok(())
     }
 
-    fn resume(&mut self) -> result::Result<(), MigratableError> {
+    fn resume(&mut self) -> std::result::Result<(), MigratableError> {
         Ok(())
     }
 }

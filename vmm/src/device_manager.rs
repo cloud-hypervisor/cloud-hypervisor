@@ -226,7 +226,7 @@ pub enum DeviceManagerError {
     UnRegisterIoevent(anyhow::Error),
 
     /// Cannot create virtio device
-    VirtioDevice(vmm_sys_util::errno::Error),
+    VirtioDevice(virtio_devices::transport::VirtioPciDeviceError),
 
     /// Cannot add PCI device
     AddPciDevice(pci::PciRootError),
