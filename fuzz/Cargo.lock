@@ -170,6 +170,7 @@ dependencies = [
  "libc",
  "libfuzzer-sys",
  "micro_http",
+ "net_util",
  "once_cell",
  "qcow",
  "seccompiler",
