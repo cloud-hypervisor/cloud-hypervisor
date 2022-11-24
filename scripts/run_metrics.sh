@@ -92,7 +92,7 @@ if [[ "${BUILD_TARGET}" == "${TEST_ARCH}-unknown-linux-musl" ]]; then
     CFLAGS="-I /usr/include/${TEST_ARCH}-linux-musl/ -idirafter /usr/include/"
 fi
 
-cargo build --all --release --target $BUILD_TARGET
+cargo build --no-default-features --features "kvm,mshv" --all --release --target $BUILD_TARGET
 
 # setup hugepages
 echo 6144 | sudo tee /proc/sys/vm/nr_hugepages

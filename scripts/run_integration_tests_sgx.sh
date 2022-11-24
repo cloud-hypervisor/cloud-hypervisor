@@ -46,7 +46,7 @@ TARGET_CC="musl-gcc"
 CFLAGS="-I /usr/include/x86_64-linux-musl/ -idirafter /usr/include/"
 fi
 
-cargo build --all --release --target $BUILD_TARGET
+cargo build --no-default-features --features "kvm,mshv" --all --release --target $BUILD_TARGET
 
 export RUST_BACKTRACE=1
 

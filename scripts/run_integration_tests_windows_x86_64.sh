@@ -44,7 +44,7 @@ dmsetup mknodes
 dmsetup create windows-snapshot-base --table "0 $img_blk_size snapshot-origin /dev/mapper/windows-base"
 dmsetup mknodes
 
-cargo build --all --release --target $BUILD_TARGET
+cargo build --no-default-features --features "kvm,mshv" --all --release --target $BUILD_TARGET
 
 export RUST_BACKTRACE=1
 
