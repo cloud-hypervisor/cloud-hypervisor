@@ -87,6 +87,33 @@ fn build_terminated_if_name(if_name: &str) -> Result<Vec<u8>> {
 }
 
 impl Tap {
+    unsafe fn ioctl_with_mut_ref<F: AsRawFd, T>(fd: &F, req: c_ulong, arg: &mut T) -> Result<()> {
+        let ret = ioctl_with_mut_ref(fd, req, arg);
+        if ret < 0 {
+            return Err(Error::IoctlError(IoError::last_os_error()));
+        }
+
+        Ok(())
+    }
+
+    unsafe fn ioctl_with_ref<F: AsRawFd, T>(fd: &F, req: c_ulong, arg: &T) -> Result<()> {
+        let ret = ioctl_with_ref(fd, req, arg);
+        if ret < 0 {
+            return Err(Error::IoctlError(IoError::last_os_error()));
+        }
+
+        Ok(())
+    }
+
+    unsafe fn ioctl_with_val<F: AsRawFd>(fd: &F, req: c_ulong, arg: c_ulong) -> Result<()> {
+        let ret = ioctl_with_val(fd, req, arg);
+        if ret < 0 {
+            return Err(Error::IoctlError(IoError::last_os_error()));
+        }
+
+        Ok(())
+    }
+
     pub fn open_named(if_name: &str, num_queue_pairs: usize, flags: Option<i32>) -> Result<Tap> {
         let terminated_if_name = build_terminated_if_name(if_name)?;
 
@@ -177,10 +204,8 @@ impl Tap {
 
         // Get current config including name
         // SAFETY: IOCTL with correct arugments
-        let ret = unsafe { ioctl_with_mut_ref(&tap_file, net_gen::TUNGETIFF(), &mut ifreq) };
-        if ret < 0 {
-            return Err(Error::IoctlError(IoError::last_os_error()));
-        }
+        unsafe { Self::ioctl_with_mut_ref(&tap_file, net_gen::TUNGETIFF(), &mut ifreq)? };
+
         // SAFETY: We only access one field of the ifru union
         let if_name = unsafe { ifreq.ifr_ifrn.ifrn_name }.to_vec();
 
@@ -216,14 +241,8 @@ impl Tap {
 
         ifreq.ifr_ifru.ifru_addr = addr;
 
-        let ret =
-            // SAFETY: ioctl is safe. Called with a valid sock fd, and we check the return.
-            unsafe { ioctl_with_ref(&sock, net_gen::sockios::SIOCSIFADDR as c_ulong, &ifreq) };
-        if ret < 0 {
-            return Err(Error::IoctlError(IoError::last_os_error()));
-        }
-
-        Ok(())
+        // SAFETY: ioctl is safe. Called with a valid sock fd, and we check the return.
+        unsafe { Self::ioctl_with_ref(&sock, net_gen::sockios::SIOCSIFADDR as c_ulong, &ifreq) }
     }
 
     /// Set mac addr for tap interface.
@@ -241,12 +260,9 @@ impl Tap {
 
         let mut ifreq = self.get_ifreq();
 
-        let ret =
-            // SAFETY: ioctl is safe. Called with a valid sock fd, and we check the return.
-            unsafe { ioctl_with_ref(&sock, net_gen::sockios::SIOCGIFHWADDR as c_ulong, &ifreq) };
-        if ret < 0 {
-            return Err(Error::IoctlError(IoError::last_os_error()));
-        }
+        // SAFETY: ioctl is safe. Called with a valid sock fd, and we check the return.
+        unsafe { Self::ioctl_with_ref(&sock, net_gen::sockios::SIOCGIFHWADDR as c_ulong, &ifreq)? };
+
         // SAFETY: We only access one field of the ifru union
         unsafe {
             let ifru_hwaddr = &mut ifreq.ifr_ifru.ifru_hwaddr;
@@ -255,14 +271,8 @@ impl Tap {
             }
         }
 
-        let ret =
-            // SAFETY: ioctl is safe. Called with a valid sock fd, and we check the return.
-            unsafe { ioctl_with_ref(&sock, net_gen::sockios::SIOCSIFHWADDR as c_ulong, &ifreq) };
-        if ret < 0 {
-            return Err(Error::IoctlError(IoError::last_os_error()));
-        }
-
-        Ok(())
+        // SAFETY: ioctl is safe. Called with a valid sock fd, and we check the return.
+        unsafe { Self::ioctl_with_ref(&sock, net_gen::sockios::SIOCSIFHWADDR as c_ulong, &ifreq) }
     }
 
     /// Get mac addr for tap interface.
@@ -271,12 +281,8 @@ impl Tap {
 
         let ifreq = self.get_ifreq();
 
-        let ret =
-            // SAFETY: ioctl is safe. Called with a valid sock fd, and we check the return.
-            unsafe { ioctl_with_ref(&sock, net_gen::sockios::SIOCGIFHWADDR as c_ulong, &ifreq) };
-        if ret < 0 {
-            return Err(Error::IoctlError(IoError::last_os_error()));
-        }
+        // SAFETY: ioctl is safe. Called with a valid sock fd, and we check the return.
+        unsafe { Self::ioctl_with_ref(&sock, net_gen::sockios::SIOCGIFHWADDR as c_ulong, &ifreq)? };
 
         // SAFETY: We only access one field of the ifru union
         let addr = unsafe {
@@ -295,14 +301,8 @@ impl Tap {
 
         ifreq.ifr_ifru.ifru_addr = addr;
 
-        let ret =
-            // SAFETY: ioctl is safe. Called with a valid sock fd, and we check the return.
-            unsafe { ioctl_with_ref(&sock, net_gen::sockios::SIOCSIFNETMASK as c_ulong, &ifreq) };
-        if ret < 0 {
-            return Err(Error::IoctlError(IoError::last_os_error()));
-        }
-
-        Ok(())
+        // SAFETY: ioctl is safe. Called with a valid sock fd, and we check the return.
+        unsafe { Self::ioctl_with_ref(&sock, net_gen::sockios::SIOCSIFNETMASK as c_ulong, &ifreq) }
     }
 
     pub fn mtu(&self) -> Result<i32> {
@@ -311,10 +311,7 @@ impl Tap {
         let ifreq = self.get_ifreq();
 
         // SAFETY: ioctl is safe. Called with a valid sock fd, and we check the return.
-        let ret = unsafe { ioctl_with_ref(&sock, net_gen::sockios::SIOCGIFMTU as c_ulong, &ifreq) };
-        if ret < 0 {
-            return Err(Error::IoctlError(IoError::last_os_error()));
-        }
+        unsafe { Self::ioctl_with_ref(&sock, net_gen::sockios::SIOCGIFMTU as c_ulong, &ifreq)? };
 
         // SAFETY: access a union field
         let mtu = unsafe { ifreq.ifr_ifru.ifru_mtu };
@@ -329,24 +326,13 @@ impl Tap {
         ifreq.ifr_ifru.ifru_mtu = mtu;
 
         // SAFETY: ioctl is safe. Called with a valid sock fd, and we check the return.
-        let ret = unsafe { ioctl_with_ref(&sock, net_gen::sockios::SIOCSIFMTU as c_ulong, &ifreq) };
-        if ret < 0 {
-            return Err(Error::IoctlError(IoError::last_os_error()));
-        }
-
-        Ok(())
+        unsafe { Self::ioctl_with_ref(&sock, net_gen::sockios::SIOCSIFMTU as c_ulong, &ifreq) }
     }
 
     /// Set the offload flags for the tap interface.
     pub fn set_offload(&self, flags: c_uint) -> Result<()> {
-        let ret =
-            // SAFETY: ioctl is safe. Called with a valid tap fd, and we check the return.
-            unsafe { ioctl_with_val(&self.tap_file, net_gen::TUNSETOFFLOAD(), flags as c_ulong) };
-        if ret < 0 {
-            return Err(Error::IoctlError(IoError::last_os_error()));
-        }
-
-        Ok(())
+        // SAFETY: ioctl is safe. Called with a valid tap fd, and we check the return.
+        unsafe { Self::ioctl_with_val(&self.tap_file, net_gen::TUNSETOFFLOAD(), flags as c_ulong) }
     }
 
     /// Enable the tap interface.
@@ -355,12 +341,8 @@ impl Tap {
 
         let mut ifreq = self.get_ifreq();
 
-        let ret =
-            // SAFETY: IOCTL with correct arguments
-            unsafe { ioctl_with_ref(&sock, net_gen::sockios::SIOCGIFFLAGS as c_ulong, &ifreq) };
-        if ret < 0 {
-            return Err(Error::IoctlError(IoError::last_os_error()));
-        }
+        // SAFETY: IOCTL with correct arguments
+        unsafe { Self::ioctl_with_ref(&sock, net_gen::sockios::SIOCGIFFLAGS as c_ulong, &ifreq)? };
 
         // If TAP device is already up don't try and enable it
         // SAFETY: access a union field
@@ -373,25 +355,14 @@ impl Tap {
 
         ifreq.ifr_ifru.ifru_flags = net_gen::net_device_flags_IFF_UP as i16;
 
-        let ret =
-            // SAFETY: ioctl is safe. Called with a valid sock fd, and we check the return.
-            unsafe { ioctl_with_ref(&sock, net_gen::sockios::SIOCSIFFLAGS as c_ulong, &ifreq) };
-        if ret < 0 {
-            return Err(Error::IoctlError(IoError::last_os_error()));
-        }
-
-        Ok(())
+        // SAFETY: ioctl is safe. Called with a valid sock fd, and we check the return.
+        unsafe { Self::ioctl_with_ref(&sock, net_gen::sockios::SIOCSIFFLAGS as c_ulong, &ifreq) }
     }
 
     /// Set the size of the vnet hdr.
     pub fn set_vnet_hdr_size(&self, size: c_int) -> Result<()> {
         // SAFETY: ioctl is safe. Called with a valid tap fd, and we check the return.
-        let ret = unsafe { ioctl_with_ref(&self.tap_file, net_gen::TUNSETVNETHDRSZ(), &size) };
-        if ret < 0 {
-            return Err(Error::IoctlError(IoError::last_os_error()));
-        }
-
-        Ok(())
+        unsafe { Self::ioctl_with_ref(&self.tap_file, net_gen::TUNSETVNETHDRSZ(), &size) }
     }
 
     fn get_ifreq(&self) -> net_gen::ifreq {
