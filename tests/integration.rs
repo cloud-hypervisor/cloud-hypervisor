@@ -35,7 +35,7 @@ mod x86_64 {
     pub const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-amd64.raw";
     pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-0.raw";
     pub const FOCAL_SGX_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-sgx.raw";
-    pub const HIRSUTE_NVIDIA_IMAGE_NAME: &str = "hirsute-server-cloudimg-amd64-nvidia.raw";
+    pub const JAMMY_NVIDIA_IMAGE_NAME: &str = "jammy-server-cloudimg-amd64-nvidia.raw";
     pub const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-amd64-custom-20210609-0.qcow2";
     pub const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-amd64-custom-20210609-0.vhd";
     pub const FOCAL_IMAGE_NAME_VHDX: &str = "focal-server-cloudimg-amd64-custom-20210609-0.vhdx";
@@ -8075,8 +8075,8 @@ mod vfio {
     }
 
     fn test_nvidia_card_memory_hotplug(hotplug_method: &str) {
-        let hirsute = UbuntuDiskConfig::new(HIRSUTE_NVIDIA_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(hirsute));
+        let jammy = UbuntuDiskConfig::new(JAMMY_NVIDIA_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(jammy));
         let api_socket = temp_api_path(&guest.tmp_dir);
 
         let mut child = GuestCommand::new(&guest)
@@ -8129,8 +8129,8 @@ mod vfio {
 
     #[test]
     fn test_nvidia_card_pci_hotplug() {
-        let hirsute = UbuntuDiskConfig::new(HIRSUTE_NVIDIA_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(hirsute));
+        let jammy = UbuntuDiskConfig::new(JAMMY_NVIDIA_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(jammy));
         let api_socket = temp_api_path(&guest.tmp_dir);
 
         let mut child = GuestCommand::new(&guest)
@@ -8171,8 +8171,8 @@ mod vfio {
 
     #[test]
     fn test_nvidia_card_reboot() {
-        let hirsute = UbuntuDiskConfig::new(HIRSUTE_NVIDIA_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(hirsute));
+        let jammy = UbuntuDiskConfig::new(JAMMY_NVIDIA_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(jammy));
         let api_socket = temp_api_path(&guest.tmp_dir);
 
         let mut child = GuestCommand::new(&guest)

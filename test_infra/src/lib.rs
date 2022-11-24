@@ -1063,27 +1063,7 @@ impl Guest {
 
     #[cfg(target_arch = "x86_64")]
     pub fn check_nvidia_gpu(&self) {
-        // Run CUDA sample to validate it can find the device
-        let device_query_result = self
-            .ssh_command("sudo /root/NVIDIA_CUDA-11.3_Samples/bin/x86_64/linux/release/deviceQuery")
-            .unwrap();
-        assert!(device_query_result.contains("Detected 1 CUDA Capable device"));
-        assert!(device_query_result.contains("Device 0: \"NVIDIA Tesla T4\""));
-        assert!(device_query_result.contains("Result = PASS"));
-
-        // Run NVIDIA DCGM Diagnostics to validate the device is functional
-        self.ssh_command("sudo nv-hostengine").unwrap();
-
-        assert!(self
-            .ssh_command("sudo dcgmi discovery -l")
-            .unwrap()
-            .contains("Name: NVIDIA Tesla T4"));
-        assert_eq!(
-            self.ssh_command("sudo dcgmi diag -r 'diagnostic' | grep Pass | wc -l")
-                .unwrap()
-                .trim(),
-            "10"
-        );
+        assert!(self.ssh_command("nvidia-smi").unwrap().contains("Tesla T4"));
     }
 
     pub fn reboot_linux(&self, current_reboot_count: u32, custom_timeout: Option<i32>) {
