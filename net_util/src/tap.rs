@@ -28,8 +28,8 @@ pub enum Error {
     GetFeatures(IoError),
     #[error("Missing multiqueue support in the kernel")]
     MultiQueueKernelSupport,
-    #[error("ioctl failed: {0}")]
-    IoctlError(IoError),
+    #[error("ioctl ({0}) failed: {1}")]
+    IoctlError(c_ulong, IoError),
     #[error("Failed to create a socket: {0}")]
     NetUtil(NetUtilError),
     #[error("Invalid interface name")]
@@ -90,7 +90,7 @@ impl Tap {
     unsafe fn ioctl_with_mut_ref<F: AsRawFd, T>(fd: &F, req: c_ulong, arg: &mut T) -> Result<()> {
         let ret = ioctl_with_mut_ref(fd, req, arg);
         if ret < 0 {
-            return Err(Error::IoctlError(IoError::last_os_error()));
+            return Err(Error::IoctlError(req, IoError::last_os_error()));
         }
 
         Ok(())
@@ -99,7 +99,7 @@ impl Tap {
     unsafe fn ioctl_with_ref<F: AsRawFd, T>(fd: &F, req: c_ulong, arg: &T) -> Result<()> {
         let ret = ioctl_with_ref(fd, req, arg);
         if ret < 0 {
-            return Err(Error::IoctlError(IoError::last_os_error()));
+            return Err(Error::IoctlError(req, IoError::last_os_error()));
         }
 
         Ok(())
@@ -108,7 +108,7 @@ impl Tap {
     unsafe fn ioctl_with_val<F: AsRawFd>(fd: &F, req: c_ulong, arg: c_ulong) -> Result<()> {
         let ret = ioctl_with_val(fd, req, arg);
         if ret < 0 {
-            return Err(Error::IoctlError(IoError::last_os_error()));
+            return Err(Error::IoctlError(req, IoError::last_os_error()));
         }
 
         Ok(())
