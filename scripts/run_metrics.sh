@@ -28,13 +28,6 @@ build_fio() {
 
 process_common_args "$@"
 
-# For now these values are default for kvm
-features=""
-
-if [ "$hypervisor" = "mshv" ]; then
-    features="--no-default-features --features mshv"
-fi
-
 cp scripts/sha1sums-${TEST_ARCH} $WORKLOADS_DIR
 
 if [ ${TEST_ARCH} == "aarch64" ]; then
@@ -99,7 +92,7 @@ if [[ "${BUILD_TARGET}" == "${TEST_ARCH}-unknown-linux-musl" ]]; then
     CFLAGS="-I /usr/include/${TEST_ARCH}-linux-musl/ -idirafter /usr/include/"
 fi
 
-cargo build --all --release $features --target $BUILD_TARGET
+cargo build --all --release --target $BUILD_TARGET
 
 # setup hugepages
 echo 6144 | sudo tee /proc/sys/vm/nr_hugepages

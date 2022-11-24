@@ -38,9 +38,6 @@ if [ ! -f "$JAMMY_OS_RAW_IMAGE" ]; then
     popd
 fi
 
-# For now these values are default for kvm
-features=""
-
 BUILD_TARGET="$(uname -m)-unknown-linux-${CH_LIBC}"
 CFLAGS=""
 TARGET_CC=""
@@ -49,11 +46,11 @@ TARGET_CC="musl-gcc"
 CFLAGS="-I /usr/include/x86_64-linux-musl/ -idirafter /usr/include/"
 fi
 
-cargo build --all --release $features --target $BUILD_TARGET
+cargo build --all --release --target $BUILD_TARGET
 
 export RUST_BACKTRACE=1
 
-time cargo test $features "sgx::$test_filter" -- ${test_binary_args[*]}
+time cargo test "sgx::$test_filter" -- ${test_binary_args[*]}
 RES=$?
 
 exit $RES

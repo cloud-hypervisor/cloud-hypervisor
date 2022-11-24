@@ -6,8 +6,6 @@ source $(dirname "$0")/test-util.sh
 source $(dirname "$0")/common-aarch64.sh
 
 process_common_args "$@"
-# For now these values are default for kvm
-features=""
 
 # aarch64 not supported for MSHV
 if [[ "$hypervisor" = "mshv" ]]; then
@@ -46,11 +44,11 @@ dmsetup mknodes
 
 export RUST_BACKTRACE=1
 
-cargo build --all --release $features --target $BUILD_TARGET
+cargo build --all --release --target $BUILD_TARGET
 
 # Only run with 1 thread to avoid tests interfering with one another because
 # Windows has a static IP configured
-time cargo test $features "windows::$test_filter" --target $BUILD_TARGET -- ${test_binary_args[*]}
+time cargo test "windows::$test_filter" --target $BUILD_TARGET -- ${test_binary_args[*]}
 RES=$?
 
 dmsetup remove_all -f

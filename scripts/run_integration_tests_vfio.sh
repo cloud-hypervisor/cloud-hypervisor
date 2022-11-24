@@ -5,8 +5,6 @@ source $HOME/.cargo/env
 source $(dirname "$0")/test-util.sh
 
 process_common_args "$@"
-# For now these values are default for kvm
-features=""
 
 WORKLOADS_DIR="$HOME/workloads"
 FOCAL_OS_IMAGE_NAME="focal-server-cloudimg-amd64-custom-20210609-0.raw"
@@ -43,7 +41,7 @@ TARGET_CC="musl-gcc"
 CFLAGS="-I /usr/include/x86_64-linux-musl/ -idirafter /usr/include/"
 fi
 
-cargo build --all --release $features --target $BUILD_TARGET
+cargo build --all --release --target $BUILD_TARGET
 
 # We always copy a fresh version of our binary for our L2 guest.
 cp target/$BUILD_TARGET/release/cloud-hypervisor $VFIO_DIR
@@ -54,11 +52,11 @@ echo 6144 | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
 export RUST_BACKTRACE=1
-time cargo test $features "vfio::test_vfio" -- ${test_binary_args[*]}
+time cargo test "vfio::test_vfio" -- ${test_binary_args[*]}
 RES=$?
 
 if [ $RES -eq 0 ]; then
-	time cargo test $features "vfio::test_nvidia" -- --test-threads=1 ${test_binary_args[*]}
+	time cargo test "vfio::test_nvidia" -- --test-threads=1 ${test_binary_args[*]}
 	RES=$?
 fi
 

@@ -12,10 +12,10 @@ mkdir -p "$WORKLOADS_DIR"
 process_common_args "$@"
 
 # For now these values are default for kvm
-features=""
+test_features=""
 
 if [ "$hypervisor" = "mshv" ] ;  then
-    features="--no-default-features --features mshv"
+    test_features="--no-default-features --features mshv"
 fi
 
 cp scripts/sha1sums-x86_64 $WORKLOADS_DIR
@@ -86,21 +86,21 @@ if [[ "${BUILD_TARGET}" == "x86_64-unknown-linux-musl" ]]; then
     CFLAGS="-I /usr/include/x86_64-linux-musl/ -idirafter /usr/include/"
 fi
 
-cargo build --all --release $features --target $BUILD_TARGET
+cargo build --all --release --target $BUILD_TARGET
 
 # Test ovs-dpdk relies on hugepages
 echo 6144 | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
 export RUST_BACKTRACE=1
-time cargo test $features "live_migration_parallel::$test_filter" -- ${test_binary_args[*]}
+time cargo test $test_features "live_migration_parallel::$test_filter" -- ${test_binary_args[*]}
 RES=$?
 
 # Run some tests in sequence since the result could be affected by other tests
 # running in parallel.
 if [ $RES -eq 0 ]; then
     export RUST_BACKTRACE=1
-    time cargo test $features "live_migration_sequential::$test_filter" -- --test-threads=1 ${test_binary_args[*]}
+    time cargo test $test_features "live_migration_sequential::$test_filter" -- --test-threads=1 ${test_binary_args[*]}
     RES=$?
 fi
 
