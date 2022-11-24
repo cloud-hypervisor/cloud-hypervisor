@@ -6,10 +6,10 @@ source $(dirname "$0")/test-util.sh
 
 process_common_args "$@"
 # For now these values are default for kvm
-features=""
+test_features=""
 
 if [ "$hypervisor" = "mshv" ] ;  then
-    features="--no-default-features --features mshv"
+    test_features="--no-default-features --features mshv"
 fi
 WIN_IMAGE_FILE="/root/workloads/windows-server-2019.raw"
 
@@ -44,13 +44,13 @@ dmsetup mknodes
 dmsetup create windows-snapshot-base --table "0 $img_blk_size snapshot-origin /dev/mapper/windows-base"
 dmsetup mknodes
 
-cargo build --all --release $features --target $BUILD_TARGET
+cargo build --all --release --target $BUILD_TARGET
 
 export RUST_BACKTRACE=1
 
 # Only run with 1 thread to avoid tests interfering with one another because
 # Windows has a static IP configured
-time cargo test $features "windows::$test_filter" -- ${test_binary_args[*]}
+time cargo test $test_features "windows::$test_filter" -- ${test_binary_args[*]}
 RES=$?
 
 dmsetup remove_all -f

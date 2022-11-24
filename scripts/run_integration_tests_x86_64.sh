@@ -12,10 +12,10 @@ mkdir -p "$WORKLOADS_DIR"
 process_common_args "$@"
 
 # For now these values are default for kvm
-features=""
+test_features=""
 
 if [ "$hypervisor" = "mshv" ] ;  then
-    features="--no-default-features --features mshv"
+    test_features="--no-default-features --features mshv"
 fi
 
 cp scripts/sha1sums-x86_64 $WORKLOADS_DIR
@@ -174,7 +174,7 @@ cp $VMLINUX_IMAGE $VFIO_DIR || exit 1
 
 BUILD_TARGET="$(uname -m)-unknown-linux-${CH_LIBC}"
 
-cargo build --all  --release $features --target $BUILD_TARGET
+cargo build --all  --release --target $BUILD_TARGET
 
 # We always copy a fresh version of our binary for our L2 guest.
 cp target/$BUILD_TARGET/release/cloud-hypervisor $VFIO_DIR
@@ -194,14 +194,14 @@ sudo chmod a+rwX /dev/hugepages
 ulimit -l unlimited
 
 export RUST_BACKTRACE=1
-time cargo test $features "common_parallel::$test_filter" -- ${test_binary_args[*]}
+time cargo test $test_features "common_parallel::$test_filter" -- ${test_binary_args[*]}
 RES=$?
 
 # Run some tests in sequence since the result could be affected by other tests
 # running in parallel.
 if [ $RES -eq 0 ]; then
     export RUST_BACKTRACE=1
-    time cargo test $features "common_sequential::$test_filter" -- --test-threads=1 ${test_binary_args[*]}
+    time cargo test $test_features "common_sequential::$test_filter" -- --test-threads=1 ${test_binary_args[*]}
     RES=$?
 fi
 
