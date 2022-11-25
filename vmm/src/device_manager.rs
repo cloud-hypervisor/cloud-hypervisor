@@ -1716,6 +1716,8 @@ impl DeviceManager {
             id.clone(),
             interrupt_group,
             serial_writer,
+            versioned_state_from_id(self.snapshot.as_ref(), id.as_str())
+                .map_err(DeviceManagerError::RestoreGetState)?,
         )));
 
         self.bus_devices
