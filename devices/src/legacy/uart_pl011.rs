@@ -122,24 +122,79 @@ impl Pl011 {
         irq: Arc<dyn InterruptSourceGroup>,
         out: Option<Box<dyn io::Write + Send>>,
         timestamp: Instant,
+        state: Option<Pl011State>,
     ) -> Self {
+        let (
+            flags,
+            lcr,
+            rsr,
+            cr,
+            dmacr,
+            debug,
+            int_enabled,
+            int_level,
+            read_fifo,
+            ilpr,
+            ibrd,
+            fbrd,
+            ifl,
+            read_count,
+            read_trigger,
+        ) = if let Some(state) = state {
+            (
+                state.flags,
+                state.lcr,
+                state.rsr,
+                state.cr,
+                state.dmacr,
+                state.debug,
+                state.int_enabled,
+                state.int_level,
+                state.read_fifo.into(),
+                state.ilpr,
+                state.ibrd,
+                state.fbrd,
+                state.ifl,
+                state.read_count,
+                state.read_trigger,
+            )
+        } else {
+            (
+                0x90,
+                0,
+                0,
+                0x300,
+                0,
+                0,
+                0,
+                0,
+                VecDeque::new(),
+                0,
+                0,
+                0,
+                0x12,
+                0,
+                1,
+            )
+        };
+
         Self {
             id,
-            flags: 0x90u32,
-            lcr: 0u32,
-            rsr: 0u32,
-            cr: 0x300u32,
-            dmacr: 0u32,
-            debug: 0u32,
-            int_enabled: 0u32,
-            int_level: 0u32,
-            read_fifo: VecDeque::new(),
-            ilpr: 0u32,
-            ibrd: 0u32,
-            fbrd: 0u32,
-            ifl: 0x12u32,
-            read_count: 0u32,
-            read_trigger: 1u32,
+            flags,
+            lcr,
+            rsr,
+            cr,
+            dmacr,
+            debug,
+            int_enabled,
+            int_level,
+            read_fifo,
+            ilpr,
+            ibrd,
+            fbrd,
+            ifl,
+            read_count,
+            read_trigger,
             irq,
             out,
             timestamp,
@@ -168,24 +223,6 @@ impl Pl011 {
             read_count: self.read_count,
             read_trigger: self.read_trigger,
         }
-    }
-
-    fn set_state(&mut self, state: &Pl011State) {
-        self.flags = state.flags;
-        self.lcr = state.lcr;
-        self.rsr = state.rsr;
-        self.cr = state.cr;
-        self.dmacr = state.dmacr;
-        self.debug = state.debug;
-        self.int_enabled = state.int_enabled;
-        self.int_level = state.int_level;
-        self.read_fifo = state.read_fifo.clone().into();
-        self.ilpr = state.ilpr;
-        self.ibrd = state.ibrd;
-        self.fbrd = state.fbrd;
-        self.ifl = state.ifl;
-        self.read_count = state.read_count;
-        self.read_trigger = state.read_trigger;
     }
 
     /// Queues raw bytes for the guest to read and signals the interrupt
@@ -419,11 +456,6 @@ impl Snapshottable for Pl011 {
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_versioned_state(&self.id, &self.state())
     }
-
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.set_state(&snapshot.to_versioned_state(&self.id)?);
-        Ok(())
-    }
 }
 
 impl Pausable for Pl011 {}
@@ -498,6 +530,7 @@ mod tests {
             Arc::new(TestInterrupt::new(intr_evt.try_clone().unwrap())),
             Some(Box::new(pl011_out.clone())),
             Instant::now(),
+            None,
         );
 
         pl011.write(0, UARTDR as u64, &[b'x', b'y']);
@@ -519,6 +552,7 @@ mod tests {
             Arc::new(TestInterrupt::new(intr_evt.try_clone().unwrap())),
             Some(Box::new(pl011_out)),
             Instant::now(),
+            None,
         );
 
         // write 1 to the interrupt event fd, so that read doesn't block in case the event fd
