@@ -63,7 +63,6 @@ pub struct Serial {
     id: String,
     interrupt_enable: u8,
     interrupt_identification: u8,
-    interrupt: Arc<dyn InterruptSourceGroup>,
     line_control: u8,
     line_status: u8,
     modem_control: u8,
@@ -71,6 +70,7 @@ pub struct Serial {
     scratch: u8,
     baud_divisor: u16,
     in_buffer: VecDeque<u8>,
+    interrupt: Arc<dyn InterruptSourceGroup>,
     out: Option<Box<dyn io::Write + Send>>,
 }
 
@@ -93,19 +93,56 @@ impl Serial {
         id: String,
         interrupt: Arc<dyn InterruptSourceGroup>,
         out: Option<Box<dyn io::Write + Send>>,
+        state: Option<SerialState>,
     ) -> Serial {
+        let (
+            interrupt_enable,
+            interrupt_identification,
+            line_control,
+            line_status,
+            modem_control,
+            modem_status,
+            scratch,
+            baud_divisor,
+            in_buffer,
+        ) = if let Some(state) = state {
+            (
+                state.interrupt_enable,
+                state.interrupt_identification,
+                state.line_control,
+                state.line_status,
+                state.modem_control,
+                state.modem_status,
+                state.scratch,
+                state.baud_divisor,
+                state.in_buffer.into(),
+            )
+        } else {
+            (
+                0,
+                DEFAULT_INTERRUPT_IDENTIFICATION,
+                DEFAULT_LINE_CONTROL,
+                DEFAULT_LINE_STATUS,
+                DEFAULT_MODEM_CONTROL,
+                DEFAULT_MODEM_STATUS,
+                0,
+                DEFAULT_BAUD_DIVISOR,
+                VecDeque::new(),
+            )
+        };
+
         Serial {
             id,
-            interrupt_enable: 0,
-            interrupt_identification: DEFAULT_INTERRUPT_IDENTIFICATION,
+            interrupt_enable,
+            interrupt_identification,
+            line_control,
+            line_status,
+            modem_control,
+            modem_status,
+            scratch,
+            baud_divisor,
+            in_buffer,
             interrupt,
-            line_control: DEFAULT_LINE_CONTROL,
-            line_status: DEFAULT_LINE_STATUS,
-            modem_control: DEFAULT_MODEM_CONTROL,
-            modem_status: DEFAULT_MODEM_STATUS,
-            scratch: 0,
-            baud_divisor: DEFAULT_BAUD_DIVISOR,
-            in_buffer: VecDeque::new(),
             out,
         }
     }
@@ -115,13 +152,18 @@ impl Serial {
         id: String,
         interrupt: Arc<dyn InterruptSourceGroup>,
         out: Box<dyn io::Write + Send>,
+        state: Option<SerialState>,
     ) -> Serial {
-        Self::new(id, interrupt, Some(out))
+        Self::new(id, interrupt, Some(out), state)
     }
 
     /// Constructs a Serial port with no connected output.
-    pub fn new_sink(id: String, interrupt: Arc<dyn InterruptSourceGroup>) -> Serial {
-        Self::new(id, interrupt, None)
+    pub fn new_sink(
+        id: String,
+        interrupt: Arc<dyn InterruptSourceGroup>,
+        state: Option<SerialState>,
+    ) -> Serial {
+        Self::new(id, interrupt, None, state)
     }
 
     pub fn set_out(&mut self, out: Box<dyn io::Write + Send>) {
@@ -242,18 +284,6 @@ impl Serial {
             in_buffer: self.in_buffer.clone().into(),
         }
     }
-
-    fn set_state(&mut self, state: &SerialState) {
-        self.interrupt_enable = state.interrupt_enable;
-        self.interrupt_identification = state.interrupt_identification;
-        self.line_control = state.line_control;
-        self.line_status = state.line_status;
-        self.modem_control = state.modem_control;
-        self.modem_status = state.modem_status;
-        self.scratch = state.scratch;
-        self.baud_divisor = state.baud_divisor;
-        self.in_buffer = state.in_buffer.clone().into();
-    }
 }
 
 impl BusDevice for Serial {
@@ -305,11 +335,6 @@ impl Snapshottable for Serial {
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_versioned_state(&self.id, &self.state())
-    }
-
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.set_state(&snapshot.to_versioned_state(&self.id)?);
-        Ok(())
     }
 }
 
@@ -384,6 +409,7 @@ mod tests {
             String::from(SERIAL_NAME),
             Arc::new(TestInterrupt::new(intr_evt.try_clone().unwrap())),
             Box::new(serial_out.clone()),
+            None,
         );
 
         serial.write(0, DATA as u64, &[b'x', b'y']);
@@ -404,6 +430,7 @@ mod tests {
             String::from(SERIAL_NAME),
             Arc::new(TestInterrupt::new(intr_evt.try_clone().unwrap())),
             Box::new(serial_out),
+            None,
         );
 
         // write 1 to the interrupt event fd, so that read doesn't block in case the event fd
@@ -440,6 +467,7 @@ mod tests {
         let mut serial = Serial::new_sink(
             String::from(SERIAL_NAME),
             Arc::new(TestInterrupt::new(intr_evt.try_clone().unwrap())),
+            None,
         );
 
         // write 1 to the interrupt event fd, so that read doesn't block in case the event fd
@@ -462,6 +490,7 @@ mod tests {
         let mut serial = Serial::new_sink(
             String::from(SERIAL_NAME),
             Arc::new(TestInterrupt::new(intr_evt.try_clone().unwrap())),
+            None,
         );
 
         serial.write(0, LCR as u64, &[LCR_DLAB_BIT]);
@@ -483,6 +512,7 @@ mod tests {
         let mut serial = Serial::new_sink(
             String::from(SERIAL_NAME),
             Arc::new(TestInterrupt::new(intr_evt.try_clone().unwrap())),
+            None,
         );
 
         serial.write(0, MCR as u64, &[MCR_LOOP_BIT]);
@@ -509,6 +539,7 @@ mod tests {
         let mut serial = Serial::new_sink(
             String::from(SERIAL_NAME),
             Arc::new(TestInterrupt::new(intr_evt.try_clone().unwrap())),
+            None,
         );
 
         serial.write(0, SCR as u64, &[0x12]);

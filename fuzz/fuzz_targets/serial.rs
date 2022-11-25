@@ -15,6 +15,7 @@ fuzz_target!(|bytes| {
     let mut serial = Serial::new_sink(
         "serial".into(),
         Arc::new(TestInterrupt::new(EventFd::new(EFD_NONBLOCK).unwrap())),
+        None,
     );
 
     let mut i = 0;
