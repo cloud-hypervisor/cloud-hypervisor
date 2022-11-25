@@ -10,7 +10,6 @@
 // See https://pdos.csail.mit.edu/6.828/2016/readings/ia32/ioapic.pdf for a specification.
 
 use super::interrupt_controller::{Error, InterruptController};
-use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
 use std::result;
 use std::sync::{Arc, Barrier};
@@ -194,6 +193,7 @@ impl Ioapic {
         id: String,
         apic_address: GuestAddress,
         interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+        state: Option<IoapicState>,
     ) -> Result<Ioapic> {
         let interrupt_source_group = interrupt_manager
             .create_group(MsiIrqGroupConfig {
@@ -202,17 +202,47 @@ impl Ioapic {
             })
             .map_err(Error::CreateInterruptSourceGroup)?;
 
+        let (id_reg, reg_sel, reg_entries, used_entries, apic_address) = if let Some(state) = &state
+        {
+            (
+                state.id_reg,
+                state.reg_sel,
+                state.reg_entries,
+                state.used_entries,
+                GuestAddress(state.apic_address),
+            )
+        } else {
+            (
+                0,
+                0,
+                [0x10000; NUM_IOAPIC_PINS],
+                [false; NUM_IOAPIC_PINS],
+                apic_address,
+            )
+        };
+
         // The IOAPIC is created with entries already masked. The guest will be
         // in charge of unmasking them if/when necessary.
-        Ok(Ioapic {
+        let ioapic = Ioapic {
             id,
-            id_reg: 0,
-            reg_sel: 0,
-            reg_entries: [0x10000; NUM_IOAPIC_PINS],
-            used_entries: [false; NUM_IOAPIC_PINS],
+            id_reg,
+            reg_sel,
+            reg_entries,
+            used_entries,
             apic_address,
             interrupt_source_group,
-        })
+        };
+
+        // When restoring the Ioapic, we must enable used entries.
+        if state.is_some() {
+            for (irq, entry) in ioapic.used_entries.iter().enumerate() {
+                if *entry {
+                    ioapic.update_entry(irq)?;
+                }
+            }
+        }
+
+        Ok(ioapic)
     }
 
     fn ioapic_write(&mut self, val: u32) {
@@ -297,21 +327,6 @@ impl Ioapic {
             used_entries: self.used_entries,
             apic_address: self.apic_address.0,
         }
-    }
-
-    fn set_state(&mut self, state: &IoapicState) -> Result<()> {
-        self.id_reg = state.id_reg;
-        self.reg_sel = state.reg_sel;
-        self.reg_entries = state.reg_entries;
-        self.used_entries = state.used_entries;
-        self.apic_address = GuestAddress(state.apic_address);
-        for (irq, entry) in self.used_entries.iter().enumerate() {
-            if *entry {
-                self.update_entry(irq)?;
-            }
-        }
-
-        Ok(())
     }
 
     fn update_entry(&self, irq: usize) -> Result<()> {
@@ -424,17 +439,6 @@ impl Snapshottable for Ioapic {
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_versioned_state(&self.id, &self.state())
-    }
-
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.set_state(&snapshot.to_versioned_state(&self.id)?)
-            .map_err(|e| {
-                MigratableError::Restore(anyhow!(
-                    "Could not restore state for {}: {:?}",
-                    self.id,
-                    e
-                ))
-            })
     }
 }
 
