@@ -1664,6 +1664,8 @@ impl DeviceManager {
         let gpio_device = Arc::new(Mutex::new(devices::legacy::Gpio::new(
             id.clone(),
             interrupt_group,
+            versioned_state_from_id(self.snapshot.as_ref(), id.as_str())
+                .map_err(DeviceManagerError::RestoreGetState)?,
         )));
 
         self.bus_devices

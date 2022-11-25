@@ -106,18 +106,39 @@ impl VersionMapped for GpioState {}
 
 impl Gpio {
     /// Constructs an PL061 GPIO device.
-    pub fn new(id: String, interrupt: Arc<dyn InterruptSourceGroup>) -> Self {
+    pub fn new(
+        id: String,
+        interrupt: Arc<dyn InterruptSourceGroup>,
+        state: Option<GpioState>,
+    ) -> Self {
+        let (data, old_in_data, dir, isense, ibe, iev, im, istate, afsel) =
+            if let Some(state) = state {
+                (
+                    state.data,
+                    state.old_in_data,
+                    state.dir,
+                    state.isense,
+                    state.ibe,
+                    state.iev,
+                    state.im,
+                    state.istate,
+                    state.afsel,
+                )
+            } else {
+                (0, 0, 0, 0, 0, 0, 0, 0, 0)
+            };
+
         Self {
             id,
-            data: 0,
-            old_in_data: 0,
-            dir: 0,
-            isense: 0,
-            ibe: 0,
-            iev: 0,
-            im: 0,
-            istate: 0,
-            afsel: 0,
+            data,
+            old_in_data,
+            dir,
+            isense,
+            ibe,
+            iev,
+            im,
+            istate,
+            afsel,
             interrupt,
         }
     }
@@ -134,18 +155,6 @@ impl Gpio {
             istate: self.istate,
             afsel: self.afsel,
         }
-    }
-
-    fn set_state(&mut self, state: &GpioState) {
-        self.data = state.data;
-        self.old_in_data = state.old_in_data;
-        self.dir = state.dir;
-        self.isense = state.isense;
-        self.ibe = state.ibe;
-        self.iev = state.iev;
-        self.im = state.im;
-        self.istate = state.istate;
-        self.afsel = state.afsel;
     }
 
     fn pl061_internal_update(&mut self) {
@@ -321,11 +330,6 @@ impl Snapshottable for Gpio {
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_versioned_state(&self.id, &self.state())
     }
-
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.set_state(&snapshot.to_versioned_state(&self.id)?);
-        Ok(())
-    }
 }
 
 impl Pausable for Gpio {}
@@ -378,6 +382,7 @@ mod tests {
         let mut gpio = Gpio::new(
             String::from(GPIO_NAME),
             Arc::new(TestInterrupt::new(intr_evt.try_clone().unwrap())),
+            None,
         );
         let mut data = [0; 4];
 
