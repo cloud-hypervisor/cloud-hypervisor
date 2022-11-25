@@ -1408,6 +1408,8 @@ impl DeviceManager {
                 id.clone(),
                 APIC_START,
                 Arc::clone(&self.msi_interrupt_manager),
+                versioned_state_from_id(self.snapshot.as_ref(), id.as_str())
+                    .map_err(DeviceManagerError::RestoreGetState)?,
             )
             .map_err(DeviceManagerError::CreateInterruptController)?,
         ));
