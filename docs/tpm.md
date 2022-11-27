@@ -30,7 +30,7 @@ process should be started to listen at the input socket. Below is an
 example invocation of swtpm process.
 
 ```
-swtpm socket --tmpstate dir=/var/run/swtpm \
+swtpm socket --tpmstate dir=/var/run/swtpm \
 	--ctrl type=unixio,path="/var/run/swtpm.socket" \
 	--flags startup-clear \
 	--tpm2
