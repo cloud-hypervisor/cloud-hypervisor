@@ -972,7 +972,15 @@ impl DeviceManager {
     ) -> DeviceManagerResult<Arc<Mutex<Self>>> {
         trace_scoped!("DeviceManager::new");
 
-        let device_tree = Arc::new(Mutex::new(DeviceTree::new()));
+        let (device_tree, device_id_cnt) = if let Some(snapshot) = snapshot.as_ref() {
+            let state: DeviceManagerState = snapshot.to_state(DEVICE_MANAGER_SNAPSHOT_ID).unwrap();
+            (
+                Arc::new(Mutex::new(state.device_tree.clone())),
+                state.device_id_cnt,
+            )
+        } else {
+            (Arc::new(Mutex::new(DeviceTree::new())), Wrapping(0))
+        };
 
         let num_pci_segments =
             if let Some(platform_config) = config.lock().unwrap().platform.as_ref() {
@@ -1081,7 +1089,7 @@ impl DeviceManager {
             cpu_manager,
             virtio_devices: Vec::new(),
             bus_devices: Vec::new(),
-            device_id_cnt: Wrapping(0),
+            device_id_cnt,
             msi_interrupt_manager,
             legacy_interrupt_manager: None,
             passthrough_device: None,
@@ -1238,11 +1246,6 @@ impl DeviceManager {
             device_tree: self.device_tree.lock().unwrap().clone(),
             device_id_cnt: self.device_id_cnt,
         }
-    }
-
-    fn set_state(&mut self, state: &DeviceManagerState) {
-        *self.device_tree.lock().unwrap() = state.device_tree.clone();
-        self.device_id_cnt = state.device_id_cnt;
     }
 
     fn get_msi_iova_space(&mut self) -> (u64, u64) {
@@ -4116,38 +4119,6 @@ impl DeviceManager {
         self.device_tree.clone()
     }
 
-    pub fn restore_devices(
-        &mut self,
-        snapshot: Snapshot,
-    ) -> std::result::Result<(), MigratableError> {
-        // Finally, restore all devices associated with the DeviceManager.
-        // It's important to restore devices in the right order, that's why
-        // the device tree is the right way to ensure we restore a child before
-        // its parent node.
-        for node in self
-            .device_tree
-            .lock()
-            .unwrap()
-            .breadth_first_traversal()
-            .rev()
-        {
-            // Restore the node
-            if let Some(migratable) = &node.migratable {
-                info!("Restoring {} from DeviceManager", node.id);
-                if let Some(snapshot) = snapshot.snapshots.get(&node.id) {
-                    migratable.lock().unwrap().restore(*snapshot.clone())?;
-                } else {
-                    return Err(MigratableError::Restore(anyhow!(
-                        "Missing device {}",
-                        node.id
-                    )));
-                }
-            }
-        }
-
-        Ok(())
-    }
-
     #[cfg(target_arch = "x86_64")]
     pub fn notify_power_button(&self) -> DeviceManagerResult<()> {
         self.ged_notification_device
@@ -4473,19 +4444,6 @@ impl Snapshottable for DeviceManager {
         )?);
 
         Ok(snapshot)
-    }
-
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        // Let's first restore the DeviceManager.
-
-        self.set_state(&snapshot.to_state(DEVICE_MANAGER_SNAPSHOT_ID)?);
-
-        // Now that DeviceManager is updated with the right states, it's time
-        // to create the devices based on the configuration.
-        self.create_devices(None, None, None)
-            .map_err(|e| MigratableError::Restore(anyhow!("Could not create devices {:?}", e)))?;
-
-        Ok(())
     }
 }
 
