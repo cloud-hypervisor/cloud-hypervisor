@@ -3,10 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::vfio::{UserMemoryRegion, Vfio, VfioCommon, VfioError};
+use crate::vfio::{UserMemoryRegion, Vfio, VfioCommon, VfioError, VFIO_COMMON_ID};
 use crate::{BarReprogrammingParams, PciBarConfiguration, VfioPciError};
 use crate::{PciBdf, PciDevice, PciDeviceError, PciSubclass};
-use anyhow::anyhow;
 use hypervisor::HypervisorVmError;
 use std::any::Any;
 use std::os::unix::prelude::AsRawFd;
@@ -72,8 +71,8 @@ impl VfioUserPciDevice {
         msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
         bdf: PciBdf,
-        restoring: bool,
         memory_slot: Arc<dyn Fn() -> u32 + Send + Sync>,
+        snapshot: Option<Snapshot>,
     ) -> Result<Self, VfioUserPciDeviceError> {
         let resettable = client.lock().unwrap().resettable();
         if resettable {
@@ -94,7 +93,7 @@ impl VfioUserPciDevice {
             Arc::new(vfio_wrapper) as Arc<dyn Vfio>,
             &PciVfioUserSubclass::VfioUserSubclass,
             bdf,
-            restoring,
+            vm_migration::snapshot_from_id(snapshot.as_ref(), VFIO_COMMON_ID),
         )
         .map_err(VfioUserPciDeviceError::CreateVfioCommon)?;
 
@@ -542,21 +541,6 @@ impl Snapshottable for VfioUserPciDevice {
         vfio_pci_dev_snapshot.add_snapshot(self.common.snapshot()?);
 
         Ok(vfio_pci_dev_snapshot)
-    }
-
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        // Restore VfioCommon
-        if let Some(vfio_common_snapshot) = snapshot.snapshots.get(&self.common.id()) {
-            self.common.restore(*vfio_common_snapshot.clone())?;
-            self.map_mmio_regions().map_err(|e| {
-                MigratableError::Restore(anyhow!(
-                    "Could not map MMIO regions for VfioUserPciDevice on restore {:?}",
-                    e
-                ))
-            })?;
-        }
-
-        Ok(())
     }
 }
 impl Transportable for VfioUserPciDevice {}

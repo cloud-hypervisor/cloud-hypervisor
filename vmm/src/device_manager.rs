@@ -3182,8 +3182,8 @@ impl DeviceManager {
             legacy_interrupt_group,
             device_cfg.iommu,
             pci_device_bdf,
-            self.restoring,
             Arc::new(move || memory_manager.lock().unwrap().allocate_memory_slot()),
+            vm_migration::snapshot_from_id(self.snapshot.as_ref(), vfio_name.as_str()),
         )
         .map_err(DeviceManagerError::VfioPciCreate)?;
 
@@ -3197,15 +3197,11 @@ impl DeviceManager {
             resources,
         )?;
 
-        // When restoring a VM, the restore codepath will take care of mapping
-        // the MMIO regions based on the information from the snapshot.
-        if !self.restoring {
-            vfio_pci_device
-                .lock()
-                .unwrap()
-                .map_mmio_regions()
-                .map_err(DeviceManagerError::VfioMapRegion)?;
-        }
+        vfio_pci_device
+            .lock()
+            .unwrap()
+            .map_mmio_regions()
+            .map_err(DeviceManagerError::VfioMapRegion)?;
 
         let mut node = device_node!(vfio_name, vfio_pci_device);
 
@@ -3341,8 +3337,8 @@ impl DeviceManager {
             self.msi_interrupt_manager.clone(),
             legacy_interrupt_group,
             pci_device_bdf,
-            self.restoring,
             Arc::new(move || memory_manager.lock().unwrap().allocate_memory_slot()),
+            vm_migration::snapshot_from_id(self.snapshot.as_ref(), vfio_user_name.as_str()),
         )
         .map_err(DeviceManagerError::VfioUserCreate)?;
 
@@ -3377,17 +3373,13 @@ impl DeviceManager {
             resources,
         )?;
 
-        // When restoring a VM, the restore codepath will take care of mapping
-        // the MMIO regions based on the information from the snapshot.
-        if !self.restoring {
-            // Note it is required to call 'add_pci_device()' in advance to have the list of
-            // mmio regions provisioned correctly
-            vfio_user_pci_device
-                .lock()
-                .unwrap()
-                .map_mmio_regions()
-                .map_err(DeviceManagerError::VfioUserMapRegion)?;
-        }
+        // Note it is required to call 'add_pci_device()' in advance to have the list of
+        // mmio regions provisioned correctly
+        vfio_user_pci_device
+            .lock()
+            .unwrap()
+            .map_mmio_regions()
+            .map_err(DeviceManagerError::VfioUserMapRegion)?;
 
         let mut node = device_node!(vfio_user_name, vfio_user_pci_device);
 
