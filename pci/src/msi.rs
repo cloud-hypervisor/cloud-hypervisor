@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
 //
 
-use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
 use std::io;
 use std::sync::Arc;
@@ -233,35 +232,6 @@ impl MsiConfig {
         MsiConfigState { cap: self.cap }
     }
 
-    fn set_state(&mut self, state: &MsiConfigState) -> Result<(), Error> {
-        self.cap = state.cap;
-
-        if self.enabled() {
-            for idx in 0..self.num_enabled_vectors() {
-                let config = MsiIrqSourceConfig {
-                    high_addr: self.cap.msg_addr_hi,
-                    low_addr: self.cap.msg_addr_lo,
-                    data: self.cap.msg_data as u32,
-                    devid: 0,
-                };
-
-                self.interrupt_source_group
-                    .update(
-                        idx as InterruptIndex,
-                        InterruptSourceConfig::MsiIrq(config),
-                        self.cap.vector_masked(idx),
-                    )
-                    .map_err(Error::UpdateInterruptRoute)?;
-            }
-
-            self.interrupt_source_group
-                .enable()
-                .map_err(Error::EnableInterruptRoute)?;
-        }
-
-        Ok(())
-    }
-
     pub fn enabled(&self) -> bool {
         self.cap.enabled()
     }
@@ -319,16 +289,5 @@ impl Snapshottable for MsiConfig {
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_versioned_state(&self.id(), &self.state())
-    }
-
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.set_state(&snapshot.to_versioned_state(&self.id())?)
-            .map_err(|e| {
-                MigratableError::Restore(anyhow!(
-                    "Could not restore state for {}: {:?}",
-                    self.id(),
-                    e
-                ))
-            })
     }
 }

@@ -4,7 +4,6 @@
 //
 
 use crate::{PciCapability, PciCapabilityId};
-use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
 use std::io;
 use std::result;
@@ -150,42 +149,6 @@ impl MsixConfig {
             masked: self.masked,
             enabled: self.enabled,
         }
-    }
-
-    fn set_state(&mut self, state: &MsixConfigState) -> result::Result<(), Error> {
-        self.table_entries = state.table_entries.clone();
-        self.pba_entries = state.pba_entries.clone();
-        self.masked = state.masked;
-        self.enabled = state.enabled;
-
-        if self.enabled && !self.masked {
-            for (idx, table_entry) in self.table_entries.iter().enumerate() {
-                if table_entry.masked() {
-                    continue;
-                }
-
-                let config = MsiIrqSourceConfig {
-                    high_addr: table_entry.msg_addr_hi,
-                    low_addr: table_entry.msg_addr_lo,
-                    data: table_entry.msg_data,
-                    devid: self.devid,
-                };
-
-                self.interrupt_source_group
-                    .update(
-                        idx as InterruptIndex,
-                        InterruptSourceConfig::MsiIrq(config),
-                        self.masked,
-                    )
-                    .map_err(Error::UpdateInterruptRoute)?;
-
-                self.interrupt_source_group
-                    .enable()
-                    .map_err(Error::EnableInterruptRoute)?;
-            }
-        }
-
-        Ok(())
     }
 
     pub fn masked(&self) -> bool {
@@ -471,17 +434,6 @@ impl Snapshottable for MsixConfig {
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_versioned_state(&self.id(), &self.state())
-    }
-
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.set_state(&snapshot.to_versioned_state(&self.id())?)
-            .map_err(|e| {
-                MigratableError::Restore(anyhow!(
-                    "Could not restore state for {}: {:?}",
-                    self.id(),
-                    e
-                ))
-            })
     }
 }
 

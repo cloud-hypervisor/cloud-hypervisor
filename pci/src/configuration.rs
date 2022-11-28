@@ -644,18 +644,6 @@ impl PciConfiguration {
         }
     }
 
-    fn set_state(&mut self, state: &PciConfigurationState) {
-        self.registers.clone_from_slice(state.registers.as_slice());
-        self.writable_bits
-            .clone_from_slice(state.writable_bits.as_slice());
-        self.bars.clone_from_slice(state.bars.as_slice());
-        self.rom_bar_addr = state.rom_bar_addr;
-        self.rom_bar_size = state.rom_bar_size;
-        self.rom_bar_used = state.rom_bar_used;
-        self.last_capability = state.last_capability;
-        self.msix_cap_reg_idx = state.msix_cap_reg_idx;
-    }
-
     /// Reads a 32bit register from `reg_idx` in the register map.
     pub fn read_reg(&self, reg_idx: usize) -> u32 {
         *(self.registers.get(reg_idx).unwrap_or(&0xffff_ffff))
@@ -1085,11 +1073,6 @@ impl Snapshottable for PciConfiguration {
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_versioned_state(&self.id(), &self.state())
-    }
-
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        self.set_state(&snapshot.to_versioned_state(&self.id())?);
-        Ok(())
     }
 }
 
