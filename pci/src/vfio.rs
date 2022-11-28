@@ -406,6 +406,53 @@ pub(crate) struct VfioCommon {
 }
 
 impl VfioCommon {
+    pub(crate) fn new(
+        msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+        legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
+        vfio_wrapper: Arc<dyn Vfio>,
+        subclass: &dyn PciSubclass,
+        bdf: PciBdf,
+        restoring: bool,
+    ) -> Result<Self, VfioPciError> {
+        let configuration = PciConfiguration::new(
+            0,
+            0,
+            0,
+            PciClassCode::Other,
+            subclass,
+            None,
+            PciHeaderType::Device,
+            0,
+            0,
+            None,
+            None,
+        );
+
+        let mut vfio_common = VfioCommon {
+            mmio_regions: Vec::new(),
+            configuration,
+            interrupt: Interrupt {
+                intx: None,
+                msi: None,
+                msix: None,
+            },
+            msi_interrupt_manager,
+            legacy_interrupt_group,
+            vfio_wrapper,
+            patches: HashMap::new(),
+        };
+
+        // No need to parse capabilities from the device if on the restore path.
+        // The initialization will be performed later when restore() will be
+        // called.
+        if !restoring {
+            vfio_common.parse_capabilities(bdf);
+            vfio_common.initialize_legacy_interrupt()?;
+        }
+
+        Ok(vfio_common)
+    }
+
     pub(crate) fn allocate_bars(
         &mut self,
         allocator: &Arc<Mutex<SystemAllocator>>,
@@ -1226,43 +1273,16 @@ impl VfioPciDevice {
         let device = Arc::new(device);
         device.reset();
 
-        let configuration = PciConfiguration::new(
-            0,
-            0,
-            0,
-            PciClassCode::Other,
-            &PciVfioSubclass::VfioSubclass,
-            None,
-            PciHeaderType::Device,
-            0,
-            0,
-            None,
-            None,
-        );
-
         let vfio_wrapper = VfioDeviceWrapper::new(Arc::clone(&device));
 
-        let mut common = VfioCommon {
-            mmio_regions: Vec::new(),
-            configuration,
-            interrupt: Interrupt {
-                intx: None,
-                msi: None,
-                msix: None,
-            },
+        let common = VfioCommon::new(
             msi_interrupt_manager,
             legacy_interrupt_group,
-            vfio_wrapper: Arc::new(vfio_wrapper) as Arc<dyn Vfio>,
-            patches: HashMap::new(),
-        };
-
-        // No need to parse capabilities from the device if on the restore path.
-        // The initialization will be performed later when restore() will be
-        // called.
-        if !restoring {
-            common.parse_capabilities(bdf);
-            common.initialize_legacy_interrupt()?;
-        }
+            Arc::new(vfio_wrapper) as Arc<dyn Vfio>,
+            &PciVfioSubclass::VfioSubclass,
+            bdf,
+            restoring,
+        )?;
 
         let vfio_pci_device = VfioPciDevice {
             id,

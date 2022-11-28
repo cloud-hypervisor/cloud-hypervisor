@@ -3,15 +3,12 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::vfio::{Interrupt, UserMemoryRegion, Vfio, VfioCommon, VfioError};
+use crate::vfio::{UserMemoryRegion, Vfio, VfioCommon, VfioError};
 use crate::{BarReprogrammingParams, PciBarConfiguration, VfioPciError};
-use crate::{
-    PciBdf, PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciSubclass,
-};
+use crate::{PciBdf, PciDevice, PciDeviceError, PciSubclass};
 use anyhow::anyhow;
 use hypervisor::HypervisorVmError;
 use std::any::Any;
-use std::collections::HashMap;
 use std::os::unix::prelude::AsRawFd;
 use std::ptr::null_mut;
 use std::sync::{Arc, Barrier, Mutex};
@@ -51,6 +48,8 @@ pub enum VfioUserPciDeviceError {
     DmaUnmap(#[source] VfioUserError),
     #[error("Failed to initialize legacy interrupts: {0}")]
     InitializeLegacyInterrupts(#[source] VfioPciError),
+    #[error("Failed to create VfioCommon: {0}")]
+    CreateVfioCommon(#[source] VfioPciError),
 }
 
 #[derive(Copy, Clone)]
@@ -76,20 +75,6 @@ impl VfioUserPciDevice {
         restoring: bool,
         memory_slot: Arc<dyn Fn() -> u32 + Send + Sync>,
     ) -> Result<Self, VfioUserPciDeviceError> {
-        // This is used for the BAR and capabilities only
-        let configuration = PciConfiguration::new(
-            0,
-            0,
-            0,
-            PciClassCode::Other,
-            &PciVfioUserSubclass::VfioUserSubclass,
-            None,
-            PciHeaderType::Device,
-            0,
-            0,
-            None,
-            None,
-        );
         let resettable = client.lock().unwrap().resettable();
         if resettable {
             client
@@ -103,29 +88,15 @@ impl VfioUserPciDevice {
             client: client.clone(),
         };
 
-        let mut common = VfioCommon {
-            mmio_regions: Vec::new(),
-            configuration,
-            interrupt: Interrupt {
-                intx: None,
-                msi: None,
-                msix: None,
-            },
+        let common = VfioCommon::new(
             msi_interrupt_manager,
             legacy_interrupt_group,
-            vfio_wrapper: Arc::new(vfio_wrapper) as Arc<dyn Vfio>,
-            patches: HashMap::new(),
-        };
-
-        // No need to parse capabilities from the device if on the restore path.
-        // The initialization will be performed later when restore() will be
-        // called.
-        if !restoring {
-            common.parse_capabilities(bdf);
-            common
-                .initialize_legacy_interrupt()
-                .map_err(VfioUserPciDeviceError::InitializeLegacyInterrupts)?;
-        }
+            Arc::new(vfio_wrapper) as Arc<dyn Vfio>,
+            &PciVfioUserSubclass::VfioUserSubclass,
+            bdf,
+            restoring,
+        )
+        .map_err(VfioUserPciDeviceError::CreateVfioCommon)?;
 
         Ok(Self {
             id,
