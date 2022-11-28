@@ -105,6 +105,10 @@ impl TxVirtio {
                     return Err(NetQueuePairError::WriteTap(e));
                 }
 
+                if (result as usize) < vnet_hdr_len() {
+                    return Err(NetQueuePairError::InvalidVirtioNetHeader);
+                }
+
                 self.counter_bytes += Wrapping(result as u64 - vnet_hdr_len() as u64);
                 self.counter_frames += Wrapping(1);
 
@@ -240,6 +244,10 @@ impl RxVirtio {
                     return Err(NetQueuePairError::ReadTap(e));
                 }
 
+                if (result as usize) < vnet_hdr_len() {
+                    return Err(NetQueuePairError::InvalidVirtioNetHeader);
+                }
+
                 // Write num_buffers to guest memory. We simply write 1 as we
                 // never spread the frame over more than one descriptor chain.
                 desc_chain
@@ -316,6 +324,8 @@ pub enum NetQueuePairError {
     QueueAddUsed(virtio_queue::Error),
     #[error("Descriptor with invalid virtio-net header")]
     DescriptorInvalidHeader,
+    #[error("Invalid virtio-net header")]
+    InvalidVirtioNetHeader,
 }
 
 pub struct NetQueuePair {
