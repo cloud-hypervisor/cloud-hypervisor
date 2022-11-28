@@ -735,7 +735,7 @@ impl VfioCommon {
             })
             .unwrap();
 
-        let msi_config = MsiConfig::new(msg_ctl, interrupt_source_group.clone());
+        let msi_config = MsiConfig::new(msg_ctl, interrupt_source_group.clone(), None).unwrap();
 
         self.interrupt.msi = Some(VfioMsi {
             cfg: msi_config,
