@@ -931,9 +931,6 @@ pub struct DeviceManager {
     // Flag to force setting the iommu on virtio devices
     force_iommu: bool,
 
-    // Helps identify if the VM is currently being restored
-    restoring: bool,
-
     // io_uring availability if detected
     io_uring_supported: Option<bool>,
 
@@ -968,7 +965,6 @@ impl DeviceManager {
         numa_nodes: NumaNodes,
         activate_evt: &EventFd,
         force_iommu: bool,
-        restoring: bool,
         boot_id_list: BTreeSet<String>,
         timestamp: Instant,
         snapshot: Option<Snapshot>,
@@ -1115,7 +1111,6 @@ impl DeviceManager {
             #[cfg(target_arch = "aarch64")]
             gpio_device: None,
             force_iommu,
-            restoring,
             io_uring_supported: None,
             boot_id_list,
             timestamp,
@@ -4150,10 +4145,6 @@ impl DeviceManager {
                 }
             }
         }
-
-        // The devices have been fully restored, we can now update the
-        // restoring state of the DeviceManager.
-        self.restoring = false;
 
         Ok(())
     }

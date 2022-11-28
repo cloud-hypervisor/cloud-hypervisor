@@ -564,7 +564,6 @@ impl Vm {
             numa_nodes.clone(),
             &activate_evt,
             force_iommu,
-            restoring,
             boot_id_list,
             timestamp,
             snapshot_from_id(snapshot, DEVICE_MANAGER_SNAPSHOT_ID),
