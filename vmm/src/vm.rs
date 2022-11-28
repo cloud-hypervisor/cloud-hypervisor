@@ -2610,7 +2610,7 @@ impl Snapshottable for Vm {
         Ok(vm_snapshot)
     }
 
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+    fn restore(&mut self, _snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
         event!("vm", "restoring");
 
         let current_state = self
@@ -2622,33 +2622,17 @@ impl Snapshottable for Vm {
         })?;
 
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-        self.load_clock_from_snapshot(&snapshot)
+        self.load_clock_from_snapshot(&_snapshot)
             .map_err(|e| MigratableError::Restore(anyhow!("Error restoring clock: {:?}", e)))?;
 
-        if let Some(device_manager_snapshot) = snapshot.snapshots.get(DEVICE_MANAGER_SNAPSHOT_ID) {
-            self.device_manager
-                .lock()
-                .unwrap()
-                .restore(*device_manager_snapshot.clone())?;
-        } else {
-            return Err(MigratableError::Restore(anyhow!(
-                "Missing device manager snapshot"
-            )));
-        }
+        self.device_manager
+            .lock()
+            .unwrap()
+            .create_devices(None, None, None)
+            .map_err(|e| MigratableError::Restore(anyhow!("Error restoring devices: {:#?}", e)))?;
 
         #[cfg(target_arch = "aarch64")]
-        self.restore_vgic_and_enable_interrupt(&snapshot)?;
-
-        if let Some(device_manager_snapshot) = snapshot.snapshots.get(DEVICE_MANAGER_SNAPSHOT_ID) {
-            self.device_manager
-                .lock()
-                .unwrap()
-                .restore_devices(*device_manager_snapshot.clone())?;
-        } else {
-            return Err(MigratableError::Restore(anyhow!(
-                "Missing device manager snapshot"
-            )));
-        }
+        self.restore_vgic_and_enable_interrupt(&_snapshot)?;
 
         // Now we can start all vCPUs from here.
         self.cpu_manager
