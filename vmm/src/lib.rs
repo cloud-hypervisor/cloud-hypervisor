@@ -1220,6 +1220,18 @@ impl Vmm {
 
         let timestamp = Instant::now();
         let hypervisor_vm = mm.lock().unwrap().vm.clone();
+        let cpus_config = {
+            &self
+                .vm_config
+                .clone()
+                .expect("CpuConfig missing")
+                .lock()
+                .unwrap()
+                .cpus
+                .clone()
+        };
+        let vcpu_config = cpu::VcpuConfig::new(cpus_config, hypervisor_vm.clone());
+
         let mut vm = Vm::new_from_memory_manager(
             self.vm_config.clone().unwrap(),
             mm,
@@ -1234,6 +1246,7 @@ impl Vmm {
             true,
             timestamp,
             Some(&snapshot),
+            vcpu_config,
         )
         .map_err(|e| {
             MigratableError::MigrateReceive(anyhow!("Error creating VM from snapshot: {:?}", e))
