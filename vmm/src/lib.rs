@@ -1220,6 +1220,7 @@ impl Vmm {
 
         let timestamp = Instant::now();
         let hypervisor_vm = mm.lock().unwrap().vm.clone();
+
         let cpus_config = {
             &self
                 .vm_config
@@ -1230,7 +1231,9 @@ impl Vmm {
                 .cpus
                 .clone()
         };
-        let vcpu_config = cpu::VcpuConfig::new(cpus_config, hypervisor_vm.clone());
+        let mut vcpu_config = cpu::VcpuConfig::new(cpus_config, hypervisor_vm.clone());
+
+        vcpu_config.create_boot_vcpus().unwrap();
 
         let mut vm = Vm::new_from_memory_manager(
             self.vm_config.clone().unwrap(),
