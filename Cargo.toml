@@ -10,6 +10,11 @@ description = "Open source Virtual Machine Monitor (VMM) that runs on top of KVM
 homepage = "https://github.com/cloud-hypervisor/cloud-hypervisor"
 # Minimum buildable version:
 # Keep in sync with version in .github/workflows/build.yaml
+# Policy on MSRV (see #4318):
+# Can only be bumped by:
+# a.) A dependency requires it, 
+# b.) If we want to use a new feature and that MSRV is at least 6 months old,
+# c.) There is a security issue that is addressed by the toolchain update.
 rust-version = "1.60"
 
 [profile.release]
