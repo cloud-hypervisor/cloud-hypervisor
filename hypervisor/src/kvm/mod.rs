@@ -410,6 +410,7 @@ impl vm::Vm for KvmVm {
         };
         Ok(Arc::new(vcpu))
     }
+
     #[cfg(target_arch = "aarch64")]
     ///
     /// Creates a virtual GIC device.
@@ -1095,6 +1096,13 @@ pub struct KvmVcpu {
 /// vcpu.get/set().unwrap()
 ///
 impl cpu::Vcpu for KvmVcpu {
+    ///
+    /// Sets the vm ops struct for vcpu
+    ///
+    fn set_vm_ops(&mut self, vm_ops: Option<Arc<dyn vm::VmOps>>) {
+        self.vm_ops = vm_ops;
+    }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// Returns the vCPU general purpose registers.

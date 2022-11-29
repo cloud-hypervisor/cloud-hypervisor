@@ -16,8 +16,10 @@ use crate::arch::x86::{
 };
 #[cfg(feature = "tdx")]
 use crate::kvm::{TdxExitDetails, TdxExitStatus};
+use crate::vm::VmOps;
 use crate::CpuState;
 use crate::MpState;
+use std::sync::Arc;
 use thiserror::Error;
 use vm_memory::GuestAddress;
 
@@ -296,6 +298,10 @@ pub trait Vcpu: Send + Sync {
     ///
     fn set_fpu(&self, fpu: &FpuState) -> Result<()>;
     #[cfg(target_arch = "x86_64")]
+    ///
+    /// Sets the vm ops struct for vcpu
+    ///
+    fn set_vm_ops(&mut self, vm_ops: Option<Arc<dyn VmOps>>);
     ///
     /// X86 specific call to setup the CPUID registers.
     ///

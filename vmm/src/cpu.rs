@@ -483,6 +483,17 @@ impl VcpuConfig {
         Ok(vcpu)
     }
 
+    pub fn setup_vm_ops(&mut self, vm_ops: Arc<dyn VmOps>) -> Result<()> {
+        for vcpu in self.vcpus.iter_mut() {
+            let mut vcpu_elem = vcpu.lock().unwrap();
+            if let Some(vcpu) = Arc::get_mut(&mut vcpu_elem.vcpu) {
+                vcpu.set_vm_ops(Some(vm_ops.clone()));
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn create_vcpus(&mut self, desired_vcpus: u8) -> Result<Vec<Arc<Mutex<Vcpu>>>> {
         let mut vcpus: Vec<Arc<Mutex<Vcpu>>> = vec![];
         info!(
