@@ -24,8 +24,12 @@ pub enum Error {
     UpdateInterrupt(io::Error),
     /// Failed enabling the interrupt.
     EnableInterrupt(io::Error),
+    #[cfg(target_arch = "aarch64")]
     /// Failed creating GIC device.
     CreateGic(hypervisor::HypervisorVmError),
+    #[cfg(target_arch = "aarch64")]
+    /// Failed restoring GIC device.
+    RestoreGic(hypervisor::arch::aarch64::gic::Error),
 }
 
 type Result<T> = result::Result<T, Error>;
