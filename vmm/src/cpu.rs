@@ -682,21 +682,17 @@ impl CpuManager {
     #[allow(unused_variables)]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        config: &CpusConfig,
         memory_manager: &Arc<Mutex<MemoryManager>>,
-        vm: Arc<dyn hypervisor::Vm>,
         exit_evt: EventFd,
         reset_evt: EventFd,
         #[cfg(feature = "guest_debug")] vm_debug_evt: EventFd,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         seccomp_action: SeccompAction,
-        vm_ops: Arc<dyn VmOps>,
         #[cfg(feature = "tdx")] tdx_enabled: bool,
         numa_nodes: &NumaNodes,
+        vcpu_config: VcpuConfig,
     ) -> Result<Arc<Mutex<CpuManager>>> {
         let guest_memory = memory_manager.lock().unwrap().guest_memory();
-        let mut vcpu_states = Vec::with_capacity(usize::from(config.max_vcpus));
-        vcpu_states.resize_with(usize::from(config.max_vcpus), VcpuState::default);
         let hypervisor_type = hypervisor.hypervisor_type();
 
         #[cfg(target_arch = "x86_64")]
@@ -708,23 +704,24 @@ impl CpuManager {
             .map(|sgx_epc_region| sgx_epc_region.epc_sections().values().cloned().collect());
         #[cfg(target_arch = "x86_64")]
         let cpuid = {
-            let phys_bits = physical_bits(config.max_phys_bits);
+            let phys_bits = physical_bits(vcpu_config.config.max_phys_bits);
             arch::generate_common_cpuid(
                 hypervisor,
-                config
+                vcpu_config
+                    .config
                     .topology
                     .clone()
                     .map(|t| (t.threads_per_core, t.cores_per_die, t.dies_per_package)),
                 sgx_epc_sections,
                 phys_bits,
-                config.kvm_hyperv,
+                vcpu_config.config.kvm_hyperv,
                 #[cfg(feature = "tdx")]
                 tdx_enabled,
             )
             .map_err(Error::CommonCpuId)?
         };
         #[cfg(target_arch = "x86_64")]
-        if config.features.amx {
+        if vcpu_config.config.features.amx {
             const ARCH_GET_XCOMP_GUEST_PERM: usize = 0x1024;
             const ARCH_REQ_XCOMP_GUEST_PERM: usize = 0x1025;
             const XFEATURE_XTILEDATA: usize = 18;
@@ -767,7 +764,7 @@ impl CpuManager {
         .into_iter()
         .collect();
 
-        let affinity = if let Some(cpu_affinity) = config.affinity.as_ref() {
+        let affinity = if let Some(cpu_affinity) = vcpu_config.config.affinity.as_ref() {
             cpu_affinity
                 .iter()
                 .map(|a| (a.vcpu, a.host_cpus.clone()))
@@ -780,8 +777,6 @@ impl CpuManager {
         let dynamic = !tdx_enabled;
         #[cfg(not(feature = "tdx"))]
         let dynamic = true;
-
-        let inner_cpu_manager = VcpuConfig::new(config, vm, vm_ops);
 
         Ok(Arc::new(Mutex::new(CpuManager {
             hypervisor_type,
@@ -801,7 +796,7 @@ impl CpuManager {
             proximity_domain_per_cpu,
             affinity,
             dynamic,
-            vcpu_config: inner_cpu_manager,
+            vcpu_config,
         })))
     }
 
