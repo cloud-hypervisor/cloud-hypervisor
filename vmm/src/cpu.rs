@@ -431,6 +431,77 @@ impl Snapshottable for Vcpu {
     }
 }
 
+pub struct VcpuConfig {
+    config: CpusConfig,
+    vcpus: Vec<Arc<Mutex<Vcpu>>>,
+    vcpu_states: Vec<VcpuState>,
+    #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
+    vm: Arc<dyn hypervisor::Vm>,
+}
+
+impl VcpuConfig {
+    pub fn new(config: &CpusConfig, vm: Arc<dyn hypervisor::Vm>) -> VcpuConfig {
+        let mut vcpu_states = Vec::with_capacity(usize::from(config.max_vcpus));
+        vcpu_states.resize_with(usize::from(config.max_vcpus), VcpuState::default);
+
+        VcpuConfig {
+            config: config.clone(),
+            vcpus: Vec::with_capacity(usize::from(config.max_vcpus)),
+            vcpu_states,
+            vm,
+        }
+    }
+
+    pub fn boot_vcpus(&self) -> u8 {
+        self.config.boot_vcpus
+    }
+
+    pub fn present_vcpus(&self) -> u8 {
+        self.vcpu_states
+            .iter()
+            .fold(0, |acc, state| acc + state.active() as u8)
+    }
+
+    pub fn create_vcpu(&mut self, cpu_id: u8) -> Result<Arc<Mutex<Vcpu>>> {
+        info!("Creating vCPU: cpu_id = {}", cpu_id);
+
+        let vcpu = Arc::new(Mutex::new(Vcpu::new(cpu_id, &self.vm, None)?));
+
+        // Adding vCPU to the CpuManager's vCPU list.
+        self.vcpus.push(vcpu.clone());
+
+        Ok(vcpu)
+    }
+
+    pub fn create_vcpus(&mut self, desired_vcpus: u8) -> Result<Vec<Arc<Mutex<Vcpu>>>> {
+        let mut vcpus: Vec<Arc<Mutex<Vcpu>>> = vec![];
+        info!(
+            "Request to create new vCPUs: desired = {}, max = {}, allocated = {}, present = {}",
+            desired_vcpus,
+            self.config.max_vcpus,
+            self.vcpus.len(),
+            self.present_vcpus()
+        );
+
+        if desired_vcpus > self.config.max_vcpus {
+            return Err(Error::DesiredVCpuCountExceedsMax);
+        }
+
+        // Only create vCPUs in excess of all the allocated vCPUs.
+        for cpu_id in self.vcpus.len() as u8..desired_vcpus {
+            vcpus.push(self.create_vcpu(cpu_id)?);
+        }
+
+        Ok(vcpus)
+    }
+
+    pub fn create_boot_vcpus(&mut self) -> Result<Vec<Arc<Mutex<Vcpu>>>> {
+        trace_scoped!("create_boot_vcpus");
+
+        self.create_vcpus(self.boot_vcpus())
+    }
+}
+
 pub struct CpuManager {
     hypervisor_type: HypervisorType,
     config: CpusConfig,
