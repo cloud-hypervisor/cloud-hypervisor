@@ -1381,10 +1381,35 @@ impl DeviceManager {
 
         self.interrupt_controller = Some(interrupt_controller.clone());
 
-        // Unlike x86_64, the "interrupt_controller" here for AArch64 is only
-        // a `Gic` object that implements the `InterruptController` to provide
-        // interrupt delivery service. This is not the real GIC device so that
-        // we do not need to insert it to the device tree.
+        // Restore the vGic if this is in the process of restoration
+        let id = String::from(gic::GIC_SNAPSHOT_ID);
+        if let Some(vgic_snapshot) = snapshot_from_id(self.snapshot.as_ref(), &id) {
+            // PMU support is optional. Nothing should be impacted if the PMU initialization failed.
+            if self
+                .cpu_manager
+                .lock()
+                .unwrap()
+                .init_pmu(arch::aarch64::fdt::AARCH64_PMU_IRQ + 16)
+                .is_err()
+            {
+                info!("Failed to initialize PMU");
+            }
+
+            let vgic_state = vgic_snapshot
+                .to_state(&id)
+                .map_err(DeviceManagerError::RestoreGetState)?;
+            let saved_vcpu_states = self.cpu_manager.lock().unwrap().get_saved_states();
+            interrupt_controller
+                .lock()
+                .unwrap()
+                .restore_vgic(vgic_state, &saved_vcpu_states)
+                .unwrap();
+        }
+
+        self.device_tree
+            .lock()
+            .unwrap()
+            .insert(id.clone(), device_node!(id, interrupt_controller));
 
         Ok(interrupt_controller)
     }
