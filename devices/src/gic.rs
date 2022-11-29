@@ -8,7 +8,7 @@ use anyhow::anyhow;
 use arch::layout;
 use hypervisor::{
     arch::aarch64::gic::{Vgic, VgicConfig},
-    CpuState,
+    CpuState, GicState,
 };
 use std::result;
 use std::sync::{Arc, Mutex};
@@ -25,6 +25,7 @@ type Result<T> = result::Result<T, Error>;
 // Reserve 32 IRQs for legacy devices.
 pub const IRQ_LEGACY_BASE: usize = layout::IRQ_BASE as usize;
 pub const IRQ_LEGACY_COUNT: usize = 32;
+pub const GIC_SNAPSHOT_ID: &str = "gic-v3-its";
 
 // Gic (Generic Interupt Controller) struct provides all the functionality of a
 // GIC device. It wraps a hypervisor-emulated GIC device (Vgic) provided by the
@@ -42,6 +43,8 @@ impl Gic {
         vcpu_count: u8,
         interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         vm: Arc<dyn hypervisor::Vm>,
+        state: Option<GicState>,
+        saved_vcpu_states: Option<Vec<CpuState>>,
     ) -> Result<Gic> {
         let interrupt_source_group = interrupt_manager
             .create_group(MsiIrqGroupConfig {
@@ -54,11 +57,22 @@ impl Gic {
             .create_vgic(Gic::create_default_config(vcpu_count as u64))
             .map_err(Error::CreateGic)?;
 
-        let gic = Gic {
+        let mut gic = Gic {
             interrupt_source_group,
-            vgic: Some(vgic),
+            vgic: Some(vgic.clone()),
         };
         gic.enable()?;
+
+        if let Some(saved_vcpu_states) = saved_vcpu_states {
+            gic.set_gicr_typers(&saved_vcpu_states);
+        }
+
+        if let Some(state) = state {
+            vgic.lock()
+                .unwrap()
+                .set_state(&state)
+                .map_err(Error::RestoreGic)?;
+        }
 
         Ok(gic)
     }
@@ -130,27 +144,15 @@ impl InterruptController for Gic {
     }
 }
 
-pub const GIC_V3_ITS_SNAPSHOT_ID: &str = "gic-v3-its";
 impl Snapshottable for Gic {
     fn id(&self) -> String {
-        GIC_V3_ITS_SNAPSHOT_ID.to_string()
+        GIC_SNAPSHOT_ID.to_string()
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         let vgic = self.vgic.as_ref().unwrap().clone();
         let state = vgic.lock().unwrap().state().unwrap();
         Snapshot::new_from_state(&self.id(), &state)
-    }
-
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        let vgic = self.vgic.as_ref().unwrap().clone();
-        vgic.lock()
-            .unwrap()
-            .set_state(&snapshot.to_state(&self.id())?)
-            .map_err(|e| {
-                MigratableError::Restore(anyhow!("Could not restore GICv3ITS state {:?}", e))
-            })?;
-        Ok(())
     }
 }
 

@@ -49,8 +49,6 @@ use arch::EntryPoint;
 use arch::PciSpaceInfo;
 use arch::{NumaNode, NumaNodes};
 #[cfg(target_arch = "aarch64")]
-use devices::gic::GIC_V3_ITS_SNAPSHOT_ID;
-#[cfg(target_arch = "aarch64")]
 use devices::interrupt_controller;
 use devices::AcpiNotificationFlags;
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
@@ -2135,70 +2133,6 @@ impl Vm {
             .map(|state| *state)
     }
 
-    #[cfg(target_arch = "aarch64")]
-    /// Add the vGIC section to the VM snapshot.
-    fn add_vgic_snapshot_section(
-        &self,
-        vm_snapshot: &mut Snapshot,
-    ) -> std::result::Result<(), MigratableError> {
-        vm_snapshot.add_snapshot(
-            self.device_manager
-                .lock()
-                .unwrap()
-                .get_interrupt_controller()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .snapshot()?,
-        );
-
-        Ok(())
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    /// Restore the vGIC from the VM snapshot and enable the interrupt controller routing.
-    fn restore_vgic_and_enable_interrupt(
-        &self,
-        vm_snapshot: &Snapshot,
-    ) -> std::result::Result<(), MigratableError> {
-        let saved_vcpu_states = self.cpu_manager.lock().unwrap().get_saved_states();
-
-        // PMU interrupt sticks to PPI, so need to be added by 16 to get real irq number.
-        self.cpu_manager
-            .lock()
-            .unwrap()
-            .init_pmu(arch::aarch64::fdt::AARCH64_PMU_IRQ + 16)
-            .map_err(|e| MigratableError::Restore(anyhow!("Error init PMU: {:?}", e)))?;
-
-        // Here we prepare the GICR_TYPER registers from the restored vCPU states.
-        self.device_manager
-            .lock()
-            .unwrap()
-            .get_interrupt_controller()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .set_gicr_typers(&saved_vcpu_states);
-
-        // Restore GIC states.
-        if let Some(gicv3_its_snapshot) = vm_snapshot.snapshots.get(GIC_V3_ITS_SNAPSHOT_ID) {
-            self.device_manager
-                .lock()
-                .unwrap()
-                .get_interrupt_controller()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .restore(*gicv3_its_snapshot.clone())?;
-        } else {
-            return Err(MigratableError::Restore(anyhow!(
-                "Missing GicV3Its snapshot"
-            )));
-        }
-
-        Ok(())
-    }
-
     /// Gets the actual size of the balloon.
     pub fn balloon_size(&self) -> u64 {
         self.device_manager.lock().unwrap().balloon_size()
@@ -2550,10 +2484,6 @@ impl Snapshottable for Vm {
         vm_snapshot.add_snapshot(self.cpu_manager.lock().unwrap().snapshot()?);
         vm_snapshot.add_snapshot(self.memory_manager.lock().unwrap().snapshot()?);
 
-        #[cfg(target_arch = "aarch64")]
-        self.add_vgic_snapshot_section(&mut vm_snapshot)
-            .map_err(|e| MigratableError::Snapshot(e.into()))?;
-
         vm_snapshot.add_snapshot(self.device_manager.lock().unwrap().snapshot()?);
         vm_snapshot.add_data_section(SnapshotDataSection {
             id: format!("{}-section", VM_SNAPSHOT_ID),
@@ -2574,9 +2504,6 @@ impl Snapshottable for Vm {
         current_state.valid_transition(new_state).map_err(|e| {
             MigratableError::Restore(anyhow!("Could not restore VM state: {:#?}", e))
         })?;
-
-        #[cfg(target_arch = "aarch64")]
-        self.restore_vgic_and_enable_interrupt(&_snapshot)?;
 
         // Now we can start all vCPUs from here.
         self.cpu_manager
