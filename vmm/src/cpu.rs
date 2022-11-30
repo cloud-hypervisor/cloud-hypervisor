@@ -76,8 +76,8 @@ use vm_memory::ByteValued;
 use vm_memory::{Bytes, GuestAddressSpace};
 use vm_memory::{GuestAddress, GuestMemoryAtomic};
 use vm_migration::{
-    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
-    Transportable,
+    snapshot_from_id, Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection,
+    Snapshottable, Transportable,
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::{register_signal_handler, SIGRTMIN};
@@ -407,6 +407,8 @@ impl Snapshottable for Vcpu {
             .state()
             .map_err(|e| MigratableError::Pause(anyhow!("Could not get vCPU state {:?}", e)))?;
 
+        // TODO: The special format of the CPU id can be removed once ready to
+        // break live upgrade.
         let mut vcpu_snapshot = Snapshot::new(&format!("{:03}", self.id));
         vcpu_snapshot.add_data_section(SnapshotDataSection::new_from_state(
             VCPU_SNAPSHOT_ID,
@@ -416,18 +418,6 @@ impl Snapshottable for Vcpu {
         self.saved_state = Some(saved_state);
 
         Ok(vcpu_snapshot)
-    }
-
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        let saved_state: CpuState = snapshot.to_state(VCPU_SNAPSHOT_ID)?;
-
-        self.vcpu
-            .set_state(&saved_state)
-            .map_err(|e| MigratableError::Pause(anyhow!("Could not set the vCPU state {:?}", e)))?;
-
-        self.saved_state = Some(saved_state);
-
-        Ok(())
     }
 }
 
@@ -720,14 +710,27 @@ impl CpuManager {
         })))
     }
 
-    fn create_vcpu(&mut self, cpu_id: u8) -> Result<Arc<Mutex<Vcpu>>> {
+    fn create_vcpu(&mut self, cpu_id: u8, snapshot: Option<Snapshot>) -> Result<Arc<Mutex<Vcpu>>> {
         info!("Creating vCPU: cpu_id = {}", cpu_id);
 
-        let vcpu = Arc::new(Mutex::new(Vcpu::new(
-            cpu_id,
-            &self.vm,
-            Some(self.vm_ops.clone()),
-        )?));
+        let mut vcpu = Vcpu::new(cpu_id, &self.vm, Some(self.vm_ops.clone()))?;
+
+        if let Some(snapshot) = snapshot {
+            // AArch64 vCPUs should be initialized after created.
+            #[cfg(target_arch = "aarch64")]
+            vcpu.init(&self.vm)?;
+
+            let state: CpuState = snapshot.to_state(VCPU_SNAPSHOT_ID).map_err(|e| {
+                Error::VcpuCreate(anyhow!("Could not get vCPU state from snapshot {:?}", e))
+            })?;
+            vcpu.vcpu
+                .set_state(&state)
+                .map_err(|e| Error::VcpuCreate(anyhow!("Could not set the vCPU state {:?}", e)))?;
+
+            vcpu.saved_state = Some(state);
+        }
+
+        let vcpu = Arc::new(Mutex::new(vcpu));
 
         // Adding vCPU to the CpuManager's vCPU list.
         self.vcpus.push(vcpu.clone());
@@ -739,36 +742,31 @@ impl CpuManager {
         &self,
         vcpu: Arc<Mutex<Vcpu>>,
         entry_point: Option<EntryPoint>,
-        snapshot: Option<Snapshot>,
     ) -> Result<()> {
         let mut vcpu = vcpu.lock().unwrap();
 
-        if let Some(snapshot) = snapshot {
-            // AArch64 vCPUs should be initialized after created.
-            #[cfg(target_arch = "aarch64")]
-            vcpu.init(&self.vm)?;
+        #[cfg(target_arch = "x86_64")]
+        vcpu.configure(
+            entry_point,
+            &self.vm_memory,
+            self.cpuid.clone(),
+            self.config.kvm_hyperv,
+        )
+        .expect("Failed to configure vCPU");
 
-            vcpu.restore(snapshot).expect("Failed to restore vCPU");
-        } else {
-            #[cfg(target_arch = "x86_64")]
-            vcpu.configure(
-                entry_point,
-                &self.vm_memory,
-                self.cpuid.clone(),
-                self.config.kvm_hyperv,
-            )
+        #[cfg(target_arch = "aarch64")]
+        vcpu.configure(&self.vm, entry_point)
             .expect("Failed to configure vCPU");
-
-            #[cfg(target_arch = "aarch64")]
-            vcpu.configure(&self.vm, entry_point)
-                .expect("Failed to configure vCPU");
-        }
 
         Ok(())
     }
 
     /// Only create new vCPUs if there aren't any inactive ones to reuse
-    fn create_vcpus(&mut self, desired_vcpus: u8) -> Result<Vec<Arc<Mutex<Vcpu>>>> {
+    fn create_vcpus(
+        &mut self,
+        desired_vcpus: u8,
+        snapshot: Option<Snapshot>,
+    ) -> Result<Vec<Arc<Mutex<Vcpu>>>> {
         let mut vcpus: Vec<Arc<Mutex<Vcpu>>> = vec![];
         info!(
             "Request to create new vCPUs: desired = {}, max = {}, allocated = {}, present = {}",
@@ -784,7 +782,12 @@ impl CpuManager {
 
         // Only create vCPUs in excess of all the allocated vCPUs.
         for cpu_id in self.vcpus.len() as u8..desired_vcpus {
-            vcpus.push(self.create_vcpu(cpu_id)?);
+            vcpus.push(self.create_vcpu(
+                cpu_id,
+                // TODO: The special format of the CPU id can be removed once
+                // ready to break live upgrade.
+                snapshot_from_id(snapshot.as_ref(), &format!("{:03}", cpu_id)),
+            )?);
         }
 
         Ok(vcpus)
@@ -1116,10 +1119,13 @@ impl CpuManager {
         Ok(())
     }
 
-    pub fn create_boot_vcpus(&mut self) -> Result<Vec<Arc<Mutex<Vcpu>>>> {
+    pub fn create_boot_vcpus(
+        &mut self,
+        snapshot: Option<Snapshot>,
+    ) -> Result<Vec<Arc<Mutex<Vcpu>>>> {
         trace_scoped!("create_boot_vcpus");
 
-        self.create_vcpus(self.boot_vcpus())
+        self.create_vcpus(self.boot_vcpus(), snapshot)
     }
 
     // Starts all the vCPUs that the VM is booting with. Blocks until all vCPUs are running.
@@ -1147,9 +1153,9 @@ impl CpuManager {
 
         match desired_vcpus.cmp(&self.present_vcpus()) {
             cmp::Ordering::Greater => {
-                let vcpus = self.create_vcpus(desired_vcpus)?;
+                let vcpus = self.create_vcpus(desired_vcpus, None)?;
                 for vcpu in vcpus {
-                    self.configure_vcpu(vcpu, None, None)?
+                    self.configure_vcpu(vcpu, None)?
                 }
                 self.activate_vcpus(desired_vcpus, true, None)?;
                 Ok(true)
@@ -2078,20 +2084,6 @@ impl Snapshottable for CpuManager {
         }
 
         Ok(cpu_manager_snapshot)
-    }
-
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        for (cpu_id, snapshot) in snapshot.snapshots.iter() {
-            let cpu_id = cpu_id.parse::<usize>().unwrap();
-            info!("Restoring VCPU {}", cpu_id);
-            let vcpu = self.vcpus[cpu_id].clone();
-            self.configure_vcpu(vcpu, None, Some(*snapshot.clone()))
-                .map_err(|e| {
-                    MigratableError::Restore(anyhow!("Could not configure vCPU {:?}", e))
-                })?
-        }
-
-        Ok(())
     }
 }
 

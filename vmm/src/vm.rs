@@ -541,7 +541,7 @@ impl Vm {
         cpu_manager
             .lock()
             .unwrap()
-            .create_boot_vcpus()
+            .create_boot_vcpus(snapshot_from_id(snapshot, CPU_MANAGER_SNAPSHOT_ID))
             .map_err(Error::CpuManager)?;
 
         #[cfg(feature = "tdx")]
@@ -2083,7 +2083,7 @@ impl Vm {
             self.cpu_manager
                 .lock()
                 .unwrap()
-                .configure_vcpu(vcpu, entry_point, None)
+                .configure_vcpu(vcpu, entry_point)
                 .map_err(Error::CpuManager)?;
         }
 
@@ -2633,17 +2633,6 @@ impl Snapshottable for Vm {
         } else {
             return Err(MigratableError::Restore(anyhow!(
                 "Missing device manager snapshot"
-            )));
-        }
-
-        if let Some(cpu_manager_snapshot) = snapshot.snapshots.get(CPU_MANAGER_SNAPSHOT_ID) {
-            self.cpu_manager
-                .lock()
-                .unwrap()
-                .restore(*cpu_manager_snapshot.clone())?;
-        } else {
-            return Err(MigratableError::Restore(anyhow!(
-                "Missing CPU manager snapshot"
             )));
         }
 
