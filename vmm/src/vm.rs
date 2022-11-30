@@ -2141,16 +2141,6 @@ impl Vm {
         &self,
         vm_snapshot: &mut Snapshot,
     ) -> std::result::Result<(), MigratableError> {
-        let saved_vcpu_states = self.cpu_manager.lock().unwrap().get_saved_states();
-        self.device_manager
-            .lock()
-            .unwrap()
-            .get_interrupt_controller()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .set_gicr_typers(&saved_vcpu_states);
-
         vm_snapshot.add_snapshot(
             self.device_manager
                 .lock()
