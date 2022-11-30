@@ -628,13 +628,15 @@ impl Console {
         exit_evt: EventFd,
         state: Option<ConsoleState>,
     ) -> io::Result<(Console, Arc<ConsoleResizer>)> {
-        let (avail_features, acked_features, config, in_buffer) = if let Some(state) = state {
+        let (avail_features, acked_features, config, in_buffer, paused) = if let Some(state) = state
+        {
             info!("Restoring virtio-console {}", id);
             (
                 state.avail_features,
                 state.acked_features,
                 state.config,
                 state.in_buffer.into(),
+                true,
             )
         } else {
             let mut avail_features = 1u64 << VIRTIO_F_VERSION_1 | 1u64 << VIRTIO_CONSOLE_F_SIZE;
@@ -647,6 +649,7 @@ impl Console {
                 0,
                 VirtioConsoleConfig::default(),
                 VecDeque::new(),
+                false,
             )
         };
 
@@ -670,6 +673,7 @@ impl Console {
                     acked_features,
                     paused_sync: Some(Arc::new(Barrier::new(2))),
                     min_queues: NUM_QUEUES as u16,
+                    paused: Arc::new(AtomicBool::new(paused)),
                     ..Default::default()
                 },
                 id,

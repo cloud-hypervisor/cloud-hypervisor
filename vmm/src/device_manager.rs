@@ -4135,7 +4135,6 @@ impl DeviceManager {
             if let Some(migratable) = &node.migratable {
                 info!("Restoring {} from DeviceManager", node.id);
                 if let Some(snapshot) = snapshot.snapshots.get(&node.id) {
-                    migratable.lock().unwrap().pause()?;
                     migratable.lock().unwrap().restore(*snapshot.clone())?;
                 } else {
                     return Err(MigratableError::Restore(anyhow!(

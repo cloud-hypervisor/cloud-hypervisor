@@ -301,9 +301,14 @@ impl Pmem {
         exit_evt: EventFd,
         state: Option<PmemState>,
     ) -> io::Result<Pmem> {
-        let (avail_features, acked_features, config) = if let Some(state) = state {
+        let (avail_features, acked_features, config, paused) = if let Some(state) = state {
             info!("Restoring virtio-pmem {}", id);
-            (state.avail_features, state.acked_features, state.config)
+            (
+                state.avail_features,
+                state.acked_features,
+                state.config,
+                true,
+            )
         } else {
             let config = VirtioPmemConfig {
                 start: addr.raw_value().to_le(),
@@ -315,7 +320,7 @@ impl Pmem {
             if iommu {
                 avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
             }
-            (avail_features, 0, config)
+            (avail_features, 0, config, false)
         };
 
         Ok(Pmem {
@@ -326,6 +331,7 @@ impl Pmem {
                 avail_features,
                 acked_features,
                 min_queues: 1,
+                paused: Arc::new(AtomicBool::new(paused)),
                 ..Default::default()
             },
             id,

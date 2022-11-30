@@ -365,9 +365,14 @@ impl Balloon {
     ) -> io::Result<Self> {
         let mut queue_sizes = vec![QUEUE_SIZE; MIN_NUM_QUEUES];
 
-        let (avail_features, acked_features, config) = if let Some(state) = state {
+        let (avail_features, acked_features, config, paused) = if let Some(state) = state {
             info!("Restoring virtio-balloon {}", id);
-            (state.avail_features, state.acked_features, state.config)
+            (
+                state.avail_features,
+                state.acked_features,
+                state.config,
+                true,
+            )
         } else {
             let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
             if deflate_on_oom {
@@ -382,7 +387,7 @@ impl Balloon {
                 ..Default::default()
             };
 
-            (avail_features, 0, config)
+            (avail_features, 0, config, false)
         };
 
         if free_page_reporting {
@@ -397,6 +402,7 @@ impl Balloon {
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 queue_sizes,
                 min_queues: MIN_NUM_QUEUES as u16,
+                paused: Arc::new(AtomicBool::new(paused)),
                 ..Default::default()
             },
             id,

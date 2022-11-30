@@ -442,78 +442,80 @@ impl Block {
         exit_evt: EventFd,
         state: Option<BlockState>,
     ) -> io::Result<Self> {
-        let (disk_nsectors, avail_features, acked_features, config) = if let Some(state) = state {
-            info!("Restoring virtio-block {}", id);
-            (
-                state.disk_nsectors,
-                state.avail_features,
-                state.acked_features,
-                state.config,
-            )
-        } else {
-            let disk_size = disk_image.size().map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("Failed getting disk size: {}", e),
+        let (disk_nsectors, avail_features, acked_features, config, paused) =
+            if let Some(state) = state {
+                info!("Restoring virtio-block {}", id);
+                (
+                    state.disk_nsectors,
+                    state.avail_features,
+                    state.acked_features,
+                    state.config,
+                    true,
                 )
-            })?;
-            if disk_size % SECTOR_SIZE != 0 {
-                warn!(
-                    "Disk size {} is not a multiple of sector size {}; \
-                 the remainder will not be visible to the guest.",
-                    disk_size, SECTOR_SIZE
-                );
-            }
-
-            let mut avail_features = (1u64 << VIRTIO_F_VERSION_1)
-                | (1u64 << VIRTIO_BLK_F_FLUSH)
-                | (1u64 << VIRTIO_BLK_F_CONFIG_WCE)
-                | (1u64 << VIRTIO_BLK_F_BLK_SIZE)
-                | (1u64 << VIRTIO_BLK_F_TOPOLOGY);
-
-            if iommu {
-                avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
-            }
-
-            if read_only {
-                avail_features |= 1u64 << VIRTIO_BLK_F_RO;
-            }
-
-            let topology = disk_image.topology();
-            info!("Disk topology: {:?}", topology);
-
-            let logical_block_size = if topology.logical_block_size > 512 {
-                topology.logical_block_size
             } else {
-                512
+                let disk_size = disk_image.size().map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("Failed getting disk size: {}", e),
+                    )
+                })?;
+                if disk_size % SECTOR_SIZE != 0 {
+                    warn!(
+                        "Disk size {} is not a multiple of sector size {}; \
+                 the remainder will not be visible to the guest.",
+                        disk_size, SECTOR_SIZE
+                    );
+                }
+
+                let mut avail_features = (1u64 << VIRTIO_F_VERSION_1)
+                    | (1u64 << VIRTIO_BLK_F_FLUSH)
+                    | (1u64 << VIRTIO_BLK_F_CONFIG_WCE)
+                    | (1u64 << VIRTIO_BLK_F_BLK_SIZE)
+                    | (1u64 << VIRTIO_BLK_F_TOPOLOGY);
+
+                if iommu {
+                    avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
+                }
+
+                if read_only {
+                    avail_features |= 1u64 << VIRTIO_BLK_F_RO;
+                }
+
+                let topology = disk_image.topology();
+                info!("Disk topology: {:?}", topology);
+
+                let logical_block_size = if topology.logical_block_size > 512 {
+                    topology.logical_block_size
+                } else {
+                    512
+                };
+
+                // Calculate the exponent that maps physical block to logical block
+                let mut physical_block_exp = 0;
+                let mut size = logical_block_size;
+                while size < topology.physical_block_size {
+                    physical_block_exp += 1;
+                    size <<= 1;
+                }
+
+                let disk_nsectors = disk_size / SECTOR_SIZE;
+                let mut config = VirtioBlockConfig {
+                    capacity: disk_nsectors,
+                    writeback: 1,
+                    blk_size: topology.logical_block_size as u32,
+                    physical_block_exp,
+                    min_io_size: (topology.minimum_io_size / logical_block_size) as u16,
+                    opt_io_size: (topology.optimal_io_size / logical_block_size) as u32,
+                    ..Default::default()
+                };
+
+                if num_queues > 1 {
+                    avail_features |= 1u64 << VIRTIO_BLK_F_MQ;
+                    config.num_queues = num_queues as u16;
+                }
+
+                (disk_nsectors, avail_features, 0, config, false)
             };
-
-            // Calculate the exponent that maps physical block to logical block
-            let mut physical_block_exp = 0;
-            let mut size = logical_block_size;
-            while size < topology.physical_block_size {
-                physical_block_exp += 1;
-                size <<= 1;
-            }
-
-            let disk_nsectors = disk_size / SECTOR_SIZE;
-            let mut config = VirtioBlockConfig {
-                capacity: disk_nsectors,
-                writeback: 1,
-                blk_size: topology.logical_block_size as u32,
-                physical_block_exp,
-                min_io_size: (topology.minimum_io_size / logical_block_size) as u16,
-                opt_io_size: (topology.optimal_io_size / logical_block_size) as u32,
-                ..Default::default()
-            };
-
-            if num_queues > 1 {
-                avail_features |= 1u64 << VIRTIO_BLK_F_MQ;
-                config.num_queues = num_queues as u16;
-            }
-
-            (disk_nsectors, avail_features, 0, config)
-        };
 
         Ok(Block {
             common: VirtioCommon {
@@ -523,6 +525,7 @@ impl Block {
                 paused_sync: Some(Arc::new(Barrier::new(num_queues + 1))),
                 queue_sizes: vec![queue_size; num_queues],
                 min_queues: 1,
+                paused: Arc::new(AtomicBool::new(paused)),
                 ..Default::default()
             },
             id,
