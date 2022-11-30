@@ -178,9 +178,9 @@ impl Rng {
     ) -> io::Result<Rng> {
         let random_file = File::open(path)?;
 
-        let (avail_features, acked_features) = if let Some(state) = state {
+        let (avail_features, acked_features, paused) = if let Some(state) = state {
             info!("Restoring virtio-rng {}", id);
-            (state.avail_features, state.acked_features)
+            (state.avail_features, state.acked_features, true)
         } else {
             let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
 
@@ -188,7 +188,7 @@ impl Rng {
                 avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
             }
 
-            (avail_features, 0)
+            (avail_features, 0, false)
         };
 
         Ok(Rng {
@@ -199,6 +199,7 @@ impl Rng {
                 avail_features,
                 acked_features,
                 min_queues: 1,
+                paused: Arc::new(AtomicBool::new(paused)),
                 ..Default::default()
             },
             id,

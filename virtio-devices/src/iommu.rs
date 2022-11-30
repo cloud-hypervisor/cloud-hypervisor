@@ -879,34 +879,36 @@ impl Iommu {
         msi_iova_space: (u64, u64),
         state: Option<IommuState>,
     ) -> io::Result<(Self, Arc<IommuMapping>)> {
-        let (avail_features, acked_features, endpoints, domains) = if let Some(state) = state {
-            info!("Restoring virtio-iommu {}", id);
-            (
-                state.avail_features,
-                state.acked_features,
-                state.endpoints.into_iter().collect(),
-                state
-                    .domains
-                    .into_iter()
-                    .map(|(k, v)| {
-                        (
-                            k,
-                            Domain {
-                                mappings: v.0.into_iter().collect(),
-                                bypass: v.1,
-                            },
-                        )
-                    })
-                    .collect(),
-            )
-        } else {
-            let avail_features = 1u64 << VIRTIO_F_VERSION_1
-                | 1u64 << VIRTIO_IOMMU_F_MAP_UNMAP
-                | 1u64 << VIRTIO_IOMMU_F_PROBE
-                | 1u64 << VIRTIO_IOMMU_F_BYPASS_CONFIG;
+        let (avail_features, acked_features, endpoints, domains, paused) =
+            if let Some(state) = state {
+                info!("Restoring virtio-iommu {}", id);
+                (
+                    state.avail_features,
+                    state.acked_features,
+                    state.endpoints.into_iter().collect(),
+                    state
+                        .domains
+                        .into_iter()
+                        .map(|(k, v)| {
+                            (
+                                k,
+                                Domain {
+                                    mappings: v.0.into_iter().collect(),
+                                    bypass: v.1,
+                                },
+                            )
+                        })
+                        .collect(),
+                    true,
+                )
+            } else {
+                let avail_features = 1u64 << VIRTIO_F_VERSION_1
+                    | 1u64 << VIRTIO_IOMMU_F_MAP_UNMAP
+                    | 1u64 << VIRTIO_IOMMU_F_PROBE
+                    | 1u64 << VIRTIO_IOMMU_F_BYPASS_CONFIG;
 
-            (avail_features, 0, BTreeMap::new(), BTreeMap::new())
-        };
+                (avail_features, 0, BTreeMap::new(), BTreeMap::new(), false)
+            };
 
         let config = VirtioIommuConfig {
             page_size_mask: VIRTIO_IOMMU_PAGE_SIZE_MASK,
@@ -930,6 +932,7 @@ impl Iommu {
                     acked_features,
                     paused_sync: Some(Arc::new(Barrier::new(2))),
                     min_queues: NUM_QUEUES as u16,
+                    paused: Arc::new(AtomicBool::new(paused)),
                     ..Default::default()
                 },
                 config,

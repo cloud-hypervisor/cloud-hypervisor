@@ -13,6 +13,7 @@ use block_util::VirtioBlockConfig;
 use seccompiler::SeccompAction;
 use std::mem;
 use std::result;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::vec::Vec;
@@ -79,96 +80,102 @@ impl Blk {
         let mut vu =
             VhostUserHandle::connect_vhost_user(false, &vu_cfg.socket, num_queues as u64, false)?;
 
-        let (avail_features, acked_features, acked_protocol_features, vu_num_queues, config) =
-            if let Some(state) = state {
-                info!("Restoring vhost-user-block {}", id);
+        let (
+            avail_features,
+            acked_features,
+            acked_protocol_features,
+            vu_num_queues,
+            config,
+            paused,
+        ) = if let Some(state) = state {
+            info!("Restoring vhost-user-block {}", id);
 
-                vu.set_protocol_features_vhost_user(
-                    state.acked_features,
-                    state.acked_protocol_features,
-                )?;
+            vu.set_protocol_features_vhost_user(
+                state.acked_features,
+                state.acked_protocol_features,
+            )?;
 
-                (
-                    state.avail_features,
-                    state.acked_features,
-                    state.acked_protocol_features,
-                    state.vu_num_queues,
-                    state.config,
-                )
-            } else {
-                // Filling device and vring features VMM supports.
-                let mut avail_features = 1 << VIRTIO_BLK_F_SIZE_MAX
-                    | 1 << VIRTIO_BLK_F_SEG_MAX
-                    | 1 << VIRTIO_BLK_F_GEOMETRY
-                    | 1 << VIRTIO_BLK_F_RO
-                    | 1 << VIRTIO_BLK_F_BLK_SIZE
-                    | 1 << VIRTIO_BLK_F_FLUSH
-                    | 1 << VIRTIO_BLK_F_TOPOLOGY
-                    | 1 << VIRTIO_BLK_F_CONFIG_WCE
-                    | 1 << VIRTIO_BLK_F_DISCARD
-                    | 1 << VIRTIO_BLK_F_WRITE_ZEROES
-                    | DEFAULT_VIRTIO_FEATURES;
+            (
+                state.avail_features,
+                state.acked_features,
+                state.acked_protocol_features,
+                state.vu_num_queues,
+                state.config,
+                true,
+            )
+        } else {
+            // Filling device and vring features VMM supports.
+            let mut avail_features = 1 << VIRTIO_BLK_F_SIZE_MAX
+                | 1 << VIRTIO_BLK_F_SEG_MAX
+                | 1 << VIRTIO_BLK_F_GEOMETRY
+                | 1 << VIRTIO_BLK_F_RO
+                | 1 << VIRTIO_BLK_F_BLK_SIZE
+                | 1 << VIRTIO_BLK_F_FLUSH
+                | 1 << VIRTIO_BLK_F_TOPOLOGY
+                | 1 << VIRTIO_BLK_F_CONFIG_WCE
+                | 1 << VIRTIO_BLK_F_DISCARD
+                | 1 << VIRTIO_BLK_F_WRITE_ZEROES
+                | DEFAULT_VIRTIO_FEATURES;
 
-                if num_queues > 1 {
-                    avail_features |= 1 << VIRTIO_BLK_F_MQ;
-                }
+            if num_queues > 1 {
+                avail_features |= 1 << VIRTIO_BLK_F_MQ;
+            }
 
-                let avail_protocol_features = VhostUserProtocolFeatures::CONFIG
-                    | VhostUserProtocolFeatures::MQ
-                    | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
-                    | VhostUserProtocolFeatures::REPLY_ACK
-                    | VhostUserProtocolFeatures::INFLIGHT_SHMFD
-                    | VhostUserProtocolFeatures::LOG_SHMFD;
+            let avail_protocol_features = VhostUserProtocolFeatures::CONFIG
+                | VhostUserProtocolFeatures::MQ
+                | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
+                | VhostUserProtocolFeatures::REPLY_ACK
+                | VhostUserProtocolFeatures::INFLIGHT_SHMFD
+                | VhostUserProtocolFeatures::LOG_SHMFD;
 
-                let (acked_features, acked_protocol_features) =
-                    vu.negotiate_features_vhost_user(avail_features, avail_protocol_features)?;
+            let (acked_features, acked_protocol_features) =
+                vu.negotiate_features_vhost_user(avail_features, avail_protocol_features)?;
 
-                let backend_num_queues =
-                    if acked_protocol_features & VhostUserProtocolFeatures::MQ.bits() != 0 {
-                        vu.socket_handle()
-                            .get_queue_num()
-                            .map_err(Error::VhostUserGetQueueMaxNum)?
-                            as usize
-                    } else {
-                        DEFAULT_QUEUE_NUMBER
-                    };
+            let backend_num_queues =
+                if acked_protocol_features & VhostUserProtocolFeatures::MQ.bits() != 0 {
+                    vu.socket_handle()
+                        .get_queue_num()
+                        .map_err(Error::VhostUserGetQueueMaxNum)? as usize
+                } else {
+                    DEFAULT_QUEUE_NUMBER
+                };
 
-                if num_queues > backend_num_queues {
-                    error!("vhost-user-blk requested too many queues ({}) since the backend only supports {}\n",
+            if num_queues > backend_num_queues {
+                error!("vhost-user-blk requested too many queues ({}) since the backend only supports {}\n",
                 num_queues, backend_num_queues);
-                    return Err(Error::BadQueueNum);
-                }
+                return Err(Error::BadQueueNum);
+            }
 
-                let config_len = mem::size_of::<VirtioBlockConfig>();
-                let config_space: Vec<u8> = vec![0u8; config_len];
-                let (_, config_space) = vu
-                    .socket_handle()
-                    .get_config(
-                        VHOST_USER_CONFIG_OFFSET,
-                        config_len as u32,
-                        VhostUserConfigFlags::WRITABLE,
-                        config_space.as_slice(),
-                    )
-                    .map_err(Error::VhostUserGetConfig)?;
-                let mut config = VirtioBlockConfig::default();
-                if let Some(backend_config) = VirtioBlockConfig::from_slice(config_space.as_slice())
-                {
-                    config = *backend_config;
-                    config.num_queues = num_queues as u16;
-                }
-
-                (
-                    acked_features,
-                    // If part of the available features that have been acked,
-                    // the PROTOCOL_FEATURES bit must be already set through
-                    // the VIRTIO acked features as we know the guest would
-                    // never ack it, thus the feature would be lost.
-                    acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits(),
-                    acked_protocol_features,
-                    num_queues,
-                    config,
+            let config_len = mem::size_of::<VirtioBlockConfig>();
+            let config_space: Vec<u8> = vec![0u8; config_len];
+            let (_, config_space) = vu
+                .socket_handle()
+                .get_config(
+                    VHOST_USER_CONFIG_OFFSET,
+                    config_len as u32,
+                    VhostUserConfigFlags::WRITABLE,
+                    config_space.as_slice(),
                 )
-            };
+                .map_err(Error::VhostUserGetConfig)?;
+            let mut config = VirtioBlockConfig::default();
+            if let Some(backend_config) = VirtioBlockConfig::from_slice(config_space.as_slice()) {
+                config = *backend_config;
+                config.num_queues = num_queues as u16;
+            }
+
+            (
+                acked_features,
+                // If part of the available features that have been acked,
+                // the PROTOCOL_FEATURES bit must be already set through
+                // the VIRTIO acked features as we know the guest would
+                // never ack it, thus the feature would be lost.
+                acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits(),
+                acked_protocol_features,
+                num_queues,
+                config,
+                false,
+            )
+        };
 
         Ok(Blk {
             common: VirtioCommon {
@@ -178,6 +185,7 @@ impl Blk {
                 acked_features,
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 min_queues: DEFAULT_QUEUE_NUMBER as u16,
+                paused: Arc::new(AtomicBool::new(paused)),
                 ..Default::default()
             },
             vu_common: VhostUserCommon {

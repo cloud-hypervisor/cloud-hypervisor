@@ -451,57 +451,65 @@ impl Net {
 
         let mtu = taps[0].mtu().map_err(Error::TapError)? as u16;
 
-        let (avail_features, acked_features, config, queue_sizes) = if let Some(state) = state {
-            info!("Restoring virtio-net {}", id);
-            (
-                state.avail_features,
-                state.acked_features,
-                state.config,
-                state.queue_size,
-            )
-        } else {
-            let mut avail_features = 1 << VIRTIO_NET_F_CSUM
-                | 1 << VIRTIO_NET_F_CTRL_GUEST_OFFLOADS
-                | 1 << VIRTIO_NET_F_GUEST_CSUM
-                | 1 << VIRTIO_NET_F_GUEST_ECN
-                | 1 << VIRTIO_NET_F_GUEST_TSO4
-                | 1 << VIRTIO_NET_F_GUEST_TSO6
-                | 1 << VIRTIO_NET_F_GUEST_UFO
-                | 1 << VIRTIO_NET_F_HOST_ECN
-                | 1 << VIRTIO_NET_F_HOST_TSO4
-                | 1 << VIRTIO_NET_F_HOST_TSO6
-                | 1 << VIRTIO_NET_F_HOST_UFO
-                | 1 << VIRTIO_NET_F_MTU
-                | 1 << VIRTIO_RING_F_EVENT_IDX
-                | 1 << VIRTIO_F_VERSION_1;
-
-            if iommu {
-                avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
-            }
-
-            avail_features |= 1 << VIRTIO_NET_F_CTRL_VQ;
-            let queue_num = num_queues + 1;
-
-            let mut config = VirtioNetConfig::default();
-            if let Some(mac) = guest_mac {
-                build_net_config_space(
-                    &mut config,
-                    mac,
-                    num_queues,
-                    Some(mtu),
-                    &mut avail_features,
-                );
+        let (avail_features, acked_features, config, queue_sizes, paused) =
+            if let Some(state) = state {
+                info!("Restoring virtio-net {}", id);
+                (
+                    state.avail_features,
+                    state.acked_features,
+                    state.config,
+                    state.queue_size,
+                    true,
+                )
             } else {
-                build_net_config_space_with_mq(
-                    &mut config,
-                    num_queues,
-                    Some(mtu),
-                    &mut avail_features,
-                );
-            }
+                let mut avail_features = 1 << VIRTIO_NET_F_CSUM
+                    | 1 << VIRTIO_NET_F_CTRL_GUEST_OFFLOADS
+                    | 1 << VIRTIO_NET_F_GUEST_CSUM
+                    | 1 << VIRTIO_NET_F_GUEST_ECN
+                    | 1 << VIRTIO_NET_F_GUEST_TSO4
+                    | 1 << VIRTIO_NET_F_GUEST_TSO6
+                    | 1 << VIRTIO_NET_F_GUEST_UFO
+                    | 1 << VIRTIO_NET_F_HOST_ECN
+                    | 1 << VIRTIO_NET_F_HOST_TSO4
+                    | 1 << VIRTIO_NET_F_HOST_TSO6
+                    | 1 << VIRTIO_NET_F_HOST_UFO
+                    | 1 << VIRTIO_NET_F_MTU
+                    | 1 << VIRTIO_RING_F_EVENT_IDX
+                    | 1 << VIRTIO_F_VERSION_1;
 
-            (avail_features, 0, config, vec![queue_size; queue_num])
-        };
+                if iommu {
+                    avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
+                }
+
+                avail_features |= 1 << VIRTIO_NET_F_CTRL_VQ;
+                let queue_num = num_queues + 1;
+
+                let mut config = VirtioNetConfig::default();
+                if let Some(mac) = guest_mac {
+                    build_net_config_space(
+                        &mut config,
+                        mac,
+                        num_queues,
+                        Some(mtu),
+                        &mut avail_features,
+                    );
+                } else {
+                    build_net_config_space_with_mq(
+                        &mut config,
+                        num_queues,
+                        Some(mtu),
+                        &mut avail_features,
+                    );
+                }
+
+                (
+                    avail_features,
+                    0,
+                    config,
+                    vec![queue_size; queue_num],
+                    false,
+                )
+            };
 
         Ok(Net {
             common: VirtioCommon {
@@ -511,6 +519,7 @@ impl Net {
                 queue_sizes,
                 paused_sync: Some(Arc::new(Barrier::new((num_queues / 2) + 1))),
                 min_queues: 2,
+                paused: Arc::new(AtomicBool::new(paused)),
                 ..Default::default()
             },
             id,

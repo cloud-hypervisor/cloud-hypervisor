@@ -12,7 +12,10 @@ use anyhow::anyhow;
 use std::{
     collections::BTreeMap,
     io, result,
-    sync::{atomic::Ordering, Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
 };
 use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeResult};
@@ -134,6 +137,7 @@ impl Vdpa {
             queue_sizes,
             iova_range,
             backend_features,
+            paused,
         ) = if let Some(state) = state {
             info!("Restoring vDPA {}", id);
 
@@ -152,6 +156,7 @@ impl Vdpa {
                     last: state.iova_range_last,
                 },
                 state.backend_features,
+                true,
             )
         } else {
             let device_type = vhost.get_device_id().map_err(Error::GetDeviceId)?;
@@ -175,6 +180,7 @@ impl Vdpa {
                 vec![queue_size; num_queues as usize],
                 iova_range,
                 backend_features,
+                false,
             )
         };
 
@@ -185,6 +191,7 @@ impl Vdpa {
                 avail_features,
                 acked_features,
                 min_queues: num_queues,
+                paused: Arc::new(AtomicBool::new(paused)),
                 ..Default::default()
             },
             id,

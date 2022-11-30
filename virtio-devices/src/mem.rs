@@ -736,10 +736,15 @@ impl Mem {
             ));
         }
 
-        let (avail_features, acked_features, config) = if let Some(state) = state {
+        let (avail_features, acked_features, config, paused) = if let Some(state) = state {
             info!("Restoring virtio-mem {}", id);
             *(blocks_state.lock().unwrap()) = state.blocks_state.clone();
-            (state.avail_features, state.acked_features, state.config)
+            (
+                state.avail_features,
+                state.acked_features,
+                state.config,
+                true,
+            )
         } else {
             let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
 
@@ -779,7 +784,7 @@ impl Mem {
                 )
             })?;
 
-            (avail_features, 0, config)
+            (avail_features, 0, config, false)
         };
 
         let host_fd = region
@@ -794,6 +799,7 @@ impl Mem {
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 queue_sizes: QUEUE_SIZES.to_vec(),
                 min_queues: 1,
+                paused: Arc::new(AtomicBool::new(paused)),
                 ..Default::default()
             },
             id,

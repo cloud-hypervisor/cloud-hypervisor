@@ -16,6 +16,7 @@ use seccompiler::SeccompAction;
 use std::io;
 use std::os::unix::io::AsRawFd;
 use std::result;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use versionize::{VersionMap, Versionize, VersionizeResult};
@@ -333,6 +334,7 @@ impl Fs {
             vu_num_queues,
             config,
             slave_req_support,
+            paused,
         ) = if let Some(state) = state {
             info!("Restoring vhost-user-fs {}", id);
 
@@ -348,6 +350,7 @@ impl Fs {
                 state.vu_num_queues,
                 state.config,
                 state.slave_req_support,
+                true,
             )
         } else {
             // Filling device and vring features VMM supports.
@@ -407,6 +410,7 @@ impl Fs {
                 num_queues,
                 config,
                 slave_req_support,
+                false,
             )
         };
 
@@ -418,6 +422,7 @@ impl Fs {
                 queue_sizes: vec![queue_size; num_queues],
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 min_queues: 1,
+                paused: Arc::new(AtomicBool::new(paused)),
                 ..Default::default()
             },
             vu_common: VhostUserCommon {
