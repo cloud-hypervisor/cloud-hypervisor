@@ -28,7 +28,7 @@ serial_buffer = { path = "../serial_buffer" }
 thiserror = "1.0.37"
 versionize = "0.1.6"
 versionize_derive = "0.1.4"
-vhost = { version = "0.5.0", features = ["vhost-user-master", "vhost-user-slave", "vhost-kern", "vhost-vdpa"] }
+vhost = { version = "0.6.0", features = ["vhost-user-master", "vhost-user-slave", "vhost-kern", "vhost-vdpa"] }
 virtio-bindings = { version = "0.1.0", features = ["virtio-v5_0_0"] }
 virtio-queue = "0.7.0"
 vm-allocator = { path = "../vm-allocator" }
