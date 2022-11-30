@@ -1406,8 +1406,9 @@ dependencies = [
 
 [[package]]
 name = "vhost"
-version = "0.5.0"
-source = "git+https://github.com/rust-vmm/vhost?branch=main#240fc2966cca9ec181cacbec2b7e589eda5aadee"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9b791c5b0717a0558888a4cf7240cea836f39a99cb342e12ce633dcaa078072"
 dependencies = [
  "bitflags",
  "libc",
@@ -1417,8 +1418,9 @@ dependencies = [
 
 [[package]]
 name = "vhost-user-backend"
-version = "0.7.0"
-source = "git+https://github.com/rust-vmm/vhost?branch=main#240fc2966cca9ec181cacbec2b7e589eda5aadee"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f237b91db4ac339d639fb43398b52d785fa51e3c7760ac9425148863c1f4303"
 dependencies = [
  "libc",
  "log",
