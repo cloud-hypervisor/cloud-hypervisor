@@ -2054,10 +2054,12 @@ impl Vm {
         // Configure the vcpus that have been created
         let vcpus = self.cpu_manager.lock().unwrap().vcpus();
         for vcpu in vcpus {
+            let guest_memory = &self.memory_manager.lock().as_ref().unwrap().guest_memory();
+            let boot_setup = entry_point.map(|e| (e, guest_memory));
             self.cpu_manager
                 .lock()
                 .unwrap()
-                .configure_vcpu(vcpu, entry_point)
+                .configure_vcpu(vcpu, boot_setup)
                 .map_err(Error::CpuManager)?;
         }
 

@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
-use vm_memory::{Address, GuestAddress, GuestMemory, GuestUsize};
+use vm_memory::{Address, GuestAddress, GuestMemory, GuestMemoryAtomic, GuestUsize};
 
 /// Errors thrown while configuring aarch64 system.
 #[derive(Debug)]
@@ -64,9 +64,9 @@ pub struct EntryPoint {
 pub fn configure_vcpu(
     vcpu: &Arc<dyn hypervisor::Vcpu>,
     id: u8,
-    kernel_entry_point: Option<EntryPoint>,
+    boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
 ) -> super::Result<u64> {
-    if let Some(kernel_entry_point) = kernel_entry_point {
+    if let Some((kernel_entry_point, _guest_memory)) = boot_setup {
         vcpu.setup_regs(
             id,
             kernel_entry_point.entry_addr.raw_value(),
