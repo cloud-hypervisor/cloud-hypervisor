@@ -308,9 +308,6 @@ pub enum Error {
     #[cfg(feature = "guest_debug")]
     #[error("Error coredumping VM: {0:?}")]
     Coredump(GuestDebuggableError),
-
-    #[error("Failed taking the RwLock")]
-    TryRwLock(#[source] anyhow::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -614,6 +611,12 @@ impl Vm {
             None
         };
 
+        let vm_state = if snapshot.is_some() {
+            VmState::Paused
+        } else {
+            VmState::Created
+        };
+
         Ok(Vm {
             #[cfg(feature = "tdx")]
             kernel,
@@ -623,7 +626,7 @@ impl Vm {
             on_tty,
             threads: Vec::with_capacity(1),
             signals: None,
-            state: RwLock::new(VmState::Created),
+            state: RwLock::new(vm_state),
             cpu_manager,
             memory_manager,
             vm,
@@ -2124,10 +2127,6 @@ impl Vm {
     pub fn restore(&mut self) -> Result<()> {
         event!("vm", "restoring");
 
-        let current_state = self.get_state()?;
-        let new_state = VmState::Paused;
-        current_state.valid_transition(new_state)?;
-
         // Now we can start all vCPUs from here.
         self.cpu_manager
             .lock()
@@ -2137,12 +2136,6 @@ impl Vm {
 
         self.setup_signal_handler()?;
         self.setup_tty()?;
-
-        let mut state = self
-            .state
-            .try_write()
-            .map_err(|e| Error::TryRwLock(anyhow!("Failed taking the lock: {}", e)))?;
-        *state = new_state;
 
         event!("vm", "restored");
         Ok(())
