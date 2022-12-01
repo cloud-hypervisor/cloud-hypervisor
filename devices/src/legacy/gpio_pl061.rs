@@ -162,7 +162,7 @@ impl Gpio {
         //  Missing Output Interrupt Emulation.
 
         // Input Edging Interrupt Emulation.
-        let changed = ((self.old_in_data ^ self.data) & !self.dir) as u32;
+        let changed = (self.old_in_data ^ self.data) & !self.dir;
         if changed > 0 {
             self.old_in_data = self.data;
             for i in 0..N_GPIOS {

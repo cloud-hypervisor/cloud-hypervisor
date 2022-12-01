@@ -1700,8 +1700,8 @@ impl cpu::Vcpu for KvmVcpu {
         // it to the corresponding KVM ID, and call `KVM_GET_ONE_REG` API to
         // get the value of the system parameter.
         //
-        let id: u64 = KVM_REG_ARM64 as u64
-            | KVM_REG_SIZE_U64 as u64
+        let id: u64 = KVM_REG_ARM64
+            | KVM_REG_SIZE_U64
             | KVM_REG_ARM64_SYSREG as u64
             | ((((sys_reg) >> 5)
                 & (KVM_REG_ARM64_SYSREG_OP0_MASK

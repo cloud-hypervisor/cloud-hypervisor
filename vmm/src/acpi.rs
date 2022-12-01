@@ -382,19 +382,19 @@ fn create_gtdt_table() -> Sdt {
     // GTDT
     let mut gtdt = Sdt::new(*b"GTDT", 104, 2, *b"CLOUDH", *b"CHGTDT  ", 1);
     // Secure EL1 Timer GSIV
-    gtdt.write(48, (ARCH_TIMER_S_EL1_IRQ + 16) as u32);
+    gtdt.write(48, ARCH_TIMER_S_EL1_IRQ + 16);
     // Secure EL1 Timer Flags
     gtdt.write(52, irqflags);
     // Non-Secure EL1 Timer GSIV
-    gtdt.write(56, (ARCH_TIMER_NS_EL1_IRQ + 16) as u32);
+    gtdt.write(56, ARCH_TIMER_NS_EL1_IRQ + 16);
     // Non-Secure EL1 Timer Flags
-    gtdt.write(60, (irqflags | ACPI_GTDT_CAP_ALWAYS_ON) as u32);
+    gtdt.write(60, irqflags | ACPI_GTDT_CAP_ALWAYS_ON);
     // Virtual EL1 Timer GSIV
-    gtdt.write(64, (ARCH_TIMER_VIRT_IRQ + 16) as u32);
+    gtdt.write(64, ARCH_TIMER_VIRT_IRQ + 16);
     // Virtual EL1 Timer Flags
     gtdt.write(68, irqflags);
     // EL2 Timer GSIV
-    gtdt.write(72, (ARCH_TIMER_NS_EL2_IRQ + 16) as u32);
+    gtdt.write(72, ARCH_TIMER_NS_EL2_IRQ + 16);
     // EL2 Timer Flags
     gtdt.write(76, irqflags);
 
@@ -414,7 +414,7 @@ fn create_spcr_table(base_address: u64, gsi: u32) -> Sdt {
     // Interrupt Type: Bit[3] ARMH GIC interrupt
     spcr.write(52, (1 << 3) as u8);
     // Global System Interrupt used by the UART
-    spcr.write(54, (gsi as u32).to_le());
+    spcr.write(54, gsi.to_le());
     // Baud Rate: 3 = 9600
     spcr.write(58, 3u8);
     // Stop Bits: 1 Stop bit
@@ -522,7 +522,7 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
     iort.write(40, (48u32).to_le());
 
     // ITS group node
-    iort.write(48, ACPI_IORT_NODE_ITS_GROUP as u8);
+    iort.write(48, ACPI_IORT_NODE_ITS_GROUP);
     // Length of the ITS group node in bytes
     iort.write(49, (24u16).to_le());
     // ITS counts
@@ -532,7 +532,7 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
     for (i, segment) in pci_segments.iter().enumerate() {
         let node_offset: usize =
             ACPI_IORT_NODE_ROOT_COMPLEX_OFFSET + i * ACPI_IORT_NODE_ROOT_COMPLEX_SIZE;
-        iort.write(node_offset, ACPI_IORT_NODE_PCI_ROOT_COMPLEX as u8);
+        iort.write(node_offset, ACPI_IORT_NODE_PCI_ROOT_COMPLEX);
         // Length of the root complex node in bytes
         iort.write(
             node_offset + 1,
