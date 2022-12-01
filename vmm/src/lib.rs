@@ -682,7 +682,7 @@ impl Vmm {
             None,
             None,
             None,
-            Some(snapshot.clone()),
+            Some(snapshot),
             Some(source_url),
             Some(restore_cfg.prefault),
         )?;
@@ -690,7 +690,7 @@ impl Vmm {
 
         // Now we can restore the rest of the VM.
         if let Some(ref mut vm) = self.vm {
-            vm.restore(snapshot).map_err(VmError::Restore)
+            vm.restore()
         } else {
             Err(VmError::VmNotCreated)
         }
@@ -1272,9 +1272,9 @@ impl Vmm {
         })?;
 
         // Create VM
-        vm.restore(snapshot).map_err(|e| {
+        vm.restore().map_err(|e| {
             Response::error().write_to(socket).ok();
-            e
+            MigratableError::MigrateReceive(anyhow!("Failed restoring the Vm: {}", e))
         })?;
         self.vm = Some(vm);
 
