@@ -2290,11 +2290,16 @@ impl Vm {
                 self.write_regs(cpu_id, regs).map_err(Error::Debug)?;
             }
             ReadMem(vaddr, len) => {
-                let mem = self.read_mem(cpu_id, *vaddr, *len).map_err(Error::Debug)?;
+                let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
+                let mem = self
+                    .read_mem(&guest_memory, cpu_id, *vaddr, *len)
+                    .map_err(Error::Debug)?;
                 return Ok(GdbResponsePayload::MemoryRegion(mem));
             }
             WriteMem(vaddr, data) => {
-                self.write_mem(cpu_id, vaddr, data).map_err(Error::Debug)?;
+                let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
+                self.write_mem(&guest_memory, cpu_id, vaddr, data)
+                    .map_err(Error::Debug)?;
             }
             ActiveVcpus => {
                 let active_vcpus = self.active_vcpus();
@@ -2671,6 +2676,7 @@ impl Debuggable for Vm {
 
     fn read_mem(
         &self,
+        guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         cpu_id: usize,
         vaddr: GuestAddress,
         len: usize,
@@ -2678,11 +2684,12 @@ impl Debuggable for Vm {
         self.cpu_manager
             .lock()
             .unwrap()
-            .read_mem(cpu_id, vaddr, len)
+            .read_mem(guest_memory, cpu_id, vaddr, len)
     }
 
     fn write_mem(
         &self,
+        guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         cpu_id: usize,
         vaddr: &GuestAddress,
         data: &[u8],
@@ -2690,7 +2697,7 @@ impl Debuggable for Vm {
         self.cpu_manager
             .lock()
             .unwrap()
-            .write_mem(cpu_id, vaddr, data)
+            .write_mem(guest_memory, cpu_id, vaddr, data)
     }
 
     fn active_vcpus(&self) -> usize {

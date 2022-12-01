@@ -5,6 +5,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+use crate::GuestMemoryMmap;
 use gdbstub::{
     arch::Arch,
     common::{Signal, Tid},
@@ -33,7 +34,7 @@ use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
 #[cfg(target_arch = "x86_64")]
 use gdbstub_arch::x86::X86_64_SSE as GdbArch;
 use std::{os::unix::net::UnixListener, sync::mpsc};
-use vm_memory::{GuestAddress, GuestMemoryError};
+use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryError};
 
 type ArchUsize = u64;
 
@@ -67,12 +68,14 @@ pub trait Debuggable: vm_migration::Pausable {
     ) -> std::result::Result<(), DebuggableError>;
     fn read_mem(
         &self,
+        guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         cpu_id: usize,
         vaddr: GuestAddress,
         len: usize,
     ) -> std::result::Result<Vec<u8>, DebuggableError>;
     fn write_mem(
         &self,
+        guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         cpu_id: usize,
         vaddr: &GuestAddress,
         data: &[u8],

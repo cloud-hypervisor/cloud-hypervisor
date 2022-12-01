@@ -418,8 +418,6 @@ pub struct CpuManager {
     config: CpusConfig,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     interrupt_controller: Option<Arc<Mutex<dyn InterruptController>>>,
-    #[cfg(feature = "guest_debug")]
-    guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
     #[cfg(target_arch = "x86_64")]
     cpuid: Vec<CpuIdEntry>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
@@ -589,7 +587,6 @@ impl CpuManager {
         #[cfg(feature = "tdx")] tdx_enabled: bool,
         numa_nodes: &NumaNodes,
     ) -> Result<Arc<Mutex<CpuManager>>> {
-        let guest_memory = memory_manager.lock().unwrap().guest_memory();
         let mut vcpu_states = Vec::with_capacity(usize::from(config.max_vcpus));
         vcpu_states.resize_with(usize::from(config.max_vcpus), VcpuState::default);
         let hypervisor_type = hypervisor.hypervisor_type();
@@ -680,8 +677,6 @@ impl CpuManager {
             hypervisor_type,
             config: config.clone(),
             interrupt_controller: None,
-            #[cfg(feature = "guest_debug")]
-            guest_memory,
             #[cfg(target_arch = "x86_64")]
             cpuid,
             vm,
@@ -1484,7 +1479,12 @@ impl CpuManager {
     }
 
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-    fn translate_gva(&self, cpu_id: u8, gva: u64) -> Result<u64> {
+    fn translate_gva(
+        &self,
+        _guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+        cpu_id: u8,
+        gva: u64,
+    ) -> Result<u64> {
         let (gpa, _) = self.vcpus[usize::from(cpu_id)]
             .lock()
             .unwrap()
@@ -1511,7 +1511,12 @@ impl CpuManager {
     /// - FEAT_LPA2
     ///
     #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
-    fn translate_gva(&self, cpu_id: u8, gva: u64) -> Result<u64> {
+    fn translate_gva(
+        &self,
+        guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+        cpu_id: u8,
+        gva: u64,
+    ) -> Result<u64> {
         let tcr_el1: u64 = self.vcpus[usize::from(cpu_id)]
             .lock()
             .unwrap()
@@ -1615,7 +1620,7 @@ impl CpuManager {
             descaddr &= !7u64;
 
             let mut buf = [0; 8];
-            self.guest_memory
+            guest_memory
                 .memory()
                 .read(&mut buf, GuestAddress(descaddr))
                 .map_err(|e| Error::TranslateVirtualAddress(e.into()))?;
@@ -2232,6 +2237,7 @@ impl Debuggable for CpuManager {
 
     fn read_mem(
         &self,
+        guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         cpu_id: usize,
         vaddr: GuestAddress,
         len: usize,
@@ -2241,14 +2247,14 @@ impl Debuggable for CpuManager {
 
         while total_read < len as u64 {
             let gaddr = vaddr.0 + total_read;
-            let paddr = match self.translate_gva(cpu_id as u8, gaddr) {
+            let paddr = match self.translate_gva(guest_memory, cpu_id as u8, gaddr) {
                 Ok(paddr) => paddr,
                 Err(_) if gaddr == u64::MIN => gaddr, // Silently return GVA as GPA if GVA == 0.
                 Err(e) => return Err(DebuggableError::TranslateGva(e)),
             };
             let psize = arch::PAGE_SIZE as u64;
             let read_len = std::cmp::min(len as u64 - total_read, psize - (paddr & (psize - 1)));
-            self.guest_memory
+            guest_memory
                 .memory()
                 .read(
                     &mut buf[total_read as usize..total_read as usize + read_len as usize],
@@ -2262,6 +2268,7 @@ impl Debuggable for CpuManager {
 
     fn write_mem(
         &self,
+        guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         cpu_id: usize,
         vaddr: &GuestAddress,
         data: &[u8],
@@ -2270,7 +2277,7 @@ impl Debuggable for CpuManager {
 
         while total_written < data.len() as u64 {
             let gaddr = vaddr.0 + total_written;
-            let paddr = match self.translate_gva(cpu_id as u8, gaddr) {
+            let paddr = match self.translate_gva(guest_memory, cpu_id as u8, gaddr) {
                 Ok(paddr) => paddr,
                 Err(_) if gaddr == u64::MIN => gaddr, // Silently return GVA as GPA if GVA == 0.
                 Err(e) => return Err(DebuggableError::TranslateGva(e)),
@@ -2280,7 +2287,7 @@ impl Debuggable for CpuManager {
                 data.len() as u64 - total_written,
                 psize - (paddr & (psize - 1)),
             );
-            self.guest_memory
+            guest_memory
                 .memory()
                 .write(
                     &data[total_written as usize..total_written as usize + write_len as usize],
