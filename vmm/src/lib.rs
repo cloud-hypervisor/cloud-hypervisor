@@ -584,6 +584,9 @@ impl Vmm {
                         None,
                         None,
                         None,
+                        None,
+                        None,
+                        None,
                     )?;
 
                     self.vm = Some(vm);
@@ -667,18 +670,21 @@ impl Vmm {
             .try_clone()
             .map_err(VmError::EventFdClone)?;
 
-        let vm = Vm::new_from_snapshot(
-            &snapshot,
+        let vm = Vm::new(
             vm_config,
             exit_evt,
             reset_evt,
             #[cfg(feature = "guest_debug")]
             debug_evt,
-            Some(source_url),
-            restore_cfg.prefault,
             &self.seccomp_action,
             self.hypervisor.clone(),
             activate_evt,
+            None,
+            None,
+            None,
+            Some(snapshot.clone()),
+            Some(source_url),
+            Some(restore_cfg.prefault),
         )?;
         self.vm = Some(vm);
 
@@ -756,6 +762,9 @@ impl Vmm {
             serial_pty,
             console_pty,
             console_resize_pipe,
+            None,
+            None,
+            None,
         )?;
 
         // And we boot it
