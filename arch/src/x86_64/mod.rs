@@ -742,8 +742,7 @@ pub fn generate_common_cpuid(
 pub fn configure_vcpu(
     vcpu: &Arc<dyn hypervisor::Vcpu>,
     id: u8,
-    kernel_entry_point: Option<EntryPoint>,
-    vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+    boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
     cpuid: Vec<CpuIdEntry>,
     kvm_hyperv: bool,
 ) -> super::Result<()> {
@@ -760,12 +759,12 @@ pub fn configure_vcpu(
     }
 
     regs::setup_msrs(vcpu).map_err(Error::MsrsConfiguration)?;
-    if let Some(kernel_entry_point) = kernel_entry_point {
+    if let Some((kernel_entry_point, guest_memory)) = boot_setup {
         if let Some(entry_addr) = kernel_entry_point.entry_addr {
             // Safe to unwrap because this method is called after the VM is configured
             regs::setup_regs(vcpu, entry_addr.raw_value()).map_err(Error::RegsConfiguration)?;
             regs::setup_fpu(vcpu).map_err(Error::FpuConfiguration)?;
-            regs::setup_sregs(&vm_memory.memory(), vcpu).map_err(Error::SregsConfiguration)?;
+            regs::setup_sregs(&guest_memory.memory(), vcpu).map_err(Error::SregsConfiguration)?;
         }
     }
     interrupts::set_lint(vcpu).map_err(|e| Error::LocalIntConfiguration(e.into()))?;

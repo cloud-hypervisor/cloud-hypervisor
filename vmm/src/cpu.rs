@@ -329,28 +329,20 @@ impl Vcpu {
     pub fn configure(
         &mut self,
         #[cfg(target_arch = "aarch64")] vm: &Arc<dyn hypervisor::Vm>,
-        kernel_entry_point: Option<EntryPoint>,
-        #[cfg(target_arch = "x86_64")] guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+        boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
         #[cfg(target_arch = "x86_64")] cpuid: Vec<CpuIdEntry>,
         #[cfg(target_arch = "x86_64")] kvm_hyperv: bool,
     ) -> Result<()> {
         #[cfg(target_arch = "aarch64")]
         {
             self.init(vm)?;
-            self.mpidr = arch::configure_vcpu(&self.vcpu, self.id, kernel_entry_point)
+            self.mpidr = arch::configure_vcpu(&self.vcpu, self.id, boot_setup)
                 .map_err(Error::VcpuConfiguration)?;
         }
         info!("Configuring vCPU: cpu_id = {}", self.id);
         #[cfg(target_arch = "x86_64")]
-        arch::configure_vcpu(
-            &self.vcpu,
-            self.id,
-            kernel_entry_point,
-            guest_memory,
-            cpuid,
-            kvm_hyperv,
-        )
-        .map_err(Error::VcpuConfiguration)?;
+        arch::configure_vcpu(&self.vcpu, self.id, boot_setup, cpuid, kvm_hyperv)
+            .map_err(Error::VcpuConfiguration)?;
 
         Ok(())
     }
@@ -426,7 +418,7 @@ pub struct CpuManager {
     config: CpusConfig,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     interrupt_controller: Option<Arc<Mutex<dyn InterruptController>>>,
-    #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
+    #[cfg(feature = "guest_debug")]
     guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
     #[cfg(target_arch = "x86_64")]
     cpuid: Vec<CpuIdEntry>,
@@ -688,6 +680,7 @@ impl CpuManager {
             hypervisor_type,
             config: config.clone(),
             interrupt_controller: None,
+            #[cfg(feature = "guest_debug")]
             guest_memory,
             #[cfg(target_arch = "x86_64")]
             cpuid,
@@ -741,21 +734,16 @@ impl CpuManager {
     pub fn configure_vcpu(
         &self,
         vcpu: Arc<Mutex<Vcpu>>,
-        entry_point: Option<EntryPoint>,
+        boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
     ) -> Result<()> {
         let mut vcpu = vcpu.lock().unwrap();
 
         #[cfg(target_arch = "x86_64")]
-        vcpu.configure(
-            entry_point,
-            &self.guest_memory,
-            self.cpuid.clone(),
-            self.config.kvm_hyperv,
-        )
-        .expect("Failed to configure vCPU");
+        vcpu.configure(boot_setup, self.cpuid.clone(), self.config.kvm_hyperv)
+            .expect("Failed to configure vCPU");
 
         #[cfg(target_arch = "aarch64")]
-        vcpu.configure(&self.vm, entry_point)
+        vcpu.configure(&self.vm, boot_setup)
             .expect("Failed to configure vCPU");
 
         Ok(())
