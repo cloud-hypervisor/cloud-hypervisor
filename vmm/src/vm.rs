@@ -526,13 +526,12 @@ impl Vm {
         let cpus_config = { &config.lock().unwrap().cpus.clone() };
         let cpu_manager = cpu::CpuManager::new(
             cpus_config,
-            &memory_manager,
             vm.clone(),
             exit_evt.try_clone().map_err(Error::EventFdClone)?,
             reset_evt.try_clone().map_err(Error::EventFdClone)?,
             #[cfg(feature = "guest_debug")]
             vm_debug_evt,
-            hypervisor.clone(),
+            &hypervisor,
             seccomp_action.clone(),
             vm_ops,
             #[cfg(feature = "tdx")]
@@ -540,6 +539,18 @@ impl Vm {
             &numa_nodes,
         )
         .map_err(Error::CpuManager)?;
+
+        #[cfg(target_arch = "x86_64")]
+        cpu_manager
+            .lock()
+            .unwrap()
+            .populate_cpuid(
+                &memory_manager,
+                &hypervisor,
+                #[cfg(feature = "tdx")]
+                tdx_enabled,
+            )
+            .map_err(Error::CpuManager)?;
 
         cpu_manager
             .lock()
@@ -2466,7 +2477,7 @@ impl Snapshottable for Vm {
         let common_cpuid = {
             let phys_bits = physical_bits(self.config.lock().unwrap().cpus.max_phys_bits);
             arch::generate_common_cpuid(
-                self.hypervisor.clone(),
+                &self.hypervisor,
                 None,
                 None,
                 phys_bits,

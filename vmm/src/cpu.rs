@@ -20,6 +20,7 @@ use crate::coredump::{
 };
 #[cfg(feature = "guest_debug")]
 use crate::gdb::{get_raw_tid, Debuggable, DebuggableError};
+#[cfg(target_arch = "x86_64")]
 use crate::memory_manager::MemoryManager;
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 #[cfg(target_arch = "x86_64")]
@@ -576,12 +577,11 @@ impl CpuManager {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: &CpusConfig,
-        memory_manager: &Arc<Mutex<MemoryManager>>,
         vm: Arc<dyn hypervisor::Vm>,
         exit_evt: EventFd,
         reset_evt: EventFd,
         #[cfg(feature = "guest_debug")] vm_debug_evt: EventFd,
-        hypervisor: Arc<dyn hypervisor::Hypervisor>,
+        hypervisor: &Arc<dyn hypervisor::Hypervisor>,
         seccomp_action: SeccompAction,
         vm_ops: Arc<dyn VmOps>,
         #[cfg(feature = "tdx")] tdx_enabled: bool,
@@ -591,30 +591,6 @@ impl CpuManager {
         vcpu_states.resize_with(usize::from(config.max_vcpus), VcpuState::default);
         let hypervisor_type = hypervisor.hypervisor_type();
 
-        #[cfg(target_arch = "x86_64")]
-        let sgx_epc_sections = memory_manager
-            .lock()
-            .unwrap()
-            .sgx_epc_region()
-            .as_ref()
-            .map(|sgx_epc_region| sgx_epc_region.epc_sections().values().cloned().collect());
-        #[cfg(target_arch = "x86_64")]
-        let cpuid = {
-            let phys_bits = physical_bits(config.max_phys_bits);
-            arch::generate_common_cpuid(
-                hypervisor,
-                config
-                    .topology
-                    .clone()
-                    .map(|t| (t.threads_per_core, t.cores_per_die, t.dies_per_package)),
-                sgx_epc_sections,
-                phys_bits,
-                config.kvm_hyperv,
-                #[cfg(feature = "tdx")]
-                tdx_enabled,
-            )
-            .map_err(Error::CommonCpuId)?
-        };
         #[cfg(target_arch = "x86_64")]
         if config.features.amx {
             const ARCH_GET_XCOMP_GUEST_PERM: usize = 0x1024;
@@ -678,7 +654,7 @@ impl CpuManager {
             config: config.clone(),
             interrupt_controller: None,
             #[cfg(target_arch = "x86_64")]
-            cpuid,
+            cpuid: Vec::new(),
             vm,
             vcpus_kill_signalled: Arc::new(AtomicBool::new(false)),
             vcpus_pause_signalled: Arc::new(AtomicBool::new(false)),
@@ -696,6 +672,39 @@ impl CpuManager {
             affinity,
             dynamic,
         })))
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    pub fn populate_cpuid(
+        &mut self,
+        memory_manager: &Arc<Mutex<MemoryManager>>,
+        hypervisor: &Arc<dyn hypervisor::Hypervisor>,
+        #[cfg(feature = "tdx")] tdx_enabled: bool,
+    ) -> Result<()> {
+        let sgx_epc_sections = memory_manager
+            .lock()
+            .unwrap()
+            .sgx_epc_region()
+            .as_ref()
+            .map(|sgx_epc_region| sgx_epc_region.epc_sections().values().cloned().collect());
+        self.cpuid = {
+            let phys_bits = physical_bits(self.config.max_phys_bits);
+            arch::generate_common_cpuid(
+                hypervisor,
+                self.config
+                    .topology
+                    .clone()
+                    .map(|t| (t.threads_per_core, t.cores_per_die, t.dies_per_package)),
+                sgx_epc_sections,
+                phys_bits,
+                self.config.kvm_hyperv,
+                #[cfg(feature = "tdx")]
+                tdx_enabled,
+            )
+            .map_err(Error::CommonCpuId)?
+        };
+
+        Ok(())
     }
 
     fn create_vcpu(&mut self, cpu_id: u8, snapshot: Option<Snapshot>) -> Result<Arc<Mutex<Vcpu>>> {
@@ -732,6 +741,9 @@ impl CpuManager {
         boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
     ) -> Result<()> {
         let mut vcpu = vcpu.lock().unwrap();
+
+        #[cfg(target_arch = "x86_64")]
+        assert!(!self.cpuid.is_empty());
 
         #[cfg(target_arch = "x86_64")]
         vcpu.configure(boot_setup, self.cpuid.clone(), self.config.kvm_hyperv)
@@ -1200,6 +1212,7 @@ impl CpuManager {
 
     #[cfg(target_arch = "x86_64")]
     pub fn common_cpuid(&self) -> Vec<CpuIdEntry> {
+        assert!(!self.cpuid.is_empty());
         self.cpuid.clone()
     }
 

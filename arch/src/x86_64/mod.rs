@@ -547,7 +547,7 @@ impl CpuidFeatureEntry {
 }
 
 pub fn generate_common_cpuid(
-    hypervisor: Arc<dyn hypervisor::Hypervisor>,
+    hypervisor: &Arc<dyn hypervisor::Hypervisor>,
     topology: Option<(u8, u8, u8)>,
     sgx_epc_sections: Option<Vec<SgxEpcSection>>,
     phys_bits: u8,

@@ -1506,7 +1506,7 @@ impl Vmm {
         let common_cpuid = {
             let phys_bits = vm::physical_bits(vm_config.lock().unwrap().cpus.max_phys_bits);
             arch::generate_common_cpuid(
-                hypervisor,
+                &hypervisor,
                 None,
                 None,
                 phys_bits,
@@ -1696,7 +1696,7 @@ impl Vmm {
 
             let phys_bits = vm::physical_bits(vm_config.cpus.max_phys_bits);
             arch::generate_common_cpuid(
-                self.hypervisor.clone(),
+                &self.hypervisor.clone(),
                 None,
                 None,
                 phys_bits,
