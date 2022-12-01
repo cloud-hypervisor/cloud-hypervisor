@@ -476,6 +476,9 @@ impl Vm {
         activate_evt: EventFd,
         restoring: bool,
         timestamp: Instant,
+        serial_pty: Option<PtyPair>,
+        console_pty: Option<PtyPair>,
+        console_resize_pipe: Option<File>,
         snapshot: Option<&Snapshot>,
     ) -> Result<Self> {
         trace_scoped!("Vm::new_from_memory_manager");
@@ -572,6 +575,12 @@ impl Vm {
             dynamic,
         )
         .map_err(Error::DeviceManager)?;
+
+        device_manager
+            .lock()
+            .unwrap()
+            .create_devices(serial_pty, console_pty, console_resize_pipe)
+            .map_err(Error::DeviceManager)?;
 
         // SAFETY: trivially safe
         let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO) } != 0;
@@ -754,7 +763,7 @@ impl Vm {
         )
         .map_err(Error::MemoryManager)?;
 
-        let new_vm = Vm::new_from_memory_manager(
+        Vm::new_from_memory_manager(
             config,
             memory_manager,
             vm,
@@ -767,18 +776,11 @@ impl Vm {
             activate_evt,
             false,
             timestamp,
+            serial_pty,
+            console_pty,
+            console_resize_pipe,
             None,
-        )?;
-
-        // The device manager must create the devices from here as it is part
-        // of the regular code path creating everything from scratch.
-        new_vm
-            .device_manager
-            .lock()
-            .unwrap()
-            .create_devices(serial_pty, console_pty, console_resize_pipe)
-            .map_err(Error::DeviceManager)?;
-        Ok(new_vm)
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -834,6 +836,9 @@ impl Vm {
             activate_evt,
             true,
             timestamp,
+            None,
+            None,
+            None,
             Some(snapshot),
         )
     }
@@ -2618,12 +2623,6 @@ impl Snapshottable for Vm {
         current_state.valid_transition(new_state).map_err(|e| {
             MigratableError::Restore(anyhow!("Could not restore VM state: {:#?}", e))
         })?;
-
-        self.device_manager
-            .lock()
-            .unwrap()
-            .create_devices(None, None, None)
-            .map_err(|e| MigratableError::Restore(anyhow!("Error restoring devices: {:#?}", e)))?;
 
         #[cfg(target_arch = "aarch64")]
         self.restore_vgic_and_enable_interrupt(&_snapshot)?;

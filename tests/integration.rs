@@ -5846,11 +5846,19 @@ mod common_parallel {
                 device_id: None,
             },
             &MetaEvent {
+                event: "activated".to_string(),
+                device_id: Some("__console".to_string()),
+            },
+            &MetaEvent {
+                event: "activated".to_string(),
+                device_id: Some("__rng".to_string()),
+            },
+            &MetaEvent {
                 event: "restoring".to_string(),
                 device_id: None,
             },
         ];
-        assert!(check_sequential_events_exact(
+        assert!(check_sequential_events(
             &expected_events,
             &event_path_restored
         ));
