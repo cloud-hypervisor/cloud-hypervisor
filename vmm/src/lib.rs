@@ -1260,7 +1260,6 @@ impl Vmm {
             &self.seccomp_action,
             self.hypervisor.clone(),
             activate_evt,
-            true,
             timestamp,
             None,
             None,

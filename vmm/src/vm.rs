@@ -475,7 +475,6 @@ impl Vm {
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         activate_evt: EventFd,
-        restoring: bool,
         timestamp: Instant,
         serial_pty: Option<PtyPair>,
         console_pty: Option<PtyPair>,
@@ -490,7 +489,7 @@ impl Vm {
             .validate()
             .map_err(Error::ConfigValidation)?;
 
-        let load_payload_handle = if !restoring {
+        let load_payload_handle = if snapshot.is_none() {
             Self::load_payload_async(&memory_manager, &config)?
         } else {
             None
@@ -796,7 +795,6 @@ impl Vm {
             seccomp_action,
             hypervisor,
             activate_evt,
-            snapshot.is_some(),
             timestamp,
             serial_pty,
             console_pty,
