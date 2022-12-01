@@ -854,7 +854,7 @@ impl MemoryManager {
         let uefi_mem_region = self.vm.make_user_memory_region(
             uefi_mem_slot,
             uefi_region.start_addr().raw_value(),
-            uefi_region.len() as u64,
+            uefi_region.len(),
             uefi_region.as_ptr() as u64,
             false,
             false,

@@ -108,7 +108,7 @@ pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, Region
 
     // RAM space
     // Case1: guest memory fits before the gap
-    if size as u64 <= ram_32bit_space_size {
+    if size <= ram_32bit_space_size {
         regions.push((layout::RAM_START, size as usize, RegionType::Ram));
     // Case2: guest memory extends beyond the gap
     } else {
@@ -231,7 +231,7 @@ mod tests {
             layout::MEM_32BIT_RESERVED_START.unchecked_offset_from(layout::RAM_START) as usize;
         assert_eq!(6, regions.len());
         assert_eq!(layout::RAM_START, regions[3].0);
-        assert_eq!(ram_32bit_space_size as usize, regions[3].1);
+        assert_eq!(ram_32bit_space_size, regions[3].1);
         assert_eq!(RegionType::Ram, regions[3].2);
         assert_eq!(RegionType::Reserved, regions[5].2);
         assert_eq!(RegionType::Ram, regions[4].2);

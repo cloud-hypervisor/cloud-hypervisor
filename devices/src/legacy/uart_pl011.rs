@@ -533,10 +533,10 @@ mod tests {
             None,
         );
 
-        pl011.write(0, UARTDR as u64, &[b'x', b'y']);
-        pl011.write(0, UARTDR as u64, &[b'a']);
-        pl011.write(0, UARTDR as u64, &[b'b']);
-        pl011.write(0, UARTDR as u64, &[b'c']);
+        pl011.write(0, UARTDR, &[b'x', b'y']);
+        pl011.write(0, UARTDR, &[b'a']);
+        pl011.write(0, UARTDR, &[b'b']);
+        pl011.write(0, UARTDR, &[b'c']);
         assert_eq!(
             pl011_out.buf.lock().unwrap().as_slice(),
             &[b'x', b'a', b'b', b'c']
@@ -563,11 +563,11 @@ mod tests {
         assert_eq!(intr_evt.read().unwrap(), 2);
 
         let mut data = [0u8];
-        pl011.read(0, UARTDR as u64, &mut data);
+        pl011.read(0, UARTDR, &mut data);
         assert_eq!(data[0], b'a');
-        pl011.read(0, UARTDR as u64, &mut data);
+        pl011.read(0, UARTDR, &mut data);
         assert_eq!(data[0], b'b');
-        pl011.read(0, UARTDR as u64, &mut data);
+        pl011.read(0, UARTDR, &mut data);
         assert_eq!(data[0], b'c');
     }
 }
