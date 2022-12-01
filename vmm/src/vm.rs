@@ -308,6 +308,9 @@ pub enum Error {
     #[cfg(feature = "guest_debug")]
     #[error("Error coredumping VM: {0:?}")]
     Coredump(GuestDebuggableError),
+
+    #[error("Failed taking the RwLock")]
+    TryRwLock(#[source] anyhow::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -2120,6 +2123,33 @@ impl Vm {
         Ok(())
     }
 
+    pub fn restore(&mut self) -> Result<()> {
+        event!("vm", "restoring");
+
+        let current_state = self.get_state()?;
+        let new_state = VmState::Paused;
+        current_state.valid_transition(new_state)?;
+
+        // Now we can start all vCPUs from here.
+        self.cpu_manager
+            .lock()
+            .unwrap()
+            .start_restored_vcpus()
+            .map_err(Error::CpuManager)?;
+
+        self.setup_signal_handler()?;
+        self.setup_tty()?;
+
+        let mut state = self
+            .state
+            .try_write()
+            .map_err(|e| Error::TryRwLock(anyhow!("Failed taking the lock: {}", e)))?;
+        *state = new_state;
+
+        event!("vm", "restored");
+        Ok(())
+    }
+
     /// Gets a thread-safe reference counted pointer to the VM configuration.
     pub fn get_config(&self) -> Arc<Mutex<VmConfig>> {
         Arc::clone(&self.config)
@@ -2492,42 +2522,6 @@ impl Snapshottable for Vm {
 
         event!("vm", "snapshotted");
         Ok(vm_snapshot)
-    }
-
-    fn restore(&mut self, _snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        event!("vm", "restoring");
-
-        let current_state = self
-            .get_state()
-            .map_err(|e| MigratableError::Restore(anyhow!("Could not get VM state: {:#?}", e)))?;
-        let new_state = VmState::Paused;
-        current_state.valid_transition(new_state).map_err(|e| {
-            MigratableError::Restore(anyhow!("Could not restore VM state: {:#?}", e))
-        })?;
-
-        // Now we can start all vCPUs from here.
-        self.cpu_manager
-            .lock()
-            .unwrap()
-            .start_restored_vcpus()
-            .map_err(|e| {
-                MigratableError::Restore(anyhow!("Cannot start restored vCPUs: {:#?}", e))
-            })?;
-
-        self.setup_signal_handler().map_err(|e| {
-            MigratableError::Restore(anyhow!("Could not setup signal handler: {:#?}", e))
-        })?;
-        self.setup_tty()
-            .map_err(|e| MigratableError::Restore(anyhow!("Could not setup tty: {:#?}", e)))?;
-
-        let mut state = self
-            .state
-            .try_write()
-            .map_err(|e| MigratableError::Restore(anyhow!("Could not set VM state: {:#?}", e)))?;
-        *state = new_state;
-
-        event!("vm", "restored");
-        Ok(())
     }
 }
 

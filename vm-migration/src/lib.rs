@@ -264,11 +264,6 @@ pub trait Snapshottable: Pausable {
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         Ok(Snapshot::new(""))
     }
-
-    /// Restore a component from its snapshot.
-    fn restore(&mut self, _snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        Ok(())
-    }
 }
 
 /// A transportable component can be sent or receive to a specific URL.
