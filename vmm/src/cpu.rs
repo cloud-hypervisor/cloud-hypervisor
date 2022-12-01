@@ -324,13 +324,13 @@ impl Vcpu {
     /// # Arguments
     ///
     /// * `kernel_entry_point` - Kernel entry point address in guest memory and boot protocol used.
-    /// * `vm_memory` - Guest memory.
+    /// * `guest_memory` - Guest memory.
     /// * `cpuid` - (x86_64) CpuId, wrapper over the `kvm_cpuid2` structure.
     pub fn configure(
         &mut self,
         #[cfg(target_arch = "aarch64")] vm: &Arc<dyn hypervisor::Vm>,
         kernel_entry_point: Option<EntryPoint>,
-        #[cfg(target_arch = "x86_64")] vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+        #[cfg(target_arch = "x86_64")] guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         #[cfg(target_arch = "x86_64")] cpuid: Vec<CpuIdEntry>,
         #[cfg(target_arch = "x86_64")] kvm_hyperv: bool,
     ) -> Result<()> {
@@ -346,7 +346,7 @@ impl Vcpu {
             &self.vcpu,
             self.id,
             kernel_entry_point,
-            vm_memory,
+            guest_memory,
             cpuid,
             kvm_hyperv,
         )
@@ -427,7 +427,7 @@ pub struct CpuManager {
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     interrupt_controller: Option<Arc<Mutex<dyn InterruptController>>>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
-    vm_memory: GuestMemoryAtomic<GuestMemoryMmap>,
+    guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
     #[cfg(target_arch = "x86_64")]
     cpuid: Vec<CpuIdEntry>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
@@ -688,7 +688,7 @@ impl CpuManager {
             hypervisor_type,
             config: config.clone(),
             interrupt_controller: None,
-            vm_memory: guest_memory,
+            guest_memory,
             #[cfg(target_arch = "x86_64")]
             cpuid,
             vm,
@@ -748,7 +748,7 @@ impl CpuManager {
         #[cfg(target_arch = "x86_64")]
         vcpu.configure(
             entry_point,
-            &self.vm_memory,
+            &self.guest_memory,
             self.cpuid.clone(),
             self.config.kvm_hyperv,
         )
@@ -1627,7 +1627,7 @@ impl CpuManager {
             descaddr &= !7u64;
 
             let mut buf = [0; 8];
-            self.vm_memory
+            self.guest_memory
                 .memory()
                 .read(&mut buf, GuestAddress(descaddr))
                 .map_err(|e| Error::TranslateVirtualAddress(e.into()))?;
@@ -2260,7 +2260,7 @@ impl Debuggable for CpuManager {
             };
             let psize = arch::PAGE_SIZE as u64;
             let read_len = std::cmp::min(len as u64 - total_read, psize - (paddr & (psize - 1)));
-            self.vm_memory
+            self.guest_memory
                 .memory()
                 .read(
                     &mut buf[total_read as usize..total_read as usize + read_len as usize],
@@ -2292,7 +2292,7 @@ impl Debuggable for CpuManager {
                 data.len() as u64 - total_written,
                 psize - (paddr & (psize - 1)),
             );
-            self.vm_memory
+            self.guest_memory
                 .memory()
                 .write(
                     &data[total_written as usize..total_written as usize + write_len as usize],
