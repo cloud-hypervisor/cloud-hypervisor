@@ -67,7 +67,7 @@ impl Gic {
     pub fn restore_vgic(
         &mut self,
         state: Option<GicState>,
-        saved_vcpu_states: &Vec<CpuState>,
+        saved_vcpu_states: &[CpuState],
     ) -> Result<()> {
         self.set_gicr_typers(saved_vcpu_states);
         self.vgic
