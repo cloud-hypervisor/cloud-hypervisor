@@ -1264,7 +1264,7 @@ impl Vmm {
             None,
             None,
             None,
-            Some(&snapshot),
+            Some(snapshot),
         )
         .map_err(|e| {
             MigratableError::MigrateReceive(anyhow!("Error creating VM from snapshot: {:?}", e))

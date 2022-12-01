@@ -479,7 +479,7 @@ impl Vm {
         serial_pty: Option<PtyPair>,
         console_pty: Option<PtyPair>,
         console_resize_pipe: Option<File>,
-        snapshot: Option<&Snapshot>,
+        snapshot: Option<Snapshot>,
     ) -> Result<Self> {
         trace_scoped!("Vm::new_from_memory_manager");
 
@@ -546,7 +546,7 @@ impl Vm {
         cpu_manager
             .lock()
             .unwrap()
-            .create_boot_vcpus(snapshot_from_id(snapshot, CPU_MANAGER_SNAPSHOT_ID))
+            .create_boot_vcpus(snapshot_from_id(snapshot.as_ref(), CPU_MANAGER_SNAPSHOT_ID))
             .map_err(Error::CpuManager)?;
 
         #[cfg(feature = "tdx")]
@@ -571,7 +571,7 @@ impl Vm {
             force_iommu,
             boot_id_list,
             timestamp,
-            snapshot_from_id(snapshot, DEVICE_MANAGER_SNAPSHOT_ID),
+            snapshot_from_id(snapshot.as_ref(), DEVICE_MANAGER_SNAPSHOT_ID),
             dynamic,
         )
         .map_err(Error::DeviceManager)?;
@@ -799,7 +799,7 @@ impl Vm {
             serial_pty,
             console_pty,
             console_resize_pipe,
-            snapshot.as_ref(),
+            snapshot,
         )
     }
 
