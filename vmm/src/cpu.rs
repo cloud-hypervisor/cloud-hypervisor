@@ -746,12 +746,10 @@ impl CpuManager {
         assert!(!self.cpuid.is_empty());
 
         #[cfg(target_arch = "x86_64")]
-        vcpu.configure(boot_setup, self.cpuid.clone(), self.config.kvm_hyperv)
-            .expect("Failed to configure vCPU");
+        vcpu.configure(boot_setup, self.cpuid.clone(), self.config.kvm_hyperv)?;
 
         #[cfg(target_arch = "aarch64")]
-        vcpu.configure(&self.vm, boot_setup)
-            .expect("Failed to configure vCPU");
+        vcpu.configure(&self.vm, boot_setup)?;
 
         Ok(())
     }
