@@ -28,6 +28,8 @@ use crate::gdb::{Debuggable, DebuggableError, GdbRequestPayload, GdbResponsePayl
 use crate::memory_manager::{
     Error as MemoryManagerError, MemoryManager, MemoryManagerSnapshotData,
 };
+#[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+use crate::migration::get_vm_snapshot;
 #[cfg(feature = "guest_debug")]
 use crate::migration::url_to_file;
 use crate::migration::{url_to_path, SNAPSHOT_CONFIG_FILE, SNAPSHOT_STATE_FILE};
@@ -595,6 +597,14 @@ impl Vm {
             .transpose()
             .map_err(Error::InitramfsFile)?;
 
+        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+        let saved_clock = if let Some(snapshot) = snapshot.as_ref() {
+            let vm_snapshot = get_vm_snapshot(snapshot).map_err(Error::Restore)?;
+            vm_snapshot.clock
+        } else {
+            None
+        };
+
         Ok(Vm {
             #[cfg(feature = "tdx")]
             kernel,
@@ -609,7 +619,7 @@ impl Vm {
             memory_manager,
             vm,
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-            saved_clock: None,
+            saved_clock,
             numa_nodes,
             seccomp_action: seccomp_action.clone(),
             exit_evt,
@@ -2159,18 +2169,6 @@ impl Vm {
             .map(|state| *state)
     }
 
-    /// Load saved clock from snapshot
-    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-    pub fn load_clock_from_snapshot(
-        &mut self,
-        snapshot: &Snapshot,
-    ) -> Result<Option<hypervisor::ClockData>> {
-        use crate::migration::get_vm_snapshot;
-        let vm_snapshot = get_vm_snapshot(snapshot).map_err(Error::Restore)?;
-        self.saved_clock = vm_snapshot.clock;
-        Ok(self.saved_clock)
-    }
-
     #[cfg(target_arch = "aarch64")]
     /// Add the vGIC section to the VM snapshot.
     fn add_vgic_snapshot_section(
@@ -2620,10 +2618,6 @@ impl Snapshottable for Vm {
         current_state.valid_transition(new_state).map_err(|e| {
             MigratableError::Restore(anyhow!("Could not restore VM state: {:#?}", e))
         })?;
-
-        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-        self.load_clock_from_snapshot(&_snapshot)
-            .map_err(|e| MigratableError::Restore(anyhow!("Error restoring clock: {:?}", e)))?;
 
         self.device_manager
             .lock()
