@@ -1253,6 +1253,9 @@ impl Vmm {
             activate_evt,
             true,
             timestamp,
+            None,
+            None,
+            None,
             Some(&snapshot),
         )
         .map_err(|e| {
