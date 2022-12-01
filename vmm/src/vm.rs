@@ -720,7 +720,7 @@ impl Vm {
 
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        config: Arc<Mutex<VmConfig>>,
+        vm_config: Arc<Mutex<VmConfig>>,
         exit_evt: EventFd,
         reset_evt: EventFd,
         #[cfg(feature = "guest_debug")] vm_debug_evt: EventFd,
@@ -730,13 +730,20 @@ impl Vm {
         serial_pty: Option<PtyPair>,
         console_pty: Option<PtyPair>,
         console_resize_pipe: Option<File>,
+        snapshot: Option<Snapshot>,
+        source_url: Option<&str>,
+        prefault: Option<bool>,
     ) -> Result<Self> {
         trace_scoped!("Vm::new");
 
         let timestamp = Instant::now();
 
         #[cfg(feature = "tdx")]
-        let tdx_enabled = config.lock().unwrap().is_tdx_enabled();
+        let tdx_enabled = if snapshot.is_some() {
+            false
+        } else {
+            vm_config.lock().unwrap().is_tdx_enabled()
+        };
 
         let vm = Self::create_hypervisor_vm(
             &hypervisor,
@@ -744,83 +751,37 @@ impl Vm {
             tdx_enabled,
         )?;
 
-        let phys_bits = physical_bits(config.lock().unwrap().cpus.max_phys_bits);
+        let phys_bits = physical_bits(vm_config.lock().unwrap().cpus.max_phys_bits);
 
-        #[cfg(target_arch = "x86_64")]
-        let sgx_epc_config = config.lock().unwrap().sgx_epc.clone();
-
-        let memory_manager = MemoryManager::new(
-            vm.clone(),
-            &config.lock().unwrap().memory.clone(),
-            None,
-            phys_bits,
-            #[cfg(feature = "tdx")]
-            tdx_enabled,
-            None,
-            None,
-            #[cfg(target_arch = "x86_64")]
-            sgx_epc_config,
-        )
-        .map_err(Error::MemoryManager)?;
-
-        Vm::new_from_memory_manager(
-            config,
-            memory_manager,
-            vm,
-            exit_evt,
-            reset_evt,
-            #[cfg(feature = "guest_debug")]
-            vm_debug_evt,
-            seccomp_action,
-            hypervisor,
-            activate_evt,
-            false,
-            timestamp,
-            serial_pty,
-            console_pty,
-            console_resize_pipe,
-            None,
-        )
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn new_from_snapshot(
-        snapshot: &Snapshot,
-        vm_config: Arc<Mutex<VmConfig>>,
-        exit_evt: EventFd,
-        reset_evt: EventFd,
-        #[cfg(feature = "guest_debug")] vm_debug_evt: EventFd,
-        source_url: Option<&str>,
-        prefault: bool,
-        seccomp_action: &SeccompAction,
-        hypervisor: Arc<dyn hypervisor::Hypervisor>,
-        activate_evt: EventFd,
-    ) -> Result<Self> {
-        let timestamp = Instant::now();
-
-        let vm = Self::create_hypervisor_vm(
-            &hypervisor,
-            #[cfg(feature = "tdx")]
-            false,
-        )?;
-
-        let memory_manager = if let Some(memory_manager_snapshot) =
-            snapshot.snapshots.get(MEMORY_MANAGER_SNAPSHOT_ID)
+        let memory_manager = if let Some(snapshot) =
+            snapshot_from_id(snapshot.as_ref(), MEMORY_MANAGER_SNAPSHOT_ID)
         {
-            let phys_bits = physical_bits(vm_config.lock().unwrap().cpus.max_phys_bits);
             MemoryManager::new_from_snapshot(
-                memory_manager_snapshot,
+                &snapshot,
                 vm.clone(),
                 &vm_config.lock().unwrap().memory.clone(),
                 source_url,
-                prefault,
+                prefault.unwrap(),
                 phys_bits,
             )
             .map_err(Error::MemoryManager)?
         } else {
-            return Err(Error::Restore(MigratableError::Restore(anyhow!(
-                "Missing memory manager snapshot"
-            ))));
+            #[cfg(target_arch = "x86_64")]
+            let sgx_epc_config = vm_config.lock().unwrap().sgx_epc.clone();
+
+            MemoryManager::new(
+                vm.clone(),
+                &vm_config.lock().unwrap().memory.clone(),
+                None,
+                phys_bits,
+                #[cfg(feature = "tdx")]
+                tdx_enabled,
+                None,
+                None,
+                #[cfg(target_arch = "x86_64")]
+                sgx_epc_config,
+            )
+            .map_err(Error::MemoryManager)?
         };
 
         Vm::new_from_memory_manager(
@@ -834,12 +795,12 @@ impl Vm {
             seccomp_action,
             hypervisor,
             activate_evt,
-            true,
+            snapshot.is_some(),
             timestamp,
-            None,
-            None,
-            None,
-            Some(snapshot),
+            serial_pty,
+            console_pty,
+            console_resize_pipe,
+            snapshot.as_ref(),
         )
     }
 
