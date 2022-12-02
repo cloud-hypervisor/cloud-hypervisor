@@ -6,7 +6,7 @@ edition = "2021"
 
 [dependencies]
 block_util = { path = "../block_util" }
-clap = { version = "4.0.27", features = ["wrap_help","cargo"] }
+clap = { version = "4.0.29", features = ["wrap_help","cargo"] }
 env_logger = "0.9.3"
 epoll = "4.3.1"
 libc = "0.2.137"
@@ -21,4 +21,4 @@ vm-memory = "0.10.0"
 vmm-sys-util = "0.11.0"
 
 [build-dependencies]
-clap = { version = "4.0.27", features = ["cargo"] }
+clap = { version = "4.0.29", features = ["cargo"] }
