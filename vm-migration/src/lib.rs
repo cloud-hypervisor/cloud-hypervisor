@@ -80,10 +80,7 @@ pub trait Pausable {
 /// Splitting a component migration data into different sections
 /// allows for easier and forward compatible extensions.
 #[derive(Clone, Default, Deserialize, Serialize)]
-pub struct SnapshotDataSection {
-    /// The section serialized snapshot.
-    pub snapshot: Vec<u8>,
-}
+pub struct SnapshotDataSection(pub Vec<u8>);
 
 impl SnapshotDataSection {
     /// Generate the state data from the snapshot data
@@ -91,7 +88,7 @@ impl SnapshotDataSection {
     where
         T: Deserialize<'a>,
     {
-        serde_json::from_slice(&self.snapshot)
+        serde_json::from_slice(&self.0)
             .map_err(|e| MigratableError::Restore(anyhow!("Error deserialising: {}", e)))
     }
 
@@ -100,12 +97,8 @@ impl SnapshotDataSection {
     where
         T: Versionize + VersionMapped,
     {
-        T::deserialize(
-            &mut self.snapshot.as_slice(),
-            &T::version_map(),
-            VMM_VERSION,
-        )
-        .map_err(|e| MigratableError::Restore(anyhow!("Error deserialising: {}", e)))
+        T::deserialize(&mut self.0.as_slice(), &T::version_map(), VMM_VERSION)
+            .map_err(|e| MigratableError::Restore(anyhow!("Error deserialising: {}", e)))
     }
 
     /// Create from state that can be serialized
@@ -113,10 +106,10 @@ impl SnapshotDataSection {
     where
         T: Serialize,
     {
-        let snapshot = serde_json::to_vec(state)
+        let data = serde_json::to_vec(state)
             .map_err(|e| MigratableError::Snapshot(anyhow!("Error serialising: {}", e)))?;
 
-        let snapshot_data = SnapshotDataSection { snapshot };
+        let snapshot_data = SnapshotDataSection(data);
 
         Ok(snapshot_data)
     }
@@ -126,12 +119,12 @@ impl SnapshotDataSection {
     where
         T: Versionize + VersionMapped,
     {
-        let mut snapshot = Vec::new();
+        let mut data = Vec::new();
         state
-            .serialize(&mut snapshot, &T::version_map(), VMM_VERSION)
+            .serialize(&mut data, &T::version_map(), VMM_VERSION)
             .map_err(|e| MigratableError::Snapshot(anyhow!("Error serialising: {}", e)))?;
 
-        let snapshot_data = SnapshotDataSection { snapshot };
+        let snapshot_data = SnapshotDataSection(data);
 
         Ok(snapshot_data)
     }
