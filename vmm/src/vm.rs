@@ -2522,7 +2522,6 @@ impl Snapshottable for Vm {
 
         vm_snapshot.add_snapshot(self.device_manager.lock().unwrap().snapshot()?);
         vm_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", VM_SNAPSHOT_ID),
             snapshot: vm_snapshot_data,
         });
 

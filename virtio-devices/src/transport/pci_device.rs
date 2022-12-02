@@ -522,7 +522,7 @@ impl VirtioPciDevice {
 
         let state: Option<VirtioPciDeviceState> = snapshot
             .as_ref()
-            .map(|s| s.to_versioned_state(&id))
+            .map(|s| s.to_versioned_state())
             .transpose()
             .map_err(|e| {
                 VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(

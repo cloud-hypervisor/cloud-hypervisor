@@ -81,9 +81,6 @@ pub trait Pausable {
 /// allows for easier and forward compatible extensions.
 #[derive(Clone, Default, Deserialize, Serialize)]
 pub struct SnapshotDataSection {
-    /// The section id.
-    pub id: String,
-
     /// The section serialized snapshot.
     pub snapshot: Vec<u8>,
 }
@@ -94,9 +91,8 @@ impl SnapshotDataSection {
     where
         T: Deserialize<'a>,
     {
-        serde_json::from_slice(&self.snapshot).map_err(|e| {
-            MigratableError::Restore(anyhow!("Error deserialising: {} {}", self.id, e))
-        })
+        serde_json::from_slice(&self.snapshot)
+            .map_err(|e| MigratableError::Restore(anyhow!("Error deserialising: {}", e)))
     }
 
     /// Generate versioned state
@@ -109,39 +105,33 @@ impl SnapshotDataSection {
             &T::version_map(),
             VMM_VERSION,
         )
-        .map_err(|e| MigratableError::Restore(anyhow!("Error deserialising: {} {}", self.id, e)))
+        .map_err(|e| MigratableError::Restore(anyhow!("Error deserialising: {}", e)))
     }
 
     /// Create from state that can be serialized
-    pub fn new_from_state<T>(id: &str, state: &T) -> Result<Self, MigratableError>
+    pub fn new_from_state<T>(state: &T) -> Result<Self, MigratableError>
     where
         T: Serialize,
     {
         let snapshot = serde_json::to_vec(state)
-            .map_err(|e| MigratableError::Snapshot(anyhow!("Error serialising: {} {}", id, e)))?;
+            .map_err(|e| MigratableError::Snapshot(anyhow!("Error serialising: {}", e)))?;
 
-        let snapshot_data = SnapshotDataSection {
-            id: format!("{}-section", id),
-            snapshot,
-        };
+        let snapshot_data = SnapshotDataSection { snapshot };
 
         Ok(snapshot_data)
     }
 
     /// Create from versioned state
-    pub fn new_from_versioned_state<T>(id: &str, state: &T) -> Result<Self, MigratableError>
+    pub fn new_from_versioned_state<T>(state: &T) -> Result<Self, MigratableError>
     where
         T: Versionize + VersionMapped,
     {
         let mut snapshot = Vec::new();
         state
             .serialize(&mut snapshot, &T::version_map(), VMM_VERSION)
-            .map_err(|e| MigratableError::Snapshot(anyhow!("Error serialising: {} {}", id, e)))?;
+            .map_err(|e| MigratableError::Snapshot(anyhow!("Error serialising: {}", e)))?;
 
-        let snapshot_data = SnapshotDataSection {
-            id: format!("{}-section", id),
-            snapshot,
-        };
+        let snapshot_data = SnapshotDataSection { snapshot };
 
         Ok(snapshot_data)
     }
@@ -168,7 +158,7 @@ pub struct Snapshot {
 
     /// The Snapshottable component's snapshot data.
     /// A map of snapshot sections, indexed by the section ids.
-    pub snapshot_data: std::collections::HashMap<String, SnapshotDataSection>,
+    pub snapshot_data: Option<SnapshotDataSection>,
 }
 
 impl Snapshot {
@@ -186,7 +176,7 @@ impl Snapshot {
         T: Serialize,
     {
         let mut snapshot_data = Snapshot::new(id);
-        snapshot_data.add_data_section(SnapshotDataSection::new_from_state(id, state)?);
+        snapshot_data.add_data_section(SnapshotDataSection::new_from_state(state)?);
 
         Ok(snapshot_data)
     }
@@ -197,7 +187,7 @@ impl Snapshot {
         T: Versionize + VersionMapped,
     {
         let mut snapshot_data = Snapshot::new(id);
-        snapshot_data.add_data_section(SnapshotDataSection::new_from_versioned_state(id, state)?);
+        snapshot_data.add_data_section(SnapshotDataSection::new_from_versioned_state(state)?);
 
         Ok(snapshot_data)
     }
@@ -210,28 +200,28 @@ impl Snapshot {
 
     /// Add a SnapshotDatasection to the component snapshot data.
     pub fn add_data_section(&mut self, section: SnapshotDataSection) {
-        self.snapshot_data.insert(section.id.clone(), section);
+        self.snapshot_data = Some(section);
     }
 
     /// Generate the state data from the snapshot
-    pub fn to_state<'a, T>(&'a self, id: &str) -> Result<T, MigratableError>
+    pub fn to_state<'a, T>(&'a self) -> Result<T, MigratableError>
     where
         T: Deserialize<'a>,
     {
         self.snapshot_data
-            .get(&format!("{}-section", id))
-            .ok_or_else(|| MigratableError::Restore(anyhow!("Missing section for {}", id)))?
+            .as_ref()
+            .ok_or_else(|| MigratableError::Restore(anyhow!("Missing snapshot data")))?
             .to_state()
     }
 
     /// Generate versioned state
-    pub fn to_versioned_state<T>(&self, id: &str) -> Result<T, MigratableError>
+    pub fn to_versioned_state<T>(&self) -> Result<T, MigratableError>
     where
         T: Versionize + VersionMapped,
     {
         self.snapshot_data
-            .get(&format!("{}-section", id))
-            .ok_or_else(|| MigratableError::Restore(anyhow!("Missing section for {}", id)))?
+            .as_ref()
+            .ok_or_else(|| MigratableError::Restore(anyhow!("Missing snapshot data")))?
             .to_versioned_state()
     }
 }
@@ -249,7 +239,7 @@ where
 {
     snapshot
         .and_then(|s| s.snapshots.get(id).map(|s| *s.clone()))
-        .map(|s| s.to_versioned_state(id))
+        .map(|s| s.to_versioned_state())
         .transpose()
 }
 
