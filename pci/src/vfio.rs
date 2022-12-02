@@ -465,7 +465,7 @@ impl VfioCommon {
 
         let state: Option<VfioCommonState> = snapshot
             .as_ref()
-            .map(|s| s.to_versioned_state(VFIO_COMMON_ID))
+            .map(|s| s.to_versioned_state())
             .transpose()
             .map_err(|e| {
                 VfioPciError::RetrieveVfioCommonState(anyhow!(

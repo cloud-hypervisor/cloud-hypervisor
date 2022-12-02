@@ -403,10 +403,7 @@ impl Snapshottable for Vcpu {
         // TODO: The special format of the CPU id can be removed once ready to
         // break live upgrade.
         let mut vcpu_snapshot = Snapshot::new(&format!("{:03}", self.id));
-        vcpu_snapshot.add_data_section(SnapshotDataSection::new_from_state(
-            VCPU_SNAPSHOT_ID,
-            &saved_state,
-        )?);
+        vcpu_snapshot.add_data_section(SnapshotDataSection::new_from_state(&saved_state)?);
 
         self.saved_state = Some(saved_state);
 
@@ -717,7 +714,7 @@ impl CpuManager {
             #[cfg(target_arch = "aarch64")]
             vcpu.init(&self.vm)?;
 
-            let state: CpuState = snapshot.to_state(VCPU_SNAPSHOT_ID).map_err(|e| {
+            let state: CpuState = snapshot.to_state().map_err(|e| {
                 Error::VcpuCreate(anyhow!("Could not get vCPU state from snapshot {:?}", e))
             })?;
             vcpu.vcpu

@@ -1160,9 +1160,8 @@ impl MemoryManager {
             let mut memory_file_path = url_to_path(source_url).map_err(Error::Restore)?;
             memory_file_path.push(String::from(SNAPSHOT_FILENAME));
 
-            let mem_snapshot: MemoryManagerSnapshotData = snapshot
-                .to_versioned_state(MEMORY_MANAGER_SNAPSHOT_ID)
-                .map_err(Error::Restore)?;
+            let mem_snapshot: MemoryManagerSnapshotData =
+                snapshot.to_versioned_state().map_err(Error::Restore)?;
 
             let mm = MemoryManager::new(
                 vm,
@@ -2444,7 +2443,6 @@ impl Snapshottable for MemoryManager {
         self.snapshot_memory_ranges = memory_ranges;
 
         memory_manager_snapshot.add_data_section(SnapshotDataSection::new_from_versioned_state(
-            MEMORY_MANAGER_SNAPSHOT_ID,
             &self.snapshot_data(),
         )?);
 

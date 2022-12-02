@@ -973,7 +973,7 @@ impl DeviceManager {
         trace_scoped!("DeviceManager::new");
 
         let (device_tree, device_id_cnt) = if let Some(snapshot) = snapshot.as_ref() {
-            let state: DeviceManagerState = snapshot.to_state(DEVICE_MANAGER_SNAPSHOT_ID).unwrap();
+            let state: DeviceManagerState = snapshot.to_state().unwrap();
             (
                 Arc::new(Mutex::new(state.device_tree.clone())),
                 state.device_id_cnt,
@@ -1396,7 +1396,7 @@ impl DeviceManager {
             }
 
             let vgic_state = vgic_snapshot
-                .to_state(&id)
+                .to_state()
                 .map_err(DeviceManagerError::RestoreGetState)?;
             let saved_vcpu_states = self.cpu_manager.lock().unwrap().get_saved_states();
             interrupt_controller
@@ -2157,7 +2157,7 @@ impl DeviceManager {
                         .map_err(DeviceManagerError::EventFd)?,
                     self.force_iommu,
                     snapshot
-                        .map(|s| s.to_versioned_state(&id))
+                        .map(|s| s.to_versioned_state())
                         .transpose()
                         .map_err(DeviceManagerError::RestoreGetState)?,
                 ) {
@@ -2256,7 +2256,7 @@ impl DeviceManager {
                         .try_clone()
                         .map_err(DeviceManagerError::EventFd)?,
                     snapshot
-                        .map(|s| s.to_versioned_state(&id))
+                        .map(|s| s.to_versioned_state())
                         .transpose()
                         .map_err(DeviceManagerError::RestoreGetState)?,
                 )
@@ -2339,7 +2339,7 @@ impl DeviceManager {
                         .map_err(DeviceManagerError::EventFd)?,
                     self.force_iommu,
                     snapshot
-                        .map(|s| s.to_versioned_state(&id))
+                        .map(|s| s.to_versioned_state())
                         .transpose()
                         .map_err(DeviceManagerError::RestoreGetState)?,
                 ) {
@@ -2356,7 +2356,7 @@ impl DeviceManager {
             )
         } else {
             let state = snapshot
-                .map(|s| s.to_versioned_state(&id))
+                .map(|s| s.to_versioned_state())
                 .transpose()
                 .map_err(DeviceManagerError::RestoreGetState)?;
 
@@ -4463,10 +4463,7 @@ impl Snapshottable for DeviceManager {
         }
 
         // Then we store the DeviceManager state.
-        snapshot.add_data_section(SnapshotDataSection::new_from_state(
-            DEVICE_MANAGER_SNAPSHOT_ID,
-            &self.state(),
-        )?);
+        snapshot.add_data_section(SnapshotDataSection::new_from_state(&self.state())?);
 
         Ok(snapshot)
     }
