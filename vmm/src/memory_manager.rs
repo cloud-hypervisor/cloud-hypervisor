@@ -2428,8 +2428,6 @@ impl Snapshottable for MemoryManager {
     }
 
     fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
-        let mut memory_manager_snapshot = Snapshot::default();
-
         let memory_ranges = self.memory_range_table(true)?;
 
         // Store locally this list of ranges as it will be used through the
@@ -2442,11 +2440,9 @@ impl Snapshottable for MemoryManager {
         // memory range content for the ranges requiring it.
         self.snapshot_memory_ranges = memory_ranges;
 
-        memory_manager_snapshot.add_data(SnapshotData::new_from_versioned_state(
+        Ok(Snapshot::from_data(SnapshotData::new_from_versioned_state(
             &self.snapshot_data(),
-        )?);
-
-        Ok(memory_manager_snapshot)
+        )?))
     }
 }
 

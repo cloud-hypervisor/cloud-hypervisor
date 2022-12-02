@@ -148,15 +148,19 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
+    pub fn from_data(data: SnapshotData) -> Self {
+        Snapshot {
+            snapshot_data: Some(data),
+            ..Default::default()
+        }
+    }
+
     /// Create from state that can be serialized
     pub fn new_from_state<T>(state: &T) -> Result<Self, MigratableError>
     where
         T: Serialize,
     {
-        let mut snapshot_data = Snapshot::default();
-        snapshot_data.add_data(SnapshotData::new_from_state(state)?);
-
-        Ok(snapshot_data)
+        Ok(Snapshot::from_data(SnapshotData::new_from_state(state)?))
     }
 
     /// Create from versioned state
@@ -164,20 +168,14 @@ impl Snapshot {
     where
         T: Versionize + VersionMapped,
     {
-        let mut snapshot_data = Snapshot::default();
-        snapshot_data.add_data(SnapshotData::new_from_versioned_state(state)?);
-
-        Ok(snapshot_data)
+        Ok(Snapshot::from_data(SnapshotData::new_from_versioned_state(
+            state,
+        )?))
     }
 
     /// Add a sub-component's Snapshot to the Snapshot.
     pub fn add_snapshot(&mut self, id: String, snapshot: Snapshot) {
         self.snapshots.insert(id, snapshot);
-    }
-
-    /// Add a SnapshotData to the component snapshot data.
-    pub fn add_data(&mut self, section: SnapshotData) {
-        self.snapshot_data = Some(section);
     }
 
     /// Generate the state data from the snapshot

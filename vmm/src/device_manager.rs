@@ -4445,7 +4445,7 @@ impl Snapshottable for DeviceManager {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        let mut snapshot = Snapshot::default();
+        let mut snapshot = Snapshot::from_data(SnapshotData::new_from_state(&self.state())?);
 
         // We aggregate all devices snapshots.
         for (_, device_node) in self.device_tree.lock().unwrap().iter() {
@@ -4454,9 +4454,6 @@ impl Snapshottable for DeviceManager {
                 snapshot.add_snapshot(migratable.id(), migratable.snapshot()?);
             }
         }
-
-        // Then we store the DeviceManager state.
-        snapshot.add_data(SnapshotData::new_from_state(&self.state())?);
 
         Ok(snapshot)
     }
