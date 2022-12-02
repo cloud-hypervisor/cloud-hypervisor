@@ -52,7 +52,7 @@ use vm_memory::{
 };
 use vm_migration::{
     protocol::MemoryRange, protocol::MemoryRangeTable, Migratable, MigratableError, Pausable,
-    Snapshot, SnapshotDataSection, Snapshottable, Transportable, VersionMapped,
+    Snapshot, SnapshotData, Snapshottable, Transportable, VersionMapped,
 };
 
 pub const MEMORY_MANAGER_ACPI_SIZE: usize = 0x18;
@@ -2442,7 +2442,7 @@ impl Snapshottable for MemoryManager {
         // memory range content for the ranges requiring it.
         self.snapshot_memory_ranges = memory_ranges;
 
-        memory_manager_snapshot.add_data_section(SnapshotDataSection::new_from_versioned_state(
+        memory_manager_snapshot.add_data_section(SnapshotData::new_from_versioned_state(
             &self.snapshot_data(),
         )?);
 
