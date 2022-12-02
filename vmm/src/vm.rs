@@ -2524,9 +2524,7 @@ impl Snapshottable for Vm {
         vm_snapshot.add_snapshot(self.memory_manager.lock().unwrap().snapshot()?);
 
         vm_snapshot.add_snapshot(self.device_manager.lock().unwrap().snapshot()?);
-        vm_snapshot.add_data_section(SnapshotDataSection {
-            snapshot: vm_snapshot_data,
-        });
+        vm_snapshot.add_data_section(SnapshotDataSection(vm_snapshot_data));
 
         event!("vm", "snapshotted");
         Ok(vm_snapshot)
