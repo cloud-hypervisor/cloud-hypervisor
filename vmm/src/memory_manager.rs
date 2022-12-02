@@ -2442,7 +2442,7 @@ impl Snapshottable for MemoryManager {
         // memory range content for the ranges requiring it.
         self.snapshot_memory_ranges = memory_ranges;
 
-        memory_manager_snapshot.add_data_section(SnapshotData::new_from_versioned_state(
+        memory_manager_snapshot.add_data(SnapshotData::new_from_versioned_state(
             &self.snapshot_data(),
         )?);
 

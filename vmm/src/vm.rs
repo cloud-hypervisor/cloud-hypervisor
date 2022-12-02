@@ -2532,7 +2532,7 @@ impl Snapshottable for Vm {
             (device_manager.id(), device_manager.snapshot()?)
         };
         vm_snapshot.add_snapshot(id, snapshot);
-        vm_snapshot.add_data_section(SnapshotData(vm_snapshot_data));
+        vm_snapshot.add_data(SnapshotData(vm_snapshot_data));
 
         event!("vm", "snapshotted");
         Ok(vm_snapshot)
