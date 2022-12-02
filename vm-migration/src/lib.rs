@@ -109,9 +109,7 @@ impl SnapshotData {
         let data = serde_json::to_vec(state)
             .map_err(|e| MigratableError::Snapshot(anyhow!("Error serialising: {}", e)))?;
 
-        let snapshot_data = SnapshotData(data);
-
-        Ok(snapshot_data)
+        Ok(SnapshotData(data))
     }
 
     /// Create from versioned state
@@ -124,9 +122,7 @@ impl SnapshotData {
             .serialize(&mut data, &T::version_map(), VMM_VERSION)
             .map_err(|e| MigratableError::Snapshot(anyhow!("Error serialising: {}", e)))?;
 
-        let snapshot_data = SnapshotData(data);
-
-        Ok(snapshot_data)
+        Ok(SnapshotData(data))
     }
 }
 
