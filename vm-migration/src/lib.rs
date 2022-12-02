@@ -147,7 +147,7 @@ pub struct Snapshot {
     pub id: String,
 
     /// The Snapshottable component snapshots.
-    pub snapshots: std::collections::BTreeMap<String, Box<Snapshot>>,
+    pub snapshots: std::collections::BTreeMap<String, Snapshot>,
 
     /// The Snapshottable component's snapshot data.
     /// A map of snapshot sections, indexed by the section ids.
@@ -187,8 +187,7 @@ impl Snapshot {
 
     /// Add a sub-component's Snapshot to the Snapshot.
     pub fn add_snapshot(&mut self, snapshot: Snapshot) {
-        self.snapshots
-            .insert(snapshot.id.clone(), Box::new(snapshot));
+        self.snapshots.insert(snapshot.id.clone(), snapshot);
     }
 
     /// Add a SnapshotData to the component snapshot data.
@@ -220,7 +219,7 @@ impl Snapshot {
 }
 
 pub fn snapshot_from_id(snapshot: Option<&Snapshot>, id: &str) -> Option<Snapshot> {
-    snapshot.and_then(|s| s.snapshots.get(id).map(|s| *s.clone()))
+    snapshot.and_then(|s| s.snapshots.get(id).cloned())
 }
 
 pub fn versioned_state_from_id<T>(
@@ -231,7 +230,7 @@ where
     T: Versionize + VersionMapped,
 {
     snapshot
-        .and_then(|s| s.snapshots.get(id).map(|s| *s.clone()))
+        .and_then(|s| s.snapshots.get(id).cloned())
         .map(|s| s.to_versioned_state())
         .transpose()
 }
