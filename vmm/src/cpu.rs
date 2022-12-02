@@ -400,7 +400,7 @@ impl Snapshottable for Vcpu {
             .map_err(|e| MigratableError::Pause(anyhow!("Could not get vCPU state {:?}", e)))?;
 
         let mut vcpu_snapshot = Snapshot::default();
-        vcpu_snapshot.add_data_section(SnapshotData::new_from_state(&saved_state)?);
+        vcpu_snapshot.add_data(SnapshotData::new_from_state(&saved_state)?);
 
         self.saved_state = Some(saved_state);
 

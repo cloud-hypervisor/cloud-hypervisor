@@ -4463,7 +4463,7 @@ impl Snapshottable for DeviceManager {
         }
 
         // Then we store the DeviceManager state.
-        snapshot.add_data_section(SnapshotData::new_from_state(&self.state())?);
+        snapshot.add_data(SnapshotData::new_from_state(&self.state())?);
 
         Ok(snapshot)
     }

@@ -154,7 +154,7 @@ impl Snapshot {
         T: Serialize,
     {
         let mut snapshot_data = Snapshot::default();
-        snapshot_data.add_data_section(SnapshotData::new_from_state(state)?);
+        snapshot_data.add_data(SnapshotData::new_from_state(state)?);
 
         Ok(snapshot_data)
     }
@@ -165,7 +165,7 @@ impl Snapshot {
         T: Versionize + VersionMapped,
     {
         let mut snapshot_data = Snapshot::default();
-        snapshot_data.add_data_section(SnapshotData::new_from_versioned_state(state)?);
+        snapshot_data.add_data(SnapshotData::new_from_versioned_state(state)?);
 
         Ok(snapshot_data)
     }
@@ -176,7 +176,7 @@ impl Snapshot {
     }
 
     /// Add a SnapshotData to the component snapshot data.
-    pub fn add_data_section(&mut self, section: SnapshotData) {
+    pub fn add_data(&mut self, section: SnapshotData) {
         self.snapshot_data = Some(section);
     }
 
