@@ -80,9 +80,9 @@ pub trait Pausable {
 /// Splitting a component migration data into different sections
 /// allows for easier and forward compatible extensions.
 #[derive(Clone, Default, Deserialize, Serialize)]
-pub struct SnapshotDataSection(pub Vec<u8>);
+pub struct SnapshotData(pub Vec<u8>);
 
-impl SnapshotDataSection {
+impl SnapshotData {
     /// Generate the state data from the snapshot data
     pub fn to_state<'a, T>(&'a self) -> Result<T, MigratableError>
     where
@@ -109,7 +109,7 @@ impl SnapshotDataSection {
         let data = serde_json::to_vec(state)
             .map_err(|e| MigratableError::Snapshot(anyhow!("Error serialising: {}", e)))?;
 
-        let snapshot_data = SnapshotDataSection(data);
+        let snapshot_data = SnapshotData(data);
 
         Ok(snapshot_data)
     }
@@ -124,7 +124,7 @@ impl SnapshotDataSection {
             .serialize(&mut data, &T::version_map(), VMM_VERSION)
             .map_err(|e| MigratableError::Snapshot(anyhow!("Error serialising: {}", e)))?;
 
-        let snapshot_data = SnapshotDataSection(data);
+        let snapshot_data = SnapshotData(data);
 
         Ok(snapshot_data)
     }
@@ -139,7 +139,7 @@ impl SnapshotDataSection {
 /// For example, a device manager snapshot is the composition of all its
 /// devices snapshots. The device manager Snapshot would have no snapshot_data
 /// but one Snapshot child per tracked device. Then each device's Snapshot
-/// would carry an empty snapshots map but a map of SnapshotDataSection, i.e.
+/// would carry an empty snapshots map but a map of SnapshotData, i.e.
 /// the actual device snapshot data.
 #[derive(Clone, Default, Deserialize, Serialize)]
 pub struct Snapshot {
@@ -151,7 +151,7 @@ pub struct Snapshot {
 
     /// The Snapshottable component's snapshot data.
     /// A map of snapshot sections, indexed by the section ids.
-    pub snapshot_data: Option<SnapshotDataSection>,
+    pub snapshot_data: Option<SnapshotData>,
 }
 
 impl Snapshot {
@@ -169,7 +169,7 @@ impl Snapshot {
         T: Serialize,
     {
         let mut snapshot_data = Snapshot::new(id);
-        snapshot_data.add_data_section(SnapshotDataSection::new_from_state(state)?);
+        snapshot_data.add_data_section(SnapshotData::new_from_state(state)?);
 
         Ok(snapshot_data)
     }
@@ -180,7 +180,7 @@ impl Snapshot {
         T: Versionize + VersionMapped,
     {
         let mut snapshot_data = Snapshot::new(id);
-        snapshot_data.add_data_section(SnapshotDataSection::new_from_versioned_state(state)?);
+        snapshot_data.add_data_section(SnapshotData::new_from_versioned_state(state)?);
 
         Ok(snapshot_data)
     }
@@ -191,8 +191,8 @@ impl Snapshot {
             .insert(snapshot.id.clone(), Box::new(snapshot));
     }
 
-    /// Add a SnapshotDatasection to the component snapshot data.
-    pub fn add_data_section(&mut self, section: SnapshotDataSection) {
+    /// Add a SnapshotData to the component snapshot data.
+    pub fn add_data_section(&mut self, section: SnapshotData) {
         self.snapshot_data = Some(section);
     }
 

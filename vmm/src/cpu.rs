@@ -77,8 +77,8 @@ use vm_memory::ByteValued;
 use vm_memory::{Bytes, GuestAddressSpace};
 use vm_memory::{GuestAddress, GuestMemoryAtomic};
 use vm_migration::{
-    snapshot_from_id, Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection,
-    Snapshottable, Transportable,
+    snapshot_from_id, Migratable, MigratableError, Pausable, Snapshot, SnapshotData, Snapshottable,
+    Transportable,
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::{register_signal_handler, SIGRTMIN};
@@ -403,7 +403,7 @@ impl Snapshottable for Vcpu {
         // TODO: The special format of the CPU id can be removed once ready to
         // break live upgrade.
         let mut vcpu_snapshot = Snapshot::new(&format!("{:03}", self.id));
-        vcpu_snapshot.add_data_section(SnapshotDataSection::new_from_state(&saved_state)?);
+        vcpu_snapshot.add_data_section(SnapshotData::new_from_state(&saved_state)?);
 
         self.saved_state = Some(saved_state);
 

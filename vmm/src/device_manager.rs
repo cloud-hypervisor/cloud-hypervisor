@@ -96,7 +96,7 @@ use vm_memory::{Address, GuestAddress, GuestUsize, MmapRegion};
 use vm_memory::{GuestAddressSpace, GuestMemory};
 use vm_migration::{
     protocol::MemoryRangeTable, snapshot_from_id, versioned_state_from_id, Migratable,
-    MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable, Transportable,
+    MigratableError, Pausable, Snapshot, SnapshotData, Snapshottable, Transportable,
 };
 use vm_virtio::AccessPlatform;
 use vm_virtio::VirtioDeviceType;
@@ -4463,7 +4463,7 @@ impl Snapshottable for DeviceManager {
         }
 
         // Then we store the DeviceManager state.
-        snapshot.add_data_section(SnapshotDataSection::new_from_state(&self.state())?);
+        snapshot.add_data_section(SnapshotData::new_from_state(&self.state())?);
 
         Ok(snapshot)
     }
