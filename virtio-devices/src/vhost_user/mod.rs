@@ -430,15 +430,11 @@ impl VhostUserCommon {
         }
     }
 
-    pub fn snapshot<T>(
-        &mut self,
-        id: &str,
-        state: &T,
-    ) -> std::result::Result<Snapshot, MigratableError>
+    pub fn snapshot<T>(&mut self, state: &T) -> std::result::Result<Snapshot, MigratableError>
     where
         T: Versionize + VersionMapped,
     {
-        let snapshot = Snapshot::new_from_versioned_state(id, state)?;
+        let snapshot = Snapshot::new_from_versioned_state(state)?;
 
         if self.migration_started {
             self.shutdown();

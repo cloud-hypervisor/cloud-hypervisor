@@ -518,7 +518,7 @@ where
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        Snapshot::new_from_versioned_state(&self.id, &self.state())
+        Snapshot::new_from_versioned_state(&self.state())
     }
 }
 impl<B> Transportable for Vsock<B> where B: VsockBackend + Sync + 'static {}

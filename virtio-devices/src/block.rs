@@ -743,7 +743,7 @@ impl Snapshottable for Block {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        Snapshot::new_from_versioned_state(&self.id(), &self.state())
+        Snapshot::new_from_versioned_state(&self.state())
     }
 }
 impl Transportable for Block {}

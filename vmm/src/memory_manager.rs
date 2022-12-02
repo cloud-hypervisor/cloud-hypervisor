@@ -2428,7 +2428,7 @@ impl Snapshottable for MemoryManager {
     }
 
     fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
-        let mut memory_manager_snapshot = Snapshot::new(MEMORY_MANAGER_SNAPSHOT_ID);
+        let mut memory_manager_snapshot = Snapshot::default();
 
         let memory_ranges = self.memory_range_table(true)?;
 

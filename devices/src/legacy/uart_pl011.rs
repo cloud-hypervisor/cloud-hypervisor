@@ -454,7 +454,7 @@ impl Snapshottable for Pl011 {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        Snapshot::new_from_versioned_state(&self.id, &self.state())
+        Snapshot::new_from_versioned_state(&self.state())
     }
 }
 

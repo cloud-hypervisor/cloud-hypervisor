@@ -489,12 +489,9 @@ impl Snapshottable for Vdpa {
             )));
         }
 
-        let snapshot = Snapshot::new_from_versioned_state(
-            &self.id(),
-            &self.state().map_err(|e| {
-                MigratableError::Snapshot(anyhow!("Error snapshotting vDPA device: {:?}", e))
-            })?,
-        )?;
+        let snapshot = Snapshot::new_from_versioned_state(&self.state().map_err(|e| {
+            MigratableError::Snapshot(anyhow!("Error snapshotting vDPA device: {:?}", e))
+        })?)?;
 
         // Force the vhost handler to be dropped in order to close the vDPA
         // file. This will ensure the device can be accessed if the VM is

@@ -651,7 +651,7 @@ impl Snapshottable for Fs {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        self.vu_common.snapshot(&self.id(), &self.state())
+        self.vu_common.snapshot(&self.state())
     }
 }
 impl Transportable for Fs {}
