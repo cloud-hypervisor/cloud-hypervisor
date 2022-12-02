@@ -535,10 +535,10 @@ impl Snapshottable for VfioUserPciDevice {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        let mut vfio_pci_dev_snapshot = Snapshot::new(&self.id);
+        let mut vfio_pci_dev_snapshot = Snapshot::default();
 
         // Snapshot VfioCommon
-        vfio_pci_dev_snapshot.add_snapshot(self.common.snapshot()?);
+        vfio_pci_dev_snapshot.add_snapshot(self.common.id(), self.common.snapshot()?);
 
         Ok(vfio_pci_dev_snapshot)
     }

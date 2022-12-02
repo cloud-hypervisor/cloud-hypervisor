@@ -4445,13 +4445,13 @@ impl Snapshottable for DeviceManager {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        let mut snapshot = Snapshot::new(DEVICE_MANAGER_SNAPSHOT_ID);
+        let mut snapshot = Snapshot::default();
 
         // We aggregate all devices snapshots.
         for (_, device_node) in self.device_tree.lock().unwrap().iter() {
             if let Some(migratable) = &device_node.migratable {
-                let device_snapshot = migratable.lock().unwrap().snapshot()?;
-                snapshot.add_snapshot(device_snapshot);
+                let mut migratable = migratable.lock().unwrap();
+                snapshot.add_snapshot(migratable.id(), migratable.snapshot()?);
             }
         }
 

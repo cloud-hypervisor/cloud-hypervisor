@@ -1272,18 +1272,20 @@ impl Snapshottable for VirtioPciDevice {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        let mut virtio_pci_dev_snapshot =
-            Snapshot::new_from_versioned_state(&self.id, &self.state())?;
+        let mut virtio_pci_dev_snapshot = Snapshot::new_from_versioned_state(&self.state())?;
 
         // Snapshot PciConfiguration
-        virtio_pci_dev_snapshot.add_snapshot(self.configuration.snapshot()?);
+        virtio_pci_dev_snapshot
+            .add_snapshot(self.configuration.id(), self.configuration.snapshot()?);
 
         // Snapshot VirtioPciCommonConfig
-        virtio_pci_dev_snapshot.add_snapshot(self.common_config.snapshot()?);
+        virtio_pci_dev_snapshot
+            .add_snapshot(self.common_config.id(), self.common_config.snapshot()?);
 
         // Snapshot MSI-X
         if let Some(msix_config) = &self.msix_config {
-            virtio_pci_dev_snapshot.add_snapshot(msix_config.lock().unwrap().snapshot()?);
+            let mut msix_config = msix_config.lock().unwrap();
+            virtio_pci_dev_snapshot.add_snapshot(msix_config.id(), msix_config.snapshot()?);
         }
 
         Ok(virtio_pci_dev_snapshot)

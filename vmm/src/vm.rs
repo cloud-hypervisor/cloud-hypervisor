@@ -2508,7 +2508,7 @@ impl Snapshottable for Vm {
             })?
         };
 
-        let mut vm_snapshot = Snapshot::new(VM_SNAPSHOT_ID);
+        let mut vm_snapshot = Snapshot::default();
         let vm_snapshot_data = serde_json::to_vec(&VmSnapshot {
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             clock: self.saved_clock,
@@ -2517,10 +2517,21 @@ impl Snapshottable for Vm {
         })
         .map_err(|e| MigratableError::Snapshot(e.into()))?;
 
-        vm_snapshot.add_snapshot(self.cpu_manager.lock().unwrap().snapshot()?);
-        vm_snapshot.add_snapshot(self.memory_manager.lock().unwrap().snapshot()?);
-
-        vm_snapshot.add_snapshot(self.device_manager.lock().unwrap().snapshot()?);
+        let (id, snapshot) = {
+            let mut cpu_manager = self.cpu_manager.lock().unwrap();
+            (cpu_manager.id(), cpu_manager.snapshot()?)
+        };
+        vm_snapshot.add_snapshot(id, snapshot);
+        let (id, snapshot) = {
+            let mut memory_manager = self.memory_manager.lock().unwrap();
+            (memory_manager.id(), memory_manager.snapshot()?)
+        };
+        vm_snapshot.add_snapshot(id, snapshot);
+        let (id, snapshot) = {
+            let mut device_manager = self.device_manager.lock().unwrap();
+            (device_manager.id(), device_manager.snapshot()?)
+        };
+        vm_snapshot.add_snapshot(id, snapshot);
         vm_snapshot.add_data_section(SnapshotData(vm_snapshot_data));
 
         event!("vm", "snapshotted");

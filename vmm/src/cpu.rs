@@ -387,11 +387,10 @@ impl Vcpu {
     }
 }
 
-const VCPU_SNAPSHOT_ID: &str = "vcpu";
 impl Pausable for Vcpu {}
 impl Snapshottable for Vcpu {
     fn id(&self) -> String {
-        VCPU_SNAPSHOT_ID.to_string()
+        self.id.to_string()
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
@@ -400,9 +399,7 @@ impl Snapshottable for Vcpu {
             .state()
             .map_err(|e| MigratableError::Pause(anyhow!("Could not get vCPU state {:?}", e)))?;
 
-        // TODO: The special format of the CPU id can be removed once ready to
-        // break live upgrade.
-        let mut vcpu_snapshot = Snapshot::new(&format!("{:03}", self.id));
+        let mut vcpu_snapshot = Snapshot::default();
         vcpu_snapshot.add_data_section(SnapshotData::new_from_state(&saved_state)?);
 
         self.saved_state = Some(saved_state);
@@ -776,7 +773,7 @@ impl CpuManager {
                 cpu_id,
                 // TODO: The special format of the CPU id can be removed once
                 // ready to break live upgrade.
-                snapshot_from_id(snapshot.as_ref(), &format!("{:03}", cpu_id)),
+                snapshot_from_id(snapshot.as_ref(), cpu_id.to_string().as_str()),
             )?);
         }
 
@@ -2076,12 +2073,12 @@ impl Snapshottable for CpuManager {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        let mut cpu_manager_snapshot = Snapshot::new(CPU_MANAGER_SNAPSHOT_ID);
+        let mut cpu_manager_snapshot = Snapshot::default();
 
         // The CpuManager snapshot is a collection of all vCPUs snapshots.
         for vcpu in &self.vcpus {
-            let cpu_snapshot = vcpu.lock().unwrap().snapshot()?;
-            cpu_manager_snapshot.add_snapshot(cpu_snapshot);
+            let mut vcpu = vcpu.lock().unwrap();
+            cpu_manager_snapshot.add_snapshot(vcpu.id(), vcpu.snapshot()?);
         }
 
         Ok(cpu_manager_snapshot)

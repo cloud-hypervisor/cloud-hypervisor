@@ -139,9 +139,6 @@ impl SnapshotData {
 /// the actual device snapshot data.
 #[derive(Clone, Default, Deserialize, Serialize)]
 pub struct Snapshot {
-    /// The Snapshottable component id.
-    pub id: String,
-
     /// The Snapshottable component snapshots.
     pub snapshots: std::collections::BTreeMap<String, Snapshot>,
 
@@ -151,39 +148,31 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    /// Create an empty Snapshot.
-    pub fn new(id: &str) -> Self {
-        Snapshot {
-            id: id.to_string(),
-            ..Default::default()
-        }
-    }
-
     /// Create from state that can be serialized
-    pub fn new_from_state<T>(id: &str, state: &T) -> Result<Self, MigratableError>
+    pub fn new_from_state<T>(state: &T) -> Result<Self, MigratableError>
     where
         T: Serialize,
     {
-        let mut snapshot_data = Snapshot::new(id);
+        let mut snapshot_data = Snapshot::default();
         snapshot_data.add_data_section(SnapshotData::new_from_state(state)?);
 
         Ok(snapshot_data)
     }
 
     /// Create from versioned state
-    pub fn new_from_versioned_state<T>(id: &str, state: &T) -> Result<Self, MigratableError>
+    pub fn new_from_versioned_state<T>(state: &T) -> Result<Self, MigratableError>
     where
         T: Versionize + VersionMapped,
     {
-        let mut snapshot_data = Snapshot::new(id);
+        let mut snapshot_data = Snapshot::default();
         snapshot_data.add_data_section(SnapshotData::new_from_versioned_state(state)?);
 
         Ok(snapshot_data)
     }
 
     /// Add a sub-component's Snapshot to the Snapshot.
-    pub fn add_snapshot(&mut self, snapshot: Snapshot) {
-        self.snapshots.insert(snapshot.id.clone(), snapshot);
+    pub fn add_snapshot(&mut self, id: String, snapshot: Snapshot) {
+        self.snapshots.insert(id, snapshot);
     }
 
     /// Add a SnapshotData to the component snapshot data.
@@ -240,7 +229,7 @@ pub trait Snapshottable: Pausable {
 
     /// Take a component snapshot.
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        Ok(Snapshot::new(""))
+        Ok(Snapshot::default())
     }
 }
 
@@ -271,7 +260,7 @@ pub trait Transportable: Pausable + Snapshottable {
     /// * `source_url` - The source URL to fetch the snapshot from. This could be an HTTP
     ///                  endpoint, a TCP address or a local file.
     fn recv(&self, _source_url: &str) -> std::result::Result<Snapshot, MigratableError> {
-        Ok(Snapshot::new(""))
+        Ok(Snapshot::default())
     }
 }
 

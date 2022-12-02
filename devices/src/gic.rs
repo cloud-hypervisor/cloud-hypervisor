@@ -154,7 +154,7 @@ impl Snapshottable for Gic {
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         let vgic = self.vgic.as_ref().unwrap().clone();
         let state = vgic.lock().unwrap().state().unwrap();
-        Snapshot::new_from_state(&self.id(), &state)
+        Snapshot::new_from_state(&state)
     }
 }
 

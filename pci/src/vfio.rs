@@ -1235,20 +1235,19 @@ impl Snapshottable for VfioCommon {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        let mut vfio_common_snapshot =
-            Snapshot::new_from_versioned_state(&self.id(), &self.state())?;
+        let mut vfio_common_snapshot = Snapshot::new_from_versioned_state(&self.state())?;
 
         // Snapshot PciConfiguration
-        vfio_common_snapshot.add_snapshot(self.configuration.snapshot()?);
+        vfio_common_snapshot.add_snapshot(self.configuration.id(), self.configuration.snapshot()?);
 
         // Snapshot MSI
         if let Some(msi) = &mut self.interrupt.msi {
-            vfio_common_snapshot.add_snapshot(msi.cfg.snapshot()?);
+            vfio_common_snapshot.add_snapshot(msi.cfg.id(), msi.cfg.snapshot()?);
         }
 
         // Snapshot MSI-X
         if let Some(msix) = &mut self.interrupt.msix {
-            vfio_common_snapshot.add_snapshot(msix.bar.snapshot()?);
+            vfio_common_snapshot.add_snapshot(msix.bar.id(), msix.bar.snapshot()?);
         }
 
         Ok(vfio_common_snapshot)
@@ -1740,10 +1739,10 @@ impl Snapshottable for VfioPciDevice {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        let mut vfio_pci_dev_snapshot = Snapshot::new(&self.id);
+        let mut vfio_pci_dev_snapshot = Snapshot::default();
 
         // Snapshot VfioCommon
-        vfio_pci_dev_snapshot.add_snapshot(self.common.snapshot()?);
+        vfio_pci_dev_snapshot.add_snapshot(self.common.id(), self.common.snapshot()?);
 
         Ok(vfio_pci_dev_snapshot)
     }
