@@ -8,6 +8,7 @@ extern crate clap;
 
 use api_client::simple_api_command;
 use api_client::simple_api_command_with_fds;
+use api_client::simple_api_full_command;
 use api_client::Error as ApiClientError;
 use clap::{Arg, ArgAction, ArgMatches, Command};
 use option_parser::{ByteSized, ByteSizedParseError};
@@ -337,6 +338,9 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
         }
         Some("counters") => {
             simple_api_command(&mut socket, "GET", "counters", None).map_err(Error::ApiClient)
+        }
+        Some("ping") => {
+            simple_api_full_command(&mut socket, "GET", "vmm.ping", None).map_err(Error::ApiClient)
         }
         Some("resize") => resize_api_command(
             &mut socket,
@@ -675,6 +679,9 @@ fn main() {
             Command::new("create")
                 .about("Create VM from a JSON configuration")
                 .arg(Arg::new("path").index(1).default_value("-")),
+        )
+        .subcommand(
+            Command::new("ping").about("Ping the VMM to check for API server availability"),
         );
 
     let matches = app.get_matches();
