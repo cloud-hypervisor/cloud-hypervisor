@@ -63,7 +63,6 @@ jobs:
           args: --target=${{ matrix.target }} --locked --all --all-targets --tests -- -D warnings -D clippy::undocumented_unsafe_blocks
 
       - name: Clippy (default features + guest_debug)
-        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         uses: actions-rs/cargo@v1
         with:
           use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
