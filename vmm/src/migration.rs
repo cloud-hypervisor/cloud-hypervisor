@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-#[cfg(feature = "guest_debug")]
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::GuestDebuggableError;
 use crate::{
     config::VmConfig,
@@ -34,7 +34,7 @@ pub fn url_to_path(url: &str) -> std::result::Result<PathBuf, MigratableError> {
     Ok(path)
 }
 
-#[cfg(feature = "guest_debug")]
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 pub fn url_to_file(url: &str) -> std::result::Result<PathBuf, GuestDebuggableError> {
     let file: PathBuf = url
         .strip_prefix("file://")

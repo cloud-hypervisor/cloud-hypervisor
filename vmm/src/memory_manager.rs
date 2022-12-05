@@ -5,10 +5,10 @@
 #[cfg(target_arch = "x86_64")]
 use crate::config::SgxEpcConfig;
 use crate::config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
-#[cfg(feature = "guest_debug")]
-use crate::coredump::{CoredumpMemoryRegion, CoredumpMemoryRegions};
-#[cfg(feature = "guest_debug")]
-use crate::coredump::{DumpState, GuestDebuggableError};
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use crate::coredump::{
+    CoredumpMemoryRegion, CoredumpMemoryRegions, DumpState, GuestDebuggableError,
+};
 use crate::migration::url_to_path;
 use crate::MEMORY_MANAGER_SNAPSHOT_ID;
 use crate::{GuestMemoryMmap, GuestRegionMmap};
@@ -24,7 +24,7 @@ use hypervisor::HypervisorVmError;
 #[cfg(target_arch = "x86_64")]
 use libc::{MAP_NORESERVE, MAP_POPULATE, MAP_SHARED, PROT_READ, PROT_WRITE};
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "guest_debug")]
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::convert::TryInto;
@@ -1960,7 +1960,7 @@ impl MemoryManager {
         self.uefi_flash.as_ref().unwrap().clone()
     }
 
-    #[cfg(feature = "guest_debug")]
+    #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
     pub fn coredump_memory_regions(&self, mem_offset: u64) -> CoredumpMemoryRegions {
         let mut mapping_sorted_by_gpa = self.guest_ram_mappings.clone();
         mapping_sorted_by_gpa.sort_by_key(|m| m.gpa);
@@ -1981,7 +1981,7 @@ impl MemoryManager {
         CoredumpMemoryRegions { ram_maps }
     }
 
-    #[cfg(feature = "guest_debug")]
+    #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
     pub fn coredump_iterate_save_mem(
         &mut self,
         dump_state: &DumpState,

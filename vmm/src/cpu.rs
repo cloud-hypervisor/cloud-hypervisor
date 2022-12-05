@@ -12,7 +12,7 @@
 //
 
 use crate::config::CpusConfig;
-#[cfg(feature = "guest_debug")]
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::{
     CpuElf64Writable, CpuSegment, CpuState as DumpCpusState, DumpState, Elf64Writable,
     GuestDebuggableError, NoteDescType, X86_64ElfPrStatus, X86_64UserRegs, COREDUMP_NAME_SIZE,
@@ -42,11 +42,11 @@ use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 use gdbstub_arch::x86::reg::{X86SegmentRegs, X86_64CoreRegs as CoreRegs};
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 use hypervisor::aarch64::StandardRegisters;
-#[cfg(feature = "guest_debug")]
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use hypervisor::arch::x86::msr_index;
 #[cfg(target_arch = "x86_64")]
 use hypervisor::arch::x86::CpuIdEntry;
-#[cfg(feature = "guest_debug")]
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use hypervisor::arch::x86::MsrEntry;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use hypervisor::arch::x86::{SpecialRegisters, StandardRegisters};
@@ -56,13 +56,13 @@ use hypervisor::kvm::kvm_bindings;
 use hypervisor::kvm::{TdxExitDetails, TdxExitStatus};
 use hypervisor::{CpuState, HypervisorCpuError, HypervisorType, VmExit, VmOps};
 use libc::{c_void, siginfo_t};
-#[cfg(feature = "guest_debug")]
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use linux_loader::elf::Elf64_Nhdr;
 use seccompiler::{apply_filter, SeccompAction};
 use std::collections::BTreeMap;
-#[cfg(feature = "guest_debug")]
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use std::io::Write;
-#[cfg(feature = "guest_debug")]
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use std::mem::size_of;
 use std::os::unix::thread::JoinHandleExt;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -71,7 +71,7 @@ use std::{cmp, io, result, thread};
 use thiserror::Error;
 use tracer::trace_scoped;
 use vm_device::BusDevice;
-#[cfg(feature = "guest_debug")]
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use vm_memory::ByteValued;
 #[cfg(feature = "guest_debug")]
 use vm_memory::{Bytes, GuestAddressSpace};
@@ -277,7 +277,7 @@ struct InterruptSourceOverride {
     pub flags: u16,
 }
 
-#[cfg(feature = "guest_debug")]
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 macro_rules! round_up {
     ($n:expr,$d:expr) => {
         (($n / ($d + 1)) + 1) * $d
@@ -2315,10 +2315,10 @@ impl Debuggable for CpuManager {
     }
 }
 
-#[cfg(feature = "guest_debug")]
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 impl Elf64Writable for CpuManager {}
 
-#[cfg(feature = "guest_debug")]
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 impl CpuElf64Writable for CpuManager {
     fn cpu_write_elf64_note(
         &mut self,

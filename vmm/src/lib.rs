@@ -18,7 +18,7 @@ use crate::config::{
     add_to_config, DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, RestoreConfig,
     UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
 };
-#[cfg(feature = "guest_debug")]
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::GuestDebuggable;
 use crate::memory_manager::MemoryManager;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
@@ -61,7 +61,7 @@ mod acpi;
 pub mod api;
 mod clone3;
 pub mod config;
-#[cfg(feature = "guest_debug")]
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 mod coredump;
 pub mod cpu;
 pub mod device_manager;
@@ -696,7 +696,7 @@ impl Vmm {
         }
     }
 
-    #[cfg(feature = "guest_debug")]
+    #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
     fn vm_coredump(&mut self, destination_url: &str) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm {
             vm.coredump(destination_url).map_err(VmError::Coredump)
@@ -1868,7 +1868,7 @@ impl Vmm {
 
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
-                                #[cfg(feature = "guest_debug")]
+                                #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
                                 ApiRequest::VmCoredump(coredump_data, sender) => {
                                     let response = self
                                         .vm_coredump(&coredump_data.destination_url)
