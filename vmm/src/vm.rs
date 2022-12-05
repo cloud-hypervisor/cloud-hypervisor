@@ -551,6 +551,16 @@ impl Vm {
             )
             .map_err(Error::CpuManager)?;
 
+        // The initial TDX configuration must be done before the vCPUs are
+        // created
+        #[cfg(feature = "tdx")]
+        if tdx_enabled {
+            let cpuid = cpu_manager.lock().unwrap().common_cpuid();
+            let max_vcpus = cpu_manager.lock().unwrap().max_vcpus() as u32;
+            vm.tdx_init(&cpuid, max_vcpus)
+                .map_err(Error::InitializeTdxVm)?;
+        }
+
         cpu_manager
             .lock()
             .unwrap()
@@ -1639,16 +1649,6 @@ impl Vm {
     }
 
     #[cfg(feature = "tdx")]
-    fn init_tdx(&mut self) -> Result<()> {
-        let cpuid = self.cpu_manager.lock().unwrap().common_cpuid();
-        let max_vcpus = self.cpu_manager.lock().unwrap().max_vcpus() as u32;
-        self.vm
-            .tdx_init(&cpuid, max_vcpus)
-            .map_err(Error::InitializeTdxVm)?;
-        Ok(())
-    }
-
-    #[cfg(feature = "tdx")]
     fn extract_tdvf_sections(&mut self) -> Result<Vec<TdvfSection>> {
         use arch::x86_64::tdx::*;
 
@@ -2058,13 +2058,6 @@ impl Vm {
 
         #[cfg(feature = "tdx")]
         let tdx_enabled = self.config.lock().unwrap().is_tdx_enabled();
-
-        // The initial TDX configuration must be done before the vCPUs are
-        // created
-        #[cfg(feature = "tdx")]
-        if tdx_enabled {
-            self.init_tdx()?;
-        }
 
         // Configure the vcpus that have been created
         let vcpus = self.cpu_manager.lock().unwrap().vcpus();
