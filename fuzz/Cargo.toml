@@ -12,7 +12,7 @@ cargo-fuzz = true
 block_util = { path = "../block_util" }
 devices = { path = "../devices" }
 epoll = "4.3.1"
-libc = "0.2.135"
+libc = "0.2.138"
 libfuzzer-sys = "0.4.5"
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "main" }
 net_util = { path = "../net_util" }
