@@ -16,7 +16,7 @@ use crate::config::{
     UserDeviceConfig, ValidationError, VdpaConfig, VmConfig, VsockConfig,
 };
 use crate::config::{NumaConfig, PayloadConfig};
-#[cfg(feature = "guest_debug")]
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::{
     CpuElf64Writable, DumpState, Elf64Writable, GuestDebuggable, GuestDebuggableError, NoteDescType,
 };
@@ -30,7 +30,7 @@ use crate::memory_manager::{
 };
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use crate::migration::get_vm_snapshot;
-#[cfg(feature = "guest_debug")]
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::migration::url_to_file;
 use crate::migration::{url_to_path, SNAPSHOT_CONFIG_FILE, SNAPSHOT_STATE_FILE};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
@@ -57,7 +57,7 @@ use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
 use hypervisor::{HypervisorVmError, VmOps};
 use linux_loader::cmdline::Cmdline;
-#[cfg(feature = "guest_debug")]
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use linux_loader::elf;
 #[cfg(target_arch = "x86_64")]
 use linux_loader::loader::elf::PvhBootCapability::PvhEntryPresent;
@@ -75,7 +75,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom, Write};
 #[cfg(feature = "tdx")]
 use std::mem;
-#[cfg(feature = "guest_debug")]
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use std::mem::size_of;
 use std::num::Wrapping;
 use std::ops::Deref;
@@ -305,7 +305,7 @@ pub enum Error {
     #[error("Payload configuration is not bootable")]
     InvalidPayload,
 
-    #[cfg(feature = "guest_debug")]
+    #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
     #[error("Error coredumping VM: {0:?}")]
     Coredump(GuestDebuggableError),
 }
@@ -2334,7 +2334,7 @@ impl Vm {
         Ok(GdbResponsePayload::CommandComplete)
     }
 
-    #[cfg(feature = "guest_debug")]
+    #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
     fn get_dump_state(
         &mut self,
         destination_url: &str,
@@ -2375,7 +2375,7 @@ impl Vm {
         })
     }
 
-    #[cfg(feature = "guest_debug")]
+    #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
     fn coredump_get_mem_offset(&self, phdr_num: u16, note_size: isize) -> u64 {
         size_of::<elf::Elf64_Ehdr>() as u64
             + note_size as u64
@@ -2703,10 +2703,10 @@ impl Debuggable for Vm {
 #[cfg(feature = "guest_debug")]
 pub const UINT16_MAX: u32 = 65535;
 
-#[cfg(feature = "guest_debug")]
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 impl Elf64Writable for Vm {}
 
-#[cfg(feature = "guest_debug")]
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 impl GuestDebuggable for Vm {
     fn coredump(&mut self, destination_url: &str) -> std::result::Result<(), GuestDebuggableError> {
         event!("vm", "coredumping");

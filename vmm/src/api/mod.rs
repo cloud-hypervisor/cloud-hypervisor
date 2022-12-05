@@ -320,7 +320,7 @@ pub enum ApiRequest {
     VmRestore(Arc<RestoreConfig>, Sender<ApiResponse>),
 
     /// Take a VM coredump
-    #[cfg(feature = "guest_debug")]
+    #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
     VmCoredump(Arc<VmCoredumpData>, Sender<ApiResponse>),
 
     /// Incoming migration
@@ -416,7 +416,7 @@ pub enum VmAction {
     Snapshot(Arc<VmSnapshotConfig>),
 
     /// Coredump VM
-    #[cfg(feature = "guest_debug")]
+    #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
     Coredump(Arc<VmCoredumpData>),
 
     /// Incoming migration
@@ -458,7 +458,7 @@ fn vm_action(
         ResizeZone(v) => ApiRequest::VmResizeZone(v, response_sender),
         Restore(v) => ApiRequest::VmRestore(v, response_sender),
         Snapshot(v) => ApiRequest::VmSnapshot(v, response_sender),
-        #[cfg(feature = "guest_debug")]
+        #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
         Coredump(v) => ApiRequest::VmCoredump(v, response_sender),
         ReceiveMigration(v) => ApiRequest::VmReceiveMigration(v, response_sender),
         SendMigration(v) => ApiRequest::VmSendMigration(v, response_sender),
@@ -545,7 +545,7 @@ pub fn vm_restore(
     vm_action(api_evt, api_sender, VmAction::Restore(data))
 }
 
-#[cfg(feature = "guest_debug")]
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 pub fn vm_coredump(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,

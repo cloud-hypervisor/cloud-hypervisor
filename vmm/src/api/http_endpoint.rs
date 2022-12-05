@@ -4,7 +4,7 @@
 //
 
 use crate::api::http::{error_response, EndpointHandler, HttpError};
-#[cfg(feature = "guest_debug")]
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::api::vm_coredump;
 use crate::api::{
     vm_add_device, vm_add_disk, vm_add_fs, vm_add_net, vm_add_pmem, vm_add_user_device,
@@ -153,7 +153,7 @@ impl EndpointHandler for VmActionHandler {
                     api_sender,
                     Arc::new(serde_json::from_slice(body.raw())?),
                 ),
-                #[cfg(feature = "guest_debug")]
+                #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
                 Coredump(_) => vm_coredump(
                     api_notifier,
                     api_sender,
