@@ -342,6 +342,8 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
         Some("ping") => {
             simple_api_full_command(&mut socket, "GET", "vmm.ping", None).map_err(Error::ApiClient)
         }
+        Some("shutdown-vmm") => simple_api_full_command(&mut socket, "PUT", "vmm.shutdown", None)
+            .map_err(Error::ApiClient),
         Some("resize") => resize_api_command(
             &mut socket,
             matches
@@ -680,9 +682,8 @@ fn main() {
                 .about("Create VM from a JSON configuration")
                 .arg(Arg::new("path").index(1).default_value("-")),
         )
-        .subcommand(
-            Command::new("ping").about("Ping the VMM to check for API server availability"),
-        );
+        .subcommand(Command::new("ping").about("Ping the VMM to check for API server availability"))
+        .subcommand(Command::new("shutdown-vmm").about("Shutdown the VMM"));
 
     let matches = app.get_matches();
 
