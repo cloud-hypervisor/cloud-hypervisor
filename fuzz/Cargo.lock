@@ -169,6 +169,7 @@ dependencies = [
  "epoll",
  "libc",
  "libfuzzer-sys",
+ "linux-loader",
  "micro_http",
  "net_util",
  "once_cell",
