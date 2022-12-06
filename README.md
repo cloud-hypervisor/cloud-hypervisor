@@ -220,7 +220,7 @@ $ ./cloud-hypervisor \
 
 If earlier kernel messages are required the serial console should be used instead of `virtio-console`.
 
-```cloud-hypervisor \
+```./cloud-hypervisor \
 	--kernel ./linux-cloud-hypervisor/arch/x86/boot/compressed/vmlinux.bin \
 	--console off \
 	--serial tty \
