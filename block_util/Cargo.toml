@@ -8,12 +8,12 @@ edition = "2021"
 default = []
 
 [dependencies]
-io-uring = "0.5.8"
+io-uring = "0.5.9"
 libc = "0.2.138"
 log = "0.4.17"
 qcow = { path = "../qcow" }
 thiserror = "1.0.37"
-versionize = "0.1.6"
+versionize = "0.1.9"
 versionize_derive = "0.1.4"
 vhdx = { path = "../vhdx" }
 virtio-bindings = { version = "0.1.0", features = ["virtio-v5_0_0"] }
