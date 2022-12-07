@@ -878,7 +878,7 @@ impl Vm {
         Ok(arch::InitramfsConfig { address, size })
     }
 
-    fn generate_cmdline(
+    pub fn generate_cmdline(
         payload: &PayloadConfig,
         #[cfg(target_arch = "aarch64")] device_manager: &Arc<Mutex<DeviceManager>>,
     ) -> Result<Cmdline> {
