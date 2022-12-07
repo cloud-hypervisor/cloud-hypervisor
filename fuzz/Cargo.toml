@@ -83,6 +83,12 @@ test = false
 doc = false
 
 [[bin]]
+name = "linux_loader_cmdline"
+path = "fuzz_targets/linux_loader_cmdline.rs"
+test = false
+doc = false
+
+[[bin]]
 name = "mem"
 path = "fuzz_targets/mem.rs"
 test = false
