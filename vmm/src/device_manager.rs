@@ -62,7 +62,6 @@ use pci::{
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
-use std::convert::TryInto;
 use std::fs::{read_link, File, OpenOptions};
 use std::io::{self, stdout, Seek, SeekFrom};
 use std::mem::zeroed;
@@ -504,19 +503,13 @@ pub fn create_pty() -> io::Result<(File, File, PathBuf)> {
     };
     let mut unlock: libc::c_ulong = 0;
     // SAFETY: FFI call into libc, trivially safe
-    unsafe {
-        libc::ioctl(
-            main.as_raw_fd(),
-            TIOCSPTLCK.try_into().unwrap(),
-            &mut unlock,
-        )
-    };
+    unsafe { libc::ioctl(main.as_raw_fd(), TIOCSPTLCK as _, &mut unlock) };
 
     // SAFETY: FFI call into libc, trivally safe
     let sub_fd = unsafe {
         libc::ioctl(
             main.as_raw_fd(),
-            TIOCGTPEER.try_into().unwrap(),
+            TIOCGTPEER as _,
             libc::O_NOCTTY | libc::O_RDWR,
         )
     };
