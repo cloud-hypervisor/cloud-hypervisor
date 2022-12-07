@@ -10,8 +10,6 @@
 
 //! Implements virtio devices, queues, and transport mechanisms.
 
-#![allow(clippy::significant_drop_in_scrutinee)]
-
 #[macro_use]
 extern crate event_monitor;
 #[macro_use]

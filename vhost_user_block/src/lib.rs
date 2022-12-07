@@ -8,8 +8,6 @@
 //
 // SPDX-License-Identifier: (Apache-2.0 AND BSD-3-Clause)
 
-#![allow(clippy::significant_drop_in_scrutinee)]
-
 use block_util::{build_disk_image_id, Request, VirtioBlockConfig};
 use libc::EFD_NONBLOCK;
 use log::*;

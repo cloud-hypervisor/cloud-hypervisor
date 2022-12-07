@@ -3,8 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-#![allow(clippy::significant_drop_in_scrutinee)]
-
 use serde::{Deserialize, Serialize};
 
 mod bus;
