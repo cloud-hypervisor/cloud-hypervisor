@@ -13,12 +13,12 @@ anyhow = "1.0.66"
 byteorder = "1.4.3"
 hypervisor = { path = "../hypervisor" }
 libc = "0.2.138"
-linux-loader = { version = "0.8.0", features = ["elf", "bzimage", "pe"] }
+linux-loader = { version = "0.8.1", features = ["elf", "bzimage", "pe"] }
 log = "0.4.17"
-serde = { version = "1.0.147", features = ["rc", "derive"] }
+serde = { version = "1.0.149", features = ["rc", "derive"] }
 thiserror = "1.0.37"
-uuid = "1.2.1"
-versionize = "0.1.6"
+uuid = "1.2.2"
+versionize = "0.1.9"
 versionize_derive = "0.1.4"
 vm-memory = { version = "0.10.0", features = ["backend-mmap", "backend-bitmap"] }
 vm-migration = { path = "../vm-migration" }

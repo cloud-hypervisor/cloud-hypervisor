@@ -12,4 +12,4 @@ libc = "0.2.138"
 log = "0.4.17"
 remain = "0.2.5"
 thiserror = "1.0.37"
-uuid = { version = "1.2.1", features = ["v4"] }
+uuid = { version = "1.2.2", features = ["v4"] }
