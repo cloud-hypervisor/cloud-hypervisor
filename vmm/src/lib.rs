@@ -3,8 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-#![allow(clippy::significant_drop_in_scrutinee)]
-
 #[macro_use]
 extern crate event_monitor;
 #[macro_use]
