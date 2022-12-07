@@ -13,15 +13,24 @@ jobs:
         rust:
           - stable
         target:
-          - x86_64-unknown-linux-gnu
           - aarch64-unknown-linux-gnu
+          - aarch64-unknown-linux-musl
+          - x86_64-unknown-linux-gnu
+          - x86_64-unknown-linux-musl
+
         experimental: [false]
         include:
+          - rust: beta
+            target: aarch64-unknown-linux-gnu
+            experimental: true
+          - rust: beta
+            target: aarch64-unknown-linux-musl
+            experimental: true
           - rust: beta
             target: x86_64-unknown-linux-gnu
             experimental: true
           - rust: beta
-            target: aarch64-unknown-linux-gnu
+            target: x86_64-unknown-linux-musl
             experimental: true
     steps:
       - name: Code checkout
