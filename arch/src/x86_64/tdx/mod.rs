@@ -4,7 +4,9 @@
 use crate::GuestMemoryMmap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
+use std::str::FromStr;
 use thiserror::Error;
+use uuid::Uuid;
 use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemoryError};
 
 #[derive(Error, Debug)]
@@ -13,6 +15,8 @@ pub enum TdvfError {
     ReadDescriptor(#[source] std::io::Error),
     #[error("Failed read TDVF descriptor offset: {0}")]
     ReadDescriptorOffset(#[source] std::io::Error),
+    #[error("Failed read GUID table: {0}")]
+    ReadGuidTable(#[source] std::io::Error),
     #[error("Invalid descriptor signature")]
     InvalidDescriptorSignature,
     #[error("Invalid descriptor size")]
@@ -21,7 +25,12 @@ pub enum TdvfError {
     InvalidDescriptorVersion,
     #[error("Failed to write HOB details to guest memory: {0}")]
     GuestMemoryWriteHob(#[source] GuestMemoryError),
+    #[error("Failed to create Uuid: {0}")]
+    UuidCreation(#[source] uuid::Error),
 }
+
+const TABLE_FOOTER_GUID: &str = "96b582de-1fb2-45f7-baea-a366c55a082d";
+const TDVF_METADATA_OFFSET_GUID: &str = "e47a6535-984a-4798-865e-4685a7bf8ec2";
 
 // TDVF_DESCRIPTOR
 #[repr(packed)]
@@ -64,7 +73,69 @@ impl Default for TdvfSectionType {
     }
 }
 
-pub fn parse_tdvf_sections(file: &mut File) -> Result<Vec<TdvfSection>, TdvfError> {
+fn tdvf_descriptor_offset(file: &mut File) -> Result<SeekFrom, TdvfError> {
+    // Let's first try to identify the presence of the table footer GUID
+    file.seek(SeekFrom::End(-0x30))
+        .map_err(TdvfError::ReadGuidTable)?;
+    let mut table_footer_guid: [u8; 16] = [0; 16];
+    file.read_exact(&mut table_footer_guid)
+        .map_err(TdvfError::ReadGuidTable)?;
+    let uuid =
+        Uuid::from_slice_le(table_footer_guid.as_slice()).map_err(TdvfError::UuidCreation)?;
+    let expected_uuid = Uuid::from_str(TABLE_FOOTER_GUID).map_err(TdvfError::UuidCreation)?;
+    if uuid == expected_uuid {
+        // Retrieve the table size
+        file.seek(SeekFrom::End(-0x32))
+            .map_err(TdvfError::ReadGuidTable)?;
+        let mut table_size: [u8; 2] = [0; 2];
+        file.read_exact(&mut table_size)
+            .map_err(TdvfError::ReadGuidTable)?;
+        let table_size = u16::from_le_bytes(table_size) as usize;
+        let mut table: Vec<u8> = vec![0; table_size];
+
+        // Read the entire table
+        file.seek(SeekFrom::End(-(table_size as i64 + 0x20)))
+            .map_err(TdvfError::ReadGuidTable)?;
+        file.read_exact(table.as_mut_slice())
+            .map_err(TdvfError::ReadGuidTable)?;
+
+        // Let's start from the top and go backward down the table.
+        // We start after the footer GUID and the table length.
+        let mut offset = table_size - 18;
+
+        debug!("Parsing GUIDed structure");
+        while offset >= 18 {
+            let entry_uuid = Uuid::from_slice_le(&table[offset - 16..offset])
+                .map_err(TdvfError::UuidCreation)?;
+            let entry_size =
+                u16::from_le_bytes(table[offset - 18..offset - 16].try_into().unwrap()) as usize;
+            debug!(
+                "Entry GUID = {}, size = {}",
+                entry_uuid.hyphenated().to_string(),
+                entry_size
+            );
+
+            // Avoid going through an infinite loop if the entry size is 0
+            if entry_size == 0 {
+                break;
+            }
+
+            offset -= entry_size;
+
+            let expected_uuid =
+                Uuid::from_str(TDVF_METADATA_OFFSET_GUID).map_err(TdvfError::UuidCreation)?;
+            if entry_uuid == expected_uuid && entry_size == 22 {
+                return Ok(SeekFrom::End(
+                    -(u32::from_le_bytes(table[offset..offset + 4].try_into().unwrap()) as i64),
+                ));
+            }
+        }
+    }
+
+    // If we end up here, this means the firmware doesn't support the new way
+    // of exposing the TDVF descriptor offset through the table of GUIDs.
+    // That's why we fallback onto the deprecated method.
+
     // The 32-bit offset to the TDVF metadata is located 32 bytes from
     // the end of the file.
     // See "TDVF Metadata Pointer" in "TDX Virtual Firmware Design Guide
@@ -74,9 +145,14 @@ pub fn parse_tdvf_sections(file: &mut File) -> Result<Vec<TdvfSection>, TdvfErro
     let mut descriptor_offset: [u8; 4] = [0; 4];
     file.read_exact(&mut descriptor_offset)
         .map_err(TdvfError::ReadDescriptorOffset)?;
-    let descriptor_offset = u32::from_le_bytes(descriptor_offset) as u64;
 
-    file.seek(SeekFrom::Start(descriptor_offset))
+    Ok(SeekFrom::Start(u32::from_le_bytes(descriptor_offset) as u64))
+}
+
+pub fn parse_tdvf_sections(file: &mut File) -> Result<Vec<TdvfSection>, TdvfError> {
+    let descriptor_offset = tdvf_descriptor_offset(file)?;
+
+    file.seek(descriptor_offset)
         .map_err(TdvfError::ReadDescriptor)?;
 
     let mut descriptor: TdvfDescriptor = Default::default();
