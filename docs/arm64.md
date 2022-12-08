@@ -18,57 +18,6 @@ $ qemu-img convert -p -f qcow2 -O raw focal-server-cloudimg-arm64.img focal-serv
 $ popd
 ```
 
-## UEFI booting
-
-This part introduces how to build EDK2 firmware and boot Cloud Hypervisor with it.
-
-### Building EDK2
-
-```bash
-$ pushd $CLOUDH
-
-# Clone source code repos
-$ git clone --depth 1 https://github.com/tianocore/edk2.git -b master
-$ cd edk2
-$ git submodule update --init
-$ cd ..
-$ git clone --depth 1 https://github.com/tianocore/edk2-platforms.git -b master
-$ git clone --depth 1 https://github.com/acpica/acpica.git -b master
-
-# Build tools
-$ export PACKAGES_PATH="$PWD/edk2:$PWD/edk2-platforms"
-$ export IASL_PREFIX="$PWD/acpica/generate/unix/bin/"
-$ make -C acpica
-$ cd edk2/
-$ . edksetup.sh
-$ cd ..
-$ make -C edk2/BaseTools
-
-# Build EDK2
-$ build -a AARCH64 -t GCC5 -p ArmVirtPkg/ArmVirtCloudHv.dsc -b RELEASE
-
-$ popd
-```
-
-If the build goes well, the EDK2 binary is available at
-`edk2/Build/ArmVirtCloudHv-AARCH64/RELEASE_GCC5/FV/CLOUDHV_EFI.fd`.
-
-### Booting the guest VM
-
-```bash
-$ pushd $CLOUDH
-$ sudo RUST_BACKTRACE=1 $CLOUDH/cloud-hypervisor/target/debug/cloud-hypervisor \
-           --api-socket /tmp/cloud-hypervisor.sock \
-           --kernel $CLOUDH/edk2/Build/ArmVirtCloudHv-AARCH64/RELEASE_GCC5/FV/CLOUDHV_EFI.fd \
-           --disk path=$CLOUDH/focal-server-cloudimg-arm64.raw \
-           --cpus boot=4 \
-           --memory size=4096M \
-           --net tap=,mac=12:34:56:78:90:01,ip=192.168.1.1,mask=255.255.255.0 \
-           --serial tty \
-           --console off
-$ popd
-```
-
 ## Direct-kernel booting
 
 Alternativelly, you can build your own kernel for guest VM. This way, UEFI is
