@@ -107,13 +107,10 @@ do not wish to use the pre-built binaries.
 
 ## Booting Linux
 
-The instructions below are for the `x86-64` platform. For `AArch64` please see
-the [AArch64 specific documentation](docs/arm64.md).
-
-Cloud Hypervisor supports direct kernel boot (if the kernel is built with PVH
-support) or booting via a firmware (either [Rust Hypervisor
+Cloud Hypervisor supports direct kernel boot (the x86-64 kernel requires the kernel
+built with PVH support) or booting via a firmware (either [Rust Hypervisor
 Firmware](https://github.com/cloud-hypervisor/rust-hypervisor-firmware) or an
-edk2 UEFI firmware called `CLOUDHV`.)
+edk2 UEFI firmware called `CLOUDHV` / `CLOUDHV_EFI`.)
 
 Binary builds of the firmware files are available for the latest release of
 [Rust Hyperivor
@@ -218,6 +215,8 @@ $ qemu-img convert -p -f qcow2 -O raw focal-server-cloudimg-arm64.img focal-serv
 These sample commands boot the disk image using the custom kernel whilst also
 supplying the desired kernel command line.
 
+- x86-64
+
 ```shell
 $ sudo setcap cap_net_admin+ep ./cloud-hypervisor
 $ ./create-cloud-init.sh
@@ -230,14 +229,45 @@ $ ./cloud-hypervisor \
 	--net "tap=,mac=,ip=,mask="
 ```
 
+- AArch64
+
+```shell
+$ sudo setcap cap_net_admin+ep ./cloud-hypervisor
+$ ./create-cloud-init.sh
+$ ./cloud-hypervisor \
+	--kernel ./linux-cloud-hypervisor/arch/arm64/boot/Image \
+	--disk path=focal-server-cloudimg-arm64.raw path=/tmp/ubuntu-cloudinit.img \
+	--cmdline "console=hvc0 root=/dev/vda1 rw" \
+	--cpus boot=4 \
+	--memory size=1024M \
+	--net "tap=,mac=,ip=,mask="
+```
+
 If earlier kernel messages are required the serial console should be used instead of `virtio-console`.
 
-```./cloud-hypervisor \
+- x86-64
+
+```shell
+$ ./cloud-hypervisor \
 	--kernel ./linux-cloud-hypervisor/arch/x86/boot/compressed/vmlinux.bin \
 	--console off \
 	--serial tty \
 	--disk path=focal-server-cloudimg-amd64.raw \
 	--cmdline "console=ttyS0 root=/dev/vda1 rw" \
+	--cpus boot=4 \
+	--memory size=1024M \
+	--net "tap=,mac=,ip=,mask="
+```
+
+- AArch64
+
+```shell
+$ ./cloud-hypervisor \
+	--kernel ./linux-cloud-hypervisor/arch/arm64/boot/Image \
+	--console off \
+	--serial tty \
+	--disk path=focal-server-cloudimg-arm64.raw \
+	--cmdline "console=ttyAMA0 root=/dev/vda1 rw" \
 	--cpus boot=4 \
 	--memory size=1024M \
 	--net "tap=,mac=,ip=,mask="
