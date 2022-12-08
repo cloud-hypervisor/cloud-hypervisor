@@ -7,39 +7,6 @@ booting and direct-kernel booting. The document covers both methods.
 All the steps are based on Ubuntu. We use the Ubuntu cloud image for guest VM
 disk.
 
-## Getting started
-
-We create a folder to build and run Cloud Hypervisor at `$HOME/cloud-hypervisor`
-
-```shell
-$ export CLOUDH=$HOME/cloud-hypervisor
-$ mkdir $CLOUDH
-```
-
-## Prerequisites
-
-You need to install some prerequisite packages to build and test Cloud Hypervisor.
-
-### Tools
-
-```bash
-# Install rust tool chain
-$ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-# Install the tools used for building guest kernel, EDK2 and converting guest disk
-$ sudo apt-get update
-$ sudo apt-get install git build-essential m4 bison flex uuid-dev qemu-utils
-```
-
-### Building Cloud Hypervisor
-
-```bash
-$ pushd $CLOUDH
-$ git clone https://github.com/cloud-hypervisor/cloud-hypervisor.git
-$ cd cloud-hypervisor
-$ cargo build
-$ popd
-```
-
 ### Disk image
 
 Download the Ubuntu cloud image and convert the image type.

@@ -24,12 +24,15 @@ Hypervisor. Here, all the steps are based on Ubuntu, for other Linux
 distributions please replace the package manager and package name.
 
 ```shell
-# Install build-essential, git, and qemu-utils
-$ sudo apt install git build-essential qemu-utils
+# Install basic packages needed. For a package list targeting for more
+# functionalities for example the test, please see resources/Dockerfile.
+$ sudo apt-get update
+$ sudo apt install git build-essential m4 bison flex uuid-dev qemu-utils
 # Install rust tool chain
 $ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 # If you want to build statically linked binary please add musl target
-$ rustup target add x86_64-unknown-linux-musl
+$ rustup target add x86_64-unknown-linux-musl  # x86-64
+$ rustup target add aarch64-unknown-linux-musl # AArch64
 ```
 
 ## Clone and build
@@ -46,7 +49,8 @@ $ cargo build --release
 $ sudo setcap cap_net_admin+ep ./target/release/cloud-hypervisor
 
 # If you want to build statically linked binary
-$ cargo build --release --target=x86_64-unknown-linux-musl --all
+$ cargo build --release --target=x86_64-unknown-linux-musl --all  # x86-64
+$ cargo build --release --target=aarch64-unknown-linux-musl --all # AArch64
 $ popd
 ```
 
