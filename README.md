@@ -175,7 +175,7 @@ $ ./cloud-hypervisor \
 
 #### Building your Kernel
 
-Cloud Hypervisor also supports direct kernel boot into a `vmlinux` ELF kernel (compiled with PVH support). In order to support development there is a custom branch; however provided the required options are enabled any recent kernel will suffice.
+Cloud Hypervisor also supports direct kernel boot. For x86-64, a `vmlinux` ELF kernel (compiled with PVH support) is needed. In order to support development there is a custom branch; however provided the required options are enabled any recent kernel will suffice.
 
 To build the kernel:
 
@@ -183,15 +183,23 @@ To build the kernel:
 # Clone the Cloud Hypervisor Linux branch
 $ git clone --depth 1 https://github.com/cloud-hypervisor/linux.git -b ch-5.15.12 linux-cloud-hypervisor
 $ pushd linux-cloud-hypervisor
-# Use the cloud-hypervisor kernel config to build your kernel
+# Use the x86-64 cloud-hypervisor kernel config to build your kernel for x86-64
 $ wget https://raw.githubusercontent.com/cloud-hypervisor/cloud-hypervisor/main/resources/linux-config-x86_64
-$ cp linux-config-x86_64 .config
+# Use the AArch64 cloud-hypervisor kernel config to build your kernel for AArch64
+$ wget https://raw.githubusercontent.com/cloud-hypervisor/cloud-hypervisor/main/resources/linux-config-aarch64
+$ cp linux-config-x86_64 .config  # x86-64
+$ cp linux-config-aarch64 .config # AArch64
+# Do native build of the x86-64 kernel
 $ KCFLAGS="-Wa,-mx86-used-note=no" make bzImage -j `nproc`
+# Do native build of the AArch64 kernel
+$ make -j `nproc`
 $ popd
 ```
 
-The `vmlinux` kernel image will then be located at
+For x86-64, the `vmlinux` kernel image will then be located at
 `linux-cloud-hypervisor/arch/x86/boot/compressed/vmlinux.bin`.
+For AArch64, the `Image` kernel image will then be located at
+`linux-cloud-hypervisor/arch/arm64/boot/Image`.
 
 #### Disk image
 
