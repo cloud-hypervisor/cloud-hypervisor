@@ -199,8 +199,10 @@ For the disk image the same Ubuntu image as before can be used. This contains
 an `ext4` root filesystem.
 
 ```shell
-$ wget https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img
-$ qemu-img convert -p -f qcow2 -O raw focal-server-cloudimg-amd64.img focal-server-cloudimg-amd64.raw
+$ wget https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img # x86-64
+$ wget https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-arm64.img # AArch64
+$ qemu-img convert -p -f qcow2 -O raw focal-server-cloudimg-amd64.img focal-server-cloudimg-amd64.raw # x86-64
+$ qemu-img convert -p -f qcow2 -O raw focal-server-cloudimg-arm64.img focal-server-cloudimg-arm64.raw # AArch64
 ```
 
 #### Booting the guest VM
@@ -258,10 +260,10 @@ Further details can be found in the [release documentation](docs/releases.md).
 
 As of 2022-10-13, the following cloud images are supported:
 
-- [Ubuntu Bionic](https://cloud-images.ubuntu.com/bionic/current/) (bionic-server-cloudimg-amd64.img)
-- [Ubuntu Focal](https://cloud-images.ubuntu.com/focal/current/) (focal-server-cloudimg-amd64.img)
-- [Ubuntu Jammy](https://cloud-images.ubuntu.com/jammy/current/) (jammy-server-cloudimg-amd64.img )
-- [Fedora 36](https://fedora.mirrorservice.org/fedora/linux/releases/36/Cloud/x86_64/images/) (Fedora-Cloud-Base-36-1.5.x86_64.raw.xz)
+- [Ubuntu Bionic](https://cloud-images.ubuntu.com/bionic/current/) (bionic-server-cloudimg-{amd64,arm64}.img)
+- [Ubuntu Focal](https://cloud-images.ubuntu.com/focal/current/) (focal-server-cloudimg-{amd64,arm64}.img)
+- [Ubuntu Jammy](https://cloud-images.ubuntu.com/jammy/current/) (jammy-server-cloudimg-{amd64,arm64}.img )
+- [Fedora 36](https://fedora.mirrorservice.org/fedora/linux/releases/36/Cloud/) ([Fedora-Cloud-Base-36-1.5.x86_64.raw.xz](https://fedora.mirrorservice.org/fedora/linux/releases/36/Cloud/x86_64/images/) / [Fedora-Cloud-Base-36-1.5.aarch64.raw.xz](https://fedora.mirrorservice.org/fedora/linux/releases/36/Cloud/aarch64/images/))
 
 Direct kernel boot to userspace should work with a rootfs from most
 distributions although you may need to enable exotic filesystem types in the
