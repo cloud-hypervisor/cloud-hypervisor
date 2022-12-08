@@ -7,22 +7,6 @@ booting and direct-kernel booting. The document covers both methods.
 All the steps are based on Ubuntu. We use the Ubuntu cloud image for guest VM
 disk.
 
-## Direct-kernel booting
-
-Alternativelly, you can build your own kernel for guest VM. This way, UEFI is
-not involved and ACPI cannot be enabled.
-
-### Building kernel
-
-```bash
-$ pushd $CLOUDH
-$ git clone --depth 1 "https://github.com/cloud-hypervisor/linux.git" -b ch-5.12
-$ cd linux
-$ cp $CLOUDH/cloud-hypervisor/resources/linux-config-aarch64 .config
-$ make -j `nproc`
-$ popd
-```
-
 ### Booting the guest VM
 
 ```bash
