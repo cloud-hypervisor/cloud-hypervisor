@@ -7,17 +7,6 @@ booting and direct-kernel booting. The document covers both methods.
 All the steps are based on Ubuntu. We use the Ubuntu cloud image for guest VM
 disk.
 
-### Disk image
-
-Download the Ubuntu cloud image and convert the image type.
-
-```bash
-$ pushd $CLOUDH
-$ wget https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-arm64.img
-$ qemu-img convert -p -f qcow2 -O raw focal-server-cloudimg-arm64.img focal-server-cloudimg-arm64.raw
-$ popd
-```
-
 ## Direct-kernel booting
 
 Alternativelly, you can build your own kernel for guest VM. This way, UEFI is
