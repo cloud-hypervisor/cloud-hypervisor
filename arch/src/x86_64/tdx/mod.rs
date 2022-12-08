@@ -73,7 +73,7 @@ impl Default for TdvfSectionType {
     }
 }
 
-fn tdvf_descriptor_offset(file: &mut File) -> Result<SeekFrom, TdvfError> {
+fn tdvf_descriptor_offset(file: &mut File) -> Result<(SeekFrom, bool), TdvfError> {
     // Let's first try to identify the presence of the table footer GUID
     file.seek(SeekFrom::End(-0x30))
         .map_err(TdvfError::ReadGuidTable)?;
@@ -125,8 +125,11 @@ fn tdvf_descriptor_offset(file: &mut File) -> Result<SeekFrom, TdvfError> {
             let expected_uuid =
                 Uuid::from_str(TDVF_METADATA_OFFSET_GUID).map_err(TdvfError::UuidCreation)?;
             if entry_uuid == expected_uuid && entry_size == 22 {
-                return Ok(SeekFrom::End(
-                    -(u32::from_le_bytes(table[offset..offset + 4].try_into().unwrap()) as i64),
+                return Ok((
+                    SeekFrom::End(
+                        -(u32::from_le_bytes(table[offset..offset + 4].try_into().unwrap()) as i64),
+                    ),
+                    true,
                 ));
             }
         }
@@ -146,11 +149,14 @@ fn tdvf_descriptor_offset(file: &mut File) -> Result<SeekFrom, TdvfError> {
     file.read_exact(&mut descriptor_offset)
         .map_err(TdvfError::ReadDescriptorOffset)?;
 
-    Ok(SeekFrom::Start(u32::from_le_bytes(descriptor_offset) as u64))
+    Ok((
+        SeekFrom::Start(u32::from_le_bytes(descriptor_offset) as u64),
+        false,
+    ))
 }
 
-pub fn parse_tdvf_sections(file: &mut File) -> Result<Vec<TdvfSection>, TdvfError> {
-    let descriptor_offset = tdvf_descriptor_offset(file)?;
+pub fn parse_tdvf_sections(file: &mut File) -> Result<(Vec<TdvfSection>, bool), TdvfError> {
+    let (descriptor_offset, guid_found) = tdvf_descriptor_offset(file)?;
 
     file.seek(descriptor_offset)
         .map_err(TdvfError::ReadDescriptor)?;
@@ -192,7 +198,7 @@ pub fn parse_tdvf_sections(file: &mut File) -> Result<Vec<TdvfSection>, TdvfErro
     })
     .map_err(TdvfError::ReadDescriptor)?;
 
-    Ok(sections)
+    Ok((sections, guid_found))
 }
 
 #[repr(u16)]
@@ -393,12 +399,19 @@ impl TdHob {
         physical_start: u64,
         resource_length: u64,
         ram: bool,
+        guid_found: bool,
     ) -> Result<(), TdvfError> {
         self.add_resource(
             mem,
             physical_start,
             resource_length,
             if ram {
+                if guid_found {
+                    0x7 /* EFI_RESOURCE_MEMORY_UNACCEPTED */
+                } else {
+                    0 /* EFI_RESOURCE_SYSTEM_MEMORY */
+                }
+            } else if guid_found {
                 0 /* EFI_RESOURCE_SYSTEM_MEMORY */
             } else {
                 0x5 /*EFI_RESOURCE_MEMORY_RESERVED */
@@ -526,7 +539,7 @@ mod tests {
     #[ignore]
     fn test_parse_tdvf_sections() {
         let mut f = std::fs::File::open("tdvf.fd").unwrap();
-        let sections = parse_tdvf_sections(&mut f).unwrap();
+        let (sections, _) = parse_tdvf_sections(&mut f).unwrap();
         for section in sections {
             eprintln!("{:x?}", section)
         }

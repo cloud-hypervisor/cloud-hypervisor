@@ -1649,7 +1649,7 @@ impl Vm {
     }
 
     #[cfg(feature = "tdx")]
-    fn extract_tdvf_sections(&mut self) -> Result<Vec<TdvfSection>> {
+    fn extract_tdvf_sections(&mut self) -> Result<(Vec<TdvfSection>, bool)> {
         use arch::x86_64::tdx::*;
 
         let firmware_path = self
@@ -1730,7 +1730,11 @@ impl Vm {
     }
 
     #[cfg(feature = "tdx")]
-    fn populate_tdx_sections(&mut self, sections: &[TdvfSection]) -> Result<Option<u64>> {
+    fn populate_tdx_sections(
+        &mut self,
+        sections: &[TdvfSection],
+        guid_found: bool,
+    ) -> Result<Option<u64>> {
         use arch::x86_64::tdx::*;
         // Get the memory end *before* we start adding TDVF ram regions
         let boot_guest_memory = self
@@ -1868,7 +1872,7 @@ impl Vm {
         sorted_sections.reverse();
 
         for (start, size, ram) in Vm::hob_memory_resources(sorted_sections, &boot_guest_memory) {
-            hob.add_memory_resource(&mem, start, size, ram)
+            hob.add_memory_resource(&mem, start, size, ram, guid_found)
                 .map_err(Error::PopulateHob)?;
         }
 
@@ -2072,17 +2076,17 @@ impl Vm {
         }
 
         #[cfg(feature = "tdx")]
-        let sections = if tdx_enabled {
+        let (sections, guid_found) = if tdx_enabled {
             self.extract_tdvf_sections()?
         } else {
-            Vec::new()
+            (Vec::new(), false)
         };
 
         // Configuring the TDX regions requires that the vCPUs are created.
         #[cfg(feature = "tdx")]
         let hob_address = if tdx_enabled {
             // TDX sections are written to memory.
-            self.populate_tdx_sections(&sections)?
+            self.populate_tdx_sections(&sections, guid_found)?
         } else {
             None
         };
