@@ -13,7 +13,7 @@ mshv = ["vfio-ioctls/mshv"]
 anyhow = "1.0.66"
 hypervisor = { path = "../hypervisor" }
 thiserror = "1.0.37"
-serde = { version = "1.0.149", features = ["rc", "derive"] }
+serde = { version = "1.0.150", features = ["rc", "derive"] }
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
 vm-memory = { version = "0.10.0", features = ["backend-mmap"] }
 vmm-sys-util = "0.11.0"
