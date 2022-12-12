@@ -38,7 +38,6 @@ pub struct Sdt {
     data: Vec<u8>,
 }
 
-#[allow(clippy::len_without_is_empty)]
 impl Sdt {
     pub fn new(
         signature: [u8; 4],
@@ -123,6 +122,10 @@ impl Sdt {
 
     pub fn len(&self) -> usize {
         self.data.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
     }
 }
 
