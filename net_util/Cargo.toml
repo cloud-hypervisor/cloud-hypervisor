@@ -11,7 +11,7 @@ libc = "0.2.138"
 log = "0.4.17"
 net_gen = { path = "../net_gen" }
 rate_limiter = { path = "../rate_limiter" }
-serde = "1.0.149"
+serde = "1.0.150"
 thiserror = "1.0.37"
 versionize = "0.1.9"
 versionize_derive = "0.1.4"
