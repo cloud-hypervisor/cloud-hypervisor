@@ -61,12 +61,10 @@ pub enum ClockType {
     /// Equivalent to `libc::CLOCK_MONOTONIC`.
     Monotonic,
     /// Equivalent to `libc::CLOCK_REALTIME`.
-    #[allow(dead_code)]
     Real,
     /// Equivalent to `libc::CLOCK_PROCESS_CPUTIME_ID`.
     ProcessCpu,
     /// Equivalent to `libc::CLOCK_THREAD_CPUTIME_ID`.
-    #[allow(dead_code)]
     ThreadCpu,
 }
 
@@ -101,7 +99,7 @@ pub struct LocalTime {
 
 impl LocalTime {
     /// Returns the [LocalTime](struct.LocalTime.html) structure for the calling moment.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn now() -> LocalTime {
         let mut timespec = libc::timespec {
             tv_sec: 0,
@@ -170,22 +168,6 @@ impl Default for TimestampUs {
             time_us: get_time(ClockType::Monotonic) / 1000,
             cputime_us: get_time(ClockType::ProcessCpu) / 1000,
         }
-    }
-}
-
-/// Returns a timestamp in nanoseconds from a monotonic clock.
-///
-/// Uses `_rdstc` on `x86_64` and [`get_time`](fn.get_time.html) on other architectures.
-#[allow(dead_code)]
-pub fn timestamp_cycles() -> u64 {
-    #[cfg(target_arch = "x86_64")]
-    // SAFETY: there's nothing that can go wrong with this call.
-    unsafe {
-        std::arch::x86_64::_rdtsc() as u64
-    }
-    #[cfg(not(target_arch = "x86_64"))]
-    {
-        get_time(ClockType::Monotonic)
     }
 }
 
@@ -525,7 +507,6 @@ mod tests {
         ($test_name: ident, $write_fn_name: ident, $read_fn_name: ident, $is_be: expr, $data_type: ty) => {
             #[test]
             fn $test_name() {
-                #[allow(overflowing_literals)]
                 let test_cases = [
                     (
                         0x0123_4567_89AB_CDEF as u64,
