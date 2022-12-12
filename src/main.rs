@@ -177,7 +177,7 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
                 .long("memory-zone")
                 .help(
                     "User defined memory zone parameters \
-                     \"size=<guest_memory_region_size>,file=<backing_file>,\
+                     \"size=<guest_memory_region_size>,\
                      shared=on|off,\
                      hugepages=on|off,hugepage_size=<hugepage_size>,\
                      host_numa_node=<node_id>,\

@@ -2015,6 +2015,10 @@ impl VmConfig {
 
         if let Some(zones) = &self.memory.zones {
             for zone in zones.iter() {
+                if zone.file.is_some() {
+                    warn!("MemoryZoneConfig::file is deprecated and will be removed in future release (#4837)");
+                }
+
                 let id = zone.id.clone();
                 Self::validate_identifier(&mut id_list, &Some(id))?;
             }

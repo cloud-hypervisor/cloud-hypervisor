@@ -207,7 +207,6 @@ describing how every memory region is backed and exposed to the guest.
 struct MemoryZoneConfig {
     id: String,
     size: u64,
-    file: Option<PathBuf>,
     shared: bool,
     hugepages: bool,
     hugepage_size: Option<u64>,
@@ -219,7 +218,7 @@ struct MemoryZoneConfig {
 ```
 
 ```
---memory-zone <memory-zone>	User defined memory zone parameters "size=<guest_memory_region_size>,file=<backing_file>,shared=on|off,hugepages=on|off,hugepage_size=<hugepage_size>,host_numa_node=<node_id>,id=<zone_identifier>,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>,prefault=on|off"
+--memory-zone <memory-zone>	User defined memory zone parameters "size=<guest_memory_region_size>,shared=on|off,hugepages=on|off,hugepage_size=<hugepage_size>,host_numa_node=<node_id>,id=<zone_identifier>,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>,prefault=on|off"
 ```
 
 This parameter expects one or more occurences, allowing for a list of memory
@@ -262,30 +261,6 @@ _Example_
 ```
 --memory size=0
 --memory-zone id=mem0,size=1G
-```
-
-### `file`
-
-Path to the file backing the memory zone. This can be either a file or a
-directory. In case of a file, it will be opened and used as the backing file
-for the `mmap(2)` operation. In case of a directory, a temporary file with no
-hard link on the filesystem will be created. This file will be used as the
-backing file for the `mmap(2)` operation.
-
-This option can be particularly useful when trying to back a part of the guest
-RAM with a well known file. In the context of the snapshot/restore feature, and
-if the provided path is a file, the snapshot operation will not perform any
-copy of the guest RAM content for this specific memory zone since the user has
-access to it and it would duplicate data already stored on the current
-filesystem.
-
-Value is a string.
-
-_Example_
-
-```
---memory size=0
---memory-zone id=mem0,size=1G,file=/foo/bar
 ```
 
 ### `shared`
