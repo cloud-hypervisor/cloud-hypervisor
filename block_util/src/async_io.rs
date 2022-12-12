@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use libc::{ioctl, S_IFBLK, S_IFMT};
-use std::convert::TryInto;
 use std::fs::File;
 use std::os::unix::io::AsRawFd;
 use thiserror::Error;
@@ -66,7 +65,6 @@ impl DiskTopology {
     }
 
     // libc::ioctl() takes different types on different architectures
-    #[allow(clippy::useless_conversion)]
     fn query_block_size(f: &mut File, block_size_type: BlockSize) -> std::io::Result<u64> {
         let mut block_size = 0;
         // SAFETY: FFI call with correct arguments
@@ -78,9 +76,7 @@ impl DiskTopology {
                     BlockSize::PhysicalBlock => BLKPBSZGET(),
                     BlockSize::MinimumIo => BLKIOMIN(),
                     BlockSize::OptimalIo => BLKIOOPT(),
-                }
-                .try_into()
-                .unwrap(),
+                } as _,
                 &mut block_size,
             )
         };
