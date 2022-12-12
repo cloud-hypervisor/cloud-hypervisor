@@ -668,8 +668,6 @@ components:
           type: integer
           format: int64
           default: 512 MB
-        file:
-          type: string
         mergeable:
           type: boolean
           default: false
