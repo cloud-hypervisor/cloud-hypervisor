@@ -342,8 +342,10 @@ pub fn start_http_path_thread(
 ) -> Result<thread::JoinHandle<Result<()>>> {
     let socket_path = PathBuf::from(path);
     let socket_fd = UnixListener::bind(socket_path).map_err(VmmError::CreateApiServerSocket)?;
-    let server =
-        HttpServer::new_from_fd(socket_fd.into_raw_fd()).map_err(VmmError::CreateApiServer)?;
+    // SAFETY: Valid FD just opened
+    let server = unsafe {
+        HttpServer::new_from_fd(socket_fd.into_raw_fd()).map_err(VmmError::CreateApiServer)?
+    };
     start_http_thread(
         server,
         api_notifier,
@@ -362,7 +364,8 @@ pub fn start_http_fd_thread(
     exit_evt: EventFd,
     hypervisor_type: HypervisorType,
 ) -> Result<thread::JoinHandle<Result<()>>> {
-    let server = HttpServer::new_from_fd(fd).map_err(VmmError::CreateApiServer)?;
+    // SAFETY: Valid FD
+    let server = unsafe { HttpServer::new_from_fd(fd).map_err(VmmError::CreateApiServer)? };
     start_http_thread(
         server,
         api_notifier,
