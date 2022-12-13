@@ -106,7 +106,7 @@ pub use {
 const KVM_CAP_SGX_ATTRIBUTE: u32 = 196;
 
 #[cfg(feature = "tdx")]
-const KVM_EXIT_TDX: u32 = 35;
+const KVM_EXIT_TDX: u32 = 50;
 #[cfg(feature = "tdx")]
 const TDG_VP_VMCALL_GET_QUOTE: u64 = 0x10002;
 #[cfg(feature = "tdx")]
@@ -746,36 +746,32 @@ impl vm::Vm for KvmVm {
     ///
     #[cfg(feature = "tdx")]
     fn tdx_init(&self, cpuid: &[CpuIdEntry], max_vcpus: u32) -> vm::Result<()> {
-        use std::io::{Error, ErrorKind};
-        let cpuid: Vec<kvm_bindings::kvm_cpuid_entry2> =
+        let mut cpuid: Vec<kvm_bindings::kvm_cpuid_entry2> =
             cpuid.iter().map(|e| (*e).into()).collect();
-        let kvm_cpuid = kvm_bindings::CpuId::from_entries(&cpuid).map_err(|_| {
-            vm::HypervisorVmError::InitializeTdx(Error::new(
-                ErrorKind::Other,
-                "failed to allocate CpuId",
-            ))
-        })?;
+        cpuid.resize(256, kvm_bindings::kvm_cpuid_entry2::default());
 
         #[repr(C)]
         struct TdxInitVm {
-            max_vcpus: u32,
-            tsc_khz: u32,
             attributes: u64,
-            cpuid: u64,
+            max_vcpus: u32,
+            padding: u32,
             mrconfigid: [u64; 6],
             mrowner: [u64; 6],
             mrownerconfig: [u64; 6],
-            reserved: [u64; 43],
+            cpuid_nent: u32,
+            cpuid_padding: u32,
+            cpuid_entries: [kvm_bindings::kvm_cpuid_entry2; 256],
         }
         let data = TdxInitVm {
-            max_vcpus,
-            tsc_khz: 0,
             attributes: 0,
-            cpuid: kvm_cpuid.as_fam_struct_ptr() as u64,
+            max_vcpus,
+            padding: 0,
             mrconfigid: [0; 6],
             mrowner: [0; 6],
             mrownerconfig: [0; 6],
-            reserved: [0; 43],
+            cpuid_nent: cpuid.len() as u32,
+            cpuid_padding: 0,
+            cpuid_entries: cpuid.as_slice().try_into().unwrap(),
         };
 
         tdx_command(
@@ -837,19 +833,23 @@ impl vm::Vm for KvmVm {
 fn tdx_command(
     fd: &RawFd,
     command: TdxCommand,
-    metadata: u32,
+    flags: u32,
     data: u64,
 ) -> std::result::Result<(), std::io::Error> {
     #[repr(C)]
     struct TdxIoctlCmd {
         command: TdxCommand,
-        metadata: u32,
+        flags: u32,
         data: u64,
+        error: u64,
+        unused: u64,
     }
     let cmd = TdxIoctlCmd {
         command,
-        metadata,
+        flags,
         data,
+        error: 0,
+        unused: 0,
     };
     // SAFETY: FFI call. All input parameters are valid.
     let ret = unsafe {
