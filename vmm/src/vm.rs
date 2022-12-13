@@ -833,13 +833,11 @@ impl Vm {
     ) -> Result<Arc<dyn hypervisor::Vm>> {
         hypervisor.check_required_extensions().unwrap();
 
+        // 0 for KVM_X86_LEGACY_VM
+        // 1 for KVM_X86_TDX_VM
         #[cfg(feature = "tdx")]
         let vm = hypervisor
-            .create_vm_with_type(if tdx_enabled {
-                2 // KVM_X86_TDX_VM
-            } else {
-                0 // KVM_X86_LEGACY_VM
-            })
+            .create_vm_with_type(u64::from(tdx_enabled))
             .unwrap();
         #[cfg(not(feature = "tdx"))]
         let vm = hypervisor.create_vm().unwrap();
