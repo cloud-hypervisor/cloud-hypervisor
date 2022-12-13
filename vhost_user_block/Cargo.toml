@@ -6,19 +6,19 @@ edition = "2021"
 
 [dependencies]
 block_util = { path = "../block_util" }
-clap = { version = "4.0.18", features = ["wrap_help","cargo"] }
-env_logger = "0.9.3"
+clap = { version = "4.0.29", features = ["wrap_help","cargo"] }
+env_logger = "0.10.0"
 epoll = "4.3.1"
-libc = "0.2.137"
+libc = "0.2.138"
 log = "0.4.17"
 option_parser = { path = "../option_parser" }
 qcow = { path = "../qcow" }
-vhost = { version = "0.5.0", features = ["vhost-user-slave"] }
-vhost-user-backend = "0.7.0"
+vhost = { version = "0.6.0", features = ["vhost-user-slave"] }
+vhost-user-backend = "0.8.0"
 virtio-bindings = "0.1.0"
-virtio-queue = "0.6.1"
-vm-memory = "0.9.0"
-vmm-sys-util = "0.10.0"
+virtio-queue = "0.7.0"
+vm-memory = "0.10.0"
+vmm-sys-util = "0.11.0"
 
 [build-dependencies]
-clap = { version = "4.0.18", features = ["cargo"] }
+clap = { version = "4.0.29", features = ["cargo"] }
