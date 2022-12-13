@@ -6,13 +6,15 @@ Cloud Hypervisor supports UEFI boot through the utilization of the EDK II based 
 
 To avoid any unnecessary issues, it is recommended to use Ubuntu 18.04 and its default toolset. Any other compatible Linux distribution is otherwise suitable, however it is suggested to use a temporary Docker container with Ubuntu 18.04 for a quick build on an existing Linux machine.
 
+Please note that nasm-2.15 is required for the build to succeed.
+
 The commands below will compile an OVMF firmware suitable for Cloud Hypervisor.
 
 ```shell
 sudo apt-get update
 sudo apt-get install uuid-dev nasm iasl build-essential python3-distutils git
 
-git clone https://github.com/cloud-hypervisor/edk2 -b ch
+git clone https://github.com/tianocore/edk2
 cd edk2
 . edksetup.sh
 git submodule update --init
