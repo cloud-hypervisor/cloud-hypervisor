@@ -1,3 +1,4 @@
+- [v28.1](#v281)
 - [v28.0](#v280)
     - [Community Engagement (Reminder)](#community-engagement-reminder)
     - [Long Term Support (LTS) Release](#long-term-support-lts-release)
@@ -246,6 +247,16 @@
     - [Console over virtio](#console-over-virtio)
     - [Unit testing](#unit-testing)
     - [Integration tests parallelization](#integration-tests-parallelization)
+
+# v28.1
+This is a bug fix release. The following issues have been addressed:
+
+* Update dependencies including a version of `linux-loader` that
+addresses an infinite loop issue ([details](https://github.com/rust-vmm/linux-loader/security/advisories/GHSA-52h2-m2cf-9jh6))
+* Fix bugs related to `virtio-net` including an integer overflow issue
+  (#4924, #4949)
+* Use host `cpuid` information for L2 cache for older KVM on x86 (#4920)
+* Improve README and documentation
 
 # v28.0
 
