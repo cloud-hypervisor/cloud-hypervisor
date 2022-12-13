@@ -241,8 +241,6 @@ fn create_vmm_ioctl_seccomp_rule_hypervisor(
         HypervisorType::Kvm => create_vmm_ioctl_seccomp_rule_common_kvm(),
         #[cfg(feature = "mshv")]
         HypervisorType::Mshv => create_vmm_ioctl_seccomp_rule_common_mshv(),
-        #[allow(unreachable_patterns)]
-        _ => panic!("Invalid hypervisor {:?}", hypervisor_type),
     }
 }
 
@@ -418,8 +416,6 @@ fn create_vmm_ioctl_seccomp_rule(
         HypervisorType::Kvm => create_vmm_ioctl_seccomp_rule_kvm(),
         #[cfg(feature = "mshv")]
         HypervisorType::Mshv => create_vmm_ioctl_seccomp_rule_mshv(),
-        #[allow(unreachable_patterns)]
-        _ => panic!("Invalid hypervisor {:?}", hypervisor_type),
     }
 }
 
@@ -653,8 +649,6 @@ fn create_vcpu_ioctl_seccomp_rule_hypervisor(
         HypervisorType::Kvm => create_vcpu_ioctl_seccomp_rule_kvm(),
         #[cfg(feature = "mshv")]
         HypervisorType::Mshv => create_vcpu_ioctl_seccomp_rule_mshv(),
-        #[allow(unreachable_patterns)]
-        _ => panic!("Invalid hypervisor {:?}", hypervisor_type),
     }
 }
 

@@ -61,7 +61,9 @@ pub use vm::{
 
 #[derive(Debug, Copy, Clone)]
 pub enum HypervisorType {
+    #[cfg(feature = "kvm")]
     Kvm,
+    #[cfg(feature = "mshv")]
     Mshv,
 }
 
