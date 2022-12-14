@@ -109,8 +109,7 @@ fn sigwinch_listener_main(seccomp_filter: BpfProgram, tx: File, pty: File) -> ! 
             let e = io::Error::last_os_error();
             assert!(
                 matches!(e.kind(), ErrorKind::Interrupted | ErrorKind::WouldBlock),
-                "poll: {}",
-                e
+                "poll: {e}"
             );
         }
 

@@ -234,7 +234,7 @@ mod tests {
         txbuf.push(tmp.as_slice()).unwrap();
         match txbuf.push(&[1, 2]) {
             Err(Error::TxBufFull) => (),
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
     }
 
@@ -267,7 +267,7 @@ mod tests {
         sink.set_err(io_err);
         match txbuf.flush_to(&mut sink) {
             Err(Error::TxBufFlush(ref err)) if err.kind() == ErrorKind::PermissionDenied => (),
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
     }
 }

@@ -34,9 +34,7 @@ where
     if uefi_size > 0x300000 {
         return Err(Error::UefiTooBig);
     }
-    uefi_image
-        .seek(SeekFrom::Start(0))
-        .map_err(|_| Error::SeekUefiStart)?;
+    uefi_image.rewind().map_err(|_| Error::SeekUefiStart)?;
     guest_mem
         .read_exact_from(guest_addr, uefi_image, uefi_size)
         .map_err(|_| Error::ReadUefiImage)

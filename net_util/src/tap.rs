@@ -581,7 +581,7 @@ mod tests {
         let _tap_ip_guard = TAP_IP_LOCK.lock().unwrap();
 
         let t = Tap::new(1).unwrap();
-        println!("created tap: {:?}", t);
+        println!("created tap: {t:?}");
     }
 
     #[test]

@@ -516,9 +516,9 @@ impl Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use self::Error::*;
         match self {
-            BarAddressInvalid(a, s) => write!(f, "address {} size {} too big", a, s),
-            BarInUse(b) => write!(f, "bar {} already used", b),
-            BarInUse64(b) => write!(f, "64bit bar {} already used(requires two regs)", b),
+            BarAddressInvalid(a, s) => write!(f, "address {a} size {s} too big"),
+            BarInUse(b) => write!(f, "bar {b} already used"),
+            BarInUse64(b) => write!(f, "64bit bar {b} already used(requires two regs)"),
             BarInvalid(b) => write!(f, "bar {} invalid, max {}", b, NUM_BAR_REGS - 1),
             BarInvalid64(b) => write!(
                 f,
@@ -526,18 +526,18 @@ impl Display for Error {
                 b,
                 NUM_BAR_REGS - 1
             ),
-            BarSizeInvalid(s) => write!(f, "bar address {} not a power of two", s),
+            BarSizeInvalid(s) => write!(f, "bar address {s} not a power of two"),
             CapabilityEmpty => write!(f, "empty capabilities are invalid"),
-            CapabilityLengthInvalid(l) => write!(f, "Invalid capability length {}", l),
-            CapabilitySpaceFull(s) => write!(f, "capability of size {} doesn't fit", s),
+            CapabilityLengthInvalid(l) => write!(f, "Invalid capability length {l}"),
+            CapabilitySpaceFull(s) => write!(f, "capability of size {s} doesn't fit"),
             Decode32BarSize => write!(f, "failed to decode 32 bits BAR size"),
             Decode64BarSize => write!(f, "failed to decode 64 bits BAR size"),
             Encode32BarSize => write!(f, "failed to encode 32 bits BAR size"),
             Encode64BarSize => write!(f, "failed to encode 64 bits BAR size"),
-            RomBarAddressInvalid(a, s) => write!(f, "address {} size {} too big", a, s),
-            RomBarInUse(b) => write!(f, "rom bar {} already used", b),
+            RomBarAddressInvalid(a, s) => write!(f, "address {a} size {s} too big"),
+            RomBarInUse(b) => write!(f, "rom bar {b} already used"),
             RomBarInvalid(b) => write!(f, "rom bar {} invalid, max {}", b, NUM_BAR_REGS - 1),
-            RomBarSizeInvalid(s) => write!(f, "rom bar address {} not a power of two", s),
+            RomBarSizeInvalid(s) => write!(f, "rom bar address {s} not a power of two"),
         }
     }
 }

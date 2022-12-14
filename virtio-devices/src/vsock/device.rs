@@ -598,7 +598,7 @@ mod tests {
                 .activate(memory.clone(), Arc::new(NoopVirtioInterrupt {}), Vec::new());
         match bad_activate {
             Err(ActivateError::BadActivate) => (),
-            other => panic!("{:?}", other),
+            other => panic!("{other:?}"),
         }
 
         // Test a correct activation.

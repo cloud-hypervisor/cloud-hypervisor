@@ -37,8 +37,7 @@ pub fn init_tests() {
     // The test image can not be created on tmpfs (e.g. /tmp) filesystem,
     // as tmpfs does not support O_DIRECT
     assert!(exec_host_command_output(&format!(
-        "dd if=/dev/zero of={} bs=1M count=4096",
-        BLK_IO_TEST_IMG
+        "dd if=/dev/zero of={BLK_IO_TEST_IMG} bs=1M count=4096"
     ))
     .status
     .success());
@@ -46,7 +45,7 @@ pub fn init_tests() {
 
 pub fn cleanup_tests() {
     fs::remove_file(BLK_IO_TEST_IMG)
-        .unwrap_or_else(|_| panic!("Failed to remove file '{}'.", BLK_IO_TEST_IMG));
+        .unwrap_or_else(|_| panic!("Failed to remove file '{BLK_IO_TEST_IMG}'."));
 }
 
 // Performance tests are expected to be executed sequentially, so we can
@@ -92,7 +91,7 @@ pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
     );
 
     let mut child = GuestCommand::new(&guest)
-        .args(["--cpus", &format!("boot={}", num_queues)])
+        .args(["--cpus", &format!("boot={num_queues}")])
         .args(["--memory", "size=4G"])
         .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
         .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
@@ -133,7 +132,7 @@ pub fn performance_net_latency(control: &PerformanceTestControl) -> f64 {
     );
 
     let mut child = GuestCommand::new(&guest)
-        .args(["--cpus", &format!("boot={}", num_queues)])
+        .args(["--cpus", &format!("boot={num_queues}")])
         .args(["--memory", "size=4G"])
         .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
         .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
@@ -349,7 +348,7 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
         .to_string();
 
     let mut child = GuestCommand::new(&guest)
-        .args(["--cpus", &format!("boot={}", num_queues)])
+        .args(["--cpus", &format!("boot={num_queues}")])
         .args(["--memory", "size=4G"])
         .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
         .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
@@ -365,7 +364,7 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
                 guest.disk_config.disk(DiskType::CloudInit).unwrap()
             )
             .as_str(),
-            format!("path={}", BLK_IO_TEST_IMG).as_str(),
+            format!("path={BLK_IO_TEST_IMG}").as_str(),
         ])
         .default_net()
         .args(["--api-socket", &api_socket])
@@ -381,8 +380,7 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
         let fio_command = format!(
             "sudo fio --filename=/dev/vdc --name=test --output-format=json \
             --direct=1 --bs=4k --ioengine=io_uring --iodepth=64 \
-            --rw={} --runtime={} --numjobs={}",
-            fio_ops, test_timeout, num_queues
+            --rw={fio_ops} --runtime={test_timeout} --numjobs={num_queues}"
         );
         let output = guest
             .ssh_command(&fio_command)

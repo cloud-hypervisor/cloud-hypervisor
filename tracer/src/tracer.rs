@@ -80,7 +80,7 @@ impl Tracer {
         if let Some(depth) = self.thread_depths.get_mut(thread_name) {
             depth.fetch_sub(1, Ordering::SeqCst);
         } else {
-            panic!("Unmatched decreas for thread: {}", thread_name);
+            panic!("Unmatched decreas for thread: {thread_name}");
         }
     }
 

@@ -848,7 +848,7 @@ impl CpuManager {
 
         let handle = Some(
             thread::Builder::new()
-                .name(format!("vcpu{}", vcpu_id))
+                .name(format!("vcpu{vcpu_id}"))
                 .spawn(move || {
                     // Schedule the thread to run on the expected CPU set
                     if let Some(cpuset) = cpuset.as_ref() {
@@ -1589,8 +1589,7 @@ impl CpuManager {
             6 => 52,
             _ => {
                 return Err(Error::TranslateVirtualAddress(anyhow!(format!(
-                    "PA range not supported {}",
-                    pa_range
+                    "PA range not supported {pa_range}"
                 ))))
             }
         };

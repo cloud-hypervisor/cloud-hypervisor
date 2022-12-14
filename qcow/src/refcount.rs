@@ -31,16 +31,14 @@ impl Display for Error {
         use self::Error::*;
 
         match self {
-            EvictingRefCounts(e) => write!(
-                f,
-                "failed to write a refblock from the cache to disk: {}",
-                e
-            ),
+            EvictingRefCounts(e) => {
+                write!(f, "failed to write a refblock from the cache to disk: {e}")
+            }
             InvalidIndex => write!(f, "address requested is not within the range of the disk"),
-            NeedCluster(addr) => write!(f, "cluster with addr={} needs to be read", addr),
+            NeedCluster(addr) => write!(f, "cluster with addr={addr} needs to be read"),
             NeedNewCluster => write!(f, "new cluster needs to be allocated for refcounts"),
             ReadingRefCounts(e) => {
-                write!(f, "failed to read the file into the refcount cache: {}", e)
+                write!(f, "failed to read the file into the refcount cache: {e}")
             }
         }
     }
