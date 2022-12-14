@@ -5,3 +5,4 @@
 **/Cargo.lock
 **/rusty-tags.vi
 /rpm/SOURCES
+/.vscode
