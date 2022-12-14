@@ -60,11 +60,11 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Error::BadWriteOffset(offset) => write!(f, "pl011_write: Bad Write Offset: {}", offset),
+            Error::BadWriteOffset(offset) => write!(f, "pl011_write: Bad Write Offset: {offset}"),
             Error::DmaNotImplemented => write!(f, "pl011: DMA not implemented."),
-            Error::InterruptFailure(e) => write!(f, "Failed to trigger interrupt: {}", e),
-            Error::WriteAllFailure(e) => write!(f, "Failed to write: {}", e),
-            Error::FlushFailure(e) => write!(f, "Failed to flush: {}", e),
+            Error::InterruptFailure(e) => write!(f, "Failed to trigger interrupt: {e}"),
+            Error::WriteAllFailure(e) => write!(f, "Failed to write: {e}"),
+            Error::FlushFailure(e) => write!(f, "Failed to flush: {e}"),
         }
     }
 }

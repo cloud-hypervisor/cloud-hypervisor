@@ -729,10 +729,7 @@ impl Mem {
         if region_len != region_len / VIRTIO_MEM_ALIGN_SIZE * VIRTIO_MEM_ALIGN_SIZE {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
-                format!(
-                    "Virtio-mem size is not aligned with {}",
-                    VIRTIO_MEM_ALIGN_SIZE
-                ),
+                format!("Virtio-mem size is not aligned with {VIRTIO_MEM_ALIGN_SIZE}"),
             ));
         }
 
@@ -763,8 +760,7 @@ impl Mem {
                     io::Error::new(
                         io::ErrorKind::Other,
                         format!(
-                            "Failed to resize virtio-mem configuration to {}: {:?}",
-                            initial_size, e
+                            "Failed to resize virtio-mem configuration to {initial_size}: {e:?}"
                         ),
                     )
                 })?;
@@ -780,7 +776,7 @@ impl Mem {
             config.validate().map_err(|e| {
                 io::Error::new(
                     io::ErrorKind::Other,
-                    format!("Invalid virtio-mem configuration: {:?}", e),
+                    format!("Invalid virtio-mem configuration: {e:?}"),
                 )
             })?;
 

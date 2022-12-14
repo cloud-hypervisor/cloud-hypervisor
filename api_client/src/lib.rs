@@ -22,16 +22,16 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use Error::*;
         match self {
-            Socket(e) => write!(f, "Error writing to or reading from HTTP socket: {}", e),
-            SocketSendFds(e) => write!(f, "Error writing to or reading from HTTP socket: {}", e),
-            StatusCodeParsing(e) => write!(f, "Error parsing HTTP status code: {}", e),
+            Socket(e) => write!(f, "Error writing to or reading from HTTP socket: {e}"),
+            SocketSendFds(e) => write!(f, "Error writing to or reading from HTTP socket: {e}"),
+            StatusCodeParsing(e) => write!(f, "Error parsing HTTP status code: {e}"),
             MissingProtocol => write!(f, "HTTP output is missing protocol statement"),
-            ContentLengthParsing(e) => write!(f, "Error parsing HTTP Content-Length field: {}", e),
+            ContentLengthParsing(e) => write!(f, "Error parsing HTTP Content-Length field: {e}"),
             ServerResponse(s, o) => {
                 if let Some(o) = o {
-                    write!(f, "Server responded with an error: {:?}: {}", s, o)
+                    write!(f, "Server responded with an error: {s:?}: {o}")
                 } else {
-                    write!(f, "Server responded with an error: {:?}", s)
+                    write!(f, "Server responded with an error: {s:?}")
                 }
             }
         }
@@ -79,7 +79,7 @@ impl StatusCode {
 }
 
 fn get_header<'a>(res: &'a str, header: &'a str) -> Option<&'a str> {
-    let header_str = format!("{}: ", header);
+    let header_str = format!("{header}: ");
     res.find(&header_str)
         .map(|o| &res[o + header_str.len()..o + res[o..].find('\r').unwrap()])
 }
@@ -153,8 +153,7 @@ pub fn simple_api_full_command_with_fds_and_response<T: Read + Write + ScmSocket
     socket
         .send_with_fds(
             &[format!(
-                "{} /api/v1/{} HTTP/1.1\r\nHost: localhost\r\nAccept: */*\r\n",
-                method, full_command
+                "{method} /api/v1/{full_command} HTTP/1.1\r\nHost: localhost\r\nAccept: */*\r\n"
             )
             .as_bytes()],
             &request_fds,
@@ -235,7 +234,7 @@ pub fn simple_api_command_with_fds<T: Read + Write + ScmSocket>(
 ) -> Result<(), Error> {
     // Create the full VM command. For VMM commands, use
     // simple_api_full_command().
-    let full_command = format!("vm.{}", c);
+    let full_command = format!("vm.{c}");
 
     simple_api_full_command_with_fds(socket, method, &full_command, request_body, request_fds)
 }

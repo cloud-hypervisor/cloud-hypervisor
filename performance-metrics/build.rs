@@ -22,5 +22,5 @@ fn main() {
     // variable GIT_HUMAN_READABLE, so that it can be reused from the binary.
     // Particularly, this is used from the main.rs to display the exact
     // version information.
-    println!("cargo:rustc-env=GIT_HUMAN_READABLE={}", git_human_readable);
+    println!("cargo:rustc-env=GIT_HUMAN_READABLE={git_human_readable}");
 }

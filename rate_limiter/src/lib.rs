@@ -889,7 +889,7 @@ pub(crate) mod tests {
     fn test_rate_limiter_debug() {
         let l = RateLimiter::new(1, 2, 3, 4, 5, 6).unwrap();
         assert_eq!(
-            format!("{:?}", l),
+            format!("{l:?}"),
             format!(
                 "RateLimiter {{ bandwidth: {:?}, ops: {:?} }}",
                 l.bandwidth(),

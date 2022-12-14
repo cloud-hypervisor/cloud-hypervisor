@@ -209,7 +209,7 @@ impl fmt::Display for ValidationError {
                 write!(f, "Huge page size specified but huge pages not enabled")
             }
             InvalidHugePageSize(s) => {
-                write!(f, "Huge page size is not power of 2: {}", s)
+                write!(f, "Huge page size is not power of 2: {s}")
             }
             #[cfg(feature = "tdx")]
             TdxNoCpuHotplug => {
@@ -231,56 +231,50 @@ impl fmt::Display for ValidationError {
             MemoryZoneReused(s, u1, u2) => {
                 write!(
                     f,
-                    "Memory zone: {} belongs to multiple NUMA nodes {} and {}",
-                    s, u1, u2
+                    "Memory zone: {s} belongs to multiple NUMA nodes {u1} and {u2}"
                 )
             }
             InvalidNumPciSegments(n) => {
                 write!(
                     f,
-                    "Number of PCI segments ({}) not in range of 1 to {}",
-                    n, MAX_NUM_PCI_SEGMENTS
+                    "Number of PCI segments ({n}) not in range of 1 to {MAX_NUM_PCI_SEGMENTS}"
                 )
             }
             InvalidPciSegment(pci_segment) => {
-                write!(f, "Invalid PCI segment id: {}", pci_segment)
+                write!(f, "Invalid PCI segment id: {pci_segment}")
             }
             BalloonLargerThanRam(balloon_size, ram_size) => {
                 write!(
                     f,
-                    "Ballon size ({}) greater than RAM ({})",
-                    balloon_size, ram_size
+                    "Ballon size ({balloon_size}) greater than RAM ({ram_size})"
                 )
             }
             OnIommuSegment(pci_segment) => {
                 write!(
                     f,
-                    "Device is on an IOMMU PCI segment ({}) but not placed behind IOMMU",
-                    pci_segment
+                    "Device is on an IOMMU PCI segment ({pci_segment}) but not placed behind IOMMU"
                 )
             }
             IommuNotSupportedOnSegment(pci_segment) => {
                 write!(
                     f,
-                    "Device is on an IOMMU PCI segment ({}) but does not support being placed behind IOMMU",
-                    pci_segment
+                    "Device is on an IOMMU PCI segment ({pci_segment}) but does not support being placed behind IOMMU"
                 )
             }
             IdentifierNotUnique(s) => {
-                write!(f, "Identifier {} is not unique", s)
+                write!(f, "Identifier {s} is not unique")
             }
             InvalidIdentifier(s) => {
-                write!(f, "Identifier {} is invalid", s)
+                write!(f, "Identifier {s} is invalid")
             }
             IommuNotSupported => {
                 write!(f, "Device does not support being placed behind IOMMU")
             }
-            DuplicateDevicePath(p) => write!(f, "Duplicated device path: {}", p),
+            DuplicateDevicePath(p) => write!(f, "Duplicated device path: {p}"),
             &InvalidMtu(mtu) => {
                 write!(
                     f,
-                    "Provided MTU {} is lower than 1280 (expected by VIRTIO specification)",
-                    mtu
+                    "Provided MTU {mtu} is lower than 1280 (expected by VIRTIO specification)"
                 )
             }
         }
@@ -291,51 +285,51 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use self::Error::*;
         match self {
-            ParseConsole(o) => write!(f, "Error parsing --console: {}", o),
+            ParseConsole(o) => write!(f, "Error parsing --console: {o}"),
             ParseConsoleInvalidModeGiven => {
                 write!(f, "Error parsing --console: invalid console mode given")
             }
-            ParseCpus(o) => write!(f, "Error parsing --cpus: {}", o),
-            InvalidCpuFeatures(o) => write!(f, "Invalid feature in --cpus features list: {}", o),
-            ParseDevice(o) => write!(f, "Error parsing --device: {}", o),
+            ParseCpus(o) => write!(f, "Error parsing --cpus: {o}"),
+            InvalidCpuFeatures(o) => write!(f, "Invalid feature in --cpus features list: {o}"),
+            ParseDevice(o) => write!(f, "Error parsing --device: {o}"),
             ParseDevicePathMissing => write!(f, "Error parsing --device: path missing"),
-            ParseFileSystem(o) => write!(f, "Error parsing --fs: {}", o),
+            ParseFileSystem(o) => write!(f, "Error parsing --fs: {o}"),
             ParseFsSockMissing => write!(f, "Error parsing --fs: socket missing"),
             ParseFsTagMissing => write!(f, "Error parsing --fs: tag missing"),
-            ParsePersistentMemory(o) => write!(f, "Error parsing --pmem: {}", o),
+            ParsePersistentMemory(o) => write!(f, "Error parsing --pmem: {o}"),
             ParsePmemFileMissing => write!(f, "Error parsing --pmem: file missing"),
-            ParseVsock(o) => write!(f, "Error parsing --vsock: {}", o),
+            ParseVsock(o) => write!(f, "Error parsing --vsock: {o}"),
             ParseVsockCidMissing => write!(f, "Error parsing --vsock: cid missing"),
             ParseVsockSockMissing => write!(f, "Error parsing --vsock: socket missing"),
-            ParseMemory(o) => write!(f, "Error parsing --memory: {}", o),
-            ParseMemoryZone(o) => write!(f, "Error parsing --memory-zone: {}", o),
+            ParseMemory(o) => write!(f, "Error parsing --memory: {o}"),
+            ParseMemoryZone(o) => write!(f, "Error parsing --memory-zone: {o}"),
             ParseMemoryZoneIdMissing => write!(f, "Error parsing --memory-zone: id missing"),
-            ParseNetwork(o) => write!(f, "Error parsing --net: {}", o),
-            ParseDisk(o) => write!(f, "Error parsing --disk: {}", o),
-            ParseRng(o) => write!(f, "Error parsing --rng: {}", o),
-            ParseBalloon(o) => write!(f, "Error parsing --balloon: {}", o),
-            ParseRestore(o) => write!(f, "Error parsing --restore: {}", o),
+            ParseNetwork(o) => write!(f, "Error parsing --net: {o}"),
+            ParseDisk(o) => write!(f, "Error parsing --disk: {o}"),
+            ParseRng(o) => write!(f, "Error parsing --rng: {o}"),
+            ParseBalloon(o) => write!(f, "Error parsing --balloon: {o}"),
+            ParseRestore(o) => write!(f, "Error parsing --restore: {o}"),
             #[cfg(target_arch = "x86_64")]
-            ParseSgxEpc(o) => write!(f, "Error parsing --sgx-epc: {}", o),
+            ParseSgxEpc(o) => write!(f, "Error parsing --sgx-epc: {o}"),
             #[cfg(target_arch = "x86_64")]
             ParseSgxEpcIdMissing => write!(f, "Error parsing --sgx-epc: id missing"),
-            ParseNuma(o) => write!(f, "Error parsing --numa: {}", o),
+            ParseNuma(o) => write!(f, "Error parsing --numa: {o}"),
             ParseRestoreSourceUrlMissing => {
                 write!(f, "Error parsing --restore: source_url missing")
             }
             ParseUserDeviceSocketMissing => {
                 write!(f, "Error parsing --user-device: socket missing")
             }
-            ParseUserDevice(o) => write!(f, "Error parsing --user-device: {}", o),
-            Validation(v) => write!(f, "Error validating configuration: {}", v),
+            ParseUserDevice(o) => write!(f, "Error parsing --user-device: {o}"),
+            Validation(v) => write!(f, "Error validating configuration: {v}"),
             #[cfg(feature = "tdx")]
-            ParseTdx(o) => write!(f, "Error parsing --tdx: {}", o),
+            ParseTdx(o) => write!(f, "Error parsing --tdx: {o}"),
             #[cfg(feature = "tdx")]
             FirmwarePathMissing => write!(f, "TDX firmware missing"),
-            ParsePlatform(o) => write!(f, "Error parsing --platform: {}", o),
-            ParseVdpa(o) => write!(f, "Error parsing --vdpa: {}", o),
+            ParsePlatform(o) => write!(f, "Error parsing --platform: {o}"),
+            ParseVdpa(o) => write!(f, "Error parsing --vdpa: {o}"),
             ParseVdpaPathMissing => write!(f, "Error parsing --vdpa: path missing"),
-            ParseTpm(o) => write!(f, "Error parsing --tpm: {}", o),
+            ParseTpm(o) => write!(f, "Error parsing --tpm: {o}"),
             ParseTpmPathMissing => write!(f, "Error parsing --tpm: path missing"),
         }
     }

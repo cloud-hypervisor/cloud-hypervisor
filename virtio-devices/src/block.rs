@@ -456,7 +456,7 @@ impl Block {
                 let disk_size = disk_image.size().map_err(|e| {
                     io::Error::new(
                         io::ErrorKind::Other,
-                        format!("Failed getting disk size: {}", e),
+                        format!("Failed getting disk size: {e}"),
                     )
                 })?;
                 if disk_size % SECTOR_SIZE != 0 {

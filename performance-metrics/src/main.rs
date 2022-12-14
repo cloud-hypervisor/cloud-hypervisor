@@ -117,7 +117,7 @@ pub struct PerformanceTestOverrides {
 impl fmt::Display for PerformanceTestOverrides {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let Some(test_iterations) = self.test_iterations {
-            write!(f, "test_iterations = {}", test_iterations)?;
+            write!(f, "test_iterations = {test_iterations}")?;
         }
 
         Ok(())
@@ -141,19 +141,19 @@ impl fmt::Display for PerformanceTestControl {
             self.test_timeout, self.test_iterations
         );
         if let Some(o) = self.num_queues {
-            output = format!("{}, num_queues = {}", output, o);
+            output = format!("{output}, num_queues = {o}");
         }
         if let Some(o) = self.queue_size {
-            output = format!("{}, queue_size = {}", output, o);
+            output = format!("{output}, queue_size = {o}");
         }
         if let Some(o) = self.net_rx {
-            output = format!("{}, net_rx = {}", output, o);
+            output = format!("{output}, net_rx = {o}");
         }
         if let Some(o) = &self.fio_ops {
-            output = format!("{}, fio_ops = {}", output, o);
+            output = format!("{output}, fio_ops = {o}");
         }
 
-        write!(f, "{}", output)
+        write!(f, "{output}")
     }
 }
 
@@ -569,7 +569,7 @@ fn main() {
                     metrics_report.results.push(r);
                 }
                 Err(e) => {
-                    eprintln!("Aborting test due to error: '{:?}'", e);
+                    eprintln!("Aborting test due to error: '{e:?}'");
                     std::process::exit(1);
                 }
             };
@@ -583,7 +583,7 @@ fn main() {
             Box::new(
                 std::fs::File::create(std::path::Path::new(file))
                     .map_err(|e| {
-                        eprintln!("Error opening report file: {}: {}", file, e);
+                        eprintln!("Error opening report file: {file}: {e}");
                         std::process::exit(1);
                     })
                     .unwrap(),
@@ -599,7 +599,7 @@ fn main() {
                 .as_bytes(),
         )
         .map_err(|e| {
-            eprintln!("Error writing report file: {}", e);
+            eprintln!("Error writing report file: {e}");
             std::process::exit(1);
         })
         .unwrap();

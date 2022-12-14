@@ -28,10 +28,10 @@ pub enum OptionParserError {
 impl fmt::Display for OptionParserError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            OptionParserError::UnknownOption(s) => write!(f, "unknown option: {}", s),
-            OptionParserError::InvalidSyntax(s) => write!(f, "invalid syntax:{}", s),
+            OptionParserError::UnknownOption(s) => write!(f, "unknown option: {s}"),
+            OptionParserError::InvalidSyntax(s) => write!(f, "invalid syntax:{s}"),
             OptionParserError::Conversion(field, value) => {
-                write!(f, "unable to convert {} for {}", value, field)
+                write!(f, "unable to convert {value} for {field}")
             }
         }
     }

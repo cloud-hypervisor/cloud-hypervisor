@@ -48,8 +48,8 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Error::BadWriteOffset(offset) => write!(f, "Bad Write Offset: {}", offset),
-            Error::InterruptFailure(e) => write!(f, "Failed to trigger interrupt: {}", e),
+            Error::BadWriteOffset(offset) => write!(f, "Bad Write Offset: {offset}"),
+            Error::InterruptFailure(e) => write!(f, "Failed to trigger interrupt: {e}"),
         }
     }
 }

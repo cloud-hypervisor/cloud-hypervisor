@@ -148,13 +148,12 @@ impl GuestNetworkConfig {
                 let duration = start.elapsed();
                 eprintln!(
                     "\n\n==== Start 'wait_vm_boot' (FAILED) ====\n\n\
-                 duration =\"{:?}, timeout = {}s\"\n\
-                 listen_addr=\"{}\"\n\
-                 expected_guest_addr=\"{}\"\n\
-                 message=\"{}\"\n\
-                 error=\"{:?}\"\n\
-                 \n==== End 'wait_vm_boot' outout ====\n\n",
-                    duration, timeout, listen_addr, expected_guest_addr, s, e
+                 duration =\"{duration:?}, timeout = {timeout}s\"\n\
+                 listen_addr=\"{listen_addr}\"\n\
+                 expected_guest_addr=\"{expected_guest_addr}\"\n\
+                 message=\"{s}\"\n\
+                 error=\"{e:?}\"\n\
+                 \n==== End 'wait_vm_boot' outout ====\n\n"
                 );
 
                 Err(e)
@@ -435,7 +434,7 @@ impl DiskConfig for WindowsDiskConfig {
             .output()
             .expect("Expect device mapper nodes to be ready");
 
-        self.osdisk_path = format!("/dev/mapper/{}", windows_snapshot);
+        self.osdisk_path = format!("/dev/mapper/{windows_snapshot}");
         self.windows_snapshot_cow = windows_snapshot_cow;
         self.windows_snapshot = windows_snapshot;
     }
@@ -463,10 +462,7 @@ pub fn rate_limited_copy<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> io::
 
         // Make sure there is at least 6 GiB of space
         if free_bytes < 6 << 30 {
-            eprintln!(
-                "Not enough space on disk ({}). Attempt {} of 10. Sleeping.",
-                free_bytes, i
-            );
+            eprintln!("Not enough space on disk ({free_bytes}). Attempt {i} of 10. Sleeping.");
             thread::sleep(std::time::Duration::new(60, 0));
             continue;
         }
@@ -475,7 +471,7 @@ pub fn rate_limited_copy<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> io::
             Err(e) => {
                 if let Some(errno) = e.raw_os_error() {
                     if errno == libc::ENOSPC {
-                        eprintln!("Copy returned ENOSPC. Attempt {} of 10. Sleeping.", i);
+                        eprintln!("Copy returned ENOSPC. Attempt {i} of 10. Sleeping.");
                         thread::sleep(std::time::Duration::new(60, 0));
                         continue;
                     }
@@ -510,7 +506,7 @@ pub fn handle_child_output(
             );
         }
         Some(code) => {
-            eprintln!("\n\n==== child exit code: {} ====", code);
+            eprintln!("\n\n==== child exit code: {code} ====");
         }
     }
 
@@ -564,7 +560,7 @@ fn scp_to_guest_with_auth(
     loop {
         match (|| -> Result<(), SshCommandError> {
             let tcp =
-                TcpStream::connect(format!("{}:22", ip)).map_err(SshCommandError::Connection)?;
+                TcpStream::connect(format!("{ip}:22")).map_err(SshCommandError::Connection)?;
             let mut sess = Session::new().unwrap();
             sess.set_tcp_stream(tcp);
             sess.handshake().map_err(SshCommandError::Handshake)?;
@@ -602,13 +598,12 @@ fn scp_to_guest_with_auth(
                 if counter >= retries {
                     eprintln!(
                         "\n\n==== Start scp command output (FAILED) ====\n\n\
-                         path =\"{:?}\"\n\
-                         remote_path =\"{:?}\"\n\
-                         auth=\"{:#?}\"\n\
-                         ip=\"{}\"\n\
-                         error=\"{:?}\"\n\
-                         \n==== End scp command outout ====\n\n",
-                        path, remote_path, auth, ip, e
+                         path =\"{path:?}\"\n\
+                         remote_path =\"{remote_path:?}\"\n\
+                         auth=\"{auth:#?}\"\n\
+                         ip=\"{ip}\"\n\
+                         error=\"{e:?}\"\n\
+                         \n==== End scp command outout ====\n\n"
                     );
 
                     return Err(e);
@@ -653,7 +648,7 @@ pub fn ssh_command_ip_with_auth(
     loop {
         match (|| -> Result<(), SshCommandError> {
             let tcp =
-                TcpStream::connect(format!("{}:22", ip)).map_err(SshCommandError::Connection)?;
+                TcpStream::connect(format!("{ip}:22")).map_err(SshCommandError::Connection)?;
             let mut sess = Session::new().unwrap();
             sess.set_tcp_stream(tcp);
             sess.handshake().map_err(SshCommandError::Handshake)?;
@@ -687,13 +682,12 @@ pub fn ssh_command_ip_with_auth(
                 if counter >= retries {
                     eprintln!(
                         "\n\n==== Start ssh command output (FAILED) ====\n\n\
-                         command=\"{}\"\n\
-                         auth=\"{:#?}\"\n\
-                         ip=\"{}\"\n\
-                         output=\"{}\"\n\
-                         error=\"{:?}\"\n\
-                         \n==== End ssh command outout ====\n\n",
-                        command, auth, ip, s, e
+                         command=\"{command}\"\n\
+                         auth=\"{auth:#?}\"\n\
+                         ip=\"{ip}\"\n\
+                         output=\"{s}\"\n\
+                         error=\"{e:?}\"\n\
+                         \n==== End ssh command outout ====\n\n"
                     );
 
                     return Err(e);
@@ -727,14 +721,14 @@ pub fn exec_host_command_status(command: &str) -> ExitStatus {
     std::process::Command::new("bash")
         .args(["-c", command])
         .status()
-        .unwrap_or_else(|_| panic!("Expected '{}' to run", command))
+        .unwrap_or_else(|_| panic!("Expected '{command}' to run"))
 }
 
 pub fn exec_host_command_output(command: &str) -> Output {
     std::process::Command::new("bash")
         .args(["-c", command])
         .output()
-        .unwrap_or_else(|_| panic!("Expected '{}' to run", command))
+        .unwrap_or_else(|_| panic!("Expected '{command}' to run"))
 }
 
 pub const PIPE_SIZE: i32 = 32 << 20;
@@ -755,15 +749,15 @@ impl Guest {
         let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
 
         let network = GuestNetworkConfig {
-            guest_ip: format!("{}.{}.2", class, id),
-            l2_guest_ip1: format!("{}.{}.3", class, id),
-            l2_guest_ip2: format!("{}.{}.4", class, id),
-            l2_guest_ip3: format!("{}.{}.5", class, id),
-            host_ip: format!("{}.{}.1", class, id),
-            guest_mac: format!("12:34:56:78:90:{:02x}", id),
-            l2_guest_mac1: format!("de:ad:be:ef:12:{:02x}", id),
-            l2_guest_mac2: format!("de:ad:be:ef:34:{:02x}", id),
-            l2_guest_mac3: format!("de:ad:be:ef:56:{:02x}", id),
+            guest_ip: format!("{class}.{id}.2"),
+            l2_guest_ip1: format!("{class}.{id}.3"),
+            l2_guest_ip2: format!("{class}.{id}.4"),
+            l2_guest_ip3: format!("{class}.{id}.5"),
+            host_ip: format!("{class}.{id}.1"),
+            guest_mac: format!("12:34:56:78:90:{id:02x}"),
+            l2_guest_mac1: format!("de:ad:be:ef:12:{id:02x}"),
+            l2_guest_mac2: format!("de:ad:be:ef:34:{id:02x}"),
+            l2_guest_mac3: format!("de:ad:be:ef:56:{id:02x}"),
             tcp_listener_port: DEFAULT_TCP_LISTENER_PORT + id as u16,
         };
 
@@ -900,9 +894,8 @@ impl Guest {
     pub fn get_numa_node_memory(&self, node_id: usize) -> Result<u32, Error> {
         self.ssh_command(
             format!(
-                "grep MemTotal /sys/devices/system/node/node{}/meminfo \
-                        | cut -d \":\" -f 2 | grep -o \"[0-9]*\"",
-                node_id
+                "grep MemTotal /sys/devices/system/node/node{node_id}/meminfo \
+                        | cut -d \":\" -f 2 | grep -o \"[0-9]*\""
             )
             .as_str(),
         )?
@@ -919,10 +912,7 @@ impl Guest {
 
     pub fn check_numa_node_cpus(&self, node_id: usize, cpus: Vec<usize>) -> Result<(), Error> {
         for cpu in cpus.iter() {
-            let cmd = format!(
-                "[ -d \"/sys/devices/system/node/node{}/cpu{}\" ]",
-                node_id, cpu
-            );
+            let cmd = format!("[ -d \"/sys/devices/system/node/node{node_id}/cpu{cpu}\" ]");
             self.ssh_command(cmd.as_str())?;
         }
 
@@ -934,7 +924,7 @@ impl Guest {
         node_id: usize,
         distances: &str,
     ) -> Result<bool, Error> {
-        let cmd = format!("cat /sys/devices/system/node/node{}/distance", node_id);
+        let cmd = format!("cat /sys/devices/system/node/node{node_id}/distance");
         if self.ssh_command(cmd.as_str())?.trim() == distances {
             Ok(true)
         } else {
@@ -1047,8 +1037,7 @@ impl Guest {
 
         // Write something to vsock from the host
         assert!(exec_host_command_status(&format!(
-            "echo -e \"CONNECT 16\\nHelloWorld!\" | socat - UNIX-CONNECT:{}",
-            socket
+            "echo -e \"CONNECT 16\\nHelloWorld!\" | socat - UNIX-CONNECT:{socket}"
         ))
         .success());
 
@@ -1113,7 +1102,7 @@ impl Guest {
         }
         // Check if the console is usable
         if let Some(console_text) = console_text {
-            let console_cmd = format!("echo {} | sudo tee /dev/hvc0", console_text);
+            let console_cmd = format!("echo {console_text} | sudo tee /dev/hvc0");
             self.ssh_command(&console_cmd).unwrap();
         }
         // The net device is 'automatically' exercised through the above 'ssh' commands
@@ -1121,13 +1110,11 @@ impl Guest {
         // Check if the pmem device is usable
         if let Some(pmem_path) = pmem_path {
             assert_eq!(
-                self.ssh_command(&format!("ls {}", pmem_path))
-                    .unwrap()
-                    .trim(),
+                self.ssh_command(&format!("ls {pmem_path}")).unwrap().trim(),
                 pmem_path
             );
             assert_eq!(
-                self.ssh_command(&format!("sudo mount {} /mnt", pmem_path))
+                self.ssh_command(&format!("sudo mount {pmem_path} /mnt"))
                     .unwrap(),
                 ""
             );
@@ -1138,7 +1125,7 @@ impl Guest {
             assert_eq!(self.ssh_command("ls /mnt").unwrap(), "");
 
             assert_eq!(
-                self.ssh_command(&format!("sudo mount {} /mnt", pmem_path))
+                self.ssh_command(&format!("sudo mount {pmem_path} /mnt"))
                     .unwrap(),
                 ""
             );
@@ -1261,8 +1248,7 @@ impl<'a> GuestCommand<'a> {
                 Err(std::io::Error::new(
                     std::io::ErrorKind::Other,
                     format!(
-                        "resizing pipe w/ 'fnctl' failed: stdout pipesize {}, stderr pipesize {}",
-                        pipesize, pipesize1
+                        "resizing pipe w/ 'fnctl' failed: stdout pipesize {pipesize}, stderr pipesize {pipesize1}"
                     ),
                 ))
             }
@@ -1320,8 +1306,8 @@ impl<'a> GuestCommand<'a> {
 
 pub fn clh_command(cmd: &str) -> String {
     env::var("BUILD_TARGET").map_or(
-        format!("target/x86_64-unknown-linux-gnu/release/{}", cmd),
-        |target| format!("target/{}/release/{}", target, cmd),
+        format!("target/x86_64-unknown-linux-gnu/release/{cmd}"),
+        |target| format!("target/{target}/release/{cmd}"),
     )
 }
 
@@ -1422,8 +1408,7 @@ pub fn parse_fio_output(output: &str, fio_ops: &FioOps, num_jobs: u32) -> Result
     })
     .map_err(|_| {
         eprintln!(
-            "=============== Fio output ===============\n\n{}\n\n===========end============\n\n",
-            output
+            "=============== Fio output ===============\n\n{output}\n\n===========end============\n\n"
         );
         Error::FioOutputParse
     })
@@ -1478,8 +1463,7 @@ pub fn parse_fio_output_iops(output: &str, fio_ops: &FioOps, num_jobs: u32) -> R
     })
     .map_err(|_| {
         eprintln!(
-            "=============== Fio output ===============\n\n{}\n\n===========end============\n\n",
-            output
+            "=============== Fio output ===============\n\n{output}\n\n===========end============\n\n"
         );
         Error::FioOutputParse
     })
@@ -1532,7 +1516,7 @@ pub fn measure_virtio_net_throughput(
             "-p",
             &format!("{}", default_port + n),
             "-t",
-            &format!("{}", test_timeout),
+            &format!("{test_timeout}"),
         ]);
         // For measuring the guest transmit throughput (as a sender),
         // use reverse mode of the iperf3 client on the host
@@ -1626,7 +1610,7 @@ pub fn measure_virtio_net_latency(guest: &Guest, test_timeout: u32) -> Result<Ve
     )?;
 
     // Start the ethr server on the guest
-    guest.ssh_command(&format!("{} -s &> /dev/null &", ethr_remote_path))?;
+    guest.ssh_command(&format!("{ethr_remote_path} -s &> /dev/null &"))?;
 
     thread::sleep(Duration::new(10, 0));
 
@@ -1647,7 +1631,7 @@ pub fn measure_virtio_net_latency(guest: &Guest, test_timeout: u32) -> Result<Ve
             "-o",
             &log_file, // file output is JSON format
             "-d",
-            &format!("{}s", test_timeout),
+            &format!("{test_timeout}s"),
         ])
         .stderr(Stdio::piped())
         .stdout(Stdio::piped())

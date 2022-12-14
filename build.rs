@@ -23,5 +23,5 @@ fn main() {
     // variable BUILT_VERSION, so that it can be reused from the binary.
     // Particularly, this is used from src/main.rs to display the exact
     // version.
-    println!("cargo:rustc-env=BUILT_VERSION={}", version);
+    println!("cargo:rustc-env=BUILT_VERSION={version}");
 }

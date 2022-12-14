@@ -51,13 +51,13 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Error::BadWriteOffset(offset) => write!(f, "Bad Write Offset: {}", offset),
+            Error::BadWriteOffset(offset) => write!(f, "Bad Write Offset: {offset}"),
             Error::GpioInterruptDisabled => write!(f, "GPIO interrupt disabled by guest driver.",),
             Error::GpioInterruptFailure(ref e) => {
-                write!(f, "Could not trigger GPIO interrupt: {}.", e)
+                write!(f, "Could not trigger GPIO interrupt: {e}.")
             }
             Error::GpioTriggerKeyFailure(key) => {
-                write!(f, "Invalid GPIO Input key triggerd: {}.", key)
+                write!(f, "Invalid GPIO Input key triggerd: {key}.")
             }
         }
     }

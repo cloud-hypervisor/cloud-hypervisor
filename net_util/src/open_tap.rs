@@ -41,7 +41,7 @@ type Result<T> = std::result::Result<T, Error>;
 fn check_mq_support(if_name: &Option<&str>, queue_pairs: usize) -> Result<()> {
     if let Some(tap_name) = if_name {
         let mq = queue_pairs > 1;
-        let path = format!("/sys/class/net/{}/tun_flags", tap_name);
+        let path = format!("/sys/class/net/{tap_name}/tun_flags");
         // interface does not exist, check is not required
         if !Path::new(&path).exists() {
             return Ok(());
