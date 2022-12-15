@@ -1580,6 +1580,20 @@ impl MemoryManager {
             .create_user_memory_region(mem_region)
             .map_err(Error::CreateUserMemoryRegion)?;
 
+        // SAFETY: the address and size are valid since the
+        // mmap succeeded.
+        let ret = unsafe {
+            libc::madvise(
+                userspace_addr as *mut libc::c_void,
+                memory_size as libc::size_t,
+                libc::MADV_DONTDUMP,
+            )
+        };
+        if ret != 0 {
+            let e = io::Error::last_os_error();
+            warn!("Failed to mark mappin as MADV_DONTDUMP: {}", e);
+        }
+
         // Mark the pages as mergeable if explicitly asked for.
         if mergeable {
             // SAFETY: the address and size are valid since the
