@@ -199,6 +199,20 @@ impl BlockEpollHandler {
         Ok(used_descs)
     }
 
+    fn process_queue_submit_and_signal(&mut self) -> result::Result<(), EpollHelperError> {
+        let needs_notification = self.process_queue_submit().map_err(|e| {
+            EpollHelperError::HandleEvent(anyhow!("Failed to process queue (submit): {:?}", e))
+        })?;
+
+        if needs_notification {
+            self.signal_used_queue().map_err(|e| {
+                EpollHelperError::HandleEvent(anyhow!("Failed to signal used queue: {:?}", e))
+            })?
+        };
+
+        Ok(())
+    }
+
     fn process_queue_complete(&mut self) -> Result<bool> {
         let queue = &mut self.queue;
 
@@ -318,21 +332,7 @@ impl EpollHelperHandler for BlockEpollHandler {
 
                 // Process the queue only when the rate limit is not reached
                 if !rate_limit_reached {
-                    let needs_notification = self.process_queue_submit().map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to process queue (submit): {:?}",
-                            e
-                        ))
-                    })?;
-
-                    if needs_notification {
-                        self.signal_used_queue().map_err(|e| {
-                            EpollHelperError::HandleEvent(anyhow!(
-                                "Failed to signal used queue: {:?}",
-                                e
-                            ))
-                        })?
-                    };
+                    self.process_queue_submit_and_signal()?
                 }
             }
             COMPLETION_EVENT => {
@@ -367,21 +367,7 @@ impl EpollHelperHandler for BlockEpollHandler {
                         ))
                     })?;
 
-                    let needs_notification = self.process_queue_submit().map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to process queue (submit): {:?}",
-                            e
-                        ))
-                    })?;
-
-                    if needs_notification {
-                        self.signal_used_queue().map_err(|e| {
-                            EpollHelperError::HandleEvent(anyhow!(
-                                "Failed to signal used queue: {:?}",
-                                e
-                            ))
-                        })?
-                    };
+                    self.process_queue_submit_and_signal()?
                 } else {
                     return Err(EpollHelperError::HandleEvent(anyhow!(
                         "Unexpected 'RATE_LIMITER_EVENT' when rate_limiter is not enabled."
