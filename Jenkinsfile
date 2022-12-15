@@ -10,29 +10,16 @@ pipeline {
                         checkout scm
                     }
                 }
-                stage('Check for documentation only changes') {
+                stage('Check if worker build can be skipped') {
                     when {
                         expression {
-                            return docsFileOnly()
+                            return skipWorkerBuild()
                         }
                     }
                     steps {
                         script {
                             runWorkers = false
-                            echo 'Documentation only changes, no need to run the CI'
-                        }
-                    }
-                }
-                stage('Check for fuzzer files only changes') {
-                    when {
-                        expression {
-                            return fuzzFileOnly()
-                        }
-                    }
-                    steps {
-                        script {
-                            runWorkers = false
-                            echo 'Fuzzer cargo files only changes, no need to run the CI'
+                            echo 'No changes requring a build'
                         }
                     }
                 }
@@ -432,24 +419,24 @@ def installAzureCli(distro, arch) {
     sh 'sudo apt install -y azure-cli'
 }
 
-def boolean docsFileOnly() {
+def boolean skipWorkerBuild() {
     if (env.CHANGE_TARGET == null) {
         return false
     }
 
-    return sh(
+    if (sh(
         returnStatus: true,
         script: "git diff --name-only origin/${env.CHANGE_TARGET}... | grep -v '\\.md'"
-    ) != 0
-}
-
-def boolean fuzzFileOnly() {
-    if (env.CHANGE_TARGET == null) {
-        return false
+    ) != 0) {
+        return true
     }
 
-    return sh(
+    if (sh(
         returnStatus: true,
         script: "git diff --name-only origin/${env.CHANGE_TARGET}... | grep -v -E 'fuzz/'"
-    ) != 0
+    ) != 0) {
+        return true
+    }
+
+    return false
 }
