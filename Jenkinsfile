@@ -438,5 +438,12 @@ def boolean skipWorkerBuild() {
         return true
     }
 
+    if (sh(
+        returnStatus: true,
+        script: "git diff --name-only origin/${env.CHANGE_TARGET}... | grep -v -E '.github/'"
+    ) != 0) {
+        return true
+    }
+
     return false
 }
