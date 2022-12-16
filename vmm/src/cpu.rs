@@ -2629,7 +2629,7 @@ mod tests {
         kvm_regs, kvm_vcpu_init, user_pt_regs, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG,
         KVM_REG_ARM_CORE, KVM_REG_SIZE_U64,
     };
-    use hypervisor::{arm64_core_reg_id, offset__of};
+    use hypervisor::{arm64_core_reg_id, offset_of};
     use std::mem;
 
     #[test]
@@ -2666,7 +2666,7 @@ mod tests {
 
     #[test]
     fn test_is_system_register() {
-        let offset = offset__of!(user_pt_regs, pc);
+        let offset = offset_of!(user_pt_regs, pc);
         let regid = arm64_core_reg_id!(KVM_REG_SIZE_U64, offset);
         assert!(!is_system_register(regid));
         let regid = KVM_REG_ARM64 | KVM_REG_SIZE_U64 | KVM_REG_ARM64_SYSREG as u64;

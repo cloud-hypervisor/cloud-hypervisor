@@ -24,7 +24,7 @@ pub use {kvm_ioctls::Cap, kvm_ioctls::Kvm};
 // This macro gets the offset of a structure (i.e `str`) member (i.e `field`) without having
 // an instance of that structure.
 #[macro_export]
-macro_rules! offset__of {
+macro_rules! offset_of {
     ($str:ty, $($field:ident)+) => ({
         let tmp: std::mem::MaybeUninit<$str> = std::mem::MaybeUninit::uninit();
         let base = tmp.as_ptr();
