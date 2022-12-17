@@ -446,10 +446,10 @@ impl cpu::Vcpu for MshvVcpu {
                             /* Advance RIP and update RAX */
                             let arr_reg_name_value = [
                                 (
-                                    hv_register_name::HV_X64_REGISTER_RIP,
+                                    hv_x64_register_name_HV_X64_REGISTER_RIP,
                                     info.header.rip + insn_len,
                                 ),
-                                (hv_register_name::HV_X64_REGISTER_RAX, ret_rax),
+                                (hv_x64_register_name_HV_X64_REGISTER_RAX, ret_rax),
                             ];
                             set_registers_64!(self.fd, arr_reg_name_value)
                                 .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
@@ -495,10 +495,10 @@ impl cpu::Vcpu for MshvVcpu {
                     /* Advance RIP and update RAX */
                     let arr_reg_name_value = [
                         (
-                            hv_register_name::HV_X64_REGISTER_RIP,
+                            hv_x64_register_name_HV_X64_REGISTER_RIP,
                             info.header.rip + insn_len,
                         ),
-                        (hv_register_name::HV_X64_REGISTER_RAX, ret_rax),
+                        (hv_x64_register_name_HV_X64_REGISTER_RAX, ret_rax),
                     ];
                     set_registers_64!(self.fd, arr_reg_name_value)
                         .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
