@@ -446,6 +446,9 @@ impl Net {
         rate_limiter_config: Option<RateLimiterConfig>,
         exit_evt: EventFd,
         state: Option<NetState>,
+        offload_tso: bool,
+        offload_ufo: bool,
+        offload_csum: bool,
     ) -> Result<Self> {
         assert!(!taps.is_empty());
 
@@ -462,23 +465,31 @@ impl Net {
                     true,
                 )
             } else {
-                let mut avail_features = 1 << VIRTIO_NET_F_CSUM
-                    | 1 << VIRTIO_NET_F_CTRL_GUEST_OFFLOADS
-                    | 1 << VIRTIO_NET_F_GUEST_CSUM
-                    | 1 << VIRTIO_NET_F_GUEST_ECN
-                    | 1 << VIRTIO_NET_F_GUEST_TSO4
-                    | 1 << VIRTIO_NET_F_GUEST_TSO6
-                    | 1 << VIRTIO_NET_F_GUEST_UFO
-                    | 1 << VIRTIO_NET_F_HOST_ECN
-                    | 1 << VIRTIO_NET_F_HOST_TSO4
-                    | 1 << VIRTIO_NET_F_HOST_TSO6
-                    | 1 << VIRTIO_NET_F_HOST_UFO
-                    | 1 << VIRTIO_NET_F_MTU
-                    | 1 << VIRTIO_RING_F_EVENT_IDX
-                    | 1 << VIRTIO_F_VERSION_1;
+                let mut avail_features =
+                    1 << VIRTIO_NET_F_MTU | 1 << VIRTIO_RING_F_EVENT_IDX | 1 << VIRTIO_F_VERSION_1;
 
                 if iommu {
                     avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
+                }
+
+                // Configure TSO/UFO features when hardware checksum offload is enabled.
+                if offload_csum {
+                    avail_features |= 1 << VIRTIO_NET_F_CSUM
+                        | 1 << VIRTIO_NET_F_GUEST_CSUM
+                        | 1 << VIRTIO_NET_F_CTRL_GUEST_OFFLOADS;
+
+                    if offload_tso {
+                        avail_features |= 1 << VIRTIO_NET_F_HOST_ECN
+                            | 1 << VIRTIO_NET_F_HOST_TSO4
+                            | 1 << VIRTIO_NET_F_HOST_TSO6
+                            | 1 << VIRTIO_NET_F_GUEST_ECN
+                            | 1 << VIRTIO_NET_F_GUEST_TSO4
+                            | 1 << VIRTIO_NET_F_GUEST_TSO6;
+                    }
+
+                    if offload_ufo {
+                        avail_features |= 1 << VIRTIO_NET_F_HOST_UFO | 1 << VIRTIO_NET_F_GUEST_UFO;
+                    }
                 }
 
                 avail_features |= 1 << VIRTIO_NET_F_CTRL_VQ;
@@ -551,6 +562,9 @@ impl Net {
         rate_limiter_config: Option<RateLimiterConfig>,
         exit_evt: EventFd,
         state: Option<NetState>,
+        offload_tso: bool,
+        offload_ufo: bool,
+        offload_csum: bool,
     ) -> Result<Self> {
         let taps = open_tap(
             if_name,
@@ -574,6 +588,9 @@ impl Net {
             rate_limiter_config,
             exit_evt,
             state,
+            offload_tso,
+            offload_ufo,
+            offload_csum,
         )
     }
 
@@ -589,6 +606,9 @@ impl Net {
         rate_limiter_config: Option<RateLimiterConfig>,
         exit_evt: EventFd,
         state: Option<NetState>,
+        offload_tso: bool,
+        offload_ufo: bool,
+        offload_csum: bool,
     ) -> Result<Self> {
         let mut taps: Vec<Tap> = Vec::new();
         let num_queue_pairs = fds.len();
@@ -621,6 +641,9 @@ impl Net {
             rate_limiter_config,
             exit_evt,
             state,
+            offload_tso,
+            offload_ufo,
+            offload_csum,
         )
     }
 

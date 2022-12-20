@@ -291,6 +291,16 @@ pub struct NetConfig {
     pub rate_limiter_config: Option<RateLimiterConfig>,
     #[serde(default)]
     pub pci_segment: u16,
+    #[serde(default = "default_netconfig_true")]
+    pub offload_tso: bool,
+    #[serde(default = "default_netconfig_true")]
+    pub offload_ufo: bool,
+    #[serde(default = "default_netconfig_true")]
+    pub offload_csum: bool,
+}
+
+pub fn default_netconfig_true() -> bool {
+    true
 }
 
 pub fn default_netconfig_tap() -> Option<String> {
@@ -340,6 +350,9 @@ impl Default for NetConfig {
             fds: None,
             rate_limiter_config: None,
             pci_segment: 0,
+            offload_tso: true,
+            offload_ufo: true,
+            offload_csum: true,
         }
     }
 }
