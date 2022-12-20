@@ -76,6 +76,9 @@ fuzz_target!(|bytes| {
         None,
         EventFd::new(EFD_NONBLOCK).unwrap(),
         None,
+        true,
+        true,
+        true,
     )
     .unwrap();
 

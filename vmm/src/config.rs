@@ -134,6 +134,8 @@ pub enum ValidationError {
     VnetQueueFdMismatch,
     /// Using reserved fd
     VnetReservedFd,
+    /// Hardware checksum offload is disabled.
+    NoHardwareChecksumOffload,
     /// Hugepages not turned on
     HugePageSizeWithoutHugePages,
     /// Huge page size is not power of 2
@@ -205,6 +207,10 @@ impl fmt::Display for ValidationError {
                 "Number of queues to virtio_net does not match the number of input FDs"
             ),
             VnetReservedFd => write!(f, "Reserved fd number (<= 2)"),
+            NoHardwareChecksumOffload => write!(
+                f,
+                "\"offload_tso\" and \"offload_ufo\" depend on \"offload_tso\""
+            ),
             HugePageSizeWithoutHugePages => {
                 write!(f, "Huge page size specified but huge pages not enabled")
             }
@@ -1006,7 +1012,8 @@ impl NetConfig {
     num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,id=<device_id>,\
     vhost_user=<vhost_user_enable>,socket=<vhost_user_socket_path>,vhost_mode=client|server,\
     bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,\
-    ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,pci_segment=<segment_id>\"";
+    ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,pci_segment=<segment_id>\
+    offload_tso=on|off,offload_ufo=on|off,offload_csum=on|off\"";
 
     pub fn parse(net: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -1017,6 +1024,9 @@ impl NetConfig {
             .add("mask")
             .add("mac")
             .add("host_mac")
+            .add("offload_tso")
+            .add("offload_ufo")
+            .add("offload_csum")
             .add("mtu")
             .add("iommu")
             .add("queue_size")
@@ -1049,6 +1059,21 @@ impl NetConfig {
             .map_err(Error::ParseNetwork)?
             .unwrap_or_else(default_netconfig_mac);
         let host_mac = parser.convert("host_mac").map_err(Error::ParseNetwork)?;
+        let offload_tso = parser
+            .convert::<Toggle>("offload_tso")
+            .map_err(Error::ParseNetwork)?
+            .unwrap_or(Toggle(true))
+            .0;
+        let offload_ufo = parser
+            .convert::<Toggle>("offload_ufo")
+            .map_err(Error::ParseNetwork)?
+            .unwrap_or(Toggle(true))
+            .0;
+        let offload_csum = parser
+            .convert::<Toggle>("offload_csum")
+            .map_err(Error::ParseNetwork)?
+            .unwrap_or(Toggle(true))
+            .0;
         let mtu = parser.convert("mtu").map_err(Error::ParseNetwork)?;
         let iommu = parser
             .convert::<Toggle>("iommu")
@@ -1150,6 +1175,9 @@ impl NetConfig {
             fds,
             rate_limiter_config,
             pci_segment,
+            offload_tso,
+            offload_ufo,
+            offload_csum,
         };
         Ok(config)
     }
@@ -1195,6 +1223,10 @@ impl NetConfig {
             if mtu < virtio_devices::net::MIN_MTU {
                 return Err(ValidationError::InvalidMtu(mtu));
             }
+        }
+
+        if !self.offload_csum && (self.offload_tso || self.offload_ufo) {
+            return Err(ValidationError::NoHardwareChecksumOffload);
         }
 
         Ok(())
@@ -2930,6 +2962,16 @@ mod tests {
         assert_eq!(
             invalid_config.validate(),
             Err(ValidationError::VnetReservedFd)
+        );
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.net = Some(vec![NetConfig {
+            offload_csum: false,
+            ..Default::default()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::NoHardwareChecksumOffload)
         );
 
         let mut invalid_config = valid_config.clone();
