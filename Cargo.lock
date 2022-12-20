@@ -2340,6 +2340,7 @@ dependencies = [
  "bitflags 2.3.3",
  "block",
  "blocking",
+ "cfg-if",
  "devices",
  "epoll",
  "event_monitor",

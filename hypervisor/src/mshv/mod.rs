@@ -14,7 +14,7 @@ use crate::vec_with_array_field;
 use crate::vm::{self, InterruptSourceConfig, VmOps};
 use crate::HypervisorType;
 pub use mshv_bindings::*;
-use mshv_ioctls::{set_registers_64, Mshv, NoDatamatch, VcpuFd, VmFd};
+use mshv_ioctls::{set_registers_64, Mshv, NoDatamatch, VcpuFd, VmFd, VmType};
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -210,21 +210,15 @@ impl hypervisor::Hypervisor for MshvHypervisor {
     fn hypervisor_type(&self) -> HypervisorType {
         HypervisorType::Mshv
     }
-    /// Create a mshv vm object and return the object as Vm trait object
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # extern crate hypervisor;
-    /// # use hypervisor::mshv::MshvHypervisor;
-    /// use hypervisor::mshv::MshvVm;
-    /// let hypervisor = MshvHypervisor::new().unwrap();
-    /// let vm = hypervisor.create_vm().unwrap();
-    /// ```
-    fn create_vm(&self) -> hypervisor::Result<Arc<dyn vm::Vm>> {
+
+    fn create_vm_with_type(&self, vm_type: u64) -> hypervisor::Result<Arc<dyn crate::Vm>> {
+        let mshv_vm_type: VmType = match VmType::try_from(vm_type) {
+            Ok(vm_type) => vm_type,
+            Err(_) => return Err(hypervisor::HypervisorError::UnsupportedVmType()),
+        };
         let fd: VmFd;
         loop {
-            match self.mshv.create_vm() {
+            match self.mshv.create_vm_with_type(mshv_vm_type) {
                 Ok(res) => fd = res,
                 Err(e) => {
                     if e.errno() == libc::EINTR {
@@ -270,6 +264,22 @@ impl hypervisor::Hypervisor for MshvHypervisor {
             msrs,
             dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
         }))
+    }
+
+    /// Create a mshv vm object and return the object as Vm trait object
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate hypervisor;
+    /// # use hypervisor::mshv::MshvHypervisor;
+    /// use hypervisor::mshv::MshvVm;
+    /// let hypervisor = MshvHypervisor::new().unwrap();
+    /// let vm = hypervisor.create_vm().unwrap();
+    /// ```
+    fn create_vm(&self) -> hypervisor::Result<Arc<dyn vm::Vm>> {
+        let vm_type = 0;
+        self.create_vm_with_type(vm_type)
     }
     ///
     /// Get the supported CpuID
