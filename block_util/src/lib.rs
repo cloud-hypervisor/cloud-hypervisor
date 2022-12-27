@@ -32,6 +32,7 @@ use std::path::Path;
 use std::result;
 use std::sync::Arc;
 use std::sync::MutexGuard;
+use std::time::Instant;
 use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
@@ -199,6 +200,7 @@ pub struct Request {
     pub status_addr: GuestAddress,
     pub writeback: bool,
     pub aligned_operations: Vec<AlignedOperation>,
+    pub start: Instant,
 }
 
 impl Request {
@@ -230,6 +232,7 @@ impl Request {
             status_addr: GuestAddress(0),
             writeback: true,
             aligned_operations: Vec::new(),
+            start: Instant::now(),
         };
 
         let status_desc;
