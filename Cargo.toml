@@ -24,7 +24,7 @@ opt-level = "s"
 strip = true
 
 [dependencies]
-anyhow = "1.0.66"
+anyhow = "1.0.68"
 api_client = { path = "api_client" }
 clap = { version = "4.0.29", features = ["wrap_help","cargo","string"] }
 epoll = "4.3.1"
