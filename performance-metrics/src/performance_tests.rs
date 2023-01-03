@@ -335,7 +335,7 @@ pub fn performance_boot_time_pmem(control: &PerformanceTestControl) -> f64 {
 pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
     let test_timeout = control.test_timeout;
     let num_queues = control.num_queues.unwrap();
-    let fio_ops = control.fio_ops.as_ref().unwrap();
+    let (fio_ops, bandwidth) = control.fio_control.as_ref().unwrap();
 
     let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
     let guest = performance_test_new_guest(Box::new(focal));
@@ -388,7 +388,11 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
             .unwrap();
 
         // Parse fio output
-        parse_fio_output(&output, fio_ops, num_queues).unwrap()
+        if *bandwidth {
+            parse_fio_output(&output, fio_ops, num_queues).unwrap()
+        } else {
+            parse_fio_output_iops(&output, fio_ops, num_queues).unwrap()
+        }
     });
 
     let _ = child.kill();

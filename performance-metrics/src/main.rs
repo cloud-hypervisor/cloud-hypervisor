@@ -130,7 +130,7 @@ pub struct PerformanceTestControl {
     num_queues: Option<u32>,
     queue_size: Option<u32>,
     net_rx: Option<bool>,
-    fio_ops: Option<FioOps>,
+    fio_control: Option<(FioOps, bool)>, // Second parameter controls whether we want bandwidth or IOPS
     num_boot_vcpus: Option<u8>,
 }
 
@@ -149,8 +149,9 @@ impl fmt::Display for PerformanceTestControl {
         if let Some(o) = self.net_rx {
             output = format!("{output}, net_rx = {o}");
         }
-        if let Some(o) = &self.fio_ops {
-            output = format!("{output}, fio_ops = {o}");
+        if let Some(o) = &self.fio_control {
+            let (ops, bw) = o;
+            output = format!("{output}, fio_ops = {ops}, bandwidth = {bw}");
         }
 
         write!(f, "{output}")
@@ -165,7 +166,7 @@ impl PerformanceTestControl {
             num_queues: None,
             queue_size: None,
             net_rx: None,
-            fio_ops: None,
+            fio_control: None,
             num_boot_vcpus: Some(1),
         }
     }
@@ -262,7 +263,7 @@ mod adjuster {
     }
 }
 
-const TEST_LIST: [PerformanceTest; 17] = [
+const TEST_LIST: [PerformanceTest; 25] = [
     PerformanceTest {
         name: "boot_time_ms",
         func_ptr: performance_boot_time,
@@ -365,7 +366,7 @@ const TEST_LIST: [PerformanceTest; 17] = [
         control: PerformanceTestControl {
             num_queues: Some(1),
             queue_size: Some(128),
-            fio_ops: Some(FioOps::Read),
+            fio_control: Some((FioOps::Read, true)),
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
@@ -376,7 +377,7 @@ const TEST_LIST: [PerformanceTest; 17] = [
         control: PerformanceTestControl {
             num_queues: Some(1),
             queue_size: Some(128),
-            fio_ops: Some(FioOps::Write),
+            fio_control: Some((FioOps::Write, true)),
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
@@ -387,7 +388,7 @@ const TEST_LIST: [PerformanceTest; 17] = [
         control: PerformanceTestControl {
             num_queues: Some(1),
             queue_size: Some(128),
-            fio_ops: Some(FioOps::RandomRead),
+            fio_control: Some((FioOps::RandomRead, true)),
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
@@ -398,7 +399,7 @@ const TEST_LIST: [PerformanceTest; 17] = [
         control: PerformanceTestControl {
             num_queues: Some(1),
             queue_size: Some(128),
-            fio_ops: Some(FioOps::RandomWrite),
+            fio_control: Some((FioOps::RandomWrite, true)),
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
@@ -409,7 +410,7 @@ const TEST_LIST: [PerformanceTest; 17] = [
         control: PerformanceTestControl {
             num_queues: Some(2),
             queue_size: Some(128),
-            fio_ops: Some(FioOps::Read),
+            fio_control: Some((FioOps::Read, true)),
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
@@ -420,7 +421,7 @@ const TEST_LIST: [PerformanceTest; 17] = [
         control: PerformanceTestControl {
             num_queues: Some(2),
             queue_size: Some(128),
-            fio_ops: Some(FioOps::Write),
+            fio_control: Some((FioOps::Write, true)),
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
@@ -431,7 +432,7 @@ const TEST_LIST: [PerformanceTest; 17] = [
         control: PerformanceTestControl {
             num_queues: Some(2),
             queue_size: Some(128),
-            fio_ops: Some(FioOps::RandomRead),
+            fio_control: Some((FioOps::RandomRead, true)),
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
@@ -442,10 +443,98 @@ const TEST_LIST: [PerformanceTest; 17] = [
         control: PerformanceTestControl {
             num_queues: Some(2),
             queue_size: Some(128),
-            fio_ops: Some(FioOps::RandomWrite),
+            fio_control: Some((FioOps::RandomWrite, true)),
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+    },
+    PerformanceTest {
+        name: "block_read_IOPS",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            num_queues: Some(1),
+            queue_size: Some(128),
+            fio_control: Some((FioOps::Read, false)),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::identity,
+    },
+    PerformanceTest {
+        name: "block_write_IOPS",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            num_queues: Some(1),
+            queue_size: Some(128),
+            fio_control: Some((FioOps::Write, false)),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::identity,
+    },
+    PerformanceTest {
+        name: "block_random_read_IOPS",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            num_queues: Some(1),
+            queue_size: Some(128),
+            fio_control: Some((FioOps::RandomRead, false)),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::identity,
+    },
+    PerformanceTest {
+        name: "block_random_write_IOPS",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            num_queues: Some(1),
+            queue_size: Some(128),
+            fio_control: Some((FioOps::RandomWrite, false)),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::identity,
+    },
+    PerformanceTest {
+        name: "block_multi_queue_read_IOPS",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            num_queues: Some(2),
+            queue_size: Some(128),
+            fio_control: Some((FioOps::Read, false)),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::identity,
+    },
+    PerformanceTest {
+        name: "block_multi_queue_write_IOPS",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            num_queues: Some(2),
+            queue_size: Some(128),
+            fio_control: Some((FioOps::Write, false)),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::identity,
+    },
+    PerformanceTest {
+        name: "block_multi_queue_random_read_IOPS",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            num_queues: Some(2),
+            queue_size: Some(128),
+            fio_control: Some((FioOps::RandomRead, false)),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::identity,
+    },
+    PerformanceTest {
+        name: "block_multi_queue_random_write_IOPS",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            num_queues: Some(2),
+            queue_size: Some(128),
+            fio_control: Some((FioOps::RandomWrite, false)),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::identity,
     },
 ];
 
