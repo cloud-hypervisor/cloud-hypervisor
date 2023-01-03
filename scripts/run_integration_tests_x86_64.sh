@@ -36,24 +36,6 @@ if [ ! -f "$OVMF_FW" ]; then
     popd
 fi
 
-BIONIC_OS_IMAGE_NAME="bionic-server-cloudimg-amd64.qcow2"
-BIONIC_OS_IMAGE_URL="https://cloud-hypervisor.azureedge.net/$BIONIC_OS_IMAGE_NAME"
-BIONIC_OS_IMAGE="$WORKLOADS_DIR/$BIONIC_OS_IMAGE_NAME"
-if [ ! -f "$BIONIC_OS_IMAGE" ]; then
-    pushd $WORKLOADS_DIR
-    time wget --quiet $BIONIC_OS_IMAGE_URL || exit 1
-    popd
-fi
-
-BIONIC_OS_RAW_IMAGE_NAME="bionic-server-cloudimg-amd64.raw"
-BIONIC_OS_RAW_IMAGE="$WORKLOADS_DIR/$BIONIC_OS_RAW_IMAGE_NAME"
-if [ ! -f "$BIONIC_OS_RAW_IMAGE" ]; then
-    pushd $WORKLOADS_DIR
-    time qemu-img convert -p -f qcow2 -O raw $BIONIC_OS_IMAGE_NAME $BIONIC_OS_RAW_IMAGE_NAME || exit 1
-    popd
-fi
-
-
 FOCAL_OS_IMAGE_NAME="focal-server-cloudimg-amd64-custom-20210609-0.qcow2"
 FOCAL_OS_IMAGE_URL="https://cloud-hypervisor.azureedge.net/$FOCAL_OS_IMAGE_NAME"
 FOCAL_OS_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_IMAGE_NAME"

@@ -32,7 +32,6 @@ use wait_timeout::ChildExt;
 
 #[cfg(target_arch = "x86_64")]
 mod x86_64 {
-    pub const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-amd64.raw";
     pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-0.raw";
     pub const FOCAL_SGX_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-sgx.raw";
     pub const JAMMY_NVIDIA_IMAGE_NAME: &str = "jammy-server-cloudimg-amd64-nvidia.raw";
@@ -1891,20 +1890,8 @@ mod common_parallel {
 
     #[test]
     #[cfg(target_arch = "x86_64")]
-    fn test_bionic_hypervisor_fw() {
-        test_simple_launch(fw_path(FwType::RustHypervisorFirmware), BIONIC_IMAGE_NAME)
-    }
-
-    #[test]
-    #[cfg(target_arch = "x86_64")]
     fn test_focal_hypervisor_fw() {
         test_simple_launch(fw_path(FwType::RustHypervisorFirmware), FOCAL_IMAGE_NAME)
-    }
-
-    #[test]
-    #[cfg(target_arch = "x86_64")]
-    fn test_bionic_ovmf() {
-        test_simple_launch(fw_path(FwType::Ovmf), BIONIC_IMAGE_NAME)
     }
 
     #[test]
