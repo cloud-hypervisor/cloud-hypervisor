@@ -129,7 +129,7 @@ pub struct PerformanceTestControl {
     test_iterations: u32,
     num_queues: Option<u32>,
     queue_size: Option<u32>,
-    net_rx: Option<bool>,
+    net_control: Option<(bool, bool)>, // First bool is for RX(true)/TX(false), second bool is for bandwidth or PPS
     fio_control: Option<(FioOps, bool)>, // Second parameter controls whether we want bandwidth or IOPS
     num_boot_vcpus: Option<u8>,
 }
@@ -146,8 +146,9 @@ impl fmt::Display for PerformanceTestControl {
         if let Some(o) = self.queue_size {
             output = format!("{output}, queue_size = {o}");
         }
-        if let Some(o) = self.net_rx {
-            output = format!("{output}, net_rx = {o}");
+        if let Some(o) = self.net_control {
+            let (rx, bw) = o;
+            output = format!("{output}, rx = {rx}, bandwidth = {bw}");
         }
         if let Some(o) = &self.fio_control {
             let (ops, bw) = o;
@@ -165,7 +166,7 @@ impl PerformanceTestControl {
             test_iterations: 5,
             num_queues: None,
             queue_size: None,
-            net_rx: None,
+            net_control: None,
             fio_control: None,
             num_boot_vcpus: Some(1),
         }
@@ -263,7 +264,7 @@ mod adjuster {
     }
 }
 
-const TEST_LIST: [PerformanceTest; 25] = [
+const TEST_LIST: [PerformanceTest; 29] = [
     PerformanceTest {
         name: "boot_time_ms",
         func_ptr: performance_boot_time,
@@ -322,7 +323,7 @@ const TEST_LIST: [PerformanceTest; 25] = [
         control: PerformanceTestControl {
             num_queues: Some(2),
             queue_size: Some(256),
-            net_rx: Some(true),
+            net_control: Some((true, true)),
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::bps_to_gbps,
@@ -333,7 +334,7 @@ const TEST_LIST: [PerformanceTest; 25] = [
         control: PerformanceTestControl {
             num_queues: Some(2),
             queue_size: Some(256),
-            net_rx: Some(false),
+            net_control: Some((false, true)),
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::bps_to_gbps,
@@ -344,7 +345,7 @@ const TEST_LIST: [PerformanceTest; 25] = [
         control: PerformanceTestControl {
             num_queues: Some(4),
             queue_size: Some(256),
-            net_rx: Some(true),
+            net_control: Some((true, true)),
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::bps_to_gbps,
@@ -355,10 +356,54 @@ const TEST_LIST: [PerformanceTest; 25] = [
         control: PerformanceTestControl {
             num_queues: Some(4),
             queue_size: Some(256),
-            net_rx: Some(false),
+            net_control: Some((false, true)),
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::bps_to_gbps,
+    },
+    PerformanceTest {
+        name: "virtio_net_throughput_single_queue_rx_pps",
+        func_ptr: performance_net_throughput,
+        control: PerformanceTestControl {
+            num_queues: Some(2),
+            queue_size: Some(256),
+            net_control: Some((true, false)),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::identity,
+    },
+    PerformanceTest {
+        name: "virtio_net_throughput_single_queue_tx_pps",
+        func_ptr: performance_net_throughput,
+        control: PerformanceTestControl {
+            num_queues: Some(2),
+            queue_size: Some(256),
+            net_control: Some((false, false)),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::identity,
+    },
+    PerformanceTest {
+        name: "virtio_net_throughput_multi_queue_rx_pps",
+        func_ptr: performance_net_throughput,
+        control: PerformanceTestControl {
+            num_queues: Some(4),
+            queue_size: Some(256),
+            net_control: Some((true, false)),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::identity,
+    },
+    PerformanceTest {
+        name: "virtio_net_throughput_multi_queue_tx_pps",
+        func_ptr: performance_net_throughput,
+        control: PerformanceTestControl {
+            num_queues: Some(4),
+            queue_size: Some(256),
+            net_control: Some((false, false)),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::identity,
     },
     PerformanceTest {
         name: "block_read_MiBps",
