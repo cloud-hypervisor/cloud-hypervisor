@@ -78,7 +78,7 @@ fn direct_kernel_boot_path() -> PathBuf {
 
 pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
     let test_timeout = control.test_timeout;
-    let rx = control.net_rx.unwrap();
+    let (rx, bandwidth) = control.net_control.unwrap();
 
     let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
     let guest = performance_test_new_guest(Box::new(focal));
@@ -105,7 +105,7 @@ pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
 
     let r = std::panic::catch_unwind(|| {
         guest.wait_vm_boot(None).unwrap();
-        measure_virtio_net_throughput(test_timeout, num_queues / 2, &guest, rx, true).unwrap()
+        measure_virtio_net_throughput(test_timeout, num_queues / 2, &guest, rx, bandwidth).unwrap()
     });
 
     let _ = child.kill();
