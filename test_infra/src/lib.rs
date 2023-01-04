@@ -1517,6 +1517,8 @@ pub fn measure_virtio_net_throughput(
             &format!("{}", default_port + n),
             "-t",
             &format!("{test_timeout}"),
+            "-i",
+            "0",
         ]);
         // For measuring the guest transmit throughput (as a sender),
         // use reverse mode of the iperf3 client on the host
