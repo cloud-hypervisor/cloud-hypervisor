@@ -775,7 +775,8 @@ impl QcowFile {
             refblock_clusters: u64,
             pointers_per_cluster: u64,
         ) -> Result<Vec<u64>> {
-            let refcount_table_entries = div_round_up_u64(refblock_clusters, pointers_per_cluster);
+            let refcount_clusters = div_round_up_u64(refblock_clusters, pointers_per_cluster);
+            let refcount_table_entries = refcount_clusters + refblock_clusters;
             let mut ref_table = vec![0; refcount_table_entries as usize];
             let mut first_free_cluster: u64 = 0;
             for refblock_addr in &mut ref_table {
