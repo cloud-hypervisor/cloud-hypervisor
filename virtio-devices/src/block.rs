@@ -25,6 +25,7 @@ use block_util::{
 };
 use rate_limiter::{RateLimiter, TokenType};
 use seccompiler::SeccompAction;
+use std::collections::VecDeque;
 use std::io;
 use std::num::Wrapping;
 use std::ops::Deref;
@@ -100,7 +101,7 @@ struct BlockEpollHandler {
     writeback: Arc<AtomicBool>,
     counters: BlockCounters,
     queue_evt: EventFd,
-    request_list: HashMap<u16, Request>,
+    inflight_requests: VecDeque<(u16, Request)>,
     rate_limiter: Option<RateLimiter>,
     access_platform: Option<Arc<dyn AccessPlatform>>,
     read_only: bool,
@@ -180,7 +181,8 @@ impl BlockEpollHandler {
                 )
                 .map_err(Error::RequestExecuting)?
             {
-                self.request_list.insert(desc_chain.head_index(), request);
+                self.inflight_requests
+                    .push_back((desc_chain.head_index(), request));
             } else {
                 desc_chain
                     .memory()
@@ -213,9 +215,28 @@ impl BlockEpollHandler {
         Ok(())
     }
 
-    fn process_queue_complete(&mut self) -> Result<bool> {
-        let queue = &mut self.queue;
+    #[inline]
+    fn find_inflight_request(&mut self, completed_head: u16) -> Result<Request> {
+        // This loop neatly handles the fast path where the completions are
+        // in order (it turng into just a pop_front()) and the 1% of the time
+        // (analysis during boot) where slight out of ordering has been
+        // observed e.g.
+        // Submissions: 1 2 3 4 5 6 7
+        // Completions: 2 1 3 5 4 7 6
+        // In this case find the corresponding item and swap it with the front
+        // This is a O(1) operation and is prepared for the future as it it likely
+        // the next completion would be for the one that was skipped which will
+        // now be the new front.
+        for (i, (head, _)) in self.inflight_requests.iter().enumerate() {
+            if head == &completed_head {
+                return Ok(self.inflight_requests.swap_remove_front(i).unwrap().1);
+            }
+        }
 
+        Err(Error::MissingEntryRequestList)
+    }
+
+    fn process_queue_complete(&mut self) -> Result<bool> {
         let mut used_descs = false;
         let mem = self.mem.memory();
         let mut read_bytes = Wrapping(0);
@@ -226,10 +247,9 @@ impl BlockEpollHandler {
         let completion_list = self.disk_image.complete();
         for (user_data, result) in completion_list {
             let desc_index = user_data as u16;
-            let mut request = self
-                .request_list
-                .remove(&desc_index)
-                .ok_or(Error::MissingEntryRequestList)?;
+
+            let mut request = self.find_inflight_request(desc_index)?;
+
             request.complete_async().map_err(Error::RequestCompleting)?;
 
             let (status, len) = if result >= 0 {
@@ -264,6 +284,8 @@ impl BlockEpollHandler {
 
             mem.write_obj(status, request.status_addr)
                 .map_err(Error::RequestStatus)?;
+
+            let queue = &mut self.queue;
 
             queue
                 .add_used(mem.deref(), desc_index, len)
@@ -654,7 +676,10 @@ impl VirtioDevice for Block {
                 writeback: self.writeback.clone(),
                 counters: self.counters.clone(),
                 queue_evt,
-                request_list: HashMap::with_capacity(queue_size.into()),
+                // Analysis during boot shows around ~40 maximum requests
+                // This gives head room for systems with slower I/O without
+                // compromising the cost of the reallocation or memory overhead
+                inflight_requests: VecDeque::with_capacity(64),
                 rate_limiter,
                 access_platform: self.common.access_platform.clone(),
                 read_only: self.read_only,
