@@ -9423,7 +9423,8 @@ mod rate_limiter {
         let r = std::panic::catch_unwind(|| {
             guest.wait_vm_boot(None).unwrap();
             let measured_bps =
-                measure_virtio_net_throughput(test_timeout, num_queues / 2, &guest, rx).unwrap();
+                measure_virtio_net_throughput(test_timeout, num_queues / 2, &guest, rx, true)
+                    .unwrap();
             assert!(check_rate_limit(measured_bps, limit_bps, 0.1));
         });
 

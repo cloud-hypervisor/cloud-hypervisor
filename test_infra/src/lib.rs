@@ -1311,22 +1311,36 @@ pub fn clh_command(cmd: &str) -> String {
     )
 }
 
-pub fn parse_iperf3_output(output: &[u8], sender: bool) -> Result<f64, Error> {
+pub fn parse_iperf3_output(output: &[u8], sender: bool, bandwidth: bool) -> Result<f64, Error> {
     std::panic::catch_unwind(|| {
         let s = String::from_utf8_lossy(output);
         let v: Value = serde_json::from_str(&s).expect("'iperf3' parse error: invalid json output");
 
-        let bps: f64 = if sender {
-            v["end"]["sum_sent"]["bits_per_second"]
-                .as_f64()
-                .expect("'iperf3' parse error: missing entry 'end.sum_sent.bits_per_second'")
+        if bandwidth {
+            if sender {
+                v["end"]["sum_sent"]["bits_per_second"]
+                    .as_f64()
+                    .expect("'iperf3' parse error: missing entry 'end.sum_sent.bits_per_second'")
+            } else {
+                v["end"]["sum_received"]["bits_per_second"].as_f64().expect(
+                    "'iperf3' parse error: missing entry 'end.sum_received.bits_per_second'",
+                )
+            }
         } else {
-            v["end"]["sum_received"]["bits_per_second"]
-                .as_f64()
-                .expect("'iperf3' parse error: missing entry 'end.sum_received.bits_per_second'")
-        };
+            // iperf does not distinguish sent vs received in this case.
 
-        bps
+            let lost_packets = v["end"]["sum"]["lost_packets"]
+                .as_f64()
+                .expect("'iperf3' parse error: missing entry 'end.sum.lost_packets'");
+            let packets = v["end"]["sum"]["packets"]
+                .as_f64()
+                .expect("'iperf3' parse error: missing entry 'end.sum.packets'");
+            let seconds = v["end"]["sum"]["seconds"]
+                .as_f64()
+                .expect("'iperf3' parse error: missing entry 'end.sum.seconds'");
+
+            (packets - lost_packets) / seconds
+        }
     })
     .map_err(|_| {
         eprintln!(
@@ -1495,6 +1509,7 @@ pub fn measure_virtio_net_throughput(
     queue_pairs: u32,
     guest: &Guest,
     receive: bool,
+    bandwidth: bool,
 ) -> Result<f64, Error> {
     let default_port = 5201;
 
@@ -1525,6 +1540,11 @@ pub fn measure_virtio_net_throughput(
         if !receive {
             cmd.args(["-R"]);
         }
+        // Use UDP stream to measure packets per second. The bitrate is set to
+        // 1T to make sure it saturates the link.
+        if !bandwidth {
+            cmd.args(["-u", "-b", "1T"]);
+        }
         let client = cmd
             .stderr(Stdio::piped())
             .stdout(Stdio::piped())
@@ -1535,7 +1555,7 @@ pub fn measure_virtio_net_throughput(
     }
 
     let mut err: Option<Error> = None;
-    let mut bps = Vec::new();
+    let mut results = Vec::new();
     let mut failed = false;
     for c in clients {
         let mut c = c;
@@ -1547,7 +1567,7 @@ pub fn measure_virtio_net_throughput(
         if !failed {
             // Safe to unwrap as we know the child has terminated succesffully
             let output = c.wait_with_output().unwrap();
-            bps.push(parse_iperf3_output(&output.stdout, receive)?);
+            results.push(parse_iperf3_output(&output.stdout, receive, bandwidth)?);
         } else {
             let _ = c.kill();
             let output = c.wait_with_output().unwrap();
@@ -1561,7 +1581,7 @@ pub fn measure_virtio_net_throughput(
     if let Some(e) = err {
         Err(e)
     } else {
-        Ok(bps.iter().sum())
+        Ok(results.iter().sum())
     }
 }
 

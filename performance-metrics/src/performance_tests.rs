@@ -105,7 +105,7 @@ pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
 
     let r = std::panic::catch_unwind(|| {
         guest.wait_vm_boot(None).unwrap();
-        measure_virtio_net_throughput(test_timeout, num_queues / 2, &guest, rx).unwrap()
+        measure_virtio_net_throughput(test_timeout, num_queues / 2, &guest, rx, true).unwrap()
     });
 
     let _ = child.kill();
@@ -429,7 +429,7 @@ mod tests {
 }
        "#;
         assert_eq!(
-            parse_iperf3_output(output.as_bytes(), true).unwrap(),
+            parse_iperf3_output(output.as_bytes(), true, true).unwrap(),
             23957198874.604115
         );
 
@@ -448,8 +448,30 @@ mod tests {
 }
               "#;
         assert_eq!(
-            parse_iperf3_output(output.as_bytes(), false).unwrap(),
+            parse_iperf3_output(output.as_bytes(), false, true).unwrap(),
             39520744482.79
+        );
+        let output = r#"
+{
+    "end":	{
+        "sum":  {
+            "start":        0,
+            "end":  5.000036,
+            "seconds":      5.000036,
+            "bytes":        29944971264,
+            "bits_per_second":      47911877363.396217,
+            "jitter_ms":    0.0038609822983198556,
+            "lost_packets": 16,
+            "packets":      913848,
+            "lost_percent": 0.0017508382137948542,
+            "sender":       true
+        }
+    }
+}
+              "#;
+        assert_eq!(
+            parse_iperf3_output(output.as_bytes(), true, false).unwrap(),
+            182765.08409139456
         );
     }
 
