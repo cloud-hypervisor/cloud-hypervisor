@@ -3,8 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-#[macro_use(crate_authors)]
-extern crate clap;
 #[macro_use]
 extern crate event_monitor;
 
@@ -130,7 +128,7 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
         // 'BUILT_VERSION' is set by the build script 'build.rs' at
         // compile time
         .version(env!("BUILT_VERSION"))
-        .author(crate_authors!())
+        .author(env!("CARGO_PKG_AUTHORS"))
         .about("Launch a cloud-hypervisor VMM.")
         .group(ArgGroup::new("vm-config").multiple(true))
         .group(ArgGroup::new("vmm-config").multiple(true))
