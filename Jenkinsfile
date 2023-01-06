@@ -263,6 +263,7 @@ pipeline {
                         }
                         stage('Upload metrics report') {
                             steps {
+                                sh 'cat ~/workloads/metrics.json'
                                 sh 'curl -X PUT https://cloud-hypervisor-metrics.azurewebsites.net/api/publishmetrics -H "x-functions-key: $METRICS_PUBLISH_KEY" -T ~/workloads/metrics.json'
                             }
                         }
