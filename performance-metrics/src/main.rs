@@ -5,8 +5,6 @@
 
 // Custom harness to run performance tests
 extern crate test_infra;
-#[macro_use(crate_authors)]
-extern crate clap;
 
 mod performance_tests;
 
@@ -631,7 +629,7 @@ fn date() -> String {
 fn main() {
     let cmd_arguments = ClapCommand::new("performance-metrics")
         .version(env!("GIT_HUMAN_READABLE"))
-        .author(crate_authors!())
+        .author(env!("CARGO_PKG_AUTHORS"))
         .about("Generate the performance metrics data for Cloud Hypervisor")
         .arg(
             Arg::new("test-filter")

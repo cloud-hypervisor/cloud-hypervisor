@@ -6,7 +6,7 @@ edition = "2021"
 
 [dependencies]
 block_util = { path = "../block_util" }
-clap = { version = "4.0.29", features = ["wrap_help","cargo"] }
+clap = { version = "4.0.29", features = ["wrap_help"] }
 env_logger = "0.10.0"
 epoll = "4.3.1"
 libc = "0.2.139"

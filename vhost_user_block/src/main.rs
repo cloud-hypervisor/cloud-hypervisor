@@ -8,8 +8,6 @@
 //
 // SPDX-License-Identifier: (Apache-2.0 AND BSD-3-Clause)
 
-#[macro_use(crate_version, crate_authors)]
-extern crate clap;
 extern crate vhost_user_block;
 
 use clap::{Arg, Command};
@@ -19,8 +17,8 @@ fn main() {
     env_logger::init();
 
     let cmd_arguments = Command::new("vhost-user-blk backend")
-        .version(crate_version!())
-        .author(crate_authors!())
+        .version(env!("CARGO_PKG_VERSION"))
+        .author(env!("CARGO_PKG_AUTHORS"))
         .about("Launch a vhost-user-blk backend.")
         .arg(
             Arg::new("block-backend")

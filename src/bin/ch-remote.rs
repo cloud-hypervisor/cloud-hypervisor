@@ -3,9 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-#[macro_use(crate_authors)]
-extern crate clap;
-
 use api_client::simple_api_command;
 use api_client::simple_api_command_with_fds;
 use api_client::simple_api_full_command;
@@ -506,7 +503,7 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
 
 fn main() {
     let app = Command::new("ch-remote")
-        .author(crate_authors!())
+        .author(env!("CARGO_PKG_AUTHORS"))
         .subcommand_required(true)
         .about("Remotely control a cloud-hypervisor VMM.")
         .arg(
