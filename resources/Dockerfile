@@ -1,7 +1,7 @@
 # When changing this file don't forget to update the tag name in the
 # .github/workflows/docker-image.yaml file if doing multiple per day
 
-FROM ubuntu:20.04 as dev
+FROM ubuntu:22.04 as dev
 
 ARG TARGETARCH
 ARG RUST_TOOLCHAIN="1.62.0"
@@ -14,10 +14,14 @@ ENV CARGO_HOME=/usr/local/rust
 ENV RUSTUP_HOME=$CARGO_HOME
 ENV PATH="$PATH:$CARGO_HOME/bin"
 
+# This step is required to allow apt to function in Ubuntu 22.04
+RUN chmod 777 /tmp
+
 # Install all CI dependencies
 RUN apt-get update \
 	&& apt-get -yq upgrade \
 	&& DEBIAN_FRONTEND=noninteractive apt-get install -yq \
+	apt-utils \
 	build-essential \
 	bc \
 	curl \
@@ -38,7 +42,7 @@ RUN apt-get update \
 	socat \
 	dosfstools \
 	cpio \
-	python \
+	python2 \
 	python3 \
 	python3-setuptools \
 	ntfs-3g \
@@ -112,7 +116,7 @@ RUN echo 'source $CARGO_HOME/env' >> $HOME/.bashrc \
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
        git clone https://github.com/spdk/spdk \
        && cd spdk \
-       && git checkout 6301f8915de32baed10dba1eebed556a6749211a \
+       && git checkout 4978c4fe32e466c099105f00e88b105f96f7d2d3 \
        && git submodule update --init \
        && apt-get update \
        && ./scripts/pkgdep.sh \
@@ -122,7 +126,7 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
        && mkdir /usr/local/bin/spdk-nvme \
        && cp ./build/bin/nvmf_tgt /usr/local/bin/spdk-nvme \
        && cp ./scripts/rpc.py /usr/local/bin/spdk-nvme \
-       && cp -r ./scripts/rpc /usr/local/bin/spdk-nvme \
+       && cp -r ./python/spdk/ /usr/local/bin/spdk-nvme \
        && cd .. && rm -rf spdk; fi
 
 # install ethr tool for performance tests
