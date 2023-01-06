@@ -13,6 +13,3 @@ serde_json = "1.0.89"
 test_infra = { path = "../test_infra" }
 thiserror = "1.0.37"
 wait-timeout = "0.2.0"
-
-[build-dependencies]
-clap = { version = "4.0.29", features = ["cargo"] }
