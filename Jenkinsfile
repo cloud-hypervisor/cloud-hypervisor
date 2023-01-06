@@ -238,7 +238,6 @@ pipeline {
                 stage('Worker build - Metrics') {
                     agent { node { label 'jammy-metrics' } }
                     when {
-                        branch 'main'
                         beforeAgent true
                         expression {
                             return runWorkers
