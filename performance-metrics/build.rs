@@ -3,13 +3,11 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-#[macro_use(crate_version)]
-extern crate clap;
-
 use std::process::Command;
 
 fn main() {
-    let mut git_human_readable = "v".to_owned() + crate_version!();
+    let mut git_human_readable = "v".to_owned() + env!("CARGO_PKG_VERSION");
+
     if let Ok(git_out) = Command::new("git").args(["describe", "--dirty"]).output() {
         if git_out.status.success() {
             if let Ok(git_out_str) = String::from_utf8(git_out.stdout) {
