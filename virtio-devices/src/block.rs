@@ -55,6 +55,9 @@ const COMPLETION_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
 // New 'wake up' event from the rate limiter
 const RATE_LIMITER_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
 
+// latency scale, for reduce precision loss in calculate.
+const LATENCY_SCALE: u64 = 10000;
+
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Failed to parse the request: {0}")]
@@ -79,12 +82,37 @@ pub enum Error {
 
 pub type Result<T> = result::Result<T, Error>;
 
-#[derive(Default, Clone)]
+// latency will be records as microseconds, average latency
+// will be save as scaled value.
+#[derive(Clone)]
 pub struct BlockCounters {
     read_bytes: Arc<AtomicU64>,
     read_ops: Arc<AtomicU64>,
+    read_latency_min: Arc<AtomicU64>,
+    read_latency_max: Arc<AtomicU64>,
+    read_latency_avg: Arc<AtomicU64>,
     write_bytes: Arc<AtomicU64>,
     write_ops: Arc<AtomicU64>,
+    write_latency_min: Arc<AtomicU64>,
+    write_latency_max: Arc<AtomicU64>,
+    write_latency_avg: Arc<AtomicU64>,
+}
+
+impl Default for BlockCounters {
+    fn default() -> Self {
+        BlockCounters {
+            read_bytes: Arc::new(AtomicU64::new(0)),
+            read_ops: Arc::new(AtomicU64::new(0)),
+            read_latency_min: Arc::new(AtomicU64::new(u64::MAX)),
+            read_latency_max: Arc::new(AtomicU64::new(0)),
+            read_latency_avg: Arc::new(AtomicU64::new(0)),
+            write_bytes: Arc::new(AtomicU64::new(0)),
+            write_ops: Arc::new(AtomicU64::new(0)),
+            write_latency_min: Arc::new(AtomicU64::new(u64::MAX)),
+            write_latency_max: Arc::new(AtomicU64::new(0)),
+            write_latency_avg: Arc::new(AtomicU64::new(0)),
+        }
+    }
 }
 
 struct BlockEpollHandler {
@@ -232,6 +260,11 @@ impl BlockEpollHandler {
                 .ok_or(Error::MissingEntryRequestList)?;
             request.complete_async().map_err(Error::RequestCompleting)?;
 
+            let latency = request.start.elapsed().as_micros() as u64;
+            let read_ops_last = self.counters.read_ops.load(Ordering::Relaxed) as i64;
+            let write_ops_last = self.counters.write_ops.load(Ordering::Relaxed) as i64;
+            let mut read_avg = self.counters.read_latency_avg.load(Ordering::Relaxed) as i64;
+            let mut write_avg = self.counters.write_latency_avg.load(Ordering::Relaxed) as i64;
             let (status, len) = if result >= 0 {
                 match request.request_type {
                     RequestType::In => {
@@ -239,6 +272,19 @@ impl BlockEpollHandler {
                             read_bytes += Wrapping(*data_len as u64);
                         }
                         read_ops += Wrapping(1);
+                        if latency < self.counters.read_latency_min.load(Ordering::Relaxed) {
+                            self.counters
+                                .read_latency_min
+                                .store(latency, Ordering::Relaxed);
+                        }
+                        if latency > self.counters.read_latency_max.load(Ordering::Relaxed) {
+                            self.counters
+                                .read_latency_max
+                                .store(latency, Ordering::Relaxed);
+                        }
+                        read_avg = read_avg
+                            + ((latency * LATENCY_SCALE) as i64 - read_avg)
+                                / (read_ops_last + read_ops.0 as i64);
                     }
                     RequestType::Out => {
                         if !request.writeback {
@@ -248,9 +294,30 @@ impl BlockEpollHandler {
                             write_bytes += Wrapping(*data_len as u64);
                         }
                         write_ops += Wrapping(1);
+                        if latency < self.counters.write_latency_min.load(Ordering::Relaxed) {
+                            self.counters
+                                .write_latency_min
+                                .store(latency, Ordering::Relaxed);
+                        }
+                        if latency > self.counters.write_latency_max.load(Ordering::Relaxed) {
+                            self.counters
+                                .write_latency_max
+                                .store(latency, Ordering::Relaxed);
+                        }
+                        write_avg = write_avg
+                            + ((latency * LATENCY_SCALE) as i64 - write_avg)
+                                / (write_ops_last + write_ops.0 as i64);
                     }
                     _ => {}
                 }
+
+                self.counters
+                    .read_latency_avg
+                    .store(read_avg as u64, Ordering::Relaxed);
+
+                self.counters
+                    .write_latency_avg
+                    .store(write_avg as u64, Ordering::Relaxed);
 
                 (VIRTIO_BLK_S_OK, result as u32)
             } else {
@@ -703,6 +770,30 @@ impl VirtioDevice for Block {
         counters.insert(
             "write_ops",
             Wrapping(self.counters.write_ops.load(Ordering::Acquire)),
+        );
+        counters.insert(
+            "write_latency_min",
+            Wrapping(self.counters.write_latency_min.load(Ordering::Acquire)),
+        );
+        counters.insert(
+            "write_latency_max",
+            Wrapping(self.counters.write_latency_max.load(Ordering::Acquire)),
+        );
+        counters.insert(
+            "write_latency_avg",
+            Wrapping(self.counters.write_latency_avg.load(Ordering::Acquire) / LATENCY_SCALE),
+        );
+        counters.insert(
+            "read_latency_min",
+            Wrapping(self.counters.read_latency_min.load(Ordering::Acquire)),
+        );
+        counters.insert(
+            "read_latency_max",
+            Wrapping(self.counters.read_latency_max.load(Ordering::Acquire)),
+        );
+        counters.insert(
+            "read_latency_avg",
+            Wrapping(self.counters.read_latency_avg.load(Ordering::Acquire) / LATENCY_SCALE),
         );
 
         Some(counters)
