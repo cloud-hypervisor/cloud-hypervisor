@@ -300,7 +300,7 @@ impl SerialManager {
                                     }
                                 }
                                 EpollDispatch::Kill => {
-                                    info!("KILL event received, stopping epoll loop");
+                                    info!("KILL_EVENT received, stopping epoll loop");
                                     return Ok(());
                                 }
                             }
