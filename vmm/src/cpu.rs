@@ -837,6 +837,8 @@ impl CpuManager {
     ) -> Result<()> {
         let reset_evt = self.reset_evt.try_clone().unwrap();
         let exit_evt = self.exit_evt.try_clone().unwrap();
+        #[cfg(feature = "kvm")]
+        let hypervisor_type = self.hypervisor_type;
         #[cfg(feature = "guest_debug")]
         let vm_debug_evt = self.vm_debug_evt.try_clone().unwrap();
         let panic_exit_evt = self.exit_evt.try_clone().unwrap();
@@ -941,12 +943,14 @@ impl CpuManager {
 
                                 #[cfg(feature = "kvm")]
                                 {
-                                    vcpu.lock().as_ref().unwrap().vcpu.set_immediate_exit(true);
-                                    if !matches!(vcpu.lock().unwrap().run(), Ok(VmExit::Ignore)) {
-                                        error!("Unexpected VM exit on \"immediate_exit\" run");
-                                        break;
+                                    if matches!(hypervisor_type, HypervisorType::Kvm) {
+                                        vcpu.lock().as_ref().unwrap().vcpu.set_immediate_exit(true);
+                                        if !matches!(vcpu.lock().unwrap().run(), Ok(VmExit::Ignore)) {
+                                            error!("Unexpected VM exit on \"immediate_exit\" run");
+                                            break;
+                                        }
+                                        vcpu.lock().as_ref().unwrap().vcpu.set_immediate_exit(false);
                                     }
-                                    vcpu.lock().as_ref().unwrap().vcpu.set_immediate_exit(false);
                                 }
 
                                 vcpu_run_interrupted.store(true, Ordering::SeqCst);

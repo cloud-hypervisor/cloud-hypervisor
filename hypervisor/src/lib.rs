@@ -61,7 +61,7 @@ pub use vm::{
     Vm, VmOps,
 };
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum HypervisorType {
     Kvm,
     Mshv,
