@@ -249,6 +249,7 @@ impl Request {
                 return Err(Error::DescriptorChainTooShort);
             }
         } else {
+            req.data_descriptors.reserve_exact(1);
             while desc.has_next() {
                 if desc.is_write_only() && req.request_type == RequestType::Out {
                     return Err(Error::UnexpectedWriteOnlyDescriptor);
@@ -353,7 +354,7 @@ impl Request {
         let request_type = self.request_type;
         let offset = (sector << SECTOR_SHIFT) as libc::off_t;
 
-        let mut iovecs = Vec::new();
+        let mut iovecs = Vec::with_capacity(self.data_descriptors.len());
         for (data_addr, data_len) in &self.data_descriptors {
             if *data_len == 0 {
                 continue;
