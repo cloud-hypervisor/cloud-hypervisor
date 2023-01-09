@@ -89,7 +89,7 @@ impl log::Log for Logger {
         if record.file().is_some() && record.line().is_some() {
             writeln!(
                 *(*(self.output.lock().unwrap())),
-                "cloud-hypervisor: {:?}: <{}> {}:{}:{} -- {}",
+                "cloud-hypervisor: {:.6?}: <{}> {}:{}:{} -- {}",
                 duration,
                 std::thread::current().name().unwrap_or("anonymous"),
                 record.level(),
@@ -100,7 +100,7 @@ impl log::Log for Logger {
         } else {
             writeln!(
                 *(*(self.output.lock().unwrap())),
-                "cloud-hypervisor: {:?}: <{}> {}:{} -- {}",
+                "cloud-hypervisor: {:.6?}: <{}> {}:{} -- {}",
                 duration,
                 std::thread::current().name().unwrap_or("anonymous"),
                 record.level(),
