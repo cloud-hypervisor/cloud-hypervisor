@@ -114,12 +114,23 @@ impl log::Log for Logger {
 }
 
 fn prepare_default_values() -> (String, String, String) {
-    let default_vcpus =
-        format! {"boot={},max_phys_bits={}", config::DEFAULT_VCPUS,config::DEFAULT_MAX_PHYS_BITS};
-    let default_memory = format! {"size={}M", config::DEFAULT_MEMORY_MB};
-    let default_rng = format! {"src={}", config::DEFAULT_RNG_SOURCE};
+    (default_vcpus(), default_memory(), default_rng())
+}
 
-    (default_vcpus, default_memory, default_rng)
+fn default_vcpus() -> String {
+    format!(
+        "boot={},max_phys_bits={}",
+        config::DEFAULT_VCPUS,
+        config::DEFAULT_MAX_PHYS_BITS
+    )
+}
+
+fn default_memory() -> String {
+    format!("size={}M", config::DEFAULT_MEMORY_MB)
+}
+
+fn default_rng() -> String {
+    format!("src={}", config::DEFAULT_RNG_SOURCE)
 }
 
 fn create_app(default_vcpus: String, default_memory: String, default_rng: String) -> Command {
