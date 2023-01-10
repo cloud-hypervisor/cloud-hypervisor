@@ -141,5 +141,5 @@ pub trait AsyncIo: Send {
         user_data: u64,
     ) -> AsyncIoResult<()>;
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()>;
-    fn complete(&mut self) -> Vec<(u64, i32)>;
+    fn next_completed_request(&mut self) -> Option<(u64, i32)>;
 }

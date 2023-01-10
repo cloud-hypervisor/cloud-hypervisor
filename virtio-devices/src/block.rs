@@ -244,8 +244,7 @@ impl BlockEpollHandler {
         let mut read_ops = Wrapping(0);
         let mut write_ops = Wrapping(0);
 
-        let completion_list = self.disk_image.complete();
-        for (user_data, result) in completion_list {
+        while let Some((user_data, result)) = self.disk_image.next_completed_request() {
             let desc_index = user_data as u16;
 
             let mut request = self.find_inflight_request(desc_index)?;

@@ -155,13 +155,10 @@ impl AsyncIo for RawFileAsync {
         Ok(())
     }
 
-    fn complete(&mut self) -> Vec<(u64, i32)> {
-        let cq = self.io_uring.completion();
-        let mut completion_list = Vec::with_capacity(cq.len());
-        for cq_entry in cq {
-            completion_list.push((cq_entry.user_data(), cq_entry.result()));
-        }
-
-        completion_list
+    fn next_completed_request(&mut self) -> Option<(u64, i32)> {
+        self.io_uring
+            .completion()
+            .next()
+            .map(|entry| (entry.user_data(), entry.result()))
     }
 }
