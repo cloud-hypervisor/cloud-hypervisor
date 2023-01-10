@@ -65,7 +65,7 @@ impl AsyncIo for RawFileSync {
     fn read_vectored(
         &mut self,
         offset: libc::off_t,
-        iovecs: Vec<libc::iovec>,
+        iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
         // SAFETY: FFI call with valid arguments
@@ -90,7 +90,7 @@ impl AsyncIo for RawFileSync {
     fn write_vectored(
         &mut self,
         offset: libc::off_t,
-        iovecs: Vec<libc::iovec>,
+        iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
         // SAFETY: FFI call with valid arguments

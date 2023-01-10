@@ -65,7 +65,7 @@ impl AsyncIo for QcowSync {
     fn read_vectored(
         &mut self,
         offset: libc::off_t,
-        iovecs: Vec<libc::iovec>,
+        iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
         self.qcow_file.read_vectored_sync(
@@ -80,7 +80,7 @@ impl AsyncIo for QcowSync {
     fn write_vectored(
         &mut self,
         offset: libc::off_t,
-        iovecs: Vec<libc::iovec>,
+        iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
         self.qcow_file.write_vectored_sync(

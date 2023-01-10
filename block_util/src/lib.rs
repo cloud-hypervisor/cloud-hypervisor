@@ -431,12 +431,12 @@ impl Request {
                         .mark_dirty(0, *data_len as usize);
                 }
                 disk_image
-                    .read_vectored(offset, iovecs, user_data)
+                    .read_vectored(offset, &iovecs, user_data)
                     .map_err(ExecuteError::AsyncRead)?;
             }
             RequestType::Out => {
                 disk_image
-                    .write_vectored(offset, iovecs, user_data)
+                    .write_vectored(offset, &iovecs, user_data)
                     .map_err(ExecuteError::AsyncWrite)?;
             }
             RequestType::Flush => {
@@ -590,7 +590,7 @@ where
     fn read_vectored_sync(
         &mut self,
         offset: libc::off_t,
-        iovecs: Vec<libc::iovec>,
+        iovecs: &[libc::iovec],
         user_data: u64,
         eventfd: &EventFd,
         completion_list: &mut Vec<(u64, i32)>,
@@ -623,7 +623,7 @@ where
     fn write_vectored_sync(
         &mut self,
         offset: libc::off_t,
-        iovecs: Vec<libc::iovec>,
+        iovecs: &[libc::iovec],
         user_data: u64,
         eventfd: &EventFd,
         completion_list: &mut Vec<(u64, i32)>,

@@ -76,7 +76,7 @@ impl AsyncIo for RawFileAsync {
     fn read_vectored(
         &mut self,
         offset: libc::off_t,
-        iovecs: Vec<libc::iovec>,
+        iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
         let (submitter, mut sq, _) = self.io_uring.split();
@@ -104,7 +104,7 @@ impl AsyncIo for RawFileAsync {
     fn write_vectored(
         &mut self,
         offset: libc::off_t,
-        iovecs: Vec<libc::iovec>,
+        iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
         let (submitter, mut sq, _) = self.io_uring.split();
