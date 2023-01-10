@@ -25,6 +25,7 @@ use io_uring::{opcode, IoUring, Probe};
 use smallvec::SmallVec;
 use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::cmp;
+use std::collections::VecDeque;
 use std::convert::TryInto;
 use std::fs::File;
 use std::io::{self, IoSlice, IoSliceMut, Read, Seek, SeekFrom, Write};
@@ -595,7 +596,7 @@ where
         iovecs: &[libc::iovec],
         user_data: u64,
         eventfd: &EventFd,
-        completion_list: &mut Vec<(u64, i32)>,
+        completion_list: &mut VecDeque<(u64, i32)>,
     ) -> AsyncIoResult<()> {
         // Convert libc::iovec into IoSliceMut
         let mut slices = Vec::new();
@@ -616,7 +617,7 @@ where
                 .map_err(AsyncIoError::ReadVectored)?
         };
 
-        completion_list.push((user_data, result as i32));
+        completion_list.push_back((user_data, result as i32));
         eventfd.write(1).unwrap();
 
         Ok(())
@@ -628,7 +629,7 @@ where
         iovecs: &[libc::iovec],
         user_data: u64,
         eventfd: &EventFd,
-        completion_list: &mut Vec<(u64, i32)>,
+        completion_list: &mut VecDeque<(u64, i32)>,
     ) -> AsyncIoResult<()> {
         // Convert libc::iovec into IoSlice
         let mut slices = Vec::new();
@@ -649,7 +650,7 @@ where
                 .map_err(AsyncIoError::WriteVectored)?
         };
 
-        completion_list.push((user_data, result as i32));
+        completion_list.push_back((user_data, result as i32));
         eventfd.write(1).unwrap();
 
         Ok(())
@@ -659,7 +660,7 @@ where
         &mut self,
         user_data: Option<u64>,
         eventfd: &EventFd,
-        completion_list: &mut Vec<(u64, i32)>,
+        completion_list: &mut VecDeque<(u64, i32)>,
     ) -> AsyncIoResult<()> {
         let result: i32 = {
             let mut file = self.file();
@@ -671,7 +672,7 @@ where
         };
 
         if let Some(user_data) = user_data {
-            completion_list.push((user_data, result));
+            completion_list.push_back((user_data, result));
             eventfd.write(1).unwrap();
         }
 

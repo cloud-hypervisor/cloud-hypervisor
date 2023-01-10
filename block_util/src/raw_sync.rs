@@ -5,6 +5,7 @@
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult, DiskTopology,
 };
+use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -44,7 +45,7 @@ impl DiskFile for RawFileDiskSync {
 pub struct RawFileSync {
     fd: RawFd,
     eventfd: EventFd,
-    completion_list: Vec<(u64, i32)>,
+    completion_list: VecDeque<(u64, i32)>,
 }
 
 impl RawFileSync {
@@ -52,7 +53,7 @@ impl RawFileSync {
         RawFileSync {
             fd,
             eventfd: EventFd::new(libc::EFD_NONBLOCK).expect("Failed creating EventFd for RawFile"),
-            completion_list: Vec::new(),
+            completion_list: VecDeque::new(),
         }
     }
 }
@@ -81,7 +82,7 @@ impl AsyncIo for RawFileSync {
             return Err(AsyncIoError::ReadVectored(std::io::Error::last_os_error()));
         }
 
-        self.completion_list.push((user_data, result as i32));
+        self.completion_list.push_back((user_data, result as i32));
         self.eventfd.write(1).unwrap();
 
         Ok(())
@@ -106,7 +107,7 @@ impl AsyncIo for RawFileSync {
             return Err(AsyncIoError::WriteVectored(std::io::Error::last_os_error()));
         }
 
-        self.completion_list.push((user_data, result as i32));
+        self.completion_list.push_back((user_data, result as i32));
         self.eventfd.write(1).unwrap();
 
         Ok(())
@@ -120,7 +121,7 @@ impl AsyncIo for RawFileSync {
         }
 
         if let Some(user_data) = user_data {
-            self.completion_list.push((user_data, result));
+            self.completion_list.push_back((user_data, result));
             self.eventfd.write(1).unwrap();
         }
 
@@ -128,6 +129,6 @@ impl AsyncIo for RawFileSync {
     }
 
     fn next_completed_request(&mut self) -> Option<(u64, i32)> {
-        self.completion_list.pop()
+        self.completion_list.pop_front()
     }
 }

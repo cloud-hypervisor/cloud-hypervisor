@@ -5,6 +5,7 @@
 use crate::async_io::{AsyncIo, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult};
 use crate::AsyncAdaptor;
 use qcow::{QcowFile, RawFile, Result as QcowResult};
+use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -37,7 +38,7 @@ impl DiskFile for QcowDiskSync {
 pub struct QcowSync {
     qcow_file: Arc<Mutex<QcowFile>>,
     eventfd: EventFd,
-    completion_list: Vec<(u64, i32)>,
+    completion_list: VecDeque<(u64, i32)>,
 }
 
 impl QcowSync {
@@ -46,7 +47,7 @@ impl QcowSync {
             qcow_file,
             eventfd: EventFd::new(libc::EFD_NONBLOCK)
                 .expect("Failed creating EventFd for QcowSync"),
-            completion_list: Vec::new(),
+            completion_list: VecDeque::new(),
         }
     }
 }
@@ -98,6 +99,6 @@ impl AsyncIo for QcowSync {
     }
 
     fn next_completed_request(&mut self) -> Option<(u64, i32)> {
-        self.completion_list.pop()
+        self.completion_list.pop_front()
     }
 }
