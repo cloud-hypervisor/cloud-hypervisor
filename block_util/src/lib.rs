@@ -22,6 +22,7 @@ pub mod vhdx_sync;
 
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
 use io_uring::{opcode, IoUring, Probe};
+use smallvec::SmallVec;
 use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::cmp;
 use std::convert::TryInto;
@@ -195,7 +196,7 @@ pub struct AlignedOperation {
 pub struct Request {
     pub request_type: RequestType,
     pub sector: u64,
-    pub data_descriptors: Vec<(GuestAddress, u32)>,
+    pub data_descriptors: SmallVec<[(GuestAddress, u32); 1]>,
     pub status_addr: GuestAddress,
     pub writeback: bool,
     pub aligned_operations: Vec<AlignedOperation>,
@@ -226,7 +227,7 @@ impl Request {
         let mut req = Request {
             request_type: request_type(desc_chain.memory(), hdr_desc_addr)?,
             sector: sector(desc_chain.memory(), hdr_desc_addr)?,
-            data_descriptors: Vec::new(),
+            data_descriptors: SmallVec::with_capacity(1),
             status_addr: GuestAddress(0),
             writeback: true,
             aligned_operations: Vec::new(),
@@ -354,7 +355,8 @@ impl Request {
         let request_type = self.request_type;
         let offset = (sector << SECTOR_SHIFT) as libc::off_t;
 
-        let mut iovecs = Vec::with_capacity(self.data_descriptors.len());
+        let mut iovecs: SmallVec<[libc::iovec; 1]> =
+            SmallVec::with_capacity(self.data_descriptors.len());
         for (data_addr, data_len) in &self.data_descriptors {
             if *data_len == 0 {
                 continue;

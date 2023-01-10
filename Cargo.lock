@@ -88,6 +88,7 @@ dependencies = [
  "libc",
  "log",
  "qcow",
+ "smallvec",
  "thiserror",
  "versionize",
  "versionize_derive",
