@@ -97,7 +97,7 @@ impl AsyncIo for QcowSync {
             .fsync_sync(user_data, &self.eventfd, &mut self.completion_list)
     }
 
-    fn complete(&mut self) -> Vec<(u64, i32)> {
-        self.completion_list.drain(..).collect()
+    fn next_completed_request(&mut self) -> Option<(u64, i32)> {
+        self.completion_list.pop()
     }
 }

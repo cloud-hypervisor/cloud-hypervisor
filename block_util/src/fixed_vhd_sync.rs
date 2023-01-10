@@ -101,7 +101,7 @@ impl AsyncIo for FixedVhdSync {
         self.raw_file_sync.fsync(user_data)
     }
 
-    fn complete(&mut self) -> Vec<(u64, i32)> {
-        self.raw_file_sync.complete()
+    fn next_completed_request(&mut self) -> Option<(u64, i32)> {
+        self.raw_file_sync.next_completed_request()
     }
 }
