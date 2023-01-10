@@ -62,7 +62,7 @@ impl AsyncIo for FixedVhdSync {
     fn read_vectored(
         &mut self,
         offset: libc::off_t,
-        iovecs: Vec<libc::iovec>,
+        iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
         if offset as u64 >= self.size {
@@ -81,7 +81,7 @@ impl AsyncIo for FixedVhdSync {
     fn write_vectored(
         &mut self,
         offset: libc::off_t,
-        iovecs: Vec<libc::iovec>,
+        iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
         if offset as u64 >= self.size {

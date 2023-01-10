@@ -131,13 +131,13 @@ pub trait AsyncIo: Send {
     fn read_vectored(
         &mut self,
         offset: libc::off_t,
-        iovecs: Vec<libc::iovec>,
+        iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()>;
     fn write_vectored(
         &mut self,
         offset: libc::off_t,
-        iovecs: Vec<libc::iovec>,
+        iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()>;
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()>;

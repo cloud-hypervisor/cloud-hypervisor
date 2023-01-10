@@ -64,7 +64,7 @@ impl AsyncIo for VhdxSync {
     fn read_vectored(
         &mut self,
         offset: libc::off_t,
-        iovecs: Vec<libc::iovec>,
+        iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
         self.vhdx_file.read_vectored_sync(
@@ -79,7 +79,7 @@ impl AsyncIo for VhdxSync {
     fn write_vectored(
         &mut self,
         offset: libc::off_t,
-        iovecs: Vec<libc::iovec>,
+        iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
         self.vhdx_file.write_vectored_sync(
