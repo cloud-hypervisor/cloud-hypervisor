@@ -8,11 +8,11 @@ extern crate test_infra;
 
 mod performance_tests;
 
-use clap::{Arg, ArgAction, Command as ClapCommand};
+use argh::FromArgs;
 use performance_tests::*;
 use serde::{Deserialize, Serialize};
 use std::{
-    env, fmt,
+    fmt,
     process::Command,
     sync::{mpsc::channel, Arc},
     thread,
@@ -626,39 +626,37 @@ fn date() -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
+#[derive(FromArgs)]
+/// Generate the performance metrics data for Cloud Hypervisor
+struct Options {
+    #[argh(switch, long = "list-tests")]
+    /// print the list of available metrics tests
+    list_tests: bool,
+
+    #[argh(option, long = "test-filter")]
+    /// filter metrics tests to run based on provided keywords
+    keywords: Vec<String>,
+
+    #[argh(option, long = "report-file")]
+    /// report file. Stderr is used if not specified
+    report_file: Option<String>,
+
+    #[argh(option, long = "iterations")]
+    /// override number of test iterations
+    iterations: Option<u32>,
+
+    #[argh(switch, short = 'V', long = "version")]
+    /// print version information
+    version: bool,
+}
+
 fn main() {
-    let cmd_arguments = ClapCommand::new("performance-metrics")
-        .version(env!("GIT_HUMAN_READABLE"))
-        .author(env!("CARGO_PKG_AUTHORS"))
-        .about("Generate the performance metrics data for Cloud Hypervisor")
-        .arg(
-            Arg::new("test-filter")
-                .long("test-filter")
-                .help("Filter metrics tests to run based on provided keywords")
-                .num_args(1)
-                .required(false),
-        )
-        .arg(
-            Arg::new("list-tests")
-                .long("list-tests")
-                .help("Print the list of availale metrics tests")
-                .num_args(0)
-                .action(ArgAction::SetTrue)
-                .required(false),
-        )
-        .arg(
-            Arg::new("report-file")
-                .long("report-file")
-                .help("Report file. Standard error is used if not specified")
-                .num_args(1),
-        )
-        .arg(
-            Arg::new("iterations")
-                .long("iterations")
-                .help("Override number of test iterations")
-                .num_args(1),
-        )
-        .get_matches();
+    let opts: Options = argh::from_env();
+
+    if opts.version {
+        println!("{} {}", env!("CARGO_BIN_NAME"), env!("GIT_HUMAN_READABLE"));
+        return;
+    }
 
     // It seems that the tool (ethr) used for testing the virtio-net latency
     // is not stable on AArch64, and therefore the latency test is currently
@@ -668,7 +666,7 @@ fn main() {
         .filter(|t| !(cfg!(target_arch = "aarch64") && t.name == "virtio_net_latency_us"))
         .collect();
 
-    if cmd_arguments.get_flag("list-tests") {
+    if opts.list_tests {
         for test in test_list.iter() {
             println!("\"{}\" ({})", test.name, test.control);
         }
@@ -676,10 +674,7 @@ fn main() {
         return;
     }
 
-    let test_filter = match cmd_arguments.get_many::<String>("test-filter") {
-        Some(s) => s.collect(),
-        None => Vec::new(),
-    };
+    let test_filter = opts.keywords.iter().collect::<Vec<&String>>();
 
     // Run performance tests sequentially and report results (in both readable/json format)
     let mut metrics_report: MetricsReport = Default::default();
@@ -687,11 +682,7 @@ fn main() {
     init_tests();
 
     let overrides = Arc::new(PerformanceTestOverrides {
-        test_iterations: cmd_arguments
-            .get_one::<String>("iterations")
-            .map(|s| s.parse())
-            .transpose()
-            .unwrap_or_default(),
+        test_iterations: opts.iterations,
     });
 
     for test in test_list.iter() {
@@ -710,19 +701,18 @@ fn main() {
 
     cleanup_tests();
 
-    let mut report_file: Box<dyn std::io::Write + Send> =
-        if let Some(file) = cmd_arguments.get_one::<String>("report-file") {
-            Box::new(
-                std::fs::File::create(std::path::Path::new(file))
-                    .map_err(|e| {
-                        eprintln!("Error opening report file: {file}: {e}");
-                        std::process::exit(1);
-                    })
-                    .unwrap(),
-            )
-        } else {
-            Box::new(std::io::stdout())
-        };
+    let mut report_file: Box<dyn std::io::Write + Send> = if let Some(ref file) = opts.report_file {
+        Box::new(
+            std::fs::File::create(std::path::Path::new(file))
+                .map_err(|e| {
+                    eprintln!("Error opening report file: {file}: {e}");
+                    std::process::exit(1);
+                })
+                .unwrap(),
+        )
+    } else {
+        Box::new(std::io::stdout())
+    };
 
     report_file
         .write_all(
