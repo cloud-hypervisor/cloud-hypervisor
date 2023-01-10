@@ -33,7 +33,6 @@ use wait_timeout::ChildExt;
 #[cfg(target_arch = "x86_64")]
 mod x86_64 {
     pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-0.raw";
-    pub const FOCAL_SGX_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-sgx.raw";
     pub const JAMMY_NVIDIA_IMAGE_NAME: &str = "jammy-server-cloudimg-amd64-nvidia.raw";
     pub const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-amd64-custom-20210609-0.qcow2";
     pub const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-amd64-custom-20210609-0.vhd";
