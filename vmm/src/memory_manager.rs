@@ -1270,6 +1270,10 @@ impl MemoryManager {
         size: usize,
     ) -> Result<FileOffset, Error> {
         if backing_file.is_dir() {
+            warn!(
+                "Using a directory as a backing file for memory is deprecated \
+                and will be removed in a future release. (See #5082)"
+            );
             // Override file offset as it does not apply in this case.
             info!(
                 "Ignoring file offset since the backing file is a \
