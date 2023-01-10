@@ -4,6 +4,7 @@
 
 use crate::async_io::{AsyncIo, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult};
 use crate::AsyncAdaptor;
+use std::collections::VecDeque;
 use std::fs::File;
 use std::sync::{Arc, Mutex, MutexGuard};
 use vhdx::vhdx::{Result as VhdxResult, Vhdx};
@@ -37,7 +38,7 @@ impl DiskFile for VhdxDiskSync {
 pub struct VhdxSync {
     vhdx_file: Arc<Mutex<Vhdx>>,
     eventfd: EventFd,
-    completion_list: Vec<(u64, i32)>,
+    completion_list: VecDeque<(u64, i32)>,
 }
 
 impl VhdxSync {
@@ -45,7 +46,7 @@ impl VhdxSync {
         Ok(VhdxSync {
             vhdx_file,
             eventfd: EventFd::new(libc::EFD_NONBLOCK)?,
-            completion_list: Vec::new(),
+            completion_list: VecDeque::new(),
         })
     }
 }
@@ -97,6 +98,6 @@ impl AsyncIo for VhdxSync {
     }
 
     fn next_completed_request(&mut self) -> Option<(u64, i32)> {
-        self.completion_list.pop()
+        self.completion_list.pop_front()
     }
 }
