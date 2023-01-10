@@ -773,10 +773,8 @@ impl QcowFile {
             refcounts: &mut [u16],
             cluster_size: u64,
             refblock_clusters: u64,
-            pointers_per_cluster: u64,
         ) -> Result<Vec<u64>> {
-            let refcount_table_entries = div_round_up_u64(refblock_clusters, pointers_per_cluster);
-            let mut ref_table = vec![0; refcount_table_entries as usize];
+            let mut ref_table = vec![0; refblock_clusters as usize];
             let mut first_free_cluster: u64 = 0;
             for refblock_addr in &mut ref_table {
                 loop {
@@ -897,12 +895,7 @@ impl QcowFile {
         set_refcount_table_refcounts(&mut refcounts, header, cluster_size)?;
 
         // Allocate clusters to store the new reference count blocks.
-        let ref_table = alloc_refblocks(
-            &mut refcounts,
-            cluster_size,
-            refblock_clusters,
-            pointers_per_cluster,
-        )?;
+        let ref_table = alloc_refblocks(&mut refcounts, cluster_size, refblock_clusters)?;
 
         // Write updated reference counts and point the reftable at them.
         write_refblocks(
