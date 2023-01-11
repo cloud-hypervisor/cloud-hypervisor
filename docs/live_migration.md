@@ -16,22 +16,22 @@ $ target/release/cloud-hypervisor
     --disk path=~/workloads/focal.raw \
     --cpus boot=1 --memory size=1G,shared=on \
     --cmdline "root=/dev/vda1 console=ttyS0"  \
-    --serial tty --console off --api-socket=/tmp/api1
+    --serial tty --console off --api-socket /tmp/api1
 ```
 
 Launch the destination VM from the same directory (on the host machine):
 ```bash
-$ target/release/cloud-hypervisor --api-socket=/tmp/api2
+$ target/release/cloud-hypervisor --api-socket /tmp/api2
 ```
 
 Get ready for receiving migration for the destination VM (on the host machine):
 ```bash
-$ target/release/ch-remote --api-socket=/tmp/api2 receive-migration unix:/tmp/sock
+$ target/release/ch-remote --api-socket /tmp/api2 receive-migration unix:/tmp/sock
 ```
 
 Start to send migration for the source VM (on the host machine):
 ```bash
-$ target/release/ch-remote --api-socket=/tmp/api1 send-migration --local unix:/tmp/sock
+$ target/release/ch-remote --api-socket /tmp/api1 send-migration --local unix:/tmp/sock
 ```
 
 When the above commands completed, the source VM should be successfully
@@ -51,7 +51,7 @@ $ sudo /target/release/cloud-hypervisor \
         --cpus boot=1 --memory size=512M \
         --kernel vmlinux \
         --cmdline "root=/dev/vda1 console=ttyS0"  \
-        --disk path=focal-1.raw path=focal-nested.raw path=tmp.img\
+        --disk path=focal-1.raw path=focal-nested.raw --disk path=tmp.img\
         --net ip=192.168.101.1
 ```
 
@@ -63,7 +63,7 @@ $ sudo /target/release/cloud-hypervisor \
         --cpus boot=1 --memory size=512M \
         --kernel vmlinux \
         --cmdline "root=/dev/vda1 console=ttyS0"  \
-        --disk path=focal-2.raw path=focal-nested.raw path=tmp.img\
+        --disk path=focal-2.raw path=focal-nested.raw --disk path=tmp.img\
         --net ip=192.168.102.1
 ```
 
@@ -74,8 +74,8 @@ vm-1:~$ sudo ./cloud-hypervisor \
         --memory size=128M \
         --kernel vmlinux \
         --cmdline "console=ttyS0 root=/dev/vda1" \
-        --disk path=/dev/vdb path=/dev/vdc \
-        --api-socket=/tmp/api1 \
+        --disk path=/dev/vdb --disk path=/dev/vdc \
+        --api-socket /tmp/api1 \
         --net ip=192.168.100.1
 vm-1:~$ # setup the guest network if needed
 vm-1:~$ sudo ip addr add 192.168.101.2/24 dev ens4
@@ -108,7 +108,7 @@ echo "tmp = $tmp"
 
 Launch the nested destination VM (inside the guest OS of the VM 2):
 ```bash
-vm-2:~$ sudo ./cloud-hypervisor --api-socket=/tmp/api2
+vm-2:~$ sudo ./cloud-hypervisor --api-socket /tmp/api2
 vm-2:~$ # setup the guest network with the following commands if needed
 vm-2:~$ sudo ip addr add 192.168.102.2/24 dev ens4
 vm-2:~$ sudo ip link set up dev ens4
@@ -122,7 +122,7 @@ vm-2:~$ ping 192.168.101.2 # This should succeed
 Get ready for receiving migration for the nested destination VM (inside
 the guest OS of the VM 2):
 ```bash
-vm-2:~$ sudo ./ch-remote --api-socket=/tmp/api2 receive-migration unix:/tmp/sock2
+vm-2:~$ sudo ./ch-remote --api-socket /tmp/api2 receive-migration unix:/tmp/sock2
 vm-2:~$ sudo socat TCP-LISTEN:6000,reuseaddr UNIX-CLIENT:/tmp/sock2
 ```
 
@@ -130,7 +130,7 @@ Start to send migration for the nested source VM (inside the guest OS of
 the VM 1):
 ```bash
 vm-1:~$ sudo socat UNIX-LISTEN:/tmp/sock1,reuseaddr TCP:192.168.102.2:6000
-vm-1:~$ sudo ./ch-remote --api-socket=/tmp/api1 send-migration unix:/tmp/sock1
+vm-1:~$ sudo ./ch-remote --api-socket /tmp/api1 send-migration unix:/tmp/sock1
 ```
 
 When the above commands completed, the source VM should be successfully

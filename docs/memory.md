@@ -519,7 +519,7 @@ different distances, it can be described with the following example.
 _Example_
 
 ```
---numa guest_numa_id=0,distances=[1@15,2@25] guest_numa_id=1,distances=[0@15,2@20] guest_numa_id=2,distances=[0@25,1@20]
+--numa guest_numa_id=0,distances=[1@15,2@25] --numa guest_numa_id=1,distances=[0@15,2@20] guest_numa_id=2,distances=[0@25,1@20]
 ```
 
 ### `memory_zones`
@@ -543,14 +543,14 @@ demarcate the list.
 
 Note that a memory zone must belong to a single NUMA node. The following
 configuration is incorrect, therefore not allowed:
-`--numa guest_numa_id=0,memory_zones=mem0 guest_numa_id=1,memory_zones=mem0`
+`--numa guest_numa_id=0,memory_zones=mem0 --numa guest_numa_id=1,memory_zones=mem0`
 
 _Example_
 
 ```
 --memory size=0
---memory-zone id=mem0,size=1G id=mem1,size=1G id=mem2,size=1G
---numa guest_numa_id=0,memory_zones=[mem0,mem2] guest_numa_id=1,memory_zones=mem1
+--memory-zone id=mem0,size=1G id=mem1,size=1G --memory-zone id=mem2,size=1G
+--numa guest_numa_id=0,memory_zones=[mem0,mem2] --numa guest_numa_id=1,memory_zones=mem1
 ```
 
 ### `sgx_epc_sections`
@@ -570,7 +570,7 @@ _Example_
 
 ```
 --sgx-epc id=epc0,size=32M id=epc1,size=64M id=epc2,size=32M
---numa guest_numa_id=0,sgx_epc_sections=epc1 guest_numa_id=1,sgx_epc_sections=[epc0,epc2]
+--numa guest_numa_id=0,sgx_epc_sections=epc1 --numa guest_numa_id=1,sgx_epc_sections=[epc0,epc2]
 ```
 
 ### PCI bus

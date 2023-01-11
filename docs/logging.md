@@ -38,6 +38,6 @@ This level is for the benefit of developers. It should be used for sporadic and 
 
 ### `debug!()`
 
-Use `-vv` to enable.
+Use `-v -v` to enable.
 
 For the most verbose of logging messages. It is acceptable to "spam" the log with repeated invocations of the same message. This level of logging would be combined with `--log-file`.

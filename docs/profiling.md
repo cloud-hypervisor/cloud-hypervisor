@@ -33,7 +33,7 @@ $ perf record -g target/release/cloud-hypervisor \
         --cpus boot=1 --memory size=1G \
         --cmdline "root=/dev/pmem0p1 console=ttyS0" \
         --serial tty --console off \
-        --api-socket=/tmp/api1
+        --api-socket /tmp/api1
 ```
 
 For analysing the samples:
@@ -60,5 +60,5 @@ $ perf record --call-graph lbr --all-user --user-callchains -g target/release/cl
         --cpus boot=1 --memory size=1G \
         --cmdline "root=/dev/pmem0p1 console=ttyS0" \
         --serial tty --console off \
-        --api-socket=/tmp/api1
+        --api-socket /tmp/api1
 ```

@@ -245,7 +245,7 @@ e.g.
 
 ```bash
 ./cloud-hypervisor \
-    --api-socket=/tmp/api \
+    --api-socket /tmp/api \
     --cpus boot=1 \
     --memory size=4G,hugepages=on \
     --disk path=focal-server-cloudimg-amd64.raw \
@@ -260,7 +260,7 @@ requiring the IOMMU then may be hotplugged:
 e.g.
 
 ```bash
-./ch-remote --api-socket=/tmp/api add-device path=/sys/bus/pci/devices/0000:00:04.0,iommu=on,pci_segment=1
+./ch-remote --api-socket /tmp/api add-device path=/sys/bus/pci/devices/0000:00:04.0,iommu=on,pci_segment=1
 ```
 
 Devices that cannot be placed behind an IOMMU (e.g. lacking an `iommu=` option)

@@ -36,7 +36,7 @@ Assuming parts of the guest software stack have been instrumented to use the
 `cloud-hypervisor` debug I/O port, we may want to gather the related logs.
 
 To do so we need to start `cloud-hypervisor` with the right debug level
-(`-vvv`). It is also recommended to have it log into a dedicated file in order
+(`-v -v -v`). It is also recommended to have it log into a dedicated file in order
 to easily grep for the tracing logs (e.g.
 `--log-file /tmp/cloud-hypervisor.log`):
 
@@ -48,7 +48,7 @@ to easily grep for the tracing logs (e.g.
     --memory size=1024M \
     --rng \
     --log-file /tmp/ch-fw.log \
-    -vvv
+    -v -v -v
 ```
 
 After booting the guest, we then have to grep for the debug I/O port traces in
