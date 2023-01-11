@@ -554,6 +554,23 @@ pub fn generate_common_cpuid(
     kvm_hyperv: bool,
     #[cfg(feature = "tdx")] tdx_enabled: bool,
 ) -> super::Result<Vec<CpuIdEntry>> {
+    // SAFETY: cpuid called with valid leaves
+    if unsafe { x86_64::__cpuid(1) }.ecx & 1 << HYPERVISOR_ECX_BIT == 1 << HYPERVISOR_ECX_BIT {
+        // SAFETY: cpuid called with valid leaves
+        let hypervisor_cpuid = unsafe { x86_64::__cpuid(0x4000_0000) };
+
+        let mut identifier: [u8; 12] = [0; 12];
+        identifier[0..4].copy_from_slice(&hypervisor_cpuid.ebx.to_le_bytes()[..]);
+        identifier[4..8].copy_from_slice(&hypervisor_cpuid.ecx.to_le_bytes()[..]);
+        identifier[8..12].copy_from_slice(&hypervisor_cpuid.edx.to_le_bytes()[..]);
+
+        info!(
+            "Running under nested virtualisation. Hypervisor string: {}",
+            String::from_utf8_lossy(&identifier)
+        );
+    }
+
+    info!("Generating guest CPUID for with physical address size: {phys_bits}");
     let cpuid_patches = vec![
         // Patch tsc deadline timer bit
         CpuidPatch {
