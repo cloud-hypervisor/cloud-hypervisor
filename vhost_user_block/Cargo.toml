@@ -5,8 +5,8 @@ authors = ["The Cloud Hypervisor Authors"]
 edition = "2021"
 
 [dependencies]
+argh = "0.1.9"
 block_util = { path = "../block_util" }
-clap = { version = "4.0.32", features = ["wrap_help"] }
 env_logger = "0.10.0"
 epoll = "4.3.1"
 libc = "0.2.139"
