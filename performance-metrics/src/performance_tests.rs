@@ -359,11 +359,13 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
                 guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
             )
             .as_str(),
+            "--disk",
             format!(
                 "path={}",
                 guest.disk_config.disk(DiskType::CloudInit).unwrap()
             )
             .as_str(),
+            "--disk",
             format!("path={BLK_IO_TEST_IMG}").as_str(),
         ])
         .default_net()

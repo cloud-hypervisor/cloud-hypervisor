@@ -6,7 +6,7 @@
 #[macro_use]
 extern crate event_monitor;
 
-use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command};
+use argh::FromArgs;
 use libc::EFD_NONBLOCK;
 use log::LevelFilter;
 use option_parser::OptionParser;
@@ -113,10 +113,6 @@ impl log::Log for Logger {
     fn flush(&self) {}
 }
 
-fn prepare_default_values() -> (String, String, String) {
-    (default_vcpus(), default_memory(), default_rng())
-}
-
 fn default_vcpus() -> String {
     format!(
         "boot={},max_phys_bits={}",
@@ -133,287 +129,257 @@ fn default_rng() -> String {
     format!("src={}", config::DEFAULT_RNG_SOURCE)
 }
 
-fn create_app(default_vcpus: String, default_memory: String, default_rng: String) -> Command {
-    #[allow(clippy::let_and_return)]
-    let app = Command::new("cloud-hypervisor")
-        // 'BUILT_VERSION' is set by the build script 'build.rs' at
-        // compile time
-        .version(env!("BUILT_VERSION"))
-        .author(env!("CARGO_PKG_AUTHORS"))
-        .about("Launch a cloud-hypervisor VMM.")
-        .group(ArgGroup::new("vm-config").multiple(true))
-        .group(ArgGroup::new("vmm-config").multiple(true))
-        .group(ArgGroup::new("logging").multiple(true))
-        .arg(
-            Arg::new("cpus")
-                .long("cpus")
-                .help(
-                    "boot=<boot_vcpus>,max=<max_vcpus>,\
-                    topology=<threads_per_core>:<cores_per_die>:<dies_per_package>:<packages>,\
-                    kvm_hyperv=on|off,max_phys_bits=<maximum_number_of_physical_bits>,\
-                    affinity=<list_of_vcpus_with_their_associated_cpuset>,\
-                    features=<list_of_features_to_enable>",
-                )
-                .default_value(default_vcpus)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("platform")
-                .long("platform")
-                .help(
-                    "num_pci_segments=<num_pci_segments>,iommu_segments=<list_of_segments>,serial_number=<dmi_device_serial_number>,uuid=<dmi_device_uuid>,oem_strings=<list_of_strings>",
-                )
-                .num_args(1)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("memory")
-                .long("memory")
-                .help(
-                    "Memory parameters \
-                     \"size=<guest_memory_size>,mergeable=on|off,shared=on|off,\
-                     hugepages=on|off,hugepage_size=<hugepage_size>,\
-                     hotplug_method=acpi|virtio-mem,\
-                     hotplug_size=<hotpluggable_memory_size>,\
-                     hotplugged_size=<hotplugged_memory_size>,\
-                     prefault=on|off,thp=on|off\"",
-                )
-                .default_value(default_memory)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("memory-zone")
-                .long("memory-zone")
-                .help(
-                    "User defined memory zone parameters \
-                     \"size=<guest_memory_region_size>,file=<backing_file>,\
-                     shared=on|off,\
-                     hugepages=on|off,hugepage_size=<hugepage_size>,\
-                     host_numa_node=<node_id>,\
-                     id=<zone_identifier>,hotplug_size=<hotpluggable_memory_size>,\
-                     hotplugged_size=<hotplugged_memory_size>,\
-                     prefault=on|off\"",
-                )
-                .num_args(1..)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("firmware")
-                .long("firmware")
-                .help("Path to firmware that is loaded in an architectural specific way")
-                .num_args(1)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("kernel")
-                .long("kernel")
-                .help(
-                    "Path to kernel to load. This may be a kernel or firmware that supports a PVH \
-                entry point (e.g. vmlinux) or architecture equivalent",
-                )
-                .num_args(1)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("initramfs")
-                .long("initramfs")
-                .help("Path to initramfs image")
-                .num_args(1)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("cmdline")
-                .long("cmdline")
-                .help("Kernel command line")
-                .num_args(1)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("disk")
-                .long("disk")
-                .help(config::DiskConfig::SYNTAX)
-                .num_args(1..)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("net")
-                .long("net")
-                .help(config::NetConfig::SYNTAX)
-                .num_args(1..)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("rng")
-                .long("rng")
-                .help(
-                    "Random number generator parameters \"src=<entropy_source_path>,iommu=on|off\"",
-                )
-                .default_value(default_rng)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("balloon")
-                .long("balloon")
-                .help(config::BalloonConfig::SYNTAX)
-                .num_args(1)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("fs")
-                .long("fs")
-                .help(config::FsConfig::SYNTAX)
-                .num_args(1..)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("pmem")
-                .long("pmem")
-                .help(config::PmemConfig::SYNTAX)
-                .num_args(1..)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("serial")
-                .long("serial")
-                .help("Control serial port: off|null|pty|tty|file=/path/to/a/file")
-                .default_value("null")
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("console")
-                .long("console")
-                .help(
-                    "Control (virtio) console: \"off|null|pty|tty|file=/path/to/a/file,iommu=on|off\"",
-                )
-                .default_value("tty")
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("device")
-                .long("device")
-                .help(config::DeviceConfig::SYNTAX)
-                .num_args(1..)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("user-device")
-                .long("user-device")
-                .help(config::UserDeviceConfig::SYNTAX)
-                .num_args(1..)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("vdpa")
-                .long("vdpa")
-                .help(config::VdpaConfig::SYNTAX)
-                .num_args(1..)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("vsock")
-                .long("vsock")
-                .help(config::VsockConfig::SYNTAX)
-                .num_args(1)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("numa")
-                .long("numa")
-                .help(config::NumaConfig::SYNTAX)
-                .num_args(1..)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("watchdog")
-                .long("watchdog")
-                .help("Enable virtio-watchdog")
-                .num_args(0)
-                .action(ArgAction::SetTrue)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("v")
-                .short('v')
-                .action(ArgAction::Count)
-                .help("Sets the level of debugging output")
-                .group("logging"),
-        )
-        .arg(
-            Arg::new("log-file")
-                .long("log-file")
-                .help("Log file. Standard error is used if not specified")
-                .num_args(1)
-                .group("logging"),
-        )
-        .arg(
-            Arg::new("api-socket")
-                .long("api-socket")
-                .help("HTTP API socket (UNIX domain socket): path=</path/to/a/file> or fd=<fd>.")
-                .num_args(1)
-                .group("vmm-config"),
-        )
-        .arg(
-            Arg::new("event-monitor")
-                .long("event-monitor")
-                .help("File to report events on: path=</path/to/a/file> or fd=<fd>")
-                .num_args(1)
-                .group("vmm-config"),
-        )
-        .arg(
-            Arg::new("restore")
-                .long("restore")
-                .help(config::RestoreConfig::SYNTAX)
-                .num_args(1)
-                .group("vmm-config"),
-        )
-        .arg(
-            Arg::new("seccomp")
-                .long("seccomp")
-                .num_args(1)
-                .value_parser(["true", "false", "log"])
-                .default_value("true"),
-        )
-        .arg(
-            Arg::new("tpm")
-                .long("tpm")
-                .num_args(1)
-                .help(config::TpmConfig::SYNTAX)
-                .group("vmm-config"),
+#[derive(FromArgs)]
+/// Launch a cloud-hypervisor VMM.
+pub struct TopLevel {
+    #[argh(option, long = "cpus", default = "default_vcpus()")]
+    /// boot=<boot_vcpus>,max=<max_vcpus>,topology=<threads_per_core>:<cores_per_die>:<dies_per_package>:<packages>,kvm_hyperv=on|off,max_phys_bits=<maximum_number_of_physical_bits>,affinity=<list_of_vcpus_with_their_associated_cpuset>,features=<list_of_features_to_enable>
+    cpus: String,
 
-        );
+    #[argh(option, long = "platform")]
+    /// num_pci_segments=<num_pci_segments>,iommu_segments=<list_of_segments>,serial_number=<dmi_device_serial_number>,uuid=<dmi_device_uuid>,oem_strings=<list_of_strings>
+    platform: Option<String>,
+
+    #[argh(option, long = "memory", default = "default_memory()")]
+    /// size=<guest_memory_size>,mergeable=on|off,shared=on|off,hugepages=on|off,hugepage_size=<hugepage_size>,hotplug_method=acpi|virtio-mem,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>,prefault=on|off,thp=on|off
+    memory: String,
+
+    #[argh(option, long = "memory-zone")]
+    /// size=<guest_memory_region_size>,file=<backing_file>,shared=on|off,hugepages=on|off,hugepage_size=<hugepage_size>,host_numa_node=<node_id>,id=<zone_identifier>,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>,prefault=on|off
+    memory_zone: Vec<String>,
+
+    #[argh(option, long = "firmware")]
+    /// path to firmware that is loaded in an architectural specific way
+    firmware: Option<String>,
+
+    #[argh(option, long = "kernel")]
+    /// path to kernel or firmware that supports a PVH entry point or architecture equivalent
+    kernel: Option<String>,
+
+    #[argh(option, long = "initramfs")]
+    /// path to initramfs image
+    initramfs: Option<String>,
+
+    #[argh(option, long = "cmdline")]
+    /// kernel command line
+    cmdline: Option<String>,
+
+    #[argh(option, long = "disk")]
+    /// path=<disk_image_path>,readonly=on|off,direct=on|off,iommu=on|off,num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,vhost_user=on|off,socket=<vhost_user_socket_path>,bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,id=<device_id>,pci_segment=<segment_id>
+    disk: Vec<String>,
+
+    #[argh(option, long = "net")]
+    /// tap=<if_name>,ip=<ip_addr>,mask=<net_mask>,mac=<mac_addr>,fd=<fd1,fd2...>,iommu=on|off,num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,id=<device_id>,vhost_user=<vhost_user_enable>,socket=<vhost_user_socket_path>,vhost_mode=client|server,bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,pci_segment=<segment_id>offload_tso=on|off,offload_ufo=on|off,offload_csum=on|off
+    net: Vec<String>,
+
+    #[argh(option, long = "rng", default = "default_rng()")]
+    /// src=<entropy_source_path>,iommu=on|off
+    rng: String,
+
+    #[argh(option, long = "balloon")]
+    /// size=<balloon_size>,deflate_on_oom=on|off,free_page_reporting=on|off
+    balloon: Option<String>,
+
+    #[argh(option, long = "fs")]
+    /// tag=<tag_name>,socket=<socket_path>,num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,id=<device_id>,pci_segment=<segment_id>
+    fs: Vec<String>,
+
+    #[argh(option, long = "pmem")]
+    /// file=<backing_file_path>,size=<persistent_memory_size>,iommu=on|off,discard_writes=on|off,id=<device_id>,pci_segment=<segment_id>
+    pmem: Vec<String>,
+
+    #[argh(option, long = "serial", default = "String::from(\"null\")")]
+    /// off|null|pty|tty|file=/path/to/a/file
+    serial: String,
+
+    #[argh(option, long = "console", default = "String::from(\"tty\")")]
+    /// off|null|pty|tty|file=/path/to/a/file,iommu=on|off
+    console: String,
+
+    #[argh(option, long = "device")]
+    /// path=<device_path>,iommu=on|off,id=<device_id>,pci_segment=<segment_id>
+    device: Vec<String>,
+
+    #[argh(option, long = "user-device")]
+    /// socket=<socket_path>,id=<device_id>,pci_segment=<segment_id>
+    user_device: Vec<String>,
+
+    #[argh(option, long = "vdpa")]
+    /// path=<device_path>,num_queues=<number_of_queues>,iommu=on|off,id=<device_id>,pci_segment=<segment_id>
+    vdpa: Vec<String>,
+
+    #[argh(option, long = "vsock")]
+    /// cid=<context_id>,socket=<socket_path>,iommu=on|off,id=<device_id>,pci_segment=<segment_id>
+    vsock: Option<String>,
+
+    #[argh(option, long = "numa")]
+    /// guest_numa_id=<node_id>,cpus=<cpus_id>,distances=<list_of_distances_to_destination_nodes>,memory_zones=<list_of_memory_zones>,sgx_epc_sections=<list_of_sgx_epc_sections>
+    numa: Vec<String>,
+
+    #[argh(switch, long = "watchdog")]
+    /// enable virtio-watchdog
+    watchdog: bool,
+
+    #[argh(switch, short = 'v')]
+    /// set the level of debugging output
+    verbosity: u8,
+
+    #[argh(option, long = "log-file")]
+    /// path to log file
+    log_file: Option<String>,
+
+    #[argh(option, long = "api-socket")]
+    /// path=<path/to/a/file>|fd=<fd>
+    api_socket: Option<String>,
+
+    #[argh(option, long = "event-monitor")]
+    /// path=<path/to/a/file>|fd=<fd>
+    event_monitor: Option<String>,
+
+    #[argh(option, long = "restore")]
+    /// source_url=<source_url>,prefault=on|off
+    restore: Option<String>,
+
+    #[argh(option, long = "seccomp", default = "String::from(\"true\")")]
+    /// seccomp configuration (true, false or log)
+    seccomp: String,
+
+    #[argh(option, long = "tpm")]
+    /// socket=<path/to/a/socket>
+    tpm: Option<String>,
 
     #[cfg(target_arch = "x86_64")]
-    let app = app.arg(
-        Arg::new("sgx-epc")
-            .long("sgx-epc")
-            .help(config::SgxEpcConfig::SYNTAX)
-            .num_args(1..)
-            .group("vm-config"),
-    );
+    #[argh(option, long = "sgx-epc")]
+    /// id=<epc_section_identifier>,size=<epc_section_size>,prefault=on|off
+    sgx_epc: Vec<String>,
 
     #[cfg(feature = "guest_debug")]
-    let app = app.arg(
-        Arg::new("gdb")
-            .long("gdb")
-            .help("GDB socket (UNIX domain socket): path=</path/to/a/file>")
-            .num_args(1)
-            .group("vmm-config"),
-    );
+    #[argh(option, long = "gdb")]
+    /// path=<path/to/a/file>
+    gdb: Option<String>,
 
-    app
+    #[argh(switch, short = 'V', long = "version")]
+    /// print version information
+    version: bool,
 }
 
-fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
-    let log_level = match cmd_arguments.get_count("v") {
+impl TopLevel {
+    fn to_vm_params(&self) -> config::VmParams<'_> {
+        let cpus = &self.cpus;
+        let memory = &self.memory;
+        let memory_zones = if !self.memory_zone.is_empty() {
+            Some(self.memory_zone.iter().map(|x| x.as_str()).collect())
+        } else {
+            None
+        };
+        let rng = &self.rng;
+        let serial = &self.serial;
+        let firmware = self.firmware.as_deref();
+        let kernel = self.kernel.as_deref();
+        let initramfs = self.initramfs.as_deref();
+        let cmdline = self.cmdline.as_deref();
+
+        let disks = if !self.disk.is_empty() {
+            Some(self.disk.iter().map(|x| x.as_str()).collect())
+        } else {
+            None
+        };
+
+        let net = if !self.net.is_empty() {
+            Some(self.net.iter().map(|x| x.as_str()).collect())
+        } else {
+            None
+        };
+
+        let console = &self.console;
+        let balloon = self.balloon.as_deref();
+        let fs = if !self.fs.is_empty() {
+            Some(self.fs.iter().map(|x| x.as_str()).collect())
+        } else {
+            None
+        };
+
+        let pmem = if !self.pmem.is_empty() {
+            Some(self.pmem.iter().map(|x| x.as_str()).collect())
+        } else {
+            None
+        };
+        let devices = if !self.device.is_empty() {
+            Some(self.device.iter().map(|x| x.as_str()).collect())
+        } else {
+            None
+        };
+        let user_devices = if !self.user_device.is_empty() {
+            Some(self.user_device.iter().map(|x| x.as_str()).collect())
+        } else {
+            None
+        };
+        let vdpa = if !self.vdpa.is_empty() {
+            Some(self.vdpa.iter().map(|x| x.as_str()).collect())
+        } else {
+            None
+        };
+
+        let vsock = self.vsock.as_deref();
+        #[cfg(target_arch = "x86_64")]
+        let sgx_epc = if !self.sgx_epc.is_empty() {
+            Some(self.sgx_epc.iter().map(|x| x.as_str()).collect())
+        } else {
+            None
+        };
+
+        let numa = if !self.numa.is_empty() {
+            Some(self.numa.iter().map(|x| x.as_str()).collect())
+        } else {
+            None
+        };
+        let watchdog = self.watchdog;
+        let platform = self.platform.as_deref();
+        #[cfg(feature = "guest_debug")]
+        let gdb = self.gdb.is_some();
+        let tpm = self.tpm.as_deref();
+
+        config::VmParams {
+            cpus,
+            memory,
+            memory_zones,
+            firmware,
+            kernel,
+            initramfs,
+            cmdline,
+            disks,
+            net,
+            rng,
+            balloon,
+            fs,
+            pmem,
+            serial,
+            console,
+            devices,
+            user_devices,
+            vdpa,
+            vsock,
+            #[cfg(target_arch = "x86_64")]
+            sgx_epc,
+            numa,
+            watchdog,
+            #[cfg(feature = "guest_debug")]
+            gdb,
+            platform,
+            tpm,
+        }
+    }
+}
+
+fn start_vmm(toplevel: TopLevel) -> Result<Option<String>, Error> {
+    let log_level = match toplevel.verbosity {
         0 => LevelFilter::Warn,
         1 => LevelFilter::Info,
         2 => LevelFilter::Debug,
         _ => LevelFilter::Trace,
     };
 
-    let log_file: Box<dyn std::io::Write + Send> = if let Some(file) =
-        cmd_arguments.get_one::<String>("log-file")
-    {
+    let log_file: Box<dyn std::io::Write + Send> = if let Some(ref file) = toplevel.log_file {
         Box::new(std::fs::File::create(std::path::Path::new(file)).map_err(Error::LogFileCreation)?)
     } else {
         Box::new(std::io::stderr())
@@ -426,32 +392,26 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
     .map(|()| log::set_max_level(log_level))
     .map_err(Error::LoggerSetup)?;
 
-    let (api_socket_path, api_socket_fd) =
-        if let Some(socket_config) = cmd_arguments.get_one::<String>("api-socket") {
-            let mut parser = OptionParser::new();
-            parser.add("path").add("fd");
-            parser.parse(socket_config).unwrap_or_default();
+    let (api_socket_path, api_socket_fd) = if let Some(ref socket_config) = toplevel.api_socket {
+        let mut parser = OptionParser::new();
+        parser.add("path").add("fd");
+        parser.parse(socket_config).unwrap_or_default();
 
-            if let Some(fd) = parser.get("fd") {
-                (
-                    None,
-                    Some(fd.parse::<RawFd>().map_err(Error::ParsingApiSocket)?),
-                )
-            } else if let Some(path) = parser.get("path") {
-                (Some(path), None)
-            } else {
-                (
-                    cmd_arguments
-                        .get_one::<String>("api-socket")
-                        .map(|s| s.to_string()),
-                    None,
-                )
-            }
+        if let Some(fd) = parser.get("fd") {
+            (
+                None,
+                Some(fd.parse::<RawFd>().map_err(Error::ParsingApiSocket)?),
+            )
+        } else if let Some(path) = parser.get("path") {
+            (Some(path), None)
         } else {
-            (None, None)
-        };
+            (toplevel.api_socket.as_ref().map(|s| s.to_string()), None)
+        }
+    } else {
+        (None, None)
+    };
 
-    if let Some(monitor_config) = cmd_arguments.get_one::<String>("event-monitor") {
+    if let Some(ref monitor_config) = toplevel.event_monitor {
         let mut parser = OptionParser::new();
         parser.add("path").add("fd");
         parser
@@ -481,18 +441,14 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
     let api_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateApiEventFd)?;
 
     let http_sender = api_request_sender.clone();
-    let seccomp_action = if let Some(seccomp_value) = cmd_arguments.get_one::<String>("seccomp") {
-        match seccomp_value as &str {
-            "true" => SeccompAction::Trap,
-            "false" => SeccompAction::Allow,
-            "log" => SeccompAction::Log,
-            _ => {
-                // The user providing an invalid value will be rejected by clap
-                panic!("Invalid parameter {seccomp_value} for \"--seccomp\" flag");
-            }
+    let seccomp_action = match &toplevel.seccomp as &str {
+        "true" => SeccompAction::Trap,
+        "false" => SeccompAction::Allow,
+        "log" => SeccompAction::Log,
+        val => {
+            // The user providing an invalid value will be rejected
+            panic!("Invalid parameter {val} for \"--seccomp\" flag");
         }
-    } else {
-        SeccompAction::Trap
     };
 
     if seccomp_action == SeccompAction::Trap {
@@ -532,7 +488,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
     let hypervisor = hypervisor::new().map_err(Error::CreateHypervisor)?;
 
     #[cfg(feature = "guest_debug")]
-    let gdb_socket_path = if let Some(gdb_config) = cmd_arguments.get_one::<String>("gdb") {
+    let gdb_socket_path = if let Some(ref gdb_config) = toplevel.gdb {
         let mut parser = OptionParser::new();
         parser.add("path");
         parser.parse(gdb_config).map_err(Error::ParsingGdb)?;
@@ -568,11 +524,10 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
     )
     .map_err(Error::StartVmmThread)?;
 
-    let payload_present =
-        cmd_arguments.contains_id("kernel") || cmd_arguments.contains_id("firmware");
+    let payload_present = toplevel.kernel.is_some() || toplevel.firmware.is_some();
 
     if payload_present {
-        let vm_params = config::VmParams::from_arg_matches(&cmd_arguments);
+        let vm_params = toplevel.to_vm_params();
         let vm_config = config::VmConfig::parse(vm_params).map_err(Error::ParsingConfig)?;
 
         // Create and boot the VM based off the VM config we just built.
@@ -584,11 +539,11 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         )
         .map_err(Error::VmCreate)?;
         vmm::api::vm_boot(api_evt.try_clone().unwrap(), sender).map_err(Error::VmBoot)?;
-    } else if let Some(restore_params) = cmd_arguments.get_one::<String>("restore") {
+    } else if let Some(restore_params) = toplevel.restore {
         vmm::api::vm_restore(
             api_evt.try_clone().unwrap(),
             api_request_sender,
-            Arc::new(config::RestoreConfig::parse(restore_params).map_err(Error::ParsingRestore)?),
+            Arc::new(config::RestoreConfig::parse(&restore_params).map_err(Error::ParsingRestore)?),
         )
         .map_err(Error::VmRestore)?;
     }
@@ -606,9 +561,14 @@ fn main() {
     // SAFETY: trivially safe
     let _ = unsafe { libc::umask(0o077) };
 
-    let (default_vcpus, default_memory, default_rng) = prepare_default_values();
-    let cmd_arguments = create_app(default_vcpus, default_memory, default_rng).get_matches();
-    let exit_code = match start_vmm(cmd_arguments) {
+    let toplevel: TopLevel = argh::from_env();
+
+    if toplevel.version {
+        println!("{} {}", env!("CARGO_BIN_NAME"), env!("BUILT_VERSION"));
+        return;
+    }
+
+    let exit_code = match start_vmm(toplevel) {
         Ok(path) => {
             path.map(|s| std::fs::remove_file(s).ok());
             0
@@ -633,19 +593,45 @@ fn main() {
 #[cfg(test)]
 mod unit_tests {
     use crate::config::HotplugMethod;
-    use crate::{create_app, prepare_default_values};
+    use crate::TopLevel;
     use std::path::PathBuf;
     use vmm::config::{
         ConsoleConfig, ConsoleOutputMode, CpuFeatures, CpusConfig, MemoryConfig, PayloadConfig,
-        RngConfig, VmConfig, VmParams,
+        RngConfig, VmConfig,
     };
 
-    fn get_vm_config_from_vec(args: &[&str]) -> VmConfig {
-        let (default_vcpus, default_memory, default_rng) = prepare_default_values();
-        let cmd_arguments =
-            create_app(default_vcpus, default_memory, default_rng).get_matches_from(args);
+    // Taken from argh
+    fn cmd<'a>(default: &'a str, path: &'a str) -> &'a str {
+        std::path::Path::new(path)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(default)
+    }
 
-        let vm_params = VmParams::from_arg_matches(&cmd_arguments);
+    // Some code taken from argh since it does not provide a helper to parse arbitrary strings
+    fn get_vm_config_from_vec(args: &[&str]) -> VmConfig {
+        let strings: Vec<String> = args.iter().map(|x| x.to_string()).collect();
+        let cmd = cmd(&strings[0], &strings[0]);
+        let strs: Vec<&str> = strings.iter().map(|s| s.as_str()).collect();
+        let toplevel = <TopLevel as argh::FromArgs>::from_args(&[cmd], &strs[1..]).unwrap_or_else(
+            |early_exit| {
+                std::process::exit(match early_exit.status {
+                    Ok(()) => {
+                        println!("{}", early_exit.output);
+                        0
+                    }
+                    Err(()) => {
+                        eprintln!(
+                            "{}\nRun {} --help for more information.",
+                            early_exit.output, cmd
+                        );
+                        1
+                    }
+                })
+            },
+        );
+
+        let vm_params = toplevel.to_vm_params();
 
         VmConfig::parse(vm_params).unwrap()
     }
@@ -904,6 +890,7 @@ mod unit_tests {
                     "/path/to/kernel",
                     "--disk",
                     "path=/path/to/disk/1",
+                    "--disk",
                     "path=/path/to/disk/2",
                 ],
                 r#"{
@@ -922,6 +909,7 @@ mod unit_tests {
                     "/path/to/kernel",
                     "--disk",
                     "path=/path/to/disk/1",
+                    "--disk",
                     "path=/path/to/disk/2",
                 ],
                 r#"{
@@ -1197,6 +1185,7 @@ mod unit_tests {
                     "--memory", "shared=true",
                     "--fs",
                     "tag=virtiofs1,socket=/path/to/sock1",
+                    "--fs",
                     "tag=virtiofs2,socket=/path/to/sock2",
                 ],
                 r#"{
@@ -1215,6 +1204,7 @@ mod unit_tests {
                     "--memory", "shared=true",
                     "--fs",
                     "tag=virtiofs1,socket=/path/to/sock1",
+                    "--fs",
                     "tag=virtiofs2,socket=/path/to/sock2",
                 ],
                 r#"{
@@ -1277,6 +1267,7 @@ mod unit_tests {
                     "/path/to/kernel",
                     "--pmem",
                     "file=/path/to/img/1,size=1G",
+                    "--pmem",
                     "file=/path/to/img/2,size=2G",
                 ],
                 r#"{
@@ -1443,6 +1434,7 @@ mod unit_tests {
                     "/path/to/kernel",
                     "--device",
                     "path=/path/to/device/1",
+                    "--device",
                     "path=/path/to/device/2",
                 ],
                 r#"{
@@ -1461,6 +1453,7 @@ mod unit_tests {
                     "/path/to/kernel",
                     "--device",
                     "path=/path/to/device/1",
+                    "--device",
                     "path=/path/to/device/2",
                 ],
                 r#"{
@@ -1537,6 +1530,7 @@ mod unit_tests {
                     "/path/to/kernel",
                     "--vdpa",
                     "path=/path/to/device/1",
+                    "--vdpa",
                     "path=/path/to/device/2,num_queues=2",
                 ],
                 r#"{
@@ -1555,6 +1549,7 @@ mod unit_tests {
                     "/path/to/kernel",
                     "--vdpa",
                     "path=/path/to/device/1",
+                    "--vdpa",
                     "path=/path/to/device/2",
                 ],
                 r#"{
