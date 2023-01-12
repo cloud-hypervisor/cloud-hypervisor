@@ -633,6 +633,11 @@ impl Drop for Net {
         }
         // Needed to ensure all references to tap FDs are dropped (#4868)
         self.common.wait_for_epoll_threads();
+        if let Some(thread) = self.ctrl_queue_epoll_thread.take() {
+            if let Err(e) = thread.join() {
+                error!("Error joining thread: {:?}", e);
+            }
+        }
     }
 }
 
