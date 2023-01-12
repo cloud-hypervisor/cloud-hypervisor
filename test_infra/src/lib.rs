@@ -1159,7 +1159,7 @@ impl ToString for VerbosityLevel {
         match self {
             Warn => "".to_string(),
             Info => "-v".to_string(),
-            Debug => "-vv".to_string(),
+            Debug => "-v -v".to_string(),
         }
     }
 }
@@ -1210,7 +1210,7 @@ impl<'a> GuestCommand<'a> {
                 self.command.arg("-v");
             }
             Debug => {
-                self.command.arg("-vv");
+                self.command.args(["-v", "-v"]);
             }
         };
 
@@ -1278,6 +1278,7 @@ impl<'a> GuestCommand<'a> {
                         .unwrap()
                 )
                 .as_str(),
+                "--disk",
                 format!(
                     "path={}",
                     self.guest.disk_config.disk(DiskType::CloudInit).unwrap()

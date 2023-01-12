@@ -4,7 +4,6 @@
 //
 
 pub use crate::vm_config::*;
-use clap::ArgMatches;
 use option_parser::{
     ByteSized, IntegerList, OptionParser, OptionParserError, StringList, Toggle, Tuple,
 };
@@ -381,88 +380,6 @@ pub struct VmParams<'a> {
     pub tpm: Option<&'a str>,
 }
 
-impl<'a> VmParams<'a> {
-    pub fn from_arg_matches(args: &'a ArgMatches) -> Self {
-        // These .unwrap()s cannot fail as there is a default value defined
-        let cpus = args.get_one::<String>("cpus").unwrap();
-        let memory = args.get_one::<String>("memory").unwrap();
-        let memory_zones: Option<Vec<&str>> = args
-            .get_many::<String>("memory-zone")
-            .map(|x| x.map(|y| y as &str).collect());
-        let rng = args.get_one::<String>("rng").unwrap();
-        let serial = args.get_one::<String>("serial").unwrap();
-        let firmware = args.get_one::<String>("firmware").map(|x| x as &str);
-        let kernel = args.get_one::<String>("kernel").map(|x| x as &str);
-        let initramfs = args.get_one::<String>("initramfs").map(|x| x as &str);
-        let cmdline = args.get_one::<String>("cmdline").map(|x| x as &str);
-        let disks: Option<Vec<&str>> = args
-            .get_many::<String>("disk")
-            .map(|x| x.map(|y| y as &str).collect());
-        let net: Option<Vec<&str>> = args
-            .get_many::<String>("net")
-            .map(|x| x.map(|y| y as &str).collect());
-        let console = args.get_one::<String>("console").unwrap();
-        let balloon = args.get_one::<String>("balloon").map(|x| x as &str);
-        let fs: Option<Vec<&str>> = args
-            .get_many::<String>("fs")
-            .map(|x| x.map(|y| y as &str).collect());
-        let pmem: Option<Vec<&str>> = args
-            .get_many::<String>("pmem")
-            .map(|x| x.map(|y| y as &str).collect());
-        let devices: Option<Vec<&str>> = args
-            .get_many::<String>("device")
-            .map(|x| x.map(|y| y as &str).collect());
-        let user_devices: Option<Vec<&str>> = args
-            .get_many::<String>("user-device")
-            .map(|x| x.map(|y| y as &str).collect());
-        let vdpa: Option<Vec<&str>> = args
-            .get_many::<String>("vdpa")
-            .map(|x| x.map(|y| y as &str).collect());
-        let vsock: Option<&str> = args.get_one::<String>("vsock").map(|x| x as &str);
-        #[cfg(target_arch = "x86_64")]
-        let sgx_epc: Option<Vec<&str>> = args
-            .get_many::<String>("sgx-epc")
-            .map(|x| x.map(|y| y as &str).collect());
-        let numa: Option<Vec<&str>> = args
-            .get_many::<String>("numa")
-            .map(|x| x.map(|y| y as &str).collect());
-        let watchdog = args.get_flag("watchdog");
-        let platform = args.get_one::<String>("platform").map(|x| x as &str);
-        #[cfg(feature = "guest_debug")]
-        let gdb = args.contains_id("gdb");
-        let tpm: Option<&str> = args.get_one::<String>("tpm").map(|x| x as &str);
-        VmParams {
-            cpus,
-            memory,
-            memory_zones,
-            firmware,
-            kernel,
-            initramfs,
-            cmdline,
-            disks,
-            net,
-            rng,
-            balloon,
-            fs,
-            pmem,
-            serial,
-            console,
-            devices,
-            user_devices,
-            vdpa,
-            vsock,
-            #[cfg(target_arch = "x86_64")]
-            sgx_epc,
-            numa,
-            watchdog,
-            #[cfg(feature = "guest_debug")]
-            gdb,
-            platform,
-            tpm,
-        }
-    }
-}
-
 #[derive(Debug)]
 pub enum ParseHotplugMethodError {
     InvalidValue(String),
@@ -827,14 +744,6 @@ impl MemoryConfig {
 }
 
 impl DiskConfig {
-    pub const SYNTAX: &'static str = "Disk parameters \
-         \"path=<disk_image_path>,readonly=on|off,direct=on|off,iommu=on|off,\
-         num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,\
-         vhost_user=on|off,socket=<vhost_user_socket_path>,\
-         bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,\
-         ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,\
-         id=<device_id>,pci_segment=<segment_id>\"";
-
     pub fn parse(disk: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
@@ -1007,14 +916,6 @@ impl FromStr for VhostMode {
 }
 
 impl NetConfig {
-    pub const SYNTAX: &'static str = "Network parameters \
-    \"tap=<if_name>,ip=<ip_addr>,mask=<net_mask>,mac=<mac_addr>,fd=<fd1,fd2...>,iommu=on|off,\
-    num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,id=<device_id>,\
-    vhost_user=<vhost_user_enable>,socket=<vhost_user_socket_path>,vhost_mode=client|server,\
-    bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,\
-    ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,pci_segment=<segment_id>\
-    offload_tso=on|off,offload_ufo=on|off,offload_csum=on|off\"";
-
     pub fn parse(net: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
 
@@ -1255,10 +1156,6 @@ impl RngConfig {
 }
 
 impl BalloonConfig {
-    pub const SYNTAX: &'static str =
-        "Balloon parameters \"size=<balloon_size>,deflate_on_oom=on|off,\
-        free_page_reporting=on|off\"";
-
     pub fn parse(balloon: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser.add("size");
@@ -1293,10 +1190,6 @@ impl BalloonConfig {
 }
 
 impl FsConfig {
-    pub const SYNTAX: &'static str = "virtio-fs parameters \
-    \"tag=<tag_name>,socket=<socket_path>,num_queues=<number_of_queues>,\
-    queue_size=<size_of_each_queue>,id=<device_id>,pci_segment=<segment_id>\"";
-
     pub fn parse(fs: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
@@ -1361,9 +1254,6 @@ impl FsConfig {
 }
 
 impl PmemConfig {
-    pub const SYNTAX: &'static str = "Persistent memory parameters \
-    \"file=<backing_file_path>,size=<persistent_memory_size>,iommu=on|off,\
-    discard_writes=on|off,id=<device_id>,pci_segment=<segment_id>\"";
     pub fn parse(pmem: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
@@ -1465,8 +1355,6 @@ impl ConsoleConfig {
 }
 
 impl DeviceConfig {
-    pub const SYNTAX: &'static str =
-        "Direct device assignment parameters \"path=<device_path>,iommu=on|off,id=<device_id>,pci_segment=<segment_id>\"";
     pub fn parse(device: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser.add("path").add("id").add("iommu").add("pci_segment");
@@ -1513,8 +1401,6 @@ impl DeviceConfig {
 }
 
 impl UserDeviceConfig {
-    pub const SYNTAX: &'static str =
-        "Userspace device socket=<socket_path>,id=<device_id>,pci_segment=<segment_id>\"";
     pub fn parse(user_device: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser.add("socket").add("id").add("pci_segment");
@@ -1557,9 +1443,6 @@ impl UserDeviceConfig {
 }
 
 impl VdpaConfig {
-    pub const SYNTAX: &'static str = "vDPA device \
-        \"path=<device_path>,num_queues=<number_of_queues>,iommu=on|off,\
-        id=<device_id>,pci_segment=<segment_id>\"";
     pub fn parse(vdpa: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
@@ -1616,8 +1499,6 @@ impl VdpaConfig {
 }
 
 impl VsockConfig {
-    pub const SYNTAX: &'static str = "Virtio VSOCK parameters \
-        \"cid=<context_id>,socket=<socket_path>,iommu=on|off,id=<device_id>,pci_segment=<segment_id>\"";
     pub fn parse(vsock: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
@@ -1675,8 +1556,6 @@ impl VsockConfig {
 
 #[cfg(target_arch = "x86_64")]
 impl SgxEpcConfig {
-    pub const SYNTAX: &'static str = "SGX EPC parameters \
-        \"id=<epc_section_identifier>,size=<epc_section_size>,prefault=on|off\"";
     pub fn parse(sgx_epc: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser.add("id").add("size").add("prefault");
@@ -1699,9 +1578,6 @@ impl SgxEpcConfig {
 }
 
 impl NumaConfig {
-    pub const SYNTAX: &'static str = "Settings related to a given NUMA node \
-        \"guest_numa_id=<node_id>,cpus=<cpus_id>,distances=<list_of_distances_to_destination_nodes>,\
-        memory_zones=<list_of_memory_zones>,sgx_epc_sections=<list_of_sgx_epc_sections>\"";
     pub fn parse(numa: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
@@ -1760,10 +1636,6 @@ pub struct RestoreConfig {
 }
 
 impl RestoreConfig {
-    pub const SYNTAX: &'static str = "Restore from a VM snapshot. \
-        \nRestore parameters \"source_url=<source_url>,prefault=on|off\" \
-        \n`source_url` should be a valid URL (e.g file:///foo/bar or tcp://192.168.1.10/foo) \
-        \n`prefault` brings memory pages in when enabled (disabled by default)";
     pub fn parse(restore: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser.add("source_url").add("prefault");
@@ -1787,8 +1659,6 @@ impl RestoreConfig {
 }
 
 impl TpmConfig {
-    pub const SYNTAX: &'static str = "TPM device \
-        \"(UNIX Domain Socket from swtpm) socket=</path/to/a/socket>\"";
     pub fn parse(tpm: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser.add("socket");

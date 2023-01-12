@@ -27,7 +27,6 @@ strip = true
 anyhow = "1.0.68"
 api_client = { path = "api_client" }
 argh = "0.1.9"
-clap = { version = "4.0.32", features = ["wrap_help","cargo","string"] }
 epoll = "4.3.1"
 event_monitor = { path = "event_monitor" }
 hypervisor = { path = "hypervisor" }
