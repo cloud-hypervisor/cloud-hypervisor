@@ -224,6 +224,34 @@ fn prepare_vhost_user_net_daemon(
     (command, vunet_socket_path)
 }
 
+fn prepare_swtpm_daemon(tmp_dir: &TempDir) -> (std::process::Command, String) {
+    let swtpm_tpm_dir = String::from(tmp_dir.as_path().join("swtpm").to_str().unwrap());
+    let swtpm_socket_path = String::from(
+        tmp_dir
+            .as_path()
+            .join("swtpm")
+            .join("swtpm.sock")
+            .to_str()
+            .unwrap(),
+    );
+    std::fs::create_dir(&swtpm_tpm_dir).unwrap();
+
+    let mut swtpm_command = Command::new("swtpm");
+    let swtpm_args = [
+        "socket",
+        "--tpmstate",
+        &format!("dir={swtpm_tpm_dir}"),
+        "--ctrl",
+        &format!("type=unixio,path={swtpm_socket_path}"),
+        "--flags",
+        "startup-clear",
+        "--tpm2",
+    ];
+    swtpm_command.args(swtpm_args);
+
+    (swtpm_command, swtpm_socket_path)
+}
+
 fn curl_command(api_socket: &str, method: &str, url: &str, http_body: Option<&str>) {
     let mut curl_args: Vec<&str> = ["--unix-socket", api_socket, "-i", "-X", method, url].to_vec();
 
@@ -6722,6 +6750,51 @@ mod common_parallel {
             // No need to check for hotplug as we already tested it through
             // test_vdpa_block()
         });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    #[cfg(not(feature = "mshv"))]
+    fn test_tpm() {
+        let focal = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+
+        let (mut swtpm_command, swtpm_socket_path) = prepare_swtpm_daemon(&guest.tmp_dir);
+
+        let mut guest_cmd = GuestCommand::new(&guest);
+        guest_cmd
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .args(["--tpm", &format!("socket={swtpm_socket_path}")])
+            .capture_output()
+            .default_disks()
+            .default_net();
+
+        // Start swtpm daemon
+        let mut swtpm_child = swtpm_command.spawn().unwrap();
+        thread::sleep(std::time::Duration::new(10, 0));
+        let mut child = guest_cmd.spawn().unwrap();
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+            assert_eq!(
+                guest.ssh_command("ls /dev/tpm0").unwrap().trim(),
+                "/dev/tpm0"
+            );
+            guest.ssh_command("sudo tpm2_selftest -f").unwrap();
+            guest
+                .ssh_command("echo 'hello' > /tmp/checksum_test;  ")
+                .unwrap();
+            guest.ssh_command("cmp <(sudo tpm2_pcrevent  /tmp/checksum_test | grep sha256 | awk '{print $2}') <(sha256sum /tmp/checksum_test| awk '{print $1}')").unwrap();
+        });
+
+        let _ = swtpm_child.kill();
+        let _d_out = swtpm_child.wait_with_output().unwrap();
 
         let _ = child.kill();
         let output = child.wait_with_output().unwrap();
