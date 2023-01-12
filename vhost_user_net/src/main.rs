@@ -6,25 +6,22 @@
 //
 // SPDX-License-Identifier: (Apache-2.0 AND BSD-3-Clause)
 
-use clap::{Arg, Command};
+use argh::FromArgs;
 use vhost_user_net::start_net_backend;
+
+#[derive(FromArgs)]
+/// Launch a vhost-user-net backend.
+struct TopLevel {
+    #[argh(option, long = "net-backend")]
+    /// vhost-user-net backend parameters
+    /// ip=<ip_addr>,mask=<net_mask>,socket=<socket_path>,client=on|off,num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,tap=<if_name>
+    backend_command: String,
+}
 
 fn main() {
     env_logger::init();
 
-    let cmd_arguments = Command::new("vhost-user-net backend")
-        .version(env!("CARGO_PKG_VERSION"))
-        .author(env!("CARGO_PKG_AUTHORS"))
-        .about("Launch a vhost-user-net backend.")
-        .arg(
-            Arg::new("net-backend")
-                .long("net-backend")
-                .help(vhost_user_net::SYNTAX)
-                .num_args(1)
-                .required(true),
-        )
-        .get_matches();
+    let toplevel: TopLevel = argh::from_env();
 
-    let backend_command = cmd_arguments.get_one::<String>("net-backend").unwrap();
-    start_net_backend(backend_command);
+    start_net_backend(&toplevel.backend_command);
 }

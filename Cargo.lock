@@ -148,30 +148,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
-name = "clap"
-version = "4.0.32"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7db700bc935f9e43e88d00b0850dae18a63773cfbec6d8e070fccf7fef89a39"
-dependencies = [
- "bitflags",
- "clap_lex",
- "is-terminal",
- "once_cell",
- "strsim",
- "termcolor",
- "terminal_size",
-]
-
-[[package]]
-name = "clap_lex"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d4198f73e42b4936b35b5bb248d81d2b595ecb170da0bac7655c54eedfa8da8"
-dependencies = [
- "os_str_bytes",
-]
-
-[[package]]
 name = "cloud-hypervisor"
 version = "29.0.0"
 dependencies = [
@@ -730,12 +706,6 @@ name = "option_parser"
 version = "0.1.0"
 
 [[package]]
-name = "os_str_bytes"
-version = "6.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b7820b9daea5457c9f21c69448905d723fbd21136ccf521748f23fd49e723ee"
-
-[[package]]
 name = "parking_lot"
 version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1217,16 +1187,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "terminal_size"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb20089a8ba2b69debd491f8d2d023761cbf196e999218c591fa1e7e15a21907"
-dependencies = [
- "rustix",
- "windows-sys",
-]
-
-[[package]]
 name = "test_infra"
 version = "0.1.0"
 dependencies = [
@@ -1437,7 +1397,7 @@ dependencies = [
 name = "vhost_user_net"
 version = "0.1.0"
 dependencies = [
- "clap",
+ "argh",
  "env_logger",
  "epoll",
  "libc",
