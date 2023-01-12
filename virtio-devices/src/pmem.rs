@@ -364,6 +364,7 @@ impl Drop for Pmem {
             // Ignore the result because there is nothing we can do about it.
             let _ = kill_evt.write(1);
         }
+        self.common.wait_for_epoll_threads();
     }
 }
 
