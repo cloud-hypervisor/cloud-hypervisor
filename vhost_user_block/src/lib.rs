@@ -70,11 +70,6 @@ enum Error {
     SocketParameterMissing,
 }
 
-pub const SYNTAX: &str = "vhost-user-block backend parameters \
- \"path=<image_path>,socket=<socket_path>,num_queues=<number_of_queues>,\
- queue_size=<size_of_each_queue>,readonly=true|false,direct=true|false,\
- poll_queue=true|false\"";
-
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "vhost_user_block_error: {self:?}")
