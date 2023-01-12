@@ -251,6 +251,19 @@ impl Drop for Net {
                 error!("failed to kill vhost-user-net: {:?}", e);
             }
         }
+
+        self.common.wait_for_epoll_threads();
+
+        if let Some(thread) = self.epoll_thread.take() {
+            if let Err(e) = thread.join() {
+                error!("Error joining thread: {:?}", e);
+            }
+        }
+        if let Some(thread) = self.ctrl_queue_epoll_thread.take() {
+            if let Err(e) = thread.join() {
+                error!("Error joining thread: {:?}", e);
+            }
+        }
     }
 }
 
