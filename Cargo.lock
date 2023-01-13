@@ -177,6 +177,7 @@ version = "29.0.0"
 dependencies = [
  "anyhow",
  "api_client",
+ "argh",
  "clap",
  "dirs",
  "epoll",
