@@ -36,7 +36,7 @@ option_parser = { path = "option_parser" }
 seccompiler = "0.3.0"
 serde_json = "1.0.89"
 signal-hook = "0.3.14"
-thiserror = "1.0.37"
+thiserror = "1.0.38"
 tpm = { path = "tpm"}
 tracer = { path = "tracer" }
 vmm = { path = "vmm" }
