@@ -20,3 +20,5 @@ virtio-queue = "0.7.0"
 vm-memory = "0.10.0"
 vmm-sys-util = "0.11.0"
 
+[build-dependencies]
+clap = { version = "4.0.29", features = ["cargo"] }

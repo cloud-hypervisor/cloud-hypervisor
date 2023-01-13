@@ -43,6 +43,9 @@ vmm = { path = "vmm" }
 vmm-sys-util = "0.11.0"
 vm-memory = "0.10.0"
 
+[build-dependencies]
+clap = { version = "4.0.29", features = ["cargo"] }
+
 # List of patched crates
 [patch.crates-io]
 kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch-v0.6.0-tdx" }
