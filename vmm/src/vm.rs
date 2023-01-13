@@ -1970,7 +1970,7 @@ impl Vm {
                                 Vm::signal_handler(signals, console);
                             }))
                             .map_err(|_| {
-                                error!("signal_handler thead panicked");
+                                error!("vm signal_handler thread panicked");
                                 exit_evt.write(1).ok()
                             })
                             .ok();
