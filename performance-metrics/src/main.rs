@@ -654,7 +654,7 @@ fn main() {
     let opts: Options = argh::from_env();
 
     if opts.version {
-        println!("{} {}", env!("CARGO_BIN_NAME"), env!("GIT_HUMAN_READABLE"));
+        println!("{} {}", env!("CARGO_BIN_NAME"), env!("BUILT_VERSION"));
         return;
     }
 
