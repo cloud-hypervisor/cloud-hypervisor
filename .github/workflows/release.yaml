@@ -40,6 +40,10 @@ jobs:
           toolchain: "1.62"
           target: aarch64-unknown-linux-musl
           override: true
+      - name: Clean build tree ahead of cross build
+        uses: actions-rs/cargo@v1
+        with:
+          command: clean
       - name: Static Build (AArch64)
         uses: actions-rs/cargo@v1
         with:
