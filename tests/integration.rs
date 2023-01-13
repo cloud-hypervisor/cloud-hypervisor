@@ -246,7 +246,7 @@ fn curl_command(api_socket: &str, method: &str, url: &str, http_body: Option<&st
 
 fn remote_command(api_socket: &str, command: &str, arg: Option<&str>) -> bool {
     let mut cmd = Command::new(clh_command("ch-remote"));
-    cmd.args([&format!("--api-socket={api_socket}"), command]);
+    cmd.args(["--api-socket", api_socket, command]);
 
     if let Some(arg) = arg {
         cmd.arg(arg);
@@ -264,7 +264,7 @@ fn remote_command(api_socket: &str, command: &str, arg: Option<&str>) -> bool {
 
 fn remote_command_w_output(api_socket: &str, command: &str, arg: Option<&str>) -> (bool, Vec<u8>) {
     let mut cmd = Command::new(clh_command("ch-remote"));
-    cmd.args([&format!("--api-socket={api_socket}"), command]);
+    cmd.args(["--api-socket", api_socket, command]);
 
     if let Some(arg) = arg {
         cmd.arg(arg);
@@ -283,18 +283,18 @@ fn resize_command(
     event_file: Option<&str>,
 ) -> bool {
     let mut cmd = Command::new(clh_command("ch-remote"));
-    cmd.args([&format!("--api-socket={api_socket}"), "resize"]);
+    cmd.args(["--api-socket", api_socket, "resize"]);
 
     if let Some(desired_vcpus) = desired_vcpus {
-        cmd.arg(format!("--cpus={desired_vcpus}"));
+        cmd.args(["--cpus", &format!("{desired_vcpus}")]);
     }
 
     if let Some(desired_ram) = desired_ram {
-        cmd.arg(format!("--memory={desired_ram}"));
+        cmd.args(["--memory", &format!("{desired_ram}")]);
     }
 
     if let Some(desired_balloon) = desired_balloon {
-        cmd.arg(format!("--balloon={desired_balloon}"));
+        cmd.args(["--balloon", &format!("{desired_balloon}")]);
     }
 
     let ret = cmd.status().expect("Failed to launch ch-remote").success();
@@ -319,10 +319,13 @@ fn resize_command(
 fn resize_zone_command(api_socket: &str, id: &str, desired_size: &str) -> bool {
     let mut cmd = Command::new(clh_command("ch-remote"));
     cmd.args([
-        &format!("--api-socket={api_socket}"),
+        "--api-socket",
+        api_socket,
         "resize-zone",
-        &format!("--id={id}"),
-        &format!("--size={desired_size}"),
+        "--id",
+        id,
+        "--size",
+        desired_size,
     ]);
 
     cmd.status().expect("Failed to launch ch-remote").success()
@@ -3861,7 +3864,7 @@ mod common_parallel {
             let vfio_hotplug_output = guest
                 .ssh_command_l1(
                     "sudo /mnt/ch-remote \
-                 --api-socket=/tmp/ch_api.sock \
+                 --api-socket /tmp/ch_api.sock \
                  add-device path=/sys/bus/pci/devices/0000:00:09.0,id=vfio123",
                 )
                 .unwrap();
@@ -3901,7 +3904,7 @@ mod common_parallel {
             guest
                 .ssh_command_l1(
                     "sudo /mnt/ch-remote \
-                 --api-socket=/tmp/ch_api.sock \
+                 --api-socket /tmp/ch_api.sock \
                  remove-device vfio123",
                 )
                 .unwrap();
@@ -3932,7 +3935,7 @@ mod common_parallel {
             guest
                 .ssh_command_l1(
                     "sudo /mnt/ch-remote \
-                 --api-socket=/tmp/ch_api.sock \
+                 --api-socket /tmp/ch_api.sock \
                  resize --memory=1073741824",
                 )
                 .unwrap();
@@ -7927,7 +7930,7 @@ mod vfio {
             let vfio_hotplug_output = guest
                 .ssh_command_l1(
                     "sudo /mnt/ch-remote \
-                 --api-socket=/tmp/ch_api.sock \
+                 --api-socket /tmp/ch_api.sock \
                  add-device path=/sys/bus/pci/devices/0000:00:09.0,id=vfio123",
                 )
                 .unwrap();
@@ -7967,7 +7970,7 @@ mod vfio {
             guest
                 .ssh_command_l1(
                     "sudo /mnt/ch-remote \
-                 --api-socket=/tmp/ch_api.sock \
+                 --api-socket /tmp/ch_api.sock \
                  remove-device vfio123",
                 )
                 .unwrap();
@@ -7998,7 +8001,7 @@ mod vfio {
             guest
                 .ssh_command_l1(
                     "sudo /mnt/ch-remote \
-                 --api-socket=/tmp/ch_api.sock \
+                 --api-socket /tmp/ch_api.sock \
                  resize --memory=1073741824",
                 )
                 .unwrap();
@@ -8157,7 +8160,8 @@ mod live_migration {
         // Start to receive migration from the destintion VM
         let mut receive_migration = Command::new(clh_command("ch-remote"))
             .args([
-                &format!("--api-socket={dest_api_socket}"),
+                "--api-socket",
+                dest_api_socket,
                 "receive-migration",
                 &format! {"unix:{migration_socket}"},
             ])
@@ -8170,14 +8174,15 @@ mod live_migration {
         // Start to send migration from the source VM
 
         let mut args = [
-            format!("--api-socket={}", &src_api_socket),
+            "--api-socket".to_string(),
+            src_api_socket.to_string(),
             "send-migration".to_string(),
             format! {"unix:{migration_socket}"},
         ]
         .to_vec();
 
         if local {
-            args.insert(2, "--local".to_string());
+            args.insert(3, "--local".to_string());
         }
 
         let mut send_migration = Command::new(clh_command("ch-remote"))
