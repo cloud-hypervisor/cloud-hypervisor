@@ -3,6 +3,7 @@ name = "vhost_user_net"
 version = "0.1.0"
 authors = ["The Cloud Hypervisor Authors"]
 edition = "2021"
+build = "../build.rs"
 
 [dependencies]
 argh = "0.1.9"
