@@ -468,7 +468,7 @@ impl Vmm {
                                 Vmm::signal_handler(signals, on_tty, &exit_evt);
                             }))
                             .map_err(|_| {
-                                error!("signal_handler thead panicked");
+                                error!("vmm signal_handler thread panicked");
                                 exit_evt.write(1).ok()
                             })
                             .ok();
