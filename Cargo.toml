@@ -32,6 +32,7 @@ debug = true
 anyhow = "1.0.68"
 api_client = { path = "api_client" }
 argh = "0.1.9"
+dhat = { version = "0.3.2", optional = true }
 epoll = "4.3.1"
 event_monitor = { path = "event_monitor" }
 hypervisor = { path = "hypervisor" }
@@ -63,6 +64,7 @@ wait-timeout = "0.2.0"
 
 [features]
 default = ["kvm"]
+dhat-heap = ["dhat"] # For heap profiling
 guest_debug = ["vmm/guest_debug"]
 kvm = ["vmm/kvm"]
 mshv = ["vmm/mshv"]

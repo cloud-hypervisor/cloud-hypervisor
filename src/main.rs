@@ -23,6 +23,10 @@ use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::block_signal;
 use vmm_sys_util::terminal::Terminal;
 
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 #[derive(Error, Debug)]
 enum Error {
     #[error("Failed to create API EventFd: {0}")]
@@ -557,6 +561,9 @@ fn start_vmm(toplevel: TopLevel) -> Result<Option<String>, Error> {
 }
 
 fn main() {
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = dhat::Profiler::new_heap();
+
     // Ensure all created files (.e.g sockets) are only accessible by this user
     // SAFETY: trivially safe
     let _ = unsafe { libc::umask(0o077) };
@@ -586,6 +593,9 @@ fn main() {
         // before to exit.
         std::io::stdin().lock().set_canon_mode().unwrap();
     }
+
+    #[cfg(feature = "dhat-heap")]
+    drop(_profiler);
 
     std::process::exit(exit_code);
 }
