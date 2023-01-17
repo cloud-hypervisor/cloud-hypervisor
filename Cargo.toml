@@ -23,6 +23,11 @@ codegen-units = 1
 opt-level = "s"
 strip = true
 
+[profile.profiling]
+inherits = "release"
+strip = false
+debug = true
+
 [dependencies]
 anyhow = "1.0.68"
 api_client = { path = "api_client" }
