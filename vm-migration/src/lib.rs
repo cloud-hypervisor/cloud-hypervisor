@@ -121,7 +121,7 @@ impl SnapshotDataSection {
             .map_err(|e| MigratableError::Snapshot(anyhow!("Error serialising: {} {}", id, e)))?;
 
         let snapshot_data = SnapshotDataSection {
-            id: format!("{}-section", id),
+            id: format!("{id}-section"),
             snapshot,
         };
 
@@ -139,7 +139,7 @@ impl SnapshotDataSection {
             .map_err(|e| MigratableError::Snapshot(anyhow!("Error serialising: {} {}", id, e)))?;
 
         let snapshot_data = SnapshotDataSection {
-            id: format!("{}-section", id),
+            id: format!("{id}-section"),
             snapshot,
         };
 
@@ -219,7 +219,7 @@ impl Snapshot {
         T: Deserialize<'a>,
     {
         self.snapshot_data
-            .get(&format!("{}-section", id))
+            .get(&format!("{id}-section"))
             .ok_or_else(|| MigratableError::Restore(anyhow!("Missing section for {}", id)))?
             .to_state()
     }
@@ -230,7 +230,7 @@ impl Snapshot {
         T: Versionize + VersionMapped,
     {
         self.snapshot_data
-            .get(&format!("{}-section", id))
+            .get(&format!("{id}-section"))
             .ok_or_else(|| MigratableError::Restore(anyhow!("Missing section for {}", id)))?
             .to_versioned_state()
     }

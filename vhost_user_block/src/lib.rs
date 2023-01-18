@@ -79,7 +79,7 @@ pub const SYNTAX: &str = "vhost-user-block backend parameters \
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "vhost_user_block_error: {:?}", self)
+        write!(f, "vhost_user_block_error: {self:?}")
     }
 }
 
@@ -504,7 +504,7 @@ pub fn start_block_backend(backend_command: &str) {
     let backend_config = match VhostUserBlkBackendConfig::parse(backend_command) {
         Ok(config) => config,
         Err(e) => {
-            println!("Failed parsing parameters {:?}", e);
+            println!("Failed parsing parameters {e:?}");
             process::exit(1);
         }
     };

@@ -44,7 +44,7 @@ impl InterruptRoute {
             vm.register_irqfd(&self.irq_fd, self.gsi).map_err(|e| {
                 io::Error::new(
                     io::ErrorKind::Other,
-                    format!("Failed registering irq_fd: {}", e),
+                    format!("Failed registering irq_fd: {e}"),
                 )
             })?;
 
@@ -60,7 +60,7 @@ impl InterruptRoute {
             vm.unregister_irqfd(&self.irq_fd, self.gsi).map_err(|e| {
                 io::Error::new(
                     io::ErrorKind::Other,
-                    format!("Failed unregistering irq_fd: {}", e),
+                    format!("Failed unregistering irq_fd: {e}"),
                 )
             })?;
 
@@ -109,7 +109,7 @@ impl MsiInterruptGroup {
         self.vm.set_gsi_routing(&entry_vec).map_err(|e| {
             io::Error::new(
                 io::ErrorKind::Other,
-                format!("Failed setting GSI routing: {}", e),
+                format!("Failed setting GSI routing: {e}"),
             )
         })
     }
@@ -153,7 +153,7 @@ impl InterruptSourceGroup for MsiInterruptGroup {
 
         Err(io::Error::new(
             io::ErrorKind::Other,
-            format!("trigger: Invalid interrupt index {}", index),
+            format!("trigger: Invalid interrupt index {index}"),
         ))
     }
 
@@ -188,7 +188,7 @@ impl InterruptSourceGroup for MsiInterruptGroup {
 
         Err(io::Error::new(
             io::ErrorKind::Other,
-            format!("update: Invalid interrupt index {}", index),
+            format!("update: Invalid interrupt index {index}"),
         ))
     }
 }

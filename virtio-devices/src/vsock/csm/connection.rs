@@ -853,7 +853,7 @@ mod tests {
                     assert_eq!(pkt.op(), uapi::VSOCK_OP_RESPONSE);
                     conn
                 }
-                other => panic!("invalid ctx state: {:?}", other),
+                other => panic!("invalid ctx state: {other:?}"),
             };
             assert_eq!(conn.state, conn_state);
             Self {
@@ -971,7 +971,7 @@ mod tests {
         // There's no more data in the stream, so `recv_pkt` should yield `VsockError::NoData`.
         match ctx.conn.recv_pkt(&mut ctx.pkt) {
             Err(VsockError::NoData) => (),
-            other => panic!("{:?}", other),
+            other => panic!("{other:?}"),
         }
 
         // A recv attempt in an invalid state should yield an instant reset packet.

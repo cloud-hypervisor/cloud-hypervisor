@@ -477,7 +477,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
             "log" => SeccompAction::Log,
             _ => {
                 // The user providing an invalid value will be rejected by clap
-                panic!("Invalid parameter {} for \"--seccomp\" flag", seccomp_value);
+                panic!("Invalid parameter {seccomp_value} for \"--seccomp\" flag");
             }
         }
     } else {
@@ -497,7 +497,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
                 signal_hook::low_level::emulate_default_handler(SIGSYS).unwrap();
             })
         }
-        .map_err(|e| eprintln!("Error adding SIGSYS signal handler: {}", e))
+        .map_err(|e| eprintln!("Error adding SIGSYS signal handler: {e}"))
         .ok();
     }
 
@@ -506,13 +506,13 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
     // dedicated signal handling thread we'll start in a bit.
     for sig in &vmm::vm::Vm::HANDLED_SIGNALS {
         if let Err(e) = block_signal(*sig) {
-            eprintln!("Error blocking signals: {}", e);
+            eprintln!("Error blocking signals: {e}");
         }
     }
 
     for sig in &vmm::Vmm::HANDLED_SIGNALS {
         if let Err(e) = block_signal(*sig) {
-            eprintln!("Error blocking signals: {}", e);
+            eprintln!("Error blocking signals: {e}");
         }
     }
 
@@ -602,7 +602,7 @@ fn main() {
             0
         }
         Err(e) => {
-            eprintln!("{}", e);
+            eprintln!("{e}");
             1
         }
     };

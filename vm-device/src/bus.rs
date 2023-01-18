@@ -40,7 +40,7 @@ pub type Result<T> = result::Result<T, Error>;
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "bus_error: {:?}", self)
+        write!(f, "bus_error: {self:?}")
     }
 }
 
@@ -275,7 +275,7 @@ mod tests {
 
         let result = bus.insert(dummy.clone(), 0x0f, 0x10);
         assert!(result.is_err());
-        assert_eq!(format!("{:?}", result), "Err(Overlap)");
+        assert_eq!(format!("{result:?}"), "Err(Overlap)");
 
         assert!(bus.insert(dummy.clone(), 0x10, 0x10).is_err());
         assert!(bus.insert(dummy.clone(), 0x10, 0x15).is_err());

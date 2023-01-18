@@ -291,8 +291,8 @@ impl MultiThreadBase for GdbStub {
                 });
                 Ok(())
             }
-            Ok(s) => Err(format!("Unexpected response for ActiveVcpus: {:?}", s)),
-            Err(e) => Err(format!("Failed to request ActiveVcpus: {:?}", e)),
+            Ok(s) => Err(format!("Unexpected response for ActiveVcpus: {s:?}")),
+            Err(e) => Err(format!("Failed to request ActiveVcpus: {e:?}")),
         }
     }
 
@@ -306,7 +306,7 @@ impl MultiThreadResume for GdbStub {
     fn resume(&mut self) -> Result<(), Self::Error> {
         match self.vm_request(GdbRequestPayload::Resume, 0) {
             Ok(_) => Ok(()),
-            Err(e) => Err(format!("Failed to resume the target: {:?}", e)),
+            Err(e) => Err(format!("Failed to resume the target: {e:?}")),
         }
     }
 
@@ -317,7 +317,7 @@ impl MultiThreadResume for GdbStub {
                     self.single_step = false;
                 }
                 Err(e) => {
-                    return Err(format!("Failed to request SetSingleStep: {:?}", e));
+                    return Err(format!("Failed to request SetSingleStep: {e:?}"));
                 }
             }
         }
@@ -334,7 +334,7 @@ impl MultiThreadResume for GdbStub {
         }
         match self.vm_request(GdbRequestPayload::Resume, tid_to_cpuid(tid)) {
             Ok(_) => Ok(()),
-            Err(e) => Err(format!("Failed to resume the target: {:?}", e)),
+            Err(e) => Err(format!("Failed to resume the target: {e:?}")),
         }
     }
 
@@ -360,13 +360,13 @@ impl MultiThreadSingleStep for GdbStub {
                     self.single_step = true;
                 }
                 Err(e) => {
-                    return Err(format!("Failed to request SetSingleStep: {:?}", e));
+                    return Err(format!("Failed to request SetSingleStep: {e:?}"));
                 }
             }
         }
         match self.vm_request(GdbRequestPayload::Resume, tid_to_cpuid(tid)) {
             Ok(_) => Ok(()),
-            Err(e) => Err(format!("Failed to resume the target: {:?}", e)),
+            Err(e) => Err(format!("Failed to resume the target: {e:?}")),
         }
     }
 }

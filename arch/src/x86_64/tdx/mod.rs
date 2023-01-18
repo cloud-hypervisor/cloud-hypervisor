@@ -447,7 +447,7 @@ mod tests {
         let mut f = std::fs::File::open("tdvf.fd").unwrap();
         let sections = parse_tdvf_sections(&mut f).unwrap();
         for section in sections {
-            eprintln!("{:x?}", section)
+            eprintln!("{section:x?}")
         }
     }
 }

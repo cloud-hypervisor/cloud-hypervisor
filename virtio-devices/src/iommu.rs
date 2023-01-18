@@ -781,7 +781,7 @@ impl DmaRemapping for IommuMapping {
 
         Err(io::Error::new(
             io::ErrorKind::Other,
-            format!("failed to translate GVA addr 0x{:x}", addr),
+            format!("failed to translate GVA addr 0x{addr:x}"),
         ))
     }
 
@@ -809,7 +809,7 @@ impl DmaRemapping for IommuMapping {
 
         Err(io::Error::new(
             io::ErrorKind::Other,
-            format!("failed to translate GPA addr 0x{:x}", addr),
+            format!("failed to translate GPA addr 0x{addr:x}"),
         ))
     }
 }

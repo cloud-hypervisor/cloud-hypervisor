@@ -31,15 +31,15 @@ impl Display for Error {
         use self::Error::*;
 
         match self {
-            CapabilitiesSetup(e) => write!(f, "failed to add capability {}", e),
+            CapabilitiesSetup(e) => write!(f, "failed to add capability {e}"),
             IoAllocationFailed(size) => {
-                write!(f, "failed to allocate space for an IO BAR, size={}", size)
+                write!(f, "failed to allocate space for an IO BAR, size={size}")
             }
             IoRegistrationFailed(addr, e) => {
-                write!(f, "failed to register an IO BAR, addr={} err={}", addr, e)
+                write!(f, "failed to register an IO BAR, addr={addr} err={e}")
             }
             MissingResource => write!(f, "failed to find expected resource"),
-            InvalidResource(r) => write!(f, "invalid resource {:?}", r),
+            InvalidResource(r) => write!(f, "invalid resource {r:?}"),
         }
     }
 }

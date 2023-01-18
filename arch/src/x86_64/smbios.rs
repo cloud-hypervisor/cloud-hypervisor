@@ -48,10 +48,10 @@ impl Display for Error {
             Clear => "Failure while zeroing out the memory for the SMBIOS table".to_string(),
             WriteSmbiosEp => "Failure to write SMBIOS entrypoint structure".to_string(),
             WriteData => "Failure to write additional data to memory".to_string(),
-            ParseUuid(e) => format!("Failure to parse uuid: {}", e),
+            ParseUuid(e) => format!("Failure to parse uuid: {e}"),
         };
 
-        write!(f, "SMBIOS error: {}", description)
+        write!(f, "SMBIOS error: {description}")
     }
 }
 

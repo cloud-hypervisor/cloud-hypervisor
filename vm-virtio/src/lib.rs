@@ -87,7 +87,7 @@ impl fmt::Display for VirtioDeviceType {
             VirtioDeviceType::Watchdog => "watchdog",
             VirtioDeviceType::Unknown => "UNKNOWN",
         };
-        write!(f, "{}", output)
+        write!(f, "{output}")
     }
 }
 

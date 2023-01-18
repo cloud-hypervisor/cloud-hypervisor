@@ -64,7 +64,7 @@ num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,tap=<if_name>\"";
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "vhost_user_net_error: {:?}", self)
+        write!(f, "vhost_user_net_error: {self:?}")
     }
 }
 
@@ -348,7 +348,7 @@ pub fn start_net_backend(backend_command: &str) {
     let backend_config = match VhostUserNetBackendConfig::parse(backend_command) {
         Ok(config) => config,
         Err(e) => {
-            eprintln!("Failed parsing parameters {:?}", e);
+            eprintln!("Failed parsing parameters {e:?}");
             process::exit(1);
         }
     };

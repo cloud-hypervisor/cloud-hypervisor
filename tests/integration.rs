@@ -117,8 +117,7 @@ fn prepare_vubd(
         .args([
             "--block-backend",
             format!(
-                "path={},socket={},num_queues={},readonly={},direct={}",
-                blk_file_path, vubd_socket_path, num_queues, rdonly, direct
+                "path={blk_file_path},socket={vubd_socket_path},num_queues={num_queues},readonly={rdonly},direct={direct}"
             )
             .as_str(),
         ])
@@ -210,16 +209,15 @@ fn prepare_vhost_user_net_daemon(
 
     // Start the daemon
     let mut net_params = format!(
-        "ip={},mask=255.255.255.0,socket={},num_queues={},queue_size=1024,client={}",
-        ip, vunet_socket_path, num_queues, client_mode
+        "ip={ip},mask=255.255.255.0,socket={vunet_socket_path},num_queues={num_queues},queue_size=1024,client={client_mode}"
     );
 
     if let Some(tap) = tap {
-        net_params.push_str(format!(",tap={}", tap).as_str());
+        net_params.push_str(format!(",tap={tap}").as_str());
     }
 
     if let Some(mtu) = mtu {
-        net_params.push_str(format!(",mtu={}", mtu).as_str());
+        net_params.push_str(format!(",mtu={mtu}").as_str());
     }
 
     let mut command = Command::new(clh_command("vhost_user_net"));
@@ -250,7 +248,7 @@ fn curl_command(api_socket: &str, method: &str, url: &str, http_body: Option<&st
 
 fn remote_command(api_socket: &str, command: &str, arg: Option<&str>) -> bool {
     let mut cmd = Command::new(clh_command("ch-remote"));
-    cmd.args([&format!("--api-socket={}", api_socket), command]);
+    cmd.args([&format!("--api-socket={api_socket}"), command]);
 
     if let Some(arg) = arg {
         cmd.arg(arg);
@@ -261,14 +259,14 @@ fn remote_command(api_socket: &str, command: &str, arg: Option<&str>) -> bool {
     } else {
         eprintln!("Error running ch-remote command: {:?}", &cmd);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        eprintln!("stderr: {}", stderr);
+        eprintln!("stderr: {stderr}");
         false
     }
 }
 
 fn remote_command_w_output(api_socket: &str, command: &str, arg: Option<&str>) -> (bool, Vec<u8>) {
     let mut cmd = Command::new(clh_command("ch-remote"));
-    cmd.args([&format!("--api-socket={}", api_socket), command]);
+    cmd.args([&format!("--api-socket={api_socket}"), command]);
 
     if let Some(arg) = arg {
         cmd.arg(arg);
@@ -287,18 +285,18 @@ fn resize_command(
     event_file: Option<&str>,
 ) -> bool {
     let mut cmd = Command::new(clh_command("ch-remote"));
-    cmd.args([&format!("--api-socket={}", api_socket), "resize"]);
+    cmd.args([&format!("--api-socket={api_socket}"), "resize"]);
 
     if let Some(desired_vcpus) = desired_vcpus {
-        cmd.arg(format!("--cpus={}", desired_vcpus));
+        cmd.arg(format!("--cpus={desired_vcpus}"));
     }
 
     if let Some(desired_ram) = desired_ram {
-        cmd.arg(format!("--memory={}", desired_ram));
+        cmd.arg(format!("--memory={desired_ram}"));
     }
 
     if let Some(desired_balloon) = desired_balloon {
-        cmd.arg(format!("--balloon={}", desired_balloon));
+        cmd.arg(format!("--balloon={desired_balloon}"));
     }
 
     let ret = cmd.status().expect("Failed to launch ch-remote").success();
@@ -323,10 +321,10 @@ fn resize_command(
 fn resize_zone_command(api_socket: &str, id: &str, desired_size: &str) -> bool {
     let mut cmd = Command::new(clh_command("ch-remote"));
     cmd.args([
-        &format!("--api-socket={}", api_socket),
+        &format!("--api-socket={api_socket}"),
         "resize-zone",
-        &format!("--id={}", id),
-        &format!("--size={}", desired_size),
+        &format!("--id={id}"),
+        &format!("--size={desired_size}"),
     ]);
 
     cmd.status().expect("Failed to launch ch-remote").success()
@@ -394,12 +392,11 @@ fn setup_ovs_dpdk_guests(
 
         guest1
             .ssh_command(&format!(
-                "sudo ip addr add 172.100.0.1/24 dev {}",
-                guest_net_iface
+                "sudo ip addr add 172.100.0.1/24 dev {guest_net_iface}"
             ))
             .unwrap();
         guest1
-            .ssh_command(&format!("sudo ip link set up dev {}", guest_net_iface))
+            .ssh_command(&format!("sudo ip link set up dev {guest_net_iface}"))
             .unwrap();
 
         let guest_ip = guest1.network.guest_ip.clone();
@@ -440,12 +437,11 @@ fn setup_ovs_dpdk_guests(
 
         guest2
             .ssh_command(&format!(
-                "sudo ip addr add 172.100.0.2/24 dev {}",
-                guest_net_iface
+                "sudo ip addr add 172.100.0.2/24 dev {guest_net_iface}"
             ))
             .unwrap();
         guest2
-            .ssh_command(&format!("sudo ip link set up dev {}", guest_net_iface))
+            .ssh_command(&format!("sudo ip link set up dev {guest_net_iface}"))
             .unwrap();
 
         // Check the connection works properly between the two VMs
@@ -589,8 +585,7 @@ fn test_cpu_topology(threads_per_core: u8, cores_per_package: u8, packages: u8, 
         .args([
             "--cpus",
             &format!(
-                "boot={},topology={}:{}:1:{}",
-                total_vcpus, threads_per_core, cores_per_package, packages
+                "boot={total_vcpus},topology={threads_per_core}:{cores_per_package}:1:{packages}"
             ),
         ])
         .args(["--memory", "size=512M"])
@@ -804,7 +799,7 @@ fn test_vhost_user_net(
         vunet_socket_path,
         num_queues,
         if let Some(host_mac) = host_mac {
-            format!(",host_mac={}", host_mac)
+            format!(",host_mac={host_mac}")
         } else {
             "".to_owned()
         },
@@ -845,12 +840,12 @@ fn test_vhost_user_net(
         guest.wait_vm_boot(None).unwrap();
 
         if let Some(tap_name) = tap {
-            let tap_count = exec_host_command_output(&format!("ip link | grep -c {}", tap_name));
+            let tap_count = exec_host_command_output(&format!("ip link | grep -c {tap_name}"));
             assert_eq!(String::from_utf8_lossy(&tap_count.stdout).trim(), "1");
         }
 
         if let Some(host_mac) = tap {
-            let mac_count = exec_host_command_output(&format!("ip link | grep -c {}", host_mac));
+            let mac_count = exec_host_command_output(&format!("ip link | grep -c {host_mac}"));
             assert_eq!(String::from_utf8_lossy(&mac_count.stdout).trim(), "1");
         }
 
@@ -861,7 +856,7 @@ fn test_vhost_user_net(
 
         assert_eq!(
             guest
-                .ssh_command(format!("cat /sys/class/net/{}/mtu", iface).as_str())
+                .ssh_command(format!("cat /sys/class/net/{iface}/mtu").as_str())
                 .unwrap()
                 .trim(),
             "3000"
@@ -956,15 +951,14 @@ fn test_vhost_user_blk(
 
         (
             format!(
-                "vhost_user=true,socket={},num_queues={},queue_size=128",
-                vubd_socket_path, num_queues,
+                "vhost_user=true,socket={vubd_socket_path},num_queues={num_queues},queue_size=128",
             ),
             Some(daemon_child),
         )
     };
 
     let mut child = GuestCommand::new(&guest)
-        .args(["--cpus", format!("boot={}", num_queues).as_str()])
+        .args(["--cpus", format!("boot={num_queues}").as_str()])
         .args(["--memory", "size=512M,hotplug_size=2048M,shared=on"])
         .args(["--kernel", kernel_path.to_str().unwrap()])
         .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
@@ -1030,11 +1024,7 @@ fn test_vhost_user_blk(
         guest.ssh_command("mkdir mount_image").unwrap();
         guest
             .ssh_command(
-                format!(
-                    "sudo mount -o {} -t ext4 /dev/vdc mount_image/",
-                    mount_ro_rw_flag
-                )
-                .as_str(),
+                format!("sudo mount -o {mount_ro_rw_flag} -t ext4 /dev/vdc mount_image/").as_str(),
             )
             .unwrap();
 
@@ -1109,15 +1099,14 @@ fn test_boot_from_vhost_user_blk(
 
         (
             format!(
-                "vhost_user=true,socket={},num_queues={},queue_size=128",
-                vubd_socket_path, num_queues,
+                "vhost_user=true,socket={vubd_socket_path},num_queues={num_queues},queue_size=128",
             ),
             Some(daemon_child),
         )
     };
 
     let mut child = GuestCommand::new(&guest)
-        .args(["--cpus", format!("boot={}", num_queues).as_str()])
+        .args(["--cpus", format!("boot={num_queues}").as_str()])
         .args(["--memory", "size=512M,shared=on"])
         .args(["--kernel", kernel_path.to_str().unwrap()])
         .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
@@ -1206,7 +1195,7 @@ fn _test_virtio_fs(
         "id=myfs0,tag=myfs,socket={},num_queues=1,queue_size=1024{}",
         virtiofsd_socket_path,
         if let Some(pci_segment) = pci_segment {
-            format!(",pci_segment={}", pci_segment)
+            format!(",pci_segment={pci_segment}")
         } else {
             "".to_owned()
         }
@@ -1229,8 +1218,7 @@ fn _test_virtio_fs(
 
             if let Some(pci_segment) = pci_segment {
                 assert!(String::from_utf8_lossy(&cmd_output).contains(&format!(
-                    "{{\"id\":\"myfs0\",\"bdf\":\"{:04x}:00:01.0\"}}",
-                    pci_segment
+                    "{{\"id\":\"myfs0\",\"bdf\":\"{pci_segment:04x}:00:01.0\"}}"
                 )));
             } else {
                 assert!(String::from_utf8_lossy(&cmd_output)
@@ -1299,7 +1287,7 @@ fn _test_virtio_fs(
                 "id=myfs0,tag=myfs,socket={},num_queues=1,queue_size=1024{}",
                 virtiofsd_socket_path,
                 if let Some(pci_segment) = pci_segment {
-                    format!(",pci_segment={}", pci_segment)
+                    format!(",pci_segment={pci_segment}")
                 } else {
                     "".to_owned()
                 }
@@ -1311,8 +1299,7 @@ fn _test_virtio_fs(
             assert!(cmd_success);
             if let Some(pci_segment) = pci_segment {
                 assert!(String::from_utf8_lossy(&cmd_output).contains(&format!(
-                    "{{\"id\":\"myfs0\",\"bdf\":\"{:04x}:00:01.0\"}}",
-                    pci_segment
+                    "{{\"id\":\"myfs0\",\"bdf\":\"{pci_segment:04x}:00:01.0\"}}"
                 )));
             } else {
                 assert!(String::from_utf8_lossy(&cmd_output)
@@ -1426,7 +1413,7 @@ fn test_virtio_pmem(discard_writes: bool, specify_size: bool) {
 }
 
 fn get_fd_count(pid: u32) -> usize {
-    fs::read_dir(format!("/proc/{}/fd", pid)).unwrap().count()
+    fs::read_dir(format!("/proc/{pid}/fd")).unwrap().count()
 }
 
 fn _test_virtio_vsock(hotplug: bool) {
@@ -1455,7 +1442,7 @@ fn _test_virtio_vsock(hotplug: bool) {
     cmd.default_net();
 
     if !hotplug {
-        cmd.args(["--vsock", format!("cid=3,socket={}", socket).as_str()]);
+        cmd.args(["--vsock", format!("cid=3,socket={socket}").as_str()]);
     }
 
     let mut child = cmd.capture_output().spawn().unwrap();
@@ -1467,7 +1454,7 @@ fn _test_virtio_vsock(hotplug: bool) {
             let (cmd_success, cmd_output) = remote_command_w_output(
                 &api_socket,
                 "add-vsock",
-                Some(format!("cid=3,socket={},id=test0", socket).as_str()),
+                Some(format!("cid=3,socket={socket},id=test0").as_str()),
             );
             assert!(cmd_success);
             assert!(String::from_utf8_lossy(&cmd_output)
@@ -1521,7 +1508,7 @@ fn test_memory_mergeable(mergeable: bool) {
     let guest1 = Guest::new(Box::new(focal1));
     let mut child1 = GuestCommand::new(&guest1)
         .args(["--cpus", "boot=1"])
-        .args(["--memory", format!("size=512M,{}", memory_param).as_str()])
+        .args(["--memory", format!("size=512M,{memory_param}").as_str()])
         .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
         .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
         .default_disks()
@@ -1547,7 +1534,7 @@ fn test_memory_mergeable(mergeable: bool) {
     let guest2 = Guest::new(Box::new(focal2));
     let mut child2 = GuestCommand::new(&guest2)
         .args(["--cpus", "boot=1"])
-        .args(["--memory", format!("size=512M,{}", memory_param).as_str()])
+        .args(["--memory", format!("size=512M,{memory_param}").as_str()])
         .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
         .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
         .default_disks()
@@ -1563,8 +1550,7 @@ fn test_memory_mergeable(mergeable: bool) {
 
         if mergeable {
             println!(
-                "ksm pages_shared after vm1 booted '{}', ksm pages_shared after vm2 booted '{}'",
-                ksm_ps_guest1, ksm_ps_guest2
+                "ksm pages_shared after vm1 booted '{ksm_ps_guest1}', ksm pages_shared after vm2 booted '{ksm_ps_guest2}'"
             );
             // We are expecting the number of shared pages to increase as the number of VM increases
             assert!(ksm_ps_guest1 < ksm_ps_guest2);
@@ -1584,7 +1570,7 @@ fn test_memory_mergeable(mergeable: bool) {
 }
 
 fn _get_vmm_overhead(pid: u32, guest_memory_size: u32) -> HashMap<String, u32> {
-    let smaps = fs::File::open(format!("/proc/{}/smaps", pid)).unwrap();
+    let smaps = fs::File::open(format!("/proc/{pid}/smaps")).unwrap();
     let reader = io::BufReader::new(smaps);
 
     let mut skip_map: bool = false;
@@ -1629,7 +1615,7 @@ fn get_vmm_overhead(pid: u32, guest_memory_size: u32) -> u32 {
     let mut total = 0;
 
     for (region_name, value) in &_get_vmm_overhead(pid, guest_memory_size) {
-        eprintln!("{}: {}", region_name, value);
+        eprintln!("{region_name}: {value}");
         total += value;
     }
 
@@ -1637,7 +1623,7 @@ fn get_vmm_overhead(pid: u32, guest_memory_size: u32) -> u32 {
 }
 
 fn process_rss_kib(pid: u32) -> usize {
-    let command = format!("ps -q {} -o rss=", pid);
+    let command = format!("ps -q {pid} -o rss=");
     let rss = exec_host_command_output(&command);
     String::from_utf8_lossy(&rss.stdout).trim().parse().unwrap()
 }
@@ -1842,9 +1828,7 @@ fn _test_virtio_iommu(acpi: bool) {
         let iommu_group = !acpi as i32;
         assert_eq!(
             guest
-                .ssh_command(
-                    format!("ls /sys/kernel/iommu_groups/{}/devices", iommu_group).as_str()
-                )
+                .ssh_command(format!("ls /sys/kernel/iommu_groups/{iommu_group}/devices").as_str())
                 .unwrap()
                 .trim(),
             "0000:00:02.0"
@@ -1854,9 +1838,7 @@ fn _test_virtio_iommu(acpi: bool) {
         let iommu_group = if acpi { 1 } else { 2 };
         assert_eq!(
             guest
-                .ssh_command(
-                    format!("ls /sys/kernel/iommu_groups/{}/devices", iommu_group).as_str()
-                )
+                .ssh_command(format!("ls /sys/kernel/iommu_groups/{iommu_group}/devices").as_str())
                 .unwrap()
                 .trim(),
             "0000:00:03.0"
@@ -1866,9 +1848,7 @@ fn _test_virtio_iommu(acpi: bool) {
         let iommu_group = if acpi { 2 } else { 3 };
         assert_eq!(
             guest
-                .ssh_command(
-                    format!("ls /sys/kernel/iommu_groups/{}/devices", iommu_group).as_str()
-                )
+                .ssh_command(format!("ls /sys/kernel/iommu_groups/{iommu_group}/devices").as_str())
                 .unwrap()
                 .trim(),
             "0000:00:04.0"
@@ -1899,8 +1879,7 @@ fn enable_guest_watchdog(guest: &Guest, watchdog_sec: u32) {
     // Enable systemd watchdog
     guest
         .ssh_command(&format!(
-            "echo RuntimeWatchdogSec={}s | sudo tee -a /etc/systemd/system.conf",
-            watchdog_sec
+            "echo RuntimeWatchdogSec={watchdog_sec}s | sudo tee -a /etc/systemd/system.conf"
         ))
         .unwrap();
 }
@@ -1947,7 +1926,7 @@ mod common_parallel {
             .default_disks()
             .default_net()
             .args(["--serial", "tty", "--console", "off"])
-            .args(["--event-monitor", format!("path={}", event_path).as_str()])
+            .args(["--event-monitor", format!("path={event_path}").as_str()])
             .capture_output()
             .spawn()
             .unwrap();
@@ -2090,7 +2069,7 @@ mod common_parallel {
         let guest = Guest::new(Box::new(focal));
         let max_phys_bits: u8 = 36;
         let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", &format!("max_phys_bits={}", max_phys_bits)])
+            .args(["--cpus", &format!("max_phys_bits={max_phys_bits}")])
             .args(["--memory", "size=512M"])
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
@@ -2149,9 +2128,9 @@ mod common_parallel {
         let r = std::panic::catch_unwind(|| {
             guest.wait_vm_boot(None).unwrap();
             let pid = child.id();
-            let taskset_vcpu0 = exec_host_command_output(format!("taskset -pc $(ps -T -p {} | grep vcpu0 | xargs | cut -f 2 -d \" \") | cut -f 6 -d \" \"", pid).as_str());
+            let taskset_vcpu0 = exec_host_command_output(format!("taskset -pc $(ps -T -p {pid} | grep vcpu0 | xargs | cut -f 2 -d \" \") | cut -f 6 -d \" \"").as_str());
             assert_eq!(String::from_utf8_lossy(&taskset_vcpu0.stdout).trim(), "0,2");
-            let taskset_vcpu1 = exec_host_command_output(format!("taskset -pc $(ps -T -p {} | grep vcpu1 | xargs | cut -f 2 -d \" \") | cut -f 6 -d \" \"", pid).as_str());
+            let taskset_vcpu1 = exec_host_command_output(format!("taskset -pc $(ps -T -p {pid} | grep vcpu1 | xargs | cut -f 2 -d \" \") | cut -f 6 -d \" \"").as_str());
             assert_eq!(String::from_utf8_lossy(&taskset_vcpu1.stdout).trim(), "1,3");
         });
 
@@ -2324,12 +2303,9 @@ mod common_parallel {
                 .unwrap(),
         );
         assert!(
-            exec_host_command_status(format!("truncate {} -s 4M", test_disk_path).as_str())
-                .success()
+            exec_host_command_status(format!("truncate {test_disk_path} -s 4M").as_str()).success()
         );
-        assert!(
-            exec_host_command_status(format!("mkfs.ext4 {}", test_disk_path).as_str()).success()
-        );
+        assert!(exec_host_command_status(format!("mkfs.ext4 {test_disk_path}").as_str()).success());
 
         let api_socket = temp_api_path(&guest.tmp_dir);
         let mut cmd = GuestCommand::new(&guest);
@@ -2449,7 +2425,7 @@ mod common_parallel {
             assert_eq!(
                 guest
                     .ssh_command(
-                        format!("sudo ethtool -K {} rx-gro-hw off && echo success", iface).as_str()
+                        format!("sudo ethtool -K {iface} rx-gro-hw off && echo success").as_str()
                     )
                     .unwrap()
                     .trim(),
@@ -2457,7 +2433,7 @@ mod common_parallel {
             );
             assert_eq!(
                 guest
-                    .ssh_command(format!("cat /sys/class/net/{}/mtu", iface).as_str())
+                    .ssh_command(format!("cat /sys/class/net/{iface}/mtu").as_str())
                     .unwrap()
                     .trim(),
                 "3000"
@@ -2486,12 +2462,9 @@ mod common_parallel {
                 .unwrap(),
         );
         assert!(
-            exec_host_command_status(format!("truncate {} -s 4M", test_disk_path).as_str())
-                .success()
+            exec_host_command_status(format!("truncate {test_disk_path} -s 4M").as_str()).success()
         );
-        assert!(
-            exec_host_command_status(format!("mkfs.ext4 {}", test_disk_path).as_str()).success()
-        );
+        assert!(exec_host_command_status(format!("mkfs.ext4 {test_disk_path}").as_str()).success());
 
         let mut cmd = GuestCommand::new(&guest);
         cmd.args(["--cpus", "boot=1"])
@@ -2511,7 +2484,7 @@ mod common_parallel {
                     guest.disk_config.disk(DiskType::CloudInit).unwrap()
                 )
                 .as_str(),
-                format!("path={},pci_segment=15", test_disk_path).as_str(),
+                format!("path={test_disk_path},pci_segment=15").as_str(),
             ])
             .capture_output()
             .default_net();
@@ -2816,7 +2789,7 @@ mod common_parallel {
                     guest.disk_config.disk(DiskType::CloudInit).unwrap()
                 )
                 .as_str(),
-                format!("path={}", vhdx_path).as_str(),
+                format!("path={vhdx_path}").as_str(),
             ])
             .default_net()
             .capture_output()
@@ -3106,7 +3079,7 @@ mod common_parallel {
         let s1 = "io.systemd.credential:xx=yy";
         let s2 = "This is a test string";
 
-        let oem_strings = format!("oem_strings=[{},{}]", s1, s2);
+        let oem_strings = format!("oem_strings=[{s1},{s2}]");
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=1"])
@@ -3655,7 +3628,7 @@ mod common_parallel {
             .unwrap();
 
         let text = String::from("On a branch floating down river a cricket, singing.");
-        let cmd = format!("echo {} | sudo tee /dev/hvc0", text);
+        let cmd = format!("echo {text} | sudo tee /dev/hvc0");
 
         let r = std::panic::catch_unwind(|| {
             guest.wait_vm_boot(None).unwrap();
@@ -3719,8 +3692,7 @@ mod common_parallel {
 
             if !buf.contains(CONSOLE_TEST_STRING) {
                 eprintln!(
-                    "\n\n==== Console file output ====\n\n{}\n\n==== End console file output ====",
-                    buf
+                    "\n\n==== Console file output ====\n\n{buf}\n\n==== End console file output ===="
                 );
             }
             assert!(buf.contains(CONSOLE_TEST_STRING));
@@ -3814,8 +3786,7 @@ mod common_parallel {
             .args([
                 "--cmdline",
                 format!(
-                    "{} kvm-intel.nested=1 vfio_iommu_type1.allow_unsafe_interrupts",
-                    DIRECT_KERNEL_BOOT_CMDLINE
+                    "{DIRECT_KERNEL_BOOT_CMDLINE} kvm-intel.nested=1 vfio_iommu_type1.allow_unsafe_interrupts"
                 )
                 .as_str(),
             ])
@@ -4008,7 +3979,7 @@ mod common_parallel {
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args([
                 "--cmdline",
-                format!("{} acpi=off", DIRECT_KERNEL_BOOT_CMDLINE).as_str(),
+                format!("{DIRECT_KERNEL_BOOT_CMDLINE} acpi=off").as_str(),
             ])
             .default_disks()
             .default_net()
@@ -4765,10 +4736,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=1"])
-            .args([
-                "--memory",
-                format!("size={}K", guest_memory_size_kb).as_str(),
-            ])
+            .args(["--memory", format!("size={guest_memory_size_kb}K").as_str()])
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
@@ -4780,10 +4748,7 @@ mod common_parallel {
 
         let r = std::panic::catch_unwind(|| {
             let overhead = get_vmm_overhead(child.id(), guest_memory_size_kb);
-            eprintln!(
-                "Guest memory overhead: {} vs {}",
-                overhead, MAXIMUM_VMM_OVERHEAD_KB
-            );
+            eprintln!("Guest memory overhead: {overhead} vs {MAXIMUM_VMM_OVERHEAD_KB}");
             assert!(overhead <= MAXIMUM_VMM_OVERHEAD_KB);
         });
 
@@ -5023,7 +4988,7 @@ mod common_parallel {
         }
 
         // Create loop device path
-        let loop_device_path = format!("{}{}", LOOP_DEVICE_PREFIX, loop_device_number);
+        let loop_device_path = format!("{LOOP_DEVICE_PREFIX}{loop_device_number}");
 
         // Open loop device
         let loop_device_file = OpenOptions::new()
@@ -5098,10 +5063,7 @@ mod common_parallel {
         if !output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
-            panic!(
-                "qemu-img command failed\nstdout\n{}\nstderr\n{}",
-                stdout, stderr
-            );
+            panic!("qemu-img command failed\nstdout\n{stdout}\nstderr\n{stderr}");
         }
 
         let loop_dev = create_loop_device(test_disk_path.to_str().unwrap(), 4096, 5);
@@ -5208,7 +5170,7 @@ mod common_parallel {
             thread::sleep(std::time::Duration::new(20, 0));
 
             let orig_balloon = balloon_size(&api_socket);
-            println!("The original balloon memory size is {} bytes", orig_balloon);
+            println!("The original balloon memory size is {orig_balloon} bytes");
             assert!(orig_balloon == 2147483648);
 
             // Two steps to verify if the 'deflate_on_oom' parameter works.
@@ -5223,10 +5185,7 @@ mod common_parallel {
 
             // 2nd: check balloon_mem's value to verify balloon has been automatically deflated
             let deflated_balloon = balloon_size(&api_socket);
-            println!(
-                "After deflating, balloon memory size is {} bytes",
-                deflated_balloon
-            );
+            println!("After deflating, balloon memory size is {deflated_balloon} bytes");
             // Verify the balloon size deflated
             assert!(deflated_balloon < 2147483648);
         });
@@ -5261,7 +5220,7 @@ mod common_parallel {
 
             // Check the initial RSS is less than 1GiB
             let rss = process_rss_kib(pid);
-            println!("RSS {} < 1048576", rss);
+            println!("RSS {rss} < 1048576");
             assert!(rss < 1048576);
 
             // Spawn a command inside the guest to consume 2GiB of RAM for 60
@@ -5281,7 +5240,7 @@ mod common_parallel {
             // the expected amount of memory.
             thread::sleep(std::time::Duration::new(50, 0));
             let rss = process_rss_kib(pid);
-            println!("RSS {} >= 2097152", rss);
+            println!("RSS {rss} >= 2097152");
             assert!(rss >= 2097152);
 
             // Wait for an extra minute to make sure the stress command has
@@ -5290,7 +5249,7 @@ mod common_parallel {
             // 2GiB.
             thread::sleep(std::time::Duration::new(60, 0));
             let rss = process_rss_kib(pid);
-            println!("RSS {} < 2097152", rss);
+            println!("RSS {rss} < 2097152");
             assert!(rss < 2097152);
         });
 
@@ -5365,7 +5324,7 @@ mod common_parallel {
                     "file={},id=test0{}",
                     pmem_temp_file.as_path().to_str().unwrap(),
                     if let Some(pci_segment) = pci_segment {
-                        format!(",pci_segment={}", pci_segment)
+                        format!(",pci_segment={pci_segment}")
                     } else {
                         "".to_owned()
                     }
@@ -5374,8 +5333,7 @@ mod common_parallel {
             assert!(cmd_success);
             if let Some(pci_segment) = pci_segment {
                 assert!(String::from_utf8_lossy(&cmd_output).contains(&format!(
-                    "{{\"id\":\"test0\",\"bdf\":\"{:04x}:00:01.0\"}}",
-                    pci_segment
+                    "{{\"id\":\"test0\",\"bdf\":\"{pci_segment:04x}:00:01.0\"}}"
                 )));
             } else {
                 assert!(String::from_utf8_lossy(&cmd_output)
@@ -5491,7 +5449,7 @@ mod common_parallel {
                         "{}{},id=test0",
                         guest.default_net_string(),
                         if let Some(pci_segment) = pci_segment {
-                            format!(",pci_segment={}", pci_segment)
+                            format!(",pci_segment={pci_segment}")
                         } else {
                             "".to_owned()
                         }
@@ -5503,8 +5461,7 @@ mod common_parallel {
 
             if let Some(pci_segment) = pci_segment {
                 assert!(String::from_utf8_lossy(&cmd_output).contains(&format!(
-                    "{{\"id\":\"test0\",\"bdf\":\"{:04x}:00:01.0\"}}",
-                    pci_segment
+                    "{{\"id\":\"test0\",\"bdf\":\"{pci_segment:04x}:00:01.0\"}}"
                 )));
             } else {
                 assert!(String::from_utf8_lossy(&cmd_output)
@@ -5536,7 +5493,7 @@ mod common_parallel {
                         "{}{},id=test1",
                         guest.default_net_string(),
                         if let Some(pci_segment) = pci_segment {
-                            format!(",pci_segment={}", pci_segment)
+                            format!(",pci_segment={pci_segment}")
                         } else {
                             "".to_owned()
                         }
@@ -5548,8 +5505,7 @@ mod common_parallel {
 
             if let Some(pci_segment) = pci_segment {
                 assert!(String::from_utf8_lossy(&cmd_output).contains(&format!(
-                    "{{\"id\":\"test1\",\"bdf\":\"{:04x}:00:01.0\"}}",
-                    pci_segment
+                    "{{\"id\":\"test1\",\"bdf\":\"{pci_segment:04x}:00:01.0\"}}"
                 )));
             } else {
                 assert!(String::from_utf8_lossy(&cmd_output)
@@ -5613,7 +5569,7 @@ mod common_parallel {
         initramfs_path.push("alpine_initramfs.img");
 
         let test_string = String::from("axz34i9rylotd8n50wbv6kcj7f2qushme1pg");
-        let cmdline = format!("console=hvc0 quiet TEST_STRING={}", test_string);
+        let cmdline = format!("console=hvc0 quiet TEST_STRING={test_string}");
 
         kernels.iter().for_each(|k_path| {
             let mut child = GuestCommand::new(&guest)
@@ -5681,7 +5637,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--api-socket", &api_socket_source])
-            .args(["--event-monitor", format!("path={}", event_path).as_str()])
+            .args(["--event-monitor", format!("path={event_path}").as_str()])
             .args(["--cpus", "boot=4"])
             .args(["--memory", mem_params])
             .args(["--balloon", "size=0"])
@@ -5696,7 +5652,7 @@ mod common_parallel {
                 cloudinit_params.as_str(),
             ])
             .args(["--net", net_params.as_str()])
-            .args(["--vsock", format!("cid=3,socket={}", socket).as_str()])
+            .args(["--vsock", format!("cid=3,socket={socket}").as_str()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .capture_output()
             .spawn()
@@ -5788,7 +5744,7 @@ mod common_parallel {
             assert!(remote_command(
                 &api_socket_source,
                 "snapshot",
-                Some(format!("file://{}", snapshot_dir).as_str()),
+                Some(format!("file://{snapshot_dir}").as_str()),
             ));
 
             // Wait to make sure the snapshot is completed
@@ -5833,11 +5789,11 @@ mod common_parallel {
             .args(["--api-socket", &api_socket_restored])
             .args([
                 "--event-monitor",
-                format!("path={}", event_path_restored).as_str(),
+                format!("path={event_path_restored}").as_str(),
             ])
             .args([
                 "--restore",
-                format!("source_url=file://{}", snapshot_dir).as_str(),
+                format!("source_url=file://{snapshot_dir}").as_str(),
             ])
             .capture_output()
             .spawn()
@@ -5985,19 +5941,17 @@ mod common_parallel {
             assert!(remote_command(
                 &api_socket,
                 "coredump",
-                Some(format!("file://{}", vmcore_file).as_str()),
+                Some(format!("file://{vmcore_file}").as_str()),
             ));
 
             // the num of CORE notes should equals to vcpu
-            let readelf_core_num_cmd = format!(
-                "readelf --all {} |grep CORE |grep -v Type |wc -l",
-                vmcore_file
-            );
+            let readelf_core_num_cmd =
+                format!("readelf --all {vmcore_file} |grep CORE |grep -v Type |wc -l");
             let core_num_in_elf = exec_host_command_output(&readelf_core_num_cmd);
             assert_eq!(String::from_utf8_lossy(&core_num_in_elf.stdout).trim(), "4");
 
             // the num of QEMU notes should equals to vcpu
-            let readelf_vmm_num_cmd = format!("readelf --all {} |grep QEMU |wc -l", vmcore_file);
+            let readelf_vmm_num_cmd = format!("readelf --all {vmcore_file} |grep QEMU |wc -l");
             let vmm_num_in_elf = exec_host_command_output(&readelf_vmm_num_cmd);
             assert_eq!(String::from_utf8_lossy(&vmm_num_in_elf.stdout).trim(), "4");
         });
@@ -6105,7 +6059,7 @@ mod common_parallel {
         .unwrap();
 
         let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", &format!("boot={}", num_queue_pairs)])
+            .args(["--cpus", &format!("boot={num_queue_pairs}")])
             .args(["--memory", "size=512M"])
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
@@ -6179,8 +6133,7 @@ mod common_parallel {
 
         // Create a macvtap interface for the guest VM to use
         assert!(exec_host_command_status(&format!(
-            "sudo ip link add link {} name {} type macvtap mod bridge",
-            phy_net, guest_macvtap_name
+            "sudo ip link add link {phy_net} name {guest_macvtap_name} type macvtap mod bridge"
         ))
         .success());
         assert!(exec_host_command_status(&format!(
@@ -6189,17 +6142,14 @@ mod common_parallel {
         ))
         .success());
         assert!(
-            exec_host_command_status(&format!("sudo ip link show {}", guest_macvtap_name))
-                .success()
+            exec_host_command_status(&format!("sudo ip link show {guest_macvtap_name}")).success()
         );
 
         let tap_index =
-            fs::read_to_string(format!("/sys/class/net/{}/ifindex", guest_macvtap_name)).unwrap();
+            fs::read_to_string(format!("/sys/class/net/{guest_macvtap_name}/ifindex")).unwrap();
         let tap_device = format!("/dev/tap{}", tap_index.trim());
 
-        assert!(
-            exec_host_command_status(&format!("sudo chown $UID.$UID {}", tap_device)).success()
-        );
+        assert!(exec_host_command_status(&format!("sudo chown $UID.$UID {tap_device}")).success());
 
         let cstr_tap_device = std::ffi::CString::new(tap_device).unwrap();
         let tap_fd1 = unsafe { libc::open(cstr_tap_device.as_ptr(), libc::O_RDWR) };
@@ -6210,8 +6160,7 @@ mod common_parallel {
         // Create a macvtap on the same physical net interface for
         // the host machine to use
         assert!(exec_host_command_status(&format!(
-            "sudo ip link add link {} name {} type macvtap mod bridge",
-            phy_net, host_macvtap_name
+            "sudo ip link add link {phy_net} name {host_macvtap_name} type macvtap mod bridge"
         ))
         .success());
         // Use default mask "255.255.255.0"
@@ -6220,11 +6169,10 @@ mod common_parallel {
             guest.network.host_ip, host_macvtap_name
         ))
         .success());
-        assert!(exec_host_command_status(&format!(
-            "sudo ip link set dev {} up",
-            host_macvtap_name
-        ))
-        .success());
+        assert!(
+            exec_host_command_status(&format!("sudo ip link set dev {host_macvtap_name} up"))
+                .success()
+        );
 
         let mut guest_command = GuestCommand::new(&guest);
         guest_command
@@ -6282,8 +6230,8 @@ mod common_parallel {
 
         let _ = child.kill();
 
-        exec_host_command_status(&format!("sudo ip link del {}", guest_macvtap_name));
-        exec_host_command_status(&format!("sudo ip link del {}", host_macvtap_name));
+        exec_host_command_status(&format!("sudo ip link del {guest_macvtap_name}"));
+        exec_host_command_status(&format!("sudo ip link del {host_macvtap_name}"));
 
         let output = child.wait_with_output().unwrap();
 
@@ -6351,7 +6299,7 @@ mod common_parallel {
             assert!(remote_command(
                 &api_socket_source,
                 "snapshot",
-                Some(format!("file://{}", snapshot_dir).as_str()),
+                Some(format!("file://{snapshot_dir}").as_str()),
             ));
 
             // Wait to make sure the snapshot is completed
@@ -6376,7 +6324,7 @@ mod common_parallel {
             .args(["--api-socket", &api_socket_restored])
             .args([
                 "--restore",
-                format!("source_url=file://{}", snapshot_dir).as_str(),
+                format!("source_url=file://{snapshot_dir}").as_str(),
             ])
             .capture_output()
             .spawn()
@@ -6883,7 +6831,7 @@ mod windows {
             let id = *guard;
             *guard = id + 1;
 
-            let img = PathBuf::from(format!("/tmp/test-hotplug-{}.raw", id));
+            let img = PathBuf::from(format!("/tmp/test-hotplug-{id}.raw"));
             let _ = fs::remove_file(&img);
 
             // Create an image file
@@ -6893,12 +6841,12 @@ mod windows {
                     "-f",
                     "raw",
                     img.to_str().unwrap(),
-                    format!("{}m", sz).as_str(),
+                    format!("{sz}m").as_str(),
                 ])
                 .output()
                 .expect("qemu-img command failed")
                 .stdout;
-            println!("{:?}", out);
+            println!("{out:?}");
 
             // Associate image to a loop device
             let out = Command::new("losetup")
@@ -6908,7 +6856,7 @@ mod windows {
                 .stdout;
             let _tmp = String::from_utf8_lossy(&out);
             let loop_dev = _tmp.trim();
-            println!("{:?}", out);
+            println!("{out:?}");
 
             // Create a partition table
             // echo 'type=7' | sudo sfdisk "${LOOP}"
@@ -6922,7 +6870,7 @@ mod windows {
                 .write_all("type=7".as_bytes())
                 .expect("failed to write stdin");
             let out = child.wait_with_output().expect("sfdisk failed").stdout;
-            println!("{:?}", out);
+            println!("{out:?}");
 
             // Disengage the loop device
             let out = Command::new("losetup")
@@ -6930,7 +6878,7 @@ mod windows {
                 .output()
                 .expect("loop device not found")
                 .stdout;
-            println!("{:?}", out);
+            println!("{out:?}");
 
             // Re-associate loop device pointing to the partition only
             let out = Command::new("losetup")
@@ -6946,28 +6894,28 @@ mod windows {
                 .stdout;
             let _tmp = String::from_utf8_lossy(&out);
             let loop_dev = _tmp.trim();
-            println!("{:?}", out);
+            println!("{out:?}");
 
             // Create filesystem.
             let fs_cmd = match fs {
                 WindowsGuest::FS_FAT => "mkfs.msdos",
                 WindowsGuest::FS_NTFS => "mkfs.ntfs",
-                _ => panic!("Unknown filesystem type '{}'", fs),
+                _ => panic!("Unknown filesystem type '{fs}'"),
             };
             let out = Command::new(fs_cmd)
                 .args([&loop_dev])
                 .output()
-                .unwrap_or_else(|_| panic!("{} failed", fs_cmd))
+                .unwrap_or_else(|_| panic!("{fs_cmd} failed"))
                 .stdout;
-            println!("{:?}", out);
+            println!("{out:?}");
 
             // Disengage the loop device
             let out = Command::new("losetup")
                 .args(["-d", loop_dev])
                 .output()
-                .unwrap_or_else(|_| panic!("loop device '{}' not found", loop_dev))
+                .unwrap_or_else(|_| panic!("loop device '{loop_dev}' not found"))
                 .stdout;
-            println!("{:?}", out);
+            println!("{out:?}");
 
             img.to_str().unwrap().to_string()
         }
@@ -6982,15 +6930,13 @@ mod windows {
 
         fn disk_file_put(&self, fname: &str, data: &str) {
             let _ = self.ssh_cmd(&format!(
-                "powershell -Command \"'{}' | Set-Content -Path {}\"",
-                data, fname
+                "powershell -Command \"'{data}' | Set-Content -Path {fname}\""
             ));
         }
 
         fn disk_file_read(&self, fname: &str) -> String {
             self.ssh_cmd(&format!(
-                "powershell -Command \"Get-Content -Path {}\"",
-                fname
+                "powershell -Command \"Get-Content -Path {fname}\""
             ))
         }
 
@@ -7031,7 +6977,7 @@ mod windows {
     fn vcpu_threads_count(pid: u32) -> u8 {
         // ps -T -p 12345 | grep vcpu | wc -l
         let out = Command::new("ps")
-            .args(["-T", "-p", format!("{}", pid).as_str()])
+            .args(["-T", "-p", format!("{pid}").as_str()])
             .output()
             .expect("ps command failed")
             .stdout;
@@ -7041,7 +6987,7 @@ mod windows {
     fn netdev_ctrl_threads_count(pid: u32) -> u8 {
         // ps -T -p 12345 | grep "_net[0-9]*_ctrl" | wc -l
         let out = Command::new("ps")
-            .args(["-T", "-p", format!("{}", pid).as_str()])
+            .args(["-T", "-p", format!("{pid}").as_str()])
             .output()
             .expect("ps command failed")
             .stdout;
@@ -7055,7 +7001,7 @@ mod windows {
     fn disk_ctrl_threads_count(pid: u32) -> u8 {
         // ps -T -p 15782  | grep "_disk[0-9]*_q0" | wc -l
         let out = Command::new("ps")
-            .args(["-T", "-p", format!("{}", pid).as_str()])
+            .args(["-T", "-p", format!("{pid}").as_str()])
             .output()
             .expect("ps command failed")
             .stdout;
@@ -7220,7 +7166,7 @@ mod windows {
         assert!(remote_command(
             &api_socket_source,
             "snapshot",
-            Some(format!("file://{}", snapshot_dir).as_str()),
+            Some(format!("file://{snapshot_dir}").as_str()),
         ));
 
         // Wait to make sure the snapshot is completed
@@ -7236,7 +7182,7 @@ mod windows {
             .args(["--api-socket", &api_socket_restored])
             .args([
                 "--restore",
-                format!("source_url=file://{}", snapshot_dir).as_str(),
+                format!("source_url=file://{snapshot_dir}").as_str(),
             ])
             .capture_output()
             .spawn()
@@ -7527,7 +7473,7 @@ mod windows {
             let (cmd_success, cmd_output) = remote_command_w_output(
                 &api_socket,
                 "add-disk",
-                Some(format!("path={},readonly=off", disk).as_str()),
+                Some(format!("path={disk},readonly=off").as_str()),
             );
             assert!(cmd_success);
             assert!(String::from_utf8_lossy(&cmd_output).contains("\"id\":\"_disk2\""));
@@ -7557,7 +7503,7 @@ mod windows {
             let (cmd_success, _cmd_output) = remote_command_w_output(
                 &api_socket,
                 "add-disk",
-                Some(format!("path={},readonly=off", disk).as_str()),
+                Some(format!("path={disk},readonly=off").as_str()),
             );
             assert!(cmd_success);
             thread::sleep(std::time::Duration::new(5, 0));
@@ -7639,11 +7585,11 @@ mod windows {
                 let (cmd_success, cmd_output) = remote_command_w_output(
                     &api_socket,
                     "add-disk",
-                    Some(format!("path={},readonly=off", disk).as_str()),
+                    Some(format!("path={disk},readonly=off").as_str()),
                 );
                 assert!(cmd_success);
                 assert!(String::from_utf8_lossy(&cmd_output)
-                    .contains(format!("\"id\":\"{}\"", disk_id).as_str()));
+                    .contains(format!("\"id\":\"{disk_id}\"").as_str()));
                 thread::sleep(std::time::Duration::new(5, 0));
                 // Online disk devices
                 windows_guest.disks_set_rw();
@@ -7680,7 +7626,7 @@ mod windows {
                 let (cmd_success, _cmd_output) = remote_command_w_output(
                     &api_socket,
                     "add-disk",
-                    Some(format!("path={},readonly=off", disk).as_str()),
+                    Some(format!("path={disk},readonly=off").as_str()),
                 );
                 assert!(cmd_success);
                 thread::sleep(std::time::Duration::new(5, 0));
@@ -7915,8 +7861,7 @@ mod vfio {
             .args([
                 "--cmdline",
                 format!(
-                    "{} kvm-intel.nested=1 vfio_iommu_type1.allow_unsafe_interrupts",
-                    DIRECT_KERNEL_BOOT_CMDLINE
+                    "{DIRECT_KERNEL_BOOT_CMDLINE} kvm-intel.nested=1 vfio_iommu_type1.allow_unsafe_interrupts"
                 )
                 .as_str(),
             ])
@@ -8105,7 +8050,7 @@ mod vfio {
             .args(["--cpus", "boot=4"])
             .args([
                 "--memory",
-                format!("size=4G,hotplug_size=4G,hotplug_method={}", hotplug_method).as_str(),
+                format!("size=4G,hotplug_size=4G,hotplug_method={hotplug_method}").as_str(),
             ])
             .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
             .args(["--device", "path=/sys/bus/pci/devices/0000:31:00.0/"])
@@ -8240,9 +8185,9 @@ mod live_migration {
         // Start to receive migration from the destintion VM
         let mut receive_migration = Command::new(clh_command("ch-remote"))
             .args([
-                &format!("--api-socket={}", dest_api_socket),
+                &format!("--api-socket={dest_api_socket}"),
                 "receive-migration",
-                &format! {"unix:{}", migration_socket},
+                &format! {"unix:{migration_socket}"},
             ])
             .stderr(Stdio::piped())
             .stdout(Stdio::piped())
@@ -8255,7 +8200,7 @@ mod live_migration {
         let mut args = [
             format!("--api-socket={}", &src_api_socket),
             "send-migration".to_string(),
-            format! {"unix:{}", migration_socket},
+            format! {"unix:{migration_socket}"},
         ]
         .to_vec();
 
@@ -8348,7 +8293,7 @@ mod live_migration {
             cleanup_ovs_dpdk();
         }
 
-        panic!("Test failed: {}", message)
+        panic!("Test failed: {message}")
     }
 
     // This test exercises the local live-migration between two Cloud Hypervisor VMs on the
@@ -8398,7 +8343,7 @@ mod live_migration {
         src_vm_cmd
             .args([
                 "--cpus",
-                format!("boot={},max={}", boot_vcpus, max_vcpus).as_str(),
+                format!("boot={boot_vcpus},max={max_vcpus}").as_str(),
             ])
             .args(memory_param)
             .args(["--kernel", kernel_path.to_str().unwrap()])
@@ -8562,7 +8507,7 @@ mod live_migration {
         src_vm_cmd
             .args([
                 "--cpus",
-                format!("boot={},max={}", boot_vcpus, max_vcpus).as_str(),
+                format!("boot={boot_vcpus},max={max_vcpus}").as_str(),
             ])
             .args(memory_param)
             .args(["--kernel", kernel_path.to_str().unwrap()])
@@ -8763,7 +8708,7 @@ mod live_migration {
         src_vm_cmd
             .args([
                 "--cpus",
-                format!("boot={},max={}", boot_vcpus, max_vcpus).as_str(),
+                format!("boot={boot_vcpus},max={max_vcpus}").as_str(),
             ])
             .args(memory_param)
             .args(["--kernel", kernel_path.to_str().unwrap()])
@@ -8988,7 +8933,7 @@ mod live_migration {
         src_vm_cmd
             .args([
                 "--cpus",
-                format!("boot={},max={}", boot_vcpus, max_vcpus).as_str(),
+                format!("boot={boot_vcpus},max={max_vcpus}").as_str(),
             ])
             .args(memory_param)
             .args(["--kernel", kernel_path.to_str().unwrap()])
@@ -9454,8 +9399,7 @@ mod rate_limiter {
         }
 
         eprintln!(
-            "\n\n==== check_rate_limit failed! ====\n\nmeasured={}, , lower_limit={}, upper_limit={}\n\n",
-            measured, lower_limit, upper_limit
+            "\n\n==== check_rate_limit failed! ====\n\nmeasured={measured}, , lower_limit={lower_limit}, upper_limit={upper_limit}\n\n"
         );
 
         false
@@ -9537,26 +9481,23 @@ mod rate_limiter {
 
         // Create the test block image
         assert!(exec_host_command_output(&format!(
-            "dd if=/dev/zero of={} bs=1M count=1024",
-            blk_rate_limiter_test_img
+            "dd if=/dev/zero of={blk_rate_limiter_test_img} bs=1M count=1024"
         ))
         .status
         .success());
 
         let test_blk_params = if bandwidth {
             format!(
-                "path={},bw_size={},bw_refill_time={}",
-                blk_rate_limiter_test_img, bw_size, bw_refill_time
+                "path={blk_rate_limiter_test_img},bw_size={bw_size},bw_refill_time={bw_refill_time}"
             )
         } else {
             format!(
-                "path={},ops_size={},ops_refill_time={}",
-                blk_rate_limiter_test_img, bw_size, bw_refill_time
+                "path={blk_rate_limiter_test_img},ops_size={bw_size},ops_refill_time={bw_refill_time}"
             )
         };
 
         let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", &format!("boot={}", num_queues)])
+            .args(["--cpus", &format!("boot={num_queues}")])
             .args(["--memory", "size=4G"])
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
@@ -9586,8 +9527,7 @@ mod rate_limiter {
             let fio_command = format!(
                 "sudo fio --filename=/dev/vdc --name=test --output-format=json \
                 --direct=1 --bs=4k --ioengine=io_uring --iodepth=64 \
-                --rw={} --runtime={} --numjobs={}",
-                fio_ops, test_timeout, num_queues
+                --rw={fio_ops} --runtime={test_timeout} --numjobs={num_queues}"
             );
             let output = guest.ssh_command(&fio_command).unwrap();
 

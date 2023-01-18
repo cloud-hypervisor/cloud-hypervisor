@@ -80,45 +80,41 @@ impl Display for Error {
         match self {
             BackingFilesNotSupported => write!(f, "backing files not supported"),
             CompressedBlocksNotSupported => write!(f, "compressed blocks not supported"),
-            EvictingCache(e) => write!(f, "failed to evict cache: {}", e),
-            FileTooBig(size) => write!(
-                f,
-                "file larger than max of {}: {}",
-                MAX_QCOW_FILE_SIZE, size
-            ),
-            GettingFileSize(e) => write!(f, "failed to get file size: {}", e),
-            GettingRefcount(e) => write!(f, "failed to get refcount: {}", e),
+            EvictingCache(e) => write!(f, "failed to evict cache: {e}"),
+            FileTooBig(size) => write!(f, "file larger than max of {MAX_QCOW_FILE_SIZE}: {size}"),
+            GettingFileSize(e) => write!(f, "failed to get file size: {e}"),
+            GettingRefcount(e) => write!(f, "failed to get refcount: {e}"),
             InvalidClusterIndex => write!(f, "invalid cluster index"),
             InvalidClusterSize => write!(f, "invalid cluster size"),
             InvalidIndex => write!(f, "invalid index"),
             InvalidL1TableOffset => write!(f, "invalid L1 table offset"),
-            InvalidL1TableSize(size) => write!(f, "invalid L1 table size {}", size),
+            InvalidL1TableSize(size) => write!(f, "invalid L1 table size {size}"),
             InvalidMagic => write!(f, "invalid magic"),
             InvalidOffset(_) => write!(f, "invalid offset"),
             InvalidRefcountTableOffset => write!(f, "invalid refcount table offset"),
-            InvalidRefcountTableSize(size) => write!(f, "invalid refcount table size: {}", size),
+            InvalidRefcountTableSize(size) => write!(f, "invalid refcount table size: {size}"),
             NoFreeClusters => write!(f, "no free clusters"),
             NoRefcountClusters => write!(f, "no refcount clusters"),
             NotEnoughSpaceForRefcounts => write!(f, "not enough space for refcounts"),
-            OpeningFile(e) => write!(f, "failed to open file: {}", e),
-            ReadingData(e) => write!(f, "failed to read data: {}", e),
-            ReadingHeader(e) => write!(f, "failed to read header: {}", e),
-            ReadingPointers(e) => write!(f, "failed to read pointers: {}", e),
-            ReadingRefCountBlock(e) => write!(f, "failed to read ref count block: {}", e),
-            ReadingRefCounts(e) => write!(f, "failed to read ref counts: {}", e),
-            RebuildingRefCounts(e) => write!(f, "failed to rebuild ref counts: {}", e),
+            OpeningFile(e) => write!(f, "failed to open file: {e}"),
+            ReadingData(e) => write!(f, "failed to read data: {e}"),
+            ReadingHeader(e) => write!(f, "failed to read header: {e}"),
+            ReadingPointers(e) => write!(f, "failed to read pointers: {e}"),
+            ReadingRefCountBlock(e) => write!(f, "failed to read ref count block: {e}"),
+            ReadingRefCounts(e) => write!(f, "failed to read ref counts: {e}"),
+            RebuildingRefCounts(e) => write!(f, "failed to rebuild ref counts: {e}"),
             RefcountTableOffEnd => write!(f, "refcount table offset past file end"),
             RefcountTableTooLarge => write!(f, "too many clusters specified for refcount table"),
-            SeekingFile(e) => write!(f, "failed to seek file: {}", e),
-            SettingFileSize(e) => write!(f, "failed to set file size: {}", e),
-            SettingRefcountRefcount(e) => write!(f, "failed to set refcount refcount: {}", e),
+            SeekingFile(e) => write!(f, "failed to seek file: {e}"),
+            SettingFileSize(e) => write!(f, "failed to set file size: {e}"),
+            SettingRefcountRefcount(e) => write!(f, "failed to set refcount refcount: {e}"),
             SizeTooSmallForNumberOfClusters => write!(f, "size too small for number of clusters"),
-            TooManyL1Entries(count) => write!(f, "l1 entry table too large: {}", count),
-            TooManyRefcounts(count) => write!(f, "ref count table too large: {}", count),
+            TooManyL1Entries(count) => write!(f, "l1 entry table too large: {count}"),
+            TooManyRefcounts(count) => write!(f, "ref count table too large: {count}"),
             UnsupportedRefcountOrder => write!(f, "unsupported refcount order"),
-            UnsupportedVersion(v) => write!(f, "unsupported version: {}", v),
-            WritingData(e) => write!(f, "failed to write data: {}", e),
-            WritingHeader(e) => write!(f, "failed to write header: {}", e),
+            UnsupportedVersion(v) => write!(f, "unsupported version: {v}"),
+            WritingData(e) => write!(f, "failed to write data: {e}"),
+            WritingHeader(e) => write!(f, "failed to write header: {e}"),
         }
     }
 }
@@ -190,7 +186,7 @@ pub struct QcowHeader {
 impl QcowHeader {
     /// Creates a QcowHeader from a reference to a file.
     pub fn new(f: &mut RawFile) -> Result<QcowHeader> {
-        f.seek(SeekFrom::Start(0)).map_err(Error::ReadingHeader)?;
+        f.rewind().map_err(Error::ReadingHeader)?;
         let magic = f.read_u32::<BigEndian>().map_err(Error::ReadingHeader)?;
         if magic != QCOW_MAGIC {
             return Err(Error::InvalidMagic);
@@ -559,7 +555,7 @@ impl QcowFile {
     /// Creates a new QcowFile at the given path.
     pub fn new(mut file: RawFile, version: u32, virtual_size: u64) -> Result<QcowFile> {
         let header = QcowHeader::create_for_size(version, virtual_size);
-        file.seek(SeekFrom::Start(0)).map_err(Error::SeekingFile)?;
+        file.rewind().map_err(Error::SeekingFile)?;
         header.write_to(&mut file)?;
 
         let mut qcow = Self::from(file)?;
@@ -810,10 +806,7 @@ impl QcowFile {
         ) -> Result<()> {
             // Rewrite the header with lazy refcounts enabled while we are rebuilding the tables.
             header.compatible_features |= COMPATIBLE_FEATURES_LAZY_REFCOUNTS;
-            raw_file
-                .file_mut()
-                .seek(SeekFrom::Start(0))
-                .map_err(Error::SeekingFile)?;
+            raw_file.file_mut().rewind().map_err(Error::SeekingFile)?;
             header.write_to(raw_file.file_mut())?;
 
             for (i, refblock_addr) in ref_table.iter().enumerate() {
@@ -848,10 +841,7 @@ impl QcowFile {
 
             // Rewrite the header again, now with lazy refcounts disabled.
             header.compatible_features &= !COMPATIBLE_FEATURES_LAZY_REFCOUNTS;
-            raw_file
-                .file_mut()
-                .seek(SeekFrom::Start(0))
-                .map_err(Error::SeekingFile)?;
+            raw_file.file_mut().rewind().map_err(Error::SeekingFile)?;
             header.write_to(raw_file.file_mut())?;
 
             Ok(())
@@ -1233,7 +1223,7 @@ impl QcowFile {
             .map_err(|e| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!("failed to get cluster refcount: {}", e),
+                    format!("failed to get cluster refcount: {e}"),
                 )
             })?;
         if refcount == 0 {
@@ -1649,9 +1639,7 @@ where
     R: Read + Seek + SeekHole,
 {
     let src_size = reader.seek(SeekFrom::End(0)).map_err(Error::SeekingFile)?;
-    reader
-        .seek(SeekFrom::Start(0))
-        .map_err(Error::SeekingFile)?;
+    reader.rewind().map_err(Error::SeekingFile)?;
 
     // Ensure the destination file is empty before writing to it.
     dst_file.set_len(0).map_err(Error::SettingFileSize)?;
@@ -1693,10 +1681,8 @@ pub fn convert(mut src_file: RawFile, dst_file: RawFile, dst_type: ImageType) ->
 
 /// Detect the type of an image file by checking for a valid qcow2 header.
 pub fn detect_image_type(file: &mut RawFile) -> Result<ImageType> {
-    let orig_seek = file
-        .seek(SeekFrom::Current(0))
-        .map_err(Error::SeekingFile)?;
-    file.seek(SeekFrom::Start(0)).map_err(Error::SeekingFile)?;
+    let orig_seek = file.stream_position().map_err(Error::SeekingFile)?;
+    file.rewind().map_err(Error::SeekingFile)?;
     let magic = file.read_u32::<BigEndian>().map_err(Error::ReadingHeader)?;
     let image_type = if magic == QCOW_MAGIC {
         ImageType::Qcow2
@@ -1787,7 +1773,7 @@ mod tests {
         let mut disk_file: RawFile = RawFile::new(TempFile::new().unwrap().into_file(), false);
         disk_file.write_all(header).unwrap();
         disk_file.set_len(0x1_0000_0000).unwrap();
-        disk_file.seek(SeekFrom::Start(0)).unwrap();
+        disk_file.rewind().unwrap();
 
         testfn(disk_file); // File closed when the function exits.
     }
@@ -1809,7 +1795,7 @@ mod tests {
         header
             .write_to(&mut disk_file)
             .expect("Failed to write header to temporary file.");
-        disk_file.seek(SeekFrom::Start(0)).unwrap();
+        disk_file.rewind().unwrap();
         QcowFile::from(disk_file).expect("Failed to create Qcow from default Header");
     }
 
@@ -1820,7 +1806,7 @@ mod tests {
         header
             .write_to(&mut disk_file)
             .expect("Failed to write header to temporary file.");
-        disk_file.seek(SeekFrom::Start(0)).unwrap();
+        disk_file.rewind().unwrap();
         QcowFile::from(disk_file).expect("Failed to create Qcow from default Header");
     }
 
@@ -1948,7 +1934,7 @@ mod tests {
             q.write_all(b"test first bytes")
                 .expect("Failed to write test string.");
             let mut buf = [0u8; 4];
-            q.seek(SeekFrom::Start(0)).expect("Failed to seek.");
+            q.rewind().expect("Failed to seek.");
             q.read_exact(&mut buf).expect("Failed to read.");
             assert_eq!(&buf, b"test");
         });
@@ -2000,15 +1986,15 @@ mod tests {
             let mut q = QcowFile::from(disk_file).unwrap();
             // Write some test data.
             let b = [0x55u8; CHUNK_SIZE];
-            q.seek(SeekFrom::Start(0)).expect("Failed to seek.");
+            q.rewind().expect("Failed to seek.");
             q.write_all(&b).expect("Failed to write test string.");
             // Overwrite the full cluster with zeroes.
-            q.seek(SeekFrom::Start(0)).expect("Failed to seek.");
+            q.rewind().expect("Failed to seek.");
             let nwritten = q.write_zeroes(CHUNK_SIZE).expect("Failed to write zeroes.");
             assert_eq!(nwritten, CHUNK_SIZE);
             // Verify that the data was zeroed out.
             let mut buf = [0u8; CHUNK_SIZE];
-            q.seek(SeekFrom::Start(0)).expect("Failed to seek.");
+            q.rewind().expect("Failed to seek.");
             q.read_exact(&mut buf).expect("Failed to read.");
             assert_eq!(buf[0], 0);
             assert_eq!(buf[CHUNK_SIZE - 1], 0);
@@ -2450,7 +2436,7 @@ mod tests {
                 }
             }
             // Check that address 0 is still zeros.
-            qcow_file.seek(SeekFrom::Start(0)).expect("Failed to seek.");
+            qcow_file.rewind().expect("Failed to seek.");
             let nread = qcow_file.read(&mut readback).expect("Failed to read.");
             assert_eq!(nread, BLOCK_SIZE);
             for read in readback.iter() {
@@ -2474,7 +2460,7 @@ mod tests {
     }
 
     fn seek_cur(file: &mut QcowFile) -> u64 {
-        file.seek(SeekFrom::Current(0)).unwrap()
+        file.stream_position().unwrap()
     }
 
     #[test]
@@ -2538,7 +2524,7 @@ mod tests {
             assert_eq!(seek_cur(&mut file), 0xFFFF);
 
             // seek_hole at or after the end of the file should return None
-            file.seek(SeekFrom::Start(0)).unwrap();
+            file.rewind().unwrap();
             assert_eq!(file.seek_hole(0x30000).unwrap(), None);
             assert_eq!(seek_cur(&mut file), 0);
             assert_eq!(file.seek_hole(0x30001).unwrap(), None);
@@ -2556,33 +2542,33 @@ mod tests {
             assert_eq!(seek_cur(&mut file), 0xFFFF);
 
             // seek_hole within data should return the next hole
-            file.seek(SeekFrom::Start(0)).unwrap();
+            file.rewind().unwrap();
             assert_eq!(file.seek_hole(0x10000).unwrap(), Some(0x20000));
             assert_eq!(seek_cur(&mut file), 0x20000);
-            file.seek(SeekFrom::Start(0)).unwrap();
+            file.rewind().unwrap();
             assert_eq!(file.seek_hole(0x10001).unwrap(), Some(0x20000));
             assert_eq!(seek_cur(&mut file), 0x20000);
-            file.seek(SeekFrom::Start(0)).unwrap();
+            file.rewind().unwrap();
             assert_eq!(file.seek_hole(0x1FFFF).unwrap(), Some(0x20000));
             assert_eq!(seek_cur(&mut file), 0x20000);
-            file.seek(SeekFrom::Start(0)).unwrap();
+            file.rewind().unwrap();
             assert_eq!(file.seek_hole(0xFFFF).unwrap(), Some(0xFFFF));
             assert_eq!(seek_cur(&mut file), 0xFFFF);
-            file.seek(SeekFrom::Start(0)).unwrap();
+            file.rewind().unwrap();
             assert_eq!(file.seek_hole(0x10000).unwrap(), Some(0x20000));
             assert_eq!(seek_cur(&mut file), 0x20000);
-            file.seek(SeekFrom::Start(0)).unwrap();
+            file.rewind().unwrap();
             assert_eq!(file.seek_hole(0x1FFFF).unwrap(), Some(0x20000));
             assert_eq!(seek_cur(&mut file), 0x20000);
-            file.seek(SeekFrom::Start(0)).unwrap();
+            file.rewind().unwrap();
             assert_eq!(file.seek_hole(0x20000).unwrap(), Some(0x20000));
             assert_eq!(seek_cur(&mut file), 0x20000);
-            file.seek(SeekFrom::Start(0)).unwrap();
+            file.rewind().unwrap();
             assert_eq!(file.seek_hole(0x20001).unwrap(), Some(0x20001));
             assert_eq!(seek_cur(&mut file), 0x20001);
 
             // seek_hole at EOF should return None
-            file.seek(SeekFrom::Start(0)).unwrap();
+            file.rewind().unwrap();
             assert_eq!(file.seek_hole(0x30000).unwrap(), None);
             assert_eq!(seek_cur(&mut file), 0);
 
@@ -2593,10 +2579,10 @@ mod tests {
             // seek_hole within [0x20000, 0x30000) should now find the hole at EOF
             assert_eq!(file.seek_hole(0x20000).unwrap(), Some(0x30000));
             assert_eq!(seek_cur(&mut file), 0x30000);
-            file.seek(SeekFrom::Start(0)).unwrap();
+            file.rewind().unwrap();
             assert_eq!(file.seek_hole(0x20001).unwrap(), Some(0x30000));
             assert_eq!(seek_cur(&mut file), 0x30000);
-            file.seek(SeekFrom::Start(0)).unwrap();
+            file.rewind().unwrap();
             assert_eq!(file.seek_hole(0x30000).unwrap(), None);
             assert_eq!(seek_cur(&mut file), 0);
         });

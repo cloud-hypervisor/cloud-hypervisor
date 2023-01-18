@@ -41,21 +41,21 @@ impl fmt::Display for Error {
         use Error::*;
         match self {
             ApiClient(e) => e.fmt(f),
-            Connect(e) => write!(f, "Error opening HTTP socket: {}", e),
-            InvalidCpuCount(e) => write!(f, "Error parsing CPU count: {}", e),
-            InvalidMemorySize(e) => write!(f, "Error parsing memory size: {:?}", e),
-            InvalidBalloonSize(e) => write!(f, "Error parsing balloon size: {:?}", e),
-            AddDeviceConfig(e) => write!(f, "Error parsing device syntax: {}", e),
-            AddDiskConfig(e) => write!(f, "Error parsing disk syntax: {}", e),
-            AddFsConfig(e) => write!(f, "Error parsing filesystem syntax: {}", e),
-            AddPmemConfig(e) => write!(f, "Error parsing persistent memory syntax: {}", e),
-            AddNetConfig(e) => write!(f, "Error parsing network syntax: {}", e),
-            AddUserDeviceConfig(e) => write!(f, "Error parsing user device syntax: {}", e),
-            AddVdpaConfig(e) => write!(f, "Error parsing vDPA device syntax: {}", e),
-            AddVsockConfig(e) => write!(f, "Error parsing vsock syntax: {}", e),
-            Restore(e) => write!(f, "Error parsing restore syntax: {}", e),
-            ReadingStdin(e) => write!(f, "Error reading from stdin: {}", e),
-            ReadingFile(e) => write!(f, "Error reading from file: {}", e),
+            Connect(e) => write!(f, "Error opening HTTP socket: {e}"),
+            InvalidCpuCount(e) => write!(f, "Error parsing CPU count: {e}"),
+            InvalidMemorySize(e) => write!(f, "Error parsing memory size: {e:?}"),
+            InvalidBalloonSize(e) => write!(f, "Error parsing balloon size: {e:?}"),
+            AddDeviceConfig(e) => write!(f, "Error parsing device syntax: {e}"),
+            AddDiskConfig(e) => write!(f, "Error parsing disk syntax: {e}"),
+            AddFsConfig(e) => write!(f, "Error parsing filesystem syntax: {e}"),
+            AddPmemConfig(e) => write!(f, "Error parsing persistent memory syntax: {e}"),
+            AddNetConfig(e) => write!(f, "Error parsing network syntax: {e}"),
+            AddUserDeviceConfig(e) => write!(f, "Error parsing user device syntax: {e}"),
+            AddVdpaConfig(e) => write!(f, "Error parsing vDPA device syntax: {e}"),
+            AddVsockConfig(e) => write!(f, "Error parsing vsock syntax: {e}"),
+            Restore(e) => write!(f, "Error parsing restore syntax: {e}"),
+            ReadingStdin(e) => write!(f, "Error reading from stdin: {e}"),
+            ReadingFile(e) => write!(f, "Error reading from file: {e}"),
         }
     }
 }
@@ -680,7 +680,7 @@ fn main() {
     let matches = app.get_matches();
 
     if let Err(e) = do_command(&matches) {
-        eprintln!("Error running command: {}", e);
+        eprintln!("Error running command: {e}");
         process::exit(1)
     };
 }

@@ -24,10 +24,10 @@ impl<T: Debug> Display for Exception<T> {
             self.vector,
             self.ip,
             self.error
-                .map(|e| format!(": error {:x}", e))
+                .map(|e| format!(": error {e:x}"))
                 .unwrap_or_else(|| "".to_owned()),
             self.payload
-                .map(|payload| format!(": payload {:x}", payload))
+                .map(|payload| format!(": payload {payload:x}"))
                 .unwrap_or_else(|| "".to_owned())
         )
     }

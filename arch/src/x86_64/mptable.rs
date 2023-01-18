@@ -294,7 +294,7 @@ mod tests {
             mpspec::MP_IOAPIC => mem::size_of::<MpcIoapicWrapper>(),
             mpspec::MP_INTSRC => mem::size_of::<MpcIntsrcWrapper>(),
             mpspec::MP_LINTSRC => mem::size_of::<MpcLintsrcWrapper>(),
-            _ => panic!("unrecognized mpc table entry type: {}", type_),
+            _ => panic!("unrecognized mpc table entry type: {type_}"),
         }
     }
 

@@ -117,10 +117,7 @@ fn get_fields_map(reg: u32) -> phf::Map<&'static str, [u32; 2]> {
         CRB_INTF_ID2 => CRB_INTF_ID2_FIELDS,
         CRB_CTRL_STS => CRB_CTRL_STS_FIELDS,
         _ => {
-            panic!(
-                "Fields in '{:?}' register were accessed which are Invalid",
-                reg
-            );
+            panic!("Fields in '{reg:?}' register were accessed which are Invalid");
         }
     }
 }

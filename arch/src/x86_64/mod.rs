@@ -1316,6 +1316,6 @@ mod tests {
         add_memmap_entry(&mut memmap, 0, 0x1000, E820_RAM);
         add_memmap_entry(&mut memmap, 0x10000, 0xa000, E820_RESERVED);
 
-        assert_eq!(format!("{:?}", memmap), format!("{:?}", expected_memmap));
+        assert_eq!(format!("{memmap:?}"), format!("{expected_memmap:?}"));
     }
 }
