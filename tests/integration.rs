@@ -6731,9 +6731,11 @@ mod common_parallel {
 }
 
 mod common_sequential {
+    #[cfg(not(feature = "mshv"))]
     use crate::*;
 
     #[test]
+    #[cfg(not(feature = "mshv"))]
     fn test_memory_mergeable_on() {
         test_memory_mergeable(true)
     }
