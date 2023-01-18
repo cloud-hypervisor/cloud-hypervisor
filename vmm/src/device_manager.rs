@@ -525,7 +525,7 @@ pub fn create_pty() -> io::Result<(File, File, PathBuf)> {
         return vmm_sys_util::errno::errno_result().map_err(|e| e.into());
     }
 
-    let proc_path = PathBuf::from(format!("/proc/self/fd/{}", sub_fd));
+    let proc_path = PathBuf::from(format!("/proc/self/fd/{sub_fd}"));
     let path = read_link(proc_path)?;
 
     // SAFETY: sub_fd is checked to be valid before being wrapped in File
@@ -673,15 +673,14 @@ impl DeviceRelocation for AddressManager {
                     return Err(io::Error::new(
                         io::ErrorKind::Other,
                         format!(
-                            "Couldn't find a resource with base 0x{:x} for device {}",
-                            old_base, id
+                            "Couldn't find a resource with base 0x{old_base:x} for device {id}"
                         ),
                     ));
                 }
             } else {
                 return Err(io::Error::new(
                     io::ErrorKind::Other,
-                    format!("Couldn't find device {} from device tree", id),
+                    format!("Couldn't find device {id} from device tree"),
                 ));
             }
         }
@@ -695,7 +694,7 @@ impl DeviceRelocation for AddressManager {
                     self.vm.unregister_ioevent(event, &io_addr).map_err(|e| {
                         io::Error::new(
                             io::ErrorKind::Other,
-                            format!("failed to unregister ioevent: {:?}", e),
+                            format!("failed to unregister ioevent: {e:?}"),
                         )
                     })?;
                 }
@@ -706,7 +705,7 @@ impl DeviceRelocation for AddressManager {
                         .map_err(|e| {
                             io::Error::new(
                                 io::ErrorKind::Other,
-                                format!("failed to register ioevent: {:?}", e),
+                                format!("failed to register ioevent: {e:?}"),
                             )
                         })?;
                 }
@@ -727,7 +726,7 @@ impl DeviceRelocation for AddressManager {
                         self.vm.remove_user_memory_region(mem_region).map_err(|e| {
                             io::Error::new(
                                 io::ErrorKind::Other,
-                                format!("failed to remove user memory region: {:?}", e),
+                                format!("failed to remove user memory region: {e:?}"),
                             )
                         })?;
 
@@ -744,7 +743,7 @@ impl DeviceRelocation for AddressManager {
                         self.vm.create_user_memory_region(mem_region).map_err(|e| {
                             io::Error::new(
                                 io::ErrorKind::Other,
-                                format!("failed to create user memory regions: {:?}", e),
+                                format!("failed to create user memory regions: {e:?}"),
                             )
                         })?;
 
@@ -753,7 +752,7 @@ impl DeviceRelocation for AddressManager {
                         virtio_dev.set_shm_regions(shm_regions).map_err(|e| {
                             io::Error::new(
                                 io::ErrorKind::Other,
-                                format!("failed to update shared memory regions: {:?}", e),
+                                format!("failed to update shared memory regions: {e:?}"),
                             )
                         })?;
                     }
@@ -3385,7 +3384,7 @@ impl DeviceManager {
         pci_segment_id: u16,
         dma_handler: Option<Arc<dyn ExternalDmaMapping>>,
     ) -> DeviceManagerResult<PciBdf> {
-        let id = format!("{}-{}", VIRTIO_PCI_DEVICE_NAME_PREFIX, virtio_device_id);
+        let id = format!("{VIRTIO_PCI_DEVICE_NAME_PREFIX}-{virtio_device_id}");
 
         // Add the new virtio-pci node to the device tree.
         let mut node = device_node!(id);
@@ -4229,7 +4228,7 @@ impl Aml for DeviceManager {
         let mut pci_scan_methods = Vec::new();
         for i in 0..self.pci_segments.len() {
             pci_scan_methods.push(aml::MethodCall::new(
-                format!("\\_SB_.PCI{:X}.PCNT", i).as_str().into(),
+                format!("\\_SB_.PCI{i:X}.PCNT").as_str().into(),
                 vec![],
             ));
         }

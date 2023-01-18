@@ -40,11 +40,11 @@ impl DebugIoPortRange {
 impl fmt::Display for DebugIoPortRange {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            DebugIoPortRange::Firmware => write!(f, "{}: Firmware", DEBUG_IOPORT_PREFIX),
-            DebugIoPortRange::Bootloader => write!(f, "{}: Bootloader", DEBUG_IOPORT_PREFIX),
-            DebugIoPortRange::Kernel => write!(f, "{}: Kernel", DEBUG_IOPORT_PREFIX),
-            DebugIoPortRange::Userspace => write!(f, "{}: Userspace", DEBUG_IOPORT_PREFIX),
-            DebugIoPortRange::Custom => write!(f, "{}: Custom", DEBUG_IOPORT_PREFIX),
+            DebugIoPortRange::Firmware => write!(f, "{DEBUG_IOPORT_PREFIX}: Firmware"),
+            DebugIoPortRange::Bootloader => write!(f, "{DEBUG_IOPORT_PREFIX}: Bootloader"),
+            DebugIoPortRange::Kernel => write!(f, "{DEBUG_IOPORT_PREFIX}: Kernel"),
+            DebugIoPortRange::Userspace => write!(f, "{DEBUG_IOPORT_PREFIX}: Userspace"),
+            DebugIoPortRange::Custom => write!(f, "{DEBUG_IOPORT_PREFIX}: Custom"),
         }
     }
 }

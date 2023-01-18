@@ -880,9 +880,7 @@ impl Vm {
             .map_err(|_| Error::InitramfsLoad)?
             .try_into()
             .unwrap();
-        initramfs
-            .seek(SeekFrom::Start(0))
-            .map_err(|_| Error::InitramfsLoad)?;
+        initramfs.rewind().map_err(|_| Error::InitramfsLoad)?;
 
         let address =
             arch::initramfs_load_addr(guest_mem, size).map_err(|_| Error::InitramfsLoad)?;
@@ -1868,9 +1866,7 @@ impl Vm {
                             return Err(Error::InvalidPayloadType);
                         }
 
-                        payload_file
-                            .seek(SeekFrom::Start(0))
-                            .map_err(Error::LoadPayload)?;
+                        payload_file.rewind().map_err(Error::LoadPayload)?;
                         mem.read_from(
                             GuestAddress(section.address),
                             payload_file,
@@ -2663,7 +2659,7 @@ impl Snapshottable for Vm {
 
         vm_snapshot.add_snapshot(self.device_manager.lock().unwrap().snapshot()?);
         vm_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", VM_SNAPSHOT_ID),
+            id: format!("{VM_SNAPSHOT_ID}-section"),
             snapshot: vm_snapshot_data,
         });
 
@@ -3378,7 +3374,7 @@ pub fn test_vm() {
                 println!("HLT");
                 break;
             }
-            r => panic!("unexpected exit reason: {:?}", r),
+            r => panic!("unexpected exit reason: {r:?}"),
         }
     }
 }

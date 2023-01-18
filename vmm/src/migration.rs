@@ -73,7 +73,7 @@ pub fn recv_vm_state(source_url: &str) -> std::result::Result<Snapshot, Migratab
 pub fn get_vm_snapshot(snapshot: &Snapshot) -> std::result::Result<VmSnapshot, MigratableError> {
     if let Some(vm_section) = snapshot
         .snapshot_data
-        .get(&format!("{}-section", VM_SNAPSHOT_ID))
+        .get(&format!("{VM_SNAPSHOT_ID}-section"))
     {
         return serde_json::from_slice(&vm_section.snapshot).map_err(|e| {
             MigratableError::Restore(anyhow!("Could not deserialize VM snapshot {}", e))

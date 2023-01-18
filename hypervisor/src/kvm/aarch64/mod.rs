@@ -97,8 +97,7 @@ pub fn is_system_register(regid: u64) -> bool {
 
     assert!(
         !(size != KVM_REG_SIZE_U32 && size != KVM_REG_SIZE_U64),
-        "Unexpected register size for system register {}",
-        size
+        "Unexpected register size for system register {size}"
     );
 
     true

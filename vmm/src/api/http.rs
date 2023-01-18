@@ -52,7 +52,7 @@ const HTTP_ROOT: &str = "/api/v1";
 
 pub fn error_response(error: HttpError, status: StatusCode) -> Response {
     let mut response = Response::new(Version::Http11, status);
-    response.set_body(Body::new(format!("{:?}", error)));
+    response.set_body(Body::new(format!("{error:?}")));
 
     response
 }

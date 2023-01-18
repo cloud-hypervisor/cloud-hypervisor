@@ -105,8 +105,7 @@ impl Read for Vhdx {
             std::io::Error::new(
                 std::io::ErrorKind::Other,
                 format!(
-                    "Failed reading {} sectors from VHDx at index {}: {}",
-                    sector_count, sector_index, e
+                    "Failed reading {sector_count} sectors from VHDx at index {sector_index}: {e}"
                 ),
             )
         })
@@ -130,7 +129,7 @@ impl Write for Vhdx {
             self.vhdx_header.update(&mut self.file).map_err(|e| {
                 std::io::Error::new(
                     std::io::ErrorKind::Other,
-                    format!("Failed to update VHDx header: {}", e),
+                    format!("Failed to update VHDx header: {e}"),
                 )
             })?;
         }
@@ -148,8 +147,7 @@ impl Write for Vhdx {
             std::io::Error::new(
                 std::io::ErrorKind::Other,
                 format!(
-                    "Failed writing {} sectors on VHDx at index {}: {}",
-                    sector_count, sector_index, e
+                    "Failed writing {sector_count} sectors on VHDx at index {sector_index}: {e}"
                 ),
             )
         })

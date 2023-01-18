@@ -617,13 +617,13 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioUserDmaMappi
                 .map_err(|e| {
                     std::io::Error::new(
                         std::io::ErrorKind::Other,
-                        format!("Error mapping region: {}", e),
+                        format!("Error mapping region: {e}"),
                     )
                 })
         } else {
             Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                format!("Region not found for 0x{:x}", gpa),
+                format!("Region not found for 0x{gpa:x}"),
             ))
         }
     }
@@ -636,7 +636,7 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioUserDmaMappi
             .map_err(|e| {
                 std::io::Error::new(
                     std::io::ErrorKind::Other,
-                    format!("Error unmapping region: {}", e),
+                    format!("Error unmapping region: {e}"),
                 )
             })
     }

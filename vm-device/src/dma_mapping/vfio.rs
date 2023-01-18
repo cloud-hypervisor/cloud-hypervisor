@@ -37,9 +37,8 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioDmaMapping<M
             return Err(io::Error::new(
                 io::ErrorKind::Other,
                 format!(
-                    "failed to convert guest address 0x{:x} into \
-                     host user virtual address",
-                    gpa
+                    "failed to convert guest address 0x{gpa:x} into \
+                     host user virtual address"
                 ),
             ));
         };
@@ -51,8 +50,7 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioDmaMapping<M
                     io::ErrorKind::Other,
                     format!(
                         "failed to map memory for VFIO container, \
-                         iova 0x{:x}, gpa 0x{:x}, size 0x{:x}: {:?}",
-                        iova, gpa, size, e
+                         iova 0x{iova:x}, gpa 0x{gpa:x}, size 0x{size:x}: {e:?}"
                     ),
                 )
             })
@@ -64,8 +62,7 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioDmaMapping<M
                 io::ErrorKind::Other,
                 format!(
                     "failed to unmap memory for VFIO container, \
-                     iova 0x{:x}, size 0x{:x}: {:?}",
-                    iova, size, e
+                     iova 0x{iova:x}, size 0x{size:x}: {e:?}"
                 ),
             )
         })
