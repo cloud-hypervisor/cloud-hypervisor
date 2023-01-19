@@ -16,6 +16,7 @@ rust-version = "1.60"
 lto = true
 codegen-units = 1
 opt-level = "s"
+strip = true
 
 [dependencies]
 anyhow = "1.0.66"
