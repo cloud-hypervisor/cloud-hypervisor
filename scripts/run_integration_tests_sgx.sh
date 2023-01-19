@@ -21,7 +21,7 @@ rm -f $FW
 time wget --quiet $FW_URL || exit 1
 popd
 
-JAMMY_OS_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20221118-1.qcow2"
+JAMMY_OS_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20230119-0.qcow2"
 JAMMY_OS_IMAGE_URL="https://cloud-hypervisor.azureedge.net/$JAMMY_OS_IMAGE_NAME"
 JAMMY_OS_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_IMAGE_NAME"
 if [ ! -f "$JAMMY_OS_IMAGE" ]; then
@@ -30,7 +30,7 @@ if [ ! -f "$JAMMY_OS_IMAGE" ]; then
     popd
 fi
 
-JAMMY_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20221118-1.raw"
+JAMMY_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20230119-0.raw"
 JAMMY_OS_RAW_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_RAW_IMAGE_NAME"
 if [ ! -f "$JAMMY_OS_RAW_IMAGE" ]; then
     pushd $WORKLOADS_DIR
