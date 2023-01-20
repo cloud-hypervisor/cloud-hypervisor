@@ -3,6 +3,7 @@ on: [pull_request, create]
 
 jobs:
   release:
+    if: (github.event_name == 'create' && github.event.ref_type == 'tag') || github.event_name == 'pull_request'
     name: Release
     runs-on: ubuntu-latest
     steps:
