@@ -13,7 +13,7 @@ The required Linux changes for the host side can be found in the
 the guest side can be found in the [Guest TDX tree](https://github.com/intel/tdx/tree/guest).
 
 The TDVF firmware can be found in the
-[EDK2 staging project](https://github.com/tianocore/edk2-staging/tree/TDVF).
+[EDK2 project](https://github.com/tianocore/edk2).
 
 The TDShim firmware can be found in the
 [Confidential Containers project](https://github.com/confidential-containers/td-shim).
@@ -32,19 +32,18 @@ as it must include a kernel built from the [Guest TDX tree](https://github.com/i
 The firmware can be built as follows:
 
 ```bash
-git clone https://github.com/tianocore/edk2-staging.git
-cd edk2-staging
-git checkout origin/TDVF
+git clone https://github.com/tianocore/edk2.git
+cd edk2
 git submodule update --init --recursive
 make -C BaseTools
 source ./edksetup.sh
-build -p OvmfPkg/OvmfCh.dsc -a X64 -t GCC5 -b RELEASE
+build -p OvmfPkg/IntelTdx/IntelTdxX64.dsc -a X64 -t GCC5 -b RELEASE
 ```
 
 If debug logs are needed, here is the alternative command:
 
 ```bash
-build -p OvmfPkg/OvmfCh.dsc -a X64 -t GCC5 -D DEBUG_ON_SERIAL_PORT=TRUE
+build -p OvmfPkg/IntelTdx/IntelTdxX64.dsc -a X64 -t GCC5 -D DEBUG_ON_SERIAL_PORT=TRUE
 ```
 
 On the Cloud Hypervisor side, all you need is to build the project with the
@@ -62,7 +61,7 @@ meaning it will be printing guest kernel logs to the `virtio-console` device.
 ```bash
 ./cloud-hypervisor \
     --platform tdx=on
-    --firmware edk2-staging/Build/OvmfCh/RELEASE_GCC5/FV/OVMF.fd \
+    --firmware edk2/Build/IntelTdx/RELEASE_GCC5/FV/OVMF.fd \
     --cpus boot=1 \
     --memory size=1G \
     --disk path=tdx_guest_img
@@ -74,7 +73,7 @@ firmware:
 ```bash
 ./cloud-hypervisor \
     --platform tdx=on
-    --firmware edk2-staging/Build/OvmfCh/DEBUG_GCC5/FV/OVMF.fd \
+    --firmware edk2/Build/IntelTdx/DEBUG_GCC5/FV/OVMF.fd \
     --cpus boot=1 \
     --memory size=1G \
     --disk path=tdx_guest_img \
