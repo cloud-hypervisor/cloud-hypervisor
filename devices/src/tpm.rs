@@ -94,7 +94,7 @@ const TPM_CRB_NO_LOCALITY: u32 = 0xff;
 const TPM_CRB_ADDR_BASE: u32 = TPM_START.0 as u32;
 const TPM_CRB_ADDR_SIZE: usize = TPM_SIZE as usize;
 
-const TPM_CRB_R_MAX: u32 = CRB_DATA_BUFFER;
+const TPM_CRB_R_MAX: usize = CRB_DATA_BUFFER as usize;
 
 // CRB Protocol details
 const CRB_INTF_TYPE_CRB_ACTIVE: u32 = 0b1;
@@ -123,7 +123,7 @@ fn get_fields_map(reg: u32) -> phf::Map<&'static str, [u32; 2]> {
 }
 
 /// Set a particular field in a Register
-fn set_reg_field(regs: &mut [u32; TPM_CRB_R_MAX as usize], reg: u32, field: &str, value: u32) {
+fn set_reg_field(regs: &mut [u32; TPM_CRB_R_MAX], reg: u32, field: &str, value: u32) {
     let reg_fields = get_fields_map(reg);
     if reg_fields.contains_key(field) {
         let start = reg_fields.get(field).unwrap()[0];
@@ -139,7 +139,7 @@ fn set_reg_field(regs: &mut [u32; TPM_CRB_R_MAX as usize], reg: u32, field: &str
 }
 
 /// Get the value of a particular field in a Register
-fn get_reg_field(regs: &[u32; TPM_CRB_R_MAX as usize], reg: u32, field: &str) -> u32 {
+fn get_reg_field(regs: &[u32; TPM_CRB_R_MAX], reg: u32, field: &str) -> u32 {
     let reg_fields = get_fields_map(reg);
     if reg_fields.contains_key(field) {
         let start = reg_fields.get(field).unwrap()[0];
@@ -159,7 +159,7 @@ fn locality_from_addr(addr: u32) -> u8 {
 pub struct Tpm {
     emulator: Emulator,
     cmd: Option<BackendCmd>,
-    regs: [u32; TPM_CRB_R_MAX as usize],
+    regs: [u32; TPM_CRB_R_MAX],
     backend_buff_size: usize,
     data_buff: [u8; TPM_CRB_BUFFER_MAX],
     data_buff_len: usize,
@@ -172,7 +172,7 @@ impl Tpm {
         let mut tpm = Tpm {
             emulator,
             cmd: None,
-            regs: [0; TPM_CRB_R_MAX as usize],
+            regs: [0; TPM_CRB_R_MAX],
             backend_buff_size: TPM_CRB_BUFFER_MAX,
             data_buff: [0; TPM_CRB_BUFFER_MAX],
             data_buff_len: 0,
@@ -197,7 +197,7 @@ impl Tpm {
 
     fn reset(&mut self) -> Result<()> {
         let cur_buff_size = self.emulator.get_buffer_size().unwrap();
-        self.regs = [0; TPM_CRB_R_MAX as usize];
+        self.regs = [0; TPM_CRB_R_MAX];
         set_reg_field(&mut self.regs, CRB_LOC_STATE, "tpmRegValidSts", 1);
         set_reg_field(&mut self.regs, CRB_CTRL_STS, "tpmIdle", 1);
         set_reg_field(
@@ -456,7 +456,7 @@ mod tests {
 
     #[test]
     fn test_set_get_reg_field() {
-        let mut regs: [u32; TPM_CRB_R_MAX as usize] = [0; TPM_CRB_R_MAX as usize];
+        let mut regs: [u32; TPM_CRB_R_MAX] = [0; TPM_CRB_R_MAX];
         set_reg_field(&mut regs, CRB_INTF_ID, "RID", 0xAC);
         assert_eq!(
             get_reg_field(&regs, CRB_INTF_ID, "RID"),
