@@ -1,3 +1,4 @@
+- [v28.2](#v282)
 - [v28.1](#v281)
 - [v28.0](#v280)
     - [Community Engagement (Reminder)](#community-engagement-reminder)
@@ -247,6 +248,13 @@
     - [Console over virtio](#console-over-virtio)
     - [Unit testing](#unit-testing)
     - [Integration tests parallelization](#integration-tests-parallelization)
+
+# v28.2
+This is a bug fix release. The following issues have been addressed:
+
+* Fix QCOW2 refcount table size (#5034)
+* Fix unpause support on MSHV in dual binary (#5037)
+* Threads inside `virtio` devices are now shutdown on reboot (#5095)
 
 # v28.1
 This is a bug fix release. The following issues have been addressed:
