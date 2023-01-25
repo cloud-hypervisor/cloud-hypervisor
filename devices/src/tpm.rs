@@ -471,22 +471,14 @@ impl BusDevice for Tpm {
                     {
                         self.regs[CRB_CTRL_START as usize] |= CRB_START_INVOKE;
 
-                        let cmd = BackendCmd {
+                        let mut cmd = BackendCmd {
                             locality: locality as u8,
-                            input: self.data_buff[0..self.data_buff_len].to_vec(),
+                            buffer: &mut self.data_buff,
                             input_len: cmp::min(self.data_buff_len, TPM_CRB_BUFFER_MAX),
-                            output: self.data_buff.to_vec(),
-                            output_len: TPM_CRB_BUFFER_MAX,
                             selftest_done: false,
                         };
 
-                        let mut cmd = cmd.clone();
-
-                        if let Ok(output) = self.emulator.deliver_request(&mut cmd) {
-                            // TODO: drop the copy here
-                            self.data_buff.fill(0);
-                            self.data_buff.clone_from_slice(output.as_slice());
-                        }
+                        let _ = self.emulator.deliver_request(&mut cmd);
 
                         self.request_completed(TPM_SUCCESS as isize);
                     }

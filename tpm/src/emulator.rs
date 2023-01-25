@@ -30,8 +30,8 @@ const PTM_CAP_SET_BUFFERSIZE: u64 = 1 << 13;
 
 ///Check if the input command is selftest
 ///
-pub fn is_selftest(input: Vec<u8>, in_len: usize) -> bool {
-    if in_len >= TPM_REQ_HDR_SIZE {
+pub fn is_selftest(input: &[u8]) -> bool {
+    if input.len() >= TPM_REQ_HDR_SIZE {
         let ordinal: &[u8; 4] = input[6..6 + 4]
             .try_into()
             .expect("slice with incorrect length");
@@ -61,13 +61,12 @@ pub enum Error {
 
 type Result<T> = anyhow::Result<T, Error>;
 
-#[derive(Clone)]
-pub struct BackendCmd {
+pub struct BackendCmd<'a> {
     pub locality: u8,
-    pub input: Vec<u8>,
+    // This buffer is used for both input and output.
+    // When used for input, the length of the data is input_len.
+    pub buffer: &'a mut [u8],
     pub input_len: usize,
-    pub output: Vec<u8>,
-    pub output_len: usize,
     pub selftest_done: bool,
 }
 
@@ -285,23 +284,23 @@ impl Emulator {
     }
 
     /// Function to write to data socket and read the response from it
-    fn unix_tx_bufs(&mut self, cmd: &mut BackendCmd) -> Result<()> {
+    pub fn deliver_request(&mut self, cmd: &mut BackendCmd) -> Result<()> {
         let isselftest: bool;
         // SAFETY: type "sockaddr_storage" is valid with an all-zero byte-pattern value
         let mut addr: sockaddr_storage = unsafe { mem::zeroed() };
         let mut len = mem::size_of::<sockaddr_storage>() as socklen_t;
 
         cmd.selftest_done = false;
-        isselftest = is_selftest(cmd.input.to_vec(), cmd.input_len);
+        isselftest = is_selftest(&cmd.buffer[0..cmd.input_len]);
 
         debug!(
             "Send cmd: {:02X?}  of len {:?} on data_ioc ",
-            cmd.input, cmd.input_len
+            cmd.buffer, cmd.input_len
         );
 
         let data_vecs = [libc::iovec {
-            iov_base: cmd.input.as_mut_ptr() as *mut libc::c_void,
-            iov_len: cmd.input.len(),
+            iov_base: cmd.buffer.as_ptr() as *mut libc::c_void,
+            iov_len: cmd.input_len,
         }; 1];
 
         // SAFETY: all zero values from the unsafe method are updated before usage
@@ -324,13 +323,13 @@ impl Emulator {
             }
         }
 
-        cmd.output.fill(0);
+        let output_len;
         // SAFETY: FFI calls and return value from unsafe method is checked
         unsafe {
             let ret = libc::recvfrom(
                 self.data_fd,
-                cmd.output.as_ptr() as *mut c_void,
-                cmd.output.len(),
+                cmd.buffer.as_mut_ptr() as *mut c_void,
+                cmd.buffer.len(),
                 0,
                 &mut addr as *mut libc::sockaddr_storage as *mut libc::sockaddr,
                 &mut len as *mut socklen_t,
@@ -341,36 +340,26 @@ impl Emulator {
                     std::io::Error::last_os_error()
                 )));
             }
-            cmd.output_len = ret as usize;
+            output_len = ret as usize;
         }
         debug!(
             "response = {:02X?} len = {:?} selftest = {:?}",
-            cmd.output, cmd.output_len, isselftest
+            cmd.buffer, output_len, isselftest
         );
 
         if isselftest {
-            if cmd.output_len < 10 {
+            if output_len < 10 {
                 return Err(Error::SelfTest(anyhow!(
                     "Self test response should have 10 bytes. Only {:?} returned",
-                    cmd.output_len
+                    output_len
                 )));
             }
             let mut errcode: [u8; 4] = [0; 4];
-            errcode.copy_from_slice(&cmd.output[6..6 + 4]);
+            errcode.copy_from_slice(&cmd.buffer[6..6 + 4]);
             cmd.selftest_done = u32::from_ne_bytes(errcode).to_be() == 0;
         }
 
         Ok(())
-    }
-
-    pub fn deliver_request(&mut self, cmd: &mut BackendCmd) -> Result<Vec<u8>> {
-        self.unix_tx_bufs(cmd)?;
-
-        let output = cmd.output.clone();
-        cmd.output.fill(0);
-        cmd.output.clone_from(&output);
-
-        Ok(output)
     }
 
     pub fn cancel_cmd(&mut self) -> Result<()> {
