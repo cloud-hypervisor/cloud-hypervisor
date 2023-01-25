@@ -454,12 +454,12 @@ impl Emulator {
         Ok(())
     }
 
-    pub fn get_buffer_size(&mut self) -> Result<usize> {
+    pub fn get_buffer_size(&mut self) -> usize {
         let mut curr_buf_size: usize = 0;
 
         match self.set_buffer_size(0, &mut curr_buf_size) {
-            Err(_) => Ok(TPM_CRB_BUFFER_MAX),
-            _ => Ok(curr_buf_size),
+            Err(_) => TPM_CRB_BUFFER_MAX,
+            _ => curr_buf_size,
         }
     }
 }

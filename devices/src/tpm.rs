@@ -259,7 +259,7 @@ impl Tpm {
     }
 
     fn reset(&mut self) -> Result<()> {
-        let cur_buff_size = self.emulator.get_buffer_size().unwrap();
+        let cur_buff_size = self.emulator.get_buffer_size();
         self.regs = [0; TPM_CRB_R_MAX];
         set_reg_field(
             &mut self.regs,
