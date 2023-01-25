@@ -46,7 +46,7 @@ fi
 popd
 
 # Download Cloud Hypervisor binary from its last stable release
-LAST_RELEASE_VERSION="v26.0"
+LAST_RELEASE_VERSION="v29.0"
 CH_RELEASE_URL="https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/$LAST_RELEASE_VERSION/cloud-hypervisor-static"
 CH_RELEASE_NAME="cloud-hypervisor-static"
 pushd $WORKLOADS_DIR
