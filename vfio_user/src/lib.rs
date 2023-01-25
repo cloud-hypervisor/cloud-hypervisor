@@ -24,8 +24,9 @@ extern crate log;
 
 #[allow(dead_code)]
 #[repr(u16)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 enum Command {
+    #[default]
     Unknown = 0,
     Version = 1,
     DmaMap = 2,
@@ -43,26 +44,15 @@ enum Command {
     UserDirtyPages = 14,
 }
 
-impl Default for Command {
-    fn default() -> Self {
-        Command::Unknown
-    }
-}
-
 #[allow(dead_code)]
 #[repr(u32)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 enum HeaderFlags {
+    #[default]
     Command = 0,
     Reply = 1,
     NoReply = 1 << 4,
     Error = 1 << 5,
-}
-
-impl Default for HeaderFlags {
-    fn default() -> Self {
-        HeaderFlags::Command
-    }
 }
 
 #[repr(C)]
