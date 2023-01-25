@@ -214,7 +214,6 @@ fn locality_from_addr(addr: u32) -> u8 {
 
 pub struct Tpm {
     emulator: Emulator,
-    cmd: Option<BackendCmd>,
     regs: [u32; TPM_CRB_R_MAX],
     backend_buff_size: usize,
     data_buff: [u8; TPM_CRB_BUFFER_MAX],
@@ -227,7 +226,6 @@ impl Tpm {
             .map_err(|e| Error::Init(anyhow!("Failed while initializing tpm Emulator: {:?}", e)))?;
         let mut tpm = Tpm {
             emulator,
-            cmd: None,
             regs: [0; TPM_CRB_R_MAX],
             backend_buff_size: TPM_CRB_BUFFER_MAX,
             data_buff: [0; TPM_CRB_BUFFER_MAX],
@@ -475,16 +473,16 @@ impl BusDevice for Tpm {
                     {
                         self.regs[CRB_CTRL_START as usize] |= CRB_START_INVOKE;
 
-                        self.cmd = Some(BackendCmd {
+                        let cmd = BackendCmd {
                             locality: locality as u8,
                             input: self.data_buff[0..self.data_buff_len].to_vec(),
                             input_len: cmp::min(self.data_buff_len, TPM_CRB_BUFFER_MAX),
                             output: self.data_buff.to_vec(),
                             output_len: TPM_CRB_BUFFER_MAX,
                             selftest_done: false,
-                        });
+                        };
 
-                        let mut cmd = self.cmd.as_ref().unwrap().clone();
+                        let mut cmd = cmd.clone();
                         let output = self.emulator.deliver_request(&mut cmd).map_err(|e| {
                             Error::DeliverRequest(anyhow!(
                                 "Failed to deliver tpm request. Error :{:?}",
