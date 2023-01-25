@@ -62,12 +62,10 @@ pub enum Error {
 type Result<T> = anyhow::Result<T, Error>;
 
 pub struct BackendCmd<'a> {
-    pub locality: u8,
     // This buffer is used for both input and output.
     // When used for input, the length of the data is input_len.
     pub buffer: &'a mut [u8],
     pub input_len: usize,
-    pub selftest_done: bool,
 }
 
 pub struct Emulator {
@@ -285,13 +283,10 @@ impl Emulator {
 
     /// Function to write to data socket and read the response from it
     pub fn deliver_request(&mut self, cmd: &mut BackendCmd) -> Result<()> {
-        let isselftest: bool;
         // SAFETY: type "sockaddr_storage" is valid with an all-zero byte-pattern value
         let mut addr: sockaddr_storage = unsafe { mem::zeroed() };
         let mut len = mem::size_of::<sockaddr_storage>() as socklen_t;
-
-        cmd.selftest_done = false;
-        isselftest = is_selftest(&cmd.buffer[0..cmd.input_len]);
+        let isselftest = is_selftest(&cmd.buffer[0..cmd.input_len]);
 
         debug!(
             "Send cmd: {:02X?}  of len {:?} on data_ioc ",
@@ -347,16 +342,11 @@ impl Emulator {
             cmd.buffer, output_len, isselftest
         );
 
-        if isselftest {
-            if output_len < 10 {
-                return Err(Error::SelfTest(anyhow!(
-                    "Self test response should have 10 bytes. Only {:?} returned",
-                    output_len
-                )));
-            }
-            let mut errcode: [u8; 4] = [0; 4];
-            errcode.copy_from_slice(&cmd.buffer[6..6 + 4]);
-            cmd.selftest_done = u32::from_ne_bytes(errcode).to_be() == 0;
+        if isselftest && output_len < 10 {
+            return Err(Error::SelfTest(anyhow!(
+                "Self test response should have 10 bytes. Only {:?} returned",
+                output_len
+            )));
         }
 
         Ok(())
