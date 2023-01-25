@@ -472,10 +472,8 @@ impl BusDevice for Tpm {
                         self.regs[CRB_CTRL_START as usize] |= CRB_START_INVOKE;
 
                         let mut cmd = BackendCmd {
-                            locality: locality as u8,
                             buffer: &mut self.data_buff,
                             input_len: cmp::min(self.data_buff_len, TPM_CRB_BUFFER_MAX),
-                            selftest_done: false,
                         };
 
                         let _ = self.emulator.deliver_request(&mut cmd);
