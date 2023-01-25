@@ -72,7 +72,6 @@ pub struct BackendCmd {
 }
 
 pub struct Emulator {
-    cmd: Option<BackendCmd>,
     caps: PtmCap, /* capabilities of the TPM */
     control_socket: SocketDev,
     data_fd: RawFd,
@@ -100,7 +99,6 @@ impl Emulator {
         })?;
 
         let mut emulator = Self {
-            cmd: None,
             caps: 0,
             control_socket: socket,
             data_fd: -1,
@@ -287,107 +285,92 @@ impl Emulator {
     }
 
     /// Function to write to data socket and read the response from it
-    fn unix_tx_bufs(&mut self) -> Result<()> {
+    fn unix_tx_bufs(&mut self, cmd: &mut BackendCmd) -> Result<()> {
         let isselftest: bool;
         // SAFETY: type "sockaddr_storage" is valid with an all-zero byte-pattern value
         let mut addr: sockaddr_storage = unsafe { mem::zeroed() };
         let mut len = mem::size_of::<sockaddr_storage>() as socklen_t;
 
-        if let Some(ref mut cmd) = self.cmd {
-            cmd.selftest_done = false;
-            isselftest = is_selftest(cmd.input.to_vec(), cmd.input_len);
+        cmd.selftest_done = false;
+        isselftest = is_selftest(cmd.input.to_vec(), cmd.input_len);
 
-            debug!(
-                "Send cmd: {:02X?}  of len {:?} on data_ioc ",
-                cmd.input, cmd.input_len
+        debug!(
+            "Send cmd: {:02X?}  of len {:?} on data_ioc ",
+            cmd.input, cmd.input_len
+        );
+
+        let data_vecs = [libc::iovec {
+            iov_base: cmd.input.as_mut_ptr() as *mut libc::c_void,
+            iov_len: cmd.input.len(),
+        }; 1];
+
+        // SAFETY: all zero values from the unsafe method are updated before usage
+        let mut msghdr: libc::msghdr = unsafe { mem::zeroed() };
+        msghdr.msg_name = ptr::null_mut();
+        msghdr.msg_namelen = 0;
+        msghdr.msg_iov = data_vecs.as_ptr() as *mut libc::iovec;
+        msghdr.msg_iovlen = data_vecs.len() as _;
+        msghdr.msg_control = ptr::null_mut();
+        msghdr.msg_controllen = 0;
+        msghdr.msg_flags = 0;
+        // SAFETY: FFI call and the return value of the unsafe method is checked
+        unsafe {
+            let ret = libc::sendmsg(self.data_fd, &msghdr, 0);
+            if ret == -1 {
+                return Err(Error::SendReceive(anyhow!(
+                    "Failed to send tpm command over Data FD. Error Code {:?}",
+                    std::io::Error::last_os_error()
+                )));
+            }
+        }
+
+        cmd.output.fill(0);
+        // SAFETY: FFI calls and return value from unsafe method is checked
+        unsafe {
+            let ret = libc::recvfrom(
+                self.data_fd,
+                cmd.output.as_ptr() as *mut c_void,
+                cmd.output.len(),
+                0,
+                &mut addr as *mut libc::sockaddr_storage as *mut libc::sockaddr,
+                &mut len as *mut socklen_t,
             );
-
-            let data_vecs = [libc::iovec {
-                iov_base: cmd.input.as_mut_ptr() as *mut libc::c_void,
-                iov_len: cmd.input.len(),
-            }; 1];
-
-            // SAFETY: all zero values from the unsafe method are updated before usage
-            let mut msghdr: libc::msghdr = unsafe { mem::zeroed() };
-            msghdr.msg_name = ptr::null_mut();
-            msghdr.msg_namelen = 0;
-            msghdr.msg_iov = data_vecs.as_ptr() as *mut libc::iovec;
-            msghdr.msg_iovlen = data_vecs.len() as _;
-            msghdr.msg_control = ptr::null_mut();
-            msghdr.msg_controllen = 0;
-            msghdr.msg_flags = 0;
-            // SAFETY: FFI call and the return value of the unsafe method is checked
-            unsafe {
-                let ret = libc::sendmsg(self.data_fd, &msghdr, 0);
-                if ret == -1 {
-                    return Err(Error::SendReceive(anyhow!(
-                        "Failed to send tpm command over Data FD. Error Code {:?}",
-                        std::io::Error::last_os_error()
-                    )));
-                }
+            if ret == -1 {
+                return Err(Error::SendReceive(anyhow!(
+                    "Failed to receive response for tpm command over Data FD. Error Code {:?}",
+                    std::io::Error::last_os_error()
+                )));
             }
+            cmd.output_len = ret as usize;
+        }
+        debug!(
+            "response = {:02X?} len = {:?} selftest = {:?}",
+            cmd.output, cmd.output_len, isselftest
+        );
 
-            cmd.output.fill(0);
-            // SAFETY: FFI calls and return value from unsafe method is checked
-            unsafe {
-                let ret = libc::recvfrom(
-                    self.data_fd,
-                    cmd.output.as_ptr() as *mut c_void,
-                    cmd.output.len(),
-                    0,
-                    &mut addr as *mut libc::sockaddr_storage as *mut libc::sockaddr,
-                    &mut len as *mut socklen_t,
-                );
-                if ret == -1 {
-                    return Err(Error::SendReceive(anyhow!(
-                        "Failed to receive response for tpm command over Data FD. Error Code {:?}",
-                        std::io::Error::last_os_error()
-                    )));
-                }
-                cmd.output_len = ret as usize;
+        if isselftest {
+            if cmd.output_len < 10 {
+                return Err(Error::SelfTest(anyhow!(
+                    "Self test response should have 10 bytes. Only {:?} returned",
+                    cmd.output_len
+                )));
             }
-            debug!(
-                "response = {:02X?} len = {:?} selftest = {:?}",
-                cmd.output, cmd.output_len, isselftest
-            );
-
-            if isselftest {
-                if cmd.output_len < 10 {
-                    return Err(Error::SelfTest(anyhow!(
-                        "Self test response should have 10 bytes. Only {:?} returned",
-                        cmd.output_len
-                    )));
-                }
-                let mut errcode: [u8; 4] = [0; 4];
-                errcode.copy_from_slice(&cmd.output[6..6 + 4]);
-                cmd.selftest_done = u32::from_ne_bytes(errcode).to_be() == 0;
-            }
+            let mut errcode: [u8; 4] = [0; 4];
+            errcode.copy_from_slice(&cmd.output[6..6 + 4]);
+            cmd.selftest_done = u32::from_ne_bytes(errcode).to_be() == 0;
         }
 
         Ok(())
     }
 
-    pub fn deliver_request(&mut self, in_cmd: &mut BackendCmd) -> Result<Vec<u8>> {
-        if self.cmd.is_some() {
-            //previous request did not finish cleanly
-            return Err(Error::DeliverRequest(anyhow!(
-                "Cannot deliver tpm Request as previous cmd did not complete."
-            )));
-        }
-        self.cmd = Some(in_cmd.clone());
+    pub fn deliver_request(&mut self, cmd: &mut BackendCmd) -> Result<Vec<u8>> {
+        self.unix_tx_bufs(cmd)?;
 
-        self.unix_tx_bufs()?;
+        let output = cmd.output.clone();
+        cmd.output.fill(0);
+        cmd.output.clone_from(&output);
 
-        let output = self.cmd.as_ref().unwrap().output.clone();
-        in_cmd.output.fill(0);
-        in_cmd.output.clone_from(&output);
-
-        self.backend_request_completed();
         Ok(output)
-    }
-
-    pub fn backend_request_completed(&mut self) {
-        self.cmd = None;
     }
 
     pub fn cancel_cmd(&mut self) -> Result<()> {
