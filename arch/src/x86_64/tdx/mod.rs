@@ -55,7 +55,7 @@ pub struct TdvfSection {
 }
 
 #[repr(u32)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub enum TdvfSectionType {
     Bfv,
     Cfv,
@@ -64,13 +64,8 @@ pub enum TdvfSectionType {
     PermMem,
     Payload,
     PayloadParam,
+    #[default]
     Reserved = 0xffffffff,
-}
-
-impl Default for TdvfSectionType {
-    fn default() -> Self {
-        TdvfSectionType::Reserved
-    }
 }
 
 fn tdvf_descriptor_offset(file: &mut File) -> Result<(SeekFrom, bool), TdvfError> {
@@ -202,19 +197,14 @@ pub fn parse_tdvf_sections(file: &mut File) -> Result<(Vec<TdvfSection>, bool), 
 }
 
 #[repr(u16)]
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Default)]
 enum HobType {
     Handoff = 0x1,
     ResourceDescriptor = 0x3,
     GuidExtension = 0x4,
+    #[default]
     Unused = 0xfffe,
     EndOfHobList = 0xffff,
-}
-
-impl Default for HobType {
-    fn default() -> Self {
-        HobType::Unused
-    }
 }
 
 #[repr(C)]
@@ -266,17 +256,12 @@ struct HobGuidType {
 }
 
 #[repr(u32)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub enum PayloadImageType {
+    #[default]
     ExecutablePayload,
     BzImage,
     RawVmLinux,
-}
-
-impl Default for PayloadImageType {
-    fn default() -> Self {
-        PayloadImageType::ExecutablePayload
-    }
 }
 
 #[repr(C)]
