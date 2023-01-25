@@ -371,7 +371,7 @@ impl Emulator {
     }
 
     /// Configure buffersize to use while communicating with swtpm
-    fn set_buffer_size(&mut self, wantedsize: usize, actualsize: &mut usize) -> Result<()> {
+    fn set_buffer_size(&mut self, wantedsize: usize) -> Result<usize> {
         let mut psbs: PtmSetBufferSize = PtmSetBufferSize::new(wantedsize as u32);
 
         self.stop_tpm()?;
@@ -383,19 +383,15 @@ impl Emulator {
             4 * mem::size_of::<u32>(),
         )?;
 
-        *actualsize = psbs.get_bufsize() as usize;
-
-        Ok(())
+        Ok(psbs.get_bufsize() as usize)
     }
 
     pub fn startup_tpm(&mut self, buffersize: usize) -> Result<()> {
         let mut init: PtmInit = PtmInit::new();
 
-        let mut actual_size: usize = 0;
-
         if buffersize != 0 {
-            self.set_buffer_size(buffersize, &mut actual_size)?;
-            debug!("set tpm buffersize to {:?} during Startup", buffersize);
+            let actual_size = self.set_buffer_size(buffersize)?;
+            debug!("set tpm buffersize to {:?} during Startup", actual_size);
         }
 
         self.run_control_cmd(
@@ -417,11 +413,6 @@ impl Emulator {
     }
 
     pub fn get_buffer_size(&mut self) -> usize {
-        let mut curr_buf_size: usize = 0;
-
-        match self.set_buffer_size(0, &mut curr_buf_size) {
-            Err(_) => TPM_CRB_BUFFER_MAX,
-            _ => curr_buf_size,
-        }
+        self.set_buffer_size(0).unwrap_or(TPM_CRB_BUFFER_MAX)
     }
 }
