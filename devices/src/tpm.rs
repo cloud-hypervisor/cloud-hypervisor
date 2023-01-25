@@ -22,8 +22,6 @@ pub enum Error {
     CheckCaps(#[source] anyhow::Error),
     #[error("Failed to initialize tpm: {0}")]
     Init(#[source] anyhow::Error),
-    #[error("Failed to deliver tpm Command: {0}")]
-    DeliverRequest(#[source] anyhow::Error),
 }
 type Result<T> = anyhow::Result<T, Error>;
 
@@ -483,15 +481,12 @@ impl BusDevice for Tpm {
                         };
 
                         let mut cmd = cmd.clone();
-                        let output = self.emulator.deliver_request(&mut cmd).map_err(|e| {
-                            Error::DeliverRequest(anyhow!(
-                                "Failed to deliver tpm request. Error :{:?}",
-                                e
-                            ))
-                        });
-                        // TODO: drop the copy here
-                        self.data_buff.fill(0);
-                        self.data_buff.clone_from_slice(output.unwrap().as_slice());
+
+                        if let Ok(output) = self.emulator.deliver_request(&mut cmd) {
+                            // TODO: drop the copy here
+                            self.data_buff.fill(0);
+                            self.data_buff.clone_from_slice(output.as_slice());
+                        }
 
                         self.request_completed(TPM_SUCCESS as isize);
                     }
