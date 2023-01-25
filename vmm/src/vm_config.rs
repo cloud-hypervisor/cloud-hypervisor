@@ -127,16 +127,11 @@ pub struct MemoryZoneConfig {
     pub prefault: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub enum HotplugMethod {
+    #[default]
     Acpi,
     VirtioMem,
-}
-
-impl Default for HotplugMethod {
-    fn default() -> Self {
-        HotplugMethod::Acpi
-    }
 }
 
 fn default_memoryconfig_thp() -> bool {
@@ -188,16 +183,11 @@ impl Default for MemoryConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub enum VhostMode {
+    #[default]
     Client,
     Server,
-}
-
-impl Default for VhostMode {
-    fn default() -> Self {
-        VhostMode::Client
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]

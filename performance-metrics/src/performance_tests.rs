@@ -168,7 +168,6 @@ fn parse_boot_time_output(output: &[u8]) -> Result<f64, Error> {
     std::panic::catch_unwind(|| {
         let l: Vec<String> = String::from_utf8_lossy(output)
             .lines()
-            .into_iter()
             .filter(|l| l.contains("Debug I/O port: Kernel code"))
             .map(|l| l.to_string())
             .collect();
