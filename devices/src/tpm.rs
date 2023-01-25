@@ -343,7 +343,6 @@ impl Tpm {
     }
 }
 
-//impl BusDevice for TPM
 impl BusDevice for Tpm {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
         let mut offset: u32 = offset as u32;
@@ -492,7 +491,7 @@ impl BusDevice for Tpm {
                                 e
                             ))
                         });
-                        //TODO: drop the copy here
+                        // TODO: drop the copy here
                         self.data_buff.fill(0);
                         self.data_buff.clone_from_slice(output.unwrap().as_slice());
 
