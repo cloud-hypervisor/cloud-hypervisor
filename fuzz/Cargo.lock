@@ -252,7 +252,6 @@ dependencies = [
  "hypervisor",
  "libc",
  "log",
- "phf",
  "thiserror",
  "tpm",
  "versionize",
@@ -399,9 +398,9 @@ checksum = "201de327520df007757c1f0adce6e827fe8562fbc28bfd9c15571c66ca1f5f79"
 
 [[package]]
 name = "libfuzzer-sys"
-version = "0.4.5"
+version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8fff891139ee62800da71b7fd5b508d570b9ad95e614a53c6f453ca08366038"
+checksum = "beb09950ae85a0a94b27676cccf37da5ff13f27076aa1adbc6545dd0d0e1bd4e"
 dependencies = [
  "arbitrary",
  "cc",
@@ -497,48 +496,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "phf"
-version = "0.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "928c6535de93548188ef63bb7c4036bd415cd8f36ad25af44b9789b2ee72a48c"
-dependencies = [
- "phf_macros",
- "phf_shared",
-]
-
-[[package]]
-name = "phf_generator"
-version = "0.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1181c94580fa345f50f19d738aaa39c0ed30a600d95cb2d3e23f94266f14fbf"
-dependencies = [
- "phf_shared",
- "rand",
-]
-
-[[package]]
-name = "phf_macros"
-version = "0.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92aacdc5f16768709a569e913f7451034034178b05bdc8acda226659a3dccc66"
-dependencies = [
- "phf_generator",
- "phf_shared",
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "phf_shared"
-version = "0.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1fb5f6f826b772a8d4c0394209441e7d37cbbb967ae9c7e0e8134365c9ee676"
-dependencies = [
- "siphasher",
-]
-
-[[package]]
 name = "proc-macro2"
 version = "1.0.50"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -566,21 +523,6 @@ checksum = "8856d8364d252a14d474036ea1358d63c9e6965c8e5c1885c18f73d70bff9c7b"
 dependencies = [
  "proc-macro2",
 ]
-
-[[package]]
-name = "rand"
-version = "0.8.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"
-dependencies = [
- "rand_core",
-]
-
-[[package]]
-name = "rand_core"
-version = "0.6.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 
 [[package]]
 name = "rate_limiter"
@@ -707,12 +649,6 @@ checksum = "e51e73328dc4ac0c7ccbda3a494dfa03df1de2f46018127f60c693f2648455b0"
 dependencies = [
  "libc",
 ]
-
-[[package]]
-name = "siphasher"
-version = "0.3.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7bd3e3206899af3f8b12af284fafc038cc1dc2b41d1b89dd17297221c5d225de"
 
 [[package]]
 name = "smallvec"
