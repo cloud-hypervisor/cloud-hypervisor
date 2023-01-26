@@ -379,6 +379,10 @@ cmd_tests() {
         exported_device="/dev/mshv"
     fi
 
+    if [ ! -d "${exported_device}" ] ; then
+        die "${exported_device} does not exist on the system"
+    fi
+
     set -- '--hypervisor' "$hypervisor" "$@"
 
     ensure_build_dir
