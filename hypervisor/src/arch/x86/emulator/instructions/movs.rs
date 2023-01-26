@@ -15,73 +15,79 @@ use crate::arch::x86::emulator::instructions::*;
 use crate::arch::x86::regs::DF;
 use crate::arch::x86::Exception;
 
+macro_rules! movs {
+    ($bound:ty) => {
+        fn emulate(
+            &self,
+            insn: &Instruction,
+            state: &mut T,
+            platform: &mut dyn PlatformEmulator<CpuState = T>,
+        ) -> Result<(), EmulationError<Exception>> {
+            let mut count: u64 = if insn.has_rep_prefix() {
+                state
+                    .read_reg(Register::ECX)
+                    .map_err(|e| EmulationError::InvalidOperand(anyhow!(e)))?
+            } else {
+                1
+            };
+
+            let mut rsi = state
+                .read_reg(Register::RSI)
+                .map_err(|e| EmulationError::InvalidOperand(anyhow!(e)))?;
+            let mut rdi = state
+                .read_reg(Register::RDI)
+                .map_err(|e| EmulationError::InvalidOperand(anyhow!(e)))?;
+
+            let df = (state.flags() & DF) != 0;
+            let len = std::mem::size_of::<$bound>();
+
+            while count > 0 {
+                let mut memory: [u8; 4] = [0; 4];
+
+                let src = state
+                    .linearize(Register::DS, rsi, false)
+                    .map_err(|e| EmulationError::InvalidOperand(anyhow!(e)))?;
+                let dst = state
+                    .linearize(Register::ES, rdi, true)
+                    .map_err(|e| EmulationError::InvalidOperand(anyhow!(e)))?;
+
+                platform
+                    .read_memory(src, &mut memory[0..len])
+                    .map_err(EmulationError::PlatformEmulationError)?;
+                platform
+                    .write_memory(dst, &memory[0..len])
+                    .map_err(EmulationError::PlatformEmulationError)?;
+
+                if df {
+                    rsi = rsi.wrapping_sub(len as u64);
+                    rdi = rdi.wrapping_sub(len as u64);
+                } else {
+                    rsi = rsi.wrapping_add(len as u64);
+                    rdi = rdi.wrapping_add(len as u64);
+                }
+                count -= 1;
+            }
+
+            state
+                .write_reg(Register::RSI, rsi)
+                .map_err(|e| EmulationError::InvalidOperand(anyhow!(e)))?;
+            state
+                .write_reg(Register::RDI, rdi)
+                .map_err(|e| EmulationError::InvalidOperand(anyhow!(e)))?;
+            if insn.has_rep_prefix() {
+                state
+                    .write_reg(Register::ECX, 0)
+                    .map_err(|e| EmulationError::InvalidOperand(anyhow!(e)))?;
+            }
+
+            Ok(())
+        }
+    };
+}
+
 pub struct Movsd_m32_m32;
 impl<T: CpuStateManager> InstructionHandler<T> for Movsd_m32_m32 {
-    fn emulate(
-        &self,
-        insn: &Instruction,
-        state: &mut T,
-        platform: &mut dyn PlatformEmulator<CpuState = T>,
-    ) -> Result<(), EmulationError<Exception>> {
-        let mut count: u64 = if insn.has_rep_prefix() {
-            state
-                .read_reg(Register::ECX)
-                .map_err(|e| EmulationError::InvalidOperand(anyhow!(e)))?
-        } else {
-            1
-        };
-
-        let mut rsi = state
-            .read_reg(Register::RSI)
-            .map_err(|e| EmulationError::InvalidOperand(anyhow!(e)))?;
-        let mut rdi = state
-            .read_reg(Register::RDI)
-            .map_err(|e| EmulationError::InvalidOperand(anyhow!(e)))?;
-
-        let df = (state.flags() & DF) != 0;
-        let len = std::mem::size_of::<u32>();
-
-        while count > 0 {
-            let mut memory: [u8; 4] = [0; 4];
-
-            let src = state
-                .linearize(Register::DS, rsi, false)
-                .map_err(|e| EmulationError::InvalidOperand(anyhow!(e)))?;
-            let dst = state
-                .linearize(Register::ES, rdi, true)
-                .map_err(|e| EmulationError::InvalidOperand(anyhow!(e)))?;
-
-            platform
-                .read_memory(src, &mut memory[0..len])
-                .map_err(EmulationError::PlatformEmulationError)?;
-            platform
-                .write_memory(dst, &memory[0..len])
-                .map_err(EmulationError::PlatformEmulationError)?;
-
-            if df {
-                rsi = rsi.wrapping_sub(len as u64);
-                rdi = rdi.wrapping_sub(len as u64);
-            } else {
-                rsi = rsi.wrapping_add(len as u64);
-                rdi = rdi.wrapping_add(len as u64);
-            }
-            count -= 1;
-        }
-
-        state
-            .write_reg(Register::RSI, rsi)
-            .map_err(|e| EmulationError::InvalidOperand(anyhow!(e)))?;
-        state
-            .write_reg(Register::RDI, rdi)
-            .map_err(|e| EmulationError::InvalidOperand(anyhow!(e)))?;
-        if insn.has_rep_prefix() {
-            state
-                .write_reg(Register::ECX, 0)
-                .map_err(|e| EmulationError::InvalidOperand(anyhow!(e)))?;
-        }
-
-        Ok(())
-    }
+    movs!(u32);
 }
 
 #[cfg(test)]
