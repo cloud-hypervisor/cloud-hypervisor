@@ -27,7 +27,7 @@ distributions please replace the package manager and package name.
 # Install basic packages needed. For a package list targeting for more
 # functionalities for example the test, please see resources/Dockerfile.
 $ sudo apt-get update
-$ sudo apt install git build-essential m4 bison flex uuid-dev qemu-utils
+$ sudo apt install git build-essential m4 bison flex uuid-dev qemu-utils musl-tools
 # Install rust tool chain
 $ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 # If you want to build statically linked binary please add musl target
