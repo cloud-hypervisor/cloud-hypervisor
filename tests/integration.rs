@@ -6759,7 +6759,6 @@ mod common_parallel {
 
     #[test]
     #[cfg(target_arch = "x86_64")]
-    #[cfg(not(feature = "mshv"))]
     fn test_tpm() {
         let focal = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
