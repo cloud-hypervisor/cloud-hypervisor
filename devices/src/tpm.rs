@@ -13,7 +13,6 @@ use std::sync::{Arc, Barrier};
 use thiserror::Error;
 use tpm::emulator::{BackendCmd, Emulator};
 use tpm::TPM_CRB_BUFFER_MAX;
-use tpm::TPM_SUCCESS;
 use vm_device::BusDevice;
 
 #[derive(Error, Debug)]
@@ -247,9 +246,9 @@ impl Tpm {
         )
     }
 
-    fn request_completed(&mut self, result: isize) {
+    fn request_completed(&mut self, success: bool) {
         self.regs[CRB_CTRL_START as usize] = !CRB_START_INVOKE;
-        if result != 0 {
+        if !success {
             set_reg_field(
                 &mut self.regs,
                 CrbRegister::CtrlSts(CtrlStsFields::TpmSts),
@@ -476,9 +475,9 @@ impl BusDevice for Tpm {
                             input_len: cmp::min(self.data_buff_len, TPM_CRB_BUFFER_MAX),
                         };
 
-                        let _ = self.emulator.deliver_request(&mut cmd);
+                        let status = self.emulator.deliver_request(&mut cmd).is_ok();
 
-                        self.request_completed(TPM_SUCCESS as isize);
+                        self.request_completed(status);
                     }
                 }
                 CRB_LOC_CTRL => {
