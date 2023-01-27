@@ -1,6 +1,9 @@
 def runWorkers = true
 pipeline {
     agent none
+    options {
+        timeout(time: 4, unit: 'HOURS')
+    }
     stages {
         stage('Early checks') {
             agent { node { label 'built-in' } }
