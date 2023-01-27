@@ -527,6 +527,7 @@ impl<'a, T: CpuStateManager> Emulator<'a, T> {
             // MOVS
             (movs, Movsd_m32_m32),
             (movs, Movsw_m16_m16),
+            (movs, Movsb_m8_m8),
             // OR
             (or, Or_rm8_r8)
         );
