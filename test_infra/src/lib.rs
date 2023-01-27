@@ -301,7 +301,7 @@ impl DiskConfig for UbuntuDiskConfig {
             .expect("Expected writing out network-config to succeed");
 
         std::process::Command::new("mkdosfs")
-            .args(["-n", "cidata"])
+            .args(["-n", "CIDATA"])
             .args(["-C", cloudinit_file_path.as_str()])
             .arg("8192")
             .output()
