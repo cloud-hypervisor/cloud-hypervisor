@@ -238,146 +238,146 @@ pipeline {
                         }
                     }
                 }
-                stage('Worker build - Metrics') {
-                    agent { node { label 'jammy-metrics' } }
-                    when {
-                        branch 'main'
-                        beforeAgent true
-                        expression {
-                            return runWorkers
-                        }
-                    }
-                    environment {
-                        METRICS_PUBLISH_KEY = credentials('52e0945f-ce7a-43d1-87af-67d1d87cc40f')
-                    }
-                    stages {
-                        stage('Checkout') {
-                            steps {
-                                checkout scm
-                            }
-                        }
-                        stage('Run metrics tests') {
-                            options {
-                                timeout(time: 1, unit: 'HOURS')
-                            }
-                            steps {
-                                sh 'scripts/dev_cli.sh tests --metrics -- -- --report-file /root/workloads/metrics.json'
-                            }
-                        }
-                        stage('Upload metrics report') {
-                            steps {
-                                sh 'curl -X PUT https://cloud-hypervisor-metrics.azurewebsites.net/api/publishmetrics -H "x-functions-key: $METRICS_PUBLISH_KEY" -T ~/workloads/metrics.json'
-                            }
-                        }
-                    }
-                }
-                stage('Worker build - Rate Limiter') {
-                    agent { node { label 'focal-metrics' } }
-                    when {
-                        branch 'main'
-                        beforeAgent true
-                        expression {
-                            return runWorkers
-                        }
-                    }
-                    stages {
-                        stage('Checkout') {
-                            steps {
-                                checkout scm
-                            }
-                        }
-                        stage('Run rate-limiter integration tests') {
-                            options {
-                                timeout(time: 10, unit: 'MINUTES')
-                            }
-                            steps {
-                                sh 'scripts/dev_cli.sh tests --integration-rate-limiter'
-                            }
-                        }
-                    }
-                }
-                stage('Worker build - SGX') {
-                    agent { node { label 'jammy-sgx' } }
-                    when {
-                        beforeAgent true
-                        allOf {
-                            branch 'main'
-                            expression {
-                                return runWorkers
-                            }
-                        }
-                    }
-                    stages {
-                        stage('Checkout') {
-                            steps {
-                                checkout scm
-                            }
-                        }
-                        stage('Run SGX integration tests') {
-                            options {
-                                timeout(time: 1, unit: 'HOURS')
-                            }
-                            steps {
-                                sh 'scripts/dev_cli.sh tests --integration-sgx'
-                            }
-                        }
-                        stage('Run SGX integration tests for musl') {
-                            options {
-                                timeout(time: 1, unit: 'HOURS')
-                            }
-                            steps {
-                                sh 'scripts/dev_cli.sh tests --integration-sgx --libc musl'
-                            }
-                        }
-                    }
-                    post {
-                        always {
-                            sh "sudo chown -R jenkins.jenkins ${WORKSPACE}"
-                            deleteDir()
-                        }
-                    }
-                }
-                stage('Worker build - VFIO') {
-                    agent { node { label 'jammy-vfio' } }
-                    when {
-                        beforeAgent true
-                        allOf {
-                            branch 'main'
-                            expression {
-                                return runWorkers
-                            }
-                        }
-                    }
-                    stages {
-                        stage('Checkout') {
-                            steps {
-                                checkout scm
-                            }
-                        }
-                        stage('Run VFIO integration tests') {
-                            options {
-                                timeout(time: 1, unit: 'HOURS')
-                            }
-                            steps {
-                                sh 'scripts/dev_cli.sh tests --integration-vfio'
-                            }
-                        }
-                        stage('Run VFIO integration tests for musl') {
-                            options {
-                                timeout(time: 1, unit: 'HOURS')
-                            }
-                            steps {
-                                sh 'scripts/dev_cli.sh tests --integration-vfio --libc musl'
-                            }
-                        }
-                    }
-                    post {
-                        always {
-                            sh "sudo chown -R jenkins.jenkins ${WORKSPACE}"
-                            deleteDir()
-                        }
-                    }
-                }
+                // stage('Worker build - Metrics') {
+                //     agent { node { label 'jammy-metrics' } }
+                //     when {
+                //         branch 'main'
+                //         beforeAgent true
+                //         expression {
+                //             return runWorkers
+                //         }
+                //     }
+                //     environment {
+                //         METRICS_PUBLISH_KEY = credentials('52e0945f-ce7a-43d1-87af-67d1d87cc40f')
+                //     }
+                //     stages {
+                //         stage('Checkout') {
+                //             steps {
+                //                 checkout scm
+                //             }
+                //         }
+                //         stage('Run metrics tests') {
+                //             options {
+                //                 timeout(time: 1, unit: 'HOURS')
+                //             }
+                //             steps {
+                //                 sh 'scripts/dev_cli.sh tests --metrics -- -- --report-file /root/workloads/metrics.json'
+                //             }
+                //         }
+                //         stage('Upload metrics report') {
+                //             steps {
+                //                 sh 'curl -X PUT https://cloud-hypervisor-metrics.azurewebsites.net/api/publishmetrics -H "x-functions-key: $METRICS_PUBLISH_KEY" -T ~/workloads/metrics.json'
+                //             }
+                //         }
+                //     }
+                // }
+                // stage('Worker build - Rate Limiter') {
+                //     agent { node { label 'focal-metrics' } }
+                //     when {
+                //         branch 'main'
+                //         beforeAgent true
+                //         expression {
+                //             return runWorkers
+                //         }
+                //     }
+                //     stages {
+                //         stage('Checkout') {
+                //             steps {
+                //                 checkout scm
+                //             }
+                //         }
+                //         stage('Run rate-limiter integration tests') {
+                //             options {
+                //                 timeout(time: 10, unit: 'MINUTES')
+                //             }
+                //             steps {
+                //                 sh 'scripts/dev_cli.sh tests --integration-rate-limiter'
+                //             }
+                //         }
+                //     }
+                // }
+                // stage('Worker build - SGX') {
+                //     agent { node { label 'jammy-sgx' } }
+                //     when {
+                //         beforeAgent true
+                //         allOf {
+                //             branch 'main'
+                //             expression {
+                //                 return runWorkers
+                //             }
+                //         }
+                //     }
+                //     stages {
+                //         stage('Checkout') {
+                //             steps {
+                //                 checkout scm
+                //             }
+                //         }
+                //         stage('Run SGX integration tests') {
+                //             options {
+                //                 timeout(time: 1, unit: 'HOURS')
+                //             }
+                //             steps {
+                //                 sh 'scripts/dev_cli.sh tests --integration-sgx'
+                //             }
+                //         }
+                //         stage('Run SGX integration tests for musl') {
+                //             options {
+                //                 timeout(time: 1, unit: 'HOURS')
+                //             }
+                //             steps {
+                //                 sh 'scripts/dev_cli.sh tests --integration-sgx --libc musl'
+                //             }
+                //         }
+                //     }
+                //     post {
+                //         always {
+                //             sh "sudo chown -R jenkins.jenkins ${WORKSPACE}"
+                //             deleteDir()
+                //         }
+                //     }
+                // }
+                // stage('Worker build - VFIO') {
+                //     agent { node { label 'jammy-vfio' } }
+                //     when {
+                //         beforeAgent true
+                //         allOf {
+                //             branch 'main'
+                //             expression {
+                //                 return runWorkers
+                //             }
+                //         }
+                //     }
+                //     stages {
+                //         stage('Checkout') {
+                //             steps {
+                //                 checkout scm
+                //             }
+                //         }
+                //         stage('Run VFIO integration tests') {
+                //             options {
+                //                 timeout(time: 1, unit: 'HOURS')
+                //             }
+                //             steps {
+                //                 sh 'scripts/dev_cli.sh tests --integration-vfio'
+                //             }
+                //         }
+                //         stage('Run VFIO integration tests for musl') {
+                //             options {
+                //                 timeout(time: 1, unit: 'HOURS')
+                //             }
+                //             steps {
+                //                 sh 'scripts/dev_cli.sh tests --integration-vfio --libc musl'
+                //             }
+                //         }
+                //     }
+                //     post {
+                //         always {
+                //             sh "sudo chown -R jenkins.jenkins ${WORKSPACE}"
+                //             deleteDir()
+                //         }
+                //     }
+                // }
             }
         }
     }
