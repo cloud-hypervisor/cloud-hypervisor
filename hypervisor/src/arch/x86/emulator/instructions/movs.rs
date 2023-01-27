@@ -95,6 +95,11 @@ impl<T: CpuStateManager> InstructionHandler<T> for Movsw_m16_m16 {
     movs!(u16);
 }
 
+pub struct Movsb_m8_m8;
+impl<T: CpuStateManager> InstructionHandler<T> for Movsb_m8_m8 {
+    movs!(u8);
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(unused_mut)]
@@ -214,5 +219,66 @@ mod tests {
         assert_eq!(0x0, <u16>::from_le_bytes(data));
         vmm.read_memory(0x8 + 8, &mut data).unwrap();
         assert_eq!(0x0, <u16>::from_le_bytes(data));
+    }
+
+    #[test]
+    fn test_movsb_m8_m8() {
+        let ip: u64 = 0x1000;
+        let memory: [u8; 4] = [
+            0x78, 0x56, 0x34, 0x12, // 0x12345678
+        ];
+        let insn = [0x66, 0xa4]; // movsb
+        let regs = vec![(Register::ESI, 0), (Register::EDI, 0x8)];
+        let mut data = [0u8; 1];
+
+        let mut vmm = MockVmm::new(ip, regs, Some((0, &memory)));
+
+        assert!(vmm.emulate_first_insn(0, &insn).is_ok());
+
+        vmm.read_memory(0x8, &mut data).unwrap();
+        assert_eq!(0x78, data[0]);
+        // Only one byte was copied, so the value at 0x9 should be zero
+        vmm.read_memory(0x9, &mut data).unwrap();
+        assert_eq!(0x0, data[0]);
+        // The rest should be default value 0 from MockVmm
+        vmm.read_memory(0x4, &mut data).unwrap();
+        assert_eq!(0x0, data[0]);
+        // the src value is left as is after movb
+        vmm.read_memory(0x0, &mut data).unwrap();
+        assert_eq!(0x78, data[0]);
+    }
+
+    #[test]
+    fn test_rep_movsb_m8_m8() {
+        let ip: u64 = 0x1000;
+        let memory: [u8; 16] = [
+            0x78, 0x56, 0x34, 0x12, // 0x12345678
+            0xbb, 0xaa, 0x00, 0x00, // 0x0000aabb
+            0x00, 0x00, 0x00, 0x00, // 0x00000000
+            0x00, 0x00, 0x00, 0x00, // 0x00000000
+        ];
+        let insn = [0x66, 0xf3, 0xa4]; // rep movsw
+        let regs = vec![(Register::ECX, 6), (Register::ESI, 0), (Register::EDI, 0x8)];
+        let mut data = [0u8; 1];
+
+        let mut vmm = MockVmm::new(ip, regs, Some((0, &memory)));
+
+        assert!(vmm.emulate_first_insn(0, &insn).is_ok());
+
+        vmm.read_memory(0x8, &mut data).unwrap();
+        assert_eq!(0x78, data[0]);
+        vmm.read_memory(0x8 + 1, &mut data).unwrap();
+        assert_eq!(0x56, data[0]);
+        vmm.read_memory(0x8 + 2, &mut data).unwrap();
+        assert_eq!(0x34, data[0]);
+        vmm.read_memory(0x8 + 3, &mut data).unwrap();
+        assert_eq!(0x12, data[0]);
+        vmm.read_memory(0x8 + 4, &mut data).unwrap();
+        assert_eq!(0xbb, data[0]);
+        vmm.read_memory(0x8 + 5, &mut data).unwrap();
+        assert_eq!(0xaa, data[0]);
+        // The rest should be default value 0 from MockVmm
+        vmm.read_memory(0x8 + 6, &mut data).unwrap();
+        assert_eq!(0x0, data[0]);
     }
 }
