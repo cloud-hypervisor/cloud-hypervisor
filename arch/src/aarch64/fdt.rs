@@ -191,9 +191,13 @@ fn create_cpu_nodes(
         let cpu_map_node = fdt.begin_node("cpu-map")?;
 
         // Create device tree nodes with regard of above mapping.
-        for cluster_idx in 0..packages {
-            let cluster_name = format!("cluster{cluster_idx:x}");
-            let cluster_node = fdt.begin_node(&cluster_name)?;
+        for package_idx in 0..packages {
+            let package_name = format!("socket{package_idx:x}");
+            let package_node = fdt.begin_node(&package_name)?;
+
+            // Cluster is the container of cores, and it is mandatory in the CPU topology.
+            // Add a default "cluster0" in each socket/package.
+            let cluster_node = fdt.begin_node("cluster0")?;
 
             for core_idx in 0..cores_per_package {
                 let core_name = format!("core{core_idx:x}");
@@ -202,7 +206,7 @@ fn create_cpu_nodes(
                 for thread_idx in 0..threads_per_core {
                     let thread_name = format!("thread{thread_idx:x}");
                     let thread_node = fdt.begin_node(&thread_name)?;
-                    let cpu_idx = threads_per_core * cores_per_package * cluster_idx
+                    let cpu_idx = threads_per_core * cores_per_package * package_idx
                         + threads_per_core * core_idx
                         + thread_idx;
                     fdt.property_u32("cpu", cpu_idx as u32 + FIRST_VCPU_PHANDLE)?;
@@ -212,6 +216,7 @@ fn create_cpu_nodes(
                 fdt.end_node(core_node)?;
             }
             fdt.end_node(cluster_node)?;
+            fdt.end_node(package_node)?;
         }
         fdt.end_node(cpu_map_node)?;
     } else {
