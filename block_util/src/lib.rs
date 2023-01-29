@@ -201,7 +201,7 @@ pub struct Request {
     pub data_descriptors: SmallVec<[(GuestAddress, u32); 1]>,
     pub status_addr: GuestAddress,
     pub writeback: bool,
-    pub aligned_operations: Vec<AlignedOperation>,
+    pub aligned_operations: SmallVec<[AlignedOperation; 1]>,
     pub start: Instant,
 }
 
@@ -233,7 +233,7 @@ impl Request {
             data_descriptors: SmallVec::with_capacity(1),
             status_addr: GuestAddress(0),
             writeback: true,
-            aligned_operations: Vec::new(),
+            aligned_operations: SmallVec::with_capacity(1),
             start: Instant::now(),
         };
 
