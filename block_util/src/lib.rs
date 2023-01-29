@@ -602,7 +602,7 @@ where
         completion_list: &mut VecDeque<(u64, i32)>,
     ) -> AsyncIoResult<()> {
         // Convert libc::iovec into IoSliceMut
-        let mut slices = Vec::new();
+        let mut slices: SmallVec<[IoSliceMut; 1]> = SmallVec::with_capacity(iovecs.len());
         for iovec in iovecs.iter() {
             // SAFETY: on Linux IoSliceMut wraps around libc::iovec
             slices.push(IoSliceMut::new(unsafe { std::mem::transmute(*iovec) }));
@@ -635,9 +635,9 @@ where
         completion_list: &mut VecDeque<(u64, i32)>,
     ) -> AsyncIoResult<()> {
         // Convert libc::iovec into IoSlice
-        let mut slices = Vec::new();
+        let mut slices: SmallVec<[IoSlice; 1]> = SmallVec::with_capacity(iovecs.len());
         for iovec in iovecs.iter() {
-            // SAFETY: on Linux IoSliceMut wraps around libc::iovec
+            // SAFETY: on Linux IoSlice wraps around libc::iovec
             slices.push(IoSlice::new(unsafe { std::mem::transmute(*iovec) }));
         }
 
