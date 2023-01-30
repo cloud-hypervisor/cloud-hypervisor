@@ -10,7 +10,6 @@ pub mod emulator;
 pub mod socket;
 
 use anyhow::anyhow;
-use byteorder::{BigEndian, ReadBytesExt};
 use std::convert::TryInto;
 use thiserror::Error;
 
@@ -71,7 +70,7 @@ pub trait Ptm {
     // Convert PTM Request to bytes to be sent to tpm
     fn ptm_to_request(&self) -> Vec<u8>;
 
-    // Update PTM from tpm's reponse
+    // Update PTM from tpm's response
     fn update_ptm_with_response(&mut self, buf: &[u8]) -> Result<()>;
 
     // Update tpm result
@@ -90,8 +89,7 @@ pub type PtmResult = u32;
 
 impl Ptm for PtmResult {
     fn ptm_to_request(&self) -> Vec<u8> {
-        let buf: Vec<u8> = Vec::<u8>::new();
-        buf
+        Vec::new()
     }
 
     fn get_member_type(&self) -> MemberType {
@@ -99,13 +97,15 @@ impl Ptm for PtmResult {
     }
 
     fn update_ptm_with_response(&mut self, buf: &[u8]) -> Result<()> {
-        if buf.len() < 4 {
+        let expected_len = 4;
+        let len = buf.len();
+        if len != expected_len {
             return Err(Error::ConvertToPtm(anyhow!(
-                "PtmRes buffer is of insufficient length. Buffer length should be atleast 4"
+                "PtmRes buffer is of incorrect length. Got {len} expected {expected_len}."
             )));
         }
 
-        *self = u32::from_be_bytes(buf[0..4].try_into().unwrap());
+        *self = u32::from_be_bytes(buf[..].try_into().unwrap());
         Ok(())
     }
 
@@ -126,22 +126,22 @@ impl Ptm for PtmCap {
     fn ptm_to_request(&self) -> Vec<u8> {
         // tpm's GetCapability call doesn't need any supporting message
         // return an empty Buffer
-        let buf: Vec<u8> = Vec::<u8>::new();
-        buf
+        Vec::new()
     }
 
     fn get_member_type(&self) -> MemberType {
         MemberType::Cap
     }
 
-    fn update_ptm_with_response(&mut self, mut buf: &[u8]) -> Result<()> {
-        let buf_len = buf.len();
-        if buf_len != 8 {
+    fn update_ptm_with_response(&mut self, buf: &[u8]) -> Result<()> {
+        let expected_len = 8;
+        let len = buf.len();
+        if len != expected_len {
             return Err(Error::ConvertToPtm(anyhow!(
-                "Response for GetCapability cmd is of incorrect length: {:?}. Response buffer should be 8 bytes long",
-            buf_len)));
+                "Response for GetCapability cmd is of incorrect length. Got {len} expected {expected_len}."
+            )));
         }
-        *self = buf.read_u64::<BigEndian>().unwrap();
+        *self = u64::from_be_bytes(buf[..].try_into().unwrap());
         Ok(())
     }
 
@@ -187,8 +187,7 @@ impl Ptm for PtmEst {
     fn ptm_to_request(&self) -> Vec<u8> {
         // tpm's GetTpmEstablished call doesn't need any supporting message
         // return an empty Buffer
-        let buf: Vec<u8> = Vec::<u8>::new();
-        buf
+        Vec::new()
     }
 
     fn get_member_type(&self) -> MemberType {
@@ -196,15 +195,15 @@ impl Ptm for PtmEst {
     }
 
     fn update_ptm_with_response(&mut self, buf: &[u8]) -> Result<()> {
-        if buf.len() < 5 {
+        let expected_len = 8;
+        let len = buf.len();
+        if len != expected_len {
             return Err(Error::ConvertToPtm(anyhow!(
-                "Response for GetTpmEstablished cmd is of incorrect length. Response buffer should be 5 bytes long"
+                "Response for GetTpmEstablished cmd is of incorrect length. Got {len} expected {expected_len}."
             )));
         }
-        let mut res = &buf[0..4];
-        self.set_result_code(res.read_u32::<BigEndian>().unwrap());
-        let bit = &buf[4];
-        self.resp.bit = *bit;
+        self.set_result_code(u32::from_be_bytes(buf[..4].try_into().unwrap()));
+        self.resp.bit = buf[4];
         Ok(())
     }
 
@@ -258,14 +257,15 @@ impl Ptm for PtmInit {
     }
 
     fn update_ptm_with_response(&mut self, buf: &[u8]) -> Result<()> {
-        if buf.len() != 4 {
+        let expected_len = 4;
+        let len = buf.len();
+        if len != expected_len {
             return Err(Error::ConvertToPtm(anyhow!(
-                "Response for Init cmd is of incorrect length. Response buffer should be 4 bytes long"
+                "Response for Init cmd is of incorrect length. Got {len} expected {expected_len}."
             )));
         }
         self.set_member_type(MemberType::Response);
-        let mut res = &buf[0..4];
-        self.set_result_code(res.read_u32::<BigEndian>().unwrap());
+        self.set_result_code(u32::from_be_bytes(buf[..].try_into().unwrap()));
         Ok(())
     }
 
@@ -346,23 +346,24 @@ impl Ptm for PtmSetBufferSize {
     }
 
     fn update_ptm_with_response(&mut self, buf: &[u8]) -> Result<()> {
-        if buf.len() != 16 {
+        let expected_len = 16;
+        let len = buf.len();
+        if len != expected_len {
             return Err(Error::ConvertToPtm(anyhow!(
-                "Response for CmdSetBufferSize cmd is of incorrect length. Response buffer should be 16 bytes long"
+                "Response for CmdSetBufferSize cmd is of incorrect length. Got {len} expected {expected_len}."
             )));
         }
         self.set_member_type(MemberType::Response);
-        let mut res = &buf[0..4];
-        self.set_result_code(res.read_u32::<BigEndian>().unwrap());
+        self.set_result_code(u32::from_be_bytes(buf[0..4].try_into().unwrap()));
 
-        let mut bufsize = &buf[4..8];
-        self.resp.bufsize = bufsize.read_u32::<BigEndian>().unwrap();
+        let bufsize = &buf[4..8];
+        self.resp.bufsize = u32::from_be_bytes(bufsize.try_into().unwrap());
 
-        let mut minsize = &buf[8..12];
-        self.resp.minsize = minsize.read_u32::<BigEndian>().unwrap();
+        let minsize = &buf[8..12];
+        self.resp.minsize = u32::from_be_bytes(minsize.try_into().unwrap());
 
-        let mut maxsize = &buf[12..16];
-        self.resp.maxsize = maxsize.read_u32::<BigEndian>().unwrap();
+        let maxsize = &buf[12..16];
+        self.resp.maxsize = u32::from_be_bytes(maxsize.try_into().unwrap());
 
         Ok(())
     }
