@@ -216,7 +216,16 @@ impl Emulator {
             ))
         })?;
 
-        let mut output = [0_u8; TPM_CRB_BUFFER_MAX];
+        // The largest response is 16 bytes so far.
+        if msg_len_out > 16 {
+            return Err(Error::RunControlCmd(anyhow!(
+                "Response size is too large for Cmd {:02X?}, max 16 wanted {}",
+                cmd,
+                msg_len_out
+            )));
+        }
+
+        let mut output = [0u8; 16];
 
         // Every Control Cmd gets atleast a result code in response. Read it
         let read_size = self.control_socket.read(&mut output).map_err(|e| {
