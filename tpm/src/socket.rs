@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::TPM_CRB_BUFFER_MAX;
 use anyhow::anyhow;
 use std::io::Read;
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -122,23 +121,15 @@ impl SocketDev {
     }
 
     pub fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
-        let newbuf: &mut [u8] = &mut [0; TPM_CRB_BUFFER_MAX];
-
         if self.stream.is_none() {
             return Err(Error::ReadFromSocket(anyhow!(
                 "Stream for tpm socket was not initialized"
             )));
         }
         let mut socket = self.stream.as_ref().unwrap();
-        let size: usize = socket.read(newbuf).map_err(|e| {
+        let size: usize = socket.read(buf).map_err(|e| {
             Error::ReadFromSocket(anyhow!("Failed to read from socket. Error Code {:?}", e))
         })?;
-        if buf.len() < size {
-            return Err(Error::ReadFromSocket(anyhow!(
-                "Input buffer is of insufficient size"
-            )));
-        }
-        buf[0..size].clone_from_slice(&newbuf[0..size]);
         Ok(size)
     }
 }
