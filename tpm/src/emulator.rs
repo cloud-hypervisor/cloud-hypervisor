@@ -208,13 +208,20 @@ impl Emulator {
         buf.extend(converted_req);
         debug!("full Control request {:02X?}", buf);
 
-        let _res = self.control_socket.write(&buf).map_err(|e| {
+        let written = self.control_socket.write(&buf).map_err(|e| {
             Error::RunControlCmd(anyhow!(
                 "Failed while running {:02X?} Control Cmd. Error: {:?}",
                 cmd,
                 e
             ))
         })?;
+
+        if written < buf.len() {
+            return Err(Error::RunControlCmd(anyhow!(
+                "Truncated write while running {:02X?} Control Cmd",
+                cmd,
+            )));
+        }
 
         // The largest response is 16 bytes so far.
         if msg_len_out > 16 {
