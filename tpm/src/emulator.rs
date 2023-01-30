@@ -197,12 +197,12 @@ impl Emulator {
         debug!("Control Cmd to send : {:02X?}", cmd);
 
         let cmd_no = (cmd as u32).to_be_bytes();
-        let n: isize = (mem::size_of::<u32>() + msg_len_in) as isize;
+        let n = mem::size_of::<u32>() + msg_len_in;
 
         let converted_req = msg.ptm_to_request();
         debug!("converted request: {:02X?}", converted_req);
 
-        let mut buf = Vec::<u8>::with_capacity(n as usize);
+        let mut buf = Vec::<u8>::with_capacity(n);
 
         buf.extend(cmd_no);
         buf.extend(converted_req);
