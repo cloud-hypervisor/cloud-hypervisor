@@ -1292,6 +1292,7 @@ dependencies = [
  "byteorder",
  "libc",
  "log",
+ "net_gen",
  "thiserror",
  "vmm-sys-util",
 ]
