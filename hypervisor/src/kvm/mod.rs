@@ -746,6 +746,8 @@ impl vm::Vm for KvmVm {
     ///
     #[cfg(feature = "tdx")]
     fn tdx_init(&self, cpuid: &[CpuIdEntry], max_vcpus: u32) -> vm::Result<()> {
+        const TDX_ATTR_SEPT_VE_DISABLE: usize = 28;
+
         let mut cpuid: Vec<kvm_bindings::kvm_cpuid_entry2> =
             cpuid.iter().map(|e| (*e).into()).collect();
         cpuid.resize(256, kvm_bindings::kvm_cpuid_entry2::default());
@@ -763,7 +765,7 @@ impl vm::Vm for KvmVm {
             cpuid_entries: [kvm_bindings::kvm_cpuid_entry2; 256],
         }
         let data = TdxInitVm {
-            attributes: 0,
+            attributes: 1 << TDX_ATTR_SEPT_VE_DISABLE,
             max_vcpus,
             padding: 0,
             mrconfigid: [0; 6],
