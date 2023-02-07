@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use bitflags::bitflags;
 use std::ffi::CString;
 use std::fs::File;
 use std::io::{IoSlice, Read, Write};
@@ -90,19 +91,11 @@ const fn default_migration_capabilities() -> MigrationCapabilities {
     MigrationCapabilities { pgsize: 4096 }
 }
 
-#[repr(u32)]
-#[derive(Clone, Copy, Debug)]
-#[allow(dead_code)]
-enum DmaMapFlags {
-    Unknown = 0,
-    ReadOnly = 1,
-    WriteOnly = 2,
-    ReadWrite = 3,
-}
-
-impl Default for DmaMapFlags {
-    fn default() -> Self {
-        Self::Unknown
+bitflags! {
+    struct DmaMapFlags: u32 {
+        const READ_ONLY = 1 << 0;
+        const WRITE_ONLY = 1 << 1;
+        const READ_WRITE = Self::READ_ONLY.bits | Self::WRITE_ONLY.bits;
     }
 }
 
@@ -111,7 +104,7 @@ impl Default for DmaMapFlags {
 struct DmaMap {
     header: Header,
     argsz: u32,
-    flags: DmaMapFlags,
+    flags: u32,
     offset: u64,
     address: u64,
     size: u64,
@@ -367,7 +360,7 @@ impl Client {
                 ..Default::default()
             },
             argsz: (size_of::<DmaMap>() - size_of::<Header>()) as u32,
-            flags: DmaMapFlags::ReadWrite,
+            flags: DmaMapFlags::READ_WRITE.bits,
             offset,
             address,
             size,
