@@ -97,6 +97,11 @@ bitflags! {
         const WRITE_ONLY = 1 << 1;
         const READ_WRITE = Self::READ_ONLY.bits | Self::WRITE_ONLY.bits;
     }
+
+    struct DmaUnmapFlags: u32 {
+        const GET_DIRTY_PAGE_INFO = 1 << 1;
+        const UNMAP_ALL = 1 << 2;
+    }
 }
 
 #[repr(C)]
