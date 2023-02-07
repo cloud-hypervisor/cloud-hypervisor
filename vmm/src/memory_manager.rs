@@ -773,7 +773,7 @@ impl MemoryManager {
         }
     }
 
-    fn allocate_address_space(&mut self) -> Result<(), Error> {
+    pub fn allocate_address_space(&mut self) -> Result<(), Error> {
         let mut list = Vec::new();
 
         for (zone_id, memory_zone) in self.memory_zones.iter() {
@@ -1135,10 +1135,17 @@ impl MemoryManager {
             thp: config.thp,
         };
 
-        memory_manager.allocate_address_space()?;
-
         #[cfg(target_arch = "aarch64")]
-        memory_manager.add_uefi_flash()?;
+        {
+            // For Aarch64 we cannot lazily allocate the address space like we
+            // do for x86, because while restoring a VM from snapshot we would
+            // need the address space to be allocated to properly restore VGIC.
+            // And the restore of VGIC happens before we attempt to run the vCPUs
+            // for the first time, thus we need to allocate the address space
+            // beforehand.
+            memory_manager.allocate_address_space()?;
+            memory_manager.add_uefi_flash()?;
+        }
 
         #[cfg(target_arch = "x86_64")]
         if let Some(sgx_epc_config) = sgx_epc_config {
