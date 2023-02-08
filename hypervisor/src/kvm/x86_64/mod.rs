@@ -50,6 +50,9 @@ pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
     if !kvm.check_extension(Cap::ImmediateExit) {
         return Err(KvmError::CapabilityMissing(Cap::ImmediateExit));
     }
+    if !kvm.check_extension(Cap::GetTscKhz) {
+        return Err(KvmError::CapabilityMissing(Cap::GetTscKhz));
+    }
     Ok(())
 }
 #[derive(Clone, Serialize, Deserialize)]
