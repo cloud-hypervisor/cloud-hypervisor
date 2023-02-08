@@ -16,7 +16,7 @@ use crate::GuestMemoryMmap;
 use crate::InitramfsConfig;
 use crate::RegionType;
 use hypervisor::arch::x86::{CpuIdEntry, CPUID_FLAG_VALID_INDEX};
-use hypervisor::HypervisorError;
+use hypervisor::{HypervisorCpuError, HypervisorError};
 use linux_loader::loader::bootparam::boot_params;
 use linux_loader::loader::elf::start_info::{
     hvm_memmap_table_entry, hvm_modlist_entry, hvm_start_info,
@@ -36,6 +36,7 @@ pub mod tdx;
 const TSC_DEADLINE_TIMER_ECX_BIT: u8 = 24; // tsc deadline timer ecx bit.
 const HYPERVISOR_ECX_BIT: u8 = 31; // Hypervisor ecx bit.
 const MTRR_EDX_BIT: u8 = 12; // Hypervisor ecx bit.
+const INVARIANT_TSC_EDX_BIT: u8 = 8; // Invariant TSC bit on 0x8000_0007 EDX
 
 // KVM feature bits
 const KVM_FEATURE_ASYNC_PF_INT_BIT: u8 = 14;
@@ -190,6 +191,9 @@ pub enum Error {
 
     // Error writing EBDA address
     EbdaSetup(vm_memory::GuestMemoryError),
+
+    // Error getting CPU TSC frequency
+    GetTscFrequency(HypervisorCpuError),
 
     /// Error retrieving TDX capabilities through the hypervisor (kvm/mshv) API
     #[cfg(feature = "tdx")]
@@ -748,6 +752,34 @@ pub fn configure_vcpu(
     let mut cpuid = cpuid;
     CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(id));
     CpuidPatch::set_cpuid_reg(&mut cpuid, 0x1f, None, CpuidReg::EDX, u32::from(id));
+
+    // The TSC frequency CPUID leaf should not be included when running with HyperV emulation
+    if !kvm_hyperv {
+        if let Some(tsc_khz) = vcpu.tsc_khz().map_err(Error::GetTscFrequency)? {
+            // Need to check that the TSC doesn't vary with dynamic frequency
+            // SAFETY: cpuid called with valid leaves
+            if unsafe { std::arch::x86_64::__cpuid(0x8000_0007) }.edx
+                & (1u32 << INVARIANT_TSC_EDX_BIT)
+                > 0
+            {
+                CpuidPatch::set_cpuid_reg(
+                    &mut cpuid,
+                    0x4000_0000,
+                    None,
+                    CpuidReg::EAX,
+                    0x4000_0010,
+                );
+                cpuid.retain(|c| c.function != 0x4000_0010);
+                cpuid.push(CpuIdEntry {
+                    function: 0x4000_0010,
+                    eax: tsc_khz,
+                    ebx: 1000000, /* LAPIC resolution of 1ns (freq: 1GHz) is hardcoded in KVM's
+                                   * APIC_BUS_CYCLE_NS */
+                    ..Default::default()
+                });
+            };
+        }
+    }
 
     vcpu.set_cpuid2(&cpuid)
         .map_err(|e| Error::SetSupportedCpusFailed(e.into()))?;

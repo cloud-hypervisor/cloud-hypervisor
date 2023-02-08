@@ -2152,6 +2152,23 @@ impl cpu::Vcpu for KvmVcpu {
             .set_device_attr(&cpu_attr)
             .map_err(|_| cpu::HypervisorCpuError::InitializePmu)
     }
+
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Get the frequency of the TSC if available
+    ///
+    fn tsc_khz(&self) -> cpu::Result<Option<u32>> {
+        match self.fd.get_tsc_khz() {
+            Err(e) => {
+                if e.errno() == libc::EIO {
+                    Ok(None)
+                } else {
+                    Err(cpu::HypervisorCpuError::GetTscKhz(e.into()))
+                }
+            }
+            Ok(v) => Ok(Some(v)),
+        }
+    }
 }
 
 impl KvmVcpu {

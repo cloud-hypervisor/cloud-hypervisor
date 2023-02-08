@@ -341,6 +341,7 @@ fn create_vmm_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, BackendError>
     const KVM_GET_MSR_INDEX_LIST: u64 = 0xc004_ae02;
     const KVM_GET_MSRS: u64 = 0xc008_ae88;
     const KVM_GET_SREGS: u64 = 0x8138_ae83;
+    const KVM_GET_TSC_KHZ: u64 = 0xaea3;
     const KVM_GET_XCRS: u64 = 0x8188_aea6;
     const KVM_GET_XSAVE: u64 = 0x9000_aea4;
     const KVM_KVMCLOCK_CTRL: u64 = 0xaead;
@@ -367,6 +368,7 @@ fn create_vmm_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, BackendError>
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_GET_MSR_INDEX_LIST)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_GET_MSRS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_GET_SREGS)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, KVM_GET_TSC_KHZ)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_GET_XCRS,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_GET_XSAVE,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_KVMCLOCK_CTRL)?],
