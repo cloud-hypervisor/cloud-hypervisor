@@ -9,7 +9,7 @@ default = []
 tdx = []
 
 [dependencies]
-anyhow = "1.0.68"
+anyhow = "1.0.69"
 byteorder = "1.4.3"
 hypervisor = { path = "../hypervisor" }
 libc = "0.2.139"
