@@ -4,7 +4,7 @@ Currently Cloud Hypervisor supports hot plugging of CPUs devices (x86 only), PCI
 
 ## Kernel support
 
-For hotplug on Cloud Hypervisor ACPI GED support is needed. This can either be achieved by turning on `CONFIG_ACPI_REDUCED_HARDWARE_ONLY` 
+For hotplug on Cloud Hypervisor ACPI GED support is needed. This can either be achieved by turning on `CONFIG_ACPI_REDUCED_HARDWARE_ONLY`
 or by using this kernel patch (available in 5.5-rc1 and later): https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/patch/drivers/acpi/Makefile?id=ac36d37e943635fc072e9d4f47e40a48fbcdb3f0
 
 ## CPU Hot Plug
@@ -159,7 +159,7 @@ The same API can also be used to reduce the desired RAM for a VM. It is importan
 
 Extra PCI devices can be added and removed from a running `cloud-hypervisor` instance. This is controlled by making a HTTP API request to the VMM to ask for the additional device to be added, or for the existing device to be removed.
 
-Note: On AArch64 platform, PCI device hotplug can only be achieved using ACPI. Please refer to the [documentation](arm64.md#uefi-booting) for more information.
+Note: On AArch64 platform, PCI device hotplug can only be achieved using ACPI. Please refer to the [documentation](uefi.md#building-uefi-firmware-for-aarch64) for more information.
 
 To use PCI device hotplug start the VM with the HTTP server.
 
