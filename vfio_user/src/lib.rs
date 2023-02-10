@@ -4,13 +4,16 @@
 //
 
 use bitflags::bitflags;
+use libc::{c_void, iovec};
 use std::ffi::CString;
 use std::fs::File;
 use std::io::{IoSlice, Read, Write};
 use std::mem::size_of;
 use std::num::Wrapping;
-use std::os::unix::net::UnixStream;
-use std::os::unix::prelude::RawFd;
+use std::os::unix::{
+    io::{FromRawFd, RawFd},
+    net::{UnixListener, UnixStream},
+};
 use std::path::Path;
 use thiserror::Error;
 use vfio_bindings::bindings::vfio::*;
@@ -26,7 +29,7 @@ extern crate log;
 #[allow(dead_code)]
 #[repr(u16)]
 #[derive(Clone, Copy, Debug, Default)]
-enum Command {
+pub enum Command {
     #[default]
     Unknown = 0,
     Version = 1,
@@ -92,13 +95,13 @@ const fn default_migration_capabilities() -> MigrationCapabilities {
 }
 
 bitflags! {
-    struct DmaMapFlags: u32 {
+    pub struct DmaMapFlags: u32 {
         const READ_ONLY = 1 << 0;
         const WRITE_ONLY = 1 << 1;
         const READ_WRITE = Self::READ_ONLY.bits | Self::WRITE_ONLY.bits;
     }
 
-    struct DmaUnmapFlags: u32 {
+    pub struct DmaUnmapFlags: u32 {
         const GET_DIRTY_PAGE_INFO = 1 << 1;
         const UNMAP_ALL = 1 << 2;
     }
@@ -263,6 +266,12 @@ pub enum Error {
     ReceiveWithFd(#[source] vmm_sys_util::errno::Error),
     #[error("Not a PCI device")]
     NotPciDevice,
+    #[error("Error binding to socket: {0}")]
+    SocketBind(#[source] std::io::Error),
+    #[error("Error accepting connection: {0}")]
+    SocketAccept(#[source] std::io::Error),
+    #[error("Unsupported command: {0:?}")]
+    UnsupportedCommand(Command),
 }
 
 impl Client {
@@ -780,5 +789,478 @@ impl Client {
         self.stream
             .shutdown(std::net::Shutdown::Both)
             .map_err(Error::StreamShutdown)
+    }
+}
+
+pub trait ServerBackend {
+    fn region_read(
+        &mut self,
+        _region: u32,
+        _offset: u64,
+        _data: &mut [u8],
+    ) -> Result<(), std::io::Error>;
+    fn region_write(
+        &mut self,
+        _region: u32,
+        _offset: u64,
+        _data: &[u8],
+    ) -> Result<(), std::io::Error>;
+    fn dma_map(
+        &mut self,
+        _flags: DmaMapFlags,
+        _offset: u64,
+        _address: u64,
+        _size: u64,
+        _fd: Option<&File>,
+    ) -> Result<(), std::io::Error>;
+    fn dma_unmap(
+        &mut self,
+        _flags: DmaUnmapFlags,
+        _address: u64,
+        _size: u64,
+    ) -> Result<(), std::io::Error>;
+    fn reset(&mut self) -> Result<(), std::io::Error>;
+    fn set_irqs(
+        &mut self,
+        _index: u32,
+        _flags: u32,
+        _start: u32,
+        _count: u32,
+        _fds: Vec<File>,
+    ) -> Result<(), std::io::Error>;
+}
+
+pub struct Server {
+    listener: UnixListener,
+    resettable: bool,
+    irqs: Vec<IrqInfo>,
+    regions: Vec<vfio_region_info>,
+}
+
+impl Server {
+    pub fn new(
+        path: &Path,
+        resettable: bool,
+        irqs: Vec<IrqInfo>,
+        regions: Vec<vfio_region_info>,
+    ) -> Result<Server, Error> {
+        let listener = UnixListener::bind(path).map_err(Error::SocketBind)?;
+
+        Ok(Server {
+            listener,
+            resettable,
+            irqs,
+            regions,
+        })
+    }
+
+    pub fn run(&self, backend: &mut dyn ServerBackend) -> Result<(), Error> {
+        let (mut stream, _) = self.listener.accept().map_err(Error::SocketAccept)?;
+
+        loop {
+            let mut header = Header::default();
+
+            // The maximum number of FDs that can be sent is 16 so that is
+            // also the maximum that can be received.
+            let mut fds = vec![0; 16];
+            let mut iovecs = vec![iovec {
+                iov_base: header.as_mut_slice().as_mut_ptr() as *mut c_void,
+                iov_len: header.as_mut_slice().len(),
+            }];
+            // SAFETY: Safe as the iovect is correctly initialised and fds is big enough
+            let (bytes, fds_received) = unsafe {
+                stream
+                    .recv_with_fds(&mut iovecs, &mut fds)
+                    .map_err(Error::ReceiveWithFd)?
+            };
+
+            // Other end closed connection
+            if bytes == 0 {
+                info!("Connection closed");
+                break;
+            }
+
+            fds.resize(fds_received, 0);
+
+            let fds: Vec<File> = fds
+                .iter()
+                // SAFETY: Safe as we have only valid FDs in the vector now
+                .map(|fd| unsafe { File::from_raw_fd(*fd) })
+                .collect();
+
+            match header.command {
+                Command::Unknown
+                | Command::GetRegionIoFds
+                | Command::DmaRead
+                | Command::DmaWrite
+                | Command::UserDirtyPages => {
+                    return Err(Error::UnsupportedCommand(header.command));
+                }
+                Command::Version => {
+                    let mut client_version = Version {
+                        header,
+                        ..Default::default()
+                    };
+                    stream
+                        .read_exact(&mut client_version.as_mut_slice()[size_of::<Header>()..])
+                        .map_err(Error::StreamRead)?;
+
+                    let mut raw_version_data = Vec::new();
+                    raw_version_data
+                        .resize(header.message_size as usize - size_of::<Version>(), 0u8);
+                    stream
+                        .read_exact(&mut raw_version_data)
+                        .map_err(Error::StreamRead)?;
+                    let version_data = CString::from_vec_with_nul(raw_version_data)
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned();
+                    let client_capabilities: Capabilities = serde_json::from_str(&version_data)
+                        .map_err(Error::DeserializeCapabilites)?;
+
+                    info!(
+                        "Received client version: major = {} minor = {} capabilities = {:?}",
+                        client_version.major, client_version.minor, client_capabilities
+                    );
+
+                    let version = Version {
+                        header: Header {
+                            message_id: client_version.header.message_id,
+                            command: Command::Version,
+                            flags: HeaderFlags::Reply as u32,
+                            message_size: (size_of::<Version>() + version_data.len() + 1) as u32,
+                            ..Default::default()
+                        },
+                        major: 0,
+                        minor: 1,
+                    };
+
+                    let server_capabilities = Capabilities::default();
+                    let version_data = serde_json::to_string(&server_capabilities)
+                        .map_err(Error::SerializeCapabilites)?;
+                    let version_data = CString::new(version_data.as_bytes()).unwrap();
+
+                    let bufs = vec![
+                        IoSlice::new(version.as_slice()),
+                        IoSlice::new(version_data.as_bytes_with_nul()),
+                    ];
+
+                    // TODO: Use write_all_vectored() when ready
+                    let _ = stream.write_vectored(&bufs).map_err(Error::StreamWrite)?;
+
+                    info!(
+                        "Sent server version: major = {} minor = {} capabilities = {:?}",
+                        version.major, version.minor, server_capabilities
+                    );
+                }
+                Command::DmaMap => {
+                    let mut cmd = DmaMap {
+                        header,
+                        ..Default::default()
+                    };
+                    stream
+                        .read_exact(&mut cmd.as_mut_slice()[size_of::<Header>()..])
+                        .map_err(Error::StreamRead)?;
+
+                    let reply = match backend.dma_map(
+                        DmaMapFlags::from_bits_truncate(cmd.flags),
+                        cmd.offset,
+                        cmd.address,
+                        cmd.size,
+                        Some(&fds[0]),
+                    ) {
+                        Ok(()) => Header {
+                            message_id: cmd.header.message_id,
+                            command: Command::DmaMap,
+                            flags: HeaderFlags::Reply as u32,
+                            message_size: size_of::<Header>() as u32,
+                            ..Default::default()
+                        },
+                        Err(e) => Header {
+                            message_id: cmd.header.message_id,
+                            command: Command::DmaMap,
+                            flags: HeaderFlags::Error as u32,
+                            message_size: size_of::<Header>() as u32,
+                            error: e.raw_os_error().unwrap_or_default() as u32,
+                        },
+                    };
+
+                    stream
+                        .write_all(reply.as_slice())
+                        .map_err(Error::StreamWrite)?;
+                }
+                Command::DmaUnmap => {
+                    let mut cmd = DmaUnmap {
+                        header,
+                        ..Default::default()
+                    };
+                    stream
+                        .read_exact(&mut cmd.as_mut_slice()[size_of::<Header>()..])
+                        .map_err(Error::StreamRead)?;
+
+                    match backend.dma_unmap(
+                        DmaUnmapFlags::from_bits_truncate(cmd.flags),
+                        cmd.address,
+                        cmd.size,
+                    ) {
+                        Ok(()) => {
+                            let reply = DmaUnmap {
+                                header: Header {
+                                    message_id: cmd.header.message_id,
+                                    command: Command::DmaUnmap,
+                                    flags: HeaderFlags::Reply as u32,
+                                    message_size: size_of::<Header>() as u32,
+                                    ..Default::default()
+                                },
+                                argsz: cmd.argsz,
+                                flags: cmd.flags,
+                                address: cmd.address,
+                                size: cmd.size,
+                            };
+                            stream
+                                .write_all(reply.as_slice())
+                                .map_err(Error::StreamWrite)?;
+                        }
+                        Err(e) => {
+                            let reply = Header {
+                                message_id: cmd.header.message_id,
+                                command: Command::DmaUnmap,
+                                flags: HeaderFlags::Error as u32,
+                                message_size: size_of::<Header>() as u32,
+                                error: e.raw_os_error().unwrap_or_default() as u32,
+                            };
+                            stream
+                                .write_all(reply.as_slice())
+                                .map_err(Error::StreamWrite)?;
+                        }
+                    };
+                }
+                Command::DeviceGetInfo => {
+                    let mut cmd = DeviceGetInfo {
+                        header,
+                        ..Default::default()
+                    };
+                    stream
+                        .read_exact(&mut cmd.as_mut_slice()[size_of::<Header>()..])
+                        .map_err(Error::StreamRead)?;
+
+                    let reply = DeviceGetInfo {
+                        header: Header {
+                            message_id: cmd.header.message_id,
+                            command: Command::DeviceGetInfo,
+                            flags: HeaderFlags::Reply as u32,
+                            message_size: size_of::<DeviceGetInfo>() as u32,
+                            ..Default::default()
+                        },
+                        argsz: size_of::<DeviceGetInfo>() as u32,
+                        flags: VFIO_DEVICE_FLAGS_PCI
+                            | if self.resettable {
+                                VFIO_DEVICE_FLAGS_RESET
+                            } else {
+                                0
+                            },
+                        num_regions: self.regions.len() as u32,
+                        num_irqs: self.irqs.len() as u32,
+                    };
+                    stream
+                        .write_all(reply.as_slice())
+                        .map_err(Error::StreamWrite)?;
+                }
+                Command::DeviceGetRegionInfo => {
+                    let mut cmd = DeviceGetRegionInfo {
+                        header,
+                        ..Default::default()
+                    };
+                    stream
+                        .read_exact(&mut cmd.as_mut_slice()[size_of::<Header>()..])
+                        .map_err(Error::StreamRead)?;
+
+                    let reply = DeviceGetRegionInfo {
+                        header: Header {
+                            message_id: cmd.header.message_id,
+                            command: Command::DeviceGetRegionInfo,
+                            flags: HeaderFlags::Reply as u32,
+                            message_size: size_of::<DeviceGetRegionInfo>() as u32,
+                            ..Default::default()
+                        },
+                        region_info: self.regions[cmd.region_info.index as usize],
+                    };
+                    stream
+                        .write_all(reply.as_slice())
+                        .map_err(Error::StreamWrite)?;
+                }
+                Command::GetIrqInfo => {
+                    let mut cmd = GetIrqInfo {
+                        header,
+                        ..Default::default()
+                    };
+                    stream
+                        .read_exact(&mut cmd.as_mut_slice()[size_of::<Header>()..])
+                        .map_err(Error::StreamRead)?;
+
+                    let irq = &self.irqs[cmd.index as usize];
+
+                    let reply = GetIrqInfo {
+                        header: Header {
+                            message_id: cmd.header.message_id,
+                            command: Command::GetIrqInfo,
+                            flags: HeaderFlags::Reply as u32,
+                            message_size: size_of::<GetIrqInfo>() as u32,
+                            ..Default::default()
+                        },
+                        argsz: (size_of::<GetIrqInfo>() - size_of::<Header>()) as u32,
+                        index: irq.index,
+                        flags: irq.flags,
+                        count: irq.count,
+                    };
+                    stream
+                        .write_all(reply.as_slice())
+                        .map_err(Error::StreamWrite)?;
+                }
+                Command::SetIrqs => {
+                    let mut cmd = SetIrqs {
+                        header,
+                        ..Default::default()
+                    };
+                    stream
+                        .read_exact(&mut cmd.as_mut_slice()[size_of::<Header>()..])
+                        .map_err(Error::StreamRead)?;
+
+                    let reply =
+                        match backend.set_irqs(cmd.index, cmd.flags, cmd.start, cmd.count, fds) {
+                            Ok(()) => Header {
+                                message_id: cmd.header.message_id,
+                                command: Command::SetIrqs,
+                                flags: HeaderFlags::Reply as u32,
+                                message_size: size_of::<Header>() as u32,
+                                ..Default::default()
+                            },
+                            Err(e) => Header {
+                                message_id: cmd.header.message_id,
+                                command: Command::SetIrqs,
+                                flags: HeaderFlags::Error as u32,
+                                message_size: size_of::<Header>() as u32,
+                                error: e.raw_os_error().unwrap_or_default() as u32,
+                            },
+                        };
+                    stream
+                        .write_all(reply.as_slice())
+                        .map_err(Error::StreamWrite)?;
+                }
+                Command::RegionRead => {
+                    let mut cmd = RegionAccess {
+                        header,
+                        ..Default::default()
+                    };
+                    stream
+                        .read_exact(&mut cmd.as_mut_slice()[size_of::<Header>()..])
+                        .map_err(Error::StreamRead)?;
+
+                    let (region, offset, count) = (cmd.region, cmd.offset, cmd.count);
+
+                    let mut data = vec![0u8; count as usize];
+                    match backend.region_read(region, offset, &mut data) {
+                        Ok(()) => {
+                            let reply = RegionAccess {
+                                header: Header {
+                                    message_id: cmd.header.message_id,
+                                    command: Command::RegionRead,
+                                    flags: HeaderFlags::Reply as u32,
+                                    message_size: size_of::<RegionAccess>() as u32,
+                                    ..Default::default()
+                                },
+                                region,
+                                offset,
+                                count,
+                            };
+                            stream
+                                .write_all(reply.as_slice())
+                                .map_err(Error::StreamWrite)?;
+                            stream.write_all(&data).map_err(Error::StreamWrite)?;
+                        }
+                        Err(e) => {
+                            let reply = Header {
+                                message_id: cmd.header.message_id,
+                                command: Command::RegionRead,
+                                flags: HeaderFlags::Error as u32,
+                                message_size: size_of::<Header>() as u32,
+                                error: e.raw_os_error().unwrap_or_default() as u32,
+                            };
+                            stream
+                                .write_all(reply.as_slice())
+                                .map_err(Error::StreamWrite)?;
+                        }
+                    }
+                }
+                Command::RegionWrite => {
+                    let mut cmd = RegionAccess {
+                        header,
+                        ..Default::default()
+                    };
+                    stream
+                        .read_exact(&mut cmd.as_mut_slice()[size_of::<Header>()..])
+                        .map_err(Error::StreamRead)?;
+
+                    let (region, offset, count) = (cmd.region, cmd.offset, cmd.count);
+
+                    let mut data = vec![0u8; count as usize];
+                    stream.read_exact(&mut data).map_err(Error::StreamRead)?;
+                    match backend.region_write(region, offset, &data) {
+                        Ok(()) => {
+                            let reply = RegionAccess {
+                                header: Header {
+                                    message_id: cmd.header.message_id,
+                                    command: Command::RegionWrite,
+                                    flags: HeaderFlags::Reply as u32,
+                                    message_size: size_of::<RegionAccess>() as u32,
+                                    ..Default::default()
+                                },
+                                region,
+                                offset,
+                                count,
+                            };
+                            stream
+                                .write_all(reply.as_slice())
+                                .map_err(Error::StreamWrite)?;
+                        }
+                        Err(e) => {
+                            let reply = Header {
+                                message_id: cmd.header.message_id,
+                                command: Command::RegionWrite,
+                                flags: HeaderFlags::Error as u32,
+                                message_size: size_of::<Header>() as u32,
+                                error: e.raw_os_error().unwrap_or_default() as u32,
+                            };
+                            stream
+                                .write_all(reply.as_slice())
+                                .map_err(Error::StreamWrite)?;
+                        }
+                    }
+                }
+                Command::DeviceReset => {
+                    let reply = match backend.reset() {
+                        Ok(()) => Header {
+                            message_id: header.message_id,
+                            command: Command::DeviceReset,
+                            flags: HeaderFlags::Reply as u32,
+                            message_size: size_of::<Header>() as u32,
+                            ..Default::default()
+                        },
+                        Err(e) => Header {
+                            message_id: header.message_id,
+                            command: Command::DeviceReset,
+                            flags: HeaderFlags::Error as u32,
+                            message_size: size_of::<Header>() as u32,
+                            error: e.raw_os_error().unwrap_or_default() as u32,
+                        },
+                    };
+                    stream
+                        .write_all(reply.as_slice())
+                        .map_err(Error::StreamWrite)?;
+                }
+            }
+        }
+
+        Ok(())
     }
 }
