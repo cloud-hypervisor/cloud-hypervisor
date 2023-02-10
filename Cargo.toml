@@ -73,7 +73,6 @@ tracing = ["vmm/tracing", "tracer/tracing"]
 
 [workspace]
 members = [
-    "acpi_tables",
     "api_client",
     "arch",
     "block_util",

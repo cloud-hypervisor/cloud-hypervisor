@@ -5,7 +5,7 @@ authors = ["The Chromium OS Authors"]
 edition = "2021"
 
 [dependencies]
-acpi_tables = { path = "../acpi_tables" }
+acpi_tables = { git = "https://github.com/rust-vmm/acpi_tables", branch = "main"  }
 anyhow = "1.0.69"
 arch = { path = "../arch" }
 bitflags = "1.3.2"
