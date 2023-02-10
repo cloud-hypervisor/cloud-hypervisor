@@ -1385,8 +1385,10 @@ name = "vfio_user"
 version = "0.1.0"
 dependencies = [
  "bitflags",
+ "env_logger",
  "libc",
  "log",
+ "pci",
  "serde",
  "serde_derive",
  "serde_json",

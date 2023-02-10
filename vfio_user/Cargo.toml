@@ -4,6 +4,9 @@ version = "0.1.0"
 authors = ["The Cloud Hypervisor Authors"]
 edition = "2021"
 
+[[example]]
+name = "gpio"
+
 [dependencies]
 bitflags = "1.3.2"
 libc = "0.2.139"
@@ -15,3 +18,7 @@ thiserror = "1.0.38"
 vfio-bindings = { git = "https://github.com/rust-vmm/vfio", branch = "main", features = ["fam-wrappers"] }
 vm-memory = { version = "0.10.0", features = ["backend-mmap", "backend-atomic"] }
 vmm-sys-util = "0.11.0"
+
+[dev-dependencies]
+env_logger = "0.10.0"
+pci = { path = "../pci" }
