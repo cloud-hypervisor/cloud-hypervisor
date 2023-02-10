@@ -11,7 +11,7 @@ test_features=""
 if [ "$hypervisor" = "mshv" ] ;  then
     test_features="--no-default-features --features mshv"
 fi
-WIN_IMAGE_FILE="/root/workloads/windows-server-2019.raw"
+WIN_IMAGE_FILE="/root/workloads/windows-server-2022-amd64-2.raw"
 
 WORKLOADS_DIR="/root/workloads"
 OVMF_FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/edk2/releases/latest | grep "browser_download_url" | grep -o 'https://.*[^ "]')
