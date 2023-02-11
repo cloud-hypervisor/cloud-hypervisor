@@ -9,7 +9,7 @@ build = "../build.rs"
 argh = "0.1.9"
 dirs = "4.0.0"
 serde = { version = "1.0.151", features = ["rc", "derive"] }
-serde_json = "1.0.89"
+serde_json = "1.0.93"
 test_infra = { path = "../test_infra" }
 thiserror = "1.0.38"
 wait-timeout = "0.2.0"
