@@ -817,6 +817,10 @@ impl Vmm {
             self.vm_shutdown()?;
         }
 
+        if let Some(ref mut vm_config) = self.vm_config {
+            vm_config.lock().unwrap().release();
+        }
+
         self.vm_config = None;
 
         event!("vm", "deleted");

@@ -1132,6 +1132,18 @@ impl NetConfig {
 
         Ok(())
     }
+
+    // Release resource held by NetConfig.
+    pub fn release(&mut self) {
+        // 'fds' is donate from other process,
+        // close fds before drop VmConfig.
+        if let Some(mut fds) = self.fds.take() {
+            for fd in fds.drain(..) {
+                // SAFETY: closing donated FD, safe.
+                unsafe { libc::close(fd) };
+            }
+        }
+    }
 }
 
 impl RngConfig {
@@ -2101,6 +2113,16 @@ impl VmConfig {
     #[cfg(feature = "tdx")]
     pub fn is_tdx_enabled(&self) -> bool {
         self.platform.as_ref().map(|p| p.tdx).unwrap_or(false)
+    }
+
+    // Release resource held by VmConfig.
+    pub fn release(&mut self) {
+        if let Some(net_list_cfg) = &mut self.net {
+            for net_cfg in net_list_cfg.iter_mut() {
+                net_cfg.release();
+            }
+            self.net = None;
+        }
     }
 }
 
