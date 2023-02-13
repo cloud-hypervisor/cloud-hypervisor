@@ -1150,6 +1150,17 @@ impl Clone for NetConfig {
     }
 }
 
+impl Drop for NetConfig {
+    fn drop(&mut self) {
+        if let Some(mut fds) = self.fds.take() {
+            for fd in fds.drain(..) {
+                // SAFETY: Safe as the fd was given to the config by the API
+                unsafe { libc::close(fd) };
+            }
+        }
+    }
+}
+
 impl RngConfig {
     pub fn parse(rng: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -2343,6 +2354,10 @@ mod tests {
             NetConfig {
                 mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
                 host_mac: Some(MacAddr::parse_str("12:34:de:ad:be:ef").unwrap()),
+                fds: None,
+                id: None,
+                tap: None,
+                vhost_socket: None,
                 ..Default::default()
             }
         );
@@ -2353,6 +2368,9 @@ mod tests {
                 mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
                 host_mac: Some(MacAddr::parse_str("12:34:de:ad:be:ef").unwrap()),
                 id: Some("mynet0".to_owned()),
+                fds: None,
+                tap: None,
+                vhost_socket: None,
                 ..Default::default()
             }
         );
@@ -2367,6 +2385,9 @@ mod tests {
                 tap: Some("tap0".to_owned()),
                 ip: "192.168.100.1".parse().unwrap(),
                 mask: "255.255.255.128".parse().unwrap(),
+                fds: None,
+                id: None,
+                vhost_socket: None,
                 ..Default::default()
             }
         );
@@ -2380,6 +2401,9 @@ mod tests {
                 host_mac: Some(MacAddr::parse_str("12:34:de:ad:be:ef").unwrap()),
                 vhost_user: true,
                 vhost_socket: Some("/tmp/sock".to_owned()),
+                fds: None,
+                id: None,
+                tap: None,
                 ..Default::default()
             }
         );
@@ -2392,6 +2416,10 @@ mod tests {
                 num_queues: 4,
                 queue_size: 1024,
                 iommu: true,
+                fds: None,
+                id: None,
+                tap: None,
+                vhost_socket: None,
                 ..Default::default()
             }
         );
@@ -2402,6 +2430,9 @@ mod tests {
                 mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
                 fds: Some(vec![3, 7]),
                 num_queues: 4,
+                id: None,
+                tap: None,
+                vhost_socket: None,
                 ..Default::default()
             }
         );
@@ -2824,6 +2855,10 @@ mod tests {
         let mut invalid_config = valid_config.clone();
         invalid_config.net = Some(vec![NetConfig {
             vhost_user: true,
+            fds: None,
+            id: None,
+            tap: None,
+            vhost_socket: None,
             ..Default::default()
         }]);
         assert_eq!(
@@ -2835,6 +2870,9 @@ mod tests {
         still_valid_config.net = Some(vec![NetConfig {
             vhost_user: true,
             vhost_socket: Some("/path/to/sock".to_owned()),
+            fds: None,
+            id: None,
+            tap: None,
             ..Default::default()
         }]);
         still_valid_config.memory.shared = true;
@@ -2843,6 +2881,9 @@ mod tests {
         let mut invalid_config = valid_config.clone();
         invalid_config.net = Some(vec![NetConfig {
             fds: Some(vec![0]),
+            id: None,
+            tap: None,
+            vhost_socket: None,
             ..Default::default()
         }]);
         assert_eq!(
@@ -2853,6 +2894,10 @@ mod tests {
         let mut invalid_config = valid_config.clone();
         invalid_config.net = Some(vec![NetConfig {
             offload_csum: false,
+            fds: None,
+            id: None,
+            tap: None,
+            vhost_socket: None,
             ..Default::default()
         }]);
         assert_eq!(
@@ -2956,6 +3001,10 @@ mod tests {
         still_valid_config.net = Some(vec![NetConfig {
             iommu: true,
             pci_segment: 1,
+            fds: None,
+            id: None,
+            tap: None,
+            vhost_socket: None,
             ..Default::default()
         }]);
         assert!(still_valid_config.validate().is_ok());
@@ -3024,6 +3073,10 @@ mod tests {
         invalid_config.net = Some(vec![NetConfig {
             iommu: false,
             pci_segment: 1,
+            fds: None,
+            id: None,
+            tap: None,
+            vhost_socket: None,
             ..Default::default()
         }]);
         assert_eq!(
