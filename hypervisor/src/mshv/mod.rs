@@ -270,7 +270,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
     ///
     /// Get the supported CpuID
     ///
-    fn get_cpuid(&self) -> hypervisor::Result<Vec<CpuIdEntry>> {
+    fn get_supported_cpuid(&self) -> hypervisor::Result<Vec<CpuIdEntry>> {
         Ok(Vec::new())
     }
 }

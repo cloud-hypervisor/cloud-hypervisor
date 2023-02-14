@@ -609,7 +609,9 @@ pub fn generate_common_cpuid(
     ];
 
     // Supported CPUID
-    let mut cpuid = hypervisor.get_cpuid().map_err(Error::CpuidGetSupported)?;
+    let mut cpuid = hypervisor
+        .get_supported_cpuid()
+        .map_err(Error::CpuidGetSupported)?;
 
     CpuidPatch::patch_cpuid(&mut cpuid, cpuid_patches);
 
