@@ -108,7 +108,7 @@ pub trait Hypervisor: Send + Sync {
     ///
     /// Get the supported CpuID
     ///
-    fn get_cpuid(&self) -> Result<Vec<CpuIdEntry>>;
+    fn get_supported_cpuid(&self) -> Result<Vec<CpuIdEntry>>;
     ///
     /// Check particular extensions if any
     ///
