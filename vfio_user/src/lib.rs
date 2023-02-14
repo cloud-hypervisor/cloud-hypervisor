@@ -272,6 +272,8 @@ pub enum Error {
     SocketAccept(#[source] std::io::Error),
     #[error("Unsupported command: {0:?}")]
     UnsupportedCommand(Command),
+    #[error("Unsupported feature")]
+    UnsupportedFeature,
     #[error("Error from backend: {0:?}")]
     Backend(#[source] std::io::Error),
 }
@@ -1083,6 +1085,10 @@ impl Server {
                 stream
                     .read_exact(&mut cmd.as_mut_slice()[size_of::<Header>()..])
                     .map_err(Error::StreamRead)?;
+
+                if cmd.flags & VFIO_IRQ_SET_DATA_BOOL > 0 {
+                    return Err(Error::UnsupportedFeature);
+                }
 
                 backend
                     .set_irqs(cmd.index, cmd.flags, cmd.start, cmd.count, fds)
