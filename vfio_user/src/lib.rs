@@ -872,6 +872,7 @@ impl Server {
                 return Err(Error::UnsupportedCommand(header.command));
             }
             Command::Version => {
+                // TODO: Make version/capabilities configurable
                 let mut client_version = Version {
                     header,
                     ..Default::default()
@@ -1009,6 +1010,7 @@ impl Server {
                         ..Default::default()
                     },
                     argsz: size_of::<DeviceGetInfo>() as u32,
+                    // TODO: Consider non-PCI devices
                     flags: VFIO_DEVICE_FLAGS_PCI
                         | if self.resettable {
                             VFIO_DEVICE_FLAGS_RESET
@@ -1030,7 +1032,7 @@ impl Server {
                 stream
                     .read_exact(&mut cmd.as_mut_slice()[size_of::<Header>()..])
                     .map_err(Error::StreamRead)?;
-
+                // TODO: Need to handle region capabilities e.g. sparse regions
                 let reply = DeviceGetRegionInfo {
                     header: Header {
                         message_id: cmd.header.message_id,
