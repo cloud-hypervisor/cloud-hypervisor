@@ -2351,6 +2351,17 @@ mod tests {
         Ok(())
     }
 
+    fn memfd_create(name: &std::ffi::CStr, flags: u32) -> std::result::Result<i32, std::io::Error> {
+        // SAFETY: FFI call with correct arguments
+        let res = unsafe { libc::syscall(libc::SYS_memfd_create, name.as_ptr(), flags) };
+
+        if res < 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(res as i32)
+        }
+    }
+
     #[test]
     fn test_net_parsing() -> Result<()> {
         // mac address is random
@@ -2429,17 +2440,23 @@ mod tests {
             }
         );
 
+        let fd1 =
+            memfd_create(&std::ffi::CString::new("test_net_parsing_fd1").unwrap(), 0).unwrap();
+        let fd2 =
+            memfd_create(&std::ffi::CString::new("test_net_parsing_fd2").unwrap(), 0).unwrap();
+
         assert_eq!(
-            NetConfig::parse("mac=de:ad:be:ef:12:34,fd=[3,7],num_queues=4")?,
-            NetConfig {
-                mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
-                fds: Some(vec![3, 7]),
-                num_queues: 4,
-                id: None,
-                tap: None,
-                vhost_socket: None,
-                ..Default::default()
-            }
+            &format!(
+                "{:?}",
+                NetConfig::parse(&format!(
+                    "mac=de:ad:be:ef:12:34,fd=[{fd1},{fd2}],num_queues=4"
+                ))?
+            ),
+            &format!("NetConfig {{ tap: None, ip: 192.168.249.1, mask: 255.255.255.0, \
+                mac: MacAddr {{ bytes: [222, 173, 190, 239, 18, 52] }}, host_mac: None, mtu: None, \
+                iommu: false, num_queues: 4, queue_size: 256, vhost_user: false, vhost_socket: None, \
+                vhost_mode: Client, id: None, fds: Some([{fd1}, {fd2}]), \
+                rate_limiter_config: None, pci_segment: 0, offload_tso: true, offload_ufo: true, offload_csum: true }}")
         );
 
         Ok(())
