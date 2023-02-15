@@ -1384,6 +1384,7 @@ dependencies = [
 name = "vfio_user"
 version = "0.1.0"
 dependencies = [
+ "argh",
  "bitflags",
  "env_logger",
  "libc",

@@ -20,5 +20,6 @@ vm-memory = { version = "0.10.0", features = ["backend-mmap", "backend-atomic"] 
 vmm-sys-util = "0.11.0"
 
 [dev-dependencies]
+argh = "0.1.9"
 env_logger = "0.10.0"
 pci = { path = "../pci" }
