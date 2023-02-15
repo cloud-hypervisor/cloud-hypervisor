@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use argh::FromArgs;
 use log::info;
 use pci::PciBarConfiguration;
 use std::{fs::File, mem::size_of, path::PathBuf};
@@ -24,9 +25,18 @@ impl pci::PciSubclass for PciVfioUserSubclass {
     }
 }
 
+#[derive(FromArgs)]
+/// GPIO test device
+struct Args {
+    /// path to socket
+    #[argh(option)]
+    socket_path: String,
+}
+
 struct TestBackend {
     configuration: pci::PciConfiguration,
 }
+
 impl TestBackend {
     fn new() -> TestBackend {
         let subclass = PciVfioUserSubclass::VfioUserSubclass;
@@ -174,12 +184,12 @@ fn create_irqs() -> Vec<IrqInfo> {
 }
 
 fn main() {
+    let a: Args = argh::from_env();
     env_logger::init();
-
     let regions = create_regions();
     let irqs = create_irqs();
 
-    let path = PathBuf::from("/tmp/vfio-user-test.socket");
+    let path = PathBuf::from(a.socket_path);
     let s = Server::new(&path, true, irqs, regions).unwrap();
     let mut test_backend = TestBackend::new();
     s.run(&mut test_backend).unwrap();
