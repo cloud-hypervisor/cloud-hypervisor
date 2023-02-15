@@ -2138,6 +2138,8 @@ impl VmConfig {
 
 #[cfg(test)]
 mod tests {
+    use std::{fs::File, os::fd::AsRawFd};
+
     use super::*;
     use net_util::MacAddr;
 
@@ -2351,17 +2353,6 @@ mod tests {
         Ok(())
     }
 
-    fn memfd_create(name: &std::ffi::CStr, flags: u32) -> std::result::Result<i32, std::io::Error> {
-        // SAFETY: FFI call with correct arguments
-        let res = unsafe { libc::syscall(libc::SYS_memfd_create, name.as_ptr(), flags) };
-
-        if res < 0 {
-            Err(std::io::Error::last_os_error())
-        } else {
-            Ok(res as i32)
-        }
-    }
-
     #[test]
     fn test_net_parsing() -> Result<()> {
         // mac address is random
@@ -2440,10 +2431,10 @@ mod tests {
             }
         );
 
-        let fd1 =
-            memfd_create(&std::ffi::CString::new("test_net_parsing_fd1").unwrap(), 0).unwrap();
-        let fd2 =
-            memfd_create(&std::ffi::CString::new("test_net_parsing_fd2").unwrap(), 0).unwrap();
+        // SAFETY: Safe as the file was just opened
+        let fd1 = unsafe { libc::dup(File::open("/dev/null").unwrap().as_raw_fd()) };
+        // SAFETY: Safe as the file was just opened
+        let fd2 = unsafe { libc::dup(File::open("/dev/null").unwrap().as_raw_fd()) };
 
         assert_eq!(
             &format!(
