@@ -6,11 +6,12 @@
 use argh::FromArgs;
 use log::info;
 use pci::PciBarConfiguration;
-use std::{fs::File, mem::size_of, path::PathBuf};
+use std::{fs::File, io::Write, mem::size_of, num::Wrapping, path::PathBuf};
 use vfio_bindings::bindings::vfio::{
-    vfio_region_info, VFIO_IRQ_INFO_EVENTFD, VFIO_PCI_BAR2_REGION_INDEX,
-    VFIO_PCI_CONFIG_REGION_INDEX, VFIO_PCI_INTX_IRQ_INDEX, VFIO_PCI_NUM_IRQS, VFIO_PCI_NUM_REGIONS,
-    VFIO_REGION_INFO_FLAG_READ, VFIO_REGION_INFO_FLAG_WRITE,
+    vfio_region_info, VFIO_IRQ_INFO_EVENTFD, VFIO_IRQ_SET_ACTION_TRIGGER,
+    VFIO_IRQ_SET_DATA_EVENTFD, VFIO_PCI_BAR2_REGION_INDEX, VFIO_PCI_CONFIG_REGION_INDEX,
+    VFIO_PCI_INTX_IRQ_INDEX, VFIO_PCI_NUM_IRQS, VFIO_PCI_NUM_REGIONS, VFIO_REGION_INFO_FLAG_READ,
+    VFIO_REGION_INFO_FLAG_WRITE,
 };
 use vfio_user::{IrqInfo, Server, ServerBackend};
 
@@ -35,6 +36,8 @@ struct Args {
 
 struct TestBackend {
     configuration: pci::PciConfiguration,
+    irq: Option<File>,
+    count: Wrapping<u8>,
 }
 
 impl TestBackend {
@@ -65,7 +68,11 @@ impl TestBackend {
             .unwrap();
 
         configuration.set_irq(1, pci::PciInterruptPin::IntA);
-        TestBackend { configuration }
+        TestBackend {
+            configuration,
+            irq: None,
+            count: Wrapping(0),
+        }
     }
 }
 
@@ -83,6 +90,16 @@ impl ServerBackend for TestBackend {
             let v = self.configuration.read_config_register(reg_idx);
             let reg_offset = offset as usize % 4;
             data.copy_from_slice(&v.to_le_bytes()[reg_offset..reg_offset + data.len()]);
+        } else if region == VFIO_PCI_BAR2_REGION_INDEX && offset == 0 {
+            info!("gpio value read: count = {}", self.count);
+            self.count += 1;
+            if self.count.0 % 3 == 0 {
+                data[0] = 1;
+                if let Some(irq) = &mut self.irq {
+                    info!("Triggering interrupt for count = {}", self.count);
+                    irq.write_all(&1u64.to_le_bytes()).unwrap();
+                }
+            }
         }
 
         Ok(())
@@ -139,6 +156,13 @@ impl ServerBackend for TestBackend {
         fds: Vec<File>,
     ) -> Result<(), std::io::Error> {
         info!("set_irqs index = {index} flags = {flags} start = {start} count = {count} fds = {fds:?}");
+        if flags & (VFIO_IRQ_SET_DATA_EVENTFD | VFIO_IRQ_SET_ACTION_TRIGGER) > 0 {
+            if count == 1 {
+                self.irq = Some(fds[0].try_clone().unwrap());
+            } else {
+                self.irq = None;
+            }
+        }
         Ok(())
     }
 }
