@@ -168,6 +168,7 @@ process_volumes_args() {
         exported_volumes="$exported_volumes --volume $var"
     done
 }
+
 cmd_help() {
     echo ""
     echo "Cloud Hypervisor $(basename "$0")"
@@ -624,6 +625,12 @@ cmd_shell() {
 
     fix_dir_perms $?
 }
+
+if [ $# = 0 ]; then
+    cmd_help
+    say_err "Please specify command to run!"
+    exit 1
+fi
 
 # Parse main command line args.
 #
