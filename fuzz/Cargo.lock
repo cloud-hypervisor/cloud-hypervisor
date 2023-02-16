@@ -634,9 +634,9 @@ version = "0.1.0"
 
 [[package]]
 name = "signal-hook"
-version = "0.3.14"
+version = "0.3.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a253b5e89e2698464fc26b545c9edceb338e18a89effeeecfea192c3025be29d"
+checksum = "732768f1176d21d09e076c23a93123d40bba92d50c4058da34d45c8de8e682b9"
 dependencies = [
  "libc",
  "signal-hook-registry",
@@ -788,6 +788,7 @@ dependencies = [
 name = "vfio_user"
 version = "0.1.0"
 dependencies = [
+ "bitflags",
  "libc",
  "log",
  "serde",
