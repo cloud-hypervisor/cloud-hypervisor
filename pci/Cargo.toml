@@ -25,5 +25,5 @@ versionize = "0.1.9"
 versionize_derive = "0.1.4"
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
-vm-memory = "0.10.0"
+vm-memory = { version = "0.10.0", features = ["backend-mmap", "backend-atomic", "backend-bitmap"] }
 vm-migration = { path = "../vm-migration" }
