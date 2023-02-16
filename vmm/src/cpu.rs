@@ -1035,12 +1035,16 @@ impl CpuManager {
                                             "VCPU generated error: {:?}",
                                             Error::UnexpectedVmExit
                                         );
+                                        vcpu_run_interrupted.store(true, Ordering::SeqCst);
+                                        exit_evt.write(1).unwrap();
                                         break;
                                     }
                                 },
 
                                 Err(e) => {
                                     error!("VCPU generated error: {:?}", Error::VcpuRun(e.into()));
+                                    vcpu_run_interrupted.store(true, Ordering::SeqCst);
+                                    exit_evt.write(1).unwrap();
                                     break;
                                 }
                             }
