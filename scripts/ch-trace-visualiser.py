@@ -7,7 +7,6 @@
 
 from colorsys import hsv_to_rgb
 from random import random
-import xml
 import json
 from sys import argv, stderr
 import xml.etree.ElementTree as ET
