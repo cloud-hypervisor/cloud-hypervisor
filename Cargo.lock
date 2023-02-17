@@ -5,7 +5,7 @@ version = 3
 [[package]]
 name = "acpi_tables"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/acpi_tables?branch=main#4fd38dd5f746730ec5ae848dafcf8c2f50a13fc3"
+source = "git+https://github.com/rust-vmm/acpi_tables?branch=main#12bb6d7b252831527e630f8b3ef48877dbb11924"
 dependencies = [
  "vm-memory",
 ]
