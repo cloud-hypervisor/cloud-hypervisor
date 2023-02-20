@@ -3,7 +3,9 @@
 
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
+use crate::Error as DeviceError;
 use crate::GuestMemoryMmap;
+use crate::VirtioInterruptType;
 use crate::{
     ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, VirtioCommon, VirtioDevice,
     VirtioDeviceType, VirtioInterrupt, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IOMMU_PLATFORM,
@@ -16,10 +18,18 @@ use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};
+use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use virtio_queue::Queue;
-use vm_memory::{ByteValued, GuestMemoryAtomic};
+use virtio_queue::{Queue, QueueT};
+use virtiofsd::{
+    descriptor_utils::{Error as VufDescriptorError, Reader, Writer},
+    filesystem::FileSystem,
+    passthrough::{self, PassthroughFs},
+    server::Server,
+    Error as VhostUserFsError,
+};
+use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
 };
@@ -27,6 +37,18 @@ use vmm_sys_util::eventfd::EventFd;
 
 const NUM_QUEUE_OFFSET: usize = 1;
 const DEFAULT_QUEUE_NUMBER: usize = 2;
+
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("Processing queue failed: {0}")]
+    ProcessQueue(VhostUserFsError),
+    #[error("Creating a queue reader failed: {0}")]
+    QueueReader(VufDescriptorError),
+    #[error("Creating a queue writer failed: {0}")]
+    QueueWriter(VufDescriptorError),
+}
+
+pub type Result<T> = result::Result<T, Error>;
 
 #[derive(Versionize)]
 pub struct State {
@@ -53,8 +75,7 @@ impl Default for VirtioFsConfig {
     }
 }
 
-#[allow(unused)]
-struct FsEpollHandler {
+struct FsEpollHandler<F: FileSystem + Sync> {
     queue_index: u16,
     queue_evt: EventFd,
     queue: Queue,
@@ -62,12 +83,13 @@ struct FsEpollHandler {
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     kill_evt: EventFd,
     pause_evt: EventFd,
+    server: Arc<Server<F>>,
 }
 
 // New descriptors are pending on the virtio queue.
 const QUEUE_AVAIL_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 
-impl FsEpollHandler {
+impl<F: FileSystem + Sync> FsEpollHandler<F> {
     fn run(
         &mut self,
         paused: Arc<AtomicBool>,
@@ -81,12 +103,70 @@ impl FsEpollHandler {
         Ok(())
     }
 
+    fn signal_used_queue(&self) -> result::Result<(), DeviceError> {
+        self.interrupt_cb
+            .trigger(VirtioInterruptType::Queue(self.queue_index))
+            .map_err(|e| {
+                error!("Failed to signal used queue: {:?}", e);
+                DeviceError::FailedSignalingUsedQueue(e)
+            })
+    }
+
+    fn return_descriptor(queue: &mut Queue, mem: &GuestMemoryMmap, head_index: u16, len: usize) {
+        let used_len: u32 = match len.try_into() {
+            Ok(l) => l,
+            Err(_) => panic!("Invalid used length, can't return used descritors to the ring"),
+        };
+
+        if queue.add_used(mem, head_index, used_len).is_err() {
+            warn!("Couldn't return used descriptors to the ring");
+        }
+    }
+
+    fn process_queue_serial(&mut self) -> Result<bool> {
+        let queue = &mut self.queue;
+
+        let mut used_descs = false;
+
+        while let Some(desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
+            let head_index = desc_chain.head_index();
+
+            let reader = Reader::new(desc_chain.memory(), desc_chain.clone())
+                .map_err(Error::QueueReader)
+                .unwrap();
+            let writer = Writer::new(desc_chain.memory(), desc_chain.clone())
+                .map_err(Error::QueueWriter)
+                .unwrap();
+
+            let len = self
+                .server
+                .handle_message(reader, writer)
+                .map_err(Error::ProcessQueue)
+                .unwrap();
+
+            Self::return_descriptor(queue, desc_chain.memory(), head_index, len);
+            used_descs = true;
+        }
+
+        Ok(used_descs)
+    }
+
     fn handle_event_impl(&mut self) -> result::Result<(), EpollHelperError> {
+        let needs_notification = self.process_queue_serial().map_err(|e| {
+            EpollHelperError::HandleEvent(anyhow!("Failed to process queue (submit): {:?}", e))
+        })?;
+
+        if needs_notification {
+            self.signal_used_queue().map_err(|e| {
+                EpollHelperError::HandleEvent(anyhow!("Failed to signal used queue: {:?}", e))
+            })?
+        };
+
         Ok(())
     }
 }
 
-impl EpollHelperHandler for FsEpollHandler {
+impl<F: FileSystem + Sync> EpollHelperHandler for FsEpollHandler<F> {
     fn handle_event(
         &mut self,
         _helper: &mut EpollHelper,
@@ -239,6 +319,9 @@ impl VirtioDevice for Fs {
         mut queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
         self.common.activate(&queues, &interrupt_cb)?;
+        let server = Arc::new(Server::new(
+            PassthroughFs::new(passthrough::Config::default()).unwrap(),
+        ));
         let mut epoll_threads = Vec::new();
         for i in 0..queues.len() {
             let (_, queue, queue_evt) = queues.remove(0);
@@ -252,6 +335,7 @@ impl VirtioDevice for Fs {
                 interrupt_cb: interrupt_cb.clone(),
                 kill_evt,
                 pause_evt,
+                server: server.clone(),
             };
 
             let paused = self.common.paused.clone();
