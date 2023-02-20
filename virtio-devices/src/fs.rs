@@ -27,7 +27,7 @@ use virtio_queue::{Queue, QueueT};
 use virtiofsd::{
     descriptor_utils::{Error as VufDescriptorError, Reader, Writer},
     filesystem::FileSystem,
-    passthrough::{self, xattrmap::XattrMap, PassthroughFs},
+    passthrough::{self, xattrmap::XattrMap, CachePolicy, PassthroughFs},
     server::Server,
     Error as VhostUserFsError,
 };
@@ -325,7 +325,27 @@ impl Fs {
         };
         let xattr = xattrmap.is_some() || backendfs_config.posix_acl || backendfs_config.xattr;
 
+        let cache = match backendfs_config.cache {
+            0 => CachePolicy::Auto,
+            1 => CachePolicy::Always,
+            2 => CachePolicy::Never,
+            num => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!(
+                        "unknown cache policy: {}, valid input: 0(auto), 1(always), 2(never)",
+                        num
+                    ),
+                ))
+            }
+        };
+        let readdirplus = match cache {
+            CachePolicy::Never => false,
+            _ => !backendfs_config.no_readdirplus,
+        };
+
         let fs_cfg = passthrough::Config {
+            cache_policy: cache,
             root_dir: shared_dir_rp_str.into(),
             mountinfo_prefix: None,
             xattr,
@@ -333,6 +353,7 @@ impl Fs {
             proc_sfd_rawfd: None,
             proc_mountinfo_rawfd: None,
             announce_submounts: backendfs_config.announce_submounts,
+            readdirplus,
             writeback: backendfs_config.writeback,
             allow_direct_io: backendfs_config.allow_direct_io,
             killpriv_v2: backendfs_config.killpriv_v2,
