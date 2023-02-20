@@ -1259,6 +1259,7 @@ impl FsConfig {
             queue_size,
             id,
             pci_segment,
+            backendfs_config: None,
         })
     }
 

@@ -26,7 +26,7 @@ pub mod balloon;
 pub mod block;
 mod console;
 pub mod epoll_helper;
-mod fs;
+pub mod fs;
 mod iommu;
 pub mod mem;
 pub mod net;

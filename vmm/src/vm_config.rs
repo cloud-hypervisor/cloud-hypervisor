@@ -5,6 +5,7 @@
 use net_util::MacAddr;
 use serde::{Deserialize, Serialize};
 use std::{net::Ipv4Addr, path::PathBuf};
+use virtio_devices::fs::BackendFsConfig;
 use virtio_devices::RateLimiterConfig;
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -388,6 +389,8 @@ pub struct FsConfig {
     pub id: Option<String>,
     #[serde(default)]
     pub pci_segment: u16,
+    #[serde(default)]
+    pub backendfs_config: Option<BackendFsConfig>,
 }
 
 pub fn default_fsconfig_num_queues() -> usize {
@@ -407,6 +410,7 @@ impl Default for FsConfig {
             queue_size: default_fsconfig_queue_size(),
             id: None,
             pci_segment: 0,
+            backendfs_config: None,
         }
     }
 }
