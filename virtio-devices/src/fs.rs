@@ -27,7 +27,7 @@ use virtio_queue::{Queue, QueueT};
 use virtiofsd::{
     descriptor_utils::{Error as VufDescriptorError, Reader, Writer},
     filesystem::FileSystem,
-    passthrough::{self, PassthroughFs},
+    passthrough::{self, xattrmap::XattrMap, PassthroughFs},
     server::Server,
     Error as VhostUserFsError,
 };
@@ -319,9 +319,17 @@ impl Fs {
             .to_str()
             .ok_or_else(|| io::Error::from_raw_os_error(libc::EINVAL))?;
 
+        let xattrmap = match &backendfs_config.xattrmap {
+            Some(s) => Some(XattrMap::try_from(s.as_str()).unwrap()),
+            None => None,
+        };
+        let xattr = xattrmap.is_some() || backendfs_config.posix_acl || backendfs_config.xattr;
+
         let fs_cfg = passthrough::Config {
             root_dir: shared_dir_rp_str.into(),
             mountinfo_prefix: None,
+            xattr,
+            xattrmap,
             proc_sfd_rawfd: None,
             proc_mountinfo_rawfd: None,
             announce_submounts: backendfs_config.announce_submounts,
