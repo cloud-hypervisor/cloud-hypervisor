@@ -5,11 +5,14 @@ use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::GuestMemoryMmap;
 use crate::{
-    ActivateResult, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterrupt,
-    VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
+    ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, VirtioCommon, VirtioDevice,
+    VirtioDeviceType, VirtioInterrupt, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IOMMU_PLATFORM,
+    VIRTIO_F_VERSION_1,
 };
+use anyhow::anyhow;
 use seccompiler::SeccompAction;
 use std::io;
+use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};
@@ -47,6 +50,64 @@ impl Default for VirtioFsConfig {
             tag: [0; 36],
             num_request_queues: 0,
         }
+    }
+}
+
+#[allow(unused)]
+struct FsEpollHandler {
+    queue_index: u16,
+    queue_evt: EventFd,
+    queue: Queue,
+    mem: GuestMemoryAtomic<GuestMemoryMmap>,
+    interrupt_cb: Arc<dyn VirtioInterrupt>,
+    kill_evt: EventFd,
+    pause_evt: EventFd,
+}
+
+// New descriptors are pending on the virtio queue.
+const QUEUE_AVAIL_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
+
+impl FsEpollHandler {
+    fn run(
+        &mut self,
+        paused: Arc<AtomicBool>,
+        paused_sync: Arc<Barrier>,
+    ) -> result::Result<(), EpollHelperError> {
+        let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
+
+        helper.add_event(self.queue_evt.as_raw_fd(), QUEUE_AVAIL_EVENT)?;
+        helper.run(paused, paused_sync, self)?;
+
+        Ok(())
+    }
+
+    fn handle_event_impl(&mut self) -> result::Result<(), EpollHelperError> {
+        Ok(())
+    }
+}
+
+impl EpollHelperHandler for FsEpollHandler {
+    fn handle_event(
+        &mut self,
+        _helper: &mut EpollHelper,
+        event: &epoll::Event,
+    ) -> result::Result<(), EpollHelperError> {
+        let ev_type = event.data as u16;
+        match ev_type {
+            QUEUE_AVAIL_EVENT => {
+                self.queue_evt.read().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
+                })?;
+                self.handle_event_impl()?
+            }
+            _ => {
+                return Err(EpollHelperError::HandleEvent(anyhow!(
+                    "Unexpected event: {}",
+                    ev_type
+                )));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -173,20 +234,36 @@ impl VirtioDevice for Fs {
 
     fn activate(
         &mut self,
-        #[allow(unused_variables)] mem: GuestMemoryAtomic<GuestMemoryMmap>,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
-        #[allow(unused_mut)] mut queues: Vec<(usize, Queue, EventFd)>,
+        mut queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
         self.common.activate(&queues, &interrupt_cb)?;
         let mut epoll_threads = Vec::new();
         for i in 0..queues.len() {
+            let (_, queue, queue_evt) = queues.remove(0);
+            let (kill_evt, pause_evt) = self.common.dup_eventfds();
+
+            let mut handler = FsEpollHandler {
+                queue_index: i as u16,
+                queue_evt,
+                queue,
+                mem: mem.clone(),
+                interrupt_cb: interrupt_cb.clone(),
+                kill_evt,
+                pause_evt,
+            };
+
+            let paused = self.common.paused.clone();
+            let paused_sync = self.common.paused_sync.clone();
+
             spawn_virtio_thread(
                 &format!("{}_q{}", self.id.clone(), i),
                 &self.seccomp_action,
                 Thread::VirtioFs,
                 &mut epoll_threads,
                 &self.exit_evt,
-                move || return Ok(()),
+                move || handler.run(paused, paused_sync.unwrap()),
             )?;
         }
 
