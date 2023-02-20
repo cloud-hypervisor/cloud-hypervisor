@@ -14,6 +14,7 @@ use crate::{
 use anyhow::anyhow;
 use seccompiler::SeccompAction;
 use serde::Deserialize;
+use std::fs;
 use std::io;
 use std::os::unix::io::AsRawFd;
 use std::result;
@@ -312,7 +313,14 @@ impl Fs {
     }
 
     fn init_backend_fs(&self, backendfs_config: &BackendFsConfig) -> io::Result<PassthroughFs> {
+        let shared_dir = &backendfs_config.shared_dir;
+        let shared_dir_rp = fs::canonicalize(shared_dir.to_string())?;
+        let shared_dir_rp_str = shared_dir_rp
+            .to_str()
+            .ok_or_else(|| io::Error::from_raw_os_error(libc::EINVAL))?;
+
         let fs_cfg = passthrough::Config {
+            root_dir: shared_dir_rp_str.into(),
             mountinfo_prefix: None,
             proc_sfd_rawfd: None,
             proc_mountinfo_rawfd: None,
