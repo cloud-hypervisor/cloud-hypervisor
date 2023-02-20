@@ -691,6 +691,7 @@ fn vcpu_thread_rules(
         (libc::SYS_dup, vec![]),
         (libc::SYS_exit, vec![]),
         (libc::SYS_epoll_ctl, vec![]),
+        (libc::SYS_eventfd2, vec![]),
         (libc::SYS_fstat, vec![]),
         (libc::SYS_futex, vec![]),
         (libc::SYS_getrandom, vec![]),

@@ -391,6 +391,43 @@ impl Vfio for VfioUserClientWrapper {
             )
             .map_err(VfioError::VfioUser)
     }
+
+    fn set_irq_resample_fd(
+        &self,
+        irq_index: u32,
+        event_rfds: Vec<&EventFd>,
+    ) -> Result<(), VfioError> {
+        let num_fds = event_rfds.len() as u32;
+        // resamplefd count should always equal 1
+        if num_fds != 1 || irq_index != VFIO_PCI_INTX_IRQ_INDEX {
+            error!(
+                "Only INTx supports a single resamplefd: {:x} number of fds = {:?}",
+                irq_index,
+                event_rfds.len()
+            );
+        } else {
+            info!(
+                "Setting IRQ resamplefd {:x} number of fds = {:?}",
+                irq_index,
+                event_rfds.len()
+            );
+            let fds: Vec<i32> = event_rfds.iter().map(|e| e.as_raw_fd()).collect();
+
+            self.client
+                .lock()
+                .unwrap()
+                .set_irqs(
+                    irq_index,
+                    VFIO_IRQ_SET_DATA_EVENTFD | VFIO_IRQ_SET_ACTION_UNMASK,
+                    0,
+                    num_fds,
+                    &fds[0 as usize..(0 + num_fds) as usize],
+                )
+                .map_err(VfioError::VfioUser)?;
+        }
+
+        Ok(())
+    }
 }
 
 impl PciDevice for VfioUserPciDevice {

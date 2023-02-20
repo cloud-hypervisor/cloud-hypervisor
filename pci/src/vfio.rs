@@ -58,6 +58,8 @@ pub enum VfioPciError {
     MmapArea,
     #[error("Failed to notifier's eventfd")]
     MissingNotifier,
+    #[error("Failed to get the resamplefd")]
+    MissingResampleNotifier,
     #[error("Invalid region alignment")]
     RegionAlignment,
     #[error("Invalid region size")]
@@ -70,6 +72,8 @@ pub enum VfioPciError {
     RetrievePciConfigurationState(#[source] anyhow::Error),
     #[error("Failed to retrieve VfioCommonState: {0}")]
     RetrieveVfioCommonState(#[source] anyhow::Error),
+    #[error("Failed to enable the resamplefd: {0}")]
+    EnableResamplefd(#[source] std::io::Error),
 }
 
 #[derive(Copy, Clone)]
@@ -349,6 +353,14 @@ pub(crate) trait Vfio: Send + Sync {
     fn unmask_irq(&self, _irq_index: u32) -> Result<(), VfioError> {
         unimplemented!()
     }
+
+    fn set_irq_resample_fd(
+        &self,
+        _irq_index: u32,
+        _event_rfds: Vec<&EventFd>,
+    ) -> Result<(), VfioError> {
+        unimplemented!()
+    }
 }
 
 struct VfioDeviceWrapper {
@@ -389,6 +401,16 @@ impl Vfio for VfioDeviceWrapper {
     fn unmask_irq(&self, irq_index: u32) -> Result<(), VfioError> {
         self.device
             .unmask_irq(irq_index)
+            .map_err(VfioError::KernelVfio)
+    }
+
+    fn set_irq_resample_fd(
+        &self,
+        irq_index: u32,
+        event_rfds: Vec<&EventFd>,
+    ) -> Result<(), VfioError> {
+        self.device
+            .set_irq_resample_fd(irq_index, event_rfds)
             .map_err(VfioError::KernelVfio)
     }
 }
@@ -886,11 +908,26 @@ impl VfioCommon {
                     self.vfio_wrapper
                         .enable_irq(VFIO_PCI_INTX_IRQ_INDEX, vec![&eventfd])
                         .map_err(VfioPciError::EnableIntx)?;
-
-                    intx.enabled = true;
                 } else {
                     return Err(VfioPciError::MissingNotifier);
                 }
+
+                #[cfg(target_arch = "x86_64")]
+                {
+                    intx.interrupt_source_group
+                        .enable_resamplefd(0)
+                        .map_err(VfioPciError::EnableResamplefd)?;
+
+                    if let Some(reventfd) = intx.interrupt_source_group.resamplefd_notifier(0) {
+                        self.vfio_wrapper
+                            .set_irq_resample_fd(VFIO_PCI_INTX_IRQ_INDEX, vec![&reventfd])
+                            .map_err(VfioPciError::EnableIntx)?;
+                    } else {
+                        return Err(VfioPciError::MissingResampleNotifier);
+                    }
+                }
+
+                intx.enabled = true;
             }
         }
 
@@ -904,6 +941,12 @@ impl VfioCommon {
                     error!("Could not disable INTx: {}", e);
                 } else {
                     intx.enabled = false;
+                }
+                #[cfg(target_arch = "x86_64")]
+                {
+                    if let Err(e) = intx.interrupt_source_group.disable_resamplefd(0) {
+                        error!("Could not disable INTx resampefd: {}", e);
+                    }
                 }
             }
         }
@@ -1046,15 +1089,6 @@ impl VfioCommon {
                 self.vfio_wrapper.region_read(region.index, offset, data);
             }
         }
-
-        // INTx EOI
-        // The guest reading from the BAR potentially means the interrupt has
-        // been received and can be acknowledged.
-        if self.interrupt.intx_in_use() {
-            if let Err(e) = self.vfio_wrapper.unmask_irq(VFIO_PCI_INTX_IRQ_INDEX) {
-                error!("Failed unmasking INTx IRQ: {}", e);
-            }
-        }
     }
 
     pub(crate) fn write_bar(
@@ -1072,15 +1106,6 @@ impl VfioCommon {
                 self.interrupt.msix_write_table(offset, data);
             } else {
                 self.vfio_wrapper.region_write(region.index, offset, data);
-            }
-        }
-
-        // INTx EOI
-        // The guest writing to the BAR potentially means the interrupt has
-        // been received and can be acknowledged.
-        if self.interrupt.intx_in_use() {
-            if let Err(e) = self.vfio_wrapper.unmask_irq(VFIO_PCI_INTX_IRQ_INDEX) {
-                error!("Failed unmasking INTx IRQ: {}", e);
             }
         }
 
