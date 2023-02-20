@@ -15,7 +15,9 @@ use std::path::PathBuf;
 use std::result;
 use std::str::FromStr;
 use thiserror::Error;
+use virtio_devices::fs::BackendFsConfig;
 use virtio_devices::{RateLimiterConfig, TokenBucketConfig};
+use virtiofsd::passthrough::xattrmap::XattrMap;
 
 const MAX_NUM_PCI_SEGMENTS: u16 = 16;
 
@@ -98,6 +100,8 @@ pub enum Error {
     ParseTpm(OptionParserError),
     /// Missing path for TPM device
     ParseTpmPathMissing,
+    /// Filesystem shared_dir is missing
+    ParseFsSharedDirMissing,
 }
 
 #[derive(Debug, PartialEq, Eq, Error)]
@@ -336,6 +340,7 @@ impl fmt::Display for Error {
             ParseVdpaPathMissing => write!(f, "Error parsing --vdpa: path missing"),
             ParseTpm(o) => write!(f, "Error parsing --tpm: {o}"),
             ParseTpmPathMissing => write!(f, "Error parsing --tpm: path missing"),
+            ParseFsSharedDirMissing => write!(f, "Error parsing --shared_dir: path missing"),
         }
     }
 }
@@ -1221,20 +1226,167 @@ impl BalloonConfig {
     }
 }
 
+pub const DEFAULT_FS_THREAD_POOL_SIZE: usize = 0;
+
+fn default_fsconfig_thread_pool_size() -> usize {
+    DEFAULT_FS_THREAD_POOL_SIZE
+}
+
+pub const DEFAULT_FS_LIMIT_NOFILE: u64 = 0;
+fn default_fsconfig_rlimit_nofile() -> u64 {
+    DEFAULT_FS_LIMIT_NOFILE
+}
+
 impl FsConfig {
-    pub fn parse(fs: &str) -> Result<Self> {
-        let mut parser = OptionParser::new();
+    pub const SYNTAX: &'static str = "virtio-fs parameters \
+    \"tag=<tag_name>,socket=<socket_path>,num_queues=<number_of_queues>,\
+    queue_size=<size_of_each_queue>,id=<device_id>,pci_segment=<segment_id>,\
+    native=<use_native_virtiofs>,shared_dir=<shared_dir>,xattr=<xattr>,\
+    posix_acl=<posix_acl>,xattrmap=<xattrmap>,announce_submounts=<announce_submounts>\
+    cache=<cache>,no_readdirplus=<no_readdirplus>,writeback=<writeback>,\
+    allow_direct_io=<allow_direct_io>,rlimit_nofile=<rlimit_nofile>,
+    killpriv_v2=<killpriv_v2>,security_label=<security_label>\"";
+
+    fn add_frontend_args(parser: &mut OptionParser) {
         parser
             .add("tag")
             .add("queue_size")
             .add("num_queues")
             .add("socket")
             .add("id")
-            .add("pci_segment");
+            .add("pci_segment")
+            .add("native");
+    }
+    fn add_backend_args(parser: &mut OptionParser) {
+        parser
+            .add("shared_dir")
+            .add("thread_pool_size")
+            .add("xattr")
+            .add("posix_acl")
+            .add("xattrmap")
+            .add("announce_submounts")
+            .add("cache")
+            .add("no_readdirplus")
+            .add("writeback")
+            .add("allow_direct_io")
+            .add("rlimit_nofile")
+            .add("killpriv_v2")
+            .add("security_label");
+    }
+
+    fn parse_backendfs(parser: &OptionParser) -> Result<BackendFsConfig> {
+        let shared_dir = parser
+            .get("shared_dir")
+            .ok_or(Error::ParseFsSharedDirMissing)?;
+        let thread_pool_size = parser
+            .convert("thread_pool_size")
+            .map_err(Error::ParseFileSystem)?
+            .unwrap_or_else(default_fsconfig_thread_pool_size);
+        let xattr = parser
+            .convert::<Toggle>("xattr")
+            .map_err(Error::ParseFileSystem)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let posix_acl = parser
+            .convert::<Toggle>("posix_acl")
+            .map_err(Error::ParseFileSystem)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let announce_submounts = parser
+            .convert::<Toggle>("announce_submounts")
+            .map_err(Error::ParseFileSystem)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let no_readdirplus = parser
+            .convert::<Toggle>("no_readdirplus")
+            .map_err(Error::ParseFileSystem)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let writeback = parser
+            .convert::<Toggle>("writeback")
+            .map_err(Error::ParseFileSystem)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let allow_direct_io = parser
+            .convert::<Toggle>("allow_direct_io")
+            .map_err(Error::ParseFileSystem)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let killpriv_v2 = parser
+            .convert::<Toggle>("killpriv_v2")
+            .map_err(Error::ParseFileSystem)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let security_label = parser
+            .convert::<Toggle>("security_label")
+            .map_err(Error::ParseFileSystem)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let xattrmap = parser.get("xattrmap");
+        // TODO _e is not used
+        if let Some(value) = &xattrmap {
+            XattrMap::try_from(value.as_str()).map_err(|_e| {
+                Error::ParseFileSystem(OptionParserError::Conversion(
+                    "xattrmap".to_string(),
+                    value.clone(),
+                ))
+            })?;
+        }
+        let cache;
+        if let Some(cache_string) = parser.get("cache") {
+            cache = match cache_string.as_str() {
+                "auto" => 0,
+                "always" => 1,
+                "none" => 2,
+                cache_str => {
+                    return Err(Error::ParseFileSystem(OptionParserError::Conversion(
+                        "cache".to_string(),
+                        cache_str.to_string(),
+                    )))
+                }
+            }
+        } else {
+            cache = 0;
+        }
+        let rlimit_nofile = parser
+            .convert("rlimit_nofile")
+            .map_err(Error::ParseFileSystem)?
+            .unwrap_or_else(default_fsconfig_rlimit_nofile);
+
+        Ok(BackendFsConfig {
+            shared_dir,
+            thread_pool_size,
+            xattr,
+            posix_acl,
+            xattrmap,
+            announce_submounts,
+            cache,
+            no_readdirplus,
+            writeback,
+            allow_direct_io,
+            rlimit_nofile,
+            killpriv_v2,
+            security_label,
+        })
+    }
+
+    pub fn parse(fs: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        Self::add_frontend_args(&mut parser);
+        Self::add_backend_args(&mut parser);
         parser.parse(fs).map_err(Error::ParseFileSystem)?;
 
+        let native = parser
+            .convert::<Toggle>("native")
+            .map_err(Error::ParseFileSystem)?
+            .unwrap_or(Toggle(false))
+            .0;
+
         let tag = parser.get("tag").ok_or(Error::ParseFsTagMissing)?;
-        let socket = PathBuf::from(parser.get("socket").ok_or(Error::ParseFsSockMissing)?);
+        let mut socket = PathBuf::new();
+        if !native {
+            socket = PathBuf::from(parser.get("socket").ok_or(Error::ParseFsSockMissing)?);
+        }
 
         let queue_size = parser
             .convert("queue_size")
@@ -1252,6 +1404,12 @@ impl FsConfig {
             .map_err(Error::ParseFileSystem)?
             .unwrap_or_default();
 
+        let mut backendfs_config = None;
+        // backend args are ignored if native is false
+        if native {
+            backendfs_config = Some(Self::parse_backendfs(&parser)?);
+        }
+
         Ok(FsConfig {
             tag,
             socket,
@@ -1259,7 +1417,7 @@ impl FsConfig {
             queue_size,
             id,
             pci_segment,
-            backendfs_config: None,
+            backendfs_config,
         })
     }
 

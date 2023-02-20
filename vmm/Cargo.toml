@@ -55,3 +55,4 @@ vm-memory = { version = "0.10.0", features = ["backend-mmap", "backend-atomic", 
 vm-migration = { path = "../vm-migration" }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = { version = "0.11.0", features = ["with-serde"] }
+virtiofsd = { git = "https://gitlab.com/HowHsu/virtiofsd", branch = "ch_remove_vhost" }
