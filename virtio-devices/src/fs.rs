@@ -27,6 +27,7 @@ use virtio_queue::{Queue, QueueT};
 use virtiofsd::{
     descriptor_utils::{Error as VufDescriptorError, Reader, Writer},
     filesystem::FileSystem,
+    limits,
     passthrough::{self, xattrmap::XattrMap, CachePolicy, PassthroughFs},
     server::Server,
     Error as VhostUserFsError,
@@ -343,6 +344,13 @@ impl Fs {
             CachePolicy::Never => false,
             _ => !backendfs_config.no_readdirplus,
         };
+
+        limits::setup_rlimit_nofile(Some(backendfs_config.rlimit_nofile)).map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("setup rlimit nofile error {:?}", error),
+            )
+        })?;
 
         let fs_cfg = passthrough::Config {
             cache_policy: cache,
