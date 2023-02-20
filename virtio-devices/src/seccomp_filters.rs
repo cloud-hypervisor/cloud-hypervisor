@@ -212,7 +212,134 @@ fn virtio_watchdog_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
 }
 
 fn virtio_fs_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
-    vec![]
+    vec![
+        (libc::SYS_accept4, vec![]),
+        (libc::SYS_brk, vec![]),
+        (libc::SYS_capget, vec![]), // For CAP_FSETID
+        (libc::SYS_capset, vec![]),
+        (libc::SYS_clock_gettime, vec![]),
+        (libc::SYS_clone, vec![]),
+        (libc::SYS_clone3, vec![]),
+        (libc::SYS_close, vec![]),
+        (libc::SYS_copy_file_range, vec![]),
+        (libc::SYS_dup, vec![]),
+        #[cfg(any(
+            target_arch = "x86_64",
+            target_arch = "s390x",
+            target_arch = "powerpc64le"
+        ))]
+        (libc::SYS_epoll_create, vec![]),
+        (libc::SYS_epoll_create1, vec![]),
+        (libc::SYS_epoll_ctl, vec![]),
+        (libc::SYS_epoll_pwait, vec![]),
+        #[cfg(any(
+            target_arch = "x86_64",
+            target_arch = "s390x",
+            target_arch = "powerpc64le"
+        ))]
+        (libc::SYS_epoll_wait, vec![]),
+        (libc::SYS_eventfd2, vec![]),
+        (libc::SYS_exit, vec![]),
+        (libc::SYS_exit_group, vec![]),
+        (libc::SYS_fallocate, vec![]),
+        (libc::SYS_fchdir, vec![]),
+        (libc::SYS_fchmod, vec![]),
+        (libc::SYS_fchmodat, vec![]),
+        (libc::SYS_fchownat, vec![]),
+        (libc::SYS_fcntl, vec![]),
+        (libc::SYS_fdatasync, vec![]),
+        (libc::SYS_fgetxattr, vec![]),
+        (libc::SYS_flistxattr, vec![]),
+        (libc::SYS_flock, vec![]),
+        (libc::SYS_fremovexattr, vec![]),
+        (libc::SYS_fsetxattr, vec![]),
+        (libc::SYS_fstat, vec![]),
+        #[cfg(target_arch = "s390x")]
+        (libc::SYS_fstatfs64, vec![]),
+        (libc::SYS_fstatfs, vec![]),
+        (libc::SYS_fsync, vec![]),
+        (libc::SYS_ftruncate, vec![]),
+        (libc::SYS_futex, vec![]),
+        #[cfg(any(
+            target_arch = "x86_64",
+            target_arch = "s390x",
+            target_arch = "powerpc64le"
+        ))]
+        (libc::SYS_getdents, vec![]),
+        (libc::SYS_getdents64, vec![]),
+        (libc::SYS_getegid, vec![]),
+        (libc::SYS_geteuid, vec![]),
+        (libc::SYS_getpid, vec![]),
+        (libc::SYS_gettid, vec![]),
+        (libc::SYS_gettimeofday, vec![]),
+        (libc::SYS_getxattr, vec![]),
+        (libc::SYS_linkat, vec![]),
+        (libc::SYS_listxattr, vec![]),
+        (libc::SYS_lseek, vec![]),
+        (libc::SYS_madvise, vec![]),
+        (libc::SYS_mkdirat, vec![]),
+        (libc::SYS_mknodat, vec![]),
+        (libc::SYS_mmap, vec![]),
+        (libc::SYS_mprotect, vec![]),
+        (libc::SYS_mremap, vec![]),
+        (libc::SYS_munmap, vec![]),
+        (libc::SYS_name_to_handle_at, vec![]),
+        (libc::SYS_newfstatat, vec![]),
+        #[cfg(any(
+            target_arch = "x86_64",
+            target_arch = "s390x",
+            target_arch = "powerpc64le"
+        ))]
+        (libc::SYS_open, vec![]),
+        (libc::SYS_openat, vec![]),
+        (libc::SYS_openat2, vec![]),
+        (libc::SYS_open_by_handle_at, vec![]),
+        (libc::SYS_prctl, vec![]), // TODO restrict to just PR_SET_NAME?
+        (libc::SYS_preadv, vec![]),
+        (libc::SYS_pread64, vec![]),
+        (libc::SYS_pwritev2, vec![]),
+        (libc::SYS_pwrite64, vec![]),
+        (libc::SYS_read, vec![]),
+        (libc::SYS_readlinkat, vec![]),
+        (libc::SYS_recvmsg, vec![]),
+        (libc::SYS_renameat, vec![]),
+        (libc::SYS_renameat2, vec![]),
+        (libc::SYS_removexattr, vec![]),
+        #[cfg(target_env = "gnu")]
+        (libc::SYS_rseq, vec![]),
+        (libc::SYS_rt_sigaction, vec![]),
+        (libc::SYS_rt_sigprocmask, vec![]),
+        (libc::SYS_rt_sigreturn, vec![]),
+        (libc::SYS_sched_getaffinity, vec![]), // used by thread_pool
+        (libc::SYS_sendmsg, vec![]),
+        (libc::SYS_setresgid, vec![]),
+        (libc::SYS_setresuid, vec![]),
+        //(libc::SYS_setresgid32);  Needed on some platforms,
+        //(libc::SYS_setresuid32);  Needed on some platforms
+        (libc::SYS_set_robust_list, vec![]),
+        (libc::SYS_setxattr, vec![]),
+        (libc::SYS_sigaltstack, vec![]),
+        #[cfg(target_arch = "s390x")]
+        (libc::SYS_sigreturn, vec![]),
+        (libc::SYS_statx, vec![]),
+        (libc::SYS_symlinkat, vec![]),
+        (libc::SYS_syncfs, vec![]),
+        #[cfg(target_arch = "x86_64")]
+        (libc::SYS_time, vec![]), // Rarely needed, except on static builds
+        (libc::SYS_tgkill, vec![]),
+        (libc::SYS_umask, vec![]),
+        #[cfg(any(
+            target_arch = "x86_64",
+            target_arch = "s390x",
+            target_arch = "powerpc64le"
+        ))]
+        (libc::SYS_unlink, vec![]),
+        (libc::SYS_unlinkat, vec![]),
+        (libc::SYS_unshare, vec![]),
+        (libc::SYS_utimensat, vec![]),
+        (libc::SYS_write, vec![]),
+        (libc::SYS_writev, vec![]),
+    ]
 }
 
 fn get_seccomp_rules(thread_type: Thread) -> Vec<(i64, Vec<SeccompRule>)> {
