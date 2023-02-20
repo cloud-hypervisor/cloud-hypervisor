@@ -7,12 +7,13 @@ use crate::Error as DeviceError;
 use crate::GuestMemoryMmap;
 use crate::VirtioInterruptType;
 use crate::{
-    ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, VirtioCommon, VirtioDevice,
-    VirtioDeviceType, VirtioInterrupt, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IOMMU_PLATFORM,
-    VIRTIO_F_VERSION_1,
+    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, VirtioCommon,
+    VirtioDevice, VirtioDeviceType, VirtioInterrupt, EPOLL_HELPER_EVENT_LAST,
+    VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
 use anyhow::anyhow;
 use seccompiler::SeccompAction;
+use serde::Deserialize;
 use std::io;
 use std::os::unix::io::AsRawFd;
 use std::result;
@@ -191,6 +192,36 @@ impl<F: FileSystem + Sync> EpollHelperHandler for FsEpollHandler<F> {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct BackendFsConfig {
+    #[serde(default)]
+    pub shared_dir: String,
+    #[serde(default)]
+    pub thread_pool_size: usize,
+    #[serde(default)]
+    pub xattr: bool,
+    #[serde(default)]
+    pub posix_acl: bool,
+    #[serde(default)]
+    pub xattrmap: Option<String>,
+    #[serde(default)]
+    pub announce_submounts: bool,
+    #[serde(default)]
+    pub cache: u8,
+    #[serde(default)]
+    pub no_readdirplus: bool,
+    #[serde(default)]
+    pub writeback: bool,
+    #[serde(default)]
+    pub allow_direct_io: bool,
+    #[serde(default)]
+    pub rlimit_nofile: u64,
+    #[serde(default)]
+    pub killpriv_v2: bool,
+    #[serde(default)]
+    pub security_label: bool,
+}
+
 // SAFETY: only a series of integers
 unsafe impl ByteValued for VirtioFsConfig {}
 
@@ -201,6 +232,7 @@ pub struct Fs {
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
     iommu: bool,
+    backendfs_config: BackendFsConfig,
 }
 
 impl Fs {
@@ -216,6 +248,7 @@ impl Fs {
         exit_evt: EventFd,
         iommu: bool,
         state: Option<State>,
+        backendfs_config: &BackendFsConfig,
     ) -> io::Result<Fs> {
         // Calculate the actual number of queues needed.
         let num_queues = NUM_QUEUE_OFFSET + req_num_queues;
@@ -266,6 +299,7 @@ impl Fs {
             seccomp_action,
             exit_evt,
             iommu,
+            backendfs_config: backendfs_config.clone(),
         })
     }
 
@@ -275,6 +309,36 @@ impl Fs {
             acked_features: self.common.acked_features,
             config: self.config,
         }
+    }
+
+    fn init_backend_fs(&self, backendfs_config: &BackendFsConfig) -> io::Result<PassthroughFs> {
+        let fs_cfg = passthrough::Config {
+            mountinfo_prefix: None,
+            proc_sfd_rawfd: None,
+            proc_mountinfo_rawfd: None,
+            announce_submounts: backendfs_config.announce_submounts,
+            writeback: backendfs_config.writeback,
+            allow_direct_io: backendfs_config.allow_direct_io,
+            killpriv_v2: backendfs_config.killpriv_v2,
+            security_label: backendfs_config.security_label,
+            posix_acl: backendfs_config.posix_acl,
+            ..Default::default()
+        };
+
+        let fs = match PassthroughFs::new(fs_cfg) {
+            Ok(fs) => fs,
+            Err(e) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!(
+                        "Failed to create internal filesystem representation: {:?}",
+                        e
+                    ),
+                ));
+            }
+        };
+
+        Ok(fs)
     }
 }
 
@@ -319,9 +383,21 @@ impl VirtioDevice for Fs {
         mut queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
         self.common.activate(&queues, &interrupt_cb)?;
-        let server = Arc::new(Server::new(
-            PassthroughFs::new(passthrough::Config::default()).unwrap(),
-        ));
+        let fs = self
+            .init_backend_fs(&self.backendfs_config)
+            .map_err(ActivateError::ActivateVirtioFs)?;
+        // Test that unshare(CLONE_FS) works, it will be called for each thread.
+        // It's an unprivileged system call but some Docker/Moby versions are
+        // known to reject it via seccomp when CAP_SYS_ADMIN is not given.
+        //
+        // Note that the program is single-threaded here so this syscall has no
+        // visible effect and is safe to make.
+        let ret = unsafe { libc::unshare(libc::CLONE_FS) };
+        if ret == -1 {
+            return Err(ActivateError::ActivateVirtioFs(io::Error::last_os_error()));
+        }
+
+        let server = Arc::new(Server::new(fs));
         let mut epoll_threads = Vec::new();
         for i in 0..queues.len() {
             let (_, queue, queue_evt) = queues.remove(0);

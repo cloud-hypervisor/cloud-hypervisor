@@ -95,6 +95,8 @@ pub enum ActivateError {
     CreateRateLimiter(std::io::Error),
     #[error("Failed to activate the vDPA device: {0}")]
     ActivateVdpa(vdpa::Error),
+    #[error("Failed to activate the virtio-fs device: {0}")]
+    ActivateVirtioFs(std::io::Error),
 }
 
 pub type ActivateResult = std::result::Result<(), ActivateError>;
