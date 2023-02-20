@@ -24,6 +24,10 @@ pub enum Error {
     UpdateInterrupt(io::Error),
     /// Failed enabling the interrupt.
     EnableInterrupt(io::Error),
+    /// Failed enabling the resample eventfd.
+    EnableResampleFd(io::Error),
+    /// Failed disabling the resample eventfd.
+    DisableResampleFd(io::Error),
     #[cfg(target_arch = "aarch64")]
     /// Failed creating GIC device.
     CreateGic(hypervisor::HypervisorVmError),
@@ -62,4 +66,10 @@ pub trait InterruptController: Send {
     #[cfg(target_arch = "x86_64")]
     fn end_of_interrupt(&mut self, vec: u8);
     fn notifier(&self, irq: usize) -> Option<EventFd>;
+    #[cfg(target_arch = "x86_64")]
+    fn enable_resamplefd(&self, irq: usize) -> Result<()>;
+    #[cfg(target_arch = "x86_64")]
+    fn disable_resamplefd(&self, irq: usize) -> Result<()>;
+    #[cfg(target_arch = "x86_64")]
+    fn resamplefd_notifier(&self, irq: usize) -> Option<EventFd>;
 }

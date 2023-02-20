@@ -141,6 +141,35 @@ pub trait InterruptSourceGroup: Send + Sync {
     #[allow(unused_variables)]
     fn notifier(&self, index: InterruptIndex) -> Option<EventFd>;
 
+    /// Enable the resamplefd.
+    /// With the resamplefd, vfio INTx interrupt can be automatically unamsk in EOI
+    #[cfg(target_arch = "x86_64")]
+    fn enable_resamplefd(&self, _index: InterruptIndex) -> Result<()> {
+        // Not all interrupt sources need resamplefd.
+        // If not, we can have a no-op here.
+        Ok(())
+    }
+
+    /// Disable the resamplefd.
+    #[cfg(target_arch = "x86_64")]
+    fn disable_resamplefd(&self, _index: InterruptIndex) -> Result<()> {
+        // Not all interrupt sources need resamplefd.
+        // If not, we can have a no-op here.
+        Ok(())
+    }
+
+    /// Returns an interrupt resample notifier from this interrupt.
+    ///
+    /// An interrupt resample notifier allows for kvm re-enable level triggered
+    /// interrupt automatically without userspace intervention.
+    #[allow(unused_variables)]
+    #[cfg(target_arch = "x86_64")]
+    fn resamplefd_notifier(&self, index: InterruptIndex) -> Option<EventFd> {
+        // Not all interrupt sources have a unmask notifier.
+        // If not, we can return None here.
+        None
+    }
+
     /// Update the interrupt source group configuration.
     ///
     /// # Arguments

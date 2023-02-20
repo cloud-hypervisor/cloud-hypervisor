@@ -23,6 +23,8 @@ struct InterruptRoute {
     gsi: u32,
     irq_fd: EventFd,
     registered: AtomicBool,
+    #[cfg(target_arch = "x86_64")]
+    resample_fd: Mutex<Option<EventFd>>,
 }
 
 impl InterruptRoute {
@@ -32,11 +34,15 @@ impl InterruptRoute {
             .allocate_gsi()
             .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Failed allocating new GSI"))?;
 
-        Ok(InterruptRoute {
+        let route = InterruptRoute {
             gsi,
             irq_fd,
             registered: AtomicBool::new(false),
-        })
+            #[cfg(target_arch = "x86_64")]
+            resample_fd: Mutex::new(None),
+        };
+
+        Ok(route)
     }
 
     pub fn enable(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
@@ -81,6 +87,50 @@ impl InterruptRoute {
                 .try_clone()
                 .expect("Failed cloning interrupt's EventFd"),
         )
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    pub fn resamplefd_notifier(&self) -> Option<EventFd> {
+        if let Some(rfd) = self.resample_fd.lock().unwrap().as_ref() {
+            Some(
+                rfd.try_clone()
+                    .expect("Failed cloning interrupt's resample EventFd"),
+            )
+        } else {
+            None
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    pub fn enable_resamplefd(&self) -> Result<()> {
+        let mut rfd = self.resample_fd.lock().unwrap();
+        match rfd.as_ref() {
+            None => {
+                // Enable the resample eventfd, this eventfd will be triggered in the EOI
+                // function of the user-space ioapic, and the vfio kernel code will poll
+                // this eventfd. When the eventfd is triggered, the vfio kernel code will
+                // unmask the corresponding INTx interrupt. This eventfd will be registered
+                // into vfio kernel in enable_intx()
+                let resample_fd = EventFd::new(libc::EFD_NONBLOCK)?;
+                *rfd = Some(resample_fd);
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    pub fn disable_resamplefd(&self) -> Result<()> {
+        let mut rfd = self.resample_fd.lock().unwrap();
+        match rfd.as_ref() {
+            Some(_) => {
+                *rfd = None;
+            }
+            _ => {}
+        }
+
+        Ok(())
     }
 }
 
@@ -165,6 +215,31 @@ impl InterruptSourceGroup for MsiInterruptGroup {
         None
     }
 
+    #[cfg(target_arch = "x86_64")]
+    fn enable_resamplefd(&self, index: InterruptIndex) -> vm_device::interrupt::Result<()> {
+        if let Some(route) = self.irq_routes.get(&index) {
+            return route.enable_resamplefd();
+        }
+        Ok(())
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn disable_resamplefd(&self, index: InterruptIndex) -> vm_device::interrupt::Result<()> {
+        if let Some(route) = self.irq_routes.get(&index) {
+            return route.disable_resamplefd();
+        }
+        Ok(())
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn resamplefd_notifier(&self, index: InterruptIndex) -> Option<EventFd> {
+        if let Some(route) = self.irq_routes.get(&index) {
+            return route.resamplefd_notifier();
+        }
+
+        None
+    }
+
     fn update(
         &self,
         index: InterruptIndex,
@@ -229,6 +304,48 @@ impl InterruptSourceGroup for LegacyUserspaceInterruptGroup {
 
     fn notifier(&self, _index: InterruptIndex) -> Option<EventFd> {
         self.ioapic.lock().unwrap().notifier(self.irq as usize)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn enable_resamplefd(&self, _index: InterruptIndex) -> Result<()> {
+        self.ioapic
+            .lock()
+            .unwrap()
+            .enable_resamplefd(self.irq as usize)
+            .map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!(
+                        "failed to register irqfd with resamplefd for #{}: {:?}",
+                        self.irq, e
+                    ),
+                )
+            })
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn disable_resamplefd(&self, _index: InterruptIndex) -> Result<()> {
+        self.ioapic
+            .lock()
+            .unwrap()
+            .disable_resamplefd(self.irq as usize)
+            .map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!(
+                        "failed to register irqfd with resamplefd for #{}: {:?}",
+                        self.irq, e
+                    ),
+                )
+            })
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn resamplefd_notifier(&self, _index: InterruptIndex) -> Option<EventFd> {
+        self.ioapic
+            .lock()
+            .unwrap()
+            .resamplefd_notifier(self.irq as usize)
     }
 }
 

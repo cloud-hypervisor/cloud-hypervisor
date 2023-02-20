@@ -399,8 +399,16 @@ impl InterruptController for Ioapic {
     fn end_of_interrupt(&mut self, vec: u8) {
         for i in 0..NUM_IOAPIC_PINS {
             let entry = &mut self.reg_entries[i];
-            // Clear Remote IRR bit
             if vector(*entry) == vec && trigger_mode(*entry) == 1 {
+                // resamplefd write will be skipped due to split irqchip mode,
+                // so userspace EOI should handle the resamplefd write instead.
+                if let Some(rfd) = self
+                    .interrupt_source_group
+                    .resamplefd_notifier(i as InterruptIndex)
+                {
+                    rfd.write(1).unwrap();
+                }
+                // Clear Remote IRR bit
                 set_remote_irr(entry, 0);
             }
         }
@@ -429,6 +437,27 @@ impl InterruptController for Ioapic {
 
     fn notifier(&self, irq: usize) -> Option<EventFd> {
         self.interrupt_source_group.notifier(irq as InterruptIndex)
+    }
+
+    fn enable_resamplefd(&self, irq: usize) -> Result<()> {
+        self.interrupt_source_group
+            .enable_resamplefd(irq as InterruptIndex)
+            .map_err(Error::EnableResampleFd)?;
+
+        Ok(())
+    }
+
+    fn disable_resamplefd(&self, irq: usize) -> Result<()> {
+        self.interrupt_source_group
+            .disable_resamplefd(irq as InterruptIndex)
+            .map_err(Error::DisableResampleFd)?;
+
+        Ok(())
+    }
+
+    fn resamplefd_notifier(&self, irq: usize) -> Option<EventFd> {
+        self.interrupt_source_group
+            .resamplefd_notifier(irq as InterruptIndex)
     }
 }
 
