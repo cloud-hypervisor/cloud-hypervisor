@@ -74,6 +74,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tracer::trace_scoped;
 use vfio_ioctls::{VfioContainer, VfioDevice, VfioDeviceFd};
+use virtio_devices::fs::BackendFsConfig;
 use virtio_devices::transport::VirtioTransport;
 use virtio_devices::transport::{VirtioPciDevice, VirtioPciDeviceActivator};
 use virtio_devices::vhost_user::VhostUserConfig;
@@ -154,6 +155,9 @@ pub enum DeviceManagerError {
 
     /// Cannot create virtio-fs device
     CreateVirtioFs(virtio_devices::vhost_user::Error),
+
+    /// Cannot create native virtio-fs device
+    CreateNativeVirtioFs(io::Error),
 
     /// Virtio-fs device was created without a socket.
     NoVirtioFsSock,
@@ -2509,24 +2513,15 @@ impl DeviceManager {
         Ok(devices)
     }
 
-    fn make_virtio_fs_device(
+    fn make_vhost_virtio_fs_device(
         &mut self,
-        fs_cfg: &mut FsConfig,
+        id: String,
+        mut node: DeviceNode,
+        fs_cfg: &FsConfig,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
-        let id = if let Some(id) = &fs_cfg.id {
-            id.clone()
-        } else {
-            let id = self.next_device_name(FS_DEVICE_NAME_PREFIX)?;
-            fs_cfg.id = Some(id.clone());
-            id
-        };
-
-        info!("Creating virtio-fs device: {:?}", fs_cfg);
-
-        let mut node = device_node!(id);
-
+        let virtio_fs_device;
         if let Some(fs_socket) = fs_cfg.socket.to_str() {
-            let virtio_fs_device = Arc::new(Mutex::new(
+            virtio_fs_device = Arc::new(Mutex::new(
                 virtio_devices::vhost_user::Fs::new(
                     id.clone(),
                     fs_socket,
@@ -2544,21 +2539,81 @@ impl DeviceManager {
                 )
                 .map_err(DeviceManagerError::CreateVirtioFs)?,
             ));
-
-            // Update the device tree with the migratable device.
-            node.migratable = Some(Arc::clone(&virtio_fs_device) as Arc<Mutex<dyn Migratable>>);
-            self.device_tree.lock().unwrap().insert(id.clone(), node);
-
-            Ok(MetaVirtioDevice {
-                virtio_device: Arc::clone(&virtio_fs_device)
-                    as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
-                iommu: false,
-                id,
-                pci_segment: fs_cfg.pci_segment,
-                dma_handler: None,
-            })
         } else {
-            Err(DeviceManagerError::NoVirtioFsSock)
+            return Err(DeviceManagerError::NoVirtioFsSock);
+        }
+
+        // Update the device tree with the migratable device.
+        node.migratable = Some(Arc::clone(&virtio_fs_device) as Arc<Mutex<dyn Migratable>>);
+        self.device_tree.lock().unwrap().insert(id.clone(), node);
+        Ok(MetaVirtioDevice {
+            virtio_device: Arc::clone(&virtio_fs_device)
+                as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
+            iommu: false,
+            id,
+            pci_segment: fs_cfg.pci_segment,
+            dma_handler: None,
+        })
+    }
+
+    fn make_native_virtio_fs_device(
+        &mut self,
+        id: String,
+        mut node: DeviceNode,
+        fs_cfg: &FsConfig,
+        bfs_cfg: &BackendFsConfig,
+    ) -> DeviceManagerResult<MetaVirtioDevice> {
+        let virtio_fs_device = Arc::new(Mutex::new(
+            virtio_devices::Fs::new(
+                id.clone(),
+                &fs_cfg.tag,
+                fs_cfg.num_queues,
+                fs_cfg.queue_size,
+                self.seccomp_action.clone(),
+                self.exit_evt
+                    .try_clone()
+                    .map_err(DeviceManagerError::EventFd)?,
+                self.force_iommu,
+                versioned_state_from_id(self.snapshot.as_ref(), id.as_str())
+                    .map_err(DeviceManagerError::RestoreGetState)?,
+                bfs_cfg,
+            )
+            .map_err(DeviceManagerError::CreateNativeVirtioFs)?,
+        ));
+
+        // Update the device tree with the migratable device.
+        node.migratable = Some(Arc::clone(&virtio_fs_device) as Arc<Mutex<dyn Migratable>>);
+        self.device_tree.lock().unwrap().insert(id.clone(), node);
+        Ok(MetaVirtioDevice {
+            virtio_device: Arc::clone(&virtio_fs_device)
+                as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
+            iommu: false,
+            id,
+            pci_segment: fs_cfg.pci_segment,
+            dma_handler: None,
+        })
+    }
+
+    fn make_virtio_fs_device(
+        &mut self,
+        fs_cfg: &mut FsConfig,
+    ) -> DeviceManagerResult<MetaVirtioDevice> {
+        let id = if let Some(id) = &fs_cfg.id {
+            id.clone()
+        } else {
+            let id = self.next_device_name(FS_DEVICE_NAME_PREFIX)?;
+            fs_cfg.id = Some(id.clone());
+            id
+        };
+
+        info!("Creating virtio-fs device: {:?}", fs_cfg);
+
+        let node = device_node!(id);
+
+        if let Some(bfs_cfg) = &fs_cfg.backendfs_config {
+            self.make_native_virtio_fs_device(id, node, fs_cfg, bfs_cfg)
+        } else {
+            self.make_vhost_virtio_fs_device(id, node, fs_cfg)
         }
     }
 

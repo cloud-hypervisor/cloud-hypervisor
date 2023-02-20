@@ -45,6 +45,7 @@ pub use self::block::*;
 pub use self::console::*;
 pub use self::device::*;
 pub use self::epoll_helper::*;
+pub use self::fs::*;
 pub use self::iommu::*;
 pub use self::mem::*;
 pub use self::net::*;

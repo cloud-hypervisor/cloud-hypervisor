@@ -240,7 +240,6 @@ pub struct Fs {
 impl Fs {
     /// Create a new virtio-fs device.
     #[allow(clippy::too_many_arguments)]
-    #[allow(unused)]
     pub fn new(
         id: String,
         tag: &str,
