@@ -89,7 +89,6 @@ members = [
     "serial_buffer",
     "test_infra",
     "tracer",
-    "vfio_user",
     "vhdx",
     "vhost_user_block",
     "vhost_user_net",

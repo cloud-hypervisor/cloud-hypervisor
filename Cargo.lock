@@ -1383,13 +1383,11 @@ dependencies = [
 [[package]]
 name = "vfio_user"
 version = "0.1.0"
+source = "git+https://github.com/rust-vmm/vfio-user?branch=main#afbbd5722885e961ce12baea12efe01d52ce14b0"
 dependencies = [
- "argh",
  "bitflags",
- "env_logger",
  "libc",
  "log",
- "pci",
  "serde",
  "serde_derive",
  "serde_json",
