@@ -170,7 +170,7 @@ mod tests {
     use std::os::unix::io::AsRawFd;
     use std::path::PathBuf;
     use std::sync::{Arc, RwLock};
-    use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
+    use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use vm_memory::{GuestAddress, GuestMemoryAtomic};
     use vm_virtio::queue::testing::VirtQueue as GuestQ;
     use vmm_sys_util::eventfd::EventFd;

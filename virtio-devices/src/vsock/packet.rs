@@ -389,7 +389,7 @@ mod tests {
     use super::*;
     use crate::vsock::defs::MAX_PKT_BUF_SIZE;
     use crate::GuestMemoryMmap;
-    use virtio_bindings::bindings::virtio_ring::VRING_DESC_F_WRITE;
+    use virtio_bindings::virtio_ring::VRING_DESC_F_WRITE;
     use virtio_queue::QueueOwnedT;
     use vm_memory::GuestAddress;
     use vm_virtio::queue::testing::VirtqDesc as GuestQDesc;
