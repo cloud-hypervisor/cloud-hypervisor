@@ -38,7 +38,7 @@ use std::time::Instant;
 use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
-use virtio_bindings::bindings::virtio_blk::*;
+use virtio_bindings::virtio_blk::*;
 use virtio_queue::DescriptorChain;
 use vm_memory::{
     bitmap::AtomicBitmap, bitmap::Bitmap, ByteValued, Bytes, GuestAddress, GuestMemory,
