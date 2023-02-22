@@ -1422,6 +1422,10 @@ impl FsConfig {
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        if !self.backendfs_config.is_some() && !vm_config.backed_by_shared_memory() {
+            return Err(ValidationError::VhostUserRequiresSharedMemory);
+        }
+
         if self.num_queues > vm_config.cpus.boot_vcpus as usize {
             return Err(ValidationError::TooManyQueues);
         }
@@ -1967,9 +1971,6 @@ impl VmConfig {
         }
 
         if let Some(fses) = &self.fs {
-            if !fses.is_empty() && !self.backed_by_shared_memory() {
-                return Err(ValidationError::VhostUserRequiresSharedMemory);
-            }
             for fs in fses {
                 fs.validate(self)?;
 
