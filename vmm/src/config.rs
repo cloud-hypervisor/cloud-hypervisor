@@ -175,6 +175,8 @@ pub enum ValidationError {
     DuplicateDevicePath(String),
     /// Provided MTU is lower than what the VIRTIO specification expects
     InvalidMtu(u16),
+    /// native virtio-fs shouldn't have socket argument
+    NativeVirtioFsSocket,
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -285,6 +287,9 @@ impl fmt::Display for ValidationError {
                     f,
                     "Provided MTU {mtu} is lower than 1280 (expected by VIRTIO specification)"
                 )
+            }
+            NativeVirtioFsSocket => {
+                write!(f, "Native virtio-fs shouldn't have socket argument")
             }
         }
     }
@@ -1422,8 +1427,17 @@ impl FsConfig {
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        if !self.backendfs_config.is_some() && !vm_config.backed_by_shared_memory() {
-            return Err(ValidationError::VhostUserRequiresSharedMemory);
+        if self.backendfs_config.is_some() {
+            if self.socket.to_str() != Some("") {
+                return Err(ValidationError::NativeVirtioFsSocket);
+            }
+        } else {
+            if self.socket.to_str() == Some("") {
+                return Err(ValidationError::VhostUserMissingSocket);
+            }
+            if !vm_config.backed_by_shared_memory() {
+                return Err(ValidationError::VhostUserRequiresSharedMemory);
+            }
         }
 
         if self.num_queues > vm_config.cpus.boot_vcpus as usize {

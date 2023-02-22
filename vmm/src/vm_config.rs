@@ -380,6 +380,7 @@ pub struct BalloonConfig {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct FsConfig {
     pub tag: String,
+    #[serde(default)]
     pub socket: PathBuf,
     #[serde(default = "default_fsconfig_num_queues")]
     pub num_queues: usize,
