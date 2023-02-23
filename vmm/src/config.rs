@@ -1010,27 +1010,27 @@ impl NetConfig {
             .unwrap_or_default();
         let bw_size = parser
             .convert("bw_size")
-            .map_err(Error::ParseDisk)?
+            .map_err(Error::ParseNetwork)?
             .unwrap_or_default();
         let bw_one_time_burst = parser
             .convert("bw_one_time_burst")
-            .map_err(Error::ParseDisk)?
+            .map_err(Error::ParseNetwork)?
             .unwrap_or_default();
         let bw_refill_time = parser
             .convert("bw_refill_time")
-            .map_err(Error::ParseDisk)?
+            .map_err(Error::ParseNetwork)?
             .unwrap_or_default();
         let ops_size = parser
             .convert("ops_size")
-            .map_err(Error::ParseDisk)?
+            .map_err(Error::ParseNetwork)?
             .unwrap_or_default();
         let ops_one_time_burst = parser
             .convert("ops_one_time_burst")
-            .map_err(Error::ParseDisk)?
+            .map_err(Error::ParseNetwork)?
             .unwrap_or_default();
         let ops_refill_time = parser
             .convert("ops_refill_time")
-            .map_err(Error::ParseDisk)?
+            .map_err(Error::ParseNetwork)?
             .unwrap_or_default();
         let bw_tb_config = if bw_size != 0 && bw_refill_time != 0 {
             Some(TokenBucketConfig {
