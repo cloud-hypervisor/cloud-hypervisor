@@ -4,13 +4,13 @@
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::Error as DeviceError;
-use crate::GuestMemoryMmap;
 use crate::VirtioInterruptType;
 use crate::{
-    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, VirtioCommon,
-    VirtioDevice, VirtioDeviceType, VirtioInterrupt, EPOLL_HELPER_EVENT_LAST,
-    VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
+    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler,
+    UserspaceMapping, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterrupt,
+    VirtioSharedMemoryList, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
+use crate::{GuestMemoryMmap, MmapRegion};
 use anyhow::anyhow;
 use seccompiler::SeccompAction;
 use serde::Deserialize;
@@ -234,6 +234,7 @@ pub struct Fs {
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
     backendfs_config: BackendFsConfig,
+    cache: Option<(VirtioSharedMemoryList, MmapRegion)>,
 }
 
 impl Fs {
@@ -249,6 +250,7 @@ impl Fs {
         iommu: bool,
         state: Option<State>,
         backendfs_config: &BackendFsConfig,
+        cache: Option<(VirtioSharedMemoryList, MmapRegion)>,
     ) -> io::Result<Fs> {
         // Calculate the actual number of queues needed.
         let num_queues = NUM_QUEUE_OFFSET + req_num_queues;
@@ -302,6 +304,7 @@ impl Fs {
             seccomp_action,
             exit_evt,
             backendfs_config: backendfs_config.clone(),
+            cache,
         })
     }
 
@@ -489,6 +492,37 @@ impl VirtioDevice for Fs {
 
         // Return the interrupt
         Some(self.common.interrupt_cb.take().unwrap())
+    }
+
+    fn get_shm_regions(&self) -> Option<VirtioSharedMemoryList> {
+        self.cache.as_ref().map(|cache| cache.0.clone())
+    }
+
+    fn set_shm_regions(
+        &mut self,
+        shm_regions: VirtioSharedMemoryList,
+    ) -> std::result::Result<(), crate::Error> {
+        if let Some(mut cache) = self.cache.as_mut() {
+            cache.0 = shm_regions;
+            Ok(())
+        } else {
+            Err(crate::Error::SetShmRegionsNotSupported)
+        }
+    }
+
+    fn userspace_mappings(&self) -> Vec<UserspaceMapping> {
+        let mut mappings = Vec::new();
+        if let Some(cache) = self.cache.as_ref() {
+            mappings.push(UserspaceMapping {
+                host_addr: cache.0.host_addr,
+                mem_slot: cache.0.mem_slot,
+                addr: cache.0.addr,
+                len: cache.0.len,
+                mergeable: false,
+            })
+        }
+
+        mappings
     }
 }
 
