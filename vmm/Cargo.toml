@@ -30,7 +30,7 @@ linux-loader = { version = "0.8.1", features = ["elf", "bzimage", "pe"] }
 log = "0.4.17"
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "main" }
 net_util = { path = "../net_util" }
-once_cell = "1.16.0"
+once_cell = "1.17.1"
 option_parser = { path = "../option_parser" }
 pci = { path = "../pci" }
 qcow = { path = "../qcow" }
