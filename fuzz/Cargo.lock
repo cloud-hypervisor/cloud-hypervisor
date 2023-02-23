@@ -113,7 +113,7 @@ dependencies = [
  "versionize",
  "versionize_derive",
  "vhdx",
- "virtio-bindings",
+ "virtio-bindings 0.2.0",
  "virtio-queue",
  "vm-memory",
  "vm-virtio",
@@ -456,7 +456,7 @@ dependencies = [
  "thiserror",
  "versionize",
  "versionize_derive",
- "virtio-bindings",
+ "virtio-bindings 0.2.0",
  "virtio-queue",
  "vm-memory",
  "vm-virtio",
@@ -665,9 +665,9 @@ checksum = "73473c0e59e6d5812c5dfe2a064a6444949f089e20eec9a2e5506596494e4623"
 
 [[package]]
 name = "syn"
-version = "1.0.107"
+version = "1.0.108"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f4064b5b16e03ae50984a5a8ed5d4f8803e6bc1fd170a3cda91a1be4b18e3f5"
+checksum = "d56e159d99e6c2b93995d171050271edb50ecc5288fbc7cc17de8fdce4e58c14"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -787,6 +787,7 @@ dependencies = [
 [[package]]
 name = "vfio_user"
 version = "0.1.0"
+source = "git+https://github.com/rust-vmm/vfio-user?branch=main#afbbd5722885e961ce12baea12efe01d52ce14b0"
 dependencies = [
  "bitflags",
  "libc",
@@ -832,6 +833,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ff512178285488516ed85f15b5d0113a7cdb89e9e8a760b269ae4f02b84bd6b"
 
 [[package]]
+name = "virtio-bindings"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b9084faf91b9aa9676ae2cac8f1432df2839d9566e6f19f29dbc13a8b831dff"
+
+[[package]]
 name = "virtio-devices"
 version = "0.1.0"
 dependencies = [
@@ -856,7 +863,7 @@ dependencies = [
  "versionize",
  "versionize_derive",
  "vhost",
- "virtio-bindings",
+ "virtio-bindings 0.2.0",
  "virtio-queue",
  "vm-allocator",
  "vm-device",
@@ -873,7 +880,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ba81e2bcc21c0d2fc5e6683e79367e26ad219197423a498df801d79d5ba77bd"
 dependencies = [
  "log",
- "virtio-bindings",
+ "virtio-bindings 0.1.0",
  "vm-memory",
  "vmm-sys-util",
 ]
