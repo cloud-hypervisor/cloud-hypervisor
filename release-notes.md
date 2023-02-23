@@ -406,7 +406,7 @@ different firmware options and to recommend the use of pre-built binaries.
   newer Linux kernels (#4744)
 * Error on reboot from race to close TAP devices (#4871)
 * Non-spec compliant virtio-block read-only support (#4888)
-  
+
 ### Removals
 
 The following functionality has been removed:
@@ -414,7 +414,7 @@ The following functionality has been removed:
 * Support for non-PVH firmware booting has been removed (#4511)
 * I/O ports used for older versions of firmware have been removed (#3926)
 * Deprecated API options for kernel/cmdline/initramfs have been removed (#4737)
- 
+
 ### Contributors
 
 Many thanks to everyone who has contributed to our release:
@@ -921,7 +921,7 @@ Many thanks to everyone who has contributed to our release:
 * Sebastien Boeuf <sebastien.boeuf@intel.com>
 * Wei Liu <liuwe@microsoft.com>
 * Ziye Yang <ziye.yang@intel.com>
- 
+
 # v20.2
 
 This is a bug fix release. The following issues have been addressed:
@@ -1020,7 +1020,7 @@ significant improvements in the boot time of the guest.
 ### Improved TDX support
 
 When using the latest TDVF firmware the ACPI tables created by the VMM are now
-exposed via the firmware to the guest. 
+exposed via the firmware to the guest.
 
 ### Live migration enhancements
 
@@ -1107,7 +1107,7 @@ tree.
 
 ### Power button support on AArch64
 
-Use of the ACPI power button (e.g `ch-remote --api-socket=<API socket> power-button`) 
+Use of the ACPI power button (e.g `ch-remote --api-socket=<API socket> power-button`)
 is now supported when running on AArch64.
 
 ### Notable bug fixes
@@ -1519,7 +1519,7 @@ Highlights for `cloud-hypervisor` version 0.11.0 include:
 ### `io_uring` support by default for `virtio-block`
 
 Provided that the host OS supports it (Linux kernel 5.8+) then `io_uring` will
-be used for a significantly higher performance block device. 
+be used for a significantly higher performance block device.
 
 ### Windows Guest Support
 
@@ -1693,7 +1693,7 @@ A new abstraction has been introduced, in the form of a `hypervisor` crate so as
 Multiple improvements have been made to the VM snapshot/restore support that was added in the last release. This includes persisting more vCPU state and in particular preserving the guest paravirtualized clock in order to avoid vCPU hangs inside the guest when running with multiple vCPUs.
 
 ### Virtio Memory Ballooning Support
- 
+
 A `virtio-balloon` device has been added, controlled through the `resize` control, which allows the reclamation of host memory by resizing a memory balloon inside the guest.
 
 ### Enhancements to ARM64 Support
