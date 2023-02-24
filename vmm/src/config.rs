@@ -2495,14 +2495,6 @@ mod tests {
             }
         );
         assert_eq!(
-            FsConfig::parse("tag=mytag,socket=/tmp/sock")?,
-            FsConfig {
-                socket: PathBuf::from("/tmp/sock"),
-                tag: "mytag".to_owned(),
-                ..Default::default()
-            }
-        );
-        assert_eq!(
             FsConfig::parse("tag=mytag,socket=/tmp/sock,num_queues=4,queue_size=1024")?,
             FsConfig {
                 socket: PathBuf::from("/tmp/sock"),
