@@ -16,7 +16,7 @@ use seccompiler::SeccompAction;
 use serde::Deserialize;
 use std::fs;
 use std::io;
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};
@@ -27,6 +27,8 @@ use virtio_queue::{Queue, QueueT};
 use virtiofsd::{
     descriptor_utils::{Error as VufDescriptorError, Reader, Writer},
     filesystem::FileSystem,
+    fs_cache_req_handler::FsCacheReqHandler,
+    fuse::RemovemappingOne,
     limits,
     passthrough::{self, xattrmap::XattrMap, CachePolicy, PassthroughFs},
     server::Server,
@@ -78,6 +80,107 @@ impl Default for VirtioFsConfig {
     }
 }
 
+#[derive(Clone)]
+struct CacheHandler {
+    cache_size: u64,
+    mmap_cache_addr: u64,
+}
+
+impl CacheHandler {
+    // Make sure request is within cache range
+    fn is_req_valid(&self, offset: u64, len: u64) -> bool {
+        let end = match offset.checked_add(len) {
+            Some(n) => n,
+            None => return false,
+        };
+
+        !(offset >= self.cache_size || end > self.cache_size)
+    }
+}
+
+impl FsCacheReqHandler for CacheHandler {
+    fn map(
+        &mut self,
+        foffset: u64,
+        moffset: u64,
+        len: u64,
+        flags: u64,
+        fd: RawFd,
+    ) -> result::Result<(), io::Error> {
+        debug!("fs_slave_map");
+
+        // Ignore if the length is 0.
+        if len == 0 {
+            return Ok(());
+        }
+
+        if !self.is_req_valid(moffset, len) {
+            return Err(io::Error::from_raw_os_error(libc::EINVAL));
+        }
+
+        let addr = self.mmap_cache_addr + moffset;
+        // SAFETY: FFI call with valid arguments
+        let ret = unsafe {
+            libc::mmap(
+                addr as *mut libc::c_void,
+                len as usize,
+                flags as i32,
+                libc::MAP_SHARED | libc::MAP_FIXED,
+                fd.as_raw_fd(),
+                foffset as libc::off_t,
+            )
+        };
+        if ret == libc::MAP_FAILED {
+            return Err(io::Error::last_os_error());
+        }
+
+        Ok(())
+    }
+
+    fn unmap(&mut self, requests: Vec<RemovemappingOne>) -> std::result::Result<(), io::Error> {
+        debug!("fs_slave_unmap");
+
+        for req in requests {
+            let mut offset = req.moffset;
+            let mut len = req.len;
+
+            // Ignore if the length is 0.
+            if len == 0 {
+                continue;
+            }
+
+            // Need to handle a special case where the slave ask for the unmapping
+            // of the entire mapping.
+            if len == 0xffff_ffff_ffff_ffff {
+                len = self.cache_size;
+                offset = 0;
+            }
+
+            if !self.is_req_valid(offset, len) {
+                return Err(io::Error::from_raw_os_error(libc::EINVAL));
+            }
+
+            let addr = self.mmap_cache_addr + offset;
+            // SAFETY: FFI call with valid arguments
+            let ret = unsafe {
+                libc::mmap(
+                    addr as *mut libc::c_void,
+                    len as usize,
+                    libc::PROT_NONE,
+                    libc::MAP_ANONYMOUS | libc::MAP_PRIVATE | libc::MAP_FIXED,
+                    -1,
+                    0,
+                )
+            };
+            if ret == libc::MAP_FAILED {
+                return Err(io::Error::last_os_error());
+            }
+        }
+
+        Ok(())
+    }
+}
+
 struct FsEpollHandler<F: FileSystem + Sync> {
     queue_index: u16,
     queue_evt: EventFd,
@@ -87,6 +190,7 @@ struct FsEpollHandler<F: FileSystem + Sync> {
     kill_evt: EventFd,
     pause_evt: EventFd,
     server: Arc<Server<F>>,
+    cache_handler: Option<CacheHandler>,
 }
 
 // New descriptors are pending on the virtio queue.
@@ -128,7 +232,7 @@ impl<F: FileSystem + Sync> FsEpollHandler<F> {
 
     fn process_queue_serial(&mut self) -> Result<bool> {
         let queue = &mut self.queue;
-
+        let mut cache_handler = self.cache_handler.clone();
         let mut used_descs = false;
 
         while let Some(desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
@@ -143,7 +247,7 @@ impl<F: FileSystem + Sync> FsEpollHandler<F> {
 
             let len = self
                 .server
-                .handle_message(reader, writer)
+                .handle_message(reader, writer, cache_handler.as_mut())
                 .map_err(Error::ProcessQueue)
                 .unwrap();
 
@@ -447,6 +551,16 @@ impl VirtioDevice for Fs {
             let (_, queue, queue_evt) = queues.remove(0);
             let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
+            let cache_handler = if let Some(cache) = self.cache.as_ref() {
+                let handler = CacheHandler {
+                    cache_size: cache.0.len,
+                    mmap_cache_addr: cache.0.host_addr,
+                };
+
+                Some(handler)
+            } else {
+                None
+            };
             let mut handler = FsEpollHandler {
                 queue_index: i as u16,
                 queue_evt,
@@ -456,6 +570,7 @@ impl VirtioDevice for Fs {
                 kill_evt,
                 pause_evt,
                 server: server.clone(),
+                cache_handler,
             };
 
             let paused = self.common.paused.clone();
