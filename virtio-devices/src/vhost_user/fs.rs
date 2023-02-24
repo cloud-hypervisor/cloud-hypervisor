@@ -117,7 +117,6 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
         debug!("fs_slave_unmap");
 
         for i in 0..VHOST_USER_FS_SLAVE_ENTRIES {
-            let offset = fs.cache_offset[i];
             let mut len = fs.len[i];
 
             // Ignore if the length is 0.
@@ -127,9 +126,12 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
 
             // Need to handle a special case where the slave ask for the unmapping
             // of the entire mapping.
-            if len == 0xffff_ffff_ffff_ffff {
+            let offset = if len == 0xffff_ffff_ffff_ffff {
                 len = self.cache_size;
-            }
+                0
+            } else {
+                fs.cache_offset[i]
+            };
 
             if !self.is_req_valid(offset, len) {
                 return Err(io::Error::from_raw_os_error(libc::EINVAL));
