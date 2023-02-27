@@ -1943,6 +1943,11 @@ impl Vm {
     fn setup_signal_handler(&mut self) -> Result<()> {
         let console = self.device_manager.lock().unwrap().console().clone();
         let signals = Signals::new(Vm::HANDLED_SIGNALS);
+
+        if !console.need_resize() {
+            return Ok(());
+        }
+
         match signals {
             Ok(signals) => {
                 self.signals = Some(signals.handle());

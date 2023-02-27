@@ -530,6 +530,14 @@ pub struct Console {
 }
 
 impl Console {
+    pub fn need_resize(&self) -> bool {
+        if let Some(_resizer) = self.console_resizer.as_ref() {
+            return true;
+        }
+
+        false
+    }
+
     pub fn update_console_size(&self) {
         if let Some(resizer) = self.console_resizer.as_ref() {
             resizer.update_console_size()
