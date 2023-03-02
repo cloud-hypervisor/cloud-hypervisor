@@ -27,7 +27,7 @@ use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::vm::physical_bits;
 use crate::GuestMemoryMmap;
 use crate::CPU_MANAGER_SNAPSHOT_ID;
-use acpi_tables::{aml, aml::Aml, sdt::Sdt};
+use acpi_tables::{aml, sdt::Sdt, Aml};
 use anyhow::anyhow;
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 use arch::aarch64::regs;
@@ -1717,7 +1717,7 @@ impl Cpu {
 }
 
 impl Aml for Cpu {
-    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+    fn to_aml_bytes(&self, sink: &mut dyn acpi_tables::AmlSink) {
         #[cfg(target_arch = "x86_64")]
         let mat_data: Vec<u8> = self.generate_mat();
         #[allow(clippy::if_same_then_else)]
@@ -1758,7 +1758,7 @@ impl Aml for Cpu {
                     // containing the LAPIC for this processor with the enabled bit set
                     // even it if is disabled in the MADT (non-boot CPU)
                     #[cfg(target_arch = "x86_64")]
-                    &aml::Name::new("_MAT".into(), &aml::Buffer::new(mat_data)),
+                    &aml::Name::new("_MAT".into(), &aml::BufferData::new(mat_data)),
                     // Trigger CPU ejection
                     #[cfg(target_arch = "x86_64")]
                     &aml::Method::new(
@@ -1770,7 +1770,7 @@ impl Aml for Cpu {
                     ),
                 ],
             )
-            .append_aml_bytes(bytes);
+            .to_aml_bytes(sink);
         } else {
             aml::Device::new(
                 format!("C{:03}", self.cpu_id).as_str().into(),
@@ -1795,10 +1795,10 @@ impl Aml for Cpu {
                     // containing the LAPIC for this processor with the enabled bit set
                     // even it if is disabled in the MADT (non-boot CPU)
                     #[cfg(target_arch = "x86_64")]
-                    &aml::Name::new("_MAT".into(), &aml::Buffer::new(mat_data)),
+                    &aml::Name::new("_MAT".into(), &aml::BufferData::new(mat_data)),
                 ],
             )
-            .append_aml_bytes(bytes);
+            .to_aml_bytes(sink);
         }
     }
 }
@@ -1808,13 +1808,13 @@ struct CpuNotify {
 }
 
 impl Aml for CpuNotify {
-    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+    fn to_aml_bytes(&self, sink: &mut dyn acpi_tables::AmlSink) {
         let object = aml::Path::new(&format!("C{:03}", self.cpu_id));
         aml::If::new(
             &aml::Equal::new(&aml::Arg(0), &self.cpu_id),
             vec![&aml::Notify::new(&object, &aml::Arg(1))],
         )
-        .append_aml_bytes(bytes)
+        .to_aml_bytes(sink)
     }
 }
 
@@ -1824,7 +1824,7 @@ struct CpuMethods {
 }
 
 impl Aml for CpuMethods {
-    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+    fn to_aml_bytes(&self, sink: &mut dyn acpi_tables::AmlSink) {
         if self.dynamic {
             // CPU status method
             aml::Method::new(
@@ -1848,19 +1848,19 @@ impl Aml for CpuMethods {
                     &aml::Return::new(&aml::Local(0)),
                 ],
             )
-            .append_aml_bytes(bytes);
+            .to_aml_bytes(sink);
 
             let mut cpu_notifies = Vec::new();
             for cpu_id in 0..self.max_vcpus {
                 cpu_notifies.push(CpuNotify { cpu_id });
             }
 
-            let mut cpu_notifies_refs: Vec<&dyn aml::Aml> = Vec::new();
+            let mut cpu_notifies_refs: Vec<&dyn Aml> = Vec::new();
             for cpu_id in 0..self.max_vcpus {
                 cpu_notifies_refs.push(&cpu_notifies[usize::from(cpu_id)]);
             }
 
-            aml::Method::new("CTFY".into(), 2, true, cpu_notifies_refs).append_aml_bytes(bytes);
+            aml::Method::new("CTFY".into(), 2, true, cpu_notifies_refs).to_aml_bytes(sink);
 
             aml::Method::new(
                 "CEJ0".into(),
@@ -1875,7 +1875,7 @@ impl Aml for CpuMethods {
                     &aml::Release::new("\\_SB_.PRES.CPLK".into()),
                 ],
             )
-            .append_aml_bytes(bytes);
+            .to_aml_bytes(sink);
 
             aml::Method::new(
                 "CSCN".into(),
@@ -1929,22 +1929,22 @@ impl Aml for CpuMethods {
                     &aml::Release::new("\\_SB_.PRES.CPLK".into()),
                 ],
             )
-            .append_aml_bytes(bytes)
+            .to_aml_bytes(sink)
         } else {
-            aml::Method::new("CSCN".into(), 0, true, vec![]).append_aml_bytes(bytes)
+            aml::Method::new("CSCN".into(), 0, true, vec![]).to_aml_bytes(sink)
         }
     }
 }
 
 impl Aml for CpuManager {
-    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+    fn to_aml_bytes(&self, sink: &mut dyn acpi_tables::AmlSink) {
         #[cfg(target_arch = "x86_64")]
         if let Some(acpi_address) = self.acpi_address {
             // CPU hotplug controller
             aml::Device::new(
                 "_SB_.PRES".into(),
                 vec![
-                    &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0A06")),
+                    &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0A06")),
                     &aml::Name::new("_UID".into(), &"CPU Hotplug Controller"),
                     // Mutex to protect concurrent access as we write to choose CPU and then read back status
                     &aml::Mutex::new("CPLK".into(), 0),
@@ -1961,12 +1961,13 @@ impl Aml for CpuManager {
                     &aml::OpRegion::new(
                         "PRST".into(),
                         aml::OpRegionSpace::SystemMemory,
-                        acpi_address.0 as usize,
-                        CPU_MANAGER_ACPI_SIZE,
+                        &(acpi_address.0 as usize),
+                        &CPU_MANAGER_ACPI_SIZE,
                     ),
                     &aml::Field::new(
                         "PRST".into(),
                         aml::FieldAccessType::Byte,
+                        aml::FieldLockRule::NoLock,
                         aml::FieldUpdateRule::WriteAsZeroes,
                         vec![
                             aml::FieldEntry::Reserved(32),
@@ -1981,6 +1982,7 @@ impl Aml for CpuManager {
                     &aml::Field::new(
                         "PRST".into(),
                         aml::FieldAccessType::DWord,
+                        aml::FieldLockRule::NoLock,
                         aml::FieldUpdateRule::Preserve,
                         vec![
                             aml::FieldEntry::Named(*b"CSEL", 32),
@@ -1990,18 +1992,18 @@ impl Aml for CpuManager {
                     ),
                 ],
             )
-            .append_aml_bytes(bytes);
+            .to_aml_bytes(sink);
         }
 
         // CPU devices
         let hid = aml::Name::new("_HID".into(), &"ACPI0010");
-        let uid = aml::Name::new("_CID".into(), &aml::EisaName::new("PNP0A05"));
+        let uid = aml::Name::new("_CID".into(), &aml::EISAName::new("PNP0A05"));
         // Bundle methods together under a common object
         let methods = CpuMethods {
             max_vcpus: self.config.max_vcpus,
             dynamic: self.dynamic,
         };
-        let mut cpu_data_inner: Vec<&dyn aml::Aml> = vec![&hid, &uid, &methods];
+        let mut cpu_data_inner: Vec<&dyn Aml> = vec![&hid, &uid, &methods];
 
         let mut cpu_devices = Vec::new();
         for cpu_id in 0..self.config.max_vcpus {
@@ -2019,7 +2021,7 @@ impl Aml for CpuManager {
             cpu_data_inner.push(cpu_device);
         }
 
-        aml::Device::new("_SB_.CPUS".into(), cpu_data_inner).append_aml_bytes(bytes)
+        aml::Device::new("_SB_.CPUS".into(), cpu_data_inner).to_aml_bytes(sink)
     }
 }
 

@@ -9,7 +9,7 @@ use crate::pci_segment::PciSegment;
 use crate::{GuestMemoryMmap, GuestRegionMmap};
 #[cfg(target_arch = "aarch64")]
 use acpi_tables::sdt::GenericAddress;
-use acpi_tables::{aml::Aml, rsdp::Rsdp, sdt::Sdt};
+use acpi_tables::{rsdp::Rsdp, sdt::Sdt, Aml};
 #[cfg(target_arch = "aarch64")]
 use arch::aarch64::DeviceInfoForFdt;
 #[cfg(target_arch = "aarch64")]
@@ -20,7 +20,8 @@ use pci::PciBdf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tracer::trace_scoped;
-use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemoryRegion};
+use vm_memory::{Address, Bytes, GuestAddress, GuestMemoryRegion};
+use zerocopy::AsBytes;
 
 /* Values for Type in APIC sub-headers */
 #[cfg(target_arch = "x86_64")]
@@ -179,9 +180,9 @@ pub fn create_dsdt_table(
 
     let mut bytes = Vec::new();
 
-    device_manager.lock().unwrap().append_aml_bytes(&mut bytes);
-    cpu_manager.lock().unwrap().append_aml_bytes(&mut bytes);
-    memory_manager.lock().unwrap().append_aml_bytes(&mut bytes);
+    device_manager.lock().unwrap().to_aml_bytes(&mut bytes);
+    cpu_manager.lock().unwrap().to_aml_bytes(&mut bytes);
+    memory_manager.lock().unwrap().to_aml_bytes(&mut bytes);
     dsdt.append_slice(&bytes);
 
     dsdt
@@ -811,7 +812,7 @@ pub fn create_acpi_tables(
     // RSDP
     let rsdp = Rsdp::new(*b"CLOUDH", xsdt_offset.0);
     guest_mem
-        .write_slice(rsdp.as_slice(), rsdp_offset)
+        .write_slice(rsdp.as_bytes(), rsdp_offset)
         .expect("Error writing RSDP");
 
     info!(

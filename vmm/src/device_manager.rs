@@ -26,7 +26,7 @@ use crate::GuestRegionMmap;
 use crate::PciDeviceInfo;
 use crate::{device_node, DEVICE_MANAGER_SNAPSHOT_ID};
 use acpi_tables::sdt::GenericAddress;
-use acpi_tables::{aml, aml::Aml};
+use acpi_tables::{aml, Aml};
 use anyhow::anyhow;
 use arch::layout;
 #[cfg(target_arch = "x86_64")]
@@ -4220,7 +4220,7 @@ fn numa_node_id_from_memory_zone_id(numa_nodes: &NumaNodes, memory_zone_id: &str
 struct TpmDevice {}
 
 impl Aml for TpmDevice {
-    fn to_aml_bytes(&self) -> Vec<u8> {
+    fn to_aml_bytes(&self, sink: &mut dyn acpi_tables::AmlSink) {
         aml::Device::new(
             "TPM2".into(),
             vec![
@@ -4236,12 +4236,12 @@ impl Aml for TpmDevice {
                 ),
             ],
         )
-        .to_aml_bytes()
+        .to_aml_bytes(sink)
     }
 }
 
 impl Aml for DeviceManager {
-    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+    fn to_aml_bytes(&self, sink: &mut dyn acpi_tables::AmlSink) {
         #[cfg(target_arch = "aarch64")]
         use arch::aarch64::DeviceInfoForFdt;
 
@@ -4261,7 +4261,7 @@ impl Aml for DeviceManager {
         aml::Device::new(
             "_SB_.PHPR".into(),
             vec![
-                &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0A06")),
+                &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0A06")),
                 &aml::Name::new("_STA".into(), &0x0bu8),
                 &aml::Name::new("_UID".into(), &"PCI Hotplug Controller"),
                 &aml::Mutex::new("BLCK".into(), 0),
@@ -4278,12 +4278,13 @@ impl Aml for DeviceManager {
                 &aml::OpRegion::new(
                     "PCST".into(),
                     aml::OpRegionSpace::SystemMemory,
-                    self.acpi_address.0 as usize,
-                    DEVICE_MANAGER_ACPI_SIZE,
+                    &(self.acpi_address.0 as usize),
+                    &DEVICE_MANAGER_ACPI_SIZE,
                 ),
                 &aml::Field::new(
                     "PCST".into(),
                     aml::FieldAccessType::DWord,
+                    aml::FieldLockRule::NoLock,
                     aml::FieldUpdateRule::WriteAsZeroes,
                     vec![
                         aml::FieldEntry::Named(*b"PCIU", 32),
@@ -4312,10 +4313,10 @@ impl Aml for DeviceManager {
                 &aml::Method::new("PSCN".into(), 0, true, pci_scan_inner),
             ],
         )
-        .append_aml_bytes(bytes);
+        .to_aml_bytes(sink);
 
         for segment in &self.pci_segments {
-            segment.append_aml_bytes(bytes);
+            segment.to_aml_bytes(sink);
         }
 
         let mut mbrd_memory = Vec::new();
@@ -4336,12 +4337,12 @@ impl Aml for DeviceManager {
         aml::Device::new(
             "_SB_.MBRD".into(),
             vec![
-                &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0C02")),
+                &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0C02")),
                 &aml::Name::new("_UID".into(), &aml::ZERO),
                 &aml::Name::new("_CRS".into(), &aml::ResourceTemplate::new(mbrd_memory_refs)),
             ],
         )
-        .append_aml_bytes(bytes);
+        .to_aml_bytes(sink);
 
         // Serial device
         #[cfg(target_arch = "x86_64")]
@@ -4365,7 +4366,7 @@ impl Aml for DeviceManager {
                     &aml::Name::new(
                         "_HID".into(),
                         #[cfg(target_arch = "x86_64")]
-                        &aml::EisaName::new("PNP0501"),
+                        &aml::EISAName::new("PNP0501"),
                         #[cfg(target_arch = "aarch64")]
                         &"ARMH0011",
                     ),
@@ -4376,7 +4377,7 @@ impl Aml for DeviceManager {
                         &aml::ResourceTemplate::new(vec![
                             &aml::Interrupt::new(true, true, false, false, serial_irq),
                             #[cfg(target_arch = "x86_64")]
-                            &aml::Io::new(0x3f8, 0x3f8, 0, 0x8),
+                            &aml::IO::new(0x3f8, 0x3f8, 0, 0x8),
                             #[cfg(target_arch = "aarch64")]
                             &aml::Memory32Fixed::new(
                                 true,
@@ -4387,25 +4388,23 @@ impl Aml for DeviceManager {
                     ),
                 ],
             )
-            .append_aml_bytes(bytes);
+            .to_aml_bytes(sink);
         }
 
-        aml::Name::new("_S5_".into(), &aml::Package::new(vec![&5u8])).append_aml_bytes(bytes);
+        aml::Name::new("_S5_".into(), &aml::Package::new(vec![&5u8])).to_aml_bytes(sink);
 
         aml::Device::new(
             "_SB_.PWRB".into(),
             vec![
-                &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0C0C")),
+                &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0C0C")),
                 &aml::Name::new("_UID".into(), &aml::ZERO),
             ],
         )
-        .append_aml_bytes(bytes);
+        .to_aml_bytes(sink);
 
         if self.config.lock().unwrap().tpm.is_some() {
             // Add tpm device
-            let tpm_acpi = TpmDevice {};
-            let tpm_dsdt_data = tpm_acpi.to_aml_bytes();
-            bytes.extend_from_slice(tpm_dsdt_data.as_slice());
+            TpmDevice {}.to_aml_bytes(sink);
         }
 
         self.ged_notification_device
@@ -4413,7 +4412,7 @@ impl Aml for DeviceManager {
             .unwrap()
             .lock()
             .unwrap()
-            .append_aml_bytes(bytes);
+            .to_aml_bytes(sink)
     }
 }
 
