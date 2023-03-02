@@ -12,7 +12,7 @@ use crate::coredump::{
 use crate::migration::url_to_path;
 use crate::MEMORY_MANAGER_SNAPSHOT_ID;
 use crate::{GuestMemoryMmap, GuestRegionMmap};
-use acpi_tables::{aml, aml::Aml};
+use acpi_tables::{aml, Aml};
 use anyhow::anyhow;
 #[cfg(target_arch = "x86_64")]
 use arch::x86_64::{SgxEpcRegion, SgxEpcSection};
@@ -2094,13 +2094,13 @@ struct MemoryNotify {
 }
 
 impl Aml for MemoryNotify {
-    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+    fn to_aml_bytes(&self, sink: &mut dyn acpi_tables::AmlSink) {
         let object = aml::Path::new(&format!("M{:03}", self.slot_id));
         aml::If::new(
             &aml::Equal::new(&aml::Arg(0), &self.slot_id),
             vec![&aml::Notify::new(&object, &aml::Arg(1))],
         )
-        .append_aml_bytes(bytes)
+        .to_aml_bytes(sink)
     }
 }
 
@@ -2109,11 +2109,11 @@ struct MemorySlot {
 }
 
 impl Aml for MemorySlot {
-    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+    fn to_aml_bytes(&self, sink: &mut dyn acpi_tables::AmlSink) {
         aml::Device::new(
             format!("M{:03}", self.slot_id).as_str().into(),
             vec![
-                &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0C80")),
+                &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0C80")),
                 &aml::Name::new("_UID".into(), &self.slot_id),
                 /*
                 _STA return value:
@@ -2147,7 +2147,7 @@ impl Aml for MemorySlot {
                 ),
             ],
         )
-        .append_aml_bytes(bytes)
+        .to_aml_bytes(sink)
     }
 }
 
@@ -2156,9 +2156,9 @@ struct MemorySlots {
 }
 
 impl Aml for MemorySlots {
-    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+    fn to_aml_bytes(&self, sink: &mut dyn acpi_tables::AmlSink) {
         for slot_id in 0..self.slots {
-            MemorySlot { slot_id }.append_aml_bytes(bytes);
+            MemorySlot { slot_id }.to_aml_bytes(sink);
         }
     }
 }
@@ -2168,19 +2168,19 @@ struct MemoryMethods {
 }
 
 impl Aml for MemoryMethods {
-    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+    fn to_aml_bytes(&self, sink: &mut dyn acpi_tables::AmlSink) {
         // Add "MTFY" notification method
         let mut memory_notifies = Vec::new();
         for slot_id in 0..self.slots {
             memory_notifies.push(MemoryNotify { slot_id });
         }
 
-        let mut memory_notifies_refs: Vec<&dyn aml::Aml> = Vec::new();
+        let mut memory_notifies_refs: Vec<&dyn Aml> = Vec::new();
         for memory_notifier in memory_notifies.iter() {
             memory_notifies_refs.push(memory_notifier);
         }
 
-        aml::Method::new("MTFY".into(), 2, true, memory_notifies_refs).append_aml_bytes(bytes);
+        aml::Method::new("MTFY".into(), 2, true, memory_notifies_refs).to_aml_bytes(sink);
 
         // MSCN method
         aml::Method::new(
@@ -2226,7 +2226,7 @@ impl Aml for MemoryMethods {
                 &aml::Release::new("MLCK".into()),
             ],
         )
-        .append_aml_bytes(bytes);
+        .to_aml_bytes(sink);
 
         // Memory status method
         aml::Method::new(
@@ -2250,7 +2250,7 @@ impl Aml for MemoryMethods {
                 &aml::Return::new(&aml::Local(0)),
             ],
         )
-        .append_aml_bytes(bytes);
+        .to_aml_bytes(sink);
 
         // Memory range method
         aml::Method::new(
@@ -2271,12 +2271,36 @@ impl Aml for MemoryMethods {
                         0xFFFF_FFFF_FFFF_FFFEu64,
                     )]),
                 ),
-                &aml::CreateField::<u64>::new(&aml::Path::new("MR64"), &14usize, "MINL".into()),
-                &aml::CreateField::<u32>::new(&aml::Path::new("MR64"), &18usize, "MINH".into()),
-                &aml::CreateField::<u64>::new(&aml::Path::new("MR64"), &22usize, "MAXL".into()),
-                &aml::CreateField::<u32>::new(&aml::Path::new("MR64"), &26usize, "MAXH".into()),
-                &aml::CreateField::<u64>::new(&aml::Path::new("MR64"), &38usize, "LENL".into()),
-                &aml::CreateField::<u32>::new(&aml::Path::new("MR64"), &42usize, "LENH".into()),
+                &aml::CreateQWordField::new(
+                    &aml::Path::new("MINL"),
+                    &aml::Path::new("MR64"),
+                    &14usize,
+                ),
+                &aml::CreateDWordField::new(
+                    &aml::Path::new("MINH"),
+                    &aml::Path::new("MR64"),
+                    &18usize,
+                ),
+                &aml::CreateQWordField::new(
+                    &aml::Path::new("MAXL"),
+                    &aml::Path::new("MR64"),
+                    &22usize,
+                ),
+                &aml::CreateDWordField::new(
+                    &aml::Path::new("MAXH"),
+                    &aml::Path::new("MR64"),
+                    &26usize,
+                ),
+                &aml::CreateQWordField::new(
+                    &aml::Path::new("LENL"),
+                    &aml::Path::new("MR64"),
+                    &38usize,
+                ),
+                &aml::CreateDWordField::new(
+                    &aml::Path::new("LENH"),
+                    &aml::Path::new("MR64"),
+                    &42usize,
+                ),
                 &aml::Store::new(&aml::Path::new("MINL"), &aml::Path::new("\\_SB_.MHPC.MHBL")),
                 &aml::Store::new(&aml::Path::new("MINH"), &aml::Path::new("\\_SB_.MHPC.MHBH")),
                 &aml::Store::new(&aml::Path::new("LENL"), &aml::Path::new("\\_SB_.MHPC.MHLL")),
@@ -2305,18 +2329,18 @@ impl Aml for MemoryMethods {
                 &aml::Return::new(&aml::Path::new("MR64")),
             ],
         )
-        .append_aml_bytes(bytes)
+        .to_aml_bytes(sink)
     }
 }
 
 impl Aml for MemoryManager {
-    fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
+    fn to_aml_bytes(&self, sink: &mut dyn acpi_tables::AmlSink) {
         if let Some(acpi_address) = self.acpi_address {
             // Memory Hotplug Controller
             aml::Device::new(
                 "_SB_.MHPC".into(),
                 vec![
-                    &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0A06")),
+                    &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0A06")),
                     &aml::Name::new("_UID".into(), &"Memory Hotplug Controller"),
                     // Mutex to protect concurrent access as we write to choose slot and then read back status
                     &aml::Mutex::new("MLCK".into(), 0),
@@ -2333,12 +2357,13 @@ impl Aml for MemoryManager {
                     &aml::OpRegion::new(
                         "MHPR".into(),
                         aml::OpRegionSpace::SystemMemory,
-                        acpi_address.0 as usize,
-                        MEMORY_MANAGER_ACPI_SIZE,
+                        &(acpi_address.0 as usize),
+                        &MEMORY_MANAGER_ACPI_SIZE,
                     ),
                     &aml::Field::new(
                         "MHPR".into(),
                         aml::FieldAccessType::DWord,
+                        aml::FieldLockRule::NoLock,
                         aml::FieldUpdateRule::Preserve,
                         vec![
                             aml::FieldEntry::Named(*b"MHBL", 32), // Base (low 4 bytes)
@@ -2350,6 +2375,7 @@ impl Aml for MemoryManager {
                     &aml::Field::new(
                         "MHPR".into(),
                         aml::FieldAccessType::DWord,
+                        aml::FieldLockRule::NoLock,
                         aml::FieldUpdateRule::Preserve,
                         vec![
                             aml::FieldEntry::Reserved(128),
@@ -2359,6 +2385,7 @@ impl Aml for MemoryManager {
                     &aml::Field::new(
                         "MHPR".into(),
                         aml::FieldAccessType::Byte,
+                        aml::FieldLockRule::NoLock,
                         aml::FieldUpdateRule::WriteAsZeroes,
                         vec![
                             aml::FieldEntry::Reserved(160),
@@ -2371,6 +2398,7 @@ impl Aml for MemoryManager {
                     &aml::Field::new(
                         "MHPR".into(),
                         aml::FieldAccessType::DWord,
+                        aml::FieldLockRule::NoLock,
                         aml::FieldUpdateRule::Preserve,
                         vec![
                             aml::FieldEntry::Named(*b"MSEL", 32), // Selector
@@ -2386,18 +2414,18 @@ impl Aml for MemoryManager {
                     },
                 ],
             )
-            .append_aml_bytes(bytes);
+            .to_aml_bytes(sink);
         } else {
             aml::Device::new(
                 "_SB_.MHPC".into(),
                 vec![
-                    &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0A06")),
+                    &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0A06")),
                     &aml::Name::new("_UID".into(), &"Memory Hotplug Controller"),
                     // Empty MSCN for GED
                     &aml::Method::new("MSCN".into(), 0, true, vec![]),
                 ],
             )
-            .append_aml_bytes(bytes);
+            .to_aml_bytes(sink);
         }
 
         #[cfg(target_arch = "x86_64")]
@@ -2409,7 +2437,7 @@ impl Aml for MemoryManager {
                 aml::Device::new(
                     "_SB_.EPC_".into(),
                     vec![
-                        &aml::Name::new("_HID".into(), &aml::EisaName::new("INT0E0C")),
+                        &aml::Name::new("_HID".into(), &aml::EISAName::new("INT0E0C")),
                         // QWORD describing the EPC region start and size
                         &aml::Name::new(
                             "_CRS".into(),
@@ -2423,7 +2451,7 @@ impl Aml for MemoryManager {
                         &aml::Method::new("_STA".into(), 0, false, vec![&aml::Return::new(&0xfu8)]),
                     ],
                 )
-                .append_aml_bytes(bytes);
+                .to_aml_bytes(sink);
             }
         }
     }

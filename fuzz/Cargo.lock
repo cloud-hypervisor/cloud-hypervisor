@@ -5,9 +5,9 @@ version = 3
 [[package]]
 name = "acpi_tables"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/acpi_tables?branch=main#4fd38dd5f746730ec5ae848dafcf8c2f50a13fc3"
+source = "git+https://github.com/rust-vmm/acpi_tables?branch=main#0b892e2c2053c4ecfac8d9e5a52babae75114702"
 dependencies = [
- "vm-memory",
+ "zerocopy",
 ]
 
 [[package]]
@@ -989,6 +989,7 @@ dependencies = [
  "vm-migration",
  "vm-virtio",
  "vmm-sys-util",
+ "zerocopy",
 ]
 
 [[package]]
@@ -1030,3 +1031,24 @@ name = "winapi-x86_64-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
+
+[[package]]
+name = "zerocopy"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "332f188cc1bcf1fe1064b8c58d150f497e697f49774aa846f2dc949d9a25f236"
+dependencies = [
+ "byteorder",
+ "zerocopy-derive",
+]
+
+[[package]]
+name = "zerocopy-derive"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6505e6815af7de1746a08f69c69606bb45695a17149517680f3b2149713b19a3"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
