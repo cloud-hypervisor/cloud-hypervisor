@@ -22,7 +22,7 @@ block_util = { path = "../block_util" }
 devices = { path = "../devices" }
 epoll = "4.3.1"
 event_monitor = { path = "../event_monitor" }
-gdbstub = { version = "0.6.3", optional = true }
+gdbstub = { version = "0.6.4", optional = true }
 gdbstub_arch = { version = "0.2.4", optional = true }
 hypervisor = { path = "../hypervisor" }
 libc = "0.2.139"
