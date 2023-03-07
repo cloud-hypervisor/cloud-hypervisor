@@ -159,7 +159,7 @@ impl PciSegment {
 
         // There are 32 devices on the PCI bus, let's assign them an IRQ.
         for i in 0..32 {
-            pci_irq_slots[i] = irqs[(i % num_irqs)];
+            pci_irq_slots[i] = irqs[i % num_irqs];
         }
 
         Ok(())
