@@ -52,7 +52,9 @@ cp target/$BUILD_TARGET/release/cloud-hypervisor $VFIO_DIR
 cp target/$BUILD_TARGET/release/ch-remote $VFIO_DIR
 
 # test_vfio rely on hugepages
-echo 6144 | sudo tee /proc/sys/vm/nr_hugepages
+HUGEPAGESIZE=`grep Hugepagesize /proc/meminfo | awk '{print $2}'`
+PAGE_NUM=`echo $((12288 * 1024 / $HUGEPAGESIZE))`
+echo $PAGE_NUM | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
 export RUST_BACKTRACE=1
