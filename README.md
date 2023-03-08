@@ -178,7 +178,7 @@ To build the kernel:
 
 ```shell
 # Clone the Cloud Hypervisor Linux branch
-$ git clone --depth 1 https://github.com/cloud-hypervisor/linux.git -b ch-6.1.6 linux-cloud-hypervisor
+$ git clone --depth 1 https://github.com/cloud-hypervisor/linux.git -b ch-6.2 linux-cloud-hypervisor
 $ pushd linux-cloud-hypervisor
 # Use the x86-64 cloud-hypervisor kernel config to build your kernel for x86-64
 $ wget https://raw.githubusercontent.com/cloud-hypervisor/cloud-hypervisor/main/resources/linux-config-x86_64
