@@ -56,26 +56,8 @@ popd
 
 # Build custom kernel based on virtio-pmem and virtio-fs upstream patches
 VMLINUX_IMAGE="$WORKLOADS_DIR/vmlinux"
-
-LINUX_CUSTOM_DIR="$WORKLOADS_DIR/linux-custom"
-
 if [ ! -f "$VMLINUX_IMAGE" ]; then
-    SRCDIR=$PWD
-    pushd $WORKLOADS_DIR
-    time git clone --depth 1 "https://github.com/cloud-hypervisor/linux.git" -b "ch-6.1.6" $LINUX_CUSTOM_DIR
-    cp $SRCDIR/resources/linux-config-x86_64 $LINUX_CUSTOM_DIR/.config
-    popd
-fi
-
-if [ ! -f "$VMLINUX_IMAGE" ]; then
-    pushd $LINUX_CUSTOM_DIR
-    time make bzImage -j `nproc`
-    cp vmlinux $VMLINUX_IMAGE || exit 1
-    popd
-fi
-
-if [ -d "$LINUX_CUSTOM_DIR" ]; then
-    rm -rf $LINUX_CUSTOM_DIR
+    build_custom_linux
 fi
 
 BUILD_TARGET="$(uname -m)-unknown-linux-${CH_LIBC}"
