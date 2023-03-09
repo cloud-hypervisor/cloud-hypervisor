@@ -374,6 +374,7 @@ are all equal and welcome means of contribution. See the
 
 Get an [invite to our Slack channel](https://join.slack.com/t/cloud-hypervisor/shared_invite/enQtNjY3MTE3MDkwNDQ4LWQ1MTA1ZDVmODkwMWQ1MTRhYzk4ZGNlN2UwNTI3ZmFlODU0OTcwOWZjMTkwZDExYWE3YjFmNzgzY2FmNDAyMjI)
 and [join us on Slack](https://cloud-hypervisor.slack.com/).
+know community activities [join community activities Slack channel ](https://cloud-hypervisor.slack.com/archives/C04R5DUQVBN)
 
 ## Mailing list
 
@@ -386,6 +387,5 @@ list](https://lists.cloudhypervisor.org/g/dev/).
 
 Please contact the maintainers listed in the MAINTAINERS.md file with security issues.
 
-## Community Activities
 
-know community activities [join community activities release Slack channel ](https://cloud-hypervisor.slack.com/archives/C04R5DUQVBN)
+
