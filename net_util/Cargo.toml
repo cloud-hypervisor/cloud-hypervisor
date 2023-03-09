@@ -12,7 +12,7 @@ log = "0.4.17"
 net_gen = { path = "../net_gen" }
 rate_limiter = { path = "../rate_limiter" }
 serde = "1.0.151"
-thiserror = "1.0.38"
+thiserror = "1.0.39"
 versionize = "0.1.9"
 versionize_derive = "0.1.4"
 virtio-bindings = "0.2.0"
