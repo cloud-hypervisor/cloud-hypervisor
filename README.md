@@ -385,3 +385,7 @@ list](https://lists.cloudhypervisor.org/g/dev/).
 ## Security issues
 
 Please contact the maintainers listed in the MAINTAINERS.md file with security issues.
+
+## Community Activities
+
+know community activities [join community activities release Slack channel ](https://cloud-hypervisor.slack.com/archives/C04R5DUQVBN)
