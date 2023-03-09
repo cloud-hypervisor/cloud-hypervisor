@@ -45,11 +45,7 @@ if [ $? -ne 0 ]; then
 fi
 popd
 
-# Build custom kernel based on virtio-pmem and virtio-fs upstream patches
-VMLINUX_IMAGE="$WORKLOADS_DIR/vmlinux"
-if [ ! -f "$VMLINUX_IMAGE" ]; then
-    build_custom_linux
-fi
+build_custom_linux
 
 BUILD_TARGET="$(uname -m)-unknown-linux-${CH_LIBC}"
 CFLAGS=""
