@@ -221,7 +221,7 @@ The CLI options are parsed by the
 [internal API](#internal-api) commands.
 
 The REST API is processed by an HTTP thread using the
-[Firecracker's `micro_http`](https://github.com/firecracker-microvm/firecracker/tree/master/src/micro_http)
+[Firecracker's `micro_http`](https://github.com/firecracker-microvm/micro-http)
 crate. As with the CLI, the HTTP requests eventually get translated into
 [internal API](#internal-api) commands.
 
@@ -379,5 +379,5 @@ APIs work together, let's look at a complete VM creation flow, from the
    ```
 1. The Cloud Hypervisor HTTP thread sends the formed HTTP response back to the
    user. This is abstracted by the
-   [micro_http](https://github.com/firecracker-microvm/firecracker/tree/master/src/micro_http)
+   [micro_http](https://github.com/firecracker-microvm/micro-http)
    crate.
