@@ -12,9 +12,7 @@ FOCAL_OS_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_IMAGE_NAME"
 FW="$WORKLOADS_DIR/hypervisor-fw"
 
 VMLINUX_IMAGE="$WORKLOADS_DIR/vmlinux"
-if [ ! -f "$VMLINUX_IMAGE" ]; then
-    build_custom_linux
-fi
+build_custom_linux
 
 BLK_IMAGE="$WORKLOADS_DIR/blk.img"
 MNT_DIR="mount_image"
