@@ -110,18 +110,23 @@ impl Default for MetricsReport {
 #[derive(Default)]
 pub struct PerformanceTestOverrides {
     test_iterations: Option<u32>,
+    test_timeout: Option<u32>,
 }
 
 impl fmt::Display for PerformanceTestOverrides {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let Some(test_iterations) = self.test_iterations {
-            write!(f, "test_iterations = {test_iterations}")?;
+            write!(f, "test_iterations = {test_iterations}, ")?;
+        }
+        if let Some(test_timeout) = self.test_timeout {
+            write!(f, "test_timeout = {test_timeout}")?;
         }
 
         Ok(())
     }
 }
 
+#[derive(Clone)]
 pub struct PerformanceTestControl {
     test_timeout: u32,
     test_iterations: u32,
@@ -188,7 +193,14 @@ impl PerformanceTest {
             .test_iterations
             .unwrap_or(self.control.test_iterations)
         {
-            metrics.push((self.func_ptr)(&self.control));
+            // update the timeout in control if passed explicitly and run testcase with it
+            if let Some(test_timeout) = overrides.test_timeout {
+                let mut control: PerformanceTestControl = self.control.clone();
+                control.test_timeout = test_timeout;
+                metrics.push((self.func_ptr)(&control));
+            } else {
+                metrics.push((self.func_ptr)(&self.control));
+            }
         }
 
         let mean = (self.unit_adjuster)(mean(&metrics).unwrap());
@@ -207,9 +219,9 @@ impl PerformanceTest {
 
     // Calculate the timeout for each test
     // Note: To cover the setup/cleanup time, 20s is added for each iteration of the test
-    pub fn calc_timeout(&self, test_iterations: &Option<u32>) -> u64 {
-        ((self.control.test_timeout + 20) * test_iterations.unwrap_or(self.control.test_iterations))
-            as u64
+    pub fn calc_timeout(&self, test_iterations: &Option<u32>, test_timeout: &Option<u32>) -> u64 {
+        ((test_timeout.unwrap_or(self.control.test_timeout) + 20)
+            * test_iterations.unwrap_or(self.control.test_iterations)) as u64
     }
 }
 
@@ -587,6 +599,7 @@ fn run_test_with_timeout(
 ) -> Result<PerformanceTestResult, Error> {
     let (sender, receiver) = channel::<Result<PerformanceTestResult, Error>>();
     let test_iterations = overrides.test_iterations;
+    let test_timeout = overrides.test_timeout;
     let overrides = overrides.clone();
     thread::spawn(move || {
         println!(
@@ -609,7 +622,7 @@ fn run_test_with_timeout(
     });
 
     // Todo: Need to cleanup/kill all hanging child processes
-    let test_timeout = test.calc_timeout(&test_iterations);
+    let test_timeout = test.calc_timeout(&test_iterations, &test_timeout);
     receiver
         .recv_timeout(Duration::from_secs(test_timeout))
         .map_err(|_| {
@@ -644,6 +657,10 @@ struct Options {
     #[argh(option, long = "iterations")]
     /// override number of test iterations
     iterations: Option<u32>,
+
+    #[argh(option, long = "timeout")]
+    /// override test timeout, Ex. --timeout 5
+    timeout: Option<u32>,
 
     #[argh(switch, short = 'V', long = "version")]
     /// print version information
@@ -683,6 +700,7 @@ fn main() {
 
     let overrides = Arc::new(PerformanceTestOverrides {
         test_iterations: opts.iterations,
+        test_timeout: opts.timeout,
     });
 
     for test in test_list.iter() {
