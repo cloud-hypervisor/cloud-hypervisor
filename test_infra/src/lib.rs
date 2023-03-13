@@ -1352,6 +1352,7 @@ pub fn parse_iperf3_output(output: &[u8], sender: bool, bandwidth: bool) -> Resu
     })
 }
 
+#[derive(Clone)]
 pub enum FioOps {
     Read,
     RandomRead,
