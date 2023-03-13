@@ -41,7 +41,7 @@ log = { version = "0.4.17", features = ["std"] }
 option_parser = { path = "option_parser" }
 seccompiler = "0.3.0"
 serde_json = "1.0.93"
-signal-hook = "0.3.14"
+signal-hook = "0.3.15"
 thiserror = "1.0.39"
 tpm = { path = "tpm"}
 tracer = { path = "tracer" }
