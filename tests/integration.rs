@@ -3744,7 +3744,7 @@ mod common_parallel {
     // line (We tag the command line from cloud-hypervisor for that purpose).
     // The third device is added to validate that hotplug works correctly since
     // it is being added to the L2 VM through hotplugging mechanism.
-    // Also, we pass-through a vitio-blk device to the L2 VM to test the 32-bit
+    // Also, we pass-through a virtio-blk device to the L2 VM to test the 32-bit
     // vfio device support
     fn test_vfio() {
         setup_vfio_network_interfaces();
