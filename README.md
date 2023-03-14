@@ -124,7 +124,7 @@ may be required.
 ### Firmware Booting
 
 Cloud Hypervisor supports booting disk images containing all needed components
-to run cloud workloads, a.k.a. cloud images. 
+to run cloud workloads, a.k.a. cloud images.
 
 The following sample commands will download an Ubuntu Cloud image, converting
 it into a format that Cloud Hypervisor can use and a firmware to boot the image
@@ -372,8 +372,8 @@ are all equal and welcome means of contribution. See the
 
 ## Slack
 
-Get an [invite to our Slack channel](https://join.slack.com/t/cloud-hypervisor/shared_invite/enQtNjY3MTE3MDkwNDQ4LWQ1MTA1ZDVmODkwMWQ1MTRhYzk4ZGNlN2UwNTI3ZmFlODU0OTcwOWZjMTkwZDExYWE3YjFmNzgzY2FmNDAyMjI)
-and [join us on Slack](https://cloud-hypervisor.slack.com/), and [participate in our community activities](https://cloud-hypervisor.slack.com/archives/C04R5DUQVBN).
+Get an [invite to our Slack channel](https://join.slack.com/t/cloud-hypervisor/shared_invite/enQtNjY3MTE3MDkwNDQ4LWQ1MTA1ZDVmODkwMWQ1MTRhYzk4ZGNlN2UwNTI3ZmFlODU0OTcwOWZjMTkwZDExYWE3YjFmNzgzY2FmNDAyMjI),
+ [join us on Slack](https://cloud-hypervisor.slack.com/), and [participate in our community activities](https://cloud-hypervisor.slack.com/archives/C04R5DUQVBN).
 
 ## Mailing list
 
