@@ -161,6 +161,8 @@ pub struct MemoryConfig {
     pub zones: Option<Vec<MemoryZoneConfig>>,
     #[serde(default = "default_memoryconfig_thp")]
     pub thp: bool,
+    #[serde(default)]
+    pub dirty_log: bool,
 }
 
 pub const DEFAULT_MEMORY_MB: u64 = 512;
@@ -179,6 +181,7 @@ impl Default for MemoryConfig {
             prefault: false,
             zones: None,
             thp: true,
+            dirty_log: false,
         }
     }
 }

@@ -734,6 +734,9 @@ components:
         thp:
           type: boolean
           default: true
+        dirty_log:
+          type: boolean
+          default: false
         zones:
           type: array
           items:

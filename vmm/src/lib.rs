@@ -643,9 +643,9 @@ impl Vmm {
         // Safe to unwrap as we checked it was Some(&str).
         let source_url = source_url.unwrap();
 
-        let vm_config = Arc::new(Mutex::new(
-            recv_vm_config(source_url).map_err(VmError::Restore)?,
-        ));
+        let vm_config = Arc::new(Mutex::new({
+            recv_vm_config(source_url).map_err(VmError::Restore)?
+        }));
         let snapshot = recv_vm_state(source_url).map_err(VmError::Restore)?;
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         let vm_snapshot = get_vm_snapshot(&snapshot).map_err(VmError::Restore)?;
@@ -2093,6 +2093,7 @@ mod unit_tests {
                 prefault: false,
                 zones: None,
                 thp: true,
+                dirty_log: false,
             },
             payload: Some(PayloadConfig {
                 kernel: Some(PathBuf::from("/path/to/kernel")),

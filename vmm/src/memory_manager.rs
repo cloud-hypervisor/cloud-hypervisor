@@ -30,7 +30,7 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::ffi;
 use std::fs::{File, OpenOptions};
-use std::io::{self, Read};
+use std::io::{self, Read, Seek, SeekFrom};
 use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
@@ -185,6 +185,7 @@ pub struct MemoryManager {
     arch_mem_regions: Vec<ArchMemRegion>,
     ram_allocator: AddressAllocator,
     dynamic: bool,
+    dirty_log: bool,
 
     // Keep track of calls to create_userspace_mapping() for guest RAM.
     // This is useful for getting the dirty pages as we need to know the
@@ -236,6 +237,9 @@ pub enum Error {
 
     /// Failed to virtio-mem resize
     VirtioMemResizeFail(virtio_devices::mem::Error),
+
+    /// Cannot enable dirty log.
+    Dirtylog(MigratableError),
 
     /// Cannot restore VM
     Restore(MigratableError),
@@ -1130,6 +1134,7 @@ impl MemoryManager {
             arch_mem_regions,
             ram_allocator,
             dynamic,
+            dirty_log: config.dirty_log,
             #[cfg(target_arch = "aarch64")]
             uefi_flash: None,
             thp: config.thp,
@@ -1145,6 +1150,7 @@ impl MemoryManager {
             // beforehand.
             memory_manager.allocate_address_space()?;
             memory_manager.add_uefi_flash()?;
+            memory_manager.init_dirty_log().map_err(Error::Dirtylog)?;
         }
 
         #[cfg(target_arch = "x86_64")]
@@ -2087,6 +2093,51 @@ impl MemoryManager {
 
         Ok(())
     }
+
+    pub fn init_dirty_log(&mut self) -> result::Result<(), MigratableError> {
+        if self.dirty_log {
+            self.start_dirty_log()?;
+        }
+
+        Ok(())
+    }
+
+    pub fn save_range_to_file(
+        &self,
+        mut memory_file: &File,
+        range: &MemoryRange,
+        file_offset: u64,
+    ) -> result::Result<(), MigratableError> {
+        let guest_memory = self.guest_memory.memory();
+        let mut offset: u64 = 0;
+
+        if file_offset != 0 {
+            memory_file
+                .seek(SeekFrom::Start(file_offset))
+                .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+        }
+        // Here we are manually handling the retry in case we can't read
+        // the whole region at once because we can't use the implementation
+        // from vm-memory::GuestMemory of write_all_to() as it is not
+        // following the correct behavior. For more info about this issue
+        // see: https://github.com/rust-vmm/vm-memory/issues/174
+        loop {
+            let bytes_written = guest_memory
+                .write_to(
+                    GuestAddress(range.gpa + offset),
+                    &mut memory_file,
+                    (range.length - offset) as usize,
+                )
+                .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+            offset += bytes_written as u64;
+
+            if offset == range.length {
+                break;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 struct MemoryNotify {
@@ -2513,36 +2564,84 @@ impl Transportable for MemoryManager {
         memory_file_path.push(String::from(SNAPSHOT_FILENAME));
 
         // Create the snapshot file for the entire memory
-        let mut memory_file = OpenOptions::new()
+        let memory_file = OpenOptions::new()
             .read(true)
             .write(true)
             .create_new(true)
+            .truncate(true)
             .open(memory_file_path)
             .map_err(|e| MigratableError::MigrateSend(e.into()))?;
 
         let guest_memory = self.guest_memory.memory();
 
-        for range in self.snapshot_memory_ranges.regions() {
-            let mut offset: u64 = 0;
-            // Here we are manually handling the retry in case we can't read
-            // the whole region at once because we can't use the implementation
-            // from vm-memory::GuestMemory of write_all_to() as it is not
-            // following the correct behavior. For more info about this issue
-            // see: https://github.com/rust-vmm/vm-memory/issues/174
-            loop {
-                let bytes_written = guest_memory
-                    .write_to(
-                        GuestAddress(range.gpa + offset),
-                        &mut memory_file,
-                        (range.length - offset) as usize,
-                    )
-                    .map_err(|e| MigratableError::MigrateSend(e.into()))?;
-                offset += bytes_written as u64;
+        if self.dirty_log {
+            info!("Saving dirty guest memory to snapshot image file.");
+            let total_size = guest_memory.iter().map(|region| region.len()).sum::<u64>();
+            memory_file
+                .set_len(total_size)
+                .map_err(|e| MigratableError::MigrateSend(e.into()))?;
 
-                if offset == range.length {
-                    break;
+            for range in self.snapshot_memory_ranges.regions() {
+                let vmm_dirty_bitmap = match self
+                    .guest_memory
+                    .memory()
+                    .find_region(GuestAddress(range.gpa))
+                {
+                    Some(region) => {
+                        assert!(region.start_addr().raw_value() == range.gpa);
+                        assert!(region.len() == range.length);
+                        region.bitmap().get_and_reset()
+                    }
+                    None => {
+                        return Err(MigratableError::MigrateSend(anyhow!(
+                            "Error finding 'guest memory region' with address {:x}",
+                            range.gpa
+                        )))
+                    }
+                };
+
+                let slot = match self
+                    .guest_ram_mappings
+                    .iter()
+                    .find(|map| map.gpa == range.gpa && map.size == range.length)
+                {
+                    Some(map) => map.slot,
+                    None => {
+                        return Err(MigratableError::MigrateSend(anyhow!(
+                            "Error finding 'guest ram mapping' with address {:x}",
+                            range.gpa
+                        )))
+                    }
+                };
+
+                let vm_dirty_bitmap = self
+                    .vm
+                    .get_dirty_log(slot, range.gpa, range.length)
+                    .map_err(|e| {
+                        MigratableError::MigrateSend(anyhow!("Error getting VM dirty log {}", e))
+                    })?;
+
+                let dirty_bitmap: Vec<u64> = vm_dirty_bitmap
+                    .iter()
+                    .zip(vmm_dirty_bitmap.iter())
+                    .map(|(x, y)| x | y)
+                    .collect();
+
+                let sub_table = MemoryRangeTable::from_bitmap(dirty_bitmap, range.gpa, 4096);
+
+                if !sub_table.regions().is_empty() {
+                    for r in sub_table.regions() {
+                        self.save_range_to_file(&memory_file, r, r.gpa - range.gpa)?;
+                    }
                 }
             }
+
+            return Ok(());
+        }
+
+        info!("Saving full guest memory to snapshot image file.");
+        for range in self.snapshot_memory_ranges.regions() {
+            self.save_range_to_file(&memory_file, range, 0)?;
         }
         Ok(())
     }

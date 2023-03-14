@@ -207,6 +207,9 @@ pub enum Error {
     #[error("Cannot send VM snapshot: {0}")]
     SnapshotSend(#[source] MigratableError),
 
+    #[error("Cannot enable dirty_log: {0}")]
+    Dirtylog(#[source] MigratableError),
+
     #[error("Invalid restore source URL")]
     InvalidRestoreSourceUrl,
 
@@ -2133,6 +2136,12 @@ impl Vm {
             .allocate_address_space()
             .map_err(Error::MemoryManager)?;
 
+        self.memory_manager
+            .lock()
+            .unwrap()
+            .init_dirty_log()
+            .map_err(Error::Dirtylog)?;
+
         self.cpu_manager
             .lock()
             .unwrap()
@@ -2159,6 +2168,12 @@ impl Vm {
             .unwrap()
             .allocate_address_space()
             .map_err(Error::MemoryManager)?;
+
+        self.memory_manager
+            .lock()
+            .unwrap()
+            .init_dirty_log()
+            .map_err(Error::Dirtylog)?;
 
         // Now we can start all vCPUs from here.
         self.cpu_manager

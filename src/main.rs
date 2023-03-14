@@ -694,6 +694,7 @@ mod unit_tests {
                 prefault: false,
                 zones: None,
                 thp: true,
+                dirty_log: false,
             },
             payload: Some(PayloadConfig {
                 kernel: Some(PathBuf::from("/path/to/kernel")),

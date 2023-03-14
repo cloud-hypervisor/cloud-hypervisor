@@ -634,6 +634,11 @@ impl MemoryConfig {
             .map_err(Error::ParseMemory)?
             .unwrap_or(Toggle(true))
             .0;
+        let dirty_log = parser
+            .convert::<Toggle>("dirty_log")
+            .map_err(Error::ParseMemory)?
+            .unwrap_or(Toggle(false))
+            .0;
 
         let zones: Option<Vec<MemoryZoneConfig>> = if let Some(memory_zones) = &memory_zones {
             let mut zones = Vec::new();
@@ -721,6 +726,7 @@ impl MemoryConfig {
             prefault,
             zones,
             thp,
+            dirty_log,
         })
     }
 
@@ -2737,6 +2743,7 @@ mod tests {
                 prefault: false,
                 zones: None,
                 thp: true,
+                dirty_log: false,
             },
             payload: Some(PayloadConfig {
                 kernel: Some(PathBuf::from("/path/to/kernel")),
