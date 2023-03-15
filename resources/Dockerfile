@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+#
 # When changing this file don't forget to update the tag name in the
 # .github/workflows/docker-image.yaml file if doing multiple per day
 
