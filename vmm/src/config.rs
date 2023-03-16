@@ -1671,6 +1671,8 @@ pub struct RestoreConfig {
     pub source_url: PathBuf,
     #[serde(default)]
     pub prefault: bool,
+    #[serde(default)]
+    pub dirty_log: bool,
 }
 
 impl RestoreConfig {
@@ -1688,10 +1690,16 @@ impl RestoreConfig {
             .map_err(Error::ParseRestore)?
             .unwrap_or(Toggle(false))
             .0;
+        let dirty_log = parser
+            .convert::<Toggle>("dirty_log")
+            .map_err(Error::ParseRestore)?
+            .unwrap_or(Toggle(false))
+            .0;
 
         Ok(RestoreConfig {
             source_url,
             prefault,
+            dirty_log,
         })
     }
 }

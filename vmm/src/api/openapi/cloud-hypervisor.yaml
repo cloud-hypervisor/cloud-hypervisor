@@ -1123,6 +1123,9 @@ components:
           type: string
         prefault:
           type: boolean
+        dirty_log:
+          type: boolean
+          default: false
 
     ReceiveMigrationData:
       required:

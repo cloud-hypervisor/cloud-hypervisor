@@ -644,7 +644,9 @@ impl Vmm {
         let source_url = source_url.unwrap();
 
         let vm_config = Arc::new(Mutex::new({
-            recv_vm_config(source_url).map_err(VmError::Restore)?
+            let mut vm_config = recv_vm_config(source_url).map_err(VmError::Restore)?;
+            vm_config.memory.dirty_log = restore_cfg.dirty_log;
+            vm_config
         }));
         let snapshot = recv_vm_state(source_url).map_err(VmError::Restore)?;
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
