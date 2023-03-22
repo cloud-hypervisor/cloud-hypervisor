@@ -144,9 +144,6 @@ pub enum Error {
     #[error("Cannot setup terminal in raw mode: {0}")]
     SetTerminalRaw(#[source] vmm_sys_util::errno::Error),
 
-    #[error("Cannot setup terminal in canonical mode.: {0}")]
-    SetTerminalCanon(#[source] vmm_sys_util::errno::Error),
-
     #[error("Cannot spawn a signal handler thread: {0}")]
     SignalHandlerSpawn(#[source] io::Error),
 
@@ -1212,15 +1209,6 @@ impl Vm {
         let new_state = VmState::Shutdown;
 
         state.valid_transition(new_state)?;
-
-        if self.on_tty {
-            // Don't forget to set the terminal in canonical mode
-            // before to exit.
-            io::stdin()
-                .lock()
-                .set_canon_mode()
-                .map_err(Error::SetTerminalCanon)?;
-        }
 
         // Trigger the termination of the signal_handler thread
         if let Some(signals) = self.signals.take() {
