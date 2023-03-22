@@ -65,6 +65,7 @@ wait-timeout = "0.2.0"
 
 [features]
 default = ["kvm"]
+dbus_api = ["vmm/dbus_api"]
 dhat-heap = ["dhat"] # For heap profiling
 guest_debug = ["vmm/guest_debug"]
 kvm = ["vmm/kvm"]

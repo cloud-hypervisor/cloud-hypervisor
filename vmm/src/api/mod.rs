@@ -28,10 +28,14 @@
 //!    response channel Receiver.
 //! 5. The thread handles the response and forwards potential errors.
 
+#[cfg(feature = "dbus_api")]
+pub mod dbus;
+pub mod http;
+
+#[cfg(feature = "dbus_api")]
+pub use self::dbus::start_dbus_thread;
 pub use self::http::start_http_fd_thread;
 pub use self::http::start_http_path_thread;
-
-pub mod http;
 
 use crate::config::{
     DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, RestoreConfig, UserDeviceConfig,
