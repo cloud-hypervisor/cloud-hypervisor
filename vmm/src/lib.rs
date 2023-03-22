@@ -113,6 +113,16 @@ pub enum Error {
     #[error("Error spawning HTTP thread: {0}")]
     HttpThreadSpawn(#[source] io::Error),
 
+    /// Cannot create D-Bus thread
+    #[cfg(feature = "dbus_api")]
+    #[error("Error spawning D-Bus thread: {0}")]
+    DBusThreadSpawn(#[source] io::Error),
+
+    /// Cannot start D-Bus session
+    #[cfg(feature = "dbus_api")]
+    #[error("Error starting D-Bus session: {0}")]
+    CreateDBusSession(#[source] zbus::Error),
+
     /// Cannot handle the VM STDIN stream
     #[error("Error handling VM stdin: {0:?}")]
     Stdin(VmError),
@@ -301,7 +311,7 @@ pub fn start_vmm_thread(
     #[cfg(feature = "guest_debug")]
     let gdb_vm_debug_event = vm_debug_event.try_clone().map_err(Error::EventFdClone)?;
 
-    let http_api_event = api_event.try_clone().map_err(Error::EventFdClone)?;
+    let api_event_clone = api_event.try_clone().map_err(Error::EventFdClone)?;
     let hypervisor_type = hypervisor.hypervisor_type();
 
     // Retrieve seccomp filter
@@ -342,11 +352,21 @@ pub fn start_vmm_thread(
             .map_err(Error::VmmThreadSpawn)?
     };
 
-    // The VMM thread is started, we can start serving HTTP requests
+    // The VMM thread is started, we can start the dbus thread
+    // and start serving HTTP requests
+    #[cfg(feature = "dbus_api")]
+    api::start_dbus_thread(
+        api_event_clone.try_clone().map_err(Error::EventFdClone)?,
+        api_sender.clone(),
+        seccomp_action,
+        exit_event.try_clone().map_err(Error::EventFdClone)?,
+        hypervisor_type,
+    )?;
+
     if let Some(http_path) = http_path {
         api::start_http_path_thread(
             http_path,
-            http_api_event,
+            api_event_clone,
             api_sender,
             seccomp_action,
             exit_event,
@@ -355,7 +375,7 @@ pub fn start_vmm_thread(
     } else if let Some(http_fd) = http_fd {
         api::start_http_fd_thread(
             http_fd,
-            http_api_event,
+            api_event_clone,
             api_sender,
             seccomp_action,
             exit_event,

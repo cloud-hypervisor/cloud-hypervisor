@@ -42,6 +42,9 @@ jobs:
       - name: Build (default features + tdx)
         run: cargo rustc --locked --bin cloud-hypervisor --features "tdx" -- -D warnings -D clippy::undocumented_unsafe_blocks
 
+      - name: Build (default features + dbus_api)
+        run: cargo rustc --locked --bin cloud-hypervisor --features "dbus_api" -- -D warnings -D clippy::undocumented_unsafe_blocks
+
       - name: Build (default features + guest_debug)
         run: cargo rustc --locked --bin cloud-hypervisor --features "guest_debug" -- -D warnings -D clippy::undocumented_unsafe_blocks
 

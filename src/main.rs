@@ -445,7 +445,7 @@ fn start_vmm(toplevel: TopLevel) -> Result<Option<String>, Error> {
     let (api_request_sender, api_request_receiver) = channel();
     let api_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateApiEventFd)?;
 
-    let http_sender = api_request_sender.clone();
+    let api_request_sender_clone = api_request_sender.clone();
     let seccomp_action = match &toplevel.seccomp as &str {
         "true" => SeccompAction::Trap,
         "false" => SeccompAction::Allow,
@@ -518,7 +518,7 @@ fn start_vmm(toplevel: TopLevel) -> Result<Option<String>, Error> {
         &api_socket_path,
         api_socket_fd,
         api_evt.try_clone().unwrap(),
-        http_sender,
+        api_request_sender_clone,
         api_request_receiver,
         #[cfg(feature = "guest_debug")]
         gdb_socket_path,
