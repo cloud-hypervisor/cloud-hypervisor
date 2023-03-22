@@ -41,6 +41,7 @@ use std::os::unix::net::UnixListener;
 use std::os::unix::net::UnixStream;
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -407,12 +408,13 @@ pub struct Vmm {
     activate_evt: EventFd,
     signals: Option<Handle>,
     threads: Vec<thread::JoinHandle<()>>,
+    on_tty: Arc<AtomicBool>,
 }
 
 impl Vmm {
     pub const HANDLED_SIGNALS: [i32; 2] = [SIGTERM, SIGINT];
 
-    fn signal_handler(mut signals: Signals, on_tty: bool, exit_evt: &EventFd) {
+    fn signal_handler(mut signals: Signals, on_tty: Arc<AtomicBool>, exit_evt: &EventFd) {
         for sig in &Self::HANDLED_SIGNALS {
             unblock_signal(*sig).unwrap();
         }
@@ -422,7 +424,7 @@ impl Vmm {
                 SIGTERM | SIGINT => {
                     if exit_evt.write(1).is_err() {
                         // Resetting the terminal is usually done as the VMM exits
-                        if on_tty {
+                        if on_tty.load(Ordering::SeqCst) {
                             io::stdin()
                                 .lock()
                                 .set_canon_mode()
@@ -442,8 +444,7 @@ impl Vmm {
             Ok(signals) => {
                 self.signals = Some(signals.handle());
                 let exit_evt = self.exit_evt.try_clone().map_err(Error::EventFdClone)?;
-                // SAFETY: trivially safe
-                let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO) } != 0;
+                let on_tty = Arc::clone(&self.on_tty);
 
                 let signal_handler_seccomp_filter = get_seccomp_filter(
                     &self.seccomp_action,
@@ -532,6 +533,7 @@ impl Vmm {
             activate_evt,
             signals: None,
             threads: vec![],
+            on_tty: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -582,6 +584,7 @@ impl Vmm {
                         None,
                         None,
                         None,
+                        Arc::clone(&self.on_tty),
                         None,
                         None,
                         None,
@@ -680,6 +683,7 @@ impl Vmm {
             None,
             None,
             None,
+            Arc::clone(&self.on_tty),
             Some(snapshot),
             Some(source_url),
             Some(restore_cfg.prefault),
@@ -760,6 +764,7 @@ impl Vmm {
             serial_pty,
             console_pty,
             console_resize_pipe,
+            Arc::clone(&self.on_tty),
             None,
             None,
             None,
@@ -1262,6 +1267,7 @@ impl Vmm {
             None,
             None,
             None,
+            Arc::clone(&self.on_tty),
             Some(snapshot),
         )
         .map_err(|e| {
