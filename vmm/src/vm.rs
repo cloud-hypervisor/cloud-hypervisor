@@ -79,6 +79,7 @@ use std::mem::size_of;
 use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::net::UnixStream;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 use std::{result, str, thread};
@@ -95,7 +96,6 @@ use vm_migration::{
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
-use vmm_sys_util::terminal::Terminal;
 
 /// Errors associated with VM management
 #[derive(Debug, Error)]
@@ -137,9 +137,6 @@ pub enum Error {
 
     #[error("Error from device manager: {0:?}")]
     DeviceManager(DeviceManagerError),
-
-    #[error("Cannot setup terminal in raw mode: {0}")]
-    SetTerminalRaw(#[source] vmm_sys_util::errno::Error),
 
     #[error("Cannot spawn a signal handler thread: {0}")]
     SignalHandlerSpawn(#[source] io::Error),
@@ -434,7 +431,6 @@ pub struct Vm {
     threads: Vec<thread::JoinHandle<()>>,
     device_manager: Arc<Mutex<DeviceManager>>,
     config: Arc<Mutex<VmConfig>>,
-    on_tty: bool,
     state: RwLock<VmState>,
     cpu_manager: Arc<Mutex<cpu::CpuManager>>,
     memory_manager: Arc<Mutex<MemoryManager>>,
@@ -468,6 +464,7 @@ impl Vm {
         serial_pty: Option<PtyPair>,
         console_pty: Option<PtyPair>,
         console_resize_pipe: Option<File>,
+        on_tty: Arc<AtomicBool>,
         snapshot: Option<Snapshot>,
     ) -> Result<Self> {
         trace_scoped!("Vm::new_from_memory_manager");
@@ -589,11 +586,8 @@ impl Vm {
         device_manager
             .lock()
             .unwrap()
-            .create_devices(serial_pty, console_pty, console_resize_pipe)
+            .create_devices(serial_pty, console_pty, console_resize_pipe, on_tty)
             .map_err(Error::DeviceManager)?;
-
-        // SAFETY: trivially safe
-        let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO) } != 0;
 
         #[cfg(feature = "tdx")]
         let kernel = config
@@ -636,7 +630,6 @@ impl Vm {
             initramfs,
             device_manager,
             config,
-            on_tty,
             threads: Vec::with_capacity(1),
             state: RwLock::new(vm_state),
             cpu_manager,
@@ -743,6 +736,7 @@ impl Vm {
         serial_pty: Option<PtyPair>,
         console_pty: Option<PtyPair>,
         console_resize_pipe: Option<File>,
+        on_tty: Arc<AtomicBool>,
         snapshot: Option<Snapshot>,
         source_url: Option<&str>,
         prefault: Option<bool>,
@@ -812,6 +806,7 @@ impl Vm {
             serial_pty,
             console_pty,
             console_resize_pipe,
+            on_tty,
             snapshot,
         )
     }
@@ -1903,17 +1898,6 @@ impl Vm {
         Ok(())
     }
 
-    fn setup_tty(&self) -> Result<()> {
-        if self.on_tty {
-            io::stdin()
-                .lock()
-                .set_raw_mode()
-                .map_err(Error::SetTerminalRaw)?;
-        }
-
-        Ok(())
-    }
-
     // Creates ACPI tables
     // In case of TDX being used, this is a no-op since the tables will be
     // created and passed when populating the HOB.
@@ -1966,8 +1950,6 @@ impl Vm {
         // Do earlier to parallelise with loading kernel
         #[cfg(target_arch = "x86_64")]
         let rsdp_addr = self.create_acpi_tables();
-
-        self.setup_tty()?;
 
         // Load kernel synchronously or if asynchronous then wait for load to
         // finish.
@@ -2080,8 +2062,6 @@ impl Vm {
             .unwrap()
             .start_restored_vcpus()
             .map_err(Error::CpuManager)?;
-
-        self.setup_tty()?;
 
         event!("vm", "restored");
         Ok(())

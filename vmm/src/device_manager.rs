@@ -70,6 +70,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
 use std::result;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tracer::trace_scoped;
@@ -100,6 +101,7 @@ use vm_migration::{
 use vm_virtio::AccessPlatform;
 use vm_virtio::VirtioDeviceType;
 use vmm_sys_util::eventfd::EventFd;
+use vmm_sys_util::terminal::Terminal;
 
 #[cfg(target_arch = "aarch64")]
 const MMIO_LEN: u64 = 0x1000;
@@ -831,6 +833,9 @@ pub struct DeviceManager {
     // pty foreground status,
     console_resize_pipe: Option<Arc<File>>,
 
+    // Are any devices using the tty?
+    on_tty: Option<Arc<AtomicBool>>,
+
     // Interrupt controller
     #[cfg(target_arch = "x86_64")]
     interrupt_controller: Option<Arc<Mutex<ioapic::Ioapic>>>,
@@ -1115,6 +1120,7 @@ impl DeviceManager {
             serial_manager: None,
             console_pty: None,
             console_resize_pipe: None,
+            on_tty: None,
             virtio_mem_devices: Vec::new(),
             #[cfg(target_arch = "aarch64")]
             gpio_device: None,
@@ -1162,6 +1168,7 @@ impl DeviceManager {
         serial_pty: Option<PtyPair>,
         console_pty: Option<PtyPair>,
         console_resize_pipe: Option<File>,
+        on_tty: Arc<AtomicBool>,
     ) -> DeviceManagerResult<()> {
         trace_scoped!("create_devices");
 
@@ -1223,7 +1230,9 @@ impl DeviceManager {
             serial_pty,
             console_pty,
             console_resize_pipe,
+            &on_tty,
         )?;
+        self.on_tty = Some(on_tty);
 
         if let Some(tpm) = self.config.clone().lock().unwrap().tpm.as_ref() {
             let tpm_dev = self.add_tpm_device(tpm.socket.clone())?;
@@ -1864,7 +1873,7 @@ impl DeviceManager {
         Ok(())
     }
 
-    fn set_raw_mode(&self, f: &mut File) -> vmm_sys_util::errno::Result<()> {
+    fn set_raw_mode(&self, f: &mut dyn AsRawFd) -> vmm_sys_util::errno::Result<()> {
         // SAFETY: FFI call. Variable t is guaranteed to be a valid termios from modify_mode.
         self.modify_mode(f.as_raw_fd(), |t| unsafe { cfmakeraw(t) })
     }
@@ -1888,6 +1897,7 @@ impl DeviceManager {
         virtio_devices: &mut Vec<MetaVirtioDevice>,
         console_pty: Option<PtyPair>,
         resize_pipe: Option<File>,
+        on_tty: &Arc<AtomicBool>,
     ) -> DeviceManagerResult<Option<Arc<virtio_devices::ConsoleResizer>>> {
         let console_config = self.config.lock().unwrap().console.clone();
         let endpoint = match console_config.mode {
@@ -1926,7 +1936,12 @@ impl DeviceManager {
                     return vmm_sys_util::errno::errno_result().map_err(DeviceManagerError::DupFd);
                 }
                 // SAFETY: stdout is valid and owned solely by us.
-                let stdout = unsafe { File::from_raw_fd(stdout) };
+                let mut stdout = unsafe { File::from_raw_fd(stdout) };
+
+                on_tty.store(true, Ordering::SeqCst);
+
+                // Make sure stdout is in raw mode, if it's a terminal.
+                let _ = self.set_raw_mode(&mut stdout);
 
                 // SAFETY: FFI call. Trivially safe.
                 if unsafe { libc::isatty(libc::STDOUT_FILENO) } == 1 {
@@ -2004,6 +2019,7 @@ impl DeviceManager {
         serial_pty: Option<PtyPair>,
         console_pty: Option<PtyPair>,
         console_resize_pipe: Option<File>,
+        on_tty: &Arc<AtomicBool>,
     ) -> DeviceManagerResult<Arc<Console>> {
         let serial_config = self.config.lock().unwrap().serial.clone();
         let serial_writer: Option<Box<dyn io::Write + Send>> = match serial_config.mode {
@@ -2025,7 +2041,12 @@ impl DeviceManager {
                 }
                 None
             }
-            ConsoleOutputMode::Tty => Some(Box::new(stdout())),
+            ConsoleOutputMode::Tty => {
+                let mut out = stdout();
+                on_tty.store(true, Ordering::SeqCst);
+                let _ = self.set_raw_mode(&mut out);
+                Some(Box::new(out))
+            }
             ConsoleOutputMode::Off | ConsoleOutputMode::Null => None,
         };
         if serial_config.mode != ConsoleOutputMode::Off {
@@ -2052,8 +2073,12 @@ impl DeviceManager {
             };
         }
 
-        let console_resizer =
-            self.add_virtio_console_device(virtio_devices, console_pty, console_resize_pipe)?;
+        let console_resizer = self.add_virtio_console_device(
+            virtio_devices,
+            console_pty,
+            console_resize_pipe,
+            on_tty,
+        )?;
 
         Ok(Arc::new(Console { console_resizer }))
     }
@@ -4630,6 +4655,12 @@ impl Drop for DeviceManager {
     fn drop(&mut self) {
         for handle in self.virtio_devices.drain(..) {
             handle.virtio_device.lock().unwrap().shutdown();
+        }
+
+        if let Some(ref on_tty) = self.on_tty {
+            if on_tty.load(Ordering::SeqCst) {
+                let _ = std::io::stdin().lock().set_canon_mode();
+            }
         }
     }
 }
