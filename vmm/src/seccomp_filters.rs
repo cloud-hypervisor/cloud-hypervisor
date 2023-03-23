@@ -498,6 +498,7 @@ fn vmm_thread_rules(
         (libc::SYS_clone, vec![]),
         (libc::SYS_clone3, vec![]),
         (libc::SYS_close, vec![]),
+        (libc::SYS_close_range, vec![]),
         (libc::SYS_connect, vec![]),
         (libc::SYS_dup, vec![]),
         (libc::SYS_epoll_create1, vec![]),
