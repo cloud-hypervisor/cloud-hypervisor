@@ -5,8 +5,8 @@ use crate::clone3::{clone3, clone_args, CLONE_CLEAR_SIGHAND};
 use arch::_NSIG;
 use libc::{
     c_int, c_void, close, fork, getpgrp, ioctl, pipe2, poll, pollfd, setsid, sigemptyset,
-    siginfo_t, signal, sigprocmask, syscall, tcsetpgrp, SYS_close_range, EINVAL, ENOSYS, O_CLOEXEC,
-    POLLERR, SIGWINCH, SIG_DFL, SIG_SETMASK, STDERR_FILENO, TIOCSCTTY,
+    siginfo_t, signal, sigprocmask, syscall, tcgetpgrp, tcsetpgrp, SYS_close_range, EINVAL, ENOSYS,
+    ENOTTY, O_CLOEXEC, POLLERR, SIGWINCH, SIG_DFL, SIG_SETMASK, STDERR_FILENO, TIOCSCTTY,
 };
 use seccompiler::{apply_filter, BpfProgram};
 use std::cell::RefCell;
@@ -118,13 +118,48 @@ unsafe fn close_unused_fds(keep_fds: &mut [RawFd]) {
     }
 }
 
-fn sigwinch_listener_main(seccomp_filter: BpfProgram, tx: File, pty: File) -> ! {
-    let pty_fd = pty.into_raw_fd();
+fn set_foreground_process_group(tty: &mut File) -> io::Result<()> {
+    // SAFETY: trivially safe.
+    let my_pgrp = unsafe { getpgrp() };
+    // SAFETY: we have borrowed tty.
+    let tty_pgrp = unsafe { tcgetpgrp(tty.as_raw_fd()) };
 
+    if tty_pgrp == -1 {
+        let e = io::Error::last_os_error();
+        if e.raw_os_error() != Some(ENOTTY) {
+            return Err(e);
+        }
+    }
+    if tty_pgrp == my_pgrp {
+        return Ok(());
+    }
+
+    // SAFETY: trivially safe.
+    let my_pgrp = unsafe { setsid() };
+    if my_pgrp == -1 {
+        return Err(io::Error::last_os_error());
+    }
+
+    // Set the tty to be this process's controlling terminal.
+    // SAFETY: we have borrowed tty.
+    if unsafe { ioctl(tty.as_raw_fd(), TIOCSCTTY, 0) } == -1 {
+        return Err(io::Error::last_os_error());
+    }
+
+    // Become the foreground process group of the tty.
+    // SAFETY: we have borrowed tty.
+    if unsafe { tcsetpgrp(tty.as_raw_fd(), my_pgrp) } == -1 {
+        return Err(io::Error::last_os_error());
+    }
+
+    Ok(())
+}
+
+fn sigwinch_listener_main(seccomp_filter: BpfProgram, tx: File, mut tty: File) -> ! {
     // SAFETY: any references to these file descriptors are
     // unreachable, because this function never returns.
     unsafe {
-        close_unused_fds(&mut [STDERR_FILENO, tx.as_raw_fd(), pty_fd]);
+        close_unused_fds(&mut [STDERR_FILENO, tx.as_raw_fd(), tty.as_raw_fd()]);
     }
 
     TX.with(|opt| opt.replace(Some(tx)));
@@ -137,20 +172,8 @@ fn sigwinch_listener_main(seccomp_filter: BpfProgram, tx: File, pty: File) -> ! 
 
     register_signal_handler(SIGWINCH, sigwinch_handler).unwrap();
 
-    // SAFETY: FFI calls
-    unsafe {
-        // Create a new session (and therefore a new process group).
-        assert_ne!(setsid(), -1);
-
-        // Set the tty to be this process's controlling terminal.
-        assert_ne!(ioctl(pty_fd, TIOCSCTTY, 0), -1);
-
-        // Become the foreground process group of the tty.
-        assert_ne!(tcsetpgrp(pty_fd, getpgrp()), -1);
-
-        // Close the PTY fd
-        assert_ne!(close(pty_fd), -1);
-    }
+    set_foreground_process_group(&mut tty).unwrap();
+    drop(tty);
 
     notify();
 

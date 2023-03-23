@@ -21,7 +21,7 @@ use crate::coredump::{
     CpuElf64Writable, DumpState, Elf64Writable, GuestDebuggable, GuestDebuggableError, NoteDescType,
 };
 use crate::cpu;
-use crate::device_manager::{Console, DeviceManager, DeviceManagerError, PtyPair};
+use crate::device_manager::{DeviceManager, DeviceManagerError, PtyPair};
 use crate::device_tree::DeviceTree;
 #[cfg(feature = "guest_debug")]
 use crate::gdb::{Debuggable, DebuggableError, GdbRequestPayload, GdbResponsePayload};
@@ -33,7 +33,6 @@ use crate::migration::get_vm_snapshot;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::migration::url_to_file;
 use crate::migration::{url_to_path, SNAPSHOT_CONFIG_FILE, SNAPSHOT_STATE_FILE};
-use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::GuestMemoryMmap;
 use crate::{
     PciDeviceInfo, CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_SNAPSHOT_ID,
@@ -56,6 +55,7 @@ use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
 use hypervisor::{HypervisorVmError, VmOps};
+use libc::SIGWINCH;
 use linux_loader::cmdline::Cmdline;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use linux_loader::elf;
@@ -64,9 +64,8 @@ use linux_loader::loader::elf::PvhBootCapability::PvhEntryPresent;
 #[cfg(target_arch = "aarch64")]
 use linux_loader::loader::pe::Error::InvalidImageMagicNumber;
 use linux_loader::loader::KernelLoader;
-use seccompiler::{apply_filter, SeccompAction};
+use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
-use signal_hook::{consts::SIGWINCH, iterator::backend::Handle, iterator::Signals};
 use std::cmp;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -80,7 +79,6 @@ use std::mem::size_of;
 use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::net::UnixStream;
-use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 use std::{result, str, thread};
@@ -96,7 +94,6 @@ use vm_migration::{
     SnapshotData, Snapshottable, Transportable,
 };
 use vmm_sys_util::eventfd::EventFd;
-use vmm_sys_util::signal::unblock_signal;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 use vmm_sys_util::terminal::Terminal;
 
@@ -441,7 +438,6 @@ pub struct Vm {
     device_manager: Arc<Mutex<DeviceManager>>,
     config: Arc<Mutex<VmConfig>>,
     on_tty: bool,
-    signals: Option<Handle>,
     state: RwLock<VmState>,
     cpu_manager: Arc<Mutex<cpu::CpuManager>>,
     memory_manager: Arc<Mutex<MemoryManager>>,
@@ -451,8 +447,7 @@ pub struct Vm {
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     saved_clock: Option<hypervisor::ClockData>,
     numa_nodes: NumaNodes,
-    seccomp_action: SeccompAction,
-    exit_evt: EventFd,
+    #[cfg_attr(any(not(feature = "kvm"), target_arch = "aarch64"), allow(dead_code))]
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
     stop_on_boot: bool,
     load_payload_handle: Option<thread::JoinHandle<Result<EntryPoint>>>,
@@ -646,7 +641,6 @@ impl Vm {
             config,
             on_tty,
             threads: Vec::with_capacity(1),
-            signals: None,
             state: RwLock::new(vm_state),
             cpu_manager,
             memory_manager,
@@ -654,8 +648,6 @@ impl Vm {
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             saved_clock,
             numa_nodes,
-            seccomp_action: seccomp_action.clone(),
-            exit_evt,
             hypervisor,
             stop_on_boot,
             load_payload_handle,
@@ -1222,11 +1214,6 @@ impl Vm {
                 .map_err(Error::SetTerminalCanon)?;
         }
 
-        // Trigger the termination of the signal_handler thread
-        if let Some(signals) = self.signals.take() {
-            signals.close();
-        }
-
         // Wake up the DeviceManager threads so they will get terminated cleanly
         self.device_manager
             .lock()
@@ -1632,18 +1619,6 @@ impl Vm {
         Ok(self.device_manager.lock().unwrap().counters())
     }
 
-    fn signal_handler(mut signals: Signals, console_input_clone: Arc<Console>) {
-        for sig in &Vm::HANDLED_SIGNALS {
-            unblock_signal(*sig).unwrap();
-        }
-
-        for signal in signals.forever() {
-            if signal == SIGWINCH {
-                console_input_clone.update_console_size();
-            }
-        }
-    }
-
     #[cfg(feature = "tdx")]
     fn extract_tdvf_sections(&mut self) -> Result<(Vec<TdvfSection>, bool)> {
         use arch::x86_64::tdx::*;
@@ -1940,54 +1915,6 @@ impl Vm {
         Ok(())
     }
 
-    fn setup_signal_handler(&mut self) -> Result<()> {
-        let console = self.device_manager.lock().unwrap().console().clone();
-        let signals = Signals::new(Vm::HANDLED_SIGNALS);
-
-        if !console.need_resize() {
-            return Ok(());
-        }
-
-        match signals {
-            Ok(signals) => {
-                self.signals = Some(signals.handle());
-                let exit_evt = self.exit_evt.try_clone().map_err(Error::EventFdClone)?;
-                let signal_handler_seccomp_filter = get_seccomp_filter(
-                    &self.seccomp_action,
-                    Thread::SignalHandler,
-                    self.hypervisor.hypervisor_type(),
-                )
-                .map_err(Error::CreateSeccompFilter)?;
-                self.threads.push(
-                    thread::Builder::new()
-                        .name("vm_signal_handler".to_string())
-                        .spawn(move || {
-                            if !signal_handler_seccomp_filter.is_empty() {
-                                if let Err(e) = apply_filter(&signal_handler_seccomp_filter)
-                                    .map_err(Error::ApplySeccompFilter)
-                                {
-                                    error!("Error applying seccomp filter: {:?}", e);
-                                    exit_evt.write(1).ok();
-                                    return;
-                                }
-                            }
-                            std::panic::catch_unwind(AssertUnwindSafe(|| {
-                                Vm::signal_handler(signals, console);
-                            }))
-                            .map_err(|_| {
-                                error!("vm signal_handler thread panicked");
-                                exit_evt.write(1).ok()
-                            })
-                            .ok();
-                        })
-                        .map_err(Error::SignalHandlerSpawn)?,
-                );
-            }
-            Err(e) => error!("Signal not found {}", e),
-        }
-        Ok(())
-    }
-
     fn setup_tty(&self) -> Result<()> {
         if self.on_tty {
             io::stdin()
@@ -2052,7 +1979,6 @@ impl Vm {
         #[cfg(target_arch = "x86_64")]
         let rsdp_addr = self.create_acpi_tables();
 
-        self.setup_signal_handler()?;
         self.setup_tty()?;
 
         // Load kernel synchronously or if asynchronous then wait for load to
@@ -2167,7 +2093,6 @@ impl Vm {
             .start_restored_vcpus()
             .map_err(Error::CpuManager)?;
 
-        self.setup_signal_handler()?;
         self.setup_tty()?;
 
         event!("vm", "restored");

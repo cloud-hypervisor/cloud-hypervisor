@@ -41,6 +41,7 @@ macro_rules! or {
 const TCGETS: u64 = 0x5401;
 const TCSETS: u64 = 0x5402;
 const TIOCSCTTY: u64 = 0x540E;
+const TIOCGPGRP: u64 = 0x540F;
 const TIOCSPGRP: u64 = 0x5410;
 const TIOCGWINSZ: u64 = 0x5413;
 const TIOCSPTLCK: u64 = 0x4004_5431;
@@ -264,6 +265,7 @@ fn create_vmm_ioctl_seccomp_rule_common(
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCSIFNETMASK)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TCSETS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TCGETS)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TIOCGPGRP)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TIOCGTPEER)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TIOCGWINSZ)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TIOCSCTTY)?],
@@ -455,6 +457,7 @@ fn signal_handler_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
 
 fn create_pty_foreground_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, BackendError> {
     Ok(or![
+        and![Cond::new(1, ArgLen::Dword, Eq, TIOCGPGRP)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TIOCSCTTY)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TIOCSPGRP)?],
     ])
