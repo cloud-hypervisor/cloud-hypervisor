@@ -1877,14 +1877,8 @@ impl DeviceManager {
         )
         .unwrap();
 
-        match start_sigwinch_listener(seccomp_filter, pty_sub) {
-            Ok(pipe) => {
-                self.console_resize_pipe = Some(Arc::new(pipe));
-            }
-            Err(e) => {
-                warn!("Ignoring error from setting up SIGWINCH listener: {}", e)
-            }
-        }
+        self.console_resize_pipe =
+            Some(Arc::new(start_sigwinch_listener(seccomp_filter, pty_sub)?));
 
         Ok(())
     }
