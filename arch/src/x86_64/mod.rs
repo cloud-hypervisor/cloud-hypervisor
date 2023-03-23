@@ -53,6 +53,8 @@ const KVM_FEATURE_ASYNC_PF_VMEXIT_BIT: u8 = 10;
 #[cfg(feature = "tdx")]
 const KVM_FEATURE_STEAL_TIME_BIT: u8 = 5;
 
+pub const _NSIG: i32 = 65;
+
 #[derive(Debug, Copy, Clone)]
 /// Specifies the entry point address where the guest must start
 /// executing code, as well as which of the supported boot protocols

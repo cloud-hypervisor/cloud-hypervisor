@@ -21,6 +21,8 @@ use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 use vm_memory::{Address, GuestAddress, GuestMemory, GuestMemoryAtomic, GuestUsize};
 
+pub const _NSIG: i32 = 65;
+
 /// Errors thrown while configuring aarch64 system.
 #[derive(Debug)]
 pub enum Error {

@@ -82,7 +82,7 @@ pub mod aarch64;
 pub use aarch64::{
     arch_memory_regions, configure_system, configure_vcpu, fdt::DeviceInfoForFdt,
     get_host_cpu_phys_bits, initramfs_load_addr, layout, layout::CMDLINE_MAX_SIZE,
-    layout::IRQ_BASE, uefi, EntryPoint,
+    layout::IRQ_BASE, uefi, EntryPoint, _NSIG,
 };
 
 #[cfg(target_arch = "x86_64")]
@@ -92,7 +92,7 @@ pub mod x86_64;
 pub use x86_64::{
     arch_memory_regions, configure_system, configure_vcpu, generate_common_cpuid,
     get_host_cpu_phys_bits, initramfs_load_addr, layout, layout::CMDLINE_MAX_SIZE,
-    layout::CMDLINE_START, regs, CpuidFeatureEntry, EntryPoint,
+    layout::CMDLINE_START, regs, CpuidFeatureEntry, EntryPoint, _NSIG,
 };
 
 /// Safe wrapper for `sysconf(_SC_PAGESIZE)`.
