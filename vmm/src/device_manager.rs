@@ -1869,7 +1869,7 @@ impl DeviceManager {
         self.modify_mode(f.as_raw_fd(), |t| unsafe { cfmakeraw(t) })
     }
 
-    fn listen_for_sigwinch_on_tty(&mut self, pty_main: File, pty_sub: File) -> std::io::Result<()> {
+    fn listen_for_sigwinch_on_tty(&mut self, pty_sub: File) -> std::io::Result<()> {
         let seccomp_filter = get_seccomp_filter(
             &self.seccomp_action,
             Thread::PtyForeground,
@@ -1877,7 +1877,7 @@ impl DeviceManager {
         )
         .unwrap();
 
-        match start_sigwinch_listener(seccomp_filter, pty_main, pty_sub) {
+        match start_sigwinch_listener(seccomp_filter, pty_sub) {
             Ok(pipe) => {
                 self.console_resize_pipe = Some(Arc::new(pipe));
             }
@@ -1917,8 +1917,7 @@ impl DeviceManager {
                     self.config.lock().unwrap().console.file = Some(path.clone());
                     let file = main.try_clone().unwrap();
                     assert!(resize_pipe.is_none());
-                    self.listen_for_sigwinch_on_tty(main.try_clone().unwrap(), sub)
-                        .unwrap();
+                    self.listen_for_sigwinch_on_tty(sub).unwrap();
                     self.console_pty = Some(Arc::new(Mutex::new(PtyPair { main, path })));
                     Endpoint::PtyPair(file.try_clone().unwrap(), file)
                 }
