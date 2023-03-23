@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::clone3::{clone3, clone_args, CLONE_CLEAR_SIGHAND};
+use arch::_NSIG;
 use libc::{
-    c_int, c_void, close, getpgrp, ioctl, pipe2, poll, pollfd, setsid, sigemptyset, siginfo_t,
-    sigprocmask, syscall, tcsetpgrp, SYS_close_range, ENOSYS, O_CLOEXEC, POLLERR, SIGWINCH,
-    SIG_SETMASK, STDERR_FILENO, TIOCSCTTY,
+    c_int, c_void, close, fork, getpgrp, ioctl, pipe2, poll, pollfd, setsid, sigemptyset,
+    siginfo_t, signal, sigprocmask, syscall, tcsetpgrp, SYS_close_range, EINVAL, ENOSYS, O_CLOEXEC,
+    POLLERR, SIGWINCH, SIG_DFL, SIG_SETMASK, STDERR_FILENO, TIOCSCTTY,
 };
 use seccompiler::{apply_filter, BpfProgram};
 use std::cell::RefCell;
@@ -176,6 +177,35 @@ fn sigwinch_listener_main(seccomp_filter: BpfProgram, tx: File, pty: File) -> ! 
     exit(0);
 }
 
+/// # Safety
+///
+/// Same as [`fork`].
+unsafe fn clone_clear_sighand() -> io::Result<u64> {
+    let mut args = clone_args::default();
+    args.flags |= CLONE_CLEAR_SIGHAND;
+    let r = clone3(&mut args, size_of::<clone_args>());
+    if r != -1 {
+        return Ok(r.try_into().unwrap());
+    }
+    let e = io::Error::last_os_error();
+    if e.raw_os_error() != Some(ENOSYS) && e.raw_os_error() != Some(EINVAL) {
+        return Err(e);
+    }
+
+    // If CLONE_CLEAR_SIGHAND isn't available, fall back to resetting
+    // all the signal handlers one by one.
+    let r = fork();
+    if r == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    if r == 0 {
+        for signum in 1.._NSIG {
+            let _ = signal(signum, SIG_DFL);
+        }
+    }
+    Ok(r.try_into().unwrap())
+}
+
 pub fn start_sigwinch_listener(seccomp_filter: BpfProgram, tty_sub: File) -> io::Result<File> {
     let mut pipe = [-1; 2];
     // SAFETY: FFI call with valid arguments
@@ -188,16 +218,9 @@ pub fn start_sigwinch_listener(seccomp_filter: BpfProgram, tty_sub: File) -> io:
     // SAFETY: pipe[1] is valid
     let tx = unsafe { File::from_raw_fd(pipe[1]) };
 
-    let mut args = clone_args::default();
-    args.flags |= CLONE_CLEAR_SIGHAND;
-
     // SAFETY: FFI call
-    match unsafe { clone3(&mut args, size_of::<clone_args>()) } {
-        -1 => return Err(io::Error::last_os_error()),
-        0 => {
-            sigwinch_listener_main(seccomp_filter, tx, tty_sub);
-        }
-        _ => (),
+    if unsafe { clone_clear_sighand() }? == 0 {
+        sigwinch_listener_main(seccomp_filter, tx, tty_sub);
     }
 
     drop(tx);
