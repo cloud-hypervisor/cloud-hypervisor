@@ -32,7 +32,6 @@ pub use self::http::start_http_fd_thread;
 pub use self::http::start_http_path_thread;
 
 pub mod http;
-pub mod http_endpoint;
 
 use crate::config::{
     DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, RestoreConfig, UserDeviceConfig,
