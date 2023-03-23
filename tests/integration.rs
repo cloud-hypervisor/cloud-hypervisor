@@ -10,6 +10,8 @@
 
 extern crate test_infra;
 
+use api_client::simple_api_command;
+use api_client::simple_api_full_command;
 use net_util::MacAddr;
 use std::collections::HashMap;
 use std::fs;
@@ -250,26 +252,6 @@ fn prepare_swtpm_daemon(tmp_dir: &TempDir) -> (std::process::Command, String) {
     swtpm_command.args(swtpm_args);
 
     (swtpm_command, swtpm_socket_path)
-}
-
-fn curl_command(api_socket: &str, method: &str, url: &str, http_body: Option<&str>) {
-    let mut curl_args: Vec<&str> = ["--unix-socket", api_socket, "-i", "-X", method, url].to_vec();
-
-    if let Some(body) = http_body {
-        curl_args.push("-H");
-        curl_args.push("Accept: application/json");
-        curl_args.push("-H");
-        curl_args.push("Content-Type: application/json");
-        curl_args.push("-d");
-        curl_args.push(body);
-    }
-
-    let status = Command::new("curl")
-        .args(curl_args)
-        .status()
-        .expect("Failed to launch curl command");
-
-    assert!(status.success());
 }
 
 fn remote_command(api_socket: &str, command: &str, arg: Option<&str>) -> bool {
@@ -1922,7 +1904,7 @@ fn enable_guest_watchdog(guest: &Guest, watchdog_sec: u32) {
 }
 
 mod common_parallel {
-    use std::{fs::OpenOptions, io::SeekFrom};
+    use std::{fs::OpenOptions, io::SeekFrom, os::unix::net::UnixStream};
 
     use crate::*;
 
@@ -4064,8 +4046,9 @@ mod common_parallel {
 
         thread::sleep(std::time::Duration::new(1, 0));
 
+        let mut socket = UnixStream::connect(&api_socket).unwrap();
         // Verify API server is running
-        curl_command(&api_socket, "GET", "http://localhost/api/v1/vmm.ping", None);
+        simple_api_full_command(&mut socket, "GET", "vmm.ping", None).unwrap();
 
         // Create the VM first
         let cpu_count: u8 = 4;
@@ -4118,8 +4101,9 @@ mod common_parallel {
 
         thread::sleep(std::time::Duration::new(1, 0));
 
+        let mut socket = UnixStream::connect(&api_socket).unwrap();
         // Verify API server is running
-        curl_command(&api_socket, "GET", "http://localhost/api/v1/vmm.ping", None);
+        simple_api_full_command(&mut socket, "GET", "vmm.ping", None).unwrap();
 
         // Create the VM first
         let cpu_count: u8 = 4;
@@ -4130,15 +4114,12 @@ mod common_parallel {
         );
 
         let r = std::panic::catch_unwind(|| {
-            curl_command(
-                &api_socket,
-                "PUT",
-                "http://localhost/api/v1/vm.create",
-                Some(&http_body),
-            );
+            // socket has to be created again inside catch_unwind block to avoid errors
+            let mut socket = UnixStream::connect(&api_socket).unwrap();
+            simple_api_command(&mut socket, "PUT", "create", Some(&http_body)).unwrap();
 
             // Then boot it
-            curl_command(&api_socket, "PUT", "http://localhost/api/v1/vm.boot", None);
+            simple_api_command(&mut socket, "PUT", "boot", None).unwrap();
 
             guest.wait_vm_boot(None).unwrap();
 
@@ -4155,15 +4136,10 @@ mod common_parallel {
             thread::sleep(std::time::Duration::new(20, 0));
 
             // Then shut it down
-            curl_command(
-                &api_socket,
-                "PUT",
-                "http://localhost/api/v1/vm.shutdown",
-                None,
-            );
+            simple_api_command(&mut socket, "PUT", "shutdown", None).unwrap();
 
             // Then boot it again
-            curl_command(&api_socket, "PUT", "http://localhost/api/v1/vm.boot", None);
+            simple_api_command(&mut socket, "PUT", "boot", None).unwrap();
 
             guest.wait_vm_boot(None).unwrap();
 
@@ -4196,8 +4172,9 @@ mod common_parallel {
 
         thread::sleep(std::time::Duration::new(1, 0));
 
+        let mut socket = UnixStream::connect(&api_socket).unwrap();
         // Verify API server is running
-        curl_command(&api_socket, "GET", "http://localhost/api/v1/vmm.ping", None);
+        simple_api_full_command(&mut socket, "GET", "vmm.ping", None).unwrap();
 
         // Create the VM first
         let cpu_count: u8 = 4;
@@ -4208,15 +4185,12 @@ mod common_parallel {
         );
 
         let r = std::panic::catch_unwind(|| {
-            curl_command(
-                &api_socket,
-                "PUT",
-                "http://localhost/api/v1/vm.create",
-                Some(&http_body),
-            );
+            // socket has to be created again inside catch_unwind block to avoid errors
+            let mut socket = UnixStream::connect(&api_socket).unwrap();
+            simple_api_command(&mut socket, "PUT", "create", Some(&http_body)).unwrap();
 
             // Then boot it
-            curl_command(&api_socket, "PUT", "http://localhost/api/v1/vm.boot", None);
+            simple_api_command(&mut socket, "PUT", "boot", None).unwrap();
 
             guest.wait_vm_boot(None).unwrap();
 
@@ -4233,22 +4207,12 @@ mod common_parallel {
             thread::sleep(std::time::Duration::new(20, 0));
 
             // Then delete it
-            curl_command(
-                &api_socket,
-                "PUT",
-                "http://localhost/api/v1/vm.delete",
-                None,
-            );
+            simple_api_command(&mut socket, "PUT", "delete", None).unwrap();
 
-            curl_command(
-                &api_socket,
-                "PUT",
-                "http://localhost/api/v1/vm.create",
-                Some(&http_body),
-            );
+            simple_api_command(&mut socket, "PUT", "create", Some(&http_body)).unwrap();
 
             // Then boot it again
-            curl_command(&api_socket, "PUT", "http://localhost/api/v1/vm.boot", None);
+            simple_api_command(&mut socket, "PUT", "boot", None).unwrap();
 
             guest.wait_vm_boot(None).unwrap();
 
@@ -4282,8 +4246,9 @@ mod common_parallel {
 
         thread::sleep(std::time::Duration::new(1, 0));
 
+        let mut socket = UnixStream::connect(&api_socket).unwrap();
         // Verify API server is running
-        curl_command(&api_socket, "GET", "http://localhost/api/v1/vmm.ping", None);
+        simple_api_full_command(&mut socket, "GET", "vmm.ping", None).unwrap();
 
         // Create the VM first
         let cpu_count: u8 = 4;
@@ -4292,15 +4257,12 @@ mod common_parallel {
             direct_kernel_boot_path().to_str().unwrap(),
             DIRECT_KERNEL_BOOT_CMDLINE,
         );
-        curl_command(
-            &api_socket,
-            "PUT",
-            "http://localhost/api/v1/vm.create",
-            Some(&http_body),
-        );
+
+        simple_api_command(&mut socket, "PUT", "create", Some(&http_body)).unwrap();
 
         // Then boot it
-        curl_command(&api_socket, "PUT", "http://localhost/api/v1/vm.boot", None);
+        simple_api_command(&mut socket, "PUT", "boot", None).unwrap();
+
         thread::sleep(std::time::Duration::new(20, 0));
 
         let r = std::panic::catch_unwind(|| {
