@@ -1928,6 +1928,12 @@ impl DeviceManager {
                 // SAFETY: stdout is valid and owned solely by us.
                 let stdout = unsafe { File::from_raw_fd(stdout) };
 
+                // SAFETY: FFI call. Trivially safe.
+                if unsafe { libc::isatty(libc::STDOUT_FILENO) } == 1 {
+                    self.listen_for_sigwinch_on_tty(stdout.try_clone().unwrap())
+                        .unwrap();
+                }
+
                 // If an interactive TTY then we can accept input
                 // SAFETY: FFI call. Trivially safe.
                 if unsafe { libc::isatty(libc::STDIN_FILENO) == 1 } {
