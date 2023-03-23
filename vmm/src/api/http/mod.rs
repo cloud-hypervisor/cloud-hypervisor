@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::api::http_endpoint::{VmActionHandler, VmCreate, VmInfo, VmmPing, VmmShutdown};
+use self::http_endpoint::{VmActionHandler, VmCreate, VmInfo, VmmPing, VmmShutdown};
 use crate::api::{ApiError, ApiRequest, VmAction};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{Error as VmmError, Result};
@@ -22,6 +22,8 @@ use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::thread;
 use vmm_sys_util::eventfd::EventFd;
+
+pub mod http_endpoint;
 
 /// Errors associated with VMM management
 #[derive(Debug)]
