@@ -764,7 +764,7 @@ dependencies = [
 [[package]]
 name = "versionize_derive"
 version = "0.1.4"
-source = "git+https://github.com/cloud-hypervisor/versionize_derive?branch=ch#ae35ef7a3ddabd3371ab8ac0193a383aff6e4b1b"
+source = "git+https://github.com/cloud-hypervisor/versionize_derive?branch=ch#e502b1d4aabab342386f0c53780d49f21a6a1df6"
 dependencies = [
  "proc-macro2",
  "quote",
