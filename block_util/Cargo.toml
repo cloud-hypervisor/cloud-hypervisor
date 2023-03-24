@@ -14,7 +14,7 @@ log = "0.4.17"
 qcow = { path = "../qcow" }
 smallvec = "1.10.0"
 thiserror = "1.0.39"
-versionize = "0.1.9"
+versionize = "0.1.10"
 versionize_derive = "0.1.4"
 vhdx = { path = "../vhdx" }
 virtio-bindings = { version = "0.2.0", features = ["virtio-v5_0_0"] }

@@ -15,7 +15,7 @@ libc = "0.2.139"
 log = "0.4.17"
 thiserror = "1.0.39"
 tpm = { path = "../tpm" }
-versionize = "0.1.9"
+versionize = "0.1.10"
 versionize_derive = "0.1.4"
 vm-device = { path = "../vm-device" }
 vm-memory = "0.10.0"
