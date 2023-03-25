@@ -4,7 +4,8 @@
 //
 use super::{ApiRequest, VmAction};
 use crate::{Error as VmmError, Result as VmmResult};
-use futures::executor;
+use futures::channel::oneshot;
+use futures::{executor, FutureExt};
 use hypervisor::HypervisorType;
 use seccompiler::SeccompAction;
 use std::sync::mpsc::Sender;
@@ -15,6 +16,8 @@ use zbus::fdo::{self, Result};
 use zbus::zvariant::Optional;
 use zbus::{dbus_interface, ConnectionBuilder};
 
+pub type DBusApiShutdownChannels = (oneshot::Sender<()>, oneshot::Receiver<()>);
+
 pub struct DBusApi {
     api_notifier: EventFd,
     api_sender: futures::lock::Mutex<Sender<ApiRequest>>,
@@ -22,6 +25,26 @@ pub struct DBusApi {
 
 fn api_error(error: impl std::fmt::Debug) -> fdo::Error {
     fdo::Error::Failed(format!("{error:?}"))
+}
+
+// This method is intended to ensure that the DBusApi thread has enough time to
+// send a response to the VmmShutdown method call before it is terminated. If
+// this step is omitted, the thread may be terminated before it can send a
+// response, resulting in an error message stating that the message recipient
+// disconnected from the message bus without providing a reply.
+pub fn dbus_api_graceful_shutdown(ch: DBusApiShutdownChannels) {
+    let (send_shutdown, mut recv_done) = ch;
+
+    // send the shutdown signal and return
+    // if it errors out
+    if send_shutdown.send(()).is_err() {
+        return;
+    }
+
+    // loop until `recv_err` errors out
+    // or as long as the return value indicates
+    // "immediately stale" (None)
+    while let Ok(None) = recv_done.try_recv() {}
 }
 
 impl DBusApi {
@@ -60,7 +83,7 @@ impl DBusApi {
     }
 }
 
-#[dbus_interface]
+#[dbus_interface(name = "org.cloudhypervisor.DBusApi1")]
 impl DBusApi {
     async fn vmm_ping(&self) -> Result<String> {
         let api_sender = self.clone_api_sender().await;
@@ -261,26 +284,42 @@ pub fn start_dbus_thread(
     _seccomp_action: &SeccompAction,
     _exit_evt: EventFd,
     _hypervisor_type: HypervisorType,
-) -> VmmResult<thread::JoinHandle<VmmResult<()>>> {
+) -> VmmResult<(thread::JoinHandle<()>, DBusApiShutdownChannels)> {
     let dbus_iface = DBusApi::new(api_notifier, api_sender);
     let connection = executor::block_on(async move {
         ConnectionBuilder::session()?
             .internal_executor(false)
-            .name("org.cloudhypervisor.ZBUS")?
-            .serve_at("/org/cloudhypervisor/ZBUS", dbus_iface)?
+            .name("org.cloudhypervisor.DBusApi")?
+            .serve_at("/org/cloudhypervisor/DBusApi", dbus_iface)?
             .build()
             .await
     })
     .map_err(VmmError::CreateDBusSession)?;
 
-    thread::Builder::new()
+    let (send_shutdown, recv_shutdown) = oneshot::channel::<()>();
+    let (send_done, recv_done) = oneshot::channel::<()>();
+
+    let thread_join_handle = thread::Builder::new()
         .name("dbus-thread".to_string())
         .spawn(move || {
             executor::block_on(async move {
+                let recv_shutdown = recv_shutdown.fuse();
+                let executor_tick = futures::future::Fuse::terminated();
+                futures::pin_mut!(recv_shutdown, executor_tick);
+                executor_tick.set(connection.executor().tick().fuse());
+
                 loop {
-                    connection.executor().tick().await;
+                    futures::select! {
+                        _ = executor_tick => executor_tick.set(connection.executor().tick().fuse()),
+                        _ = recv_shutdown => {
+                            send_done.send(()).ok();
+                            break;
+                        },
+                    }
                 }
             })
         })
-        .map_err(VmmError::DBusThreadSpawn)
+        .map_err(VmmError::DBusThreadSpawn)?;
+
+    Ok((thread_join_handle, (send_shutdown, recv_done)))
 }

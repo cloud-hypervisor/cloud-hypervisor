@@ -25,6 +25,8 @@ use crate::migration::{recv_vm_config, recv_vm_state};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::vm::{Error as VmError, Vm, VmState};
 use anyhow::anyhow;
+#[cfg(feature = "dbus_api")]
+use api::dbus::DBusApiShutdownChannels;
 use libc::{tcsetattr, termios, EFD_NONBLOCK, SIGINT, SIGTERM, TCSANOW};
 use memory_manager::MemoryManagerSnapshotData;
 use pci::PciBdf;
@@ -301,7 +303,7 @@ pub fn start_vmm_thread(
     exit_event: EventFd,
     seccomp_action: &SeccompAction,
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
-) -> Result<thread::JoinHandle<Result<()>>> {
+) -> Result<VmmThreadHandle> {
     #[cfg(feature = "guest_debug")]
     let gdb_hw_breakpoints = hypervisor.get_guest_debug_hw_bps();
     #[cfg(feature = "guest_debug")]
@@ -355,7 +357,7 @@ pub fn start_vmm_thread(
     // The VMM thread is started, we can start the dbus thread
     // and start serving HTTP requests
     #[cfg(feature = "dbus_api")]
-    api::start_dbus_thread(
+    let (_, dbus_shutdown_chs) = api::start_dbus_thread(
         api_event_clone.try_clone().map_err(Error::EventFdClone)?,
         api_sender.clone(),
         seccomp_action,
@@ -397,7 +399,11 @@ pub fn start_vmm_thread(
             .map_err(Error::GdbThreadSpawn)?;
     }
 
-    Ok(thread)
+    Ok(VmmThreadHandle {
+        thread_handle: thread,
+        #[cfg(feature = "dbus_api")]
+        dbus_shutdown_chs,
+    })
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -421,6 +427,12 @@ impl VmmVersionInfo {
             version: version.to_owned(),
         }
     }
+}
+
+pub struct VmmThreadHandle {
+    pub thread_handle: thread::JoinHandle<Result<()>>,
+    #[cfg(feature = "dbus_api")]
+    pub dbus_shutdown_chs: DBusApiShutdownChannels,
 }
 
 pub struct Vmm {

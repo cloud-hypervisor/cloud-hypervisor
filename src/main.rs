@@ -18,6 +18,8 @@ use std::os::unix::io::{FromRawFd, RawFd};
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
+#[cfg(feature = "dbus_api")]
+use vmm::api::dbus::dbus_api_graceful_shutdown;
 use vmm::config;
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::block_signal;
@@ -513,7 +515,7 @@ fn start_vmm(toplevel: TopLevel) -> Result<Option<String>, Error> {
 
     let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateExitEventFd)?;
 
-    let vmm_thread = vmm::start_vmm_thread(
+    let vmm_thread_handle = vmm::start_vmm_thread(
         vmm::VmmVersionInfo::new(env!("BUILD_VERSION"), env!("CARGO_PKG_VERSION")),
         &api_socket_path,
         api_socket_fd,
@@ -568,10 +570,14 @@ fn start_vmm(toplevel: TopLevel) -> Result<Option<String>, Error> {
         }
     }
 
-    vmm_thread
+    vmm_thread_handle
+        .thread_handle
         .join()
         .map_err(Error::ThreadJoin)?
         .map_err(Error::VmmThread)?;
+
+    #[cfg(feature = "dbus_api")]
+    dbus_api_graceful_shutdown(vmm_thread_handle.dbus_shutdown_chs);
 
     r.map(|_| api_socket_path)
 }
