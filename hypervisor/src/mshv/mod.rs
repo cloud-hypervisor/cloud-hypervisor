@@ -576,8 +576,14 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// X86 specific call to setup the CPUID registers.
     ///
-    fn set_cpuid2(&self, _cpuid: &[CpuIdEntry]) -> cpu::Result<()> {
-        Ok(())
+    fn set_cpuid2(&self, cpuid: &[CpuIdEntry]) -> cpu::Result<()> {
+        let cpuid: Vec<mshv_bindings::hv_cpuid_entry> = cpuid.iter().map(|e| (*e).into()).collect();
+        let mshv_cpuid = <CpuId>::from_entries(&cpuid)
+            .map_err(|_| cpu::HypervisorCpuError::SetCpuid(anyhow!("failed to create CpuId")))?;
+
+        self.fd
+            .register_intercept_result_cpuid(&mshv_cpuid)
+            .map_err(|e| cpu::HypervisorCpuError::SetCpuid(e.into()))
     }
     #[cfg(target_arch = "x86_64")]
     ///
