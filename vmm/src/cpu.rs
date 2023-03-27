@@ -689,14 +689,23 @@ impl CpuManager {
             .sgx_epc_region()
             .as_ref()
             .map(|sgx_epc_region| sgx_epc_region.epc_sections().values().cloned().collect());
+
+        let topology = self.config.topology.clone().map_or_else(
+            || {
+                #[cfg(feature = "mshv")]
+                if matches!(hypervisor.hypervisor_type(), HypervisorType::Mshv) {
+                    return Some((1, self.boot_vcpus(), 1));
+                }
+                None
+            },
+            |t| Some((t.threads_per_core, t.cores_per_die, t.dies_per_package)),
+        );
+
         self.cpuid = {
             let phys_bits = physical_bits(self.config.max_phys_bits);
             arch::generate_common_cpuid(
                 hypervisor,
-                self.config
-                    .topology
-                    .clone()
-                    .map(|t| (t.threads_per_core, t.cores_per_die, t.dies_per_package)),
+                topology,
                 sgx_epc_sections,
                 phys_bits,
                 self.config.kvm_hyperv,
