@@ -89,7 +89,7 @@ The Cloud Hypervisor API exposes the following actions through its endpoints:
 | Pause the VM                       | `/vm.pause`           | N/A                         | N/A                      | The VM is booted                 |
 | Resume the VM                      | `/vm.resume`          | N/A                         | N/A                      | The VM is paused                 |
 | Task a snapshot of the VM          | `/vm.snapshot`        | `/schemas/VmSnapshotConfig` | N/A                      | The VM is paused                 |
-| Perform a coredump of the VM       | `/vm.coredump`        | `/schemas/VmCoredumpData`   | N/A                      | The VM is paused                 |
+| Perform a coredump of the VM*      | `/vm.coredump`        | `/schemas/VmCoredumpData`   | N/A                      | The VM is paused                 |
 | Restore the VM from a snapshot     | `/vm.restore`         | `/schemas/RestoreConfig`    | N/A                      | The VM is created but not booted |
 | Add/remove CPUs to/from the VM     | `/vm.resize`          | `/schemas/VmResize`         | N/A                      | The VM is booted                 |
 | Add/remove memory from the VM      | `/vm.resize`          | `/schemas/VmResize`         | N/A                      | The VM is booted                 |
@@ -105,6 +105,11 @@ The Cloud Hypervisor API exposes the following actions through its endpoints:
 | Add vsock device to the VM         | `/vm.add-vsock`       | `/schemas/VsockConfig`      | `/schemas/PciDeviceInfo` | The VM is booted                 |
 | Remove device from the VM          | `/vm.remove-device`   | `/schemas/VmRemoveDevice`   | N/A                      | The VM is booted                 |
 | Dump the VM counters               | `/vm.counters`        | N/A                         | `/schemas/VmCounters`    | The VM is booted                 |
+
+* The `vmcoredump` action is available exclusively for the `x86_64`
+architecture and can be executed only when the `guest_debug` feature is
+enabled. Without this feature, the corresponding REST API endpoint is not
+available.
 
 ### REST API Examples
 
