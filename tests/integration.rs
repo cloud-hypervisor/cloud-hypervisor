@@ -2046,19 +2046,16 @@ mod common_parallel {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_cpu_topology_421() {
         test_cpu_topology(4, 2, 1, false);
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_cpu_topology_142() {
         test_cpu_topology(1, 4, 2, false);
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_cpu_topology_262() {
         test_cpu_topology(2, 6, 2, false);
     }
