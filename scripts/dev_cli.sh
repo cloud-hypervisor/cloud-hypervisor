@@ -172,7 +172,11 @@ process_volumes_args() {
 cmd_help() {
     echo ""
     echo "Cloud Hypervisor $(basename "$0")"
-    echo "Usage: $(basename "$0") <command> [<command args>]"
+    echo "Usage: $(basename "$0") [flags] <command> [<command args>]"
+    echo ""
+    echo "Available flags":
+    echo ""
+    echo "    --local        Set the container image version being used to \"local\"."
     echo ""
     echo "Available commands:"
     echo ""
