@@ -357,6 +357,7 @@ dependencies = [
  "vmm",
  "vmm-sys-util",
  "wait-timeout",
+ "zbus",
 ]
 
 [[package]]

@@ -48,6 +48,7 @@ tracer = { path = "tracer" }
 vmm = { path = "vmm" }
 vmm-sys-util = "0.11.0"
 vm-memory = "0.10.0"
+zbus = { version = "3.11.1", optional = true }
 
 # List of patched crates
 [patch.crates-io]
@@ -65,7 +66,7 @@ wait-timeout = "0.2.0"
 
 [features]
 default = ["kvm"]
-dbus_api = ["vmm/dbus_api"]
+dbus_api = ["zbus", "vmm/dbus_api"]
 dhat-heap = ["dhat"] # For heap profiling
 guest_debug = ["vmm/guest_debug"]
 kvm = ["vmm/kvm"]
