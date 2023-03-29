@@ -113,7 +113,7 @@ Firmware](https://github.com/cloud-hypervisor/rust-hypervisor-firmware) or an
 edk2 UEFI firmware called `CLOUDHV` / `CLOUDHV_EFI`.)
 
 Binary builds of the firmware files are available for the latest release of
-[Rust Hyperivor
+[Rust Hypervisor
 Firmware](https://github.com/cloud-hypervisor/rust-hypervisor-firmware/releases/latest)
 and [our edk2
 repository](https://github.com/cloud-hypervisor/edk2/releases/latest)
