@@ -12,10 +12,10 @@ mkdir -p "$WORKLOADS_DIR"
 process_common_args "$@"
 
 # For now these values are default for kvm
-test_features=""
+test_features="--features dbus_api"
 
 if [ "$hypervisor" = "mshv" ] ;  then
-    test_features="--no-default-features --features mshv"
+    test_features="--no-default-features ${test_features},mshv"
 fi
 
 cp scripts/sha1sums-x86_64 $WORKLOADS_DIR
@@ -156,7 +156,7 @@ cp $VMLINUX_IMAGE $VFIO_DIR || exit 1
 
 BUILD_TARGET="$(uname -m)-unknown-linux-${CH_LIBC}"
 
-cargo build --no-default-features --features "kvm,mshv" --all  --release --target $BUILD_TARGET
+cargo build --no-default-features --features "kvm,mshv,dbus_api" --all  --release --target $BUILD_TARGET
 
 # We always copy a fresh version of our binary for our L2 guest.
 cp target/$BUILD_TARGET/release/cloud-hypervisor $VFIO_DIR

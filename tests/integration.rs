@@ -10,8 +10,6 @@
 
 extern crate test_infra;
 
-use api_client::simple_api_command;
-use api_client::simple_api_full_command;
 use net_util::MacAddr;
 use std::collections::HashMap;
 use std::fs;
@@ -74,6 +72,73 @@ const DIRECT_KERNEL_BOOT_CMDLINE: &str =
     "root=/dev/vda1 console=hvc0 rw systemd.journald.forward_to_console=1";
 
 const CONSOLE_TEST_STRING: &str = "Started OpenBSD Secure Shell server";
+
+// This enum exists to make it more convenient to
+// implement test for both D-Bus and REST APIs.
+enum TargetApi {
+    // API socket
+    HttpApi(String),
+    // well known service name, object path
+    DBusApi(String, String),
+}
+
+impl TargetApi {
+    fn new_http_api(tmp_dir: &TempDir) -> Self {
+        Self::HttpApi(temp_api_path(tmp_dir))
+    }
+
+    fn new_dbus_api(tmp_dir: &TempDir) -> Self {
+        // `tmp_dir` is in the form of "/tmp/chXXXXXX"
+        // and we take the `chXXXXXX` part as a unique identifier for the guest
+        let id = tmp_dir.as_path().file_name().unwrap().to_str().unwrap();
+
+        Self::DBusApi(
+            format!("org.cloudhypervisor.{id}"),
+            format!("/org/cloudhypervisor/{id}"),
+        )
+    }
+
+    fn guest_args(&self) -> Vec<&str> {
+        match self {
+            TargetApi::HttpApi(api_socket) => {
+                vec!["--api-socket", api_socket.as_str()]
+            }
+            TargetApi::DBusApi(service_name, object_path) => {
+                vec![
+                    "--dbus-service-name",
+                    service_name.as_str(),
+                    "--dbus-object-path",
+                    object_path.as_str(),
+                ]
+            }
+        }
+    }
+
+    fn remote_args(&self) -> Vec<&str> {
+        // `guest_args` and `remote_args` are consistent with each other
+        self.guest_args()
+    }
+
+    fn remote_command(&self, command: &str, arg: Option<&str>) -> bool {
+        let mut cmd = Command::new(clh_command("ch-remote"));
+        cmd.args(self.remote_args());
+        cmd.arg(command);
+
+        if let Some(arg) = arg {
+            cmd.arg(arg);
+        }
+
+        let output = cmd.output().unwrap();
+        if output.status.success() {
+            true
+        } else {
+            eprintln!("Error running ch-remote command: {:?}", &cmd);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            eprintln!("stderr: {stderr}");
+            false
+        }
+    }
+}
 
 fn prepare_virtiofsd(tmp_dir: &TempDir, shared_dir: &str) -> (std::process::Child, String) {
     let mut workload_path = dirs::home_dir().unwrap();
@@ -1910,7 +1975,7 @@ fn enable_guest_watchdog(guest: &Guest, watchdog_sec: u32) {
 }
 
 mod common_parallel {
-    use std::{fs::OpenOptions, io::SeekFrom, os::unix::net::UnixStream};
+    use std::{fs::OpenOptions, io::SeekFrom};
 
     use crate::*;
 
@@ -4037,46 +4102,126 @@ mod common_parallel {
         _test_virtio_vsock(true);
     }
 
+    // Start cloud-hypervisor with no VM parameters, running both the HTTP
+    // and DBus APIs. Alternate calls to the external APIs (HTTP and DBus)
+    // to create a VM, boot it, and verify that it can be shut down and then
+    // booted again.
     #[test]
-    // Start cloud-hypervisor with no VM parameters, only the API server running.
-    // From the API: Create a VM, boot it and check that it looks as expected.
-    fn test_api_create_boot() {
+    fn test_api_dbus_and_http_interleaved() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
-
-        let api_socket = temp_api_path(&guest.tmp_dir);
+        let dbus_api = TargetApi::new_dbus_api(&guest.tmp_dir);
+        let http_api = TargetApi::new_http_api(&guest.tmp_dir);
 
         let mut child = GuestCommand::new(&guest)
-            .args(["--api-socket", &api_socket])
+            .args(dbus_api.guest_args())
+            .args(http_api.guest_args())
             .capture_output()
             .spawn()
             .unwrap();
 
         thread::sleep(std::time::Duration::new(1, 0));
 
-        let mut socket = UnixStream::connect(&api_socket).unwrap();
-        // Verify API server is running
-        simple_api_full_command(&mut socket, "GET", "vmm.ping", None).unwrap();
+        // Verify API servers are running
+        assert!(dbus_api.remote_command("ping", None));
+        assert!(http_api.remote_command("ping", None));
 
         // Create the VM first
         let cpu_count: u8 = 4;
-        let http_body = guest.api_create_body(
+        let request_body = guest.api_create_body(
             cpu_count,
             direct_kernel_boot_path().to_str().unwrap(),
             DIRECT_KERNEL_BOOT_CMDLINE,
         );
 
         let temp_config_path = guest.tmp_dir.as_path().join("config");
-        std::fs::write(&temp_config_path, http_body).unwrap();
+        std::fs::write(&temp_config_path, request_body).unwrap();
+        let create_config = temp_config_path.as_os_str().to_str().unwrap();
 
-        remote_command(
-            &api_socket,
-            "create",
-            Some(temp_config_path.as_os_str().to_str().unwrap()),
+        let r = std::panic::catch_unwind(|| {
+            // Create the VM
+            assert!(dbus_api.remote_command("create", Some(create_config),));
+
+            // Then boot it
+            assert!(http_api.remote_command("boot", None));
+            guest.wait_vm_boot(None).unwrap();
+
+            // Check that the VM booted as expected
+            assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
+            assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+
+            // Sync and shutdown without powering off to prevent filesystem
+            // corruption.
+            guest.ssh_command("sync").unwrap();
+            guest.ssh_command("sudo shutdown -H now").unwrap();
+
+            // Wait for the guest to be fully shutdown
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            // Then shutdown the VM
+            assert!(dbus_api.remote_command("shutdown", None));
+
+            // Then boot it again
+            assert!(http_api.remote_command("boot", None));
+            guest.wait_vm_boot(None).unwrap();
+
+            // Check that the VM booted as expected
+            assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
+            assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_api_dbus_create_boot() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+
+        _test_api_create_boot(TargetApi::new_dbus_api(&guest.tmp_dir), guest)
+    }
+
+    #[test]
+    fn test_api_http_create_boot() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+
+        _test_api_create_boot(TargetApi::new_http_api(&guest.tmp_dir), guest)
+    }
+
+    // Start cloud-hypervisor with no VM parameters, only the API server running.
+    // From the API: Create a VM, boot it and check that it looks as expected.
+    fn _test_api_create_boot(target_api: TargetApi, guest: Guest) {
+        let mut child = GuestCommand::new(&guest)
+            .args(target_api.guest_args())
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        thread::sleep(std::time::Duration::new(1, 0));
+
+        // Verify API server is running
+        assert!(target_api.remote_command("ping", None));
+
+        // Create the VM first
+        let cpu_count: u8 = 4;
+        let request_body = guest.api_create_body(
+            cpu_count,
+            direct_kernel_boot_path().to_str().unwrap(),
+            DIRECT_KERNEL_BOOT_CMDLINE,
         );
 
+        let temp_config_path = guest.tmp_dir.as_path().join("config");
+        std::fs::write(&temp_config_path, request_body).unwrap();
+        let create_config = temp_config_path.as_os_str().to_str().unwrap();
+
+        assert!(target_api.remote_command("create", Some(create_config),));
+
         // Then boot it
-        remote_command(&api_socket, "boot", None);
+        assert!(target_api.remote_command("boot", None));
         thread::sleep(std::time::Duration::new(20, 0));
 
         let r = std::panic::catch_unwind(|| {
@@ -4092,42 +4237,53 @@ mod common_parallel {
     }
 
     #[test]
-    // Start cloud-hypervisor with no VM parameters, only the API server running.
-    // From the API: Create a VM, boot it and check it can be shutdown and then
-    // booted again
-    fn test_api_shutdown() {
+    fn test_api_dbus_shutdown() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
 
-        let api_socket = temp_api_path(&guest.tmp_dir);
+        _test_api_shutdown(TargetApi::new_dbus_api(&guest.tmp_dir), guest)
+    }
 
+    #[test]
+    fn test_api_http_shutdown() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+
+        _test_api_shutdown(TargetApi::new_http_api(&guest.tmp_dir), guest)
+    }
+
+    // Start cloud-hypervisor with no VM parameters, only the API server running.
+    // From the API: Create a VM, boot it and check it can be shutdown and then
+    // booted again
+    fn _test_api_shutdown(target_api: TargetApi, guest: Guest) {
         let mut child = GuestCommand::new(&guest)
-            .args(["--api-socket", &api_socket])
+            .args(target_api.guest_args())
             .capture_output()
             .spawn()
             .unwrap();
 
         thread::sleep(std::time::Duration::new(1, 0));
 
-        let mut socket = UnixStream::connect(&api_socket).unwrap();
         // Verify API server is running
-        simple_api_full_command(&mut socket, "GET", "vmm.ping", None).unwrap();
+        assert!(target_api.remote_command("ping", None));
 
         // Create the VM first
         let cpu_count: u8 = 4;
-        let http_body = guest.api_create_body(
+        let request_body = guest.api_create_body(
             cpu_count,
             direct_kernel_boot_path().to_str().unwrap(),
             DIRECT_KERNEL_BOOT_CMDLINE,
         );
 
+        let temp_config_path = guest.tmp_dir.as_path().join("config");
+        std::fs::write(&temp_config_path, request_body).unwrap();
+        let create_config = temp_config_path.as_os_str().to_str().unwrap();
+
         let r = std::panic::catch_unwind(|| {
-            // socket has to be created again inside catch_unwind block to avoid errors
-            let mut socket = UnixStream::connect(&api_socket).unwrap();
-            simple_api_command(&mut socket, "PUT", "create", Some(&http_body)).unwrap();
+            assert!(target_api.remote_command("create", Some(create_config)));
 
             // Then boot it
-            simple_api_command(&mut socket, "PUT", "boot", None).unwrap();
+            assert!(target_api.remote_command("boot", None));
 
             guest.wait_vm_boot(None).unwrap();
 
@@ -4144,10 +4300,10 @@ mod common_parallel {
             thread::sleep(std::time::Duration::new(20, 0));
 
             // Then shut it down
-            simple_api_command(&mut socket, "PUT", "shutdown", None).unwrap();
+            assert!(target_api.remote_command("shutdown", None));
 
             // Then boot it again
-            simple_api_command(&mut socket, "PUT", "boot", None).unwrap();
+            assert!(target_api.remote_command("boot", None));
 
             guest.wait_vm_boot(None).unwrap();
 
@@ -4163,42 +4319,52 @@ mod common_parallel {
     }
 
     #[test]
-    // Start cloud-hypervisor with no VM parameters, only the API server running.
-    // From the API: Create a VM, boot it and check it can be deleted and then recreated
-    // booted again.
-    fn test_api_delete() {
+    fn test_api_dbus_delete() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
 
-        let api_socket = temp_api_path(&guest.tmp_dir);
+        _test_api_delete(TargetApi::new_dbus_api(&guest.tmp_dir), guest);
+    }
 
+    #[test]
+    fn test_api_http_delete() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+
+        _test_api_delete(TargetApi::new_http_api(&guest.tmp_dir), guest);
+    }
+
+    // Start cloud-hypervisor with no VM parameters, only the API server running.
+    // From the API: Create a VM, boot it and check it can be deleted and then recreated
+    // booted again.
+    fn _test_api_delete(target_api: TargetApi, guest: Guest) {
         let mut child = GuestCommand::new(&guest)
-            .args(["--api-socket", &api_socket])
+            .args(target_api.guest_args())
             .capture_output()
             .spawn()
             .unwrap();
 
         thread::sleep(std::time::Duration::new(1, 0));
 
-        let mut socket = UnixStream::connect(&api_socket).unwrap();
         // Verify API server is running
-        simple_api_full_command(&mut socket, "GET", "vmm.ping", None).unwrap();
+        assert!(target_api.remote_command("ping", None));
 
         // Create the VM first
         let cpu_count: u8 = 4;
-        let http_body = guest.api_create_body(
+        let request_body = guest.api_create_body(
             cpu_count,
             direct_kernel_boot_path().to_str().unwrap(),
             DIRECT_KERNEL_BOOT_CMDLINE,
         );
+        let temp_config_path = guest.tmp_dir.as_path().join("config");
+        std::fs::write(&temp_config_path, request_body).unwrap();
+        let create_config = temp_config_path.as_os_str().to_str().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            // socket has to be created again inside catch_unwind block to avoid errors
-            let mut socket = UnixStream::connect(&api_socket).unwrap();
-            simple_api_command(&mut socket, "PUT", "create", Some(&http_body)).unwrap();
+            assert!(target_api.remote_command("create", Some(create_config)));
 
             // Then boot it
-            simple_api_command(&mut socket, "PUT", "boot", None).unwrap();
+            assert!(target_api.remote_command("boot", None));
 
             guest.wait_vm_boot(None).unwrap();
 
@@ -4215,12 +4381,12 @@ mod common_parallel {
             thread::sleep(std::time::Duration::new(20, 0));
 
             // Then delete it
-            simple_api_command(&mut socket, "PUT", "delete", None).unwrap();
+            assert!(target_api.remote_command("delete", None));
 
-            simple_api_command(&mut socket, "PUT", "create", Some(&http_body)).unwrap();
+            assert!(target_api.remote_command("create", Some(create_config)));
 
             // Then boot it again
-            simple_api_command(&mut socket, "PUT", "boot", None).unwrap();
+            assert!(target_api.remote_command("boot", None));
 
             guest.wait_vm_boot(None).unwrap();
 
@@ -4236,41 +4402,53 @@ mod common_parallel {
     }
 
     #[test]
+    fn test_api_dbus_pause_resume() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+
+        _test_api_pause_resume(TargetApi::new_dbus_api(&guest.tmp_dir), guest)
+    }
+
+    #[test]
+    fn test_api_http_pause_resume() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+
+        _test_api_pause_resume(TargetApi::new_http_api(&guest.tmp_dir), guest)
+    }
+
     // Start cloud-hypervisor with no VM parameters, only the API server running.
     // From the API: Create a VM, boot it and check that it looks as expected.
     // Then we pause the VM, check that it's no longer available.
     // Finally we resume the VM and check that it's available.
-    fn test_api_pause_resume() {
-        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(focal));
-
-        let api_socket = temp_api_path(&guest.tmp_dir);
-
+    fn _test_api_pause_resume(target_api: TargetApi, guest: Guest) {
         let mut child = GuestCommand::new(&guest)
-            .args(["--api-socket", &api_socket])
+            .args(target_api.guest_args())
             .capture_output()
             .spawn()
             .unwrap();
 
         thread::sleep(std::time::Duration::new(1, 0));
 
-        let mut socket = UnixStream::connect(&api_socket).unwrap();
         // Verify API server is running
-        simple_api_full_command(&mut socket, "GET", "vmm.ping", None).unwrap();
+        assert!(target_api.remote_command("ping", None));
 
         // Create the VM first
         let cpu_count: u8 = 4;
-        let http_body = guest.api_create_body(
+        let request_body = guest.api_create_body(
             cpu_count,
             direct_kernel_boot_path().to_str().unwrap(),
             DIRECT_KERNEL_BOOT_CMDLINE,
         );
 
-        simple_api_command(&mut socket, "PUT", "create", Some(&http_body)).unwrap();
+        let temp_config_path = guest.tmp_dir.as_path().join("config");
+        std::fs::write(&temp_config_path, request_body).unwrap();
+        let create_config = temp_config_path.as_os_str().to_str().unwrap();
+
+        assert!(target_api.remote_command("create", Some(create_config)));
 
         // Then boot it
-        simple_api_command(&mut socket, "PUT", "boot", None).unwrap();
-
+        assert!(target_api.remote_command("boot", None));
         thread::sleep(std::time::Duration::new(20, 0));
 
         let r = std::panic::catch_unwind(|| {
@@ -4279,10 +4457,10 @@ mod common_parallel {
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
 
             // We now pause the VM
-            assert!(remote_command(&api_socket, "pause", None));
+            assert!(target_api.remote_command("pause", None));
 
             // Check pausing again fails
-            assert!(!remote_command(&api_socket, "pause", None));
+            assert!(!target_api.remote_command("pause", None));
 
             thread::sleep(std::time::Duration::new(2, 0));
 
@@ -4296,10 +4474,10 @@ mod common_parallel {
             .is_err());
 
             // Resume the VM
-            assert!(remote_command(&api_socket, "resume", None));
+            assert!(target_api.remote_command("resume", None));
 
             // Check resuming again fails
-            assert!(!remote_command(&api_socket, "resume", None));
+            assert!(!target_api.remote_command("resume", None));
 
             thread::sleep(std::time::Duration::new(2, 0));
 
