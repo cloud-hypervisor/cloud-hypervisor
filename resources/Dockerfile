@@ -18,54 +18,54 @@ ENV PATH="$PATH:$CARGO_HOME/bin"
 
 # Install all CI dependencies
 RUN apt-get update \
-	&& apt-get -yq upgrade \
-	&& DEBIAN_FRONTEND=noninteractive apt-get install -yq \
-	build-essential \
-	bc \
-	curl \
-	wget \
-	sudo \
-	mtools \
-	musl-tools \
-	libssl-dev \
-	pkg-config \
-	flex \
-	bison \
-	libelf-dev \
-	qemu-utils \
-	libglib2.0-dev \
-	libpixman-1-dev \
-	libseccomp-dev \
-	libcap-ng-dev \
-	socat \
-	dosfstools \
-	cpio \
-	python \
-	python3 \
-	python3-setuptools \
-	ntfs-3g \
-	openvswitch-switch-dpdk \
-	python3-distutils \
-	uuid-dev \
-	iperf3 \
-	zip \
-	git-core \
-	dnsmasq \
-	dmsetup \
+        && apt-get -yq upgrade \
+        && DEBIAN_FRONTEND=noninteractive apt-get install -yq \
+        build-essential \
+        bc \
+        curl \
+        wget \
+        sudo \
+        mtools \
+        musl-tools \
+        libssl-dev \
+        pkg-config \
+        flex \
+        bison \
+        libelf-dev \
+        qemu-utils \
+        libglib2.0-dev \
+        libpixman-1-dev \
+        libseccomp-dev \
+        libcap-ng-dev \
+        socat \
+        dosfstools \
+        cpio \
+        python \
+        python3 \
+        python3-setuptools \
+        ntfs-3g \
+        openvswitch-switch-dpdk \
+        python3-distutils \
+        uuid-dev \
+        iperf3 \
+        zip \
+        git-core \
+        dnsmasq \
+        dmsetup \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 RUN update-alternatives --set ovs-vswitchd /usr/lib/openvswitch-switch-dpdk/ovs-vswitchd-dpdk
 
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
-	apt-get update \
-	&& apt-get -yq upgrade \
-	&& DEBIAN_FRONTEND=noninteractive apt-get install -yq gcc-multilib gawk \
-	libtool expect gnutls-dev gnutls-bin libfuse-dev \
-	libjson-glib-dev libgmp-dev libtasn1-dev python3-twisted \
-	net-tools softhsm2 \
-	&& apt-get clean \
-    && rm -rf /var/lib/apt/lists/*;	fi
+        apt-get update \
+        && apt-get -yq upgrade \
+        && DEBIAN_FRONTEND=noninteractive apt-get install -yq gcc-multilib gawk \
+        libtool expect gnutls-dev gnutls-bin libfuse-dev \
+        libjson-glib-dev libgmp-dev libtasn1-dev python3-twisted \
+        net-tools softhsm2 \
+        && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*;     fi
 
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
         # On AArch64, `setcap` binary should be installed via `libcap2-bin`.
@@ -84,7 +84,7 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
         perl \
         texinfo \
         && apt-get clean \
-        && rm -rf /var/lib/apt/lists/*;	fi
+        && rm -rf /var/lib/apt/lists/*;         fi
 
 # Fix the libssl-dev install
 RUN export ARCH="$(uname -m)" \
