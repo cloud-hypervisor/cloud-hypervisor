@@ -151,6 +151,7 @@ fn virtio_rng_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
 
 fn virtio_vhost_fs_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
     vec![
+        (libc::SYS_clock_nanosleep, vec![]),
         (libc::SYS_connect, vec![]),
         (libc::SYS_nanosleep, vec![]),
         (libc::SYS_pread64, vec![]),
@@ -170,8 +171,11 @@ fn virtio_vhost_net_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
     vec![
         (libc::SYS_accept4, vec![]),
         (libc::SYS_bind, vec![]),
+        (libc::SYS_clock_nanosleep, vec![]),
+        (libc::SYS_connect, vec![]),
         (libc::SYS_getcwd, vec![]),
         (libc::SYS_listen, vec![]),
+        (libc::SYS_nanosleep, vec![]),
         (libc::SYS_recvmsg, vec![]),
         (libc::SYS_sendmsg, vec![]),
         (libc::SYS_sendto, vec![]),
@@ -184,7 +188,14 @@ fn virtio_vhost_net_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
 }
 
 fn virtio_vhost_block_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
-    vec![]
+    vec![
+        (libc::SYS_clock_nanosleep, vec![]),
+        (libc::SYS_connect, vec![]),
+        (libc::SYS_nanosleep, vec![]),
+        (libc::SYS_recvmsg, vec![]),
+        (libc::SYS_sendmsg, vec![]),
+        (libc::SYS_socket, vec![]),
+    ]
 }
 
 fn create_vsock_ioctl_seccomp_rule() -> Vec<SeccompRule> {
