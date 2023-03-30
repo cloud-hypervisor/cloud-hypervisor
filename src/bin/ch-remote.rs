@@ -329,7 +329,8 @@ fn do_command(toplevel: &TopLevel) -> Result<(), Error> {
             simple_api_command(&mut socket, "PUT", "delete", None).map_err(Error::ApiClient)
         }
         SubCommandEnum::ShutdownVmm(_) => {
-            simple_api_command(&mut socket, "PUT", "shutdown-vmm", None).map_err(Error::ApiClient)
+            simple_api_full_command(&mut socket, "PUT", "vmm.shutdown", None)
+                .map_err(Error::ApiClient)
         }
         SubCommandEnum::Resume(_) => {
             simple_api_command(&mut socket, "PUT", "resume", None).map_err(Error::ApiClient)
@@ -353,8 +354,7 @@ fn do_command(toplevel: &TopLevel) -> Result<(), Error> {
             simple_api_full_command(&mut socket, "GET", "vmm.ping", None).map_err(Error::ApiClient)
         }
         SubCommandEnum::Shutdown(_) => {
-            simple_api_full_command(&mut socket, "PUT", "vmm.shutdown", None)
-                .map_err(Error::ApiClient)
+            simple_api_command(&mut socket, "PUT", "shutdown", None).map_err(Error::ApiClient)
         }
         SubCommandEnum::Resize(ref config) => {
             resize_api_command(&mut socket, config.cpus, &config.memory, &config.balloon)
