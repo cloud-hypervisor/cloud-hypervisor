@@ -426,7 +426,7 @@ cmd_tests() {
             --env USER="root" \
             --env CH_LIBC="${libc}" \
             "$CTR_IMAGE" \
-            ./scripts/run_integration_tests_"$(uname -m)".sh "$@" || fix_dir_perms $? || exit $?
+            dbus-run-session ./scripts/run_integration_tests_"$(uname -m)".sh "$@" || fix_dir_perms $? || exit $?
     fi
 
     if [ "$integration_sgx" = true ]; then

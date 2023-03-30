@@ -231,7 +231,7 @@ fi
 
 export RUST_BACKTRACE=1
 
-cargo build --all --release --target $BUILD_TARGET
+cargo build --features "dbus_api" --all --release --target $BUILD_TARGET
 
 # Enable KSM with some reasonable parameters so that it won't take too long
 # for the memory to be merged between two processes.
