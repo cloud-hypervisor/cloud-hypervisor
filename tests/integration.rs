@@ -2230,7 +2230,7 @@ mod common_parallel {
                 "--memory-zone",
                 "id=mem0,size=1G,hotplug_size=2G",
                 "--memory-zone",
-                "id=mem1,size=1G,file=/dev/shm",
+                "id=mem1,size=1G,shared=on",
                 "--memory-zone",
                 "id=mem2,size=1G,host_numa_node=0,hotplug_size=2G",
             ])
