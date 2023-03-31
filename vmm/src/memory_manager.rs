@@ -327,6 +327,9 @@ pub enum Error {
     #[cfg(target_arch = "aarch64")]
     /// Failed to create UEFI flash
     CreateUefiFlash(HypervisorVmError),
+
+    /// Using a directory as a backing file for memory is not supported
+    DirectoryAsBackingFileForMemory,
 }
 
 const ENABLE_FLAG: usize = 0;
@@ -1271,37 +1274,9 @@ impl MemoryManager {
         Ok(FileOffset::new(f, 0))
     }
 
-    fn open_backing_file(
-        backing_file: &PathBuf,
-        file_offset: u64,
-        size: usize,
-    ) -> Result<FileOffset, Error> {
+    fn open_backing_file(backing_file: &PathBuf, file_offset: u64) -> Result<FileOffset, Error> {
         if backing_file.is_dir() {
-            warn!(
-                "Using a directory as a backing file for memory is deprecated \
-                and will be removed in a future release. (See #5082)"
-            );
-            // Override file offset as it does not apply in this case.
-            info!(
-                "Ignoring file offset since the backing file is a \
-                        temporary file created from the specified directory."
-            );
-            let fs_str = format!("{}{}", backing_file.display(), "/tmpfile_XXXXXX");
-            let fs = ffi::CString::new(fs_str).unwrap();
-            let mut path = fs.as_bytes_with_nul().to_owned();
-            let path_ptr = path.as_mut_ptr() as *mut _;
-            // SAFETY: FFI call
-            let fd = unsafe { libc::mkstemp(path_ptr) };
-            if fd == -1 {
-                return Err(Error::SharedFileCreate(std::io::Error::last_os_error()));
-            }
-            // SAFETY: FFI call
-            unsafe { libc::unlink(path_ptr) };
-            // SAFETY: fd is valid
-            let f = unsafe { File::from_raw_fd(fd) };
-            f.set_len(size as u64).map_err(Error::SharedFileSetLen)?;
-
-            Ok(FileOffset::new(f, 0))
+            Err(Error::DirectoryAsBackingFileForMemory)
         } else {
             let f = OpenOptions::new()
                 .read(true)
@@ -1341,7 +1316,7 @@ impl MemoryManager {
             } else {
                 mmap_flags |= libc::MAP_PRIVATE;
             }
-            Some(Self::open_backing_file(backing_file, file_offset, size)?)
+            Some(Self::open_backing_file(backing_file, file_offset)?)
         } else if shared || hugepages {
             // For hugepages we must also MAP_SHARED otherwise we will trigger #4805
             // because the MAP_PRIVATE will trigger CoW against the backing file with
