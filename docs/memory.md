@@ -266,11 +266,8 @@ _Example_
 
 ### `file`
 
-Path to the file backing the memory zone. This can be either a file or a
-directory. In case of a file, it will be opened and used as the backing file
-for the `mmap(2)` operation. In case of a directory, a temporary file with no
-hard link on the filesystem will be created. This file will be used as the
-backing file for the `mmap(2)` operation.
+Path to the file backing the memory zone. The file will be opened and used as
+the backing file for the `mmap(2)` operation.
 
 This option can be particularly useful when trying to back a part of the guest
 RAM with a well known file. In the context of the snapshot/restore feature, and
