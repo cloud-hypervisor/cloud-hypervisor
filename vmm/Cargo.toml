@@ -36,7 +36,7 @@ pci = { path = "../pci" }
 qcow = { path = "../qcow" }
 seccompiler = "0.3.0"
 serde = { version = "1.0.151", features = ["rc", "derive"] }
-serde_json = "1.0.93"
+serde_json = "1.0.95"
 serial_buffer = { path = "../serial_buffer" }
 signal-hook = "0.3.15"
 thiserror = "1.0.39"
