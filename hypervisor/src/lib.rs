@@ -48,9 +48,9 @@ mod cpu;
 /// Device related module
 mod device;
 
+pub use crate::hypervisor::{Hypervisor, HypervisorError};
 pub use cpu::{HypervisorCpuError, Vcpu, VmExit};
 pub use device::HypervisorDeviceError;
-pub use hypervisor::{Hypervisor, HypervisorError};
 #[cfg(all(feature = "kvm", target_arch = "aarch64"))]
 pub use kvm::{aarch64, GicState};
 use std::sync::Arc;
