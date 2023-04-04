@@ -1,9 +1,9 @@
 // Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-/// This module implements our vsock connection state machine. The heavy lifting is done by
-/// `connection::VsockConnection`, while this file only defines some constants and helper structs.
-///
+//! This module implements our vsock connection state machine. The heavy lifting is done by
+//! `connection::VsockConnection`, while this file only defines some constants and helper structs.
+
 mod connection;
 mod txbuf;
 

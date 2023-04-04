@@ -1,28 +1,28 @@
 // Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-/// The main job of `VsockConnection` is to forward data traffic, back and forth, between a
-/// guest-side AF_VSOCK socket and a host-side generic `Read + Write + AsRawFd` stream, while
-/// also managing its internal state.
-/// To that end, `VsockConnection` implements:
-/// - `VsockChannel` for:
-///   - moving data from the host stream to a guest-provided RX buffer, via `recv_pkt()`; and
-///   - moving data from a guest-provided TX buffer to the host stream, via `send_pkt()`; and
-///   - updating its internal state, by absorbing control packets (anything other than
-///     VSOCK_OP_RW).
-/// - `VsockEpollListener` for getting notified about the availability of data or free buffer
-///   space at the host stream.
-///
-/// Note: there is a certain asymmetry to the RX and TX data flows:
-///       - RX transfers do not need any data buffering, since data is read straight from the
-///         host stream and into the guest-provided RX buffer;
-///       - TX transfers may require some data to be buffered by `VsockConnection`, if the host
-///         peer can't keep up with reading the data that we're writing. This is because, once
-///         the guest driver provides some data in a virtio TX buffer, the vsock device must
-///         consume it.  If that data can't be forwarded straight to the host stream, we'll
-///         have to store it in a buffer (and flush it at a later time). Vsock flow control
-///         ensures that our TX buffer doesn't overflow.
-///
+//! The main job of `VsockConnection` is to forward data traffic, back and forth, between a
+//! guest-side AF_VSOCK socket and a host-side generic `Read + Write + AsRawFd` stream, while
+//! also managing its internal state.
+//! To that end, `VsockConnection` implements:
+//! - `VsockChannel` for:
+//!   - moving data from the host stream to a guest-provided RX buffer, via `recv_pkt()`; and
+//!   - moving data from a guest-provided TX buffer to the host stream, via `send_pkt()`; and
+//!   - updating its internal state, by absorbing control packets (anything other than
+//!     VSOCK_OP_RW).
+//! - `VsockEpollListener` for getting notified about the availability of data or free buffer
+//!   space at the host stream.
+//!
+//! Note: there is a certain asymmetry to the RX and TX data flows:
+//! - RX transfers do not need any data buffering, since data is read straight from the
+//!   host stream and into the guest-provided RX buffer;
+//! - TX transfers may require some data to be buffered by `VsockConnection`, if the host
+//!   peer can't keep up with reading the data that we're writing. This is because, once
+//!   the guest driver provides some data in a virtio TX buffer, the vsock device must
+//!   consume it.  If that data can't be forwarded straight to the host stream, we'll
+//!   have to store it in a buffer (and flush it at a later time). Vsock flow control
+//!   ensures that our TX buffer doesn't overflow.
+//
 // The code in this file is best read with a fresh memory of the vsock protocol inner-workings.
 // To help with that, here is a
 //

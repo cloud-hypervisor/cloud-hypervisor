@@ -2,35 +2,42 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-/// `VsockMuxer` is the device-facing component of the Unix domain sockets vsock backend. I.e.
-/// by implementing the `VsockBackend` trait, it abstracts away the gory details of translating
-/// between AF_VSOCK and AF_UNIX, and presents a clean interface to the rest of the vsock
-/// device model.
-///
-/// The vsock muxer has two main roles:
-/// 1. Vsock connection multiplexer:
-///    It's the muxer's job to create, manage, and terminate `VsockConnection` objects. The
-///    muxer also routes packets to their owning connections. It does so via a connection
-///    `HashMap`, keyed by what is basically a (host_port, guest_port) tuple.
-///    Vsock packet traffic needs to be inspected, in order to detect connection request
-///    packets (leading to the creation of a new connection), and connection reset packets
-///    (leading to the termination of an existing connection). All other packets, though, must
-///    belong to an existing connection and, as such, the muxer simply forwards them.
-/// 2. Event dispatcher
-///    There are three event categories that the vsock backend is interested it:
-///    1. A new host-initiated connection is ready to be accepted from the listening host Unix
-///       socket;
-///    2. Data is available for reading from a newly-accepted host-initiated connection (i.e.
-///       the host is ready to issue a vsock connection request, informing us of the
-///       destination port to which it wants to connect);
-///    3. Some event was triggered for a connected Unix socket, that belongs to a
-///       `VsockConnection`.
-///    The muxer gets notified about all of these events, because, as a `VsockEpollListener`
-///    implementor, it gets to register a nested epoll FD into the main VMM epolling loop. All
-///    other pollable FDs are then registered under this nested epoll FD.
-///    To route all these events to their handlers, the muxer uses another `HashMap` object,
-///    mapping `RawFd`s to `EpollListener`s.
-///
+//! `VsockMuxer` is the device-facing component of the Unix domain sockets vsock backend. I.e.
+//! by implementing the `VsockBackend` trait, it abstracts away the gory details of translating
+//! between AF_VSOCK and AF_UNIX, and presents a clean interface to the rest of the vsock
+//! device model.
+//!
+//! The vsock muxer has two main roles:
+//!
+//! ## Vsock connection multiplexer
+//!
+//! It's the muxer's job to create, manage, and terminate `VsockConnection` objects. The
+//! muxer also routes packets to their owning connections. It does so via a connection
+//! `HashMap`, keyed by what is basically a (host_port, guest_port) tuple.
+//!
+//! Vsock packet traffic needs to be inspected, in order to detect connection request
+//! packets (leading to the creation of a new connection), and connection reset packets
+//! (leading to the termination of an existing connection). All other packets, though, must
+//! belong to an existing connection and, as such, the muxer simply forwards them.
+//!
+//! ## Event dispatcher
+//!
+//! There are three event categories that the vsock backend is interested it:
+//! 1. A new host-initiated connection is ready to be accepted from the listening host Unix
+//!    socket;
+//! 2. Data is available for reading from a newly-accepted host-initiated connection (i.e.
+//!    the host is ready to issue a vsock connection request, informing us of the
+//!    destination port to which it wants to connect);
+//! 3. Some event was triggered for a connected Unix socket, that belongs to a
+//!    `VsockConnection`.
+//!
+//! The muxer gets notified about all of these events, because, as a `VsockEpollListener`
+//! implementor, it gets to register a nested epoll FD into the main VMM epolling loop. All
+//! other pollable FDs are then registered under this nested epoll FD.
+//!
+//! To route all these events to their handlers, the muxer uses another `HashMap` object,
+//! mapping `RawFd`s to `EpollListener`s.
+
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, Read};
