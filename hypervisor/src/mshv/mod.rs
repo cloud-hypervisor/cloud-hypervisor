@@ -195,13 +195,16 @@ impl MshvHypervisor {
     }
 }
 /// Implementation of Hypervisor trait for Mshv
-/// Example:
-/// #[cfg(feature = "mshv")]
-/// extern crate hypervisor
-/// let mshv = hypervisor::mshv::MshvHypervisor::new().unwrap();
-/// let hypervisor: Arc<dyn hypervisor::Hypervisor> = Arc::new(mshv);
-/// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
 ///
+/// # Examples
+///
+/// ```
+/// # use hypervisor::mshv::MshvHypervisor;
+/// # use std::sync::Arc;
+/// let mshv = MshvHypervisor::new().unwrap();
+/// let hypervisor = Arc::new(mshv);
+/// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
+/// ```
 impl hypervisor::Hypervisor for MshvHypervisor {
     ///
     /// Returns the type of the hypervisor
@@ -210,13 +213,16 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         HypervisorType::Mshv
     }
     /// Create a mshv vm object and return the object as Vm trait object
-    /// Example
-    /// # extern crate hypervisor;
-    /// # use hypervisor::MshvHypervisor;
-    /// use hypervisor::MshvVm;
-    /// let hypervisor = MshvHypervisor::new().unwrap();
-    /// let vm = hypervisor.create_vm().unwrap()
     ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate hypervisor;
+    /// # use hypervisor::mshv::MshvHypervisor;
+    /// use hypervisor::mshv::MshvVm;
+    /// let hypervisor = MshvHypervisor::new().unwrap();
+    /// let vm = hypervisor.create_vm().unwrap();
+    /// ```
     fn create_vm(&self) -> hypervisor::Result<Arc<dyn vm::Vm>> {
         let fd: VmFd;
         loop {
@@ -285,15 +291,17 @@ pub struct MshvVcpu {
 }
 
 /// Implementation of Vcpu trait for Microsoft Hypervisor
-/// Example:
-/// #[cfg(feature = "mshv")]
-/// extern crate hypervisor
-/// let mshv = hypervisor::mshv::MshvHypervisor::new().unwrap();
-/// let hypervisor: Arc<dyn hypervisor::Hypervisor> = Arc::new(mshv);
-/// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
-/// let vcpu = vm.create_vcpu(0).unwrap();
-/// vcpu.get/set().unwrap()
 ///
+/// # Examples
+///
+/// ```
+/// # use hypervisor::mshv::MshvHypervisor;
+/// # use std::sync::Arc;
+/// let mshv = MshvHypervisor::new().unwrap();
+/// let hypervisor = Arc::new(mshv);
+/// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
+/// let vcpu = vm.create_vcpu(0, None).unwrap();
+/// ```
 impl cpu::Vcpu for MshvVcpu {
     #[cfg(target_arch = "x86_64")]
     ///
@@ -917,15 +925,17 @@ impl MshvVm {
 
 ///
 /// Implementation of Vm trait for Mshv
-/// Example:
-/// #[cfg(feature = "mshv")]
-/// # extern crate hypervisor;
-/// # use hypervisor::MshvHypervisor;
-/// let mshv = MshvHypervisor::new().unwrap();
-/// let hypervisor: Arc<dyn hypervisor::Hypervisor> = Arc::new(mshv);
-/// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
-/// vm.set/get().unwrap()
 ///
+/// # Examples
+///
+/// ```
+/// # extern crate hypervisor;
+/// # use hypervisor::mshv::MshvHypervisor;
+/// # use std::sync::Arc;
+/// let mshv = MshvHypervisor::new().unwrap();
+/// let hypervisor = Arc::new(mshv);
+/// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
+/// ```
 impl vm::Vm for MshvVm {
     #[cfg(target_arch = "x86_64")]
     ///
