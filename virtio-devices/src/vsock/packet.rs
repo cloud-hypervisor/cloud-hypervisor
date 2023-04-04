@@ -2,19 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-/// `VsockPacket` provides a thin wrapper over the buffers exchanged via virtio queues.
-/// There are two components to a vsock packet, each using its own descriptor in a
-/// virtio queue:
-/// - the packet header; and
-/// - the packet data/buffer.
-/// There is a 1:1 relation between descriptor chains and packets: the first (chain head) holds
-/// the header, and an optional second descriptor holds the data. The second descriptor is only
-/// present for data packets (VSOCK_OP_RW).
-///
-/// `VsockPacket` wraps these two buffers and provides direct access to the data stored
-/// in guest memory. This is done to avoid unnecessarily copying data from guest memory
-/// to temporary buffers, before passing it on to the vsock backend.
-///
+//! `VsockPacket` provides a thin wrapper over the buffers exchanged via virtio queues.
+//! There are two components to a vsock packet, each using its own descriptor in a
+//! virtio queue:
+//! - the packet header; and
+//! - the packet data/buffer.
+//! There is a 1:1 relation between descriptor chains and packets: the first (chain head) holds
+//! the header, and an optional second descriptor holds the data. The second descriptor is only
+//! present for data packets (VSOCK_OP_RW).
+//!
+//! `VsockPacket` wraps these two buffers and provides direct access to the data stored
+//! in guest memory. This is done to avoid unnecessarily copying data from guest memory
+//! to temporary buffers, before passing it on to the vsock backend.
+
 use byteorder::{ByteOrder, LittleEndian};
 use std::ops::Deref;
 use std::sync::Arc;
