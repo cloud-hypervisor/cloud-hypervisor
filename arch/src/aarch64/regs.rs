@@ -1,18 +1,17 @@
 // Copyright 2022 Arm Limited (or its affiliates). All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-///
-/// AArch64 system register encoding:
-/// See https://developer.arm.com/documentation/ddi0487 (chapter D12)
-///
-///   31      22  21 20 19 18 16 15 12 11  8 7   5 4  0
-///  +----------+---+-----+-----+-----+-----+-----+----+
-///  |1101010100| L | op0 | op1 | CRn | CRm | op2 | Rt |
-///  +----------+---+-----+-----+-----+-----+-----+----+
-///
-/// Notes:
-/// - L and Rt are reserved as implementation defined fields, ignored.
-///
+// AArch64 system register encoding:
+// See https://developer.arm.com/documentation/ddi0487 (chapter D12)
+//
+//   31      22  21 20 19 18 16 15 12 11  8 7   5 4  0
+//  +----------+---+-----+-----+-----+-----+-----+----+
+//  |1101010100| L | op0 | op1 | CRn | CRm | op2 | Rt |
+//  +----------+---+-----+-----+-----+-----+-----+----+
+//
+// Notes:
+// - L and Rt are reserved as implementation defined fields, ignored.
+
 const SYSREG_HEAD: u32 = 0b1101010100u32 << 22;
 const SYSREG_OP0_SHIFT: u32 = 19;
 const SYSREG_OP0_MASK: u32 = 0b11u32 << 19;
