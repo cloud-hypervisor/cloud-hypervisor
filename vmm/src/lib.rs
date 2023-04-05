@@ -26,7 +26,7 @@ use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::vm::{Error as VmError, Vm, VmState};
 use anyhow::anyhow;
 #[cfg(feature = "dbus_api")]
-use api::dbus::DBusApiShutdownChannels;
+use api::dbus::{DBusApiOptions, DBusApiShutdownChannels};
 use libc::{tcsetattr, termios, EFD_NONBLOCK, SIGINT, SIGTERM, TCSANOW};
 use memory_manager::MemoryManagerSnapshotData;
 use pci::PciBdf;
@@ -294,6 +294,7 @@ pub fn start_vmm_thread(
     vmm_version: VmmVersionInfo,
     http_path: &Option<String>,
     http_fd: Option<RawFd>,
+    #[cfg(feature = "dbus_api")] dbus_options: Option<DBusApiOptions>,
     api_event: EventFd,
     api_sender: Sender<ApiRequest>,
     api_receiver: Receiver<ApiRequest>,
@@ -357,13 +358,20 @@ pub fn start_vmm_thread(
     // The VMM thread is started, we can start the dbus thread
     // and start serving HTTP requests
     #[cfg(feature = "dbus_api")]
-    let (_, dbus_shutdown_chs) = api::start_dbus_thread(
-        api_event_clone.try_clone().map_err(Error::EventFdClone)?,
-        api_sender.clone(),
-        seccomp_action,
-        exit_event.try_clone().map_err(Error::EventFdClone)?,
-        hypervisor_type,
-    )?;
+    let dbus_shutdown_chs = match dbus_options {
+        Some(opts) => {
+            let (_, chs) = api::start_dbus_thread(
+                opts,
+                api_event_clone.try_clone().map_err(Error::EventFdClone)?,
+                api_sender.clone(),
+                seccomp_action,
+                exit_event.try_clone().map_err(Error::EventFdClone)?,
+                hypervisor_type,
+            )?;
+            Some(chs)
+        }
+        None => None,
+    };
 
     if let Some(http_path) = http_path {
         api::start_http_path_thread(
@@ -432,7 +440,7 @@ impl VmmVersionInfo {
 pub struct VmmThreadHandle {
     pub thread_handle: thread::JoinHandle<Result<()>>,
     #[cfg(feature = "dbus_api")]
-    pub dbus_shutdown_chs: DBusApiShutdownChannels,
+    pub dbus_shutdown_chs: Option<DBusApiShutdownChannels>,
 }
 
 pub struct Vmm {

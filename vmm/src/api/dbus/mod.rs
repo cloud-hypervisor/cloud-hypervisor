@@ -20,6 +20,12 @@ use zbus::{dbus_interface, ConnectionBuilder};
 
 pub type DBusApiShutdownChannels = (oneshot::Sender<()>, oneshot::Receiver<()>);
 
+pub struct DBusApiOptions {
+    pub service_name: String,
+    pub object_path: String,
+    pub system_bus: bool,
+}
+
 pub struct DBusApi {
     api_notifier: EventFd,
     api_sender: futures::lock::Mutex<Sender<ApiRequest>>,
@@ -278,8 +284,8 @@ impl DBusApi {
     }
 }
 
-// TODO: add command line arguments to make this configurable
 pub fn start_dbus_thread(
+    dbus_options: DBusApiOptions,
     api_notifier: EventFd,
     api_sender: Sender<ApiRequest>,
     seccomp_action: &SeccompAction,
@@ -288,10 +294,16 @@ pub fn start_dbus_thread(
 ) -> VmmResult<(thread::JoinHandle<VmmResult<()>>, DBusApiShutdownChannels)> {
     let dbus_iface = DBusApi::new(api_notifier, api_sender);
     let connection = executor::block_on(async move {
-        ConnectionBuilder::session()?
+        let conn_builder = if dbus_options.system_bus {
+            ConnectionBuilder::system()?
+        } else {
+            ConnectionBuilder::session()?
+        };
+
+        conn_builder
             .internal_executor(false)
-            .name("org.cloudhypervisor.DBusApi")?
-            .serve_at("/org/cloudhypervisor/DBusApi", dbus_iface)?
+            .name(dbus_options.service_name)?
+            .serve_at(dbus_options.object_path, dbus_iface)?
             .build()
             .await
     })
