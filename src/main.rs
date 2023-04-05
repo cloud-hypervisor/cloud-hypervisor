@@ -19,7 +19,7 @@ use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 #[cfg(feature = "dbus_api")]
-use vmm::api::dbus::dbus_api_graceful_shutdown;
+use vmm::api::dbus::{dbus_api_graceful_shutdown, DBusApiOptions};
 use vmm::config;
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::block_signal;
@@ -59,6 +59,12 @@ enum Error {
     ParsingApiSocket(std::num::ParseIntError),
     #[error("Error parsing --event-monitor: {0}")]
     ParsingEventMonitor(option_parser::OptionParserError),
+    #[cfg(feature = "dbus_api")]
+    #[error("`--dbus-object-path` option isn't provided")]
+    MissingDBusObjectPath,
+    #[cfg(feature = "dbus_api")]
+    #[error("`--dbus-service-name` option isn't provided")]
+    MissingDBusServiceName,
     #[error("Error parsing --event-monitor: path or fd required")]
     BareEventMonitor,
     #[error("Error doing event monitor I/O: {0}")]
@@ -239,6 +245,21 @@ pub struct TopLevel {
     /// path=<path/to/a/file>|fd=<fd>
     api_socket: Option<String>,
 
+    #[cfg(feature = "dbus_api")]
+    #[argh(option, long = "dbus-service-name")]
+    /// well known name of the service
+    dbus_name: Option<String>,
+
+    #[cfg(feature = "dbus_api")]
+    #[argh(option, long = "dbus-object-path")]
+    /// object path to serve the dbus interface
+    dbus_path: Option<String>,
+
+    #[cfg(feature = "dbus_api")]
+    #[argh(switch, long = "dbus-system-bus")]
+    /// use the system bus instead of a session bus
+    dbus_system_bus: bool,
+
     #[argh(option, long = "event-monitor")]
     /// path=<path/to/a/file>|fd=<fd>
     event_monitor: Option<String>,
@@ -418,6 +439,18 @@ fn start_vmm(toplevel: TopLevel) -> Result<Option<String>, Error> {
         (None, None)
     };
 
+    #[cfg(feature = "dbus_api")]
+    let dbus_options = match (&toplevel.dbus_name, &toplevel.dbus_path) {
+        (Some(ref name), Some(ref path)) => Ok(Some(DBusApiOptions {
+            service_name: name.to_owned(),
+            object_path: path.to_owned(),
+            system_bus: toplevel.dbus_system_bus,
+        })),
+        (Some(_), None) => Err(Error::MissingDBusObjectPath),
+        (None, Some(_)) => Err(Error::MissingDBusServiceName),
+        (None, None) => Ok(None),
+    }?;
+
     if let Some(ref monitor_config) = toplevel.event_monitor {
         let mut parser = OptionParser::new();
         parser.add("path").add("fd");
@@ -519,6 +552,8 @@ fn start_vmm(toplevel: TopLevel) -> Result<Option<String>, Error> {
         vmm::VmmVersionInfo::new(env!("BUILD_VERSION"), env!("CARGO_PKG_VERSION")),
         &api_socket_path,
         api_socket_fd,
+        #[cfg(feature = "dbus_api")]
+        dbus_options,
         api_evt.try_clone().unwrap(),
         api_request_sender_clone,
         api_request_receiver,
@@ -577,7 +612,9 @@ fn start_vmm(toplevel: TopLevel) -> Result<Option<String>, Error> {
         .map_err(Error::VmmThread)?;
 
     #[cfg(feature = "dbus_api")]
-    dbus_api_graceful_shutdown(vmm_thread_handle.dbus_shutdown_chs);
+    if let Some(chs) = vmm_thread_handle.dbus_shutdown_chs {
+        dbus_api_graceful_shutdown(chs);
+    }
 
     r.map(|_| api_socket_path)
 }
