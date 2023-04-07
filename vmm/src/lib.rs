@@ -281,7 +281,7 @@ impl Serialize for PciDeviceInfo {
 #[allow(unused_variables)]
 #[allow(clippy::too_many_arguments)]
 pub fn start_vmm_thread(
-    vmm_version: String,
+    vmm_version: VmmVersionInfo,
     http_path: &Option<String>,
     http_fd: Option<RawFd>,
     api_event: EventFd,
@@ -322,7 +322,7 @@ pub fn start_vmm_thread(
                 }
 
                 let mut vmm = Vmm::new(
-                    vmm_version.to_string(),
+                    vmm_version,
                     api_event,
                     #[cfg(feature = "guest_debug")]
                     debug_event,
@@ -390,6 +390,21 @@ struct VmMigrationConfig {
     memory_manager_data: MemoryManagerSnapshotData,
 }
 
+#[derive(Debug, Clone)]
+pub struct VmmVersionInfo {
+    pub build_version: String,
+    pub version: String,
+}
+
+impl VmmVersionInfo {
+    pub fn new(build_version: &str, version: &str) -> Self {
+        Self {
+            build_version: build_version.to_owned(),
+            version: version.to_owned(),
+        }
+    }
+}
+
 pub struct Vmm {
     epoll: EpollContext,
     exit_evt: EventFd,
@@ -399,7 +414,7 @@ pub struct Vmm {
     debug_evt: EventFd,
     #[cfg(feature = "guest_debug")]
     vm_debug_evt: EventFd,
-    version: String,
+    version: VmmVersionInfo,
     vm: Option<Vm>,
     vm_config: Option<Arc<Mutex<VmConfig>>>,
     seccomp_action: SeccompAction,
@@ -482,7 +497,7 @@ impl Vmm {
     }
 
     fn new(
-        vmm_version: String,
+        vmm_version: VmmVersionInfo,
         api_evt: EventFd,
         #[cfg(feature = "guest_debug")] debug_evt: EventFd,
         #[cfg(feature = "guest_debug")] vm_debug_evt: EventFd,
@@ -802,8 +817,15 @@ impl Vmm {
     }
 
     fn vmm_ping(&self) -> VmmPingResponse {
+        let VmmVersionInfo {
+            build_version,
+            version,
+        } = self.version.clone();
+
         VmmPingResponse {
-            version: self.version.clone(),
+            build_version,
+            version,
+            pid: std::process::id() as i64,
         }
     }
 
@@ -2057,7 +2079,7 @@ mod unit_tests {
 
     fn create_dummy_vmm() -> Vmm {
         Vmm::new(
-            "dummy".to_string(),
+            VmmVersionInfo::new("dummy", "dummy"),
             EventFd::new(EFD_NONBLOCK).unwrap(),
             #[cfg(feature = "guest_debug")]
             EventFd::new(EFD_NONBLOCK).unwrap(),
