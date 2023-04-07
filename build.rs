@@ -17,8 +17,8 @@ fn main() {
     }
 
     // This println!() has a special behavior, as it will set the environment
-    // variable BUILT_VERSION, so that it can be reused from the binary.
+    // variable BUILD_VERSION, so that it can be reused from the binary.
     // Particularly, this is used from src/main.rs to display the exact
     // version.
-    println!("cargo:rustc-env=BUILT_VERSION={version}");
+    println!("cargo:rustc-env=BUILD_VERSION={version}");
 }

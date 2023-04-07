@@ -32,7 +32,7 @@ fn main() {
     let toplevel: TopLevel = argh::from_env();
 
     if toplevel.version {
-        println!("{} {}", env!("CARGO_BIN_NAME"), env!("BUILT_VERSION"));
+        println!("{} {}", env!("CARGO_BIN_NAME"), env!("BUILD_VERSION"));
         return;
     }
 
