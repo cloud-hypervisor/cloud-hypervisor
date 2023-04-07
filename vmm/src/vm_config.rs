@@ -277,6 +277,8 @@ pub struct NetConfig {
     pub id: Option<String>,
     #[serde(default)]
     pub fds: Option<Vec<i32>>,
+    #[serde(skip)]
+    pub fds_validated: bool,
     #[serde(default)]
     pub rate_limiter_config: Option<RateLimiterConfig>,
     #[serde(default)]
@@ -338,6 +340,7 @@ impl Default for NetConfig {
             vhost_mode: VhostMode::Client,
             id: None,
             fds: None,
+            fds_validated: false,
             rate_limiter_config: None,
             pci_segment: 0,
             offload_tso: true,

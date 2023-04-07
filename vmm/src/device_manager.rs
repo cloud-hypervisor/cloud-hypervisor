@@ -2388,26 +2388,29 @@ impl DeviceManager {
                     .map_err(DeviceManagerError::CreateVirtioNet)?,
                 ))
             } else if let Some(fds) = &net_cfg.fds {
-                Arc::new(Mutex::new(
-                    virtio_devices::Net::from_tap_fds(
-                        id.clone(),
-                        fds,
-                        Some(net_cfg.mac),
-                        net_cfg.mtu,
-                        self.force_iommu | net_cfg.iommu,
-                        net_cfg.queue_size,
-                        self.seccomp_action.clone(),
-                        net_cfg.rate_limiter_config,
-                        self.exit_evt
-                            .try_clone()
-                            .map_err(DeviceManagerError::EventFd)?,
-                        state,
-                        net_cfg.offload_tso,
-                        net_cfg.offload_ufo,
-                        net_cfg.offload_csum,
-                    )
-                    .map_err(DeviceManagerError::CreateVirtioNet)?,
-                ))
+                let net = virtio_devices::Net::from_tap_fds(
+                    id.clone(),
+                    fds,
+                    Some(net_cfg.mac),
+                    net_cfg.mtu,
+                    self.force_iommu | net_cfg.iommu,
+                    net_cfg.queue_size,
+                    self.seccomp_action.clone(),
+                    net_cfg.rate_limiter_config,
+                    self.exit_evt
+                        .try_clone()
+                        .map_err(DeviceManagerError::EventFd)?,
+                    state,
+                    net_cfg.offload_tso,
+                    net_cfg.offload_ufo,
+                    net_cfg.offload_csum,
+                )
+                .map_err(DeviceManagerError::CreateVirtioNet)?;
+
+                // The input FDs are validated because TAP devices are created successfully
+                net_cfg.fds_validated = true;
+
+                Arc::new(Mutex::new(net))
             } else {
                 Arc::new(Mutex::new(
                     virtio_devices::Net::new(

@@ -1074,6 +1074,7 @@ impl NetConfig {
             vhost_mode,
             id,
             fds,
+            fds_validated: false,
             rate_limiter_config,
             pci_segment,
             offload_tso,
@@ -1136,15 +1137,12 @@ impl NetConfig {
 
 impl Drop for NetConfig {
     fn drop(&mut self) {
-        if let Some(mut fds) = self.fds.take() {
-            for fd in fds.drain(..) {
-                // Skip reserved FDs
-                if fd <= 2 {
-                    continue;
+        if self.fds_validated {
+            if let Some(mut fds) = self.fds.take() {
+                for fd in fds.drain(..) {
+                    // SAFETY: Safe as the fds were validated by creating TAP devices successfully
+                    unsafe { libc::close(fd) };
                 }
-
-                // SAFETY: Safe as the fd was given to the config by the API
-                unsafe { libc::close(fd) };
             }
         }
     }
