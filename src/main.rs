@@ -511,7 +511,7 @@ fn start_vmm(toplevel: TopLevel) -> Result<Option<String>, Error> {
     let vm_debug_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateDebugEventFd)?;
 
     let vmm_thread = vmm::start_vmm_thread(
-        env!("CARGO_PKG_VERSION").to_string(),
+        vmm::VmmVersionInfo::new(env!("BUILD_VERSION"), env!("CARGO_PKG_VERSION")),
         &api_socket_path,
         api_socket_fd,
         api_evt.try_clone().unwrap(),

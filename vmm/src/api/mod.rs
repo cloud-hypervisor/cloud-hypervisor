@@ -165,7 +165,9 @@ pub struct VmInfo {
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct VmmPingResponse {
+    pub build_version: String,
     pub version: String,
+    pub pid: i64,
 }
 
 #[derive(Clone, Deserialize, Serialize, Default, Debug)]
