@@ -105,6 +105,10 @@ impl EndpointHandler for VmActionHandler {
                 ),
                 AddNet(_) => {
                     let mut net_cfg: NetConfig = serde_json::from_slice(body.raw())?;
+                    if net_cfg.fds.is_some() {
+                        warn!("Ignoring FDs sent via the HTTP request body");
+                        net_cfg.fds = None;
+                    }
                     // Update network config with optional files that might have
                     // been sent through control message.
                     if !files.is_empty() {
