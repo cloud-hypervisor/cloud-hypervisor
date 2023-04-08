@@ -2418,19 +2418,18 @@ mod tests {
         // SAFETY: Safe as the file was just opened
         let fd2 = unsafe { libc::dup(File::open("/dev/null").unwrap().as_raw_fd()) };
 
-        assert_eq!(
-            &format!(
-                "{:?}",
-                NetConfig::parse(&format!(
-                    "mac=de:ad:be:ef:12:34,fd=[{fd1},{fd2}],num_queues=4"
-                ))?
-            ),
-            &format!("NetConfig {{ tap: None, ip: 192.168.249.1, mask: 255.255.255.0, \
-                mac: MacAddr {{ bytes: [222, 173, 190, 239, 18, 52] }}, host_mac: None, mtu: None, \
-                iommu: false, num_queues: 4, queue_size: 256, vhost_user: false, vhost_socket: None, \
-                vhost_mode: Client, id: None, fds: Some([{fd1}, {fd2}]), \
-                rate_limiter_config: None, pci_segment: 0, offload_tso: true, offload_ufo: true, offload_csum: true }}")
-        );
+        let mut net = NetConfig::parse(&format!(
+            "mac=de:ad:be:ef:12:34,fd=[{fd1},{fd2}],num_queues=4"
+        ))?;
+        net.fds_validated = true;
+
+        let net_string = format!("NetConfig {{ tap: None, ip: 192.168.249.1, mask: 255.255.255.0, \
+            mac: MacAddr {{ bytes: [222, 173, 190, 239, 18, 52] }}, host_mac: None, mtu: None, \
+            iommu: false, num_queues: 4, queue_size: 256, vhost_user: false, vhost_socket: None, \
+            vhost_mode: Client, id: None, fds: Some([{fd1}, {fd2}]), fds_validated: true, \
+            rate_limiter_config: None, pci_segment: 0, offload_tso: true, offload_ufo: true, offload_csum: true }}");
+
+        assert_eq!(&format!("{:?}", net), &net_string);
 
         Ok(())
     }
