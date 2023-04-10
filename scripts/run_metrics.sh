@@ -107,7 +107,12 @@ fi
 # Ensure that git commands can be run in this directory (for metrics report)
 git config --global --add safe.directory $PWD
 
-export RUST_BACKTRACE=1
+RUST_BACKTRACE_VALUE=`echo $RUST_BACKTRACE`
+if [ -z $RUST_BACKTRACE_VALUE ];then
+	export RUST_BACKTRACE=1
+else
+	echo "RUST_BACKTRACE is set to: $RUST_BACKTRACE_VALUE"
+fi
 time target/$BUILD_TARGET/release/performance-metrics ${test_binary_args[*]}
 RES=$?
 
