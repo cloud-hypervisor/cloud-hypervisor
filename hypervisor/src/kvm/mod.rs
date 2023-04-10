@@ -330,7 +330,7 @@ impl KvmVm {
         Ok(VfioDeviceFd::new_from_kvm(device_fd))
     }
     /// Checks if a particular `Cap` is available.
-    fn check_extension(&self, c: Cap) -> bool {
+    pub fn check_extension(&self, c: Cap) -> bool {
         self.fd.check_extension(c)
     }
 }
