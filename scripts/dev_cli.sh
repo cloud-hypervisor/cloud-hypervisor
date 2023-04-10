@@ -539,6 +539,7 @@ cmd_tests() {
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
             --env USER="root" \
             --env CH_LIBC="${libc}" \
+            --env RUST_BACKTRACE="${RUST_BACKTRACE}" \
             "$CTR_IMAGE" \
             ./scripts/run_metrics.sh "$@" || fix_dir_perms $? || exit $?
     fi
