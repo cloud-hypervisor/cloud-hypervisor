@@ -997,16 +997,16 @@ impl vm::Vm for MshvVm {
     ///
     fn create_vcpu(
         &self,
-        id: u8,
+        id: u32,
         vm_ops: Option<Arc<dyn VmOps>>,
     ) -> vm::Result<Arc<dyn cpu::Vcpu>> {
         let vcpu_fd = self
             .fd
-            .create_vcpu(id)
+            .create_vcpu(id as u8)
             .map_err(|e| vm::HypervisorVmError::CreateVcpu(e.into()))?;
         let vcpu = MshvVcpu {
             fd: vcpu_fd,
-            vp_index: id,
+            vp_index: id as u8,
             cpuid: Vec::new(),
             msrs: self.msrs.clone(),
             vm_ops,

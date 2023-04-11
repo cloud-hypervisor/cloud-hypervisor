@@ -444,11 +444,11 @@ impl CpusConfig {
             .add("features");
         parser.parse(cpus).map_err(Error::ParseCpus)?;
 
-        let boot_vcpus: u8 = parser
+        let boot_vcpus: u32 = parser
             .convert("boot")
             .map_err(Error::ParseCpus)?
             .unwrap_or(DEFAULT_VCPUS);
-        let max_vcpus: u8 = parser
+        let max_vcpus: u32 = parser
             .convert("max")
             .map_err(Error::ParseCpus)?
             .unwrap_or(boot_vcpus);
@@ -463,7 +463,7 @@ impl CpusConfig {
             .map_err(Error::ParseCpus)?
             .unwrap_or(DEFAULT_MAX_PHYS_BITS);
         let affinity = parser
-            .convert::<Tuple<u8, Vec<u8>>>("affinity")
+            .convert::<Tuple<u32, Vec<u32>>>("affinity")
             .map_err(Error::ParseCpus)?
             .map(|v| {
                 v.0.iter()
@@ -1596,7 +1596,7 @@ impl NumaConfig {
         let cpus = parser
             .convert::<IntegerList>("cpus")
             .map_err(Error::ParseNuma)?
-            .map(|v| v.0.iter().map(|e| *e as u8).collect());
+            .map(|v| v.0.iter().map(|e| *e as u32).collect());
         let distances = parser
             .convert::<Tuple<u64, u64>>("distances")
             .map_err(Error::ParseNuma)?

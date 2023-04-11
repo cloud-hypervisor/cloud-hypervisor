@@ -11,8 +11,8 @@ to set vCPUs options for Cloud Hypervisor.
 
 ```rust
 struct CpusConfig {
-    boot_vcpus: u8,
-    max_vcpus: u8,
+    boot_vcpus: u32,
+    max_vcpus: u32,
     topology: Option<CpuTopology>,
     kvm_hyperv: bool,
     max_phys_bits: u8,

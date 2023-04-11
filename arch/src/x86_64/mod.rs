@@ -553,7 +553,7 @@ impl CpuidFeatureEntry {
 
 pub fn generate_common_cpuid(
     hypervisor: &Arc<dyn hypervisor::Hypervisor>,
-    topology: Option<(u8, u8, u8)>,
+    topology: Option<(u32, u32, u32)>,
     sgx_epc_sections: Option<Vec<SgxEpcSection>>,
     phys_bits: u8,
     kvm_hyperv: bool,
@@ -765,15 +765,15 @@ pub fn generate_common_cpuid(
 
 pub fn configure_vcpu(
     vcpu: &Arc<dyn hypervisor::Vcpu>,
-    id: u8,
+    id: u32,
     boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
     cpuid: Vec<CpuIdEntry>,
     kvm_hyperv: bool,
 ) -> super::Result<()> {
     // Per vCPU CPUID changes; common are handled via generate_common_cpuid()
     let mut cpuid = cpuid;
-    CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(id));
-    CpuidPatch::set_cpuid_reg(&mut cpuid, 0x1f, None, CpuidReg::EDX, u32::from(id));
+    CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, id);
+    CpuidPatch::set_cpuid_reg(&mut cpuid, 0x1f, None, CpuidReg::EDX, id);
 
     // Set ApicId in cpuid for each vcpu
     // SAFETY: get host cpuid when eax=1
@@ -872,7 +872,7 @@ pub fn configure_system(
     guest_mem: &GuestMemoryMmap,
     cmdline_addr: GuestAddress,
     initramfs: &Option<InitramfsConfig>,
-    _num_cpus: u8,
+    _num_cpus: u32,
     rsdp_addr: Option<GuestAddress>,
     sgx_epc_region: Option<SgxEpcRegion>,
     serial_number: Option<&str>,
@@ -1167,9 +1167,9 @@ pub fn get_host_cpu_phys_bits(hypervisor: &Arc<dyn hypervisor::Hypervisor>) -> u
 
 fn update_cpuid_topology(
     cpuid: &mut Vec<CpuIdEntry>,
-    threads_per_core: u8,
-    cores_per_die: u8,
-    dies_per_package: u8,
+    threads_per_core: u32,
+    cores_per_die: u32,
+    dies_per_package: u32,
 ) {
     let thread_width = 8 - (threads_per_core - 1).leading_zeros();
     let core_width = (8 - (cores_per_die - 1).leading_zeros()) + thread_width;
@@ -1177,13 +1177,7 @@ fn update_cpuid_topology(
 
     // CPU Topology leaf 0xb
     CpuidPatch::set_cpuid_reg(cpuid, 0xb, Some(0), CpuidReg::EAX, thread_width);
-    CpuidPatch::set_cpuid_reg(
-        cpuid,
-        0xb,
-        Some(0),
-        CpuidReg::EBX,
-        u32::from(threads_per_core),
-    );
+    CpuidPatch::set_cpuid_reg(cpuid, 0xb, Some(0), CpuidReg::EBX, threads_per_core);
     CpuidPatch::set_cpuid_reg(cpuid, 0xb, Some(0), CpuidReg::ECX, 1 << 8);
 
     CpuidPatch::set_cpuid_reg(cpuid, 0xb, Some(1), CpuidReg::EAX, die_width);
@@ -1192,19 +1186,13 @@ fn update_cpuid_topology(
         0xb,
         Some(1),
         CpuidReg::EBX,
-        u32::from(dies_per_package * cores_per_die * threads_per_core),
+        dies_per_package * cores_per_die * threads_per_core,
     );
     CpuidPatch::set_cpuid_reg(cpuid, 0xb, Some(1), CpuidReg::ECX, 2 << 8);
 
     // CPU Topology leaf 0x1f
     CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(0), CpuidReg::EAX, thread_width);
-    CpuidPatch::set_cpuid_reg(
-        cpuid,
-        0x1f,
-        Some(0),
-        CpuidReg::EBX,
-        u32::from(threads_per_core),
-    );
+    CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(0), CpuidReg::EBX, threads_per_core);
     CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(0), CpuidReg::ECX, 1 << 8);
 
     CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(1), CpuidReg::EAX, core_width);
@@ -1213,7 +1201,7 @@ fn update_cpuid_topology(
         0x1f,
         Some(1),
         CpuidReg::EBX,
-        u32::from(cores_per_die * threads_per_core),
+        cores_per_die * threads_per_core,
     );
     CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(1), CpuidReg::ECX, 2 << 8);
 
@@ -1223,7 +1211,7 @@ fn update_cpuid_topology(
         0x1f,
         Some(2),
         CpuidReg::EBX,
-        u32::from(dies_per_package * cores_per_die * threads_per_core),
+        dies_per_package * cores_per_die * threads_per_core,
     );
     CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(2), CpuidReg::ECX, 5 << 8);
 }

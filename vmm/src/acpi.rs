@@ -25,7 +25,7 @@ use zerocopy::AsBytes;
 
 /* Values for Type in APIC sub-headers */
 #[cfg(target_arch = "x86_64")]
-pub const ACPI_APIC_PROCESSOR: u8 = 0;
+pub const ACPI_X2APIC_PROCESSOR: u8 = 9;
 #[cfg(target_arch = "x86_64")]
 pub const ACPI_APIC_IO: u8 = 1;
 #[cfg(target_arch = "x86_64")]
@@ -316,7 +316,7 @@ fn create_srat_table(numa_nodes: &NumaNodes) -> Sdt {
         }
 
         for cpu in &node.cpus {
-            let x2apic_id = *cpu as u32;
+            let x2apic_id = *cpu;
 
             // Flags
             // - Enabled = 1 (bit 0)

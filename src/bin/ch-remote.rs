@@ -483,7 +483,7 @@ fn dbus_api_do_command(toplevel: &TopLevel, proxy: &mut DBusApi1ProxyBlocking<'_
     }
 }
 fn resize_config(
-    desired_vcpus: Option<u8>,
+    desired_vcpus: Option<u32>,
     memory: &Option<String>,
     balloon: &Option<String>,
 ) -> Result<String, Error> {
@@ -854,7 +854,7 @@ struct ShutdownVmmSubcommand {}
 struct ResizeSubcommand {
     #[argh(option, long = "cpus")]
     /// new VCPUs count
-    cpus: Option<u8>,
+    cpus: Option<u32>,
 
     #[argh(option, long = "memory")]
     /// new memory size in bytes (supports K/M/G suffix)"
