@@ -1084,6 +1084,11 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             self.kvm.get_guest_debug_hw_bps() as usize
         }
     }
+
+    /// Get maximum number of vCPUs
+    fn get_max_vcpus(&self) -> u32 {
+        self.kvm.get_max_vcpus().min(u32::MAX as usize) as u32
+    }
 }
 /// Vcpu struct for KVM
 pub struct KvmVcpu {

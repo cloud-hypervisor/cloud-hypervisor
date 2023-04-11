@@ -133,4 +133,7 @@ pub trait Hypervisor: Send + Sync {
     fn get_guest_debug_hw_bps(&self) -> usize {
         unimplemented!()
     }
+
+    /// Get maximum number of vCPUs
+    fn get_max_vcpus(&self) -> u32;
 }
