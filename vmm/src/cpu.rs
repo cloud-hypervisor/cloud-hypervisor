@@ -165,6 +165,9 @@ pub enum Error {
     #[cfg(target_arch = "x86_64")]
     #[error("Error setting up AMX: {0}")]
     AmxEnable(#[source] anyhow::Error),
+
+    #[error("Maximum number of vCPUs exceeds host limit")]
+    MaximumVcpusExceeded,
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -580,6 +583,10 @@ impl CpuManager {
         #[cfg(feature = "tdx")] tdx_enabled: bool,
         numa_nodes: &NumaNodes,
     ) -> Result<Arc<Mutex<CpuManager>>> {
+        if u32::from(config.max_vcpus) > hypervisor.get_max_vcpus() {
+            return Err(Error::MaximumVcpusExceeded);
+        }
+
         let mut vcpu_states = Vec::with_capacity(usize::from(config.max_vcpus));
         vcpu_states.resize_with(usize::from(config.max_vcpus), VcpuState::default);
         let hypervisor_type = hypervisor.hypervisor_type();

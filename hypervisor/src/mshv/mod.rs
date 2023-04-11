@@ -279,6 +279,13 @@ impl hypervisor::Hypervisor for MshvHypervisor {
     fn get_supported_cpuid(&self) -> hypervisor::Result<Vec<CpuIdEntry>> {
         Ok(Vec::new())
     }
+
+    /// Get maximum number of vCPUs
+    fn get_max_vcpus(&self) -> u32 {
+        // TODO: Using HV_MAXIMUM_PROCESSORS would be better
+        // but the ioctl API is limited to u8
+        256
+    }
 }
 
 /// Vcpu struct for Microsoft Hypervisor
