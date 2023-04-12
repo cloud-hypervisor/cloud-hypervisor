@@ -237,7 +237,7 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
             .map_err(|e| {
                 EpollHelperError::IoError(std::io::Error::new(
                     std::io::ErrorKind::Other,
-                    format!("failed reconnecting vhost-user backend{e:?}"),
+                    format!("failed reconnecting vhost-user backend: {e:?}"),
                 ))
             })?;
 
