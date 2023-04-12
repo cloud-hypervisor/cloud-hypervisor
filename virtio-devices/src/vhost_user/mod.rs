@@ -340,7 +340,7 @@ impl VhostUserCommon {
                 &slave_req_handler,
                 inflight.as_mut(),
             )
-            .map_err(ActivateError::VhostUserBlkSetup)?;
+            .map_err(ActivateError::VhostUserSetup)?;
 
         Ok(VhostUserEpollHandler {
             vu: vu.clone(),
@@ -413,7 +413,7 @@ impl VhostUserCommon {
     pub fn pause(&mut self) -> std::result::Result<(), MigratableError> {
         if let Some(vu) = &self.vu {
             vu.lock().unwrap().pause_vhost_user().map_err(|e| {
-                MigratableError::Pause(anyhow!("Error pausing vhost-user-blk backend: {:?}", e))
+                MigratableError::Pause(anyhow!("Error pausing vhost-user backend: {:?}", e))
             })
         } else {
             Ok(())
@@ -423,7 +423,7 @@ impl VhostUserCommon {
     pub fn resume(&mut self) -> std::result::Result<(), MigratableError> {
         if let Some(vu) = &self.vu {
             vu.lock().unwrap().resume_vhost_user().map_err(|e| {
-                MigratableError::Resume(anyhow!("Error resuming vhost-user-blk backend: {:?}", e))
+                MigratableError::Resume(anyhow!("Error resuming vhost-user backend: {:?}", e))
             })
         } else {
             Ok(())

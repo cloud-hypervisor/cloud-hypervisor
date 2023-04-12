@@ -86,8 +86,8 @@ pub enum ActivateError {
     ThreadSpawn(std::io::Error),
     #[error("Failed to setup vhost-user-fs daemon: {0}")]
     VhostUserFsSetup(vhost_user::Error),
-    #[error("Failed to setup vhost-user-blk daemon: {0}")]
-    VhostUserBlkSetup(vhost_user::Error),
+    #[error("Failed to setup vhost-user daemon: {0}")]
+    VhostUserSetup(vhost_user::Error),
     #[error("Failed to create seccomp filter: {0}")]
     CreateSeccompFilter(seccompiler::Error),
     #[error("Failed to create rate limiter: {0}")]
