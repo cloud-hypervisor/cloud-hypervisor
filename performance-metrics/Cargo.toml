@@ -7,7 +7,7 @@ build = "../build.rs"
 
 [dependencies]
 argh = "0.1.9"
-dirs = "4.0.0"
+dirs = "5.0.0"
 serde = { version = "1.0.151", features = ["rc", "derive"] }
 serde_json = "1.0.95"
 test_infra = { path = "../test_infra" }
