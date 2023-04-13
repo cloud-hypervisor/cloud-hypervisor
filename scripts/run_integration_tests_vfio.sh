@@ -56,7 +56,12 @@ echo $PAGE_NUM | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
 export RUST_BACKTRACE=1
-time cargo test "vfio::test_nvidia" -- --test-threads=1 ${test_binary_args[*]}
+time cargo test "vfio::test_vfio" -- ${test_binary_args[*]}
 RES=$?
+
+if [ $RES -eq 0 ]; then
+	time cargo test "vfio::test_nvidia" -- --test-threads=1 ${test_binary_args[*]}
+	RES=$?
+fi
 
 exit $RES
