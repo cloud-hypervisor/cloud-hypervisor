@@ -1223,6 +1223,7 @@ impl Vmm {
             false,
             Some(&vm_migration_config.memory_manager_data),
             existing_memory_files,
+            None,
             #[cfg(target_arch = "x86_64")]
             None,
         )

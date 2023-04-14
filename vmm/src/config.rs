@@ -741,6 +741,22 @@ impl MemoryConfig {
 
         size
     }
+
+    pub fn backed_by_private_memory(&self) -> bool {
+        if self.shared {
+            return false;
+        }
+
+        if let Some(zones) = &self.zones {
+            for zone in zones.iter() {
+                if zone.shared {
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
 }
 
 impl DiskConfig {

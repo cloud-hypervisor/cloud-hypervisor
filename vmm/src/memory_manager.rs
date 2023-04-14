@@ -321,6 +321,9 @@ pub enum Error {
     // Error copying snapshot into region
     SnapshotCopy(GuestMemoryError),
 
+    // Error dup snapshot file.
+    SnapshotDup(io::Error),
+
     /// Failed to allocate MMIO address
     AllocateMmioAddress,
 
@@ -503,6 +506,8 @@ impl MemoryManager {
                     zone.hugepage_size,
                     zone.host_numa_node,
                     None,
+                    None,
+                    0,
                     thp,
                 )?;
 
@@ -553,9 +558,11 @@ impl MemoryManager {
     // Restore both GuestMemory regions along with MemoryZone zones.
     fn restore_memory_regions_and_zones(
         guest_ram_mappings: &[GuestRamMapping],
+        saved_regions: &MemoryRangeTable,
         zones_config: &[MemoryZoneConfig],
         prefault: Option<bool>,
         mut existing_memory_files: HashMap<u32, File>,
+        saved_file: Option<File>,
         thp: bool,
     ) -> Result<(Vec<Arc<GuestRegionMmap>>, MemoryZones), Error> {
         let mut memory_regions = Vec::new();
@@ -568,6 +575,19 @@ impl MemoryManager {
         for guest_ram_mapping in guest_ram_mappings {
             for zone_config in zones_config {
                 if guest_ram_mapping.zone_id == zone_config.id {
+                    let mut file = None;
+                    let mut offset = 0;
+                    if let Some(ref f) = saved_file {
+                        for range in saved_regions.regions() {
+                            if guest_ram_mapping.gpa == range.gpa
+                                && guest_ram_mapping.size == range.length
+                            {
+                                file = Some(f.try_clone().map_err(Error::SnapshotDup)?);
+                                break;
+                            }
+                            offset += range.length;
+                        }
+                    }
                     let region = MemoryManager::create_ram_region(
                         &zone_config.file,
                         guest_ram_mapping.file_offset,
@@ -582,6 +602,8 @@ impl MemoryManager {
                         zone_config.hugepage_size,
                         zone_config.host_numa_node,
                         existing_memory_files.remove(&guest_ram_mapping.slot),
+                        file,
+                        offset,
                         thp,
                     )?;
                     memory_regions.push(Arc::clone(&region));
@@ -883,6 +905,7 @@ impl MemoryManager {
         #[cfg(feature = "tdx")] tdx_enabled: bool,
         restore_data: Option<&MemoryManagerSnapshotData>,
         existing_memory_files: Option<HashMap<u32, File>>,
+        snap_file: Option<File>,
         #[cfg(target_arch = "x86_64")] sgx_epc_config: Option<Vec<SgxEpcConfig>>,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         trace_scoped!("MemoryManager::new");
@@ -916,9 +939,11 @@ impl MemoryManager {
         ) = if let Some(data) = restore_data {
             let (regions, memory_zones) = Self::restore_memory_regions_and_zones(
                 &data.guest_ram_mappings,
+                &data.memory_ranges,
                 &zones,
                 prefault,
                 existing_memory_files.unwrap_or_default(),
+                snap_file,
                 config.thp,
             )?;
             let guest_memory =
@@ -1006,6 +1031,8 @@ impl MemoryManager {
                                 zone.hugepage_size,
                                 zone.host_numa_node,
                                 None,
+                                None,
+                                0,
                                 config.thp,
                             )?;
 
@@ -1170,6 +1197,21 @@ impl MemoryManager {
             let mut memory_file_path = url_to_path(source_url).map_err(Error::Restore)?;
             memory_file_path.push(String::from(SNAPSHOT_FILENAME));
 
+            let (mmap_memory_file, memory_file) = if config.backed_by_private_memory() {
+                info!("restore non-shared map, speed up restore base map memory file");
+                (
+                    true,
+                    Some(
+                        OpenOptions::new()
+                            .read(true)
+                            .open(memory_file_path.clone())
+                            .map_err(Error::SnapshotOpen)?,
+                    ),
+                )
+            } else {
+                (false, None)
+            };
+
             let mem_snapshot: MemoryManagerSnapshotData =
                 snapshot.to_versioned_state().map_err(Error::Restore)?;
 
@@ -1182,13 +1224,16 @@ impl MemoryManager {
                 false,
                 Some(&mem_snapshot),
                 None,
+                memory_file,
                 #[cfg(target_arch = "x86_64")]
                 None,
             )?;
 
-            mm.lock()
-                .unwrap()
-                .fill_saved_regions(memory_file_path, mem_snapshot.memory_ranges)?;
+            if !mmap_memory_file {
+                mm.lock()
+                    .unwrap()
+                    .fill_saved_regions(memory_file_path, mem_snapshot.memory_ranges)?;
+            }
 
             Ok(mm)
         } else {
@@ -1300,13 +1345,18 @@ impl MemoryManager {
         hugepage_size: Option<u64>,
         host_numa_node: Option<u32>,
         existing_memory_file: Option<File>,
+        snap_file: Option<File>,
+        snap_offset: u64,
         thp: bool,
     ) -> Result<Arc<GuestRegionMmap>, Error> {
         let mut mmap_flags = libc::MAP_NORESERVE;
 
         // The duplication of mmap_flags ORing here is unfortunate but it also makes
         // the complexity of the handling clear.
-        let fo = if let Some(f) = existing_memory_file {
+        let fo = if let Some(f) = snap_file {
+            mmap_flags |= libc::MAP_PRIVATE;
+            Some(FileOffset::new(f, snap_offset))
+        } else if let Some(f) = existing_memory_file {
             // It must be MAP_SHARED as we wouldn't already have an FD
             mmap_flags |= libc::MAP_SHARED;
             Some(FileOffset::new(f, file_offset))
@@ -1442,6 +1492,8 @@ impl MemoryManager {
             self.hugepage_size,
             None,
             None,
+            None,
+            0,
             self.thp,
         )?;
 
