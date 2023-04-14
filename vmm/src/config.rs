@@ -1134,22 +1134,6 @@ impl NetConfig {
     }
 }
 
-impl Clone for NetConfig {
-    fn clone(&self) -> Self {
-        NetConfig {
-            tap: self.tap.clone(),
-            vhost_socket: self.vhost_socket.clone(),
-            id: self.id.clone(),
-            fds: self
-                .fds
-                .as_ref()
-                // SAFETY: We have been handed these FDs through the API
-                .map(|fds| fds.iter().map(|fd| unsafe { libc::dup(*fd) }).collect()),
-            ..*self
-        }
-    }
-}
-
 impl RngConfig {
     pub fn parse(rng: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
