@@ -2191,9 +2191,25 @@ impl VmConfig {
             gdb,
             platform,
             tpm,
+            preserved_fds: None,
         };
         config.validate().map_err(Error::Validation)?;
         Ok(config)
+    }
+
+    /// # Safety
+    /// To use this safely, the caller must guarantee that the input
+    /// fds are all valid.
+    pub unsafe fn add_preserved_fds(&mut self, mut fds: Vec<i32>) {
+        if fds.is_empty() {
+            return;
+        }
+
+        if let Some(preserved_fds) = &self.preserved_fds {
+            fds.append(&mut preserved_fds.clone());
+        }
+
+        self.preserved_fds = Some(fds);
     }
 
     #[cfg(feature = "tdx")]
@@ -2812,6 +2828,7 @@ mod tests {
             gdb: false,
             platform: None,
             tpm: None,
+            preserved_fds: None,
         };
 
         assert!(valid_config.validate().is_ok());
