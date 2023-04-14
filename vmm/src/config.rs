@@ -1154,11 +1154,6 @@ impl Drop for NetConfig {
     fn drop(&mut self) {
         if let Some(mut fds) = self.fds.take() {
             for fd in fds.drain(..) {
-                // Skip reserved FDs
-                if fd <= 2 {
-                    continue;
-                }
-
                 // SAFETY: Safe as the fd was given to the config by the API
                 unsafe { libc::close(fd) };
             }
