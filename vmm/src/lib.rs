@@ -2158,6 +2158,7 @@ mod unit_tests {
             gdb: false,
             platform: None,
             tpm: None,
+            preserved_fds: None,
         }))
     }
 
