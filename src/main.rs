@@ -722,6 +722,7 @@ mod unit_tests {
             gdb: false,
             platform: None,
             tpm: None,
+            preserved_fds: None,
         };
 
         assert_eq!(expected_vm_config, result_vm_config);

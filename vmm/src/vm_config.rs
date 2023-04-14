@@ -596,4 +596,10 @@ pub struct VmConfig {
     pub gdb: bool,
     pub platform: Option<PlatformConfig>,
     pub tpm: Option<TpmConfig>,
+    // Preseved FDs are the ones that share the same life-time as its holding
+    // VmConfig instance, such as FDs for creating TAP devices.
+    // Perserved FDs will stay open as long as the holding VmConfig instance is
+    // valid, and will be closed when the holding VmConfig instance is destroyed.
+    #[serde(skip)]
+    pub preserved_fds: Option<Vec<i32>>,
 }
