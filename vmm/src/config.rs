@@ -1649,6 +1649,8 @@ pub struct RestoreConfig {
     pub source_url: PathBuf,
     #[serde(default)]
     pub prefault: bool,
+    #[serde(default)]
+    pub mmap_file: bool,
 }
 
 impl RestoreConfig {
@@ -1666,10 +1668,16 @@ impl RestoreConfig {
             .map_err(Error::ParseRestore)?
             .unwrap_or(Toggle(false))
             .0;
+        let mmap_file = parser
+            .convert::<Toggle>("mmap_file")
+            .map_err(Error::ParseRestore)?
+            .unwrap_or(Toggle(false))
+            .0;
 
         Ok(RestoreConfig {
             source_url,
             prefault,
+            mmap_file,
         })
     }
 }

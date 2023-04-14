@@ -602,6 +602,7 @@ impl Vmm {
                         None,
                         None,
                         None,
+                        None,
                     )?;
 
                     self.vm = Some(vm);
@@ -701,6 +702,7 @@ impl Vmm {
             Some(snapshot),
             Some(source_url),
             Some(restore_cfg.prefault),
+            Some(restore_cfg.mmap_file),
         )?;
         self.vm = Some(vm);
 
@@ -779,6 +781,7 @@ impl Vmm {
             console_pty,
             console_resize_pipe,
             Arc::clone(&self.on_tty),
+            None,
             None,
             None,
             None,
