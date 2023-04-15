@@ -6238,6 +6238,18 @@ mod common_parallel {
                     .unwrap_or_default(),
                 2
             );
+
+            guest.reboot_linux(0, None);
+
+            assert_eq!(
+                guest
+                    .ssh_command("ip -o link | wc -l")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                2
+            );
         });
 
         let _ = child.kill();
