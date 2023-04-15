@@ -2266,6 +2266,8 @@ impl Drop for VmConfig {
 mod tests {
     use super::*;
     use net_util::MacAddr;
+    use std::fs::File;
+    use std::os::unix::io::AsRawFd;
 
     #[test]
     fn test_cpu_parsing() -> Result<()> {
@@ -3272,7 +3274,7 @@ mod tests {
         ]);
         assert!(still_valid_config.validate().is_ok());
 
-        let mut invalid_config = valid_config;
+        let mut invalid_config = valid_config.clone();
         invalid_config.devices = Some(vec![
             DeviceConfig {
                 path: "/device1".into(),
@@ -3284,5 +3286,16 @@ mod tests {
             },
         ]);
         assert!(invalid_config.validate().is_err());
+
+        let mut still_valid_config = valid_config;
+        // SAFETY: Safe as the file was just opened
+        let fd1 = unsafe { libc::dup(File::open("/dev/null").unwrap().as_raw_fd()) };
+        // SAFETY: Safe as the file was just opened
+        let fd2 = unsafe { libc::dup(File::open("/dev/null").unwrap().as_raw_fd()) };
+        // SAFETY: safe as both FDs are valid
+        unsafe {
+            still_valid_config.add_preserved_fds(vec![fd1, fd2]);
+        }
+        let _still_valid_config = still_valid_config.clone();
     }
 }
