@@ -2218,6 +2218,50 @@ impl VmConfig {
     }
 }
 
+impl Clone for VmConfig {
+    fn clone(&self) -> Self {
+        VmConfig {
+            cpus: self.cpus.clone(),
+            memory: self.memory.clone(),
+            payload: self.payload.clone(),
+            disks: self.disks.clone(),
+            net: self.net.clone(),
+            rng: self.rng.clone(),
+            balloon: self.balloon.clone(),
+            fs: self.fs.clone(),
+            pmem: self.pmem.clone(),
+            serial: self.serial.clone(),
+            console: self.console.clone(),
+            devices: self.devices.clone(),
+            user_devices: self.user_devices.clone(),
+            vdpa: self.vdpa.clone(),
+            vsock: self.vsock.clone(),
+            #[cfg(target_arch = "x86_64")]
+            sgx_epc: self.sgx_epc.clone(),
+            numa: self.numa.clone(),
+            platform: self.platform.clone(),
+            tpm: self.tpm.clone(),
+            preserved_fds: self
+                .preserved_fds
+                .as_ref()
+                // SAFETY: FFI call with valid FDs
+                .map(|fds| fds.iter().map(|fd| unsafe { libc::dup(*fd) }).collect()),
+            ..*self
+        }
+    }
+}
+
+impl Drop for VmConfig {
+    fn drop(&mut self) {
+        if let Some(mut fds) = self.preserved_fds.take() {
+            for fd in fds.drain(..) {
+                // SAFETY: FFI call with valid FDs
+                unsafe { libc::close(fd) };
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
