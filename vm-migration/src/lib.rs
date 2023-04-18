@@ -13,7 +13,7 @@ pub mod protocol;
 
 /// Global VMM version for versioning
 const MAJOR_VERSION: u16 = 30;
-const MINOR_VERSION: u16 = 0;
+const MINOR_VERSION: u16 = 1;
 const VMM_VERSION: u16 = MAJOR_VERSION << 12 | MINOR_VERSION & 0b1111;
 
 pub trait VersionMapped {
