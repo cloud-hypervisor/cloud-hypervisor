@@ -1,3 +1,4 @@
+- [v30.1](#v301)
 - [v30.0](#v300)
     - [Command Line Changes for Reduced Binary Size](#command-line-changes-for-reduced-binary-size)
     - [Basic vfio-user Server Support](#basic-vfio-user-server-support)
@@ -267,6 +268,20 @@
     - [Console over virtio](#console-over-virtio)
     - [Unit testing](#unit-testing)
     - [Integration tests parallelization](#integration-tests-parallelization)
+
+# v30.1
+
+This is a bug fix release. The following issues have been addressed:
+
+* Ignore and warn TAP FDs sent via the HTTP request body (#5350)
+* Properly preserve and close valid FDs for TAP devices (#5373)
+* Only use `KVM_ARM_VCPU_PMU_V3` if available (#5360)
+* Only touch the tty flags if it's being used (#5343)
+* Fix seccomp filter lists for vhost-user devices (#5361)
+* Fix the offset setting while removing the entire mapping of
+  `vhost-user` FS client (#5235)
+* Fix the `ShutdownVmm` and `Shutdown` commands to call the correct API
+  endpoint (#5322)
 
 # v30.0
 
