@@ -1,3 +1,4 @@
+- [v31.1](#v311)
 - [v31.0](#v310)
     - [Update to Latest `acpi_tables`](#update-to-latest-acpi_tables)
     - [Update Reference Kernel to 6.2](#update-reference-kernel-to-62)
@@ -275,6 +276,16 @@
     - [Console over virtio](#console-over-virtio)
     - [Unit testing](#unit-testing)
     - [Integration tests parallelization](#integration-tests-parallelization)
+
+# v31.1
+
+This is a bug fix release. The following issues have been addressed:
+
+* Ignore and warn TAP FDs sent via the HTTP request body (#5350)
+* Properly preserve and close valid FDs for TAP devices (#5373)
+* Only use `KVM_ARM_VCPU_PMU_V3` if available (#5360)
+* Only touch the tty flags if it's being used (#5343)
+* Fix seccomp filter lists for vhost-user devices (#5361)
 
 # v31.0
 
