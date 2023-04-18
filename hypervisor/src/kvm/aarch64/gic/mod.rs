@@ -243,7 +243,6 @@ impl KvmGicV3Its {
     }
 
     /// Method to initialize the GIC device
-    #[allow(clippy::new_ret_no_self)]
     pub fn new(vm: &dyn Vm, config: VgicConfig) -> Result<KvmGicV3Its> {
         // This is inside KVM module
         let vm = vm.as_any().downcast_ref::<KvmVm>().expect("Wrong VM type?");

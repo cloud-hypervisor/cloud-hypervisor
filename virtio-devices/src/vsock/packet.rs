@@ -436,7 +436,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::cognitive_complexity)]
     fn test_tx_packet_assembly() {
         // Test case: successful TX packet assembly.
         {
@@ -581,7 +580,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::cognitive_complexity)]
     fn test_packet_hdr_accessors() {
         const SRC_CID: u64 = 1;
         const DST_CID: u64 = 2;

@@ -435,7 +435,6 @@ impl run_blocking::BlockingEventLoop for GdbEventLoop {
     type Connection = Box<dyn ConnectionExt<Error = std::io::Error>>;
     type StopReason = MultiThreadStopReason<ArchUsize>;
 
-    #[allow(clippy::type_complexity)]
     fn wait_for_stop_reason(
         target: &mut Self::Target,
         conn: &mut Self::Connection,

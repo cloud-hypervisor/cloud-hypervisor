@@ -232,7 +232,6 @@ pub enum ApiResponsePayload {
 /// This is the response sent by the VMM API server through the mpsc channel.
 pub type ApiResponse = std::result::Result<ApiResponsePayload, ApiError>;
 
-#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum ApiRequest {
     /// Create the virtual machine. This request payload is a VM configuration
