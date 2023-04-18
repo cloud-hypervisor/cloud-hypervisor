@@ -26,7 +26,6 @@ pub const MTRR_MEM_TYPE_WB: u64 = 0x6;
 pub const NUM_IOAPIC_PINS: usize = 24;
 
 // X86 Exceptions
-#[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Debug)]
 pub enum Exception {
     DE = 0,  // Divide Error

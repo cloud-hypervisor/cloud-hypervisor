@@ -82,7 +82,6 @@ type GuestRegionMmap = vm_memory::GuestRegionMmap<AtomicBitmap>;
 
 /// Errors associated with VMM management
 #[derive(Debug, Error)]
-#[allow(clippy::large_enum_variant)]
 pub enum Error {
     /// API request receive error
     #[error("Error receiving API request: {0}")]
