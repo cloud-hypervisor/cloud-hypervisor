@@ -1,3 +1,4 @@
+- [v28.3](#v283)
 - [v28.2](#v282)
 - [v28.1](#v281)
 - [v28.0](#v280)
@@ -248,6 +249,21 @@
     - [Console over virtio](#console-over-virtio)
     - [Unit testing](#unit-testing)
     - [Integration tests parallelization](#integration-tests-parallelization)
+
+
+# v28.3
+
+This is a bug fix release. The following issues have been addressed:
+
+* Ignore and warn TAP FDs sent via the HTTP request body (#5350)
+* Properly preserve and close valid FDs for TAP devices (#5373)
+* Only use `KVM_ARM_VCPU_PMU_V3` if available (#5360)
+* Fix seccomp filter lists for vhost-user devices (#5361)
+* Fix the offset setting while removing the entire mapping of
+  `vhost-user` FS client (#5235)
+* Set vcpu thread status properly and signal exit_evt upon thread exit (#5211)
+* Populate CPUID leaf 0x4000_0010 (TSC frequency) (#5179)
+* Bug fix to OpenAPI specification file (#5186)
 
 # v28.2
 This is a bug fix release. The following issues have been addressed:
