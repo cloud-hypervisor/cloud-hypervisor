@@ -25,7 +25,7 @@ virtio-devices = { path = "../virtio-devices" }
 virtio-queue = "0.7.1"
 vmm = { path = "../vmm" }
 vmm-sys-util = "0.11.1"
-vm-memory = "0.10.0"
+vm-memory = "0.11.0"
 vm-device = { path = "../vm-device" }
 vm-virtio = { path = "../vm-virtio" }
 
