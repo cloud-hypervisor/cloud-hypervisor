@@ -26,8 +26,8 @@ BUILD_TARGET="$(uname -m)-unknown-linux-${CH_LIBC}"
 CFLAGS=""
 TARGET_CC=""
 if [[ "${BUILD_TARGET}" == "x86_64-unknown-linux-musl" ]]; then
-TARGET_CC="musl-gcc"
-CFLAGS="-I /usr/include/x86_64-linux-musl/ -idirafter /usr/include/"
+    TARGET_CC="musl-gcc"
+    CFLAGS="-I /usr/include/x86_64-linux-musl/ -idirafter /usr/include/"
 fi
 
 # Check if the images are present

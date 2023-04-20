@@ -225,8 +225,8 @@ fi
 
 BUILD_TARGET="aarch64-unknown-linux-${CH_LIBC}"
 if [[ "${BUILD_TARGET}" == "aarch64-unknown-linux-musl" ]]; then
-export TARGET_CC="musl-gcc"
-export RUSTFLAGS="-C link-arg=-lgcc -C link_arg=-specs -C link_arg=/usr/lib/aarch64-linux-musl/musl-gcc.specs"
+    export TARGET_CC="musl-gcc"
+    export RUSTFLAGS="-C link-arg=-lgcc -C link_arg=-specs -C link_arg=/usr/lib/aarch64-linux-musl/musl-gcc.specs"
 fi
 
 export RUST_BACKTRACE=1
