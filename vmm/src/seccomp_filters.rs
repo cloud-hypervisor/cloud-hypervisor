@@ -530,6 +530,7 @@ fn vmm_thread_rules(
         #[cfg(target_arch = "aarch64")]
         (libc::SYS_newfstatat, vec![]),
         (libc::SYS_futex, vec![]),
+        (libc::SYS_getdents64, vec![]),
         (libc::SYS_getpgid, vec![]),
         #[cfg(target_arch = "x86_64")]
         (libc::SYS_getpgrp, vec![]),
