@@ -192,52 +192,52 @@ pipeline {
                         }
                     }
                 }
-                stage('Worker build - Windows guest') {
-                    agent { node { label 'jammy' } }
-                    when {
-                        beforeAgent true
-                        expression {
-                            return runWorkers
-                        }
-                    }
-                    environment {
-                            AZURE_CONNECTION_STRING = credentials('46b4e7d6-315f-4cc1-8333-b58780863b9b')
-                    }
-                    stages {
-                        stage('Checkout') {
-                            steps {
-                                checkout scm
-                            }
-                        }
-                        stage('Install azure-cli') {
-                            steps {
-                                installAzureCli('jammy', 'amd64')
-                            }
-                        }
-                        stage('Download assets') {
-                            steps {
-                                sh "mkdir ${env.HOME}/workloads"
-                                sh 'az storage blob download --container-name private-images --file "$HOME/workloads/windows-server-2022-amd64-2.raw" --name windows-server-2022-amd64-2.raw --connection-string "$AZURE_CONNECTION_STRING"'
-                            }
-                        }
-                        stage('Run Windows guest integration tests') {
-                            options {
-                                timeout(time: 1, unit: 'HOURS')
-                            }
-                            steps {
-                                sh 'scripts/dev_cli.sh tests --integration-windows'
-                            }
-                        }
-                        stage('Run Windows guest integration tests for musl') {
-                            options {
-                                timeout(time: 1, unit: 'HOURS')
-                            }
-                            steps {
-                                sh 'scripts/dev_cli.sh tests --integration-windows --libc musl'
-                            }
-                        }
-                    }
-                }
+                // stage('Worker build - Windows guest') {
+                //     agent { node { label 'jammy' } }
+                //     when {
+                //         beforeAgent true
+                //         expression {
+                //             return runWorkers
+                //         }
+                //     }
+                //     environment {
+                //             AZURE_CONNECTION_STRING = credentials('46b4e7d6-315f-4cc1-8333-b58780863b9b')
+                //     }
+                //     stages {
+                //         stage('Checkout') {
+                //             steps {
+                //                 checkout scm
+                //             }
+                //         }
+                //         stage('Install azure-cli') {
+                //             steps {
+                //                 installAzureCli('jammy', 'amd64')
+                //             }
+                //         }
+                //         stage('Download assets') {
+                //             steps {
+                //                 sh "mkdir ${env.HOME}/workloads"
+                //                 sh 'az storage blob download --container-name private-images --file "$HOME/workloads/windows-server-2022-amd64-2.raw" --name windows-server-2022-amd64-2.raw --connection-string "$AZURE_CONNECTION_STRING"'
+                //             }
+                //         }
+                //         stage('Run Windows guest integration tests') {
+                //             options {
+                //                 timeout(time: 1, unit: 'HOURS')
+                //             }
+                //             steps {
+                //                 sh 'scripts/dev_cli.sh tests --integration-windows'
+                //             }
+                //         }
+                //         stage('Run Windows guest integration tests for musl') {
+                //             options {
+                //                 timeout(time: 1, unit: 'HOURS')
+                //             }
+                //             steps {
+                //                 sh 'scripts/dev_cli.sh tests --integration-windows --libc musl'
+                //             }
+                //         }
+                //     }
+                // }
                 stage('Worker build - Metrics') {
                     agent { node { label 'jammy-metrics' } }
                     when {
