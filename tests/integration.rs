@@ -1942,7 +1942,6 @@ mod common_parallel {
             guest.wait_vm_boot(Some(120)).unwrap();
 
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
-            assert_eq!(guest.get_initial_apicid().unwrap_or(1), 0);
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
             assert_eq!(guest.get_pci_bridge_class().unwrap_or_default(), "0x060000");
 

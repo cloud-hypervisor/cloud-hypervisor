@@ -868,14 +868,6 @@ impl Guest {
             .map_err(Error::Parsing)
     }
 
-    #[cfg(target_arch = "x86_64")]
-    pub fn get_initial_apicid(&self) -> Result<u32, Error> {
-        self.ssh_command("grep \"initial apicid\" /proc/cpuinfo | grep -o \"[0-9]*\"")?
-            .trim()
-            .parse()
-            .map_err(Error::Parsing)
-    }
-
     pub fn get_total_memory(&self) -> Result<u32, Error> {
         self.ssh_command("grep MemTotal /proc/meminfo | grep -o \"[0-9]*\"")?
             .trim()
