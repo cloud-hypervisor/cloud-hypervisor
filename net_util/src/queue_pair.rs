@@ -19,6 +19,8 @@ use vm_virtio::{AccessPlatform, Translatable};
 pub struct TxVirtio {
     pub counter_bytes: Wrapping<u64>,
     pub counter_frames: Wrapping<u64>,
+    pub limit_bytes: Wrapping<u64>,
+    pub limit_frames: Wrapping<u64>,
 }
 
 impl Default for TxVirtio {
@@ -32,6 +34,8 @@ impl TxVirtio {
         TxVirtio {
             counter_bytes: Wrapping(0),
             counter_frames: Wrapping(0),
+            limit_bytes: Wrapping(0),
+            limit_frames: Wrapping(0),
         }
     }
 
@@ -128,8 +132,13 @@ impl TxVirtio {
             // limit, and simply stop processing oncoming `avail_desc` if any.
             if let Some(rate_limiter) = rate_limiter {
                 rate_limit_reached = rate_limiter.consume(1, TokenType::Ops);
-                if rate_limit_reached == BucketReduction::Success {
+                if rate_limit_reached != BucketReduction::Success {
+                    self.limit_frames += Wrapping(1);
+                } else {
                     rate_limit_reached = rate_limiter.consume(len as u64, TokenType::Bytes);
+                    if rate_limit_reached != BucketReduction::Success {
+                        self.limit_bytes += Wrapping(1);
+                    }
                 }
             }
 
@@ -153,6 +162,8 @@ impl TxVirtio {
 pub struct RxVirtio {
     pub counter_bytes: Wrapping<u64>,
     pub counter_frames: Wrapping<u64>,
+    pub limit_bytes: Wrapping<u64>,
+    pub limit_frames: Wrapping<u64>,
 }
 
 impl Default for RxVirtio {
@@ -166,6 +177,8 @@ impl RxVirtio {
         RxVirtio {
             counter_bytes: Wrapping(0),
             counter_frames: Wrapping(0),
+            limit_bytes: Wrapping(0),
+            limit_frames: Wrapping(0),
         }
     }
 
@@ -283,8 +296,13 @@ impl RxVirtio {
             // processing oncoming `avail_desc` if any.
             if let Some(rate_limiter) = rate_limiter {
                 rate_limit_reached = rate_limiter.consume(1, TokenType::Ops);
-                if rate_limit_reached == BucketReduction::Success {
+                if rate_limit_reached != BucketReduction::Success {
+                    self.limit_frames += Wrapping(1);
+                } else {
                     rate_limit_reached = rate_limiter.consume(len as u64, TokenType::Bytes);
+                    if rate_limit_reached != BucketReduction::Success {
+                        self.limit_bytes += Wrapping(1);
+                    }
                 }
             }
 
@@ -310,6 +328,10 @@ pub struct NetCounters {
     pub tx_frames: Arc<AtomicU64>,
     pub rx_bytes: Arc<AtomicU64>,
     pub rx_frames: Arc<AtomicU64>,
+    pub rx_limit_bytes: Arc<AtomicU64>,
+    pub rx_limit_frames: Arc<AtomicU64>,
+    pub tx_limit_bytes: Arc<AtomicU64>,
+    pub tx_limit_frames: Arc<AtomicU64>,
 }
 
 #[derive(Error, Debug)]
@@ -408,8 +430,16 @@ impl NetQueuePair {
         self.counters
             .tx_frames
             .fetch_add(self.tx.counter_frames.0, Ordering::AcqRel);
+        self.counters
+            .tx_limit_bytes
+            .fetch_add(self.tx.limit_bytes.0, Ordering::AcqRel);
+        self.counters
+            .tx_limit_frames
+            .fetch_add(self.tx.limit_frames.0, Ordering::AcqRel);
         self.tx.counter_bytes = Wrapping(0);
         self.tx.counter_frames = Wrapping(0);
+        self.tx.limit_bytes = Wrapping(0);
+        self.tx.limit_frames = Wrapping(0);
 
         queue
             .needs_notification(mem)
@@ -453,8 +483,16 @@ impl NetQueuePair {
         self.counters
             .rx_frames
             .fetch_add(self.rx.counter_frames.0, Ordering::AcqRel);
+        self.counters
+            .rx_limit_bytes
+            .fetch_add(self.rx.limit_bytes.0, Ordering::AcqRel);
+        self.counters
+            .rx_limit_frames
+            .fetch_add(self.rx.limit_frames.0, Ordering::AcqRel);
         self.rx.counter_bytes = Wrapping(0);
         self.rx.counter_frames = Wrapping(0);
+        self.rx.limit_bytes = Wrapping(0);
+        self.rx.limit_frames = Wrapping(0);
 
         queue
             .needs_notification(mem)

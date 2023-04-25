@@ -849,12 +849,28 @@ impl VirtioDevice for Net {
             Wrapping(self.counters.rx_frames.load(Ordering::Acquire)),
         );
         counters.insert(
+            "rx_limit_bytes",
+            Wrapping(self.counters.rx_limit_bytes.load(Ordering::Acquire)),
+        );
+        counters.insert(
+            "rx_limit_frames",
+            Wrapping(self.counters.rx_limit_frames.load(Ordering::Acquire)),
+        );
+        counters.insert(
             "tx_bytes",
             Wrapping(self.counters.tx_bytes.load(Ordering::Acquire)),
         );
         counters.insert(
             "tx_frames",
             Wrapping(self.counters.tx_frames.load(Ordering::Acquire)),
+        );
+        counters.insert(
+            "tx_limit_bytes",
+            Wrapping(self.counters.tx_limit_bytes.load(Ordering::Acquire)),
+        );
+        counters.insert(
+            "tx_limit_frames",
+            Wrapping(self.counters.tx_limit_frames.load(Ordering::Acquire)),
         );
 
         Some(counters)
