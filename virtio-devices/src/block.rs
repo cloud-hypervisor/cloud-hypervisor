@@ -98,6 +98,8 @@ pub struct BlockCounters {
     write_latency_min: Arc<AtomicU64>,
     write_latency_max: Arc<AtomicU64>,
     write_latency_avg: Arc<AtomicU64>,
+    limit_by_bytes: Arc<AtomicU64>,
+    limit_by_ops: Arc<AtomicU64>,
 }
 
 impl Default for BlockCounters {
@@ -113,6 +115,8 @@ impl Default for BlockCounters {
             write_latency_min: Arc::new(AtomicU64::new(u64::MAX)),
             write_latency_max: Arc::new(AtomicU64::new(0)),
             write_latency_avg: Arc::new(AtomicU64::new(0)),
+            limit_by_bytes: Arc::new(AtomicU64::new(0)),
+            limit_by_ops: Arc::new(AtomicU64::new(0)),
         }
     }
 }
@@ -141,6 +145,8 @@ impl BlockEpollHandler {
         let queue = &mut self.queue;
 
         let mut used_descs = false;
+        let mut limit_by_bytes = Wrapping(0);
+        let mut limit_by_ops = Wrapping(0);
 
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
             let mut request = Request::parse(&mut desc_chain, self.access_platform.as_ref())
@@ -175,6 +181,7 @@ impl BlockEpollHandler {
                     // Stop processing the queue and return this descriptor chain to the
                     // avail ring, for later processing.
                     queue.go_to_previous_position();
+                    limit_by_ops = Wrapping(1);
                     break;
                 }
                 // Exercise the rate limiter only if this request is of data transfer type.
@@ -196,9 +203,11 @@ impl BlockEpollHandler {
                             // Stop processing the queue and return this descriptor chain to the
                             // avail ring, for later processing.
                             queue.go_to_previous_position();
+                            limit_by_bytes = Wrapping(1);
                             break;
                         }
                         BucketReduction::OverConsumption(_r) => {
+                            limit_by_bytes = Wrapping(1);
                             break;
                         }
                         BucketReduction::Success => {}
@@ -234,6 +243,13 @@ impl BlockEpollHandler {
                 used_descs = true;
             }
         }
+
+        self.counters
+            .limit_by_bytes
+            .fetch_add(limit_by_bytes.0, Ordering::AcqRel);
+        self.counters
+            .limit_by_ops
+            .fetch_add(limit_by_ops.0, Ordering::AcqRel);
 
         Ok(used_descs)
     }
@@ -828,6 +844,14 @@ impl VirtioDevice for Block {
         counters.insert(
             "read_latency_avg",
             Wrapping(self.counters.read_latency_avg.load(Ordering::Acquire) / LATENCY_SCALE),
+        );
+        counters.insert(
+            "limit_by_bytes",
+            Wrapping(self.counters.limit_by_bytes.load(Ordering::Acquire)),
+        );
+        counters.insert(
+            "limit_by_ops",
+            Wrapping(self.counters.limit_by_ops.load(Ordering::Acquire)),
         );
 
         Some(counters)
