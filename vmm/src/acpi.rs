@@ -41,7 +41,7 @@ pub const ACPI_APIC_GENERIC_TRANSLATOR: u8 = 15;
 
 #[allow(dead_code)]
 #[repr(packed)]
-#[derive(Default)]
+#[derive(Default, AsBytes)]
 struct PciRangeEntry {
     pub base_address: u64,
     pub segment: u16,
@@ -52,7 +52,7 @@ struct PciRangeEntry {
 
 #[allow(dead_code)]
 #[repr(packed)]
-#[derive(Default)]
+#[derive(Default, AsBytes)]
 struct MemoryAffinity {
     pub type_: u8,
     pub length: u8,
@@ -69,7 +69,7 @@ struct MemoryAffinity {
 
 #[allow(dead_code)]
 #[repr(packed)]
-#[derive(Default)]
+#[derive(Default, AsBytes)]
 struct ProcessorLocalX2ApicAffinity {
     pub type_: u8,
     pub length: u8,
@@ -83,7 +83,7 @@ struct ProcessorLocalX2ApicAffinity {
 
 #[allow(dead_code)]
 #[repr(packed)]
-#[derive(Default)]
+#[derive(Default, AsBytes)]
 struct ProcessorGiccAffinity {
     pub type_: u8,
     pub length: u8,
@@ -143,7 +143,7 @@ impl MemoryAffinity {
 
 #[allow(dead_code)]
 #[repr(packed)]
-#[derive(Default)]
+#[derive(Default, AsBytes)]
 struct ViotVirtioPciNode {
     pub type_: u8,
     _reserved: u8,
@@ -155,7 +155,7 @@ struct ViotVirtioPciNode {
 
 #[allow(dead_code)]
 #[repr(packed)]
-#[derive(Default)]
+#[derive(Default, AsBytes)]
 struct ViotPciRangeNode {
     pub type_: u8,
     _reserved: u8,
