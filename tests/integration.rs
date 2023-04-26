@@ -32,6 +32,9 @@ use test_infra::*;
 use vmm_sys_util::{tempdir::TempDir, tempfile::TempFile};
 use wait_timeout::ChildExt;
 
+// Constant taken from the VMM crate.
+const MAX_NUM_PCI_SEGMENTS: u16 = 16;
+
 #[cfg(target_arch = "x86_64")]
 mod x86_64 {
     pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-0.raw";
@@ -1206,7 +1209,10 @@ fn _test_virtio_fs(
         .default_net()
         .args(["--api-socket", &api_socket]);
     if pci_segment.is_some() {
-        guest_command.args(["--platform", "num_pci_segments=16"]);
+        guest_command.args([
+            "--platform",
+            &format!("num_pci_segments={MAX_NUM_PCI_SEGMENTS}"),
+        ]);
     }
 
     let fs_params = format!(
@@ -2318,7 +2324,10 @@ mod common_parallel {
             .args(["--memory", "size=512M"])
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args(["--platform", "num_pci_segments=16,iommu_segments=[1]"])
+            .args([
+                "--platform",
+                &format!("num_pci_segments={MAX_NUM_PCI_SEGMENTS},iommu_segments=[1]"),
+            ])
             .default_disks()
             .capture_output()
             .default_net();
@@ -2474,7 +2483,10 @@ mod common_parallel {
             .args(["--memory", "size=512M"])
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args(["--platform", "num_pci_segments=16"])
+            .args([
+                "--platform",
+                &format!("num_pci_segments={MAX_NUM_PCI_SEGMENTS}"),
+            ])
             .args([
                 "--disk",
                 format!(
@@ -2501,15 +2513,15 @@ mod common_parallel {
         let grep_cmd = "lspci | grep \"Host bridge\" | wc -l";
 
         let r = std::panic::catch_unwind(|| {
-            // There should be 16 PCI host bridges in the guest.
+            // There should be MAX_NUM_PCI_SEGMENTS PCI host bridges in the guest.
             assert_eq!(
                 guest
                     .ssh_command(grep_cmd)
                     .unwrap()
                     .trim()
-                    .parse::<u32>()
+                    .parse::<u16>()
                     .unwrap_or_default(),
-                16
+                MAX_NUM_PCI_SEGMENTS
             );
 
             // Check both if /dev/vdc exists and if the block size is 4M.
@@ -5298,7 +5310,10 @@ mod common_parallel {
             .capture_output();
 
         if pci_segment.is_some() {
-            cmd.args(["--platform", "num_pci_segments=16"]);
+            cmd.args([
+                "--platform",
+                &format!("num_pci_segments={MAX_NUM_PCI_SEGMENTS}"),
+            ]);
         }
 
         let mut child = cmd.spawn().unwrap();
@@ -5434,7 +5449,10 @@ mod common_parallel {
             .capture_output();
 
         if pci_segment.is_some() {
-            cmd.args(["--platform", "num_pci_segments=16"]);
+            cmd.args([
+                "--platform",
+                &format!("num_pci_segments={MAX_NUM_PCI_SEGMENTS}"),
+            ]);
         }
 
         let mut child = cmd.spawn().unwrap();
