@@ -33,7 +33,7 @@ virtio-bindings = { version = "0.2.0", features = ["virtio-v5_0_0"] }
 virtio-queue = "0.7.1"
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
-vm-memory = { version = "0.10.0", features = ["backend-mmap", "backend-atomic", "backend-bitmap"] }
+vm-memory = { version = "0.11.0", features = ["backend-mmap", "backend-atomic", "backend-bitmap"] }
 vm-migration = { path = "../vm-migration" }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = "0.11.0"
