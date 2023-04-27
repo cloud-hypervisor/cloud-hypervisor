@@ -314,10 +314,10 @@ impl VmState {
     fn valid_transition(self, new_state: VmState) -> Result<()> {
         match self {
             VmState::Created => match new_state {
-                VmState::Created | VmState::Shutdown => {
-                    Err(Error::InvalidStateTransition(self, new_state))
+                VmState::Created => Err(Error::InvalidStateTransition(self, new_state)),
+                VmState::Running | VmState::Paused | VmState::BreakPoint | VmState::Shutdown => {
+                    Ok(())
                 }
-                VmState::Running | VmState::Paused | VmState::BreakPoint => Ok(()),
             },
 
             VmState::Running => match new_state {
@@ -2694,7 +2694,7 @@ mod tests {
                 // Check the transitions from Created
                 assert!(state.valid_transition(VmState::Created).is_err());
                 assert!(state.valid_transition(VmState::Running).is_ok());
-                assert!(state.valid_transition(VmState::Shutdown).is_err());
+                assert!(state.valid_transition(VmState::Shutdown).is_ok());
                 assert!(state.valid_transition(VmState::Paused).is_ok());
                 assert!(state.valid_transition(VmState::BreakPoint).is_ok());
             }
