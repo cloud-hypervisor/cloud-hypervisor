@@ -55,7 +55,7 @@ use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
 use hypervisor::{HypervisorVmError, VmOps};
-use libc::SIGWINCH;
+use libc::{termios, SIGWINCH};
 use linux_loader::cmdline::Cmdline;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use linux_loader::elf;
@@ -79,7 +79,6 @@ use std::mem::size_of;
 use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::net::UnixStream;
-use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 use std::{result, str, thread};
@@ -464,7 +463,7 @@ impl Vm {
         serial_pty: Option<PtyPair>,
         console_pty: Option<PtyPair>,
         console_resize_pipe: Option<File>,
-        on_tty: Arc<AtomicBool>,
+        original_termios: Arc<Mutex<Option<termios>>>,
         snapshot: Option<Snapshot>,
     ) -> Result<Self> {
         trace_scoped!("Vm::new_from_memory_manager");
@@ -586,7 +585,12 @@ impl Vm {
         device_manager
             .lock()
             .unwrap()
-            .create_devices(serial_pty, console_pty, console_resize_pipe, on_tty)
+            .create_devices(
+                serial_pty,
+                console_pty,
+                console_resize_pipe,
+                original_termios,
+            )
             .map_err(Error::DeviceManager)?;
 
         #[cfg(feature = "tdx")]
@@ -736,7 +740,7 @@ impl Vm {
         serial_pty: Option<PtyPair>,
         console_pty: Option<PtyPair>,
         console_resize_pipe: Option<File>,
-        on_tty: Arc<AtomicBool>,
+        original_termios: Arc<Mutex<Option<termios>>>,
         snapshot: Option<Snapshot>,
         source_url: Option<&str>,
         prefault: Option<bool>,
@@ -806,7 +810,7 @@ impl Vm {
             serial_pty,
             console_pty,
             console_resize_pipe,
-            on_tty,
+            original_termios,
             snapshot,
         )
     }
