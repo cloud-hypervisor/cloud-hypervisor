@@ -8,7 +8,7 @@ extern crate event_monitor;
 
 use argh::FromArgs;
 use libc::EFD_NONBLOCK;
-use log::LevelFilter;
+use log::{warn, LevelFilter};
 use option_parser::OptionParser;
 use seccompiler::SeccompAction;
 use signal_hook::consts::SIGSYS;
@@ -33,6 +33,8 @@ enum Error {
     #[cfg(feature = "guest_debug")]
     #[error("Failed to create Debug EventFd: {0}")]
     CreateDebugEventFd(#[source] std::io::Error),
+    #[error("Failed to create exit EventFd: {0}")]
+    CreateExitEventFd(#[source] std::io::Error),
     #[error("Failed to open hypervisor interface (is hypervisor interface available?): {0}")]
     CreateHypervisor(#[source] hypervisor::HypervisorError),
     #[error("Failed to start the VMM thread: {0}")]
@@ -509,6 +511,8 @@ fn start_vmm(toplevel: TopLevel) -> Result<Option<String>, Error> {
     #[cfg(feature = "guest_debug")]
     let vm_debug_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateDebugEventFd)?;
 
+    let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateExitEventFd)?;
+
     let vmm_thread = vmm::start_vmm_thread(
         env!("CARGO_PKG_VERSION").to_string(),
         &api_socket_path,
@@ -522,33 +526,46 @@ fn start_vmm(toplevel: TopLevel) -> Result<Option<String>, Error> {
         debug_evt.try_clone().unwrap(),
         #[cfg(feature = "guest_debug")]
         vm_debug_evt.try_clone().unwrap(),
+        exit_evt.try_clone().unwrap(),
         &seccomp_action,
         hypervisor,
     )
     .map_err(Error::StartVmmThread)?;
 
-    let payload_present = toplevel.kernel.is_some() || toplevel.firmware.is_some();
+    let r: Result<(), Error> = (|| {
+        let payload_present = toplevel.kernel.is_some() || toplevel.firmware.is_some();
 
-    if payload_present {
-        let vm_params = toplevel.to_vm_params();
-        let vm_config = config::VmConfig::parse(vm_params).map_err(Error::ParsingConfig)?;
+        if payload_present {
+            let vm_params = toplevel.to_vm_params();
+            let vm_config = config::VmConfig::parse(vm_params).map_err(Error::ParsingConfig)?;
 
-        // Create and boot the VM based off the VM config we just built.
-        let sender = api_request_sender.clone();
-        vmm::api::vm_create(
-            api_evt.try_clone().unwrap(),
-            api_request_sender,
-            Arc::new(Mutex::new(vm_config)),
-        )
-        .map_err(Error::VmCreate)?;
-        vmm::api::vm_boot(api_evt.try_clone().unwrap(), sender).map_err(Error::VmBoot)?;
-    } else if let Some(restore_params) = toplevel.restore {
-        vmm::api::vm_restore(
-            api_evt.try_clone().unwrap(),
-            api_request_sender,
-            Arc::new(config::RestoreConfig::parse(&restore_params).map_err(Error::ParsingRestore)?),
-        )
-        .map_err(Error::VmRestore)?;
+            // Create and boot the VM based off the VM config we just built.
+            let sender = api_request_sender.clone();
+            vmm::api::vm_create(
+                api_evt.try_clone().unwrap(),
+                api_request_sender,
+                Arc::new(Mutex::new(vm_config)),
+            )
+            .map_err(Error::VmCreate)?;
+            vmm::api::vm_boot(api_evt.try_clone().unwrap(), sender).map_err(Error::VmBoot)?;
+        } else if let Some(restore_params) = toplevel.restore {
+            vmm::api::vm_restore(
+                api_evt.try_clone().unwrap(),
+                api_request_sender,
+                Arc::new(
+                    config::RestoreConfig::parse(&restore_params).map_err(Error::ParsingRestore)?,
+                ),
+            )
+            .map_err(Error::VmRestore)?;
+        }
+
+        Ok(())
+    })();
+
+    if r.is_err() {
+        if let Err(e) = exit_evt.write(1) {
+            warn!("writing to exit EventFd: {e}");
+        }
     }
 
     vmm_thread

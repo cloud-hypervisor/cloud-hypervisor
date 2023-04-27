@@ -289,6 +289,7 @@ pub fn start_vmm_thread(
     #[cfg(feature = "guest_debug")] debug_path: Option<PathBuf>,
     #[cfg(feature = "guest_debug")] debug_event: EventFd,
     #[cfg(feature = "guest_debug")] vm_debug_event: EventFd,
+    exit_event: EventFd,
     seccomp_action: &SeccompAction,
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
 ) -> Result<thread::JoinHandle<Result<()>>> {
@@ -309,9 +310,8 @@ pub fn start_vmm_thread(
         .map_err(Error::CreateSeccompFilter)?;
 
     let vmm_seccomp_action = seccomp_action.clone();
-    let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
     let thread = {
-        let exit_evt = exit_evt.try_clone().map_err(Error::EventFdClone)?;
+        let exit_event = exit_event.try_clone().map_err(Error::EventFdClone)?;
         thread::Builder::new()
             .name("vmm".to_string())
             .spawn(move || {
@@ -329,7 +329,7 @@ pub fn start_vmm_thread(
                     vm_debug_event,
                     vmm_seccomp_action,
                     hypervisor,
-                    exit_evt,
+                    exit_event,
                 )?;
 
                 vmm.setup_signal_handler()?;
@@ -350,7 +350,7 @@ pub fn start_vmm_thread(
             http_api_event,
             api_sender,
             seccomp_action,
-            exit_evt,
+            exit_event,
             hypervisor_type,
         )?;
     } else if let Some(http_fd) = http_fd {
@@ -359,7 +359,7 @@ pub fn start_vmm_thread(
             http_api_event,
             api_sender,
             seccomp_action,
-            exit_evt,
+            exit_event,
             hypervisor_type,
         )?;
     }
