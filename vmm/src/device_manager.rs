@@ -4285,7 +4285,7 @@ impl Aml for DeviceManager {
         let mut pci_scan_methods = Vec::new();
         for i in 0..self.pci_segments.len() {
             pci_scan_methods.push(aml::MethodCall::new(
-                format!("\\_SB_.PCI{i:X}.PCNT").as_str().into(),
+                format!("\\_SB_.PC{i:02X}.PCNT").as_str().into(),
                 vec![],
             ));
         }
