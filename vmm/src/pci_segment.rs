@@ -418,7 +418,7 @@ impl Aml for PciSegment {
         pci_dsdt_inner_data.push(&prt);
 
         aml::Device::new(
-            format!("_SB_.PCI{:X}", self.id).as_str().into(),
+            format!("_SB_.PC{:02X}", self.id).as_str().into(),
             pci_dsdt_inner_data,
         )
         .to_aml_bytes(sink)
