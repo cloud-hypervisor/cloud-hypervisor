@@ -1634,7 +1634,6 @@ impl Vmm {
             arch::generate_common_cpuid(
                 &hypervisor,
                 None,
-                None,
                 phys_bits,
                 vm_config.lock().unwrap().cpus.kvm_hyperv,
                 #[cfg(feature = "tdx")]
@@ -1823,7 +1822,6 @@ impl Vmm {
             let phys_bits = vm::physical_bits(&self.hypervisor, vm_config.cpus.max_phys_bits);
             arch::generate_common_cpuid(
                 &self.hypervisor.clone(),
-                None,
                 None,
                 phys_bits,
                 vm_config.cpus.kvm_hyperv,
