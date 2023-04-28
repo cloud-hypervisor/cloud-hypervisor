@@ -552,7 +552,6 @@ impl CpuidFeatureEntry {
 
 pub fn generate_common_cpuid(
     hypervisor: &Arc<dyn hypervisor::Hypervisor>,
-    topology: Option<(u8, u8, u8)>,
     sgx_epc_sections: Option<Vec<SgxEpcSection>>,
     phys_bits: u8,
     kvm_hyperv: bool,
@@ -614,10 +613,6 @@ pub fn generate_common_cpuid(
         .map_err(Error::CpuidGetSupported)?;
 
     CpuidPatch::patch_cpuid(&mut cpuid, cpuid_patches);
-
-    if let Some(t) = topology {
-        update_cpuid_topology(&mut cpuid, t.0, t.1, t.2);
-    }
 
     if let Some(sgx_epc_sections) = sgx_epc_sections {
         update_cpuid_sgx(&mut cpuid, sgx_epc_sections)?;
@@ -761,11 +756,26 @@ pub fn configure_vcpu(
     boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
     cpuid: Vec<CpuIdEntry>,
     kvm_hyperv: bool,
+    cpu_vendor: CpuVendor,
+    topology: Option<(u8, u8, u8)>,
 ) -> super::Result<()> {
     // Per vCPU CPUID changes; common are handled via generate_common_cpuid()
     let mut cpuid = cpuid;
     CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(id));
     CpuidPatch::set_cpuid_reg(&mut cpuid, 0x1f, None, CpuidReg::EDX, u32::from(id));
+    if matches!(cpu_vendor, CpuVendor::AMD) {
+        CpuidPatch::set_cpuid_reg(
+            &mut cpuid,
+            0x8000_001e,
+            Some(0),
+            CpuidReg::EAX,
+            u32::from(id),
+        );
+    }
+
+    if let Some(t) = topology {
+        update_cpuid_topology(&mut cpuid, t.0, t.1, t.2, cpu_vendor, id);
+    }
 
     // Set ApicId in cpuid for each vcpu
     // SAFETY: get host cpuid when eax=1
@@ -1160,6 +1170,8 @@ fn update_cpuid_topology(
     threads_per_core: u8,
     cores_per_die: u8,
     dies_per_package: u8,
+    cpu_vendor: CpuVendor,
+    id: u8,
 ) {
     let thread_width = 8 - (threads_per_core - 1).leading_zeros();
     let core_width = (8 - (cores_per_die - 1).leading_zeros()) + thread_width;
@@ -1216,6 +1228,65 @@ fn update_cpuid_topology(
         u32::from(dies_per_package * cores_per_die * threads_per_core),
     );
     CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(2), CpuidReg::ECX, 5 << 8);
+
+    if matches!(cpu_vendor, CpuVendor::AMD) {
+        CpuidPatch::set_cpuid_reg(
+            cpuid,
+            0x8000_001e,
+            Some(0),
+            CpuidReg::EBX,
+            ((threads_per_core as u32 - 1) << 8) | (id as u32 & 0xff),
+        );
+        CpuidPatch::set_cpuid_reg(
+            cpuid,
+            0x8000_001e,
+            Some(0),
+            CpuidReg::ECX,
+            ((dies_per_package as u32 - 1) << 8) | (thread_width + die_width) & 0xff,
+        );
+        CpuidPatch::set_cpuid_reg(cpuid, 0x8000_001e, Some(0), CpuidReg::EDX, 0);
+        if cores_per_die * threads_per_core > 1 {
+            CpuidPatch::set_cpuid_reg(
+                cpuid,
+                0x8000_0001,
+                Some(0),
+                CpuidReg::ECX,
+                (1u32 << 1) | (1u32 << 22),
+            );
+            CpuidPatch::set_cpuid_reg(
+                cpuid,
+                0x0000_0001,
+                Some(0),
+                CpuidReg::EBX,
+                ((id as u32) << 24)
+                    | (8 << 8)
+                    | (((cores_per_die * threads_per_core) as u32) << 16),
+            );
+            let cpuid_patches = vec![
+                // Patch tsc deadline timer bit
+                CpuidPatch {
+                    function: 1,
+                    index: 0,
+                    flags_bit: None,
+                    eax_bit: None,
+                    ebx_bit: None,
+                    ecx_bit: None,
+                    edx_bit: Some(28),
+                },
+            ];
+            CpuidPatch::patch_cpuid(cpuid, cpuid_patches);
+            CpuidPatch::set_cpuid_reg(
+                cpuid,
+                0x8000_0008,
+                Some(0),
+                CpuidReg::ECX,
+                ((thread_width + core_width + die_width) << 12)
+                    | ((cores_per_die * threads_per_core) - 1) as u32,
+            );
+        } else {
+            CpuidPatch::set_cpuid_reg(cpuid, 0x8000_0008, Some(0), CpuidReg::ECX, 0u32);
+        }
+    }
 }
 
 // The goal is to update the CPUID sub-leaves to reflect the number of EPC
