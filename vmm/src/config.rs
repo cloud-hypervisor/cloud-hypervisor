@@ -17,7 +17,7 @@ use std::str::FromStr;
 use thiserror::Error;
 use virtio_devices::{RateLimiterConfig, TokenBucketConfig};
 
-const MAX_NUM_PCI_SEGMENTS: u16 = 16;
+const MAX_NUM_PCI_SEGMENTS: u16 = 96;
 
 /// Errors associated with VM configuration parameters.
 #[derive(Debug, Error)]
