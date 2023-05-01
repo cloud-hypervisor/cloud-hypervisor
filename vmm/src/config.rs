@@ -2947,24 +2947,26 @@ mod tests {
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.platform = Some(PlatformConfig {
-            num_pci_segments: 16,
+            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             ..Default::default()
         });
         assert!(still_valid_config.validate().is_ok());
 
         let mut invalid_config = valid_config.clone();
         invalid_config.platform = Some(PlatformConfig {
-            num_pci_segments: 17,
+            num_pci_segments: MAX_NUM_PCI_SEGMENTS + 1,
             ..Default::default()
         });
         assert_eq!(
             invalid_config.validate(),
-            Err(ValidationError::InvalidNumPciSegments(17))
+            Err(ValidationError::InvalidNumPciSegments(
+                MAX_NUM_PCI_SEGMENTS + 1
+            ))
         );
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.platform = Some(PlatformConfig {
-            num_pci_segments: 16,
+            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: Some(vec![1, 2, 3]),
             ..Default::default()
         });
@@ -2972,18 +2974,18 @@ mod tests {
 
         let mut invalid_config = valid_config.clone();
         invalid_config.platform = Some(PlatformConfig {
-            num_pci_segments: 16,
-            iommu_segments: Some(vec![17, 18]),
+            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
+            iommu_segments: Some(vec![MAX_NUM_PCI_SEGMENTS + 1, MAX_NUM_PCI_SEGMENTS + 2]),
             ..Default::default()
         });
         assert_eq!(
             invalid_config.validate(),
-            Err(ValidationError::InvalidPciSegment(17))
+            Err(ValidationError::InvalidPciSegment(MAX_NUM_PCI_SEGMENTS + 1))
         );
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.platform = Some(PlatformConfig {
-            num_pci_segments: 16,
+            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: Some(vec![1, 2, 3]),
             ..Default::default()
         });
@@ -2996,7 +2998,7 @@ mod tests {
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.platform = Some(PlatformConfig {
-            num_pci_segments: 16,
+            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: Some(vec![1, 2, 3]),
             ..Default::default()
         });
@@ -3009,7 +3011,7 @@ mod tests {
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.platform = Some(PlatformConfig {
-            num_pci_segments: 16,
+            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: Some(vec![1, 2, 3]),
             ..Default::default()
         });
@@ -3022,7 +3024,7 @@ mod tests {
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.platform = Some(PlatformConfig {
-            num_pci_segments: 16,
+            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: Some(vec![1, 2, 3]),
             ..Default::default()
         });
@@ -3035,7 +3037,7 @@ mod tests {
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.platform = Some(PlatformConfig {
-            num_pci_segments: 16,
+            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: Some(vec![1, 2, 3]),
             ..Default::default()
         });
@@ -3048,7 +3050,7 @@ mod tests {
 
         let mut invalid_config = valid_config.clone();
         invalid_config.platform = Some(PlatformConfig {
-            num_pci_segments: 16,
+            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: Some(vec![1, 2, 3]),
             ..Default::default()
         });
@@ -3064,7 +3066,7 @@ mod tests {
 
         let mut invalid_config = valid_config.clone();
         invalid_config.platform = Some(PlatformConfig {
-            num_pci_segments: 16,
+            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: Some(vec![1, 2, 3]),
             ..Default::default()
         });
@@ -3080,7 +3082,7 @@ mod tests {
 
         let mut invalid_config = valid_config.clone();
         invalid_config.platform = Some(PlatformConfig {
-            num_pci_segments: 16,
+            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: Some(vec![1, 2, 3]),
             ..Default::default()
         });
@@ -3096,7 +3098,7 @@ mod tests {
 
         let mut invalid_config = valid_config.clone();
         invalid_config.platform = Some(PlatformConfig {
-            num_pci_segments: 16,
+            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: Some(vec![1, 2, 3]),
             ..Default::default()
         });
@@ -3112,7 +3114,7 @@ mod tests {
 
         let mut invalid_config = valid_config.clone();
         invalid_config.platform = Some(PlatformConfig {
-            num_pci_segments: 16,
+            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: Some(vec![1, 2, 3]),
             ..Default::default()
         });
@@ -3129,7 +3131,7 @@ mod tests {
         let mut invalid_config = valid_config.clone();
         invalid_config.memory.shared = true;
         invalid_config.platform = Some(PlatformConfig {
-            num_pci_segments: 16,
+            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: Some(vec![1, 2, 3]),
             ..Default::default()
         });
@@ -3144,7 +3146,7 @@ mod tests {
 
         let mut invalid_config = valid_config.clone();
         invalid_config.platform = Some(PlatformConfig {
-            num_pci_segments: 16,
+            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: Some(vec![1, 2, 3]),
             ..Default::default()
         });
@@ -3160,7 +3162,7 @@ mod tests {
         let mut invalid_config = valid_config.clone();
         invalid_config.memory.shared = true;
         invalid_config.platform = Some(PlatformConfig {
-            num_pci_segments: 16,
+            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: Some(vec![1, 2, 3]),
             ..Default::default()
         });
