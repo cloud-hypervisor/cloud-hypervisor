@@ -109,7 +109,8 @@ pub struct BftIter<'a> {
 
 impl<'a> BftIter<'a> {
     fn new(hash_map: &'a HashMap<String, DeviceNode>) -> Self {
-        let mut nodes = Vec::new();
+        let mut nodes = Vec::with_capacity(hash_map.len());
+        let mut i = 0;
 
         for (_, node) in hash_map.iter() {
             if node.parent.is_none() {
@@ -117,26 +118,13 @@ impl<'a> BftIter<'a> {
             }
         }
 
-        let mut node_layer = nodes.as_slice();
-        loop {
-            let mut next_node_layer = Vec::new();
-
-            for node in node_layer.iter() {
-                for child_node_id in node.children.iter() {
-                    if let Some(child_node) = hash_map.get(child_node_id) {
-                        next_node_layer.push(child_node);
-                    }
+        while i < nodes.len() {
+            for child_node_id in nodes[i].children.iter() {
+                if let Some(child_node) = hash_map.get(child_node_id) {
+                    nodes.push(child_node);
                 }
             }
-
-            if next_node_layer.is_empty() {
-                break;
-            }
-
-            let pos = nodes.len();
-            nodes.extend(next_node_layer);
-
-            node_layer = &nodes[pos..];
+            i += 1;
         }
 
         BftIter { nodes }
