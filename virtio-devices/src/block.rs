@@ -23,7 +23,7 @@ use block_util::{
     async_io::AsyncIo, async_io::AsyncIoError, async_io::DiskFile, build_disk_image_id, Request,
     RequestType, VirtioBlockConfig,
 };
-use rate_limiter::{RateLimiter, TokenType};
+use rate_limiter::{BucketReduction, RateLimiter, TokenType};
 use seccompiler::SeccompAction;
 use std::collections::VecDeque;
 use std::io;
@@ -170,7 +170,8 @@ impl BlockEpollHandler {
             if let Some(rate_limiter) = &mut self.rate_limiter {
                 // If limiter.consume() fails it means there is no more TokenType::Ops
                 // budget and rate limiting is in effect.
-                if !rate_limiter.consume(1, TokenType::Ops) {
+                let rate_limit_reached = rate_limiter.consume(1, TokenType::Ops);
+                if rate_limit_reached != BucketReduction::Success {
                     // Stop processing the queue and return this descriptor chain to the
                     // avail ring, for later processing.
                     queue.go_to_previous_position();
@@ -187,13 +188,20 @@ impl BlockEpollHandler {
 
                     // If limiter.consume() fails it means there is no more TokenType::Bytes
                     // budget and rate limiting is in effect.
-                    if !rate_limiter.consume(bytes.0, TokenType::Bytes) {
-                        // Revert the OPS consume().
-                        rate_limiter.manual_replenish(1, TokenType::Ops);
-                        // Stop processing the queue and return this descriptor chain to the
-                        // avail ring, for later processing.
-                        queue.go_to_previous_position();
-                        break;
+                    let rate_limit_reached = rate_limiter.consume(bytes.0, TokenType::Bytes);
+                    match rate_limit_reached {
+                        BucketReduction::Failure => {
+                            // Revert the OPS consume().
+                            rate_limiter.manual_replenish(1, TokenType::Ops);
+                            // Stop processing the queue and return this descriptor chain to the
+                            // avail ring, for later processing.
+                            queue.go_to_previous_position();
+                            break;
+                        }
+                        BucketReduction::OverConsumption(_r) => {
+                            break;
+                        }
+                        BucketReduction::Success => {}
                     }
                 };
             }

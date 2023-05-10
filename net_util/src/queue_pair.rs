@@ -4,7 +4,7 @@
 
 use super::{register_listener, unregister_listener, vnet_hdr_len, Tap};
 use crate::GuestMemoryMmap;
-use rate_limiter::{RateLimiter, TokenType};
+use rate_limiter::{BucketReduction, RateLimiter, TokenType};
 use std::io;
 use std::num::Wrapping;
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -44,12 +44,18 @@ impl TxVirtio {
         access_platform: Option<&Arc<dyn AccessPlatform>>,
     ) -> Result<bool, NetQueuePairError> {
         let mut retry_write = false;
-        let mut rate_limit_reached = false;
+        let mut rate_limit_reached = BucketReduction::Success;
 
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(mem) {
-            if rate_limit_reached {
-                queue.go_to_previous_position();
-                break;
+            match rate_limit_reached {
+                BucketReduction::Failure => {
+                    queue.go_to_previous_position();
+                    break;
+                }
+                BucketReduction::OverConsumption(_r) => {
+                    break;
+                }
+                BucketReduction::Success => {}
             }
 
             let mut next_desc = desc_chain.next();
@@ -121,8 +127,10 @@ impl TxVirtio {
             // let the 'last' descriptor chain go-through even if it was over the rate
             // limit, and simply stop processing oncoming `avail_desc` if any.
             if let Some(rate_limiter) = rate_limiter {
-                rate_limit_reached = !rate_limiter.consume(1, TokenType::Ops)
-                    || !rate_limiter.consume(len as u64, TokenType::Bytes);
+                rate_limit_reached = rate_limiter.consume(1, TokenType::Ops);
+                if rate_limit_reached == BucketReduction::Success {
+                    rate_limit_reached = rate_limiter.consume(len as u64, TokenType::Bytes);
+                }
             }
 
             queue
@@ -170,13 +178,19 @@ impl RxVirtio {
         access_platform: Option<&Arc<dyn AccessPlatform>>,
     ) -> Result<bool, NetQueuePairError> {
         let mut exhausted_descs = true;
-        let mut rate_limit_reached = false;
+        let mut rate_limit_reached = BucketReduction::Success;
 
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(mem) {
-            if rate_limit_reached {
-                exhausted_descs = false;
-                queue.go_to_previous_position();
-                break;
+            match rate_limit_reached {
+                BucketReduction::Failure => {
+                    exhausted_descs = false;
+                    queue.go_to_previous_position();
+                    break;
+                }
+                BucketReduction::OverConsumption(_r) => {
+                    break;
+                }
+                BucketReduction::Success => {}
             }
 
             let desc = desc_chain
@@ -268,8 +282,10 @@ impl RxVirtio {
             // chain go-through even if it was over the rate limit, and simply stop
             // processing oncoming `avail_desc` if any.
             if let Some(rate_limiter) = rate_limiter {
-                rate_limit_reached = !rate_limiter.consume(1, TokenType::Ops)
-                    || !rate_limiter.consume(len as u64, TokenType::Bytes);
+                rate_limit_reached = rate_limiter.consume(1, TokenType::Ops);
+                if rate_limit_reached == BucketReduction::Success {
+                    rate_limit_reached = rate_limiter.consume(len as u64, TokenType::Bytes);
+                }
             }
 
             queue
