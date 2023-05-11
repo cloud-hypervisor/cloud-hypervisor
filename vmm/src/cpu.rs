@@ -1752,7 +1752,6 @@ impl Aml for Cpu {
     fn to_aml_bytes(&self, sink: &mut dyn acpi_tables::AmlSink) {
         #[cfg(target_arch = "x86_64")]
         let mat_data: Vec<u8> = self.generate_mat();
-        #[allow(clippy::if_same_then_else)]
         if self.dynamic {
             aml::Device::new(
                 format!("C{:03}", self.cpu_id).as_str().into(),
