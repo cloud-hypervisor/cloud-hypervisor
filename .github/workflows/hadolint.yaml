@@ -1,0 +1,26 @@
+name: Lint Dockerfile
+
+on:
+  push:
+    paths:
+    - resources/Dockerfile
+  pull_request:
+    paths:
+    - resources/Dockerfile
+
+jobs:
+  hadolint:
+    name: Run Hadolint Dockerfile Linter
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@master
+        with:
+          dockerfile: ./resources/Dockerfile
+          format: tty
+          no-fail: false
+          verbose: true
+          failure-threshold: info
