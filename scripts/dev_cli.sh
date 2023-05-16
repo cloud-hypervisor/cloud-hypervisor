@@ -30,6 +30,9 @@ CTR_CLH_INTEGRATION_WORKLOADS="/root/workloads"
 # Container networking option
 CTR_CLH_NET="bridge"
 
+# Uid and gid.  In Docker "rootless" mode, these should be 0.
+UID_GID="$(id -u):$(id -g)"
+
 # Cargo paths
 # Full path to the cargo registry dir on the host. This appears on the host
 # because we want to persist the cargo registry across container invocations.
@@ -145,7 +148,7 @@ fix_dir_perms() {
         --volume /dev:/dev \
         --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
         "$CTR_IMAGE" \
-        chown -R "$(id -u):$(id -g)" "$CTR_CLH_ROOT_DIR"
+        chown -R "$UID_GID" "$CTR_CLH_ROOT_DIR"
 
     return "$1"
 }
@@ -177,6 +180,9 @@ cmd_help() {
     echo "Available flags":
     echo ""
     echo "    --local        Set the container image version being used to \"local\"."
+    echo "    --rootless     Set uid and gid to  0 rather than the current user's uid and gid."
+    echo "                   This is needed to run Docker in \"rootless mode\"."
+    echo "                   See https://docs.docker.com/engine/security/rootless/ for more details."
     echo ""
     echo "Available commands:"
     echo ""
@@ -290,7 +296,7 @@ cmd_build() {
     fi
 
     $DOCKER_RUNTIME run \
-        --user "$(id -u):$(id -g)" \
+        --user "$UID_GID" \
         --workdir "$CTR_CLH_ROOT_DIR" \
         --rm \
         --volume $exported_device \
@@ -310,7 +316,7 @@ cmd_clean() {
     ensure_latest_ctr
 
     $DOCKER_RUNTIME run \
-        --user "$(id -u):$(id -g)" \
+        --user "$UID_GID" \
         --workdir "$CTR_CLH_ROOT_DIR" \
         --rm \
         --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
@@ -648,6 +654,9 @@ while [ $# -gt 0 ]; do
     --local) {
         CTR_IMAGE_VERSION="local"
         CTR_IMAGE="${CTR_IMAGE_TAG}:${CTR_IMAGE_VERSION}"
+    } ;;
+    --rootless) {
+        UID_GID="0:0"
     } ;;
     -*)
         die "Unknown arg: $1. Please use \`$0 help\` for help."
