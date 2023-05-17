@@ -145,7 +145,7 @@ fix_dir_perms() {
     $DOCKER_RUNTIME run \
         --workdir "$CTR_CLH_ROOT_DIR" \
         --rm \
-        --volume /dev:/dev \
+        --volume /dev/log:/dev/log \
         --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
         "$CTR_IMAGE" \
         chown -R "$UID_GID" "$CTR_CLH_ROOT_DIR"
@@ -426,7 +426,7 @@ cmd_tests() {
             --ipc=host \
             --net="$CTR_CLH_NET" \
             --mount type=tmpfs,destination=/tmp \
-            --volume /dev:/dev \
+            --volume /dev/log:/dev/log \
             --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
             --env USER="root" \
@@ -445,7 +445,7 @@ cmd_tests() {
             --ipc=host \
             --net="$CTR_CLH_NET" \
             --mount type=tmpfs,destination=/tmp \
-            --volume /dev:/dev \
+            --volume /dev/log:/dev/log \
             --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
             --env USER="root" \
@@ -464,7 +464,7 @@ cmd_tests() {
             --ipc=host \
             --net="$CTR_CLH_NET" \
             --mount type=tmpfs,destination=/tmp \
-            --volume /dev:/dev \
+            --volume /dev/log:/dev/log \
             --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
             --env USER="root" \
@@ -483,7 +483,7 @@ cmd_tests() {
             --ipc=host \
             --net="$CTR_CLH_NET" \
             --mount type=tmpfs,destination=/tmp \
-            --volume /dev:/dev \
+            --volume /dev/log:/dev/log \
             --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
             --env USER="root" \
@@ -502,7 +502,7 @@ cmd_tests() {
             --ipc=host \
             --net="$CTR_CLH_NET" \
             --mount type=tmpfs,destination=/tmp \
-            --volume /dev:/dev \
+            --volume /dev/log:/dev/log \
             --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
             --env USER="root" \
@@ -521,7 +521,7 @@ cmd_tests() {
             --ipc=host \
             --net="$CTR_CLH_NET" \
             --mount type=tmpfs,destination=/tmp \
-            --volume /dev:/dev \
+            --volume /dev/log:/dev/log \
             --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
             --env USER="root" \
@@ -540,7 +540,7 @@ cmd_tests() {
             --ipc=host \
             --net="$CTR_CLH_NET" \
             --mount type=tmpfs,destination=/tmp \
-            --volume /dev:/dev \
+            --volume /dev/log:/dev/log \
             --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
             --env USER="root" \
@@ -627,7 +627,7 @@ cmd_shell() {
         --ipc=host \
         --net="$CTR_CLH_NET" \
         --tmpfs /tmp:exec \
-        --volume /dev:/dev \
+        --volume /dev/log:/dev/log \
         --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
         --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
         --env USER="root" \
