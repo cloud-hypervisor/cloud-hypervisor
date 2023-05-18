@@ -6277,11 +6277,13 @@ mod common_parallel {
     }
 
     #[test]
+    #[cfg_attr(target_arch = "aarch64", ignore = "See #5443")]
     fn test_macvtap() {
         _test_macvtap(false, "guestmacvtap0", "hostmacvtap0")
     }
 
     #[test]
+    #[cfg_attr(target_arch = "aarch64", ignore = "See #5443")]
     fn test_macvtap_hotplug() {
         _test_macvtap(true, "guestmacvtap1", "hostmacvtap1")
     }
