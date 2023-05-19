@@ -121,7 +121,7 @@ RUN echo 'source $CARGO_HOME/env' >> "$HOME"/.bashrc \
 
 # install SPDK NVMe
 # only for 'x86_64' platform images as 'docker buildx' can't build 'spdk'
-# hadolint ignore=DL3003
+# hadolint ignore=DL3003,SC2046
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
        git clone https://github.com/spdk/spdk \
        && cd spdk \
