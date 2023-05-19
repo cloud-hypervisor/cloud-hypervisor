@@ -154,7 +154,7 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
 
 # install ethr tool for performance tests
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
-    wget https://github.com/microsoft/ethr/releases/latest/download/ethr_linux.zip \
+    wget -nv https://github.com/microsoft/ethr/releases/latest/download/ethr_linux.zip \
     && unzip ethr_linux.zip \
     && cp ethr /usr/local/bin \
     && rm ethr_linux.zip; fi
