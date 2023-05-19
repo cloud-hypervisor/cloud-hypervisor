@@ -14,6 +14,7 @@ use crate::{
 use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
 use hypervisor::HypervisorVmError;
+use libc::{sysconf, _SC_PAGESIZE};
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
 use std::io;
@@ -663,7 +664,12 @@ impl VfioCommon {
                 PciBarRegionType::Memory64BitRegion => {
                     // BAR allocation must be naturally aligned
                     mmio_allocator
-                        .allocate(restored_bar_addr, region_size, Some(region_size))
+                        .allocate(
+                            restored_bar_addr,
+                            region_size,
+                            // SAFETY: FFI call. Trivially safe.
+                            Some(unsafe { sysconf(_SC_PAGESIZE) as GuestUsize }),
+                        )
                         .ok_or(PciDeviceError::IoAllocationFailed(region_size))?
                 }
             };
@@ -1316,8 +1322,10 @@ impl VfioPciDevice {
         self.iommu_attached
     }
 
-    fn align_4k(address: u64) -> u64 {
-        (address + 0xfff) & 0xffff_ffff_ffff_f000
+    fn align_page_size(address: u64) -> u64 {
+        // SAFETY: FFI call. Trivially safe.
+        let page_size = unsafe { sysconf(_SC_PAGESIZE) as u64 };
+        (address + page_size - 1) & !(page_size - 1)
     }
 
     fn is_4k_aligned(address: u64) -> bool {
@@ -1377,6 +1385,7 @@ impl VfioPciDevice {
                     let mut sparse_areas = Vec::new();
                     let mut current_offset = 0;
                     for (range_offset, range_size) in inter_ranges {
+                        let range_offset = Self::align_page_size(range_offset);
                         if range_offset > current_offset {
                             sparse_areas.push(VfioRegionSparseMmapArea {
                                 offset: current_offset,
@@ -1384,13 +1393,13 @@ impl VfioPciDevice {
                             });
                         }
 
-                        current_offset = Self::align_4k(range_offset + range_size);
+                        current_offset = Self::align_page_size(range_offset + range_size);
                     }
 
                     if region_size > current_offset {
                         sparse_areas.push(VfioRegionSparseMmapArea {
-                            offset: current_offset,
-                            size: region_size - current_offset,
+                            offset: Self::align_page_size(current_offset),
+                            size: Self::align_page_size(region_size - current_offset),
                         });
                     }
 
