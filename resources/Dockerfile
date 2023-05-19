@@ -126,7 +126,7 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
        && ./scripts/pkgdep.sh \
        && apt-get clean \
        && ./configure --with-vfio-user \
-       && make -j `nproc` \
+       && make -j $(nproc) \
        && mkdir /usr/local/bin/spdk-nvme \
        && cp ./build/bin/nvmf_tgt /usr/local/bin/spdk-nvme \
        && cp ./scripts/rpc.py /usr/local/bin/spdk-nvme \
