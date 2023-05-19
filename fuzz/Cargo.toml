@@ -14,7 +14,7 @@ devices = { path = "../devices" }
 epoll = "4.3.1"
 libc = "0.2.145"
 libfuzzer-sys = "0.4.6"
-linux-loader = { version = "0.8.1", features = ["elf", "bzimage", "pe"] }
+linux-loader = { version = "0.9.0", features = ["elf", "bzimage", "pe"] }
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "main" }
 net_util = { path = "../net_util" }
 once_cell = "1.17.2"
@@ -22,10 +22,10 @@ qcow = { path = "../qcow" }
 seccompiler = "0.3.0"
 vhdx = { path = "../vhdx" }
 virtio-devices = { path = "../virtio-devices" }
-virtio-queue = "0.7.1"
+virtio-queue = "0.8.0"
 vmm = { path = "../vmm" }
 vmm-sys-util = "0.11.1"
-vm-memory = "0.10.0"
+vm-memory = "0.11.0"
 vm-device = { path = "../vm-device" }
 vm-virtio = { path = "../vm-virtio" }
 
