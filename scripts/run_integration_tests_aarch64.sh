@@ -11,7 +11,7 @@ build_spdk_nvme() {
     SPDK_DIR="$WORKLOADS_DIR/spdk"
     SPDK_REPO="https://github.com/spdk/spdk.git"
     SPDK_DEPLOY_DIR="/usr/local/bin/spdk-nvme"
-    checkout_repo "$SPDK_DIR" "$SPDK_REPO" master "6301f8915de32baed10dba1eebed556a6749211a"
+    checkout_repo "$SPDK_DIR" "$SPDK_REPO" master "ceefb46358f845d6c4e9f9e18d02ec20a7098ff7"
 
     if [ ! -f "$SPDK_DIR/.built" ]; then
         pushd $SPDK_DIR
@@ -19,7 +19,7 @@ build_spdk_nvme() {
         apt-get update
         ./scripts/pkgdep.sh
         ./configure --with-vfio-user
-        chmod +x /usr/local/lib/python3.8/dist-packages/ninja/data/bin/ninja
+        chmod +x /usr/local/lib/python3.10/dist-packages/ninja/data/bin/ninja
         make -j `nproc` || exit 1
         touch .built
         popd
@@ -30,13 +30,14 @@ build_spdk_nvme() {
     cp "$WORKLOADS_DIR/spdk/build/bin/nvmf_tgt" $SPDK_DEPLOY_DIR/nvmf_tgt
     cp "$WORKLOADS_DIR/spdk/scripts/rpc.py" $SPDK_DEPLOY_DIR/rpc.py
     cp -r "$WORKLOADS_DIR/spdk/scripts/rpc" $SPDK_DEPLOY_DIR/rpc
+    cp -r "$WORKLOADS_DIR/spdk/python" $SPDK_DEPLOY_DIR/../
 }
 
 build_virtiofsd() {
     VIRTIOFSD_DIR="$WORKLOADS_DIR/virtiofsd_build"
     VIRTIOFSD_REPO="https://gitlab.com/virtio-fs/virtiofsd.git"
 
-    checkout_repo "$VIRTIOFSD_DIR" "$VIRTIOFSD_REPO" v1.1.0 "220405d7a2606c92636d31992b5cb3036a41047b"
+    checkout_repo "$VIRTIOFSD_DIR" "$VIRTIOFSD_REPO" v1.6.1 "7886ab7c819fd8de370d5a3bbfaae44de56923ed"
 
     if [ ! -f "$VIRTIOFSD_DIR/.built" ]; then
         pushd $VIRTIOFSD_DIR

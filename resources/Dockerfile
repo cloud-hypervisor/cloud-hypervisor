@@ -3,7 +3,7 @@
 # When changing this file don't forget to update the tag name in the
 # .github/workflows/docker-image.yaml file if doing multiple per day
 
-FROM ubuntu:20.04 as dev
+FROM ubuntu:22.04 as dev
 
 ARG TARGETARCH
 ARG RUST_TOOLCHAIN="1.67.1"
@@ -40,7 +40,16 @@ RUN apt-get update \
 	socat \
 	dosfstools \
 	cpio \
-	python \
+	cmake \
+	libjson-c-dev \
+	libcmocka-dev \
+	libtool \
+	meson \
+	libaio-dev \
+	libcunit1-dev \
+	libncurses-dev \
+	iasl \
+	gcc-9 \
 	python3 \
 	python3-setuptools \
 	ntfs-3g \
@@ -56,6 +65,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 RUN update-alternatives --set ovs-vswitchd /usr/lib/openvswitch-switch-dpdk/ovs-vswitchd-dpdk
+RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 100
+RUN update-alternatives --set gcc /usr/bin/gcc-9
 
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
 	apt-get update \
