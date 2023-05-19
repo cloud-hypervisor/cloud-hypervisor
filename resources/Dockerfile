@@ -18,9 +18,11 @@ ENV PATH="$PATH:$CARGO_HOME/bin"
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install all CI dependencies
+# DL3015 ignored cause not installing openvswitch-switch-dpdk recommended packages breaks ovs_dpdk test
+# hadolint ignore=DL3008,DL3015
 RUN apt-get update \
         && apt-get -yq upgrade \
-        && apt-get install -yq \
+        && apt-get install --no-install-recommends -yq \
         build-essential \
         bc \
         curl \
@@ -45,7 +47,6 @@ RUN apt-get update \
         python3 \
         python3-setuptools \
         ntfs-3g \
-        openvswitch-switch-dpdk \
         python3-distutils \
         uuid-dev \
         iperf3 \
@@ -53,6 +54,11 @@ RUN apt-get update \
         git-core \
         dnsmasq \
         dmsetup \
+        ca-certificates \
+        unzip \
+        iproute2 \
+        dbus \
+    && apt-get install openvswitch-switch-dpdk -yq \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /var/log/*log  /var/log/apt/* /var/lib/dpkg/*-old /var/cache/debconf/*-old
 
@@ -61,7 +67,7 @@ RUN update-alternatives --set ovs-vswitchd /usr/lib/openvswitch-switch-dpdk/ovs-
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
         apt-get update \
         && apt-get -yq upgrade \
-        && apt-get install -yq gcc-multilib gawk \
+        && apt-get install --no-install-recommends -yq gcc-multilib gawk \
         libtool expect gnutls-dev gnutls-bin libfuse-dev \
         libjson-glib-dev libgmp-dev libtasn1-dev python3-twisted \
         net-tools softhsm2 \
@@ -75,7 +81,7 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
         # kernel (any version) image in `/boot` and modules in `/lib/modules`.
         apt-get update \
         && apt-get -yq upgrade \
-        && apt-get install -yq \
+        && apt-get install --no-install-recommends -yq \
         libcap2-bin \
         libguestfs-tools \
         linux-image-generic \
