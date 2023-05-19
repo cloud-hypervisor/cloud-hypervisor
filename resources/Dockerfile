@@ -18,6 +18,7 @@ ENV PATH="$PATH:$CARGO_HOME/bin"
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install all CI dependencies
+# hadolint ignore=DL3008
 RUN apt-get update \
         && apt-get -yq upgrade \
         && apt-get install --no-install-recommends -yq \
@@ -60,6 +61,7 @@ RUN apt-get update \
 
 RUN update-alternatives --set ovs-vswitchd /usr/lib/openvswitch-switch-dpdk/ovs-vswitchd-dpdk
 
+# hadolint ignore=DL3008
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
         apt-get update \
         && apt-get -yq upgrade \
@@ -70,6 +72,7 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
         && apt-get clean \
     && rm -rf /var/lib/apt/lists/*; fi
 
+# hadolint ignore=DL3008
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
         # On AArch64, `setcap` binary should be installed via `libcap2-bin`.
         # The `setcap` binary is used in integration tests.
