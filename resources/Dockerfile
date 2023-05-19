@@ -20,7 +20,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Install all CI dependencies
 RUN apt-get update \
         && apt-get -yq upgrade \
-        && apt-get install -yq \
+        && apt-get install --no-install-recommends -yq \
         build-essential \
         bc \
         curl \
@@ -61,7 +61,7 @@ RUN update-alternatives --set ovs-vswitchd /usr/lib/openvswitch-switch-dpdk/ovs-
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
         apt-get update \
         && apt-get -yq upgrade \
-        && apt-get install -yq gcc-multilib gawk \
+        && apt-get install --no-install-recommends -yq gcc-multilib gawk \
         libtool expect gnutls-dev gnutls-bin libfuse-dev \
         libjson-glib-dev libgmp-dev libtasn1-dev python3-twisted \
         net-tools softhsm2 \
@@ -75,7 +75,7 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
         # kernel (any version) image in `/boot` and modules in `/lib/modules`.
         apt-get update \
         && apt-get -yq upgrade \
-        && apt-get install -yq \
+        && apt-get install --no-install-recommends -yq \
         libcap2-bin \
         libguestfs-tools \
         linux-image-generic \
