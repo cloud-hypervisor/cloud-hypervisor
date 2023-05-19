@@ -114,6 +114,7 @@ RUN export ARCH="$(uname -m)" \
     && ln -s "$CARGO_GIT_REGISTRY_DIR" "$CARGO_HOME/git"
 
 # Set the rust environment
+# hadolint ignore=SC2016
 RUN echo 'source $CARGO_HOME/env' >> "$HOME"/.bashrc \
     && mkdir "$HOME"/.cargo \
     && ln -s $CARGO_HOME/env "$HOME"/.cargo/env
