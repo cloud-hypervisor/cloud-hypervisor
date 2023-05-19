@@ -70,7 +70,7 @@ dependencies = [
  "versionize",
  "versionize_derive",
  "vm-fdt",
- "vm-memory",
+ "vm-memory 0.10.0",
  "vm-migration",
  "vmm-sys-util",
 ]
@@ -154,7 +154,7 @@ dependencies = [
  "vhdx",
  "virtio-bindings 0.2.0",
  "virtio-queue",
- "vm-memory",
+ "vm-memory 0.10.0",
  "vm-virtio",
  "vmm-sys-util",
 ]
@@ -201,7 +201,7 @@ dependencies = [
  "thiserror",
  "tpm",
  "tracer",
- "vm-memory",
+ "vm-memory 0.10.0",
  "vmm",
  "vmm-sys-util",
  "wait-timeout",
@@ -274,7 +274,7 @@ dependencies = [
  "versionize",
  "versionize_derive",
  "vm-device",
- "vm-memory",
+ "vm-memory 0.10.0",
  "vm-migration",
  "vmm-sys-util",
 ]
@@ -457,7 +457,7 @@ dependencies = [
  "serde_with",
  "thiserror",
  "vfio-ioctls",
- "vm-memory",
+ "vm-memory 0.10.0",
  "vmm-sys-util",
 ]
 
@@ -597,7 +597,7 @@ version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9259ddbfbb52cc918f6bbc60390004ddd0228cf1d85f402009ff2b3d95de83f"
 dependencies = [
- "vm-memory",
+ "vm-memory 0.10.0",
 ]
 
 [[package]]
@@ -714,7 +714,7 @@ dependencies = [
  "versionize_derive",
  "virtio-bindings 0.2.0",
  "virtio-queue",
- "vm-memory",
+ "vm-memory 0.10.0",
  "vm-virtio",
  "vmm-sys-util",
 ]
@@ -848,7 +848,7 @@ dependencies = [
  "vfio_user",
  "vm-allocator",
  "vm-device",
- "vm-memory",
+ "vm-memory 0.10.0",
  "vm-migration",
  "vmm-sys-util",
 ]
@@ -1357,7 +1357,7 @@ dependencies = [
 [[package]]
 name = "vfio-bindings"
 version = "0.4.0"
-source = "git+https://github.com/rust-vmm/vfio?branch=main#ea8f710464a24690ce109e6b7dfaa623dc518304"
+source = "git+https://github.com/rust-vmm/vfio?branch=main#89f8e77dd1a2829197ecde65b686bafcc8a1def4"
 dependencies = [
  "vmm-sys-util",
 ]
@@ -1376,14 +1376,14 @@ dependencies = [
  "mshv-ioctls",
  "thiserror",
  "vfio-bindings",
- "vm-memory",
+ "vm-memory 0.10.0",
  "vmm-sys-util",
 ]
 
 [[package]]
 name = "vfio_user"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vfio-user?branch=main#e75c9415d973769c5fd1d07716eb92d6e5be7c48"
+source = "git+https://github.com/rust-vmm/vfio-user?branch=main#eef6bec4d421f08ed1688fe67c5ea33aabbf5069"
 dependencies = [
  "bitflags",
  "libc",
@@ -1393,7 +1393,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "vfio-bindings",
- "vm-memory",
+ "vm-memory 0.11.0",
  "vmm-sys-util",
 ]
 
@@ -1418,7 +1418,7 @@ checksum = "c9b791c5b0717a0558888a4cf7240cea836f39a99cb342e12ce633dcaa078072"
 dependencies = [
  "bitflags",
  "libc",
- "vm-memory",
+ "vm-memory 0.10.0",
  "vmm-sys-util",
 ]
 
@@ -1433,7 +1433,7 @@ dependencies = [
  "vhost",
  "virtio-bindings 0.1.0",
  "virtio-queue",
- "vm-memory",
+ "vm-memory 0.10.0",
  "vmm-sys-util",
 ]
 
@@ -1453,7 +1453,7 @@ dependencies = [
  "vhost-user-backend",
  "virtio-bindings 0.2.0",
  "virtio-queue",
- "vm-memory",
+ "vm-memory 0.10.0",
  "vmm-sys-util",
 ]
 
@@ -1471,7 +1471,7 @@ dependencies = [
  "vhost",
  "vhost-user-backend",
  "virtio-bindings 0.2.0",
- "vm-memory",
+ "vm-memory 0.10.0",
  "vmm-sys-util",
 ]
 
@@ -1516,7 +1516,7 @@ dependencies = [
  "virtio-queue",
  "vm-allocator",
  "vm-device",
- "vm-memory",
+ "vm-memory 0.10.0",
  "vm-migration",
  "vm-virtio",
  "vmm-sys-util",
@@ -1530,7 +1530,7 @@ checksum = "3ba81e2bcc21c0d2fc5e6683e79367e26ad219197423a498df801d79d5ba77bd"
 dependencies = [
  "log",
  "virtio-bindings 0.1.0",
- "vm-memory",
+ "vm-memory 0.10.0",
  "vmm-sys-util",
 ]
 
@@ -1540,7 +1540,7 @@ version = "0.1.0"
 dependencies = [
  "arch",
  "libc",
- "vm-memory",
+ "vm-memory 0.10.0",
 ]
 
 [[package]]
@@ -1552,7 +1552,7 @@ dependencies = [
  "serde",
  "thiserror",
  "vfio-ioctls",
- "vm-memory",
+ "vm-memory 0.10.0",
  "vmm-sys-util",
 ]
 
@@ -1573,6 +1573,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "vm-memory"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d6ea57fe00f9086c59eeeb68e102dd611686bc3c28520fa465996d4d4bdce07"
+dependencies = [
+ "arc-swap",
+ "libc",
+ "winapi",
+]
+
+[[package]]
 name = "vm-migration"
 version = "0.1.0"
 dependencies = [
@@ -1582,7 +1593,7 @@ dependencies = [
  "thiserror",
  "versionize",
  "versionize_derive",
- "vm-memory",
+ "vm-memory 0.10.0",
 ]
 
 [[package]]
@@ -1591,7 +1602,7 @@ version = "0.1.0"
 dependencies = [
  "log",
  "virtio-queue",
- "vm-memory",
+ "vm-memory 0.10.0",
 ]
 
 [[package]]
@@ -1636,7 +1647,7 @@ dependencies = [
  "virtio-queue",
  "vm-allocator",
  "vm-device",
- "vm-memory",
+ "vm-memory 0.10.0",
  "vm-migration",
  "vm-virtio",
  "vmm-sys-util",
