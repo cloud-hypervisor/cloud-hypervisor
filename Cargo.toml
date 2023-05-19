@@ -47,7 +47,7 @@ tpm = { path = "tpm"}
 tracer = { path = "tracer" }
 vmm = { path = "vmm" }
 vmm-sys-util = "0.11.0"
-vm-memory = "0.10.0"
+vm-memory = "0.11.0"
 
 # List of patched crates
 [patch.crates-io]
