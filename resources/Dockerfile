@@ -120,6 +120,7 @@ RUN echo 'source $CARGO_HOME/env' >> "$HOME"/.bashrc \
 
 # install SPDK NVMe
 # only for 'x86_64' platform images as 'docker buildx' can't build 'spdk'
+# hadolint ignore=DL3003
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
        git clone https://github.com/spdk/spdk \
        && cd spdk \
@@ -137,6 +138,7 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
        && cd .. && rm -rf spdk; fi
 
 # install swtpm only for x86_64 arch
+# hadolint ignore=DL3003
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
     git clone https://github.com/stefanberger/libtpms libtpms_build \
     && cd libtpms_build \
