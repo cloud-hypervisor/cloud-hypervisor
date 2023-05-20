@@ -276,7 +276,6 @@ impl DBusApi {
     }
 }
 
-// TODO: add another field to the `seccomp_filters::Thread` enum for the D-Bus API
 // TODO: add command line arguments to make this configurable
 pub fn start_dbus_thread(
     api_notifier: EventFd,

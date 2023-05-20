@@ -13,6 +13,8 @@ use std::convert::TryInto;
 
 pub enum Thread {
     HttpApi,
+    #[cfg(feature = "dbus_api")]
+    DBusApi,
     SignalHandler,
     Vcpu,
     Vmm,
@@ -772,12 +774,50 @@ fn http_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError>
     ])
 }
 
+// The filter containing the white listed syscall rules required by the D-Bus API
+// to function.
+#[cfg(feature = "dbus_api")]
+fn dbus_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
+    Ok(vec![
+        (libc::SYS_brk, vec![]),
+        (libc::SYS_clock_gettime, vec![]),
+        (libc::SYS_clone, vec![]),
+        (libc::SYS_clone3, vec![]),
+        (libc::SYS_close, vec![]),
+        (libc::SYS_dup, vec![]),
+        (libc::SYS_epoll_ctl, vec![]),
+        (libc::SYS_exit, vec![]),
+        (libc::SYS_futex, vec![]),
+        (libc::SYS_getrandom, vec![]),
+        (libc::SYS_madvise, vec![]),
+        (libc::SYS_mmap, vec![]),
+        (libc::SYS_mprotect, vec![]),
+        (libc::SYS_munmap, vec![]),
+        (libc::SYS_prctl, vec![]),
+        (libc::SYS_recvmsg, vec![]),
+        // musl is missing this constant
+        // (libc::SYS_rseq, vec![]),
+        #[cfg(target_arch = "x86_64")]
+        (334, vec![]),
+        #[cfg(target_arch = "aarch64")]
+        (293, vec![]),
+        (libc::SYS_rt_sigprocmask, vec![]),
+        (libc::SYS_sched_getaffinity, vec![]),
+        (libc::SYS_sendmsg, vec![]),
+        (libc::SYS_set_robust_list, vec![]),
+        (libc::SYS_sigaltstack, vec![]),
+        (libc::SYS_write, vec![]),
+    ])
+}
+
 fn get_seccomp_rules(
     thread_type: Thread,
     hypervisor_type: HypervisorType,
 ) -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
     match thread_type {
         Thread::HttpApi => Ok(http_api_thread_rules()?),
+        #[cfg(feature = "dbus_api")]
+        Thread::DBusApi => Ok(dbus_api_thread_rules()?),
         Thread::SignalHandler => Ok(signal_handler_thread_rules()?),
         Thread::Vcpu => Ok(vcpu_thread_rules(hypervisor_type)?),
         Thread::Vmm => Ok(vmm_thread_rules(hypervisor_type)?),
