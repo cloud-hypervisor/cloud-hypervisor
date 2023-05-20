@@ -3,11 +3,13 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 use super::{ApiRequest, VmAction};
+use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{Error as VmmError, Result as VmmResult};
 use futures::channel::oneshot;
 use futures::{executor, FutureExt};
 use hypervisor::HypervisorType;
-use seccompiler::SeccompAction;
+use seccompiler::{apply_filter, SeccompAction};
+use std::panic::AssertUnwindSafe;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -280,10 +282,10 @@ impl DBusApi {
 pub fn start_dbus_thread(
     api_notifier: EventFd,
     api_sender: Sender<ApiRequest>,
-    _seccomp_action: &SeccompAction,
-    _exit_evt: EventFd,
-    _hypervisor_type: HypervisorType,
-) -> VmmResult<(thread::JoinHandle<()>, DBusApiShutdownChannels)> {
+    seccomp_action: &SeccompAction,
+    exit_evt: EventFd,
+    hypervisor_type: HypervisorType,
+) -> VmmResult<(thread::JoinHandle<VmmResult<()>>, DBusApiShutdownChannels)> {
     let dbus_iface = DBusApi::new(api_notifier, api_sender);
     let connection = executor::block_on(async move {
         ConnectionBuilder::session()?
@@ -298,25 +300,49 @@ pub fn start_dbus_thread(
     let (send_shutdown, recv_shutdown) = oneshot::channel::<()>();
     let (send_done, recv_done) = oneshot::channel::<()>();
 
+    // Retrieve seccomp filter for API thread
+    let api_seccomp_filter = get_seccomp_filter(seccomp_action, Thread::DBusApi, hypervisor_type)
+        .map_err(VmmError::CreateSeccompFilter)?;
+
     let thread_join_handle = thread::Builder::new()
         .name("dbus-thread".to_string())
         .spawn(move || {
-            executor::block_on(async move {
-                let recv_shutdown = recv_shutdown.fuse();
-                let executor_tick = futures::future::Fuse::terminated();
-                futures::pin_mut!(recv_shutdown, executor_tick);
-                executor_tick.set(connection.executor().tick().fuse());
+            // Apply seccomp filter for API thread.
+            if !api_seccomp_filter.is_empty() {
+                apply_filter(&api_seccomp_filter)
+                    .map_err(VmmError::ApplySeccompFilter)
+                    .map_err(|e| {
+                        error!("Error applying seccomp filter: {:?}", e);
+                        exit_evt.write(1).ok();
+                        e
+                    })?;
+            }
 
-                loop {
-                    futures::select! {
-                        _ = executor_tick => executor_tick.set(connection.executor().tick().fuse()),
-                        _ = recv_shutdown => {
-                            send_done.send(()).ok();
-                            break;
-                        },
+            std::panic::catch_unwind(AssertUnwindSafe(move || {
+                executor::block_on(async move {
+                    let recv_shutdown = recv_shutdown.fuse();
+                    let executor_tick = futures::future::Fuse::terminated();
+                    futures::pin_mut!(recv_shutdown, executor_tick);
+                    executor_tick.set(connection.executor().tick().fuse());
+
+                    loop {
+                        futures::select! {
+                            _ = executor_tick => executor_tick.set(connection.executor().tick().fuse()),
+                            _ = recv_shutdown => {
+                                send_done.send(()).ok();
+                                break;
+                            },
+                        }
                     }
-                }
+                })
+            }))
+            .map_err(|_| {
+                error!("dbus-api thread panicked");
+                exit_evt.write(1).ok()
             })
+            .ok();
+
+            Ok(())
         })
         .map_err(VmmError::DBusThreadSpawn)?;
 
