@@ -284,7 +284,7 @@ fn start_http_thread(
     hypervisor_type: HypervisorType,
 ) -> Result<thread::JoinHandle<Result<()>>> {
     // Retrieve seccomp filter for API thread
-    let api_seccomp_filter = get_seccomp_filter(seccomp_action, Thread::Api, hypervisor_type)
+    let api_seccomp_filter = get_seccomp_filter(seccomp_action, Thread::HttpApi, hypervisor_type)
         .map_err(VmmError::CreateSeccompFilter)?;
 
     thread::Builder::new()

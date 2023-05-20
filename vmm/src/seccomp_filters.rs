@@ -12,7 +12,7 @@ use seccompiler::{
 use std::convert::TryInto;
 
 pub enum Thread {
-    Api,
+    HttpApi,
     SignalHandler,
     Vcpu,
     Vmm,
@@ -743,9 +743,9 @@ fn vcpu_thread_rules(
     ])
 }
 
-// The filter containing the white listed syscall rules required by the API to
+// The filter containing the white listed syscall rules required by the HTTP API to
 // function.
-fn api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
+fn http_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
     Ok(vec![
         (libc::SYS_accept4, vec![]),
         (libc::SYS_brk, vec![]),
@@ -777,7 +777,7 @@ fn get_seccomp_rules(
     hypervisor_type: HypervisorType,
 ) -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
     match thread_type {
-        Thread::Api => Ok(api_thread_rules()?),
+        Thread::HttpApi => Ok(http_api_thread_rules()?),
         Thread::SignalHandler => Ok(signal_handler_thread_rules()?),
         Thread::Vcpu => Ok(vcpu_thread_rules(hypervisor_type)?),
         Thread::Vmm => Ok(vmm_thread_rules(hypervisor_type)?),
