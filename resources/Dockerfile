@@ -102,6 +102,7 @@ ENV AARCH64_UNKNOWN_LINUX_MUSL_OPENSSL_LIB_DIR=/usr/lib/aarch64-linux-gnu/
 ENV OPENSSL_INCLUDE_DIR=/usr/include/
 
 # Install the rust toolchain
+# hadolint ignore=DL4006
 RUN export ARCH="$(uname -m)" \
     && nohup curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain "$RUST_TOOLCHAIN" \
     && rustup target add "$ARCH"-unknown-linux-musl --toolchain "$RUST_TOOLCHAIN" \
