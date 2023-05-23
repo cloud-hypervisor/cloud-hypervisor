@@ -350,7 +350,7 @@ fn setup_ovs_dpdk() {
     assert!(exec_host_command_status("service openvswitch-switch start").success());
     assert!(exec_host_command_status("ovs-vsctl init").success());
     assert!(
-        exec_host_command_status("ovs-vsctl set Open_vSwitch . other_config:dpdk-init=true")
+        exec_host_command_status("ovs-vsctl set Open_vSwitch . other_config:dpdk-init=true other_config:dpdk-socket-mem=1024")
             .success()
     );
     assert!(exec_host_command_status("service openvswitch-switch restart").success());
