@@ -13,7 +13,7 @@ byteorder = "1.4.3"
 hypervisor = { path = "../hypervisor" }
 libc = "0.2.139"
 log = "0.4.17"
-thiserror = "1.0.39"
+thiserror = "1.0.40"
 tpm = { path = "../tpm" }
 versionize = "0.1.10"
 versionize_derive = "0.1.4"

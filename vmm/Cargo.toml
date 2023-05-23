@@ -39,7 +39,7 @@ serde = { version = "1.0.156", features = ["rc", "derive"] }
 serde_json = "1.0.96"
 serial_buffer = { path = "../serial_buffer" }
 signal-hook = "0.3.15"
-thiserror = "1.0.39"
+thiserror = "1.0.40"
 tracer = { path = "../tracer" }
 uuid = "1.3.3"
 versionize = "0.1.10"
