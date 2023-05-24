@@ -54,6 +54,7 @@ pub struct CpusConfig {
 }
 
 pub const DEFAULT_VCPUS: u8 = 1;
+pub const DEFAULT_MEMORY_POLICY: u32 = 1; // MPOL_PREFERRED
 
 impl Default for CpusConfig {
     fn default() -> Self {
@@ -125,6 +126,7 @@ pub struct MemoryZoneConfig {
     pub hotplugged_size: Option<u64>,
     #[serde(default)]
     pub prefault: bool,
+    pub policy: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]

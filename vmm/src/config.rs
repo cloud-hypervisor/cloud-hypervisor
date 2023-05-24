@@ -649,7 +649,8 @@ impl MemoryConfig {
                     .add("host_numa_node")
                     .add("hotplug_size")
                     .add("hotplugged_size")
-                    .add("prefault");
+                    .add("prefault")
+                    .add("policy");
                 parser.parse(memory_zone).map_err(Error::ParseMemoryZone)?;
 
                 let id = parser.get("id").ok_or(Error::ParseMemoryZoneIdMissing)?;
@@ -690,6 +691,9 @@ impl MemoryConfig {
                     .map_err(Error::ParseMemoryZone)?
                     .unwrap_or(Toggle(false))
                     .0;
+                let policy = parser
+                    .convert::<u32>("policy")
+                    .map_err(Error::ParseMemoryZone)?;
 
                 zones.push(MemoryZoneConfig {
                     id,
@@ -702,6 +706,7 @@ impl MemoryConfig {
                     hotplug_size,
                     hotplugged_size,
                     prefault,
+                    policy,
                 });
             }
             Some(zones)

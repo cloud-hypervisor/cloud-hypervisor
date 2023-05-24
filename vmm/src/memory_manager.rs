@@ -10,6 +10,7 @@ use crate::coredump::{
     CoredumpMemoryRegion, CoredumpMemoryRegions, DumpState, GuestDebuggableError,
 };
 use crate::migration::url_to_path;
+use crate::vm_config::DEFAULT_MEMORY_POLICY;
 use crate::MEMORY_MANAGER_SNAPSHOT_ID;
 use crate::{GuestMemoryMmap, GuestRegionMmap};
 use acpi_tables::{aml, Aml};
@@ -70,7 +71,14 @@ const SGX_PAGE_SIZE: u64 = 1 << 12;
 const HOTPLUG_COUNT: usize = 8;
 
 // Memory policy constants
+#[allow(dead_code)]
+const MPOL_DEFAULT: u32 = 0;
+#[allow(dead_code)]
+const MPOL_PREFERRED: u32 = 1;
+#[allow(dead_code)]
 const MPOL_BIND: u32 = 2;
+#[allow(dead_code)]
+const MPOL_INTERLEAVE: u32 = 3;
 const MPOL_MF_STRICT: u32 = 1;
 const MPOL_MF_MOVE: u32 = 1 << 1;
 
@@ -155,6 +163,7 @@ struct ArchMemRegion {
     r_type: RegionType,
 }
 
+#[allow(dead_code)]
 pub struct MemoryManager {
     boot_guest_memory: GuestMemoryMmap,
     guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
@@ -504,6 +513,7 @@ impl MemoryManager {
                     zone.host_numa_node,
                     None,
                     thp,
+                    zone.policy,
                 )?;
 
                 // Add region to the list of regions associated with the
@@ -583,6 +593,7 @@ impl MemoryManager {
                         zone_config.host_numa_node,
                         existing_memory_files.remove(&guest_ram_mapping.slot),
                         thp,
+                        zone_config.policy,
                     )?;
                     memory_regions.push(Arc::clone(&region));
                     if let Some(memory_zone) = memory_zones.get_mut(&guest_ram_mapping.zone_id) {
@@ -709,6 +720,7 @@ impl MemoryManager {
                 hotplug_size: config.hotplug_size,
                 hotplugged_size: config.hotplugged_size,
                 prefault: config.prefault,
+                policy: None,
             }];
 
             Ok((config.size, zones, allow_mem_hotplug))
@@ -766,6 +778,16 @@ impl MemoryManager {
                         error!(
                             "Invalid to define 'hotplugged_size' with hotplug \
                             method 'acpi'"
+                        );
+                        return Err(Error::InvalidMemoryParameters);
+                    }
+                }
+
+                if let Some(policy) = zone.policy {
+                    if policy < MPOL_DEFAULT || policy > MPOL_INTERLEAVE {
+                        error!(
+                            "'policy' should be greater than or equal to MPOL_DEFAULT(0) and\
+                            less than or equal to MPOL_INTERLEAVE(3)"
                         );
                         return Err(Error::InvalidMemoryParameters);
                     }
@@ -1007,6 +1029,7 @@ impl MemoryManager {
                                 zone.host_numa_node,
                                 None,
                                 config.thp,
+                                zone.policy,
                             )?;
 
                             guest_memory = guest_memory
@@ -1301,6 +1324,7 @@ impl MemoryManager {
         host_numa_node: Option<u32>,
         existing_memory_file: Option<File>,
         thp: bool,
+        policy: Option<u32>,
     ) -> Result<Arc<GuestRegionMmap>, Error> {
         let mut mmap_flags = libc::MAP_NORESERVE;
 
@@ -1357,7 +1381,6 @@ impl MemoryManager {
         if let Some(node) = host_numa_node {
             let addr = region.deref().as_ptr();
             let len = region.deref().size() as u64;
-            let mode = MPOL_BIND;
             let mut nodemask: Vec<u64> = Vec::new();
             let flags = MPOL_MF_STRICT | MPOL_MF_MOVE;
 
@@ -1381,8 +1404,15 @@ impl MemoryManager {
             // MPOL_BIND is the selected mode as it specifies a strict policy
             // that restricts memory allocation to the nodes specified in the
             // nodemask.
-            Self::mbind(addr, len, mode, nodemask, maxnode, flags)
-                .map_err(Error::ApplyNumaPolicy)?;
+            Self::mbind(
+                addr,
+                len,
+                policy.unwrap_or(DEFAULT_MEMORY_POLICY),
+                nodemask,
+                maxnode,
+                flags,
+            )
+            .map_err(Error::ApplyNumaPolicy)?;
         }
 
         Ok(Arc::new(region))
@@ -1443,6 +1473,7 @@ impl MemoryManager {
             None,
             None,
             self.thp,
+            None,
         )?;
 
         // Map it into the guest
