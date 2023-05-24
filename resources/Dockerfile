@@ -53,6 +53,8 @@ RUN apt-get update \
         git-core \
         dnsmasq \
         dmsetup \
+        ca-certificates \
+        unzip \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
