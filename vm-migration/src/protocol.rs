@@ -241,6 +241,32 @@ impl MemoryRangeTable {
         table
     }
 
+    pub fn from_mincore(vector: Vec<u8>, start_addr: u64, page_size: u64) -> Self {
+        let mut table = MemoryRangeTable::default();
+        let mut entry: Option<MemoryRange> = None;
+        for (i, value) in vector.iter().enumerate() {
+            let is_page_res = value & 0x1 == 0x1;
+            let page_offset = i as u64 * page_size;
+            if is_page_res {
+                if let Some(entry) = &mut entry {
+                    entry.length += page_size;
+                } else {
+                    entry = Some(MemoryRange {
+                        gpa: start_addr + page_offset,
+                        length: page_size,
+                    });
+                }
+            } else if let Some(entry) = entry.take() {
+                table.push(entry);
+            }
+        }
+        if let Some(entry) = entry.take() {
+            table.push(entry);
+        }
+
+        table
+    }
+
     pub fn regions(&self) -> &[MemoryRange] {
         &self.data
     }
