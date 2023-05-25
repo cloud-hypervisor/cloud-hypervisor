@@ -625,6 +625,7 @@ fn vmm_thread_rules(
         (libc::SYS_wait4, vec![]),
         (libc::SYS_write, vec![]),
         (libc::SYS_writev, vec![]),
+        (libc::SYS_mincore, vec![]),
     ])
 }
 

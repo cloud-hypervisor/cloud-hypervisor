@@ -30,7 +30,7 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::ffi;
 use std::fs::{File, OpenOptions};
-use std::io::{self, Read};
+use std::io::{self, Read, Seek, SeekFrom};
 use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
@@ -2062,6 +2062,43 @@ impl MemoryManager {
 
         Ok(())
     }
+
+    pub fn save_range_to_file(
+        &self,
+        mut memory_file: &File,
+        range: &MemoryRange,
+        file_offset: u64,
+    ) -> result::Result<(), MigratableError> {
+        let guest_memory = self.guest_memory.memory();
+        let mut offset: u64 = 0;
+
+        if file_offset != 0 {
+            memory_file
+                .seek(SeekFrom::Start(file_offset))
+                .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+        }
+        // Here we are manually handling the retry in case we can't read
+        // the whole region at once because we can't use the implementation
+        // from vm-memory::GuestMemory of write_all_to() as it is not
+        // following the correct behavior. For more info about this issue
+        // see: https://github.com/rust-vmm/vm-memory/issues/174
+        loop {
+            let bytes_written = guest_memory
+                .write_to(
+                    GuestAddress(range.gpa + offset),
+                    &mut memory_file,
+                    (range.length - offset) as usize,
+                )
+                .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+            offset += bytes_written as u64;
+
+            if offset == range.length {
+                break;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 struct MemoryNotify {
@@ -2488,37 +2525,64 @@ impl Transportable for MemoryManager {
         memory_file_path.push(String::from(SNAPSHOT_FILENAME));
 
         // Create the snapshot file for the entire memory
-        let mut memory_file = OpenOptions::new()
+        let memory_file = OpenOptions::new()
             .read(true)
             .write(true)
             .create_new(true)
+            .truncate(true)
             .open(memory_file_path)
             .map_err(|e| MigratableError::MigrateSend(e.into()))?;
 
         let guest_memory = self.guest_memory.memory();
 
-        for range in self.snapshot_memory_ranges.regions() {
-            let mut offset: u64 = 0;
-            // Here we are manually handling the retry in case we can't read
-            // the whole region at once because we can't use the implementation
-            // from vm-memory::GuestMemory of write_all_to() as it is not
-            // following the correct behavior. For more info about this issue
-            // see: https://github.com/rust-vmm/vm-memory/issues/174
-            loop {
-                let bytes_written = guest_memory
-                    .write_to(
-                        GuestAddress(range.gpa + offset),
-                        &mut memory_file,
-                        (range.length - offset) as usize,
-                    )
-                    .map_err(|e| MigratableError::MigrateSend(e.into()))?;
-                offset += bytes_written as u64;
+        let total_size = guest_memory.iter().map(|region| region.len()).sum::<u64>();
+        memory_file
+            .set_len(total_size)
+            .map_err(|e| MigratableError::MigrateSend(e.into()))?;
 
-                if offset == range.length {
-                    break;
+        // SAFETY: FFI call with correct arguments
+        let ret = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+        if ret < 0 {
+            return Err(MigratableError::MigrateSend(
+                std::io::Error::last_os_error().into(),
+            ));
+        }
+        let page_size = ret as u64;
+        let mut offset = 0_u64;
+        for range in self.snapshot_memory_ranges.regions() {
+            let mut buffer: Vec<u8> = Vec::new();
+            let length = range.length;
+            let address = guest_memory
+                .get_host_address(GuestAddress(range.gpa))
+                .unwrap() as u64;
+            buffer.resize(
+                ((length + page_size - 1) / page_size).try_into().unwrap(),
+                0,
+            );
+            // SAFETY: FFI call with correct arguments
+            let ret = unsafe {
+                libc::mincore(
+                    address as *mut libc::c_void,
+                    length.try_into().unwrap(),
+                    buffer.as_mut_ptr(),
+                )
+            };
+            if ret < 0 {
+                return Err(MigratableError::MigrateSend(
+                    std::io::Error::last_os_error().into(),
+                ));
+            }
+
+            let sub_table = MemoryRangeTable::from_mincore(buffer, range.gpa, page_size);
+            if !sub_table.regions().is_empty() {
+                for r in sub_table.regions() {
+                    self.save_range_to_file(&memory_file, r, r.gpa - range.gpa + offset)?;
                 }
             }
+            // Move to next range.
+            offset += range.length;
         }
+
         Ok(())
     }
 }
