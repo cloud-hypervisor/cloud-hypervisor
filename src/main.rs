@@ -138,19 +138,19 @@ fn default_rng() -> String {
 /// Launch a cloud-hypervisor VMM.
 pub struct TopLevel {
     #[argh(option, long = "cpus", default = "default_vcpus()")]
-    /// boot=<boot_vcpus>,max=<max_vcpus>,topology=<threads_per_core>:<cores_per_die>:<dies_per_package>:<packages>,kvm_hyperv=on|off,max_phys_bits=<maximum_number_of_physical_bits>,affinity=<list_of_vcpus_with_their_associated_cpuset>,features=<list_of_features_to_enable>
+    /// boot=<boot_vcpus>, max=<max_vcpus>, topology=<threads_per_core>:<cores_per_die>:<dies_per_package>:<packages>, kvm_hyperv=on|off, max_phys_bits=<maximum_number_of_physical_bits>, affinity=<list_of_vcpus_with_their_associated_cpuset>, features=<list_of_features_to_enable>
     cpus: String,
 
     #[argh(option, long = "platform")]
-    /// num_pci_segments=<num_pci_segments>,iommu_segments=<list_of_segments>,serial_number=<dmi_device_serial_number>,uuid=<dmi_device_uuid>,oem_strings=<list_of_strings>
+    /// num_pci_segments=<num_pci_segments>, iommu_segments=<list_of_segments>, serial_number=<dmi_device_serial_number>, uuid=<dmi_device_uuid>, oem_strings=<list_of_strings>
     platform: Option<String>,
 
     #[argh(option, long = "memory", default = "default_memory()")]
-    /// size=<guest_memory_size>,mergeable=on|off,shared=on|off,hugepages=on|off,hugepage_size=<hugepage_size>,hotplug_method=acpi|virtio-mem,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>,prefault=on|off,thp=on|off
+    /// size=<guest_memory_size>, mergeable=on|off, shared=on|off, hugepages=on|off, hugepage_size=<hugepage_size>, hotplug_method=acpi|virtio-mem, hotplug_size=<hotpluggable_memory_size>, hotplugged_size=<hotplugged_memory_size>, prefault=on|off, thp=on|off
     memory: String,
 
     #[argh(option, long = "memory-zone")]
-    /// size=<guest_memory_region_size>,file=<backing_file>,shared=on|off,hugepages=on|off,hugepage_size=<hugepage_size>,host_numa_node=<node_id>,id=<zone_identifier>,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>,prefault=on|off
+    /// size=<guest_memory_region_size>, file=<backing_file>, shared=on|off, hugepages=on|off, hugepage_size=<hugepage_size>, host_numa_node=<node_id>, id=<zone_identifier>, hotplug_size=<hotpluggable_memory_size>, hotplugged_size=<hotplugged_memory_size>, prefault=on|off
     memory_zone: Vec<String>,
 
     #[argh(option, long = "firmware")]
@@ -170,27 +170,27 @@ pub struct TopLevel {
     cmdline: Option<String>,
 
     #[argh(option, long = "disk")]
-    /// path=<disk_image_path>,readonly=on|off,direct=on|off,iommu=on|off,num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,vhost_user=on|off,socket=<vhost_user_socket_path>,bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,id=<device_id>,pci_segment=<segment_id>
+    /// path=<disk_image_path>, readonly=on|off, direct=on|off, iommu=on|off, num_queues=<number_of_queues>, queue_size=<size_of_each_queue>, vhost_user=on|off, socket=<vhost_user_socket_path>, bw_size=<bytes>, bw_one_time_burst=<bytes>, bw_refill_time=<ms>, ops_size=<io_ops>, ops_one_time_burst=<io_ops>, ops_refill_time=<ms>, id=<device_id>, pci_segment=<segment_id>
     disk: Vec<String>,
 
     #[argh(option, long = "net")]
-    /// tap=<if_name>,ip=<ip_addr>,mask=<net_mask>,mac=<mac_addr>,fd=<fd1,fd2...>,iommu=on|off,num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,id=<device_id>,vhost_user=<vhost_user_enable>,socket=<vhost_user_socket_path>,vhost_mode=client|server,bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,pci_segment=<segment_id>offload_tso=on|off,offload_ufo=on|off,offload_csum=on|off
+    /// tap=<if_name>, ip=<ip_addr>, mask=<net_mask>, mac=<mac_addr>, fd=<fd1,fd2...>, iommu=on|off, num_queues=<number_of_queues>, queue_size=<size_of_each_queue>, id=<device_id>, vhost_user=<vhost_user_enable>, socket=<vhost_user_socket_path>, vhost_mode=client|server, bw_size=<bytes>, bw_one_time_burst=<bytes>, bw_refill_time=<ms>, ops_size=<io_ops>, ops_one_time_burst=<io_ops>, ops_refill_time=<ms>, pci_segment=<segment_id>offload_tso=on|off, offload_ufo=on|off, offload_csum=on|off
     net: Vec<String>,
 
     #[argh(option, long = "rng", default = "default_rng()")]
-    /// src=<entropy_source_path>,iommu=on|off
+    /// src=<entropy_source_path>, iommu=on|off
     rng: String,
 
     #[argh(option, long = "balloon")]
-    /// size=<balloon_size>,deflate_on_oom=on|off,free_page_reporting=on|off
+    /// size=<balloon_size>, deflate_on_oom=on|off, free_page_reporting=on|off
     balloon: Option<String>,
 
     #[argh(option, long = "fs")]
-    /// tag=<tag_name>,socket=<socket_path>,num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,id=<device_id>,pci_segment=<segment_id>
+    /// tag=<tag_name>, socket=<socket_path>, num_queues=<number_of_queues>, queue_size=<size_of_each_queue>, id=<device_id>, pci_segment=<segment_id>
     fs: Vec<String>,
 
     #[argh(option, long = "pmem")]
-    /// file=<backing_file_path>,size=<persistent_memory_size>,iommu=on|off,discard_writes=on|off,id=<device_id>,pci_segment=<segment_id>
+    /// file=<backing_file_path>, size=<persistent_memory_size>, iommu=on|off, discard_writes=on|off, id=<device_id>, pci_segment=<segment_id>
     pmem: Vec<String>,
 
     #[argh(option, long = "serial", default = "String::from(\"null\")")]
@@ -198,27 +198,27 @@ pub struct TopLevel {
     serial: String,
 
     #[argh(option, long = "console", default = "String::from(\"tty\")")]
-    /// off|null|pty|tty|file=/path/to/a/file,iommu=on|off
+    /// off|null|pty|tty|file=/path/to/a/file, iommu=on|off
     console: String,
 
     #[argh(option, long = "device")]
-    /// path=<device_path>,iommu=on|off,id=<device_id>,pci_segment=<segment_id>
+    /// path=<device_path>, iommu=on|off, id=<device_id>, pci_segment=<segment_id>
     device: Vec<String>,
 
     #[argh(option, long = "user-device")]
-    /// socket=<socket_path>,id=<device_id>,pci_segment=<segment_id>
+    /// socket=<socket_path>, id=<device_id>, pci_segment=<segment_id>
     user_device: Vec<String>,
 
     #[argh(option, long = "vdpa")]
-    /// path=<device_path>,num_queues=<number_of_queues>,iommu=on|off,id=<device_id>,pci_segment=<segment_id>
+    /// path=<device_path>, num_queues=<number_of_queues>, iommu=on|off, id=<device_id>, pci_segment=<segment_id>
     vdpa: Vec<String>,
 
     #[argh(option, long = "vsock")]
-    /// cid=<context_id>,socket=<socket_path>,iommu=on|off,id=<device_id>,pci_segment=<segment_id>
+    /// cid=<context_id>, socket=<socket_path>, iommu=on|off, id=<device_id>, pci_segment=<segment_id>
     vsock: Option<String>,
 
     #[argh(option, long = "numa")]
-    /// guest_numa_id=<node_id>,cpus=<cpus_id>,distances=<list_of_distances_to_destination_nodes>,memory_zones=<list_of_memory_zones>,sgx_epc_sections=<list_of_sgx_epc_sections>
+    /// guest_numa_id=<node_id>, cpus=<cpus_id>, distances=<list_of_distances_to_destination_nodes>, memory_zones=<list_of_memory_zones>, sgx_epc_sections=<list_of_sgx_epc_sections>
     numa: Vec<String>,
 
     #[argh(switch, long = "watchdog")]
@@ -242,7 +242,7 @@ pub struct TopLevel {
     event_monitor: Option<String>,
 
     #[argh(option, long = "restore")]
-    /// source_url=<source_url>,prefault=on|off
+    /// source_url=<source_url>, prefault=on|off
     restore: Option<String>,
 
     #[argh(option, long = "seccomp", default = "String::from(\"true\")")]
@@ -255,7 +255,7 @@ pub struct TopLevel {
 
     #[cfg(target_arch = "x86_64")]
     #[argh(option, long = "sgx-epc")]
-    /// id=<epc_section_identifier>,size=<epc_section_size>,prefault=on|off
+    /// id=<epc_section_identifier>, size=<epc_section_size>, prefault=on|off
     sgx_epc: Vec<String>,
 
     #[cfg(feature = "guest_debug")]
