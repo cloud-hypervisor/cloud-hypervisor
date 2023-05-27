@@ -1,18 +1,21 @@
 - [Cloud Hypervisor API](#cloud-hypervisor-api)
   - [External API](#external-api)
     - [REST API](#rest-api)
-    - [Location and availability](#location-and-availability)
-    - [Endpoints](#endpoints)
-      - [Virtual Machine Manager (VMM) Actions](#virtual-machine-manager-vmm-actions)
-      - [Virtual Machine (VM) Actions](#virtual-machine-vm-actions)
-    - [REST API Examples](#rest-api-examples)
-      - [Create a Virtual Machine](#create-a-virtual-machine)
-      - [Boot a Virtual Machine](#boot-a-virtual-machine)
-      - [Dump a Virtual Machine Information](#dump-a-virtual-machine-information)
-      - [Reboot a Virtual Machine](#reboot-a-virtual-machine)
-      - [Shut a Virtual Machine Down](#shut-a-virtual-machine-down)
+      - [REST API Location and availability](#rest-api-location-and-availability)
+      - [REST API Endpoints](#rest-api-endpoints)
+        - [Virtual Machine Manager (VMM) Actions](#virtual-machine-manager-vmm-actions)
+        - [Virtual Machine (VM) Actions](#virtual-machine-vm-actions)
+      - [REST API Examples](#rest-api-examples)
+        - [Create a Virtual Machine](#create-a-virtual-machine)
+        - [Boot a Virtual Machine](#boot-a-virtual-machine)
+        - [Dump a Virtual Machine Information](#dump-a-virtual-machine-information)
+        - [Reboot a Virtual Machine](#reboot-a-virtual-machine)
+        - [Shut a Virtual Machine Down](#shut-a-virtual-machine-down)
+    - [D-Bus API](#d-bus-api)
+      - [D-Bus API Location and availability](#d-bus-api-location-and-availability)
+      - [D-Bus API Interface](#d-bus-api-interface)
     - [Command Line Interface](#command-line-interface)
-    - [REST API and CLI Architectural Relationship](#rest-api-and-cli-architectural-relationship)
+    - [REST API, D-Bus API and CLI Architectural Relationship](#rest-api-and-cli-architectural-relationship)
   - [Internal API](#internal-api)
     - [Goals and Design](#goals-and-design)
   - [End to End Example](#end-to-end-example)
@@ -21,9 +24,11 @@
 
 The Cloud Hypervisor API is made of 2 distinct interfaces:
 
-1. **The external API**. This is the user facing API. Users and operators can
-   control and manage Cloud Hypervisor through either a REST API or a Command
-   Line Interface (CLI).
+1. **The External API** This is the user facing API. Users and operators
+   can control and manage the Cloud Hypervisor through various options
+   including a REST API, a Command Line Interface (CLI) or a D-Bus based API,
+   which is not compiled into Cloud Hypervisor by default.
+
 1. **The internal API**, based on [rust's Multi-Producer, Single-Consumer (MPSC)](https://doc.rust-lang.org/std/sync/mpsc/)
    module. This API is used internally by the Cloud Hypervisor threads to
    communicate between each others.
@@ -40,10 +45,10 @@ API triggers VM and VMM specific actions, and as such it is designed as a
 collection of RPC-style, static methods.
 
 The API is [OpenAPI 3.0](https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.0.md)
-compliant. Please consult the [Cloud Hypervisor API](https://raw.githubusercontent.com/cloud-hypervisor/cloud-hypervisor/master/vmm/src/api/openapi/cloud-hypervisor.yaml)
-document for more details about the API payloads and responses.
+compliant. Please consult the [Cloud Hypervisor OpenAPI Document](https://raw.githubusercontent.com/cloud-hypervisor/cloud-hypervisor/master/vmm/src/api/openapi/cloud-hypervisor.yaml)
+for more details about the API payloads and responses.
 
-### Location and availability
+#### REST API Location and availability
 
 The REST API is available as soon as the Cloud Hypervisor binary is started,
 through a local UNIX socket.
@@ -65,18 +70,18 @@ Cloud Hypervisor Guest
     Disk(s): None
 ```
 
-### Endpoints
+#### REST API Endpoints
 
 The Cloud Hypervisor API exposes the following actions through its endpoints:
 
-#### Virtual Machine Manager (VMM) Actions
+##### Virtual Machine Manager (VMM) Actions
 
 | Action                              | Endpoint        | Request Body | Response Body              | Prerequisites      |
 | ----------------------------------- | --------------- | ------------ | -------------------------- | ------------------ |
 | Check for the REST API availability | `/vmm.ping`     | N/A          | `/schemas/VmmPingResponse` | N/A                |
 | Shut the VMM down                   | `/vmm.shutdown` | N/A          | N/A                        | The VMM is running |
 
-#### Virtual Machine (VM) Actions
+##### Virtual Machine (VM) Actions
 
 | Action                             | Endpoint                | Request Body                    | Response Body            | Prerequisites                                          |
 | ---------------------------------- | ----------------------- | ------------------------------- | ------------------------ | ------------------------------------------------------ |
@@ -110,10 +115,10 @@ The Cloud Hypervisor API exposes the following actions through its endpoints:
 
 * The `vmcoredump` action is available exclusively for the `x86_64`
 architecture and can be executed only when the `guest_debug` feature is
-enabled. Without this feature, the corresponding REST API endpoint is not
-available.
+enabled. Without this feature, the corresponding [REST API](#rest-api) or
+[D-Bus API](#d-bus-api) endpoints are not available.
 
-### REST API Examples
+#### REST API Examples
 
 For the following set of examples, we assume Cloud Hypervisor is started with
 the REST API available at `/tmp/cloud-hypervisor.sock`:
@@ -129,7 +134,7 @@ Cloud Hypervisor Guest
     Disk(s): None
 ```
 
-#### Create a Virtual Machine
+##### Create a Virtual Machine
 
 We want to create a virtual machine with the following characteristics:
 
@@ -157,7 +162,7 @@ curl --unix-socket /tmp/cloud-hypervisor.sock -i \
          }'
 ```
 
-#### Boot a Virtual Machine
+##### Boot a Virtual Machine
 
 Once the VM is created, we can boot it:
 
@@ -167,7 +172,7 @@ Once the VM is created, we can boot it:
 curl --unix-socket /tmp/cloud-hypervisor.sock -i -X PUT 'http://localhost/api/v1/vm.boot'
 ```
 
-#### Dump a Virtual Machine Information
+##### Dump a Virtual Machine Information
 
 We can fetch information about any VM, as soon as it's created:
 
@@ -179,7 +184,7 @@ curl --unix-socket /tmp/cloud-hypervisor.sock -i \
      -H 'Accept: application/json'
 ```
 
-#### Reboot a Virtual Machine
+##### Reboot a Virtual Machine
 
 We can reboot a VM that's already booted:
 
@@ -189,7 +194,7 @@ We can reboot a VM that's already booted:
 curl --unix-socket /tmp/cloud-hypervisor.sock -i -X PUT 'http://localhost/api/v1/vm.reboot'
 ```
 
-#### Shut a Virtual Machine Down
+##### Shut a Virtual Machine Down
 
 Once booted, we can shut a VM down from the REST API:
 
@@ -199,6 +204,50 @@ Once booted, we can shut a VM down from the REST API:
 curl --unix-socket /tmp/cloud-hypervisor.sock -i -X PUT 'http://localhost/api/v1/vm.shutdown'
 ```
 
+### D-Bus API
+
+Cloud Hypervisor offers a D-Bus API as an alternative to its REST API. As of
+writing this document, the D-Bus API mirrors the functionality of the REST
+API and shares the same set of endpoints, meaning that it supports every call
+that is supported by the REST API and can be a drop-in replacement since it
+also consumes/produces JSON.
+
+#### D-Bus API Location and availability
+
+This feature is not compiled into Cloud Hypervisor by default. Users who
+wish to use the D-Bus API, must explicitly enable it with the `dbus_api`
+feature flag when compiling Cloud Hypervisor.
+
+```sh
+$ ./scripts/dev_cli.sh build --release --libc musl -- --features dbus_api
+```
+
+Once this feature is enabled, it can be configured with the following
+CLI options:
+
+```
+  --dbus-service-name
+                    well known name of the service
+  --dbus-object-path
+                    object path to serve the dbus interface
+  --dbus-system-bus use the system bus instead of a session bus
+```
+
+Example invocation:
+
+```sh
+$ ./cloud-hypervisor --dbus-service-name "org.cloudhypervisor.DBusApi" \
+                     --dbus-object-path "/org/cloudhypervisor/DBusApi"
+```
+
+This will start serving a service with the name `org.cloudhypervisor.DBusApi1`
+which in turn can be used to control and manage Cloud Hypervisor.
+
+#### D-Bus API Interface
+
+Please refer to the [REST API](#rest-api) documentation. As previously
+mentioned, the D-Bus API currently mirrors the behaviour of the REST API.
+
 ### Command Line Interface
 
 The Cloud Hypervisor Command Line Interface (CLI) can only be used for launching
@@ -206,22 +255,26 @@ the Cloud Hypervisor binary, i.e. it can not be used for controlling the VMM or
 the launched VM once they're up and running.
 
 If you want to inspect the VMM, or control the VM after launching Cloud
-Hypervisor from the CLI, you must use the [REST API](#rest-api).
+Hypervisor from the CLI, you must use either the [REST API](#rest-api)
+or the [D-Bus API](#d-bus-api).
 
-From the CLI, one can either:
+From the CLI, one can:
 
 1. Create and boot a complete virtual machine by using the CLI options to build
    the VM config. Run `cloud-hypervisor --help` for a complete list of CLI
-   options. As soon as the `cloud-hypervisor` binary is launched, the
-   [REST API](#rest-api) is available for controlling and managing the VM.
-1. Start the [REST API](#rest-api) server only, by not passing any VM
-   configuration options. The VM can then be asynchronously created and booted
-   by sending HTTP commands to the [REST API](#rest-api). Check the
-   [REST API examples](#rest-api-examples) section for more details.
+   options. As soon as the `cloud-hypervisor` binary is launched, contrary
+   to the [D-Bus API](#d-bus-api), the [REST API](#rest-api) is available
+   for controlling and managing the VM. The [D-Bus API](#d-bus-api) doesn't start
+   automatically and needs to be explicitly configured in order to be run.
+1. Start either the REST API, D-Bus API or both simultaneously without passing
+   any VM configuration options. The VM can then be asynchronously created and
+   booted by calling API methods of choice. It should be noted that one external
+   API does not exclude another; it is possible to have both the REST and D-Bus
+   APIs running simultaneously.
 
-### REST API and CLI Architectural Relationship
+### REST API, D-Bus API and CLI Architectural Relationship
 
-The REST API and the CLI both rely on a common, [internal API](#internal-api).
+The REST API, D-Bus API and the CLI all rely on a common, [internal API](#internal-api).
 
 The CLI options are parsed by the
 [argh crate](https://docs.rs/argh/latest/argh/) and then translated into
@@ -232,7 +285,11 @@ The REST API is processed by an HTTP thread using the
 crate. As with the CLI, the HTTP requests eventually get translated into
 [internal API](#internal-api) commands.
 
-As a summary, the REST API and the CLI are essentially frontends for the
+The D-Bus API is implemented using the [zbus](https://github.com/dbus2/zbus)
+crate and runs in its own thread. Whenever it needs to call the [internal API](#internal-api),
+the [blocking](https://github.com/smol-rs/blocking) crate is used perform the call in zbus' async context.
+
+As a summary, the REST API, the D-Bus API and the CLI are essentially frontends for the
 [internal API](#internal-api):
 
 ```
@@ -243,11 +300,11 @@ As a summary, the REST API and the CLI are essentially frontends for the
                        |          +------------------+        |
                        |                                      |      +------------------------+
                        |                                      |      |                        |
-+------------+         |                                      |      |                        |
-|            |         |                                      |      | +--------------+       |
-|    User    +---------+                                      +------> | Internal API |       |
-|            |         |                                      |      | +--------------+       |
-+------------+         |                                      |      |                        |
++------------+         |            +----------+              |      |                        |
+|            |         |  D-Bus API |          |              |      | +--------------+       |
+|    User    +---------+----------->+   zbus   +--------------+------> | Internal API |       |
+|            |         |            |          |              |      | +--------------+       |
++------------+         |            +----------+              |      |                        |
                        |                                      |      |                        |
                        |                                      |      +------------------------+
                        |            +----------+              |                 VMM
@@ -262,22 +319,23 @@ As a summary, the REST API and the CLI are essentially frontends for the
 ## Internal API
 
 The Cloud Hypervisor internal API, as its name suggests, is used internally
-by the different Cloud Hypervisor threads (VMM, HTTP, control loop, etc) to
-send commands and responses to each others.
+by the different Cloud Hypervisor threads (VMM, HTTP, D-Bus, control loop,
+etc) to send commands and responses to each others.
 
 It is based on [rust's Multi-Producer, Single-Consumer (MPSC)](https://doc.rust-lang.org/std/sync/mpsc/),
 and the single consumer (a.k.a. the API receiver) is the Cloud Hypervisor
 control loop.
 
-API producers are the HTTP thread handling the [REST API](#rest-api) and the
-main thread that initially parses the [CLI](#command-line-interface).
+API producers are the HTTP thread handling the [REST API](#rest-api), the
+D-Bus thread handling the [D-Bus API](#d-bus-api) and the main thread that
+initially parses the [CLI](#command-line-interface).
 
 ### Goals and Design
 
 The internal API is designed for controlling, managing and inspecting a Cloud
 Hypervisor VMM and its guest. It is a backend for handling external, user
-visible requests through either the [REST API](#rest-api) or the
-[CLI](#command-line-interface) interfaces.
+visible requests through the [REST API](#rest-api), the [D-Bus API](#d-bus-api)
+or the [CLI](#command-line-interface) interfaces.
 
 The API follows a command-response scheme that closely maps the [REST API](#rest-api).
 Any command must be replied to with a response.
