@@ -28,6 +28,9 @@ use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::{
     VfioContainer, VfioDevice, VfioIrq, VfioRegionInfoCap, VfioRegionSparseMmapArea,
 };
+use vm_allocator::page_size::{
+    align_page_size_down, align_page_size_up, is_4k_aligned, is_4k_multiple, is_page_size_aligned,
+};
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
@@ -499,6 +502,29 @@ impl VfioCommon {
         Ok(vfio_common)
     }
 
+    /// In case msix table offset is not page size aligned, we need do some fixup to achive it.
+    /// Becuse we don't want the MMIO RW region and trap region overlap each other.
+    fn fixup_msix_region(&mut self, bar_id: u32, region_size: u64) -> u64 {
+        let msix = self.interrupt.msix.as_mut().unwrap();
+        let msix_cap = &mut msix.cap;
+
+        // Suppose table_bir equals to pba_bir here. Am I right?
+        let (table_offset, table_size) = msix_cap.table_range();
+        if is_page_size_aligned(table_offset) || msix_cap.table_bir() != bar_id {
+            return region_size;
+        }
+
+        let (pba_offset, pba_size) = msix_cap.pba_range();
+        let msix_sz = align_page_size_up(table_size + pba_size);
+        // Expand region to hold RW and trap region which both page size aligned
+        let size = std::cmp::max(region_size * 2, msix_sz * 2);
+        // let table starts from the middle of the region
+        msix_cap.table_set_offset((size / 2) as u32);
+        msix_cap.pba_set_offset((size / 2 + pba_offset - table_offset) as u32);
+
+        size
+    }
+
     pub(crate) fn allocate_bars(
         &mut self,
         allocator: &Arc<Mutex<SystemAllocator>>,
@@ -662,7 +688,9 @@ impl VfioCommon {
                         .ok_or(PciDeviceError::IoAllocationFailed(region_size))?
                 }
                 PciBarRegionType::Memory64BitRegion => {
-                    // BAR allocation must be naturally aligned
+                    // We need do some fixup to keep MMIO RW region and msix cap region page size
+                    // aligned.
+                    region_size = self.fixup_msix_region(bar_id, region_size);
                     mmio_allocator
                         .allocate(
                             restored_bar_addr,
@@ -804,6 +832,23 @@ impl VfioCommon {
             cap_offset,
             interrupt_source_group,
         });
+    }
+
+    pub(crate) fn get_msix_cap_idx(&self) -> Option<usize> {
+        let mut cap_next = self
+            .vfio_wrapper
+            .read_config_byte(PCI_CONFIG_CAPABILITY_OFFSET);
+
+        while cap_next != 0 {
+            let cap_id = self.vfio_wrapper.read_config_byte(cap_next.into());
+            if PciCapabilityId::from(cap_id) == PciCapabilityId::MsiX {
+                return Some(cap_next as usize);
+            } else {
+                cap_next = self.vfio_wrapper.read_config_byte((cap_next + 1).into());
+            }
+        }
+
+        None
     }
 
     pub(crate) fn parse_capabilities(&mut self, bdf: PciBdf) {
@@ -1160,6 +1205,15 @@ impl VfioCommon {
             return self.configuration.read_reg(reg_idx);
         }
 
+        if let Some(id) = self.get_msix_cap_idx() {
+            let msix = self.interrupt.msix.as_mut().unwrap();
+            if reg_idx * 4 == id + 4 {
+                return msix.cap.table;
+            } else if reg_idx * 4 == id + 8 {
+                return msix.cap.pba;
+            }
+        }
+
         // Since we don't support passing multi-functions devices, we should
         // mask the multi-function bit, bit 7 of the Header Type byte on the
         // register 3.
@@ -1322,20 +1376,6 @@ impl VfioPciDevice {
         self.iommu_attached
     }
 
-    fn align_page_size(address: u64) -> u64 {
-        // SAFETY: FFI call. Trivially safe.
-        let page_size = unsafe { sysconf(_SC_PAGESIZE) as u64 };
-        (address + page_size - 1) & !(page_size - 1)
-    }
-
-    fn is_4k_aligned(address: u64) -> bool {
-        (address & 0xfff) == 0
-    }
-
-    fn is_4k_multiple(size: u64) -> bool {
-        (size & 0xfff) == 0
-    }
-
     fn generate_sparse_areas(
         caps: &[VfioRegionInfoCap],
         region_index: u32,
@@ -1347,14 +1387,14 @@ impl VfioPciDevice {
             match cap {
                 VfioRegionInfoCap::SparseMmap(sparse_mmap) => return Ok(sparse_mmap.areas.clone()),
                 VfioRegionInfoCap::MsixMappable => {
-                    if !Self::is_4k_aligned(region_start) {
+                    if !is_4k_aligned(region_start) {
                         error!(
                             "Region start address 0x{:x} must be at least aligned on 4KiB",
                             region_start
                         );
                         return Err(VfioPciError::RegionAlignment);
                     }
-                    if !Self::is_4k_multiple(region_size) {
+                    if !is_4k_multiple(region_size) {
                         error!(
                             "Region size 0x{:x} must be at least a multiple of 4KiB",
                             region_size
@@ -1366,7 +1406,8 @@ impl VfioPciDevice {
                     // the MSI-X PBA table, we must calculate the subregions
                     // around them, leading to a list of sparse areas.
                     // We want to make sure we will still trap MMIO accesses
-                    // to these MSI-X specific ranges.
+                    // to these MSI-X specific ranges. If these region don't align
+                    // with pagesize, we can achive it by enlarging its range.
                     //
                     // Using a BtreeMap as the list provided through the iterator is sorted
                     // by key. This ensures proper split of the whole region.
@@ -1374,10 +1415,14 @@ impl VfioPciDevice {
                     if let Some(msix) = vfio_msix {
                         if region_index == msix.cap.table_bir() {
                             let (offset, size) = msix.cap.table_range();
+                            let offset = align_page_size_down(offset);
+                            let size = align_page_size_up(size);
                             inter_ranges.insert(offset, size);
                         }
                         if region_index == msix.cap.pba_bir() {
                             let (offset, size) = msix.cap.pba_range();
+                            let offset = align_page_size_down(offset);
+                            let size = align_page_size_up(size);
                             inter_ranges.insert(offset, size);
                         }
                     }
@@ -1385,21 +1430,19 @@ impl VfioPciDevice {
                     let mut sparse_areas = Vec::new();
                     let mut current_offset = 0;
                     for (range_offset, range_size) in inter_ranges {
-                        let range_offset = Self::align_page_size(range_offset);
                         if range_offset > current_offset {
                             sparse_areas.push(VfioRegionSparseMmapArea {
                                 offset: current_offset,
                                 size: range_offset - current_offset,
                             });
                         }
-
-                        current_offset = Self::align_page_size(range_offset + range_size);
+                        current_offset = align_page_size_down(range_offset + range_size);
                     }
 
                     if region_size > current_offset {
                         sparse_areas.push(VfioRegionSparseMmapArea {
-                            offset: Self::align_page_size(current_offset),
-                            size: Self::align_page_size(region_size - current_offset),
+                            offset: current_offset,
+                            size: region_size - current_offset,
                         });
                     }
 
@@ -1489,6 +1532,15 @@ impl VfioPciDevice {
                             std::io::Error::last_os_error()
                         );
                         return Err(VfioPciError::MmapArea);
+                    }
+
+                    if !is_page_size_aligned(area.size) || !is_page_size_aligned(area.offset) {
+                        warn!(
+                            "Could not mmap sparse area that is not page size aligned (offset = 0x{:x}, size = 0x{:x})",
+                            area.offset,
+                            area.size,
+                            );
+                        return Ok(());
                     }
 
                     let user_memory_region = UserMemoryRegion {
