@@ -511,6 +511,16 @@ impl MsixCap {
         self.pba & 0xffff_fff8
     }
 
+    pub fn table_set_offset(&mut self, addr: u32) {
+        self.table &= 0x7;
+        self.table += addr;
+    }
+
+    pub fn pba_set_offset(&mut self, addr: u32) {
+        self.pba &= 0x7;
+        self.pba += addr;
+    }
+
     pub fn table_bir(&self) -> u32 {
         self.table & 0x7
     }
