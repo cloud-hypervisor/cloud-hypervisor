@@ -57,7 +57,7 @@ RUN apt-get update \
         ca-certificates \
         unzip \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* /var/log/*log  /var/log/apt/* /var/lib/dpkg/*-old /var/cache/debconf/*-old
 
 RUN update-alternatives --set ovs-vswitchd /usr/lib/openvswitch-switch-dpdk/ovs-vswitchd-dpdk
 
@@ -70,7 +70,7 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
         libjson-glib-dev libgmp-dev libtasn1-dev python3-twisted \
         net-tools softhsm2 \
         && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*; fi
+        && rm -rf /var/lib/apt/lists/* /var/log/*log  /var/log/apt/* /var/lib/dpkg/*-old /var/cache/debconf/*-old; fi
 
 # hadolint ignore=DL3008
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
@@ -90,7 +90,7 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
         perl \
         texinfo \
         && apt-get clean \
-        && rm -rf /var/lib/apt/lists/*; fi
+        && rm -rf /var/lib/apt/lists/* /var/log/*log  /var/log/apt/* /var/lib/dpkg/*-old /var/cache/debconf/*-old; fi
 
 # Fix the libssl-dev install
 # hadolint ignore=SC2155
