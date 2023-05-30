@@ -9,10 +9,14 @@
 //
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::CpuIdEntry;
+#[cfg(target_arch = "x86_64")]
+use crate::cpu::CpuVendor;
 #[cfg(feature = "tdx")]
 use crate::kvm::TdxCapabilities;
 use crate::vm::Vm;
 use crate::HypervisorType;
+#[cfg(target_arch = "x86_64")]
+use std::arch::x86_64;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -75,6 +79,11 @@ pub enum HypervisorError {
     ///
     #[error("Failed to set partition property:{0}")]
     SetPartitionProperty(#[source] anyhow::Error),
+    ///
+    /// Running on an unsupported CPU
+    ///
+    #[error("Unsupported CPU:{0}")]
+    UnsupportedCpu(#[source] anyhow::Error),
 }
 
 ///
@@ -136,4 +145,27 @@ pub trait Hypervisor: Send + Sync {
 
     /// Get maximum number of vCPUs
     fn get_max_vcpus(&self) -> u32;
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Determine CPU vendor
+    ///
+    fn get_cpu_vendor(&self) -> CpuVendor {
+        // SAFETY: call cpuid with valid leaves
+        unsafe {
+            let leaf = x86_64::__cpuid(0x0);
+
+            if leaf.ebx == 0x756e_6547 && leaf.ecx == 0x6c65_746e && leaf.edx == 0x4965_6e69 {
+                // Vendor string GenuineIntel
+                CpuVendor::Intel
+            } else if leaf.ebx == 0x6874_7541 && leaf.ecx == 0x444d_4163 && leaf.edx == 0x6974_6e65
+            {
+                // Vendor string AuthenticAMD
+                CpuVendor::AMD
+            } else {
+                // Not known yet, the corresponding manufacturer manual should contain the
+                // necesssary info. See also https://wiki.osdev.org/CPUID#CPU_Vendor_ID_String
+                CpuVendor::default()
+            }
+        }
+    }
 }
