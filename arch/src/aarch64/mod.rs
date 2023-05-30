@@ -198,11 +198,8 @@ pub fn initramfs_load_addr(
     }
 }
 
-pub fn get_host_cpu_phys_bits() -> u8 {
-    // A dummy hypervisor created only for querying the host IPA size and will
-    // be freed after the query.
-    let hv = hypervisor::new().unwrap();
-    let host_cpu_phys_bits = hv.get_host_ipa_limit().try_into().unwrap();
+pub fn get_host_cpu_phys_bits(hypervisor: &Arc<dyn hypervisor::Hypervisor>) -> u8 {
+    let host_cpu_phys_bits = hypervisor.get_host_ipa_limit().try_into().unwrap();
     if host_cpu_phys_bits == 0 {
         // Host kernel does not support `get_host_ipa_limit`,
         // we return the default value 40 here.

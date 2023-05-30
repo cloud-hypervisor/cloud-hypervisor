@@ -716,7 +716,7 @@ impl CpuManager {
         );
 
         self.cpuid = {
-            let phys_bits = physical_bits(self.config.max_phys_bits);
+            let phys_bits = physical_bits(hypervisor, self.config.max_phys_bits);
             arch::generate_common_cpuid(
                 hypervisor,
                 topology,
