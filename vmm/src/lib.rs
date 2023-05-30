@@ -1219,7 +1219,8 @@ impl Vmm {
             ))
         })?;
 
-        let phys_bits = vm::physical_bits(config.lock().unwrap().cpus.max_phys_bits);
+        let phys_bits =
+            vm::physical_bits(&self.hypervisor, config.lock().unwrap().cpus.max_phys_bits);
 
         let memory_manager = MemoryManager::new(
             vm,
@@ -1535,7 +1536,8 @@ impl Vmm {
         let vm_config = vm.get_config();
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         let common_cpuid = {
-            let phys_bits = vm::physical_bits(vm_config.lock().unwrap().cpus.max_phys_bits);
+            let phys_bits =
+                vm::physical_bits(&hypervisor, vm_config.lock().unwrap().cpus.max_phys_bits);
             arch::generate_common_cpuid(
                 &hypervisor,
                 None,
@@ -1725,7 +1727,7 @@ impl Vmm {
         let dest_cpuid = &{
             let vm_config = &src_vm_config.lock().unwrap();
 
-            let phys_bits = vm::physical_bits(vm_config.cpus.max_phys_bits);
+            let phys_bits = vm::physical_bits(&self.hypervisor, vm_config.cpus.max_phys_bits);
             arch::generate_common_cpuid(
                 &self.hypervisor.clone(),
                 None,

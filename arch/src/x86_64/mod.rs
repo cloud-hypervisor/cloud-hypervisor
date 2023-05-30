@@ -16,7 +16,7 @@ use crate::GuestMemoryMmap;
 use crate::InitramfsConfig;
 use crate::RegionType;
 use hypervisor::arch::x86::{CpuIdEntry, CPUID_FLAG_VALID_INDEX};
-use hypervisor::{HypervisorCpuError, HypervisorError};
+use hypervisor::{CpuVendor, HypervisorCpuError, HypervisorError};
 use linux_loader::loader::bootparam::boot_params;
 use linux_loader::loader::elf::start_info::{
     hvm_memmap_table_entry, hvm_modlist_entry, hvm_start_info,
@@ -1078,7 +1078,7 @@ pub fn initramfs_load_addr(
     Ok(aligned_addr)
 }
 
-pub fn get_host_cpu_phys_bits() -> u8 {
+pub fn get_host_cpu_phys_bits(hypervisor: &Arc<dyn hypervisor::Hypervisor>) -> u8 {
     // SAFETY: call cpuid with valid leaves
     unsafe {
         let leaf = x86_64::__cpuid(0x8000_0000);
@@ -1087,9 +1087,7 @@ pub fn get_host_cpu_phys_bits() -> u8 {
         // Some physical address bits may become reserved when the feature is enabled.
         // See AMD64 Architecture Programmer's Manual Volume 2, Section 7.10.1
         let reduced = if leaf.eax >= 0x8000_001f
-            && leaf.ebx == 0x6874_7541    // Vendor ID: AuthenticAMD
-            && leaf.ecx == 0x444d_4163
-            && leaf.edx == 0x6974_6e65
+            && matches!(hypervisor.get_cpu_vendor(), CpuVendor::AMD)
             && x86_64::__cpuid(0x8000_001f).eax & 0x1 != 0
         {
             (x86_64::__cpuid(0x8000_001f).ebx >> 6) & 0x3f

@@ -417,8 +417,8 @@ impl VmOps for VmOpsHandler {
     }
 }
 
-pub fn physical_bits(max_phys_bits: u8) -> u8 {
-    let host_phys_bits = get_host_cpu_phys_bits();
+pub fn physical_bits(hypervisor: &Arc<dyn hypervisor::Hypervisor>, max_phys_bits: u8) -> u8 {
+    let host_phys_bits = get_host_cpu_phys_bits(hypervisor);
 
     cmp::min(host_phys_bits, max_phys_bits)
 }
@@ -762,7 +762,7 @@ impl Vm {
             tdx_enabled,
         )?;
 
-        let phys_bits = physical_bits(vm_config.lock().unwrap().cpus.max_phys_bits);
+        let phys_bits = physical_bits(&hypervisor, vm_config.lock().unwrap().cpus.max_phys_bits);
 
         let memory_manager = if let Some(snapshot) =
             snapshot_from_id(snapshot.as_ref(), MEMORY_MANAGER_SNAPSHOT_ID)
@@ -2413,7 +2413,10 @@ impl Snapshottable for Vm {
 
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         let common_cpuid = {
-            let phys_bits = physical_bits(self.config.lock().unwrap().cpus.max_phys_bits);
+            let phys_bits = physical_bits(
+                &self.hypervisor,
+                self.config.lock().unwrap().cpus.max_phys_bits,
+            );
             arch::generate_common_cpuid(
                 &self.hypervisor,
                 None,
