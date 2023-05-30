@@ -605,7 +605,7 @@ impl VirtioDevice for Fs {
         &mut self,
         shm_regions: VirtioSharedMemoryList,
     ) -> std::result::Result<(), crate::Error> {
-        if let Some(mut cache) = self.cache.as_mut() {
+        if let Some(cache) = self.cache.as_mut() {
             cache.0 = shm_regions;
             Ok(())
         } else {
