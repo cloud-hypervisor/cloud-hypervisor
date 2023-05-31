@@ -100,9 +100,9 @@ impl log::Log for Logger {
         let duration = now.duration_since(self.start);
 
         if record.file().is_some() && record.line().is_some() {
-            writeln!(
+            write!(
                 *(*(self.output.lock().unwrap())),
-                "cloud-hypervisor: {:.6?}: <{}> {}:{}:{} -- {}",
+                "cloud-hypervisor: {:.6?}: <{}> {}:{}:{} -- {}\r\n",
                 duration,
                 std::thread::current().name().unwrap_or("anonymous"),
                 record.level(),
@@ -111,9 +111,9 @@ impl log::Log for Logger {
                 record.args()
             )
         } else {
-            writeln!(
+            write!(
                 *(*(self.output.lock().unwrap())),
-                "cloud-hypervisor: {:.6?}: <{}> {}:{} -- {}",
+                "cloud-hypervisor: {:.6?}: <{}> {}:{} -- {}\r\n",
                 duration,
                 std::thread::current().name().unwrap_or("anonymous"),
                 record.level(),
