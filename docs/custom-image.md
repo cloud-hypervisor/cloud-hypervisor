@@ -225,7 +225,7 @@ Number  Start   End     Size    File system  Name  Flags
 
 ### Create a macvtap interface
 
-Rely on the following [documentation](docs/macvtap-bridge.md) to set up a
+Rely on the following [documentation](macvtap-bridge.md) to set up a
 macvtap interface to provide your VM with proper connectivity.
 
 ### Boot the image
