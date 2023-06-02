@@ -12,6 +12,8 @@
 
 mod address;
 mod gsi;
+/// page size related utility funtions
+pub mod page_size;
 mod system;
 
 pub use crate::address::AddressAllocator;
