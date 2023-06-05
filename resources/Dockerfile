@@ -56,6 +56,7 @@ RUN apt-get update \
         dmsetup \
         ca-certificates \
         unzip \
+        iproute2 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /var/log/*log  /var/log/apt/* /var/lib/dpkg/*-old /var/cache/debconf/*-old
 
