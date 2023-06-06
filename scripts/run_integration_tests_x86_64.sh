@@ -12,10 +12,10 @@ mkdir -p "$WORKLOADS_DIR"
 process_common_args "$@"
 
 # For now these values are default for kvm
-test_features="--features dbus_api"
+test_features=""
 
 if [ "$hypervisor" = "mshv" ] ;  then
-    test_features="--no-default-features ${test_features},mshv"
+    test_features="--no-default-features --features mshv"
 fi
 
 cp scripts/sha1sums-x86_64 $WORKLOADS_DIR
@@ -156,7 +156,7 @@ cp $VMLINUX_IMAGE $VFIO_DIR || exit 1
 
 BUILD_TARGET="$(uname -m)-unknown-linux-${CH_LIBC}"
 
-cargo build --no-default-features --features "kvm,mshv,dbus_api" --all  --release --target $BUILD_TARGET
+cargo build --no-default-features --features "kvm,mshv" --all  --release --target $BUILD_TARGET
 
 # We always copy a fresh version of our binary for our L2 guest.
 cp target/$BUILD_TARGET/release/cloud-hypervisor $VFIO_DIR
@@ -186,6 +186,15 @@ RES=$?
 if [ $RES -eq 0 ]; then
     export RUST_BACKTRACE=1
     time cargo test $test_features "common_sequential::$test_filter" -- --test-threads=1 ${test_binary_args[*]}
+    RES=$?
+fi
+
+# Run tests on dbus_api
+if [ $RES -eq 0 ]; then
+    cargo build --no-default-features --features "kvm,mshv,dbus_api" --all  --release --target $BUILD_TARGET
+    export RUST_BACKTRACE=1
+    # integration tests now do not reply on build feature "dbus_api"
+    time cargo test $test_features "dbus_api::$test_filter" -- ${test_binary_args[*]}
     RES=$?
 fi
 
