@@ -231,7 +231,7 @@ fi
 
 export RUST_BACKTRACE=1
 
-cargo build --features "dbus_api" --all --release --target $BUILD_TARGET
+cargo build --all --release --target $BUILD_TARGET
 
 # Enable KSM with some reasonable parameters so that it won't take too long
 # for the memory to be merged between two processes.
@@ -279,6 +279,14 @@ if [ $RES -eq 0 ]; then
     RES=$?
 else
     exit $RES
+fi
+
+# Run tests on dbus_api
+if [ $RES -eq 0 ]; then
+    cargo build --features "dbus_api" --all --release --target $BUILD_TARGET
+    export RUST_BACKTRACE=1
+    time cargo test "dbus_api::$test_filter" --target $BUILD_TARGET -- ${test_binary_args[*]}
+    RES=$?
 fi
 
 exit $RES
