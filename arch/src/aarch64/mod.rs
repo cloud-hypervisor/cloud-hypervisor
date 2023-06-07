@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
-use vm_memory::{Address, GuestAddress, GuestMemory, GuestMemoryAtomic, GuestUsize};
+use vm_memory::{Address, GuestAddress, GuestMemory, GuestMemoryAtomic};
 
 pub const _NSIG: i32 = 65;
 
@@ -83,8 +83,8 @@ pub fn configure_vcpu(
     Ok(mpidr)
 }
 
-pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, RegionType)> {
-    let mut regions = vec![
+pub fn arch_memory_regions() -> Vec<(GuestAddress, usize, RegionType)> {
+    vec![
         // 0 MiB ~ 256 MiB: UEFI, GIC and legacy devices
         (
             GuestAddress(0),
@@ -103,39 +103,21 @@ pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, Region
             layout::PCI_MMCONFIG_SIZE as usize,
             RegionType::Reserved,
         ),
-    ];
-
-    let ram_32bit_space_size =
-        layout::MEM_32BIT_RESERVED_START.unchecked_offset_from(layout::RAM_START);
-
-    // RAM space
-    // Case1: guest memory fits before the gap
-    if size <= ram_32bit_space_size {
-        regions.push((layout::RAM_START, size as usize, RegionType::Ram));
-    // Case2: guest memory extends beyond the gap
-    } else {
-        // Push memory before the gap
-        regions.push((
+        // 1GiB ~ 4032 MiB: RAM before the gap
+        (
             layout::RAM_START,
-            ram_32bit_space_size as usize,
+            layout::MEM_32BIT_RESERVED_START.unchecked_offset_from(layout::RAM_START) as usize,
             RegionType::Ram,
-        ));
-        // Other memory is placed after 4GiB
-        regions.push((
-            layout::RAM_64BIT_START,
-            (size - ram_32bit_space_size) as usize,
-            RegionType::Ram,
-        ));
-    }
-
-    // Add the 32-bit reserved memory hole as a reserved region
-    regions.push((
-        layout::MEM_32BIT_RESERVED_START,
-        layout::MEM_32BIT_RESERVED_SIZE as usize,
-        RegionType::Reserved,
-    ));
-
-    regions
+        ),
+        // 4GiB ~ inf: RAM after the gap
+        (layout::RAM_64BIT_START, usize::MAX, RegionType::Ram),
+        // Add the 32-bit reserved memory hole as a reserved region
+        (
+            layout::MEM_32BIT_RESERVED_START,
+            layout::MEM_32BIT_RESERVED_SIZE as usize,
+            RegionType::Reserved,
+        ),
+    ]
 }
 
 /// Configures the system and should be called once per vm before starting vcpu threads.
@@ -217,26 +199,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_arch_memory_regions_dram_2gb() {
-        let regions = arch_memory_regions((1usize << 31) as u64); //2GB
-        assert_eq!(5, regions.len());
-        assert_eq!(layout::RAM_START, regions[3].0);
-        assert_eq!((1usize << 31), regions[3].1);
-        assert_eq!(RegionType::Ram, regions[3].2);
-        assert_eq!(RegionType::Reserved, regions[4].2);
-    }
-
-    #[test]
-    fn test_arch_memory_regions_dram_4gb() {
-        let regions = arch_memory_regions((1usize << 32) as u64); //4GB
-        let ram_32bit_space_size =
-            layout::MEM_32BIT_RESERVED_START.unchecked_offset_from(layout::RAM_START) as usize;
+    fn test_arch_memory_regions_dram() {
+        let regions = arch_memory_regions();
         assert_eq!(6, regions.len());
         assert_eq!(layout::RAM_START, regions[3].0);
-        assert_eq!(ram_32bit_space_size, regions[3].1);
         assert_eq!(RegionType::Ram, regions[3].2);
         assert_eq!(RegionType::Reserved, regions[5].2);
         assert_eq!(RegionType::Ram, regions[4].2);
-        assert_eq!(((1usize << 32) - ram_32bit_space_size), regions[4].1);
     }
 }
