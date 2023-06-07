@@ -933,7 +933,7 @@ impl MemoryManager {
             )
         } else {
             // Init guest memory
-            let arch_mem_regions = arch::arch_memory_regions(ram_size);
+            let arch_mem_regions = arch::arch_memory_regions();
 
             let ram_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
                 .iter()
