@@ -260,32 +260,51 @@ fn create_memory_node(
             fdt.end_node(memory_node)?;
         }
     } else {
-        let last_addr = guest_mem.last_addr().raw_value();
-        if last_addr < super::layout::MEM_32BIT_RESERVED_START.raw_value() {
-            // Case 1: all RAM is under the hole
-            let mem_size = last_addr - super::layout::RAM_START.raw_value() + 1;
-            let mem_reg_prop = [super::layout::RAM_START.raw_value(), mem_size];
-            let memory_node = fdt.begin_node("memory")?;
-            fdt.property_string("device_type", "memory")?;
-            fdt.property_array_u64("reg", &mem_reg_prop)?;
-            fdt.end_node(memory_node)?;
-        } else {
-            // Case 2: RAM is split by the hole
-            // Region 1: RAM before the hole
-            let mem_size = super::layout::MEM_32BIT_RESERVED_START.raw_value()
-                - super::layout::RAM_START.raw_value();
-            let mem_reg_prop = [super::layout::RAM_START.raw_value(), mem_size];
-            let memory_node_name = format!("memory@{:x}", super::layout::RAM_START.raw_value());
-            let memory_node = fdt.begin_node(&memory_node_name)?;
-            fdt.property_string("device_type", "memory")?;
-            fdt.property_array_u64("reg", &mem_reg_prop)?;
-            fdt.end_node(memory_node)?;
+        let ram_regions = {
+            let mut ram_regions = Vec::new();
+            let mut current_start = 0;
+            let mut current_end = 0;
 
-            // Region 2: RAM after the hole
-            let mem_size = last_addr - super::layout::RAM_64BIT_START.raw_value() + 1;
-            let mem_reg_prop = [super::layout::RAM_64BIT_START.raw_value(), mem_size];
-            let memory_node_name =
-                format!("memory@{:x}", super::layout::RAM_64BIT_START.raw_value());
+            for (start, size) in guest_mem
+                .iter()
+                .map(|m| (m.start_addr().raw_value(), m.len()))
+            {
+                if current_end == start {
+                    // This zone is continuous with the previous one.
+                    current_end += size;
+                } else {
+                    if current_start < current_end {
+                        ram_regions.push((current_start, current_end));
+                    }
+
+                    current_start = start;
+                    current_end = start + size;
+                }
+            }
+
+            if current_start < current_end {
+                ram_regions.push((current_start, current_end));
+            }
+
+            ram_regions
+        };
+
+        for ((region_start, region_end), layout_start) in ram_regions
+            .iter()
+            .zip([super::layout::RAM_START, super::layout::RAM_64BIT_START])
+        {
+            let layout_start = layout_start.raw_value();
+            if &layout_start < region_start || region_end <= &layout_start {
+                warn!(
+                    "Layout start addr {:#x} cannot fit ram region {:#x} ~ {:#x}",
+                    layout_start, region_start, region_end
+                );
+                continue;
+            }
+
+            let mem_size = region_end - layout_start;
+            let mem_reg_prop = [layout_start, mem_size];
+            let memory_node_name = format!("memory@{:x}", layout_start);
             let memory_node = fdt.begin_node(&memory_node_name)?;
             fdt.property_string("device_type", "memory")?;
             fdt.property_array_u64("reg", &mem_reg_prop)?;

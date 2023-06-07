@@ -973,30 +973,55 @@ fn configure_pvh(
     // Create the memory map entries.
     add_memmap_entry(&mut memmap, 0, layout::EBDA_START.raw_value(), E820_RAM);
 
-    let mem_end = guest_mem.last_addr();
+    // Merge continuous zones to one region
+    let ram_regions = {
+        let mut ram_regions = Vec::new();
+        let mut current_start = 0;
+        let mut current_end = 0;
 
-    if mem_end < layout::MEM_32BIT_RESERVED_START {
-        add_memmap_entry(
-            &mut memmap,
-            layout::HIGH_RAM_START.raw_value(),
-            mem_end.unchecked_offset_from(layout::HIGH_RAM_START) + 1,
-            E820_RAM,
-        );
-    } else {
-        add_memmap_entry(
-            &mut memmap,
-            layout::HIGH_RAM_START.raw_value(),
-            layout::MEM_32BIT_RESERVED_START.unchecked_offset_from(layout::HIGH_RAM_START),
-            E820_RAM,
-        );
-        if mem_end > layout::RAM_64BIT_START {
-            add_memmap_entry(
-                &mut memmap,
-                layout::RAM_64BIT_START.raw_value(),
-                mem_end.unchecked_offset_from(layout::RAM_64BIT_START) + 1,
-                E820_RAM,
-            );
+        for (start, size) in guest_mem
+            .iter()
+            .map(|m| (m.start_addr().raw_value(), m.len()))
+        {
+            if current_end == start {
+                // This zone is continuous with the previous one.
+                current_end += size;
+            } else {
+                if current_start < current_end {
+                    ram_regions.push((current_start, current_end));
+                }
+
+                current_start = start;
+                current_end = start + size;
+            }
         }
+
+        if current_start < current_end {
+            ram_regions.push((current_start, current_end));
+        }
+
+        ram_regions
+    };
+
+    for ((region_start, region_end), layout_start) in ram_regions
+        .iter()
+        .zip([layout::HIGH_RAM_START, layout::RAM_64BIT_START])
+    {
+        let layout_start = layout_start.raw_value();
+        if &layout_start < region_start || region_end <= &layout_start {
+            return Err(super::Error::MemmapTableSetup);
+        }
+
+        info!(
+            "create_memmap_entry, start: 0x{:08x}, end: 0x{:08x})",
+            layout_start, region_end
+        );
+        add_memmap_entry(
+            &mut memmap,
+            layout_start,
+            region_end - layout_start,
+            E820_RAM,
+        );
     }
 
     add_memmap_entry(
