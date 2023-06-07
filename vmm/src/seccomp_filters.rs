@@ -611,6 +611,7 @@ fn vmm_thread_rules(
         (libc::SYS_socketpair, vec![]),
         #[cfg(target_arch = "x86_64")]
         (libc::SYS_stat, vec![]),
+        (libc::SYS_statfs, vec![]),
         (libc::SYS_statx, vec![]),
         (libc::SYS_tgkill, vec![]),
         (libc::SYS_timerfd_create, vec![]),
