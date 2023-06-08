@@ -116,6 +116,7 @@ impl Aml for AcpiGedDevice {
                         true,
                         self.address.0,
                         self.address.0 + GED_DEVICE_ACPI_SIZE as u64 - 1,
+                        None,
                     )]),
                 ),
                 &aml::OpRegion::new(

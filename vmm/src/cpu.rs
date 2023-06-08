@@ -1987,6 +1987,7 @@ impl Aml for CpuManager {
                             true,
                             acpi_address.0,
                             acpi_address.0 + CPU_MANAGER_ACPI_SIZE as u64 - 1,
+                            None,
                         )]),
                     ),
                     // OpRegion and Fields map MMIO range into individual field values
