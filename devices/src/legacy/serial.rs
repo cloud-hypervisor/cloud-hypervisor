@@ -166,8 +166,8 @@ impl Serial {
         Self::new(id, interrupt, None, state)
     }
 
-    pub fn set_out(&mut self, out: Box<dyn io::Write + Send>) {
-        self.out = Some(out);
+    pub fn set_out(&mut self, out: Option<Box<dyn io::Write + Send>>) {
+        self.out = out;
     }
 
     /// Queues raw bytes for the guest to read and signals the interrupt if the line status would

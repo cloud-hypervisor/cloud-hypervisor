@@ -947,9 +947,11 @@ components:
       properties:
         file:
           type: string
+        socket:
+          type: string
         mode:
           type: string
-          enum: [Off, Pty, Tty, File, Null]
+          enum: [Off, Pty, Tty, File, Socket, Null]
         iommu:
           type: boolean
           default: false

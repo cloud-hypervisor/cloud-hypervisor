@@ -111,6 +111,8 @@ pub enum ValidationError {
     KernelMissing,
     /// Missing file value for console
     ConsoleFileMissing,
+    /// Missing socket path for console
+    ConsoleSocketPathMissing,
     /// Max is less than boot
     CpusMaxLowerThanBoot,
     /// Both socket and path specified
@@ -185,6 +187,7 @@ impl fmt::Display for ValidationError {
             DoubleTtyMode => write!(f, "Console mode tty specified for both serial and console"),
             KernelMissing => write!(f, "No kernel specified"),
             ConsoleFileMissing => write!(f, "Path missing when using file console mode"),
+            ConsoleSocketPathMissing => write!(f, "Path missing when using socket console mode"),
             CpusMaxLowerThanBoot => write!(f, "Max CPUs lower than boot CPUs"),
             DiskSocketAndPath => write!(f, "Disk path and vhost socket both provided"),
             VhostUserRequiresSharedMemory => {
@@ -1341,10 +1344,12 @@ impl ConsoleConfig {
             .add_valueless("tty")
             .add_valueless("null")
             .add("file")
-            .add("iommu");
+            .add("iommu")
+            .add("socket");
         parser.parse(console).map_err(Error::ParseConsole)?;
 
         let mut file: Option<PathBuf> = default_consoleconfig_file();
+        let mut socket: Option<PathBuf> = None;
         let mut mode: ConsoleOutputMode = ConsoleOutputMode::Off;
 
         if parser.is_set("off") {
@@ -1360,6 +1365,11 @@ impl ConsoleConfig {
                 Some(PathBuf::from(parser.get("file").ok_or(
                     Error::Validation(ValidationError::ConsoleFileMissing),
                 )?));
+        } else if parser.is_set("socket") {
+            mode = ConsoleOutputMode::Socket;
+            socket = Some(PathBuf::from(parser.get("socket").ok_or(
+                Error::Validation(ValidationError::ConsoleSocketPathMissing),
+            )?));
         } else {
             return Err(Error::ParseConsoleInvalidModeGiven);
         }
@@ -1369,7 +1379,12 @@ impl ConsoleConfig {
             .unwrap_or(Toggle(false))
             .0;
 
-        Ok(Self { file, mode, iommu })
+        Ok(Self {
+            file,
+            mode,
+            iommu,
+            socket,
+        })
     }
 }
 
@@ -2659,6 +2674,7 @@ mod tests {
                 mode: ConsoleOutputMode::Off,
                 iommu: false,
                 file: None,
+                socket: None,
             }
         );
         assert_eq!(
@@ -2667,6 +2683,7 @@ mod tests {
                 mode: ConsoleOutputMode::Pty,
                 iommu: false,
                 file: None,
+                socket: None,
             }
         );
         assert_eq!(
@@ -2675,6 +2692,7 @@ mod tests {
                 mode: ConsoleOutputMode::Tty,
                 iommu: false,
                 file: None,
+                socket: None,
             }
         );
         assert_eq!(
@@ -2683,6 +2701,7 @@ mod tests {
                 mode: ConsoleOutputMode::Null,
                 iommu: false,
                 file: None,
+                socket: None,
             }
         );
         assert_eq!(
@@ -2690,7 +2709,8 @@ mod tests {
             ConsoleConfig {
                 mode: ConsoleOutputMode::File,
                 iommu: false,
-                file: Some(PathBuf::from("/tmp/console"))
+                file: Some(PathBuf::from("/tmp/console")),
+                socket: None,
             }
         );
         assert_eq!(
@@ -2699,6 +2719,7 @@ mod tests {
                 mode: ConsoleOutputMode::Null,
                 iommu: true,
                 file: None,
+                socket: None,
             }
         );
         assert_eq!(
@@ -2706,7 +2727,17 @@ mod tests {
             ConsoleConfig {
                 mode: ConsoleOutputMode::File,
                 iommu: true,
-                file: Some(PathBuf::from("/tmp/console"))
+                file: Some(PathBuf::from("/tmp/console")),
+                socket: None,
+            }
+        );
+        assert_eq!(
+            ConsoleConfig::parse("socket=/tmp/serial.sock,iommu=on")?,
+            ConsoleConfig {
+                mode: ConsoleOutputMode::Socket,
+                iommu: true,
+                file: None,
+                socket: Some(PathBuf::from("/tmp/serial.sock")),
             }
         );
         Ok(())
@@ -2852,11 +2883,13 @@ mod tests {
                 file: None,
                 mode: ConsoleOutputMode::Null,
                 iommu: false,
+                socket: None,
             },
             console: ConsoleConfig {
                 file: None,
                 mode: ConsoleOutputMode::Tty,
                 iommu: false,
+                socket: None,
             },
             devices: None,
             user_devices: None,

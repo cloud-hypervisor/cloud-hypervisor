@@ -2250,11 +2250,13 @@ mod unit_tests {
                 file: None,
                 mode: ConsoleOutputMode::Null,
                 iommu: false,
+                socket: None,
             },
             console: ConsoleConfig {
                 file: None,
                 mode: ConsoleOutputMode::Tty,
                 iommu: false,
+                socket: None,
             },
             devices: None,
             user_devices: None,
