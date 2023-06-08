@@ -13,8 +13,11 @@ use libc::EFD_NONBLOCK;
 use serial_buffer::SerialBuffer;
 use std::fs::File;
 use std::io::Read;
-use std::os::unix::io::{AsRawFd, FromRawFd};
+use std::net::Shutdown;
+use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd};
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::panic::AssertUnwindSafe;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::{io, result, thread};
@@ -54,6 +57,22 @@ pub enum Error {
     /// Cannot spawn SerialManager thread.
     #[error("Error spawning SerialManager thread: {0}")]
     SpawnSerialManager(#[source] io::Error),
+
+    /// Cannot bind to Unix socket
+    #[error("Error binding to socket: {0}")]
+    BindUnixSocket(#[source] io::Error),
+
+    /// Cannot accept connection from Unix socket
+    #[error("Error accepting connection: {0}")]
+    AcceptConnection(#[source] io::Error),
+
+    /// Cannot clone the UnixStream
+    #[error("Error cloning UnixStream: {0}")]
+    CloneUnixStream(#[source] io::Error),
+
+    /// Cannot shutdown the connection
+    #[error("Error shutting down a connection: {0}")]
+    ShutdownConnection(#[source] io::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -62,6 +81,7 @@ pub type Result<T> = result::Result<T, Error>;
 pub enum EpollDispatch {
     File = 0,
     Kill = 1,
+    Socket = 2,
     Unknown,
 }
 
@@ -71,6 +91,7 @@ impl From<u64> for EpollDispatch {
         match v {
             0 => File,
             1 => Kill,
+            2 => Socket,
             _ => Unknown,
         }
     }
@@ -86,6 +107,7 @@ pub struct SerialManager {
     kill_evt: EventFd,
     handle: Option<thread::JoinHandle<()>>,
     pty_write_out: Option<Arc<AtomicBool>>,
+    mode: ConsoleOutputMode,
 }
 
 impl SerialManager {
@@ -94,6 +116,7 @@ impl SerialManager {
         #[cfg(target_arch = "aarch64")] serial: Arc<Mutex<Pl011>>,
         pty_pair: Option<Arc<Mutex<PtyPair>>>,
         mode: ConsoleOutputMode,
+        socket: Option<PathBuf>,
     ) -> Result<Option<Self>> {
         let in_file = match mode {
             ConsoleOutputMode::Pty => {
@@ -130,6 +153,16 @@ impl SerialManager {
                     return Ok(None);
                 }
             }
+            ConsoleOutputMode::Socket => {
+                if let Some(socket_path) = socket {
+                    let listener =
+                        UnixListener::bind(socket_path.as_path()).map_err(Error::BindUnixSocket)?;
+                    // SAFETY: listener is valid and will return valid fd
+                    unsafe { File::from_raw_fd(listener.into_raw_fd()) }
+                } else {
+                    return Ok(None);
+                }
+            }
             _ => return Ok(None),
         };
 
@@ -144,11 +177,17 @@ impl SerialManager {
         )
         .map_err(Error::Epoll)?;
 
+        let epoll_fd_data = if mode == ConsoleOutputMode::Socket {
+            EpollDispatch::Socket
+        } else {
+            EpollDispatch::File
+        };
+
         epoll::ctl(
             epoll_fd,
             epoll::ControlOptions::EPOLL_CTL_ADD,
             in_file.as_raw_fd(),
-            epoll::Event::new(epoll::Events::EPOLLIN, EpollDispatch::File as u64),
+            epoll::Event::new(epoll::Events::EPOLLIN, epoll_fd_data as u64),
         )
         .map_err(Error::Epoll)?;
 
@@ -158,7 +197,11 @@ impl SerialManager {
             pty_write_out = Some(write_out.clone());
             let writer = in_file.try_clone().map_err(Error::FileClone)?;
             let buffer = SerialBuffer::new(Box::new(writer), write_out);
-            serial.as_ref().lock().unwrap().set_out(Box::new(buffer));
+            serial
+                .as_ref()
+                .lock()
+                .unwrap()
+                .set_out(Some(Box::new(buffer)));
         }
 
         // Use 'File' to enforce closing on 'epoll_fd'
@@ -172,6 +215,7 @@ impl SerialManager {
             kill_evt,
             handle: None,
             pty_write_out,
+            mode,
         }))
     }
 
@@ -212,6 +256,10 @@ impl SerialManager {
         let mut in_file = self.in_file.try_clone().map_err(Error::FileClone)?;
         let serial = self.serial.clone();
         let pty_write_out = self.pty_write_out.clone();
+        //SAFETY: in_file is has a valid fd
+        let listener = unsafe { UnixListener::from_raw_fd(self.in_file.as_raw_fd()) };
+        let mut reader: Option<UnixStream> = None;
+        let mode = self.mode.clone();
 
         // In case of PTY, we want to be able to detect a connection on the
         // other end of the PTY. This is done by detecting there's no event
@@ -250,7 +298,7 @@ impl SerialManager {
                             }
                         };
 
-                        if num_events == 0 {
+                        if mode != ConsoleOutputMode::Socket && num_events == 0 {
                             // This very specific case happens when the serial is connected
                             // to a PTY. We know EPOLLHUP is always present when there's nothing
                             // connected at the other end of the PTY. That's why getting no event
@@ -266,11 +314,67 @@ impl SerialManager {
                                     let event = event.data;
                                     warn!("Unknown serial manager loop event: {}", event);
                                 }
+                                EpollDispatch::Socket => {
+                                    // New connection request arrived.
+                                    // Shutdown the previous connection, if any
+                                    if let Some(previous_reader) = reader {
+                                        previous_reader
+                                            .shutdown(Shutdown::Both)
+                                            .map_err(Error::AcceptConnection)?;
+                                    }
+                                    // Events on the listening socket will be connection requests.
+                                    // Accept them, create a reader and a writer.
+                                    let (unix_stream, _) =
+                                        listener.accept().map_err(Error::AcceptConnection)?;
+                                    let writer =
+                                        unix_stream.try_clone().map_err(Error::CloneUnixStream)?;
+                                    reader = Some(
+                                        unix_stream.try_clone().map_err(Error::CloneUnixStream)?,
+                                    );
+
+                                    epoll::ctl(
+                                        epoll_fd,
+                                        epoll::ControlOptions::EPOLL_CTL_ADD,
+                                        unix_stream.into_raw_fd(),
+                                        epoll::Event::new(
+                                            epoll::Events::EPOLLIN,
+                                            EpollDispatch::File as u64,
+                                        ),
+                                    )
+                                    .map_err(Error::Epoll)?;
+                                    serial.lock().unwrap().set_out(Some(Box::new(writer)));
+                                }
                                 EpollDispatch::File => {
                                     if event.events & libc::EPOLLIN as u32 != 0 {
                                         let mut input = [0u8; 64];
-                                        let count =
-                                            in_file.read(&mut input).map_err(Error::ReadInput)?;
+                                        let count = match mode {
+                                            ConsoleOutputMode::Socket => {
+                                                if let Some(mut serial_reader) = reader.as_ref() {
+                                                    let count = serial_reader
+                                                        .read(&mut input)
+                                                        .map_err(Error::ReadInput)?;
+                                                    if count == 0 {
+                                                        info!("Remote end closed serial socket");
+                                                        serial_reader
+                                                            .shutdown(Shutdown::Both)
+                                                            .map_err(Error::ShutdownConnection)?;
+
+                                                        reader = None;
+                                                        serial
+                                                            .as_ref()
+                                                            .lock()
+                                                            .unwrap()
+                                                            .set_out(None);
+                                                    }
+                                                    count
+                                                } else {
+                                                    0
+                                                }
+                                            }
+                                            _ => in_file
+                                                .read(&mut input)
+                                                .map_err(Error::ReadInput)?,
+                                        };
 
                                         // Replace "\n" with "\r" to deal with Windows SAC (#1170)
                                         if count == 1 && input[0] == 0x0a {
