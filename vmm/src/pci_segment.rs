@@ -353,17 +353,19 @@ impl Aml for PciSegment {
                         layout::MEM_32BIT_DEVICES_START.0 as u32,
                         (layout::MEM_32BIT_DEVICES_START.0 + layout::MEM_32BIT_DEVICES_SIZE - 1)
                             as u32,
+                        None,
                     ),
                     &aml::AddressSpace::new_memory(
                         aml::AddressSpaceCachable::NotCacheable,
                         true,
                         self.start_of_device_area,
                         self.end_of_device_area,
+                        None,
                     ),
                     #[cfg(target_arch = "x86_64")]
-                    &aml::AddressSpace::new_io(0u16, 0x0cf7u16),
+                    &aml::AddressSpace::new_io(0u16, 0x0cf7u16, None),
                     #[cfg(target_arch = "x86_64")]
-                    &aml::AddressSpace::new_io(0x0d00u16, 0xffffu16),
+                    &aml::AddressSpace::new_io(0x0d00u16, 0xffffu16, None),
                 ]),
             )
         } else {
@@ -381,6 +383,7 @@ impl Aml for PciSegment {
                         true,
                         self.start_of_device_area,
                         self.end_of_device_area,
+                        None,
                     ),
                 ]),
             )

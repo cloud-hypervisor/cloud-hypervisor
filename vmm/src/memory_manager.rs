@@ -2244,6 +2244,7 @@ impl Aml for MemoryMethods {
                         true,
                         0x0000_0000_0000_0000u64,
                         0xFFFF_FFFF_FFFF_FFFEu64,
+                        None,
                     )]),
                 ),
                 &aml::CreateQWordField::new(
@@ -2326,6 +2327,7 @@ impl Aml for MemoryManager {
                             true,
                             acpi_address.0,
                             acpi_address.0 + MEMORY_MANAGER_ACPI_SIZE as u64 - 1,
+                            None,
                         )]),
                     ),
                     // OpRegion and Fields map MMIO range into individual field values
@@ -2421,6 +2423,7 @@ impl Aml for MemoryManager {
                                 true,
                                 min,
                                 max,
+                                None,
                             )]),
                         ),
                         &aml::Method::new("_STA".into(), 0, false, vec![&aml::Return::new(&0xfu8)]),

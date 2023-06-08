@@ -5,7 +5,7 @@ version = 3
 [[package]]
 name = "acpi_tables"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/acpi_tables?branch=main#cb5f06c747e45f54bc839c4aeea7fed9d49967df"
+source = "git+https://github.com/rust-vmm/acpi_tables?branch=main#05a609136387cc1cc9b499cee4320020325c263f"
 dependencies = [
  "zerocopy",
 ]
