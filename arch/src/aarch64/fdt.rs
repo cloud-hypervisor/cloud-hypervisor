@@ -260,10 +260,16 @@ fn create_memory_node(
             fdt.end_node(memory_node)?;
         }
     } else {
+        // Note: memory regions from "GuestMemory" are sorted and non-zero sized.
         let ram_regions = {
             let mut ram_regions = Vec::new();
-            let mut current_start = 0;
-            let mut current_end = 0;
+            let mut current_start = guest_mem
+                .iter()
+                .next()
+                .map(GuestMemoryRegion::start_addr)
+                .expect("GuestMemory must have one memory region at least")
+                .raw_value();
+            let mut current_end = current_start;
 
             for (start, size) in guest_mem
                 .iter()
@@ -273,38 +279,67 @@ fn create_memory_node(
                     // This zone is continuous with the previous one.
                     current_end += size;
                 } else {
-                    if current_start < current_end {
-                        ram_regions.push((current_start, current_end));
-                    }
+                    ram_regions.push((current_start, current_end));
 
                     current_start = start;
                     current_end = start + size;
                 }
             }
 
-            if current_start < current_end {
-                ram_regions.push((current_start, current_end));
-            }
+            ram_regions.push((current_start, current_end));
 
             ram_regions
         };
 
-        for ((region_start, region_end), layout_start) in ram_regions
-            .iter()
-            .zip([super::layout::RAM_START, super::layout::RAM_64BIT_START])
+        if ram_regions.len() > 2 {
+            panic!(
+                "There should be up to two non-continuous regions, devidided by the
+                    gap at the end of 32bit address space."
+            );
+        }
+
+        // Create the memory node for memory region before the gap
         {
-            let layout_start = layout_start.raw_value();
-            if &layout_start < region_start || region_end <= &layout_start {
-                warn!(
-                    "Layout start addr {:#x} cannot fit ram region {:#x} ~ {:#x}",
-                    layout_start, region_start, region_end
+            let (first_region_start, first_region_end) = ram_regions
+                .first()
+                .expect("There should be at last one memory region");
+            let ram_start = super::layout::RAM_START.raw_value();
+            let mem_32bit_reserved_start = super::layout::MEM_32BIT_RESERVED_START.raw_value();
+
+            if !((first_region_start <= &ram_start)
+                && (first_region_end > &ram_start)
+                && (first_region_end <= &mem_32bit_reserved_start))
+            {
+                panic!(
+                    "Unexpected first memory region layout: (start: 0x{:08x}, end: 0x{:08x}).
+                    ram_start: 0x{:08x}, mem_32bit_reserved_start: 0x{:08x}",
+                    first_region_start, first_region_end, ram_start, mem_32bit_reserved_start
                 );
-                continue;
             }
 
-            let mem_size = region_end - layout_start;
-            let mem_reg_prop = [layout_start, mem_size];
-            let memory_node_name = format!("memory@{:x}", layout_start);
+            let mem_size = first_region_end - ram_start;
+            let mem_reg_prop = [ram_start, mem_size];
+            let memory_node_name = format!("memory@{:x}", ram_start);
+            let memory_node = fdt.begin_node(&memory_node_name)?;
+            fdt.property_string("device_type", "memory")?;
+            fdt.property_array_u64("reg", &mem_reg_prop)?;
+            fdt.end_node(memory_node)?;
+        }
+
+        // Create the memory map entry for memory region after the gap if any
+        if let Some((second_region_start, second_region_end)) = ram_regions.get(1) {
+            let ram_64bit_start = super::layout::RAM_64BIT_START.raw_value();
+
+            if second_region_start != &ram_64bit_start {
+                panic!(
+                    "Unexpected second memory region layout: start: 0x{:08x}, ram_64bit_start: 0x{:08x}",
+                    second_region_start, ram_64bit_start
+                );
+            }
+
+            let mem_size = second_region_end - ram_64bit_start;
+            let mem_reg_prop = [ram_64bit_start, mem_size];
+            let memory_node_name = format!("memory@{:x}", ram_64bit_start);
             let memory_node = fdt.begin_node(&memory_node_name)?;
             fdt.property_string("device_type", "memory")?;
             fdt.property_array_u64("reg", &mem_reg_prop)?;
