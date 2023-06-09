@@ -947,11 +947,17 @@ fn configure_pvh(
     // Create the memory map entries.
     add_memmap_entry(&mut memmap, 0, layout::EBDA_START.raw_value(), E820_RAM);
 
-    // Merge continuous zones to one region
+    // Merge continuous memory regions into one region.
+    // Note: memory regions from "GuestMemory" are sorted and non-zero sized.
     let ram_regions = {
         let mut ram_regions = Vec::new();
-        let mut current_start = 0;
-        let mut current_end = 0;
+        let mut current_start = guest_mem
+            .iter()
+            .next()
+            .map(GuestMemoryRegion::start_addr)
+            .expect("GuestMemory must have one memory region at least")
+            .raw_value();
+        let mut current_end = current_start;
 
         for (start, size) in guest_mem
             .iter()
@@ -961,39 +967,80 @@ fn configure_pvh(
                 // This zone is continuous with the previous one.
                 current_end += size;
             } else {
-                if current_start < current_end {
-                    ram_regions.push((current_start, current_end));
-                }
+                ram_regions.push((current_start, current_end));
 
                 current_start = start;
                 current_end = start + size;
             }
         }
 
-        if current_start < current_end {
-            ram_regions.push((current_start, current_end));
-        }
+        ram_regions.push((current_start, current_end));
 
         ram_regions
     };
 
-    for ((region_start, region_end), layout_start) in ram_regions
-        .iter()
-        .zip([layout::HIGH_RAM_START, layout::RAM_64BIT_START])
+    if ram_regions.len() > 2 {
+        error!(
+            "There should be up to two non-continuous regions, devidided by the
+            gap at the end of 32bit address space (e.g. between 3G and 4G)."
+        );
+        return Err(super::Error::MemmapTableSetup);
+    }
+
+    // Create the memory map entry for memory region before the gap
     {
-        let layout_start = layout_start.raw_value();
-        if &layout_start < region_start || region_end <= &layout_start {
+        let (first_region_start, first_region_end) =
+            ram_regions.first().ok_or(super::Error::MemmapTableSetup)?;
+        let high_ram_start = layout::HIGH_RAM_START.raw_value();
+        let mem_32bit_reserved_start = layout::MEM_32BIT_RESERVED_START.raw_value();
+
+        if !((first_region_start <= &high_ram_start)
+            && (first_region_end > &high_ram_start)
+            && (first_region_end <= &mem_32bit_reserved_start))
+        {
+            error!(
+                "Unexpected first memory region layout: (start: 0x{:08x}, end: 0x{:08x}).
+                high_ram_start: 0x{:08x}, mem_32bit_reserved_start: 0x{:08x}",
+                first_region_start, first_region_end, high_ram_start, mem_32bit_reserved_start
+            );
+
             return Err(super::Error::MemmapTableSetup);
         }
 
         info!(
             "create_memmap_entry, start: 0x{:08x}, end: 0x{:08x})",
-            layout_start, region_end
+            high_ram_start, first_region_end
+        );
+
+        add_memmap_entry(
+            &mut memmap,
+            high_ram_start,
+            first_region_end - high_ram_start,
+            E820_RAM,
+        );
+    }
+
+    // Create the memory map entry for memory region after the gap if any
+    if let Some((second_region_start, second_region_end)) = ram_regions.get(1) {
+        let ram_64bit_start = layout::RAM_64BIT_START.raw_value();
+
+        if second_region_start != &ram_64bit_start {
+            error!(
+                "Unexpected second memory region layout: start: 0x{:08x}, ram_64bit_start: 0x{:08x}",
+                second_region_start, ram_64bit_start
+            );
+
+            return Err(super::Error::MemmapTableSetup);
+        }
+
+        info!(
+            "create_memmap_entry, start: 0x{:08x}, end: 0x{:08x})",
+            ram_64bit_start, second_region_end
         );
         add_memmap_entry(
             &mut memmap,
-            layout_start,
-            region_end - layout_start,
+            ram_64bit_start,
+            second_region_end - ram_64bit_start,
             E820_RAM,
         );
     }
