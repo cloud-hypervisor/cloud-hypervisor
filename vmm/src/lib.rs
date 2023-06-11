@@ -298,6 +298,7 @@ pub fn start_vmm_thread(
     api_event: EventFd,
     api_sender: Sender<ApiRequest>,
     api_receiver: Receiver<ApiRequest>,
+    event_monitor_receiver: Option<flume::Receiver<String>>,
     #[cfg(feature = "guest_debug")] debug_path: Option<PathBuf>,
     #[cfg(feature = "guest_debug")] debug_event: EventFd,
     #[cfg(feature = "guest_debug")] vm_debug_event: EventFd,

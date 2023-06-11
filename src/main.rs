@@ -261,7 +261,7 @@ pub struct TopLevel {
     dbus_system_bus: bool,
 
     #[argh(option, long = "event-monitor")]
-    /// path=<path/to/a/file>|fd=<fd>
+    /// broadcast, path=<path/to/a/file>|fd=<fd>
     event_monitor: Option<String>,
 
     #[argh(option, long = "restore")]
@@ -451,31 +451,54 @@ fn start_vmm(toplevel: TopLevel) -> Result<Option<String>, Error> {
         (None, None) => Ok(None),
     }?;
 
-    if let Some(ref monitor_config) = toplevel.event_monitor {
-        let mut parser = OptionParser::new();
-        parser.add("path").add("fd");
-        parser
-            .parse(monitor_config)
-            .map_err(Error::ParsingEventMonitor)?;
+    let (file, broadcast) = toplevel
+        .event_monitor
+        .as_ref()
+        .map(|monitor_config| {
+            let mut parser = OptionParser::new();
+            parser.add_valueless("broadcast").add("path").add("fd");
+            parser
+                .parse(monitor_config)
+                .map_err(Error::ParsingEventMonitor)?;
 
-        let file = if parser.is_set("fd") {
-            let fd = parser
-                .convert("fd")
-                .map_err(Error::ParsingEventMonitor)?
-                .unwrap();
-            // SAFETY: fd is valid
-            unsafe { File::from_raw_fd(fd) }
-        } else if parser.is_set("path") {
-            std::fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .open(parser.get("path").unwrap())
-                .map_err(Error::EventMonitorIo)?
-        } else {
-            return Err(Error::BareEventMonitor);
-        };
-        event_monitor::set_monitor(file).map_err(Error::EventMonitorIo)?;
-    }
+            let file = if parser.is_set("fd") {
+                let fd = parser
+                    .convert("fd")
+                    .map_err(Error::ParsingEventMonitor)?
+                    .unwrap();
+                // SAFETY: fd is valid
+                Some(unsafe { File::from_raw_fd(fd) })
+            } else if parser.is_set("path") {
+                Some(
+                    std::fs::OpenOptions::new()
+                        .write(true)
+                        .create(true)
+                        .open(parser.get("path").unwrap())
+                        .map_err(Error::EventMonitorIo)?,
+                )
+            } else {
+                None
+            };
+
+            if file.is_none() && !parser.is_set("broadcast") {
+                return Err(Error::BareEventMonitor);
+            }
+
+            Ok((file, parser.is_set("broadcast")))
+        })
+        .transpose()?
+        .unwrap_or((None, false));
+
+    let dbus_enabled = cfg!(feature = "dbus_api");
+    #[cfg(feature = "dbus_api")]
+    let dbus_enabled = dbus_enabled && dbus_options.is_some();
+
+    let broadcast = broadcast || dbus_enabled;
+    let event_monitor_receiver = if file.is_some() || broadcast {
+        event_monitor::set_monitor(file, broadcast).map_err(Error::EventMonitorIo)?
+    } else {
+        None
+    };
 
     let (api_request_sender, api_request_receiver) = channel();
     let api_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateApiEventFd)?;
@@ -557,6 +580,7 @@ fn start_vmm(toplevel: TopLevel) -> Result<Option<String>, Error> {
         api_evt.try_clone().unwrap(),
         api_request_sender_clone,
         api_request_receiver,
+        event_monitor_receiver,
         #[cfg(feature = "guest_debug")]
         gdb_socket_path,
         #[cfg(feature = "guest_debug")]
