@@ -519,6 +519,9 @@ impl MemoryManager {
     /// - First one mapping entirely the first memory zone on 0-1G range
     /// - Second one mapping partially the second memory zone on 1G-3G range
     /// - Third one mapping partially the second memory zone on 4G-6G range
+    /// Also, all memory regions are page-size aligned (e.g. their sizes must
+    /// be multiple of page-size), which may leave an additional hole in the
+    /// address space when hugepage is used.
     fn create_memory_regions_from_zones(
         ram_regions: &[(GuestAddress, usize)],
         zones: &[MemoryZoneConfig],
