@@ -73,6 +73,10 @@ pub enum Error {
     /// Cannot shutdown the connection
     #[error("Error shutting down a connection: {0}")]
     ShutdownConnection(#[source] io::Error),
+
+    /// Cannot remove the serial socket
+    #[error("Error removing serial socket: {0}")]
+    RemoveUnixSocket(#[source] io::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -108,6 +112,7 @@ pub struct SerialManager {
     handle: Option<thread::JoinHandle<()>>,
     pty_write_out: Option<Arc<AtomicBool>>,
     mode: ConsoleOutputMode,
+    socket_path: Option<PathBuf>,
 }
 
 impl SerialManager {
@@ -118,6 +123,8 @@ impl SerialManager {
         mode: ConsoleOutputMode,
         socket: Option<PathBuf>,
     ) -> Result<Option<Self>> {
+        let mut socket_path: Option<PathBuf> = None;
+
         let in_file = match mode {
             ConsoleOutputMode::Pty => {
                 if let Some(pty_pair) = pty_pair {
@@ -154,9 +161,10 @@ impl SerialManager {
                 }
             }
             ConsoleOutputMode::Socket => {
-                if let Some(socket_path) = socket {
-                    let listener =
-                        UnixListener::bind(socket_path.as_path()).map_err(Error::BindUnixSocket)?;
+                if let Some(path_in_socket) = socket {
+                    socket_path = Some(path_in_socket.clone());
+                    let listener = UnixListener::bind(path_in_socket.as_path())
+                        .map_err(Error::BindUnixSocket)?;
                     // SAFETY: listener is valid and will return valid fd
                     unsafe { File::from_raw_fd(listener.into_raw_fd()) }
                 } else {
@@ -216,6 +224,7 @@ impl SerialManager {
             handle: None,
             pty_write_out,
             mode,
+            socket_path,
         }))
     }
 
@@ -358,7 +367,6 @@ impl SerialManager {
                                                         serial_reader
                                                             .shutdown(Shutdown::Both)
                                                             .map_err(Error::ShutdownConnection)?;
-
                                                         reader = None;
                                                         serial
                                                             .as_ref()
@@ -428,6 +436,13 @@ impl Drop for SerialManager {
         self.kill_evt.write(1).ok();
         if let Some(handle) = self.handle.take() {
             handle.join().ok();
+        }
+        if self.mode == ConsoleOutputMode::Socket {
+            if let Some(socket_path) = self.socket_path.as_ref() {
+                std::fs::remove_file(socket_path.as_os_str())
+                    .map_err(Error::RemoveUnixSocket)
+                    .ok();
+            }
         }
     }
 }
