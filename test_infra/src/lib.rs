@@ -249,7 +249,8 @@ impl DiskConfig for UbuntuDiskConfig {
             .unwrap()
             .join("test_data")
             .join("cloud-init")
-            .join("ubuntu");
+            .join("ubuntu")
+            .join("ci");
 
         vec!["meta-data"].iter().for_each(|x| {
             rate_limited_copy(source_file_dir.join(x), cloud_init_directory.join(x))
