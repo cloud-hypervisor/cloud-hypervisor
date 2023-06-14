@@ -10,13 +10,16 @@ anyhow = "1.0.71"
 arch = { path = "../arch" }
 bitflags = "2.3.3"
 byteorder = "1.4.3"
+event_monitor = { path = "../event_monitor" }
 hypervisor = { path = "../hypervisor" }
 libc = "0.2.139"
 log = "0.4.17"
+pci = { path = "../pci" }
 thiserror = "1.0.40"
 tpm = { path = "../tpm" }
 versionize = "0.1.10"
 versionize_derive = "0.1.4"
+vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
 vm-memory = "0.11.0"
 vm-migration = { path = "../vm-migration" }
