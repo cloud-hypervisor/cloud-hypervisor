@@ -3,16 +3,24 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use anyhow::anyhow;
 use pci::{
     BarReprogrammingParams, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType,
     PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciSubclass,
+    PCI_CONFIGURATION_ID,
 };
 use std::any::Any;
 use std::result;
 use std::sync::{Arc, Barrier, Mutex};
+use thiserror::Error;
+use versionize::{VersionMap, Versionize, VersionizeResult};
+use versionize_derive::Versionize;
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::{BusDevice, Resource};
 use vm_memory::{Address, GuestAddress};
+use vm_migration::{
+    Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
+};
 
 const PVPANIC_VENDOR_ID: u16 = 0x1b36;
 const PVPANIC_DEVICE_ID: u16 = 0x0011;
@@ -21,6 +29,14 @@ pub const PVPANIC_DEVICE_MMIO_SIZE: u64 = 0x2;
 
 const PVPANIC_PANICKED: u8 = 1 << 0;
 const PVPANIC_CRASH_LOADED: u8 = 1 << 1;
+
+#[derive(Debug, Error)]
+pub enum PvPanicError {
+    #[error("Failed creating PvPanicDevice: {0}")]
+    CreatePvPanicDevice(#[source] anyhow::Error),
+    #[error("Failed to retrieve PciConfigurationState: {0}")]
+    RetrievePciConfigurationState(#[source] anyhow::Error),
+}
 
 #[allow(dead_code)]
 #[derive(Copy, Clone)]
@@ -44,8 +60,24 @@ pub struct PvPanicDevice {
     bar_regions: Vec<PciBarConfiguration>,
 }
 
+#[derive(Versionize)]
+pub struct PvPanicDeviceState {
+    events: u8,
+}
+
+impl VersionMapped for PvPanicDeviceState {}
+
 impl PvPanicDevice {
-    pub fn new(id: String) -> PvPanicDevice {
+    pub fn new(id: String, snapshot: Option<Snapshot>) -> Result<Self, PvPanicError> {
+        let pci_configuration_state =
+            vm_migration::versioned_state_from_id(snapshot.as_ref(), PCI_CONFIGURATION_ID)
+                .map_err(|e| {
+                    PvPanicError::RetrievePciConfigurationState(anyhow!(
+                        "Failed to get PciConfigurationState from Snapshot: {}",
+                        e
+                    ))
+                })?;
+
         let mut configuration = PciConfiguration::new(
             PVPANIC_VENDOR_ID,
             PVPANIC_DEVICE_ID,
@@ -57,20 +89,36 @@ impl PvPanicDevice {
             0,
             0,
             None,
-            None,
+            pci_configuration_state,
         );
 
         let command: [u8; 2] = [0x03, 0x01];
         configuration.write_config_register(1, 0, &command);
 
-        let events = PVPANIC_PANICKED | PVPANIC_CRASH_LOADED;
+        let state: Option<PvPanicDeviceState> = snapshot
+            .as_ref()
+            .map(|s| s.to_versioned_state())
+            .transpose()
+            .map_err(|e| {
+                PvPanicError::CreatePvPanicDevice(anyhow!(
+                    "Failed to get PvPanicDeviceState from Snapshot: {}",
+                    e
+                ))
+            })?;
+        let events = if let Some(state) = state {
+            state.events
+        } else {
+            PVPANIC_PANICKED | PVPANIC_CRASH_LOADED
+        };
 
-        PvPanicDevice {
+        let pvpanic_device = PvPanicDevice {
             id,
             events,
             configuration,
             bar_regions: vec![],
-        }
+        };
+
+        Ok(pvpanic_device)
     }
 
     pub fn event_to_string(&self, event: u8) -> String {
@@ -80,6 +128,12 @@ impl PvPanicDevice {
             "crash_loaded".to_string()
         } else {
             "unknown_event".to_string()
+        }
+    }
+
+    fn state(&self) -> PvPanicDeviceState {
+        PvPanicDeviceState {
+            events: self.events,
         }
     }
 }
@@ -125,12 +179,13 @@ impl PciDevice for PvPanicDevice {
         &mut self,
         allocator: &Arc<Mutex<SystemAllocator>>,
         _mmio_allocator: &mut AddressAllocator,
-        _resources: Option<Vec<Resource>>,
+        resources: Option<Vec<Resource>>,
     ) -> std::result::Result<Vec<PciBarConfiguration>, PciDeviceError> {
         let mut bars = Vec::new();
         let region_type = PciBarRegionType::Memory32BitRegion;
         let bar_id = 0;
         let region_size = PVPANIC_DEVICE_MMIO_SIZE;
+        let restoring = resources.is_some();
         let bar_addr = allocator
             .lock()
             .unwrap()
@@ -145,9 +200,12 @@ impl PciDevice for PvPanicDevice {
             .set_prefetchable(PciBarPrefetchable::NotPrefetchable);
 
         debug!("pvpanic bar address 0x{:x}", bar_addr.0);
-        self.configuration
-            .add_pci_bar(&bar)
-            .map_err(|e| PciDeviceError::IoRegistrationFailed(bar_addr.raw_value(), e))?;
+        if !restoring {
+            self.configuration
+                .add_pci_bar(&bar)
+                .map_err(|e| PciDeviceError::IoRegistrationFailed(bar_addr.raw_value(), e))?;
+        }
+
         bars.push(bar);
         self.bar_regions = bars.clone();
 
@@ -188,3 +246,23 @@ impl PciDevice for PvPanicDevice {
         Some(self.id.clone())
     }
 }
+
+impl Pausable for PvPanicDevice {}
+
+impl Snapshottable for PvPanicDevice {
+    fn id(&self) -> String {
+        self.id.clone()
+    }
+
+    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+        let mut snapshot = Snapshot::new_from_versioned_state(&self.state())?;
+
+        // Snapshot PciConfiguration
+        snapshot.add_snapshot(self.configuration.id(), self.configuration.snapshot()?);
+
+        Ok(snapshot)
+    }
+}
+
+impl Transportable for PvPanicDevice {}
+impl Migratable for PvPanicDevice {}
