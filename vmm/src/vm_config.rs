@@ -586,6 +586,8 @@ pub struct VmConfig {
     pub vdpa: Option<Vec<VdpaConfig>>,
     pub vsock: Option<VsockConfig>,
     #[serde(default)]
+    pub pvpanic: bool,
+    #[serde(default)]
     pub iommu: bool,
     #[cfg(target_arch = "x86_64")]
     pub sgx_epc: Option<Vec<SgxEpcConfig>>,

@@ -25,6 +25,7 @@ pub mod pvpanic;
 pub mod tpm;
 
 pub use self::acpi::{AcpiGedDevice, AcpiPmTimerDevice, AcpiShutdownDevice};
+pub use self::pvpanic::{PvPanicDevice, PVPANIC_DEVICE_MMIO_SIZE};
 
 bitflags! {
     pub struct AcpiNotificationFlags: u8 {

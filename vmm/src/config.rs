@@ -370,6 +370,7 @@ pub struct VmParams<'a> {
     pub user_devices: Option<Vec<&'a str>>,
     pub vdpa: Option<Vec<&'a str>>,
     pub vsock: Option<&'a str>,
+    pub pvpanic: bool,
     #[cfg(target_arch = "x86_64")]
     pub sgx_epc: Option<Vec<&'a str>>,
     pub numa: Option<Vec<&'a str>>,
@@ -2084,6 +2085,7 @@ impl VmConfig {
             user_devices,
             vdpa,
             vsock,
+            pvpanic: vm_params.pvpanic,
             iommu: false, // updated in VmConfig::validate()
             #[cfg(target_arch = "x86_64")]
             sgx_epc,
@@ -2767,6 +2769,7 @@ mod tests {
             user_devices: None,
             vdpa: None,
             vsock: None,
+            pvpanic: false,
             iommu: false,
             #[cfg(target_arch = "x86_64")]
             sgx_epc: None,

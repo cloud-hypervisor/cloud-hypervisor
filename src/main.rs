@@ -225,6 +225,10 @@ pub struct TopLevel {
     /// cid=<context_id>, socket=<socket_path>, iommu=on|off, id=<device_id>, pci_segment=<segment_id>
     vsock: Option<String>,
 
+    #[argh(switch, long = "pvpanic")]
+    /// enable pvpanic device
+    pvpanic: bool,
+
     #[argh(option, long = "numa")]
     /// guest_numa_id=<node_id>, cpus=<cpus_id>, distances=<list_of_distances_to_destination_nodes>, memory_zones=<list_of_memory_zones>, sgx_epc_sections=<list_of_sgx_epc_sections>
     numa: Vec<String>,
@@ -349,6 +353,9 @@ impl TopLevel {
         };
 
         let vsock = self.vsock.as_deref();
+
+        let pvpanic = self.pvpanic;
+
         #[cfg(target_arch = "x86_64")]
         let sgx_epc = if !self.sgx_epc.is_empty() {
             Some(self.sgx_epc.iter().map(|x| x.as_str()).collect())
@@ -387,6 +394,7 @@ impl TopLevel {
             user_devices,
             vdpa,
             vsock,
+            pvpanic,
             #[cfg(target_arch = "x86_64")]
             sgx_epc,
             numa,
@@ -773,6 +781,7 @@ mod unit_tests {
             user_devices: None,
             vdpa: None,
             vsock: None,
+            pvpanic: false,
             iommu: false,
             #[cfg(target_arch = "x86_64")]
             sgx_epc: None,
