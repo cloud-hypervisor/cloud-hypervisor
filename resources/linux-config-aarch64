@@ -1402,7 +1402,8 @@ CONFIG_NVME_MULTIPATH=y
 # CONFIG_MISC_RTSX_PCI is not set
 # CONFIG_HABANA_AI is not set
 # CONFIG_UACCE is not set
-# CONFIG_PVPANIC is not set
+CONFIG_PVPANIC=y
+CONFIG_PVPANIC_PCI=y
 # CONFIG_GP_PCI1XXXX is not set
 # end of Misc devices
 
