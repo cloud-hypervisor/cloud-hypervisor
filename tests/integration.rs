@@ -2225,6 +2225,16 @@ fn enable_guest_watchdog(guest: &Guest, watchdog_sec: u32) {
         .unwrap();
 }
 
+fn make_guest_panic(guest: &Guest) {
+    // Check for pvpanic device
+    assert!(guest
+        .does_device_vendor_pair_match("0x0011", "0x1b36")
+        .unwrap_or_default());
+
+    // Trigger guest a panic
+    guest.ssh_command("screen -dmS reboot sh -c \"sleep 5; echo s | tee /proc/sysrq-trigger; echo c | sudo tee /proc/sysrq-trigger\"").unwrap();
+}
+
 mod common_parallel {
     use std::{fs::OpenOptions, io::SeekFrom};
 
@@ -6123,6 +6133,54 @@ mod common_parallel {
                 // Check no reboot
                 assert_eq!(get_reboot_count(&guest), expected_reboot_count);
             }
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_pvpanic() {
+        let jammy = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(jammy));
+        let api_socket = temp_api_path(&guest.tmp_dir);
+        let event_path = temp_event_monitor_path(&guest.tmp_dir);
+
+        let kernel_path = direct_kernel_boot_path();
+
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .args(["--net", guest.default_net_string().as_str()])
+            .args(["--pvpanic"])
+            .args(["--api-socket", &api_socket])
+            .args(["--event-monitor", format!("path={event_path}").as_str()])
+            .capture_output();
+
+        let mut child = cmd.spawn().unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            // Trigger guest a panic
+            make_guest_panic(&guest);
+
+            // Wait a while for guest
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            let expected_sequential_events = [&MetaEvent {
+                event: "panic".to_string(),
+                device_id: None,
+            }];
+            assert!(check_latest_events_exact(
+                &expected_sequential_events,
+                &event_path
+            ));
         });
 
         let _ = child.kill();
