@@ -486,6 +486,7 @@ fn pty_foreground_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
         #[cfg(target_arch = "aarch64")]
         (libc::SYS_ppoll, vec![]),
         (libc::SYS_read, vec![]),
+        (libc::SYS_restart_syscall, vec![]),
         (libc::SYS_rt_sigaction, vec![]),
         (libc::SYS_rt_sigreturn, vec![]),
         (libc::SYS_setsid, vec![]),
