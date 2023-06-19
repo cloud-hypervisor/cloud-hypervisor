@@ -4,8 +4,8 @@
 //
 use super::{ApiRequest, VmAction};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
-use crate::NetConfig;
 use crate::{Error as VmmError, Result as VmmResult};
+use crate::{NetConfig, VmConfig};
 use futures::channel::oneshot;
 use futures::{executor, FutureExt};
 use hypervisor::HypervisorType;
@@ -194,7 +194,17 @@ impl DBusApi {
         let api_sender = self.clone_api_sender().await;
         let api_notifier = self.clone_api_notifier()?;
 
-        let vm_config = serde_json::from_str(&vm_config).map_err(api_error)?;
+        let mut vm_config: VmConfig = serde_json::from_str(&vm_config).map_err(api_error)?;
+
+        if let Some(ref mut nets) = vm_config.net {
+            if nets.iter().any(|net| net.fds.is_some()) {
+                warn!("Ignoring FDs sent via the D-Bus request body");
+            }
+            for net in nets {
+                net.fds = None;
+            }
+        }
+
         blocking::unblock(move || {
             super::vm_create(api_notifier, api_sender, Arc::new(Mutex::new(vm_config)))
         })
