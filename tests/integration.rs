@@ -4295,7 +4295,7 @@ mod common_parallel {
                 .ssh_command_l1(
                     "sudo /mnt/ch-remote \
                  --api-socket /tmp/ch_api.sock \
-                 resize --memory=1073741824",
+                 resize --memory 1073741824",
                 )
                 .unwrap();
             assert!(guest.get_total_memory_l2().unwrap_or_default() > 960_000);
@@ -8286,7 +8286,7 @@ mod vfio {
                 .ssh_command_l1(
                     "sudo /mnt/ch-remote \
                  --api-socket /tmp/ch_api.sock \
-                 resize --memory=1073741824",
+                 resize --memory 1073741824",
                 )
                 .unwrap();
             assert!(guest.get_total_memory_l2().unwrap_or_default() > 960_000);
