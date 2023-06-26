@@ -452,10 +452,9 @@ impl From<PciBarType> for PciBarRegionType {
     }
 }
 
-#[allow(clippy::from_over_into)]
-impl Into<PciBarType> for PciBarRegionType {
-    fn into(self) -> PciBarType {
-        match self {
+impl From<PciBarRegionType> for PciBarType {
+    fn from(val: PciBarRegionType) -> Self {
+        match val {
             PciBarRegionType::IoRegion => PciBarType::Io,
             PciBarRegionType::Memory32BitRegion => PciBarType::Mmio32,
             PciBarRegionType::Memory64BitRegion => PciBarType::Mmio64,
@@ -469,10 +468,9 @@ pub enum PciBarPrefetchable {
     Prefetchable = 0x08,
 }
 
-#[allow(clippy::from_over_into)]
-impl Into<bool> for PciBarPrefetchable {
-    fn into(self) -> bool {
-        match self {
+impl From<PciBarPrefetchable> for bool {
+    fn from(val: PciBarPrefetchable) -> Self {
+        match val {
             PciBarPrefetchable::NotPrefetchable => false,
             PciBarPrefetchable::Prefetchable => true,
         }
