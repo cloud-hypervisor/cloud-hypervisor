@@ -38,7 +38,7 @@ option_parser = { path = "../option_parser" }
 pci = { path = "../pci" }
 qcow = { path = "../qcow" }
 seccompiler = "0.3.0"
-serde = { version = "1.0.163", features = ["rc", "derive"] }
+serde = { version = "1.0.164", features = ["rc", "derive"] }
 serde_json = "1.0.96"
 serial_buffer = { path = "../serial_buffer" }
 signal-hook = "0.3.15"
