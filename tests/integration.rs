@@ -4996,7 +4996,6 @@ mod common_parallel {
         handle_child_output(r, &output);
     }
 
-    #[allow(clippy::useless_conversion)]
     fn create_loop_device(backing_file_path: &str, block_size: u32, num_retries: usize) -> String {
         const LOOP_CONFIGURE: u64 = 0x4c0a;
         const LOOP_CTL_GET_FREE: u64 = 0x4c82;
@@ -5057,12 +5056,9 @@ mod common_parallel {
             .unwrap();
 
         // Request a free loop device
-        let loop_device_number = unsafe {
-            libc::ioctl(
-                loop_ctl_file.as_raw_fd(),
-                LOOP_CTL_GET_FREE.try_into().unwrap(),
-            )
-        };
+        let loop_device_number =
+            unsafe { libc::ioctl(loop_ctl_file.as_raw_fd(), LOOP_CTL_GET_FREE as _) };
+
         if loop_device_number < 0 {
             panic!("Couldn't find a free loop device");
         }
@@ -5094,7 +5090,7 @@ mod common_parallel {
             let ret = unsafe {
                 libc::ioctl(
                     loop_device_file.as_raw_fd(),
-                    LOOP_CONFIGURE.try_into().unwrap(),
+                    LOOP_CONFIGURE as _,
                     &loop_config,
                 )
             };
