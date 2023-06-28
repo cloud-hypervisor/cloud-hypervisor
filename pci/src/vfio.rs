@@ -858,6 +858,12 @@ impl VfioCommon {
 
         let mut pci_express_cap_found = false;
         let mut power_management_cap_found = false;
+        let limit = libc::rlimit {
+            rlim_cur: 2048,
+            rlim_max: 2048,
+        };
+        // SAFETY: FFI call with correct arguments
+        unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &limit) };
 
         while cap_next != 0 {
             let cap_id = self.vfio_wrapper.read_config_byte(cap_next.into());
