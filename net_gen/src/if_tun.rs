@@ -10,6 +10,7 @@
 #[repr(C)]
 #[derive(Default)]
 pub struct __IncompleteArrayField<T>(::std::marker::PhantomData<T>, [T; 0]);
+#[allow(clippy::missing_safety_doc)]
 impl<T> __IncompleteArrayField<T> {
     #[inline]
     pub const fn new() -> Self {
