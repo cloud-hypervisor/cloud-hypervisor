@@ -26,7 +26,7 @@ vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", defau
 vm-memory = { version = "0.11.0", features = ["backend-mmap", "backend-atomic"] }
 vmm-sys-util = { version = "0.11.0", features = ["with-serde"] }
 
-[target.'cfg(target_arch = "x86_64")'.dependencies.iced-x86]
+[target.'cfg(all(target_arch = "x86_64", target_os = "windows"))'.dependencies.iced-x86]
 version = "1.19.0"
 default-features = false
 features = ["std", "decoder", "op_code_info", "instr_info", "fast_fmt"]
