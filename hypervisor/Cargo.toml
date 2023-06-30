@@ -7,7 +7,7 @@ license = "Apache-2.0 OR BSD-3-Clause"
 
 [features]
 kvm = ["kvm-ioctls", "kvm-bindings", "vfio-ioctls/kvm"]
-mshv = ["mshv-ioctls", "mshv-bindings", "vfio-ioctls/mshv"]
+mshv = ["mshv-ioctls", "mshv-bindings", "vfio-ioctls/mshv", "iced-x86"]
 tdx = []
 
 [dependencies]
@@ -27,6 +27,7 @@ vm-memory = { version = "0.11.0", features = ["backend-mmap", "backend-atomic"] 
 vmm-sys-util = { version = "0.11.0", features = ["with-serde"] }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies.iced-x86]
+optional = true
 version = "1.19.0"
 default-features = false
 features = ["std", "decoder", "op_code_info", "instr_info", "fast_fmt"]

@@ -11,6 +11,7 @@
 // Copyright © 2020, Microsoft Corporation
 //
 
+#[cfg(all(feature = "mshv", target_arch = "x86_64"))]
 pub mod emulator;
 pub mod gdt;
 #[allow(non_camel_case_types)]
