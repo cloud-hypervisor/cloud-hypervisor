@@ -1591,7 +1591,7 @@ impl MemoryManager {
             .ok_or(Error::MemoryRangeAllocation)?;
 
         // Update the slot so that it can be queried via the I/O port
-        let mut slot = &mut self.hotplug_slots[self.next_hotplug_slot];
+        let slot = &mut self.hotplug_slots[self.next_hotplug_slot];
         slot.active = true;
         slot.inserting = true;
         slot.base = region.start_addr().0;

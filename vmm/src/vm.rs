@@ -1258,7 +1258,7 @@ impl Vm {
                 .resize(desired_memory)
                 .map_err(Error::MemoryManager)?;
 
-            let mut memory_config = &mut self.config.lock().unwrap().memory;
+            let memory_config = &mut self.config.lock().unwrap().memory;
 
             if let Some(new_region) = &new_region {
                 self.device_manager
