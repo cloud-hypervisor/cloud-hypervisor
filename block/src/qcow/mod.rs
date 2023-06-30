@@ -673,6 +673,10 @@ impl QcowFile {
         Ok(qcow)
     }
 
+    pub fn set_backing_file(&mut self, backing: Option<Box<dyn BlockBackend>>) {
+        self.backing_file = backing;
+    }
+
     /// Returns the `QcowHeader` for this file.
     pub fn header(&self) -> &QcowHeader {
         &self.header
@@ -1509,6 +1513,9 @@ impl Read for QcowFile {
                 self.raw_file
                     .file_mut()
                     .read_exact(&mut buf[nread..(nread + count)])?;
+            } else if let Some(backing) = self.backing_file.as_mut() {
+                backing.seek(SeekFrom::Start(curr_addr))?;
+                backing.read_exact(&mut buf[nread..(nread + count)])?;
             } else {
                 // Previously unwritten region, return zeros
                 for b in &mut buf[nread..(nread + count)] {
@@ -1867,16 +1874,19 @@ mod tests {
         ]
     }
 
-    fn with_basic_file<F>(header: &[u8], mut testfn: F)
-    where
-        F: FnMut(RawFile),
-    {
+    fn basic_file(header: &[u8]) -> RawFile {
         let mut disk_file: RawFile = RawFile::new(TempFile::new().unwrap().into_file(), false);
         disk_file.write_all(header).unwrap();
         disk_file.set_len(0x1_0000_0000).unwrap();
         disk_file.rewind().unwrap();
+        disk_file
+    }
 
-        testfn(disk_file); // File closed when the function exits.
+    fn with_basic_file<F>(header: &[u8], mut testfn: F)
+    where
+        F: FnMut(RawFile),
+    {
+        testfn(basic_file(header)); // File closed when the function exits.
     }
 
     fn with_default_file<F>(file_size: u64, direct: bool, mut testfn: F)
@@ -1887,6 +1897,38 @@ mod tests {
         let qcow_file = QcowFile::new(tmp, 3, file_size).unwrap();
 
         testfn(qcow_file); // File closed when the function exits.
+    }
+
+    #[test]
+    fn write_read_start_backing_v2() {
+        let disk_file = basic_file(&valid_header_v2());
+        let mut backing = QcowFile::from(disk_file).unwrap();
+        backing
+            .write_all(b"test first bytes")
+            .expect("Failed to write test string.");
+        let mut buf = [0u8; 4];
+        let wrapping_disk_file = basic_file(&valid_header_v2());
+        let mut wrapping = QcowFile::from(wrapping_disk_file).unwrap();
+        wrapping.set_backing_file(Some(Box::new(backing)));
+        wrapping.seek(SeekFrom::Start(0)).expect("Failed to seek.");
+        wrapping.read_exact(&mut buf).expect("Failed to read.");
+        assert_eq!(&buf, b"test");
+    }
+
+    #[test]
+    fn write_read_start_backing_v3() {
+        let disk_file = basic_file(&valid_header_v3());
+        let mut backing = QcowFile::from(disk_file).unwrap();
+        backing
+            .write_all(b"test first bytes")
+            .expect("Failed to write test string.");
+        let mut buf = [0u8; 4];
+        let wrapping_disk_file = basic_file(&valid_header_v3());
+        let mut wrapping = QcowFile::from(wrapping_disk_file).unwrap();
+        wrapping.set_backing_file(Some(Box::new(backing)));
+        wrapping.seek(SeekFrom::Start(0)).expect("Failed to seek.");
+        wrapping.read_exact(&mut buf).expect("Failed to read.");
+        assert_eq!(&buf, b"test");
     }
 
     #[test]
