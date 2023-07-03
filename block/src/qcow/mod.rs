@@ -1106,7 +1106,7 @@ impl QcowFile {
             let l2_table = if l2_addr_disk == 0 {
                 // Allocate a new cluster to store the L2 table and update the L1 table to point
                 // to the new table.
-                let new_addr: u64 = self.get_new_cluster()?;
+                let new_addr: u64 = self.get_new_cluster(None)?;
                 // The cluster refcount starts at one meaning it is used but doesn't need COW.
                 set_refcounts.push((new_addr, 1));
                 self.l1_table[l1_index] = new_addr;
@@ -1127,8 +1127,18 @@ impl QcowFile {
 
         let cluster_addr = match self.l2_cache.get(l1_index).unwrap()[l2_index] {
             0 => {
+                let initial_data = if let Some(backing) = self.backing_file.as_mut() {
+                    let cluster_size = self.raw_file.cluster_size();
+                    let cluster_begin = address - (address % cluster_size);
+                    let mut cluster_data = vec![0u8; cluster_size as usize];
+                    backing.seek(SeekFrom::Start(cluster_begin))?;
+                    backing.read_exact(&mut cluster_data)?;
+                    Some(cluster_data)
+                } else {
+                    None
+                };
                 // Need to allocate a data cluster
-                let cluster_addr = self.append_data_cluster()?;
+                let cluster_addr = self.append_data_cluster(initial_data)?;
                 self.update_cluster_addr(l1_index, l2_index, cluster_addr, &mut set_refcounts)?;
                 cluster_addr
             }
@@ -1165,7 +1175,7 @@ impl QcowFile {
             // Allocate a new cluster to store the L2 table and update the L1 table to point
             // to the new table. The cluster will be written when the cache is flushed, no
             // need to copy the data now.
-            let new_addr: u64 = self.get_new_cluster()?;
+            let new_addr: u64 = self.get_new_cluster(None)?;
             // The cluster refcount starts at one indicating it is used but doesn't need
             // COW.
             set_refcounts.push((new_addr, 1));
@@ -1177,15 +1187,22 @@ impl QcowFile {
     }
 
     // Allocate a new cluster and return its offset within the raw file.
-    fn get_new_cluster(&mut self) -> std::io::Result<u64> {
+    fn get_new_cluster(&mut self, initial_data: Option<Vec<u8>>) -> std::io::Result<u64> {
         // First use a pre allocated cluster if one is available.
         if let Some(free_cluster) = self.avail_clusters.pop() {
-            self.raw_file.zero_cluster(free_cluster)?;
+            if let Some(initial_data) = initial_data {
+                self.raw_file.write_cluster(free_cluster, initial_data)?;
+            } else {
+                self.raw_file.zero_cluster(free_cluster)?;
+            }
             return Ok(free_cluster);
         }
 
         let max_valid_cluster_offset = self.refcounts.max_valid_cluster_offset();
         if let Some(new_cluster) = self.raw_file.add_cluster_end(max_valid_cluster_offset)? {
+            if let Some(initial_data) = initial_data {
+                self.raw_file.write_cluster(new_cluster, initial_data)?;
+            }
             Ok(new_cluster)
         } else {
             error!("No free clusters in get_new_cluster()");
@@ -1195,8 +1212,8 @@ impl QcowFile {
 
     // Allocate and initialize a new data cluster. Returns the offset of the
     // cluster in to the file on success.
-    fn append_data_cluster(&mut self) -> std::io::Result<u64> {
-        let new_addr: u64 = self.get_new_cluster()?;
+    fn append_data_cluster(&mut self, initial_data: Option<Vec<u8>>) -> std::io::Result<u64> {
+        let new_addr: u64 = self.get_new_cluster(initial_data)?;
         // The cluster refcount starts at one indicating it is used but doesn't need COW.
         let mut newly_unref = self.set_cluster_refcount(new_addr, 1)?;
         self.unref_clusters.append(&mut newly_unref);
@@ -1430,7 +1447,7 @@ impl QcowFile {
                 }
                 Err(refcount::Error::NeedNewCluster) => {
                     // Allocate the cluster and call set_cluster_refcount again.
-                    let addr = self.get_new_cluster()?;
+                    let addr = self.get_new_cluster(None)?;
                     added_clusters.push(addr);
                     new_cluster = Some((
                         addr,
@@ -2117,6 +2134,26 @@ mod tests {
             q.read_exact(&mut buf).expect("Failed to read.");
             assert_eq!(&buf, b"test");
         });
+    }
+
+    #[test]
+    fn write_read_start_backing_overlap() {
+        let disk_file = basic_file(&valid_header_v3());
+        let mut backing = QcowFile::from(disk_file).unwrap();
+        backing
+            .write_all(b"test first bytes")
+            .expect("Failed to write test string.");
+        let wrapping_disk_file = basic_file(&valid_header_v3());
+        let mut wrapping = QcowFile::from(wrapping_disk_file).unwrap();
+        wrapping.set_backing_file(Some(Box::new(backing)));
+        wrapping.seek(SeekFrom::Start(0)).expect("Failed to seek.");
+        wrapping
+            .write_all(b"TEST")
+            .expect("Failed to write second test string.");
+        let mut buf = [0u8; 10];
+        wrapping.seek(SeekFrom::Start(0)).expect("Failed to seek.");
+        wrapping.read_exact(&mut buf).expect("Failed to read.");
+        assert_eq!(&buf, b"TEST first");
     }
 
     #[test]
