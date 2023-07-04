@@ -22,7 +22,7 @@ bitflags = "2.3.3"
 block_util = { path = "../block_util" }
 blocking = { version = "1.3.0", optional = true }
 devices = { path = "../devices" }
-epoll = "4.3.1"
+epoll = "4.3.3"
 event_monitor = { path = "../event_monitor" }
 futures = { version = "0.3.27", optional = true }
 gdbstub = { version = "0.6.4", optional = true }

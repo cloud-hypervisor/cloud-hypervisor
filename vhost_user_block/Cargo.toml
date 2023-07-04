@@ -9,7 +9,7 @@ build = "../build.rs"
 argh = "0.1.9"
 block_util = { path = "../block_util" }
 env_logger = "0.10.0"
-epoll = "4.3.1"
+epoll = "4.3.3"
 libc = "0.2.139"
 log = "0.4.17"
 option_parser = { path = "../option_parser" }

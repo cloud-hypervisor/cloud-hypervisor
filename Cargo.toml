@@ -33,7 +33,7 @@ anyhow = "1.0.71"
 api_client = { path = "api_client" }
 argh = "0.1.9"
 dhat = { version = "0.3.2", optional = true }
-epoll = "4.3.1"
+epoll = "4.3.3"
 event_monitor = { path = "event_monitor" }
 hypervisor = { path = "hypervisor" }
 libc = "0.2.139"
