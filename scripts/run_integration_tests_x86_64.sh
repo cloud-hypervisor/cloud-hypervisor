@@ -53,6 +53,14 @@ if [ ! -f "$FOCAL_OS_RAW_IMAGE" ]; then
     popd
 fi
 
+FOCAL_OS_QCOW_BACKING_FILE_IMAGE_NAME="focal-server-cloudimg-amd64-custom-20210609-0-backing.qcow2"
+FOCAL_OS_QCOW_BACKING_FILE_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_QCOW_BACKING_FILE_IMAGE_NAME"
+if [ ! -f "$FOCAL_OS_QCOW_BACKING_FILE_IMAGE" ]; then
+    pushd $WORKLOADS_DIR
+    time qemu-img create -f qcow2 -b $FOCAL_OS_IMAGE -F qcow2 $FOCAL_OS_QCOW_BACKING_FILE_IMAGE_NAME
+    popd
+fi
+
 JAMMY_OS_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20230119-0.qcow2"
 JAMMY_OS_IMAGE_URL="https://cloud-hypervisor.azureedge.net/$JAMMY_OS_IMAGE_NAME"
 JAMMY_OS_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_IMAGE_NAME"

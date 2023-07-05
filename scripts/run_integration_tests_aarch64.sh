@@ -95,6 +95,14 @@ update_workloads() {
         popd
     fi
 
+    FOCAL_OS_QCOW2_IMAGE_BACKING_FILE_NAME="focal-server-cloudimg-arm64-custom-20210929-0-backing.qcow2"
+    FOCAL_OS_QCOW2_BACKING_FILE_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_QCOW2_IMAGE_BACKING_FILE_NAME"
+    if [ ! -f "$FOCAL_OS_QCOW2_BACKING_FILE_IMAGE" ]; then
+        pushd $WORKLOADS_DIR
+        time qemu-img create -f qcow2 -b $FOCAL_OS_QCOW2_UNCOMPRESSED_IMAGE -F qcow2 $FOCAL_OS_QCOW2_IMAGE_BACKING_FILE_NAME
+        popd
+    fi
+
     JAMMY_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0.raw"
     JAMMY_OS_RAW_IMAGE_DOWNLOAD_URL="https://cloud-hypervisor.azureedge.net/$JAMMY_OS_RAW_IMAGE_NAME"
     JAMMY_OS_RAW_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_RAW_IMAGE_NAME"
