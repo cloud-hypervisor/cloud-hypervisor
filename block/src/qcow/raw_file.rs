@@ -23,6 +23,7 @@ pub struct RawFile {
     file: File,
     alignment: usize,
     position: u64,
+    direct_io: bool,
 }
 
 const BLK_ALIGNMENTS: [usize; 2] = [512, 4096];
@@ -65,6 +66,7 @@ impl RawFile {
             file,
             alignment,
             position: 0,
+            direct_io,
         }
     }
 
@@ -103,6 +105,7 @@ impl RawFile {
             file: self.file.try_clone().expect("RawFile cloning failed"),
             alignment: self.alignment,
             position: self.position,
+            direct_io: self.direct_io,
         })
     }
 
@@ -112,6 +115,10 @@ impl RawFile {
 
     pub fn sync_data(&self) -> std::io::Result<()> {
         self.file.sync_data()
+    }
+
+    pub fn is_direct(&self) -> bool {
+        self.direct_io
     }
 }
 
@@ -356,6 +363,7 @@ impl Clone for RawFile {
             file: self.file.try_clone().expect("RawFile cloning failed"),
             alignment: self.alignment,
             position: self.position,
+            direct_io: self.direct_io,
         }
     }
 }
