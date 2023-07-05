@@ -1,3 +1,4 @@
+- [v32.1](#v321)
 - [v32.0](#v320)
     - [Increased PCI Segment Limit](#increased-pci-segment-limit)
     - [API Changes](#api-changes)
@@ -281,6 +282,19 @@
     - [Console over virtio](#console-over-virtio)
     - [Unit testing](#unit-testing)
     - [Integration tests parallelization](#integration-tests-parallelization)
+
+# v32.1
+
+This is a bug fix release. The following issues have been addressed:
+
+* Report errors explicitly to users when VM failed to boot (#5453)
+* Fix VFIO on platforms with non-4k page size (#5450, #5469)
+* Fix TDX initialization (#5454)
+* Ensure all guest memory regions are page-size aligned (#5496)
+* Fix seccomp filter lists related to virtio-console, serial and pty
+(#5506, #5524)
+* Populate APIC ID properly (#5512)
+* Ignore and warn TAP FDs in more situations (#5522)
 
 # v32.0
 
