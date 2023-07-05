@@ -38,6 +38,8 @@ mod x86_64 {
     pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-0.raw";
     pub const JAMMY_NVIDIA_IMAGE_NAME: &str = "jammy-server-cloudimg-amd64-nvidia.raw";
     pub const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-amd64-custom-20210609-0.qcow2";
+    pub const FOCAL_IMAGE_NAME_QCOW2_BACKING_FILE: &str =
+        "focal-server-cloudimg-amd64-custom-20210609-0-backing.qcow2";
     pub const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-amd64-custom-20210609-0.vhd";
     pub const FOCAL_IMAGE_NAME_VHDX: &str = "focal-server-cloudimg-amd64-custom-20210609-0.vhdx";
     pub const JAMMY_IMAGE_NAME: &str = "jammy-server-cloudimg-amd64-custom-20230119-0.raw";
@@ -56,6 +58,8 @@ mod aarch64 {
     pub const FOCAL_IMAGE_UPDATE_KERNEL_NAME: &str =
         "focal-server-cloudimg-arm64-custom-20210929-0-update-kernel.raw";
     pub const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-arm64-custom-20210929-0.qcow2";
+    pub const FOCAL_IMAGE_NAME_QCOW2_BACKING_FILE: &str =
+        "focal-server-cloudimg-arm64-custom-20210929-0-backing.qcow2";
     pub const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-arm64-custom-20210929-0.vhd";
     pub const FOCAL_IMAGE_NAME_VHDX: &str = "focal-server-cloudimg-arm64-custom-20210929-0.vhdx";
     pub const JAMMY_IMAGE_NAME: &str = "jammy-server-cloudimg-arm64-custom-20220329-0.raw";
@@ -3033,6 +3037,11 @@ mod common_parallel {
     #[test]
     fn test_virtio_block_qcow2() {
         _test_virtio_block(FOCAL_IMAGE_NAME_QCOW2, false)
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_backing_file() {
+        _test_virtio_block(FOCAL_IMAGE_NAME_QCOW2_BACKING_FILE, false)
     }
 
     #[test]
