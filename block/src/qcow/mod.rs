@@ -324,11 +324,14 @@ impl QcowHeader {
         write_u32_to_file(file, self.refcount_table_clusters)?;
         write_u32_to_file(file, self.nb_snapshots)?;
         write_u64_to_file(file, self.snapshots_offset)?;
-        write_u64_to_file(file, self.incompatible_features)?;
-        write_u64_to_file(file, self.compatible_features)?;
-        write_u64_to_file(file, self.autoclear_features)?;
-        write_u32_to_file(file, self.refcount_order)?;
-        write_u32_to_file(file, self.header_size)?;
+
+        if self.version == 3 {
+            write_u64_to_file(file, self.incompatible_features)?;
+            write_u64_to_file(file, self.compatible_features)?;
+            write_u64_to_file(file, self.autoclear_features)?;
+            write_u32_to_file(file, self.refcount_order)?;
+            write_u32_to_file(file, self.header_size)?;
+        }
 
         // Set the file length by seeking and writing a zero to the last byte. This avoids needing
         // a `File` instead of anything that implements seek as the `file` argument.
