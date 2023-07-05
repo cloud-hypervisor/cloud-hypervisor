@@ -1,3 +1,4 @@
+- [v31.2](#v312)
 - [v31.1](#v311)
 - [v31.0](#v310)
     - [Update to Latest `acpi_tables`](#update-to-latest-acpi_tables)
@@ -276,6 +277,23 @@
     - [Console over virtio](#console-over-virtio)
     - [Unit testing](#unit-testing)
     - [Integration tests parallelization](#integration-tests-parallelization)
+
+# v31.2
+
+This is a bug fix release. The following issues have been addressed:
+
+* The number of vCPUs is capped at the hypervisor maximum (#5357)
+* Fixes for TTY reset (#5414)
+* CPU topology fixes on MSHV (#5325)
+* Seccomp fixes for older distributions (#5397)
+* Report errors explicitly to users when VM failed to boot (#5453)
+* Fix VFIO on platforms with non-4k page size (#5450, #5469)
+* Fix TDX initialization (#5454)
+* Ensure all guest memory regions are page-size aligned (#5496)
+* Fix seccomp filter lists related to virtio-console, serial and pty
+(#5506, #5524)
+* Populate APIC ID properly (#5512)
+* Ignore and warn TAP FDs in more situations (#5522)
 
 # v31.1
 
