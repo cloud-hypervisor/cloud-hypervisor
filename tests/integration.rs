@@ -2439,7 +2439,7 @@ mod common_parallel {
         assert!(
             String::from_utf8_lossy(&host_cpus_count.stdout)
                 .trim()
-                .parse::<u8>()
+                .parse::<u16>()
                 .unwrap_or(0)
                 >= 4
         );
