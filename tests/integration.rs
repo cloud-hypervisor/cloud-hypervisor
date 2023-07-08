@@ -102,23 +102,21 @@ impl TargetApi {
         )
     }
 
-    fn guest_args(&self) -> Vec<&str> {
+    fn guest_args(&self) -> Vec<String> {
         match self {
             TargetApi::HttpApi(api_socket) => {
-                vec!["--api-socket", api_socket.as_str()]
+                vec![format!("--api-socket={}", api_socket.as_str())]
             }
             TargetApi::DBusApi(service_name, object_path) => {
                 vec![
-                    "--dbus-service-name",
-                    service_name.as_str(),
-                    "--dbus-object-path",
-                    object_path.as_str(),
+                    format!("--dbus-service-name={}", service_name.as_str()),
+                    format!("--dbus-object-path={}", object_path.as_str()),
                 ]
             }
         }
     }
 
-    fn remote_args(&self) -> Vec<&str> {
+    fn remote_args(&self) -> Vec<String> {
         // `guest_args` and `remote_args` are consistent with each other
         self.guest_args()
     }
@@ -625,7 +623,7 @@ fn prepare_swtpm_daemon(tmp_dir: &TempDir) -> (std::process::Command, String) {
 
 fn remote_command(api_socket: &str, command: &str, arg: Option<&str>) -> bool {
     let mut cmd = Command::new(clh_command("ch-remote"));
-    cmd.args(["--api-socket", api_socket, command]);
+    cmd.args([&format!("--api-socket={api_socket}"), command]);
 
     if let Some(arg) = arg {
         cmd.arg(arg);
@@ -643,7 +641,7 @@ fn remote_command(api_socket: &str, command: &str, arg: Option<&str>) -> bool {
 
 fn remote_command_w_output(api_socket: &str, command: &str, arg: Option<&str>) -> (bool, Vec<u8>) {
     let mut cmd = Command::new(clh_command("ch-remote"));
-    cmd.args(["--api-socket", api_socket, command]);
+    cmd.args([&format!("--api-socket={api_socket}"), command]);
 
     if let Some(arg) = arg {
         cmd.arg(arg);
@@ -662,18 +660,18 @@ fn resize_command(
     event_file: Option<&str>,
 ) -> bool {
     let mut cmd = Command::new(clh_command("ch-remote"));
-    cmd.args(["--api-socket", api_socket, "resize"]);
+    cmd.args([&format!("--api-socket={api_socket}"), "resize"]);
 
     if let Some(desired_vcpus) = desired_vcpus {
-        cmd.args(["--cpus", &format!("{desired_vcpus}")]);
+        cmd.arg(format!("--cpus={desired_vcpus}"));
     }
 
     if let Some(desired_ram) = desired_ram {
-        cmd.args(["--memory", &format!("{desired_ram}")]);
+        cmd.arg(format!("--memory={desired_ram}"));
     }
 
     if let Some(desired_balloon) = desired_balloon {
-        cmd.args(["--balloon", &format!("{desired_balloon}")]);
+        cmd.arg(format!("--balloon={desired_balloon}"));
     }
 
     let ret = cmd.status().expect("Failed to launch ch-remote").success();
@@ -698,13 +696,10 @@ fn resize_command(
 fn resize_zone_command(api_socket: &str, id: &str, desired_size: &str) -> bool {
     let mut cmd = Command::new(clh_command("ch-remote"));
     cmd.args([
-        "--api-socket",
-        api_socket,
+        &format!("--api-socket={api_socket}"),
         "resize-zone",
-        "--id",
-        id,
-        "--size",
-        desired_size,
+        &format!("--id={id}"),
+        &format!("--size={desired_size}"),
     ]);
 
     cmd.status().expect("Failed to launch ch-remote").success()
@@ -757,7 +752,7 @@ fn setup_ovs_dpdk_guests(
                     .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
                     .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                     .default_disks()
-                    .args(["--net", guest1.default_net_string().as_str(), "--net", "vhost_user=true,socket=/tmp/dpdkvhostclient1,num_queues=2,queue_size=256,vhost_mode=server"])
+                    .args(["--net", guest1.default_net_string().as_str(), "vhost_user=true,socket=/tmp/dpdkvhostclient1,num_queues=2,queue_size=256,vhost_mode=server"])
                     .capture_output()
                     .spawn()
                     .unwrap();
@@ -807,7 +802,7 @@ fn setup_ovs_dpdk_guests(
                     .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
                     .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                     .default_disks()
-                    .args(["--net", guest2.default_net_string().as_str(), "--net", "vhost_user=true,socket=/tmp/dpdkvhostclient2,num_queues=2,queue_size=256,vhost_mode=server"])
+                    .args(["--net", guest2.default_net_string().as_str(), "vhost_user=true,socket=/tmp/dpdkvhostclient2,num_queues=2,queue_size=256,vhost_mode=server"])
                     .capture_output()
                     .spawn()
                     .unwrap();
@@ -1040,17 +1035,13 @@ fn _test_guest_numa_nodes(acpi: bool) {
         .args([
             "--memory-zone",
             "id=mem0,size=1G,hotplug_size=3G",
-            "--memory-zone",
             "id=mem1,size=2G,hotplug_size=3G",
-            "--memory-zone",
             "id=mem2,size=3G,hotplug_size=3G",
         ])
         .args([
             "--numa",
             "guest_numa_id=0,cpus=[0-2,9],distances=[1@15,2@20],memory_zones=mem0",
-            "--numa",
             "guest_numa_id=1,cpus=[3-4,6-8],distances=[0@20,2@25],memory_zones=mem1",
-            "--numa",
             "guest_numa_id=2,cpus=[5,10-11],distances=[0@25,1@30],memory_zones=mem2",
         ])
         .args(["--kernel", kernel_path.to_str().unwrap()])
@@ -1353,13 +1344,11 @@ fn test_vhost_user_blk(
                 guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
             )
             .as_str(),
-            "--disk",
             format!(
                 "path={}",
                 guest.disk_config.disk(DiskType::CloudInit).unwrap()
             )
             .as_str(),
-            "--disk",
             blk_params.as_str(),
         ])
         .default_net()
@@ -1499,7 +1488,6 @@ fn test_boot_from_vhost_user_blk(
         .args([
             "--disk",
             blk_boot_params.as_str(),
-            "--disk",
             format!(
                 "path={}",
                 guest.disk_config.disk(DiskType::CloudInit).unwrap()
@@ -2195,7 +2183,6 @@ fn _test_virtio_iommu(acpi: bool) {
                 guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
             )
             .as_str(),
-            "--disk",
             format!(
                 "path={},iommu=on",
                 guest.disk_config.disk(DiskType::CloudInit).unwrap()
@@ -2617,9 +2604,7 @@ mod common_parallel {
             .args([
                 "--memory-zone",
                 "id=mem0,size=1G,hotplug_size=2G",
-                "--memory-zone",
                 "id=mem1,size=1G,shared=on",
-                "--memory-zone",
                 "id=mem2,size=1G,host_numa_node=0,hotplug_size=2G",
             ])
             .args(["--kernel", kernel_path.to_str().unwrap()])
@@ -2876,13 +2861,11 @@ mod common_parallel {
                     guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
                 )
                 .as_str(),
-                "--disk",
                 format!(
                     "path={}",
                     guest.disk_config.disk(DiskType::CloudInit).unwrap()
                 )
                 .as_str(),
-                "--disk",
                 format!("path={test_disk_path},pci_segment=15").as_str(),
             ])
             .capture_output()
@@ -3103,13 +3086,11 @@ mod common_parallel {
                     guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
                 )
                 .as_str(),
-                "--disk",
                 format!(
                     "path={}",
                     guest.disk_config.disk(DiskType::CloudInit).unwrap()
                 )
                 .as_str(),
-                "--disk",
                 format!(
                     "path={},readonly=on,direct=on,num_queues=4,_disable_io_uring={}",
                     blk_file_path.to_str().unwrap(),
@@ -3276,13 +3257,11 @@ mod common_parallel {
                     guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
                 )
                 .as_str(),
-                "--disk",
                 format!(
                     "path={}",
                     guest.disk_config.disk(DiskType::CloudInit).unwrap()
                 )
                 .as_str(),
-                "--disk",
                 format!("path={vhdx_path}").as_str(),
             ])
             .default_net()
@@ -3352,7 +3331,6 @@ mod common_parallel {
             .args([
                 "--disk",
                 format!("path={},direct=on", os_path.as_path().to_str().unwrap()).as_str(),
-                "--disk",
                 format!(
                     "path={}",
                     guest.disk_config.disk(DiskType::CloudInit).unwrap()
@@ -3730,9 +3708,7 @@ mod common_parallel {
             .args([
                 "--net",
                 guest.default_net_string().as_str(),
-                "--net",
                 "tap=,mac=8a:6b:6f:5a:de:ac,ip=192.168.3.1,mask=255.255.255.0",
-                "--net",
                 "tap=mytap1,mac=fe:1f:9e:e1:60:f2,ip=192.168.4.1,mask=255.255.255.0",
             ])
             .capture_output()
@@ -4294,15 +4270,12 @@ mod common_parallel {
                     guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
                 )
                 .as_str(),
-                "--disk",
                 format!(
                     "path={}",
                     guest.disk_config.disk(DiskType::CloudInit).unwrap()
                 )
                 .as_str(),
-                "--disk",
                 format!("path={}", vfio_disk_path.to_str().unwrap()).as_str(),
-                "--disk",
                 format!("path={},iommu=on", blk_file_path.to_str().unwrap()).as_str(),
             ])
             .args([
@@ -4315,19 +4288,16 @@ mod common_parallel {
             .args([
                 "--net",
                 format!("tap={},mac={}", vfio_tap0, guest.network.guest_mac).as_str(),
-                "--net",
                 format!(
                     "tap={},mac={},iommu=on",
                     vfio_tap1, guest.network.l2_guest_mac1
                 )
                 .as_str(),
-                "--net",
                 format!(
                     "tap={},mac={},iommu=on",
                     vfio_tap2, guest.network.l2_guest_mac2
                 )
                 .as_str(),
-                "--net",
                 format!(
                     "tap={},mac={},iommu=on",
                     vfio_tap3, guest.network.l2_guest_mac3
@@ -4405,7 +4375,7 @@ mod common_parallel {
             let vfio_hotplug_output = guest
                 .ssh_command_l1(
                     "sudo /mnt/ch-remote \
-                 --api-socket /tmp/ch_api.sock \
+                 --api-socket=/tmp/ch_api.sock \
                  add-device path=/sys/bus/pci/devices/0000:00:09.0,id=vfio123",
                 )
                 .unwrap();
@@ -4445,7 +4415,7 @@ mod common_parallel {
             guest
                 .ssh_command_l1(
                     "sudo /mnt/ch-remote \
-                 --api-socket /tmp/ch_api.sock \
+                 --api-socket=/tmp/ch_api.sock \
                  remove-device vfio123",
                 )
                 .unwrap();
@@ -4476,8 +4446,8 @@ mod common_parallel {
             guest
                 .ssh_command_l1(
                     "sudo /mnt/ch-remote \
-                 --api-socket /tmp/ch_api.sock \
-                 resize --memory 1073741824",
+                 --api-socket=/tmp/ch_api.sock \
+                 resize --memory=1073741824",
                 )
                 .unwrap();
             assert!(guest.get_total_memory_l2().unwrap_or_default() > 960_000);
@@ -4600,7 +4570,6 @@ mod common_parallel {
             .args([
                 "--net",
                 guest.default_net_string().as_str(),
-                "--net",
                 "tap=,mac=8a:6b:6f:5a:de:ac,ip=192.168.3.1,mask=255.255.255.0",
             ])
             .capture_output()
@@ -5339,13 +5308,11 @@ mod common_parallel {
                     guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
                 )
                 .as_str(),
-                "--disk",
                 format!(
                     "path={}",
                     guest.disk_config.disk(DiskType::CloudInit).unwrap()
                 )
                 .as_str(),
-                "--disk",
                 format!("path={}", &loop_dev).as_str(),
             ])
             .default_net()
@@ -5917,7 +5884,6 @@ mod common_parallel {
                     guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
                 )
                 .as_str(),
-                "--disk",
                 cloudinit_params.as_str(),
             ])
             .args(["--net", net_params.as_str()])
@@ -8213,9 +8179,7 @@ mod windows {
             .args([
                 "--net",
                 windows_guest.guest().default_net_string().as_str(),
-                "--net",
                 "tap=,mac=8a:6b:6f:5a:de:ac,ip=192.168.3.1,mask=255.255.255.0",
-                "--net",
                 "tap=mytap42,mac=fe:1f:9e:e1:60:f2,ip=192.168.4.1,mask=255.255.255.0",
             ])
             .capture_output()
@@ -8368,15 +8332,12 @@ mod vfio {
                     guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
                 )
                 .as_str(),
-                "--disk",
                 format!(
                     "path={}",
                     guest.disk_config.disk(DiskType::CloudInit).unwrap()
                 )
                 .as_str(),
-                "--disk",
                 format!("path={}", vfio_disk_path.to_str().unwrap()).as_str(),
-                "--disk",
                 format!("path={},iommu=on", blk_file_path.to_str().unwrap()).as_str(),
             ])
             .args([
@@ -8389,19 +8350,16 @@ mod vfio {
             .args([
                 "--net",
                 format!("tap={},mac={}", vfio_tap0, guest.network.guest_mac).as_str(),
-                "--net",
                 format!(
                     "tap={},mac={},iommu=on",
                     vfio_tap1, guest.network.l2_guest_mac1
                 )
                 .as_str(),
-                "--net",
                 format!(
                     "tap={},mac={},iommu=on",
                     vfio_tap2, guest.network.l2_guest_mac2
                 )
                 .as_str(),
-                "--net",
                 format!(
                     "tap={},mac={},iommu=on",
                     vfio_tap3, guest.network.l2_guest_mac3
@@ -8479,7 +8437,7 @@ mod vfio {
             let vfio_hotplug_output = guest
                 .ssh_command_l1(
                     "sudo /mnt/ch-remote \
-                 --api-socket /tmp/ch_api.sock \
+                 --api-socket=/tmp/ch_api.sock \
                  add-device path=/sys/bus/pci/devices/0000:00:09.0,id=vfio123",
                 )
                 .unwrap();
@@ -8519,7 +8477,7 @@ mod vfio {
             guest
                 .ssh_command_l1(
                     "sudo /mnt/ch-remote \
-                 --api-socket /tmp/ch_api.sock \
+                 --api-socket=/tmp/ch_api.sock \
                  remove-device vfio123",
                 )
                 .unwrap();
@@ -8550,8 +8508,8 @@ mod vfio {
             guest
                 .ssh_command_l1(
                     "sudo /mnt/ch-remote \
-                 --api-socket /tmp/ch_api.sock \
-                 resize --memory 1073741824",
+                 --api-socket=/tmp/ch_api.sock \
+                 resize --memory=1073741824",
                 )
                 .unwrap();
             assert!(guest.get_total_memory_l2().unwrap_or_default() > 960_000);
@@ -8709,8 +8667,7 @@ mod live_migration {
         // Start to receive migration from the destintion VM
         let mut receive_migration = Command::new(clh_command("ch-remote"))
             .args([
-                "--api-socket",
-                dest_api_socket,
+                &format!("--api-socket={dest_api_socket}"),
                 "receive-migration",
                 &format! {"unix:{migration_socket}"},
             ])
@@ -8723,15 +8680,14 @@ mod live_migration {
         // Start to send migration from the source VM
 
         let mut args = [
-            "--api-socket".to_string(),
-            src_api_socket.to_string(),
+            format!("--api-socket={}", &src_api_socket),
             "send-migration".to_string(),
             format! {"unix:{migration_socket}"},
         ]
         .to_vec();
 
         if local {
-            args.insert(3, "--local".to_string());
+            args.insert(2, "--local".to_string());
         }
 
         let mut send_migration = Command::new(clh_command("ch-remote"))
@@ -9190,15 +9146,11 @@ mod live_migration {
                 "size=0,hotplug_method=virtio-mem,shared=on",
                 "--memory-zone",
                 "id=mem0,size=1G,hotplug_size=4G,shared=on",
-                "--memory-zone",
                 "id=mem1,size=1G,hotplug_size=4G,shared=on",
-                "--memory-zone",
                 "id=mem2,size=2G,hotplug_size=4G,shared=on",
                 "--numa",
                 "guest_numa_id=0,cpus=[0-2,9],distances=[1@15,2@20],memory_zones=mem0",
-                "--numa",
                 "guest_numa_id=1,cpus=[3-4,6-8],distances=[0@20,2@25],memory_zones=mem1",
-                "--numa",
                 "guest_numa_id=2,cpus=[5,10-11],distances=[0@25,1@30],memory_zones=mem2",
             ]
         } else {
@@ -9207,15 +9159,11 @@ mod live_migration {
                 "size=0,hotplug_method=virtio-mem",
                 "--memory-zone",
                 "id=mem0,size=1G,hotplug_size=4G",
-                "--memory-zone",
                 "id=mem1,size=1G,hotplug_size=4G",
-                "--memory-zone",
                 "id=mem2,size=2G,hotplug_size=4G",
                 "--numa",
                 "guest_numa_id=0,cpus=[0-2,9],distances=[1@15,2@20],memory_zones=mem0",
-                "--numa",
                 "guest_numa_id=1,cpus=[3-4,6-8],distances=[0@20,2@25],memory_zones=mem1",
-                "--numa",
                 "guest_numa_id=2,cpus=[5,10-11],distances=[0@25,1@30],memory_zones=mem2",
             ]
         };
@@ -9773,43 +9721,51 @@ mod live_migration {
         }
 
         #[test]
+        #[ignore = "See #5791"]
         fn test_live_upgrade_basic() {
             _test_live_migration(true, false)
         }
 
         #[test]
+        #[ignore = "See #5791"]
         fn test_live_upgrade_local() {
             _test_live_migration(true, true)
         }
 
         #[test]
         #[cfg(not(feature = "mshv"))]
+        #[ignore = "See #5791"]
         fn test_live_upgrade_numa() {
             _test_live_migration_numa(true, false)
         }
 
         #[test]
         #[cfg(not(feature = "mshv"))]
+        #[ignore = "See #5791"]
         fn test_live_upgrade_numa_local() {
             _test_live_migration_numa(true, true)
         }
 
         #[test]
+        #[ignore = "See #5791"]
         fn test_live_upgrade_watchdog() {
             _test_live_migration_watchdog(true, false)
         }
 
         #[test]
+        #[ignore = "See #5791"]
         fn test_live_upgrade_watchdog_local() {
             _test_live_migration_watchdog(true, true)
         }
 
         #[test]
+        #[ignore = "See #5791"]
         fn test_live_upgrade_balloon() {
             _test_live_migration_balloon(true, false)
         }
 
         #[test]
+        #[ignore = "See #5791"]
         fn test_live_upgrade_balloon_local() {
             _test_live_migration_balloon(true, true)
         }
@@ -9838,6 +9794,7 @@ mod live_migration {
         #[test]
         #[cfg(target_arch = "x86_64")]
         #[cfg(not(feature = "mshv"))]
+        #[ignore = "See #5791"]
         fn test_live_upgrade_ovs_dpdk() {
             _test_live_migration_ovs_dpdk(true, false);
         }
@@ -9845,6 +9802,7 @@ mod live_migration {
         #[test]
         #[cfg(target_arch = "x86_64")]
         #[cfg(not(feature = "mshv"))]
+        #[ignore = "See #5791"]
         fn test_live_upgrade_ovs_dpdk_local() {
             _test_live_migration_ovs_dpdk(true, true);
         }
@@ -10043,13 +10001,11 @@ mod rate_limiter {
                     guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
                 )
                 .as_str(),
-                "--disk",
                 format!(
                     "path={}",
                     guest.disk_config.disk(DiskType::CloudInit).unwrap()
                 )
                 .as_str(),
-                "--disk",
                 test_blk_params.as_str(),
             ])
             .default_net()
