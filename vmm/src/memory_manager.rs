@@ -528,10 +528,10 @@ impl MemoryManager {
         prefault: Option<bool>,
         thp: bool,
     ) -> Result<(Vec<Arc<GuestRegionMmap>>, MemoryZones), Error> {
-        let mut zones = zones.to_owned();
+        let mut zone_iter = zones.iter();
         let mut mem_regions = Vec::new();
-        let mut zone = zones.remove(0);
-        let mut zone_align_size = memory_zone_get_align_size(&zone)?;
+        let mut zone = zone_iter.next().ok_or(Error::MissingMemoryZones)?;
+        let mut zone_align_size = memory_zone_get_align_size(zone)?;
         let mut zone_offset = 0u64;
         let mut memory_zones = HashMap::new();
 
@@ -609,12 +609,13 @@ impl MemoryManager {
                 if pull_next_zone {
                     // Get the next zone and reset the offset.
                     zone_offset = 0;
-                    if zones.is_empty() {
+                    if let Some(z) = zone_iter.next() {
+                        zone = z;
+                    } else {
                         exit = true;
                         break;
                     }
-                    zone = zones.remove(0);
-                    zone_align_size = memory_zone_get_align_size(&zone)?;
+                    zone_align_size = memory_zone_get_align_size(zone)?;
                     if !is_aligned(zone.size, zone_align_size) {
                         return Err(Error::MisalignedMemorySize);
                     }
