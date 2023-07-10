@@ -66,10 +66,11 @@ test_infra = { path = "test_infra" }
 wait-timeout = "0.2.0"
 
 [features]
-default = ["kvm"]
+default = ["kvm", "io_uring"]
 dbus_api = ["zbus", "vmm/dbus_api"]
 dhat-heap = ["dhat"] # For heap profiling
 guest_debug = ["vmm/guest_debug"]
+io_uring = ["vmm/io_uring"]
 kvm = ["vmm/kvm"]
 mshv = ["vmm/mshv"]
 tdx = ["vmm/tdx"]

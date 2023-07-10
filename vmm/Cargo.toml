@@ -8,6 +8,7 @@ edition = "2021"
 default = []
 dbus_api = ["blocking", "futures", "zbus"]
 guest_debug = ["kvm", "gdbstub", "gdbstub_arch"]
+io_uring = ["block_util/io_uring"]
 kvm = ["hypervisor/kvm", "vfio-ioctls/kvm", "vm-device/kvm", "pci/kvm"]
 mshv = ["hypervisor/mshv", "vfio-ioctls/mshv", "vm-device/mshv", "pci/mshv"]
 tdx = ["arch/tdx", "hypervisor/tdx"]
