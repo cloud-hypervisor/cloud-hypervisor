@@ -12,15 +12,22 @@
 extern crate log;
 
 pub mod async_io;
+#[cfg(feature = "io_uring")]
+/// Enabled with the `"io_uring"` feature
 pub mod fixed_vhd_async;
 pub mod fixed_vhd_sync;
 pub mod qcow_sync;
+#[cfg(feature = "io_uring")]
+/// Async primitives based on `io-uring`
+///
+/// Enabled with the `"io_uring"` feature
 pub mod raw_async;
 pub mod raw_sync;
 pub mod vhd;
 pub mod vhdx_sync;
 
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
+#[cfg(feature = "io_uring")]
 use io_uring::{opcode, IoUring, Probe};
 use smallvec::SmallVec;
 use std::alloc::{alloc_zeroed, dealloc, Layout};
@@ -543,50 +550,59 @@ unsafe impl ByteValued for VirtioBlockGeometry {}
 /// Check if io_uring for block device can be used on the current system, as
 /// it correctly supports the expected io_uring features.
 pub fn block_io_uring_is_supported() -> bool {
-    let error_msg = "io_uring not supported:";
+    #[cfg(not(feature = "io_uring"))]
+    {
+        info!("io_uring is disabled by crate features");
+        false
+    }
 
-    // Check we can create an io_uring instance, which effectively verifies
-    // that io_uring_setup() syscall is supported.
-    let io_uring = match IoUring::new(1) {
-        Ok(io_uring) => io_uring,
-        Err(e) => {
-            info!("{} failed to create io_uring instance: {}", error_msg, e);
+    #[cfg(feature = "io_uring")]
+    {
+        let error_msg = "io_uring not supported:";
+
+        // Check we can create an io_uring instance, which effectively verifies
+        // that io_uring_setup() syscall is supported.
+        let io_uring = match IoUring::new(1) {
+            Ok(io_uring) => io_uring,
+            Err(e) => {
+                info!("{} failed to create io_uring instance: {}", error_msg, e);
+                return false;
+            }
+        };
+
+        let submitter = io_uring.submitter();
+
+        let mut probe = Probe::new();
+
+        // Check we can register a probe to validate supported operations.
+        match submitter.register_probe(&mut probe) {
+            Ok(_) => {}
+            Err(e) => {
+                info!("{} failed to register a probe: {}", error_msg, e);
+                return false;
+            }
+        }
+
+        // Check IORING_OP_FSYNC is supported
+        if !probe.is_supported(opcode::Fsync::CODE) {
+            info!("{} IORING_OP_FSYNC operation not supported", error_msg);
             return false;
         }
-    };
 
-    let submitter = io_uring.submitter();
-
-    let mut probe = Probe::new();
-
-    // Check we can register a probe to validate supported operations.
-    match submitter.register_probe(&mut probe) {
-        Ok(_) => {}
-        Err(e) => {
-            info!("{} failed to register a probe: {}", error_msg, e);
+        // Check IORING_OP_READV is supported
+        if !probe.is_supported(opcode::Readv::CODE) {
+            info!("{} IORING_OP_READV operation not supported", error_msg);
             return false;
         }
-    }
 
-    // Check IORING_OP_FSYNC is supported
-    if !probe.is_supported(opcode::Fsync::CODE) {
-        info!("{} IORING_OP_FSYNC operation not supported", error_msg);
-        return false;
-    }
+        // Check IORING_OP_WRITEV is supported
+        if !probe.is_supported(opcode::Writev::CODE) {
+            info!("{} IORING_OP_WRITEV operation not supported", error_msg);
+            return false;
+        }
 
-    // Check IORING_OP_READV is supported
-    if !probe.is_supported(opcode::Readv::CODE) {
-        info!("{} IORING_OP_READV operation not supported", error_msg);
-        return false;
+        true
     }
-
-    // Check IORING_OP_WRITEV is supported
-    if !probe.is_supported(opcode::Writev::CODE) {
-        info!("{} IORING_OP_WRITEV operation not supported", error_msg);
-        return false;
-    }
-
-    true
 }
 
 pub trait AsyncAdaptor<F>
