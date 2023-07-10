@@ -8,7 +8,7 @@ edition = "2021"
 dirs = "5.0.0"
 epoll = "4.3.3"
 libc = "0.2.139"
-once_cell = "1.17.1"
+once_cell = "1.18.0"
 serde = { version = "1.0.164", features = ["rc", "derive"] }
 serde_json = "1.0.96"
 ssh2 = { version = "0.9.4", features = ["vendored-openssl"] }
