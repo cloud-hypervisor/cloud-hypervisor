@@ -595,6 +595,7 @@ pub struct VmConfig {
     #[serde(default)]
     pub watchdog: bool,
     #[cfg(feature = "guest_debug")]
+    #[serde(default)]
     pub gdb: bool,
     pub platform: Option<PlatformConfig>,
     pub tpm: Option<TpmConfig>,
