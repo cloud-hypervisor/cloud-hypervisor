@@ -1024,13 +1024,20 @@ impl Vmm {
     fn vm_remove_device(&mut self, id: String) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm {
             if let Err(e) = vm.remove_device(id) {
-                error!("Error when removing new device to the VM: {:?}", e);
+                error!("Error when removing device from the VM: {:?}", e);
                 Err(e)
             } else {
                 Ok(())
             }
+        } else if let Some(ref config) = self.vm_config {
+            let mut config = config.lock().unwrap();
+            if config.remove_device(&id) {
+                Ok(())
+            } else {
+                Err(VmError::NoDeviceToRemove(id))
+            }
         } else {
-            Err(VmError::VmNotRunning)
+            Err(VmError::VmNotCreated)
         }
     }
 

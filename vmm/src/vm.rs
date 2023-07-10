@@ -137,6 +137,9 @@ pub enum Error {
     #[error("Error from device manager: {0:?}")]
     DeviceManager(DeviceManagerError),
 
+    #[error("No device with id {0:?} to remove")]
+    NoDeviceToRemove(String),
+
     #[error("Cannot spawn a signal handler thread: {0}")]
     SignalHandlerSpawn(#[source] io::Error),
 
@@ -1406,49 +1409,7 @@ impl Vm {
 
         // Update VmConfig by removing the device. This is important to
         // ensure the device would not be created in case of a reboot.
-        let mut config = self.config.lock().unwrap();
-
-        // Remove if VFIO device
-        if let Some(devices) = config.devices.as_mut() {
-            devices.retain(|dev| dev.id.as_ref() != Some(&id));
-        }
-
-        // Remove if VFIO user device
-        if let Some(user_devices) = config.user_devices.as_mut() {
-            user_devices.retain(|dev| dev.id.as_ref() != Some(&id));
-        }
-
-        // Remove if disk device
-        if let Some(disks) = config.disks.as_mut() {
-            disks.retain(|dev| dev.id.as_ref() != Some(&id));
-        }
-
-        // Remove if fs device
-        if let Some(fs) = config.fs.as_mut() {
-            fs.retain(|dev| dev.id.as_ref() != Some(&id));
-        }
-
-        // Remove if net device
-        if let Some(net) = config.net.as_mut() {
-            net.retain(|dev| dev.id.as_ref() != Some(&id));
-        }
-
-        // Remove if pmem device
-        if let Some(pmem) = config.pmem.as_mut() {
-            pmem.retain(|dev| dev.id.as_ref() != Some(&id));
-        }
-
-        // Remove if vDPA device
-        if let Some(vdpa) = config.vdpa.as_mut() {
-            vdpa.retain(|dev| dev.id.as_ref() != Some(&id));
-        }
-
-        // Remove if vsock device
-        if let Some(vsock) = config.vsock.as_ref() {
-            if vsock.id.as_ref() == Some(&id) {
-                config.vsock = None;
-            }
-        }
+        self.config.lock().unwrap().remove_device(&id);
 
         self.device_manager
             .lock()
