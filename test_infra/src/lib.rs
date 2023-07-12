@@ -108,7 +108,7 @@ impl GuestNetworkConfig {
                 epoll::Event::new(epoll::Events::EPOLLIN, 0),
             )
             .expect("Cannot add 'tcp_listener' event to epoll");
-            let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); 1];
+            let mut events = [epoll::Event::new(epoll::Events::empty(), 0); 1];
             loop {
                 let num_events = match epoll::wait(epoll_fd, timeout * 1000_i32, &mut events[..]) {
                     Ok(num_events) => Ok(num_events),
@@ -252,7 +252,7 @@ impl DiskConfig for UbuntuDiskConfig {
             .join("ubuntu")
             .join("ci");
 
-        vec!["meta-data"].iter().for_each(|x| {
+        ["meta-data"].iter().for_each(|x| {
             rate_limited_copy(source_file_dir.join(x), cloud_init_directory.join(x))
                 .expect("Expect copying cloud-init meta-data to succeed");
         });
@@ -308,7 +308,7 @@ impl DiskConfig for UbuntuDiskConfig {
             .output()
             .expect("Expect creating disk image to succeed");
 
-        vec!["user-data", "meta-data", "network-config"]
+        ["user-data", "meta-data", "network-config"]
             .iter()
             .for_each(|x| {
                 std::process::Command::new("mcopy")
