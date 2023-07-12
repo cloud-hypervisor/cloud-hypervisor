@@ -224,7 +224,7 @@ pub struct TopLevel {
     vdpa: Vec<String>,
 
     #[argh(option, long = "vsock")]
-    /// cid=<context_id>, socket=<socket_path>, iommu=on|off, id=<device_id>, pci_segment=<segment_id>
+    /// cid=<context_id>, socket=<socket_path>, iommu=on|off, id=<device_id>, pci_segment=<segment_id>, vsock_mode=bidirectional|host2guest|guest2host
     vsock: Option<String>,
 
     #[argh(switch, long = "pvpanic")]

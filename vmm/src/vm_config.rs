@@ -4,7 +4,7 @@
 //
 use net_util::MacAddr;
 use serde::{Deserialize, Serialize};
-use std::{net::Ipv4Addr, path::PathBuf};
+use std::{net::Ipv4Addr, path::PathBuf, str::FromStr};
 use virtio_devices::RateLimiterConfig;
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -491,6 +491,32 @@ pub fn default_vdpaconfig_num_queues() -> usize {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
+pub enum VsockMode {
+    #[default]
+    Bidirectional,
+    HostToGuest,
+    GuestToHost,
+}
+
+#[derive(Debug)]
+pub enum ParseVsockModeError {
+    InvalidValue(String),
+}
+
+impl FromStr for VsockMode {
+    type Err = ParseVsockModeError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "bidirectional" => Ok(VsockMode::Bidirectional),
+            "host2guest" => Ok(VsockMode::HostToGuest),
+            "guest2host" => Ok(VsockMode::GuestToHost),
+            _ => Err(ParseVsockModeError::InvalidValue(s.to_owned())),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct VsockConfig {
     pub cid: u64,
     pub socket: PathBuf,
@@ -500,6 +526,8 @@ pub struct VsockConfig {
     pub id: Option<String>,
     #[serde(default)]
     pub pci_segment: u16,
+    #[serde(default)]
+    pub vsock_mode: VsockMode,
 }
 
 #[cfg(target_arch = "x86_64")]

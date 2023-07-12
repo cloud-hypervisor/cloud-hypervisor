@@ -11,7 +11,7 @@
 
 use crate::config::{
     ConsoleOutputMode, DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig,
-    VdpaConfig, VhostMode, VmConfig, VsockConfig,
+    VdpaConfig, VhostMode, VmConfig, VsockConfig, VsockMode,
 };
 use crate::cpu::{CpuManager, CPU_MANAGER_ACPI_SIZE};
 use crate::device_tree::{DeviceNode, DeviceTree};
@@ -2858,9 +2858,13 @@ impl DeviceManager {
             .socket
             .to_str()
             .ok_or(DeviceManagerError::CreateVsockConvertPath)?;
-        let backend =
-            virtio_devices::vsock::VsockUnixBackend::new(vsock_cfg.cid, socket_path.to_string())
-                .map_err(DeviceManagerError::CreateVsockBackend)?;
+        let guest_to_host = matches!(vsock_cfg.vsock_mode, VsockMode::GuestToHost);
+        let backend = virtio_devices::vsock::VsockUnixBackend::new(
+            vsock_cfg.cid,
+            socket_path.to_string(),
+            guest_to_host,
+        )
+        .map_err(DeviceManagerError::CreateVsockBackend)?;
 
         let vsock_device = Arc::new(Mutex::new(
             virtio_devices::Vsock::new(

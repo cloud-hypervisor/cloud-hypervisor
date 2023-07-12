@@ -1522,7 +1522,8 @@ impl VsockConfig {
             .add("cid")
             .add("iommu")
             .add("id")
-            .add("pci_segment");
+            .add("pci_segment")
+            .add("vsock_mode");
         parser.parse(vsock).map_err(Error::ParseVsock)?;
 
         let socket = parser
@@ -1543,6 +1544,10 @@ impl VsockConfig {
             .convert("pci_segment")
             .map_err(Error::ParseVsock)?
             .unwrap_or_default();
+        let vsock_mode = parser
+            .convert("vsock_mode")
+            .map_err(Error::ParseNetwork)?
+            .unwrap_or_default();
 
         Ok(VsockConfig {
             cid,
@@ -1550,6 +1555,7 @@ impl VsockConfig {
             iommu,
             id,
             pci_segment,
+            vsock_mode,
         })
     }
 

@@ -111,7 +111,7 @@ pub struct VsockMuxer {
     /// A queue used for terminating connections that are taking too long to shut down.
     killq: MuxerKillQ,
     /// The Unix socket, through which host-initiated connections are accepted.
-    host_sock: UnixListener,
+    host_sock: Option<UnixListener>,
     /// The file system path of the host-side Unix socket. This is used to figure out the path
     /// to Unix sockets listening on specific ports. I.e. "\<this path>_\<port number>".
     host_sock_path: String,
@@ -336,19 +336,24 @@ impl VsockBackend for VsockMuxer {}
 impl VsockMuxer {
     /// Muxer constructor.
     ///
-    pub fn new(cid: u64, host_sock_path: String) -> Result<Self> {
+    pub fn new(cid: u64, host_sock_path: String, guest_to_host: bool) -> Result<Self> {
         // Create the nested epoll FD. This FD will be added to the VMM `EpollContext`, at
         // device activation time.
         let epoll_fd = epoll::create(true).map_err(Error::EpollFdCreate)?;
         // Use 'File' to enforce closing on 'epoll_fd'
         // SAFETY: epoll_fd is a valid fd
         let epoll_file = unsafe { File::from_raw_fd(epoll_fd) };
+        let mut host_sock = None;
 
         // Open/bind/listen on the host Unix socket, so we can accept host-initiated
         // connections.
-        let host_sock = UnixListener::bind(&host_sock_path)
-            .and_then(|sock| sock.set_nonblocking(true).map(|_| sock))
-            .map_err(Error::UnixBind)?;
+        if !guest_to_host {
+            host_sock = Some(
+                UnixListener::bind(&host_sock_path)
+                    .and_then(|sock| sock.set_nonblocking(true).map(|_| sock))
+                    .map_err(Error::UnixBind)?,
+            );
+        }
 
         let mut muxer = Self {
             cid,
@@ -363,7 +368,12 @@ impl VsockMuxer {
             local_port_set: HashSet::with_capacity(defs::MAX_CONNECTIONS),
         };
 
-        muxer.add_listener(muxer.host_sock.as_raw_fd(), EpollListener::HostSock)?;
+        if !guest_to_host {
+            muxer.add_listener(
+                muxer.host_sock.as_ref().unwrap().as_raw_fd(),
+                EpollListener::HostSock,
+            )?;
+        }
         Ok(muxer)
     }
 
@@ -397,10 +407,17 @@ impl VsockMuxer {
                     // If we're already maxed-out on connections, we'll just accept and
                     // immediately discard this potentially new one.
                     warn!("vsock: connection limit reached; refusing new host connection");
-                    self.host_sock.accept().map(|_| 0).unwrap_or(0);
+                    self.host_sock
+                        .as_ref()
+                        .unwrap()
+                        .accept()
+                        .map(|_| 0)
+                        .unwrap_or(0);
                     return;
                 }
                 self.host_sock
+                    .as_ref()
+                    .unwrap()
                     .accept()
                     .map_err(Error::UnixAccept)
                     .and_then(|(stream, _)| {
@@ -860,7 +877,7 @@ mod tests {
             )
             .unwrap();
             let uds_path = format!("test_vsock_{name}.sock");
-            let muxer = VsockMuxer::new(PEER_CID, uds_path).unwrap();
+            let muxer = VsockMuxer::new(PEER_CID, uds_path, false).unwrap();
 
             Self {
                 _vsock_test_ctx: vsock_test_ctx,
