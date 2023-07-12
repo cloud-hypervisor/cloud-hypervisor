@@ -86,7 +86,7 @@ impl TxVirtio {
                 let result = unsafe {
                     libc::writev(
                         tap.as_raw_fd() as libc::c_int,
-                        iovecs.as_ptr() as *const libc::iovec,
+                        iovecs.as_ptr(),
                         iovecs.len() as libc::c_int,
                     )
                 };
@@ -224,7 +224,7 @@ impl RxVirtio {
                 let result = unsafe {
                     libc::readv(
                         tap.as_raw_fd() as libc::c_int,
-                        iovecs.as_ptr() as *const libc::iovec,
+                        iovecs.as_ptr(),
                         iovecs.len() as libc::c_int,
                     )
                 };
