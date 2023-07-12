@@ -38,9 +38,7 @@ use std::fs::File;
 use std::os::unix::io::AsRawFd;
 
 #[cfg(target_arch = "x86_64")]
-use crate::arch::x86::{
-    CpuIdEntry, FpuState, LapicState, MsrEntry, SpecialRegisters, StandardRegisters,
-};
+use crate::arch::x86::{CpuIdEntry, FpuState, MsrEntry};
 
 const DIRTY_BITMAP_CLEAR_DIRTY: u64 = 0x4;
 const DIRTY_BITMAP_SET_DIRTY: u64 = 0x8;
@@ -299,7 +297,7 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// Returns the vCPU general purpose registers.
     ///
-    fn get_regs(&self) -> cpu::Result<StandardRegisters> {
+    fn get_regs(&self) -> cpu::Result<crate::arch::x86::StandardRegisters> {
         Ok(self
             .fd
             .get_regs()
@@ -310,7 +308,7 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// Sets the vCPU general purpose registers.
     ///
-    fn set_regs(&self, regs: &StandardRegisters) -> cpu::Result<()> {
+    fn set_regs(&self, regs: &crate::arch::x86::StandardRegisters) -> cpu::Result<()> {
         let regs = (*regs).into();
         self.fd
             .set_regs(&regs)
@@ -320,7 +318,7 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// Returns the vCPU special registers.
     ///
-    fn get_sregs(&self) -> cpu::Result<SpecialRegisters> {
+    fn get_sregs(&self) -> cpu::Result<crate::arch::x86::SpecialRegisters> {
         Ok(self
             .fd
             .get_sregs()
@@ -331,7 +329,7 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// Sets the vCPU special registers.
     ///
-    fn set_sregs(&self, sregs: &SpecialRegisters) -> cpu::Result<()> {
+    fn set_sregs(&self, sregs: &crate::arch::x86::SpecialRegisters) -> cpu::Result<()> {
         let sregs = (*sregs).into();
         self.fd
             .set_sregs(&sregs)
@@ -581,7 +579,7 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// Returns the state of the LAPIC (Local Advanced Programmable Interrupt Controller).
     ///
-    fn get_lapic(&self) -> cpu::Result<LapicState> {
+    fn get_lapic(&self) -> cpu::Result<crate::arch::x86::LapicState> {
         Ok(self
             .fd
             .get_lapic()
@@ -592,7 +590,7 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// Sets the state of the LAPIC (Local Advanced Programmable Interrupt Controller).
     ///
-    fn set_lapic(&self, lapic: &LapicState) -> cpu::Result<()> {
+    fn set_lapic(&self, lapic: &crate::arch::x86::LapicState) -> cpu::Result<()> {
         let lapic: mshv_bindings::LapicState = (*lapic).clone().into();
         self.fd
             .set_lapic(&lapic)
