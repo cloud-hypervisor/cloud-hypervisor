@@ -8,6 +8,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+use crate::BlockBackend;
 use libc::c_void;
 use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::convert::TryInto;
@@ -340,6 +341,12 @@ impl SeekHole for RawFile {
             }
             Err(e) => Err(e),
         }
+    }
+}
+
+impl BlockBackend for RawFile {
+    fn size(&self) -> std::result::Result<u64, crate::Error> {
+        Ok(self.metadata().map_err(crate::Error::RawFileError)?.len())
     }
 }
 
