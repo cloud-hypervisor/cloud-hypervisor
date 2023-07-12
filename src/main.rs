@@ -1562,7 +1562,7 @@ mod unit_tests {
 
     #[test]
     fn test_valid_vm_config_vsock() {
-        vec![
+        [
             (
                 vec![
                     "cloud-hypervisor",
