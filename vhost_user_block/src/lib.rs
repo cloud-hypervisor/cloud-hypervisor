@@ -8,11 +8,14 @@
 //
 // SPDX-License-Identifier: (Apache-2.0 AND BSD-3-Clause)
 
-use block_util::{build_disk_image_id, Request, VirtioBlockConfig};
+use block::{
+    build_disk_image_id,
+    qcow::{self, ImageType, QcowFile},
+    Request, VirtioBlockConfig,
+};
 use libc::EFD_NONBLOCK;
 use log::*;
 use option_parser::{OptionParser, OptionParserError, Toggle};
-use qcow::{self, ImageType, QcowFile};
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::Read;

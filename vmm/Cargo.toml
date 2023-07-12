@@ -8,7 +8,7 @@ edition = "2021"
 default = []
 dbus_api = ["blocking", "futures", "zbus"]
 guest_debug = ["kvm", "gdbstub", "gdbstub_arch"]
-io_uring = ["block_util/io_uring"]
+io_uring = ["block/io_uring"]
 kvm = ["hypervisor/kvm", "vfio-ioctls/kvm", "vm-device/kvm", "pci/kvm"]
 mshv = ["hypervisor/mshv", "vfio-ioctls/mshv", "vm-device/mshv", "pci/mshv"]
 tdx = ["arch/tdx", "hypervisor/tdx"]
@@ -20,7 +20,7 @@ anyhow = "1.0.71"
 arc-swap = "1.5.1"
 arch = { path = "../arch" }
 bitflags = "2.3.3"
-block_util = { path = "../block_util" }
+block = { path = "../block" }
 blocking = { version = "1.3.0", optional = true }
 devices = { path = "../devices" }
 epoll = "4.3.3"
@@ -37,7 +37,6 @@ net_util = { path = "../net_util" }
 once_cell = "1.18.0"
 option_parser = { path = "../option_parser" }
 pci = { path = "../pci" }
-qcow = { path = "../qcow" }
 seccompiler = "0.3.0"
 serde = { version = "1.0.164", features = ["rc", "derive"] }
 serde_json = "1.0.96"
@@ -50,7 +49,6 @@ versionize = "0.1.10"
 versionize_derive = "0.1.4"
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
 vfio_user = { git = "https://github.com/rust-vmm/vfio-user", branch = "main" }
-vhdx = { path = "../vhdx" }
 virtio-devices = { path = "../virtio-devices" }
 virtio-queue = "0.8.0"
 vm-allocator = { path = "../vm-allocator" }

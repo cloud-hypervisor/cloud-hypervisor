@@ -17,6 +17,7 @@ pub mod fixed_vhd;
 /// Enabled with the `"io_uring"` feature
 pub mod fixed_vhd_async;
 pub mod fixed_vhd_sync;
+pub mod qcow;
 pub mod qcow_sync;
 #[cfg(feature = "io_uring")]
 /// Async primitives based on `io-uring`
@@ -25,6 +26,7 @@ pub mod qcow_sync;
 pub mod raw_async;
 pub mod raw_sync;
 pub mod vhd;
+pub mod vhdx;
 pub mod vhdx_sync;
 
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};

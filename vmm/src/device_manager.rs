@@ -34,13 +34,13 @@ use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
 use arch::NumaNodes;
 #[cfg(target_arch = "aarch64")]
 use arch::{DeviceType, MmioDeviceInfo};
-use block_util::{
+use block::{
     async_io::DiskFile, block_io_uring_is_supported, detect_image_type,
-    fixed_vhd_sync::FixedVhdDiskSync, qcow_sync::QcowDiskSync, raw_sync::RawFileDiskSync,
-    vhdx_sync::VhdxDiskSync, ImageType,
+    fixed_vhd_sync::FixedVhdDiskSync, qcow, qcow_sync::QcowDiskSync, raw_sync::RawFileDiskSync,
+    vhdx, vhdx_sync::VhdxDiskSync, ImageType,
 };
 #[cfg(feature = "io_uring")]
-use block_util::{fixed_vhd_async::FixedVhdDiskAsync, raw_async::RawFileDisk};
+use block::{fixed_vhd_async::FixedVhdDiskAsync, raw_async::RawFileDisk};
 #[cfg(target_arch = "aarch64")]
 use devices::gic;
 #[cfg(target_arch = "x86_64")]
@@ -424,7 +424,7 @@ pub enum DeviceManagerError {
     CreateQcowDiskSync(qcow::Error),
 
     /// Failed to create FixedVhdxDiskSync
-    CreateFixedVhdxDiskSync(vhdx::vhdx::VhdxError),
+    CreateFixedVhdxDiskSync(vhdx::VhdxError),
 
     /// Failed to add DMA mapping handler to virtio-mem device.
     AddDmaMappingHandlerVirtioMem(virtio_devices::mem::Error),

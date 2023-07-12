@@ -8,7 +8,7 @@
 
 #![no_main]
 
-use block_util::{async_io::DiskFile, raw_sync::RawFileDiskSync};
+use block::{async_io::DiskFile, raw_sync::RawFileDiskSync};
 use libfuzzer_sys::fuzz_target;
 use seccompiler::SeccompAction;
 use std::ffi;

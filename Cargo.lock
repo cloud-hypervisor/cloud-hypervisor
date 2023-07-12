@@ -274,32 +274,34 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "630be753d4e58660abd17930c71b647fe46c27ea6b63cc59e1e3851406972e42"
 
 [[package]]
+name = "block"
+version = "0.1.0"
+dependencies = [
+ "byteorder",
+ "crc32c",
+ "io-uring",
+ "libc",
+ "log",
+ "remain",
+ "smallvec",
+ "thiserror",
+ "uuid",
+ "versionize",
+ "versionize_derive",
+ "virtio-bindings",
+ "virtio-queue",
+ "vm-memory",
+ "vm-virtio",
+ "vmm-sys-util",
+]
+
+[[package]]
 name = "block-buffer"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71"
 dependencies = [
  "generic-array",
-]
-
-[[package]]
-name = "block_util"
-version = "0.1.0"
-dependencies = [
- "io-uring",
- "libc",
- "log",
- "qcow",
- "smallvec",
- "thiserror",
- "versionize",
- "versionize_derive",
- "vhdx",
- "virtio-bindings",
- "virtio-queue",
- "vm-memory",
- "vm-virtio",
- "vmm-sys-util",
 ]
 
 [[package]]
@@ -1453,17 +1455,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "qcow"
-version = "0.1.0"
-dependencies = [
- "byteorder",
- "libc",
- "log",
- "remain",
- "vmm-sys-util",
-]
-
-[[package]]
 name = "quote"
 version = "1.0.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2071,19 +2062,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vhdx"
-version = "0.1.0"
-dependencies = [
- "byteorder",
- "crc32c",
- "libc",
- "log",
- "remain",
- "thiserror",
- "uuid",
-]
-
-[[package]]
 name = "vhost"
 version = "0.7.0"
 source = "git+https://github.com/rust-vmm/vhost?branch=main#bdc6f2ab2b3dbd3b9574100ac641a2f8e9667400"
@@ -2114,13 +2092,12 @@ name = "vhost_user_block"
 version = "0.1.0"
 dependencies = [
  "argh",
- "block_util",
+ "block",
  "env_logger",
  "epoll",
  "libc",
  "log",
  "option_parser",
- "qcow",
  "vhost",
  "vhost-user-backend",
  "virtio-bindings",
@@ -2159,7 +2136,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arc-swap",
- "block_util",
+ "block",
  "byteorder",
  "epoll",
  "event_monitor",
@@ -2268,7 +2245,7 @@ dependencies = [
  "arc-swap",
  "arch",
  "bitflags 2.3.3",
- "block_util",
+ "block",
  "blocking",
  "devices",
  "epoll",
@@ -2285,7 +2262,6 @@ dependencies = [
  "once_cell",
  "option_parser",
  "pci",
- "qcow",
  "seccompiler",
  "serde",
  "serde_json",
@@ -2298,7 +2274,6 @@ dependencies = [
  "versionize_derive",
  "vfio-ioctls",
  "vfio_user",
- "vhdx",
  "virtio-devices",
  "virtio-queue",
  "vm-allocator",
