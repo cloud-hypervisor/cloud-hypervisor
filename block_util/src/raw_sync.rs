@@ -71,7 +71,7 @@ impl AsyncIo for RawFileSync {
         let result = unsafe {
             libc::preadv(
                 self.fd as libc::c_int,
-                iovecs.as_ptr() as *const libc::iovec,
+                iovecs.as_ptr(),
                 iovecs.len() as libc::c_int,
                 offset,
             )
@@ -95,7 +95,7 @@ impl AsyncIo for RawFileSync {
         let result = unsafe {
             libc::pwritev(
                 self.fd as libc::c_int,
-                iovecs.as_ptr() as *const libc::iovec,
+                iovecs.as_ptr(),
                 iovecs.len() as libc::c_int,
                 offset,
             )
