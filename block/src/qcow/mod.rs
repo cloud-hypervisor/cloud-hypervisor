@@ -12,6 +12,7 @@ use crate::qcow::{
     refcount::RefCount,
     vec_cache::{CacheMap, Cacheable, VecCache},
 };
+use crate::BlockBackend;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use libc::{EINVAL, ENOSPC, ENOTSUP};
 use remain::sorted;
@@ -1552,6 +1553,12 @@ impl SeekHole for QcowFile {
                 Ok(Some(o))
             }
         }
+    }
+}
+
+impl BlockBackend for QcowFile {
+    fn size(&self) -> std::result::Result<u64, crate::Error> {
+        Ok(self.virtual_size())
     }
 }
 

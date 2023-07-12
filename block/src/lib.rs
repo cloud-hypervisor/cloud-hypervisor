@@ -30,6 +30,9 @@ pub mod vhdx;
 pub mod vhdx_sync;
 
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
+use crate::fixed_vhd::FixedVhd;
+use crate::qcow::{QcowFile, RawFile};
+use crate::vhdx::{Vhdx, VhdxError};
 #[cfg(feature = "io_uring")]
 use io_uring::{opcode, IoUring, Probe};
 use smallvec::SmallVec;
@@ -37,6 +40,7 @@ use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::cmp;
 use std::collections::VecDeque;
 use std::convert::TryInto;
+use std::fmt::Debug;
 use std::fs::File;
 use std::io::{self, IoSlice, IoSliceMut, Read, Seek, SeekFrom, Write};
 use std::os::linux::fs::MetadataExt;
@@ -76,12 +80,22 @@ pub enum Error {
     DescriptorChainTooShort,
     #[error("Guest gave us a descriptor that was too short to use")]
     DescriptorLengthTooSmall,
+    #[error("Failed to detect image type: {0}")]
+    DetectImageType(std::io::Error),
+    #[error("Failure in fixed vhd: {0}")]
+    FixedVhdError(std::io::Error),
     #[error("Getting a block's metadata fails for any reason")]
     GetFileMetadata,
     #[error("The requested operation would cause a seek beyond disk end")]
     InvalidOffset,
+    #[error("Failure in qcow: {0}")]
+    QcowError(qcow::Error),
+    #[error("Failure in raw file: {0}")]
+    RawFileError(std::io::Error),
     #[error("The requested operation does not support multiple descriptors")]
     TooManyDescriptors,
+    #[error("Failure in vhdx: {0}")]
+    VhdxError(VhdxError),
 }
 
 fn build_device_id(disk_path: &Path) -> result::Result<String, Error> {
@@ -738,4 +752,27 @@ pub fn detect_image_type(f: &mut File) -> std::io::Result<ImageType> {
     };
 
     Ok(image_type)
+}
+
+pub trait BlockBackend: Read + Write + Seek + Send + Debug {
+    fn size(&self) -> Result<u64, Error>;
+}
+
+/// Inspect the image file type and create an appropriate disk file to match it.
+pub fn create_disk_file(mut file: File, direct_io: bool) -> Result<Box<dyn BlockBackend>, Error> {
+    let image_type = detect_image_type(&mut file).map_err(Error::DetectImageType)?;
+
+    Ok(match image_type {
+        ImageType::Qcow2 => {
+            Box::new(QcowFile::from(RawFile::new(file, direct_io)).map_err(Error::QcowError)?)
+                as Box<dyn BlockBackend>
+        }
+        ImageType::FixedVhd => {
+            Box::new(FixedVhd::new(file).map_err(Error::FixedVhdError)?) as Box<dyn BlockBackend>
+        }
+        ImageType::Vhdx => {
+            Box::new(Vhdx::new(file).map_err(Error::VhdxError)?) as Box<dyn BlockBackend>
+        }
+        ImageType::Raw => Box::new(RawFile::new(file, direct_io)) as Box<dyn BlockBackend>,
+    })
 }

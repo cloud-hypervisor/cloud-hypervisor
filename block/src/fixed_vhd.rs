@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::vhd::VhdFooter;
+use crate::BlockBackend;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -23,10 +24,6 @@ impl FixedVhd {
             size: footer.current_size(),
             position: 0,
         })
-    }
-
-    pub fn size(&self) -> u64 {
-        self.size
     }
 }
 
@@ -73,6 +70,12 @@ impl Seek for FixedVhd {
             }
             Err(e) => Err(e),
         }
+    }
+}
+
+impl BlockBackend for FixedVhd {
+    fn size(&self) -> std::result::Result<u64, crate::Error> {
+        Ok(self.size)
     }
 }
 

@@ -8,6 +8,7 @@ use crate::vhdx::{
     vhdx_io::VhdxIoError,
     vhdx_metadata::{DiskSpec, VhdxMetadataError},
 };
+use crate::BlockBackend;
 use byteorder::{BigEndian, ByteOrder};
 use remain::sorted;
 use std::collections::btree_map::BTreeMap;
@@ -205,6 +206,12 @@ impl Seek for Vhdx {
             std::io::ErrorKind::InvalidData,
             "Failed seek operation",
         ))
+    }
+}
+
+impl BlockBackend for Vhdx {
+    fn size(&self) -> std::result::Result<u64, crate::Error> {
+        Ok(self.virtual_disk_size())
     }
 }
 
