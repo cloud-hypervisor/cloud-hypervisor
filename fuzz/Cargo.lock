@@ -107,18 +107,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "630be753d4e58660abd17930c71b647fe46c27ea6b63cc59e1e3851406972e42"
 
 [[package]]
-name = "block_util"
+name = "block"
 version = "0.1.0"
 dependencies = [
+ "byteorder",
+ "crc32c",
  "io-uring",
  "libc",
  "log",
- "qcow",
+ "remain",
  "smallvec",
  "thiserror",
+ "uuid",
  "versionize",
  "versionize_derive",
- "vhdx",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
@@ -175,7 +177,7 @@ dependencies = [
 name = "cloud-hypervisor-fuzz"
 version = "0.0.0"
 dependencies = [
- "block_util",
+ "block",
  "cloud-hypervisor",
  "devices",
  "epoll",
@@ -185,9 +187,7 @@ dependencies = [
  "micro_http",
  "net_util",
  "once_cell",
- "qcow",
  "seccompiler",
- "vhdx",
  "virtio-devices",
  "virtio-queue",
  "vm-device",
@@ -496,17 +496,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "qcow"
-version = "0.1.0"
-dependencies = [
- "byteorder",
- "libc",
- "log",
- "remain",
- "vmm-sys-util",
-]
-
-[[package]]
 name = "quote"
 version = "1.0.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -803,19 +792,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vhdx"
-version = "0.1.0"
-dependencies = [
- "byteorder",
- "crc32c",
- "libc",
- "log",
- "remain",
- "thiserror",
- "uuid",
-]
-
-[[package]]
 name = "vhost"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -839,7 +815,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arc-swap",
- "block_util",
+ "block",
  "byteorder",
  "epoll",
  "event_monitor",
@@ -948,7 +924,7 @@ dependencies = [
  "arc-swap",
  "arch",
  "bitflags 2.3.3",
- "block_util",
+ "block",
  "devices",
  "epoll",
  "event_monitor",
@@ -961,7 +937,6 @@ dependencies = [
  "once_cell",
  "option_parser",
  "pci",
- "qcow",
  "seccompiler",
  "serde",
  "serde_json",
@@ -974,7 +949,6 @@ dependencies = [
  "versionize_derive",
  "vfio-ioctls",
  "vfio_user",
- "vhdx",
  "virtio-devices",
  "virtio-queue",
  "vm-allocator",

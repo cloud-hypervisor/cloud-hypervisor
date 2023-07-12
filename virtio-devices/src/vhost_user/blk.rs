@@ -9,7 +9,7 @@ use crate::thread_helper::spawn_virtio_thread;
 use crate::vhost_user::VhostUserCommon;
 use crate::{GuestMemoryMmap, GuestRegionMmap};
 use crate::{VirtioInterrupt, VIRTIO_F_IOMMU_PLATFORM};
-use block_util::VirtioBlockConfig;
+use block::VirtioBlockConfig;
 use seccompiler::SeccompAction;
 use std::mem;
 use std::result;
