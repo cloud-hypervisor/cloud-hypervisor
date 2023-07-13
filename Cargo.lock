@@ -1070,7 +1070,7 @@ dependencies = [
 [[package]]
 name = "mshv-bindings"
 version = "0.1.1"
-source = "git+https://github.com/rust-vmm/mshv?branch=main#afc1581a2c482a1eddc4446af50e068fa7c0006e"
+source = "git+https://github.com/rust-vmm/mshv?branch=main#243953f7ef1c21ed6eebfece80c98e706ebe6a8f"
 dependencies = [
  "libc",
  "serde",
@@ -1082,7 +1082,7 @@ dependencies = [
 [[package]]
 name = "mshv-ioctls"
 version = "0.1.1"
-source = "git+https://github.com/rust-vmm/mshv?branch=main#afc1581a2c482a1eddc4446af50e068fa7c0006e"
+source = "git+https://github.com/rust-vmm/mshv?branch=main#243953f7ef1c21ed6eebfece80c98e706ebe6a8f"
 dependencies = [
  "libc",
  "mshv-bindings",
