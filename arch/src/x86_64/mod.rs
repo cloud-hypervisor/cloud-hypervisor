@@ -1015,7 +1015,7 @@ fn configure_pvh(
         }
 
         info!(
-            "create_memmap_entry, start: 0x{:08x}, end: 0x{:08x})",
+            "create_memmap_entry, start: 0x{:08x}, end: 0x{:08x}",
             high_ram_start, first_region_end
         );
 
@@ -1041,7 +1041,7 @@ fn configure_pvh(
         }
 
         info!(
-            "create_memmap_entry, start: 0x{:08x}, end: 0x{:08x})",
+            "create_memmap_entry, start: 0x{:08x}, end: 0x{:08x}",
             ram_64bit_start, second_region_end
         );
         add_memmap_entry(
