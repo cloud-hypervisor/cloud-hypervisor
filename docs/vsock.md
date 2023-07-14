@@ -50,14 +50,14 @@ The examples use __socat__ `>=1.7.4` to illustrate the VSOCK functionality. Howe
 
 ### Connecting from Host to Guest
 
-The host starts to listen on the defined port:
+The guest starts to listen on the defined port:
 
 `$ socat - VSOCK-LISTEN:1234`
 
-Once the host is listening, the guest can send data:
+Once the guest is listening, the host can send data:
 
 `echo -e "CONNECT 1234\\nHello from host!" | socat - UNIX-CONNECT:/tmp/ch.vsock
- 
+
 Note the string `CONNECT <port>` prepended to the actual data. It is possible for the guest to start listening on different ports, thus the specific command is needed to instruct VSOCK to which listener the host wants to connect. It needs to be sent once per connection. Once the connection established, data transfers can take place directly.
 
 ### Connecting from Guest to Host
