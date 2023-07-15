@@ -185,12 +185,13 @@ pub type Result<T> = result::Result<T, Error>;
 #[allow(dead_code)]
 #[repr(packed)]
 #[derive(AsBytes)]
-struct LocalApic {
+struct LocalX2Apic {
     pub r#type: u8,
     pub length: u8,
-    pub processor_id: u8,
-    pub apic_id: u8,
+    pub _reserved: u16,
+    pub apic_id: u32,
     pub flags: u32,
+    pub processor_id: u32,
 }
 
 #[allow(dead_code)]
@@ -1293,16 +1294,17 @@ impl CpuManager {
             madt.write(36, arch::layout::APIC_START.0);
 
             for cpu in 0..self.config.max_vcpus {
-                let lapic = LocalApic {
-                    r#type: acpi::ACPI_APIC_PROCESSOR,
-                    length: 8,
-                    processor_id: cpu,
-                    apic_id: cpu,
+                let lapic = LocalX2Apic {
+                    r#type: acpi::ACPI_X2APIC_PROCESSOR,
+                    length: 16,
+                    processor_id: cpu.into(),
+                    apic_id: cpu.into(),
                     flags: if cpu < self.config.boot_vcpus {
                         1 << MADT_CPU_ENABLE_FLAG
                     } else {
                         0
                     } | 1 << MADT_CPU_ONLINE_CAPABLE_FLAG,
+                    _reserved: 0,
                 };
                 madt.append(lapic);
             }
@@ -1736,18 +1738,19 @@ const MADT_CPU_ONLINE_CAPABLE_FLAG: usize = 1;
 impl Cpu {
     #[cfg(target_arch = "x86_64")]
     fn generate_mat(&self) -> Vec<u8> {
-        let lapic = LocalApic {
-            r#type: 0,
-            length: 8,
-            processor_id: self.cpu_id,
-            apic_id: self.cpu_id,
+        let lapic = LocalX2Apic {
+            r#type: crate::acpi::ACPI_X2APIC_PROCESSOR,
+            length: 16,
+            processor_id: self.cpu_id.into(),
+            apic_id: self.cpu_id.into(),
             flags: 1 << MADT_CPU_ENABLE_FLAG,
+            _reserved: 0,
         };
 
         let mut mat_data: Vec<u8> = Vec::new();
         mat_data.resize(std::mem::size_of_val(&lapic), 0);
         // SAFETY: mat_data is large enough to hold lapic
-        unsafe { *(mat_data.as_mut_ptr() as *mut LocalApic) = lapic };
+        unsafe { *(mat_data.as_mut_ptr() as *mut LocalX2Apic) = lapic };
 
         mat_data
     }
