@@ -1760,7 +1760,7 @@ impl Aml for Cpu {
         #[allow(clippy::if_same_then_else)]
         if self.dynamic {
             aml::Device::new(
-                format!("C{:03}", self.cpu_id).as_str().into(),
+                format!("C{:03X}", self.cpu_id).as_str().into(),
                 vec![
                     &aml::Name::new("_HID".into(), &"ACPI0007"),
                     &aml::Name::new("_UID".into(), &self.cpu_id),
@@ -1810,7 +1810,7 @@ impl Aml for Cpu {
             .to_aml_bytes(sink);
         } else {
             aml::Device::new(
-                format!("C{:03}", self.cpu_id).as_str().into(),
+                format!("C{:03X}", self.cpu_id).as_str().into(),
                 vec![
                     &aml::Name::new("_HID".into(), &"ACPI0007"),
                     &aml::Name::new("_UID".into(), &self.cpu_id),
@@ -1846,7 +1846,7 @@ struct CpuNotify {
 
 impl Aml for CpuNotify {
     fn to_aml_bytes(&self, sink: &mut dyn acpi_tables::AmlSink) {
-        let object = aml::Path::new(&format!("C{:03}", self.cpu_id));
+        let object = aml::Path::new(&format!("C{:03X}", self.cpu_id));
         aml::If::new(
             &aml::Equal::new(&aml::Arg(0), &self.cpu_id),
             vec![&aml::Notify::new(&object, &aml::Arg(1))],
