@@ -2607,6 +2607,8 @@ impl GuestDebuggable for Vm {
     fn coredump(&mut self, destination_url: &str) -> std::result::Result<(), GuestDebuggableError> {
         event!("vm", "coredumping");
 
+        let mut resume = false;
+
         #[cfg(feature = "tdx")]
         {
             if let Some(ref platform) = self.config.lock().unwrap().platform {
@@ -2618,11 +2620,17 @@ impl GuestDebuggable for Vm {
             }
         }
 
-        let current_state = self.get_state().unwrap();
-        if current_state != VmState::Paused {
-            return Err(GuestDebuggableError::Coredump(anyhow!(
-                "Trying to coredump while VM is running"
-            )));
+        match self.get_state().unwrap() {
+            VmState::Running => {
+                self.pause().map_err(GuestDebuggableError::Pause)?;
+                resume = true;
+            }
+            VmState::Paused => {}
+            _ => {
+                return Err(GuestDebuggableError::Coredump(anyhow!(
+                    "Trying to coredump while VM is not running or paused"
+                )));
+            }
         }
 
         let coredump_state = self.get_dump_state(destination_url)?;
@@ -2643,7 +2651,13 @@ impl GuestDebuggable for Vm {
         self.memory_manager
             .lock()
             .unwrap()
-            .coredump_iterate_save_mem(&coredump_state)
+            .coredump_iterate_save_mem(&coredump_state)?;
+
+        if resume {
+            self.resume().map_err(GuestDebuggableError::Resume)?;
+        }
+
+        Ok(())
     }
 }
 

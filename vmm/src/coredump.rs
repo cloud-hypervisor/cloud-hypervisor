@@ -36,6 +36,8 @@ pub struct DumpState {
 pub enum GuestDebuggableError {
     Coredump(anyhow::Error),
     CoredumpFile(std::io::Error),
+    Pause(vm_migration::MigratableError),
+    Resume(vm_migration::MigratableError),
 }
 
 pub trait GuestDebuggable: vm_migration::Pausable {
