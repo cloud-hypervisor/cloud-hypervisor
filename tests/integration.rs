@@ -2100,6 +2100,16 @@ fn balloon_size(api_socket: &str) -> u64 {
     total_mem - actual_mem
 }
 
+fn vm_state(api_socket: &str) -> String {
+    let (cmd_success, cmd_output) = remote_command_w_output(api_socket, "info", None);
+    assert!(cmd_success);
+
+    let info: serde_json::Value = serde_json::from_slice(&cmd_output).unwrap_or_default();
+    let state = &info["state"].as_str().unwrap();
+
+    state.to_string()
+}
+
 // This test validates that it can find the virtio-iommu device at first.
 // It also verifies that both disks and the network card are attached to
 // the virtual IOMMU by looking at /sys/kernel/iommu_groups directory.
@@ -6067,6 +6077,43 @@ mod common_parallel {
             let readelf_vmm_num_cmd = format!("readelf --all {vmcore_file} |grep QEMU |wc -l");
             let vmm_num_in_elf = exec_host_command_output(&readelf_vmm_num_cmd);
             assert_eq!(String::from_utf8_lossy(&vmm_num_in_elf.stdout).trim(), "4");
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    #[cfg(feature = "guest_debug")]
+    fn test_coredump_no_pause() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+        let api_socket = temp_api_path(&guest.tmp_dir);
+
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", "boot=4"])
+            .args(["--memory", "size=4G"])
+            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .default_disks()
+            .args(["--net", guest.default_net_string().as_str()])
+            .args(["--api-socket", &api_socket])
+            .capture_output();
+
+        let mut child = cmd.spawn().unwrap();
+        let vmcore_file = temp_vmcore_file_path(&guest.tmp_dir);
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            assert!(remote_command(
+                &api_socket,
+                "coredump",
+                Some(format!("file://{vmcore_file}").as_str()),
+            ));
+
+            assert_eq!(vm_state(&api_socket), "Running");
         });
 
         let _ = child.kill();
