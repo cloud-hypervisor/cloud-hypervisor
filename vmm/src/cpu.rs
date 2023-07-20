@@ -552,6 +552,7 @@ struct VcpuState {
     handle: Option<thread::JoinHandle<()>>,
     kill: Arc<AtomicBool>,
     vcpu_run_interrupted: Arc<AtomicBool>,
+    paused: Arc<AtomicBool>,
 }
 
 impl VcpuState {
@@ -864,6 +865,7 @@ impl CpuManager {
             .vcpu_run_interrupted
             .clone();
         let panic_vcpu_run_interrupted = vcpu_run_interrupted.clone();
+        let vcpu_paused = self.vcpu_states[usize::from(vcpu_id)].paused.clone();
 
         // Prepare the CPU set the current vCPU is expected to run onto.
         let cpuset = self.affinity.get(&vcpu_id).map(|host_cpus| {
@@ -970,6 +972,8 @@ impl CpuManager {
                                 }
 
                                 vcpu_run_interrupted.store(true, Ordering::SeqCst);
+
+                                vcpu_paused.store(true, Ordering::SeqCst);
                                 while vcpu_pause_signalled.load(Ordering::SeqCst) {
                                     thread::park();
                                 }
@@ -2092,6 +2096,17 @@ impl Pausable for CpuManager {
             }
         }
 
+        // The vCPU thread will change its paused state before parking, wait here for each
+        // actived vCPU change their state to ensure they have parked.
+        for state in self.vcpu_states.iter() {
+            if state.active() {
+                while !state.paused.load(Ordering::SeqCst) {
+                    // To avoid a priority inversion with the vCPU thread
+                    thread::sleep(std::time::Duration::from_millis(1));
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -2108,6 +2123,7 @@ impl Pausable for CpuManager {
         // boolean. Since it'll be set to false, they will exit their pause loop
         // and go back to vmx root.
         for state in self.vcpu_states.iter() {
+            state.paused.store(false, Ordering::SeqCst);
             state.unpark_thread();
         }
         Ok(())
