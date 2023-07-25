@@ -2,8 +2,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::vhdx_bat::{self, BatEntry, VhdxBatError};
-use crate::vhdx_metadata::{self, DiskSpec};
+use crate::vhdx::{
+    vhdx_bat::{self, BatEntry, VhdxBatError},
+    vhdx_metadata::{self, DiskSpec},
+};
 use remain::sorted;
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};

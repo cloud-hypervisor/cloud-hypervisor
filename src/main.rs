@@ -100,9 +100,9 @@ impl log::Log for Logger {
         let duration = now.duration_since(self.start);
 
         if record.file().is_some() && record.line().is_some() {
-            writeln!(
+            write!(
                 *(*(self.output.lock().unwrap())),
-                "cloud-hypervisor: {:.6?}: <{}> {}:{}:{} -- {}",
+                "cloud-hypervisor: {:.6?}: <{}> {}:{}:{} -- {}\r\n",
                 duration,
                 std::thread::current().name().unwrap_or("anonymous"),
                 record.level(),
@@ -111,9 +111,9 @@ impl log::Log for Logger {
                 record.args()
             )
         } else {
-            writeln!(
+            write!(
                 *(*(self.output.lock().unwrap())),
-                "cloud-hypervisor: {:.6?}: <{}> {}:{} -- {}",
+                "cloud-hypervisor: {:.6?}: <{}> {}:{} -- {}\r\n",
                 duration,
                 std::thread::current().name().unwrap_or("anonymous"),
                 record.level(),
@@ -182,7 +182,7 @@ pub struct TopLevel {
     disk: Vec<String>,
 
     #[argh(option, long = "net")]
-    /// tap=<if_name>, ip=<ip_addr>, mask=<net_mask>, mac=<mac_addr>, fd=<fd1,fd2...>, iommu=on|off, num_queues=<number_of_queues>, queue_size=<size_of_each_queue>, id=<device_id>, vhost_user=<vhost_user_enable>, socket=<vhost_user_socket_path>, vhost_mode=client|server, bw_size=<bytes>, bw_one_time_burst=<bytes>, bw_refill_time=<ms>, ops_size=<io_ops>, ops_one_time_burst=<io_ops>, ops_refill_time=<ms>, pci_segment=<segment_id>offload_tso=on|off, offload_ufo=on|off, offload_csum=on|off
+    /// tap=<if_name>, ip=<ip_addr>, mask=<net_mask>, mac=<mac_addr>, fd=<fd1,fd2...>, iommu=on|off, num_queues=<number_of_queues>, queue_size=<size_of_each_queue>, id=<device_id>, vhost_user=<vhost_user_enable>, socket=<vhost_user_socket_path>, vhost_mode=client|server, bw_size=<bytes>, bw_one_time_burst=<bytes>, bw_refill_time=<ms>, ops_size=<io_ops>, ops_one_time_burst=<io_ops>, ops_refill_time=<ms>, pci_segment=<segment_id>, offload_tso=on|off, offload_ufo=on|off, offload_csum=on|off
     net: Vec<String>,
 
     #[argh(option, long = "rng", default = "default_rng()")]
@@ -224,6 +224,10 @@ pub struct TopLevel {
     #[argh(option, long = "vsock")]
     /// cid=<context_id>, socket=<socket_path>, iommu=on|off, id=<device_id>, pci_segment=<segment_id>
     vsock: Option<String>,
+
+    #[argh(switch, long = "pvpanic")]
+    /// enable pvpanic device
+    pvpanic: bool,
 
     #[argh(option, long = "numa")]
     /// guest_numa_id=<node_id>, cpus=<cpus_id>, distances=<list_of_distances_to_destination_nodes>, memory_zones=<list_of_memory_zones>, sgx_epc_sections=<list_of_sgx_epc_sections>
@@ -349,6 +353,9 @@ impl TopLevel {
         };
 
         let vsock = self.vsock.as_deref();
+
+        let pvpanic = self.pvpanic;
+
         #[cfg(target_arch = "x86_64")]
         let sgx_epc = if !self.sgx_epc.is_empty() {
             Some(self.sgx_epc.iter().map(|x| x.as_str()).collect())
@@ -387,6 +394,7 @@ impl TopLevel {
             user_devices,
             vdpa,
             vsock,
+            pvpanic,
             #[cfg(target_arch = "x86_64")]
             sgx_epc,
             numa,
@@ -773,6 +781,7 @@ mod unit_tests {
             user_devices: None,
             vdpa: None,
             vsock: None,
+            pvpanic: false,
             iommu: false,
             #[cfg(target_arch = "x86_64")]
             sgx_epc: None,
@@ -790,7 +799,7 @@ mod unit_tests {
 
     #[test]
     fn test_valid_vm_config_cpus() {
-        vec![
+        [
             (
                 vec![
                     "cloud-hypervisor",
@@ -908,7 +917,7 @@ mod unit_tests {
 
     #[test]
     fn test_valid_vm_config_kernel() {
-        vec![(
+        [(
             vec!["cloud-hypervisor", "--kernel", "/path/to/kernel"],
             r#"{
                 "payload": {"kernel": "/path/to/kernel"}
@@ -923,7 +932,7 @@ mod unit_tests {
 
     #[test]
     fn test_valid_vm_config_cmdline() {
-        vec![(
+        [(
             vec![
                 "cloud-hypervisor",
                 "--kernel",
@@ -944,7 +953,7 @@ mod unit_tests {
 
     #[test]
     fn test_valid_vm_config_disks() {
-        vec![
+        [
             (
                 vec![
                     "cloud-hypervisor",
@@ -1218,7 +1227,7 @@ mod unit_tests {
 
     #[test]
     fn test_valid_vm_config_rng() {
-        vec![(
+        [(
             vec![
                 "cloud-hypervisor",
                 "--kernel",
@@ -1240,8 +1249,7 @@ mod unit_tests {
 
     #[test]
     fn test_valid_vm_config_fs() {
-        vec![
-            (
+        [(
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--memory", "shared=true",
@@ -1311,8 +1319,7 @@ mod unit_tests {
                     ]
                 }"#,
                 true,
-            ),
-        ]
+            )]
         .iter()
         .for_each(|(cli, openapi, equal)| {
             compare_vm_config_cli_vs_json(cli, openapi, *equal);
@@ -1321,7 +1328,7 @@ mod unit_tests {
 
     #[test]
     fn test_valid_vm_config_pmem() {
-        vec![
+        [
             (
                 vec![
                     "cloud-hypervisor",
@@ -1385,7 +1392,7 @@ mod unit_tests {
 
     #[test]
     fn test_valid_vm_config_serial_console() {
-        vec![
+        [
             (
                 vec!["cloud-hypervisor", "--kernel", "/path/to/kernel"],
                 r#"{
@@ -1436,7 +1443,7 @@ mod unit_tests {
 
     #[test]
     fn test_valid_vm_config_serial_pty_console_pty() {
-        vec![
+        [
             (
                 vec!["cloud-hypervisor", "--kernel", "/path/to/kernel"],
                 r#"{
@@ -1584,7 +1591,7 @@ mod unit_tests {
 
     #[test]
     fn test_valid_vm_config_vdpa() {
-        vec![
+        [
             (
                 vec![
                     "cloud-hypervisor",
@@ -1631,7 +1638,7 @@ mod unit_tests {
 
     #[test]
     fn test_valid_vm_config_vsock() {
-        vec![
+        [
             (
                 vec![
                     "cloud-hypervisor",
@@ -1714,7 +1721,7 @@ mod unit_tests {
 
     #[test]
     fn test_valid_vm_config_tpm_socket() {
-        vec![(
+        [(
             vec![
                 "cloud-hypervisor",
                 "--kernel",

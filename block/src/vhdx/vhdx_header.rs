@@ -344,7 +344,7 @@ impl RegionTableEntry {
         // SAFETY: the assertion above makes sure the buffer size is correct.
         let mut region_table_entry = unsafe { *(buffer.as_ptr() as *mut RegionTableEntry) };
 
-        let uuid = crate::uuid_from_guid(buffer);
+        let uuid = crate::vhdx::uuid_from_guid(buffer);
         region_table_entry.guid = uuid;
 
         Ok(region_table_entry)

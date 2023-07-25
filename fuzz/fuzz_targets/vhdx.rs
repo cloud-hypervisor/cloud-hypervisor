@@ -8,7 +8,7 @@ use std::ffi;
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::unix::io::{FromRawFd, RawFd};
-use vhdx::vhdx::Vhdx;
+use block::vhdx::Vhdx;
 
 // Populate the corpus directory with a test file:
 // truncate -s 16M /tmp/source

@@ -1,64 +1,63 @@
 // Copyright © 2021 Intel Corporation
 //
-// SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
+// SPDX-License-Identifier: Apache-2.0
 
 use crate::async_io::{AsyncIo, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult};
+use crate::vhdx::{Result as VhdxResult, Vhdx};
 use crate::AsyncAdaptor;
-use qcow::{QcowFile, RawFile, Result as QcowResult};
 use std::collections::VecDeque;
 use std::fs::File;
-use std::io::{Seek, SeekFrom};
 use std::sync::{Arc, Mutex, MutexGuard};
 use vmm_sys_util::eventfd::EventFd;
 
-pub struct QcowDiskSync {
-    qcow_file: Arc<Mutex<QcowFile>>,
+pub struct VhdxDiskSync {
+    vhdx_file: Arc<Mutex<Vhdx>>,
 }
 
-impl QcowDiskSync {
-    pub fn new(file: File, direct_io: bool) -> QcowResult<Self> {
-        Ok(QcowDiskSync {
-            qcow_file: Arc::new(Mutex::new(QcowFile::from(RawFile::new(file, direct_io))?)),
+impl VhdxDiskSync {
+    pub fn new(f: File) -> VhdxResult<Self> {
+        Ok(VhdxDiskSync {
+            vhdx_file: Arc::new(Mutex::new(Vhdx::new(f)?)),
         })
     }
 }
 
-impl DiskFile for QcowDiskSync {
+impl DiskFile for VhdxDiskSync {
     fn size(&mut self) -> DiskFileResult<u64> {
-        let mut file = self.qcow_file.lock().unwrap();
-
-        file.seek(SeekFrom::End(0)).map_err(DiskFileError::Size)
+        Ok(self.vhdx_file.lock().unwrap().virtual_disk_size())
     }
 
     fn new_async_io(&self, _ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
-        Ok(Box::new(QcowSync::new(self.qcow_file.clone())) as Box<dyn AsyncIo>)
+        Ok(
+            Box::new(VhdxSync::new(self.vhdx_file.clone()).map_err(DiskFileError::NewAsyncIo)?)
+                as Box<dyn AsyncIo>,
+        )
     }
 }
 
-pub struct QcowSync {
-    qcow_file: Arc<Mutex<QcowFile>>,
+pub struct VhdxSync {
+    vhdx_file: Arc<Mutex<Vhdx>>,
     eventfd: EventFd,
     completion_list: VecDeque<(u64, i32)>,
 }
 
-impl QcowSync {
-    pub fn new(qcow_file: Arc<Mutex<QcowFile>>) -> Self {
-        QcowSync {
-            qcow_file,
-            eventfd: EventFd::new(libc::EFD_NONBLOCK)
-                .expect("Failed creating EventFd for QcowSync"),
+impl VhdxSync {
+    pub fn new(vhdx_file: Arc<Mutex<Vhdx>>) -> std::io::Result<Self> {
+        Ok(VhdxSync {
+            vhdx_file,
+            eventfd: EventFd::new(libc::EFD_NONBLOCK)?,
             completion_list: VecDeque::new(),
-        }
+        })
     }
 }
 
-impl AsyncAdaptor<QcowFile> for Arc<Mutex<QcowFile>> {
-    fn file(&mut self) -> MutexGuard<QcowFile> {
+impl AsyncAdaptor<Vhdx> for Arc<Mutex<Vhdx>> {
+    fn file(&mut self) -> MutexGuard<Vhdx> {
         self.lock().unwrap()
     }
 }
 
-impl AsyncIo for QcowSync {
+impl AsyncIo for VhdxSync {
     fn notifier(&self) -> &EventFd {
         &self.eventfd
     }
@@ -69,7 +68,7 @@ impl AsyncIo for QcowSync {
         iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
-        self.qcow_file.read_vectored_sync(
+        self.vhdx_file.read_vectored_sync(
             offset,
             iovecs,
             user_data,
@@ -84,7 +83,7 @@ impl AsyncIo for QcowSync {
         iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
-        self.qcow_file.write_vectored_sync(
+        self.vhdx_file.write_vectored_sync(
             offset,
             iovecs,
             user_data,
@@ -94,7 +93,7 @@ impl AsyncIo for QcowSync {
     }
 
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()> {
-        self.qcow_file
+        self.vhdx_file
             .fsync_sync(user_data, &self.eventfd, &mut self.completion_list)
     }
 

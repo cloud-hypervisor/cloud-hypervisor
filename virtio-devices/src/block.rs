@@ -19,7 +19,7 @@ use crate::thread_helper::spawn_virtio_thread;
 use crate::GuestMemoryMmap;
 use crate::VirtioInterrupt;
 use anyhow::anyhow;
-use block_util::{
+use block::{
     async_io::AsyncIo, async_io::AsyncIoError, async_io::DiskFile, build_disk_image_id, Request,
     RequestType, VirtioBlockConfig,
 };
@@ -63,11 +63,11 @@ const LATENCY_SCALE: u64 = 10000;
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Failed to parse the request: {0}")]
-    RequestParsing(block_util::Error),
+    RequestParsing(block::Error),
     #[error("Failed to execute the request: {0}")]
-    RequestExecuting(block_util::ExecuteError),
+    RequestExecuting(block::ExecuteError),
     #[error("Failed to complete the request: {0}")]
-    RequestCompleting(block_util::Error),
+    RequestCompleting(block::Error),
     #[error("Missing the expected entry in the list of requests")]
     MissingEntryRequestList,
     #[error("The asynchronous request returned with failure")]

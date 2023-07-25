@@ -4,7 +4,7 @@
 
 #![no_main]
 use libfuzzer_sys::fuzz_target;
-use qcow::{QcowFile, RawFile};
+use block::qcow::{QcowFile, RawFile};
 use std::ffi;
 use std::fs::File;
 use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};

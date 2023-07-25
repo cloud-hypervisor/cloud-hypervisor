@@ -5,36 +5,29 @@
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult,
 };
+use crate::fixed_vhd::FixedVhd;
 use crate::raw_async::RawFileAsync;
-use crate::vhd::VhdFooter;
+use crate::BlockBackend;
 use std::fs::File;
 use std::os::unix::io::{AsRawFd, RawFd};
 use vmm_sys_util::eventfd::EventFd;
 
-pub struct FixedVhdDiskAsync {
-    file: File,
-    size: u64,
-}
+pub struct FixedVhdDiskAsync(FixedVhd);
 
 impl FixedVhdDiskAsync {
-    pub fn new(mut file: File) -> std::io::Result<Self> {
-        let footer = VhdFooter::new(&mut file)?;
-
-        Ok(FixedVhdDiskAsync {
-            file,
-            size: footer.current_size(),
-        })
+    pub fn new(file: File) -> std::io::Result<Self> {
+        Ok(Self(FixedVhd::new(file)?))
     }
 }
 
 impl DiskFile for FixedVhdDiskAsync {
     fn size(&mut self) -> DiskFileResult<u64> {
-        Ok(self.size)
+        Ok(self.0.size().unwrap())
     }
 
     fn new_async_io(&self, ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
         Ok(Box::new(
-            FixedVhdAsync::new(self.file.as_raw_fd(), ring_depth, self.size)
+            FixedVhdAsync::new(self.0.as_raw_fd(), ring_depth, self.0.size().unwrap())
                 .map_err(DiskFileError::NewAsyncIo)?,
         ) as Box<dyn AsyncIo>)
     }

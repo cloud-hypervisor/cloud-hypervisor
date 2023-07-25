@@ -2,8 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::vhdx_header::RegionTableEntry;
-use crate::vhdx_metadata::DiskSpec;
+use crate::vhdx::{vhdx_header::RegionTableEntry, vhdx_metadata::DiskSpec};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use remain::sorted;
 use std::fs::File;

@@ -25,7 +25,7 @@ use zerocopy::AsBytes;
 
 /* Values for Type in APIC sub-headers */
 #[cfg(target_arch = "x86_64")]
-pub const ACPI_APIC_PROCESSOR: u8 = 0;
+pub const ACPI_X2APIC_PROCESSOR: u8 = 9;
 #[cfg(target_arch = "x86_64")]
 pub const ACPI_APIC_IO: u8 = 1;
 #[cfg(target_arch = "x86_64")]

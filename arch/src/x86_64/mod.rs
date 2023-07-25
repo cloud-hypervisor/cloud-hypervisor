@@ -775,6 +775,13 @@ pub fn configure_vcpu(
     CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(id));
     CpuidPatch::set_cpuid_reg(&mut cpuid, 0x1f, None, CpuidReg::EDX, u32::from(id));
 
+    // Set ApicId in cpuid for each vcpu
+    // SAFETY: get host cpuid when eax=1
+    let mut cpu_ebx = unsafe { core::arch::x86_64::__cpuid(1) }.ebx;
+    cpu_ebx &= 0xffffff;
+    cpu_ebx |= (id as u32) << 24;
+    CpuidPatch::set_cpuid_reg(&mut cpuid, 0x1, None, CpuidReg::EBX, cpu_ebx);
+
     // The TSC frequency CPUID leaf should not be included when running with HyperV emulation
     if !kvm_hyperv {
         if let Some(tsc_khz) = vcpu.tsc_khz().map_err(Error::GetTscFrequency)? {
@@ -827,47 +834,29 @@ pub fn configure_vcpu(
 /// These should be used to configure the GuestMemory structure for the platform.
 /// For x86_64 all addresses are valid from the start of the kernel except a
 /// carve out at the end of 32bit address space.
-pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, RegionType)> {
-    let reserved_memory_gap_start = layout::MEM_32BIT_RESERVED_START
-        .checked_add(layout::MEM_32BIT_DEVICES_SIZE)
-        .expect("32-bit reserved region is too large");
-
-    let requested_memory_size = GuestAddress(size);
-    let mut regions = Vec::new();
-
-    // case1: guest memory fits before the gap
-    if size <= layout::MEM_32BIT_RESERVED_START.raw_value() {
-        regions.push((GuestAddress(0), size as usize, RegionType::Ram));
-    // case2: guest memory extends beyond the gap
-    } else {
-        // push memory before the gap
-        regions.push((
+pub fn arch_memory_regions() -> Vec<(GuestAddress, usize, RegionType)> {
+    vec![
+        // 0 GiB ~ 3GiB: memory before the gap
+        (
             GuestAddress(0),
             layout::MEM_32BIT_RESERVED_START.raw_value() as usize,
             RegionType::Ram,
-        ));
-        regions.push((
-            layout::RAM_64BIT_START,
-            requested_memory_size.unchecked_offset_from(layout::MEM_32BIT_RESERVED_START) as usize,
-            RegionType::Ram,
-        ));
-    }
-
-    // Add the 32-bit device memory hole as a sub region.
-    regions.push((
-        layout::MEM_32BIT_RESERVED_START,
-        layout::MEM_32BIT_DEVICES_SIZE as usize,
-        RegionType::SubRegion,
-    ));
-
-    // Add the 32-bit reserved memory hole as a sub region.
-    regions.push((
-        reserved_memory_gap_start,
-        (layout::MEM_32BIT_RESERVED_SIZE - layout::MEM_32BIT_DEVICES_SIZE) as usize,
-        RegionType::Reserved,
-    ));
-
-    regions
+        ),
+        // 4 GiB ~ inf: memory after the gap
+        (layout::RAM_64BIT_START, usize::MAX, RegionType::Ram),
+        // 3 GiB ~ 3712 MiB: 32-bit device memory hole
+        (
+            layout::MEM_32BIT_RESERVED_START,
+            layout::MEM_32BIT_DEVICES_SIZE as usize,
+            RegionType::SubRegion,
+        ),
+        // 3712 MiB ~ 3968 MiB: 32-bit reserved memory hole
+        (
+            layout::MEM_32BIT_RESERVED_START.unchecked_add(layout::MEM_32BIT_DEVICES_SIZE),
+            (layout::MEM_32BIT_RESERVED_SIZE - layout::MEM_32BIT_DEVICES_SIZE) as usize,
+            RegionType::Reserved,
+        ),
+    ]
 }
 
 /// Configures the system and should be called once per vm before starting vcpu threads.
@@ -965,30 +954,102 @@ fn configure_pvh(
     // Create the memory map entries.
     add_memmap_entry(&mut memmap, 0, layout::EBDA_START.raw_value(), E820_RAM);
 
-    let mem_end = guest_mem.last_addr();
+    // Merge continuous memory regions into one region.
+    // Note: memory regions from "GuestMemory" are sorted and non-zero sized.
+    let ram_regions = {
+        let mut ram_regions = Vec::new();
+        let mut current_start = guest_mem
+            .iter()
+            .next()
+            .map(GuestMemoryRegion::start_addr)
+            .expect("GuestMemory must have one memory region at least")
+            .raw_value();
+        let mut current_end = current_start;
 
-    if mem_end < layout::MEM_32BIT_RESERVED_START {
-        add_memmap_entry(
-            &mut memmap,
-            layout::HIGH_RAM_START.raw_value(),
-            mem_end.unchecked_offset_from(layout::HIGH_RAM_START) + 1,
-            E820_RAM,
-        );
-    } else {
-        add_memmap_entry(
-            &mut memmap,
-            layout::HIGH_RAM_START.raw_value(),
-            layout::MEM_32BIT_RESERVED_START.unchecked_offset_from(layout::HIGH_RAM_START),
-            E820_RAM,
-        );
-        if mem_end > layout::RAM_64BIT_START {
-            add_memmap_entry(
-                &mut memmap,
-                layout::RAM_64BIT_START.raw_value(),
-                mem_end.unchecked_offset_from(layout::RAM_64BIT_START) + 1,
-                E820_RAM,
-            );
+        for (start, size) in guest_mem
+            .iter()
+            .map(|m| (m.start_addr().raw_value(), m.len()))
+        {
+            if current_end == start {
+                // This zone is continuous with the previous one.
+                current_end += size;
+            } else {
+                ram_regions.push((current_start, current_end));
+
+                current_start = start;
+                current_end = start + size;
+            }
         }
+
+        ram_regions.push((current_start, current_end));
+
+        ram_regions
+    };
+
+    if ram_regions.len() > 2 {
+        error!(
+            "There should be up to two non-continuous regions, devidided by the
+            gap at the end of 32bit address space (e.g. between 3G and 4G)."
+        );
+        return Err(super::Error::MemmapTableSetup);
+    }
+
+    // Create the memory map entry for memory region before the gap
+    {
+        let (first_region_start, first_region_end) =
+            ram_regions.first().ok_or(super::Error::MemmapTableSetup)?;
+        let high_ram_start = layout::HIGH_RAM_START.raw_value();
+        let mem_32bit_reserved_start = layout::MEM_32BIT_RESERVED_START.raw_value();
+
+        if !((first_region_start <= &high_ram_start)
+            && (first_region_end > &high_ram_start)
+            && (first_region_end <= &mem_32bit_reserved_start))
+        {
+            error!(
+                "Unexpected first memory region layout: (start: 0x{:08x}, end: 0x{:08x}).
+                high_ram_start: 0x{:08x}, mem_32bit_reserved_start: 0x{:08x}",
+                first_region_start, first_region_end, high_ram_start, mem_32bit_reserved_start
+            );
+
+            return Err(super::Error::MemmapTableSetup);
+        }
+
+        info!(
+            "create_memmap_entry, start: 0x{:08x}, end: 0x{:08x}",
+            high_ram_start, first_region_end
+        );
+
+        add_memmap_entry(
+            &mut memmap,
+            high_ram_start,
+            first_region_end - high_ram_start,
+            E820_RAM,
+        );
+    }
+
+    // Create the memory map entry for memory region after the gap if any
+    if let Some((second_region_start, second_region_end)) = ram_regions.get(1) {
+        let ram_64bit_start = layout::RAM_64BIT_START.raw_value();
+
+        if second_region_start != &ram_64bit_start {
+            error!(
+                "Unexpected second memory region layout: start: 0x{:08x}, ram_64bit_start: 0x{:08x}",
+                second_region_start, ram_64bit_start
+            );
+
+            return Err(super::Error::MemmapTableSetup);
+        }
+
+        info!(
+            "create_memmap_entry, start: 0x{:08x}, end: 0x{:08x}",
+            ram_64bit_start, second_region_end
+        );
+        add_memmap_entry(
+            &mut memmap,
+            ram_64bit_start,
+            second_region_end - ram_64bit_start,
+            E820_RAM,
+        );
     }
 
     add_memmap_entry(
@@ -1222,16 +1283,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn regions_lt_4gb() {
-        let regions = arch_memory_regions(1 << 29);
-        assert_eq!(3, regions.len());
-        assert_eq!(GuestAddress(0), regions[0].0);
-        assert_eq!(1usize << 29, regions[0].1);
-    }
-
-    #[test]
-    fn regions_gt_4gb() {
-        let regions = arch_memory_regions((1 << 32) + 0x8000);
+    fn regions_base_addr() {
+        let regions = arch_memory_regions();
         assert_eq!(4, regions.len());
         assert_eq!(GuestAddress(0), regions[0].0);
         assert_eq!(GuestAddress(1 << 32), regions[1].0);
@@ -1255,49 +1308,13 @@ mod tests {
         assert!(config_err.is_err());
 
         // Now assigning some memory that falls before the 32bit memory hole.
-        let mem_size = 128 << 20;
-        let arch_mem_regions = arch_memory_regions(mem_size);
+        let arch_mem_regions = arch_memory_regions();
         let ram_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
             .iter()
-            .filter(|r| r.2 == RegionType::Ram)
+            .filter(|r| r.2 == RegionType::Ram && r.1 != usize::MAX)
             .map(|r| (r.0, r.1))
             .collect();
         let gm = GuestMemoryMmap::from_ranges(&ram_regions).unwrap();
-
-        configure_system(
-            &gm,
-            GuestAddress(0),
-            &None,
-            no_vcpus,
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-
-        // Now assigning some memory that is equal to the start of the 32bit memory hole.
-        let mem_size = 3328 << 20;
-        let arch_mem_regions = arch_memory_regions(mem_size);
-        let ram_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
-            .iter()
-            .filter(|r| r.2 == RegionType::Ram)
-            .map(|r| (r.0, r.1))
-            .collect();
-        let gm = GuestMemoryMmap::from_ranges(&ram_regions).unwrap();
-        configure_system(
-            &gm,
-            GuestAddress(0),
-            &None,
-            no_vcpus,
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
-        .unwrap();
 
         configure_system(
             &gm,
@@ -1313,12 +1330,17 @@ mod tests {
         .unwrap();
 
         // Now assigning some memory that falls after the 32bit memory hole.
-        let mem_size = 3330 << 20;
-        let arch_mem_regions = arch_memory_regions(mem_size);
+        let arch_mem_regions = arch_memory_regions();
         let ram_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
             .iter()
             .filter(|r| r.2 == RegionType::Ram)
-            .map(|r| (r.0, r.1))
+            .map(|r| {
+                if r.1 == usize::MAX {
+                    (r.0, 128 << 20)
+                } else {
+                    (r.0, r.1)
+                }
+            })
             .collect();
         let gm = GuestMemoryMmap::from_ranges(&ram_regions).unwrap();
         configure_system(

@@ -38,6 +38,8 @@ mod x86_64 {
     pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-0.raw";
     pub const JAMMY_NVIDIA_IMAGE_NAME: &str = "jammy-server-cloudimg-amd64-nvidia.raw";
     pub const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-amd64-custom-20210609-0.qcow2";
+    pub const FOCAL_IMAGE_NAME_QCOW2_BACKING_FILE: &str =
+        "focal-server-cloudimg-amd64-custom-20210609-0-backing.qcow2";
     pub const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-amd64-custom-20210609-0.vhd";
     pub const FOCAL_IMAGE_NAME_VHDX: &str = "focal-server-cloudimg-amd64-custom-20210609-0.vhdx";
     pub const JAMMY_IMAGE_NAME: &str = "jammy-server-cloudimg-amd64-custom-20230119-0.raw";
@@ -56,6 +58,8 @@ mod aarch64 {
     pub const FOCAL_IMAGE_UPDATE_KERNEL_NAME: &str =
         "focal-server-cloudimg-arm64-custom-20210929-0-update-kernel.raw";
     pub const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-arm64-custom-20210929-0.qcow2";
+    pub const FOCAL_IMAGE_NAME_QCOW2_BACKING_FILE: &str =
+        "focal-server-cloudimg-arm64-custom-20210929-0-backing.qcow2";
     pub const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-arm64-custom-20210929-0.vhd";
     pub const FOCAL_IMAGE_NAME_VHDX: &str = "focal-server-cloudimg-arm64-custom-20210929-0.vhdx";
     pub const JAMMY_IMAGE_NAME: &str = "jammy-server-cloudimg-arm64-custom-20220329-0.raw";
@@ -2225,6 +2229,16 @@ fn enable_guest_watchdog(guest: &Guest, watchdog_sec: u32) {
         .unwrap();
 }
 
+fn make_guest_panic(guest: &Guest) {
+    // Check for pvpanic device
+    assert!(guest
+        .does_device_vendor_pair_match("0x0011", "0x1b36")
+        .unwrap_or_default());
+
+    // Trigger guest a panic
+    guest.ssh_command("screen -dmS reboot sh -c \"sleep 5; echo s | tee /proc/sysrq-trigger; echo c | sudo tee /proc/sysrq-trigger\"").unwrap();
+}
+
 mod common_parallel {
     use std::{fs::OpenOptions, io::SeekFrom};
 
@@ -2429,7 +2443,7 @@ mod common_parallel {
         assert!(
             String::from_utf8_lossy(&host_cpus_count.stdout)
                 .trim()
-                .parse::<u8>()
+                .parse::<u16>()
                 .unwrap_or(0)
                 >= 4
         );
@@ -3023,6 +3037,11 @@ mod common_parallel {
     #[test]
     fn test_virtio_block_qcow2() {
         _test_virtio_block(FOCAL_IMAGE_NAME_QCOW2, false)
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_backing_file() {
+        _test_virtio_block(FOCAL_IMAGE_NAME_QCOW2_BACKING_FILE, false)
     }
 
     #[test]
@@ -4295,7 +4314,7 @@ mod common_parallel {
                 .ssh_command_l1(
                     "sudo /mnt/ch-remote \
                  --api-socket /tmp/ch_api.sock \
-                 resize --memory=1073741824",
+                 resize --memory 1073741824",
                 )
                 .unwrap();
             assert!(guest.get_total_memory_l2().unwrap_or_default() > 960_000);
@@ -4996,7 +5015,6 @@ mod common_parallel {
         handle_child_output(r, &output);
     }
 
-    #[allow(clippy::useless_conversion)]
     fn create_loop_device(backing_file_path: &str, block_size: u32, num_retries: usize) -> String {
         const LOOP_CONFIGURE: u64 = 0x4c0a;
         const LOOP_CTL_GET_FREE: u64 = 0x4c82;
@@ -5057,12 +5075,9 @@ mod common_parallel {
             .unwrap();
 
         // Request a free loop device
-        let loop_device_number = unsafe {
-            libc::ioctl(
-                loop_ctl_file.as_raw_fd(),
-                LOOP_CTL_GET_FREE.try_into().unwrap(),
-            )
-        };
+        let loop_device_number =
+            unsafe { libc::ioctl(loop_ctl_file.as_raw_fd(), LOOP_CTL_GET_FREE as _) };
+
         if loop_device_number < 0 {
             panic!("Couldn't find a free loop device");
         }
@@ -5094,7 +5109,7 @@ mod common_parallel {
             let ret = unsafe {
                 libc::ioctl(
                     loop_device_file.as_raw_fd(),
-                    LOOP_CONFIGURE.try_into().unwrap(),
+                    LOOP_CONFIGURE as _,
                     &loop_config,
                 )
             };
@@ -6127,6 +6142,54 @@ mod common_parallel {
                 // Check no reboot
                 assert_eq!(get_reboot_count(&guest), expected_reboot_count);
             }
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_pvpanic() {
+        let jammy = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(jammy));
+        let api_socket = temp_api_path(&guest.tmp_dir);
+        let event_path = temp_event_monitor_path(&guest.tmp_dir);
+
+        let kernel_path = direct_kernel_boot_path();
+
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .args(["--net", guest.default_net_string().as_str()])
+            .args(["--pvpanic"])
+            .args(["--api-socket", &api_socket])
+            .args(["--event-monitor", format!("path={event_path}").as_str()])
+            .capture_output();
+
+        let mut child = cmd.spawn().unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            // Trigger guest a panic
+            make_guest_panic(&guest);
+
+            // Wait a while for guest
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            let expected_sequential_events = [&MetaEvent {
+                event: "panic".to_string(),
+                device_id: None,
+            }];
+            assert!(check_latest_events_exact(
+                &expected_sequential_events,
+                &event_path
+            ));
         });
 
         let _ = child.kill();
@@ -8286,7 +8349,7 @@ mod vfio {
                 .ssh_command_l1(
                     "sudo /mnt/ch-remote \
                  --api-socket /tmp/ch_api.sock \
-                 resize --memory=1073741824",
+                 resize --memory 1073741824",
                 )
                 .unwrap();
             assert!(guest.get_total_memory_l2().unwrap_or_default() > 960_000);

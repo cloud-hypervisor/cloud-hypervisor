@@ -34,11 +34,13 @@ use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
 use arch::NumaNodes;
 #[cfg(target_arch = "aarch64")]
 use arch::{DeviceType, MmioDeviceInfo};
-use block_util::{
+use block::{
     async_io::DiskFile, block_io_uring_is_supported, detect_image_type,
-    fixed_vhd_async::FixedVhdDiskAsync, fixed_vhd_sync::FixedVhdDiskSync, qcow_sync::QcowDiskSync,
-    raw_async::RawFileDisk, raw_sync::RawFileDiskSync, vhdx_sync::VhdxDiskSync, ImageType,
+    fixed_vhd_sync::FixedVhdDiskSync, qcow, qcow_sync::QcowDiskSync, raw_sync::RawFileDiskSync,
+    vhdx, vhdx_sync::VhdxDiskSync, ImageType,
 };
+#[cfg(feature = "io_uring")]
+use block::{fixed_vhd_async::FixedVhdDiskAsync, raw_async::RawFileDisk};
 #[cfg(target_arch = "aarch64")]
 use devices::gic;
 #[cfg(target_arch = "x86_64")]
@@ -114,6 +116,7 @@ const RNG_DEVICE_NAME: &str = "__rng";
 const IOMMU_DEVICE_NAME: &str = "__iommu";
 const BALLOON_DEVICE_NAME: &str = "__balloon";
 const CONSOLE_DEVICE_NAME: &str = "__console";
+const PVPANIC_DEVICE_NAME: &str = "__pvpanic";
 
 // Devices that the user may name and for which we generate
 // identifiers if the user doesn't give one
@@ -421,7 +424,7 @@ pub enum DeviceManagerError {
     CreateQcowDiskSync(qcow::Error),
 
     /// Failed to create FixedVhdxDiskSync
-    CreateFixedVhdxDiskSync(vhdx::vhdx::VhdxError),
+    CreateFixedVhdxDiskSync(vhdx::VhdxError),
 
     /// Failed to add DMA mapping handler to virtio-mem device.
     AddDmaMappingHandlerVirtioMem(virtio_devices::mem::Error),
@@ -470,6 +473,9 @@ pub enum DeviceManagerError {
 
     /// Failed retrieving device state from snapshot
     RestoreGetState(MigratableError),
+
+    /// Cannot create a PvPanic device
+    PvPanicCreate(devices::pvpanic::PvPanicError),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -931,6 +937,9 @@ pub struct DeviceManager {
     // GPIO device for AArch64
     gpio_device: Option<Arc<Mutex<devices::legacy::Gpio>>>,
 
+    // pvpanic device
+    pvpanic_device: Option<Arc<Mutex<devices::PvPanicDevice>>>,
+
     // Flag to force setting the iommu on virtio devices
     force_iommu: bool,
 
@@ -1122,6 +1131,7 @@ impl DeviceManager {
             virtio_mem_devices: Vec::new(),
             #[cfg(target_arch = "aarch64")]
             gpio_device: None,
+            pvpanic_device: None,
             force_iommu,
             io_uring_supported: None,
             boot_id_list,
@@ -1244,6 +1254,10 @@ impl DeviceManager {
         self.add_pci_devices(virtio_devices.clone())?;
 
         self.virtio_devices = virtio_devices;
+
+        if self.config.clone().lock().unwrap().pvpanic {
+            self.pvpanic_device = self.add_pvpanic_device()?;
+        }
 
         Ok(())
     }
@@ -2213,12 +2227,21 @@ impl DeviceManager {
                 ImageType::FixedVhd => {
                     // Use asynchronous backend relying on io_uring if the
                     // syscalls are supported.
-                    if !disk_cfg.disable_io_uring && self.io_uring_is_supported() {
+                    if cfg!(feature = "io_uring")
+                        && !disk_cfg.disable_io_uring
+                        && self.io_uring_is_supported()
+                    {
                         info!("Using asynchronous fixed VHD disk file (io_uring)");
-                        Box::new(
-                            FixedVhdDiskAsync::new(file)
-                                .map_err(DeviceManagerError::CreateFixedVhdDiskAsync)?,
-                        ) as Box<dyn DiskFile>
+
+                        #[cfg(not(feature = "io_uring"))]
+                        unreachable!("Checked in if statement above");
+                        #[cfg(feature = "io_uring")]
+                        {
+                            Box::new(
+                                FixedVhdDiskAsync::new(file)
+                                    .map_err(DeviceManagerError::CreateFixedVhdDiskAsync)?,
+                            ) as Box<dyn DiskFile>
+                        }
                     } else {
                         info!("Using synchronous fixed VHD disk file");
                         Box::new(
@@ -2230,9 +2253,18 @@ impl DeviceManager {
                 ImageType::Raw => {
                     // Use asynchronous backend relying on io_uring if the
                     // syscalls are supported.
-                    if !disk_cfg.disable_io_uring && self.io_uring_is_supported() {
+                    if cfg!(feature = "io_uring")
+                        && !disk_cfg.disable_io_uring
+                        && self.io_uring_is_supported()
+                    {
                         info!("Using asynchronous RAW disk file (io_uring)");
-                        Box::new(RawFileDisk::new(file)) as Box<dyn DiskFile>
+
+                        #[cfg(not(feature = "io_uring"))]
+                        unreachable!("Checked in if statement above");
+                        #[cfg(feature = "io_uring")]
+                        {
+                            Box::new(RawFileDisk::new(file)) as Box<dyn DiskFile>
+                        }
                     } else {
                         info!("Using synchronous RAW disk file");
                         Box::new(RawFileDiskSync::new(file)) as Box<dyn DiskFile>
@@ -3602,6 +3634,43 @@ impl DeviceManager {
         self.device_tree.lock().unwrap().insert(id, node);
 
         Ok(pci_device_bdf)
+    }
+
+    fn add_pvpanic_device(
+        &mut self,
+    ) -> DeviceManagerResult<Option<Arc<Mutex<devices::PvPanicDevice>>>> {
+        let id = String::from(PVPANIC_DEVICE_NAME);
+        let pci_segment_id = 0x0_u16;
+
+        info!("Creating pvpanic device {}", id);
+
+        let (pci_segment_id, pci_device_bdf, resources) =
+            self.pci_resources(&id, pci_segment_id)?;
+
+        let snapshot = snapshot_from_id(self.snapshot.as_ref(), id.as_str());
+
+        let pvpanic_device = devices::PvPanicDevice::new(id.clone(), snapshot)
+            .map_err(DeviceManagerError::PvPanicCreate)?;
+
+        let pvpanic_device = Arc::new(Mutex::new(pvpanic_device));
+
+        let new_resources = self.add_pci_device(
+            pvpanic_device.clone(),
+            pvpanic_device.clone(),
+            pci_segment_id,
+            pci_device_bdf,
+            resources,
+        )?;
+
+        let mut node = device_node!(id, pvpanic_device);
+
+        node.resources = new_resources;
+        node.pci_bdf = Some(pci_device_bdf);
+        node.pci_device_handle = None;
+
+        self.device_tree.lock().unwrap().insert(id, node);
+
+        Ok(Some(pvpanic_device))
     }
 
     fn pci_resources(
