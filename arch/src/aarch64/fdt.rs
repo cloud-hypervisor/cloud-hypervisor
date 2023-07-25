@@ -178,6 +178,40 @@ pub fn get_cache_number_of_sets(cache_level: CacheLevel) -> u32 {
     }
 }
 
+/// NOTE: CACHE NUMBER OF SETS file directory example,
+/// "/sys/devices/system/cpu/cpu0/cache/index0/shared_cpu_list".
+pub fn get_cache_shared(cache_level: CacheLevel) -> bool {
+    let mut file_directory: String = "/sys/devices/system/cpu/cpu0/cache".to_string();
+    let result: bool;
+
+    match cache_level {
+        CacheLevel::L1D => file_directory += "/index0/shared_cpu_list",
+        CacheLevel::L1I => file_directory += "/index1/shared_cpu_list",
+        CacheLevel::L2 => file_directory += "/index2/shared_cpu_list",
+        CacheLevel::L3 => file_directory += "/index3/shared_cpu_list",
+    }
+
+    let file_path = Path::new(&file_directory);
+    if !file_path.exists() {
+        error!("File: {} not exist.", file_directory);
+        result = false;
+    } else {
+        info!("File: {} exist.", file_directory);
+
+        let src = fs::read_to_string(file_directory).expect("File not exists or file corrupted.");
+        let src = src.trim();
+        if src.is_empty() {
+            result = false;
+        } else {
+            result = src.contains('-') || src.contains(',');
+        }
+
+        info!("result = {}", result);
+    }
+
+    result
+}
+
 /// Creates the flattened device tree for this aarch64 VM.
 #[allow(clippy::too_many_arguments)]
 pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHasher>(
@@ -255,6 +289,11 @@ fn create_cpu_nodes(
     fdt.property_u32("#size-cells", 0x0)?;
 
     let num_cpus = vcpu_mpidr.len();
+    let threads_per_core = vcpu_topology.unwrap_or_default().0;
+    let cores_per_package = vcpu_topology.unwrap_or_default().1;
+    let packages = vcpu_topology.unwrap_or_default().2;
+
+    let max_cpus: u32 = (threads_per_core * cores_per_package * packages).into();
 
     // Add cache info.
     // L1 Data Cache Info.
@@ -276,6 +315,10 @@ fn create_cpu_nodes(
     let mut l3_cache_size: u32 = 0;
     let mut l3_cache_line_size: u32 = 0;
     let mut l3_cache_sets: u32 = 0;
+
+    // Cache Shared Info.
+    let mut l2_cache_shared: bool = false;
+    let mut l3_cache_shared: bool = false;
 
     let cache_path = Path::new("/sys/devices/system/cpu/cpu0/cache");
     let cache_exist: bool = cache_path.exists();
@@ -302,6 +345,10 @@ fn create_cpu_nodes(
         l3_cache_size = get_cache_size(CacheLevel::L3);
         l3_cache_line_size = get_cache_coherency_line_size(CacheLevel::L3);
         l3_cache_sets = get_cache_number_of_sets(CacheLevel::L3);
+
+        // Cache Shared Info.
+        l2_cache_shared = get_cache_shared(CacheLevel::L2);
+        l3_cache_shared = get_cache_shared(CacheLevel::L3);
     }
 
     for (cpu_id, mpidr) in vcpu_mpidr.iter().enumerate().take(num_cpus) {
@@ -328,8 +375,41 @@ fn create_cpu_nodes(
             fdt.property_u32("i-cache-line-size", l1_i_cache_line_size)?;
             fdt.property_u32("i-cache-sets", l1_i_cache_sets)?;
 
-            if l2_cache_size != 0 {
-                fdt.property_u32("next-level-cache", L2_CACHE_PHANDLE)?;
+            if l2_cache_size != 0 && !l2_cache_shared {
+                fdt.property_u32(
+                    "next-level-cache",
+                    cpu_id as u32 + max_cpus + FIRST_VCPU_PHANDLE + L2_CACHE_PHANDLE,
+                )?;
+
+                let l2_cache_name = "l2-cache0";
+                let l2_cache_node = fdt.begin_node(l2_cache_name)?;
+                fdt.property_u32(
+                    "phandle",
+                    cpu_id as u32 + max_cpus + FIRST_VCPU_PHANDLE + L2_CACHE_PHANDLE,
+                )?;
+
+                fdt.property_string("compatible", "cache")?;
+                fdt.property_u32("cache-size", l2_cache_size)?;
+                fdt.property_u32("cache-line-size", l2_cache_line_size)?;
+                fdt.property_u32("cache-sets", l2_cache_sets)?;
+                fdt.property_u32("cache-level", 2)?;
+
+                if l3_cache_size != 0 && l3_cache_shared {
+                    let package_id: u32 = cpu_id as u32 / cores_per_package as u32;
+                    fdt.property_u32(
+                        "next-level-cache",
+                        package_id
+                            + num_cpus as u32
+                            + max_cpus
+                            + FIRST_VCPU_PHANDLE
+                            + L2_CACHE_PHANDLE
+                            + L3_CACHE_PHANDLE,
+                    )?;
+                }
+
+                fdt.end_node(l2_cache_node)?;
+            } else if l2_cache_size != 0 && l2_cache_shared {
+                error!("L2 cache shared with other cpus");
             }
         }
 
@@ -346,34 +426,30 @@ fn create_cpu_nodes(
         fdt.end_node(cpu_node)?;
     }
 
-    if cache_exist && l2_cache_size != 0 {
-        let l2_cache_name = "l2-cache0";
-        let l2_cache_node = fdt.begin_node(l2_cache_name)?;
-        fdt.property_u32("phandle", L2_CACHE_PHANDLE)?;
-        fdt.property_string("compatible", "cache")?;
-        fdt.property_u32("cache-size", l2_cache_size)?;
-        fdt.property_u32("cache-line-size", l2_cache_line_size)?;
-        fdt.property_u32("cache-sets", l2_cache_sets)?;
-        fdt.property_u32("cache-level", 2)?;
+    if cache_exist && l3_cache_size != 0 && l3_cache_shared {
+        let mut i: u32 = 0;
+        while i < packages.into() {
+            let l3_cache_name = "l3-cache0";
+            let l3_cache_node = fdt.begin_node(l3_cache_name)?;
+            fdt.property_u32(
+                "phandle",
+                i + num_cpus as u32
+                    + max_cpus
+                    + FIRST_VCPU_PHANDLE
+                    + L2_CACHE_PHANDLE
+                    + L3_CACHE_PHANDLE,
+            )?;
 
-        if l3_cache_size != 0 {
-            fdt.property_u32("next-level-cache", L3_CACHE_PHANDLE)?;
+            fdt.property_string("compatible", "cache")?;
+            fdt.property_null("cache-unified")?;
+            fdt.property_u32("cache-size", l3_cache_size)?;
+            fdt.property_u32("cache-line-size", l3_cache_line_size)?;
+            fdt.property_u32("cache-sets", l3_cache_sets)?;
+            fdt.property_u32("cache-level", 3)?;
+            fdt.end_node(l3_cache_node)?;
+
+            i += 1;
         }
-
-        fdt.end_node(l2_cache_node)?;
-    }
-
-    if cache_exist && l3_cache_size != 0 {
-        let l3_cache_name = "l3-cache0";
-        let l3_cache_node = fdt.begin_node(l3_cache_name)?;
-        fdt.property_u32("phandle", L3_CACHE_PHANDLE)?;
-        fdt.property_string("compatible", "cache")?;
-        fdt.property_null("cache-unified")?;
-        fdt.property_u32("cache-size", l3_cache_size)?;
-        fdt.property_u32("cache-line-size", l3_cache_line_size)?;
-        fdt.property_u32("cache-sets", l3_cache_sets)?;
-        fdt.property_u32("cache-level", 3)?;
-        fdt.end_node(l3_cache_node)?;
     }
 
     if let Some(topology) = vcpu_topology {
