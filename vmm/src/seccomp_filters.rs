@@ -486,6 +486,7 @@ fn pty_foreground_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
         #[cfg(target_arch = "aarch64")]
         (libc::SYS_ppoll, vec![]),
         (libc::SYS_read, vec![]),
+        (libc::SYS_restart_syscall, vec![]),
         (libc::SYS_rt_sigaction, vec![]),
         (libc::SYS_rt_sigreturn, vec![]),
         (libc::SYS_setsid, vec![]),
@@ -611,6 +612,7 @@ fn vmm_thread_rules(
         (libc::SYS_socketpair, vec![]),
         #[cfg(target_arch = "x86_64")]
         (libc::SYS_stat, vec![]),
+        (libc::SYS_statfs, vec![]),
         (libc::SYS_statx, vec![]),
         (libc::SYS_tgkill, vec![]),
         (libc::SYS_timerfd_create, vec![]),
@@ -717,6 +719,7 @@ fn vcpu_thread_rules(
         (libc::SYS_madvise, vec![]),
         (libc::SYS_mmap, vec![]),
         (libc::SYS_mprotect, vec![]),
+        (libc::SYS_mremap, vec![]),
         (libc::SYS_munmap, vec![]),
         (libc::SYS_nanosleep, vec![]),
         (libc::SYS_newfstatat, vec![]),

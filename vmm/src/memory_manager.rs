@@ -31,7 +31,7 @@ use std::convert::TryInto;
 use std::ffi;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read};
-use std::ops::Deref;
+use std::ops::{BitAnd, Deref, Not, Sub};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
 use std::result;
@@ -330,6 +330,12 @@ pub enum Error {
 
     /// Using a directory as a backing file for memory is not supported
     DirectoryAsBackingFileForMemory,
+
+    /// Failed to stat filesystem
+    GetFileSystemBlockSize(io::Error),
+
+    /// Memory size is misaligned with default page size or its hugepage size
+    MisalignedMemorySize,
 }
 
 const ENABLE_FLAG: usize = 0;
@@ -351,6 +357,77 @@ const SELECTION_OFFSET: u64 = 0;
 //  - Windows requires the addressable space size to be 64k aligned
 fn mmio_address_space_size(phys_bits: u8) -> u64 {
     (1 << phys_bits) - (1 << 16)
+}
+
+// The `statfs` function can get information of hugetlbfs, and the hugepage size is in the
+// `f_bsize` field.
+//
+// See: https://github.com/torvalds/linux/blob/v6.3/fs/hugetlbfs/inode.c#L1169
+fn statfs_get_bsize(path: &str) -> Result<u64, Error> {
+    let path = std::ffi::CString::new(path).map_err(|_| Error::InvalidMemoryParameters)?;
+    let mut buf = std::mem::MaybeUninit::<libc::statfs>::uninit();
+
+    // SAFETY: FFI call with a valid path and buffer
+    let ret = unsafe { libc::statfs(path.as_ptr(), buf.as_mut_ptr()) };
+    if ret != 0 {
+        return Err(Error::GetFileSystemBlockSize(
+            std::io::Error::last_os_error(),
+        ));
+    }
+
+    // SAFETY: `buf` is valid at this point
+    // Because this value is always positive, just convert it directly.
+    // Note that the `f_bsize` is `i64` in glibc and `u64` in musl, using `as u64` will be warned
+    // by `clippy` on musl target.  To avoid the warning, there should be `as _` instead of
+    // `as u64`.
+    let bsize = unsafe { (*buf.as_ptr()).f_bsize } as _;
+    Ok(bsize)
+}
+
+fn memory_zone_get_align_size(zone: &MemoryZoneConfig) -> Result<u64, Error> {
+    // SAFETY: FFI call. Trivially safe.
+    let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) as u64 };
+
+    // There is no backend file and the `hugepages` is disabled, just use system page size.
+    if zone.file.is_none() && !zone.hugepages {
+        return Ok(page_size);
+    }
+
+    // The `hugepages` is enabled and the `hugepage_size` is specified, just use it directly.
+    if zone.hugepages && zone.hugepage_size.is_some() {
+        return Ok(zone.hugepage_size.unwrap());
+    }
+
+    // There are two scenarios here:
+    //  - `hugepages` is enabled but `hugepage_size` is not specified:
+    //     Call `statfs` for `/dev/hugepages` for getting the default size of hugepage
+    //  - The backing file is specified:
+    //     Call `statfs` for the file and get its `f_bsize`.  If the value is larger than the page
+    //     size of normal page, just use the `f_bsize` because the file is in a hugetlbfs.  If the
+    //     value is less than or equal to the page size, just use the page size.
+    let path = zone.file.as_ref().map_or(Ok("/dev/hugepages"), |pathbuf| {
+        pathbuf.to_str().ok_or(Error::InvalidMemoryParameters)
+    })?;
+
+    let align_size = std::cmp::max(page_size, statfs_get_bsize(path)?);
+
+    Ok(align_size)
+}
+
+#[inline]
+fn align_down<T>(val: T, align: T) -> T
+where
+    T: BitAnd<Output = T> + Not<Output = T> + Sub<Output = T> + From<u8>,
+{
+    val & !(align - 1u8.into())
+}
+
+#[inline]
+fn is_aligned<T>(val: T, align: T) -> bool
+where
+    T: BitAnd<Output = T> + Sub<Output = T> + From<u8> + PartialEq,
+{
+    (val & (align - 1u8.into())) == 0u8.into()
 }
 
 impl BusDevice for MemoryManager {
@@ -442,17 +519,25 @@ impl MemoryManager {
     /// - First one mapping entirely the first memory zone on 0-1G range
     /// - Second one mapping partially the second memory zone on 1G-3G range
     /// - Third one mapping partially the second memory zone on 4G-6G range
+    /// Also, all memory regions are page-size aligned (e.g. their sizes must
+    /// be multiple of page-size), which may leave an additional hole in the
+    /// address space when hugepage is used.
     fn create_memory_regions_from_zones(
         ram_regions: &[(GuestAddress, usize)],
         zones: &[MemoryZoneConfig],
         prefault: Option<bool>,
         thp: bool,
     ) -> Result<(Vec<Arc<GuestRegionMmap>>, MemoryZones), Error> {
-        let mut zones = zones.to_owned();
+        let mut zone_iter = zones.iter();
         let mut mem_regions = Vec::new();
-        let mut zone = zones.remove(0);
-        let mut zone_offset = 0;
+        let mut zone = zone_iter.next().ok_or(Error::MissingMemoryZones)?;
+        let mut zone_align_size = memory_zone_get_align_size(zone)?;
+        let mut zone_offset = 0u64;
         let mut memory_zones = HashMap::new();
+
+        if !is_aligned(zone.size, zone_align_size) {
+            return Err(Error::MisalignedMemorySize);
+        }
 
         // Add zone id to the list of memory zones.
         memory_zones.insert(zone.id.clone(), MemoryZone::default());
@@ -465,16 +550,20 @@ impl MemoryManager {
                 let mut ram_region_consumed = false;
                 let mut pull_next_zone = false;
 
-                let ram_region_sub_size = ram_region.1 - ram_region_offset;
-                let zone_sub_size = zone.size as usize - zone_offset;
+                let ram_region_available_size =
+                    align_down(ram_region.1 as u64 - ram_region_offset, zone_align_size);
+                if ram_region_available_size == 0 {
+                    break;
+                }
+                let zone_sub_size = zone.size - zone_offset;
 
-                let file_offset = zone_offset as u64;
+                let file_offset = zone_offset;
                 let region_start = ram_region
                     .0
-                    .checked_add(ram_region_offset as u64)
+                    .checked_add(ram_region_offset)
                     .ok_or(Error::GuestAddressOverFlow)?;
-                let region_size = if zone_sub_size <= ram_region_sub_size {
-                    if zone_sub_size == ram_region_sub_size {
+                let region_size = if zone_sub_size <= ram_region_available_size {
+                    if zone_sub_size == ram_region_available_size {
                         ram_region_consumed = true;
                     }
 
@@ -483,21 +572,24 @@ impl MemoryManager {
 
                     zone_sub_size
                 } else {
-                    zone_offset += ram_region_sub_size;
+                    zone_offset += ram_region_available_size;
                     ram_region_consumed = true;
 
-                    ram_region_sub_size
+                    ram_region_available_size
                 };
 
+                info!(
+                    "create ram region for zone {}, region_start: {:#x}, region_size: {:#x}",
+                    zone.id,
+                    region_start.raw_value(),
+                    region_size
+                );
                 let region = MemoryManager::create_ram_region(
                     &zone.file,
                     file_offset,
                     region_start,
-                    region_size,
-                    match prefault {
-                        Some(pf) => pf,
-                        None => zone.prefault,
-                    },
+                    region_size as usize,
+                    prefault.unwrap_or(zone.prefault),
                     zone.shared,
                     zone.hugepages,
                     zone.hugepage_size,
@@ -517,11 +609,16 @@ impl MemoryManager {
                 if pull_next_zone {
                     // Get the next zone and reset the offset.
                     zone_offset = 0;
-                    if zones.is_empty() {
+                    if let Some(z) = zone_iter.next() {
+                        zone = z;
+                    } else {
                         exit = true;
                         break;
                     }
-                    zone = zones.remove(0);
+                    zone_align_size = memory_zone_get_align_size(zone)?;
+                    if !is_aligned(zone.size, zone_align_size) {
+                        return Err(Error::MisalignedMemorySize);
+                    }
 
                     // Check if zone id already exist. In case it does, throw
                     // an error as we need unique identifiers. Otherwise, add
@@ -573,10 +670,7 @@ impl MemoryManager {
                         guest_ram_mapping.file_offset,
                         GuestAddress(guest_ram_mapping.gpa),
                         guest_ram_mapping.size as usize,
-                        match prefault {
-                            Some(pf) => pf,
-                            None => zone_config.prefault,
-                        },
+                        prefault.unwrap_or(zone_config.prefault),
                         zone_config.shared,
                         zone_config.hugepages,
                         zone_config.hugepage_size,
@@ -939,7 +1033,7 @@ impl MemoryManager {
             )
         } else {
             // Init guest memory
-            let arch_mem_regions = arch::arch_memory_regions(ram_size);
+            let arch_mem_regions = arch::arch_memory_regions();
 
             let ram_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
                 .iter()
@@ -997,10 +1091,7 @@ impl MemoryManager {
                                 0,
                                 start_addr,
                                 hotplug_size as usize,
-                                match prefault {
-                                    Some(pf) => pf,
-                                    None => zone.prefault,
-                                },
+                                prefault.unwrap_or(zone.prefault),
                                 zone.shared,
                                 zone.hugepages,
                                 zone.hugepage_size,

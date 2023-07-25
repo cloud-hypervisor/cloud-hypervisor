@@ -43,6 +43,7 @@ use std::os::unix::net::UnixListener;
 use std::os::unix::net::UnixStream;
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -347,9 +348,9 @@ pub fn start_vmm_thread(
                 vmm.setup_signal_handler()?;
 
                 vmm.control_loop(
-                    Arc::new(api_receiver),
+                    Rc::new(api_receiver),
                     #[cfg(feature = "guest_debug")]
-                    Arc::new(gdb_receiver),
+                    Rc::new(gdb_receiver),
                 )
             })
             .map_err(Error::VmmThreadSpawn)?
@@ -1024,13 +1025,20 @@ impl Vmm {
     fn vm_remove_device(&mut self, id: String) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm {
             if let Err(e) = vm.remove_device(id) {
-                error!("Error when removing new device to the VM: {:?}", e);
+                error!("Error when removing device from the VM: {:?}", e);
                 Err(e)
             } else {
                 Ok(())
             }
+        } else if let Some(ref config) = self.vm_config {
+            let mut config = config.lock().unwrap();
+            if config.remove_device(&id) {
+                Ok(())
+            } else {
+                Err(VmError::NoDeviceToRemove(id))
+            }
         } else {
-            Err(VmError::VmNotRunning)
+            Err(VmError::VmNotCreated)
         }
     }
 
@@ -1791,8 +1799,8 @@ impl Vmm {
 
     fn control_loop(
         &mut self,
-        api_receiver: Arc<Receiver<ApiRequest>>,
-        #[cfg(feature = "guest_debug")] gdb_receiver: Arc<Receiver<gdb::GdbRequest>>,
+        api_receiver: Rc<Receiver<ApiRequest>>,
+        #[cfg(feature = "guest_debug")] gdb_receiver: Rc<Receiver<gdb::GdbRequest>>,
     ) -> Result<()> {
         const EPOLL_EVENTS_LEN: usize = 100;
 
@@ -2197,6 +2205,7 @@ mod unit_tests {
             user_devices: None,
             vdpa: None,
             vsock: None,
+            pvpanic: false,
             iommu: false,
             #[cfg(target_arch = "x86_64")]
             sgx_epc: None,

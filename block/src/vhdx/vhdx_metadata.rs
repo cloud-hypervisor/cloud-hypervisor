@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::vhdx_header::RegionTableEntry;
+use crate::vhdx::vhdx_header::RegionTableEntry;
 use byteorder::{LittleEndian, ReadBytesExt};
 use remain::sorted;
 use std::fs::File;
@@ -303,7 +303,7 @@ impl MetadataTableEntry {
         // SAFETY: the assertion above makes sure the buffer size is correct.
         let mut metadata_table_entry = unsafe { *(buffer.as_ptr() as *mut MetadataTableEntry) };
 
-        let uuid = crate::uuid_from_guid(buffer);
+        let uuid = crate::vhdx::uuid_from_guid(buffer);
         metadata_table_entry.item_id = uuid;
 
         if metadata_table_entry.length > METADATA_LENGTH_MAX {

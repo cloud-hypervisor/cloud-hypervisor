@@ -4,7 +4,7 @@
 
 use super::RawFile;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use std::io::{self, BufWriter, Seek, SeekFrom};
+use std::io::{self, BufWriter, Seek, SeekFrom, Write};
 use std::mem::size_of;
 use vmm_sys_util::write_zeroes::WriteZeroes;
 
@@ -136,6 +136,13 @@ impl QcowRawFile {
         self.file.seek(SeekFrom::Start(address))?;
         self.file.write_zeroes(cluster_size)?;
         Ok(())
+    }
+
+    /// Writes
+    pub fn write_cluster(&mut self, address: u64, data: Vec<u8>) -> io::Result<()> {
+        let cluster_size = self.cluster_size as usize;
+        self.file.seek(SeekFrom::Start(address))?;
+        self.file.write_all(&data[0..cluster_size])
     }
 }
 

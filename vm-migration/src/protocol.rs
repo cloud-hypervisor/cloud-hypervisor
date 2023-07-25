@@ -276,10 +276,7 @@ impl MemoryRangeTable {
     pub fn write_to(&self, fd: &mut dyn Write) -> Result<(), MigratableError> {
         // SAFETY: the slice is construted with the correct arguments
         fd.write_all(unsafe {
-            std::slice::from_raw_parts(
-                self.data.as_ptr() as *const MemoryRange as *const u8,
-                self.length() as usize,
-            )
+            std::slice::from_raw_parts(self.data.as_ptr() as *const u8, self.length() as usize)
         })
         .map_err(MigratableError::MigrateSocket)
     }

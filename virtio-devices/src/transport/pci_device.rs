@@ -48,14 +48,13 @@ use super::pci_common_config::VirtioPciCommonConfigState;
 /// Vector value used to disable MSI for a queue.
 const VIRTQ_MSI_NO_VECTOR: u16 = 0xffff;
 
-#[allow(clippy::enum_variant_names)]
 enum PciCapabilityType {
-    CommonConfig = 1,
-    NotifyConfig = 2,
-    IsrConfig = 3,
-    DeviceConfig = 4,
-    PciConfig = 5,
-    SharedMemoryConfig = 8,
+    Common = 1,
+    Notify = 2,
+    Isr = 3,
+    Device = 4,
+    Pci = 5,
+    SharedMemory = 8,
 }
 
 // This offset represents the 2 bytes omitted from the VirtioPciCap structure
@@ -210,7 +209,7 @@ impl PciCapability for VirtioPciCfgCap {
 impl VirtioPciCfgCap {
     fn new() -> Self {
         VirtioPciCfgCap {
-            cap: VirtioPciCap::new(PciCapabilityType::PciConfig, 0, 0, 0),
+            cap: VirtioPciCap::new(PciCapabilityType::Pci, 0, 0, 0),
             ..Default::default()
         }
     }
@@ -667,7 +666,7 @@ impl VirtioPciDevice {
     ) -> std::result::Result<(), PciDeviceError> {
         // Add pointers to the different configuration structures from the PCI capabilities.
         let common_cap = VirtioPciCap::new(
-            PciCapabilityType::CommonConfig,
+            PciCapabilityType::Common,
             settings_bar,
             COMMON_CONFIG_BAR_OFFSET as u32,
             COMMON_CONFIG_SIZE as u32,
@@ -677,7 +676,7 @@ impl VirtioPciDevice {
             .map_err(PciDeviceError::CapabilitiesSetup)?;
 
         let isr_cap = VirtioPciCap::new(
-            PciCapabilityType::IsrConfig,
+            PciCapabilityType::Isr,
             settings_bar,
             ISR_CONFIG_BAR_OFFSET as u32,
             ISR_CONFIG_SIZE as u32,
@@ -688,7 +687,7 @@ impl VirtioPciDevice {
 
         // TODO(dgreid) - set based on device's configuration size?
         let device_cap = VirtioPciCap::new(
-            PciCapabilityType::DeviceConfig,
+            PciCapabilityType::Device,
             settings_bar,
             DEVICE_CONFIG_BAR_OFFSET as u32,
             DEVICE_CONFIG_SIZE as u32,
@@ -698,7 +697,7 @@ impl VirtioPciDevice {
             .map_err(PciDeviceError::CapabilitiesSetup)?;
 
         let notify_cap = VirtioPciNotifyCap::new(
-            PciCapabilityType::NotifyConfig,
+            PciCapabilityType::Notify,
             settings_bar,
             NOTIFICATION_BAR_OFFSET as u32,
             NOTIFICATION_SIZE as u32,
@@ -1057,7 +1056,7 @@ impl PciDevice for VirtioPciDevice {
 
                 for (idx, shm) in shm_list.region_list.iter().enumerate() {
                     let shm_cap = VirtioPciCap64::new(
-                        PciCapabilityType::SharedMemoryConfig,
+                        PciCapabilityType::SharedMemory,
                         VIRTIO_SHM_BAR_INDEX as u8,
                         idx as u8,
                         shm.offset,

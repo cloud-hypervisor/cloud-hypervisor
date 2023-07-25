@@ -259,6 +259,7 @@ fn virtio_thread_common() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_madvise, vec![]),
         (libc::SYS_mmap, vec![]),
         (libc::SYS_mprotect, vec![]),
+        (libc::SYS_mremap, vec![]),
         (libc::SYS_munmap, vec![]),
         (libc::SYS_openat, vec![]),
         (libc::SYS_read, vec![]),

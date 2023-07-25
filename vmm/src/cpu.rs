@@ -98,6 +98,13 @@ macro_rules! extract_bits_64 {
     };
 }
 
+#[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
+macro_rules! extract_bits_64_without_offset {
+    ($value: tt, $length: tt) => {
+        $value & (!0u64 >> (64 - $length))
+    };
+}
+
 pub const CPU_MANAGER_ACPI_SIZE: usize = 0xc;
 
 #[derive(Debug, Error)]
@@ -178,12 +185,13 @@ pub type Result<T> = result::Result<T, Error>;
 #[allow(dead_code)]
 #[repr(packed)]
 #[derive(AsBytes)]
-struct LocalApic {
+struct LocalX2Apic {
     pub r#type: u8,
     pub length: u8,
-    pub processor_id: u8,
-    pub apic_id: u8,
+    pub _reserved: u16,
+    pub apic_id: u32,
     pub flags: u32,
+    pub processor_id: u32,
 }
 
 #[allow(dead_code)]
@@ -1286,16 +1294,17 @@ impl CpuManager {
             madt.write(36, arch::layout::APIC_START.0);
 
             for cpu in 0..self.config.max_vcpus {
-                let lapic = LocalApic {
-                    r#type: acpi::ACPI_APIC_PROCESSOR,
-                    length: 8,
-                    processor_id: cpu,
-                    apic_id: cpu,
+                let lapic = LocalX2Apic {
+                    r#type: acpi::ACPI_X2APIC_PROCESSOR,
+                    length: 16,
+                    processor_id: cpu.into(),
+                    apic_id: cpu.into(),
                     flags: if cpu < self.config.boot_vcpus {
                         1 << MADT_CPU_ENABLE_FLAG
                     } else {
                         0
                     } | 1 << MADT_CPU_ONLINE_CAPABLE_FLAG,
+                    _reserved: 0,
                 };
                 madt.append(lapic);
             }
@@ -1611,8 +1620,7 @@ impl CpuManager {
 
         // PA or IPA size is determined
         let tcr_ips = extract_bits_64!(tcr_el1, 32, 3);
-        #[allow(clippy::identity_op)]
-        let pa_range = extract_bits_64!(id_aa64mmfr0_el1, 0, 4);
+        let pa_range = extract_bits_64_without_offset!(id_aa64mmfr0_el1, 4);
         // The IPA size in TCR_BL1 and PA Range in ID_AA64MMFR0_EL1 should match.
         // To be safe, we use the minimum value if they are different.
         let pa_range = std::cmp::min(tcr_ips, pa_range);
@@ -1645,8 +1653,7 @@ impl CpuManager {
         let descaddrmask = descaddrmask & !indexmask_grainsize;
 
         // Translation table base address
-        #[allow(clippy::identity_op)]
-        let mut descaddr: u64 = extract_bits_64!(ttbr1_el1, 0, 48);
+        let mut descaddr: u64 = extract_bits_64_without_offset!(ttbr1_el1, 48);
         // In the case of FEAT_LPA and FEAT_LPA2, the initial translation table
         // addresss bits [48:51] comes from TTBR1_EL1 bits [2:5].
         if pa_size == 52 {
@@ -1731,18 +1738,19 @@ const MADT_CPU_ONLINE_CAPABLE_FLAG: usize = 1;
 impl Cpu {
     #[cfg(target_arch = "x86_64")]
     fn generate_mat(&self) -> Vec<u8> {
-        let lapic = LocalApic {
-            r#type: 0,
-            length: 8,
-            processor_id: self.cpu_id,
-            apic_id: self.cpu_id,
+        let lapic = LocalX2Apic {
+            r#type: crate::acpi::ACPI_X2APIC_PROCESSOR,
+            length: 16,
+            processor_id: self.cpu_id.into(),
+            apic_id: self.cpu_id.into(),
             flags: 1 << MADT_CPU_ENABLE_FLAG,
+            _reserved: 0,
         };
 
         let mut mat_data: Vec<u8> = Vec::new();
         mat_data.resize(std::mem::size_of_val(&lapic), 0);
         // SAFETY: mat_data is large enough to hold lapic
-        unsafe { *(mat_data.as_mut_ptr() as *mut LocalApic) = lapic };
+        unsafe { *(mat_data.as_mut_ptr() as *mut LocalX2Apic) = lapic };
 
         mat_data
     }
@@ -1755,7 +1763,7 @@ impl Aml for Cpu {
         #[allow(clippy::if_same_then_else)]
         if self.dynamic {
             aml::Device::new(
-                format!("C{:03}", self.cpu_id).as_str().into(),
+                format!("C{:03X}", self.cpu_id).as_str().into(),
                 vec![
                     &aml::Name::new("_HID".into(), &"ACPI0007"),
                     &aml::Name::new("_UID".into(), &self.cpu_id),
@@ -1805,7 +1813,7 @@ impl Aml for Cpu {
             .to_aml_bytes(sink);
         } else {
             aml::Device::new(
-                format!("C{:03}", self.cpu_id).as_str().into(),
+                format!("C{:03X}", self.cpu_id).as_str().into(),
                 vec![
                     &aml::Name::new("_HID".into(), &"ACPI0007"),
                     &aml::Name::new("_UID".into(), &self.cpu_id),
@@ -1841,7 +1849,7 @@ struct CpuNotify {
 
 impl Aml for CpuNotify {
     fn to_aml_bytes(&self, sink: &mut dyn acpi_tables::AmlSink) {
-        let object = aml::Path::new(&format!("C{:03}", self.cpu_id));
+        let object = aml::Path::new(&format!("C{:03X}", self.cpu_id));
         aml::If::new(
             &aml::Equal::new(&aml::Arg(0), &self.cpu_id),
             vec![&aml::Notify::new(&object, &aml::Arg(1))],

@@ -2,15 +2,31 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::vhdx_bat::{BatEntry, VhdxBatError};
-use crate::vhdx_header::{self, RegionInfo, RegionTableEntry, VhdxHeader, VhdxHeaderError};
-use crate::vhdx_io::{self, VhdxIoError};
-use crate::vhdx_metadata::{DiskSpec, VhdxMetadataError};
+use crate::vhdx::{
+    vhdx_bat::{BatEntry, VhdxBatError},
+    vhdx_header::{RegionInfo, RegionTableEntry, VhdxHeader, VhdxHeaderError},
+    vhdx_io::VhdxIoError,
+    vhdx_metadata::{DiskSpec, VhdxMetadataError},
+};
+use crate::BlockBackend;
+use byteorder::{BigEndian, ByteOrder};
 use remain::sorted;
 use std::collections::btree_map::BTreeMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use thiserror::Error;
+use uuid::Uuid;
+
+macro_rules! div_round_up {
+    ($n:expr,$d:expr) => {
+        ($n + $d - 1) / $d
+    };
+}
+
+mod vhdx_bat;
+mod vhdx_header;
+mod vhdx_io;
+mod vhdx_metadata;
 
 #[sorted]
 #[derive(Error, Debug)]
@@ -193,6 +209,12 @@ impl Seek for Vhdx {
     }
 }
 
+impl BlockBackend for Vhdx {
+    fn size(&self) -> std::result::Result<u64, crate::Error> {
+        Ok(self.virtual_disk_size())
+    }
+}
+
 impl Clone for Vhdx {
     fn clone(&self) -> Self {
         Vhdx {
@@ -207,4 +229,16 @@ impl Clone for Vhdx {
             first_write: self.first_write,
         }
     }
+}
+
+pub(crate) fn uuid_from_guid(buf: &[u8]) -> Uuid {
+    // The first 3 fields of UUID are stored in Big Endian format, and
+    // the last 8 bytes are stored as byte array. Therefore, we read the
+    // first 3 fields in Big Endian format instead of Little Endian.
+    Uuid::from_fields_le(
+        BigEndian::read_u32(&buf[0..4]),
+        BigEndian::read_u16(&buf[4..6]),
+        BigEndian::read_u16(&buf[6..8]),
+        buf[8..16].try_into().unwrap(),
+    )
 }

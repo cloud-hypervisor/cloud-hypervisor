@@ -8,6 +8,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+use crate::BlockBackend;
 use libc::c_void;
 use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::convert::TryInto;
@@ -22,6 +23,7 @@ pub struct RawFile {
     file: File,
     alignment: usize,
     position: u64,
+    direct_io: bool,
 }
 
 const BLK_ALIGNMENTS: [usize; 2] = [512, 4096];
@@ -64,6 +66,7 @@ impl RawFile {
             file,
             alignment,
             position: 0,
+            direct_io,
         }
     }
 
@@ -102,6 +105,7 @@ impl RawFile {
             file: self.file.try_clone().expect("RawFile cloning failed"),
             alignment: self.alignment,
             position: self.position,
+            direct_io: self.direct_io,
         })
     }
 
@@ -111,6 +115,10 @@ impl RawFile {
 
     pub fn sync_data(&self) -> std::io::Result<()> {
         self.file.sync_data()
+    }
+
+    pub fn is_direct(&self) -> bool {
+        self.direct_io
     }
 }
 
@@ -343,12 +351,19 @@ impl SeekHole for RawFile {
     }
 }
 
+impl BlockBackend for RawFile {
+    fn size(&self) -> std::result::Result<u64, crate::Error> {
+        Ok(self.metadata().map_err(crate::Error::RawFileError)?.len())
+    }
+}
+
 impl Clone for RawFile {
     fn clone(&self) -> Self {
         RawFile {
             file: self.file.try_clone().expect("RawFile cloning failed"),
             alignment: self.alignment,
             position: self.position,
+            direct_io: self.direct_io,
         }
     }
 }

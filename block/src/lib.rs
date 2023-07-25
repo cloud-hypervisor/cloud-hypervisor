@@ -12,21 +12,35 @@
 extern crate log;
 
 pub mod async_io;
+pub mod fixed_vhd;
+#[cfg(feature = "io_uring")]
+/// Enabled with the `"io_uring"` feature
 pub mod fixed_vhd_async;
 pub mod fixed_vhd_sync;
+pub mod qcow;
 pub mod qcow_sync;
+#[cfg(feature = "io_uring")]
+/// Async primitives based on `io-uring`
+///
+/// Enabled with the `"io_uring"` feature
 pub mod raw_async;
 pub mod raw_sync;
 pub mod vhd;
+pub mod vhdx;
 pub mod vhdx_sync;
 
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
+use crate::fixed_vhd::FixedVhd;
+use crate::qcow::{QcowFile, RawFile};
+use crate::vhdx::{Vhdx, VhdxError};
+#[cfg(feature = "io_uring")]
 use io_uring::{opcode, IoUring, Probe};
 use smallvec::SmallVec;
 use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::cmp;
 use std::collections::VecDeque;
 use std::convert::TryInto;
+use std::fmt::Debug;
 use std::fs::File;
 use std::io::{self, IoSlice, IoSliceMut, Read, Seek, SeekFrom, Write};
 use std::os::linux::fs::MetadataExt;
@@ -66,12 +80,22 @@ pub enum Error {
     DescriptorChainTooShort,
     #[error("Guest gave us a descriptor that was too short to use")]
     DescriptorLengthTooSmall,
+    #[error("Failed to detect image type: {0}")]
+    DetectImageType(std::io::Error),
+    #[error("Failure in fixed vhd: {0}")]
+    FixedVhdError(std::io::Error),
     #[error("Getting a block's metadata fails for any reason")]
     GetFileMetadata,
     #[error("The requested operation would cause a seek beyond disk end")]
     InvalidOffset,
+    #[error("Failure in qcow: {0}")]
+    QcowError(qcow::Error),
+    #[error("Failure in raw file: {0}")]
+    RawFileError(std::io::Error),
     #[error("The requested operation does not support multiple descriptors")]
     TooManyDescriptors,
+    #[error("Failure in vhdx: {0}")]
+    VhdxError(VhdxError),
 }
 
 fn build_device_id(disk_path: &Path) -> result::Result<String, Error> {
@@ -543,50 +567,59 @@ unsafe impl ByteValued for VirtioBlockGeometry {}
 /// Check if io_uring for block device can be used on the current system, as
 /// it correctly supports the expected io_uring features.
 pub fn block_io_uring_is_supported() -> bool {
-    let error_msg = "io_uring not supported:";
+    #[cfg(not(feature = "io_uring"))]
+    {
+        info!("io_uring is disabled by crate features");
+        false
+    }
 
-    // Check we can create an io_uring instance, which effectively verifies
-    // that io_uring_setup() syscall is supported.
-    let io_uring = match IoUring::new(1) {
-        Ok(io_uring) => io_uring,
-        Err(e) => {
-            info!("{} failed to create io_uring instance: {}", error_msg, e);
+    #[cfg(feature = "io_uring")]
+    {
+        let error_msg = "io_uring not supported:";
+
+        // Check we can create an io_uring instance, which effectively verifies
+        // that io_uring_setup() syscall is supported.
+        let io_uring = match IoUring::new(1) {
+            Ok(io_uring) => io_uring,
+            Err(e) => {
+                info!("{} failed to create io_uring instance: {}", error_msg, e);
+                return false;
+            }
+        };
+
+        let submitter = io_uring.submitter();
+
+        let mut probe = Probe::new();
+
+        // Check we can register a probe to validate supported operations.
+        match submitter.register_probe(&mut probe) {
+            Ok(_) => {}
+            Err(e) => {
+                info!("{} failed to register a probe: {}", error_msg, e);
+                return false;
+            }
+        }
+
+        // Check IORING_OP_FSYNC is supported
+        if !probe.is_supported(opcode::Fsync::CODE) {
+            info!("{} IORING_OP_FSYNC operation not supported", error_msg);
             return false;
         }
-    };
 
-    let submitter = io_uring.submitter();
-
-    let mut probe = Probe::new();
-
-    // Check we can register a probe to validate supported operations.
-    match submitter.register_probe(&mut probe) {
-        Ok(_) => {}
-        Err(e) => {
-            info!("{} failed to register a probe: {}", error_msg, e);
+        // Check IORING_OP_READV is supported
+        if !probe.is_supported(opcode::Readv::CODE) {
+            info!("{} IORING_OP_READV operation not supported", error_msg);
             return false;
         }
-    }
 
-    // Check IORING_OP_FSYNC is supported
-    if !probe.is_supported(opcode::Fsync::CODE) {
-        info!("{} IORING_OP_FSYNC operation not supported", error_msg);
-        return false;
-    }
+        // Check IORING_OP_WRITEV is supported
+        if !probe.is_supported(opcode::Writev::CODE) {
+            info!("{} IORING_OP_WRITEV operation not supported", error_msg);
+            return false;
+        }
 
-    // Check IORING_OP_READV is supported
-    if !probe.is_supported(opcode::Readv::CODE) {
-        info!("{} IORING_OP_READV operation not supported", error_msg);
-        return false;
+        true
     }
-
-    // Check IORING_OP_WRITEV is supported
-    if !probe.is_supported(opcode::Writev::CODE) {
-        info!("{} IORING_OP_WRITEV operation not supported", error_msg);
-        return false;
-    }
-
-    true
 }
 
 pub trait AsyncAdaptor<F>
@@ -719,4 +752,27 @@ pub fn detect_image_type(f: &mut File) -> std::io::Result<ImageType> {
     };
 
     Ok(image_type)
+}
+
+pub trait BlockBackend: Read + Write + Seek + Send + Debug {
+    fn size(&self) -> Result<u64, Error>;
+}
+
+/// Inspect the image file type and create an appropriate disk file to match it.
+pub fn create_disk_file(mut file: File, direct_io: bool) -> Result<Box<dyn BlockBackend>, Error> {
+    let image_type = detect_image_type(&mut file).map_err(Error::DetectImageType)?;
+
+    Ok(match image_type {
+        ImageType::Qcow2 => {
+            Box::new(QcowFile::from(RawFile::new(file, direct_io)).map_err(Error::QcowError)?)
+                as Box<dyn BlockBackend>
+        }
+        ImageType::FixedVhd => {
+            Box::new(FixedVhd::new(file).map_err(Error::FixedVhdError)?) as Box<dyn BlockBackend>
+        }
+        ImageType::Vhdx => {
+            Box::new(Vhdx::new(file).map_err(Error::VhdxError)?) as Box<dyn BlockBackend>
+        }
+        ImageType::Raw => Box::new(RawFile::new(file, direct_io)) as Box<dyn BlockBackend>,
+    })
 }
