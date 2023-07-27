@@ -6,7 +6,7 @@ edition = "2021"
 
 [dependencies]
 epoll = "4.3.3"
-getrandom = "0.2.8"
+getrandom = "0.2.10"
 libc = "0.2.139"
 log = "0.4.17"
 net_gen = { path = "../net_gen" }
