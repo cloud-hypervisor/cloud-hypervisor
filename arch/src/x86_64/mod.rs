@@ -39,7 +39,6 @@ const MTRR_EDX_BIT: u8 = 12; // Hypervisor ecx bit.
 const INVARIANT_TSC_EDX_BIT: u8 = 8; // Invariant TSC bit on 0x8000_0007 EDX
 
 // KVM feature bits
-const KVM_FEATURE_ASYNC_PF_INT_BIT: u8 = 14;
 #[cfg(feature = "tdx")]
 const KVM_FEATURE_CLOCKSOURCE_BIT: u8 = 0;
 #[cfg(feature = "tdx")]
@@ -675,14 +674,7 @@ pub fn generate_common_cpuid(
             0x8000_0008 => {
                 entry.eax = (entry.eax & 0xffff_ff00) | (phys_bits as u32 & 0xff);
             }
-            // Disable KVM_FEATURE_ASYNC_PF_INT
-            // This is required until we find out why the asynchronous page
-            // fault is generating unexpected behavior when using interrupt
-            // mechanism.
-            // TODO: Re-enable KVM_FEATURE_ASYNC_PF_INT (#2277)
             0x4000_0001 => {
-                entry.eax &= !(1 << KVM_FEATURE_ASYNC_PF_INT_BIT);
-
                 // These features are not supported by TDX
                 #[cfg(feature = "tdx")]
                 if tdx_enabled {
