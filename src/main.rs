@@ -69,6 +69,8 @@ enum Error {
     BareEventMonitor,
     #[error("Error doing event monitor I/O: {0}")]
     EventMonitorIo(std::io::Error),
+    #[error("Event monitor thread failed: {0}")]
+    EventMonitorThread(#[source] vmm::Error),
     #[cfg(feature = "guest_debug")]
     #[error("Error parsing --gdb: {0}")]
     ParsingGdb(option_parser::OptionParserError),
@@ -459,32 +461,6 @@ fn start_vmm(toplevel: TopLevel) -> Result<Option<String>, Error> {
         (None, None) => Ok(None),
     }?;
 
-    if let Some(ref monitor_config) = toplevel.event_monitor {
-        let mut parser = OptionParser::new();
-        parser.add("path").add("fd");
-        parser
-            .parse(monitor_config)
-            .map_err(Error::ParsingEventMonitor)?;
-
-        let file = if parser.is_set("fd") {
-            let fd = parser
-                .convert("fd")
-                .map_err(Error::ParsingEventMonitor)?
-                .unwrap();
-            // SAFETY: fd is valid
-            unsafe { File::from_raw_fd(fd) }
-        } else if parser.is_set("path") {
-            std::fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .open(parser.get("path").unwrap())
-                .map_err(Error::EventMonitorIo)?
-        } else {
-            return Err(Error::BareEventMonitor);
-        };
-        event_monitor::set_monitor(file).map_err(Error::EventMonitorIo)?;
-    }
-
     let (api_request_sender, api_request_receiver) = channel();
     let api_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateApiEventFd)?;
 
@@ -531,8 +507,6 @@ fn start_vmm(toplevel: TopLevel) -> Result<Option<String>, Error> {
         }
     }
 
-    event!("vmm", "starting");
-
     let hypervisor = hypervisor::new().map_err(Error::CreateHypervisor)?;
 
     #[cfg(feature = "guest_debug")]
@@ -555,6 +529,37 @@ fn start_vmm(toplevel: TopLevel) -> Result<Option<String>, Error> {
     let vm_debug_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateDebugEventFd)?;
 
     let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateExitEventFd)?;
+
+    if let Some(ref monitor_config) = toplevel.event_monitor {
+        let mut parser = OptionParser::new();
+        parser.add("path").add("fd");
+        parser
+            .parse(monitor_config)
+            .map_err(Error::ParsingEventMonitor)?;
+
+        let file = if parser.is_set("fd") {
+            let fd = parser
+                .convert("fd")
+                .map_err(Error::ParsingEventMonitor)?
+                .unwrap();
+            // SAFETY: fd is valid
+            unsafe { File::from_raw_fd(fd) }
+        } else if parser.is_set("path") {
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(parser.get("path").unwrap())
+                .map_err(Error::EventMonitorIo)?
+        } else {
+            return Err(Error::BareEventMonitor);
+        };
+
+        let monitor = event_monitor::set_monitor(file).map_err(Error::EventMonitorIo)?;
+        vmm::start_event_monitor_thread(monitor, exit_evt.try_clone().unwrap())
+            .map_err(Error::EventMonitorThread)?;
+    }
+
+    event!("vmm", "starting");
 
     let vmm_thread_handle = vmm::start_vmm_thread(
         vmm::VmmVersionInfo::new(env!("BUILD_VERSION"), env!("CARGO_PKG_VERSION")),
