@@ -126,6 +126,10 @@ pub enum Error {
     #[error("Error starting D-Bus session: {0}")]
     CreateDBusSession(#[source] zbus::Error),
 
+    /// Cannot create `event-monitor` thread
+    #[error("Error spawning `event-monitor` thread: {0}")]
+    EventMonitorThreadSpawn(#[source] io::Error),
+
     /// Cannot handle the VM STDIN stream
     #[error("Error handling VM stdin: {0:?}")]
     Stdin(VmError),
@@ -287,6 +291,28 @@ impl Serialize for PciDeviceInfo {
         state.serialize_field("bdf", &bdf_str)?;
         state.end()
     }
+}
+
+pub fn start_event_monitor_thread(
+    mut monitor: event_monitor::Monitor,
+    exit_event: EventFd,
+) -> Result<()> {
+    thread::Builder::new()
+        .name("event-monitor".to_owned())
+        .spawn(move || {
+            std::panic::catch_unwind(AssertUnwindSafe(move || {
+                while let Ok(event) = monitor.rx.recv() {
+                    monitor.file.write_all(event.as_bytes().as_ref()).ok();
+                    monitor.file.write_all(b"\n\n").ok();
+                }
+            }))
+            .map_err(|_| {
+                error!("`event-monitor` thread panicked");
+                exit_event.write(1).ok();
+            })
+        })
+        .map(|_| ())
+        .map_err(Error::EventMonitorThreadSpawn)
 }
 
 #[allow(unused_variables)]
