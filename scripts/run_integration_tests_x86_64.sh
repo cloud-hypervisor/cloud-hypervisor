@@ -185,6 +185,9 @@ sudo chmod a+rwX /dev/hugepages
 # Update max locked memory to 'unlimited' to avoid issues with vDPA
 ulimit -l unlimited
 
+# Set number of open descriptors high enough for VFIO tests to run
+ulimit -n 4096
+
 export RUST_BACKTRACE=1
 time cargo test $test_features "common_parallel::$test_filter" -- ${test_binary_args[*]}
 RES=$?
