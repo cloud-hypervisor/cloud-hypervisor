@@ -86,7 +86,7 @@ impl AsyncIo for RawFileAsync {
         let _ = unsafe {
             sq.push(
                 &opcode::Readv::new(types::Fd(self.fd), iovecs.as_ptr(), iovecs.len() as u32)
-                    .offset(offset)
+                    .offset(offset.try_into().unwrap())
                     .build()
                     .flags(squeue::Flags::ASYNC)
                     .user_data(user_data),
@@ -114,7 +114,7 @@ impl AsyncIo for RawFileAsync {
         let _ = unsafe {
             sq.push(
                 &opcode::Writev::new(types::Fd(self.fd), iovecs.as_ptr(), iovecs.len() as u32)
-                    .offset(offset)
+                    .offset(offset.try_into().unwrap())
                     .build()
                     .flags(squeue::Flags::ASYNC)
                     .user_data(user_data),
