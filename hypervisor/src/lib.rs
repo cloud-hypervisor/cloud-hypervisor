@@ -36,7 +36,7 @@ pub mod kvm;
 #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
 pub mod mshv;
 
-/// Hypevisor related module
+/// Hypervisor related module
 mod hypervisor;
 
 /// Vm related module
