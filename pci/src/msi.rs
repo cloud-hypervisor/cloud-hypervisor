@@ -205,9 +205,14 @@ impl MsiConfig {
                             idx as InterruptIndex,
                             InterruptSourceConfig::MsiIrq(config),
                             state.cap.vector_masked(idx),
+                            false,
                         )
                         .map_err(Error::UpdateInterruptRoute)?;
                 }
+
+                interrupt_source_group
+                    .set_gsi()
+                    .map_err(Error::EnableInterruptRoute)?;
 
                 interrupt_source_group
                     .enable()
@@ -262,6 +267,7 @@ impl MsiConfig {
                     idx as InterruptIndex,
                     InterruptSourceConfig::MsiIrq(config),
                     self.cap.vector_masked(idx),
+                    true,
                 ) {
                     error!("Failed updating vector: {:?}", e);
                 }

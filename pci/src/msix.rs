@@ -107,6 +107,7 @@ impl MsixConfig {
                             idx as InterruptIndex,
                             InterruptSourceConfig::MsiIrq(config),
                             state.masked,
+                            true,
                         )
                         .map_err(Error::UpdateInterruptRoute)?;
 
@@ -182,6 +183,7 @@ impl MsixConfig {
                         idx as InterruptIndex,
                         InterruptSourceConfig::MsiIrq(config),
                         table_entry.masked(),
+                        true,
                     ) {
                         error!("Failed updating vector: {:?}", e);
                     }
@@ -320,6 +322,7 @@ impl MsixConfig {
                 index as InterruptIndex,
                 InterruptSourceConfig::MsiIrq(config),
                 table_entry.masked(),
+                true,
             ) {
                 error!("Failed updating vector: {:?}", e);
             }

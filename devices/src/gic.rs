@@ -98,9 +98,14 @@ impl Gic {
                     i as InterruptIndex,
                     InterruptSourceConfig::LegacyIrq(config),
                     false,
+                    false,
                 )
                 .map_err(Error::EnableInterrupt)?;
         }
+
+        self.interrupt_source_group
+            .set_gsi()
+            .map_err(Error::EnableInterrupt)?;
         Ok(())
     }
 
