@@ -170,6 +170,7 @@ impl InterruptSourceGroup for MsiInterruptGroup {
         index: InterruptIndex,
         config: InterruptSourceConfig,
         masked: bool,
+        set_gsi: bool,
     ) -> Result<()> {
         if let Some(route) = self.irq_routes.get(&index) {
             let entry = RoutingEntry {
@@ -183,13 +184,22 @@ impl InterruptSourceGroup for MsiInterruptGroup {
             }
             let mut routes = self.gsi_msi_routes.lock().unwrap();
             routes.insert(route.gsi, entry);
-            return self.set_gsi_routes(&routes);
+            if set_gsi {
+                return self.set_gsi_routes(&routes);
+            } else {
+                return Ok(());
+            }
         }
 
         Err(io::Error::new(
             io::ErrorKind::Other,
             format!("update: Invalid interrupt index {index}"),
         ))
+    }
+
+    fn set_gsi(&self) -> Result<()> {
+        let routes = self.gsi_msi_routes.lock().unwrap();
+        self.set_gsi_routes(&routes)
     }
 }
 
@@ -223,7 +233,12 @@ impl InterruptSourceGroup for LegacyUserspaceInterruptGroup {
         _index: InterruptIndex,
         _config: InterruptSourceConfig,
         _masked: bool,
+        _set_gsi: bool,
     ) -> Result<()> {
+        Ok(())
+    }
+
+    fn set_gsi(&self) -> Result<()> {
         Ok(())
     }
 
