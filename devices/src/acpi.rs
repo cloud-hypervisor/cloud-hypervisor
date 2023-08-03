@@ -5,7 +5,9 @@
 
 use super::AcpiNotificationFlags;
 use acpi_tables::{aml, Aml, AmlSink};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
+use std::thread;
 use std::time::Instant;
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_device::BusDevice;
@@ -18,14 +20,20 @@ pub const GED_DEVICE_ACPI_SIZE: usize = 0x1;
 pub struct AcpiShutdownDevice {
     exit_evt: EventFd,
     reset_evt: EventFd,
+    vcpus_kill_signalled: Arc<AtomicBool>,
 }
 
 impl AcpiShutdownDevice {
     /// Constructs a device that will signal the given event when the guest requests it.
-    pub fn new(exit_evt: EventFd, reset_evt: EventFd) -> AcpiShutdownDevice {
+    pub fn new(
+        exit_evt: EventFd,
+        reset_evt: EventFd,
+        vcpus_kill_signalled: Arc<AtomicBool>,
+    ) -> AcpiShutdownDevice {
         AcpiShutdownDevice {
             exit_evt,
             reset_evt,
+            vcpus_kill_signalled,
         }
     }
 }
@@ -43,6 +51,13 @@ impl BusDevice for AcpiShutdownDevice {
             if let Err(e) = self.reset_evt.write(1) {
                 error!("Error triggering ACPI reset event: {}", e);
             }
+            // Spin until we are sure the reset_evt has been handled and that when
+            // we return from the KVM_RUN we will exit rather than re-enter the guest.
+            while !self.vcpus_kill_signalled.load(Ordering::SeqCst) {
+                // This is more effective than thread::yield_now() at
+                // avoiding a priority inversion with the VMM thread
+                thread::sleep(std::time::Duration::from_millis(1));
+            }
         }
         // The ACPI DSDT table specifies the S5 sleep state (shutdown) as value 5
         const S5_SLEEP_VALUE: u8 = 5;
@@ -52,6 +67,13 @@ impl BusDevice for AcpiShutdownDevice {
             info!("ACPI Shutdown signalled");
             if let Err(e) = self.exit_evt.write(1) {
                 error!("Error triggering ACPI shutdown event: {}", e);
+            }
+            // Spin until we are sure the reset_evt has been handled and that when
+            // we return from the KVM_RUN we will exit rather than re-enter the guest.
+            while !self.vcpus_kill_signalled.load(Ordering::SeqCst) {
+                // This is more effective than thread::yield_now() at
+                // avoiding a priority inversion with the VMM thread
+                thread::sleep(std::time::Duration::from_millis(1));
             }
         }
         None

@@ -1725,6 +1725,10 @@ impl CpuManager {
     ) {
         self.interrupt_controller = Some(interrupt_controller);
     }
+
+    pub(crate) fn vcpus_kill_signalled(&self) -> &Arc<AtomicBool> {
+        &self.vcpus_kill_signalled
+    }
 }
 
 struct Cpu {
