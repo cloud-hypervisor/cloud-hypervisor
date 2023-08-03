@@ -2,19 +2,27 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
-use std::sync::{Arc, Barrier};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Barrier,
+};
+use std::thread;
 use vm_device::BusDevice;
 use vmm_sys_util::eventfd::EventFd;
 
 /// A i8042 PS/2 controller that emulates just enough to shutdown the machine.
 pub struct I8042Device {
     reset_evt: EventFd,
+    vcpus_kill_signalled: Arc<AtomicBool>,
 }
 
 impl I8042Device {
     /// Constructs a i8042 device that will signal the given event when the guest requests it.
-    pub fn new(reset_evt: EventFd) -> I8042Device {
-        I8042Device { reset_evt }
+    pub fn new(reset_evt: EventFd, vcpus_kill_signalled: Arc<AtomicBool>) -> I8042Device {
+        I8042Device {
+            reset_evt,
+            vcpus_kill_signalled,
+        }
     }
 }
 
@@ -37,6 +45,13 @@ impl BusDevice for I8042Device {
             info!("i8042 reset signalled");
             if let Err(e) = self.reset_evt.write(1) {
                 error!("Error triggering i8042 reset event: {}", e);
+            }
+            // Spin until we are sure the reset_evt has been handled and that when
+            // we return from the KVM_RUN we will exit rather than re-enter the guest.
+            while !self.vcpus_kill_signalled.load(Ordering::SeqCst) {
+                // This is more effective than thread::yield_now() at
+                // avoiding a priority inversion with the VMM thread
+                thread::sleep(std::time::Duration::from_millis(1));
             }
         }
 

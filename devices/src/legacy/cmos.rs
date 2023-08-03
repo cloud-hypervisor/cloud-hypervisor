@@ -5,7 +5,9 @@
 use libc::{clock_gettime, gmtime_r, timespec, tm, CLOCK_REALTIME};
 use std::cmp::min;
 use std::mem;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
+use std::thread;
 use vm_device::BusDevice;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -23,13 +25,19 @@ pub struct Cmos {
     index: u8,
     data: [u8; DATA_LEN],
     reset_evt: EventFd,
+    vcpus_kill_signalled: Arc<AtomicBool>,
 }
 
 impl Cmos {
     /// Constructs a CMOS/RTC device with initial data.
     /// `mem_below_4g` is the size of memory in bytes below the 32-bit gap.
     /// `mem_above_4g` is the size of memory in bytes above the 32-bit gap.
-    pub fn new(mem_below_4g: u64, mem_above_4g: u64, reset_evt: EventFd) -> Cmos {
+    pub fn new(
+        mem_below_4g: u64,
+        mem_above_4g: u64,
+        reset_evt: EventFd,
+        vcpus_kill_signalled: Arc<AtomicBool>,
+    ) -> Cmos {
         let mut data = [0u8; DATA_LEN];
 
         // Extended memory from 16 MB to 4 GB in units of 64 KB
@@ -50,6 +58,7 @@ impl Cmos {
             index: 0,
             data,
             reset_evt,
+            vcpus_kill_signalled,
         }
     }
 }
@@ -67,6 +76,13 @@ impl BusDevice for Cmos {
                 if self.index == 0x8f && data[0] == 0 {
                     info!("CMOS reset");
                     self.reset_evt.write(1).unwrap();
+                    // Spin until we are sure the reset_evt has been handled and that when
+                    // we return from the KVM_RUN we will exit rather than re-enter the guest.
+                    while !self.vcpus_kill_signalled.load(Ordering::SeqCst) {
+                        // This is more effective than thread::yield_now() at
+                        // avoiding a priority inversion with the VMM thread
+                        thread::sleep(std::time::Duration::from_millis(1));
+                    }
                 } else {
                     self.data[(self.index & INDEX_MASK) as usize] = data[0]
                 }
