@@ -46,7 +46,7 @@ if [[ "${BUILD_TARGET}" == "x86_64-unknown-linux-musl" ]]; then
     CFLAGS="-I /usr/include/x86_64-linux-musl/ -idirafter /usr/include/"
 fi
 
-cargo build --no-default-features --features "kvm,mshv" --all --release --target $BUILD_TARGET
+cargo build --features mshv --all --release --target $BUILD_TARGET
 
 export RUST_BACKTRACE=1
 

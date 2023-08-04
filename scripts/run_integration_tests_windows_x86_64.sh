@@ -9,7 +9,7 @@ process_common_args "$@"
 test_features=""
 
 if [ "$hypervisor" = "mshv" ] ;  then
-    test_features="--no-default-features --features mshv"
+    test_features="--features mshv"
 fi
 WIN_IMAGE_FILE="/root/workloads/windows-server-2022-amd64-2.raw"
 
@@ -44,7 +44,7 @@ dmsetup mknodes
 dmsetup create windows-snapshot-base --table "0 $img_blk_size snapshot-origin /dev/mapper/windows-base"
 dmsetup mknodes
 
-cargo build --no-default-features --features "kvm,mshv" --all --release --target $BUILD_TARGET
+cargo build --features mshv --all --release --target $BUILD_TARGET
 
 export RUST_BACKTRACE=1
 

@@ -15,7 +15,7 @@ process_common_args "$@"
 test_features=""
 
 if [ "$hypervisor" = "mshv" ] ;  then
-    test_features="--no-default-features --features mshv"
+    test_features="--features mshv"
 fi
 
 cp scripts/sha1sums-x86_64 $WORKLOADS_DIR
@@ -68,7 +68,7 @@ if [[ "${BUILD_TARGET}" == "x86_64-unknown-linux-musl" ]]; then
     CFLAGS="-I /usr/include/x86_64-linux-musl/ -idirafter /usr/include/"
 fi
 
-cargo build --no-default-features --features "kvm,mshv" --all --release --target $BUILD_TARGET
+cargo build --features mshv --all --release --target $BUILD_TARGET
 
 # Test ovs-dpdk relies on hugepages
 HUGEPAGESIZE=`grep Hugepagesize /proc/meminfo | awk '{print $2}'`
