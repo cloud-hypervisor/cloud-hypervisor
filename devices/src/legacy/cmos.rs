@@ -25,7 +25,7 @@ pub struct Cmos {
     index: u8,
     data: [u8; DATA_LEN],
     reset_evt: EventFd,
-    vcpus_kill_signalled: Arc<AtomicBool>,
+    vcpus_kill_signalled: Option<Arc<AtomicBool>>,
 }
 
 impl Cmos {
@@ -36,7 +36,7 @@ impl Cmos {
         mem_below_4g: u64,
         mem_above_4g: u64,
         reset_evt: EventFd,
-        vcpus_kill_signalled: Arc<AtomicBool>,
+        vcpus_kill_signalled: Option<Arc<AtomicBool>>,
     ) -> Cmos {
         let mut data = [0u8; DATA_LEN];
 
@@ -76,12 +76,14 @@ impl BusDevice for Cmos {
                 if self.index == 0x8f && data[0] == 0 {
                     info!("CMOS reset");
                     self.reset_evt.write(1).unwrap();
-                    // Spin until we are sure the reset_evt has been handled and that when
-                    // we return from the KVM_RUN we will exit rather than re-enter the guest.
-                    while !self.vcpus_kill_signalled.load(Ordering::SeqCst) {
-                        // This is more effective than thread::yield_now() at
-                        // avoiding a priority inversion with the VMM thread
-                        thread::sleep(std::time::Duration::from_millis(1));
+                    if let Some(vcpus_kill_signalled) = self.vcpus_kill_signalled.take() {
+                        // Spin until we are sure the reset_evt has been handled and that when
+                        // we return from the KVM_RUN we will exit rather than re-enter the guest.
+                        while !vcpus_kill_signalled.load(Ordering::SeqCst) {
+                            // This is more effective than thread::yield_now() at
+                            // avoiding a priority inversion with the VMM thread
+                            thread::sleep(std::time::Duration::from_millis(1));
+                        }
                     }
                 } else {
                     self.data[(self.index & INDEX_MASK) as usize] = data[0]

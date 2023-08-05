@@ -1630,7 +1630,7 @@ impl DeviceManager {
                 mem_below_4g,
                 mem_above_4g,
                 reset_evt,
-                vcpus_kill_signalled,
+                Some(vcpus_kill_signalled),
             )));
 
             self.bus_devices
