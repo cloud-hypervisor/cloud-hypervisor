@@ -27,7 +27,7 @@ fuzz_target!(|bytes| {
         u64::from_le_bytes(below_4g),
         u64::from_le_bytes(above_4g),
         EventFd::new(EFD_NONBLOCK).unwrap(),
-        Arc::new(AtomicBool::default()),
+        None,
     );
 
     let mut i = 16;
