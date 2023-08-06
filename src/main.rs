@@ -555,8 +555,13 @@ fn start_vmm(toplevel: TopLevel) -> Result<Option<String>, Error> {
         };
 
         let monitor = event_monitor::set_monitor(file).map_err(Error::EventMonitorIo)?;
-        vmm::start_event_monitor_thread(monitor, exit_evt.try_clone().unwrap())
-            .map_err(Error::EventMonitorThread)?;
+        vmm::start_event_monitor_thread(
+            monitor,
+            &seccomp_action,
+            hypervisor.hypervisor_type(),
+            exit_evt.try_clone().unwrap(),
+        )
+        .map_err(Error::EventMonitorThread)?;
     }
 
     event!("vmm", "starting");
