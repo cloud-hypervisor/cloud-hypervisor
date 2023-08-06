@@ -295,11 +295,28 @@ impl Serialize for PciDeviceInfo {
 
 pub fn start_event_monitor_thread(
     mut monitor: event_monitor::Monitor,
+    seccomp_action: &SeccompAction,
+    hypervisor_type: hypervisor::HypervisorType,
     exit_event: EventFd,
-) -> Result<()> {
+) -> Result<thread::JoinHandle<Result<()>>> {
+    // Retrieve seccomp filter
+    let seccomp_filter = get_seccomp_filter(seccomp_action, Thread::EventMonitor, hypervisor_type)
+        .map_err(Error::CreateSeccompFilter)?;
+
     thread::Builder::new()
         .name("event-monitor".to_owned())
         .spawn(move || {
+            // Apply seccomp filter
+            if !seccomp_filter.is_empty() {
+                apply_filter(&seccomp_filter)
+                    .map_err(Error::ApplySeccompFilter)
+                    .map_err(|e| {
+                        error!("Error applying seccomp filter: {:?}", e);
+                        exit_event.write(1).ok();
+                        e
+                    })?;
+            }
+
             std::panic::catch_unwind(AssertUnwindSafe(move || {
                 while let Ok(event) = monitor.rx.recv() {
                     monitor.file.write_all(event.as_bytes().as_ref()).ok();
@@ -310,8 +327,10 @@ pub fn start_event_monitor_thread(
                 error!("`event-monitor` thread panicked");
                 exit_event.write(1).ok();
             })
+            .ok();
+
+            Ok(())
         })
-        .map(|_| ())
         .map_err(Error::EventMonitorThreadSpawn)
 }
 

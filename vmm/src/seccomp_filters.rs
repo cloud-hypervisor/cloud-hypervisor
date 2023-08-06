@@ -15,6 +15,7 @@ pub enum Thread {
     HttpApi,
     #[cfg(feature = "dbus_api")]
     DBusApi,
+    EventMonitor,
     SignalHandler,
     Vcpu,
     Vmm,
@@ -817,6 +818,15 @@ fn dbus_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError>
     ])
 }
 
+fn event_monitor_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
+    Ok(vec![
+        (libc::SYS_brk, vec![]),
+        (libc::SYS_futex, vec![]),
+        (libc::SYS_mmap, vec![]),
+        (libc::SYS_write, vec![]),
+    ])
+}
+
 fn get_seccomp_rules(
     thread_type: Thread,
     hypervisor_type: HypervisorType,
@@ -825,6 +835,7 @@ fn get_seccomp_rules(
         Thread::HttpApi => Ok(http_api_thread_rules()?),
         #[cfg(feature = "dbus_api")]
         Thread::DBusApi => Ok(dbus_api_thread_rules()?),
+        Thread::EventMonitor => Ok(event_monitor_thread_rules()?),
         Thread::SignalHandler => Ok(signal_handler_thread_rules()?),
         Thread::Vcpu => Ok(vcpu_thread_rules(hypervisor_type)?),
         Thread::Vmm => Ok(vmm_thread_rules(hypervisor_type)?),
