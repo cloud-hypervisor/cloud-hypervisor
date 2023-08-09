@@ -276,18 +276,18 @@ impl BalloonEpollHandler {
                     .map_err(Error::GuestMemory)?;
                 offset += data_chunk_size as u64;
 
-                let range_base = GuestAddress((pfn as u64) << VIRTIO_BALLOON_PFN_SHIFT);
-                let range_len = 1 << VIRTIO_BALLOON_PFN_SHIFT;
-
                 match queue_index {
                     0 => {
                         Self::release_memory_range_4k(&mut self.pbp, desc_chain.memory(), pfn)?;
                     }
                     1 => {
+                        let page_size = get_page_size() as usize;
+                        let rbase = align_page_size_down((pfn as u64) << VIRTIO_BALLOON_PFN_SHIFT);
+
                         Self::advise_memory_range(
                             desc_chain.memory(),
-                            range_base,
-                            range_len,
+                            vm_memory::GuestAddress(rbase),
+                            page_size,
                             libc::MADV_WILLNEED,
                         )?;
                     }
