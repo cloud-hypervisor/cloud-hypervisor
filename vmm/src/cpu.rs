@@ -124,6 +124,9 @@ pub enum Error {
     #[error("Error configuring vCPU: {0}")]
     VcpuConfiguration(#[source] arch::Error),
 
+    #[error("Still pending removed vcpu")]
+    VcpuPendingRemovedVcpu,
+
     #[cfg(target_arch = "aarch64")]
     #[error("Error fetching preferred target: {0}")]
     VcpuArmPreferredTarget(#[source] hypervisor::HypervisorVmError),
@@ -549,6 +552,7 @@ impl BusDevice for CpuManager {
 struct VcpuState {
     inserting: bool,
     removing: bool,
+    pending_removal: Arc<AtomicBool>,
     handle: Option<thread::JoinHandle<()>>,
     kill: Arc<AtomicBool>,
     vcpu_run_interrupted: Arc<AtomicBool>,
@@ -1138,7 +1142,19 @@ impl CpuManager {
         // Mark vCPUs for removal, actual removal happens on ejection
         for cpu_id in desired_vcpus..self.present_vcpus() {
             self.vcpu_states[usize::from(cpu_id)].removing = true;
+            self.vcpu_states[usize::from(cpu_id)]
+                .pending_removal
+                .store(true, Ordering::SeqCst);
         }
+    }
+
+    pub fn check_pending_removed_vcpu(&mut self) -> bool {
+        for state in self.vcpu_states.iter() {
+            if state.active() && state.pending_removal.load(Ordering::SeqCst) {
+                return true;
+            }
+        }
+        false
     }
 
     fn remove_vcpu(&mut self, cpu_id: u8) -> Result<()> {
@@ -1151,6 +1167,7 @@ impl CpuManager {
 
         // Once the thread has exited, clear the "kill" so that it can reused
         state.kill.store(false, Ordering::SeqCst);
+        state.pending_removal.store(false, Ordering::SeqCst);
 
         Ok(())
     }
@@ -1185,6 +1202,10 @@ impl CpuManager {
 
         if !self.dynamic {
             return Ok(false);
+        }
+
+        if self.check_pending_removed_vcpu() {
+            return Err(Error::VcpuPendingRemovedVcpu);
         }
 
         match desired_vcpus.cmp(&self.present_vcpus()) {
