@@ -562,6 +562,18 @@ impl cpu::Vcpu for MshvVcpu {
                     debug!("Exception Info {:?}", { info.exception_vector });
                     Ok(cpu::VmExit::Ignore)
                 }
+                hv_message_type_HVMSG_X64_APIC_EOI => {
+                    let info = x.to_apic_eoi_info().unwrap();
+                    // The kernel should dispatch the EOI to the correct thread.
+                    // Check the VP index is the same as the one we have.
+                    assert!(info.vp_index == self.vp_index as u32);
+                    // The interrupt vector in info is u32, but x86 only supports 256 vectors.
+                    // There is no good way to recover from this if the hypervisor messes around.
+                    // Just unwrap.
+                    Ok(cpu::VmExit::IoapicEoi(
+                        info.interrupt_vector.try_into().unwrap(),
+                    ))
+                }
                 exit => Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
                     "Unhandled VCPU exit {:?}",
                     exit
