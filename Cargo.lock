@@ -2344,6 +2344,7 @@ dependencies = [
  "devices",
  "epoll",
  "event_monitor",
+ "flume",
  "futures",
  "gdbstub",
  "gdbstub_arch",

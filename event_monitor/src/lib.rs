@@ -24,12 +24,12 @@ struct Event<'a> {
 
 pub struct Monitor {
     pub rx: flume::Receiver<String>,
-    pub file: File,
+    pub file: Option<File>,
     pub broadcast: Vec<flume::Sender<Arc<String>>>,
 }
 
 impl Monitor {
-    pub fn new(rx: flume::Receiver<String>, file: File) -> Self {
+    pub fn new(rx: flume::Receiver<String>, file: Option<File>) -> Self {
         Self {
             rx,
             file,
@@ -68,11 +68,14 @@ fn set_file_nonblocking(file: &File) -> io::Result<()> {
 
 /// This function must only be called once from the main thread before any threads
 /// are created to avoid race conditions.
-pub fn set_monitor(file: File) -> io::Result<Monitor> {
+pub fn set_monitor(file: Option<File>) -> io::Result<Monitor> {
     // SAFETY: there is only one caller of this function, so MONITOR is written to only once
     assert!(unsafe { MONITOR.is_none() });
 
-    set_file_nonblocking(&file)?;
+    if let Some(ref file) = file {
+        set_file_nonblocking(file)?;
+    }
+
     let (tx, rx) = flume::unbounded();
     let monitor = Monitor::new(rx, file);
 
