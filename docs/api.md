@@ -206,11 +206,14 @@ curl --unix-socket /tmp/cloud-hypervisor.sock -i -X PUT 'http://localhost/api/v1
 
 ### D-Bus API
 
-Cloud Hypervisor offers a D-Bus API as an alternative to its REST API. As of
-writing this document, the D-Bus API mirrors the functionality of the REST
-API and shares the same set of endpoints, meaning that it supports every call
-that is supported by the REST API and can be a drop-in replacement since it
-also consumes/produces JSON.
+Cloud Hypervisor offers a D-Bus API as an alternative to its REST API. This
+D-Bus API fully reflects the functionality of the REST API, exposing the
+same group of endpoints. It can be a drop-in replacement since it also
+consumes/produces JSON.
+
+In addition, the D-Bus API also exposes events from `event-monitor` in the
+form of a D-Bus signal to which users can subscribe. For more information,
+see [D-Bus API Interface](#d-bus-api-interface).
 
 #### D-Bus API Location and availability
 
@@ -245,8 +248,23 @@ which in turn can be used to control and manage Cloud Hypervisor.
 
 #### D-Bus API Interface
 
-Please refer to the [REST API](#rest-api) documentation. As previously
-mentioned, the D-Bus API currently mirrors the behaviour of the REST API.
+Please refer to the [REST API](#rest-api) documentation for everything that
+is in common with the REST API. As previously mentioned, the D-Bus API can
+be used as a drop-in replacement for the [REST API](#rest-api).
+
+The D-Bus interface also exposes a signal, named `Event`, which is emitted
+whenever a new event is published from the `event-monitor` crate. Here is its
+definition in XML format:
+
+```xml
+<node>
+  <interface name="org.cloudhypervisor.DBusApi1">
+    <signal name="Event">
+      <arg name="event" type="s"/>
+    </signal>
+  </interface>
+</node>
+```
 
 ### Command Line Interface
 
