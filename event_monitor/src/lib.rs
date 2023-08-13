@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io;
 use std::os::unix::io::AsRawFd;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 static mut MONITOR: Option<MonitorHandle> = None;
@@ -24,6 +25,23 @@ struct Event<'a> {
 pub struct Monitor {
     pub rx: flume::Receiver<String>,
     pub file: File,
+    pub broadcast: Vec<flume::Sender<Arc<String>>>,
+}
+
+impl Monitor {
+    pub fn new(rx: flume::Receiver<String>, file: File) -> Self {
+        Self {
+            rx,
+            file,
+            broadcast: vec![],
+        }
+    }
+
+    pub fn subscribe(&mut self) -> flume::Receiver<Arc<String>> {
+        let (tx, rx) = flume::unbounded();
+        self.broadcast.push(tx);
+        rx
+    }
 }
 
 struct MonitorHandle {
@@ -56,7 +74,7 @@ pub fn set_monitor(file: File) -> io::Result<Monitor> {
 
     set_file_nonblocking(&file)?;
     let (tx, rx) = flume::unbounded();
-    let monitor = Monitor { rx, file };
+    let monitor = Monitor::new(rx, file);
 
     // SAFETY: MONITOR is None. Nobody else can hold a reference to it.
     unsafe {

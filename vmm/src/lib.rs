@@ -319,8 +319,14 @@ pub fn start_event_monitor_thread(
 
             std::panic::catch_unwind(AssertUnwindSafe(move || {
                 while let Ok(event) = monitor.rx.recv() {
+                    let event = Arc::new(event);
+
                     monitor.file.write_all(event.as_bytes().as_ref()).ok();
                     monitor.file.write_all(b"\n\n").ok();
+
+                    for tx in monitor.broadcast.iter() {
+                        tx.send(event.clone()).ok();
+                    }
                 }
             }))
             .map_err(|_| {
