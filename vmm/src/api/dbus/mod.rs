@@ -25,6 +25,7 @@ pub struct DBusApiOptions {
     pub service_name: String,
     pub object_path: String,
     pub system_bus: bool,
+    pub event_monitor_rx: flume::Receiver<Arc<String>>,
 }
 
 pub struct DBusApi {
@@ -297,6 +298,10 @@ impl DBusApi {
             .await
             .map(|_| ())
     }
+
+    // implementation of this function is provided by the `dbus_interface` macro
+    #[dbus_interface(signal)]
+    async fn event(ctxt: &zbus::SignalContext<'_>, event: Arc<String>) -> zbus::Result<()>;
 }
 
 pub fn start_dbus_thread(
@@ -308,19 +313,26 @@ pub fn start_dbus_thread(
     hypervisor_type: HypervisorType,
 ) -> VmmResult<(thread::JoinHandle<VmmResult<()>>, DBusApiShutdownChannels)> {
     let dbus_iface = DBusApi::new(api_notifier, api_sender);
-    let connection = executor::block_on(async move {
+    let (connection, iface_ref) = executor::block_on(async move {
         let conn_builder = if dbus_options.system_bus {
             ConnectionBuilder::system()?
         } else {
             ConnectionBuilder::session()?
         };
 
-        conn_builder
+        let conn = conn_builder
             .internal_executor(false)
             .name(dbus_options.service_name)?
-            .serve_at(dbus_options.object_path, dbus_iface)?
+            .serve_at(dbus_options.object_path.as_str(), dbus_iface)?
             .build()
-            .await
+            .await?;
+
+        let iface_ref = conn
+            .object_server()
+            .interface::<_, DBusApi>(dbus_options.object_path)
+            .await?;
+
+        Ok((conn, iface_ref))
     })
     .map_err(VmmError::CreateDBusSession)?;
 
@@ -359,6 +371,11 @@ pub fn start_dbus_thread(
                                 send_done.send(()).ok();
                                 break;
                             },
+                            ret = dbus_options.event_monitor_rx.recv_async() => {
+                                if let Ok(event) = ret {
+                                    DBusApi::event(iface_ref.signal_context(), event).await.ok();
+                                }
+                            }
                         }
                     }
                 })

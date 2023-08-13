@@ -321,8 +321,10 @@ pub fn start_event_monitor_thread(
                 while let Ok(event) = monitor.rx.recv() {
                     let event = Arc::new(event);
 
-                    monitor.file.write_all(event.as_bytes().as_ref()).ok();
-                    monitor.file.write_all(b"\n\n").ok();
+                    if let Some(ref mut file) = monitor.file {
+                        file.write_all(event.as_bytes().as_ref()).ok();
+                        file.write_all(b"\n\n").ok();
+                    }
 
                     for tx in monitor.broadcast.iter() {
                         tx.send(event.clone()).ok();

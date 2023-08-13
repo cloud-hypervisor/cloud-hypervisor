@@ -449,18 +449,6 @@ fn start_vmm(toplevel: TopLevel) -> Result<Option<String>, Error> {
         (None, None)
     };
 
-    #[cfg(feature = "dbus_api")]
-    let dbus_options = match (&toplevel.dbus_name, &toplevel.dbus_path) {
-        (Some(ref name), Some(ref path)) => Ok(Some(DBusApiOptions {
-            service_name: name.to_owned(),
-            object_path: path.to_owned(),
-            system_bus: toplevel.dbus_system_bus,
-        })),
-        (Some(_), None) => Err(Error::MissingDBusObjectPath),
-        (None, Some(_)) => Err(Error::MissingDBusServiceName),
-        (None, None) => Ok(None),
-    }?;
-
     let (api_request_sender, api_request_receiver) = channel();
     let api_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateApiEventFd)?;
 
@@ -530,31 +518,67 @@ fn start_vmm(toplevel: TopLevel) -> Result<Option<String>, Error> {
 
     let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateExitEventFd)?;
 
-    if let Some(ref monitor_config) = toplevel.event_monitor {
-        let mut parser = OptionParser::new();
-        parser.add("path").add("fd");
-        parser
-            .parse(monitor_config)
-            .map_err(Error::ParsingEventMonitor)?;
+    #[allow(unused_mut)]
+    let mut event_monitor = toplevel
+        .event_monitor
+        .as_ref()
+        .map(|monitor_config| {
+            let mut parser = OptionParser::new();
+            parser.add("path").add("fd");
+            parser
+                .parse(monitor_config)
+                .map_err(Error::ParsingEventMonitor)?;
 
-        let file = if parser.is_set("fd") {
-            let fd = parser
-                .convert("fd")
-                .map_err(Error::ParsingEventMonitor)?
-                .unwrap();
-            // SAFETY: fd is valid
-            unsafe { File::from_raw_fd(fd) }
-        } else if parser.is_set("path") {
-            std::fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .open(parser.get("path").unwrap())
-                .map_err(Error::EventMonitorIo)?
-        } else {
-            return Err(Error::BareEventMonitor);
-        };
+            if parser.is_set("fd") {
+                let fd = parser
+                    .convert("fd")
+                    .map_err(Error::ParsingEventMonitor)?
+                    .unwrap();
+                // SAFETY: fd is valid
+                Ok(Some(unsafe { File::from_raw_fd(fd) }))
+            } else if parser.is_set("path") {
+                Ok(Some(
+                    std::fs::OpenOptions::new()
+                        .write(true)
+                        .create(true)
+                        .open(parser.get("path").unwrap())
+                        .map_err(Error::EventMonitorIo)?,
+                ))
+            } else {
+                Err(Error::BareEventMonitor)
+            }
+        })
+        .transpose()?
+        .map(|event_monitor_file| {
+            event_monitor::set_monitor(event_monitor_file).map_err(Error::EventMonitorIo)
+        })
+        .transpose()?;
 
-        let monitor = event_monitor::set_monitor(file).map_err(Error::EventMonitorIo)?;
+    #[cfg(feature = "dbus_api")]
+    let dbus_options = match (&toplevel.dbus_name, &toplevel.dbus_path) {
+        (Some(ref name), Some(ref path)) => {
+            // monitor is either set (file based) or not.
+            // if it's not set, create one without file support.
+            let mut monitor = match event_monitor.take() {
+                Some(monitor) => monitor,
+                None => event_monitor::set_monitor(None).map_err(Error::EventMonitorIo)?,
+            };
+            let options = DBusApiOptions {
+                service_name: name.to_owned(),
+                object_path: path.to_owned(),
+                system_bus: toplevel.dbus_system_bus,
+                event_monitor_rx: monitor.subscribe(),
+            };
+
+            event_monitor = Some(monitor);
+            Ok(Some(options))
+        }
+        (Some(_), None) => Err(Error::MissingDBusObjectPath),
+        (None, Some(_)) => Err(Error::MissingDBusServiceName),
+        (None, None) => Ok(None),
+    }?;
+
+    if let Some(monitor) = event_monitor {
         vmm::start_event_monitor_thread(
             monitor,
             &seccomp_action,
