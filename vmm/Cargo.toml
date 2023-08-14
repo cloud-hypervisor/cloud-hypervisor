@@ -29,7 +29,7 @@ futures = { version = "0.3.27", optional = true }
 gdbstub = { version = "0.6.4", optional = true }
 gdbstub_arch = { version = "0.2.4", optional = true }
 hypervisor = { path = "../hypervisor" }
-libc = "0.2.139"
+libc = "0.2.147"
 linux-loader = { version = "0.9.0", features = ["elf", "bzimage", "pe"] }
 log = "0.4.17"
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "main" }

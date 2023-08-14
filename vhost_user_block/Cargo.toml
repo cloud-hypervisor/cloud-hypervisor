@@ -10,7 +10,7 @@ argh = "0.1.9"
 block = { path = "../block" }
 env_logger = "0.10.0"
 epoll = "4.3.3"
-libc = "0.2.139"
+libc = "0.2.147"
 log = "0.4.17"
 option_parser = { path = "../option_parser" }
 vhost = { version = "0.7.0", features = ["vhost-user-slave"] }
