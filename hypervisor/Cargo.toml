@@ -11,7 +11,7 @@ mshv = ["mshv-ioctls", "mshv-bindings", "vfio-ioctls/mshv", "iced-x86"]
 tdx = []
 
 [dependencies]
-anyhow = "1.0.71"
+anyhow = "1.0.75"
 byteorder = "1.4.3"
 thiserror = "1.0.40"
 libc = "0.2.147"
