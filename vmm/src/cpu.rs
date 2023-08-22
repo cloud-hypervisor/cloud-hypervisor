@@ -1776,8 +1776,7 @@ impl Cpu {
             _reserved: 0,
         };
 
-        let mut mat_data: Vec<u8> = Vec::new();
-        mat_data.resize(std::mem::size_of_val(&lapic), 0);
+        let mut mat_data: Vec<u8> = vec![0; std::mem::size_of_val(&lapic)];
         // SAFETY: mat_data is large enough to hold lapic
         unsafe { *(mat_data.as_mut_ptr() as *mut LocalX2Apic) = lapic };
 
