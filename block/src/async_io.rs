@@ -51,7 +51,7 @@ enum BlockSize {
 }
 
 impl DiskTopology {
-    fn is_block_device(f: &mut File) -> std::io::Result<bool> {
+    fn is_block_device(f: &File) -> std::io::Result<bool> {
         let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
         // SAFETY: FFI call with a valid fd and buffer
         let ret = unsafe { libc::fstat(f.as_raw_fd(), stat.as_mut_ptr()) };
@@ -65,7 +65,7 @@ impl DiskTopology {
     }
 
     // libc::ioctl() takes different types on different architectures
-    fn query_block_size(f: &mut File, block_size_type: BlockSize) -> std::io::Result<u64> {
+    fn query_block_size(f: &File, block_size_type: BlockSize) -> std::io::Result<u64> {
         let mut block_size = 0;
         // SAFETY: FFI call with correct arguments
         let ret = unsafe {
@@ -87,7 +87,7 @@ impl DiskTopology {
         Ok(block_size)
     }
 
-    pub fn probe(f: &mut File) -> std::io::Result<Self> {
+    pub fn probe(f: &File) -> std::io::Result<Self> {
         if !Self::is_block_device(f)? {
             return Ok(DiskTopology::default());
         }

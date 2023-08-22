@@ -33,7 +33,7 @@ impl DiskFile for RawFileDiskSync {
     }
 
     fn topology(&mut self) -> DiskTopology {
-        if let Ok(topology) = DiskTopology::probe(&mut self.file) {
+        if let Ok(topology) = DiskTopology::probe(&self.file) {
             topology
         } else {
             warn!("Unable to get device topology. Using default topology");
