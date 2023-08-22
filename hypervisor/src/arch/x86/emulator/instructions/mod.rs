@@ -18,8 +18,8 @@ fn get_op<T: CpuStateManager>(
     insn: &Instruction,
     op_index: u32,
     op_size: usize,
-    state: &mut T,
-    platform: &mut dyn PlatformEmulator<CpuState = T>,
+    state: &T,
+    platform: &dyn PlatformEmulator<CpuState = T>,
 ) -> Result<u64, PlatformError> {
     if insn.op_count() < op_index + 1 {
         return Err(PlatformError::InvalidOperand(anyhow!(
