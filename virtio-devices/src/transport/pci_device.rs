@@ -1116,7 +1116,7 @@ impl PciDevice for VirtioPciDevice {
             o if o < COMMON_CONFIG_BAR_OFFSET + COMMON_CONFIG_SIZE => self.common_config.read(
                 o - COMMON_CONFIG_BAR_OFFSET,
                 data,
-                &mut self.queues,
+                &self.queues,
                 self.device.clone(),
             ),
             o if (ISR_CONFIG_BAR_OFFSET..ISR_CONFIG_BAR_OFFSET + ISR_CONFIG_SIZE).contains(&o) => {
