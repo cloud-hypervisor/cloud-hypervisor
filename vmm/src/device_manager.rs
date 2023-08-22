@@ -1905,7 +1905,7 @@ impl DeviceManager {
         Ok(())
     }
 
-    fn set_raw_mode(&mut self, f: &mut dyn AsRawFd) -> vmm_sys_util::errno::Result<()> {
+    fn set_raw_mode(&mut self, f: &dyn AsRawFd) -> vmm_sys_util::errno::Result<()> {
         // SAFETY: FFI call. Variable t is guaranteed to be a valid termios from modify_mode.
         self.modify_mode(f.as_raw_fd(), |t| unsafe { cfmakeraw(t) })
     }
@@ -1945,9 +1945,9 @@ impl DeviceManager {
                     self.console_resize_pipe = resize_pipe.map(Arc::new);
                     Endpoint::PtyPair(file.try_clone().unwrap(), file)
                 } else {
-                    let (main, mut sub, path) =
+                    let (main, sub, path) =
                         create_pty().map_err(DeviceManagerError::ConsolePtyOpen)?;
-                    self.set_raw_mode(&mut sub)
+                    self.set_raw_mode(&sub)
                         .map_err(DeviceManagerError::SetPtyRaw)?;
                     self.config.lock().unwrap().console.file = Some(path.clone());
                     let file = main.try_clone().unwrap();
@@ -1967,10 +1967,10 @@ impl DeviceManager {
                     return vmm_sys_util::errno::errno_result().map_err(DeviceManagerError::DupFd);
                 }
                 // SAFETY: stdout is valid and owned solely by us.
-                let mut stdout = unsafe { File::from_raw_fd(stdout) };
+                let stdout = unsafe { File::from_raw_fd(stdout) };
 
                 // Make sure stdout is in raw mode, if it's a terminal.
-                let _ = self.set_raw_mode(&mut stdout);
+                let _ = self.set_raw_mode(&stdout);
 
                 // SAFETY: FFI call. Trivially safe.
                 if unsafe { libc::isatty(libc::STDOUT_FILENO) } == 1 {
@@ -2060,9 +2060,9 @@ impl DeviceManager {
                     self.config.lock().unwrap().serial.file = Some(pty.path.clone());
                     self.serial_pty = Some(Arc::new(Mutex::new(pty)));
                 } else {
-                    let (main, mut sub, path) =
+                    let (main, sub, path) =
                         create_pty().map_err(DeviceManagerError::SerialPtyOpen)?;
-                    self.set_raw_mode(&mut sub)
+                    self.set_raw_mode(&sub)
                         .map_err(DeviceManagerError::SetPtyRaw)?;
                     self.config.lock().unwrap().serial.file = Some(path.clone());
                     self.serial_pty = Some(Arc::new(Mutex::new(PtyPair { main, path })));
@@ -2070,8 +2070,8 @@ impl DeviceManager {
                 None
             }
             ConsoleOutputMode::Tty => {
-                let mut out = stdout();
-                let _ = self.set_raw_mode(&mut out);
+                let out = stdout();
+                let _ = self.set_raw_mode(&out);
                 Some(Box::new(out))
             }
             ConsoleOutputMode::Off | ConsoleOutputMode::Null => None,
