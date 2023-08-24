@@ -105,12 +105,12 @@ impl Default for BlockCounters {
         BlockCounters {
             read_bytes: Arc::new(AtomicU64::new(0)),
             read_ops: Arc::new(AtomicU64::new(0)),
-            read_latency_min: Arc::new(AtomicU64::new(u64::MAX)),
+            read_latency_min: Arc::new(AtomicU64::new(0)),
             read_latency_max: Arc::new(AtomicU64::new(0)),
             read_latency_avg: Arc::new(AtomicU64::new(0)),
             write_bytes: Arc::new(AtomicU64::new(0)),
             write_ops: Arc::new(AtomicU64::new(0)),
-            write_latency_min: Arc::new(AtomicU64::new(u64::MAX)),
+            write_latency_min: Arc::new(AtomicU64::new(0)),
             write_latency_max: Arc::new(AtomicU64::new(0)),
             write_latency_avg: Arc::new(AtomicU64::new(0)),
         }
@@ -292,7 +292,9 @@ impl BlockEpollHandler {
                             read_bytes += Wrapping(*data_len as u64);
                         }
                         read_ops += Wrapping(1);
-                        if latency < self.counters.read_latency_min.load(Ordering::Relaxed) {
+                        if read_ops_last == 0
+                            || latency < self.counters.read_latency_min.load(Ordering::Relaxed)
+                        {
                             self.counters
                                 .read_latency_min
                                 .store(latency, Ordering::Relaxed);
@@ -314,7 +316,9 @@ impl BlockEpollHandler {
                             write_bytes += Wrapping(*data_len as u64);
                         }
                         write_ops += Wrapping(1);
-                        if latency < self.counters.write_latency_min.load(Ordering::Relaxed) {
+                        if write_ops_last == 0
+                            || latency < self.counters.write_latency_min.load(Ordering::Relaxed)
+                        {
                             self.counters
                                 .write_latency_min
                                 .store(latency, Ordering::Relaxed);
