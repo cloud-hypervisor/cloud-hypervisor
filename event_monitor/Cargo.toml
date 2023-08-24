@@ -7,5 +7,5 @@ edition = "2021"
 [dependencies]
 flume = "0.10.14"
 libc = "0.2.147"
-serde = { version = "1.0.164", features = ["rc", "derive"] }
+serde = { version = "1.0.168", features = ["rc", "derive"] }
 serde_json = "1.0.96"
