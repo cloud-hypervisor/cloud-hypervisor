@@ -1087,7 +1087,7 @@ dependencies = [
 [[package]]
 name = "micro_http"
 version = "0.1.0"
-source = "git+https://github.com/firecracker-microvm/micro-http?branch=main#b538bf89e50be83b6fa9ab1896727ff61e02fa13"
+source = "git+https://github.com/firecracker-microvm/micro-http?branch=main#0d0fdcd50ea10c1b4777f9a958873fc848a5b7bb"
 dependencies = [
  "libc",
  "vmm-sys-util",
