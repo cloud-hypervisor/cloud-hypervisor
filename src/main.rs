@@ -662,6 +662,9 @@ fn start_vmm(toplevel: TopLevel) -> Result<Option<String>, Error> {
 }
 
 fn main() {
+    #[cfg(all(feature = "tdx", feature = "sev_snp"))]
+    compile_error!("Feature 'tdx' and 'sev_snp' are mutually exclusive.");
+
     #[cfg(feature = "dhat-heap")]
     let _profiler = dhat::Profiler::new_heap();
 
