@@ -106,13 +106,13 @@ impl Default for BlockCounters {
             read_bytes: Arc::new(AtomicU64::new(0)),
             read_ops: Arc::new(AtomicU64::new(0)),
             read_latency_min: Arc::new(AtomicU64::new(u64::MAX)),
-            read_latency_max: Arc::new(AtomicU64::new(0)),
-            read_latency_avg: Arc::new(AtomicU64::new(0)),
+            read_latency_max: Arc::new(AtomicU64::new(u64::MAX)),
+            read_latency_avg: Arc::new(AtomicU64::new(u64::MAX)),
             write_bytes: Arc::new(AtomicU64::new(0)),
             write_ops: Arc::new(AtomicU64::new(0)),
             write_latency_min: Arc::new(AtomicU64::new(u64::MAX)),
-            write_latency_max: Arc::new(AtomicU64::new(0)),
-            write_latency_avg: Arc::new(AtomicU64::new(0)),
+            write_latency_max: Arc::new(AtomicU64::new(u64::MAX)),
+            write_latency_avg: Arc::new(AtomicU64::new(u64::MAX)),
         }
     }
 }
@@ -281,10 +281,10 @@ impl BlockEpollHandler {
             request.complete_async().map_err(Error::RequestCompleting)?;
 
             let latency = request.start.elapsed().as_micros() as u64;
-            let read_ops_last = self.counters.read_ops.load(Ordering::Relaxed) as i64;
-            let write_ops_last = self.counters.write_ops.load(Ordering::Relaxed) as i64;
-            let mut read_avg = self.counters.read_latency_avg.load(Ordering::Relaxed) as i64;
-            let mut write_avg = self.counters.write_latency_avg.load(Ordering::Relaxed) as i64;
+            let read_ops_last = self.counters.read_ops.load(Ordering::Relaxed);
+            let write_ops_last = self.counters.write_ops.load(Ordering::Relaxed);
+            let mut read_avg = self.counters.read_latency_avg.load(Ordering::Relaxed);
+            let mut write_avg = self.counters.write_latency_avg.load(Ordering::Relaxed);
             let (status, len) = if result >= 0 {
                 match request.request_type {
                     RequestType::In => {
@@ -297,14 +297,22 @@ impl BlockEpollHandler {
                                 .read_latency_min
                                 .store(latency, Ordering::Relaxed);
                         }
-                        if latency > self.counters.read_latency_max.load(Ordering::Relaxed) {
+                        if latency > self.counters.read_latency_max.load(Ordering::Relaxed)
+                            || latency == u64::MAX
+                        {
                             self.counters
                                 .read_latency_max
                                 .store(latency, Ordering::Relaxed);
                         }
-                        read_avg = read_avg
-                            + ((latency * LATENCY_SCALE) as i64 - read_avg)
-                                / (read_ops_last + read_ops.0 as i64);
+
+                        // Special case the first real latency report
+                        read_avg = if read_avg == u64::MAX {
+                            latency
+                        } else {
+                            read_avg
+                                + ((latency * LATENCY_SCALE) - read_avg)
+                                    / (read_ops_last + read_ops.0)
+                        };
                     }
                     RequestType::Out => {
                         if !request.writeback {
@@ -319,25 +327,33 @@ impl BlockEpollHandler {
                                 .write_latency_min
                                 .store(latency, Ordering::Relaxed);
                         }
-                        if latency > self.counters.write_latency_max.load(Ordering::Relaxed) {
+                        if latency > self.counters.write_latency_max.load(Ordering::Relaxed)
+                            || latency == u64::MAX
+                        {
                             self.counters
                                 .write_latency_max
                                 .store(latency, Ordering::Relaxed);
                         }
-                        write_avg = write_avg
-                            + ((latency * LATENCY_SCALE) as i64 - write_avg)
-                                / (write_ops_last + write_ops.0 as i64);
+
+                        // Special case the first real latency report
+                        write_avg = if write_avg == u64::MAX {
+                            latency
+                        } else {
+                            write_avg
+                                + ((latency * LATENCY_SCALE) - write_avg)
+                                    / (write_ops_last + write_ops.0)
+                        };
                     }
                     _ => {}
                 }
 
                 self.counters
                     .read_latency_avg
-                    .store(read_avg as u64, Ordering::Relaxed);
+                    .store(read_avg, Ordering::Relaxed);
 
                 self.counters
                     .write_latency_avg
-                    .store(write_avg as u64, Ordering::Relaxed);
+                    .store(write_avg, Ordering::Relaxed);
 
                 (VIRTIO_BLK_S_OK, result as u32)
             } else {
