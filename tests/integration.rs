@@ -4070,7 +4070,6 @@ mod common_parallel {
     #[test]
     #[cfg(target_arch = "x86_64")]
     #[cfg(not(feature = "mshv"))]
-    #[ignore = "See #4324"]
     // The VFIO integration test starts cloud-hypervisor guest with 3 TAP
     // backed networking interfaces, bound through a simple bridge on the host.
     // So if the nested cloud-hypervisor succeeds in getting a directly
