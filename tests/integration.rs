@@ -395,6 +395,52 @@ fn _test_api_pause_resume(target_api: TargetApi, guest: Guest) {
     handle_child_output(r, &output);
 }
 
+fn _test_pty_interaction(pty_path: PathBuf) {
+    let mut cf = std::fs::OpenOptions::new()
+        .write(true)
+        .read(true)
+        .open(pty_path)
+        .unwrap();
+
+    // Some dumb sleeps but we don't want to write
+    // before the console is up and we don't want
+    // to try and write the next line before the
+    // login process is ready.
+    thread::sleep(std::time::Duration::new(5, 0));
+    assert_eq!(cf.write(b"cloud\n").unwrap(), 6);
+    thread::sleep(std::time::Duration::new(2, 0));
+    assert_eq!(cf.write(b"cloud123\n").unwrap(), 9);
+    thread::sleep(std::time::Duration::new(2, 0));
+    assert_eq!(cf.write(b"echo test_pty_console\n").unwrap(), 22);
+    thread::sleep(std::time::Duration::new(2, 0));
+
+    // read pty and ensure they have a login shell
+    // some fairly hacky workarounds to avoid looping
+    // forever in case the channel is blocked getting output
+    let ptyc = pty_read(cf);
+    let mut empty = 0;
+    let mut prev = String::new();
+    loop {
+        thread::sleep(std::time::Duration::new(2, 0));
+        match ptyc.try_recv() {
+            Ok(line) => {
+                empty = 0;
+                prev = prev + &line;
+                if prev.contains("test_pty_console") {
+                    break;
+                }
+            }
+            Err(mpsc::TryRecvError::Empty) => {
+                empty += 1;
+                assert!(empty <= 5, "No login on pty");
+            }
+            _ => {
+                panic!("No login on pty")
+            }
+        }
+    }
+}
+
 fn prepare_virtiofsd(tmp_dir: &TempDir, shared_dir: &str) -> (std::process::Child, String) {
     let mut workload_path = dirs::home_dir().unwrap();
     workload_path.push("workloads");
@@ -3914,49 +3960,72 @@ mod common_parallel {
             guest.wait_vm_boot(None).unwrap();
             // Get pty fd for console
             let console_path = get_pty_path(&api_socket, "console");
-            // TODO: Get serial pty test working
-            let mut cf = std::fs::OpenOptions::new()
-                .write(true)
-                .read(true)
-                .open(console_path)
-                .unwrap();
+            _test_pty_interaction(console_path);
 
-            // Some dumb sleeps but we don't want to write
-            // before the console is up and we don't want
-            // to try and write the next line before the
-            // login process is ready.
-            thread::sleep(std::time::Duration::new(5, 0));
-            assert_eq!(cf.write(b"cloud\n").unwrap(), 6);
-            thread::sleep(std::time::Duration::new(2, 0));
-            assert_eq!(cf.write(b"cloud123\n").unwrap(), 9);
-            thread::sleep(std::time::Duration::new(2, 0));
-            assert_eq!(cf.write(b"echo test_pty_console\n").unwrap(), 22);
-            thread::sleep(std::time::Duration::new(2, 0));
+            guest.ssh_command("sudo shutdown -h now").unwrap();
+        });
 
-            // read pty and ensure they have a login shell
-            // some fairly hacky workarounds to avoid looping
-            // forever in case the channel is blocked getting output
-            let ptyc = pty_read(cf);
-            let mut empty = 0;
-            let mut prev = String::new();
-            loop {
-                thread::sleep(std::time::Duration::new(2, 0));
-                match ptyc.try_recv() {
-                    Ok(line) => {
-                        empty = 0;
-                        prev = prev + &line;
-                        if prev.contains("test_pty_console") {
-                            break;
-                        }
-                    }
-                    Err(mpsc::TryRecvError::Empty) => {
-                        empty += 1;
-                        assert!(empty <= 5, "No login on pty");
-                    }
-                    _ => panic!("No login on pty"),
-                }
-            }
+        let _ = child.wait_timeout(std::time::Duration::from_secs(20));
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
 
+        let r = std::panic::catch_unwind(|| {
+            // Check that the cloud-hypervisor binary actually terminated
+            assert!(output.status.success())
+        });
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_serial_socket_interaction() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+        let serial_socket = guest.tmp_dir.as_path().join("/tmp/serial.socket");
+        let serial_socket_pty = guest.tmp_dir.as_path().join("/tmp/serial.pty");
+        let serial_option = if cfg!(target_arch = "x86_64") {
+            " console=ttyS0"
+        } else {
+            " console=ttyAMA0"
+        };
+        let cmdline = DIRECT_KERNEL_BOOT_CMDLINE.to_owned() + serial_option;
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", &cmdline])
+            .default_disks()
+            .default_net()
+            .args(["--console", "null"])
+            .args([
+                "--serial",
+                format!("socket={}", serial_socket.to_str().unwrap()).as_str(),
+            ])
+            .spawn()
+            .unwrap();
+
+        let _ = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+        });
+
+        let mut socat_command = Command::new("socat");
+        let socat_args = [
+            &format!("pty,link={},raw", serial_socket_pty.display()),
+            &format!("UNIX-CONNECT:{}", serial_socket.display()),
+        ];
+        socat_command.args(socat_args);
+
+        let mut socat_child = socat_command.spawn().unwrap();
+        thread::sleep(std::time::Duration::new(1, 0));
+
+        let _ = std::panic::catch_unwind(|| {
+            _test_pty_interaction(serial_socket_pty);
+        });
+
+        let _ = socat_child.kill();
+
+        let r = std::panic::catch_unwind(|| {
             guest.ssh_command("sudo shutdown -h now").unwrap();
         });
 
