@@ -1295,6 +1295,7 @@ fn test_vhost_user_blk(
         )
     };
 
+    let event_path = temp_event_monitor_path(&guest.tmp_dir);
     let mut child = GuestCommand::new(&guest)
         .args(["--cpus", format!("boot={num_queues}").as_str()])
         .args(["--memory", "size=512M,hotplug_size=2048M,shared=on"])
@@ -1318,6 +1319,7 @@ fn test_vhost_user_blk(
         ])
         .default_net()
         .args(["--api-socket", &api_socket])
+        .args(["--event-monitor", format!("path={event_path}").as_str()])
         .capture_output()
         .spawn()
         .unwrap();
@@ -1382,10 +1384,13 @@ fn test_vhost_user_blk(
 
             // Add RAM to the VM
             let desired_ram = 1024 << 20;
-            resize_command(&api_socket, None, Some(desired_ram), None, None);
-
-            thread::sleep(std::time::Duration::new(10, 0));
-
+            resize_command(
+                &api_socket,
+                None,
+                Some(desired_ram),
+                None,
+                Some(&event_path),
+            );
             assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
 
             // Check again the content of the block device after the resize
