@@ -888,7 +888,7 @@ fn check_sequential_events_exact(expected_events: &[&MetaEvent], event_file: &st
     true
 }
 
-// Return true if events from the input 'expected_events' are matched exactly
+// Return true if events from the input 'latest_events' are matched exactly
 // with the most recent events from the 'event_file'
 fn check_latest_events_exact(latest_events: &[&MetaEvent], event_file: &str) -> bool {
     let json_events = parse_event_file(event_file);
