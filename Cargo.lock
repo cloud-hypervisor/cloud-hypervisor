@@ -7,7 +7,7 @@ name = "acpi_tables"
 version = "0.1.0"
 source = "git+https://github.com/rust-vmm/acpi_tables?branch=main#05a609136387cc1cc9b499cee4320020325c263f"
 dependencies = [
- "zerocopy",
+ "zerocopy 0.6.1",
 ]
 
 [[package]]
@@ -1115,19 +1115,19 @@ dependencies = [
 [[package]]
 name = "mshv-bindings"
 version = "0.1.1"
-source = "git+https://github.com/rust-vmm/mshv?branch=main#a45fbeb4a3930a2d17142e5687fe2f667c2df529"
+source = "git+https://github.com/rust-vmm/mshv?branch=main#c5a60508595dc504da469b89102b8b49e91714a9"
 dependencies = [
  "libc",
  "serde",
  "serde_derive",
  "vmm-sys-util",
- "zerocopy",
+ "zerocopy 0.7.1",
 ]
 
 [[package]]
 name = "mshv-ioctls"
 version = "0.1.1"
-source = "git+https://github.com/rust-vmm/mshv?branch=main#a45fbeb4a3930a2d17142e5687fe2f667c2df529"
+source = "git+https://github.com/rust-vmm/mshv?branch=main#c5a60508595dc504da469b89102b8b49e91714a9"
 dependencies = [
  "libc",
  "mshv-bindings",
@@ -2378,7 +2378,7 @@ dependencies = [
  "vm-virtio",
  "vmm-sys-util",
  "zbus",
- "zerocopy",
+ "zerocopy 0.6.1",
 ]
 
 [[package]]
@@ -2723,7 +2723,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "332f188cc1bcf1fe1064b8c58d150f497e697f49774aa846f2dc949d9a25f236"
 dependencies = [
  "byteorder",
- "zerocopy-derive",
+ "zerocopy-derive 0.3.2",
+]
+
+[[package]]
+name = "zerocopy"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f00a66029e63d181fa590cc5694cf2afbc0974a4604824e80017b1789f99c07"
+dependencies = [
+ "byteorder",
+ "zerocopy-derive 0.7.1",
 ]
 
 [[package]]
@@ -2735,6 +2745,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "zerocopy-derive"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9c682f46403e5d567cb27b79f6279c145759528ba9450fe371f43b921b452bd"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.23",
 ]
 
 [[package]]
