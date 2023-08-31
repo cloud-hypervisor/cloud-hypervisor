@@ -1,0 +1,21 @@
+# Configuration for https://github.com/crate-ci/typos
+
+[files]
+extend-exclude = [
+    "hypervisor/src/kvm/x86_64/mod.rs",
+    "resources/linux-config-*",
+]
+
+[default.extend-words]
+ba = "ba"
+CLASSE = "CLASSE"
+conectix = "conectix"
+Dake = "Dake"
+EXTINT = "EXTINT"
+INOUT = "INOUT"
+liness = "liness"
+outout = "outout"
+
+[default.extend-identifiers]
+fo = "fo"
+fpr = "fpr"
