@@ -22,7 +22,7 @@ pipeline {
                     steps {
                         script {
                             runWorkers = false
-                            echo 'No changes requring a build'
+                            echo 'No changes requiring a build'
                         }
                     }
                 }

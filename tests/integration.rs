@@ -1844,7 +1844,7 @@ fn test_memory_mergeable(mergeable: bool) {
         "mergeable=off"
     };
 
-    // We are assuming the rest of the system in our CI is not using mergeable memeory
+    // We are assuming the rest of the system in our CI is not using mergeable memory
     let ksm_ps_init = get_ksm_pages_shared();
     assert!(ksm_ps_init == 0);
 
@@ -6175,7 +6175,7 @@ mod common_parallel {
             guest.ssh_command("screen -dmS reboot sh -c \"sleep 5; echo s | tee /proc/sysrq-trigger; echo c | sudo tee /proc/sysrq-trigger\"").unwrap();
             // Allow some time for the watchdog to trigger (max 30s) and reboot to happen
             guest.wait_vm_boot(Some(50)).unwrap();
-            // Check a reboot is triggerred by the watchdog
+            // Check a reboot is triggered by the watchdog
             expected_reboot_count += 1;
             assert_eq!(get_reboot_count(&guest), expected_reboot_count);
 
@@ -8788,13 +8788,13 @@ mod live_migration {
             );
         });
 
-        // Check and report any errors occured during the live-migration
+        // Check and report any errors occurred during the live-migration
         if r.is_err() {
             print_and_panic(
                 src_child,
                 dest_child,
                 None,
-                "Error occured during live-migration",
+                "Error occurred during live-migration",
             );
         }
 
@@ -8962,13 +8962,13 @@ mod live_migration {
             );
         });
 
-        // Check and report any errors occured during the live-migration
+        // Check and report any errors occurred during the live-migration
         if r.is_err() {
             print_and_panic(
                 src_child,
                 dest_child,
                 None,
-                "Error occured during live-migration",
+                "Error occurred during live-migration",
             );
         }
 
@@ -9188,13 +9188,13 @@ mod live_migration {
             );
         });
 
-        // Check and report any errors occured during the live-migration
+        // Check and report any errors occurred during the live-migration
         if r.is_err() {
             print_and_panic(
                 src_child,
                 dest_child,
                 None,
-                "Error occured during live-migration",
+                "Error occurred during live-migration",
             );
         }
 
@@ -9407,13 +9407,13 @@ mod live_migration {
             );
         });
 
-        // Check and report any errors occured during the live-migration
+        // Check and report any errors occurred during the live-migration
         if r.is_err() {
             print_and_panic(
                 src_child,
                 dest_child,
                 None,
-                "Error occured during live-migration",
+                "Error occurred during live-migration",
             );
         }
 
@@ -9448,7 +9448,7 @@ mod live_migration {
             guest.ssh_command("screen -dmS reboot sh -c \"sleep 5; echo s | tee /proc/sysrq-trigger; echo c | sudo tee /proc/sysrq-trigger\"").unwrap();
             // Allow some time for the watchdog to trigger (max 30s) and reboot to happen
             guest.wait_vm_boot(Some(50)).unwrap();
-            // Check a reboot is triggerred by the watchdog
+            // Check a reboot is triggered by the watchdog
             expected_reboot_count += 1;
             assert_eq!(get_reboot_count(&guest), expected_reboot_count);
 
@@ -9517,13 +9517,13 @@ mod live_migration {
             );
         });
 
-        // Check and report any errors occured during the live-migration
+        // Check and report any errors occurred during the live-migration
         if r.is_err() {
             print_and_panic(
                 src_child,
                 dest_child,
                 Some(ovs_child),
-                "Error occured during live-migration",
+                "Error occurred during live-migration",
             );
         }
 

@@ -98,7 +98,7 @@ fn tdvf_descriptor_offset(file: &mut File) -> Result<(SeekFrom, bool), TdvfError
         // We start after the footer GUID and the table length.
         let mut offset = table_size - 18;
 
-        debug!("Parsing GUIDed structure");
+        debug!("Parsing GUID structure");
         while offset >= 18 {
             let entry_uuid = Uuid::from_slice_le(&table[offset - 16..offset])
                 .map_err(TdvfError::UuidCreation)?;

@@ -5,7 +5,7 @@ License](https://opensource.org/licenses/Apache-2.0) and the [BSD 3
 Clause](https://opensource.org/licenses/BSD-3-Clause) license. Individual files
 contain details of their licensing and changes to that file are under the same
 license unless the contribution changes the license of the file. When importing
-code from a third party project (e.g. Firecracker or CrosVM) please respect the
+code from a third party project (e.g. Firecracker or crosvm) please respect the
 license of those projects.
 
 New code should be under the [Apache v2

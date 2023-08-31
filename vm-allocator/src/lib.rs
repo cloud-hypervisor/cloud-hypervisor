@@ -12,7 +12,7 @@
 
 mod address;
 mod gsi;
-/// page size related utility funtions
+/// page size related utility functions
 pub mod page_size;
 mod system;
 

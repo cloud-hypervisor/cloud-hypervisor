@@ -502,8 +502,8 @@ impl VfioCommon {
         Ok(vfio_common)
     }
 
-    /// In case msix table offset is not page size aligned, we need do some fixup to achive it.
-    /// Becuse we don't want the MMIO RW region and trap region overlap each other.
+    /// In case msix table offset is not page size aligned, we need do some fixup to achieve it.
+    /// Because we don't want the MMIO RW region and trap region overlap each other.
     fn fixup_msix_region(&mut self, bar_id: u32, region_size: u64) -> u64 {
         if let Some(msix) = self.interrupt.msix.as_mut() {
             let msix_cap = &mut msix.cap;
@@ -911,7 +911,7 @@ impl VfioCommon {
             let cap_next: u16 = ((ext_cap_hdr >> 20) & 0xfff) as u16;
 
             match PciExpressCapabilityId::from(cap_id) {
-                PciExpressCapabilityId::AlternativeRoutingIdentificationIntepretation
+                PciExpressCapabilityId::AlternativeRoutingIdentificationInterpretation
                 | PciExpressCapabilityId::ResizeableBar
                 | PciExpressCapabilityId::SingleRootIoVirtualization => {
                     let reg_idx = (current_offset / 4) as usize;
@@ -1411,7 +1411,7 @@ impl VfioPciDevice {
                     // around them, leading to a list of sparse areas.
                     // We want to make sure we will still trap MMIO accesses
                     // to these MSI-X specific ranges. If these region don't align
-                    // with pagesize, we can achive it by enlarging its range.
+                    // with pagesize, we can achieve it by enlarging its range.
                     //
                     // Using a BtreeMap as the list provided through the iterator is sorted
                     // by key. This ensures proper split of the whole region.

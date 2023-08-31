@@ -1436,7 +1436,7 @@ impl MemoryManager {
                 region.as_ptr() as u64,
                 size
             );
-            // SAFETY: FFI call with corect arguments
+            // SAFETY: FFI call with correct arguments
             let ret = unsafe { libc::madvise(region.as_ptr() as _, size, libc::MADV_HUGEPAGE) };
             if ret != 0 {
                 let e = io::Error::last_os_error();

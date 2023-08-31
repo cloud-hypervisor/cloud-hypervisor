@@ -1205,7 +1205,7 @@ impl cpu::Vcpu for KvmVcpu {
             off += std::mem::size_of::<u64>();
         }
 
-        // Now moving on to floting point registers which are stored in the user_fpsimd_state in the kernel:
+        // Now moving on to floating point registers which are stored in the user_fpsimd_state in the kernel:
         // https://elixir.free-electrons.com/linux/v4.9.62/source/arch/arm64/include/uapi/asm/kvm.h#L53
         let mut off = offset_of!(kvm_regs, fp_regs) + offset_of!(user_fpsimd_state, vregs);
         for i in 0..32 {

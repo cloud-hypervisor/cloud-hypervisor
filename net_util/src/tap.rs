@@ -203,7 +203,7 @@ impl Tap {
         let mut ifreq: net_gen::ifreq = Default::default();
 
         // Get current config including name
-        // SAFETY: IOCTL with correct arugments
+        // SAFETY: IOCTL with correct arguments
         unsafe { Self::ioctl_with_mut_ref(&tap_file, net_gen::TUNGETIFF(), &mut ifreq)? };
 
         // SAFETY: We only access one field of the ifru union

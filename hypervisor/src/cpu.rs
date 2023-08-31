@@ -242,7 +242,7 @@ pub enum HypervisorCpuError {
     UnknownTdxVmCall,
     #[cfg(target_arch = "aarch64")]
     ///
-    /// Failed to intialize PMU
+    /// Failed to initialize PMU
     ///
     #[error("Failed to initialize PMU")]
     InitializePmu,
