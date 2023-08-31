@@ -119,3 +119,12 @@ jobs:
 
       - name: Check build did not modify any files
         run: test -z "$(git status --porcelain)"
+
+  typos:
+    if: github.event_name == 'pull_request'
+    name: Typos / Spellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      # Executes "typos ."
+      - uses: crate-ci/typos@v1.16.11
