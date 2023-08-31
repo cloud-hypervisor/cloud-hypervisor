@@ -511,7 +511,7 @@ pub fn create_pty() -> io::Result<(File, File, PathBuf)> {
     // SAFETY: FFI call into libc, trivially safe
     unsafe { libc::ioctl(main.as_raw_fd(), TIOCSPTLCK as _, &mut unlock) };
 
-    // SAFETY: FFI call into libc, trivally safe
+    // SAFETY: FFI call into libc, trivially safe
     let sub_fd = unsafe {
         libc::ioctl(
             main.as_raw_fd(),
@@ -4280,7 +4280,7 @@ impl DeviceManager {
         // 1. Users will use direct kernel boot with device tree.
         // 2. Users will use ACPI+UEFI boot.
 
-        // Trigger a GPIO pin 3 event to satisify use case 1.
+        // Trigger a GPIO pin 3 event to satisfy use case 1.
         self.gpio_device
             .as_ref()
             .unwrap()
@@ -4288,7 +4288,7 @@ impl DeviceManager {
             .unwrap()
             .trigger_key(3)
             .map_err(DeviceManagerError::AArch64PowerButtonNotification)?;
-        // Trigger a GED power button event to satisify use case 2.
+        // Trigger a GED power button event to satisfy use case 2.
         return self
             .ged_notification_device
             .as_ref()

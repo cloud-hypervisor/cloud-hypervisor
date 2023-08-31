@@ -148,7 +148,7 @@ pub enum ValidationError {
     /// Missing firmware for TDX
     #[cfg(feature = "tdx")]
     TdxFirmwareMissing,
-    /// Insuffient vCPUs for queues
+    /// Insufficient vCPUs for queues
     TooManyQueues,
     /// Need shared memory for vfio-user
     UserDevicesRequireSharedMemory,
@@ -162,7 +162,7 @@ pub enum ValidationError {
     BalloonLargerThanRam(u64, u64),
     /// On a IOMMU segment but not behind IOMMU
     OnIommuSegment(u16),
-    // On a IOMMU segment but IOMMU not suported
+    // On a IOMMU segment but IOMMU not supported
     IommuNotSupportedOnSegment(u16),
     // Identifier is not unique
     IdentifierNotUnique(String),

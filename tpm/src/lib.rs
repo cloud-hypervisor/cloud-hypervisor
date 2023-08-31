@@ -154,7 +154,7 @@ impl Ptm for PtmCap {
     }
 }
 
-/* GET_TPMESTABLISHED Reponse */
+/* GET_TPMESTABLISHED Response */
 #[derive(Debug)]
 pub struct PtmEstResp {
     pub bit: u8,
