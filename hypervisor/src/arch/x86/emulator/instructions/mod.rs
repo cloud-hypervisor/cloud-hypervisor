@@ -124,7 +124,7 @@ fn memory_operand_address<T: CpuStateManager>(
         address += index;
     }
 
-    address += insn.memory_displacement64();
+    address = address.wrapping_add(insn.memory_displacement64());
 
     // Translate to a linear address.
     state.linearize(insn.memory_segment(), address, write)
