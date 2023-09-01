@@ -4786,6 +4786,7 @@ mod common_parallel {
         let api_socket = temp_api_path(&guest.tmp_dir);
 
         let kernel_path = direct_kernel_boot_path();
+        let event_path = temp_event_monitor_path(&guest.tmp_dir);
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=2,max=4"])
@@ -4795,6 +4796,7 @@ mod common_parallel {
             .default_disks()
             .default_net()
             .args(["--api-socket", &api_socket])
+            .args(["--event-monitor", format!("path={event_path}").as_str()])
             .capture_output()
             .spawn()
             .unwrap();
@@ -4815,7 +4817,7 @@ mod common_parallel {
                 Some(desired_vcpus),
                 Some(desired_ram),
                 None,
-                None,
+                Some(&event_path),
             );
 
             guest
