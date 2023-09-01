@@ -191,12 +191,22 @@ pub enum VhostMode {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub enum ImageType {
+    FixedVhd,
+    Qcow2,
+    Raw,
+    Vhdx,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct DiskConfig {
     pub path: Option<PathBuf>,
     #[serde(default)]
     pub readonly: bool,
     #[serde(default)]
     pub direct: bool,
+    #[serde(default)]
+    pub image_type: Option<ImageType>,
     #[serde(default)]
     pub iommu: bool,
     #[serde(default = "default_diskconfig_num_queues")]
@@ -236,6 +246,7 @@ impl Default for DiskConfig {
             readonly: false,
             direct: false,
             iommu: false,
+            image_type: None,
             num_queues: default_diskconfig_num_queues(),
             queue_size: default_diskconfig_queue_size(),
             vhost_user: false,

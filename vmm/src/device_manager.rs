@@ -11,7 +11,7 @@
 
 use crate::config::{
     ConsoleOutputMode, DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig,
-    VdpaConfig, VhostMode, VmConfig, VsockConfig,
+    VdpaConfig, VhostMode, VmConfig, VsockConfig, ImageType,
 };
 use crate::cpu::{CpuManager, CPU_MANAGER_ACPI_SIZE};
 use crate::device_tree::{DeviceNode, DeviceTree};
@@ -37,7 +37,7 @@ use arch::{DeviceType, MmioDeviceInfo};
 use block::{
     async_io::DiskFile, block_io_uring_is_supported, detect_image_type,
     fixed_vhd_sync::FixedVhdDiskSync, qcow, qcow_sync::QcowDiskSync, raw_sync::RawFileDiskSync,
-    vhdx, vhdx_sync::VhdxDiskSync, ImageType,
+    vhdx, vhdx_sync::VhdxDiskSync,
 };
 #[cfg(feature = "io_uring")]
 use block::{fixed_vhd_async::FixedVhdDiskAsync, raw_async::RawFileDisk};
@@ -2236,11 +2236,17 @@ impl DeviceManager {
                         .clone(),
                 )
                 .map_err(DeviceManagerError::Disk)?;
-            let image_type =
-                detect_image_type(&mut file).map_err(DeviceManagerError::DetectImageType)?;
+            
+            let image_type = match &disk_cfg.image_type {
+                Some(ImageType::Raw) => block::ImageType::Raw,
+                Some(ImageType::Qcow2) => block::ImageType::Qcow2,
+                Some(ImageType::Vhdx) => block::ImageType::Vhdx,
+                Some(ImageType::FixedVhd) => block::ImageType::FixedVhd,
+                None => detect_image_type(&mut file).map_err(DeviceManagerError::DetectImageType)?,
+            };
 
             let image = match image_type {
-                ImageType::FixedVhd => {
+                block::ImageType::FixedVhd => {
                     // Use asynchronous backend relying on io_uring if the
                     // syscalls are supported.
                     if cfg!(feature = "io_uring")
@@ -2266,7 +2272,7 @@ impl DeviceManager {
                         ) as Box<dyn DiskFile>
                     }
                 }
-                ImageType::Raw => {
+                block::ImageType::Raw => {
                     // Use asynchronous backend relying on io_uring if the
                     // syscalls are supported.
                     if cfg!(feature = "io_uring")
@@ -2286,14 +2292,14 @@ impl DeviceManager {
                         Box::new(RawFileDiskSync::new(file)) as Box<dyn DiskFile>
                     }
                 }
-                ImageType::Qcow2 => {
+                block::ImageType::Qcow2 => {
                     info!("Using synchronous QCOW disk file");
                     Box::new(
                         QcowDiskSync::new(file, disk_cfg.direct)
                             .map_err(DeviceManagerError::CreateQcowDiskSync)?,
                     ) as Box<dyn DiskFile>
                 }
-                ImageType::Vhdx => {
+                block::ImageType::Vhdx => {
                     info!("Using synchronous VHDX disk file");
                     Box::new(
                         VhdxDiskSync::new(file)

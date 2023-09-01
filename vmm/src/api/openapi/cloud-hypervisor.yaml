@@ -799,6 +799,8 @@ components:
         direct:
           type: boolean
           default: false
+        image_type:
+          type: string
         iommu:
           type: boolean
           default: false

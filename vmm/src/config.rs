@@ -744,6 +744,25 @@ impl MemoryConfig {
     }
 }
 
+#[derive(Debug)]
+pub enum ParseImageTypeError {
+    InvalidValue(String),
+}
+
+impl FromStr for ImageType {
+    type Err = ParseImageTypeError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "raw" => Ok(ImageType::Raw),
+            "qcow2" => Ok(ImageType::Qcow2),
+            "vhdx" => Ok(ImageType::Vhdx),
+            "fixed_vhd" => Ok(ImageType::FixedVhd),
+            _ => Err(ParseImageTypeError::InvalidValue(s.to_owned())),
+        }
+    }
+}
+
 impl DiskConfig {
     pub fn parse(disk: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -751,6 +770,7 @@ impl DiskConfig {
             .add("path")
             .add("readonly")
             .add("direct")
+            .add("image_type")
             .add("iommu")
             .add("queue_size")
             .add("num_queues")
@@ -778,6 +798,9 @@ impl DiskConfig {
             .map_err(Error::ParseDisk)?
             .unwrap_or(Toggle(false))
             .0;
+        let image_type = parser
+            .convert("image_type")
+            .map_err(Error::ParseDisk)?;
         let iommu = parser
             .convert::<Toggle>("iommu")
             .map_err(Error::ParseDisk)?
@@ -862,6 +885,7 @@ impl DiskConfig {
             path,
             readonly,
             direct,
+            image_type,
             iommu,
             num_queues,
             queue_size,
