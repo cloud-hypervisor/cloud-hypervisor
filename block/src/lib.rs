@@ -731,24 +731,33 @@ pub enum ImageType {
 const QCOW_MAGIC: u32 = 0x5146_49fb;
 const VHDX_SIGN: u64 = 0x656C_6966_7864_6876;
 
+/// Read a block into memory aligned by the source block size (needed for O_DIRECT)
+pub fn read_aligned_block_size(f: &mut File) -> std::io::Result<Vec<u8>> {
+    let blocksize = DiskTopology::probe(f)?.logical_block_size as usize;
+    // SAFETY: We are allocating memory that is naturally aligned (size = alignment) and we meet
+    // requirements for safety from Vec::from_raw_parts() as we are using the global allocator
+    // and transferring ownership of the memory.
+    let mut data = unsafe {
+        Vec::from_raw_parts(
+            alloc_zeroed(Layout::from_size_align_unchecked(blocksize, blocksize)),
+            blocksize,
+            blocksize,
+        )
+    };
+    f.read_exact(&mut data)?;
+    Ok(data)
+}
+
 /// Determine image type through file parsing.
 pub fn detect_image_type(f: &mut File) -> std::io::Result<ImageType> {
-    // We must create a buffer aligned on 512 bytes with a size being a
-    // multiple of 512 bytes as the file might be opened with O_DIRECT flag.
-    #[repr(align(512))]
-    struct Sector {
-        data: [u8; 512],
-    }
-    let mut s = Sector { data: [0; 512] };
-
-    f.read_exact(&mut s.data)?;
+    let block = read_aligned_block_size(f)?;
 
     // Check 4 first bytes to get the header value and determine the image type
-    let image_type = if u32::from_be_bytes(s.data[0..4].try_into().unwrap()) == QCOW_MAGIC {
+    let image_type = if u32::from_be_bytes(block[0..4].try_into().unwrap()) == QCOW_MAGIC {
         ImageType::Qcow2
     } else if vhd::is_fixed_vhd(f)? {
         ImageType::FixedVhd
-    } else if u64::from_le_bytes(s.data[0..8].try_into().unwrap()) == VHDX_SIGN {
+    } else if u64::from_le_bytes(block[0..8].try_into().unwrap()) == VHDX_SIGN {
         ImageType::Vhdx
     } else {
         ImageType::Raw
