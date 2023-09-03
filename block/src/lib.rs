@@ -35,6 +35,7 @@ use crate::qcow::{QcowFile, RawFile};
 use crate::vhdx::{Vhdx, VhdxError};
 #[cfg(feature = "io_uring")]
 use io_uring::{opcode, IoUring, Probe};
+use libc::{ioctl, S_IFBLK, S_IFMT};
 use smallvec::SmallVec;
 use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::cmp;
@@ -44,6 +45,7 @@ use std::fmt::Debug;
 use std::fs::File;
 use std::io::{self, IoSlice, IoSliceMut, Read, Seek, SeekFrom, Write};
 use std::os::linux::fs::MetadataExt;
+use std::os::unix::io::AsRawFd;
 use std::path::Path;
 use std::result;
 use std::sync::Arc;
@@ -60,6 +62,7 @@ use vm_memory::{
 };
 use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
+use vmm_sys_util::{ioctl_io_nr, ioctl_ioc_nr};
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
@@ -775,4 +778,86 @@ pub fn create_disk_file(mut file: File, direct_io: bool) -> Result<Box<dyn Block
         }
         ImageType::Raw => Box::new(RawFile::new(file, direct_io)) as Box<dyn BlockBackend>,
     })
+}
+
+#[derive(Debug)]
+pub struct DiskTopology {
+    pub logical_block_size: u64,
+    pub physical_block_size: u64,
+    pub minimum_io_size: u64,
+    pub optimal_io_size: u64,
+}
+
+impl Default for DiskTopology {
+    fn default() -> Self {
+        Self {
+            logical_block_size: 512,
+            physical_block_size: 512,
+            minimum_io_size: 512,
+            optimal_io_size: 0,
+        }
+    }
+}
+
+ioctl_io_nr!(BLKSSZGET, 0x12, 104);
+ioctl_io_nr!(BLKPBSZGET, 0x12, 123);
+ioctl_io_nr!(BLKIOMIN, 0x12, 120);
+ioctl_io_nr!(BLKIOOPT, 0x12, 121);
+
+enum BlockSize {
+    LogicalBlock,
+    PhysicalBlock,
+    MinimumIo,
+    OptimalIo,
+}
+
+impl DiskTopology {
+    fn is_block_device(f: &File) -> std::io::Result<bool> {
+        let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
+        // SAFETY: FFI call with a valid fd and buffer
+        let ret = unsafe { libc::fstat(f.as_raw_fd(), stat.as_mut_ptr()) };
+        if ret != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+
+        // SAFETY: stat is valid at this point
+        let is_block = unsafe { (*stat.as_ptr()).st_mode & S_IFMT == S_IFBLK };
+        Ok(is_block)
+    }
+
+    // libc::ioctl() takes different types on different architectures
+    fn query_block_size(f: &File, block_size_type: BlockSize) -> std::io::Result<u64> {
+        let mut block_size = 0;
+        // SAFETY: FFI call with correct arguments
+        let ret = unsafe {
+            ioctl(
+                f.as_raw_fd(),
+                match block_size_type {
+                    BlockSize::LogicalBlock => BLKSSZGET(),
+                    BlockSize::PhysicalBlock => BLKPBSZGET(),
+                    BlockSize::MinimumIo => BLKIOMIN(),
+                    BlockSize::OptimalIo => BLKIOOPT(),
+                } as _,
+                &mut block_size,
+            )
+        };
+        if ret != 0 {
+            return Err(std::io::Error::last_os_error());
+        };
+
+        Ok(block_size)
+    }
+
+    pub fn probe(f: &File) -> std::io::Result<Self> {
+        if !Self::is_block_device(f)? {
+            return Ok(DiskTopology::default());
+        }
+
+        Ok(DiskTopology {
+            logical_block_size: Self::query_block_size(f, BlockSize::LogicalBlock)?,
+            physical_block_size: Self::query_block_size(f, BlockSize::PhysicalBlock)?,
+            minimum_io_size: Self::query_block_size(f, BlockSize::MinimumIo)?,
+            optimal_io_size: Self::query_block_size(f, BlockSize::OptimalIo)?,
+        })
+    }
 }

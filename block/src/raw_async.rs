@@ -3,8 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use crate::async_io::{
-    AsyncIo, AsyncIoError, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult, DiskTopology,
+    AsyncIo, AsyncIoError, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult,
 };
+use crate::DiskTopology;
 use io_uring::{opcode, squeue, types, IoUring};
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
