@@ -1164,9 +1164,9 @@ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
 name = "zerocopy"
-version = "0.6.3"
+version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3b9c234616391070b0b173963ebc65a9195068e7ed3731c6edac2ec45ebe106"
+checksum = "20707b61725734c595e840fb3704378a0cd2b9c74cc9e6e20724838fc6a1e2f9"
 dependencies = [
  "byteorder",
  "zerocopy-derive",
@@ -1174,9 +1174,9 @@ dependencies = [
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.6.3"
+version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f7f3a471f98d0a61c34322fbbfd10c384b07687f680d4119813713f72308d91"
+checksum = "56097d5b91d711293a42be9289403896b68654625021732067eac7a4ca388a1f"
 dependencies = [
  "proc-macro2",
  "quote",
