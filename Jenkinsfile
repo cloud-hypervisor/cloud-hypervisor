@@ -207,7 +207,7 @@ pipeline {
                         }
                         stage('Install azure-cli') {
                             steps {
-                                installAzureCli('bionic', 'arm64')
+                                installAzureCli('focal', 'arm64')
                             }
                         }
                         stage('Download Windows image') {
