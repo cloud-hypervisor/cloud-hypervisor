@@ -5,7 +5,7 @@ version = 3
 [[package]]
 name = "acpi_tables"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/acpi_tables?branch=main#05a609136387cc1cc9b499cee4320020325c263f"
+source = "git+https://github.com/rust-vmm/acpi_tables?branch=main#1029d22777f07b04849234bbe756da34a6df2913"
 dependencies = [
  "zerocopy",
 ]
@@ -1032,6 +1032,7 @@ dependencies = [
  "arch",
  "bitflags 2.3.3",
  "block",
+ "cfg-if",
  "devices",
  "epoll",
  "event_monitor",

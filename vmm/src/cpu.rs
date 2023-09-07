@@ -2019,7 +2019,7 @@ impl Aml for CpuManager {
                     &aml::Name::new(
                         "_CRS".into(),
                         &aml::ResourceTemplate::new(vec![&aml::AddressSpace::new_memory(
-                            aml::AddressSpaceCachable::NotCacheable,
+                            aml::AddressSpaceCacheable::NotCacheable,
                             true,
                             acpi_address.0,
                             acpi_address.0 + CPU_MANAGER_ACPI_SIZE as u64 - 1,
