@@ -4383,7 +4383,7 @@ impl Aml for DeviceManager {
                 &aml::Name::new(
                     "_CRS".into(),
                     &aml::ResourceTemplate::new(vec![&aml::AddressSpace::new_memory(
-                        aml::AddressSpaceCachable::NotCacheable,
+                        aml::AddressSpaceCacheable::NotCacheable,
                         true,
                         self.acpi_address.0,
                         self.acpi_address.0 + DEVICE_MANAGER_ACPI_SIZE as u64 - 1,
