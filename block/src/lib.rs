@@ -406,13 +406,13 @@ impl Request {
             let origin_ptr = mem
                 .get_slice(*data_addr, *data_len as usize)
                 .map_err(ExecuteError::GetHostAddress)?
-                .as_ptr();
+                .ptr_guard();
 
             // Verify the buffer alignment.
             // In case it's not properly aligned, an intermediate buffer is
             // created with the correct alignment, and a copy from/to the
             // origin buffer is performed, depending on the type of operation.
-            let iov_base = if (origin_ptr as u64) % SECTOR_SIZE != 0 {
+            let iov_base = if (origin_ptr.as_ptr() as u64) % SECTOR_SIZE != 0 {
                 let layout =
                     Layout::from_size_align(*data_len as usize, SECTOR_SIZE as usize).unwrap();
                 // SAFETY: layout has non-zero size
@@ -428,15 +428,13 @@ impl Request {
                 if request_type == RequestType::Out {
                     // SAFETY: destination buffer has been allocated with
                     // the proper size.
-                    unsafe {
-                        std::ptr::copy(origin_ptr as *const u8, aligned_ptr, *data_len as usize)
-                    };
+                    unsafe { std::ptr::copy(origin_ptr.as_ptr(), aligned_ptr, *data_len as usize) };
                 }
 
                 // Store both origin and aligned pointers for complete_async()
                 // to process them.
                 self.aligned_operations.push(AlignedOperation {
-                    origin_ptr: origin_ptr as u64,
+                    origin_ptr: origin_ptr.as_ptr() as u64,
                     aligned_ptr: aligned_ptr as u64,
                     size: *data_len as usize,
                     layout,
@@ -444,7 +442,7 @@ impl Request {
 
                 aligned_ptr as *mut libc::c_void
             } else {
-                origin_ptr as *mut libc::c_void
+                origin_ptr.as_ptr() as *mut libc::c_void
             };
 
             let iovec = libc::iovec {

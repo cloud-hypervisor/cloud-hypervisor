@@ -33,7 +33,7 @@ gdbstub = { version = "0.6.4", optional = true }
 gdbstub_arch = { version = "0.2.4", optional = true }
 hypervisor = { path = "../hypervisor" }
 libc = "0.2.147"
-linux-loader = { version = "0.9.0", features = ["elf", "bzimage", "pe"] }
+linux-loader = { version = "0.9.1", features = ["elf", "bzimage", "pe"] }
 log = "0.4.17"
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "main" }
 net_util = { path = "../net_util" }
@@ -53,10 +53,10 @@ versionize_derive = "0.1.4"
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
 vfio_user = { git = "https://github.com/rust-vmm/vfio-user", branch = "main" }
 virtio-devices = { path = "../virtio-devices" }
-virtio-queue = "0.8.0"
+virtio-queue = "0.9.0"
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
-vm-memory = { version = "0.11.0", features = ["backend-mmap", "backend-atomic", "backend-bitmap"] }
+vm-memory = { version = "0.12.2", features = ["backend-mmap", "backend-atomic", "backend-bitmap"] }
 vm-migration = { path = "../vm-migration" }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = { version = "0.11.0", features = ["with-serde"] }

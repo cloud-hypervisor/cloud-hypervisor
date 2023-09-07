@@ -47,7 +47,7 @@ tpm = { path = "tpm"}
 tracer = { path = "tracer" }
 vmm = { path = "vmm" }
 vmm-sys-util = "0.11.0"
-vm-memory = "0.11.0"
+vm-memory = "0.12.2"
 zbus = { version = "3.11.1", optional = true }
 
 # List of patched crates
@@ -55,7 +55,6 @@ zbus = { version = "3.11.1", optional = true }
 kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch-v0.6.0-tdx" }
 kvm-ioctls = { git = "https://github.com/rust-vmm/kvm-ioctls", branch = "main" }
 versionize_derive = { git = "https://github.com/cloud-hypervisor/versionize_derive", branch = "ch" }
-vhost = { git = "https://github.com/rust-vmm/vhost", branch = "main" }
 
 [dev-dependencies]
 dirs = "5.0.0"

@@ -64,9 +64,9 @@ impl TxVirtio {
                         .memory()
                         .get_slice(desc_addr, desc.len() as usize)
                         .map_err(NetQueuePairError::GuestMemory)?
-                        .as_ptr();
+                        .ptr_guard_mut();
                     let iovec = libc::iovec {
-                        iov_base: buf as *mut libc::c_void,
+                        iov_base: buf.as_ptr() as *mut libc::c_void,
                         iov_len: desc.len() as libc::size_t,
                     };
                     iovecs.push(iovec);
@@ -203,9 +203,9 @@ impl RxVirtio {
                         .memory()
                         .get_slice(desc_addr, desc.len() as usize)
                         .map_err(NetQueuePairError::GuestMemory)?
-                        .as_ptr();
+                        .ptr_guard_mut();
                     let iovec = libc::iovec {
-                        iov_base: buf as *mut libc::c_void,
+                        iov_base: buf.as_ptr() as *mut libc::c_void,
                         iov_len: desc.len() as libc::size_t,
                     };
                     iovecs.push(iovec);
