@@ -13,10 +13,10 @@ epoll = "4.3.3"
 libc = "0.2.147"
 log = "0.4.17"
 option_parser = { path = "../option_parser" }
-vhost = { version = "0.7.0", features = ["vhost-user-slave"] }
-vhost-user-backend = "0.9.0"
+vhost = { version = "0.8.1", features = ["vhost-user-slave"] }
+vhost-user-backend = "0.10.1"
 virtio-bindings = "0.2.0"
-virtio-queue = "0.8.0"
-vm-memory = "0.11.0"
+virtio-queue = "0.9.0"
+vm-memory = "0.12.2"
 vmm-sys-util = "0.11.0"
 
