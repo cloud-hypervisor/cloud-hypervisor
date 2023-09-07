@@ -4848,12 +4848,13 @@ mod common_parallel {
             .args(["--memory", format!("size={guest_memory_size_kb}K").as_str()])
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_net()
             .default_disks()
             .capture_output()
             .spawn()
             .unwrap();
 
-        thread::sleep(std::time::Duration::new(20, 0));
+        guest.wait_vm_boot(None).unwrap();
 
         let r = std::panic::catch_unwind(|| {
             let overhead = get_vmm_overhead(child.id(), guest_memory_size_kb);
