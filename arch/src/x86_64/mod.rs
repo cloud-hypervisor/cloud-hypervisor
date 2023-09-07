@@ -557,6 +557,7 @@ pub fn generate_common_cpuid(
     phys_bits: u8,
     kvm_hyperv: bool,
     #[cfg(feature = "tdx")] tdx_enabled: bool,
+    migratable: bool,
 ) -> super::Result<Vec<CpuIdEntry>> {
     // SAFETY: cpuid called with valid leaves
     if unsafe { x86_64::__cpuid(1) }.ecx & 1 << HYPERVISOR_ECX_BIT == 1 << HYPERVISOR_ECX_BIT {
@@ -670,6 +671,13 @@ pub fn generate_common_cpuid(
                     }
                 }
             }
+            // Set Invariant TSC
+            0x8000_0007 => {
+                if migratable {
+                    entry.edx &= !(1 << INVARIANT_TSC_EDX_BIT);
+                }
+            }
+
             // Set CPU physical bits
             0x8000_0008 => {
                 entry.eax = (entry.eax & 0xffff_ff00) | (phys_bits as u32 & 0xff);

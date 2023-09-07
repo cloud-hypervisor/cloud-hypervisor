@@ -460,6 +460,8 @@ pub struct CpuManager {
     proximity_domain_per_cpu: BTreeMap<u8, u32>,
     affinity: BTreeMap<u8, Vec<u8>>,
     dynamic: bool,
+    #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
+    migratable: bool,
 }
 
 const CPU_ENABLE_FLAG: usize = 0;
@@ -607,6 +609,7 @@ impl CpuManager {
         vm_ops: Arc<dyn VmOps>,
         #[cfg(feature = "tdx")] tdx_enabled: bool,
         numa_nodes: &NumaNodes,
+        migratable: bool,
     ) -> Result<Arc<Mutex<CpuManager>>> {
         if u32::from(config.max_vcpus) > hypervisor.get_max_vcpus() {
             return Err(Error::MaximumVcpusExceeded);
@@ -696,6 +699,7 @@ impl CpuManager {
             proximity_domain_per_cpu,
             affinity,
             dynamic,
+            migratable,
         })))
     }
 
@@ -734,6 +738,7 @@ impl CpuManager {
                 self.config.kvm_hyperv,
                 #[cfg(feature = "tdx")]
                 tdx_enabled,
+                self.migratable,
             )
             .map_err(Error::CommonCpuId)?
         };

@@ -605,4 +605,6 @@ pub struct VmConfig {
     // valid, and will be closed when the holding VmConfig instance is destroyed.
     #[serde(skip)]
     pub preserved_fds: Option<Vec<i32>>,
+    #[serde(default)]
+    pub migratable: bool,
 }

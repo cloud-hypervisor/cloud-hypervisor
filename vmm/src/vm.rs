@@ -527,6 +527,7 @@ impl Vm {
             #[cfg(feature = "tdx")]
             tdx_enabled,
             &numa_nodes,
+            config.lock().unwrap().migratable,
         )
         .map_err(Error::CpuManager)?;
 
@@ -2378,14 +2379,16 @@ impl Snapshottable for Vm {
                 &self.hypervisor,
                 self.config.lock().unwrap().cpus.max_phys_bits,
             );
+            let vm_config = &self.config.lock().unwrap();
             arch::generate_common_cpuid(
                 &self.hypervisor,
                 None,
                 None,
                 phys_bits,
-                self.config.lock().unwrap().cpus.kvm_hyperv,
+                vm_config.cpus.kvm_hyperv,
                 #[cfg(feature = "tdx")]
                 tdx_enabled,
+                vm_config.migratable,
             )
             .map_err(|e| {
                 MigratableError::MigrateReceive(anyhow!("Error generating common cpuid: {:?}", e))

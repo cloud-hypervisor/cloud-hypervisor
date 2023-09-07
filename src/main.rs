@@ -295,6 +295,10 @@ pub struct TopLevel {
     #[argh(switch, short = 'V', long = "version")]
     /// print version information
     version: bool,
+
+    #[argh(option, long = "migratable", default = "String::from(\"on\")")]
+    /// migratable on|off
+    migratable: String,
 }
 
 impl TopLevel {
@@ -375,6 +379,11 @@ impl TopLevel {
         #[cfg(feature = "guest_debug")]
         let gdb = self.gdb.is_some();
         let tpm = self.tpm.as_deref();
+        let migratable = match &self.migratable as &str {
+            "on" => true,
+            "off" => false,
+            _ => panic!("Invalid migratable parameter, on|off is needed"),
+        };
 
         config::VmParams {
             cpus,
@@ -405,6 +414,7 @@ impl TopLevel {
             gdb,
             platform,
             tpm,
+            migratable,
         }
     }
 }
@@ -802,6 +812,7 @@ mod unit_tests {
             platform: None,
             tpm: None,
             preserved_fds: None,
+            migratable: true,
         };
 
         assert_eq!(expected_vm_config, result_vm_config);

@@ -379,6 +379,7 @@ pub struct VmParams<'a> {
     pub gdb: bool,
     pub platform: Option<&'a str>,
     pub tpm: Option<&'a str>,
+    pub migratable: bool,
 }
 
 #[derive(Debug)]
@@ -2096,6 +2097,7 @@ impl VmConfig {
             platform,
             tpm,
             preserved_fds: None,
+            migratable: vm_params.migratable,
         };
         config.validate().map_err(Error::Validation)?;
         Ok(config)
@@ -2843,6 +2845,7 @@ mod tests {
             platform: None,
             tpm: None,
             preserved_fds: None,
+            migratable: true,
         };
 
         assert!(valid_config.validate().is_ok());
