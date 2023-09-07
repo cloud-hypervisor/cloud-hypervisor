@@ -307,7 +307,7 @@ impl BlockEpollHandler {
 
                         // Special case the first real latency report
                         read_avg = if read_avg == u64::MAX {
-                            latency
+                            latency * LATENCY_SCALE
                         } else {
                             read_avg
                                 + ((latency * LATENCY_SCALE) - read_avg)
@@ -337,7 +337,7 @@ impl BlockEpollHandler {
 
                         // Special case the first real latency report
                         write_avg = if write_avg == u64::MAX {
-                            latency
+                            latency * LATENCY_SCALE
                         } else {
                             write_avg
                                 + ((latency * LATENCY_SCALE) - write_avg)
