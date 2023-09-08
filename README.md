@@ -201,6 +201,17 @@ For x86-64, the `vmlinux` kernel image will then be located at
 For AArch64, the `Image` kernel image will then be located at
 `linux-cloud-hypervisor/arch/arm64/boot/Image`.
 
+#### Handling bzImage
+
+On x86-64, `bzImage` is a common format for Linux kernels. Cloud Hypervisor does not support booting `bzImage` directly. To boot a `bzImage`, you either have to wrap it in a disk image (see below) or unpack the contained `vmlinux` file using a script from the Linux kernel source directory.
+
+The `vmlinux` can be unpacked from a `bzImage` using:
+
+```shell
+# In the Linux source tree
+$ ./scripts/extract-vmlinux bzImage > vmlinux
+```
+
 #### Disk image
 
 For the disk image the same Ubuntu image as before can be used. This contains
