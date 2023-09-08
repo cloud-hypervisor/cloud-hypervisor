@@ -20,7 +20,7 @@ use crate::GuestMemoryMmap;
 use crate::VirtioInterrupt;
 use anyhow::anyhow;
 use block::{
-    async_io::AsyncIo, async_io::AsyncIoError, async_io::DiskFile, build_disk_image_id, Request,
+    async_io::AsyncIo, async_io::AsyncIoError, async_io::DiskFile, build_serial, Request,
     RequestType, VirtioBlockConfig,
 };
 use rate_limiter::{RateLimiter, TokenType};
@@ -124,7 +124,7 @@ struct BlockEpollHandler {
     disk_image: Box<dyn AsyncIo>,
     disk_nsectors: u64,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
-    disk_image_id: Vec<u8>,
+    serial: Vec<u8>,
     kill_evt: EventFd,
     pause_evt: EventFd,
     writeback: Arc<AtomicBool>,
@@ -205,7 +205,7 @@ impl BlockEpollHandler {
                     desc_chain.memory(),
                     self.disk_nsectors,
                     self.disk_image.as_mut(),
-                    &self.disk_image_id,
+                    &self.serial,
                     desc_chain.head_index() as u64,
                 )
                 .map_err(Error::RequestExecuting)?
@@ -504,6 +504,7 @@ pub struct Block {
     rate_limiter_config: Option<RateLimiterConfig>,
     exit_evt: EventFd,
     read_only: bool,
+    serial: Vec<u8>,
 }
 
 #[derive(Versionize)]
@@ -528,6 +529,7 @@ impl Block {
         iommu: bool,
         num_queues: usize,
         queue_size: u16,
+        serial: Option<String>,
         seccomp_action: SeccompAction,
         rate_limiter_config: Option<RateLimiterConfig>,
         exit_evt: EventFd,
@@ -608,6 +610,8 @@ impl Block {
                 (disk_nsectors, avail_features, 0, config, false)
             };
 
+        let serial = serial.map(Vec::from).unwrap_or(build_serial(&disk_path));
+
         Ok(Block {
             common: VirtioCommon {
                 device_type: VirtioDeviceType::Block as u32,
@@ -630,6 +634,7 @@ impl Block {
             rate_limiter_config,
             exit_evt,
             read_only,
+            serial,
         })
     }
 
@@ -726,7 +731,6 @@ impl VirtioDevice for Block {
     ) -> ActivateResult {
         self.common.activate(&queues, &interrupt_cb)?;
 
-        let disk_image_id = build_disk_image_id(&self.disk_path);
         self.update_writeback();
 
         let mut epoll_threads = Vec::new();
@@ -754,7 +758,7 @@ impl VirtioDevice for Block {
                     })?,
                 disk_nsectors: self.disk_nsectors,
                 interrupt_cb: interrupt_cb.clone(),
-                disk_image_id: disk_image_id.clone(),
+                serial: self.serial.clone(),
                 kill_evt,
                 pause_evt,
                 writeback: self.writeback.clone(),

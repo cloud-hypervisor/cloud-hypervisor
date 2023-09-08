@@ -779,7 +779,8 @@ impl DiskConfig {
             .add("ops_refill_time")
             .add("id")
             .add("_disable_io_uring")
-            .add("pci_segment");
+            .add("pci_segment")
+            .add("serial");
         parser.parse(disk).map_err(Error::ParseDisk)?;
 
         let path = parser.get("path").map(PathBuf::from);
@@ -846,6 +847,7 @@ impl DiskConfig {
             .convert("ops_refill_time")
             .map_err(Error::ParseDisk)?
             .unwrap_or_default();
+        let serial = parser.get("serial");
         let bw_tb_config = if bw_size != 0 && bw_refill_time != 0 {
             Some(TokenBucketConfig {
                 size: bw_size,
@@ -886,6 +888,7 @@ impl DiskConfig {
             id,
             disable_io_uring,
             pci_segment,
+            serial,
         })
     }
 
@@ -2462,7 +2465,14 @@ mod tests {
                 ..Default::default()
             }
         );
-
+        assert_eq!(
+            DiskConfig::parse("path=/path/to_file,serial=test")?,
+            DiskConfig {
+                path: Some(PathBuf::from("/path/to_file")),
+                serial: Some(String::from("test")),
+                ..Default::default()
+            }
+        );
         Ok(())
     }
 
