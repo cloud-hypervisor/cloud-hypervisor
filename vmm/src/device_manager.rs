@@ -2315,6 +2315,7 @@ impl DeviceManager {
                     self.force_iommu | disk_cfg.iommu,
                     disk_cfg.num_queues,
                     disk_cfg.queue_size,
+                    disk_cfg.serial.clone(),
                     self.seccomp_action.clone(),
                     disk_cfg.rate_limiter_config,
                     self.exit_evt

@@ -116,8 +116,8 @@ fn build_device_id(disk_path: &Path) -> result::Result<String, Error> {
     Ok(device_id)
 }
 
-pub fn build_disk_image_id(disk_path: &Path) -> Vec<u8> {
-    let mut default_disk_image_id = vec![0; VIRTIO_BLK_ID_BYTES as usize];
+pub fn build_serial(disk_path: &Path) -> Vec<u8> {
+    let mut default_serial = vec![0; VIRTIO_BLK_ID_BYTES as usize];
     match build_device_id(disk_path) {
         Err(_) => {
             warn!("Could not generate device id. We'll use a default.");
@@ -127,10 +127,10 @@ pub fn build_disk_image_id(disk_path: &Path) -> Vec<u8> {
             // This will also zero out any leftover bytes.
             let disk_id = m.as_bytes();
             let bytes_to_copy = cmp::min(disk_id.len(), VIRTIO_BLK_ID_BYTES as usize);
-            default_disk_image_id[..bytes_to_copy].clone_from_slice(&disk_id[..bytes_to_copy])
+            default_serial[..bytes_to_copy].clone_from_slice(&disk_id[..bytes_to_copy])
         }
     }
-    default_disk_image_id
+    default_serial
 }
 
 #[derive(Error, Debug)]
@@ -330,7 +330,7 @@ impl Request {
         disk: &mut T,
         disk_nsectors: u64,
         mem: &GuestMemoryMmap,
-        disk_id: &[u8],
+        serial: &[u8],
     ) -> result::Result<u32, ExecuteError> {
         disk.seek(SeekFrom::Start(self.sector << SECTOR_SHIFT))
             .map_err(ExecuteError::Seek)?;
@@ -362,10 +362,10 @@ impl Request {
                 }
                 RequestType::Flush => disk.flush().map_err(ExecuteError::Flush)?,
                 RequestType::GetDeviceId => {
-                    if (*data_len as usize) < disk_id.len() {
+                    if (*data_len as usize) < serial.len() {
                         return Err(ExecuteError::BadRequest(Error::InvalidOffset));
                     }
-                    mem.write_slice(disk_id, *data_addr)
+                    mem.write_slice(serial, *data_addr)
                         .map_err(ExecuteError::Write)?;
                 }
                 RequestType::Unsupported(t) => return Err(ExecuteError::Unsupported(t)),
@@ -379,7 +379,7 @@ impl Request {
         mem: &GuestMemoryMmap,
         disk_nsectors: u64,
         disk_image: &mut dyn AsyncIo,
-        disk_id: &[u8],
+        serial: &[u8],
         user_data: u64,
     ) -> result::Result<bool, ExecuteError> {
         let sector = self.sector;
@@ -481,10 +481,10 @@ impl Request {
                 } else {
                     return Err(ExecuteError::BadRequest(Error::TooManyDescriptors));
                 };
-                if (data_len as usize) < disk_id.len() {
+                if (data_len as usize) < serial.len() {
                     return Err(ExecuteError::BadRequest(Error::InvalidOffset));
                 }
-                mem.write_slice(disk_id, data_addr)
+                mem.write_slice(serial, data_addr)
                     .map_err(ExecuteError::Write)?;
                 return Ok(false);
             }

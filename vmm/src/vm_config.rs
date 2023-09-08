@@ -220,6 +220,8 @@ pub struct DiskConfig {
     pub disable_io_uring: bool,
     #[serde(default)]
     pub pci_segment: u16,
+    #[serde(default)]
+    pub serial: Option<String>,
 }
 
 pub const DEFAULT_DISK_NUM_QUEUES: usize = 1;
@@ -249,6 +251,7 @@ impl Default for DiskConfig {
             disable_io_uring: false,
             rate_limiter_config: None,
             pci_segment: 0,
+            serial: None,
         }
     }
 }
