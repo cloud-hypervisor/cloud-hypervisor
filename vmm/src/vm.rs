@@ -980,9 +980,7 @@ impl Vm {
         if let PvhEntryPresent(entry_addr) = entry_addr.pvh_boot_cap {
             // Use the PVH kernel entry point to boot the guest
             info!("Kernel loaded: entry_addr = 0x{:x}", entry_addr.0);
-            Ok(EntryPoint {
-                entry_addr: Some(entry_addr),
-            })
+            Ok(EntryPoint { entry_addr })
         } else {
             Err(Error::KernelMissingPvhHeader)
         }
