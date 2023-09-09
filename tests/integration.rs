@@ -6646,6 +6646,7 @@ mod common_parallel {
 
     #[test]
     #[cfg(target_arch = "x86_64")]
+    #[ignore = "See #5756"]
     fn test_vdpa_net() {
         // Before trying to run the test, verify the vdpa_sim_net module is correctly loaded.
         if !exec_host_command_status("lsmod | grep vdpa_sim_net").success() {
