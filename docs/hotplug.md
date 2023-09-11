@@ -27,16 +27,16 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 	--memory size=1024M \
 	--net "tap=,mac=,ip=,mask=" \
 	--rng \
-	--api-socket /tmp/ch-socket
+	--api-socket=/tmp/ch-socket
 $ popd
 ```
 
-Notice the addition of `--api-socket /tmp/ch-socket` and a `max` parameter on `--cpus boot=4,max=8`.
+Notice the addition of `--api-socket=/tmp/ch-socket` and a `max` parameter on `--cpus boot=4,max=8`.
 
 To ask the VMM to add additional vCPUs then use the resize API:
 
 ```shell
-./ch-remote --api-socket /tmp/ch-socket resize --cpus 8
+./ch-remote --api-socket=/tmp/ch-socket resize --cpus 8
 ```
 
 The extra vCPU threads will be created and advertised to the running kernel. The kernel does not bring up the CPUs immediately and instead the user must "online" them from inside the VM:
@@ -56,7 +56,7 @@ After a reboot the added CPUs will remain.
 Removing CPUs works similarly by reducing the number in the "desired_vcpus" field of the reisze API. The CPUs will be automatically offlined inside the guest so there is no need to run any commands inside the guest:
 
 ```shell
-./ch-remote --api-socket /tmp/ch-socket resize --cpus 2
+./ch-remote --api-socket=/tmp/ch-socket resize --cpus 2
 ```
 
 As per adding CPUs to the guest, after a reboot the VM will be running with the reduced number of vCPUs.
@@ -85,7 +85,7 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 	--memory size=1024M,hotplug_size=8192M \
 	--net "tap=,mac=,ip=,mask=" \
 	--rng \
-	--api-socket /tmp/ch-socket
+	--api-socket=/tmp/ch-socket
 $ popd
 ```
 
@@ -98,7 +98,7 @@ root@ch-guest ~ # echo online | sudo tee /sys/devices/system/memory/auto_online_
 To ask the VMM to expand the RAM for the VM:
 
 ```shell
-./ch-remote --api-socket /tmp/ch-socket resize --memory 3G
+./ch-remote --api-socket=/tmp/ch-socket resize --memory 3G
 ```
 
 The new memory is now available to use inside the VM:
@@ -134,14 +134,14 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 	--disk path=focal-server-cloudimg-amd64.raw \
 	--memory size=1024M,hotplug_size=8192M,hotplug_method=virtio-mem \
 	--net "tap=,mac=,ip=,mask=" \
-	--api-socket /tmp/ch-socket
+	--api-socket=/tmp/ch-socket
 $ popd
 ```
 
 To ask the VMM to expand the RAM for the VM (request is in bytes):
 
 ```shell
-./ch-remote --api-socket /tmp/ch-socket resize --memory 3G
+./ch-remote --api-socket=/tmp/ch-socket resize --memory 3G
 ```
 
 The new memory is now available to use inside the VM:
@@ -172,17 +172,17 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 	--cpus boot=4 \
 	--memory size=1024M \
 	--net "tap=,mac=,ip=,mask=" \
-	--api-socket /tmp/ch-socket
+	--api-socket=/tmp/ch-socket
 ```
 
-Notice the addition of `--api-socket /tmp/ch-socket`.
+Notice the addition of `--api-socket=/tmp/ch-socket`.
 
 ### Add VFIO Device
 
 To ask the VMM to add additional VFIO device then use the `add-device` API.
 
 ```shell
-./ch-remote --api-socket /tmp/ch-socket add-device path=/sys/bus/pci/devices/0000:01:00.0/
+./ch-remote --api-socket=/tmp/ch-socket add-device path=/sys/bus/pci/devices/0000:01:00.0/
 ```
 
 ### Add Disk Device
@@ -190,7 +190,7 @@ To ask the VMM to add additional VFIO device then use the `add-device` API.
 To ask the VMM to add additional disk device then use the `add-disk` API.
 
 ```shell
-./ch-remote --api-socket /tmp/ch-socket add-disk path=/foo/bar/cloud.img
+./ch-remote --api-socket=/tmp/ch-socket add-disk path=/foo/bar/cloud.img
 ```
 
 ### Add Fs Device
@@ -198,7 +198,7 @@ To ask the VMM to add additional disk device then use the `add-disk` API.
 To ask the VMM to add additional fs device then use the `add-fs` API.
 
 ```shell
-./ch-remote --api-socket /tmp/ch-socket add-fs tag=myfs,socket=/foo/bar/virtiofs.sock
+./ch-remote --api-socket=/tmp/ch-socket add-fs tag=myfs,socket=/foo/bar/virtiofs.sock
 ```
 
 ### Add Net Device
@@ -206,7 +206,7 @@ To ask the VMM to add additional fs device then use the `add-fs` API.
 To ask the VMM to add additional network device then use the `add-net` API.
 
 ```shell
-./ch-remote --api-socket /tmp/ch-socket add-net tap=chtap0
+./ch-remote --api-socket=/tmp/ch-socket add-net tap=chtap0
 ```
 
 ### Add Pmem Device
@@ -214,7 +214,7 @@ To ask the VMM to add additional network device then use the `add-net` API.
 To ask the VMM to add additional PMEM device then use the `add-pmem` API.
 
 ```shell
-./ch-remote --api-socket /tmp/ch-socket add-pmem file=/foo/bar.cloud.img
+./ch-remote --api-socket=/tmp/ch-socket add-pmem file=/foo/bar.cloud.img
 ```
 
 ### Add Vsock Device
@@ -222,7 +222,7 @@ To ask the VMM to add additional PMEM device then use the `add-pmem` API.
 To ask the VMM to add additional vsock device then use the `add-vsock` API.
 
 ```shell
-./ch-remote --api-socket /tmp/ch-socket add-vsock cid=3,socket=/foo/bar/vsock.sock
+./ch-remote --api-socket=/tmp/ch-socket add-vsock cid=3,socket=/foo/bar/vsock.sock
 ```
 
 ### Common Across All PCI Devices
@@ -244,7 +244,7 @@ After a reboot the added PCI device will remain.
 Removing a PCI device works the same way for all kind of PCI devices. The unique identifier related to the device must be provided. This identifier can be provided by the user when adding the new device, or by default Cloud Hypervisor will assign one.
 
 ```shell
-./ch-remote --api-socket /tmp/ch-socket remove-device _disk0
+./ch-remote --api-socket=/tmp/ch-socket remove-device _disk0
 ```
 
 As per adding a PCI device to the guest, after a reboot the VM will be running without the removed PCI device.
