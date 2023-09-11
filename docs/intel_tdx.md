@@ -47,6 +47,9 @@ The custom Linux kernel for the guest can be built with the [TDX Tools](https://
 The firmware can be built as follows:
 
 ```bash
+sudo apt-get update
+sudo apt-get install uuid-dev nasm iasl build-essential python3-distutils git
+
 git clone https://github.com/tianocore/edk2.git
 cd edk2
 git checkout 13b97736c876919b9786055829caaa4fa46984b7
