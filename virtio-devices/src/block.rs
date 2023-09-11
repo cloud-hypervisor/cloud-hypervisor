@@ -309,9 +309,13 @@ impl BlockEpollHandler {
                         read_avg = if read_avg == u64::MAX {
                             latency * LATENCY_SCALE
                         } else {
-                            read_avg
-                                + ((latency * LATENCY_SCALE) - read_avg)
-                                    / (read_ops_last + read_ops.0)
+                            // Cumulative average is guaranteed to be
+                            // positive if being calculated properly
+                            (read_avg as i64
+                                + ((latency * LATENCY_SCALE) as i64 - read_avg as i64)
+                                    / (read_ops_last + read_ops.0) as i64)
+                                .try_into()
+                                .unwrap()
                         };
                     }
                     RequestType::Out => {
@@ -339,10 +343,14 @@ impl BlockEpollHandler {
                         write_avg = if write_avg == u64::MAX {
                             latency * LATENCY_SCALE
                         } else {
-                            write_avg
-                                + ((latency * LATENCY_SCALE) - write_avg)
-                                    / (write_ops_last + write_ops.0)
-                        };
+                            // Cumulative average is guaranteed to be
+                            // positive if being calculated properly
+                            (write_avg as i64
+                                + ((latency * LATENCY_SCALE) as i64 - write_avg as i64)
+                                    / (write_ops_last + write_ops.0) as i64)
+                                .try_into()
+                                .unwrap()
+                        }
                     }
                     _ => {}
                 }
