@@ -150,7 +150,7 @@ $ sudo setcap cap_net_admin+ep ./cloud-hypervisor
 $ ./create-cloud-init.sh
 $ ./cloud-hypervisor \
 	--kernel ./hypervisor-fw \
-	--disk path=focal-server-cloudimg-amd64.raw --disk path=/tmp/ubuntu-cloudinit.img \
+	--disk path=focal-server-cloudimg-amd64.raw path=/tmp/ubuntu-cloudinit.img \
 	--cpus boot=4 \
 	--memory size=1024M \
 	--net "tap=,mac=,ip=,mask="
@@ -163,7 +163,7 @@ GRUB) is required then it necessary to switch to the serial console instead of
 ```shell
 $ ./cloud-hypervisor \
 	--kernel ./hypervisor-fw \
-	--disk path=focal-server-cloudimg-amd64.raw --disk path=/tmp/ubuntu-cloudinit.img \
+	--disk path=focal-server-cloudimg-amd64.raw path=/tmp/ubuntu-cloudinit.img \
 	--cpus boot=4 \
 	--memory size=1024M \
 	--net "tap=,mac=,ip=,mask=" \
@@ -225,7 +225,7 @@ $ sudo setcap cap_net_admin+ep ./cloud-hypervisor
 $ ./create-cloud-init.sh
 $ ./cloud-hypervisor \
 	--kernel ./linux-cloud-hypervisor/arch/x86/boot/compressed/vmlinux.bin \
-	--disk path=focal-server-cloudimg-amd64.raw --disk path=/tmp/ubuntu-cloudinit.img \
+	--disk path=focal-server-cloudimg-amd64.raw path=/tmp/ubuntu-cloudinit.img \
 	--cmdline "console=hvc0 root=/dev/vda1 rw" \
 	--cpus boot=4 \
 	--memory size=1024M \
@@ -239,7 +239,7 @@ $ sudo setcap cap_net_admin+ep ./cloud-hypervisor
 $ ./create-cloud-init.sh
 $ ./cloud-hypervisor \
 	--kernel ./linux-cloud-hypervisor/arch/arm64/boot/Image \
-	--disk path=focal-server-cloudimg-arm64.raw --disk path=/tmp/ubuntu-cloudinit.img \
+	--disk path=focal-server-cloudimg-arm64.raw path=/tmp/ubuntu-cloudinit.img \
 	--cmdline "console=hvc0 root=/dev/vda1 rw" \
 	--cpus boot=4 \
 	--memory size=1024M \

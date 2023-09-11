@@ -295,7 +295,7 @@ From the CLI, one can:
 The REST API, D-Bus API and the CLI all rely on a common, [internal API](#internal-api).
 
 The CLI options are parsed by the
-[argh crate](https://docs.rs/argh/latest/argh/) and then translated into
+[clap crate](https://docs.rs/clap/4.3.11/clap/) and then translated into
 [internal API](#internal-api) commands.
 
 The REST API is processed by an HTTP thread using the
@@ -327,7 +327,7 @@ As a summary, the REST API, the D-Bus API and the CLI are essentially frontends 
                        |                                      |      +------------------------+
                        |            +----------+              |                 VMM
                        |     CLI    |          |              |
-                       +----------->+   argh   +--------------+
+                       +----------->+   clap   +--------------+
                                     |          |
                                     +----------+
 
