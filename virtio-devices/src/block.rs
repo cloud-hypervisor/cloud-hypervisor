@@ -283,6 +283,8 @@ impl BlockEpollHandler {
             let latency = request.start.elapsed().as_micros() as u64;
             let read_ops_last = self.counters.read_ops.load(Ordering::Relaxed);
             let write_ops_last = self.counters.write_ops.load(Ordering::Relaxed);
+            let read_max = self.counters.read_latency_max.load(Ordering::Relaxed);
+            let write_max = self.counters.write_latency_max.load(Ordering::Relaxed);
             let mut read_avg = self.counters.read_latency_avg.load(Ordering::Relaxed);
             let mut write_avg = self.counters.write_latency_avg.load(Ordering::Relaxed);
             let (status, len) = if result >= 0 {
@@ -297,9 +299,7 @@ impl BlockEpollHandler {
                                 .read_latency_min
                                 .store(latency, Ordering::Relaxed);
                         }
-                        if latency > self.counters.read_latency_max.load(Ordering::Relaxed)
-                            || latency == u64::MAX
-                        {
+                        if latency > read_max || read_max == u64::MAX {
                             self.counters
                                 .read_latency_max
                                 .store(latency, Ordering::Relaxed);
@@ -327,9 +327,7 @@ impl BlockEpollHandler {
                                 .write_latency_min
                                 .store(latency, Ordering::Relaxed);
                         }
-                        if latency > self.counters.write_latency_max.load(Ordering::Relaxed)
-                            || latency == u64::MAX
-                        {
+                        if latency > write_max || write_max == u64::MAX {
                             self.counters
                                 .write_latency_max
                                 .store(latency, Ordering::Relaxed);
