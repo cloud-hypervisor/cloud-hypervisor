@@ -25,14 +25,14 @@ First thing, we must run a Cloud Hypervisor VM:
 At any point in time when the VM is running, one might choose to pause it:
 
 ```bash
-./ch-remote --api-socket /tmp/cloud-hypervisor.sock pause
+./ch-remote --api-socket=/tmp/cloud-hypervisor.sock pause
 ```
 
 Once paused, the VM can be safely snapshot into the specified directory and
 using the following command:
 
 ```bash
-./ch-remote --api-socket /tmp/cloud-hypervisor.sock snapshot file:///home/foo/snapshot
+./ch-remote --api-socket=/tmp/cloud-hypervisor.sock snapshot file:///home/foo/snapshot
 ```
 
 Given the directory was present on the system, the snapshot will succeed and
@@ -79,7 +79,7 @@ Or using two different commands from two terminals:
 ./cloud-hypervisor --api-socket /tmp/cloud-hypervisor.sock
 
 # Second terminal
-./ch-remote --api-socket /tmp/cloud-hypervisor.sock restore source_url=file:///home/foo/snapshot
+./ch-remote --api-socket=/tmp/cloud-hypervisor.sock restore source_url=file:///home/foo/snapshot
 ```
 
 Remember the VM is restored in a `paused` state, which was the VM's state when
@@ -87,7 +87,7 @@ it was snapshot. For this reason, one must explicitly `resume` the VM before to
 start using it.
 
 ```bash
-./ch-remote --api-socket /tmp/cloud-hypervisor.sock resume
+./ch-remote --api-socket=/tmp/cloud-hypervisor.sock resume
 ```
 
 At this point, the VM is fully restored and is identical to the VM which was

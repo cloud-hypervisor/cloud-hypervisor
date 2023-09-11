@@ -8,7 +8,7 @@ To enable debugging with GDB, build with the `guest_debug` feature enabled:
 cargo build --features guest_debug
 ```
 
-To use the `--gdb` option, specify the Unix Domain Socket with `path` that Cloud Hypervisor will use to communicate with the host's GDB:
+To use the `--gdb` option, specify the Unix Domain Socket with `--path` that Cloud Hypervisor will use to communicate with the host's GDB:
 
 ```bash
 ./cloud-hypervisor \
