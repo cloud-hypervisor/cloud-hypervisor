@@ -50,9 +50,9 @@ The firmware can be built as follows:
 git clone https://github.com/tianocore/edk2.git
 cd edk2
 git checkout 13b97736c876919b9786055829caaa4fa46984b7
+source ./edksetup.sh
 git submodule update --init --recursive
 make -C BaseTools -j `nproc`
-source ./edksetup.sh
 build -p OvmfPkg/IntelTdx/IntelTdxX64.dsc -a X64 -t GCC5 -b RELEASE
 ```
 
