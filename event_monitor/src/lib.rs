@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use once_cell::sync::OnceCell;
 use serde::Serialize;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -12,7 +13,7 @@ use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-static mut MONITOR: Option<MonitorHandle> = None;
+static MONITOR: OnceCell<MonitorHandle> = OnceCell::new();
 
 #[derive(Serialize)]
 struct Event<'a> {
@@ -69,8 +70,8 @@ fn set_file_nonblocking(file: &File) -> io::Result<()> {
 /// This function must only be called once from the main thread before any threads
 /// are created to avoid race conditions.
 pub fn set_monitor(file: Option<File>) -> io::Result<Monitor> {
-    // SAFETY: there is only one caller of this function, so MONITOR is written to only once
-    assert!(unsafe { MONITOR.is_none() });
+    // There is only one caller of this function, so MONITOR is written to only once
+    assert!(MONITOR.get().is_none());
 
     if let Some(ref file) = file {
         set_file_nonblocking(file)?;
@@ -79,24 +80,21 @@ pub fn set_monitor(file: Option<File>) -> io::Result<Monitor> {
     let (tx, rx) = flume::unbounded();
     let monitor = Monitor::new(rx, file);
 
-    // SAFETY: MONITOR is None. Nobody else can hold a reference to it.
-    unsafe {
-        MONITOR = Some(MonitorHandle {
-            tx,
-            start: Instant::now(),
-        });
-    };
+    MONITOR.get_or_init(|| MonitorHandle {
+        tx,
+        start: Instant::now(),
+    });
 
     Ok(monitor)
 }
 
 pub fn event_log(source: &str, event: &str, properties: Option<&HashMap<Cow<str>, Cow<str>>>) {
-    // SAFETY: `MONITOR` is always in a valid state (None or Some), because it
-    // is set only once before any threads are spawned, and it's not mutated
+    // `MONITOR` is always in a valid state (None or Some), because it is set
+    // only once before any threads are spawned, and it's not mutated
     // afterwards. This function only creates immutable references to `MONITOR`.
     // Because `MONITOR.tx` is `Sync`, it's safe to share `MONITOR` across
     // threads, making this function thread-safe.
-    if let Some(monitor_handle) = unsafe { MONITOR.as_ref() } {
+    if let Some(monitor_handle) = MONITOR.get().as_ref() {
         let event = Event {
             timestamp: monitor_handle.start.elapsed(),
             source,
