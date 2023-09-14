@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use once_cell::sync::OnceCell;
 use serde::Serialize;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -11,12 +12,13 @@ use std::io::Write;
 use std::os::unix::io::AsRawFd;
 use std::time::{Duration, Instant};
 
-static mut MONITOR: Option<(File, Instant)> = None;
+static MONITOR: OnceCell<(File, Instant)> = OnceCell::new();
 
 /// This function must only be called once from the main process before any threads
 /// are created to avoid race conditions
 pub fn set_monitor(file: File) -> Result<(), std::io::Error> {
-    assert!(unsafe { MONITOR.is_none() });
+    // There is only one caller of this function, so MONITOR is written to only once
+    assert!(MONITOR.get().is_none());
     let fd = file.as_raw_fd();
     let ret = unsafe {
         let mut flags = libc::fcntl(fd, libc::F_GETFL);
@@ -26,9 +28,9 @@ pub fn set_monitor(file: File) -> Result<(), std::io::Error> {
     if ret < 0 {
         return Err(std::io::Error::last_os_error());
     }
-    unsafe {
-        MONITOR = Some((file, Instant::now()));
-    };
+
+    MONITOR.get_or_init(|| (file, Instant::now()));
+
     Ok(())
 }
 
@@ -41,7 +43,7 @@ struct Event<'a> {
 }
 
 pub fn event_log(source: &str, event: &str, properties: Option<&HashMap<Cow<str>, Cow<str>>>) {
-    if let Some((file, start)) = unsafe { MONITOR.as_ref() } {
+    if let Some((file, start)) = MONITOR.get().as_ref() {
         let e = Event {
             timestamp: start.elapsed(),
             source,
