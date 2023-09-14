@@ -624,6 +624,7 @@ version = "0.1.0"
 dependencies = [
  "flume",
  "libc",
+ "once_cell",
  "serde",
  "serde_json",
 ]
