@@ -106,8 +106,6 @@ pub enum Error {
 
 #[derive(Debug, PartialEq, Eq, Error)]
 pub enum ValidationError {
-    /// Both console and serial are tty.
-    DoubleTtyMode,
     /// No kernel specified
     KernelMissing,
     /// Missing file value for console
@@ -189,7 +187,6 @@ impl fmt::Display for ValidationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use self::ValidationError::*;
         match self {
-            DoubleTtyMode => write!(f, "Console mode tty specified for both serial and console"),
             KernelMissing => write!(f, "No kernel specified"),
             ConsoleFileMissing => write!(f, "Path missing when using file console mode"),
             ConsoleSocketPathMissing => write!(f, "Path missing when using socket console mode"),
@@ -1930,9 +1927,18 @@ impl VmConfig {
             }
         }
 
+        // The 'conflict' check is introduced in commit 24438e0390d3
+        // (vm-virtio: Enable the vmm support for virtio-console).
+        //
+        // Allow simultaneously set serial and console as TTY mode, for
+        // someone want to use virtio console for better performance, and
+        // want to keep legacy serial to catch boot stage logs for debug.
+        // Using such double tty mode, you need to configure the kernel
+        // properly, such as:
+        // "console=hvc0 earlyprintk=ttyS0"
         if self.console.mode == ConsoleOutputMode::Tty && self.serial.mode == ConsoleOutputMode::Tty
         {
-            return Err(ValidationError::DoubleTtyMode);
+            warn!("Using TTY output for both virtio-console and serial port");
         }
 
         if self.console.mode == ConsoleOutputMode::File && self.console.file.is_none() {
@@ -3110,10 +3116,7 @@ mod tests {
         let mut invalid_config = valid_config.clone();
         invalid_config.serial.mode = ConsoleOutputMode::Tty;
         invalid_config.console.mode = ConsoleOutputMode::Tty;
-        assert_eq!(
-            invalid_config.validate(),
-            Err(ValidationError::DoubleTtyMode)
-        );
+        assert!(valid_config.validate().is_ok());
 
         let mut invalid_config = valid_config.clone();
         invalid_config.payload = None;
