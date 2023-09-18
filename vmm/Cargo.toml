@@ -42,7 +42,7 @@ option_parser = { path = "../option_parser" }
 pci = { path = "../pci" }
 seccompiler = "0.3.0"
 serde = { version = "1.0.168", features = ["rc", "derive"] }
-serde_json = "1.0.96"
+serde_json = "1.0.107"
 serial_buffer = { path = "../serial_buffer" }
 signal-hook = "0.3.17"
 thiserror = "1.0.40"
