@@ -67,6 +67,7 @@ pub struct VcpuKvmState {
     pub xsave: Xsave,
     pub xcrs: ExtendedControlRegisters,
     pub mp_state: MpState,
+    pub tsc_khz: Option<u32>,
 }
 
 impl From<StandardRegisters> for kvm_regs {
