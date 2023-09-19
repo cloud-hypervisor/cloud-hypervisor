@@ -1890,6 +1890,7 @@ impl cpu::Vcpu for KvmVcpu {
         };
 
         let vcpu_events = self.get_vcpu_events()?;
+        let tsc_khz = self.tsc_khz()?;
 
         Ok(VcpuKvmState {
             cpuid,
@@ -1902,6 +1903,7 @@ impl cpu::Vcpu for KvmVcpu {
             xsave,
             xcrs,
             mp_state,
+            tsc_khz,
         }
         .into())
     }
@@ -2003,6 +2005,10 @@ impl cpu::Vcpu for KvmVcpu {
         self.set_xcrs(&state.xcrs)?;
         self.set_lapic(&state.lapic_state)?;
         self.set_fpu(&state.fpu)?;
+
+        if let Some(freq) = state.tsc_khz {
+            self.set_tsc_khz(freq)?;
+        }
 
         // Try to set all MSRs previously stored.
         // If the number of MSRs set from SET_MSRS is different from the
@@ -2184,6 +2190,23 @@ impl cpu::Vcpu for KvmVcpu {
                 }
             }
             Ok(v) => Ok(Some(v)),
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Set the frequency of the TSC if available
+    ///
+    fn set_tsc_khz(&self, freq: u32) -> cpu::Result<()> {
+        match self.fd.set_tsc_khz(freq) {
+            Err(e) => {
+                if e.errno() == libc::EIO {
+                    Ok(())
+                } else {
+                    Err(cpu::HypervisorCpuError::SetTscKhz(e.into()))
+                }
+            }
+            Ok(_) => Ok(()),
         }
     }
 }
