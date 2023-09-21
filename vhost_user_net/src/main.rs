@@ -6,36 +6,25 @@
 //
 // SPDX-License-Identifier: (Apache-2.0 AND BSD-3-Clause)
 
-use argh::FromArgs;
+use clap::{Arg, Command};
 use vhost_user_net::start_net_backend;
-
-#[derive(FromArgs)]
-/// Launch a vhost-user-net backend.
-struct TopLevel {
-    #[argh(option, long = "net-backend")]
-    /// vhost-user-net backend parameters
-    /// ip=<ip_addr>,mask=<net_mask>,socket=<socket_path>,client=on|off,num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,tap=<if_name>
-    backend_command: Option<String>,
-
-    #[argh(switch, short = 'V', long = "version")]
-    /// print version information
-    version: bool,
-}
 
 fn main() {
     env_logger::init();
 
-    let toplevel: TopLevel = argh::from_env();
+    let cmd_arguments = Command::new("vhost-user-net backend")
+        .version(env!("CARGO_PKG_VERSION"))
+        .author(env!("CARGO_PKG_AUTHORS"))
+        .about("Launch a vhost-user-net backend.")
+        .arg(
+            Arg::new("net-backend")
+                .long("net-backend")
+                .help(vhost_user_net::SYNTAX)
+                .num_args(1)
+                .required(true),
+        )
+        .get_matches();
 
-    if toplevel.version {
-        println!("{} {}", env!("CARGO_BIN_NAME"), env!("BUILD_VERSION"));
-        return;
-    }
-
-    if toplevel.backend_command.is_none() {
-        println!("Please specify --net-backend");
-        std::process::exit(1)
-    }
-
-    start_net_backend(&toplevel.backend_command.unwrap());
+    let backend_command = cmd_arguments.get_one::<String>("net-backend").unwrap();
+    start_net_backend(backend_command);
 }
