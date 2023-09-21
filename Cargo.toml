@@ -31,7 +31,6 @@ debug = true
 [dependencies]
 anyhow = "1.0.75"
 api_client = { path = "api_client" }
-argh = "0.1.9"
 clap = { version = "4.3.11", features = ["string"] }
 dhat = { version = "0.3.2", optional = true }
 epoll = "4.3.3"
