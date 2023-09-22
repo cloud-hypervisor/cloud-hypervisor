@@ -54,7 +54,7 @@ Value is a boolean set to `off` by default.
 _Example_
 
 ```
---ballloon size=2G,deflate_on_oom=on
+--balloon size=2G,deflate_on_oom=on
 ```
 
 ### `free_page_reporting`
@@ -72,5 +72,5 @@ Value is a boolean set to `off` by default.
 _Example_
 
 ```
---ballloon size=0,free_page_reporting=on
+--balloon size=0,free_page_reporting=on
 ```
