@@ -5,7 +5,7 @@ version = 3
 [[package]]
 name = "acpi_tables"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/acpi_tables?branch=main#1029d22777f07b04849234bbe756da34a6df2913"
+source = "git+https://github.com/rust-vmm/acpi_tables?branch=main#1a733bf690ccc10bdfeacad33e3c9f6cce0008fd"
 dependencies = [
  "zerocopy",
 ]
@@ -76,7 +76,7 @@ dependencies = [
  "argh_shared",
  "proc-macro2",
  "quote",
- "syn 2.0.23",
+ "syn 2.0.32",
 ]
 
 [[package]]
@@ -249,7 +249,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "strsim",
- "syn 2.0.23",
+ "syn 2.0.32",
 ]
 
 [[package]]
@@ -260,7 +260,7 @@ checksum = "836a9bbc7ad63342d6d6e7b815ccab164bc77a2d95d84bc3117a8c0d5c98e2d5"
 dependencies = [
  "darling_core",
  "quote",
- "syn 2.0.23",
+ "syn 2.0.32",
 ]
 
 [[package]]
@@ -576,7 +576,7 @@ checksum = "4359fd9c9171ec6e8c62926d6faaf553a8dc3f64e1507e76da7911b4f6a04405"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.23",
+ "syn 2.0.32",
 ]
 
 [[package]]
@@ -614,7 +614,7 @@ checksum = "bce3a7139d2ee67d07538ee5dba997364fbc243e7e7143e96eb830c74bfaa082"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.23",
+ "syn 2.0.32",
 ]
 
 [[package]]
@@ -670,7 +670,7 @@ checksum = "d4fe589678c688e44177da4f27152ee2d190757271dc7f1d5b6b9f68d869d641"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.23",
+ "syn 2.0.32",
 ]
 
 [[package]]
@@ -703,7 +703,7 @@ dependencies = [
  "darling",
  "proc-macro2",
  "quote",
- "syn 2.0.23",
+ "syn 2.0.32",
 ]
 
 [[package]]
@@ -763,9 +763,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "2.0.23"
+version = "2.0.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59fb7d6d8281a51045d62b8eb3a7d1ce347b76f312af50cd3dc0af39c87c1737"
+checksum = "239814284fd6f1a4ffe4ca893952cdd93c224b6a1571c9a9eadd670295c0c9e2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -789,7 +789,7 @@ checksum = "49922ecae66cc8a249b77e68d1d0623c1b2c514f0060c27cdc68bd62a1219d35"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.23",
+ "syn 2.0.32",
 ]
 
 [[package]]
@@ -1110,7 +1110,7 @@ dependencies = [
  "once_cell",
  "proc-macro2",
  "quote",
- "syn 2.0.23",
+ "syn 2.0.32",
  "wasm-bindgen-shared",
 ]
 
@@ -1132,7 +1132,7 @@ checksum = "54681b18a46765f095758388f2d0cf16eb8d4169b639ab575a8f5693af210c7b"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.23",
+ "syn 2.0.32",
  "wasm-bindgen-backend",
  "wasm-bindgen-shared",
 ]
@@ -1167,9 +1167,9 @@ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
 name = "zerocopy"
-version = "0.6.4"
+version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20707b61725734c595e840fb3704378a0cd2b9c74cc9e6e20724838fc6a1e2f9"
+checksum = "870cdd4b8b867698aea998d95bcc06c1d75fe566267781ee6f5ae8c9c45a3930"
 dependencies = [
  "byteorder",
  "zerocopy-derive",
@@ -1177,11 +1177,11 @@ dependencies = [
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.6.4"
+version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56097d5b91d711293a42be9289403896b68654625021732067eac7a4ca388a1f"
+checksum = "e9c6f95fa5657518b36c6784ba7cdd89e8bdf9a16e58266085248bfb950860c5"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.23",
+ "syn 2.0.32",
 ]
