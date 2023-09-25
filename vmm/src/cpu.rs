@@ -427,7 +427,7 @@ impl Snapshottable for Vcpu {
         let saved_state = self
             .vcpu
             .state()
-            .map_err(|e| MigratableError::Pause(anyhow!("Could not get vCPU state {:?}", e)))?;
+            .map_err(|e| MigratableError::Snapshot(anyhow!("Could not get vCPU state {:?}", e)))?;
 
         self.saved_state = Some(saved_state.clone());
 
