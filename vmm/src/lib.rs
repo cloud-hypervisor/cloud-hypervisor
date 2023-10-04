@@ -293,6 +293,29 @@ impl Serialize for PciDeviceInfo {
     }
 }
 
+pub fn feature_list() -> Vec<String> {
+    vec![
+        #[cfg(feature = "dbus_api")]
+        "dbus_api".to_string(),
+        #[cfg(feature = "dhat-heap")]
+        "dhat-heap".to_string(),
+        #[cfg(feature = "guest_debug")]
+        "guest_debug".to_string(),
+        #[cfg(feature = "io_uring")]
+        "io_uring".to_string(),
+        #[cfg(feature = "kvm")]
+        "kvm".to_string(),
+        #[cfg(feature = "mshv")]
+        "mshv".to_string(),
+        #[cfg(feature = "sev_snp")]
+        "sev_snp".to_string(),
+        #[cfg(feature = "tdx")]
+        "tdx".to_string(),
+        #[cfg(feature = "tracing")]
+        "tracing".to_string(),
+    ]
+}
+
 pub fn start_event_monitor_thread(
     mut monitor: event_monitor::Monitor,
     seccomp_action: &SeccompAction,
@@ -931,6 +954,7 @@ impl Vmm {
             build_version,
             version,
             pid: std::process::id() as i64,
+            features: feature_list(),
         }
     }
 
