@@ -64,6 +64,8 @@ serde_json = "1.0.107"
 test_infra = { path = "test_infra" }
 wait-timeout = "0.2.0"
 
+# Please adjust `vmm::feature_list()` accordingly when changing the
+# feature list below
 [features]
 default = ["kvm", "io_uring"]
 dbus_api = ["zbus", "vmm/dbus_api"]
