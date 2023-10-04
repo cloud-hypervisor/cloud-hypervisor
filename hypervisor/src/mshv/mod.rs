@@ -234,6 +234,23 @@ impl hypervisor::Hypervisor for MshvHypervisor {
             break;
         }
 
+        // Set additional partition property for SEV-SNP partition.
+        if mshv_vm_type == VmType::Snp {
+            let snp_policy = snp::get_default_snp_guest_policy();
+            // SAFETY: access union fields
+            unsafe {
+                debug!(
+                    "Setting the partition isolation policy as: 0x{:x}",
+                    snp_policy.as_uint64
+                );
+                fd.set_partition_property(
+                    hv_partition_property_code_HV_PARTITION_PROPERTY_ISOLATION_POLICY,
+                    snp_policy.as_uint64,
+                )
+                .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
+            }
+        }
+
         // Default Microsoft Hypervisor behavior for unimplemented MSR is to
         // send a fault to the guest if it tries to access it. It is possible
         // to override this behavior with a more suitable option i.e., ignore
