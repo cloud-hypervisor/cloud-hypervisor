@@ -676,6 +676,11 @@ fn main() {
 
     if toplevel.version {
         println!("{} {}", env!("CARGO_BIN_NAME"), env!("BUILD_VERSION"));
+
+        if toplevel.verbosity != 0 {
+            println!("Enabled features: {:?}", vmm::feature_list());
+        }
+
         return;
     }
 
