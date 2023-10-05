@@ -71,10 +71,11 @@ default = ["kvm", "io_uring"]
 dbus_api = ["zbus", "vmm/dbus_api"]
 dhat-heap = ["dhat"] # For heap profiling
 guest_debug = ["vmm/guest_debug"]
+igvm = ["vmm/igvm", "mshv"]
 io_uring = ["vmm/io_uring"]
 kvm = ["vmm/kvm"]
 mshv = ["vmm/mshv"]
-sev_snp = ["vmm/sev_snp", "mshv"]
+sev_snp = ["igvm", "vmm/sev_snp", "mshv"]
 tdx = ["vmm/tdx"]
 tracing = ["vmm/tracing", "tracer/tracing"]
 

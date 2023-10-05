@@ -302,6 +302,8 @@ pub fn feature_list() -> Vec<String> {
         "dhat-heap".to_string(),
         #[cfg(feature = "guest_debug")]
         "guest_debug".to_string(),
+        #[cfg(feature = "igvm")]
+        "igvm".to_string(),
         #[cfg(feature = "io_uring")]
         "io_uring".to_string(),
         #[cfg(feature = "kvm")]

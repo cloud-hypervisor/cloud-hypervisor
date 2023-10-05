@@ -398,6 +398,8 @@ pub struct VmParams<'a> {
     pub gdb: bool,
     pub platform: Option<&'a str>,
     pub tpm: Option<&'a str>,
+    #[cfg(feature = "igvm")]
+    pub igvm: Option<&'a str>,
 }
 
 impl<'a> VmParams<'a> {
@@ -451,6 +453,8 @@ impl<'a> VmParams<'a> {
         #[cfg(feature = "guest_debug")]
         let gdb = args.contains_id("gdb");
         let tpm: Option<&str> = args.get_one::<String>("tpm").map(|x| x as &str);
+        #[cfg(feature = "igvm")]
+        let igvm = args.get_one::<String>("igvm").map(|x| x as &str);
         VmParams {
             cpus,
             memory,
@@ -480,6 +484,8 @@ impl<'a> VmParams<'a> {
             gdb,
             platform,
             tpm,
+            #[cfg(feature = "igvm")]
+            igvm,
         }
     }
 }
@@ -2283,12 +2289,21 @@ impl VmConfig {
             numa = Some(numa_config_list);
         }
 
-        let payload = if vm_params.kernel.is_some() || vm_params.firmware.is_some() {
+        #[cfg(not(feature = "igvm"))]
+        let payload_present = vm_params.kernel.is_some() || vm_params.firmware.is_some();
+
+        #[cfg(feature = "igvm")]
+        let payload_present =
+            vm_params.kernel.is_some() || vm_params.firmware.is_some() || vm_params.igvm.is_some();
+
+        let payload = if payload_present {
             Some(PayloadConfig {
                 kernel: vm_params.kernel.map(PathBuf::from),
                 initramfs: vm_params.initramfs.map(PathBuf::from),
                 cmdline: vm_params.cmdline.map(|s| s.to_string()),
                 firmware: vm_params.firmware.map(PathBuf::from),
+                #[cfg(feature = "igvm")]
+                igvm: vm_params.igvm.map(PathBuf::from),
             })
         } else {
             None
