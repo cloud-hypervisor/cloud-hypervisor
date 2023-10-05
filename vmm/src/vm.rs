@@ -25,6 +25,8 @@ use crate::device_manager::{DeviceManager, DeviceManagerError, PtyPair};
 use crate::device_tree::DeviceTree;
 #[cfg(feature = "guest_debug")]
 use crate::gdb::{Debuggable, DebuggableError, GdbRequestPayload, GdbResponsePayload};
+#[cfg(feature = "igvm")]
+use crate::igvm::igvm_loader;
 use crate::memory_manager::{
     Error as MemoryManagerError, MemoryManager, MemoryManagerSnapshotData,
 };
@@ -305,6 +307,14 @@ pub enum Error {
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
     #[error("Error coredumping VM: {0:?}")]
     Coredump(GuestDebuggableError),
+
+    #[cfg(feature = "igvm")]
+    #[error("Cannot open igvm file: {0}")]
+    IgvmFile(#[source] io::Error),
+
+    #[cfg(feature = "igvm")]
+    #[error("Cannot load the igvm into memory: {0}")]
+    IgvmLoad(#[source] igvm_loader::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -481,6 +491,7 @@ impl Vm {
             .validate()
             .map_err(Error::ConfigValidation)?;
 
+        #[cfg(not(feature = "igvm"))]
         let load_payload_handle = if snapshot.is_none() {
             Self::load_payload_async(&memory_manager, &config)?
         } else {
@@ -548,6 +559,19 @@ impl Vm {
             )
             .map_err(Error::CpuManager)?;
 
+        // Loading the igvm file is pushed down here because
+        // igvm parser needs cpu_manager to retrieve cpuid leaf.
+        // For the regular case, we can start loading early, but for
+        // igvm case we have to wait until cpu_manager is created.
+        // Currently, Microsoft Hypervisor does not provide any
+        // Hypervisor specific common cpuid, we need to call get_cpuid_values
+        // per cpuid through cpu_manager.
+        #[cfg(feature = "igvm")]
+        let load_payload_handle = if snapshot.is_none() {
+            Self::load_payload_async(&memory_manager, &config, &cpu_manager)?
+        } else {
+            None
+        };
         // The initial TDX configuration must be done before the vCPUs are
         // created
         #[cfg(feature = "tdx")]
@@ -968,6 +992,22 @@ impl Vm {
         Ok(EntryPoint { entry_addr })
     }
 
+    #[cfg(feature = "igvm")]
+    fn load_igvm(
+        igvm: File,
+        memory_manager: Arc<Mutex<MemoryManager>>,
+        cpu_manager: Arc<Mutex<cpu::CpuManager>>,
+    ) -> Result<EntryPoint> {
+        //TODO: see issue https://github.com/cloud-hypervisor/cloud-hypervisor/issues/5993
+
+        let res = igvm_loader::load_igvm(&igvm, memory_manager, cpu_manager, "")
+            .map_err(Error::IgvmLoad)?;
+
+        Ok(EntryPoint {
+            entry_addr: vm_memory::GuestAddress(res.vmsa.rip),
+        })
+    }
+
     #[cfg(target_arch = "x86_64")]
     fn load_kernel(
         mut kernel: File,
@@ -1006,8 +1046,14 @@ impl Vm {
     fn load_payload(
         payload: &PayloadConfig,
         memory_manager: Arc<Mutex<MemoryManager>>,
+        #[cfg(feature = "igvm")] cpu_manager: Arc<Mutex<cpu::CpuManager>>,
     ) -> Result<EntryPoint> {
         trace_scoped!("load_payload");
+        #[cfg(feature = "igvm")]
+        if let Some(_igvm_file) = &payload.igvm {
+            let igvm = File::open(_igvm_file).map_err(Error::IgvmFile)?;
+            return Self::load_igvm(igvm, memory_manager, cpu_manager);
+        }
         match (
             &payload.firmware,
             &payload.kernel,
@@ -1048,6 +1094,7 @@ impl Vm {
     fn load_payload_async(
         memory_manager: &Arc<Mutex<MemoryManager>>,
         config: &Arc<Mutex<VmConfig>>,
+        #[cfg(feature = "igvm")] cpu_manager: &Arc<Mutex<cpu::CpuManager>>,
     ) -> Result<Option<thread::JoinHandle<Result<EntryPoint>>>> {
         // Kernel with TDX is loaded in a different manner
         #[cfg(feature = "tdx")]
@@ -1063,10 +1110,19 @@ impl Vm {
             .map(|payload| {
                 let memory_manager = memory_manager.clone();
                 let payload = payload.clone();
+                #[cfg(feature = "igvm")]
+                let cpu_manager = cpu_manager.clone();
 
                 std::thread::Builder::new()
                     .name("payload_loader".into())
-                    .spawn(move || Self::load_payload(&payload, memory_manager))
+                    .spawn(move || {
+                        Self::load_payload(
+                            &payload,
+                            memory_manager,
+                            #[cfg(feature = "igvm")]
+                            cpu_manager,
+                        )
+                    })
                     .map_err(Error::KernelLoadThreadSpawn)
             })
             .transpose()
