@@ -443,7 +443,14 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
                 .num_args(0)
                 .group("vmm-config"),
         );
-
+    #[cfg(feature = "igvm")]
+    let app = app.arg(
+        Arg::new("igvm")
+            .long("igvm")
+            .help("Path to IGVM file to load.")
+            .num_args(1)
+            .group("vm-config"),
+    );
     app.arg(
         Arg::new("version")
             .short('V')

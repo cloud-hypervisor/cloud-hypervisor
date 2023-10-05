@@ -8,6 +8,9 @@ edition = "2021"
 [package.metadata]
 cargo-fuzz = true
 
+[features]
+igvm = []
+
 [dependencies]
 block = { path = "../block" }
 devices = { path = "../devices" }
