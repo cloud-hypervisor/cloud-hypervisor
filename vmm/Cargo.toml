@@ -61,4 +61,4 @@ vm-migration = { path = "../vm-migration" }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = { version = "0.11.0", features = ["with-serde"] }
 zbus = { version = "3.11.1", optional = true }
-zerocopy = { version = "0.7.1", features = ["derive"] }
+zerocopy = { version = "0.7.8", features = ["derive"] }
