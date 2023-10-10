@@ -713,6 +713,22 @@ pub fn generate_common_cpuid(
         });
     }
 
+    //CPUID_MWAIT_LEAF
+    let function: u32 = 0x5;
+    let leaf = unsafe { std::arch::x86_64::__cpuid(function) };
+    CpuidPatch::set_cpuid_reg(&mut cpuid, function, Some(0), CpuidReg::EAX, leaf.eax);
+    CpuidPatch::set_cpuid_reg(&mut cpuid, function, Some(0), CpuidReg::EBX, leaf.ebx);
+    CpuidPatch::set_cpuid_reg(&mut cpuid, function, Some(0), CpuidReg::ECX, leaf.ecx);
+    CpuidPatch::set_cpuid_reg(&mut cpuid, function, Some(0), CpuidReg::EDX, leaf.edx);
+
+    //mwait
+    let function: u32 = 0x1;
+    let leaf = unsafe { std::arch::x86_64::__cpuid(function) };
+    CpuidPatch::set_cpuid_reg(&mut cpuid, function, Some(0), CpuidReg::EAX, leaf.eax);
+    CpuidPatch::set_cpuid_reg(&mut cpuid, function, Some(0), CpuidReg::EBX, leaf.ebx);
+    CpuidPatch::set_cpuid_reg(&mut cpuid, function, Some(0), CpuidReg::ECX, leaf.ecx);
+    CpuidPatch::set_cpuid_reg(&mut cpuid, function, Some(0), CpuidReg::EDX, leaf.edx);
+
     if kvm_hyperv {
         // Remove conflicting entries
         cpuid.retain(|c| c.function != 0x4000_0000);
