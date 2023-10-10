@@ -1784,6 +1784,24 @@ impl CpuManager {
     pub(crate) fn vcpus_kill_signalled(&self) -> &Arc<AtomicBool> {
         &self.vcpus_kill_signalled
     }
+
+    #[cfg(feature = "igvm")]
+    pub(crate) fn get_cpuid_leaf(
+        &self,
+        cpu_id: u8,
+        eax: u32,
+        ecx: u32,
+        xfem: u64,
+        xss: u64,
+    ) -> Result<[u32; 4]> {
+        let leaf_info = self.vcpus[usize::from(cpu_id)]
+            .lock()
+            .unwrap()
+            .vcpu
+            .get_cpuid_values(eax, ecx, xfem, xss)
+            .unwrap();
+        Ok(leaf_info)
+    }
 }
 
 struct Cpu {
