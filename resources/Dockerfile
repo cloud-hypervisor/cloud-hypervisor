@@ -112,17 +112,18 @@ RUN echo 'source $CARGO_HOME/env' >> $HOME/.bashrc \
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
        git clone https://github.com/spdk/spdk \
        && cd spdk \
-       && git checkout 6301f8915de32baed10dba1eebed556a6749211a \
+       && git checkout ef8bcce58f3f02b79c0619a297e4f17e81e62b24 \
        && git submodule update --init \
        && apt-get update \
        && ./scripts/pkgdep.sh \
        && apt-get clean \
        && ./configure --with-vfio-user \
-       && make -j `nproc` \
+       && make -j $(nproc) TARGET_ARCHITECTURE=skylake \
+       && rm -rf /usr/local/bin/spdk-nvme \
        && mkdir /usr/local/bin/spdk-nvme \
-       && cp ./build/bin/nvmf_tgt /usr/local/bin/spdk-nvme \
-       && cp ./scripts/rpc.py /usr/local/bin/spdk-nvme \
-       && cp -r ./scripts/rpc /usr/local/bin/spdk-nvme \
+       && cp -f ./build/bin/nvmf_tgt /usr/local/bin/spdk-nvme \
+       && cp -f ./scripts/rpc.py /usr/local/bin/spdk-nvme \
+       && cp -rf ./python /usr/local/bin \
        && cd .. && rm -rf spdk; fi
 
 # install ethr tool for performance tests
