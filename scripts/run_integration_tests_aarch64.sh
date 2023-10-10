@@ -11,12 +11,13 @@ build_spdk_nvme() {
     SPDK_DIR="$WORKLOADS_DIR/spdk"
     SPDK_REPO="https://github.com/spdk/spdk.git"
     SPDK_DEPLOY_DIR="/usr/local/bin/spdk-nvme"
-    checkout_repo "$SPDK_DIR" "$SPDK_REPO" master "6301f8915de32baed10dba1eebed556a6749211a"
+    checkout_repo "$SPDK_DIR" "$SPDK_REPO" master "ef8bcce58f3f02b79c0619a297e4f17e81e62b24"
 
     if [ ! -f "$SPDK_DIR/.built" ]; then
         pushd $SPDK_DIR
         git submodule update --init
         apt-get update
+        sed -i "/grpcio/d" scripts/pkgdep/debian.sh
         ./scripts/pkgdep.sh
         ./configure --with-vfio-user
         chmod +x /usr/local/lib/python3.8/dist-packages/ninja/data/bin/ninja
@@ -30,6 +31,7 @@ build_spdk_nvme() {
     cp "$WORKLOADS_DIR/spdk/build/bin/nvmf_tgt" $SPDK_DEPLOY_DIR/nvmf_tgt
     cp "$WORKLOADS_DIR/spdk/scripts/rpc.py" $SPDK_DEPLOY_DIR/rpc.py
     cp -r "$WORKLOADS_DIR/spdk/scripts/rpc" $SPDK_DEPLOY_DIR/rpc
+    cp -r "$WORKLOADS_DIR/spdk/python" $SPDK_DEPLOY_DIR/../
 }
 
 build_virtiofsd() {
