@@ -118,7 +118,7 @@ unsafe fn close_unused_fds(keep_fds: &mut [RawFd]) {
     }
 }
 
-fn set_foreground_process_group(tty: &mut File) -> io::Result<()> {
+fn set_foreground_process_group(tty: &File) -> io::Result<()> {
     // SAFETY: trivially safe.
     let my_pgrp = unsafe { getpgrp() };
     // SAFETY: we have borrowed tty.
@@ -155,7 +155,7 @@ fn set_foreground_process_group(tty: &mut File) -> io::Result<()> {
     Ok(())
 }
 
-fn sigwinch_listener_main(seccomp_filter: BpfProgram, tx: File, mut tty: File) -> ! {
+fn sigwinch_listener_main(seccomp_filter: BpfProgram, tx: File, tty: File) -> ! {
     // SAFETY: any references to these file descriptors are
     // unreachable, because this function never returns.
     unsafe {
@@ -172,7 +172,7 @@ fn sigwinch_listener_main(seccomp_filter: BpfProgram, tx: File, mut tty: File) -
 
     register_signal_handler(SIGWINCH, sigwinch_handler).unwrap();
 
-    set_foreground_process_group(&mut tty).unwrap();
+    set_foreground_process_group(&tty).unwrap();
     drop(tty);
 
     notify();

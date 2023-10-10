@@ -124,6 +124,9 @@ pub enum Error {
     #[error("Error configuring vCPU: {0}")]
     VcpuConfiguration(#[source] arch::Error),
 
+    #[error("Still pending removed vcpu")]
+    VcpuPendingRemovedVcpu,
+
     #[cfg(target_arch = "aarch64")]
     #[error("Error fetching preferred target: {0}")]
     VcpuArmPreferredTarget(#[source] hypervisor::HypervisorVmError),
@@ -424,7 +427,7 @@ impl Snapshottable for Vcpu {
         let saved_state = self
             .vcpu
             .state()
-            .map_err(|e| MigratableError::Pause(anyhow!("Could not get vCPU state {:?}", e)))?;
+            .map_err(|e| MigratableError::Snapshot(anyhow!("Could not get vCPU state {:?}", e)))?;
 
         self.saved_state = Some(saved_state.clone());
 
@@ -549,6 +552,7 @@ impl BusDevice for CpuManager {
 struct VcpuState {
     inserting: bool,
     removing: bool,
+    pending_removal: Arc<AtomicBool>,
     handle: Option<thread::JoinHandle<()>>,
     kill: Arc<AtomicBool>,
     vcpu_run_interrupted: Arc<AtomicBool>,
@@ -623,7 +627,7 @@ impl CpuManager {
             const XFEATURE_XTILEDATA: usize = 18;
             const XFEATURE_XTILEDATA_MASK: usize = 1 << XFEATURE_XTILEDATA;
 
-            // SAFETY: the syscall is only modifing kernel internal
+            // SAFETY: the syscall is only modifying kernel internal
             // data structures that the kernel is itself expected to safeguard.
             let amx_tile = unsafe {
                 libc::syscall(
@@ -1138,7 +1142,19 @@ impl CpuManager {
         // Mark vCPUs for removal, actual removal happens on ejection
         for cpu_id in desired_vcpus..self.present_vcpus() {
             self.vcpu_states[usize::from(cpu_id)].removing = true;
+            self.vcpu_states[usize::from(cpu_id)]
+                .pending_removal
+                .store(true, Ordering::SeqCst);
         }
+    }
+
+    pub fn check_pending_removed_vcpu(&mut self) -> bool {
+        for state in self.vcpu_states.iter() {
+            if state.active() && state.pending_removal.load(Ordering::SeqCst) {
+                return true;
+            }
+        }
+        false
     }
 
     fn remove_vcpu(&mut self, cpu_id: u8) -> Result<()> {
@@ -1151,6 +1167,7 @@ impl CpuManager {
 
         // Once the thread has exited, clear the "kill" so that it can reused
         state.kill.store(false, Ordering::SeqCst);
+        state.pending_removal.store(false, Ordering::SeqCst);
 
         Ok(())
     }
@@ -1185,6 +1202,10 @@ impl CpuManager {
 
         if !self.dynamic {
             return Ok(false);
+        }
+
+        if self.check_pending_removed_vcpu() {
+            return Err(Error::VcpuPendingRemovedVcpu);
         }
 
         match desired_vcpus.cmp(&self.present_vcpus()) {
@@ -1659,7 +1680,7 @@ impl CpuManager {
         // Translation table base address
         let mut descaddr: u64 = extract_bits_64_without_offset!(ttbr1_el1, 48);
         // In the case of FEAT_LPA and FEAT_LPA2, the initial translation table
-        // addresss bits [48:51] comes from TTBR1_EL1 bits [2:5].
+        // address bits [48:51] comes from TTBR1_EL1 bits [2:5].
         if pa_size == 52 {
             descaddr |= extract_bits_64!(ttbr1_el1, 2, 4) << 48;
         }
@@ -1725,6 +1746,10 @@ impl CpuManager {
     ) {
         self.interrupt_controller = Some(interrupt_controller);
     }
+
+    pub(crate) fn vcpus_kill_signalled(&self) -> &Arc<AtomicBool> {
+        &self.vcpus_kill_signalled
+    }
 }
 
 struct Cpu {
@@ -1751,8 +1776,7 @@ impl Cpu {
             _reserved: 0,
         };
 
-        let mut mat_data: Vec<u8> = Vec::new();
-        mat_data.resize(std::mem::size_of_val(&lapic), 0);
+        let mut mat_data: Vec<u8> = vec![0; std::mem::size_of_val(&lapic)];
         // SAFETY: mat_data is large enough to hold lapic
         unsafe { *(mat_data.as_mut_ptr() as *mut LocalX2Apic) = lapic };
 
@@ -1995,7 +2019,7 @@ impl Aml for CpuManager {
                     &aml::Name::new(
                         "_CRS".into(),
                         &aml::ResourceTemplate::new(vec![&aml::AddressSpace::new_memory(
-                            aml::AddressSpaceCachable::NotCacheable,
+                            aml::AddressSpaceCacheable::NotCacheable,
                             true,
                             acpi_address.0,
                             acpi_address.0 + CPU_MANAGER_ACPI_SIZE as u64 - 1,
@@ -2097,7 +2121,7 @@ impl Pausable for CpuManager {
         }
 
         // The vCPU thread will change its paused state before parking, wait here for each
-        // actived vCPU change their state to ensure they have parked.
+        // activated vCPU change their state to ensure they have parked.
         for state in self.vcpu_states.iter() {
             if state.active() {
                 while !state.paused.load(Ordering::SeqCst) {

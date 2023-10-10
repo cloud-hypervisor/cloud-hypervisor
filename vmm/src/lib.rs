@@ -126,6 +126,10 @@ pub enum Error {
     #[error("Error starting D-Bus session: {0}")]
     CreateDBusSession(#[source] zbus::Error),
 
+    /// Cannot create `event-monitor` thread
+    #[error("Error spawning `event-monitor` thread: {0}")]
+    EventMonitorThreadSpawn(#[source] io::Error),
+
     /// Cannot handle the VM STDIN stream
     #[error("Error handling VM stdin: {0:?}")]
     Stdin(VmError),
@@ -287,6 +291,78 @@ impl Serialize for PciDeviceInfo {
         state.serialize_field("bdf", &bdf_str)?;
         state.end()
     }
+}
+
+pub fn feature_list() -> Vec<String> {
+    vec![
+        #[cfg(feature = "dbus_api")]
+        "dbus_api".to_string(),
+        #[cfg(feature = "dhat-heap")]
+        "dhat-heap".to_string(),
+        #[cfg(feature = "guest_debug")]
+        "guest_debug".to_string(),
+        #[cfg(feature = "io_uring")]
+        "io_uring".to_string(),
+        #[cfg(feature = "kvm")]
+        "kvm".to_string(),
+        #[cfg(feature = "mshv")]
+        "mshv".to_string(),
+        #[cfg(feature = "sev_snp")]
+        "sev_snp".to_string(),
+        #[cfg(feature = "tdx")]
+        "tdx".to_string(),
+        #[cfg(feature = "tracing")]
+        "tracing".to_string(),
+    ]
+}
+
+pub fn start_event_monitor_thread(
+    mut monitor: event_monitor::Monitor,
+    seccomp_action: &SeccompAction,
+    hypervisor_type: hypervisor::HypervisorType,
+    exit_event: EventFd,
+) -> Result<thread::JoinHandle<Result<()>>> {
+    // Retrieve seccomp filter
+    let seccomp_filter = get_seccomp_filter(seccomp_action, Thread::EventMonitor, hypervisor_type)
+        .map_err(Error::CreateSeccompFilter)?;
+
+    thread::Builder::new()
+        .name("event-monitor".to_owned())
+        .spawn(move || {
+            // Apply seccomp filter
+            if !seccomp_filter.is_empty() {
+                apply_filter(&seccomp_filter)
+                    .map_err(Error::ApplySeccompFilter)
+                    .map_err(|e| {
+                        error!("Error applying seccomp filter: {:?}", e);
+                        exit_event.write(1).ok();
+                        e
+                    })?;
+            }
+
+            std::panic::catch_unwind(AssertUnwindSafe(move || {
+                while let Ok(event) = monitor.rx.recv() {
+                    let event = Arc::new(event);
+
+                    if let Some(ref mut file) = monitor.file {
+                        file.write_all(event.as_bytes().as_ref()).ok();
+                        file.write_all(b"\n\n").ok();
+                    }
+
+                    for tx in monitor.broadcast.iter() {
+                        tx.send(event.clone()).ok();
+                    }
+                }
+            }))
+            .map_err(|_| {
+                error!("`event-monitor` thread panicked");
+                exit_event.write(1).ok();
+            })
+            .ok();
+
+            Ok(())
+        })
+        .map_err(Error::EventMonitorThreadSpawn)
 }
 
 #[allow(unused_variables)]
@@ -878,6 +954,7 @@ impl Vmm {
             build_version,
             version,
             pid: std::process::id() as i64,
+            features: feature_list(),
         }
     }
 
@@ -1258,6 +1335,8 @@ impl Vmm {
         let vm = Vm::create_hypervisor_vm(
             &self.hypervisor,
             #[cfg(feature = "tdx")]
+            false,
+            #[cfg(feature = "sev_snp")]
             false,
         )
         .map_err(|e| {
@@ -2195,11 +2274,13 @@ mod unit_tests {
                 file: None,
                 mode: ConsoleOutputMode::Null,
                 iommu: false,
+                socket: None,
             },
             console: ConsoleConfig {
                 file: None,
                 mode: ConsoleOutputMode::Tty,
                 iommu: false,
+                socket: None,
             },
             devices: None,
             user_devices: None,

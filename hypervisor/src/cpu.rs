@@ -242,7 +242,7 @@ pub enum HypervisorCpuError {
     UnknownTdxVmCall,
     #[cfg(target_arch = "aarch64")]
     ///
-    /// Failed to intialize PMU
+    /// Failed to initialize PMU
     ///
     #[error("Failed to initialize PMU")]
     InitializePmu,
@@ -252,6 +252,11 @@ pub enum HypervisorCpuError {
     ///
     #[error("Failed to get TSC frequency: {0}")]
     GetTscKhz(#[source] anyhow::Error),
+    ///
+    /// Error setting TSC frequency
+    ///
+    #[error("Failed to set TSC frequency: {0}")]
+    SetTscKhz(#[source] anyhow::Error),
 }
 
 #[derive(Debug)]
@@ -447,11 +452,19 @@ pub trait Vcpu: Send + Sync {
     /// Return the list of initial MSR entries for a VCPU
     ///
     fn boot_msr_entries(&self) -> Vec<MsrEntry>;
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// Get the frequency of the TSC if available
     ///
     fn tsc_khz(&self) -> Result<Option<u32>> {
         Ok(None)
+    }
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Set the frequency of the TSC if available
+    ///
+    fn set_tsc_khz(&self, _freq: u32) -> Result<()> {
+        Ok(())
     }
 }

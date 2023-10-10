@@ -84,6 +84,11 @@ pub enum HypervisorError {
     ///
     #[error("Unsupported CPU:{0}")]
     UnsupportedCpu(#[source] anyhow::Error),
+    ///
+    /// Launching a VM with unsupported VM Type
+    ///
+    #[error("Unsupported VmType")]
+    UnsupportedVmType(),
 }
 
 ///

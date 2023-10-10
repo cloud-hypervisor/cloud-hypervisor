@@ -89,6 +89,9 @@ pub struct PlatformConfig {
     #[cfg(feature = "tdx")]
     #[serde(default)]
     pub tdx: bool,
+    #[cfg(feature = "sev_snp")]
+    #[serde(default)]
+    pub sev_snp: bool,
 }
 
 impl Default for PlatformConfig {
@@ -101,6 +104,8 @@ impl Default for PlatformConfig {
             oem_strings: None,
             #[cfg(feature = "tdx")]
             tdx: false,
+            #[cfg(feature = "sev_snp")]
+            sev_snp: false,
         }
     }
 }
@@ -215,6 +220,8 @@ pub struct DiskConfig {
     pub disable_io_uring: bool,
     #[serde(default)]
     pub pci_segment: u16,
+    #[serde(default)]
+    pub serial: Option<String>,
 }
 
 pub const DEFAULT_DISK_NUM_QUEUES: usize = 1;
@@ -244,6 +251,7 @@ impl Default for DiskConfig {
             disable_io_uring: false,
             rate_limiter_config: None,
             pci_segment: 0,
+            serial: None,
         }
     }
 }
@@ -432,6 +440,7 @@ pub enum ConsoleOutputMode {
     Pty,
     Tty,
     File,
+    Socket,
     Null,
 }
 
@@ -442,6 +451,7 @@ pub struct ConsoleConfig {
     pub mode: ConsoleOutputMode,
     #[serde(default)]
     pub iommu: bool,
+    pub socket: Option<PathBuf>,
 }
 
 pub fn default_consoleconfig_file() -> Option<PathBuf> {
@@ -547,6 +557,7 @@ pub fn default_serial() -> ConsoleConfig {
         file: None,
         mode: ConsoleOutputMode::Null,
         iommu: false,
+        socket: None,
     }
 }
 
@@ -555,6 +566,7 @@ pub fn default_console() -> ConsoleConfig {
         file: None,
         mode: ConsoleOutputMode::Tty,
         iommu: false,
+        socket: None,
     }
 }
 
@@ -599,9 +611,9 @@ pub struct VmConfig {
     pub gdb: bool,
     pub platform: Option<PlatformConfig>,
     pub tpm: Option<TpmConfig>,
-    // Preseved FDs are the ones that share the same life-time as its holding
+    // Preserved FDs are the ones that share the same life-time as its holding
     // VmConfig instance, such as FDs for creating TAP devices.
-    // Perserved FDs will stay open as long as the holding VmConfig instance is
+    // Preserved FDs will stay open as long as the holding VmConfig instance is
     // valid, and will be closed when the holding VmConfig instance is destroyed.
     #[serde(skip)]
     pub preserved_fds: Option<Vec<i32>>,

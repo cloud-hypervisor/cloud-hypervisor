@@ -502,27 +502,31 @@ impl VfioCommon {
         Ok(vfio_common)
     }
 
-    /// In case msix table offset is not page size aligned, we need do some fixup to achive it.
-    /// Becuse we don't want the MMIO RW region and trap region overlap each other.
+    /// In case msix table offset is not page size aligned, we need do some fixup to achieve it.
+    /// Because we don't want the MMIO RW region and trap region overlap each other.
     fn fixup_msix_region(&mut self, bar_id: u32, region_size: u64) -> u64 {
-        let msix = self.interrupt.msix.as_mut().unwrap();
-        let msix_cap = &mut msix.cap;
+        if let Some(msix) = self.interrupt.msix.as_mut() {
+            let msix_cap = &mut msix.cap;
 
-        // Suppose table_bir equals to pba_bir here. Am I right?
-        let (table_offset, table_size) = msix_cap.table_range();
-        if is_page_size_aligned(table_offset) || msix_cap.table_bir() != bar_id {
-            return region_size;
+            // Suppose table_bir equals to pba_bir here. Am I right?
+            let (table_offset, table_size) = msix_cap.table_range();
+            if is_page_size_aligned(table_offset) || msix_cap.table_bir() != bar_id {
+                return region_size;
+            }
+
+            let (pba_offset, pba_size) = msix_cap.pba_range();
+            let msix_sz = align_page_size_up(table_size + pba_size);
+            // Expand region to hold RW and trap region which both page size aligned
+            let size = std::cmp::max(region_size * 2, msix_sz * 2);
+            // let table starts from the middle of the region
+            msix_cap.table_set_offset((size / 2) as u32);
+            msix_cap.pba_set_offset((size / 2 + pba_offset - table_offset) as u32);
+
+            size
+        } else {
+            // MSI-X not supported for this device
+            region_size
         }
-
-        let (pba_offset, pba_size) = msix_cap.pba_range();
-        let msix_sz = align_page_size_up(table_size + pba_size);
-        // Expand region to hold RW and trap region which both page size aligned
-        let size = std::cmp::max(region_size * 2, msix_sz * 2);
-        // let table starts from the middle of the region
-        msix_cap.table_set_offset((size / 2) as u32);
-        msix_cap.pba_set_offset((size / 2 + pba_offset - table_offset) as u32);
-
-        size
     }
 
     pub(crate) fn allocate_bars(
@@ -907,7 +911,7 @@ impl VfioCommon {
             let cap_next: u16 = ((ext_cap_hdr >> 20) & 0xfff) as u16;
 
             match PciExpressCapabilityId::from(cap_id) {
-                PciExpressCapabilityId::AlternativeRoutingIdentificationIntepretation
+                PciExpressCapabilityId::AlternativeRoutingIdentificationInterpretation
                 | PciExpressCapabilityId::ResizeableBar
                 | PciExpressCapabilityId::SingleRootIoVirtualization => {
                     let reg_idx = (current_offset / 4) as usize;
@@ -1407,7 +1411,7 @@ impl VfioPciDevice {
                     // around them, leading to a list of sparse areas.
                     // We want to make sure we will still trap MMIO accesses
                     // to these MSI-X specific ranges. If these region don't align
-                    // with pagesize, we can achive it by enlarging its range.
+                    // with pagesize, we can achieve it by enlarging its range.
                     //
                     // Using a BtreeMap as the list provided through the iterator is sorted
                     // by key. This ensures proper split of the whole region.

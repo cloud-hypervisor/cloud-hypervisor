@@ -123,7 +123,7 @@ pub enum Error {
     VhostUserSetLogBase(VhostError),
     #[error("Invalid used address")]
     UsedAddress,
-    #[error("Invalid features provided from vhost-user backe")]
+    #[error("Invalid features provided from vhost-user backend")]
     InvalidFeatures,
     #[error("Missing file descriptor for the region")]
     MissingRegionFd,

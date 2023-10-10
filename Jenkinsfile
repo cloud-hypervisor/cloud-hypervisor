@@ -22,7 +22,7 @@ pipeline {
                     steps {
                         script {
                             runWorkers = false
-                            echo 'No changes requring a build'
+                            echo 'No changes requiring a build'
                         }
                     }
                 }
@@ -117,6 +117,63 @@ pipeline {
                         }
                     }
                 }
+                stage('Worker build - AMD') {
+                    agent { node { label 'jammy-amd' } }
+                    when {
+                        beforeAgent true
+                        expression {
+                            return runWorkers
+                        }
+                    }
+                    stages {
+                        stage('Checkout') {
+                            steps {
+                                checkout scm
+                            }
+                        }
+                        stage('Prepare environment') {
+                            steps {
+                                sh 'scripts/prepare_vdpa.sh'
+                            }
+                        }
+                        stage('Run integration tests') {
+                            options {
+                                timeout(time: 1, unit: 'HOURS')
+                            }
+                            steps {
+                                sh 'sudo modprobe openvswitch'
+                                sh 'scripts/dev_cli.sh tests --integration'
+                            }
+                        }
+                        stage('Run live-migration integration tests') {
+                            options {
+                                timeout(time: 1, unit: 'HOURS')
+                            }
+                            steps {
+                                sh 'sudo modprobe openvswitch'
+                                sh 'scripts/dev_cli.sh tests --integration-live-migration'
+                            }
+                        }
+                        stage('Run integration tests for musl') {
+                            options {
+                                timeout(time: 1, unit: 'HOURS')
+                            }
+                            steps {
+                                sh 'sudo modprobe openvswitch'
+                                sh 'scripts/dev_cli.sh tests --integration --libc musl'
+                            }
+                        }
+                        stage('Run live-migration integration tests for musl') {
+                            options {
+                                timeout(time: 1, unit: 'HOURS')
+                            }
+                            steps {
+                                sh 'sudo modprobe openvswitch'
+                                sh 'scripts/dev_cli.sh tests --integration-live-migration --libc musl'
+                            }
+                        }
+                    }
+                }
                 stage('AArch64 worker build') {
                     agent { node { label 'bionic-arm64' } }
                     when {
@@ -150,7 +207,7 @@ pipeline {
                         }
                         stage('Install azure-cli') {
                             steps {
-                                installAzureCli('bionic', 'arm64')
+                                installAzureCli('focal', 'arm64')
                             }
                         }
                         stage('Download Windows image') {

@@ -35,6 +35,7 @@ use crate::qcow::{QcowFile, RawFile};
 use crate::vhdx::{Vhdx, VhdxError};
 #[cfg(feature = "io_uring")]
 use io_uring::{opcode, IoUring, Probe};
+use libc::{ioctl, S_IFBLK, S_IFMT};
 use smallvec::SmallVec;
 use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::cmp;
@@ -44,6 +45,7 @@ use std::fmt::Debug;
 use std::fs::File;
 use std::io::{self, IoSlice, IoSliceMut, Read, Seek, SeekFrom, Write};
 use std::os::linux::fs::MetadataExt;
+use std::os::unix::io::AsRawFd;
 use std::path::Path;
 use std::result;
 use std::sync::Arc;
@@ -60,6 +62,7 @@ use vm_memory::{
 };
 use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
+use vmm_sys_util::{ioctl_io_nr, ioctl_ioc_nr};
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
@@ -113,8 +116,8 @@ fn build_device_id(disk_path: &Path) -> result::Result<String, Error> {
     Ok(device_id)
 }
 
-pub fn build_disk_image_id(disk_path: &Path) -> Vec<u8> {
-    let mut default_disk_image_id = vec![0; VIRTIO_BLK_ID_BYTES as usize];
+pub fn build_serial(disk_path: &Path) -> Vec<u8> {
+    let mut default_serial = vec![0; VIRTIO_BLK_ID_BYTES as usize];
     match build_device_id(disk_path) {
         Err(_) => {
             warn!("Could not generate device id. We'll use a default.");
@@ -124,17 +127,17 @@ pub fn build_disk_image_id(disk_path: &Path) -> Vec<u8> {
             // This will also zero out any leftover bytes.
             let disk_id = m.as_bytes();
             let bytes_to_copy = cmp::min(disk_id.len(), VIRTIO_BLK_ID_BYTES as usize);
-            default_disk_image_id[..bytes_to_copy].clone_from_slice(&disk_id[..bytes_to_copy])
+            default_serial[..bytes_to_copy].clone_from_slice(&disk_id[..bytes_to_copy])
         }
     }
-    default_disk_image_id
+    default_serial
 }
 
 #[derive(Error, Debug)]
 pub enum ExecuteError {
     #[error("Bad request: {0}")]
     BadRequest(Error),
-    #[error("Falied to flush: {0}")]
+    #[error("Failed to flush: {0}")]
     Flush(io::Error),
     #[error("Failed to read: {0}")]
     Read(GuestMemoryError),
@@ -327,7 +330,7 @@ impl Request {
         disk: &mut T,
         disk_nsectors: u64,
         mem: &GuestMemoryMmap,
-        disk_id: &[u8],
+        serial: &[u8],
     ) -> result::Result<u32, ExecuteError> {
         disk.seek(SeekFrom::Start(self.sector << SECTOR_SHIFT))
             .map_err(ExecuteError::Seek)?;
@@ -359,10 +362,10 @@ impl Request {
                 }
                 RequestType::Flush => disk.flush().map_err(ExecuteError::Flush)?,
                 RequestType::GetDeviceId => {
-                    if (*data_len as usize) < disk_id.len() {
+                    if (*data_len as usize) < serial.len() {
                         return Err(ExecuteError::BadRequest(Error::InvalidOffset));
                     }
-                    mem.write_slice(disk_id, *data_addr)
+                    mem.write_slice(serial, *data_addr)
                         .map_err(ExecuteError::Write)?;
                 }
                 RequestType::Unsupported(t) => return Err(ExecuteError::Unsupported(t)),
@@ -376,7 +379,7 @@ impl Request {
         mem: &GuestMemoryMmap,
         disk_nsectors: u64,
         disk_image: &mut dyn AsyncIo,
-        disk_id: &[u8],
+        serial: &[u8],
         user_data: u64,
     ) -> result::Result<bool, ExecuteError> {
         let sector = self.sector;
@@ -403,13 +406,13 @@ impl Request {
             let origin_ptr = mem
                 .get_slice(*data_addr, *data_len as usize)
                 .map_err(ExecuteError::GetHostAddress)?
-                .as_ptr();
+                .ptr_guard();
 
             // Verify the buffer alignment.
             // In case it's not properly aligned, an intermediate buffer is
             // created with the correct alignment, and a copy from/to the
             // origin buffer is performed, depending on the type of operation.
-            let iov_base = if (origin_ptr as u64) % SECTOR_SIZE != 0 {
+            let iov_base = if (origin_ptr.as_ptr() as u64) % SECTOR_SIZE != 0 {
                 let layout =
                     Layout::from_size_align(*data_len as usize, SECTOR_SIZE as usize).unwrap();
                 // SAFETY: layout has non-zero size
@@ -425,15 +428,13 @@ impl Request {
                 if request_type == RequestType::Out {
                     // SAFETY: destination buffer has been allocated with
                     // the proper size.
-                    unsafe {
-                        std::ptr::copy(origin_ptr as *const u8, aligned_ptr, *data_len as usize)
-                    };
+                    unsafe { std::ptr::copy(origin_ptr.as_ptr(), aligned_ptr, *data_len as usize) };
                 }
 
                 // Store both origin and aligned pointers for complete_async()
                 // to process them.
                 self.aligned_operations.push(AlignedOperation {
-                    origin_ptr: origin_ptr as u64,
+                    origin_ptr: origin_ptr.as_ptr() as u64,
                     aligned_ptr: aligned_ptr as u64,
                     size: *data_len as usize,
                     layout,
@@ -441,7 +442,7 @@ impl Request {
 
                 aligned_ptr as *mut libc::c_void
             } else {
-                origin_ptr as *mut libc::c_void
+                origin_ptr.as_ptr() as *mut libc::c_void
             };
 
             let iovec = libc::iovec {
@@ -480,10 +481,10 @@ impl Request {
                 } else {
                     return Err(ExecuteError::BadRequest(Error::TooManyDescriptors));
                 };
-                if (data_len as usize) < disk_id.len() {
+                if (data_len as usize) < serial.len() {
                     return Err(ExecuteError::BadRequest(Error::InvalidOffset));
                 }
-                mem.write_slice(disk_id, data_addr)
+                mem.write_slice(serial, data_addr)
                     .map_err(ExecuteError::Write)?;
                 return Ok(false);
             }
@@ -728,24 +729,33 @@ pub enum ImageType {
 const QCOW_MAGIC: u32 = 0x5146_49fb;
 const VHDX_SIGN: u64 = 0x656C_6966_7864_6876;
 
+/// Read a block into memory aligned by the source block size (needed for O_DIRECT)
+pub fn read_aligned_block_size(f: &mut File) -> std::io::Result<Vec<u8>> {
+    let blocksize = DiskTopology::probe(f)?.logical_block_size as usize;
+    // SAFETY: We are allocating memory that is naturally aligned (size = alignment) and we meet
+    // requirements for safety from Vec::from_raw_parts() as we are using the global allocator
+    // and transferring ownership of the memory.
+    let mut data = unsafe {
+        Vec::from_raw_parts(
+            alloc_zeroed(Layout::from_size_align_unchecked(blocksize, blocksize)),
+            blocksize,
+            blocksize,
+        )
+    };
+    f.read_exact(&mut data)?;
+    Ok(data)
+}
+
 /// Determine image type through file parsing.
 pub fn detect_image_type(f: &mut File) -> std::io::Result<ImageType> {
-    // We must create a buffer aligned on 512 bytes with a size being a
-    // multiple of 512 bytes as the file might be opened with O_DIRECT flag.
-    #[repr(align(512))]
-    struct Sector {
-        data: [u8; 512],
-    }
-    let mut s = Sector { data: [0; 512] };
-
-    f.read_exact(&mut s.data)?;
+    let block = read_aligned_block_size(f)?;
 
     // Check 4 first bytes to get the header value and determine the image type
-    let image_type = if u32::from_be_bytes(s.data[0..4].try_into().unwrap()) == QCOW_MAGIC {
+    let image_type = if u32::from_be_bytes(block[0..4].try_into().unwrap()) == QCOW_MAGIC {
         ImageType::Qcow2
     } else if vhd::is_fixed_vhd(f)? {
         ImageType::FixedVhd
-    } else if u64::from_le_bytes(s.data[0..8].try_into().unwrap()) == VHDX_SIGN {
+    } else if u64::from_le_bytes(block[0..8].try_into().unwrap()) == VHDX_SIGN {
         ImageType::Vhdx
     } else {
         ImageType::Raw
@@ -775,4 +785,86 @@ pub fn create_disk_file(mut file: File, direct_io: bool) -> Result<Box<dyn Block
         }
         ImageType::Raw => Box::new(RawFile::new(file, direct_io)) as Box<dyn BlockBackend>,
     })
+}
+
+#[derive(Debug)]
+pub struct DiskTopology {
+    pub logical_block_size: u64,
+    pub physical_block_size: u64,
+    pub minimum_io_size: u64,
+    pub optimal_io_size: u64,
+}
+
+impl Default for DiskTopology {
+    fn default() -> Self {
+        Self {
+            logical_block_size: 512,
+            physical_block_size: 512,
+            minimum_io_size: 512,
+            optimal_io_size: 0,
+        }
+    }
+}
+
+ioctl_io_nr!(BLKSSZGET, 0x12, 104);
+ioctl_io_nr!(BLKPBSZGET, 0x12, 123);
+ioctl_io_nr!(BLKIOMIN, 0x12, 120);
+ioctl_io_nr!(BLKIOOPT, 0x12, 121);
+
+enum BlockSize {
+    LogicalBlock,
+    PhysicalBlock,
+    MinimumIo,
+    OptimalIo,
+}
+
+impl DiskTopology {
+    fn is_block_device(f: &File) -> std::io::Result<bool> {
+        let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
+        // SAFETY: FFI call with a valid fd and buffer
+        let ret = unsafe { libc::fstat(f.as_raw_fd(), stat.as_mut_ptr()) };
+        if ret != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+
+        // SAFETY: stat is valid at this point
+        let is_block = unsafe { (*stat.as_ptr()).st_mode & S_IFMT == S_IFBLK };
+        Ok(is_block)
+    }
+
+    // libc::ioctl() takes different types on different architectures
+    fn query_block_size(f: &File, block_size_type: BlockSize) -> std::io::Result<u64> {
+        let mut block_size = 0;
+        // SAFETY: FFI call with correct arguments
+        let ret = unsafe {
+            ioctl(
+                f.as_raw_fd(),
+                match block_size_type {
+                    BlockSize::LogicalBlock => BLKSSZGET(),
+                    BlockSize::PhysicalBlock => BLKPBSZGET(),
+                    BlockSize::MinimumIo => BLKIOMIN(),
+                    BlockSize::OptimalIo => BLKIOOPT(),
+                } as _,
+                &mut block_size,
+            )
+        };
+        if ret != 0 {
+            return Err(std::io::Error::last_os_error());
+        };
+
+        Ok(block_size)
+    }
+
+    pub fn probe(f: &File) -> std::io::Result<Self> {
+        if !Self::is_block_device(f)? {
+            return Ok(DiskTopology::default());
+        }
+
+        Ok(DiskTopology {
+            logical_block_size: Self::query_block_size(f, BlockSize::LogicalBlock)?,
+            physical_block_size: Self::query_block_size(f, BlockSize::PhysicalBlock)?,
+            minimum_io_size: Self::query_block_size(f, BlockSize::MinimumIo)?,
+            optimal_io_size: Self::query_block_size(f, BlockSize::OptimalIo)?,
+        })
+    }
 }

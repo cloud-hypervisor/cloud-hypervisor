@@ -239,6 +239,36 @@ impl<T: CpuStateManager> InstructionHandler<T> for Movzx_r64_rm16 {
     movzx!(u64, u16);
 }
 
+pub struct Mov_moffs16_AX;
+impl<T: CpuStateManager> InstructionHandler<T> for Mov_moffs16_AX {
+    movzx!(u16, u16);
+}
+
+pub struct Mov_AX_moffs16;
+impl<T: CpuStateManager> InstructionHandler<T> for Mov_AX_moffs16 {
+    movzx!(u16, u16);
+}
+
+pub struct Mov_moffs32_EAX;
+impl<T: CpuStateManager> InstructionHandler<T> for Mov_moffs32_EAX {
+    movzx!(u32, u32);
+}
+
+pub struct Mov_EAX_moffs32;
+impl<T: CpuStateManager> InstructionHandler<T> for Mov_EAX_moffs32 {
+    movzx!(u32, u32);
+}
+
+pub struct Mov_moffs64_RAX;
+impl<T: CpuStateManager> InstructionHandler<T> for Mov_moffs64_RAX {
+    movzx!(u64, u64);
+}
+
+pub struct Mov_RAX_moffs64;
+impl<T: CpuStateManager> InstructionHandler<T> for Mov_RAX_moffs64 {
+    movzx!(u64, u64);
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(unused_mut)]
@@ -616,5 +646,124 @@ mod tests {
             .read_reg(Register::EAX)
             .unwrap();
         assert_eq!(eax, value as u64);
+    }
+
+    #[test]
+    // movabs ax, ds:0x1337
+    // movabs eax, ds:0x1337
+    // movabs rax, ds:0x1337
+    fn test_mov_memoff_ax() {
+        let test_inputs: [(Register, &[u8]); 3] = [
+            (Register::AX, &[0x66, 0xa1]),
+            (Register::EAX, &[0xa1]),
+            (Register::RAX, &[0x48, 0xa1]),
+        ];
+
+        // Constructs the instruction with the provided inputs and emulates it.
+        fn helper(register: Register, instruction_prefix: &[u8]) {
+            let mem_addr: u64 = 0x1337;
+            let mem_value: u64 = 0x13371337deadbeef;
+            let ip: u64 = 0x1000;
+            let cpu_id = 0;
+
+            let mut instruction_bytes = Vec::new();
+            // instruction prefix with specified register
+            instruction_bytes.extend(instruction_prefix);
+            // 64-bit memory operand
+            instruction_bytes.extend([
+                mem_addr.to_le_bytes()[0],
+                mem_addr.to_le_bytes()[1],
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            ]);
+
+            let memory: [u8; 8] = mem_value.to_le_bytes();
+            let mut vmm = MockVmm::new(ip, vec![], Some((mem_addr, &memory)));
+            assert!(vmm.emulate_first_insn(cpu_id, &instruction_bytes).is_ok());
+
+            let ax: u64 = vmm.cpu_state(cpu_id).unwrap().read_reg(register).unwrap();
+
+            match register {
+                Register::AX => {
+                    assert_eq!(ax as u16, mem_value as u16);
+                }
+                Register::EAX => {
+                    assert_eq!(ax as u32, mem_value as u32);
+                }
+                Register::RAX => {
+                    assert_eq!(ax, mem_value);
+                }
+                _ => panic!(),
+            }
+        }
+
+        for (register, instruction_prefix) in test_inputs {
+            helper(register, instruction_prefix)
+        }
+    }
+
+    #[test]
+    // movabs ds:0x1337, ax
+    // movabs ds:0x1337, eax
+    // movabs ds:0x1337, rax
+    fn test_mov_ax_memoff() {
+        let test_inputs: [(Register, &[u8]); 3] = [
+            (Register::AX, &[0x66, 0xa3]),
+            (Register::EAX, &[0xa3]),
+            (Register::RAX, &[0x48, 0xa3]),
+        ];
+
+        // Constructs the instruction with the provided inputs and emulates it.
+        fn helper(register: Register, instruction_prefix: &[u8]) {
+            let mem_addr: u64 = 0x1337;
+            let ax: u64 = 0x13371337deadbeef;
+            let ip: u64 = 0x1000;
+            let cpu_id = 0;
+
+            let mut instruction_bytes = Vec::new();
+            // instruction prefix with specified register
+            instruction_bytes.extend(instruction_prefix);
+            // 64-bit memory operand
+            instruction_bytes.extend([
+                mem_addr.to_le_bytes()[0],
+                mem_addr.to_le_bytes()[1],
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            ]);
+
+            let mut vmm = MockVmm::new(ip, vec![(Register::RAX, ax)], None);
+            assert!(vmm.emulate_first_insn(cpu_id, &instruction_bytes).is_ok());
+
+            match register {
+                Register::AX => {
+                    let mut memory: [u8; 2] = [0; 2];
+                    vmm.read_memory(mem_addr, &mut memory).unwrap();
+                    assert_eq!(u16::from_le_bytes(memory), ax as u16);
+                }
+                Register::EAX => {
+                    let mut memory: [u8; 4] = [0; 4];
+                    vmm.read_memory(mem_addr, &mut memory).unwrap();
+                    assert_eq!(u32::from_le_bytes(memory), ax as u32);
+                }
+                Register::RAX => {
+                    let mut memory: [u8; 8] = [0; 8];
+                    vmm.read_memory(mem_addr, &mut memory).unwrap();
+                    assert_eq!(u64::from_le_bytes(memory), ax);
+                }
+                _ => panic!(),
+            }
+        }
+
+        for (register, instruction_prefix) in test_inputs {
+            helper(register, instruction_prefix)
+        }
     }
 }

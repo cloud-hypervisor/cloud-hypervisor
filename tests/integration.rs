@@ -395,6 +395,52 @@ fn _test_api_pause_resume(target_api: TargetApi, guest: Guest) {
     handle_child_output(r, &output);
 }
 
+fn _test_pty_interaction(pty_path: PathBuf) {
+    let mut cf = std::fs::OpenOptions::new()
+        .write(true)
+        .read(true)
+        .open(pty_path)
+        .unwrap();
+
+    // Some dumb sleeps but we don't want to write
+    // before the console is up and we don't want
+    // to try and write the next line before the
+    // login process is ready.
+    thread::sleep(std::time::Duration::new(5, 0));
+    assert_eq!(cf.write(b"cloud\n").unwrap(), 6);
+    thread::sleep(std::time::Duration::new(2, 0));
+    assert_eq!(cf.write(b"cloud123\n").unwrap(), 9);
+    thread::sleep(std::time::Duration::new(2, 0));
+    assert_eq!(cf.write(b"echo test_pty_console\n").unwrap(), 22);
+    thread::sleep(std::time::Duration::new(2, 0));
+
+    // read pty and ensure they have a login shell
+    // some fairly hacky workarounds to avoid looping
+    // forever in case the channel is blocked getting output
+    let ptyc = pty_read(cf);
+    let mut empty = 0;
+    let mut prev = String::new();
+    loop {
+        thread::sleep(std::time::Duration::new(2, 0));
+        match ptyc.try_recv() {
+            Ok(line) => {
+                empty = 0;
+                prev = prev + &line;
+                if prev.contains("test_pty_console") {
+                    break;
+                }
+            }
+            Err(mpsc::TryRecvError::Empty) => {
+                empty += 1;
+                assert!(empty <= 5, "No login on pty");
+            }
+            _ => {
+                panic!("No login on pty")
+            }
+        }
+    }
+}
+
 fn prepare_virtiofsd(tmp_dir: &TempDir, shared_dir: &str) -> (std::process::Child, String) {
     let mut workload_path = dirs::home_dir().unwrap();
     workload_path.push("workloads");
@@ -888,7 +934,7 @@ fn check_sequential_events_exact(expected_events: &[&MetaEvent], event_file: &st
     true
 }
 
-// Return true if events from the input 'expected_events' are matched exactly
+// Return true if events from the input 'latest_events' are matched exactly
 // with the most recent events from the 'event_file'
 fn check_latest_events_exact(latest_events: &[&MetaEvent], event_file: &str) -> bool {
     let json_events = parse_event_file(event_file);
@@ -1844,7 +1890,7 @@ fn test_memory_mergeable(mergeable: bool) {
         "mergeable=off"
     };
 
-    // We are assuming the rest of the system in our CI is not using mergeable memeory
+    // We are assuming the rest of the system in our CI is not using mergeable memory
     let ksm_ps_init = get_ksm_pages_shared();
     assert!(ksm_ps_init == 0);
 
@@ -2098,6 +2144,16 @@ fn balloon_size(api_socket: &str) -> u64 {
         .parse::<u64>()
         .unwrap();
     total_mem - actual_mem
+}
+
+fn vm_state(api_socket: &str) -> String {
+    let (cmd_success, cmd_output) = remote_command_w_output(api_socket, "info", None);
+    assert!(cmd_success);
+
+    let info: serde_json::Value = serde_json::from_slice(&cmd_output).unwrap_or_default();
+    let state = &info["state"].as_str().unwrap();
+
+    state.to_string()
 }
 
 // This test validates that it can find the virtio-iommu device at first.
@@ -2786,7 +2842,6 @@ mod common_parallel {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_pci_multiple_segments() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
@@ -3905,49 +3960,72 @@ mod common_parallel {
             guest.wait_vm_boot(None).unwrap();
             // Get pty fd for console
             let console_path = get_pty_path(&api_socket, "console");
-            // TODO: Get serial pty test working
-            let mut cf = std::fs::OpenOptions::new()
-                .write(true)
-                .read(true)
-                .open(console_path)
-                .unwrap();
+            _test_pty_interaction(console_path);
 
-            // Some dumb sleeps but we don't want to write
-            // before the console is up and we don't want
-            // to try and write the next line before the
-            // login process is ready.
-            thread::sleep(std::time::Duration::new(5, 0));
-            assert_eq!(cf.write(b"cloud\n").unwrap(), 6);
-            thread::sleep(std::time::Duration::new(2, 0));
-            assert_eq!(cf.write(b"cloud123\n").unwrap(), 9);
-            thread::sleep(std::time::Duration::new(2, 0));
-            assert_eq!(cf.write(b"echo test_pty_console\n").unwrap(), 22);
-            thread::sleep(std::time::Duration::new(2, 0));
+            guest.ssh_command("sudo shutdown -h now").unwrap();
+        });
 
-            // read pty and ensure they have a login shell
-            // some fairly hacky workarounds to avoid looping
-            // forever in case the channel is blocked getting output
-            let ptyc = pty_read(cf);
-            let mut empty = 0;
-            let mut prev = String::new();
-            loop {
-                thread::sleep(std::time::Duration::new(2, 0));
-                match ptyc.try_recv() {
-                    Ok(line) => {
-                        empty = 0;
-                        prev = prev + &line;
-                        if prev.contains("test_pty_console") {
-                            break;
-                        }
-                    }
-                    Err(mpsc::TryRecvError::Empty) => {
-                        empty += 1;
-                        assert!(empty <= 5, "No login on pty");
-                    }
-                    _ => panic!("No login on pty"),
-                }
-            }
+        let _ = child.wait_timeout(std::time::Duration::from_secs(20));
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
 
+        let r = std::panic::catch_unwind(|| {
+            // Check that the cloud-hypervisor binary actually terminated
+            assert!(output.status.success())
+        });
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_serial_socket_interaction() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+        let serial_socket = guest.tmp_dir.as_path().join("/tmp/serial.socket");
+        let serial_socket_pty = guest.tmp_dir.as_path().join("/tmp/serial.pty");
+        let serial_option = if cfg!(target_arch = "x86_64") {
+            " console=ttyS0"
+        } else {
+            " console=ttyAMA0"
+        };
+        let cmdline = DIRECT_KERNEL_BOOT_CMDLINE.to_owned() + serial_option;
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", &cmdline])
+            .default_disks()
+            .default_net()
+            .args(["--console", "null"])
+            .args([
+                "--serial",
+                format!("socket={}", serial_socket.to_str().unwrap()).as_str(),
+            ])
+            .spawn()
+            .unwrap();
+
+        let _ = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+        });
+
+        let mut socat_command = Command::new("socat");
+        let socat_args = [
+            &format!("pty,link={},raw", serial_socket_pty.display()),
+            &format!("UNIX-CONNECT:{}", serial_socket.display()),
+        ];
+        socat_command.args(socat_args);
+
+        let mut socat_child = socat_command.spawn().unwrap();
+        thread::sleep(std::time::Duration::new(1, 0));
+
+        let _ = std::panic::catch_unwind(|| {
+            _test_pty_interaction(serial_socket_pty);
+        });
+
+        let _ = socat_child.kill();
+
+        let r = std::panic::catch_unwind(|| {
             guest.ssh_command("sudo shutdown -h now").unwrap();
         });
 
@@ -4060,7 +4138,6 @@ mod common_parallel {
     #[test]
     #[cfg(target_arch = "x86_64")]
     #[cfg(not(feature = "mshv"))]
-    #[ignore = "See #4324"]
     // The VFIO integration test starts cloud-hypervisor guest with 3 TAP
     // backed networking interfaces, bound through a simple bridge on the host.
     // So if the nested cloud-hypervisor succeeds in getting a directly
@@ -4838,12 +4915,13 @@ mod common_parallel {
             .args(["--memory", format!("size={guest_memory_size_kb}K").as_str()])
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_net()
             .default_disks()
             .capture_output()
             .spawn()
             .unwrap();
 
-        thread::sleep(std::time::Duration::new(20, 0));
+        guest.wait_vm_boot(None).unwrap();
 
         let r = std::panic::catch_unwind(|| {
             let overhead = get_vmm_overhead(child.id(), guest_memory_size_kb);
@@ -6076,6 +6154,43 @@ mod common_parallel {
     }
 
     #[test]
+    #[cfg(feature = "guest_debug")]
+    fn test_coredump_no_pause() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+        let api_socket = temp_api_path(&guest.tmp_dir);
+
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", "boot=4"])
+            .args(["--memory", "size=4G"])
+            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .default_disks()
+            .args(["--net", guest.default_net_string().as_str()])
+            .args(["--api-socket", &api_socket])
+            .capture_output();
+
+        let mut child = cmd.spawn().unwrap();
+        let vmcore_file = temp_vmcore_file_path(&guest.tmp_dir);
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            assert!(remote_command(
+                &api_socket,
+                "coredump",
+                Some(format!("file://{vmcore_file}").as_str()),
+            ));
+
+            assert_eq!(vm_state(&api_socket), "Running");
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
     fn test_watchdog() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
@@ -6128,7 +6243,7 @@ mod common_parallel {
             guest.ssh_command("screen -dmS reboot sh -c \"sleep 5; echo s | tee /proc/sysrq-trigger; echo c | sudo tee /proc/sysrq-trigger\"").unwrap();
             // Allow some time for the watchdog to trigger (max 30s) and reboot to happen
             guest.wait_vm_boot(Some(50)).unwrap();
-            // Check a reboot is triggerred by the watchdog
+            // Check a reboot is triggered by the watchdog
             expected_reboot_count += 1;
             assert_eq!(get_reboot_count(&guest), expected_reboot_count);
 
@@ -6806,6 +6921,7 @@ mod common_parallel {
 
     #[test]
     #[cfg(target_arch = "x86_64")]
+    #[ignore = "See #5756"]
     fn test_vdpa_net() {
         // Before trying to run the test, verify the vdpa_sim_net module is correctly loaded.
         if !exec_host_command_status("lsmod | grep vdpa_sim_net").success() {
@@ -8740,13 +8856,13 @@ mod live_migration {
             );
         });
 
-        // Check and report any errors occured during the live-migration
+        // Check and report any errors occurred during the live-migration
         if r.is_err() {
             print_and_panic(
                 src_child,
                 dest_child,
                 None,
-                "Error occured during live-migration",
+                "Error occurred during live-migration",
             );
         }
 
@@ -8914,13 +9030,13 @@ mod live_migration {
             );
         });
 
-        // Check and report any errors occured during the live-migration
+        // Check and report any errors occurred during the live-migration
         if r.is_err() {
             print_and_panic(
                 src_child,
                 dest_child,
                 None,
-                "Error occured during live-migration",
+                "Error occurred during live-migration",
             );
         }
 
@@ -9140,13 +9256,13 @@ mod live_migration {
             );
         });
 
-        // Check and report any errors occured during the live-migration
+        // Check and report any errors occurred during the live-migration
         if r.is_err() {
             print_and_panic(
                 src_child,
                 dest_child,
                 None,
-                "Error occured during live-migration",
+                "Error occurred during live-migration",
             );
         }
 
@@ -9359,13 +9475,13 @@ mod live_migration {
             );
         });
 
-        // Check and report any errors occured during the live-migration
+        // Check and report any errors occurred during the live-migration
         if r.is_err() {
             print_and_panic(
                 src_child,
                 dest_child,
                 None,
-                "Error occured during live-migration",
+                "Error occurred during live-migration",
             );
         }
 
@@ -9400,7 +9516,7 @@ mod live_migration {
             guest.ssh_command("screen -dmS reboot sh -c \"sleep 5; echo s | tee /proc/sysrq-trigger; echo c | sudo tee /proc/sysrq-trigger\"").unwrap();
             // Allow some time for the watchdog to trigger (max 30s) and reboot to happen
             guest.wait_vm_boot(Some(50)).unwrap();
-            // Check a reboot is triggerred by the watchdog
+            // Check a reboot is triggered by the watchdog
             expected_reboot_count += 1;
             assert_eq!(get_reboot_count(&guest), expected_reboot_count);
 
@@ -9469,13 +9585,13 @@ mod live_migration {
             );
         });
 
-        // Check and report any errors occured during the live-migration
+        // Check and report any errors occurred during the live-migration
         if r.is_err() {
             print_and_panic(
                 src_child,
                 dest_child,
                 Some(ovs_child),
-                "Error occured during live-migration",
+                "Error occurred during live-migration",
             );
         }
 

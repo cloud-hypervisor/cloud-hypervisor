@@ -3,8 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use crate::async_io::{
-    AsyncIo, AsyncIoError, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult, DiskTopology,
+    AsyncIo, AsyncIoError, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult,
 };
+use crate::DiskTopology;
 use io_uring::{opcode, squeue, types, IoUring};
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
@@ -36,7 +37,7 @@ impl DiskFile for RawFileDisk {
     }
 
     fn topology(&mut self) -> DiskTopology {
-        if let Ok(topology) = DiskTopology::probe(&mut self.file) {
+        if let Ok(topology) = DiskTopology::probe(&self.file) {
             topology
         } else {
             warn!("Unable to get device topology. Using default topology");
@@ -86,7 +87,7 @@ impl AsyncIo for RawFileAsync {
         let _ = unsafe {
             sq.push(
                 &opcode::Readv::new(types::Fd(self.fd), iovecs.as_ptr(), iovecs.len() as u32)
-                    .offset(offset)
+                    .offset(offset.try_into().unwrap())
                     .build()
                     .flags(squeue::Flags::ASYNC)
                     .user_data(user_data),
@@ -114,7 +115,7 @@ impl AsyncIo for RawFileAsync {
         let _ = unsafe {
             sq.push(
                 &opcode::Writev::new(types::Fd(self.fd), iovecs.as_ptr(), iovecs.len() as u32)
-                    .offset(offset)
+                    .offset(offset.try_into().unwrap())
                     .build()
                     .flags(squeue::Flags::ASYNC)
                     .user_data(user_data),

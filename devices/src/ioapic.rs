@@ -237,9 +237,14 @@ impl Ioapic {
         if state.is_some() {
             for (irq, entry) in ioapic.used_entries.iter().enumerate() {
                 if *entry {
-                    ioapic.update_entry(irq)?;
+                    ioapic.update_entry(irq, false)?;
                 }
             }
+
+            ioapic
+                .interrupt_source_group
+                .set_gsi()
+                .map_err(Error::UpdateInterrupt)?;
         }
 
         Ok(ioapic)
@@ -278,7 +283,7 @@ impl Ioapic {
                 }
                 // The entry must be updated through the interrupt source
                 // group.
-                if let Err(e) = self.update_entry(index) {
+                if let Err(e) = self.update_entry(index, true) {
                     error!("Failed updating IOAPIC entry: {:?}", e);
                 }
                 // Store the information this IRQ is now being used.
@@ -329,7 +334,7 @@ impl Ioapic {
         }
     }
 
-    fn update_entry(&self, irq: usize) -> Result<()> {
+    fn update_entry(&self, irq: usize, set_gsi: bool) -> Result<()> {
         let entry = self.reg_entries[irq];
 
         // Validate Destination Mode value, and retrieve Destination ID
@@ -386,6 +391,7 @@ impl Ioapic {
                 irq as InterruptIndex,
                 InterruptSourceConfig::MsiIrq(config),
                 interrupt_mask(entry) == 1,
+                set_gsi,
             )
             .map_err(Error::UpdateInterrupt)?;
 

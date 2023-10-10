@@ -201,8 +201,8 @@ impl Pl011 {
         }
     }
 
-    pub fn set_out(&mut self, out: Box<dyn io::Write + Send>) {
-        self.out = Some(out);
+    pub fn set_out(&mut self, out: Option<Box<dyn io::Write + Send>>) {
+        self.out = out;
     }
 
     fn state(&self) -> Pl011State {
@@ -485,7 +485,11 @@ mod tests {
             _index: InterruptIndex,
             _config: InterruptSourceConfig,
             _masked: bool,
+            _set_gsi: bool,
         ) -> result::Result<(), std::io::Error> {
+            Ok(())
+        }
+        fn set_gsi(&self) -> result::Result<(), std::io::Error> {
             Ok(())
         }
         fn notifier(&self, _index: InterruptIndex) -> Option<EventFd> {

@@ -15,6 +15,7 @@ pub enum Thread {
     HttpApi,
     #[cfg(feature = "dbus_api")]
     DBusApi,
+    EventMonitor,
     SignalHandler,
     Vcpu,
     Vmm,
@@ -170,6 +171,8 @@ mod mshv {
     pub const MSHV_GET_GPA_ACCESS_STATES: u64 = 0xc01c_b812;
     pub const MSHV_VP_TRANSLATE_GVA: u64 = 0xc020_b80e;
     pub const MSHV_CREATE_PARTITION: u64 = 0x4030_b801;
+    pub const MSHV_CREATE_DEVICE: u64 = 0xc00c_b813;
+    pub const MSHV_SET_DEVICE_ATTR: u64 = 0x4018_b814;
     pub const MSHV_VP_REGISTER_INTERCEPT_RESULT: u64 = 0x4030_b817;
 }
 #[cfg(feature = "mshv")]
@@ -206,6 +209,8 @@ fn create_vmm_ioctl_seccomp_rule_common_mshv() -> Result<Vec<SeccompRule>, Backe
             Eq,
             MSHV_VP_REGISTER_INTERCEPT_RESULT
         )?],
+        and![Cond::new(1, ArgLen::Dword, Eq, MSHV_CREATE_DEVICE)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, MSHV_SET_DEVICE_ATTR)?],
     ])
 }
 
@@ -361,6 +366,7 @@ fn create_vmm_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, BackendError>
     const KVM_SET_LAPIC: u64 = 0x4400_ae8f;
     const KVM_SET_MSRS: u64 = 0x4008_ae89;
     const KVM_SET_SREGS: u64 = 0x4138_ae84;
+    const KVM_SET_TSC_KHZ: u64 = 0xaea2;
     const KVM_SET_TSS_ADDR: u64 = 0xae47;
     const KVM_SET_XCRS: u64 = 0x4188_aea7;
     const KVM_SET_XSAVE: u64 = 0x5000_aea5;
@@ -387,6 +393,7 @@ fn create_vmm_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, BackendError>
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_IDENTITY_MAP_ADDR)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_LAPIC)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_SREGS)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_TSC_KHZ)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_TSS_ADDR,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_MSRS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_XCRS,)?],
@@ -813,6 +820,15 @@ fn dbus_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError>
     ])
 }
 
+fn event_monitor_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError> {
+    Ok(vec![
+        (libc::SYS_brk, vec![]),
+        (libc::SYS_futex, vec![]),
+        (libc::SYS_mmap, vec![]),
+        (libc::SYS_write, vec![]),
+    ])
+}
+
 fn get_seccomp_rules(
     thread_type: Thread,
     hypervisor_type: HypervisorType,
@@ -821,6 +837,7 @@ fn get_seccomp_rules(
         Thread::HttpApi => Ok(http_api_thread_rules()?),
         #[cfg(feature = "dbus_api")]
         Thread::DBusApi => Ok(dbus_api_thread_rules()?),
+        Thread::EventMonitor => Ok(event_monitor_thread_rules()?),
         Thread::SignalHandler => Ok(signal_handler_thread_rules()?),
         Thread::Vcpu => Ok(vcpu_thread_rules(hypervisor_type)?),
         Thread::Vmm => Ok(vmm_thread_rules(hypervisor_type)?),

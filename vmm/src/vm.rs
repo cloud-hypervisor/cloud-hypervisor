@@ -759,10 +759,19 @@ impl Vm {
             vm_config.lock().unwrap().is_tdx_enabled()
         };
 
+        #[cfg(feature = "sev_snp")]
+        let sev_snp_enabled = if snapshot.is_some() {
+            false
+        } else {
+            vm_config.lock().unwrap().is_sev_snp_enabled()
+        };
+
         let vm = Self::create_hypervisor_vm(
             &hypervisor,
             #[cfg(feature = "tdx")]
             tdx_enabled,
+            #[cfg(feature = "sev_snp")]
+            sev_snp_enabled,
         )?;
 
         let phys_bits = physical_bits(&hypervisor, vm_config.lock().unwrap().cpus.max_phys_bits);
@@ -821,17 +830,31 @@ impl Vm {
     pub fn create_hypervisor_vm(
         hypervisor: &Arc<dyn hypervisor::Hypervisor>,
         #[cfg(feature = "tdx")] tdx_enabled: bool,
+        #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
     ) -> Result<Arc<dyn hypervisor::Vm>> {
         hypervisor.check_required_extensions().unwrap();
 
-        // 0 for KVM_X86_LEGACY_VM
-        // 1 for KVM_X86_TDX_VM
-        #[cfg(feature = "tdx")]
-        let vm = hypervisor
-            .create_vm_with_type(u64::from(tdx_enabled))
-            .unwrap();
-        #[cfg(not(feature = "tdx"))]
-        let vm = hypervisor.create_vm().unwrap();
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "tdx")] {
+                let vm = hypervisor
+                    .create_vm_with_type(if tdx_enabled {
+                        1 // KVM_X86_TDX_VM
+                    } else {
+                        0 // KVM_X86_LEGACY_VM
+                    })
+                    .unwrap();
+            } else if #[cfg(feature = "sev_snp")] {
+                let vm = hypervisor
+                    .create_vm_with_type(if sev_snp_enabled {
+                        1 // SEV_SNP_ENABLED
+                    } else {
+                        0 // SEV_SNP_DISABLED
+                    })
+                    .unwrap();
+            } else {
+                let vm = hypervisor.create_vm().unwrap();
+            }
+        }
 
         #[cfg(target_arch = "x86_64")]
         {
@@ -957,9 +980,7 @@ impl Vm {
         if let PvhEntryPresent(entry_addr) = entry_addr.pvh_boot_cap {
             // Use the PVH kernel entry point to boot the guest
             info!("Kernel loaded: entry_addr = 0x{:x}", entry_addr.0);
-            Ok(EntryPoint {
-                entry_addr: Some(entry_addr),
-            })
+            Ok(EntryPoint { entry_addr })
         } else {
             Err(Error::KernelMissingPvhHeader)
         }
@@ -2607,6 +2628,8 @@ impl GuestDebuggable for Vm {
     fn coredump(&mut self, destination_url: &str) -> std::result::Result<(), GuestDebuggableError> {
         event!("vm", "coredumping");
 
+        let mut resume = false;
+
         #[cfg(feature = "tdx")]
         {
             if let Some(ref platform) = self.config.lock().unwrap().platform {
@@ -2618,11 +2641,17 @@ impl GuestDebuggable for Vm {
             }
         }
 
-        let current_state = self.get_state().unwrap();
-        if current_state != VmState::Paused {
-            return Err(GuestDebuggableError::Coredump(anyhow!(
-                "Trying to coredump while VM is running"
-            )));
+        match self.get_state().unwrap() {
+            VmState::Running => {
+                self.pause().map_err(GuestDebuggableError::Pause)?;
+                resume = true;
+            }
+            VmState::Paused => {}
+            _ => {
+                return Err(GuestDebuggableError::Coredump(anyhow!(
+                    "Trying to coredump while VM is not running or paused"
+                )));
+            }
         }
 
         let coredump_state = self.get_dump_state(destination_url)?;
@@ -2643,7 +2672,13 @@ impl GuestDebuggable for Vm {
         self.memory_manager
             .lock()
             .unwrap()
-            .coredump_iterate_save_mem(&coredump_state)
+            .coredump_iterate_save_mem(&coredump_state)?;
+
+        if resume {
+            self.resume().map_err(GuestDebuggableError::Resume)?;
+        }
+
+        Ok(())
     }
 }
 

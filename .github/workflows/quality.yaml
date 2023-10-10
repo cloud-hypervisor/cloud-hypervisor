@@ -101,6 +101,14 @@ jobs:
           command: clippy
           args: --target=${{ matrix.target }} --locked --all --all-targets --no-default-features --tests --examples --features "mshv,kvm" -- -D warnings -D clippy::undocumented_unsafe_blocks
 
+      - name: Clippy (sev_snp)
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        uses: actions-rs/cargo@v1
+        with:
+          use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
+          command: clippy
+          args: --target=${{ matrix.target }} --locked --all --all-targets --no-default-features --tests --examples --features "sev_snp" -- -D warnings -D clippy::undocumented_unsafe_blocks
+
       - name: Clippy (kvm + tdx)
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         uses: actions-rs/cargo@v1
@@ -111,3 +119,12 @@ jobs:
 
       - name: Check build did not modify any files
         run: test -z "$(git status --porcelain)"
+
+  typos:
+    if: github.event_name == 'pull_request'
+    name: Typos / Spellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      # Executes "typos ."
+      - uses: crate-ci/typos@v1.16.11

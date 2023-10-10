@@ -147,10 +147,15 @@ pub trait InterruptSourceGroup: Send + Sync {
     /// * index: sub-index into the group.
     /// * config: configuration data for the interrupt source.
     /// * masked: if the interrupt is masked
+    /// * set_gsi: whether update the GSI routing table.
     fn update(
         &self,
         index: InterruptIndex,
         config: InterruptSourceConfig,
         masked: bool,
+        set_gsi: bool,
     ) -> Result<()>;
+
+    /// Set the interrupt group GSI routing table.
+    fn set_gsi(&self) -> Result<()>;
 }

@@ -38,9 +38,8 @@ pub enum PvPanicError {
     RetrievePciConfigurationState(#[source] anyhow::Error),
 }
 
-#[allow(dead_code)]
 #[derive(Copy, Clone)]
-pub enum PvPanicSubclass {
+enum PvPanicSubclass {
     Other = 0x80,
 }
 

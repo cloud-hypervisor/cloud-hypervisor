@@ -394,7 +394,7 @@ fn rest_api_do_command(toplevel: &TopLevel, socket: &mut UnixStream) -> ApiResul
 }
 
 #[cfg(feature = "dbus_api")]
-fn dbus_api_do_command(toplevel: &TopLevel, proxy: &mut DBusApi1ProxyBlocking<'_>) -> ApiResult {
+fn dbus_api_do_command(toplevel: &TopLevel, proxy: &DBusApi1ProxyBlocking<'_>) -> ApiResult {
     match toplevel.command {
         SubCommandEnum::Boot(_) => proxy.api_vm_boot(),
         SubCommandEnum::Delete(_) => proxy.api_vm_delete(),

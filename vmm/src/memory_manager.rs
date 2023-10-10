@@ -1436,7 +1436,7 @@ impl MemoryManager {
                 region.as_ptr() as u64,
                 size
             );
-            // SAFETY: FFI call with corect arguments
+            // SAFETY: FFI call with correct arguments
             let ret = unsafe { libc::madvise(region.as_ptr() as _, size, libc::MADV_HUGEPAGE) };
             if ret != 0 {
                 let e = io::Error::last_os_error();
@@ -2331,7 +2331,7 @@ impl Aml for MemoryMethods {
                 &aml::Name::new(
                     "MR64".into(),
                     &aml::ResourceTemplate::new(vec![&aml::AddressSpace::new_memory(
-                        aml::AddressSpaceCachable::Cacheable,
+                        aml::AddressSpaceCacheable::Cacheable,
                         true,
                         0x0000_0000_0000_0000u64,
                         0xFFFF_FFFF_FFFF_FFFEu64,
@@ -2414,7 +2414,7 @@ impl Aml for MemoryManager {
                     &aml::Name::new(
                         "_CRS".into(),
                         &aml::ResourceTemplate::new(vec![&aml::AddressSpace::new_memory(
-                            aml::AddressSpaceCachable::NotCacheable,
+                            aml::AddressSpaceCacheable::NotCacheable,
                             true,
                             acpi_address.0,
                             acpi_address.0 + MEMORY_MANAGER_ACPI_SIZE as u64 - 1,
@@ -2510,7 +2510,7 @@ impl Aml for MemoryManager {
                         &aml::Name::new(
                             "_CRS".into(),
                             &aml::ResourceTemplate::new(vec![&aml::AddressSpace::new_memory(
-                                aml::AddressSpaceCachable::NotCacheable,
+                                aml::AddressSpaceCacheable::NotCacheable,
                                 true,
                                 min,
                                 max,

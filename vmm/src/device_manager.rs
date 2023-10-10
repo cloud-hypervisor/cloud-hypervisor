@@ -395,6 +395,9 @@ pub enum DeviceManagerError {
     /// No support for device passthrough
     NoDevicePassthroughSupport,
 
+    /// No socket option support for console device
+    NoSocketOptionSupportForConsoleDevice,
+
     /// Failed to resize virtio-balloon
     VirtioBalloonResize(virtio_devices::balloon::Error),
 
@@ -511,7 +514,7 @@ pub fn create_pty() -> io::Result<(File, File, PathBuf)> {
     // SAFETY: FFI call into libc, trivially safe
     unsafe { libc::ioctl(main.as_raw_fd(), TIOCSPTLCK as _, &mut unlock) };
 
-    // SAFETY: FFI call into libc, trivally safe
+    // SAFETY: FFI call into libc, trivially safe
     let sub_fd = unsafe {
         libc::ioctl(
             main.as_raw_fd(),
@@ -1485,8 +1488,16 @@ impl DeviceManager {
         reset_evt: EventFd,
         exit_evt: EventFd,
     ) -> DeviceManagerResult<Option<Arc<Mutex<devices::AcpiGedDevice>>>> {
+        let vcpus_kill_signalled = self
+            .cpu_manager
+            .lock()
+            .unwrap()
+            .vcpus_kill_signalled()
+            .clone();
         let shutdown_device = Arc::new(Mutex::new(devices::AcpiShutdownDevice::new(
-            exit_evt, reset_evt,
+            exit_evt,
+            reset_evt,
+            vcpus_kill_signalled,
         )));
 
         self.bus_devices
@@ -1585,9 +1596,16 @@ impl DeviceManager {
 
     #[cfg(target_arch = "x86_64")]
     fn add_legacy_devices(&mut self, reset_evt: EventFd) -> DeviceManagerResult<()> {
+        let vcpus_kill_signalled = self
+            .cpu_manager
+            .lock()
+            .unwrap()
+            .vcpus_kill_signalled()
+            .clone();
         // Add a shutdown device (i8042)
         let i8042 = Arc::new(Mutex::new(devices::legacy::I8042Device::new(
             reset_evt.try_clone().unwrap(),
+            vcpus_kill_signalled.clone(),
         )));
 
         self.bus_devices
@@ -1615,6 +1633,7 @@ impl DeviceManager {
                 mem_below_4g,
                 mem_above_4g,
                 reset_evt,
+                Some(vcpus_kill_signalled),
             )));
 
             self.bus_devices
@@ -1889,7 +1908,7 @@ impl DeviceManager {
         Ok(())
     }
 
-    fn set_raw_mode(&mut self, f: &mut dyn AsRawFd) -> vmm_sys_util::errno::Result<()> {
+    fn set_raw_mode(&mut self, f: &dyn AsRawFd) -> vmm_sys_util::errno::Result<()> {
         // SAFETY: FFI call. Variable t is guaranteed to be a valid termios from modify_mode.
         self.modify_mode(f.as_raw_fd(), |t| unsafe { cfmakeraw(t) })
     }
@@ -1929,9 +1948,9 @@ impl DeviceManager {
                     self.console_resize_pipe = resize_pipe.map(Arc::new);
                     Endpoint::PtyPair(file.try_clone().unwrap(), file)
                 } else {
-                    let (main, mut sub, path) =
+                    let (main, sub, path) =
                         create_pty().map_err(DeviceManagerError::ConsolePtyOpen)?;
-                    self.set_raw_mode(&mut sub)
+                    self.set_raw_mode(&sub)
                         .map_err(DeviceManagerError::SetPtyRaw)?;
                     self.config.lock().unwrap().console.file = Some(path.clone());
                     let file = main.try_clone().unwrap();
@@ -1951,10 +1970,10 @@ impl DeviceManager {
                     return vmm_sys_util::errno::errno_result().map_err(DeviceManagerError::DupFd);
                 }
                 // SAFETY: stdout is valid and owned solely by us.
-                let mut stdout = unsafe { File::from_raw_fd(stdout) };
+                let stdout = unsafe { File::from_raw_fd(stdout) };
 
                 // Make sure stdout is in raw mode, if it's a terminal.
-                let _ = self.set_raw_mode(&mut stdout);
+                let _ = self.set_raw_mode(&stdout);
 
                 // SAFETY: FFI call. Trivially safe.
                 if unsafe { libc::isatty(libc::STDOUT_FILENO) } == 1 {
@@ -1978,6 +1997,9 @@ impl DeviceManager {
                 } else {
                     Endpoint::File(stdout)
                 }
+            }
+            ConsoleOutputMode::Socket => {
+                return Err(DeviceManagerError::NoSocketOptionSupportForConsoleDevice);
             }
             ConsoleOutputMode::Null => Endpoint::Null,
             ConsoleOutputMode::Off => return Ok(None),
@@ -2044,9 +2066,9 @@ impl DeviceManager {
                     self.config.lock().unwrap().serial.file = Some(pty.path.clone());
                     self.serial_pty = Some(Arc::new(Mutex::new(pty)));
                 } else {
-                    let (main, mut sub, path) =
+                    let (main, sub, path) =
                         create_pty().map_err(DeviceManagerError::SerialPtyOpen)?;
-                    self.set_raw_mode(&mut sub)
+                    self.set_raw_mode(&sub)
                         .map_err(DeviceManagerError::SetPtyRaw)?;
                     self.config.lock().unwrap().serial.file = Some(path.clone());
                     self.serial_pty = Some(Arc::new(Mutex::new(PtyPair { main, path })));
@@ -2054,19 +2076,23 @@ impl DeviceManager {
                 None
             }
             ConsoleOutputMode::Tty => {
-                let mut out = stdout();
-                let _ = self.set_raw_mode(&mut out);
+                let out = stdout();
+                let _ = self.set_raw_mode(&out);
                 Some(Box::new(out))
             }
-            ConsoleOutputMode::Off | ConsoleOutputMode::Null => None,
+            ConsoleOutputMode::Off | ConsoleOutputMode::Null | ConsoleOutputMode::Socket => None,
         };
         if serial_config.mode != ConsoleOutputMode::Off {
             let serial = self.add_serial_device(interrupt_manager, serial_writer)?;
             self.serial_manager = match serial_config.mode {
-                ConsoleOutputMode::Pty | ConsoleOutputMode::Tty => {
-                    let serial_manager =
-                        SerialManager::new(serial, self.serial_pty.clone(), serial_config.mode)
-                            .map_err(DeviceManagerError::CreateSerialManager)?;
+                ConsoleOutputMode::Pty | ConsoleOutputMode::Tty | ConsoleOutputMode::Socket => {
+                    let serial_manager = SerialManager::new(
+                        serial,
+                        self.serial_pty.clone(),
+                        serial_config.mode,
+                        serial_config.socket,
+                    )
+                    .map_err(DeviceManagerError::CreateSerialManager)?;
                     if let Some(mut serial_manager) = serial_manager {
                         serial_manager
                             .start_thread(
@@ -2299,6 +2325,7 @@ impl DeviceManager {
                     self.force_iommu | disk_cfg.iommu,
                     disk_cfg.num_queues,
                     disk_cfg.queue_size,
+                    disk_cfg.serial.clone(),
                     self.seccomp_action.clone(),
                     disk_cfg.rate_limiter_config,
                     self.exit_evt
@@ -4264,7 +4291,7 @@ impl DeviceManager {
         // 1. Users will use direct kernel boot with device tree.
         // 2. Users will use ACPI+UEFI boot.
 
-        // Trigger a GPIO pin 3 event to satisify use case 1.
+        // Trigger a GPIO pin 3 event to satisfy use case 1.
         self.gpio_device
             .as_ref()
             .unwrap()
@@ -4272,7 +4299,7 @@ impl DeviceManager {
             .unwrap()
             .trigger_key(3)
             .map_err(DeviceManagerError::AArch64PowerButtonNotification)?;
-        // Trigger a GED power button event to satisify use case 2.
+        // Trigger a GED power button event to satisfy use case 2.
         return self
             .ged_notification_device
             .as_ref()
@@ -4367,7 +4394,7 @@ impl Aml for DeviceManager {
                 &aml::Name::new(
                     "_CRS".into(),
                     &aml::ResourceTemplate::new(vec![&aml::AddressSpace::new_memory(
-                        aml::AddressSpaceCachable::NotCacheable,
+                        aml::AddressSpaceCacheable::NotCacheable,
                         true,
                         self.acpi_address.0,
                         self.acpi_address.0 + DEVICE_MANAGER_ACPI_SIZE as u64 - 1,

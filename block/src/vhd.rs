@@ -2,9 +2,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::{read_aligned_block_size, DiskTopology};
 use std::convert::TryInto;
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Seek, SeekFrom};
 
 #[derive(Clone, Copy)]
 pub struct VhdFooter {
@@ -27,37 +28,33 @@ pub struct VhdFooter {
 
 impl VhdFooter {
     pub fn new(file: &mut File) -> std::io::Result<VhdFooter> {
-        // We must create a buffer aligned on 512 bytes with a size being a
-        // multiple of 512 bytes as the file might be opened with O_DIRECT flag.
-        #[repr(align(512))]
-        struct Sector {
-            data: [u8; 512],
-        }
-        let mut s = Sector { data: [0; 512] };
+        let blocksize = DiskTopology::probe(file)?.logical_block_size as usize;
 
-        // Place the cursor 512 bytes before the end of the file, as this is
-        // where the footer starts.
-        file.seek(SeekFrom::End(-512))?;
+        // Place the cursor in the last block of the file
+        file.seek(SeekFrom::End(0 - (blocksize as i64)))?;
+        // Read in the last block
+        let data = read_aligned_block_size(file)?;
 
-        // Fill in the VhdFooter structure
-        file.read_exact(&mut s.data)?;
+        // We only care about the last sector
+        let offset = blocksize - 512;
+        let sector = &data[offset..];
 
         Ok(VhdFooter {
-            cookie: u64::from_be_bytes(s.data[0..8].try_into().unwrap()),
-            features: u32::from_be_bytes(s.data[8..12].try_into().unwrap()),
-            file_format_version: u32::from_be_bytes(s.data[12..16].try_into().unwrap()),
-            data_offset: u64::from_be_bytes(s.data[16..24].try_into().unwrap()),
-            time_stamp: u32::from_be_bytes(s.data[24..28].try_into().unwrap()),
-            creator_application: u32::from_be_bytes(s.data[28..32].try_into().unwrap()),
-            creator_version: u32::from_be_bytes(s.data[32..36].try_into().unwrap()),
-            creator_host_os: u32::from_be_bytes(s.data[36..40].try_into().unwrap()),
-            original_size: u64::from_be_bytes(s.data[40..48].try_into().unwrap()),
-            current_size: u64::from_be_bytes(s.data[48..56].try_into().unwrap()),
-            disk_geometry: u32::from_be_bytes(s.data[56..60].try_into().unwrap()),
-            disk_type: u32::from_be_bytes(s.data[60..64].try_into().unwrap()),
-            checksum: u32::from_be_bytes(s.data[64..68].try_into().unwrap()),
-            unique_id: u128::from_be_bytes(s.data[68..84].try_into().unwrap()),
-            saved_state: u8::from_be_bytes(s.data[84..85].try_into().unwrap()),
+            cookie: u64::from_be_bytes(sector[0..8].try_into().unwrap()),
+            features: u32::from_be_bytes(sector[8..12].try_into().unwrap()),
+            file_format_version: u32::from_be_bytes(sector[12..16].try_into().unwrap()),
+            data_offset: u64::from_be_bytes(sector[16..24].try_into().unwrap()),
+            time_stamp: u32::from_be_bytes(sector[24..28].try_into().unwrap()),
+            creator_application: u32::from_be_bytes(sector[28..32].try_into().unwrap()),
+            creator_version: u32::from_be_bytes(sector[32..36].try_into().unwrap()),
+            creator_host_os: u32::from_be_bytes(sector[36..40].try_into().unwrap()),
+            original_size: u64::from_be_bytes(sector[40..48].try_into().unwrap()),
+            current_size: u64::from_be_bytes(sector[48..56].try_into().unwrap()),
+            disk_geometry: u32::from_be_bytes(sector[56..60].try_into().unwrap()),
+            disk_type: u32::from_be_bytes(sector[60..64].try_into().unwrap()),
+            checksum: u32::from_be_bytes(sector[64..68].try_into().unwrap()),
+            unique_id: u128::from_be_bytes(sector[68..84].try_into().unwrap()),
+            saved_state: u8::from_be_bytes(sector[84..85].try_into().unwrap()),
         })
     }
 

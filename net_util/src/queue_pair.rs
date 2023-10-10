@@ -38,7 +38,7 @@ impl TxVirtio {
     pub fn process_desc_chain(
         &mut self,
         mem: &GuestMemoryMmap,
-        tap: &mut Tap,
+        tap: &Tap,
         queue: &mut Queue,
         rate_limiter: &mut Option<RateLimiter>,
         access_platform: Option<&Arc<dyn AccessPlatform>>,
@@ -64,9 +64,9 @@ impl TxVirtio {
                         .memory()
                         .get_slice(desc_addr, desc.len() as usize)
                         .map_err(NetQueuePairError::GuestMemory)?
-                        .as_ptr();
+                        .ptr_guard_mut();
                     let iovec = libc::iovec {
-                        iov_base: buf as *mut libc::c_void,
+                        iov_base: buf.as_ptr() as *mut libc::c_void,
                         iov_len: desc.len() as libc::size_t,
                     };
                     iovecs.push(iovec);
@@ -164,7 +164,7 @@ impl RxVirtio {
     pub fn process_desc_chain(
         &mut self,
         mem: &GuestMemoryMmap,
-        tap: &mut Tap,
+        tap: &Tap,
         queue: &mut Queue,
         rate_limiter: &mut Option<RateLimiter>,
         access_platform: Option<&Arc<dyn AccessPlatform>>,
@@ -203,9 +203,9 @@ impl RxVirtio {
                         .memory()
                         .get_slice(desc_addr, desc.len() as usize)
                         .map_err(NetQueuePairError::GuestMemory)?
-                        .as_ptr();
+                        .ptr_guard_mut();
                     let iovec = libc::iovec {
-                        iov_base: buf as *mut libc::c_void,
+                        iov_base: buf.as_ptr() as *mut libc::c_void,
                         iov_len: desc.len() as libc::size_t,
                     };
                     iovecs.push(iovec);
@@ -357,7 +357,7 @@ impl NetQueuePair {
     ) -> Result<bool, NetQueuePairError> {
         let tx_tap_retry = self.tx.process_desc_chain(
             mem,
-            &mut self.tap,
+            &self.tap,
             queue,
             &mut self.tx_rate_limiter,
             self.access_platform.as_ref(),
@@ -407,7 +407,7 @@ impl NetQueuePair {
     ) -> Result<bool, NetQueuePairError> {
         self.rx_desc_avail = !self.rx.process_desc_chain(
             mem,
-            &mut self.tap,
+            &self.tap,
             queue,
             &mut self.rx_rate_limiter,
             self.access_platform.as_ref(),

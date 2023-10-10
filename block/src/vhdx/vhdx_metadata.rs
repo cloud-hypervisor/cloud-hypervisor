@@ -96,7 +96,7 @@ pub struct DiskSpec {
 }
 
 impl DiskSpec {
-    /// Parse all meatadata from the provided file and store info in DiskSpec
+    /// Parse all metadata from the provided file and store info in DiskSpec
     /// structure.
     pub fn new(f: &mut File, metadata_region: &RegionTableEntry) -> Result<DiskSpec> {
         let mut disk_spec = DiskSpec::default();
@@ -133,7 +133,7 @@ impl DiskSpec {
                     .map_err(VhdxMetadataError::ReadMetadata)?;
 
                 // MUST be at least 1 MiB and not greater than 256 MiB
-                if disk_spec.block_size < BLOCK_SIZE_MIN && disk_spec.block_size > BLOCK_SIZE_MAX {
+                if disk_spec.block_size < BLOCK_SIZE_MIN || disk_spec.block_size > BLOCK_SIZE_MAX {
                     return Err(VhdxMetadataError::InvalidBlockSize);
                 }
 

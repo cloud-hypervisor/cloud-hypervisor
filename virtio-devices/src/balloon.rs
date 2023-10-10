@@ -29,6 +29,7 @@ use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_queue::{Queue, QueueT};
+use vm_allocator::page_size::{align_page_size_down, get_page_size};
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
     GuestMemoryError, GuestMemoryRegion,
@@ -94,6 +95,50 @@ pub struct VirtioBalloonConfig {
     actual: u32,
 }
 
+#[derive(Clone, Debug)]
+struct PartiallyBalloonedPage {
+    addr: u64,
+    bitmap: Vec<u64>,
+    page_size: u64,
+}
+
+impl PartiallyBalloonedPage {
+    fn new() -> Self {
+        let page_size = get_page_size();
+        let len = ((page_size >> VIRTIO_BALLOON_PFN_SHIFT) + 63) / 64;
+        // Initial each padding bit as 1 in bitmap.
+        let mut bitmap = vec![0_u64; len as usize];
+        let pad_num = len * 64 - (page_size >> VIRTIO_BALLOON_PFN_SHIFT);
+        bitmap[(len - 1) as usize] = !((1 << (64 - pad_num)) - 1);
+        Self {
+            addr: 0,
+            bitmap,
+            page_size,
+        }
+    }
+
+    fn pfn_match(&self, addr: u64) -> bool {
+        self.addr == addr & !(self.page_size - 1)
+    }
+
+    fn bitmap_full(&self) -> bool {
+        self.bitmap.iter().all(|b| *b == u64::MAX)
+    }
+
+    fn set_bit(&mut self, addr: u64) {
+        let addr_offset = (addr % self.page_size) >> VIRTIO_BALLOON_PFN_SHIFT;
+        self.bitmap[(addr_offset / 64) as usize] |= 1 << (addr_offset % 64);
+    }
+
+    fn reset(&mut self) {
+        let len = ((self.page_size >> VIRTIO_BALLOON_PFN_SHIFT) + 63) / 64;
+        self.addr = 0;
+        self.bitmap = vec![0; len as usize];
+        let pad_num = len * 64 - (self.page_size >> VIRTIO_BALLOON_PFN_SHIFT);
+        self.bitmap[(len - 1) as usize] = !((1 << (64 - pad_num)) - 1);
+    }
+}
+
 const CONFIG_ACTUAL_OFFSET: u64 = 4;
 const CONFIG_ACTUAL_SIZE: usize = 4;
 
@@ -109,6 +154,7 @@ struct BalloonEpollHandler {
     reporting_queue_evt: Option<EventFd>,
     kill_evt: EventFd,
     pause_evt: EventFd,
+    pbp: Option<PartiallyBalloonedPage>,
 }
 
 impl BalloonEpollHandler {
@@ -165,6 +211,43 @@ impl BalloonEpollHandler {
         Self::advise_memory_range(memory, range_base, range_len, libc::MADV_DONTNEED)
     }
 
+    fn release_memory_range_4k(
+        pbp: &mut Option<PartiallyBalloonedPage>,
+        memory: &GuestMemoryMmap,
+        pfn: u32,
+    ) -> result::Result<(), Error> {
+        let range_base = GuestAddress((pfn as u64) << VIRTIO_BALLOON_PFN_SHIFT);
+        let range_len = 1 << VIRTIO_BALLOON_PFN_SHIFT;
+
+        let page_size: u64 = get_page_size();
+        if page_size == 1 << VIRTIO_BALLOON_PFN_SHIFT {
+            return Self::release_memory_range(memory, range_base, range_len);
+        }
+
+        if pbp.is_none() {
+            *pbp = Some(PartiallyBalloonedPage::new());
+        }
+
+        if !pbp.as_ref().unwrap().pfn_match(range_base.0) {
+            // We are trying to free memory region in a different pfn with current pbp. Flush pbp.
+            pbp.as_mut().unwrap().reset();
+            pbp.as_mut().unwrap().addr = align_page_size_down(range_base.0);
+        }
+
+        pbp.as_mut().unwrap().set_bit(range_base.0);
+        if pbp.as_ref().unwrap().bitmap_full() {
+            Self::release_memory_range(
+                memory,
+                vm_memory::GuestAddress(pbp.as_ref().unwrap().addr),
+                page_size as usize,
+            )?;
+
+            pbp.as_mut().unwrap().reset();
+        }
+
+        Ok(())
+    }
+
     fn process_queue(&mut self, queue_index: usize) -> result::Result<(), Error> {
         let mut used_descs = false;
         while let Some(mut desc_chain) =
@@ -193,18 +276,18 @@ impl BalloonEpollHandler {
                     .map_err(Error::GuestMemory)?;
                 offset += data_chunk_size as u64;
 
-                let range_base = GuestAddress((pfn as u64) << VIRTIO_BALLOON_PFN_SHIFT);
-                let range_len = 1 << VIRTIO_BALLOON_PFN_SHIFT;
-
                 match queue_index {
                     0 => {
-                        Self::release_memory_range(desc_chain.memory(), range_base, range_len)?;
+                        Self::release_memory_range_4k(&mut self.pbp, desc_chain.memory(), pfn)?;
                     }
                     1 => {
+                        let page_size = get_page_size() as usize;
+                        let rbase = align_page_size_down((pfn as u64) << VIRTIO_BALLOON_PFN_SHIFT);
+
                         Self::advise_memory_range(
                             desc_chain.memory(),
-                            range_base,
-                            range_len,
+                            vm_memory::GuestAddress(rbase),
+                            page_size,
                             libc::MADV_WILLNEED,
                         )?;
                     }
@@ -543,6 +626,7 @@ impl VirtioDevice for Balloon {
             reporting_queue_evt,
             kill_evt,
             pause_evt,
+            pbp: None,
         };
 
         let paused = self.common.paused.clone();

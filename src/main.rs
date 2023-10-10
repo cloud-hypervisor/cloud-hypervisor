@@ -69,6 +69,8 @@ enum Error {
     BareEventMonitor,
     #[error("Error doing event monitor I/O: {0}")]
     EventMonitorIo(std::io::Error),
+    #[error("Event monitor thread failed: {0}")]
+    EventMonitorThread(#[source] vmm::Error),
     #[cfg(feature = "guest_debug")]
     #[error("Error parsing --gdb: {0}")]
     ParsingGdb(option_parser::OptionParserError),
@@ -447,44 +449,6 @@ fn start_vmm(toplevel: TopLevel) -> Result<Option<String>, Error> {
         (None, None)
     };
 
-    #[cfg(feature = "dbus_api")]
-    let dbus_options = match (&toplevel.dbus_name, &toplevel.dbus_path) {
-        (Some(ref name), Some(ref path)) => Ok(Some(DBusApiOptions {
-            service_name: name.to_owned(),
-            object_path: path.to_owned(),
-            system_bus: toplevel.dbus_system_bus,
-        })),
-        (Some(_), None) => Err(Error::MissingDBusObjectPath),
-        (None, Some(_)) => Err(Error::MissingDBusServiceName),
-        (None, None) => Ok(None),
-    }?;
-
-    if let Some(ref monitor_config) = toplevel.event_monitor {
-        let mut parser = OptionParser::new();
-        parser.add("path").add("fd");
-        parser
-            .parse(monitor_config)
-            .map_err(Error::ParsingEventMonitor)?;
-
-        let file = if parser.is_set("fd") {
-            let fd = parser
-                .convert("fd")
-                .map_err(Error::ParsingEventMonitor)?
-                .unwrap();
-            // SAFETY: fd is valid
-            unsafe { File::from_raw_fd(fd) }
-        } else if parser.is_set("path") {
-            std::fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .open(parser.get("path").unwrap())
-                .map_err(Error::EventMonitorIo)?
-        } else {
-            return Err(Error::BareEventMonitor);
-        };
-        event_monitor::set_monitor(file).map_err(Error::EventMonitorIo)?;
-    }
-
     let (api_request_sender, api_request_receiver) = channel();
     let api_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateApiEventFd)?;
 
@@ -531,8 +495,6 @@ fn start_vmm(toplevel: TopLevel) -> Result<Option<String>, Error> {
         }
     }
 
-    event!("vmm", "starting");
-
     let hypervisor = hypervisor::new().map_err(Error::CreateHypervisor)?;
 
     #[cfg(feature = "guest_debug")]
@@ -555,6 +517,78 @@ fn start_vmm(toplevel: TopLevel) -> Result<Option<String>, Error> {
     let vm_debug_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateDebugEventFd)?;
 
     let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateExitEventFd)?;
+
+    #[allow(unused_mut)]
+    let mut event_monitor = toplevel
+        .event_monitor
+        .as_ref()
+        .map(|monitor_config| {
+            let mut parser = OptionParser::new();
+            parser.add("path").add("fd");
+            parser
+                .parse(monitor_config)
+                .map_err(Error::ParsingEventMonitor)?;
+
+            if parser.is_set("fd") {
+                let fd = parser
+                    .convert("fd")
+                    .map_err(Error::ParsingEventMonitor)?
+                    .unwrap();
+                // SAFETY: fd is valid
+                Ok(Some(unsafe { File::from_raw_fd(fd) }))
+            } else if parser.is_set("path") {
+                Ok(Some(
+                    std::fs::OpenOptions::new()
+                        .write(true)
+                        .create(true)
+                        .open(parser.get("path").unwrap())
+                        .map_err(Error::EventMonitorIo)?,
+                ))
+            } else {
+                Err(Error::BareEventMonitor)
+            }
+        })
+        .transpose()?
+        .map(|event_monitor_file| {
+            event_monitor::set_monitor(event_monitor_file).map_err(Error::EventMonitorIo)
+        })
+        .transpose()?;
+
+    #[cfg(feature = "dbus_api")]
+    let dbus_options = match (&toplevel.dbus_name, &toplevel.dbus_path) {
+        (Some(ref name), Some(ref path)) => {
+            // monitor is either set (file based) or not.
+            // if it's not set, create one without file support.
+            let mut monitor = match event_monitor.take() {
+                Some(monitor) => monitor,
+                None => event_monitor::set_monitor(None).map_err(Error::EventMonitorIo)?,
+            };
+            let options = DBusApiOptions {
+                service_name: name.to_owned(),
+                object_path: path.to_owned(),
+                system_bus: toplevel.dbus_system_bus,
+                event_monitor_rx: monitor.subscribe(),
+            };
+
+            event_monitor = Some(monitor);
+            Ok(Some(options))
+        }
+        (Some(_), None) => Err(Error::MissingDBusObjectPath),
+        (None, Some(_)) => Err(Error::MissingDBusServiceName),
+        (None, None) => Ok(None),
+    }?;
+
+    if let Some(monitor) = event_monitor {
+        vmm::start_event_monitor_thread(
+            monitor,
+            &seccomp_action,
+            hypervisor.hypervisor_type(),
+            exit_evt.try_clone().unwrap(),
+        )
+        .map_err(Error::EventMonitorThread)?;
+    }
+
+    event!("vmm", "starting");
 
     let vmm_thread_handle = vmm::start_vmm_thread(
         vmm::VmmVersionInfo::new(env!("BUILD_VERSION"), env!("CARGO_PKG_VERSION")),
@@ -628,6 +662,9 @@ fn start_vmm(toplevel: TopLevel) -> Result<Option<String>, Error> {
 }
 
 fn main() {
+    #[cfg(all(feature = "tdx", feature = "sev_snp"))]
+    compile_error!("Feature 'tdx' and 'sev_snp' are mutually exclusive.");
+
     #[cfg(feature = "dhat-heap")]
     let _profiler = dhat::Profiler::new_heap();
 
@@ -639,6 +676,11 @@ fn main() {
 
     if toplevel.version {
         println!("{} {}", env!("CARGO_BIN_NAME"), env!("BUILD_VERSION"));
+
+        if toplevel.verbosity != 0 {
+            println!("Enabled features: {:?}", vmm::feature_list());
+        }
+
         return;
     }
 
@@ -771,11 +813,13 @@ mod unit_tests {
                 file: None,
                 mode: ConsoleOutputMode::Null,
                 iommu: false,
+                socket: None,
             },
             console: ConsoleConfig {
                 file: None,
                 mode: ConsoleOutputMode::Tty,
                 iommu: false,
+                socket: None,
             },
             devices: None,
             user_devices: None,

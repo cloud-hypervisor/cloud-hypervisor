@@ -51,6 +51,9 @@ jobs:
       - name: Build (mshv)
         run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "mshv"  -- -D warnings -D clippy::undocumented_unsafe_blocks
 
+      - name: Build (sev_snp)
+        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "sev_snp"  -- -D warnings -D clippy::undocumented_unsafe_blocks
+
       - name: Build (mshv + kvm)
         run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "mshv,kvm"  -- -D warnings -D clippy::undocumented_unsafe_blocks
 

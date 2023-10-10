@@ -57,6 +57,7 @@ fuzz_target!(|bytes| {
         false,
         2,
         256,
+        None,
         SeccompAction::Allow,
         None,
         EventFd::new(EFD_NONBLOCK).unwrap(),
