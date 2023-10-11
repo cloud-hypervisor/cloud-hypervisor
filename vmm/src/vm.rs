@@ -2415,11 +2415,13 @@ impl Snapshottable for Vm {
             );
             arch::generate_common_cpuid(
                 &self.hypervisor,
-                None,
-                phys_bits,
-                self.config.lock().unwrap().cpus.kvm_hyperv,
-                #[cfg(feature = "tdx")]
-                tdx_enabled,
+                &arch::CpuidConfig {
+                    sgx_epc_sections: None,
+                    phys_bits,
+                    kvm_hyperv: self.config.lock().unwrap().cpus.kvm_hyperv,
+                    #[cfg(feature = "tdx")]
+                    tdx: tdx_enabled,
+                },
             )
             .map_err(|e| {
                 MigratableError::MigrateReceive(anyhow!("Error generating common cpuid: {:?}", e))
