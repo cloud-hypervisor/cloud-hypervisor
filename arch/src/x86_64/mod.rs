@@ -37,6 +37,9 @@ const TSC_DEADLINE_TIMER_ECX_BIT: u8 = 24; // tsc deadline timer ecx bit.
 const HYPERVISOR_ECX_BIT: u8 = 31; // Hypervisor ecx bit.
 const MTRR_EDX_BIT: u8 = 12; // Hypervisor ecx bit.
 const INVARIANT_TSC_EDX_BIT: u8 = 8; // Invariant TSC bit on 0x8000_0007 EDX
+const AMX_BF16: u8 = 22; // AMX tile computation on bfloat16 numbers
+const AMX_TILE: u8 = 24; // AMX tile load/store instructions
+const AMX_INT8: u8 = 25; // AMX tile computation on 8-bit integers
 
 // KVM feature bits
 #[cfg(feature = "tdx")]
@@ -151,6 +154,7 @@ pub struct CpuidConfig {
     pub kvm_hyperv: bool,
     #[cfg(feature = "tdx")]
     pub tdx: bool,
+    pub amx: bool,
 }
 
 #[derive(Debug)]
@@ -640,6 +644,12 @@ pub fn generate_common_cpuid(
     // Update some existing CPUID
     for entry in cpuid.as_mut_slice().iter_mut() {
         match entry.function {
+            // Clear AMX related bits if the AMX feature is not enabled
+            0x7 => {
+                if !config.amx && entry.index == 0 {
+                    entry.edx &= !(1 << AMX_BF16 | 1 << AMX_TILE | 1 << AMX_INT8)
+                }
+            }
             0xd =>
             {
                 #[cfg(feature = "tdx")]

@@ -2409,6 +2409,7 @@ impl Snapshottable for Vm {
 
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         let common_cpuid = {
+            let amx = self.config.lock().unwrap().cpus.features.amx;
             let phys_bits = physical_bits(
                 &self.hypervisor,
                 self.config.lock().unwrap().cpus.max_phys_bits,
@@ -2421,6 +2422,7 @@ impl Snapshottable for Vm {
                     kvm_hyperv: self.config.lock().unwrap().cpus.kvm_hyperv,
                     #[cfg(feature = "tdx")]
                     tdx: tdx_enabled,
+                    amx,
                 },
             )
             .map_err(|e| {
