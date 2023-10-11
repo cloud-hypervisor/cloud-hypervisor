@@ -1665,6 +1665,7 @@ impl Vmm {
         let common_cpuid = {
             #[cfg(feature = "tdx")]
             let tdx = vm_config.lock().unwrap().is_tdx_enabled();
+            let amx = vm_config.lock().unwrap().cpus.features.amx;
             let phys_bits =
                 vm::physical_bits(&hypervisor, vm_config.lock().unwrap().cpus.max_phys_bits);
             arch::generate_common_cpuid(
@@ -1675,6 +1676,7 @@ impl Vmm {
                     kvm_hyperv: vm_config.lock().unwrap().cpus.kvm_hyperv,
                     #[cfg(feature = "tdx")]
                     tdx,
+                    amx,
                 },
             )
             .map_err(|e| {
@@ -1866,6 +1868,7 @@ impl Vmm {
                     kvm_hyperv: vm_config.cpus.kvm_hyperv,
                     #[cfg(feature = "tdx")]
                     tdx: vm_config.is_tdx_enabled(),
+                    amx: vm_config.cpus.features.amx,
                 },
             )
             .map_err(|e| {

@@ -745,6 +745,7 @@ impl CpuManager {
                     kvm_hyperv: self.config.kvm_hyperv,
                     #[cfg(feature = "tdx")]
                     tdx,
+                    amx: self.config.features.amx,
                 },
             )
             .map_err(Error::CommonCpuId)?
