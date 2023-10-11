@@ -726,7 +726,7 @@ impl CpuManager {
         &mut self,
         memory_manager: &Arc<Mutex<MemoryManager>>,
         hypervisor: &Arc<dyn hypervisor::Hypervisor>,
-        #[cfg(feature = "tdx")] tdx_enabled: bool,
+        #[cfg(feature = "tdx")] tdx: bool,
     ) -> Result<()> {
         let sgx_epc_sections = memory_manager
             .lock()
@@ -739,11 +739,13 @@ impl CpuManager {
             let phys_bits = physical_bits(hypervisor, self.config.max_phys_bits);
             arch::generate_common_cpuid(
                 hypervisor,
-                sgx_epc_sections,
-                phys_bits,
-                self.config.kvm_hyperv,
-                #[cfg(feature = "tdx")]
-                tdx_enabled,
+                &arch::CpuidConfig {
+                    sgx_epc_sections,
+                    phys_bits,
+                    kvm_hyperv: self.config.kvm_hyperv,
+                    #[cfg(feature = "tdx")]
+                    tdx,
+                },
             )
             .map_err(Error::CommonCpuId)?
         };

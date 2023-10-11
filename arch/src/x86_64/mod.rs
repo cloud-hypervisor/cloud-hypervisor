@@ -145,6 +145,14 @@ struct BootParamsWrapper(boot_params);
 // SAFETY: BootParamsWrap is a wrapper over `boot_params` (a series of ints).
 unsafe impl ByteValued for BootParamsWrapper {}
 
+pub struct CpuidConfig {
+    pub sgx_epc_sections: Option<Vec<SgxEpcSection>>,
+    pub phys_bits: u8,
+    pub kvm_hyperv: bool,
+    #[cfg(feature = "tdx")]
+    pub tdx: bool,
+}
+
 #[derive(Debug)]
 pub enum Error {
     /// Error writing MP table to memory.
@@ -552,10 +560,7 @@ impl CpuidFeatureEntry {
 
 pub fn generate_common_cpuid(
     hypervisor: &Arc<dyn hypervisor::Hypervisor>,
-    sgx_epc_sections: Option<Vec<SgxEpcSection>>,
-    phys_bits: u8,
-    kvm_hyperv: bool,
-    #[cfg(feature = "tdx")] tdx_enabled: bool,
+    config: &CpuidConfig,
 ) -> super::Result<Vec<CpuIdEntry>> {
     // SAFETY: cpuid called with valid leaves
     if unsafe { x86_64::__cpuid(1) }.ecx & 1 << HYPERVISOR_ECX_BIT == 1 << HYPERVISOR_ECX_BIT {
@@ -573,7 +578,10 @@ pub fn generate_common_cpuid(
         );
     }
 
-    info!("Generating guest CPUID for with physical address size: {phys_bits}");
+    info!(
+        "Generating guest CPUID for with physical address size: {}",
+        config.phys_bits
+    );
     let cpuid_patches = vec![
         // Patch tsc deadline timer bit
         CpuidPatch {
@@ -614,12 +622,12 @@ pub fn generate_common_cpuid(
 
     CpuidPatch::patch_cpuid(&mut cpuid, cpuid_patches);
 
-    if let Some(sgx_epc_sections) = sgx_epc_sections {
+    if let Some(sgx_epc_sections) = &config.sgx_epc_sections {
         update_cpuid_sgx(&mut cpuid, sgx_epc_sections)?;
     }
 
     #[cfg(feature = "tdx")]
-    let tdx_capabilities = if tdx_enabled {
+    let tdx_capabilities = if config.tdx {
         let caps = hypervisor
             .tdx_capabilities()
             .map_err(Error::TdxCapabilities)?;
@@ -667,12 +675,12 @@ pub fn generate_common_cpuid(
             }
             // Set CPU physical bits
             0x8000_0008 => {
-                entry.eax = (entry.eax & 0xffff_ff00) | (phys_bits as u32 & 0xff);
+                entry.eax = (entry.eax & 0xffff_ff00) | (config.phys_bits as u32 & 0xff);
             }
             0x4000_0001 => {
                 // These features are not supported by TDX
                 #[cfg(feature = "tdx")]
-                if tdx_enabled {
+                if config.tdx {
                     entry.eax &= !(1 << KVM_FEATURE_CLOCKSOURCE_BIT
                         | 1 << KVM_FEATURE_CLOCKSOURCE2_BIT
                         | 1 << KVM_FEATURE_CLOCKSOURCE_STABLE_BIT
@@ -700,7 +708,7 @@ pub fn generate_common_cpuid(
         });
     }
 
-    if kvm_hyperv {
+    if config.kvm_hyperv {
         // Remove conflicting entries
         cpuid.retain(|c| c.function != 0x4000_0000);
         cpuid.retain(|c| c.function != 0x4000_0001);
@@ -1293,7 +1301,7 @@ fn update_cpuid_topology(
 // sections exposed to the guest.
 fn update_cpuid_sgx(
     cpuid: &mut Vec<CpuIdEntry>,
-    epc_sections: Vec<SgxEpcSection>,
+    epc_sections: &Vec<SgxEpcSection>,
 ) -> Result<(), Error> {
     // Something's wrong if there's no EPC section.
     if epc_sections.is_empty() {
