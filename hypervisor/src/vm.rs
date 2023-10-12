@@ -190,6 +190,13 @@ pub enum HypervisorVmError {
     #[error("Failed to assert virtual Interrupt: {0}")]
     AsserttVirtualInterrupt(#[source] anyhow::Error),
 
+    #[cfg(feature = "sev_snp")]
+    ///
+    /// Error initializing SEV-SNP on the VM
+    ///
+    #[error("Failed to initialize SEV-SNP: {0}")]
+    InitializeSevSnp(#[source] std::io::Error),
+
     #[cfg(feature = "tdx")]
     ///
     /// Error initializing TDX on the VM
@@ -324,6 +331,11 @@ pub trait Vm: Send + Sync + Any {
     fn stop_dirty_log(&self) -> Result<()>;
     /// Get dirty pages bitmap
     fn get_dirty_log(&self, slot: u32, base_gpa: u64, memory_size: u64) -> Result<Vec<u64>>;
+    #[cfg(feature = "sev_snp")]
+    /// Initialize SEV-SNP on this VM
+    fn sev_snp_init(&self) -> Result<()> {
+        unimplemented!()
+    }
     #[cfg(feature = "tdx")]
     /// Initialize TDX on this VM
     fn tdx_init(&self, _cpuid: &[CpuIdEntry], _max_vcpus: u32) -> Result<()> {

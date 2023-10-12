@@ -245,6 +245,10 @@ pub enum Error {
     #[error("Failed to copy firmware to memory: {0}")]
     FirmwareLoad(#[source] vm_memory::GuestMemoryError),
 
+    #[cfg(feature = "sev_snp")]
+    #[error("Error enabling SEV-SNP VM: {0}")]
+    InitializeSevSnpVm(#[source] hypervisor::HypervisorVmError),
+
     #[cfg(feature = "tdx")]
     #[error("Error performing I/O on TDX firmware file: {0}")]
     LoadTdvf(#[source] std::io::Error),
@@ -491,6 +495,8 @@ impl Vm {
 
         #[cfg(feature = "tdx")]
         let tdx_enabled = config.lock().unwrap().is_tdx_enabled();
+        #[cfg(feature = "sev_snp")]
+        let sev_snp_enabled = config.lock().unwrap().is_sev_snp_enabled();
         #[cfg(feature = "tdx")]
         let force_iommu = tdx_enabled;
         #[cfg(not(feature = "tdx"))]
@@ -557,6 +563,14 @@ impl Vm {
             .unwrap()
             .create_boot_vcpus(snapshot_from_id(snapshot.as_ref(), CPU_MANAGER_SNAPSHOT_ID))
             .map_err(Error::CpuManager)?;
+
+        // This initial SEV-SNP configuration must be done immediately after
+        // vCPUs are created. As part of this initialization we are
+        // transitioning the guest into secure state.
+        #[cfg(feature = "sev_snp")]
+        if sev_snp_enabled {
+            vm.sev_snp_init().map_err(Error::InitializeSevSnpVm)?;
+        }
 
         #[cfg(feature = "tdx")]
         let dynamic = !tdx_enabled;
