@@ -1266,4 +1266,14 @@ impl vm::Vm for MshvVm {
     fn as_any(&self) -> &dyn Any {
         self
     }
+    /// Initialize the SEV-SNP VM
+    #[cfg(feature = "sev_snp")]
+    fn sev_snp_init(&self) -> vm::Result<()> {
+        self.fd
+            .set_partition_property(
+                hv_partition_property_code_HV_PARTITION_PROPERTY_ISOLATION_STATE,
+                hv_partition_isolation_state_HV_PARTITION_ISOLATION_SECURE as u64,
+            )
+            .map_err(|e| vm::HypervisorVmError::InitializeSevSnp(e.into()))
+    }
 }
