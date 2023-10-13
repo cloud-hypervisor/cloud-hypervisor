@@ -20,13 +20,21 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use vfio_ioctls::VfioDeviceFd;
 use vm::DataMatch;
+
+#[cfg(feature = "sev_snp")]
+mod snp_constants;
 // x86_64 dependencies
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
+#[cfg(feature = "sev_snp")]
+use snp_constants::*;
+
 use crate::{
     ClockData, CpuState, IoEventAddress, IrqRoutingEntry, MpState, UserMemoryRegion,
     USER_MEMORY_REGION_EXECUTE, USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
 };
+#[cfg(feature = "sev_snp")]
+use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
 use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::VcpuMshvState;
@@ -1313,5 +1321,52 @@ impl vm::Vm for MshvVm {
         self.fd
             .import_isolated_pages(&isolated_pages[0])
             .map_err(|e| vm::HypervisorVmError::ImportIsolatedPages(e.into()))
+    }
+    #[cfg(feature = "sev_snp")]
+    fn complete_isolated_import(
+        &self,
+        snp_id_block: IGVM_VHS_SNP_ID_BLOCK,
+        host_data: &[u8],
+        id_block_enabled: u8,
+    ) -> vm::Result<()> {
+        let mut auth_info = hv_snp_id_auth_info {
+            id_key_algorithm: snp_id_block.id_key_algorithm,
+            auth_key_algorithm: snp_id_block.author_key_algorithm,
+            ..Default::default()
+        };
+        // Each of r/s component is 576 bits long
+        auth_info.id_block_signature[..SIG_R_COMPONENT_SIZE_IN_BYTES]
+            .copy_from_slice(snp_id_block.id_key_signature.r_comp.as_ref());
+        auth_info.id_block_signature
+            [SIG_R_COMPONENT_SIZE_IN_BYTES..SIG_R_AND_S_COMPONENT_SIZE_IN_BYTES]
+            .copy_from_slice(snp_id_block.id_key_signature.s_comp.as_ref());
+        auth_info.id_key[..ECDSA_CURVE_ID_SIZE_IN_BYTES]
+            .copy_from_slice(snp_id_block.id_public_key.curve.to_le_bytes().as_ref());
+        auth_info.id_key[ECDSA_SIG_X_COMPONENT_START..ECDSA_SIG_X_COMPONENT_END]
+            .copy_from_slice(snp_id_block.id_public_key.qx.as_ref());
+        auth_info.id_key[ECDSA_SIG_Y_COMPONENT_START..ECDSA_SIG_Y_COMPONENT_END]
+            .copy_from_slice(snp_id_block.id_public_key.qy.as_ref());
+
+        let data = mshv_complete_isolated_import {
+            import_data: hv_partition_complete_isolated_import_data {
+                psp_parameters: hv_psp_launch_finish_data {
+                    id_block: hv_snp_id_block {
+                        launch_digest: snp_id_block.ld,
+                        family_id: snp_id_block.family_id,
+                        image_id: snp_id_block.image_id,
+                        version: snp_id_block.version,
+                        guest_svn: snp_id_block.guest_svn,
+                        policy: get_default_snp_guest_policy(),
+                    },
+                    id_auth_info: auth_info,
+                    host_data: host_data[0..32].try_into().unwrap(),
+                    id_block_enabled,
+                    author_key_enabled: 0,
+                },
+            },
+        };
+        self.fd
+            .complete_isolated_import(&data)
+            .map_err(|e| vm::HypervisorVmError::CompleteIsolatedImport(e.into()))
     }
 }

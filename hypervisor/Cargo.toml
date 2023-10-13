@@ -8,13 +8,14 @@ license = "Apache-2.0 OR BSD-3-Clause"
 [features]
 kvm = ["kvm-ioctls", "kvm-bindings", "vfio-ioctls/kvm"]
 mshv = ["mshv-ioctls", "mshv-bindings", "vfio-ioctls/mshv", "iced-x86"]
-sev_snp = []
+sev_snp = ["igvm_parser", "igvm_defs"]
 tdx = []
 
 [dependencies]
 anyhow = "1.0.75"
 byteorder = "1.4.3"
-thiserror = "1.0.40"
+igvm_defs = { git = "https://github.com/microsoft/igvm", branch = "main" , package = "igvm_defs", optional  = true }
+igvm_parser = { git = "https://github.com/microsoft/igvm", branch = "main" , package = "igvm", optional  = true }
 libc = "0.2.147"
 log = "0.4.17"
 kvm-ioctls = { version = "0.13.0", optional = true }
@@ -26,6 +27,7 @@ serde_with = { version = "3.0.0", default-features = false, features = ["macros"
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
 vm-memory = { version = "0.12.2", features = ["backend-mmap", "backend-atomic"] }
 vmm-sys-util = { version = "0.11.0", features = ["with-serde"] }
+thiserror = "1.0.40"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies.iced-x86]
 optional = true

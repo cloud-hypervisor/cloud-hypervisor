@@ -19,6 +19,8 @@ use crate::cpu::Vcpu;
 use crate::ClockData;
 use crate::UserMemoryRegion;
 use crate::{IoEventAddress, IrqRoutingEntry};
+#[cfg(feature = "sev_snp")]
+use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
 use std::any::Any;
 #[cfg(target_arch = "x86_64")]
 use std::fs::File;
@@ -225,6 +227,10 @@ pub enum HypervisorVmError {
     ///
     #[error("Failed to import isolated pages: {0}")]
     ImportIsolatedPages(#[source] anyhow::Error),
+    /// Failed to complete isolated import
+    ///
+    #[error("Failed to complete isolated import: {0}")]
+    CompleteIsolatedImport(#[source] anyhow::Error),
 }
 ///
 /// Result type for returning from a function
@@ -371,6 +377,16 @@ pub trait Vm: Send + Sync + Any {
         _page_type: u32,
         _page_size: u32,
         _pages: &[u64],
+    ) -> Result<()> {
+        unimplemented!()
+    }
+    /// Complete the isolated import
+    #[cfg(feature = "sev_snp")]
+    fn complete_isolated_import(
+        &self,
+        _snp_id_block: IGVM_VHS_SNP_ID_BLOCK,
+        _host_data: &[u8],
+        _id_block_enabled: u8,
     ) -> Result<()> {
         unimplemented!()
     }
