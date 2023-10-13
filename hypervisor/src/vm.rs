@@ -220,6 +220,11 @@ pub enum HypervisorVmError {
     ///
     #[error("Failed to create Vgic: {0}")]
     CreateVgic(#[source] anyhow::Error),
+    ///
+    /// Import isolated pages error
+    ///
+    #[error("Failed to import isolated pages: {0}")]
+    ImportIsolatedPages(#[source] anyhow::Error),
 }
 ///
 /// Result type for returning from a function
@@ -359,6 +364,16 @@ pub trait Vm: Send + Sync + Any {
     }
     /// Downcast to the underlying hypervisor VM type
     fn as_any(&self) -> &dyn Any;
+    /// Import the isolated pages
+    #[cfg(feature = "sev_snp")]
+    fn import_isolated_pages(
+        &self,
+        _page_type: u32,
+        _page_size: u32,
+        _pages: &[u64],
+    ) -> Result<()> {
+        unimplemented!()
+    }
 }
 
 pub trait VmOps: Send + Sync {

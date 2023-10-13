@@ -1286,4 +1286,32 @@ impl vm::Vm for MshvVm {
             )
             .map_err(|e| vm::HypervisorVmError::InitializeSevSnp(e.into()))
     }
+
+    #[cfg(feature = "sev_snp")]
+    fn import_isolated_pages(
+        &self,
+        page_type: u32,
+        page_size: u32,
+        pages: &[u64],
+    ) -> vm::Result<()> {
+        if pages.is_empty() {
+            return Ok(());
+        }
+
+        let mut isolated_pages =
+            vec_with_array_field::<mshv_import_isolated_pages, u64>(pages.len());
+        isolated_pages[0].num_pages = pages.len() as u64;
+        isolated_pages[0].page_type = page_type;
+        isolated_pages[0].page_size = page_size;
+        // SAFETY: isolated_pages initialized with pages.len() and now it is being turned into
+        // pages_slice with pages.len() again. It is guaranteed to be large enough to hold
+        // everything from pages.
+        unsafe {
+            let pages_slice: &mut [u64] = isolated_pages[0].page_number.as_mut_slice(pages.len());
+            pages_slice.copy_from_slice(pages);
+        }
+        self.fd
+            .import_isolated_pages(&isolated_pages[0])
+            .map_err(|e| vm::HypervisorVmError::ImportIsolatedPages(e.into()))
+    }
 }
