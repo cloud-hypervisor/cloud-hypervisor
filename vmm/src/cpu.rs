@@ -454,7 +454,6 @@ impl Snapshottable for Vcpu {
 }
 
 pub struct CpuManager {
-    hypervisor_type: HypervisorType,
     config: CpusConfig,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     interrupt_controller: Option<Arc<Mutex<dyn InterruptController>>>,
@@ -479,8 +478,7 @@ pub struct CpuManager {
     proximity_domain_per_cpu: BTreeMap<u8, u32>,
     affinity: BTreeMap<u8, Vec<u8>>,
     dynamic: bool,
-    #[cfg(target_arch = "x86_64")]
-    cpu_vendor: CpuVendor,
+    hypervisor: Arc<dyn hypervisor::Hypervisor>,
 }
 
 const CPU_ENABLE_FLAG: usize = 0;
@@ -699,7 +697,6 @@ impl CpuManager {
         let dynamic = true;
 
         Ok(Arc::new(Mutex::new(CpuManager {
-            hypervisor_type,
             config: config.clone(),
             interrupt_controller: None,
             #[cfg(target_arch = "x86_64")]
@@ -720,8 +717,7 @@ impl CpuManager {
             proximity_domain_per_cpu,
             affinity,
             dynamic,
-            #[cfg(target_arch = "x86_64")]
-            cpu_vendor,
+            hypervisor: hypervisor.clone(),
         })))
     }
 
@@ -763,7 +759,7 @@ impl CpuManager {
             &self.vm,
             Some(self.vm_ops.clone()),
             #[cfg(target_arch = "x86_64")]
-            self.cpu_vendor,
+            self.hypervisor.get_cpu_vendor(),
         )?;
 
         if let Some(snapshot) = snapshot {
@@ -803,7 +799,7 @@ impl CpuManager {
         let topology = self.config.topology.clone().map_or_else(
             || {
                 #[cfg(feature = "mshv")]
-                if matches!(self.hypervisor_type, HypervisorType::Mshv) {
+                if matches!(self.hypervisor.hypervisor_type(), HypervisorType::Mshv) {
                     return Some((1, self.boot_vcpus(), 1));
                 }
                 None
@@ -889,7 +885,7 @@ impl CpuManager {
         let reset_evt = self.reset_evt.try_clone().unwrap();
         let exit_evt = self.exit_evt.try_clone().unwrap();
         #[cfg(feature = "kvm")]
-        let hypervisor_type = self.hypervisor_type;
+        let hypervisor_type = self.hypervisor.hypervisor_type();
         #[cfg(feature = "guest_debug")]
         let vm_debug_evt = self.vm_debug_evt.try_clone().unwrap();
         let panic_exit_evt = self.exit_evt.try_clone().unwrap();
@@ -917,9 +913,12 @@ impl CpuManager {
         });
 
         // Retrieve seccomp filter for vcpu thread
-        let vcpu_seccomp_filter =
-            get_seccomp_filter(&self.seccomp_action, Thread::Vcpu, self.hypervisor_type)
-                .map_err(Error::CreateSeccompFilter)?;
+        let vcpu_seccomp_filter = get_seccomp_filter(
+            &self.seccomp_action,
+            Thread::Vcpu,
+            self.hypervisor.hypervisor_type(),
+        )
+        .map_err(Error::CreateSeccompFilter)?;
 
         #[cfg(target_arch = "x86_64")]
         let interrupt_controller_clone = self.interrupt_controller.as_ref().cloned();
