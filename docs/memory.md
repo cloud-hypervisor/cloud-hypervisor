@@ -572,7 +572,16 @@ _Example_
 
 ### PCI bus
 
-Cloud Hypervisor supports only one PCI bus, which is why it has been tied to
-the NUMA node 0 by default. It is the user responsibility to organize the NUMA
-nodes correctly so that vCPUs and guest RAM which should be located on the same
-NUMA node as the PCI bus end up on the NUMA node 0.
+Cloud Hypervisor supports guests with one or more PCI segments. The default PCI segment always
+has affinity to NUMA node 0. Be default, all other PCI segments have afffinity to NUMA node 0.
+The user may configure the NUMA affinity for any additional PCI segments.
+
+_Example_
+
+```
+--platform num_pci_segments=2
+--memory-zone size=16G,host_numa_node=0,id=mem0
+--memory-zone size=16G,host_numa_node=1,id=mem1
+--numa guest_numa_id=0,memory_zones=mem0,pci_segments=[0]
+--numa guest_numa_id=1,memory_zones=mem1,pci_segments=[1]
+```

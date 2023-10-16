@@ -2947,6 +2947,92 @@ mod common_parallel {
         handle_child_output(r, &output);
     }
 
+    fn test_pci_multiple_segments_numa_node() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+        let api_socket = temp_api_path(&guest.tmp_dir);
+        #[cfg(target_arch = "x86_64")]
+        let kernel_path = direct_kernel_boot_path();
+        #[cfg(target_arch = "aarch64")]
+        let kernel_path = edk2_path();
+
+        // Prepare another disk file for the virtio-disk device
+        let test_disk_path = String::from(
+            guest
+                .tmp_dir
+                .as_path()
+                .join("test-disk.raw")
+                .to_str()
+                .unwrap(),
+        );
+        assert!(
+            exec_host_command_status(format!("truncate {test_disk_path} -s 4M").as_str()).success()
+        );
+        assert!(exec_host_command_status(format!("mkfs.ext4 {test_disk_path}").as_str()).success());
+        const TEST_DISK_NODE: u16 = 1;
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--platform", "num_pci_segments=2"])
+            .args(["--cpus", "boot=2"])
+            .args(["--memory", "size=0"])
+            .args([
+                "--memory-zone",
+                "id=mem0,size=256M",
+                "--memory-zone",
+                "id=mem1,size=256M",
+            ])
+            .args([
+                "--numa",
+                "guest_numa_id=0,cpus=[0],memory_zones=mem0,pci_segments=[0]",
+                "--numa",
+                "guest_numa_id=1,cpus=[1],memory_zones=mem1,pci_segments=[1]",
+            ])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--api-socket", &api_socket])
+            .capture_output()
+            .args([
+                "--disk",
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                )
+                .as_str(),
+                "--disk",
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                )
+                .as_str(),
+                "--disk",
+                format!("path={test_disk_path},pci_segment={TEST_DISK_NODE}").as_str(),
+            ])
+            .default_net()
+            .spawn()
+            .unwrap();
+
+        let cmd = "cat /sys/block/vdc/device/../numa_node";
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            assert_eq!(
+                guest
+                    .ssh_command(cmd)
+                    .unwrap()
+                    .trim()
+                    .parse::<u16>()
+                    .unwrap_or_default(),
+                TEST_DISK_NODE
+            );
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
     #[test]
     fn test_direct_kernel_boot() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());

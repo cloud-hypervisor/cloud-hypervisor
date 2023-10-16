@@ -1065,6 +1065,7 @@ impl DeviceManager {
         for i in 1..num_pci_segments as usize {
             pci_segments.push(PciSegment::new(
                 i as u16,
+                numa_node_id_from_pci_segment_id(&numa_nodes, i as u16),
                 &address_manager,
                 Arc::clone(&address_manager.pci_mmio_allocators[i]),
                 &pci_irq_slots,
@@ -4341,6 +4342,16 @@ fn numa_node_id_from_memory_zone_id(numa_nodes: &NumaNodes, memory_zone_id: &str
     }
 
     None
+}
+
+fn numa_node_id_from_pci_segment_id(numa_nodes: &NumaNodes, pci_segment_id: u16) -> u32 {
+    for (numa_node_id, numa_node) in numa_nodes.iter() {
+        if numa_node.pci_segments.contains(&pci_segment_id) {
+            return *numa_node_id;
+        }
+    }
+
+    0
 }
 
 struct TpmDevice {}

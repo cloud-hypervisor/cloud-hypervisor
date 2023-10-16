@@ -25,6 +25,7 @@ pub(crate) struct PciSegment {
     pub(crate) pci_bus: Arc<Mutex<PciBus>>,
     pub(crate) pci_config_mmio: Arc<Mutex<PciConfigMmio>>,
     pub(crate) mmio_config_address: u64,
+    pub(crate) proximity_domain: u32,
 
     #[cfg(target_arch = "x86_64")]
     pub(crate) pci_config_io: Option<Arc<Mutex<PciConfigIo>>>,
@@ -46,6 +47,7 @@ pub(crate) struct PciSegment {
 impl PciSegment {
     pub(crate) fn new(
         id: u16,
+        numa_node: u32,
         address_manager: &Arc<AddressManager>,
         allocator: Arc<Mutex<AddressAllocator>>,
         pci_irq_slots: &[u8; 32],
@@ -77,6 +79,7 @@ impl PciSegment {
             pci_bus,
             pci_config_mmio,
             mmio_config_address,
+            proximity_domain: numa_node,
             pci_devices_up: 0,
             pci_devices_down: 0,
             #[cfg(target_arch = "x86_64")]
@@ -100,7 +103,7 @@ impl PciSegment {
         allocator: Arc<Mutex<AddressAllocator>>,
         pci_irq_slots: &[u8; 32],
     ) -> DeviceManagerResult<PciSegment> {
-        let mut segment = Self::new(0, address_manager, allocator, pci_irq_slots)?;
+        let mut segment = Self::new(0, 0, address_manager, allocator, pci_irq_slots)?;
         let pci_config_io = Arc::new(Mutex::new(PciConfigIo::new(Arc::clone(&segment.pci_bus))));
 
         address_manager
@@ -123,7 +126,7 @@ impl PciSegment {
         allocator: Arc<Mutex<AddressAllocator>>,
         pci_irq_slots: &[u8; 32],
     ) -> DeviceManagerResult<PciSegment> {
-        Self::new(0, address_manager, allocator, pci_irq_slots)
+        Self::new(0, 0, address_manager, allocator, pci_irq_slots)
     }
 
     pub(crate) fn next_device_bdf(&self) -> DeviceManagerResult<PciBdf> {
@@ -329,10 +332,7 @@ impl Aml for PciSegment {
         let supp = aml::Name::new("SUPP".into(), &aml::ZERO);
         pci_dsdt_inner_data.push(&supp);
 
-        // Since Cloud Hypervisor supports only one PCI bus, it can be tied
-        // to the NUMA node 0. It's up to the user to organize the NUMA nodes
-        // so that the PCI bus relates to the expected vCPUs and guest RAM.
-        let proximity_domain = 0u32;
+        let proximity_domain = self.proximity_domain;
         let pxm_return = aml::Return::new(&proximity_domain);
         let pxm = aml::Method::new("_PXM".into(), 0, false, vec![&pxm_return]);
         pci_dsdt_inner_data.push(&pxm);
