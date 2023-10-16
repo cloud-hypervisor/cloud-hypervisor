@@ -701,6 +701,10 @@ impl Vm {
                     node.cpus.extend(cpus);
                 }
 
+                if let Some(pci_segments) = &config.pci_segments {
+                    node.pci_segments.extend(pci_segments);
+                }
+
                 if let Some(distances) = &config.distances {
                     for distance in distances.iter() {
                         let dest = distance.destination;

@@ -176,6 +176,10 @@ pub enum ValidationError {
     DuplicateDevicePath(String),
     /// Provided MTU is lower than what the VIRTIO specification expects
     InvalidMtu(u16),
+    /// PCI segment is reused across NUMA nodes
+    PciSegmentReused(u16, u32, u32),
+    /// Default PCI segment is assigned to NUMA node other than 0.
+    DefaultPciSegmentInvalidNode(u32),
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -287,6 +291,15 @@ impl fmt::Display for ValidationError {
                     f,
                     "Provided MTU {mtu} is lower than 1280 (expected by VIRTIO specification)"
                 )
+            }
+            PciSegmentReused(pci_segment, u1, u2) => {
+                write!(
+                    f,
+                    "PCI segment: {pci_segment} belongs to multiple NUMA nodes {u1} and {u2}"
+                )
+            }
+            DefaultPciSegmentInvalidNode(u1) => {
+                write!(f, "Default PCI segment assigned to non-zero NUMA node {u1}")
             }
         }
     }
@@ -1619,7 +1632,9 @@ impl NumaConfig {
             .add("cpus")
             .add("distances")
             .add("memory_zones")
-            .add("sgx_epc_sections");
+            .add("sgx_epc_sections")
+            .add("pci_segments");
+
         parser.parse(numa).map_err(Error::ParseNuma)?;
 
         let guest_numa_id = parser
@@ -1650,7 +1665,10 @@ impl NumaConfig {
             .convert::<StringList>("sgx_epc_sections")
             .map_err(Error::ParseNuma)?
             .map(|v| v.0);
-
+        let pci_segments = parser
+            .convert::<IntegerList>("pci_segments")
+            .map_err(Error::ParseNuma)?
+            .map(|v| v.0.iter().map(|e| *e as u16).collect());
         Ok(NumaConfig {
             guest_numa_id,
             cpus,
@@ -1658,6 +1676,7 @@ impl NumaConfig {
             memory_zones,
             #[cfg(target_arch = "x86_64")]
             sgx_epc_sections,
+            pci_segments,
         })
     }
 }
@@ -1925,19 +1944,48 @@ impl VmConfig {
             Self::validate_identifier(&mut id_list, &vsock.id)?;
         }
 
+        let num_pci_segments = match &self.platform {
+            Some(platform_config) => platform_config.num_pci_segments,
+            None => 1,
+        };
         if let Some(numa) = &self.numa {
             let mut used_numa_node_memory_zones = HashMap::new();
+            let mut used_pci_segments = HashMap::new();
             for numa_node in numa.iter() {
-                for memory_zone in numa_node.memory_zones.clone().unwrap().iter() {
-                    if !used_numa_node_memory_zones.contains_key(memory_zone) {
-                        used_numa_node_memory_zones
-                            .insert(memory_zone.to_string(), numa_node.guest_numa_id);
-                    } else {
-                        return Err(ValidationError::MemoryZoneReused(
-                            memory_zone.to_string(),
-                            *used_numa_node_memory_zones.get(memory_zone).unwrap(),
-                            numa_node.guest_numa_id,
-                        ));
+                if let Some(memory_zones) = numa_node.memory_zones.clone() {
+                    for memory_zone in memory_zones.iter() {
+                        if !used_numa_node_memory_zones.contains_key(memory_zone) {
+                            used_numa_node_memory_zones
+                                .insert(memory_zone.to_string(), numa_node.guest_numa_id);
+                        } else {
+                            return Err(ValidationError::MemoryZoneReused(
+                                memory_zone.to_string(),
+                                *used_numa_node_memory_zones.get(memory_zone).unwrap(),
+                                numa_node.guest_numa_id,
+                            ));
+                        }
+                    }
+                }
+
+                if let Some(pci_segments) = numa_node.pci_segments.clone() {
+                    for pci_segment in pci_segments.iter() {
+                        if *pci_segment >= num_pci_segments {
+                            return Err(ValidationError::InvalidPciSegment(*pci_segment));
+                        }
+                        if *pci_segment == 0 && numa_node.guest_numa_id != 0 {
+                            return Err(ValidationError::DefaultPciSegmentInvalidNode(
+                                numa_node.guest_numa_id,
+                            ));
+                        }
+                        if !used_pci_segments.contains_key(pci_segment) {
+                            used_pci_segments.insert(*pci_segment, numa_node.guest_numa_id);
+                        } else {
+                            return Err(ValidationError::PciSegmentReused(
+                                *pci_segment,
+                                *used_pci_segments.get(pci_segment).unwrap(),
+                                numa_node.guest_numa_id,
+                            ));
+                        }
                     }
                 }
             }
@@ -3302,6 +3350,63 @@ mod tests {
         assert_eq!(
             invalid_config.validate(),
             Err(ValidationError::IommuNotSupportedOnSegment(1))
+        );
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.platform = Some(PlatformConfig {
+            num_pci_segments: 2,
+            ..Default::default()
+        });
+        invalid_config.numa = Some(vec![
+            NumaConfig {
+                guest_numa_id: 0,
+                pci_segments: Some(vec![1]),
+                ..Default::default()
+            },
+            NumaConfig {
+                guest_numa_id: 1,
+                pci_segments: Some(vec![1]),
+                ..Default::default()
+            },
+        ]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::PciSegmentReused(1, 0, 1))
+        );
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.numa = Some(vec![
+            NumaConfig {
+                guest_numa_id: 0,
+                ..Default::default()
+            },
+            NumaConfig {
+                guest_numa_id: 1,
+                pci_segments: Some(vec![0]),
+                ..Default::default()
+            },
+        ]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::DefaultPciSegmentInvalidNode(1))
+        );
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.numa = Some(vec![
+            NumaConfig {
+                guest_numa_id: 0,
+                pci_segments: Some(vec![0]),
+                ..Default::default()
+            },
+            NumaConfig {
+                guest_numa_id: 1,
+                pci_segments: Some(vec![1]),
+                ..Default::default()
+            },
+        ]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::InvalidPciSegment(1))
         );
 
         let mut still_valid_config = valid_config.clone();

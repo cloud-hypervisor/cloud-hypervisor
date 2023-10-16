@@ -538,6 +538,8 @@ pub struct NumaConfig {
     #[cfg(target_arch = "x86_64")]
     #[serde(default)]
     pub sgx_epc_sections: Option<Vec<String>>,
+    #[serde(default)]
+    pub pci_segments: Option<Vec<u16>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]

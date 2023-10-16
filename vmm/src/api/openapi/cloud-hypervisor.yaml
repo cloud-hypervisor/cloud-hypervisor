@@ -1080,6 +1080,11 @@ components:
           type: array
           items:
             type: string
+        pci_segments:
+          type: array
+          items:
+            type: integer
+            format: int32
 
     VmResize:
       type: object
