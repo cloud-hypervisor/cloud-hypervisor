@@ -1639,6 +1639,8 @@ impl Vmm {
         let vm_config = vm.get_config();
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         let common_cpuid = {
+            #[cfg(feature = "tdx")]
+            let tdx_enabled = vm_config.lock().unwrap().is_tdx_enabled();
             let phys_bits =
                 vm::physical_bits(&hypervisor, vm_config.lock().unwrap().cpus.max_phys_bits);
             arch::generate_common_cpuid(
@@ -1648,7 +1650,7 @@ impl Vmm {
                 phys_bits,
                 vm_config.lock().unwrap().cpus.kvm_hyperv,
                 #[cfg(feature = "tdx")]
-                vm_config.lock().unwrap().is_tdx_enabled(),
+                tdx_enabled,
             )
             .map_err(|e| {
                 MigratableError::MigrateReceive(anyhow!("Error generating common cpuid': {:?}", e))
