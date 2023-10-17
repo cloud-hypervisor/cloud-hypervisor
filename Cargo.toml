@@ -15,7 +15,7 @@ homepage = "https://github.com/cloud-hypervisor/cloud-hypervisor"
 # a.) A dependency requires it,
 # b.) If we want to use a new feature and that MSRV is at least 6 months old,
 # c.) There is a security issue that is addressed by the toolchain update.
-rust-version = "1.64"
+rust-version = "1.65"
 
 [profile.release]
 lto = true
