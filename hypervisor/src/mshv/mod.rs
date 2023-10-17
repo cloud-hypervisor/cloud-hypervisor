@@ -237,6 +237,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         // Set additional partition property for SEV-SNP partition.
         if mshv_vm_type == VmType::Snp {
             let snp_policy = snp::get_default_snp_guest_policy();
+            let vmgexit_offloads = snp::get_default_vmgexit_offload_features();
             // SAFETY: access union fields
             unsafe {
                 debug!(
@@ -246,6 +247,15 @@ impl hypervisor::Hypervisor for MshvHypervisor {
                 fd.set_partition_property(
                     hv_partition_property_code_HV_PARTITION_PROPERTY_ISOLATION_POLICY,
                     snp_policy.as_uint64,
+                )
+                .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
+                debug!(
+                    "Setting the partition property to enable VMGEXIT offloads as : 0x{:x}",
+                    vmgexit_offloads.as_uint64
+                );
+                fd.set_partition_property(
+                    hv_partition_property_code_HV_PARTITION_PROPERTY_SEV_VMGEXIT_OFFLOADS,
+                    vmgexit_offloads.as_uint64,
                 )
                 .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
             }
