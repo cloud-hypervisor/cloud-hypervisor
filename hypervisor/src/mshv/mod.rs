@@ -619,6 +619,44 @@ impl cpu::Vcpu for MshvVcpu {
                         info.interrupt_vector.try_into().unwrap(),
                     ))
                 }
+                #[cfg(feature = "sev_snp")]
+                hv_message_type_HVMSG_X64_SEV_VMGEXIT_INTERCEPT => {
+                    let info = x.to_vmg_intercept_info().unwrap();
+                    let ghcb_data = info.ghcb_msr >> GHCB_INFO_BIT_WIDTH;
+                    let ghcb_msr = svm_ghcb_msr {
+                        as_uint64: info.ghcb_msr,
+                    };
+                    // SAFETY: Accessing a union element from bindgen generated bindings.
+                    let ghcb_op = unsafe { ghcb_msr.__bindgen_anon_2.ghcb_info() as u32 };
+                    // Sanity check on the header fields before handling other operations.
+                    assert!(info.header.intercept_access_type == HV_INTERCEPT_ACCESS_EXECUTE as u8);
+
+                    match ghcb_op {
+                        GHCB_INFO_HYP_FEATURE_REQUEST => {
+                            // Pre-condition: GHCB data must be zero
+                            assert!(ghcb_data == 0);
+                            let mut ghcb_response = GHCB_INFO_HYP_FEATURE_RESPONSE as u64;
+                            // Indicate support for basic SEV-SNP features
+                            ghcb_response |=
+                                (GHCB_HYP_FEATURE_SEV_SNP << GHCB_INFO_BIT_WIDTH) as u64;
+                            // Indicate support for SEV-SNP AP creation
+                            ghcb_response |= (GHCB_HYP_FEATURE_SEV_SNP_AP_CREATION
+                                << GHCB_INFO_BIT_WIDTH)
+                                as u64;
+                            debug!(
+                                "GHCB_INFO_HYP_FEATURE_REQUEST: Supported features: {:0x}",
+                                ghcb_response
+                            );
+                            let arr_reg_name_value =
+                                [(hv_register_name_HV_X64_REGISTER_GHCB, ghcb_response)];
+                            set_registers_64!(self.fd, arr_reg_name_value)
+                                .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+                        }
+                        _ => panic!("Unsupported VMGEXIT operation: {:0x}", ghcb_op),
+                    }
+
+                    Ok(cpu::VmExit::Ignore)
+                }
                 exit => Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
                     "Unhandled VCPU exit {:?}",
                     exit
