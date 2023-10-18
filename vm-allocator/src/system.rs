@@ -119,7 +119,7 @@ impl SystemAllocator {
         self.platform_mmio_address_space.allocate(
             address,
             size,
-            Some(align_size.unwrap_or(get_page_size())),
+            Some(align_size.unwrap_or_else(get_page_size)),
         )
     }
 
@@ -133,7 +133,7 @@ impl SystemAllocator {
         self.mmio_hole_address_space.allocate(
             address,
             size,
-            Some(align_size.unwrap_or(get_page_size())),
+            Some(align_size.unwrap_or_else(get_page_size)),
         )
     }
 
