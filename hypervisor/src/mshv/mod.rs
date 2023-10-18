@@ -652,6 +652,47 @@ impl cpu::Vcpu for MshvVcpu {
                             set_registers_64!(self.fd, arr_reg_name_value)
                                 .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
                         }
+                        GHCB_INFO_REGISTER_REQUEST => {
+                            let mut ghcb_gpa = hv_x64_register_sev_ghcb::default();
+                            // SAFETY: Accessing a union element from bindgen generated bindings.
+                            unsafe {
+                                ghcb_gpa.__bindgen_anon_1.set_enabled(1);
+                                ghcb_gpa
+                                    .__bindgen_anon_1
+                                    .set_page_number(ghcb_msr.__bindgen_anon_2.gpa_page_number());
+                            }
+                            // SAFETY: Accessing a union element from bindgen generated bindings.
+                            let reg_name_value = unsafe {
+                                [(
+                                    hv_register_name_HV_X64_REGISTER_SEV_GHCB_GPA,
+                                    ghcb_gpa.as_uint64,
+                                )]
+                            };
+
+                            set_registers_64!(self.fd, reg_name_value)
+                                .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+
+                            let mut resp_ghcb_msr = svm_ghcb_msr::default();
+                            // SAFETY: Accessing a union element from bindgen generated bindings.
+                            unsafe {
+                                resp_ghcb_msr
+                                    .__bindgen_anon_2
+                                    .set_ghcb_info(GHCB_INFO_REGISTER_RESPONSE as u64);
+                                resp_ghcb_msr.__bindgen_anon_2.set_gpa_page_number(
+                                    ghcb_msr.__bindgen_anon_2.gpa_page_number(),
+                                );
+                            }
+                            // SAFETY: Accessing a union element from bindgen generated bindings.
+                            let reg_name_value = unsafe {
+                                [(
+                                    hv_register_name_HV_X64_REGISTER_GHCB,
+                                    resp_ghcb_msr.as_uint64,
+                                )]
+                            };
+
+                            set_registers_64!(self.fd, reg_name_value)
+                                .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+                        }
                         _ => panic!("Unsupported VMGEXIT operation: {:0x}", ghcb_op),
                     }
 
