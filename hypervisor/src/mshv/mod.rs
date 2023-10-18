@@ -693,6 +693,29 @@ impl cpu::Vcpu for MshvVcpu {
                             set_registers_64!(self.fd, reg_name_value)
                                 .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
                         }
+                        GHCB_INFO_SEV_INFO_REQUEST => {
+                            let sev_cpuid_function = 0x8000_001F;
+                            let cpu_leaf = self
+                                .fd
+                                .get_cpuid_values(sev_cpuid_function, 0, 0, 0)
+                                .unwrap();
+                            let ebx = cpu_leaf[1];
+                            // First 6-byte of EBX represents page table encryption bit number
+                            let pbit_encryption = (ebx & 0x3f) as u8;
+                            let mut ghcb_response = GHCB_INFO_SEV_INFO_RESPONSE as u64;
+
+                            // GHCBData[63:48] specifies the maximum GHCB protocol version supported
+                            ghcb_response |= (GHCB_PROTOCOL_VERSION_MAX as u64) << 48;
+                            // GHCBData[47:32] specifies the minimum GHCB protocol version supported
+                            ghcb_response |= (GHCB_PROTOCOL_VERSION_MIN as u64) << 32;
+                            // GHCBData[31:24] specifies the SEV page table encryption bit number.
+                            ghcb_response |= (pbit_encryption as u64) << 24;
+
+                            let arr_reg_name_value =
+                                [(hv_register_name_HV_X64_REGISTER_GHCB, ghcb_response)];
+                            set_registers_64!(self.fd, arr_reg_name_value)
+                                .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+                        }
                         _ => panic!("Unsupported VMGEXIT operation: {:0x}", ghcb_op),
                     }
 
