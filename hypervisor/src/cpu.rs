@@ -257,6 +257,16 @@ pub enum HypervisorCpuError {
     ///
     #[error("Failed to set TSC frequency: {0}")]
     SetTscKhz(#[source] anyhow::Error),
+    ///
+    /// Error reading value at given GPA
+    ///
+    #[error("Failed to read from GPA: {0}")]
+    GpaRead(#[source] anyhow::Error),
+    ///
+    /// Error writing value at given GPA
+    ///
+    #[error("Failed to write to GPA: {0}")]
+    GpaWrite(#[source] anyhow::Error),
 }
 
 #[derive(Debug)]
