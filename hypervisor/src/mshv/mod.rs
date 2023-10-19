@@ -716,6 +716,127 @@ impl cpu::Vcpu for MshvVcpu {
                             set_registers_64!(self.fd, arr_reg_name_value)
                                 .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
                         }
+                        GHCB_INFO_NORMAL => {
+                            let exit_code =
+                                info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_code as u32;
+                            // SAFETY: Accessing a union element from bindgen generated bindings.
+                            let pfn = unsafe { ghcb_msr.__bindgen_anon_2.gpa_page_number() };
+                            let ghcb_gpa = pfn << GHCB_INFO_BIT_WIDTH;
+                            match exit_code {
+                                SVM_EXITCODE_HV_DOORBELL_PAGE => {
+                                    let exit_info1 =
+                                        info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info1 as u32;
+                                    match exit_info1 {
+                                        SVM_NAE_HV_DOORBELL_PAGE_GET_PREFERRED => {
+                                            // Hypervisor does not have any preference for doorbell GPA.
+                                            let preferred_doorbell_gpa: u64 = 0xFFFFFFFFFFFFFFFF;
+                                            let mut swei2_rw_gpa_arg =
+                                                mshv_bindings::mshv_read_write_gpa {
+                                                    base_gpa: ghcb_gpa + GHCB_SW_EXITINFO2_OFFSET,
+                                                    byte_count: std::mem::size_of::<u64>() as u32,
+                                                    ..Default::default()
+                                                };
+                                            swei2_rw_gpa_arg.data.copy_from_slice(
+                                                &preferred_doorbell_gpa.to_le_bytes(),
+                                            );
+                                            self.fd.gpa_write(&mut swei2_rw_gpa_arg).map_err(
+                                                |e| cpu::HypervisorCpuError::GpaWrite(e.into()),
+                                            )?;
+                                        }
+                                        SVM_NAE_HV_DOORBELL_PAGE_SET => {
+                                            let exit_info2 = info
+                                                .__bindgen_anon_2
+                                                .__bindgen_anon_1
+                                                .sw_exit_info2;
+                                            let mut ghcb_doorbell_gpa =
+                                                hv_x64_register_sev_hv_doorbell::default();
+                                            // SAFETY: Accessing a union element from bindgen generated bindings.
+                                            unsafe {
+                                                ghcb_doorbell_gpa.__bindgen_anon_1.set_enabled(1);
+                                                ghcb_doorbell_gpa
+                                                    .__bindgen_anon_1
+                                                    .set_page_number(exit_info2 >> PAGE_SHIFT);
+                                            }
+                                            // SAFETY: Accessing a union element from bindgen generated bindings.
+                                            let reg_names = unsafe {
+                                                [(
+                                                    hv_register_name_HV_X64_REGISTER_SEV_DOORBELL_GPA,
+                                                    ghcb_doorbell_gpa.as_uint64,
+                                                )]
+                                            };
+                                            set_registers_64!(self.fd, reg_names).map_err(|e| {
+                                                cpu::HypervisorCpuError::SetRegister(e.into())
+                                            })?;
+
+                                            let mut swei2_rw_gpa_arg =
+                                                mshv_bindings::mshv_read_write_gpa {
+                                                    base_gpa: ghcb_gpa + GHCB_SW_EXITINFO2_OFFSET,
+                                                    byte_count: std::mem::size_of::<u64>() as u32,
+                                                    ..Default::default()
+                                                };
+                                            swei2_rw_gpa_arg.data[0..8]
+                                                .copy_from_slice(&exit_info2.to_le_bytes());
+                                            self.fd.gpa_write(&mut swei2_rw_gpa_arg).map_err(
+                                                |e| cpu::HypervisorCpuError::GpaWrite(e.into()),
+                                            )?;
+
+                                            // Clear the SW_EXIT_INFO1 register to indicate no error
+                                            let mut swei1_rw_gpa_arg =
+                                                mshv_bindings::mshv_read_write_gpa {
+                                                    base_gpa: ghcb_gpa + GHCB_SW_EXITINFO1_OFFSET,
+                                                    byte_count: std::mem::size_of::<u64>() as u32,
+                                                    ..Default::default()
+                                                };
+                                            self.fd.gpa_write(&mut swei1_rw_gpa_arg).map_err(
+                                                |e| cpu::HypervisorCpuError::GpaWrite(e.into()),
+                                            )?;
+                                        }
+                                        SVM_NAE_HV_DOORBELL_PAGE_QUERY => {
+                                            let mut reg_assocs = [ hv_register_assoc {
+                                                name: hv_register_name_HV_X64_REGISTER_SEV_DOORBELL_GPA,
+                                                ..Default::default()
+                                            } ];
+                                            self.fd.get_reg(&mut reg_assocs).unwrap();
+                                            // SAFETY: Accessing a union element from bindgen generated bindings.
+                                            let doorbell_gpa = unsafe { reg_assocs[0].value.reg64 };
+                                            let mut swei2_rw_gpa_arg =
+                                                mshv_bindings::mshv_read_write_gpa {
+                                                    base_gpa: ghcb_gpa + GHCB_SW_EXITINFO2_OFFSET,
+                                                    byte_count: std::mem::size_of::<u64>() as u32,
+                                                    ..Default::default()
+                                                };
+                                            swei2_rw_gpa_arg
+                                                .data
+                                                .copy_from_slice(&doorbell_gpa.to_le_bytes());
+                                            self.fd.gpa_write(&mut swei2_rw_gpa_arg).map_err(
+                                                |e| cpu::HypervisorCpuError::GpaWrite(e.into()),
+                                            )?;
+                                        }
+                                        SVM_NAE_HV_DOORBELL_PAGE_CLEAR => {
+                                            let mut swei2_rw_gpa_arg =
+                                                mshv_bindings::mshv_read_write_gpa {
+                                                    base_gpa: ghcb_gpa + GHCB_SW_EXITINFO2_OFFSET,
+                                                    byte_count: std::mem::size_of::<u64>() as u32,
+                                                    ..Default::default()
+                                                };
+                                            self.fd.gpa_write(&mut swei2_rw_gpa_arg).map_err(
+                                                |e| cpu::HypervisorCpuError::GpaWrite(e.into()),
+                                            )?;
+                                        }
+                                        _ => {
+                                            panic!(
+                                                "SVM_EXITCODE_HV_DOORBELL_PAGE: Unhandled exit code: {:0x}",
+                                                exit_info1
+                                            );
+                                        }
+                                    }
+                                }
+                                _ => panic!(
+                                    "GHCB_INFO_NORMAL: Unhandled exit code: {:0x}",
+                                    exit_code
+                                ),
+                            }
+                        }
                         _ => panic!("Unsupported VMGEXIT operation: {:0x}", ghcb_op),
                     }
 
