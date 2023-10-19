@@ -53,3 +53,29 @@ grcov . --binary-path ./target/x86_64-unknown-linux-gnu/release -s . -t html --b
 
 You can then open the `index.html` file under coverage-html-output to see the
 results.
+
+## Notes on running the in-tree integration tests and unit tests
+
+Please set RUSTFLAGS the same way while invoking `dev_cli.sh`. The script will
+pass RUSTFLAGS to the container.
+
+Since the `profraw` files are generated from within the container, the file
+paths embedded in the data files are going to be different. It is easier to do
+the data processing from within the container if you don't want to fight the
+tool chain.
+
+```shell
+# Get a shell
+./scripts/dev_cli.sh shell
+
+# Install llvm-tools-preview for llvm-profdata
+rustup component add llvm-tools-preview
+# Merge data files by using the following command
+find . -name '*.profraw' -exec `rustc --print sysroot`/lib/rustlib/x86_64-unknown-linux-gnu/bin/llvm-profdata merge -sparse {} -o coverage.profdata \;
+
+# As of writing, the container has Rust 1.67.1. It is too old for grcov.
+rustup install stable
+cargo +stable install grcov
+# Run grcov as usual
+grcov . --binary-path ./target/x86_64-unknown-linux-gnu/release -s . -t html --branch --ignore-not-existing -o coverage-html-output/
+```
