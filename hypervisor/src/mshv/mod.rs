@@ -831,6 +831,23 @@ impl cpu::Vcpu for MshvVcpu {
                                         }
                                     }
                                 }
+                                SVM_EXITCODE_SNP_EXTENDED_GUEST_REQUEST => {
+                                    warn!("Fetching extended guest request is not supported");
+                                    // Extended guest request is not supported by the Hypervisor
+                                    // Returning the error to the guest
+                                    // 0x6 means `The NAE event was not valid`
+                                    // Reference: GHCB Spec, page 42
+                                    let value: u64 = 0x6;
+                                    let mut swei2_rw_gpa_arg = mshv_bindings::mshv_read_write_gpa {
+                                        base_gpa: ghcb_gpa + GHCB_SW_EXITINFO2_OFFSET,
+                                        byte_count: std::mem::size_of::<u64>() as u32,
+                                        ..Default::default()
+                                    };
+                                    swei2_rw_gpa_arg.data.copy_from_slice(&value.to_le_bytes());
+                                    self.fd
+                                        .gpa_write(&mut swei2_rw_gpa_arg)
+                                        .map_err(|e| cpu::HypervisorCpuError::GpaWrite(e.into()))?;
+                                }
                                 _ => panic!(
                                     "GHCB_INFO_NORMAL: Unhandled exit code: {:0x}",
                                     exit_code
