@@ -20,7 +20,6 @@ WIN_IMAGE_FILE="$WORKLOADS_DIR/$WIN_IMAGE_BASENAME"
 OVMF_FW="$WORKLOADS_DIR/CLOUDHV_EFI.fd"
 build_edk2
 
-BUILD_TARGET="$(uname -m)-unknown-linux-${CH_LIBC}"
 CFLAGS=""
 TARGET_CC=""
 if [[ "${BUILD_TARGET}" == "aarch64-unknown-linux-musl" ]]; then
