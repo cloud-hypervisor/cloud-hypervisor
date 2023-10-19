@@ -24,6 +24,7 @@ pub mod qcow_sync;
 ///
 /// Enabled with the `"io_uring"` feature
 pub mod raw_async;
+pub mod raw_async_aio;
 pub mod raw_sync;
 pub mod vhd;
 pub mod vhdx;
@@ -61,6 +62,7 @@ use vm_memory::{
     GuestMemoryError, GuestMemoryLoadGuard,
 };
 use vm_virtio::{AccessPlatform, Translatable};
+use vmm_sys_util::aio;
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::{ioctl_io_nr, ioctl_ioc_nr};
 
@@ -564,6 +566,11 @@ pub struct VirtioBlockGeometry {
 unsafe impl ByteValued for VirtioBlockConfig {}
 // SAFETY: data structure only contain a series of integers
 unsafe impl ByteValued for VirtioBlockGeometry {}
+
+/// Check if aio can be used on the current system.
+pub fn block_aio_is_supported() -> bool {
+    aio::IoContext::new(1).is_ok()
+}
 
 /// Check if io_uring for block device can be used on the current system, as
 /// it correctly supports the expected io_uring features.

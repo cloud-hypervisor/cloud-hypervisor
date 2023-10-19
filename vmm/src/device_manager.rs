@@ -35,9 +35,9 @@ use arch::NumaNodes;
 #[cfg(target_arch = "aarch64")]
 use arch::{DeviceType, MmioDeviceInfo};
 use block::{
-    async_io::DiskFile, block_io_uring_is_supported, detect_image_type,
-    fixed_vhd_sync::FixedVhdDiskSync, qcow, qcow_sync::QcowDiskSync, raw_sync::RawFileDiskSync,
-    vhdx, vhdx_sync::VhdxDiskSync, ImageType,
+    async_io::DiskFile, block_aio_is_supported, block_io_uring_is_supported, detect_image_type,
+    fixed_vhd_sync::FixedVhdDiskSync, qcow, qcow_sync::QcowDiskSync, raw_async_aio::RawFileDiskAio,
+    raw_sync::RawFileDiskSync, vhdx, vhdx_sync::VhdxDiskSync, ImageType,
 };
 #[cfg(feature = "io_uring")]
 use block::{fixed_vhd_async::FixedVhdDiskAsync, raw_async::RawFileDisk};
@@ -949,6 +949,9 @@ pub struct DeviceManager {
     // io_uring availability if detected
     io_uring_supported: Option<bool>,
 
+    // aio availability if detected
+    aio_supported: Option<bool>,
+
     // List of unique identifiers provided at boot through the configuration.
     boot_id_list: BTreeSet<String>,
 
@@ -1138,6 +1141,7 @@ impl DeviceManager {
             pvpanic_device: None,
             force_iommu,
             io_uring_supported: None,
+            aio_supported: None,
             boot_id_list,
             timestamp,
             pending_activations: Arc::new(Mutex::new(Vec::default())),
@@ -2171,6 +2175,17 @@ impl DeviceManager {
         Ok(devices)
     }
 
+    // Cache whether aio is supported to avoid checking for very block device
+    fn aio_is_supported(&mut self) -> bool {
+        if let Some(supported) = self.aio_supported {
+            return supported;
+        }
+
+        let supported = block_aio_is_supported();
+        self.aio_supported = Some(supported);
+        supported
+    }
+
     // Cache whether io_uring is supported to avoid probing for very block device
     fn io_uring_is_supported(&mut self) -> bool {
         if let Some(supported) = self.io_uring_supported {
@@ -2292,6 +2307,9 @@ impl DeviceManager {
                         {
                             Box::new(RawFileDisk::new(file)) as Box<dyn DiskFile>
                         }
+                    } else if !disk_cfg.disable_aio && self.aio_is_supported() {
+                        info!("Using asynchronous RAW disk file (aio)");
+                        Box::new(RawFileDiskAio::new(file)) as Box<dyn DiskFile>
                     } else {
                         info!("Using synchronous RAW disk file");
                         Box::new(RawFileDiskSync::new(file)) as Box<dyn DiskFile>
