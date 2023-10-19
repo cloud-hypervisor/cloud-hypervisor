@@ -848,6 +848,78 @@ impl cpu::Vcpu for MshvVcpu {
                                         .gpa_write(&mut swei2_rw_gpa_arg)
                                         .map_err(|e| cpu::HypervisorCpuError::GpaWrite(e.into()))?;
                                 }
+                                SVM_EXITCODE_IOIO_PROT => {
+                                    let exit_info1 =
+                                        info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info1 as u32;
+                                    let port_info = hv_sev_vmgexit_port_info {
+                                        as_uint32: exit_info1,
+                                    };
+
+                                    let port =
+                                        // SAFETY: Accessing a union element from bindgen generated bindings.
+                                        unsafe { port_info.__bindgen_anon_1.intercepted_port() };
+                                    let mut len = 4;
+                                    // SAFETY: Accessing a union element from bindgen generated bindings.
+                                    unsafe {
+                                        if port_info.__bindgen_anon_1.operand_size_16bit() == 1 {
+                                            len = 2;
+                                        } else if port_info.__bindgen_anon_1.operand_size_8bit()
+                                            == 1
+                                        {
+                                            len = 1;
+                                        }
+                                    }
+                                    let is_write =
+                                        // SAFETY: Accessing a union element from bindgen generated bindings.
+                                        unsafe { port_info.__bindgen_anon_1.access_type() == 0 };
+                                    let mut rax_rw_gpa_arg: mshv_read_write_gpa =
+                                        mshv_bindings::mshv_read_write_gpa {
+                                            base_gpa: ghcb_gpa + GHCB_RAX_OFFSET,
+                                            byte_count: std::mem::size_of::<u64>() as u32,
+                                            ..Default::default()
+                                        };
+                                    self.fd
+                                        .gpa_read(&mut rax_rw_gpa_arg)
+                                        .map_err(|e| cpu::HypervisorCpuError::GpaRead(e.into()))?;
+
+                                    if is_write {
+                                        if let Some(vm_ops) = &self.vm_ops {
+                                            vm_ops
+                                                .pio_write(
+                                                    port.into(),
+                                                    &rax_rw_gpa_arg.data[0..len],
+                                                )
+                                                .map_err(|e| {
+                                                    cpu::HypervisorCpuError::RunVcpu(e.into())
+                                                })?;
+                                        }
+                                    } else {
+                                        if let Some(vm_ops) = &self.vm_ops {
+                                            vm_ops
+                                                .pio_read(
+                                                    port.into(),
+                                                    &mut rax_rw_gpa_arg.data[0..len],
+                                                )
+                                                .map_err(|e| {
+                                                    cpu::HypervisorCpuError::RunVcpu(e.into())
+                                                })?;
+                                        }
+
+                                        self.fd.gpa_write(&mut rax_rw_gpa_arg).map_err(|e| {
+                                            cpu::HypervisorCpuError::GpaWrite(e.into())
+                                        })?;
+                                    }
+
+                                    // Clear the SW_EXIT_INFO1 register to indicate no error
+                                    let mut swei1_rw_gpa_arg = mshv_bindings::mshv_read_write_gpa {
+                                        base_gpa: ghcb_gpa + GHCB_SW_EXITINFO1_OFFSET,
+                                        byte_count: std::mem::size_of::<u64>() as u32,
+                                        ..Default::default()
+                                    };
+                                    self.fd
+                                        .gpa_write(&mut swei1_rw_gpa_arg)
+                                        .map_err(|e| cpu::HypervisorCpuError::GpaWrite(e.into()))?;
+                                }
                                 _ => panic!(
                                     "GHCB_INFO_NORMAL: Unhandled exit code: {:0x}",
                                     exit_code
