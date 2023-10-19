@@ -227,11 +227,6 @@ if [ $RES -ne 0 ]; then
     exit 1
 fi
 
-if [[ "${BUILD_TARGET}" == "aarch64-unknown-linux-musl" ]]; then
-export TARGET_CC="musl-gcc"
-export RUSTFLAGS="-C link-arg=-lgcc -C link_arg=-specs -C link_arg=/usr/lib/aarch64-linux-musl/musl-gcc.specs"
-fi
-
 export RUST_BACKTRACE=1
 
 # Test without ACPI

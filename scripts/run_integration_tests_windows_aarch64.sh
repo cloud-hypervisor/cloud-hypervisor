@@ -22,13 +22,6 @@ WIN_IMAGE_FILE="$WORKLOADS_DIR/$WIN_IMAGE_BASENAME"
 OVMF_FW="$WORKLOADS_DIR/CLOUDHV_EFI.fd"
 build_edk2
 
-CFLAGS=""
-TARGET_CC=""
-if [[ "${BUILD_TARGET}" == "aarch64-unknown-linux-musl" ]]; then
-export TARGET_CC="musl-gcc"
-export RUSTFLAGS="-C link-arg=-lgcc -C link_arg=-specs -C link_arg=/usr/lib/aarch64-linux-musl/musl-gcc.specs"
-fi
-
 # Check if the images are present
 if [[ ! -f ${WIN_IMAGE_FILE} || ! -f ${OVMF_FW} ]]; then
     echo "Windows image/firmware not present in the host"
