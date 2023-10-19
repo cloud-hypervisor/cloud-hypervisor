@@ -3055,7 +3055,7 @@ mod common_parallel {
         handle_child_output(r, &output);
     }
 
-    fn _test_virtio_block(image_name: &str, disable_io_uring: bool) {
+    fn _test_virtio_block(image_name: &str, disable_io_uring: bool, disable_aio: bool) {
         let focal = UbuntuDiskConfig::new(image_name.to_string());
         let guest = Guest::new(Box::new(focal));
 
@@ -3085,9 +3085,10 @@ mod common_parallel {
                 )
                 .as_str(),
                 format!(
-                    "path={},readonly=on,direct=on,num_queues=4,_disable_io_uring={}",
+                    "path={},readonly=on,direct=on,num_queues=4,_disable_io_uring={},_disable_aio={}",
                     blk_file_path.to_str().unwrap(),
-                    disable_io_uring
+                    disable_io_uring,
+                    disable_aio,
                 )
                 .as_str(),
             ])
@@ -3140,23 +3141,28 @@ mod common_parallel {
     }
 
     #[test]
-    fn test_virtio_block() {
-        _test_virtio_block(FOCAL_IMAGE_NAME, false)
+    fn test_virtio_block_io_uring() {
+        _test_virtio_block(FOCAL_IMAGE_NAME, false, true)
     }
 
     #[test]
-    fn test_virtio_block_disable_io_uring() {
-        _test_virtio_block(FOCAL_IMAGE_NAME, true)
+    fn test_virtio_block_aio() {
+        _test_virtio_block(FOCAL_IMAGE_NAME, true, false)
+    }
+
+    #[test]
+    fn test_virtio_block_sync() {
+        _test_virtio_block(FOCAL_IMAGE_NAME, true, true)
     }
 
     #[test]
     fn test_virtio_block_qcow2() {
-        _test_virtio_block(FOCAL_IMAGE_NAME_QCOW2, false)
+        _test_virtio_block(FOCAL_IMAGE_NAME_QCOW2, false, false)
     }
 
     #[test]
     fn test_virtio_block_qcow2_backing_file() {
-        _test_virtio_block(FOCAL_IMAGE_NAME_QCOW2_BACKING_FILE, false)
+        _test_virtio_block(FOCAL_IMAGE_NAME_QCOW2_BACKING_FILE, false, false)
     }
 
     #[test]
@@ -3181,7 +3187,7 @@ mod common_parallel {
             .output()
             .expect("Expect generating VHD image from RAW image");
 
-        _test_virtio_block(FOCAL_IMAGE_NAME_VHD, false)
+        _test_virtio_block(FOCAL_IMAGE_NAME_VHD, false, false)
     }
 
     #[test]
@@ -3205,7 +3211,7 @@ mod common_parallel {
             .output()
             .expect("Expect generating dynamic VHDx image from RAW image");
 
-        _test_virtio_block(FOCAL_IMAGE_NAME_VHDX, false)
+        _test_virtio_block(FOCAL_IMAGE_NAME_VHDX, false, false)
     }
 
     #[test]

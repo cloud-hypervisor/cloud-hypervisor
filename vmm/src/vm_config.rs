@@ -218,6 +218,9 @@ pub struct DiskConfig {
     // For testing use only. Not exposed in API.
     #[serde(default)]
     pub disable_io_uring: bool,
+    // For testing use only. Not exposed in API.
+    #[serde(default)]
+    pub disable_aio: bool,
     #[serde(default)]
     pub pci_segment: u16,
     #[serde(default)]
@@ -249,6 +252,7 @@ impl Default for DiskConfig {
             vhost_socket: None,
             id: None,
             disable_io_uring: false,
+            disable_aio: false,
             rate_limiter_config: None,
             pci_segment: 0,
             serial: None,

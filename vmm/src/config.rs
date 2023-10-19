@@ -888,6 +888,7 @@ impl DiskConfig {
             .add("ops_refill_time")
             .add("id")
             .add("_disable_io_uring")
+            .add("_disable_aio")
             .add("pci_segment")
             .add("serial");
         parser.parse(disk).map_err(Error::ParseDisk)?;
@@ -925,6 +926,11 @@ impl DiskConfig {
         let id = parser.get("id");
         let disable_io_uring = parser
             .convert::<Toggle>("_disable_io_uring")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let disable_aio = parser
+            .convert::<Toggle>("_disable_aio")
             .map_err(Error::ParseDisk)?
             .unwrap_or(Toggle(false))
             .0;
@@ -996,6 +1002,7 @@ impl DiskConfig {
             rate_limiter_config,
             id,
             disable_io_uring,
+            disable_aio,
             pci_segment,
             serial,
         })
