@@ -1,7 +1,5 @@
 #!/bin/bash
 
-export BUILD_TARGET=${BUILD_TARGET-aarch64-unknown-linux-gnu}
-
 WORKLOADS_DIR="$HOME/workloads"
 
 mkdir -p "$WORKLOADS_DIR"
