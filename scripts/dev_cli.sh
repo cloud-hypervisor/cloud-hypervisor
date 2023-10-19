@@ -282,10 +282,10 @@ cmd_build() {
     [ $build = "release" ] && cargo_args+=("--release")
     cargo_args+=(--target "$target")
 
-    rustflags=""
+    rustflags="$RUSTFLAGS"
     target_cc=""
     if [ "$(uname -m)" = "aarch64" ] && [ "$libc" = "musl" ]; then
-        rustflags="-C link-arg=-lgcc -C link_arg=-specs -C link_arg=/usr/lib/aarch64-linux-musl/musl-gcc.specs"
+        rustflags="$rustflags -C link-arg=-lgcc -C link_arg=-specs -C link_arg=/usr/lib/aarch64-linux-musl/musl-gcc.specs"
         target_cc="musl-gcc"
     fi
 
