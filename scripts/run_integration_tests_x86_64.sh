@@ -4,8 +4,6 @@ set -x
 source $HOME/.cargo/env
 source $(dirname "$0")/test-util.sh
 
-export BUILD_TARGET=${BUILD_TARGET-x86_64-unknown-linux-gnu}
-
 WORKLOADS_DIR="$HOME/workloads"
 mkdir -p "$WORKLOADS_DIR"
 
@@ -171,8 +169,6 @@ mkdir -p $VFIO_DIR
 cp $FOCAL_OS_RAW_IMAGE $VFIO_DIR
 cp $FW $VFIO_DIR
 cp $VMLINUX_IMAGE $VFIO_DIR || exit 1
-
-BUILD_TARGET="$(uname -m)-unknown-linux-${CH_LIBC}"
 
 cargo build --all  --release $features --target $BUILD_TARGET
 strip target/$BUILD_TARGET/release/cloud-hypervisor

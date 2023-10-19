@@ -4,8 +4,6 @@ set -x
 source $HOME/.cargo/env
 source $(dirname "$0")/test-util.sh
 
-export BUILD_TARGET=${BUILD_TARGET-x86_64-unknown-linux-gnu}
-
 WORKLOADS_DIR="$HOME/workloads"
 mkdir -p "$WORKLOADS_DIR"
 
@@ -78,7 +76,6 @@ if [ -d "$LINUX_CUSTOM_DIR" ]; then
     rm -rf $LINUX_CUSTOM_DIR
 fi
 
-BUILD_TARGET="$(uname -m)-unknown-linux-${CH_LIBC}"
 CFLAGS=""
 TARGET_CC=""
 if [[ "${BUILD_TARGET}" == "x86_64-unknown-linux-musl" ]]; then
