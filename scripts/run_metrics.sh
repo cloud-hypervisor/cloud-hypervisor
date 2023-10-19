@@ -5,8 +5,6 @@ source $HOME/.cargo/env
 source $(dirname "$0")/test-util.sh
 
 export TEST_ARCH=$(uname -m)
-export BUILD_TARGET=${BUILD_TARGET-${TEST_ARCH}-unknown-linux-gnu}
-
 
 WORKLOADS_DIR="$HOME/workloads"
 mkdir -p "$WORKLOADS_DIR"
@@ -84,7 +82,6 @@ fi
 # Build custom kernel based on virtio-pmem and virtio-fs upstream patches
 build_custom_linux
 
-BUILD_TARGET="${TEST_ARCH}-unknown-linux-${CH_LIBC}"
 CFLAGS=""
 TARGET_CC=""
 if [[ "${BUILD_TARGET}" == "${TEST_ARCH}-unknown-linux-musl" ]]; then

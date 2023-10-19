@@ -5,7 +5,6 @@ source $(dirname "$0")/test-util.sh
 
 process_common_args "$@"
 
-BUILD_TARGET=${BUILD_TARGET-x86_64-unknown-linux-gnu}
 cargo_args=("")
 
 if [[ $hypervisor = "mshv" ]]; then
