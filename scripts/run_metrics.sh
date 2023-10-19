@@ -90,9 +90,7 @@ fi
 build_custom_linux
 
 CFLAGS=""
-TARGET_CC=""
 if [[ "${BUILD_TARGET}" == "${TEST_ARCH}-unknown-linux-musl" ]]; then
-    TARGET_CC="musl-gcc"
     CFLAGS="-I /usr/include/${TEST_ARCH}-linux-musl/ -idirafter /usr/include/"
 fi
 

@@ -68,9 +68,7 @@ if [ -d "$LINUX_CUSTOM_DIR" ]; then
 fi
 
 CFLAGS=""
-TARGET_CC=""
 if [[ "${BUILD_TARGET}" == "x86_64-unknown-linux-musl" ]]; then
-    TARGET_CC="musl-gcc"
     CFLAGS="-I /usr/include/x86_64-linux-musl/ -idirafter /usr/include/"
 fi
 
