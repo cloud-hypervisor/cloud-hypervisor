@@ -69,10 +69,8 @@ cp $FW $VFIO_DIR
 cp $VMLINUX_IMAGE $VFIO_DIR || exit 1
 
 CFLAGS=""
-TARGET_CC=""
 if [[ "${BUILD_TARGET}" == "x86_64-unknown-linux-musl" ]]; then
-TARGET_CC="musl-gcc"
-CFLAGS="-I /usr/include/x86_64-linux-musl/ -idirafter /usr/include/"
+    CFLAGS="-I /usr/include/x86_64-linux-musl/ -idirafter /usr/include/"
 fi
 
 cargo build --features mshv --all --release --target $BUILD_TARGET
