@@ -338,6 +338,8 @@ pub struct MshvVcpu {
     cpuid: Vec<CpuIdEntry>,
     msrs: Vec<MsrEntry>,
     vm_ops: Option<Arc<dyn vm::VmOps>>,
+    #[cfg(feature = "sev_snp")]
+    vm_fd: Arc<VmFd>,
 }
 
 /// Implementation of Vcpu trait for Microsoft Hypervisor
@@ -1435,6 +1437,8 @@ impl vm::Vm for MshvVm {
             cpuid: Vec::new(),
             msrs: self.msrs.clone(),
             vm_ops,
+            #[cfg(feature = "sev_snp")]
+            vm_fd: self.fd.clone(),
         };
         Ok(Arc::new(vcpu))
     }
