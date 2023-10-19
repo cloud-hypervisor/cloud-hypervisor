@@ -920,6 +920,34 @@ impl cpu::Vcpu for MshvVcpu {
                                         .gpa_write(&mut swei1_rw_gpa_arg)
                                         .map_err(|e| cpu::HypervisorCpuError::GpaWrite(e.into()))?;
                                 }
+                                SVM_EXITCODE_MMIO_READ => {
+                                    let src_gpa =
+                                        info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info1;
+                                    let dst_gpa = info.__bindgen_anon_2.__bindgen_anon_1.sw_scratch;
+                                    let data_len =
+                                        info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info2
+                                            as usize;
+                                    // Sanity check to make sure data len is within supported range.
+                                    assert!(data_len <= 0x8);
+
+                                    let mut data: Vec<u8> = vec![0; data_len];
+                                    if let Some(vm_ops) = &self.vm_ops {
+                                        vm_ops.mmio_read(src_gpa, &mut data[0..data_len]).map_err(
+                                            |e| cpu::HypervisorCpuError::RunVcpu(e.into()),
+                                        )?;
+                                    }
+                                    let mut arg: mshv_read_write_gpa =
+                                        mshv_bindings::mshv_read_write_gpa {
+                                            base_gpa: dst_gpa,
+                                            byte_count: data_len as u32,
+                                            ..Default::default()
+                                        };
+                                    arg.data[0..data_len].copy_from_slice(&data);
+
+                                    self.fd
+                                        .gpa_write(&mut arg)
+                                        .map_err(|e| cpu::HypervisorCpuError::GpaWrite(e.into()))?;
+                                }
                                 _ => panic!(
                                     "GHCB_INFO_NORMAL: Unhandled exit code: {:0x}",
                                     exit_code
