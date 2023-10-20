@@ -854,20 +854,18 @@ impl Vm {
 
         cfg_if::cfg_if! {
             if #[cfg(feature = "tdx")] {
+                // Passing KVM_X86_TDX_VM: 1 if tdx_enabled is true
+                // Otherwise KVM_X86_LEGACY_VM: 0
+                // value of tdx_enabled is mapped to KVM_X86_TDX_VM or KVM_X86_LEGACY_VM
                 let vm = hypervisor
-                    .create_vm_with_type(if tdx_enabled {
-                        1 // KVM_X86_TDX_VM
-                    } else {
-                        0 // KVM_X86_LEGACY_VM
-                    })
+                    .create_vm_with_type(u64::from(tdx_enabled))
                     .unwrap();
             } else if #[cfg(feature = "sev_snp")] {
+                // Passing SEV_SNP_ENABLED: 1 if sev_snp_enabled is true
+                // Otherwise SEV_SNP_DISABLED: 0
+                // value of sev_snp_enabled is mapped to SEV_SNP_ENABLED for true or SEV_SNP_DISABLED for false
                 let vm = hypervisor
-                    .create_vm_with_type(if sev_snp_enabled {
-                        1 // SEV_SNP_ENABLED
-                    } else {
-                        0 // SEV_SNP_DISABLED
-                    })
+                    .create_vm_with_type(u64::from(sev_snp_enabled))
                     .unwrap();
             } else {
                 let vm = hypervisor.create_vm().unwrap();
