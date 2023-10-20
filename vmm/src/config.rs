@@ -1756,7 +1756,8 @@ impl SgxEpcConfig {
 impl NumaConfig {
     pub const SYNTAX: &'static str = "Settings related to a given NUMA node \
         \"guest_numa_id=<node_id>,cpus=<cpus_id>,distances=<list_of_distances_to_destination_nodes>,\
-        memory_zones=<list_of_memory_zones>,sgx_epc_sections=<list_of_sgx_epc_sections>\"";
+        memory_zones=<list_of_memory_zones>,sgx_epc_sections=<list_of_sgx_epc_sections>,\
+        pci_segments=<list_of_pci_segments>\"";
 
     pub fn parse(numa: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
