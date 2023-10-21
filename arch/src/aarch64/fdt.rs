@@ -1059,7 +1059,7 @@ fn create_distance_map_node(fdt: &mut FdtWriter, numa_nodes: &NumaNodes) -> FdtW
                     .unwrap()
                     .distances
                     .get(&(dest_numa_node as u32))
-                    .unwrap() as u32,
+                    .unwrap_or(20) as u32,
             );
         }
     }
