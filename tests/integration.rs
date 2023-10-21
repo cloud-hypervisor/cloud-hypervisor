@@ -2930,6 +2930,7 @@ mod common_parallel {
         handle_child_output(r, &output);
     }
 
+    #[test]
     fn test_pci_multiple_segments_numa_node() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
@@ -2958,17 +2959,11 @@ mod common_parallel {
             .args(["--platform", "num_pci_segments=2"])
             .args(["--cpus", "boot=2"])
             .args(["--memory", "size=0"])
-            .args([
-                "--memory-zone",
-                "id=mem0,size=256M",
-                "--memory-zone",
-                "id=mem1,size=256M",
-            ])
+            .args(["--memory-zone", "id=mem0,size=256M", "id=mem1,size=256M"])
             .args([
                 "--numa",
-                "guest_numa_id=0,cpus=[0],memory_zones=mem0,pci_segments=[0]",
-                "--numa",
-                "guest_numa_id=1,cpus=[1],memory_zones=mem1,pci_segments=[1]",
+                "guest_numa_id=0,cpus=[0],distances=[1@20],memory_zones=mem0,pci_segments=[0]",
+                "guest_numa_id=1,cpus=[1],distances=[0@20],memory_zones=mem1,pci_segments=[1]",
             ])
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
@@ -2981,13 +2976,11 @@ mod common_parallel {
                     guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
                 )
                 .as_str(),
-                "--disk",
                 format!(
                     "path={}",
                     guest.disk_config.disk(DiskType::CloudInit).unwrap()
                 )
                 .as_str(),
-                "--disk",
                 format!("path={test_disk_path},pci_segment={TEST_DISK_NODE}").as_str(),
             ])
             .default_net()
