@@ -1,7 +1,7 @@
 # When changing this file don't forget to update the tag name in the
 # .github/workflows/docker-image.yaml file if doing multiple per day
 
-FROM ubuntu:20.04 as dev
+FROM ubuntu:22.04 as dev
 
 ARG TARGETARCH
 ARG RUST_TOOLCHAIN="1.62.0"
@@ -16,40 +16,43 @@ ENV PATH="$PATH:$CARGO_HOME/bin"
 
 # Install all CI dependencies
 RUN apt-get update \
-	&& apt-get -yq upgrade \
-	&& DEBIAN_FRONTEND=noninteractive apt-get install -yq \
-	build-essential \
-	bc \
-	curl \
-	wget \
-	sudo \
-	mtools \
-	musl-tools \
-	libssl-dev \
-	pkg-config \
-	flex \
-	bison \
-	libelf-dev \
-	qemu-utils \
-	libglib2.0-dev \
-	libpixman-1-dev \
-	libseccomp-dev \
-	libcap-ng-dev \
-	socat \
-	dosfstools \
-	cpio \
-	python \
-	python3 \
-	python3-setuptools \
-	ntfs-3g \
-	openvswitch-switch-dpdk \
-	python3-distutils \
-	uuid-dev \
-	iperf3 \
-	zip \
-	git-core \
-	dnsmasq \
-	dmsetup \
+        && apt-get -yq upgrade \
+        && apt-get install --no-install-recommends -yq \
+        build-essential \
+        bc \
+        curl \
+        wget \
+        sudo \
+        mtools \
+        musl-tools \
+        libssl-dev \
+        pkg-config \
+        flex \
+        bison \
+        libelf-dev \
+        qemu-utils \
+        libglib2.0-dev \
+        libpixman-1-dev \
+        libseccomp-dev \
+        libcap-ng-dev \
+        socat \
+        dosfstools \
+        cpio \
+        python3 \
+        python3-setuptools \
+        ntfs-3g \
+        python3-distutils \
+        uuid-dev \
+        iperf3 \
+        zip \
+        git-core \
+        dnsmasq \
+        dmsetup \
+        ca-certificates \
+        unzip \
+        iproute2 \
+        dbus \
+    && apt-get install openvswitch-switch-dpdk -yq \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
