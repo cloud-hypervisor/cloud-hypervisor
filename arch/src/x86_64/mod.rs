@@ -41,6 +41,11 @@ const AMX_BF16: u8 = 22; // AMX tile computation on bfloat16 numbers
 const AMX_TILE: u8 = 24; // AMX tile load/store instructions
 const AMX_INT8: u8 = 25; // AMX tile computation on 8-bit integers
 
+#[cfg(feature = "kvm")]
+const X86_FEATURE_MWAIT: u8 = 3; // Mwait function
+#[cfg(feature = "kvm")]
+const X86_FEATURE_ARAT: u8 = 2; // Always Running APIC Timer
+
 // KVM feature bits
 #[cfg(feature = "tdx")]
 const KVM_FEATURE_CLOCKSOURCE_BIT: u8 = 0;
@@ -716,6 +721,37 @@ pub fn generate_common_cpuid(
             edx: leaf.edx,
             ..Default::default()
         });
+    }
+
+    // mwait
+    // Intel-defined CPU features, CPUID leaf 0x00000001 (ECX)
+    // SAFETY: leaf are guaranteed to be non-null.
+    #[cfg(feature = "kvm")]
+    if unsafe { std::arch::x86_64::__cpuid(0x1) }.ecx & 1 << X86_FEATURE_MWAIT
+        == 1 << X86_FEATURE_MWAIT
+    {
+        // Thermal and Power Management Leaf, CPUID leaf 0x00000006 (EAX)
+        // SAFETY: cpuid called with valid leaves
+        if unsafe { x86_64::__cpuid(0x6) }.eax & 1 << X86_FEATURE_ARAT == 1 << X86_FEATURE_ARAT {
+            // Update some existing CPUID for X86_FEATURE_MWAIT
+            for entry in cpuid.as_mut_slice().iter_mut() {
+                if entry.function == 0x1 {
+                    // set mwait bit
+                    if entry.ecx & 1 << X86_FEATURE_MWAIT != 1 << X86_FEATURE_MWAIT {
+                        info!("mwait instruction cpuid leaf enabled.");
+                        entry.ecx |= 1 << X86_FEATURE_MWAIT as u32;
+                    }
+                }
+            }
+
+            // CPUID_MWAIT_LEAF. Intel-defined CPU features, CPUID leaf 0x00000005
+            // SAFETY: leaf are guaranteed to be non-null.
+            let leaf = unsafe { std::arch::x86_64::__cpuid(0x5) };
+            CpuidPatch::set_cpuid_reg(&mut cpuid, function, Some(0), CpuidReg::EAX, leaf.eax);
+            CpuidPatch::set_cpuid_reg(&mut cpuid, function, Some(0), CpuidReg::EBX, leaf.ebx);
+            CpuidPatch::set_cpuid_reg(&mut cpuid, function, Some(0), CpuidReg::ECX, leaf.ecx);
+            CpuidPatch::set_cpuid_reg(&mut cpuid, function, Some(0), CpuidReg::EDX, leaf.edx);
+        }
     }
 
     if config.kvm_hyperv {
