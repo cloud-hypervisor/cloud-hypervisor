@@ -7,7 +7,7 @@
 CLI_NAME="Cloud Hypervisor"
 
 CTR_IMAGE_TAG="ghcr.io/cloud-hypervisor/cloud-hypervisor"
-CTR_IMAGE_VERSION="20231012-0"
+CTR_IMAGE_VERSION="20231220-0"
 : "${CTR_IMAGE:=${CTR_IMAGE_TAG}:${CTR_IMAGE_VERSION}}"
 
 DOCKER_RUNTIME="docker"
@@ -285,8 +285,7 @@ cmd_build() {
     rustflags="$RUSTFLAGS"
     target_cc=""
     if [ "$(uname -m)" = "aarch64" ] && [ "$libc" = "musl" ]; then
-        rustflags="$rustflags -C link-arg=-lgcc -C link_arg=-specs -C link_arg=/usr/lib/aarch64-linux-musl/musl-gcc.specs"
-        target_cc="musl-gcc"
+        rustflags="$rustflags -C link-args=-Wl,-Bstatic -C link-args=-lc"
     fi
 
     $DOCKER_RUNTIME run \
@@ -399,8 +398,7 @@ cmd_tests() {
     rustflags="$RUSTFLAGS"
     target_cc=""
     if [ "$(uname -m)" = "aarch64" ] && [ "$libc" = "musl" ]; then
-        rustflags="$rustflags -C link-arg=-lgcc -C link_arg=-specs -C link_arg=/usr/lib/aarch64-linux-musl/musl-gcc.specs"
-        target_cc="musl-gcc"
+        rustflags="$rustflags -C link-args=-Wl,-Bstatic -C link-args=-lc"
     fi
 
     if [[ "$unit" = true ]]; then
