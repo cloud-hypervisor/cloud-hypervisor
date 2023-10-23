@@ -3,7 +3,7 @@
 # When changing this file don't forget to update the tag name in the
 # .github/workflows/docker-image.yaml file if doing multiple per day
 
-FROM ubuntu:20.04 as dev
+FROM ubuntu:22.04 as dev
 
 ARG TARGETARCH
 ARG RUST_TOOLCHAIN="1.70.0"
@@ -43,7 +43,6 @@ RUN apt-get update \
         socat \
         dosfstools \
         cpio \
-        python \
         python3 \
         python3-setuptools \
         ntfs-3g \
