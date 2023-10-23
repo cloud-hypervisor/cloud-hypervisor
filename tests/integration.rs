@@ -4083,8 +4083,8 @@ mod common_parallel {
     fn test_vfio() {
         setup_vfio_network_interfaces();
 
-        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-        let guest = Guest::new_from_ip_range(Box::new(focal), "172.18", 0);
+        let jammy = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new_from_ip_range(Box::new(jammy), "172.18", 0);
 
         let mut workload_path = dirs::home_dir().unwrap();
         workload_path.push("workloads");
@@ -7810,6 +7810,7 @@ mod windows {
     }
 
     #[test]
+    #[ignore = "See #6037"]
     #[cfg(not(feature = "mshv"))]
     #[cfg(not(target_arch = "aarch64"))]
     fn test_windows_guest_disk_hotplug() {
@@ -7905,6 +7906,7 @@ mod windows {
     }
 
     #[test]
+    #[ignore = "See #6037"]
     #[cfg(not(feature = "mshv"))]
     #[cfg(not(target_arch = "aarch64"))]
     fn test_windows_guest_disk_hotplug_multi() {
@@ -9668,6 +9670,7 @@ mod live_migration {
 
         // Require to run ovs-dpdk tests sequentially because they rely on the same ovs-dpdk setup
         #[test]
+        #[ignore = "See #5532"]
         #[cfg(target_arch = "x86_64")]
         #[cfg(not(feature = "mshv"))]
         fn test_live_migration_ovs_dpdk() {
@@ -9682,6 +9685,7 @@ mod live_migration {
         }
 
         #[test]
+        #[ignore = "See #5532"]
         #[cfg(target_arch = "x86_64")]
         #[cfg(not(feature = "mshv"))]
         fn test_live_upgrade_ovs_dpdk() {
