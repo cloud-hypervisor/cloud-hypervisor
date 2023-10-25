@@ -482,6 +482,8 @@ pub struct VmParams<'a> {
     pub user_devices: Option<Vec<&'a str>>,
     pub vdpa: Option<Vec<&'a str>>,
     pub vsock: Option<&'a str>,
+    #[cfg(feature = "pvmemcontrol")]
+    pub pvmemcontrol: bool,
     pub pvpanic: bool,
     #[cfg(target_arch = "x86_64")]
     pub sgx_epc: Option<Vec<&'a str>>,
@@ -543,6 +545,8 @@ impl<'a> VmParams<'a> {
             .get_many::<String>("vdpa")
             .map(|x| x.map(|y| y as &str).collect());
         let vsock: Option<&str> = args.get_one::<String>("vsock").map(|x| x as &str);
+        #[cfg(feature = "pvmemcontrol")]
+        let pvmemcontrol = args.get_flag("pvmemcontrol");
         let pvpanic = args.get_flag("pvpanic");
         #[cfg(target_arch = "x86_64")]
         let sgx_epc: Option<Vec<&str>> = args
@@ -591,6 +595,8 @@ impl<'a> VmParams<'a> {
             user_devices,
             vdpa,
             vsock,
+            #[cfg(feature = "pvmemcontrol")]
+            pvmemcontrol,
             pvpanic,
             #[cfg(target_arch = "x86_64")]
             sgx_epc,
@@ -2772,6 +2778,11 @@ impl VmConfig {
             balloon = Some(BalloonConfig::parse(balloon_params)?);
         }
 
+        #[cfg(feature = "pvmemcontrol")]
+        let pvmemcontrol: Option<PvmemcontrolConfig> = vm_params
+            .pvmemcontrol
+            .then_some(PvmemcontrolConfig::default());
+
         let mut fs: Option<Vec<FsConfig>> = None;
         if let Some(fs_list) = &vm_params.fs {
             let mut fs_config_list = Vec::new();
@@ -2930,6 +2941,8 @@ impl VmConfig {
             user_devices,
             vdpa,
             vsock,
+            #[cfg(feature = "pvmemcontrol")]
+            pvmemcontrol,
             pvpanic: vm_params.pvpanic,
             iommu: false, // updated in VmConfig::validate()
             #[cfg(target_arch = "x86_64")]
@@ -3049,6 +3062,8 @@ impl Clone for VmConfig {
             net: self.net.clone(),
             rng: self.rng.clone(),
             balloon: self.balloon.clone(),
+            #[cfg(feature = "pvmemcontrol")]
+            pvmemcontrol: self.pvmemcontrol.clone(),
             fs: self.fs.clone(),
             pmem: self.pmem.clone(),
             serial: self.serial.clone(),
@@ -3838,6 +3853,8 @@ mod tests {
             user_devices: None,
             vdpa: None,
             vsock: None,
+            #[cfg(feature = "pvmemcontrol")]
+            pvmemcontrol: None,
             pvpanic: false,
             iommu: false,
             #[cfg(target_arch = "x86_64")]
@@ -4047,6 +4064,8 @@ mod tests {
             user_devices: None,
             vdpa: None,
             vsock: None,
+            #[cfg(feature = "pvmemcontrol")]
+            pvmemcontrol: None,
             pvpanic: false,
             iommu: false,
             #[cfg(target_arch = "x86_64")]
