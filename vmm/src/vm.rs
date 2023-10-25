@@ -929,42 +929,32 @@ impl Vm {
         Ok(())
     }
 
+    // Load image as pe file first, if fails, load it as plain file.
     #[cfg(target_arch = "aarch64")]
-    fn load_kernel(
-        firmware: Option<File>,
-        kernel: Option<File>,
+    fn load_booting_binary(
+        mut file: File,
         memory_manager: Arc<Mutex<MemoryManager>>,
     ) -> Result<EntryPoint> {
         let guest_memory = memory_manager.lock().as_ref().unwrap().guest_memory();
         let mem = guest_memory.memory();
-        let entry_addr = match (firmware, kernel) {
-            (None, Some(mut kernel)) => {
-                match linux_loader::loader::pe::PE::load(
-                    mem.deref(),
-                    Some(arch::layout::KERNEL_START),
-                    &mut kernel,
-                    None,
-                ) {
-                    Ok(entry_addr) => entry_addr.kernel_load,
-                    // Try to load the binary as kernel PE file at first.
-                    // If failed, retry to load it as UEFI binary.
-                    // As the UEFI binary is formatless, it must be the last option to try.
-                    Err(linux_loader::loader::Error::Pe(InvalidImageMagicNumber)) => {
-                        Self::load_firmware(&kernel, memory_manager)?;
-                        arch::layout::UEFI_START
-                    }
-                    Err(e) => {
-                        return Err(Error::KernelLoad(e));
-                    }
-                }
-            }
-            (Some(firmware), None) => {
-                Self::load_firmware(&firmware, memory_manager)?;
+        let entry_addr = match linux_loader::loader::pe::PE::load(
+            mem.deref(),
+            Some(arch::layout::KERNEL_START),
+            &mut file,
+            None,
+        ) {
+            Ok(entry_addr) => entry_addr.kernel_load,
+            // Try to load the binary as kernel PE file at first.
+            // If failed, retry to load it as UEFI binary.
+            // As the UEFI binary is formatless, it must be the last option to try.
+            Err(linux_loader::loader::Error::Pe(InvalidImageMagicNumber)) => {
+                Self::load_firmware(&file, memory_manager)?;
                 arch::layout::UEFI_START
             }
-            _ => return Err(Error::InvalidPayload),
+            Err(e) => {
+                return Err(Error::KernelLoad(e));
+            }
         };
-
         Ok(EntryPoint { entry_addr })
     }
 
@@ -1035,11 +1025,11 @@ impl Vm {
         match (&payload.firmware, &payload.kernel) {
             (Some(firmware), None) => {
                 let firmware = File::open(firmware).map_err(Error::FirmwareFile)?;
-                Self::load_kernel(Some(firmware), None, memory_manager)
+                Self::load_booting_binary(firmware, memory_manager)
             }
             (None, Some(kernel)) => {
                 let kernel = File::open(kernel).map_err(Error::KernelFile)?;
-                Self::load_kernel(None, Some(kernel), memory_manager)
+                Self::load_booting_binary(kernel, memory_manager)
             }
             _ => Err(Error::InvalidPayload),
         }
