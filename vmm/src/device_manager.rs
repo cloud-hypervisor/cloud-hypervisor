@@ -49,6 +49,8 @@ use devices::gic;
 use devices::ioapic;
 #[cfg(target_arch = "aarch64")]
 use devices::legacy::Pl011;
+#[cfg(feature = "pvmemcontrol")]
+use devices::pvmemcontrol::{PvmemcontrolBusDevice, PvmemcontrolPciDevice};
 use devices::{
     interrupt_controller, interrupt_controller::InterruptController, AcpiNotificationFlags,
 };
@@ -118,6 +120,8 @@ const DEBUGCON_DEVICE_NAME: &str = "__debug_console";
 const GPIO_DEVICE_NAME: &str = "__gpio";
 const RNG_DEVICE_NAME: &str = "__rng";
 const IOMMU_DEVICE_NAME: &str = "__iommu";
+#[cfg(feature = "pvmemcontrol")]
+const PVMEMCONTROL_DEVICE_NAME: &str = "__pvmemcontrol";
 const BALLOON_DEVICE_NAME: &str = "__balloon";
 const CONSOLE_DEVICE_NAME: &str = "__console";
 const PVPANIC_DEVICE_NAME: &str = "__pvpanic";
@@ -194,6 +198,10 @@ pub enum DeviceManagerError {
 
     /// Cannot create virtio-balloon device
     CreateVirtioBalloon(io::Error),
+
+    /// Cannot create pvmemcontrol device
+    #[cfg(feature = "pvmemcontrol")]
+    CreatePvmemcontrol(io::Error),
 
     /// Cannot create virtio-watchdog device
     CreateVirtioWatchdog(io::Error),
@@ -886,6 +894,12 @@ pub struct DeviceManager {
     // GPIO device for AArch64
     gpio_device: Option<Arc<Mutex<devices::legacy::Gpio>>>,
 
+    #[cfg(feature = "pvmemcontrol")]
+    pvmemcontrol_devices: Option<(
+        Arc<PvmemcontrolBusDevice>,
+        Arc<Mutex<PvmemcontrolPciDevice>>,
+    )>,
+
     // pvpanic device
     pvpanic_device: Option<Arc<Mutex<devices::PvPanicDevice>>>,
 
@@ -1165,6 +1179,8 @@ impl DeviceManager {
             virtio_mem_devices: Vec::new(),
             #[cfg(target_arch = "aarch64")]
             gpio_device: None,
+            #[cfg(feature = "pvmemcontrol")]
+            pvmemcontrol_devices: None,
             pvpanic_device: None,
             force_iommu,
             io_uring_supported: None,
@@ -1277,6 +1293,17 @@ impl DeviceManager {
         self.add_pci_devices(virtio_devices.clone())?;
 
         self.virtio_devices = virtio_devices;
+
+        // Add pvmemcontrol if required
+        #[cfg(feature = "pvmemcontrol")]
+        {
+            if self.config.lock().unwrap().pvmemcontrol.is_some() {
+                let (pvmemcontrol_bus_device, pvmemcontrol_pci_device) =
+                    self.make_pvmemcontrol_device()?;
+                self.pvmemcontrol_devices =
+                    Some((pvmemcontrol_bus_device, pvmemcontrol_pci_device));
+            }
+        }
 
         if self.config.clone().lock().unwrap().pvpanic {
             self.pvpanic_device = self.add_pvpanic_device()?;
@@ -3046,6 +3073,48 @@ impl DeviceManager {
         }
 
         Ok(devices)
+    }
+
+    #[cfg(feature = "pvmemcontrol")]
+    fn make_pvmemcontrol_device(
+        &mut self,
+    ) -> DeviceManagerResult<(
+        Arc<PvmemcontrolBusDevice>,
+        Arc<Mutex<PvmemcontrolPciDevice>>,
+    )> {
+        let id = String::from(PVMEMCONTROL_DEVICE_NAME);
+        let pci_segment_id = 0x0_u16;
+
+        let (pci_segment_id, pci_device_bdf, resources) =
+            self.pci_resources(&id, pci_segment_id)?;
+
+        info!("Creating pvmemcontrol device: id = {}", id);
+        let (pvmemcontrol_pci_device, pvmemcontrol_bus_device) =
+            devices::pvmemcontrol::PvmemcontrolDevice::make_device(
+                id.clone(),
+                self.memory_manager.lock().unwrap().guest_memory(),
+            );
+
+        let pvmemcontrol_pci_device = Arc::new(Mutex::new(pvmemcontrol_pci_device));
+        let pvmemcontrol_bus_device = Arc::new(pvmemcontrol_bus_device);
+
+        let new_resources = self.add_pci_device(
+            pvmemcontrol_bus_device.clone(),
+            pvmemcontrol_pci_device.clone(),
+            pci_segment_id,
+            pci_device_bdf,
+            resources,
+        )?;
+
+        let mut node = device_node!(id, pvmemcontrol_pci_device);
+
+        node.resources = new_resources;
+        node.pci_bdf = Some(pci_device_bdf);
+        node.pci_device_handle = None;
+
+        self.device_tree.lock().unwrap().insert(id, node);
+
+        Ok((pvmemcontrol_bus_device, pvmemcontrol_pci_device))
     }
 
     fn make_virtio_balloon_devices(&mut self) -> DeviceManagerResult<Vec<MetaVirtioDevice>> {

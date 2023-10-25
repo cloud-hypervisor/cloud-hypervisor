@@ -389,6 +389,10 @@ pub struct BalloonConfig {
     pub free_page_reporting: bool,
 }
 
+#[cfg(feature = "pvmemcontrol")]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
+pub struct PvmemcontrolConfig {}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct FsConfig {
     pub tag: String,
@@ -624,6 +628,9 @@ pub struct VmConfig {
     pub user_devices: Option<Vec<UserDeviceConfig>>,
     pub vdpa: Option<Vec<VdpaConfig>>,
     pub vsock: Option<VsockConfig>,
+    #[cfg(feature = "pvmemcontrol")]
+    #[serde(default)]
+    pub pvmemcontrol: Option<PvmemcontrolConfig>,
     #[serde(default)]
     pub pvpanic: bool,
     #[serde(default)]

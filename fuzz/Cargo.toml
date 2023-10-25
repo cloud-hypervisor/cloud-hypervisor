@@ -10,6 +10,7 @@ cargo-fuzz = true
 
 [features]
 igvm = []
+pvmemcontrol = []
 
 [dependencies]
 block = { path = "../block" }
