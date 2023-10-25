@@ -2462,6 +2462,8 @@ mod unit_tests {
             user_devices: None,
             vdpa: None,
             vsock: None,
+            #[cfg(feature = "pvmemcontrol")]
+            pvmemcontrol: None,
             pvpanic: false,
             iommu: false,
             #[cfg(target_arch = "x86_64")]

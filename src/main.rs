@@ -522,6 +522,16 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
             .num_args(1)
             .group("vm-config"),
     );
+    #[cfg(feature = "pvmemcontrol")]
+    let app = app.arg(
+        Arg::new("pvmemcontrol")
+            .long("pvmemcontrol")
+            .help("Pvmemcontrol device")
+            .num_args(0)
+            .action(ArgAction::SetTrue)
+            .group("vm-config"),
+    );
+
     app.arg(
         Arg::new("version")
             .short('V')
@@ -1079,6 +1089,8 @@ mod unit_tests {
             vdpa: None,
             vsock: None,
             pvpanic: false,
+            #[cfg(feature = "pvmemcontrol")]
+            pvmemcontrol: None,
             iommu: false,
             #[cfg(target_arch = "x86_64")]
             sgx_epc: None,

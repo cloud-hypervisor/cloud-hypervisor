@@ -14,13 +14,18 @@ event_monitor = { path = "../event_monitor" }
 hypervisor = { path = "../hypervisor" }
 libc = "0.2.153"
 log = "0.4.22"
+num_enum = "0.7.2"
 pci = { path = "../pci" }
 serde = { version = "1.0.197", features = ["derive"] }
 thiserror = "1.0.62"
 tpm = { path = "../tpm" }
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
-vm-memory = "0.14.1"
+vm-memory = { version = "0.14.1", features = [
+  "backend-atomic",
+  "backend-bitmap",
+  "backend-mmap",
+] }
 vm-migration = { path = "../vm-migration" }
 vmm-sys-util = "0.12.1"
 
@@ -29,3 +34,4 @@ arch = { path = "../arch" }
 
 [features]
 default = []
+pvmemcontrol = []
