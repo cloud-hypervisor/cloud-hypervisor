@@ -1,3 +1,10 @@
+// Copyright © 2023 Intel Corporation
+//
+// SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
+//
+// Copyright © 2023 Crusoe Energy Systems LLC
+//
+
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult,
 };
