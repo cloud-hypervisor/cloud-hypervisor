@@ -607,6 +607,7 @@ fn vmm_thread_rules(
         (libc::SYS_rt_sigreturn, vec![]),
         (libc::SYS_sched_getaffinity, vec![]),
         (libc::SYS_sched_setaffinity, vec![]),
+        (libc::SYS_seccomp, vec![]),
         (libc::SYS_sendmsg, vec![]),
         (libc::SYS_sendto, vec![]),
         (libc::SYS_set_robust_list, vec![]),
