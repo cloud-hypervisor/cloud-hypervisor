@@ -290,10 +290,7 @@ fn create_cpu_nodes(
     fdt.property_u32("#size-cells", 0x0)?;
 
     let num_cpus = vcpu_mpidr.len();
-    let threads_per_core = vcpu_topology.unwrap_or_default().0;
-    let cores_per_package = vcpu_topology.unwrap_or_default().1;
-    let packages = vcpu_topology.unwrap_or_default().2;
-
+    let (threads_per_core, cores_per_package, packages) = vcpu_topology.unwrap_or((1, 1, 1));
     let max_cpus: u32 = (threads_per_core * cores_per_package * packages).into();
 
     // Add cache info.
