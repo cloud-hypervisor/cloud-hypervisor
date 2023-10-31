@@ -7093,6 +7093,58 @@ mod common_parallel {
 
         handle_child_output(r, &output);
     }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_double_tty() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+        let mut cmd = GuestCommand::new(&guest);
+        let api_socket = temp_api_path(&guest.tmp_dir);
+        let tty_str: &str = "console=hvc0 earlyprintk=ttyS0 ";
+        // linux printk module enable console log.
+        let con_dis_str: &str = "console [hvc0] enabled";
+        // linux printk module disable console log.
+        let con_enb_str: &str = "bootconsole [earlyser0] disabled";
+
+        let kernel_path = direct_kernel_boot_path();
+
+        cmd.args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args([
+                "--cmdline",
+                DIRECT_KERNEL_BOOT_CMDLINE
+                    .replace("console=hvc0 ", tty_str)
+                    .as_str(),
+            ])
+            .capture_output()
+            .default_disks()
+            .default_net()
+            .args(["--serial", "tty"])
+            .args(["--console", "tty"])
+            .args(["--api-socket", &api_socket]);
+
+        let mut child = cmd.spawn().unwrap();
+
+        let mut r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        if r.is_ok() {
+            r = std::panic::catch_unwind(|| {
+                let s = String::from_utf8_lossy(&output.stdout);
+                assert!(s.contains(tty_str));
+                assert!(s.contains(con_dis_str));
+                assert!(s.contains(con_enb_str));
+            });
+        }
+
+        handle_child_output(r, &output);
+    }
 }
 
 mod dbus_api {
