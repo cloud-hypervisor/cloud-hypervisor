@@ -42,7 +42,7 @@ build_virtiofsd() {
 
     if [ ! -f "$VIRTIOFSD_DIR/.built" ]; then
         pushd $VIRTIOFSD_DIR
-        time cargo build --release
+        time cargo build --release --target $BUILD_TARGET
         cp target/release/virtiofsd "$WORKLOADS_DIR/" || exit 1
         touch .built
         popd
