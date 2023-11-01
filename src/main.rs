@@ -287,7 +287,7 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
         .arg(
             Arg::new("serial")
                 .long("serial")
-                .help("Control serial port: off|null|pty|tty|file=/path/to/a/file")
+                .help("Control serial port: off|null|pty|tty|file=</path/to/a/file>|socket=</path/to/a/file>")
                 .default_value("null")
                 .group("vm-config"),
         )
@@ -295,7 +295,7 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
             Arg::new("console")
                 .long("console")
                 .help(
-                    "Control (virtio) console: \"off|null|pty|tty|file=/path/to/a/file,iommu=on|off\"",
+                    "Control (virtio) console: \"off|null|pty|tty|file=</path/to/a/file>,iommu=on|off\"",
                 )
                 .default_value("tty")
                 .group("vm-config"),
