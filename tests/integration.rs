@@ -858,6 +858,7 @@ fn fw_path(_fw_type: FwType) -> String {
     fw_path.to_str().unwrap().to_string()
 }
 
+#[derive(Debug)]
 struct MetaEvent {
     event: String,
     device_id: Option<String>,
@@ -910,7 +911,18 @@ fn check_sequential_events(expected_events: &[&MetaEvent], event_file: &str) -> 
         }
     }
 
-    idx == len
+    let ret = idx == len;
+
+    if !ret {
+        eprintln!(
+            "\n\n==== Start 'check_sequential_events' failed ==== \
+             \n\nexpected_events={:?}\nactual_events={:?} \
+             \n\n==== End 'check_sequential_events' failed ====",
+            expected_events, json_events,
+        );
+    }
+
+    ret
 }
 
 // Return true if all events from the input 'expected_events' are matched exactly
@@ -922,6 +934,13 @@ fn check_sequential_events_exact(expected_events: &[&MetaEvent], event_file: &st
 
     for (idx, e) in json_events.iter().enumerate() {
         if !expected_events[idx].match_with_json_event(e) {
+            eprintln!(
+                "\n\n==== Start 'check_sequential_events_exact' failed ==== \
+                 \n\nexpected_events={:?}\nactual_events={:?} \
+                 \n\n==== End 'check_sequential_events_exact' failed ====",
+                expected_events, json_events,
+            );
+
             return false;
         }
     }
@@ -938,6 +957,13 @@ fn check_latest_events_exact(latest_events: &[&MetaEvent], event_file: &str) -> 
 
     for (idx, e) in json_events.iter().enumerate() {
         if !latest_events[idx].match_with_json_event(e) {
+            eprintln!(
+                "\n\n==== Start 'check_latest_events_exact' failed ==== \
+                 \n\nexpected_events={:?}\nactual_events={:?} \
+                 \n\n==== End 'check_latest_events_exact' failed ====",
+                latest_events, json_events,
+            );
+
             return false;
         }
     }
