@@ -719,17 +719,26 @@ pub fn ssh_command_ip(
 }
 
 pub fn exec_host_command_status(command: &str) -> ExitStatus {
-    std::process::Command::new("bash")
-        .args(["-c", command])
-        .status()
-        .unwrap_or_else(|_| panic!("Expected '{command}' to run"))
+    exec_host_command_output(command).status
 }
 
 pub fn exec_host_command_output(command: &str) -> Output {
-    std::process::Command::new("bash")
+    let output = std::process::Command::new("bash")
         .args(["-c", command])
         .output()
-        .unwrap_or_else(|_| panic!("Expected '{command}' to run"))
+        .unwrap_or_else(|e| panic!("Expected '{command}' to run. Error: {:?}", e));
+
+    if !output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        eprintln!(
+            "\n\n==== Start 'exec_host_command' failed ==== \
+            \n\n---stdout---\n{stdout}\n---stderr---{stderr} \
+            \n\n==== End 'exec_host_command' failed ====",
+        );
+    }
+
+    output
 }
 
 pub const PIPE_SIZE: i32 = 32 << 20;
