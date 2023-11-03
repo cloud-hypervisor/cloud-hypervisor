@@ -8525,8 +8525,13 @@ mod live_migration {
         if !send_success {
             let _ = send_migration.kill();
             let output = send_migration.wait_with_output().unwrap();
-            eprintln!("\n\n==== Start 'send_migration' output ====\n\n---stdout---\n{}\n\n---stderr---\n{}\n\n==== End 'send_migration' output ====\n\n",
-                    String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+            eprintln!(
+                "\n\n==== Start 'send_migration' output ==== \
+                \n\n---stdout---\n{}\n\n---stderr---\n{} \
+                \n\n==== End 'send_migration' output ====\n\n",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
 
         // The 'receive-migration' command should be executed successfully within the given timeout
@@ -8542,8 +8547,13 @@ mod live_migration {
         if !receive_success {
             let _ = receive_migration.kill();
             let output = receive_migration.wait_with_output().unwrap();
-            eprintln!("\n\n==== Start 'receive_migration' output ====\n\n---stdout---\n{}\n\n---stderr---\n{}\n\n==== End 'receive_migration' output ====\n\n",
-                    String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+            eprintln!(
+                "\n\n==== Start 'receive_migration' output ==== \
+                \n\n---stdout---\n{}\n\n---stderr---\n{} \
+                \n\n==== End 'receive_migration' output ====\n\n",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
 
         send_success && receive_success
@@ -9706,7 +9716,9 @@ mod rate_limiter {
         }
 
         eprintln!(
-            "\n\n==== check_rate_limit failed! ====\n\nmeasured={measured}, , lower_limit={lower_limit}, upper_limit={upper_limit}\n\n"
+            "\n\n==== Start 'check_rate_limit' failed ==== \
+            \n\nmeasured={measured}, , lower_limit={lower_limit}, upper_limit={upper_limit} \
+            \n\n==== End 'check_rate_limit' failed ====\n\n"
         );
 
         false

@@ -147,13 +147,13 @@ impl GuestNetworkConfig {
             Err(e) => {
                 let duration = start.elapsed();
                 eprintln!(
-                    "\n\n==== Start 'wait_vm_boot' (FAILED) ====\n\n\
-                 duration =\"{duration:?}, timeout = {timeout}s\"\n\
-                 listen_addr=\"{listen_addr}\"\n\
-                 expected_guest_addr=\"{expected_guest_addr}\"\n\
-                 message=\"{s}\"\n\
-                 error=\"{e:?}\"\n\
-                 \n==== End 'wait_vm_boot' outout ====\n\n"
+                    "\n\n==== Start 'wait_vm_boot' (FAILED) ==== \
+                    \n\nduration =\"{duration:?}, timeout = {timeout}s\" \
+                    \nlisten_addr=\"{listen_addr}\" \
+                    \nexpected_guest_addr=\"{expected_guest_addr}\" \
+                    \nmessage=\"{s}\" \
+                    \nerror=\"{e:?}\" \
+                    \n\n==== End 'wait_vm_boot' outout ====\n\n"
                 );
 
                 Err(e)
@@ -1346,7 +1346,7 @@ pub fn parse_iperf3_output(output: &[u8], sender: bool, bandwidth: bool) -> Resu
     })
     .map_err(|_| {
         eprintln!(
-            "=============== iperf3 output ===============\n\n{}\n\n===========end============\n\n",
+            "==== Start iperf3 output ===\n\n{}\n\n=== End iperf3 output ===\n\n",
             String::from_utf8_lossy(output)
         );
         Error::Iperf3Parse
@@ -1424,9 +1424,7 @@ pub fn parse_fio_output(output: &str, fio_ops: &FioOps, num_jobs: u32) -> Result
         total_bps
     })
     .map_err(|_| {
-        eprintln!(
-            "=============== Fio output ===============\n\n{output}\n\n===========end============\n\n"
-        );
+        eprintln!("=== Start Fio output ===\n\n{output}\n\n=== End Fio output ===\n\n");
         Error::FioOutputParse
     })
 }
@@ -1479,9 +1477,7 @@ pub fn parse_fio_output_iops(output: &str, fio_ops: &FioOps, num_jobs: u32) -> R
         total_iops
     })
     .map_err(|_| {
-        eprintln!(
-            "=============== Fio output ===============\n\n{output}\n\n===========end============\n\n"
-        );
+        eprintln!("=== Start Fio output ===\n\n{output}\n\n=== End Fio output ===\n\n");
         Error::FioOutputParse
     })
 }
@@ -1614,7 +1610,7 @@ pub fn parse_ethr_latency_output(output: &[u8]) -> Result<Vec<f64>, Error> {
     })
     .map_err(|_| {
         eprintln!(
-            "=============== ethr output ===============\n\n{}\n\n===========end============\n\n",
+            "=== Start ethr output ===\n\n{}\n\n=== End ethr output ===\n\n",
             String::from_utf8_lossy(output)
         );
         Error::EthrLogParse
