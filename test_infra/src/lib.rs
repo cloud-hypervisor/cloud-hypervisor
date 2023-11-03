@@ -741,6 +741,42 @@ pub fn exec_host_command_output(command: &str) -> Output {
     output
 }
 
+pub fn check_lines_count(input: &str, line_count: usize) -> bool {
+    if input.lines().count() == line_count {
+        true
+    } else {
+        eprintln!(
+            "\n\n==== Start 'check_lines_count' failed ==== \
+            \n\ninput = {input}\nline_count = {line_count} \
+            \n\n==== End 'check_lines_count' failed ====",
+        );
+
+        false
+    }
+}
+
+pub fn check_matched_lines_count(input: &str, keywords: Vec<&str>, line_count: usize) -> bool {
+    let mut matches = String::new();
+    for line in input.lines() {
+        if keywords.iter().all(|k| line.contains(k)) {
+            matches += line;
+        }
+    }
+
+    if matches.lines().count() == line_count {
+        true
+    } else {
+        eprintln!(
+            "\n\n==== Start 'check_matched_lines_count' failed ==== \
+            \nkeywords = {keywords:?}, line_count = {line_count} \
+            \n\ninput = {input} matches = {matches} \
+            \n\n==== End 'check_matched_lines_count' failed ====",
+        );
+
+        false
+    }
+}
+
 pub const PIPE_SIZE: i32 = 32 << 20;
 
 static NEXT_VM_ID: Lazy<Mutex<u8>> = Lazy::new(|| Mutex::new(1));

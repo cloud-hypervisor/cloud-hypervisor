@@ -4344,49 +4344,35 @@ mod common_parallel {
             // Let's ssh into it and verify that it's there. If it is it means
             // we're in the right guest (The L2 one) because the QEMU L1 guest
             // does not have this command line tag.
-            assert_eq!(
-                guest
-                    .ssh_command_l2_1("grep -c VFIOTAG /proc/cmdline")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
+            assert!(check_matched_lines_count(
+                guest.ssh_command_l2_1("cat /proc/cmdline").unwrap().trim(),
+                vec!["VFIOTAG"],
                 1
-            );
+            ));
 
             // Let's also verify from the second virtio-net device passed to
             // the L2 VM.
-            assert_eq!(
-                guest
-                    .ssh_command_l2_2("grep -c VFIOTAG /proc/cmdline")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
+            assert!(check_matched_lines_count(
+                guest.ssh_command_l2_2("cat /proc/cmdline").unwrap().trim(),
+                vec!["VFIOTAG"],
                 1
-            );
+            ));
 
             // Check the amount of PCI devices appearing in L2 VM.
-            assert_eq!(
+            assert!(check_lines_count(
                 guest
-                    .ssh_command_l2_1("ls /sys/bus/pci/devices | wc -l")
+                    .ssh_command_l2_1("ls /sys/bus/pci/devices")
                     .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                8,
-            );
+                    .trim(),
+                8
+            ));
 
             // Check both if /dev/vdc exists and if the block size is 16M in L2 VM
-            assert_eq!(
-                guest
-                    .ssh_command_l2_1("lsblk | grep vdc | grep -c 16M")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
+            assert!(check_matched_lines_count(
+                guest.ssh_command_l2_1("lsblk").unwrap().trim(),
+                vec!["vdc", "16M"],
                 1
-            );
+            ));
 
             // Hotplug an extra virtio-net device through L2 VM.
             guest
@@ -4404,35 +4390,33 @@ mod common_parallel {
                  add-device path=/sys/bus/pci/devices/0000:00:09.0,id=vfio123",
                 )
                 .unwrap();
-            assert!(vfio_hotplug_output.contains("{\"id\":\"vfio123\",\"bdf\":\"0000:00:08.0\"}"));
+            assert!(check_matched_lines_count(
+                vfio_hotplug_output.trim(),
+                vec!["{\"id\":\"vfio123\",\"bdf\":\"0000:00:08.0\"}"],
+                1
+            ));
 
             thread::sleep(std::time::Duration::new(10, 0));
 
             // Let's also verify from the third virtio-net device passed to
             // the L2 VM. This third device has been hotplugged through the L2
             // VM, so this is our way to validate hotplug works for VFIO PCI.
-            assert_eq!(
-                guest
-                    .ssh_command_l2_3("grep -c VFIOTAG /proc/cmdline")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
+            assert!(check_matched_lines_count(
+                guest.ssh_command_l2_3("cat /proc/cmdline").unwrap().trim(),
+                vec!["VFIOTAG"],
                 1
-            );
+            ));
 
             // Check the amount of PCI devices appearing in L2 VM.
             // There should be one more device than before, raising the count
             // up to 9 PCI devices.
-            assert_eq!(
+            assert!(check_lines_count(
                 guest
-                    .ssh_command_l2_1("ls /sys/bus/pci/devices | wc -l")
+                    .ssh_command_l2_1("ls /sys/bus/pci/devices")
                     .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                9,
-            );
+                    .trim(),
+                9
+            ));
 
             // Let's now verify that we can correctly remove the virtio-net
             // device through the "remove-device" command responsible for
@@ -4448,15 +4432,13 @@ mod common_parallel {
 
             // Check the amount of PCI devices appearing in L2 VM is back down
             // to 8 devices.
-            assert_eq!(
+            assert!(check_lines_count(
                 guest
-                    .ssh_command_l2_1("ls /sys/bus/pci/devices | wc -l")
+                    .ssh_command_l2_1("ls /sys/bus/pci/devices")
                     .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                8,
-            );
+                    .trim(),
+                8
+            ));
 
             // Perform memory hotplug in L2 and validate the memory is showing
             // up as expected. In order to check, we will use the virtio-net
