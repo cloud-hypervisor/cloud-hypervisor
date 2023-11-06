@@ -15,7 +15,7 @@ process_common_args "$@"
 WORKLOADS_DIR="$HOME/workloads"
 
 # Always download the latest "hypervisor-fw"
-FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/rust-hypervisor-firmware/releases/latest | grep "browser_download_url" | grep -o 'https://.*[^ "]')
+FW_URL="https://cloud-hypervisor.azureedge.net/hypervisor-fw-0.4.2"
 pushd $WORKLOADS_DIR
 time wget --quiet $FW_URL -O hypervisor-fw || exit 1
 popd

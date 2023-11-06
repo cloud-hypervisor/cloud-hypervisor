@@ -18,11 +18,11 @@ fi
 
 cp scripts/sha1sums-x86_64 $WORKLOADS_DIR
 
-FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/rust-hypervisor-firmware/releases/latest | grep "browser_download_url" | grep -o 'https://.*[^ "]')
+FW_URL="https://cloud-hypervisor.azureedge.net/hypervisor-fw-0.4.2"
 FW="$WORKLOADS_DIR/hypervisor-fw"
 if [ ! -f "$FW" ]; then
     pushd $WORKLOADS_DIR
-    time wget --quiet $FW_URL || exit 1
+    time wget --quiet $FW_URL -O hypervisor-fw|| exit 1
     popd
 fi
 
