@@ -20,7 +20,9 @@ use vhost::vhost_kern::vhost_binding::{VHOST_F_LOG_ALL, VHOST_VRING_F_LOG};
 use vhost::vhost_user::message::{
     VhostUserHeaderFlag, VhostUserInflight, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
 };
-use vhost::vhost_user::{Master, MasterReqHandler, VhostUserMaster, VhostUserMasterReqHandler};
+use vhost::vhost_user::{
+    Frontend, FrontendReqHandler, VhostUserFrontend, VhostUserFrontendReqHandler,
+};
 use vhost::{VhostBackend, VhostUserDirtyLogRegion, VhostUserMemoryRegionInfo, VringConfigData};
 use virtio_queue::{Descriptor, Queue, QueueT};
 use vm_memory::{
@@ -47,7 +49,7 @@ struct VringInfo {
 
 #[derive(Clone)]
 pub struct VhostUserHandle {
-    vu: Master,
+    vu: Frontend,
     ready: bool,
     supports_migration: bool,
     shm_log: Option<Arc<MmapRegion>>,
@@ -148,13 +150,13 @@ impl VhostUserHandle {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn setup_vhost_user<S: VhostUserMasterReqHandler>(
+    pub fn setup_vhost_user<S: VhostUserFrontendReqHandler>(
         &mut self,
         mem: &GuestMemoryMmap,
         queues: Vec<(usize, Queue, EventFd)>,
         virtio_interrupt: &Arc<dyn VirtioInterrupt>,
         acked_features: u64,
-        slave_req_handler: &Option<MasterReqHandler<S>>,
+        backend_req_handler: &Option<FrontendReqHandler<S>>,
         inflight: Option<&mut Inflight>,
     ) -> Result<()> {
         self.vu
@@ -266,10 +268,10 @@ impl VhostUserHandle {
 
         self.enable_vhost_user_vrings(self.queue_indexes.clone(), true)?;
 
-        if let Some(slave_req_handler) = slave_req_handler {
+        if let Some(backend_req_handler) = backend_req_handler {
             self.vu
-                .set_slave_request_fd(&slave_req_handler.get_tx_raw_fd())
-                .map_err(Error::VhostUserSetSlaveRequestFd)?;
+                .set_backend_request_fd(&backend_req_handler.get_tx_raw_fd())
+                .map_err(Error::VhostUserSetBackendRequestFd)?;
         }
 
         self.vrings_info = Some(vrings_info);
@@ -333,14 +335,14 @@ impl VhostUserHandle {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn reinitialize_vhost_user<S: VhostUserMasterReqHandler>(
+    pub fn reinitialize_vhost_user<S: VhostUserFrontendReqHandler>(
         &mut self,
         mem: &GuestMemoryMmap,
         queues: Vec<(usize, Queue, EventFd)>,
         virtio_interrupt: &Arc<dyn VirtioInterrupt>,
         acked_features: u64,
         acked_protocol_features: u64,
-        slave_req_handler: &Option<MasterReqHandler<S>>,
+        backend_req_handler: &Option<FrontendReqHandler<S>>,
         inflight: Option<&mut Inflight>,
     ) -> Result<()> {
         self.set_protocol_features_vhost_user(acked_features, acked_protocol_features)?;
@@ -350,7 +352,7 @@ impl VhostUserHandle {
             queues,
             virtio_interrupt,
             acked_features,
-            slave_req_handler,
+            backend_req_handler,
             inflight,
         )
     }
@@ -372,7 +374,7 @@ impl VhostUserHandle {
             let (stream, _) = listener.accept().map_err(Error::AcceptConnection)?;
 
             Ok(VhostUserHandle {
-                vu: Master::from_stream(stream, num_queues),
+                vu: Frontend::from_stream(stream, num_queues),
                 ready: false,
                 supports_migration: false,
                 shm_log: None,
@@ -385,7 +387,7 @@ impl VhostUserHandle {
 
             // Retry connecting for a full minute
             let err = loop {
-                let err = match Master::connect(socket_path, num_queues) {
+                let err = match Frontend::connect(socket_path, num_queues) {
                     Ok(m) => {
                         return Ok(VhostUserHandle {
                             vu: m,
@@ -414,7 +416,7 @@ impl VhostUserHandle {
         }
     }
 
-    pub fn socket_handle(&mut self) -> &mut Master {
+    pub fn socket_handle(&mut self) -> &mut Frontend {
         &mut self.vu
     }
 

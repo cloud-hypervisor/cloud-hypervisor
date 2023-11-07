@@ -158,9 +158,10 @@ impl VhostUserNetBackend {
     }
 }
 
-impl VhostUserBackendMut<VringRwLock<GuestMemoryAtomic<GuestMemoryMmap>>, AtomicBitmap>
-    for VhostUserNetBackend
-{
+impl VhostUserBackendMut for VhostUserNetBackend {
+    type Bitmap = AtomicBitmap;
+    type Vring = VringRwLock<GuestMemoryAtomic<GuestMemoryMmap>>;
+
     fn num_queues(&self) -> usize {
         self.num_queues
     }
@@ -203,7 +204,7 @@ impl VhostUserBackendMut<VringRwLock<GuestMemoryAtomic<GuestMemoryMmap>>, Atomic
         _evset: EventSet,
         vrings: &[VringRwLock<GuestMemoryAtomic<GuestMemoryMmap>>],
         thread_id: usize,
-    ) -> VhostUserBackendResult<bool> {
+    ) -> VhostUserBackendResult<()> {
         let mut thread = self.threads[thread_id].lock().unwrap();
         match device_event {
             0 => {
@@ -245,7 +246,7 @@ impl VhostUserBackendMut<VringRwLock<GuestMemoryAtomic<GuestMemoryMmap>>, Atomic
             _ => return Err(Error::HandleEventUnknownEvent.into()),
         }
 
-        Ok(false)
+        Ok(())
     }
 
     fn exit_event(&self, thread_index: usize) -> Option<EventFd> {
