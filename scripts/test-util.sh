@@ -107,3 +107,12 @@ process_common_args() {
 
     test_binary_args=($@)
 }
+
+download_hypervisor_fw() {
+    FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/rust-hypervisor-firmware/releases/latest | grep "browser_download_url" | grep -o 'https://.*[^ "]')
+    FW="$WORKLOADS_DIR/hypervisor-fw"
+    pushd $WORKLOADS_DIR
+    rm -f $FW
+    time wget --quiet $FW_URL || exit 1
+    popd
+}
