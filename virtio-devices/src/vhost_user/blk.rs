@@ -23,7 +23,7 @@ use vhost::vhost_user::message::{
     VhostUserConfigFlags, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
     VHOST_USER_CONFIG_OFFSET,
 };
-use vhost::vhost_user::{MasterReqHandler, VhostUserMaster, VhostUserMasterReqHandler};
+use vhost::vhost_user::{FrontendReqHandler, VhostUserFrontend, VhostUserFrontendReqHandler};
 use virtio_bindings::virtio_blk::{
     VIRTIO_BLK_F_BLK_SIZE, VIRTIO_BLK_F_CONFIG_WCE, VIRTIO_BLK_F_DISCARD, VIRTIO_BLK_F_FLUSH,
     VIRTIO_BLK_F_GEOMETRY, VIRTIO_BLK_F_MQ, VIRTIO_BLK_F_RO, VIRTIO_BLK_F_SEG_MAX,
@@ -50,8 +50,8 @@ pub struct State {
 
 impl VersionMapped for State {}
 
-struct SlaveReqHandler {}
-impl VhostUserMasterReqHandler for SlaveReqHandler {}
+struct BackendReqHandler {}
+impl VhostUserFrontendReqHandler for BackendReqHandler {}
 
 pub struct Blk {
     common: VirtioCommon,
@@ -294,7 +294,7 @@ impl VirtioDevice for Blk {
         self.common.activate(&queues, &interrupt_cb)?;
         self.guest_memory = Some(mem.clone());
 
-        let slave_req_handler: Option<MasterReqHandler<SlaveReqHandler>> = None;
+        let backend_req_handler: Option<FrontendReqHandler<BackendReqHandler>> = None;
 
         // Run a dedicated thread for handling potential reconnections with
         // the backend.
@@ -305,7 +305,7 @@ impl VirtioDevice for Blk {
             queues,
             interrupt_cb,
             self.common.acked_features,
-            slave_req_handler,
+            backend_req_handler,
             kill_evt,
             pause_evt,
         )?;
