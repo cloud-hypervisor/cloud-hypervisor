@@ -14,12 +14,7 @@ fi
 WORKLOADS_DIR="$HOME/workloads"
 mkdir -p "$WORKLOADS_DIR"
 
-FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/rust-hypervisor-firmware/releases/latest | grep "browser_download_url" | grep -o 'https://.*[^ "]')
-FW="$WORKLOADS_DIR/hypervisor-fw"
-pushd $WORKLOADS_DIR
-rm -f $FW
-time wget --quiet $FW_URL || exit 1
-popd
+download_hypervisor_fw
 
 JAMMY_OS_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20230119-0.qcow2"
 JAMMY_OS_IMAGE_URL="https://cloud-hypervisor.azureedge.net/$JAMMY_OS_IMAGE_NAME"
