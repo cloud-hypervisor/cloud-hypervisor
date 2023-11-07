@@ -22,11 +22,11 @@ use std::thread;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use vhost::vhost_user::message::{
-    VhostUserFSSlaveMsg, VhostUserFSSlaveMsgFlags, VhostUserProtocolFeatures,
-    VhostUserVirtioFeatures, VHOST_USER_FS_SLAVE_ENTRIES,
+    VhostUserFSBackendMsg, VhostUserFSBackendMsgFlags, VhostUserProtocolFeatures,
+    VhostUserVirtioFeatures, VHOST_USER_FS_BACKEND_ENTRIES,
 };
 use vhost::vhost_user::{
-    HandlerResult, MasterReqHandler, VhostUserMaster, VhostUserMasterReqHandler,
+    FrontendReqHandler, HandlerResult, VhostUserFrontend, VhostUserFrontendReqHandler,
 };
 use virtio_queue::Queue;
 use vm_memory::{
@@ -48,19 +48,19 @@ pub struct State {
     pub config: VirtioFsConfig,
     pub acked_protocol_features: u64,
     pub vu_num_queues: usize,
-    pub slave_req_support: bool,
+    pub backend_req_support: bool,
 }
 
 impl VersionMapped for State {}
 
-struct SlaveReqHandler {
+struct BackendReqHandler {
     cache_offset: GuestAddress,
     cache_size: u64,
     mmap_cache_addr: u64,
     mem: GuestMemoryAtomic<GuestMemoryMmap>,
 }
 
-impl SlaveReqHandler {
+impl BackendReqHandler {
     // Make sure request is within cache range
     fn is_req_valid(&self, offset: u64, len: u64) -> bool {
         let end = match offset.checked_add(len) {
@@ -72,16 +72,16 @@ impl SlaveReqHandler {
     }
 }
 
-impl VhostUserMasterReqHandler for SlaveReqHandler {
+impl VhostUserFrontendReqHandler for BackendReqHandler {
     fn handle_config_change(&self) -> HandlerResult<u64> {
         debug!("handle_config_change");
         Ok(0)
     }
 
-    fn fs_slave_map(&self, fs: &VhostUserFSSlaveMsg, fd: &dyn AsRawFd) -> HandlerResult<u64> {
-        debug!("fs_slave_map");
+    fn fs_backend_map(&self, fs: &VhostUserFSBackendMsg, fd: &dyn AsRawFd) -> HandlerResult<u64> {
+        debug!("fs_backend_map");
 
-        for i in 0..VHOST_USER_FS_SLAVE_ENTRIES {
+        for i in 0..VHOST_USER_FS_BACKEND_ENTRIES {
             let offset = fs.cache_offset[i];
             let len = fs.len[i];
 
@@ -115,10 +115,10 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
         Ok(0)
     }
 
-    fn fs_slave_unmap(&self, fs: &VhostUserFSSlaveMsg) -> HandlerResult<u64> {
-        debug!("fs_slave_unmap");
+    fn fs_backend_unmap(&self, fs: &VhostUserFSBackendMsg) -> HandlerResult<u64> {
+        debug!("fs_backend_unmap");
 
-        for i in 0..VHOST_USER_FS_SLAVE_ENTRIES {
+        for i in 0..VHOST_USER_FS_BACKEND_ENTRIES {
             let mut len = fs.len[i];
 
             // Ignore if the length is 0.
@@ -126,7 +126,7 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
                 continue;
             }
 
-            // Need to handle a special case where the slave ask for the unmapping
+            // Need to handle a special case where the backend ask for the unmapping
             // of the entire mapping.
             let offset = if len == 0xffff_ffff_ffff_ffff {
                 len = self.cache_size;
@@ -159,10 +159,10 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
         Ok(0)
     }
 
-    fn fs_slave_sync(&self, fs: &VhostUserFSSlaveMsg) -> HandlerResult<u64> {
-        debug!("fs_slave_sync");
+    fn fs_backend_sync(&self, fs: &VhostUserFSBackendMsg) -> HandlerResult<u64> {
+        debug!("fs_backend_sync");
 
-        for i in 0..VHOST_USER_FS_SLAVE_ENTRIES {
+        for i in 0..VHOST_USER_FS_BACKEND_ENTRIES {
             let offset = fs.cache_offset[i];
             let len = fs.len[i];
 
@@ -187,11 +187,11 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
         Ok(0)
     }
 
-    fn fs_slave_io(&self, fs: &VhostUserFSSlaveMsg, fd: &dyn AsRawFd) -> HandlerResult<u64> {
-        debug!("fs_slave_io");
+    fn fs_backend_io(&self, fs: &VhostUserFSBackendMsg, fd: &dyn AsRawFd) -> HandlerResult<u64> {
+        debug!("fs_backend_io");
 
         let mut done: u64 = 0;
-        for i in 0..VHOST_USER_FS_SLAVE_ENTRIES {
+        for i in 0..VHOST_USER_FS_BACKEND_ENTRIES {
             // Ignore if the length is 0.
             if fs.len[i] == 0 {
                 continue;
@@ -230,8 +230,8 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
             };
 
             while len > 0 {
-                let ret = if (fs.flags[i] & VhostUserFSSlaveMsgFlags::MAP_W)
-                    == VhostUserFSSlaveMsgFlags::MAP_W
+                let ret = if (fs.flags[i] & VhostUserFSBackendMsgFlags::MAP_W)
+                    == VhostUserFSBackendMsgFlags::MAP_W
                 {
                     debug!("write: foffset={}, len={}", foffset, len);
                     // SAFETY: FFI call with valid arguments
@@ -298,7 +298,7 @@ pub struct Fs {
     // Hold ownership of the memory that is allocated for the device
     // which will be automatically dropped when the device is dropped
     cache: Option<(VirtioSharedMemoryList, MmapRegion)>,
-    slave_req_support: bool,
+    backend_req_support: bool,
     seccomp_action: SeccompAction,
     guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     epoll_thread: Option<thread::JoinHandle<()>>,
@@ -321,7 +321,7 @@ impl Fs {
         iommu: bool,
         state: Option<State>,
     ) -> Result<Fs> {
-        let mut slave_req_support = false;
+        let mut backend_req_support = false;
 
         // Calculate the actual number of queues needed.
         let num_queues = NUM_QUEUE_OFFSET + req_num_queues;
@@ -335,7 +335,7 @@ impl Fs {
             acked_protocol_features,
             vu_num_queues,
             config,
-            slave_req_support,
+            backend_req_support,
             paused,
         ) = if let Some(state) = state {
             info!("Restoring vhost-user-fs {}", id);
@@ -351,7 +351,7 @@ impl Fs {
                 state.acked_protocol_features,
                 state.vu_num_queues,
                 state.config,
-                state.slave_req_support,
+                state.backend_req_support,
                 true,
             )
         } else {
@@ -363,10 +363,10 @@ impl Fs {
                 | VhostUserProtocolFeatures::REPLY_ACK
                 | VhostUserProtocolFeatures::INFLIGHT_SHMFD
                 | VhostUserProtocolFeatures::LOG_SHMFD;
-            let slave_protocol_features =
-                VhostUserProtocolFeatures::SLAVE_REQ | VhostUserProtocolFeatures::SLAVE_SEND_FD;
+            let backend_protocol_features =
+                VhostUserProtocolFeatures::BACKEND_REQ | VhostUserProtocolFeatures::BACKEND_SEND_FD;
             if cache.is_some() {
-                avail_protocol_features |= slave_protocol_features;
+                avail_protocol_features |= backend_protocol_features;
             }
 
             let (acked_features, acked_protocol_features) =
@@ -389,10 +389,10 @@ impl Fs {
                 return Err(Error::BadQueueNum);
             }
 
-            if acked_protocol_features & slave_protocol_features.bits()
-                == slave_protocol_features.bits()
+            if acked_protocol_features & backend_protocol_features.bits()
+                == backend_protocol_features.bits()
             {
-                slave_req_support = true;
+                backend_req_support = true;
             }
 
             // Create virtio-fs device configuration.
@@ -411,7 +411,7 @@ impl Fs {
                 acked_protocol_features,
                 num_queues,
                 config,
-                slave_req_support,
+                backend_req_support,
                 false,
             )
         };
@@ -437,7 +437,7 @@ impl Fs {
             id,
             config,
             cache,
-            slave_req_support,
+            backend_req_support,
             seccomp_action,
             guest_memory: None,
             epoll_thread: None,
@@ -453,7 +453,7 @@ impl Fs {
             config: self.config,
             acked_protocol_features: self.vu_common.acked_protocol_features,
             vu_num_queues: self.vu_common.vu_num_queues,
-            slave_req_support: self.slave_req_support,
+            backend_req_support: self.backend_req_support,
         }
     }
 }
@@ -507,10 +507,10 @@ impl VirtioDevice for Fs {
         self.common.activate(&queues, &interrupt_cb)?;
         self.guest_memory = Some(mem.clone());
 
-        // Initialize slave communication.
-        let slave_req_handler = if self.slave_req_support {
+        // Initialize backend communication.
+        let backend_req_handler = if self.backend_req_support {
             if let Some(cache) = self.cache.as_ref() {
-                let vu_master_req_handler = Arc::new(SlaveReqHandler {
+                let vu_frontend_req_handler = Arc::new(BackendReqHandler {
                     cache_offset: cache.0.addr,
                     cache_size: cache.0.len,
                     mmap_cache_addr: cache.0.host_addr,
@@ -518,8 +518,8 @@ impl VirtioDevice for Fs {
                 });
 
                 let mut req_handler =
-                    MasterReqHandler::new(vu_master_req_handler).map_err(|e| {
-                        ActivateError::VhostUserFsSetup(Error::MasterReqHandlerCreation(e))
+                    FrontendReqHandler::new(vu_frontend_req_handler).map_err(|e| {
+                        ActivateError::VhostUserFsSetup(Error::FrontendReqHandlerCreation(e))
                     })?;
 
                 if self.vu_common.acked_protocol_features
@@ -546,7 +546,7 @@ impl VirtioDevice for Fs {
             queues,
             interrupt_cb,
             self.common.acked_features,
-            slave_req_handler,
+            backend_req_handler,
             kill_evt,
             pause_evt,
         )?;

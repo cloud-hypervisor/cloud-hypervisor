@@ -299,9 +299,10 @@ impl VhostUserBlkBackend {
     }
 }
 
-impl VhostUserBackendMut<VringRwLock<GuestMemoryAtomic<GuestMemoryMmap>>, AtomicBitmap>
-    for VhostUserBlkBackend
-{
+impl VhostUserBackendMut for VhostUserBlkBackend {
+    type Bitmap = AtomicBitmap;
+    type Vring = VringRwLock<GuestMemoryAtomic<GuestMemoryMmap>>;
+
     fn num_queues(&self) -> usize {
         self.config.num_queues as usize
     }
@@ -350,7 +351,7 @@ impl VhostUserBackendMut<VringRwLock<GuestMemoryAtomic<GuestMemoryMmap>>, Atomic
         evset: EventSet,
         vrings: &[VringRwLock<GuestMemoryAtomic<GuestMemoryMmap>>],
         thread_id: usize,
-    ) -> VhostUserBackendResult<bool> {
+    ) -> VhostUserBackendResult<()> {
         if evset != EventSet::IN {
             return Err(Error::HandleEventNotEpollIn.into());
         }
@@ -394,7 +395,7 @@ impl VhostUserBackendMut<VringRwLock<GuestMemoryAtomic<GuestMemoryMmap>>, Atomic
                     thread.process_queue(&mut vring);
                 }
 
-                Ok(false)
+                Ok(())
             }
             _ => Err(Error::HandleEventUnknownEvent.into()),
         }
