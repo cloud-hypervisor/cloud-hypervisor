@@ -53,6 +53,9 @@ pipeline {
                             return runWorkers
                         }
                     }
+                    environment {
+                        AUTH_DOWNLOAD_TOKEN = credentials('8a26fd74-d40e-414c-9132-ff3f867806ef')
+                    }
                     stages {
                         stage('Checkout') {
                             steps {
@@ -124,6 +127,9 @@ pipeline {
                         expression {
                             return runWorkers
                         }
+                    }
+                    environment {
+                        AUTH_DOWNLOAD_TOKEN = credentials('8a26fd74-d40e-414c-9132-ff3f867806ef')
                     }
                     stages {
                         stage('Checkout') {
@@ -364,6 +370,9 @@ pipeline {
                             }
                         }
                     }
+                    environment {
+                        AUTH_DOWNLOAD_TOKEN = credentials('8a26fd74-d40e-414c-9132-ff3f867806ef')
+                    }
                     stages {
                         stage('Checkout') {
                             steps {
@@ -404,6 +413,9 @@ pipeline {
                                 return runWorkers
                             }
                         }
+                    }
+                    environment {
+                        AUTH_DOWNLOAD_TOKEN = credentials('8a26fd74-d40e-414c-9132-ff3f867806ef')
                     }
                     stages {
                         stage('Checkout') {
