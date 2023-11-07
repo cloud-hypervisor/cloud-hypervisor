@@ -436,6 +436,7 @@ cmd_tests() {
             --env BUILD_TARGET="$target" \
             --env RUSTFLAGS="$rustflags" \
             --env TARGET_CC="$target_cc" \
+            --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
             "$CTR_IMAGE" \
             dbus-run-session ./scripts/run_integration_tests_"$(uname -m)".sh "$@" || fix_dir_perms $? || exit $?
     fi
@@ -457,6 +458,7 @@ cmd_tests() {
             --env BUILD_TARGET="$target" \
             --env RUSTFLAGS="$rustflags" \
             --env TARGET_CC="$target_cc" \
+            --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
             "$CTR_IMAGE" \
             ./scripts/run_integration_tests_sgx.sh "$@" || fix_dir_perms $? || exit $?
     fi
@@ -478,6 +480,7 @@ cmd_tests() {
             --env BUILD_TARGET="$target" \
             --env RUSTFLAGS="$rustflags" \
             --env TARGET_CC="$target_cc" \
+            --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
             "$CTR_IMAGE" \
             ./scripts/run_integration_tests_vfio.sh "$@" || fix_dir_perms $? || exit $?
     fi
@@ -499,6 +502,7 @@ cmd_tests() {
             --env BUILD_TARGET="$target" \
             --env RUSTFLAGS="$rustflags" \
             --env TARGET_CC="$target_cc" \
+            --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
             "$CTR_IMAGE" \
             ./scripts/run_integration_tests_windows_"$(uname -m)".sh "$@" || fix_dir_perms $? || exit $?
     fi
@@ -520,6 +524,7 @@ cmd_tests() {
             --env BUILD_TARGET="$target" \
             --env RUSTFLAGS="$rustflags" \
             --env TARGET_CC="$target_cc" \
+            --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
             "$CTR_IMAGE" \
             ./scripts/run_integration_tests_live_migration.sh "$@" || fix_dir_perms $? || exit $?
     fi
@@ -541,6 +546,7 @@ cmd_tests() {
             --env BUILD_TARGET="$target" \
             --env RUSTFLAGS="$rustflags" \
             --env TARGET_CC="$target_cc" \
+            --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
             "$CTR_IMAGE" \
             ./scripts/run_integration_tests_rate_limiter.sh "$@" || fix_dir_perms $? || exit $?
     fi
@@ -563,6 +569,7 @@ cmd_tests() {
             --env RUSTFLAGS="$rustflags" \
             --env TARGET_CC="$target_cc" \
             --env RUST_BACKTRACE="${RUST_BACKTRACE}" \
+            --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
             "$CTR_IMAGE" \
             ./scripts/run_metrics.sh "$@" || fix_dir_perms $? || exit $?
     fi
