@@ -109,7 +109,15 @@ process_common_args() {
 }
 
 download_hypervisor_fw() {
-    FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/rust-hypervisor-firmware/releases/latest | grep "browser_download_url" | grep -o 'https://.*[^ "]')
+    if [ -v AUTH_DOWNLOAD_TOKEN ]; then
+        echo "Using authenticated download from GitHub"
+        FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/rust-hypervisor-firmware/releases/latest \
+                 --header "Authorization: Token $AUTH_DOWNLOAD_TOKEN" \
+                 --header "X-GitHub-Api-Version: 2022-11-28" | grep "browser_download_url" | grep -o 'https://.*[^ "]')
+    else
+        echo "Using anonymous download from GitHub"
+        FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/rust-hypervisor-firmware/releases/latest | grep "browser_download_url" | grep -o 'https://.*[^ "]')
+    fi
     FW="$WORKLOADS_DIR/hypervisor-fw"
     pushd $WORKLOADS_DIR
     rm -f $FW
