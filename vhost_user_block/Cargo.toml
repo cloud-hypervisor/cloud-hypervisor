@@ -6,7 +6,7 @@ edition = "2021"
 build = "../build.rs"
 
 [dependencies]
-clap = { version = "4.3.11", features = ["wrap_help","cargo"] }
+clap = { version = "4.4.7", features = ["wrap_help","cargo"] }
 block = { path = "../block" }
 env_logger = "0.10.0"
 epoll = "4.3.3"
