@@ -9,7 +9,6 @@ use crate::layout::{APIC_START, HIGH_RAM_START, IOAPIC_START};
 use crate::x86_64::mpspec;
 use crate::GuestMemoryMmap;
 use libc::c_char;
-use std::io;
 use std::mem;
 use std::result;
 use std::slice;
@@ -154,7 +153,7 @@ pub fn setup_mptable(offset: GuestAddress, mem: &GuestMemoryMmap, num_cpus: u8) 
         return Err(Error::AddressOverflow);
     }
 
-    mem.read_exact_from(base_mp, &mut io::repeat(0), mp_size)
+    mem.read_exact_volatile_from(base_mp, &mut vec![0; mp_size].as_slice(), mp_size)
         .map_err(Error::Clear)?;
 
     {
@@ -291,6 +290,7 @@ pub fn setup_mptable(offset: GuestAddress, mem: &GuestMemoryMmap, num_cpus: u8) 
 mod tests {
     use super::*;
     use crate::layout::MPTABLE_START;
+    use std::io;
     use vm_memory::{GuestAddress, GuestUsize};
 
     fn table_entry_size(type_: u8) -> usize {
@@ -364,6 +364,7 @@ mod tests {
         }
 
         let mut sum = Sum(0);
+        #[allow(deprecated)]
         mem.write_to(mpc_offset, &mut sum, mpc_table.0.length as usize)
             .unwrap();
         assert_eq!(sum.0, 0);

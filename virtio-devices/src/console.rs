@@ -28,7 +28,7 @@ use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_queue::{Queue, QueueT};
-use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic};
+use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemory, GuestMemoryAtomic};
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::{AccessPlatform, Translatable};
@@ -59,6 +59,8 @@ enum Error {
     GuestMemoryRead(vm_memory::guest_memory::Error),
     #[error("Failed to write to guest memory: {0}")]
     GuestMemoryWrite(vm_memory::guest_memory::Error),
+    #[error("Failed to write_all output: {0}")]
+    OutputWriteAll(io::Error),
     #[error("Failed to flush output: {0}")]
     OutputFlush(io::Error),
     #[error("Failed to add used index: {0}")]
@@ -264,15 +266,20 @@ impl ConsoleEpollHandler {
         while let Some(mut desc_chain) = trans_queue.pop_descriptor_chain(self.mem.memory()) {
             let desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
             if let Some(out) = &mut self.out {
+                let mut buf = vec![0u8; desc.len() as usize];
+                buf.shrink_to_fit();
+
                 desc_chain
                     .memory()
-                    .write_to(
+                    .write_volatile_to(
                         desc.addr()
                             .translate_gva(self.access_platform.as_ref(), desc.len() as usize),
-                        out,
+                        &mut buf,
                         desc.len() as usize,
                     )
                     .map_err(Error::GuestMemoryRead)?;
+
+                out.write_all(&buf).map_err(Error::OutputWriteAll)?;
                 out.flush().map_err(Error::OutputFlush)?;
             }
             trans_queue

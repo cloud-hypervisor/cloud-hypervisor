@@ -30,7 +30,7 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::ffi;
 use std::fs::{File, OpenOptions};
-use std::io::{self, Read};
+use std::io::{self};
 use std::ops::{BitAnd, Deref, Not, Sub};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
@@ -47,8 +47,9 @@ use vm_device::BusDevice;
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
-    mmap::MmapRegionError, Address, Bytes, Error as MmapError, GuestAddress, GuestAddressSpace,
+    mmap::MmapRegionError, Address, Error as MmapError, GuestAddress, GuestAddressSpace,
     GuestMemory, GuestMemoryAtomic, GuestMemoryError, GuestMemoryRegion, GuestUsize, MmapRegion,
+    ReadVolatile,
 };
 use vm_migration::{
     protocol::MemoryRange, protocol::MemoryRangeTable, Migratable, MigratableError, Pausable,
@@ -728,7 +729,7 @@ impl MemoryManager {
             // see: https://github.com/rust-vmm/vm-memory/issues/174
             loop {
                 let bytes_read = guest_memory
-                    .read_from(
+                    .read_volatile_from(
                         GuestAddress(range.gpa + offset),
                         &mut memory_file,
                         (range.length - offset) as usize,
@@ -2093,7 +2094,7 @@ impl MemoryManager {
             let mut offset: u64 = 0;
             loop {
                 let bytes_written = guest_memory
-                    .write_to(
+                    .write_volatile_to(
                         GuestAddress(range.gpa + offset),
                         &mut coredump_file,
                         (range.length - offset) as usize,
@@ -2118,7 +2119,7 @@ impl MemoryManager {
         fd: &mut F,
     ) -> std::result::Result<(), MigratableError>
     where
-        F: Read,
+        F: ReadVolatile,
     {
         let guest_memory = self.guest_memory();
         let mem = guest_memory.memory();
@@ -2132,7 +2133,7 @@ impl MemoryManager {
             // see: https://github.com/rust-vmm/vm-memory/issues/174
             loop {
                 let bytes_read = mem
-                    .read_from(
+                    .read_volatile_from(
                         GuestAddress(range.gpa + offset),
                         fd,
                         (range.length - offset) as usize,
@@ -2600,7 +2601,7 @@ impl Transportable for MemoryManager {
             // see: https://github.com/rust-vmm/vm-memory/issues/174
             loop {
                 let bytes_written = guest_memory
-                    .write_to(
+                    .write_volatile_to(
                         GuestAddress(range.gpa + offset),
                         &mut memory_file,
                         (range.length - offset) as usize,
