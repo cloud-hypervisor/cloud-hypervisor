@@ -9,7 +9,6 @@ use crate::layout::{APIC_START, HIGH_RAM_START, IOAPIC_START};
 use crate::x86_64::mpspec;
 use crate::GuestMemoryMmap;
 use libc::c_char;
-use std::io;
 use std::mem;
 use std::result;
 use std::slice;
@@ -154,7 +153,7 @@ pub fn setup_mptable(offset: GuestAddress, mem: &GuestMemoryMmap, num_cpus: u8) 
         return Err(Error::AddressOverflow);
     }
 
-    mem.read_exact_from(base_mp, &mut io::repeat(0), mp_size)
+    mem.read_exact_volatile_from(base_mp, &mut vec![0; mp_size].as_slice(), mp_size)
         .map_err(Error::Clear)?;
 
     {
@@ -291,7 +290,10 @@ pub fn setup_mptable(offset: GuestAddress, mem: &GuestMemoryMmap, num_cpus: u8) 
 mod tests {
     use super::*;
     use crate::layout::MPTABLE_START;
-    use vm_memory::{GuestAddress, GuestUsize};
+    use vm_memory::{
+        bitmap::BitmapSlice, GuestAddress, GuestUsize, VolatileMemoryError, VolatileSlice,
+        WriteVolatile,
+    };
 
     fn table_entry_size(type_: u8) -> usize {
         match type_ as u32 {
@@ -351,20 +353,24 @@ mod tests {
         let mpc_table: MpcTableWrapper = mem.read_obj(mpc_offset).unwrap();
 
         struct Sum(u8);
-        impl io::Write for Sum {
-            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-                for v in buf.iter() {
+        impl WriteVolatile for Sum {
+            fn write_volatile<B: BitmapSlice>(
+                &mut self,
+                buf: &VolatileSlice<B>,
+            ) -> result::Result<usize, VolatileMemoryError> {
+                let mut tmp = vec![0u8; buf.len()];
+                tmp.write_all_volatile(buf)?;
+
+                for v in tmp.iter() {
                     self.0 = self.0.wrapping_add(*v);
                 }
+
                 Ok(buf.len())
-            }
-            fn flush(&mut self) -> io::Result<()> {
-                Ok(())
             }
         }
 
         let mut sum = Sum(0);
-        mem.write_to(mpc_offset, &mut sum, mpc_table.0.length as usize)
+        mem.write_volatile_to(mpc_offset, &mut sum, mpc_table.0.length as usize)
             .unwrap();
         assert_eq!(sum.0, 0);
     }
