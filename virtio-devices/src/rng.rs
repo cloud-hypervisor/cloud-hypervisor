@@ -24,7 +24,7 @@ use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use virtio_queue::{Queue, QueueT};
-use vm_memory::{Bytes, GuestAddressSpace, GuestMemoryAtomic};
+use vm_memory::{GuestAddressSpace, GuestMemory, GuestMemoryAtomic};
 use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::{AccessPlatform, Translatable};
@@ -75,7 +75,7 @@ impl RngEpollHandler {
             // Fill the read with data from the random device on the host.
             let len = desc_chain
                 .memory()
-                .read_from(
+                .read_volatile_from(
                     desc.addr()
                         .translate_gva(self.access_platform.as_ref(), desc.len() as usize),
                     &mut self.random_file,

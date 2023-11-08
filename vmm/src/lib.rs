@@ -51,6 +51,7 @@ use std::{result, thread};
 use thiserror::Error;
 use tracer::trace_scoped;
 use vm_memory::bitmap::AtomicBitmap;
+use vm_memory::{ReadVolatile, WriteVolatile};
 use vm_migration::{protocol::*, Migratable};
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
@@ -1449,7 +1450,7 @@ impl Vmm {
         memory_manager: &mut MemoryManager,
     ) -> std::result::Result<(), MigratableError>
     where
-        T: Read + Write,
+        T: Read + ReadVolatile + Write,
     {
         // Read table
         let table = MemoryRangeTable::read_from(socket, req.length())?;
@@ -1608,7 +1609,7 @@ impl Vmm {
         socket: &mut T,
     ) -> result::Result<bool, MigratableError>
     where
-        T: Read + Write,
+        T: Read + Write + WriteVolatile,
     {
         // Send (dirty) memory table
         let table = vm.dirty_log()?;

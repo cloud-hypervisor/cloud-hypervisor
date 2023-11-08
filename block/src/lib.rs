@@ -143,10 +143,14 @@ pub enum ExecuteError {
     Flush(io::Error),
     #[error("Failed to read: {0}")]
     Read(GuestMemoryError),
+    #[error("Failed to read_exact: {0}")]
+    ReadExact(io::Error),
     #[error("Failed to seek: {0}")]
     Seek(io::Error),
     #[error("Failed to write: {0}")]
     Write(GuestMemoryError),
+    #[error("Failed to write_all: {0}")]
+    WriteAll(io::Error),
     #[error("Unsupported request: {0}")]
     Unsupported(u32),
     #[error("Failed to submit io uring: {0}")]
@@ -169,8 +173,10 @@ impl ExecuteError {
             ExecuteError::BadRequest(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::Flush(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::Read(_) => VIRTIO_BLK_S_IOERR,
+            ExecuteError::ReadExact(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::Seek(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::Write(_) => VIRTIO_BLK_S_IOERR,
+            ExecuteError::WriteAll(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::Unsupported(_) => VIRTIO_BLK_S_UNSUPP,
             ExecuteError::SubmitIoUring(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::GetHostAddress(_) => VIRTIO_BLK_S_IOERR,
@@ -351,13 +357,21 @@ impl Request {
 
             match self.request_type {
                 RequestType::In => {
-                    mem.read_exact_from(*data_addr, disk, *data_len as usize)
-                        .map_err(ExecuteError::Read)?;
+                    let mut buf = vec![0u8; *data_len as usize];
+                    disk.read_exact(&mut buf).map_err(ExecuteError::ReadExact)?;
+                    mem.read_exact_volatile_from(
+                        *data_addr,
+                        &mut buf.as_slice(),
+                        *data_len as usize,
+                    )
+                    .map_err(ExecuteError::Read)?;
                     len += data_len;
                 }
                 RequestType::Out => {
-                    mem.write_all_to(*data_addr, disk, *data_len as usize)
+                    let mut buf: Vec<u8> = Vec::new();
+                    mem.write_all_volatile_to(*data_addr, &mut buf, *data_len as usize)
                         .map_err(ExecuteError::Write)?;
+                    disk.write_all(&buf).map_err(ExecuteError::WriteAll)?;
                     if !self.writeback {
                         disk.flush().map_err(ExecuteError::Flush)?;
                     }

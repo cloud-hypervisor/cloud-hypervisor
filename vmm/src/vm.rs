@@ -72,8 +72,6 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom, Write};
-#[cfg(feature = "tdx")]
-use std::mem;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use std::mem::size_of;
 use std::num::Wrapping;
@@ -86,8 +84,10 @@ use thiserror::Error;
 use tracer::trace_scoped;
 use vm_device::Bus;
 #[cfg(feature = "tdx")]
-use vm_memory::{Address, ByteValued, GuestMemory, GuestMemoryRegion};
-use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
+use vm_memory::{Address, ByteValued, GuestMemoryRegion, ReadVolatile};
+use vm_memory::{
+    Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic, WriteVolatile,
+};
 use vm_migration::protocol::{Request, Response, Status};
 use vm_migration::{
     protocol::MemoryRangeTable, snapshot_from_id, Migratable, MigratableError, Pausable, Snapshot,
@@ -884,7 +884,7 @@ impl Vm {
     }
 
     fn load_initramfs(&mut self, guest_mem: &GuestMemoryMmap) -> Result<arch::InitramfsConfig> {
-        let mut initramfs = self.initramfs.as_ref().unwrap();
+        let initramfs = self.initramfs.as_mut().unwrap();
         let size: usize = initramfs
             .seek(SeekFrom::End(0))
             .map_err(|_| Error::InitramfsLoad)?
@@ -897,7 +897,7 @@ impl Vm {
         let address = GuestAddress(address);
 
         guest_mem
-            .read_from(address, &mut initramfs, size)
+            .read_volatile_from(address, initramfs, size)
             .map_err(|_| Error::InitramfsLoad)?;
 
         info!("Initramfs loaded: address = 0x{:x}", address.0);
@@ -1744,7 +1744,7 @@ impl Vm {
                     firmware_file
                         .seek(SeekFrom::Start(section.data_offset as u64))
                         .map_err(Error::LoadTdvf)?;
-                    mem.read_from(
+                    mem.read_volatile_from(
                         GuestAddress(section.address),
                         &mut firmware_file,
                         section.data_size as usize,
@@ -1766,13 +1766,8 @@ impl Vm {
                             .map_err(Error::LoadPayload)?;
 
                         let mut payload_header = linux_loader::bootparam::setup_header::default();
-                        payload_header
-                            .as_bytes()
-                            .read_from(
-                                0,
-                                payload_file,
-                                mem::size_of::<linux_loader::bootparam::setup_header>(),
-                            )
+                        payload_file
+                            .read_volatile(&mut payload_header.as_bytes())
                             .unwrap();
 
                         if payload_header.header != 0x5372_6448 {
@@ -1786,7 +1781,7 @@ impl Vm {
                         }
 
                         payload_file.rewind().map_err(Error::LoadPayload)?;
-                        mem.read_from(
+                        mem.read_volatile_from(
                             GuestAddress(section.address),
                             payload_file,
                             payload_size as usize,
@@ -2129,7 +2124,7 @@ impl Vm {
         fd: &mut F,
     ) -> std::result::Result<(), MigratableError>
     where
-        F: Write,
+        F: WriteVolatile,
     {
         let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
         let mem = guest_memory.memory();
@@ -2143,7 +2138,7 @@ impl Vm {
             // see: https://github.com/rust-vmm/vm-memory/issues/174
             loop {
                 let bytes_written = mem
-                    .write_to(
+                    .write_volatile_to(
                         GuestAddress(range.gpa + offset),
                         fd,
                         (range.length - offset) as usize,
