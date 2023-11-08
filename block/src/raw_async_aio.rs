@@ -120,15 +120,20 @@ impl AsyncIo for RawFileAsyncAio {
     }
 
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()> {
-        let iocbs = [&mut aio::IoControlBlock {
-            aio_fildes: self.fd.as_raw_fd() as u32,
-            aio_lio_opcode: aio::IOCB_CMD_FSYNC as u16,
-            aio_data: user_data.unwrap_or(0),
-            aio_flags: aio::IOCB_FLAG_RESFD,
-            aio_resfd: self.eventfd.as_raw_fd() as u32,
-            ..Default::default()
-        }];
-        let _ = self.ctx.submit(&iocbs[..]).map_err(AsyncIoError::Fsync)?;
+        if let Some(user_data) = user_data {
+            let iocbs = [&mut aio::IoControlBlock {
+                aio_fildes: self.fd.as_raw_fd() as u32,
+                aio_lio_opcode: aio::IOCB_CMD_FSYNC as u16,
+                aio_data: user_data,
+                aio_flags: aio::IOCB_FLAG_RESFD,
+                aio_resfd: self.eventfd.as_raw_fd() as u32,
+                ..Default::default()
+            }];
+            let _ = self.ctx.submit(&iocbs[..]).map_err(AsyncIoError::Fsync)?;
+        } else {
+            // SAFETY: FFI call with a valid fd
+            unsafe { libc::fsync(self.fd) };
+        }
 
         Ok(())
     }
