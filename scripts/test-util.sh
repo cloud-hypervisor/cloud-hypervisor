@@ -109,7 +109,7 @@ process_common_args() {
 }
 
 download_hypervisor_fw() {
-    if [ -v AUTH_DOWNLOAD_TOKEN ]; then
+    if [ -n "$AUTH_DOWNLOAD_TOKEN" ]; then
         echo "Using authenticated download from GitHub"
         FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/rust-hypervisor-firmware/releases/latest \
                  --header "Authorization: Token $AUTH_DOWNLOAD_TOKEN" \
