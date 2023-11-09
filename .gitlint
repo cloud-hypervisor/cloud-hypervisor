@@ -1,0 +1,15 @@
+[general]
+extra-path=scripts/gitlint/rules.py
+regex-style-search=true
+
+[ignore-by-author-name]
+regex=dependabot
+ignore=all
+
+# default 72
+[title-max-length]
+line-length=50
+
+# default 80
+[body-max-line-length]
+line-length=72
