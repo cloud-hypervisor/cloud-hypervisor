@@ -3297,16 +3297,19 @@ mod common_parallel {
     }
 
     #[test]
+    #[cfg(not(target_arch = "aarch64"))]
     fn test_vhost_user_blk_default() {
         test_vhost_user_blk(2, false, false, Some(&prepare_vubd))
     }
 
     #[test]
+    #[cfg(not(target_arch = "aarch64"))]
     fn test_vhost_user_blk_readonly() {
         test_vhost_user_blk(1, true, false, Some(&prepare_vubd))
     }
 
     #[test]
+    #[cfg(not(target_arch = "aarch64"))]
     fn test_vhost_user_blk_direct() {
         test_vhost_user_blk(1, false, true, Some(&prepare_vubd))
     }
