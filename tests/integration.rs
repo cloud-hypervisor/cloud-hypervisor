@@ -6080,6 +6080,12 @@ mod common_parallel {
         let r = std::panic::catch_unwind(|| {
             // Resume the VM
             assert!(remote_command(&api_socket_restored, "resume", None));
+            // There is no way that we can ensure the 'write()' to the
+            // event file is completed when the 'resume' request is
+            // returned successfully, because the 'write()' was done
+            // asynchronously from a different thread of Cloud
+            // Hypervisor (e.g. the event-monitor thread).
+            thread::sleep(std::time::Duration::new(1, 0));
             let latest_events = [
                 &MetaEvent {
                     event: "resuming".to_string(),
