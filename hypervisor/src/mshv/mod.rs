@@ -1004,6 +1004,33 @@ impl cpu::Vcpu for MshvVcpu {
                                         .gpa_write(&mut swei2_rw_gpa_arg)
                                         .map_err(|e| cpu::HypervisorCpuError::GpaWrite(e.into()))?;
                                 }
+                                SVM_EXITCODE_SNP_AP_CREATION => {
+                                    let vmsa_gpa =
+                                        info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info2;
+                                    let apic_id =
+                                        info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info1 >> 32;
+                                    debug!(
+                                        "SNP AP CREATE REQUEST with VMSA GPA {:0x}, and APIC ID {:?}",
+                                        vmsa_gpa, apic_id
+                                    );
+
+                                    let mshv_ap_create_req = mshv_sev_snp_ap_create {
+                                        vp_id: apic_id,
+                                        vmsa_gpa,
+                                    };
+                                    self.vm_fd
+                                        .sev_snp_ap_create(&mshv_ap_create_req)
+                                        .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
+
+                                    let mut swei2_rw_gpa_arg = mshv_bindings::mshv_read_write_gpa {
+                                        base_gpa: ghcb_gpa + GHCB_SW_EXITINFO2_OFFSET,
+                                        byte_count: std::mem::size_of::<u64>() as u32,
+                                        ..Default::default()
+                                    };
+                                    self.fd
+                                        .gpa_write(&mut swei2_rw_gpa_arg)
+                                        .map_err(|e| cpu::HypervisorCpuError::GpaWrite(e.into()))?;
+                                }
                                 _ => panic!(
                                     "GHCB_INFO_NORMAL: Unhandled exit code: {:0x}",
                                     exit_code
