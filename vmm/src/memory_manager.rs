@@ -1035,6 +1035,14 @@ impl MemoryManager {
             // Init guest memory
             let arch_mem_regions = arch::arch_memory_regions();
 
+            let last_reserved_addr: GuestAddress = arch_mem_regions
+                .iter()
+                .filter(|r| r.2 == RegionType::Reserved)
+                .map(|r| r.0.unchecked_add(r.1 as u64 - 1))
+                .fold(GuestAddress::new(0), std::cmp::max);
+
+            info!("last_reserved_addr: {:x}", last_reserved_addr.0);
+
             let ram_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
                 .iter()
                 .filter(|r| r.2 == RegionType::Ram)
@@ -1058,8 +1066,10 @@ impl MemoryManager {
 
             let boot_guest_memory = guest_memory.clone();
 
-            let mut start_of_device_area =
-                MemoryManager::start_addr(guest_memory.last_addr(), allow_mem_hotplug)?;
+            let mut start_of_device_area = MemoryManager::start_addr(
+                std::cmp::max(last_reserved_addr, guest_memory.last_addr()),
+                allow_mem_hotplug,
+            )?;
 
             // Update list of memory zones for resize.
             for zone in zones.iter() {

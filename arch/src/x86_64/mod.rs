@@ -860,8 +860,26 @@ pub fn arch_memory_regions() -> Vec<(GuestAddress, usize, RegionType)> {
             layout::MEM_32BIT_RESERVED_START.raw_value() as usize,
             RegionType::Ram,
         ),
-        // 4 GiB ~ inf: memory after the gap
-        (layout::RAM_64BIT_START, usize::MAX, RegionType::Ram),
+        // 4 GiB ~ 1012 GiB: memory after the gap
+        (
+            layout::RAM_64BIT_START,
+            layout::AMD_HYPER_TRANSPORT_HOLE_START.unchecked_offset_from(layout::RAM_64BIT_START)
+                as usize,
+            RegionType::Ram,
+        ),
+        // 1012 GiB - 1 TiB: AMD HyperTransport memory hole.
+        (
+            layout::AMD_HYPER_TRANSPORT_HOLE_START,
+            layout::AMD_HYPER_TRANSPORT_HOLE_SIZE as usize,
+            RegionType::Reserved,
+        ),
+        // 1 TiB ~ inf: memory after AMD HyperTransport memory hole.
+        (
+            layout::AMD_HYPER_TRANSPORT_HOLE_START
+                .unchecked_add(layout::AMD_HYPER_TRANSPORT_HOLE_SIZE),
+            usize::MAX,
+            RegionType::Ram,
+        ),
         // 3 GiB ~ 3712 MiB: 32-bit device memory hole
         (
             layout::MEM_32BIT_RESERVED_START,
@@ -1004,14 +1022,6 @@ fn configure_pvh(
         ram_regions
     };
 
-    if ram_regions.len() > 2 {
-        error!(
-            "There should be up to two non-continuous regions, devidided by the
-            gap at the end of 32bit address space (e.g. between 3G and 4G)."
-        );
-        return Err(super::Error::MemmapTableSetup);
-    }
-
     // Create the memory map entry for memory region before the gap
     {
         let (first_region_start, first_region_end) =
@@ -1066,6 +1076,20 @@ fn configure_pvh(
             &mut memmap,
             ram_64bit_start,
             second_region_end - ram_64bit_start,
+            E820_RAM,
+        );
+    }
+
+    // Create the memory map entry for memory region after the gap if any
+    if let Some((region_start, region_end)) = ram_regions.get(2) {
+        info!(
+            "create_memmap_entry, region_end: 0x{:08x}, end: 0x{:08x}",
+            region_start, region_end
+        );
+        add_memmap_entry(
+            &mut memmap,
+            *region_start,
+            region_end - region_start,
             E820_RAM,
         );
     }
@@ -1364,7 +1388,7 @@ mod tests {
     #[test]
     fn regions_base_addr() {
         let regions = arch_memory_regions();
-        assert_eq!(4, regions.len());
+        assert_eq!(6, regions.len());
         assert_eq!(GuestAddress(0), regions[0].0);
         assert_eq!(GuestAddress(1 << 32), regions[1].0);
     }
