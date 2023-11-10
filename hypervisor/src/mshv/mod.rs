@@ -978,6 +978,32 @@ impl cpu::Vcpu for MshvVcpu {
                                             })?;
                                     }
                                 }
+                                SVM_EXITCODE_SNP_GUEST_REQUEST => {
+                                    let req_gpa =
+                                        info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info1;
+                                    let rsp_gpa =
+                                        info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info2;
+
+                                    let mshv_psp_req =
+                                        mshv_issue_psp_guest_request { req_gpa, rsp_gpa };
+                                    self.vm_fd
+                                        .psp_issue_guest_request(&mshv_psp_req)
+                                        .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
+
+                                    debug!(
+                                        "SNP guest request: req_gpa {:0x} rsp_gpa {:0x}",
+                                        req_gpa, rsp_gpa
+                                    );
+
+                                    let mut swei2_rw_gpa_arg = mshv_bindings::mshv_read_write_gpa {
+                                        base_gpa: ghcb_gpa + GHCB_SW_EXITINFO2_OFFSET,
+                                        byte_count: std::mem::size_of::<u64>() as u32,
+                                        ..Default::default()
+                                    };
+                                    self.fd
+                                        .gpa_write(&mut swei2_rw_gpa_arg)
+                                        .map_err(|e| cpu::HypervisorCpuError::GpaWrite(e.into()))?;
+                                }
                                 _ => panic!(
                                     "GHCB_INFO_NORMAL: Unhandled exit code: {:0x}",
                                     exit_code
