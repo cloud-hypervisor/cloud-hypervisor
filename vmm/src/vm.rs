@@ -833,6 +833,8 @@ impl Vm {
                 source_url,
                 prefault.unwrap(),
                 phys_bits,
+                #[cfg(target_arch = "x86_64")]
+                hypervisor.get_cpu_vendor(),
             )
             .map_err(Error::MemoryManager)?
         } else {
@@ -850,6 +852,8 @@ impl Vm {
                 None,
                 #[cfg(target_arch = "x86_64")]
                 sgx_epc_config,
+                #[cfg(target_arch = "x86_64")]
+                hypervisor.get_cpu_vendor(),
             )
             .map_err(Error::MemoryManager)?
         };

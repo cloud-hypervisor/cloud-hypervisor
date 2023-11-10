@@ -126,8 +126,8 @@ download_hypervisor_fw() {
 }
 
 download_ovmf() {
-    OVMF_FW_TAG="ch-6624aa331f"
-    OVMF_FW_URL="https://github.com/cloud-hypervisor/edk2/releases/download/$OVMF_FW_TAG/CLOUDHV.fd"
+    OVMF_FW_TAG="ch-highmem"
+    OVMF_FW_URL="https://github.com/thomasbarrett/edk2/releases/download/$OVMF_FW_TAG/CLOUDHV.fd"
     OVMF_FW="$WORKLOADS_DIR/CLOUDHV.fd"
     pushd $WORKLOADS_DIR
     rm -f $OVMF_FW

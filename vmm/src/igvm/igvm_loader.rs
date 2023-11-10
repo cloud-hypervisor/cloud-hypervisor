@@ -92,15 +92,10 @@ fn generate_memory_map(
     let mut memory_map = Vec::new();
 
     // Get usable physical memory ranges
-    let (first_ram_range, second_ram_range) =
-        arch::generate_ram_ranges(guest_mem).map_err(Error::InvalidGuestMemmap)?;
+    let ram_ranges = arch::generate_ram_ranges(guest_mem).map_err(Error::InvalidGuestMemmap)?;
 
-    // Create the memory map entry for memory region before the gap
-    memory_map.push(igvm_memmap_from_ram_range(first_ram_range));
-
-    // Create the memory map entry for memory region after the gap if any
-    if let Some(second_ram_range) = second_ram_range {
-        memory_map.push(igvm_memmap_from_ram_range(second_ram_range));
+    for ram_range in ram_ranges {
+        memory_map.push(igvm_memmap_from_ram_range(ram_range));
     }
 
     Ok(memory_map)
