@@ -7,7 +7,6 @@ use crate::{
     get_host_address_range, GuestMemoryMmap, GuestRegionMmap, MmapRegion, VirtioInterrupt,
     VirtioInterruptType,
 };
-use std::convert::TryInto;
 use std::ffi;
 use std::fs::File;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
@@ -201,7 +200,7 @@ impl VhostUserHandle {
 
         let mut vrings_info = Vec::new();
         for (queue_index, queue, queue_evt) in queues.iter() {
-            let actual_size: usize = queue.size().try_into().unwrap();
+            let actual_size: usize = queue.size().into();
 
             let config_data = VringConfigData {
                 queue_max_size: queue.max_size(),
