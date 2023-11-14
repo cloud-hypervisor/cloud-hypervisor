@@ -561,7 +561,8 @@ pub(crate) struct AddressManager {
     pub(crate) mmio_bus: Arc<Bus>,
     pub(crate) vm: Arc<dyn hypervisor::Vm>,
     device_tree: Arc<Mutex<DeviceTree>>,
-    pci_mmio_allocators: Vec<Arc<Mutex<AddressAllocator>>>,
+    pci_mmio32_allocators: Vec<Arc<Mutex<AddressAllocator>>>,
+    pci_mmio64_allocators: Vec<Arc<Mutex<AddressAllocator>>>,
 }
 
 impl DeviceRelocation for AddressManager {
@@ -604,56 +605,35 @@ impl DeviceRelocation for AddressManager {
                 error!("I/O region is not supported");
             }
             PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
-                // Update system allocator
-                if region_type == PciBarRegionType::Memory32BitRegion {
-                    self.allocator
-                        .lock()
-                        .unwrap()
-                        .free_mmio_hole_addresses(GuestAddress(old_base), len as GuestUsize);
-
-                    self.allocator
-                        .lock()
-                        .unwrap()
-                        .allocate_mmio_hole_addresses(
-                            Some(GuestAddress(new_base)),
-                            len as GuestUsize,
-                            Some(len),
-                        )
-                        .ok_or_else(|| {
-                            io::Error::new(
-                                io::ErrorKind::Other,
-                                "failed allocating new 32 bits MMIO range",
-                            )
-                        })?;
+                let allocators = if region_type == PciBarRegionType::Memory32BitRegion {
+                    &self.pci_mmio32_allocators
                 } else {
-                    // Find the specific allocator that this BAR was allocated from and use it for new one
-                    for allocator in &self.pci_mmio_allocators {
-                        let allocator_base = allocator.lock().unwrap().base();
-                        let allocator_end = allocator.lock().unwrap().end();
+                    &self.pci_mmio64_allocators
+                };
 
-                        if old_base >= allocator_base.0 && old_base <= allocator_end.0 {
-                            allocator
-                                .lock()
-                                .unwrap()
-                                .free(GuestAddress(old_base), len as GuestUsize);
+                // Find the specific allocator that this BAR was allocated from and use it for new one
+                for allocator in allocators {
+                    let allocator_base = allocator.lock().unwrap().base();
+                    let allocator_end = allocator.lock().unwrap().end();
 
-                            allocator
-                                .lock()
-                                .unwrap()
-                                .allocate(
-                                    Some(GuestAddress(new_base)),
-                                    len as GuestUsize,
-                                    Some(len),
+                    if old_base >= allocator_base.0 && old_base <= allocator_end.0 {
+                        allocator
+                            .lock()
+                            .unwrap()
+                            .free(GuestAddress(old_base), len as GuestUsize);
+
+                        allocator
+                            .lock()
+                            .unwrap()
+                            .allocate(Some(GuestAddress(new_base)), len as GuestUsize, Some(len))
+                            .ok_or_else(|| {
+                                io::Error::new(
+                                    io::ErrorKind::Other,
+                                    "failed allocating new MMIO range",
                                 )
-                                .ok_or_else(|| {
-                                    io::Error::new(
-                                        io::ErrorKind::Other,
-                                        "failed allocating new 64 bits MMIO range",
-                                    )
-                                })?;
+                            })?;
 
-                            break;
-                        }
+                        break;
                     }
                 }
 
@@ -1007,22 +987,40 @@ impl DeviceManager {
                 1
             };
 
-        let start_of_device_area = memory_manager.lock().unwrap().start_of_device_area().0;
-        let end_of_device_area = memory_manager.lock().unwrap().end_of_device_area().0;
+        let create_mmio_allocators = |start, end, num_pci_segments, alignment| {
+            // Start each PCI segment mmio range on an aligned boundary
+            let pci_segment_mmio_size =
+                (end - start + 1) / (alignment * num_pci_segments as u64) * alignment;
 
-        // Start each PCI segment range on a 4GiB boundary
-        let pci_segment_size = (end_of_device_area - start_of_device_area + 1)
-            / ((4 << 30) * num_pci_segments as u64)
-            * (4 << 30);
+            let mut mmio_allocators = vec![];
+            for i in 0..num_pci_segments as u64 {
+                let mmio_start = start + i * pci_segment_mmio_size;
+                let allocator = Arc::new(Mutex::new(
+                    AddressAllocator::new(GuestAddress(mmio_start), pci_segment_mmio_size).unwrap(),
+                ));
+                mmio_allocators.push(allocator)
+            }
 
-        let mut pci_mmio_allocators = vec![];
-        for i in 0..num_pci_segments as u64 {
-            let mmio_start = start_of_device_area + i * pci_segment_size;
-            let allocator = Arc::new(Mutex::new(
-                AddressAllocator::new(GuestAddress(mmio_start), pci_segment_size).unwrap(),
-            ));
-            pci_mmio_allocators.push(allocator)
-        }
+            mmio_allocators
+        };
+
+        let start_of_mmio32_area = layout::MEM_32BIT_DEVICES_START.0;
+        let end_of_mmio32_area = layout::MEM_32BIT_DEVICES_START.0 + layout::MEM_32BIT_DEVICES_SIZE;
+        let pci_mmio32_allocators = create_mmio_allocators(
+            start_of_mmio32_area,
+            end_of_mmio32_area,
+            num_pci_segments,
+            4 << 10,
+        );
+
+        let start_of_mmio64_area = memory_manager.lock().unwrap().start_of_device_area().0;
+        let end_of_mmio64_area = memory_manager.lock().unwrap().end_of_device_area().0;
+        let pci_mmio64_allocators = create_mmio_allocators(
+            start_of_mmio64_area,
+            end_of_mmio64_area,
+            num_pci_segments,
+            4 << 30,
+        );
 
         let address_manager = Arc::new(AddressManager {
             allocator: memory_manager.lock().unwrap().allocator(),
@@ -1031,7 +1029,8 @@ impl DeviceManager {
             mmio_bus,
             vm: vm.clone(),
             device_tree: Arc::clone(&device_tree),
-            pci_mmio_allocators,
+            pci_mmio32_allocators,
+            pci_mmio64_allocators,
         });
 
         // First we create the MSI interrupt manager, the legacy one is created
@@ -1061,7 +1060,8 @@ impl DeviceManager {
 
         let mut pci_segments = vec![PciSegment::new_default_segment(
             &address_manager,
-            Arc::clone(&address_manager.pci_mmio_allocators[0]),
+            Arc::clone(&address_manager.pci_mmio32_allocators[0]),
+            Arc::clone(&address_manager.pci_mmio64_allocators[0]),
             &pci_irq_slots,
         )?];
 
@@ -1070,7 +1070,8 @@ impl DeviceManager {
                 i as u16,
                 numa_node_id_from_pci_segment_id(&numa_nodes, i as u16),
                 &address_manager,
-                Arc::clone(&address_manager.pci_mmio_allocators[i]),
+                Arc::clone(&address_manager.pci_mmio32_allocators[i]),
+                Arc::clone(&address_manager.pci_mmio64_allocators[i]),
                 &pci_irq_slots,
             )?);
         }
@@ -2765,7 +2766,7 @@ impl DeviceManager {
             // The memory needs to be 2MiB aligned in order to support
             // hugepages.
             self.pci_segments[pmem_cfg.pci_segment as usize]
-                .allocator
+                .mem64_allocator
                 .lock()
                 .unwrap()
                 .allocate(
@@ -2780,7 +2781,7 @@ impl DeviceManager {
             // The memory needs to be 2MiB aligned in order to support
             // hugepages.
             let base = self.pci_segments[pmem_cfg.pci_segment as usize]
-                .allocator
+                .mem64_allocator
                 .lock()
                 .unwrap()
                 .allocate(None, size as GuestUsize, Some(0x0020_0000))
@@ -3367,7 +3368,11 @@ impl DeviceManager {
             .allocate_bars(
                 &self.address_manager.allocator,
                 &mut self.pci_segments[segment_id as usize]
-                    .allocator
+                    .mem32_allocator
+                    .lock()
+                    .unwrap(),
+                &mut self.pci_segments[segment_id as usize]
+                    .mem64_allocator
                     .lock()
                     .unwrap(),
                 resources,
@@ -4080,7 +4085,11 @@ impl DeviceManager {
             .free_bars(
                 &mut self.address_manager.allocator.lock().unwrap(),
                 &mut self.pci_segments[pci_segment_id as usize]
-                    .allocator
+                    .mem32_allocator
+                    .lock()
+                    .unwrap(),
+                &mut self.pci_segments[pci_segment_id as usize]
+                    .mem64_allocator
                     .lock()
                     .unwrap(),
             )

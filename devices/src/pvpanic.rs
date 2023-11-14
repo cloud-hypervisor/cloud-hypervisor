@@ -181,8 +181,9 @@ impl PciDevice for PvPanicDevice {
 
     fn allocate_bars(
         &mut self,
-        allocator: &Arc<Mutex<SystemAllocator>>,
-        _mmio_allocator: &mut AddressAllocator,
+        _allocator: &Arc<Mutex<SystemAllocator>>,
+        mmio32_allocator: &mut AddressAllocator,
+        _mmio64_allocator: &mut AddressAllocator,
         resources: Option<Vec<Resource>>,
     ) -> std::result::Result<Vec<PciBarConfiguration>, PciDeviceError> {
         let mut bars = Vec::new();
@@ -190,10 +191,8 @@ impl PciDevice for PvPanicDevice {
         let bar_id = 0;
         let region_size = PVPANIC_DEVICE_MMIO_SIZE;
         let restoring = resources.is_some();
-        let bar_addr = allocator
-            .lock()
-            .unwrap()
-            .allocate_mmio_hole_addresses(None, region_size, Some(PVPANIC_DEVICE_MMIO_ALIGNMENT))
+        let bar_addr = mmio32_allocator
+            .allocate(None, region_size, Some(PVPANIC_DEVICE_MMIO_ALIGNMENT))
             .ok_or(PciDeviceError::IoAllocationFailed(region_size))?;
 
         let bar = PciBarConfiguration::default()
@@ -218,11 +217,12 @@ impl PciDevice for PvPanicDevice {
 
     fn free_bars(
         &mut self,
-        allocator: &mut SystemAllocator,
-        _mmio_allocator: &mut AddressAllocator,
+        _allocator: &mut SystemAllocator,
+        mmio32_allocator: &mut AddressAllocator,
+        _mmio64_allocator: &mut AddressAllocator,
     ) -> std::result::Result<(), PciDeviceError> {
         for bar in self.bar_regions.drain(..) {
-            allocator.free_mmio_hole_addresses(GuestAddress(bar.addr()), bar.size());
+            mmio32_allocator.free(GuestAddress(bar.addr()), bar.size());
         }
 
         Ok(())

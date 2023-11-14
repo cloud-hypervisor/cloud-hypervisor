@@ -38,10 +38,14 @@ pub(crate) struct PciSegment {
     pub(crate) pci_irq_slots: [u8; 32],
 
     // Device memory covered by this segment
-    pub(crate) start_of_device_area: u64,
-    pub(crate) end_of_device_area: u64,
+    pub(crate) start_of_mem32_area: u64,
+    pub(crate) end_of_mem32_area: u64,
 
-    pub(crate) allocator: Arc<Mutex<AddressAllocator>>,
+    pub(crate) start_of_mem64_area: u64,
+    pub(crate) end_of_mem64_area: u64,
+
+    pub(crate) mem32_allocator: Arc<Mutex<AddressAllocator>>,
+    pub(crate) mem64_allocator: Arc<Mutex<AddressAllocator>>,
 }
 
 impl PciSegment {
@@ -49,7 +53,8 @@ impl PciSegment {
         id: u16,
         numa_node: u32,
         address_manager: &Arc<AddressManager>,
-        allocator: Arc<Mutex<AddressAllocator>>,
+        mem32_allocator: Arc<Mutex<AddressAllocator>>,
+        mem64_allocator: Arc<Mutex<AddressAllocator>>,
         pci_irq_slots: &[u8; 32],
     ) -> DeviceManagerResult<PciSegment> {
         let pci_root = PciRoot::new(None);
@@ -71,8 +76,11 @@ impl PciSegment {
             )
             .map_err(DeviceManagerError::BusError)?;
 
-        let start_of_device_area = allocator.lock().unwrap().base().0;
-        let end_of_device_area = allocator.lock().unwrap().end().0;
+        let start_of_mem32_area = mem32_allocator.lock().unwrap().base().0;
+        let end_of_mem32_area = mem32_allocator.lock().unwrap().end().0;
+
+        let start_of_mem64_area = mem64_allocator.lock().unwrap().base().0;
+        let end_of_mem64_area = mem64_allocator.lock().unwrap().end().0;
 
         let segment = PciSegment {
             id,
@@ -84,15 +92,18 @@ impl PciSegment {
             pci_devices_down: 0,
             #[cfg(target_arch = "x86_64")]
             pci_config_io: None,
-            allocator,
-            start_of_device_area,
-            end_of_device_area,
+            mem32_allocator,
+            mem64_allocator,
+            start_of_mem32_area,
+            end_of_mem32_area,
+            start_of_mem64_area,
+            end_of_mem64_area,
             pci_irq_slots: *pci_irq_slots,
         };
 
         info!(
-            "Adding PCI segment: id={}, PCI MMIO config address: 0x{:x}, device area [0x{:x}-0x{:x}",
-            segment.id, segment.mmio_config_address, segment.start_of_device_area, segment.end_of_device_area
+            "Adding PCI segment: id={}, PCI MMIO config address: 0x{:x}, mem32 area [0x{:x}-0x{:x}, mem64 area [0x{:x}-0x{:x}",
+            segment.id, segment.mmio_config_address, segment.start_of_mem32_area, segment.end_of_mem32_area, segment.start_of_mem64_area, segment.end_of_mem64_area
         );
         Ok(segment)
     }
@@ -100,10 +111,18 @@ impl PciSegment {
     #[cfg(target_arch = "x86_64")]
     pub(crate) fn new_default_segment(
         address_manager: &Arc<AddressManager>,
-        allocator: Arc<Mutex<AddressAllocator>>,
+        mem32_allocator: Arc<Mutex<AddressAllocator>>,
+        mem64_allocator: Arc<Mutex<AddressAllocator>>,
         pci_irq_slots: &[u8; 32],
     ) -> DeviceManagerResult<PciSegment> {
-        let mut segment = Self::new(0, 0, address_manager, allocator, pci_irq_slots)?;
+        let mut segment = Self::new(
+            0,
+            0,
+            address_manager,
+            mem32_allocator,
+            mem64_allocator,
+            pci_irq_slots,
+        )?;
         let pci_config_io = Arc::new(Mutex::new(PciConfigIo::new(Arc::clone(&segment.pci_bus))));
 
         address_manager
@@ -123,10 +142,18 @@ impl PciSegment {
     #[cfg(target_arch = "aarch64")]
     pub(crate) fn new_default_segment(
         address_manager: &Arc<AddressManager>,
-        allocator: Arc<Mutex<AddressAllocator>>,
+        mem32_allocator: Arc<Mutex<AddressAllocator>>,
+        mem64_allocator: Arc<Mutex<AddressAllocator>>,
         pci_irq_slots: &[u8; 32],
     ) -> DeviceManagerResult<PciSegment> {
-        Self::new(0, 0, address_manager, allocator, pci_irq_slots)
+        Self::new(
+            0,
+            0,
+            address_manager,
+            mem32_allocator,
+            mem64_allocator,
+            pci_irq_slots,
+        )
     }
 
     pub(crate) fn next_device_bdf(&self) -> DeviceManagerResult<PciBdf> {
@@ -340,6 +367,7 @@ impl Aml for PciSegment {
         let pci_dsm = PciDsmMethod {};
         pci_dsdt_inner_data.push(&pci_dsm);
 
+        #[allow(clippy::if_same_then_else)]
         let crs = if self.id == 0 {
             aml::Name::new(
                 "_CRS".into(),
@@ -347,19 +375,23 @@ impl Aml for PciSegment {
                     &aml::AddressSpace::new_bus_number(0x0u16, 0x0u16),
                     #[cfg(target_arch = "x86_64")]
                     &aml::IO::new(0xcf8, 0xcf8, 1, 0x8),
+                    &aml::Memory32Fixed::new(
+                        true,
+                        self.mmio_config_address as u32,
+                        layout::PCI_MMIO_CONFIG_SIZE_PER_SEGMENT as u32,
+                    ),
                     &aml::AddressSpace::new_memory(
                         aml::AddressSpaceCacheable::NotCacheable,
                         true,
-                        layout::MEM_32BIT_DEVICES_START.0 as u32,
-                        (layout::MEM_32BIT_DEVICES_START.0 + layout::MEM_32BIT_DEVICES_SIZE - 1)
-                            as u32,
+                        self.start_of_mem32_area,
+                        self.end_of_mem32_area,
                         None,
                     ),
                     &aml::AddressSpace::new_memory(
                         aml::AddressSpaceCacheable::NotCacheable,
                         true,
-                        self.start_of_device_area,
-                        self.end_of_device_area,
+                        self.start_of_mem64_area,
+                        self.end_of_mem64_area,
                         None,
                     ),
                     #[cfg(target_arch = "x86_64")]
@@ -381,8 +413,15 @@ impl Aml for PciSegment {
                     &aml::AddressSpace::new_memory(
                         aml::AddressSpaceCacheable::NotCacheable,
                         true,
-                        self.start_of_device_area,
-                        self.end_of_device_area,
+                        self.start_of_mem32_area,
+                        self.end_of_mem32_area,
+                        None,
+                    ),
+                    &aml::AddressSpace::new_memory(
+                        aml::AddressSpaceCacheable::NotCacheable,
+                        true,
+                        self.start_of_mem64_area,
+                        self.end_of_mem64_area,
                         None,
                     ),
                 ]),

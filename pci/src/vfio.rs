@@ -529,10 +529,13 @@ impl VfioCommon {
         }
     }
 
+    // The `allocator` argument is unused on `aarch64`
+    #[allow(unused_variables)]
     pub(crate) fn allocate_bars(
         &mut self,
         allocator: &Arc<Mutex<SystemAllocator>>,
-        mmio_allocator: &mut AddressAllocator,
+        mmio32_allocator: &mut AddressAllocator,
+        mmio64_allocator: &mut AddressAllocator,
         resources: Option<Vec<Resource>>,
     ) -> Result<Vec<PciBarConfiguration>, PciDeviceError> {
         let mut bars = Vec::new();
@@ -681,21 +684,15 @@ impl VfioCommon {
                 }
                 PciBarRegionType::Memory32BitRegion => {
                     // BAR allocation must be naturally aligned
-                    allocator
-                        .lock()
-                        .unwrap()
-                        .allocate_mmio_hole_addresses(
-                            restored_bar_addr,
-                            region_size,
-                            Some(region_size),
-                        )
+                    mmio32_allocator
+                        .allocate(restored_bar_addr, region_size, Some(region_size))
                         .ok_or(PciDeviceError::IoAllocationFailed(region_size))?
                 }
                 PciBarRegionType::Memory64BitRegion => {
                     // We need do some fixup to keep MMIO RW region and msix cap region page size
                     // aligned.
                     region_size = self.fixup_msix_region(bar_id, region_size);
-                    mmio_allocator
+                    mmio64_allocator
                         .allocate(
                             restored_bar_addr,
                             region_size,
@@ -742,10 +739,13 @@ impl VfioCommon {
         Ok(bars)
     }
 
+    // The `allocator` argument is unused on `aarch64`
+    #[allow(unused_variables)]
     pub(crate) fn free_bars(
         &mut self,
         allocator: &mut SystemAllocator,
-        mmio_allocator: &mut AddressAllocator,
+        mmio32_allocator: &mut AddressAllocator,
+        mmio64_allocator: &mut AddressAllocator,
     ) -> Result<(), PciDeviceError> {
         for region in self.mmio_regions.iter() {
             match region.type_ {
@@ -756,10 +756,10 @@ impl VfioCommon {
                     error!("I/O region is not supported");
                 }
                 PciBarRegionType::Memory32BitRegion => {
-                    allocator.free_mmio_hole_addresses(region.start, region.length);
+                    mmio32_allocator.free(region.start, region.length);
                 }
                 PciBarRegionType::Memory64BitRegion => {
-                    mmio_allocator.free(region.start, region.length);
+                    mmio64_allocator.free(region.start, region.length);
                 }
             }
         }
@@ -1694,19 +1694,22 @@ impl PciDevice for VfioPciDevice {
     fn allocate_bars(
         &mut self,
         allocator: &Arc<Mutex<SystemAllocator>>,
-        mmio_allocator: &mut AddressAllocator,
+        mmio32_allocator: &mut AddressAllocator,
+        mmio64_allocator: &mut AddressAllocator,
         resources: Option<Vec<Resource>>,
     ) -> Result<Vec<PciBarConfiguration>, PciDeviceError> {
         self.common
-            .allocate_bars(allocator, mmio_allocator, resources)
+            .allocate_bars(allocator, mmio32_allocator, mmio64_allocator, resources)
     }
 
     fn free_bars(
         &mut self,
         allocator: &mut SystemAllocator,
-        mmio_allocator: &mut AddressAllocator,
+        mmio32_allocator: &mut AddressAllocator,
+        mmio64_allocator: &mut AddressAllocator,
     ) -> Result<(), PciDeviceError> {
-        self.common.free_bars(allocator, mmio_allocator)
+        self.common
+            .free_bars(allocator, mmio32_allocator, mmio64_allocator)
     }
 
     fn write_config_register(

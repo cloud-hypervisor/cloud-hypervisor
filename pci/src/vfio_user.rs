@@ -397,19 +397,22 @@ impl PciDevice for VfioUserPciDevice {
     fn allocate_bars(
         &mut self,
         allocator: &Arc<Mutex<SystemAllocator>>,
-        mmio_allocator: &mut AddressAllocator,
+        mmio32_allocator: &mut AddressAllocator,
+        mmio64_allocator: &mut AddressAllocator,
         resources: Option<Vec<Resource>>,
     ) -> Result<Vec<PciBarConfiguration>, PciDeviceError> {
         self.common
-            .allocate_bars(allocator, mmio_allocator, resources)
+            .allocate_bars(allocator, mmio32_allocator, mmio64_allocator, resources)
     }
 
     fn free_bars(
         &mut self,
         allocator: &mut SystemAllocator,
-        mmio_allocator: &mut AddressAllocator,
+        mmio32_allocator: &mut AddressAllocator,
+        mmio64_allocator: &mut AddressAllocator,
     ) -> Result<(), PciDeviceError> {
-        self.common.free_bars(allocator, mmio_allocator)
+        self.common
+            .free_bars(allocator, mmio32_allocator, mmio64_allocator)
     }
 
     fn as_any(&mut self) -> &mut dyn Any {
