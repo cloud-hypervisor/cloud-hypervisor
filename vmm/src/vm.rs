@@ -1162,9 +1162,9 @@ impl Vm {
             let pci_space = PciSpaceInfo {
                 pci_segment_id: pci_segment.id,
                 mmio_config_address: pci_segment.mmio_config_address,
-                pci_device_space_start: pci_segment.start_of_device_area,
-                pci_device_space_size: pci_segment.end_of_device_area
-                    - pci_segment.start_of_device_area
+                pci_device_space_start: pci_segment.start_of_mem64_area,
+                pci_device_space_size: pci_segment.end_of_mem64_area
+                    - pci_segment.start_of_mem64_area
                     + 1,
             };
             pci_space_info.push(pci_space);

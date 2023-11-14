@@ -955,8 +955,9 @@ impl PciDevice for VirtioPciDevice {
 
     fn allocate_bars(
         &mut self,
-        allocator: &Arc<Mutex<SystemAllocator>>,
-        mmio_allocator: &mut AddressAllocator,
+        _allocator: &Arc<Mutex<SystemAllocator>>,
+        mmio32_allocator: &mut AddressAllocator,
+        mmio64_allocator: &mut AddressAllocator,
         resources: Option<Vec<Resource>>,
     ) -> std::result::Result<Vec<PciBarConfiguration>, PciDeviceError> {
         let mut bars = Vec::new();
@@ -995,7 +996,7 @@ impl PciDevice for VirtioPciDevice {
         // See http://docs.oasis-open.org/virtio/virtio/v1.0/cs04/virtio-v1.0-cs04.html#x1-740004
         let (virtio_pci_bar_addr, region_type) = if use_64bit_bar {
             let region_type = PciBarRegionType::Memory64BitRegion;
-            let addr = mmio_allocator
+            let addr = mmio64_allocator
                 .allocate(
                     settings_bar_addr,
                     CAPABILITY_BAR_SIZE,
@@ -1005,10 +1006,8 @@ impl PciDevice for VirtioPciDevice {
             (addr, region_type)
         } else {
             let region_type = PciBarRegionType::Memory32BitRegion;
-            let addr = allocator
-                .lock()
-                .unwrap()
-                .allocate_mmio_hole_addresses(
+            let addr = mmio32_allocator
+                .allocate(
                     settings_bar_addr,
                     CAPABILITY_BAR_SIZE,
                     Some(CAPABILITY_BAR_SIZE),
@@ -1078,16 +1077,17 @@ impl PciDevice for VirtioPciDevice {
 
     fn free_bars(
         &mut self,
-        allocator: &mut SystemAllocator,
-        mmio_allocator: &mut AddressAllocator,
+        _allocator: &mut SystemAllocator,
+        mmio32_allocator: &mut AddressAllocator,
+        mmio64_allocator: &mut AddressAllocator,
     ) -> std::result::Result<(), PciDeviceError> {
         for bar in self.bar_regions.drain(..) {
             match bar.region_type() {
                 PciBarRegionType::Memory32BitRegion => {
-                    allocator.free_mmio_hole_addresses(GuestAddress(bar.addr()), bar.size());
+                    mmio32_allocator.free(GuestAddress(bar.addr()), bar.size());
                 }
                 PciBarRegionType::Memory64BitRegion => {
-                    mmio_allocator.free(GuestAddress(bar.addr()), bar.size());
+                    mmio64_allocator.free(GuestAddress(bar.addr()), bar.size());
                 }
                 _ => error!("Unexpected PCI bar type"),
             }

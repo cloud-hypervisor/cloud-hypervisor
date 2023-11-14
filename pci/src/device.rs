@@ -58,7 +58,8 @@ pub trait PciDevice: BusDevice {
     fn allocate_bars(
         &mut self,
         _allocator: &Arc<Mutex<SystemAllocator>>,
-        _mmio_allocator: &mut AddressAllocator,
+        _mmio32_allocator: &mut AddressAllocator,
+        _mmio64_allocator: &mut AddressAllocator,
         _resources: Option<Vec<Resource>>,
     ) -> Result<Vec<PciBarConfiguration>> {
         Ok(Vec::new())
@@ -68,7 +69,8 @@ pub trait PciDevice: BusDevice {
     fn free_bars(
         &mut self,
         _allocator: &mut SystemAllocator,
-        _mmio_allocator: &mut AddressAllocator,
+        _mmio32_allocator: &mut AddressAllocator,
+        _mmio64_allocator: &mut AddressAllocator,
     ) -> Result<()> {
         Ok(())
     }

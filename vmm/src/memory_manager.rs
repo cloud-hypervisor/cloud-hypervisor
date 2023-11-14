@@ -16,7 +16,7 @@ use acpi_tables::{aml, Aml};
 use anyhow::anyhow;
 #[cfg(target_arch = "x86_64")]
 use arch::x86_64::{SgxEpcRegion, SgxEpcSection};
-use arch::{layout, RegionType};
+use arch::RegionType;
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
 #[cfg(target_arch = "aarch64")]
@@ -1160,8 +1160,6 @@ impl MemoryManager {
                 },
                 start_of_platform_device_area,
                 PLATFORM_DEVICE_AREA_SIZE,
-                layout::MEM_32BIT_DEVICES_START,
-                layout::MEM_32BIT_DEVICES_SIZE,
                 #[cfg(target_arch = "x86_64")]
                 vec![GsiApic::new(
                     X86_64_IRQ_BASE,
