@@ -26,6 +26,7 @@ const PVPANIC_VENDOR_ID: u16 = 0x1b36;
 const PVPANIC_DEVICE_ID: u16 = 0x0011;
 
 pub const PVPANIC_DEVICE_MMIO_SIZE: u64 = 0x2;
+pub const PVPANIC_DEVICE_MMIO_ALIGNMENT: u64 = 0x10;
 
 const PVPANIC_PANICKED: u8 = 1 << 0;
 const PVPANIC_CRASH_LOADED: u8 = 1 << 1;
@@ -192,7 +193,7 @@ impl PciDevice for PvPanicDevice {
         let bar_addr = allocator
             .lock()
             .unwrap()
-            .allocate_mmio_hole_addresses(None, region_size, None)
+            .allocate_mmio_hole_addresses(None, region_size, Some(PVPANIC_DEVICE_MMIO_ALIGNMENT))
             .ok_or(PciDeviceError::IoAllocationFailed(region_size))?;
 
         let bar = PciBarConfiguration::default()
