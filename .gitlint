@@ -8,7 +8,7 @@ ignore=all
 
 # default 72
 [title-max-length]
-line-length=50
+line-length=72
 
 # default 80
 [body-max-line-length]
