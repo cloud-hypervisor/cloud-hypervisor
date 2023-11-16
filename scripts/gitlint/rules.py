@@ -31,6 +31,7 @@ class TitleStartsWithComponent(LineRule):
             'fuzz',
             'github',
             'gitignore',
+            'gitlint',
             'hypervisor',
             'Jenkinsfile',
             'misc',
