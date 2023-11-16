@@ -512,5 +512,19 @@ def boolean skipWorkerBuild() {
         return true
     }
 
+    if (sh(
+        returnStatus: true,
+        script: "git diff --name-only origin/${env.CHANGE_TARGET}... | grep -v '^\\.'"
+    ) != 0) {
+        return true
+    }
+
+    if (sh(
+        returnStatus: true,
+        script: "git diff --name-only origin/${env.CHANGE_TARGET}... | grep -v 'gitlint'"
+    ) != 0) {
+        return true
+    }
+
     return false
 }
