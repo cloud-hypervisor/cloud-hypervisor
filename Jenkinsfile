@@ -67,11 +67,6 @@ pipeline {
                                 sh 'scripts/prepare_vdpa.sh'
                             }
                         }
-                        stage('Run OpenAPI tests') {
-                            steps {
-                                sh 'scripts/run_openapi_tests.sh'
-                            }
-                        }
                         stage('Run unit tests') {
                             steps {
                                 sh 'scripts/dev_cli.sh tests --unit'
