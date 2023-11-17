@@ -3,8 +3,17 @@ import re
 
 
 class TitleStartsWithComponent(LineRule):
-    """This rule will enforce that the commit message title starts with valid
-    component name
+    """A rule to enforce valid commit message title
+
+    Valid title format:
+    component1[, component2, componentN]: submodule: summary
+
+    Title should have at least one component
+    Components are separated by comma+space: ", "
+    Components are validated to be in valid_components
+    Components list is ended by a colon
+    Submodules are not validated
+
     """
 
     # A rule MUST have a human friendly name
@@ -18,7 +27,7 @@ class TitleStartsWithComponent(LineRule):
     target = CommitMessageTitle
 
     def validate(self, line, _commit):
-        valid_components = [
+        valid_components = (
             'api_client',
             'arch',
             'block',
@@ -57,20 +66,26 @@ class TitleStartsWithComponent(LineRule):
             'vm-device',
             'vmm',
             'vm-migration',
-            'vm-virtio']
+            'vm-virtio')
 
-        pattern = re.compile(r'^(.+):\s(.+)$')
-        match = pattern.match(line)
+        ptrn_title = re.compile(r'^(.+?):\s(.+)$')
+        match = ptrn_title.match(line)
 
         if not match:
             self.log.debug("Invalid commit title {}", line)
             return [RuleViolation(self.id, "Commit title does not comply with "
                                   "rule: 'component: change summary'")]
-        component = match.group(1)
+        components = match.group(1)
         summary = match.group(2)
-        self.log.debug(f"\nComponent: {component}\nSummary: {summary}")
+        self.log.debug(f"\nComponents: {components}\nSummary: {summary}")
 
-        if component not in valid_components:
-            return [RuleViolation(self.id,
-                                  f"Invalid component: {component}, "
-                                  f"valid components are: {valid_components}")]
+        ptrn_components = re.compile(r',\s')
+        components_list = re.split(ptrn_components, components)
+        self.log.debug("components list: %s" % components_list)
+
+        for component in components_list:
+            if component not in valid_components:
+                return [RuleViolation(self.id,
+                                      f"Invalid component: {component}, "
+                                      "\nValid components are: {}".format(
+                                          " ".join(valid_components)))]
