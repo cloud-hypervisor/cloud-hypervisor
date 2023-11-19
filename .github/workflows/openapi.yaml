@@ -1,0 +1,16 @@
+name: Cloud Hypervisor OpenAPI Validation
+
+on:
+  pull_request:
+
+jobs:
+  Validate:
+    runs-on: ubuntu-latest
+    container: openapitools/openapi-generator-cli
+    steps:
+    - uses: actions/checkout@v2
+    - name: Validate OpenAPI
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        /usr/local/bin/docker-entrypoint.sh validate -i vmm/src/api/openapi/cloud-hypervisor.yaml
