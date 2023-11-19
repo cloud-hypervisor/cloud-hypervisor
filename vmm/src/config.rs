@@ -588,10 +588,18 @@ impl CpusConfig {
         #[allow(unused_mut)]
         let mut features = CpuFeatures::default();
         for s in features_list.0 {
-            match <std::string::String as AsRef<str>>::as_ref(&s) {
+            let feature: String = s.chars().filter(|c| *c != '+' && *c != '-').collect();
+            let feature_ref: &str = &feature;
+            let enable = s.chars().next().unwrap_or('+') != '-';
+            match (feature_ref, enable) {
                 #[cfg(target_arch = "x86_64")]
-                "amx" => {
-                    features.amx = true;
+                ("amx", enable) => {
+                    features.amx = enable;
+                    Ok(())
+                }
+                #[cfg(target_arch = "x86_64")]
+                ("x2apic", enable) => {
+                    features.x2apic = enable;
                     Ok(())
                 }
                 _ => Err(Error::InvalidCpuFeatures(s)),

@@ -189,6 +189,18 @@ pub type Result<T> = result::Result<T, Error>;
 #[allow(dead_code)]
 #[repr(packed)]
 #[derive(AsBytes)]
+struct LocalApic {
+    pub r#type: u8,
+    pub length: u8,
+    pub processor_id: u8,
+    pub apic_id: u8,
+    pub flags: u32,
+}
+
+#[cfg(target_arch = "x86_64")]
+#[allow(dead_code)]
+#[repr(packed)]
+#[derive(AsBytes)]
 struct LocalX2Apic {
     pub r#type: u8,
     pub length: u8,
@@ -746,6 +758,7 @@ impl CpuManager {
                     #[cfg(feature = "tdx")]
                     tdx,
                     amx: self.config.features.amx,
+                    x2apic: self.config.features.x2apic,
                 },
             )
             .map_err(Error::CommonCpuId)?
@@ -1353,19 +1366,36 @@ impl CpuManager {
             madt.write(36, arch::layout::APIC_START.0);
 
             for cpu in 0..self.config.max_vcpus {
-                let lapic = LocalX2Apic {
-                    r#type: acpi::ACPI_X2APIC_PROCESSOR,
-                    length: 16,
-                    processor_id: cpu.into(),
-                    apic_id: cpu.into(),
-                    flags: if cpu < self.config.boot_vcpus {
-                        1 << MADT_CPU_ENABLE_FLAG
-                    } else {
-                        0
-                    } | 1 << MADT_CPU_ONLINE_CAPABLE_FLAG,
-                    _reserved: 0,
-                };
-                madt.append(lapic);
+                if self.config.features.x2apic {
+                    let lapic = LocalX2Apic {
+                        r#type: acpi::ACPI_X2APIC_PROCESSOR,
+                        length: 16,
+                        processor_id: cpu.into(),
+                        apic_id: cpu.into(),
+                        flags: if cpu < self.config.boot_vcpus {
+                            1 << MADT_CPU_ENABLE_FLAG
+                        } else {
+                            0
+                        } | 1 << MADT_CPU_ONLINE_CAPABLE_FLAG,
+                        _reserved: 0,
+                    };
+
+                    madt.append(lapic);
+                } else {
+                    let lapic = LocalApic {
+                        r#type: acpi::ACPI_APIC_PROCESSOR,
+                        length: std::mem::size_of::<LocalApic>() as u8,
+                        processor_id: cpu,
+                        apic_id: cpu,
+                        flags: if cpu < self.config.boot_vcpus {
+                            1 << MADT_CPU_ENABLE_FLAG
+                        } else {
+                            1 << MADT_CPU_ONLINE_CAPABLE_FLAG
+                        },
+                    };
+
+                    madt.append(lapic);
+                }
             }
 
             madt.append(Ioapic {
@@ -1790,6 +1820,8 @@ struct Cpu {
     cpu_id: u8,
     proximity_domain: u32,
     dynamic: bool,
+    #[cfg(target_arch = "x86_64")]
+    x2apic: bool,
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -1801,20 +1833,36 @@ const MADT_CPU_ONLINE_CAPABLE_FLAG: usize = 1;
 impl Cpu {
     #[cfg(target_arch = "x86_64")]
     fn generate_mat(&self) -> Vec<u8> {
-        let lapic = LocalX2Apic {
-            r#type: crate::acpi::ACPI_X2APIC_PROCESSOR,
-            length: 16,
-            processor_id: self.cpu_id.into(),
-            apic_id: self.cpu_id.into(),
-            flags: 1 << MADT_CPU_ENABLE_FLAG,
-            _reserved: 0,
-        };
+        if self.x2apic {
+            let lapic = LocalX2Apic {
+                r#type: crate::acpi::ACPI_X2APIC_PROCESSOR,
+                length: std::mem::size_of::<LocalX2Apic>() as u8,
+                processor_id: self.cpu_id.into(),
+                apic_id: self.cpu_id.into(),
+                flags: 1 << MADT_CPU_ENABLE_FLAG,
+                _reserved: 0,
+            };
 
-        let mut mat_data: Vec<u8> = vec![0; std::mem::size_of_val(&lapic)];
-        // SAFETY: mat_data is large enough to hold lapic
-        unsafe { *(mat_data.as_mut_ptr() as *mut LocalX2Apic) = lapic };
+            let mut mat_data: Vec<u8> = vec![0; std::mem::size_of_val(&lapic)];
+            // SAFETY: mat_data is large enough to hold lapic
+            unsafe { *(mat_data.as_mut_ptr() as *mut LocalX2Apic) = lapic };
 
-        mat_data
+            mat_data
+        } else {
+            let lapic = LocalApic {
+                r#type: crate::acpi::ACPI_APIC_PROCESSOR,
+                length: std::mem::size_of::<LocalApic>() as u8,
+                processor_id: self.cpu_id,
+                apic_id: self.cpu_id,
+                flags: 1 << MADT_CPU_ENABLE_FLAG,
+            };
+
+            let mut mat_data: Vec<u8> = vec![0; std::mem::size_of_val(&lapic)];
+            // SAFETY: mat_data is large enough to hold lapic
+            unsafe { *(mat_data.as_mut_ptr() as *mut LocalApic) = lapic };
+
+            mat_data
+        }
     }
 }
 
@@ -2106,8 +2154,8 @@ impl Aml for CpuManager {
             max_vcpus: self.config.max_vcpus,
             dynamic: self.dynamic,
         };
-        let mut cpu_data_inner: Vec<&dyn Aml> = vec![&hid, &uid, &methods];
 
+        let mut cpu_data_inner: Vec<&dyn Aml> = vec![&hid, &uid, &methods];
         let mut cpu_devices = Vec::new();
         for cpu_id in 0..self.config.max_vcpus {
             let proximity_domain = *self.proximity_domain_per_cpu.get(&cpu_id).unwrap_or(&0);
@@ -2115,8 +2163,9 @@ impl Aml for CpuManager {
                 cpu_id,
                 proximity_domain,
                 dynamic: self.dynamic,
+                #[cfg(target_arch = "x86_64")]
+                x2apic: self.config.features.x2apic,
             };
-
             cpu_devices.push(cpu_device);
         }
 

@@ -13,11 +13,19 @@ pub struct CpuAffinity {
     pub host_cpus: Vec<u8>,
 }
 
+#[cfg(target_arch = "x86_64")]
+pub fn default_x2apic() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CpuFeatures {
     #[cfg(target_arch = "x86_64")]
     #[serde(default)]
     pub amx: bool,
+    #[cfg(target_arch = "x86_64")]
+    #[serde(default = "default_x2apic")]
+    pub x2apic: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]

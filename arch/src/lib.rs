@@ -113,6 +113,8 @@ pub struct NumaNode {
     pub memory_zones: Vec<String>,
     #[cfg(target_arch = "x86_64")]
     pub sgx_epc_sections: Vec<SgxEpcSection>,
+    #[cfg(target_arch = "x86_64")]
+    pub x2apic: bool,
 }
 
 pub type NumaNodes = BTreeMap<u32, NumaNode>;

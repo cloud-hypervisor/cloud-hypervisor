@@ -604,6 +604,9 @@ components:
       properties:
         amx:
           type: boolean
+        x2apic:
+          type: boolean
+          default: true
 
     CpuTopology:
       type: object

@@ -25,6 +25,8 @@ use zerocopy::AsBytes;
 
 /* Values for Type in APIC sub-headers */
 #[cfg(target_arch = "x86_64")]
+pub const ACPI_APIC_PROCESSOR: u8 = 0;
+#[cfg(target_arch = "x86_64")]
 pub const ACPI_X2APIC_PROCESSOR: u8 = 9;
 #[cfg(target_arch = "x86_64")]
 pub const ACPI_APIC_IO: u8 = 1;
@@ -65,6 +67,20 @@ struct MemoryAffinity {
     _reserved2: u32,
     pub flags: u32,
     _reserved3: u64,
+}
+
+#[allow(dead_code)]
+#[repr(packed)]
+#[derive(Default, AsBytes)]
+struct ProcessorLocalApicAffinity {
+    pub type_: u8,
+    pub length: u8,
+    pub proximity_domain_lo: u8,
+    pub apic_id: u8,
+    pub flags: u32,
+    pub sapic_eid: u8,
+    pub proximity_domain_hi: [u8; 3],
+    pub clock_domain: u32,
 }
 
 #[allow(dead_code)]
@@ -316,29 +332,43 @@ fn create_srat_table(numa_nodes: &NumaNodes) -> Sdt {
         }
 
         for cpu in &node.cpus {
-            let x2apic_id = *cpu as u32;
-
             // Flags
             // - Enabled = 1 (bit 0)
             // - Reserved bits 1-31
             let flags = 1;
 
             #[cfg(target_arch = "x86_64")]
-            srat.append(ProcessorLocalX2ApicAffinity {
-                type_: 2,
-                length: 24,
-                proximity_domain,
-                x2apic_id,
-                flags,
-                clock_domain: 0,
-                ..Default::default()
-            });
+            if node.x2apic {
+                srat.append(ProcessorLocalX2ApicAffinity {
+                    type_: 2,
+                    length: 24,
+                    proximity_domain,
+                    x2apic_id: (*cpu).into(),
+                    flags,
+                    clock_domain: 0,
+                    ..Default::default()
+                });
+            } else {
+                srat.append(ProcessorLocalApicAffinity {
+                    type_: 0,
+                    length: std::mem::size_of::<ProcessorLocalApicAffinity>() as u8,
+                    proximity_domain_lo: u32::to_le_bytes(proximity_domain)[0],
+                    apic_id: *cpu,
+                    flags,
+                    proximity_domain_hi: u32::to_le_bytes(proximity_domain)[1..]
+                        .try_into()
+                        .unwrap(),
+                    sapic_eid: 0,
+                    clock_domain: 0,
+                });
+            }
+
             #[cfg(target_arch = "aarch64")]
             srat.append(ProcessorGiccAffinity {
                 type_: 3,
                 length: 18,
                 proximity_domain,
-                acpi_processor_uid: x2apic_id,
+                acpi_processor_uid: *cpu as u32,
                 flags,
                 clock_domain: 0,
             });

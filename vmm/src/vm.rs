@@ -490,8 +490,12 @@ impl Vm {
         info!("Booting VM from config: {:?}", &config);
 
         // Create NUMA nodes based on NumaConfig.
-        let numa_nodes =
-            Self::create_numa_nodes(config.lock().unwrap().numa.clone(), &memory_manager)?;
+        let numa_nodes = Self::create_numa_nodes(
+            config.lock().unwrap().numa.clone(),
+            &memory_manager,
+            #[cfg(target_arch = "x86_64")]
+            config.lock().unwrap().cpus.features.x2apic,
+        )?;
 
         #[cfg(feature = "tdx")]
         let tdx_enabled = config.lock().unwrap().is_tdx_enabled();
@@ -668,6 +672,7 @@ impl Vm {
     fn create_numa_nodes(
         configs: Option<Vec<NumaConfig>>,
         memory_manager: &Arc<Mutex<MemoryManager>>,
+        #[cfg(target_arch = "x86_64")] x2apic: bool,
     ) -> Result<NumaNodes> {
         let mm = memory_manager.lock().unwrap();
         let mm_zones = mm.memory_zones();
@@ -680,7 +685,11 @@ impl Vm {
                     return Err(Error::InvalidNumaConfig);
                 }
 
-                let mut node = NumaNode::default();
+                let mut node = NumaNode {
+                    #[cfg(target_arch = "x86_64")]
+                    x2apic,
+                    ..Default::default()
+                };
 
                 if let Some(memory_zones) = &config.memory_zones {
                     for memory_zone in memory_zones.iter() {
@@ -2407,6 +2416,7 @@ impl Snapshottable for Vm {
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         let common_cpuid = {
             let amx = self.config.lock().unwrap().cpus.features.amx;
+            let x2apic = self.config.lock().unwrap().cpus.features.x2apic;
             let phys_bits = physical_bits(
                 &self.hypervisor,
                 self.config.lock().unwrap().cpus.max_phys_bits,
@@ -2420,6 +2430,7 @@ impl Snapshottable for Vm {
                     #[cfg(feature = "tdx")]
                     tdx: tdx_enabled,
                     amx,
+                    x2apic,
                 },
             )
             .map_err(|e| {

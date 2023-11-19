@@ -155,6 +155,7 @@ pub struct CpuidConfig {
     #[cfg(feature = "tdx")]
     pub tdx: bool,
     pub amx: bool,
+    pub x2apic: bool,
 }
 
 #[derive(Debug)]
@@ -644,6 +645,11 @@ pub fn generate_common_cpuid(
     // Update some existing CPUID
     for entry in cpuid.as_mut_slice().iter_mut() {
         match entry.function {
+            0x1 => {
+                if !config.x2apic {
+                    entry.ecx &= !(1u32 << 21);
+                }
+            }
             // Clear AMX related bits if the AMX feature is not enabled
             0x7 => {
                 if !config.amx && entry.index == 0 {
