@@ -8,6 +8,6 @@ edition = "2021"
 default = []
 
 [dependencies]
-log = "0.4.17"
+log = "0.4.20"
 virtio-queue = "0.10.0"
 vm-memory = { version = "0.13.1", features = ["backend-mmap", "backend-atomic", "backend-bitmap"] }

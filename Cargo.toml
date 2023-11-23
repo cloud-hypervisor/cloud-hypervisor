@@ -37,7 +37,7 @@ epoll = "4.3.3"
 event_monitor = { path = "event_monitor" }
 hypervisor = { path = "hypervisor" }
 libc = "0.2.147"
-log = { version = "0.4.17", features = ["std"] }
+log = { version = "0.4.20", features = ["std"] }
 option_parser = { path = "option_parser" }
 seccompiler = "0.4.0"
 serde_json = "1.0.107"
