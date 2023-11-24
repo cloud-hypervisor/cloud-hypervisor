@@ -6869,9 +6869,7 @@ mod common_parallel {
     #[cfg(target_arch = "x86_64")]
     fn test_vdpa_block() {
         // Before trying to run the test, verify the vdpa_sim_blk module is correctly loaded.
-        if !exec_host_command_status("lsmod | grep vdpa_sim_blk").success() {
-            return;
-        }
+        assert!(exec_host_command_status("lsmod | grep vdpa_sim_blk").success());
 
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
