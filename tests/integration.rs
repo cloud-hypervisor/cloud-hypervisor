@@ -6265,6 +6265,7 @@ mod common_parallel {
         let api_socket = temp_api_path(&guest.tmp_dir);
 
         let kernel_path = direct_kernel_boot_path();
+        let event_path = temp_event_monitor_path(&guest.tmp_dir);
 
         let mut cmd = GuestCommand::new(&guest);
         cmd.args(["--cpus", "boot=1"])
@@ -6275,6 +6276,7 @@ mod common_parallel {
             .args(["--net", guest.default_net_string().as_str()])
             .args(["--watchdog"])
             .args(["--api-socket", &api_socket])
+            .args(["--event-monitor", format!("path={event_path}").as_str()])
             .capture_output();
 
         let mut child = cmd.spawn().unwrap();
@@ -6319,7 +6321,17 @@ mod common_parallel {
             {
                 // Now pause the VM and remain offline for 30s
                 assert!(remote_command(&api_socket, "pause", None));
-                thread::sleep(std::time::Duration::new(30, 0));
+                let latest_events = [
+                    &MetaEvent {
+                        event: "pausing".to_string(),
+                        device_id: None,
+                    },
+                    &MetaEvent {
+                        event: "paused".to_string(),
+                        device_id: None,
+                    },
+                ];
+                assert!(check_latest_events_exact(&latest_events, &event_path));
                 assert!(remote_command(&api_socket, "resume", None));
 
                 // Check no reboot
