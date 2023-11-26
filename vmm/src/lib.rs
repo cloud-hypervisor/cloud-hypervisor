@@ -1840,6 +1840,15 @@ impl RequestHandler for Vmm {
         }
     }
 
+    fn vm_nmi(&mut self) -> result::Result<(), VmError> {
+        if let Some(ref mut vm) = self.vm {
+            info!("nmi");
+            vm.power_button()
+        } else {
+            Err(VmError::VmNotRunning)
+        }
+    }
+
     fn vm_receive_migration(
         &mut self,
         receive_data_migration: VmReceiveMigrationData,

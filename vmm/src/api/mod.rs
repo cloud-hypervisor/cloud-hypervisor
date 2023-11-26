@@ -159,6 +159,9 @@ pub enum ApiError {
 
     /// Error triggering power button
     VmPowerButton(VmError),
+
+    /// Error triggering NMI
+    VmNmi(VmError),
 }
 pub type ApiResult<T> = Result<T, ApiError>;
 
@@ -200,6 +203,7 @@ impl Display for ApiError {
             VmReceiveMigration(migratable_error) => write!(f, "{}", migratable_error),
             VmSendMigration(migratable_error) => write!(f, "{}", migratable_error),
             VmPowerButton(vm_error) => write!(f, "{}", vm_error),
+            VmNmi(vm_error) => write!(f, "{}", vm_error),
         }
     }
 }
@@ -353,6 +357,8 @@ pub trait RequestHandler {
         &mut self,
         send_data_migration: VmSendMigrationData,
     ) -> Result<(), MigratableError>;
+
+    fn vm_nmi(&mut self) -> Result<(), VmError>;
 }
 
 /// It would be nice if we could pass around an object like this:
@@ -380,6 +386,7 @@ fn get_response<Action: ApiAction>(
     let (response_sender, response_receiver) = channel();
 
     let request = action.request(data, response_sender);
+
     // Send the VM request.
     api_sender.send(request).map_err(ApiError::RequestSend)?;
     api_evt.write(1).map_err(ApiError::EventFdWrite)?;
@@ -1413,5 +1420,38 @@ impl ApiAction for VmmShutdown {
         get_response(self, api_evt, api_sender, data)?;
 
         Ok(())
+    }
+}
+
+pub struct VmNmi;
+
+impl ApiAction for VmNmi {
+    type RequestBody = ();
+    type ResponseBody = Option<Body>;
+
+    fn request(&self, _: Self::RequestBody, response_sender: Sender<ApiResponse>) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmNmi");
+
+            let response = vmm
+                .vm_nmi()
+                .map_err(ApiError::VmNmi)
+                .map(|_| ApiResponsePayload::Empty);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
     }
 }

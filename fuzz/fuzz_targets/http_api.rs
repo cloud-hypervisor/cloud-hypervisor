@@ -273,6 +273,10 @@ impl RequestHandler for StubApiRequestHandler {
     fn vm_send_migration(&mut self, _: VmSendMigrationData) -> Result<(), MigratableError> {
         Ok(())
     }
+
+    fn vm_nmi(&mut self) -> Result<(), VmError> {
+        Ok(())
+    }
 }
 
 fn http_receiver_stub(exit_evt: EventFd, api_evt: EventFd, api_receiver: Receiver<ApiRequest>) {

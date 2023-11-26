@@ -9,7 +9,7 @@ use crate::api::http::{error_response, EndpointHandler, HttpError};
 use crate::api::VmCoredump;
 use crate::api::{
     AddDisk, ApiAction, ApiRequest, VmAddDevice, VmAddFs, VmAddNet, VmAddPmem, VmAddUserDevice,
-    VmAddVdpa, VmAddVsock, VmBoot, VmConfig, VmCounters, VmDelete, VmPause, VmPowerButton,
+    VmAddVdpa, VmAddVsock, VmBoot, VmConfig, VmCounters, VmDelete, VmNmi, VmPause, VmPowerButton,
     VmReboot, VmReceiveMigration, VmRemoveDevice, VmResize, VmResizeZone, VmRestore, VmResume,
     VmSendMigration, VmShutdown, VmSnapshot,
 };
@@ -172,6 +172,7 @@ vm_action_put_handler!(VmReboot);
 vm_action_put_handler!(VmPause);
 vm_action_put_handler!(VmResume);
 vm_action_put_handler!(VmPowerButton);
+vm_action_put_handler!(VmNmi);
 
 vm_action_put_handler_body!(VmAddDevice);
 vm_action_put_handler_body!(AddDisk);
