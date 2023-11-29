@@ -7185,12 +7185,14 @@ mod dbus_api {
     fn test_api_dbus_and_http_interleaved() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
+        let event_path = temp_event_monitor_path(&guest.tmp_dir);
         let dbus_api = TargetApi::new_dbus_api(&guest.tmp_dir);
         let http_api = TargetApi::new_http_api(&guest.tmp_dir);
 
         let mut child = GuestCommand::new(&guest)
             .args(dbus_api.guest_args())
             .args(http_api.guest_args())
+            .args(["--event-monitor", format!("path={event_path}").as_str()])
             .capture_output()
             .spawn()
             .unwrap();
@@ -7230,11 +7232,14 @@ mod dbus_api {
             guest.ssh_command("sync").unwrap();
             guest.ssh_command("sudo shutdown -H now").unwrap();
 
-            // Wait for the guest to be fully shutdown
-            thread::sleep(std::time::Duration::new(20, 0));
-
             // Then shutdown the VM
             assert!(dbus_api.remote_command("shutdown", None));
+
+            let latest_events = [&MetaEvent {
+                event: "shutdown".to_string(),
+                device_id: None,
+            }];
+            assert!(check_latest_events_exact(&latest_events, &event_path));
 
             // Then boot it again
             assert!(http_api.remote_command("boot", None));
