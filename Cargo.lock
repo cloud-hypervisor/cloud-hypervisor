@@ -886,12 +886,26 @@ dependencies = [
 ]
 
 [[package]]
-name = "gdbstub_arch"
-version = "0.2.4"
+name = "gdbstub"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eecb536c55c43593a00dde9074dbbdb0e81ce5f20dbca921400f8779c21dea9c"
+checksum = "09a8b954f9d02b74fe8e89a1c77bd9a6b8206713ebf1b272bfad9573b4a86f88"
 dependencies = [
- "gdbstub",
+ "bitflags 2.4.1",
+ "cfg-if",
+ "log",
+ "managed",
+ "num-traits",
+ "paste",
+]
+
+[[package]]
+name = "gdbstub_arch"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4e3b1357bd3203fc09a6601327ae0ab38865d14231d0b65d3143f5762cc7977d"
+dependencies = [
+ "gdbstub 0.7.0",
  "num-traits",
 ]
 
@@ -2518,7 +2532,7 @@ dependencies = [
  "event_monitor",
  "flume",
  "futures",
- "gdbstub",
+ "gdbstub 0.6.6",
  "gdbstub_arch",
  "hypervisor",
  "libc",
