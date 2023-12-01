@@ -243,7 +243,7 @@ impl MultiThreadBase for GdbStub {
         start_addr: <Self::Arch as Arch>::Usize,
         data: &mut [u8],
         tid: Tid,
-    ) -> TargetResult<(), Self> {
+    ) -> TargetResult<usize, Self> {
         match self.vm_request(
             GdbRequestPayload::ReadMem(GuestAddress(start_addr), data.len()),
             tid_to_cpuid(tid),
@@ -252,7 +252,7 @@ impl MultiThreadBase for GdbStub {
                 for (dst, v) in data.iter_mut().zip(r.iter()) {
                     *dst = *v;
                 }
-                Ok(())
+                Ok(std::cmp::min(data.len(), r.len()))
             }
             Ok(s) => {
                 error!("Unexpected response for ReadMem: {:?}", s);
