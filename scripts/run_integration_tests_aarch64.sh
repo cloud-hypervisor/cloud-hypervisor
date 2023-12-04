@@ -163,7 +163,7 @@ update_workloads() {
     CH_RELEASE_URL="https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/$LAST_RELEASE_VERSION/cloud-hypervisor-static-aarch64"
     CH_RELEASE_NAME="cloud-hypervisor-static-aarch64"
     pushd $WORKLOADS_DIR
-    time wget $CH_RELEASE_URL -O "$CH_RELEASE_NAME" || exit 1
+    time wget --debug --secure-protocol=TLSv1_2 $CH_RELEASE_URL -O "$CH_RELEASE_NAME" || exit 1
     chmod +x $CH_RELEASE_NAME
     popd
 
