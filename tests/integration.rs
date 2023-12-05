@@ -4128,7 +4128,12 @@ mod common_parallel {
 
         let r = std::panic::catch_unwind(|| {
             // Check that the cloud-hypervisor binary actually terminated
-            assert!(output.status.success())
+            if !output.status.success() {
+                panic!(
+                    "Cloud Hypervisor process failed to terminate gracefully: {:?}",
+                    output.status
+                );
+            }
         });
         handle_child_output(r, &output);
     }
