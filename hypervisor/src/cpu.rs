@@ -267,6 +267,11 @@ pub enum HypervisorCpuError {
     ///
     #[error("Failed to write to GPA: {0}")]
     GpaWrite(#[source] anyhow::Error),
+    ///
+    /// Error getting CPUID leaf
+    ///
+    #[error("Failed to get CPUID entries: {0}")]
+    GetCpuidVales(#[source] anyhow::Error),
 }
 
 #[derive(Debug)]
@@ -476,5 +481,18 @@ pub trait Vcpu: Send + Sync {
     ///
     fn set_tsc_khz(&self, _freq: u32) -> Result<()> {
         Ok(())
+    }
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// X86 specific call to retrieve cpuid leaf
+    ///
+    fn get_cpuid_values(
+        &self,
+        _function: u32,
+        _index: u32,
+        _xfem: u64,
+        _xss: u64,
+    ) -> Result<[u32; 4]> {
+        unimplemented!()
     }
 }
