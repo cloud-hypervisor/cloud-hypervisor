@@ -687,6 +687,8 @@ fn resize_command(
                 device_id: None,
             },
         ];
+        // See: #5938
+        thread::sleep(std::time::Duration::new(1, 0));
         assert!(check_latest_events_exact(&latest_events, event_path));
     }
 
@@ -5960,6 +5962,8 @@ mod common_parallel {
                     event: "device-removed".to_string(),
                     device_id: Some(net_id.to_string()),
                 }];
+                // See: #5938
+                thread::sleep(std::time::Duration::new(1, 0));
                 assert!(check_latest_events_exact(&latest_events, &event_path));
 
                 // Plug the virtio-net device again
@@ -5983,6 +5987,8 @@ mod common_parallel {
                     device_id: None,
                 },
             ];
+            // See: #5938
+            thread::sleep(std::time::Duration::new(1, 0));
             assert!(check_latest_events_exact(&latest_events, &event_path));
 
             // Take a snapshot from the VM
@@ -6005,6 +6011,8 @@ mod common_parallel {
                     device_id: None,
                 },
             ];
+            // See: #5938
+            thread::sleep(std::time::Duration::new(1, 0));
             assert!(check_latest_events_exact(&latest_events, &event_path));
         });
 
