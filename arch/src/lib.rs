@@ -117,11 +117,11 @@ pub struct NumaNode {
 
 pub type NumaNodes = BTreeMap<u32, NumaNode>;
 
-/// Type for passing information about the initramfs in the guest memory.
-pub struct InitramfsConfig {
-    /// Load address of initramfs in guest memory
+/// Type for passing information about the initramfs/kernel in the guest memory.
+pub struct BootFileConfig {
+    /// Load address of initramfs/kernel in guest memory
     pub address: vm_memory::GuestAddress,
-    /// Size of initramfs in guest memory
+    /// Size of initramfs/kernel in guest memory
     pub size: usize,
 }
 

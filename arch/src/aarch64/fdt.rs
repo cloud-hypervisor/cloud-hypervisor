@@ -17,9 +17,9 @@ use std::result;
 use std::str;
 use std::sync::{Arc, Mutex};
 
+use super::super::BootFileConfig;
 use super::super::DeviceType;
 use super::super::GuestMemoryMmap;
-use super::super::InitramfsConfig;
 use super::layout::{
     IRQ_BASE, MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START, MEM_PCI_IO_SIZE, MEM_PCI_IO_START,
     PCI_HIGH_BASE, PCI_MMIO_CONFIG_SIZE_PER_SEGMENT,
@@ -222,7 +222,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     vcpu_topology: Option<(u8, u8, u8)>,
     device_info: &HashMap<(DeviceType, String), T, S>,
     gic_device: &Arc<Mutex<dyn Vgic>>,
-    initrd: &Option<InitramfsConfig>,
+    initrd: &Option<BootFileConfig>,
     pci_space_info: &[PciSpaceInfo],
     numa_nodes: &NumaNodes,
     virtio_iommu_bdf: Option<u32>,
@@ -629,7 +629,7 @@ fn create_memory_node(
 fn create_chosen_node(
     fdt: &mut FdtWriter,
     cmdline: &str,
-    initrd: &Option<InitramfsConfig>,
+    initrd: &Option<BootFileConfig>,
 ) -> FdtWriterResult<()> {
     let chosen_node = fdt.begin_node("chosen")?;
     fdt.property_string("bootargs", cmdline)?;

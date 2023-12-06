@@ -12,8 +12,8 @@ pub mod layout;
 mod mpspec;
 mod mptable;
 pub mod regs;
+use crate::BootFileConfig;
 use crate::GuestMemoryMmap;
-use crate::InitramfsConfig;
 use crate::RegionType;
 use hypervisor::arch::x86::{CpuIdEntry, CPUID_FLAG_VALID_INDEX};
 use hypervisor::{CpuVendor, HypervisorCpuError, HypervisorError};
@@ -889,7 +889,7 @@ pub fn arch_memory_regions() -> Vec<(GuestAddress, usize, RegionType)> {
 pub fn configure_system(
     guest_mem: &GuestMemoryMmap,
     cmdline_addr: GuestAddress,
-    initramfs: &Option<InitramfsConfig>,
+    initramfs: &Option<BootFileConfig>,
     _num_cpus: u8,
     rsdp_addr: Option<GuestAddress>,
     sgx_epc_region: Option<SgxEpcRegion>,
@@ -929,7 +929,7 @@ pub fn configure_system(
 fn configure_pvh(
     guest_mem: &GuestMemoryMmap,
     cmdline_addr: GuestAddress,
-    initramfs: &Option<InitramfsConfig>,
+    initramfs: &Option<BootFileConfig>,
     rsdp_addr: Option<GuestAddress>,
     sgx_epc_region: Option<SgxEpcRegion>,
 ) -> super::Result<()> {

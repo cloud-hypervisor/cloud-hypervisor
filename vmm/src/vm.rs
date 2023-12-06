@@ -115,6 +115,9 @@ pub enum Error {
     #[error("Cannot load the initramfs into memory")]
     InitramfsLoad,
 
+    #[error("Cannot load the initramfs or kernel into memory")]
+    BootFileLoad,
+
     #[error("Cannot load the kernel command line in memory: {0}")]
     LoadCmdLine(#[source] linux_loader::loader::Error),
 
@@ -883,25 +886,36 @@ impl Vm {
         Ok(vm)
     }
 
-    fn load_initramfs(&mut self, guest_mem: &GuestMemoryMmap) -> Result<arch::InitramfsConfig> {
-        let initramfs = self.initramfs.as_mut().unwrap();
-        let size: usize = initramfs
+    // Load initramfs or kernel image into memory
+    // @is_top: For initramfs is true as it always locates at the top memory address,
+    // for kernel, is true if there is no initramfs, otherwise false.
+    fn load_boot_file(
+        file: &mut Option<File>,
+        guest_mem: &GuestMemoryMmap,
+        is_top: bool,
+    ) -> Result<arch::BootFileConfig> {
+        let file = file.as_mut().unwrap();
+        let size: usize = file
             .seek(SeekFrom::End(0))
             .map_err(|_| Error::InitramfsLoad)?
             .try_into()
             .unwrap();
-        initramfs.rewind().map_err(|_| Error::InitramfsLoad)?;
 
-        let address =
+        let top_addr =
             arch::initramfs_load_addr(guest_mem, size).map_err(|_| Error::InitramfsLoad)?;
-        let address = GuestAddress(address);
+        #[cfg(target_arch = "aarch64")]
+        let offset = arch::aarch64::layout::KERNEL_IMAGE_MAX_SIZE;
+        #[cfg(target_arch = "x86_64")]
+        let offset = 0;
+        let address = if is_top { top_addr } else { top_addr - offset };
 
+        file.rewind().map_err(|_| Error::BootFileLoad)?;
+        let address = GuestAddress(address as u64);
         guest_mem
-            .read_volatile_from(address, initramfs, size)
-            .map_err(|_| Error::InitramfsLoad)?;
+            .read_volatile_from(address, file, size)
+            .map_err(|_| Error::BootFileLoad)?;
 
-        info!("Initramfs loaded: address = 0x{:x}", address.0);
-        Ok(arch::InitramfsConfig { address, size })
+        Ok(arch::BootFileConfig { address, size })
     }
 
     pub fn generate_cmdline(
@@ -1069,7 +1083,7 @@ impl Vm {
         let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
 
         let initramfs_config = match self.initramfs {
-            Some(_) => Some(self.load_initramfs(&mem)?),
+            Some(_) => Some(Self::load_boot_file(&mut self.initramfs, &mem, true)?),
             None => None,
         };
 
@@ -1137,7 +1151,7 @@ impl Vm {
         let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
         let mut pci_space_info: Vec<PciSpaceInfo> = Vec::new();
         let initramfs_config = match self.initramfs {
-            Some(_) => Some(self.load_initramfs(&mem)?),
+            Some(_) => Some(Self::load_boot_file(&mut self.initramfs, &mem, true)?),
             None => None,
         };
 
