@@ -163,8 +163,21 @@ update_workloads() {
     CH_RELEASE_URL="https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/$LAST_RELEASE_VERSION/cloud-hypervisor-static-aarch64"
     CH_RELEASE_NAME="cloud-hypervisor-static-aarch64"
     pushd $WORKLOADS_DIR
-    time wget $CH_RELEASE_URL -O "$CH_RELEASE_NAME" || exit 1
-    chmod +x $CH_RELEASE_NAME
+    # Repeat a few times to workaround a random wget failure
+    WGET_RETRY_MAX=10
+    wget_retry=0
+
+    until [ "$wget_retry" -ge "$WGET_RETRY_MAX" ]
+    do
+        time wget $CH_RELEASE_URL -O "$CH_RELEASE_NAME" && break
+        wget_retry=$((wget_retry+1))
+    done
+
+    if [ $wget_retry -ge "$WGET_RETRY_MAX" ]; then
+        exit 1
+    else
+        chmod +x $CH_RELEASE_NAME
+    fi
     popd
 
     # Build custom kernel for guest VMs
