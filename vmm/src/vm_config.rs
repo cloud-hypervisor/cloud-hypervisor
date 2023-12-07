@@ -196,6 +196,23 @@ pub enum VhostMode {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct RateLimiterGroupConfig {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub rate_limiter_config: RateLimiterConfig,
+}
+
+impl Default for RateLimiterGroupConfig {
+    fn default() -> Self {
+        RateLimiterGroupConfig {
+            id: "".to_string(),
+            rate_limiter_config: RateLimiterConfig::default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct DiskConfig {
     pub path: Option<PathBuf>,
     #[serde(default)]
@@ -211,6 +228,8 @@ pub struct DiskConfig {
     #[serde(default)]
     pub vhost_user: bool,
     pub vhost_socket: Option<String>,
+    #[serde(default)]
+    pub rate_limit_group: Option<String>,
     #[serde(default)]
     pub rate_limiter_config: Option<RateLimiterConfig>,
     #[serde(default)]
@@ -253,6 +272,7 @@ impl Default for DiskConfig {
             id: None,
             disable_io_uring: false,
             disable_aio: false,
+            rate_limit_group: None,
             rate_limiter_config: None,
             pci_segment: 0,
             serial: None,
@@ -591,6 +611,7 @@ pub struct VmConfig {
     #[serde(default)]
     pub memory: MemoryConfig,
     pub payload: Option<PayloadConfig>,
+    pub rate_limit_groups: Option<Vec<RateLimiterGroupConfig>>,
     pub disks: Option<Vec<DiskConfig>>,
     pub net: Option<Vec<NetConfig>>,
     #[serde(default)]

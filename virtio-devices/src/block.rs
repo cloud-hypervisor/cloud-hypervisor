@@ -10,9 +10,8 @@
 
 use super::Error as DeviceError;
 use super::{
-    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler,
-    RateLimiterConfig, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType,
-    EPOLL_HELPER_EVENT_LAST,
+    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, VirtioCommon,
+    VirtioDevice, VirtioDeviceType, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
 };
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
@@ -23,7 +22,8 @@ use block::{
     async_io::AsyncIo, async_io::AsyncIoError, async_io::DiskFile, build_serial, Request,
     RequestType, VirtioBlockConfig,
 };
-use rate_limiter::{RateLimiter, TokenType};
+use rate_limiter::group::{RateLimiterGroup, RateLimiterGroupHandle};
+use rate_limiter::TokenType;
 use seccompiler::SeccompAction;
 use std::collections::VecDeque;
 use std::io;
@@ -131,7 +131,7 @@ struct BlockEpollHandler {
     counters: BlockCounters,
     queue_evt: EventFd,
     inflight_requests: VecDeque<(u16, Request)>,
-    rate_limiter: Option<RateLimiter>,
+    rate_limiter: Option<RateLimiterGroupHandle>,
     access_platform: Option<Arc<dyn AccessPlatform>>,
     read_only: bool,
 }
@@ -507,7 +507,7 @@ pub struct Block {
     writeback: Arc<AtomicBool>,
     counters: BlockCounters,
     seccomp_action: SeccompAction,
-    rate_limiter_config: Option<RateLimiterConfig>,
+    rate_limiter: Option<Arc<RateLimiterGroup>>,
     exit_evt: EventFd,
     read_only: bool,
     serial: Vec<u8>,
@@ -537,7 +537,7 @@ impl Block {
         queue_size: u16,
         serial: Option<String>,
         seccomp_action: SeccompAction,
-        rate_limiter_config: Option<RateLimiterConfig>,
+        rate_limiter: Option<Arc<RateLimiterGroup>>,
         exit_evt: EventFd,
         state: Option<BlockState>,
     ) -> io::Result<Self> {
@@ -639,7 +639,7 @@ impl Block {
             writeback: Arc::new(AtomicBool::new(true)),
             counters: BlockCounters::default(),
             seccomp_action,
-            rate_limiter_config,
+            rate_limiter,
             exit_evt,
             read_only,
             serial,
@@ -747,12 +747,6 @@ impl VirtioDevice for Block {
             let queue_size = queue.size();
             let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
-            let rate_limiter: Option<RateLimiter> = self
-                .rate_limiter_config
-                .map(RateLimiterConfig::try_into)
-                .transpose()
-                .map_err(ActivateError::CreateRateLimiter)?;
-
             let mut handler = BlockEpollHandler {
                 queue_index: i as u16,
                 queue,
@@ -776,7 +770,12 @@ impl VirtioDevice for Block {
                 // This gives head room for systems with slower I/O without
                 // compromising the cost of the reallocation or memory overhead
                 inflight_requests: VecDeque::with_capacity(64),
-                rate_limiter,
+                rate_limiter: self
+                    .rate_limiter
+                    .as_ref()
+                    .map(|r| r.new_handle())
+                    .transpose()
+                    .unwrap(),
                 access_platform: self.common.access_platform.clone(),
                 read_only: self.read_only,
             };
