@@ -42,3 +42,14 @@ actual rate limit users get can be as low as
 generally advisable to keep `bw/ops_refill_time` larger than `100 ms`
 (`cool_down_time`) to make sure the actual rate limit is close to users'
 expectation ("refill-rate").
+
+## Rate Limit Groups
+It is possible to throttle the aggregate bandwidth or operations
+of multiple virtio-blk devices using a `rate_limit_group`. virtio-blk devices may be
+dynamically added and removed from a `rate_limit_group`. The following example
+demonstrates how to throttle the aggregate bandwidth of two disks to 10 MiB/s.
+```
+--disk path=disk0.raw,rate_limit_group=group0 \
+       path=disk1.raw,rate_limit_group=group0 \
+--rate-limit-group bw_size=1048576,bw_refill_time,bw_refill_time=100
+```

@@ -61,6 +61,7 @@ use pci::{
     DeviceRelocation, PciBarRegionType, PciBdf, PciDevice, VfioPciDevice, VfioUserDmaMapping,
     VfioUserPciDevice, VfioUserPciDeviceError,
 };
+use rate_limiter::group::RateLimiterGroup;
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
@@ -479,7 +480,11 @@ pub enum DeviceManagerError {
 
     /// Cannot create a PvPanic device
     PvPanicCreate(devices::pvpanic::PvPanicError),
+
+    /// Cannot create a RateLimiterGroup
+    RateLimiterGroupCreate(rate_limiter::group::Error),
 }
+
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
 const DEVICE_MANAGER_ACPI_SIZE: usize = 0x10;
@@ -945,6 +950,8 @@ pub struct DeviceManager {
     acpi_platform_addresses: AcpiPlatformAddresses,
 
     snapshot: Option<Snapshot>,
+
+    rate_limit_groups: HashMap<String, Arc<RateLimiterGroup>>,
 }
 
 impl DeviceManager {
@@ -1096,6 +1103,31 @@ impl DeviceManager {
             cpu_manager.lock().unwrap().set_acpi_address(acpi_address);
         }
 
+        let mut rate_limit_groups = HashMap::<String, Arc<RateLimiterGroup>>::new();
+        if let Some(rate_limit_groups_cfg) = config.lock().unwrap().rate_limit_groups.as_ref() {
+            for rate_limit_group_cfg in rate_limit_groups_cfg {
+                let rate_limit_cfg = rate_limit_group_cfg.rate_limiter_config;
+                let bw = rate_limit_cfg.bandwidth.unwrap_or_default();
+                let ops = rate_limit_cfg.ops.unwrap_or_default();
+                let mut rate_limit_group = RateLimiterGroup::new(
+                    &rate_limit_group_cfg.id,
+                    bw.size,
+                    bw.one_time_burst.unwrap_or(0),
+                    bw.refill_time,
+                    ops.size,
+                    ops.one_time_burst.unwrap_or(0),
+                    ops.refill_time,
+                )
+                .map_err(DeviceManagerError::RateLimiterGroupCreate)?;
+
+                let exit_evt = exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?;
+
+                rate_limit_group.start_thread(exit_evt).unwrap();
+                rate_limit_groups
+                    .insert(rate_limit_group_cfg.id.clone(), Arc::new(rate_limit_group));
+            }
+        }
+
         let device_manager = DeviceManager {
             hypervisor_type,
             address_manager: Arc::clone(&address_manager),
@@ -1148,6 +1180,7 @@ impl DeviceManager {
             pending_activations: Arc::new(Mutex::new(Vec::default())),
             acpi_platform_addresses: AcpiPlatformAddresses::default(),
             snapshot,
+            rate_limit_groups,
         };
 
         let device_manager = Arc::new(Mutex::new(device_manager));
@@ -2332,6 +2365,38 @@ impl DeviceManager {
                 }
             };
 
+            let rate_limit_group =
+                if let Some(rate_limiter_cfg) = disk_cfg.rate_limiter_config.as_ref() {
+                    // Create an anonymous RateLimiterGroup that is dropped when the Disk
+                    // is dropped.
+                    let bw = rate_limiter_cfg.bandwidth.unwrap_or_default();
+                    let ops = rate_limiter_cfg.ops.unwrap_or_default();
+                    let mut rate_limit_group = RateLimiterGroup::new(
+                        disk_cfg.id.as_ref().unwrap(),
+                        bw.size,
+                        bw.one_time_burst.unwrap_or(0),
+                        bw.refill_time,
+                        ops.size,
+                        ops.one_time_burst.unwrap_or(0),
+                        ops.refill_time,
+                    )
+                    .map_err(DeviceManagerError::RateLimiterGroupCreate)?;
+
+                    rate_limit_group
+                        .start_thread(
+                            self.exit_evt
+                                .try_clone()
+                                .map_err(DeviceManagerError::EventFd)?,
+                        )
+                        .unwrap();
+
+                    Some(Arc::new(rate_limit_group))
+                } else if let Some(rate_limit_group) = disk_cfg.rate_limit_group.as_ref() {
+                    self.rate_limit_groups.get(rate_limit_group).cloned()
+                } else {
+                    None
+                };
+
             let virtio_block = Arc::new(Mutex::new(
                 virtio_devices::Block::new(
                     id.clone(),
@@ -2347,7 +2412,7 @@ impl DeviceManager {
                     disk_cfg.queue_size,
                     disk_cfg.serial.clone(),
                     self.seccomp_action.clone(),
-                    disk_cfg.rate_limiter_config,
+                    rate_limit_group,
                     self.exit_evt
                         .try_clone()
                         .map_err(DeviceManagerError::EventFd)?,

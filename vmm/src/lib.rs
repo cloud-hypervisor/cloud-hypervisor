@@ -2285,6 +2285,7 @@ mod unit_tests {
                 kernel: Some(PathBuf::from("/path/to/kernel")),
                 ..Default::default()
             }),
+            rate_limit_groups: None,
             disks: None,
             net: None,
             rng: RngConfig {

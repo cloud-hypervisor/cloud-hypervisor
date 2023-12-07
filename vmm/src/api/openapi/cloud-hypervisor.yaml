@@ -554,6 +554,10 @@ components:
           $ref: "#/components/schemas/MemoryConfig"
         payload:
           $ref: "#/components/schemas/PayloadConfig"
+        rate_limit_groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/RateLimitGroupConfig"
         disks:
           type: array
           items:
@@ -812,6 +816,17 @@ components:
         Defines an IO rate limiter with independent bytes/s and ops/s limits.
         Limits are defined by configuring each of the _bandwidth_ and _ops_ token buckets.
 
+    RateLimitGroupConfig:
+      required:
+        - id
+        - rate_limiter_config
+      type: object
+      properties:
+        id:
+          type: string
+        rate_limiter_config:
+          $ref: "#/components/schemas/RateLimiterConfig"
+
     DiskConfig:
       required:
         - path
@@ -847,6 +862,8 @@ components:
         id:
           type: string
         serial:
+          type: string
+        rate_limit_group:
           type: string
 
     NetConfig:

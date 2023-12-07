@@ -241,6 +241,13 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
                 .group("vm-config"),
         )
         .arg(
+            Arg::new("rate-limit-group")
+                .long("rate-limit-group")
+                .help(config::RateLimiterGroupConfig::SYNTAX)
+                .num_args(1..)
+                .group("vm-config"),
+        )
+        .arg(
             Arg::new("disk")
                 .long("disk")
                 .help(config::DiskConfig::SYNTAX)
@@ -845,6 +852,7 @@ mod unit_tests {
                 kernel: Some(PathBuf::from("/path/to/kernel")),
                 ..Default::default()
             }),
+            rate_limit_groups: None,
             disks: None,
             net: None,
             rng: RngConfig {
@@ -1112,6 +1120,29 @@ mod unit_tests {
                     "memory" : { "shared": true, "size": 536870912 },
                     "disks": [
                         {"vhost_user":true, "vhost_socket":"/tmp/sock1"}
+                    ]
+                }"#,
+                true,
+            ),
+            (
+                vec![
+                    "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
+                    "--disk",
+                    "path=/path/to/disk/1,rate_limit_group=group0",
+                    "path=/path/to/disk/2,rate_limit_group=group0",
+                    "--rate-limit-group",
+                    "id=group0,bw_size=1000,bw_refill_time=100",
+                ],
+                r#"{
+                    "payload": {"kernel": "/path/to/kernel"},
+                    "disks": [
+                        {"path": "/path/to/disk/1", "rate_limit_group": "group0"},
+                        {"path": "/path/to/disk/2", "rate_limit_group": "group0"}
+                    ],
+                    "rate_limit_groups": [
+                        {"id": "group0", "rate_limiter_config": {"bandwidth": {"size": 1000, "one_time_burst": 0, "refill_time": 100}}}
                     ]
                 }"#,
                 true,
