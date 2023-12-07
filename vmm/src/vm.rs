@@ -1156,7 +1156,7 @@ impl Vm {
         };
 
         // Load kernel image into memory once both firmware and kernel are offered
-        let _kernel_info = if self
+        let kernel_info = if self
             .config
             .lock()
             .unwrap()
@@ -1236,6 +1236,7 @@ impl Vm {
             vcpu_topology,
             device_info,
             &initramfs_config,
+            &kernel_info,
             &pci_space_info,
             virtio_iommu_bdf.map(|bdf| bdf.into()),
             &vgic,
@@ -3055,6 +3056,7 @@ mod tests {
             Some((0, 0, 0)),
             &dev_info,
             &gic,
+            &None,
             &None,
             &Vec::new(),
             &BTreeMap::new(),

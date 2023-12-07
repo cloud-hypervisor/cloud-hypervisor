@@ -223,6 +223,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     device_info: &HashMap<(DeviceType, String), T, S>,
     gic_device: &Arc<Mutex<dyn Vgic>>,
     initrd: &Option<BootFileConfig>,
+    kernel: &Option<BootFileConfig>,
     pci_space_info: &[PciSpaceInfo],
     numa_nodes: &NumaNodes,
     virtio_iommu_bdf: Option<u32>,
@@ -247,7 +248,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     fdt.property_u32("interrupt-parent", GIC_PHANDLE)?;
     create_cpu_nodes(&mut fdt, &vcpu_mpidr, vcpu_topology, numa_nodes)?;
     create_memory_node(&mut fdt, guest_mem, numa_nodes)?;
-    create_chosen_node(&mut fdt, cmdline, initrd)?;
+    create_chosen_node(&mut fdt, cmdline, initrd, kernel)?;
     create_gic_node(&mut fdt, gic_device)?;
     create_timer_node(&mut fdt)?;
     if pmu_supported {
@@ -630,6 +631,7 @@ fn create_chosen_node(
     fdt: &mut FdtWriter,
     cmdline: &str,
     initrd: &Option<BootFileConfig>,
+    kernel: &Option<BootFileConfig>,
 ) -> FdtWriterResult<()> {
     let chosen_node = fdt.begin_node("chosen")?;
     fdt.property_string("bootargs", cmdline)?;
@@ -639,6 +641,13 @@ fn create_chosen_node(
         let initrd_end = initrd_config.address.raw_value() + initrd_config.size as u64;
         fdt.property_u64("linux,initrd-start", initrd_start)?;
         fdt.property_u64("linux,initrd-end", initrd_end)?;
+    }
+
+    if let Some(kernel_info) = kernel {
+        let kernel_start = kernel_info.address.raw_value();
+        let kernel_size = kernel_info.size as u64;
+        fdt.property_u64("linux,kernel-start", kernel_start)?;
+        fdt.property_u64("linux,kernel-size", kernel_size)?;
     }
 
     fdt.end_node(chosen_node)?;
