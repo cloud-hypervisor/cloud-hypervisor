@@ -434,7 +434,7 @@ pub fn physical_bits(hypervisor: &Arc<dyn hypervisor::Hypervisor>, max_phys_bits
 }
 
 pub struct Vm {
-    #[cfg(feature = "tdx")]
+    #[cfg(any(target_arch = "aarch64", feature = "tdx"))]
     kernel: Option<File>,
     initramfs: Option<File>,
     threads: Vec<thread::JoinHandle<()>>,
@@ -613,7 +613,7 @@ impl Vm {
             )
             .map_err(Error::DeviceManager)?;
 
-        #[cfg(feature = "tdx")]
+        #[cfg(any(target_arch = "aarch64", feature = "tdx"))]
         let kernel = config
             .lock()
             .unwrap()
@@ -649,7 +649,7 @@ impl Vm {
         };
 
         Ok(Vm {
-            #[cfg(feature = "tdx")]
+            #[cfg(any(target_arch = "aarch64", feature = "tdx"))]
             kernel,
             initramfs,
             device_manager,
@@ -1037,7 +1037,7 @@ impl Vm {
         memory_manager: Arc<Mutex<MemoryManager>>,
     ) -> Result<EntryPoint> {
         match (&payload.firmware, &payload.kernel) {
-            (Some(firmware), None) => {
+            (Some(firmware), _) => {
                 let firmware = File::open(firmware).map_err(Error::FirmwareFile)?;
                 Self::load_booting_binary(firmware, memory_manager)
             }
@@ -1155,6 +1155,26 @@ impl Vm {
             None => None,
         };
 
+        // Load kernel image into memory once both firmware and kernel are offered
+        let _kernel_info = if self
+            .config
+            .lock()
+            .unwrap()
+            .payload
+            .as_ref()
+            .unwrap()
+            .firmware
+            .is_some()
+            && self.kernel.is_some()
+        {
+            Some(Self::load_boot_file(
+                &mut self.kernel,
+                &mem,
+                self.initramfs.is_none(),
+            )?)
+        } else {
+            None
+        };
         let device_info = &self
             .device_manager
             .lock()
