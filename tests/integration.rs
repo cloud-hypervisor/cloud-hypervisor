@@ -973,6 +973,33 @@ fn check_latest_events_exact(latest_events: &[&MetaEvent], event_file: &str) -> 
     true
 }
 
+/// Return true if event occurs before timeout elapses
+///
+/// # Arguments
+///
+/// * `event` - an even to wait for
+/// * `timeout` - maximum time to wait for event
+/// * `event_file` - event file to read events from
+fn wait_for_event(event: &MetaEvent, timeout: u64, event_file: &str) -> bool {
+    assert!(timeout > 0);
+    let json_events = parse_event_file(event_file);
+
+    for _i in 1..timeout {
+        let latest_events = parse_event_file(event_file);
+        if json_events.len() < latest_events.len() {
+            let new_events = &latest_events[json_events.len()..];
+
+            for ev in new_events.iter() {
+                if event.match_with_json_event(ev) {
+                    return true;
+                }
+            }
+        }
+        thread::sleep(std::time::Duration::new(1, 0));
+    }
+    false
+}
+
 fn test_cpu_topology(threads_per_core: u8, cores_per_package: u8, packages: u8, use_fw: bool) {
     let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
     let guest = Guest::new(Box::new(focal));
