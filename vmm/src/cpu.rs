@@ -188,6 +188,10 @@ pub enum Error {
     #[cfg(feature = "sev_snp")]
     #[error("Failed to set sev control register: {0}")]
     SetSevControlRegister(#[source] hypervisor::HypervisorCpuError),
+
+    #[cfg(target_arch = "x86_64")]
+    #[error("Failed to inject NMI")]
+    NmiError(hypervisor::HypervisorCpuError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -477,6 +481,7 @@ pub struct CpuManager {
     vm: Arc<dyn hypervisor::Vm>,
     vcpus_kill_signalled: Arc<AtomicBool>,
     vcpus_pause_signalled: Arc<AtomicBool>,
+    vcpus_kick_signalled: Arc<AtomicBool>,
     exit_evt: EventFd,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     reset_evt: EventFd,
@@ -721,6 +726,7 @@ impl CpuManager {
             vm,
             vcpus_kill_signalled: Arc::new(AtomicBool::new(false)),
             vcpus_pause_signalled: Arc::new(AtomicBool::new(false)),
+            vcpus_kick_signalled: Arc::new(AtomicBool::new(false)),
             vcpu_states,
             exit_evt,
             reset_evt,
@@ -934,6 +940,7 @@ impl CpuManager {
         let panic_exit_evt = self.exit_evt.try_clone().unwrap();
         let vcpu_kill_signalled = self.vcpus_kill_signalled.clone();
         let vcpu_pause_signalled = self.vcpus_pause_signalled.clone();
+        let vcpu_kick_signalled = self.vcpus_kick_signalled.clone();
 
         let vcpu_kill = self.vcpu_states[usize::from(vcpu_id)].kill.clone();
         let vcpu_run_interrupted = self.vcpu_states[usize::from(vcpu_id)]
@@ -1056,6 +1063,18 @@ impl CpuManager {
                                     thread::park();
                                 }
                                 vcpu_run_interrupted.store(false, Ordering::SeqCst);
+                            }
+
+                            if vcpu_kick_signalled.load(Ordering::SeqCst) {
+                                vcpu_run_interrupted.store(true, Ordering::SeqCst);
+                                #[cfg(target_arch = "x86_64")]
+                                match vcpu.lock().as_ref().unwrap().vcpu.nmi() {
+                                    Ok(()) => {},
+                                    Err(e) => {
+                                        error!("Error when inject nmi {}", e);
+                                        break;
+                                    }
+                                }
                             }
 
                             // We've been told to terminate
@@ -1847,6 +1866,18 @@ impl CpuManager {
     #[cfg(feature = "sev_snp")]
     pub(crate) fn sev_snp_enabled(&self) -> bool {
         self.sev_snp_enabled
+    }
+
+    pub(crate) fn nmi(&self) -> Result<()> {
+        self.vcpus_kick_signalled.store(true, Ordering::SeqCst);
+
+        for state in self.vcpu_states.iter() {
+            state.signal_thread();
+        }
+
+        self.vcpus_kick_signalled.store(false, Ordering::SeqCst);
+
+        Ok(())
     }
 }
 

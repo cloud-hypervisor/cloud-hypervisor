@@ -105,6 +105,15 @@ pub use {
 #[cfg(target_arch = "x86_64")]
 const KVM_CAP_SGX_ATTRIBUTE: u32 = 196;
 
+#[cfg(target_arch = "x86_64")]
+use vmm_sys_util::ioctl_io_nr;
+
+#[cfg(all(not(feature = "tdx"), target_arch = "x86_64"))]
+use vmm_sys_util::ioctl_ioc_nr;
+
+#[cfg(target_arch = "x86_64")]
+ioctl_io_nr!(KVM_NMI, kvm_bindings::KVMIO, 0x9a);
+
 #[cfg(feature = "tdx")]
 const KVM_EXIT_TDX: u32 = 50;
 #[cfg(feature = "tdx")]
@@ -2307,6 +2316,23 @@ impl cpu::Vcpu for KvmVcpu {
                     Ok(())
                 } else {
                     Err(cpu::HypervisorCpuError::SetTscKhz(e.into()))
+                }
+            }
+            Ok(_) => Ok(()),
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Trigger NMI interrupt
+    ///
+    fn nmi(&self) -> cpu::Result<()> {
+        match self.fd.nmi() {
+            Err(e) => {
+                if e.errno() == libc::EIO {
+                    Ok(())
+                } else {
+                    Err(cpu::HypervisorCpuError::Nmi(e.into()))
                 }
             }
             Ok(_) => Ok(()),

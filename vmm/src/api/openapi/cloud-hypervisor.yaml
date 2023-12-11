@@ -405,6 +405,13 @@ paths:
         405:
           description: The VM instance could not be coredumped because it is not booted.
 
+  /vmm.nmi:
+    put:
+      summary: Inject an NMI.
+      responses:
+        204:
+          description: The NMI successfully injected.
+
   /vm.restore:
     put:
       summary: Restore a VM from a snapshot.

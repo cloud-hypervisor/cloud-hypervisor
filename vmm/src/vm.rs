@@ -316,6 +316,9 @@ pub enum Error {
     #[cfg(feature = "igvm")]
     #[error("Cannot load the igvm into memory: {0}")]
     IgvmLoad(#[source] igvm_loader::Error),
+
+    #[error("Error injecting NMI")]
+    ErrorNmi,
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -2445,6 +2448,15 @@ impl Vm {
         size_of::<elf::Elf64_Ehdr>() as u64
             + note_size as u64
             + size_of::<elf::Elf64_Phdr>() as u64 * phdr_num as u64
+    }
+
+    pub fn nmi(&self) -> Result<()> {
+        return self
+            .cpu_manager
+            .lock()
+            .unwrap()
+            .nmi()
+            .map_err(|_| Error::ErrorNmi);
     }
 }
 
