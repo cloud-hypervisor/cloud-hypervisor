@@ -1685,7 +1685,7 @@ impl Vmm {
                 },
             )
             .map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!("Error generating common cpuid': {:?}", e))
+                MigratableError::MigrateSend(anyhow!("Error generating common cpuid': {:?}", e))
             })?
         };
 
