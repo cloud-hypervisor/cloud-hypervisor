@@ -34,7 +34,7 @@ jobs:
             experimental: true
     steps:
       - name: Code checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -133,6 +133,6 @@ jobs:
     name: Typos / Spellcheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       # Executes "typos ."
       - uses: crate-ci/typos@v1.16.11
