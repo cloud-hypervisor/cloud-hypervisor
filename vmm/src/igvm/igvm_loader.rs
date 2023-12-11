@@ -309,10 +309,10 @@ pub fn load_igvm(
             } => {
                 loaded_info.snp_id_block.compatibility_mask = *compatibility_mask;
                 loaded_info.snp_id_block.author_key_enabled = *author_key_enabled;
-                loaded_info.snp_id_block.reserved[..3].copy_from_slice(reserved);
-                loaded_info.snp_id_block.ld[..48].copy_from_slice(ld);
-                loaded_info.snp_id_block.family_id[..16].copy_from_slice(family_id);
-                loaded_info.snp_id_block.image_id[..16].copy_from_slice(image_id);
+                loaded_info.snp_id_block.reserved = *reserved;
+                loaded_info.snp_id_block.ld = *ld;
+                loaded_info.snp_id_block.family_id = *family_id;
+                loaded_info.snp_id_block.image_id = *image_id;
                 loaded_info.snp_id_block.version = *version;
                 loaded_info.snp_id_block.guest_svn = *guest_svn;
                 loaded_info.snp_id_block.id_key_algorithm = *id_key_algorithm;
