@@ -1669,7 +1669,12 @@ impl Vmm {
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         let common_cpuid = {
             #[cfg(feature = "tdx")]
-            let tdx = vm_config.lock().unwrap().is_tdx_enabled();
+            if vm_config.lock().unwrap().is_tdx_enabled() {
+                return Err(MigratableError::MigrateSend(anyhow!(
+                    "Live Migration is not supported when TDX is enabled"
+                )));
+            };
+
             let amx = vm_config.lock().unwrap().cpus.features.amx;
             let phys_bits =
                 vm::physical_bits(&hypervisor, vm_config.lock().unwrap().cpus.max_phys_bits);
@@ -1680,7 +1685,7 @@ impl Vmm {
                     phys_bits,
                     kvm_hyperv: vm_config.lock().unwrap().cpus.kvm_hyperv,
                     #[cfg(feature = "tdx")]
-                    tdx,
+                    tdx: false,
                     amx,
                 },
             )
@@ -1859,6 +1864,13 @@ impl Vmm {
         src_vm_config: &Arc<Mutex<VmConfig>>,
         src_vm_cpuid: &[hypervisor::arch::x86::CpuIdEntry],
     ) -> result::Result<(), MigratableError> {
+        #[cfg(feature = "tdx")]
+        if src_vm_config.lock().unwrap().is_tdx_enabled() {
+            return Err(MigratableError::MigrateReceive(anyhow!(
+                "Live Migration is not supported when TDX is enabled"
+            )));
+        };
+
         // We check the `CPUID` compatibility of between the source vm and destination, which is
         // mostly about feature compatibility and "topology/sgx" leaves are not relevant.
         let dest_cpuid = &{
@@ -1872,7 +1884,7 @@ impl Vmm {
                     phys_bits,
                     kvm_hyperv: vm_config.cpus.kvm_hyperv,
                     #[cfg(feature = "tdx")]
-                    tdx: vm_config.is_tdx_enabled(),
+                    tdx: false,
                     amx: vm_config.cpus.features.amx,
                 },
             )
