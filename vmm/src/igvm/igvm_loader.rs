@@ -30,6 +30,11 @@ use std::mem::size_of;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
+#[cfg(feature = "sev_snp")]
+use crate::GuestMemoryMmap;
+#[cfg(feature = "sev_snp")]
+use igvm_defs::{MemoryMapEntryType, IGVM_VHS_MEMORY_MAP_ENTRY};
+
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("command line is not a valid C string")]
@@ -38,6 +43,8 @@ pub enum Error {
     Igvm(#[source] std::io::Error),
     #[error("invalid igvm file")]
     InvalidIgvmFile(#[source] igvm_parser::Error),
+    #[error("invalid guest memory map")]
+    InvalidGuestMemmap(#[source] arch::Error),
     #[error("loader error")]
     Loader(#[source] crate::igvm::loader::Error),
     #[error("parameter too large for parameter area")]
@@ -62,6 +69,41 @@ enum ParameterAreaState {
     Allocated { data: Vec<u8>, max_size: u64 },
     /// Parameter area inserted and invalid to use.
     Inserted,
+}
+
+#[cfg(feature = "sev_snp")]
+fn igvm_memmap_from_ram_range(ram_range: (u64, u64)) -> IGVM_VHS_MEMORY_MAP_ENTRY {
+    assert!(ram_range.0 % HV_PAGE_SIZE == 0);
+    assert!((ram_range.1 - ram_range.0) % HV_PAGE_SIZE == 0);
+
+    IGVM_VHS_MEMORY_MAP_ENTRY {
+        starting_gpa_page_number: ram_range.0 / HV_PAGE_SIZE,
+        number_of_pages: (ram_range.1 - ram_range.0) / HV_PAGE_SIZE,
+        entry_type: MemoryMapEntryType::MEMORY,
+        flags: 0,
+        reserved: 0,
+    }
+}
+
+#[cfg(feature = "sev_snp")]
+fn generate_memory_map(
+    guest_mem: &GuestMemoryMmap,
+) -> Result<Vec<IGVM_VHS_MEMORY_MAP_ENTRY>, Error> {
+    let mut memory_map = Vec::new();
+
+    // Get usable physical memory ranges
+    let (first_ram_range, second_ram_range) =
+        arch::generate_ram_ranges(guest_mem).map_err(Error::InvalidGuestMemmap)?;
+
+    // Create the memory map entry for memory region before the gap
+    memory_map.push(igvm_memmap_from_ram_range(first_ram_range));
+
+    // Create the memory map entry for memory region after the gap if any
+    if let Some(second_ram_range) = second_ram_range {
+        memory_map.push(igvm_memmap_from_ram_range(second_ram_range));
+    }
+
+    Ok(memory_map)
 }
 
 // Import a parameter to the given parameter area.
@@ -245,6 +287,14 @@ pub fn load_igvm(
                 todo!("unsupported IgvmPageDataType");
             }
             IgvmDirectiveHeader::MemoryMap(_info) => {
+                #[cfg(feature = "sev_snp")]
+                {
+                    let guest_mem = memory_manager.lock().unwrap().boot_guest_memory();
+                    let memory_map = generate_memory_map(&guest_mem)?;
+                    import_parameter(&mut parameter_areas, _info, memory_map.as_bytes())?;
+                }
+
+                #[cfg(not(feature = "sev_snp"))]
                 todo!("Not implemented");
             }
             IgvmDirectiveHeader::CommandLine(info) => {
