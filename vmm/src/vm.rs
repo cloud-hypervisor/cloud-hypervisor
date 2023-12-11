@@ -998,8 +998,6 @@ impl Vm {
         memory_manager: Arc<Mutex<MemoryManager>>,
         cpu_manager: Arc<Mutex<cpu::CpuManager>>,
     ) -> Result<EntryPoint> {
-        //TODO: see issue https://github.com/cloud-hypervisor/cloud-hypervisor/issues/5993
-
         let res = igvm_loader::load_igvm(&igvm, memory_manager, cpu_manager, "")
             .map_err(Error::IgvmLoad)?;
 
