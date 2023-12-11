@@ -49,7 +49,7 @@ qemu-system-x86_64 \
 	-m 4G \
 	-bios ./$OVMF_DIR/OVMF_CODE.fd \
 	-cdrom ./$WIN_ISO_FILE \
-	-drive file=./$VIRTIO_ISO_FILE,index=0,media=cdrom
+	-drive file=./$VIRTIO_ISO_FILE,index=0,media=cdrom \
 	-drive if=none,id=root,file=./$IMG_FILE \
 	-device virtio-blk-pci,drive=root,disable-legacy=on \
 	-device virtio-net-pci,netdev=mynet0,disable-legacy=on \
