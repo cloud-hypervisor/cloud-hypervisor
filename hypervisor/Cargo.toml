@@ -14,8 +14,8 @@ tdx = []
 [dependencies]
 anyhow = "1.0.75"
 byteorder = "1.4.3"
-igvm_defs = { git = "https://github.com/microsoft/igvm", branch = "main" , package = "igvm_defs", optional  = true }
-igvm_parser = { git = "https://github.com/microsoft/igvm", branch = "main" , package = "igvm", optional  = true }
+igvm_defs = { git = "https://github.com/microsoft/igvm", branch = "main", package = "igvm_defs", optional  = true }
+igvm_parser = { git = "https://github.com/microsoft/igvm", branch = "main", package = "igvm", optional  = true }
 libc = "0.2.147"
 log = "0.4.20"
 kvm-ioctls = { version = "0.13.0", optional = true }
