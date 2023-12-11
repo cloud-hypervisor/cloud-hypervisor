@@ -278,6 +278,11 @@ pub enum HypervisorCpuError {
     #[cfg(feature = "sev_snp")]
     #[error("Failed to set sev control register: {0}")]
     SetSevControlRegister(#[source] anyhow::Error),
+
+    /// Error injecting NMI
+    ///
+    #[error("Failed to inject NMI")]
+    Nmi(#[source] anyhow::Error),
 }
 
 #[derive(Debug)]
@@ -503,6 +508,14 @@ pub trait Vcpu: Send + Sync {
     }
     #[cfg(feature = "mshv")]
     fn set_sev_control_register(&self, _reg: u64) -> Result<()> {
+        unimplemented!()
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Trigger NMI interrupt
+    ///
+    fn nmi(&self) -> Result<()> {
         unimplemented!()
     }
 }

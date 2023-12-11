@@ -1842,8 +1842,7 @@ impl RequestHandler for Vmm {
 
     fn vm_nmi(&mut self) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm {
-            info!("nmi");
-            vm.power_button()
+            vm.nmi()
         } else {
             Err(VmError::VmNotRunning)
         }
