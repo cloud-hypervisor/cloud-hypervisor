@@ -2442,11 +2442,8 @@ impl Snapshottable for Vm {
         event!("vm", "snapshotting");
 
         #[cfg(feature = "tdx")]
-        let tdx_enabled = self.config.lock().unwrap().is_tdx_enabled();
-
-        #[cfg(feature = "tdx")]
         {
-            if tdx_enabled {
+            if self.config.lock().unwrap().is_tdx_enabled() {
                 return Err(MigratableError::Snapshot(anyhow!(
                     "Snapshot not possible with TDX VM"
                 )));
@@ -2474,7 +2471,7 @@ impl Snapshottable for Vm {
                     phys_bits,
                     kvm_hyperv: self.config.lock().unwrap().cpus.kvm_hyperv,
                     #[cfg(feature = "tdx")]
-                    tdx: tdx_enabled,
+                    tdx: false,
                     amx,
                 },
             )
