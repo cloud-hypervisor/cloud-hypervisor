@@ -200,6 +200,7 @@ impl MshvHypervisor {
         }
     }
 }
+
 /// Implementation of Hypervisor trait for Mshv
 ///
 /// # Examples
@@ -366,6 +367,7 @@ impl cpu::Vcpu for MshvVcpu {
             .map_err(|e| cpu::HypervisorCpuError::GetStandardRegs(e.into()))?
             .into())
     }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// Sets the vCPU general purpose registers.
@@ -376,6 +378,7 @@ impl cpu::Vcpu for MshvVcpu {
             .set_regs(&regs)
             .map_err(|e| cpu::HypervisorCpuError::SetStandardRegs(e.into()))
     }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// Returns the vCPU special registers.
@@ -387,6 +390,7 @@ impl cpu::Vcpu for MshvVcpu {
             .map_err(|e| cpu::HypervisorCpuError::GetSpecialRegs(e.into()))?
             .into())
     }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// Sets the vCPU special registers.
@@ -397,6 +401,7 @@ impl cpu::Vcpu for MshvVcpu {
             .set_sregs(&sregs)
             .map_err(|e| cpu::HypervisorCpuError::SetSpecialRegs(e.into()))
     }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// Returns the floating point state (FPU) from the vCPU.
@@ -408,6 +413,7 @@ impl cpu::Vcpu for MshvVcpu {
             .map_err(|e| cpu::HypervisorCpuError::GetFloatingPointRegs(e.into()))?
             .into())
     }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// Set the floating point state (FPU) of a vCPU.
@@ -440,6 +446,7 @@ impl cpu::Vcpu for MshvVcpu {
 
         Ok(succ)
     }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// Setup the model-specific registers (MSR) for this vCPU.
@@ -461,6 +468,7 @@ impl cpu::Vcpu for MshvVcpu {
         /* We always have SynIC enabled on MSHV */
         Ok(())
     }
+
     #[allow(non_upper_case_globals)]
     fn run(&self) -> std::result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
         let hv_message: hv_message = hv_message::default();
@@ -1057,6 +1065,7 @@ impl cpu::Vcpu for MshvVcpu {
             },
         }
     }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// X86 specific call to setup the CPUID registers.
@@ -1070,6 +1079,7 @@ impl cpu::Vcpu for MshvVcpu {
             .register_intercept_result_cpuid(&mshv_cpuid)
             .map_err(|e| cpu::HypervisorCpuError::SetCpuid(e.into()))
     }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// X86 specific call to retrieve the CPUID registers.
@@ -1105,6 +1115,7 @@ impl cpu::Vcpu for MshvVcpu {
             .map_err(|e| cpu::HypervisorCpuError::GetlapicState(e.into()))?
             .into())
     }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// Sets the state of the LAPIC (Local Advanced Programmable Interrupt Controller).
@@ -1115,18 +1126,21 @@ impl cpu::Vcpu for MshvVcpu {
             .set_lapic(&lapic)
             .map_err(|e| cpu::HypervisorCpuError::SetLapicState(e.into()))
     }
+
     ///
     /// Returns the vcpu's current "multiprocessing state".
     ///
     fn get_mp_state(&self) -> cpu::Result<MpState> {
         Ok(MpState::Mshv)
     }
+
     ///
     /// Sets the vcpu's current "multiprocessing state".
     ///
     fn set_mp_state(&self, _mp_state: MpState) -> cpu::Result<()> {
         Ok(())
     }
+
     ///
     /// Set CPU state
     ///
@@ -1152,6 +1166,7 @@ impl cpu::Vcpu for MshvVcpu {
             .map_err(|e| cpu::HypervisorCpuError::SetDebugRegs(e.into()))?;
         Ok(())
     }
+
     ///
     /// Get CPU State
     ///
@@ -1188,6 +1203,7 @@ impl cpu::Vcpu for MshvVcpu {
         }
         .into())
     }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// Translate guest virtual address to guest physical address
@@ -1204,6 +1220,7 @@ impl cpu::Vcpu for MshvVcpu {
 
         Ok((gpa, result_code))
     }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// Return the list of initial MSR entries for a VCPU
@@ -1236,6 +1253,7 @@ impl MshvVcpu {
             .get_xsave()
             .map_err(|e| cpu::HypervisorCpuError::GetXsaveState(e.into()))
     }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// X86 specific call that sets the vcpu's current "xsave struct".
@@ -1245,6 +1263,7 @@ impl MshvVcpu {
             .set_xsave(xsave)
             .map_err(|e| cpu::HypervisorCpuError::SetXsaveState(e.into()))
     }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// X86 specific call that returns the vcpu's current "xcrs".
@@ -1254,6 +1273,7 @@ impl MshvVcpu {
             .get_xcrs()
             .map_err(|e| cpu::HypervisorCpuError::GetXcsr(e.into()))
     }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// X86 specific call that sets the vcpu's current "xcrs".
@@ -1263,6 +1283,7 @@ impl MshvVcpu {
             .set_xcrs(xcrs)
             .map_err(|e| cpu::HypervisorCpuError::SetXcsr(e.into()))
     }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// Returns currently pending exceptions, interrupts, and NMIs as well as related
@@ -1273,6 +1294,7 @@ impl MshvVcpu {
             .get_vcpu_events()
             .map_err(|e| cpu::HypervisorCpuError::GetVcpuEvents(e.into()))
     }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// Sets pending exceptions, interrupts, and NMIs as well as related states
@@ -1452,6 +1474,7 @@ impl vm::Vm for MshvVm {
     fn set_identity_map_address(&self, _address: u64) -> vm::Result<()> {
         Ok(())
     }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// Sets the address of the three-page region in the VM's address space.
@@ -1459,12 +1482,14 @@ impl vm::Vm for MshvVm {
     fn set_tss_address(&self, _offset: usize) -> vm::Result<()> {
         Ok(())
     }
+
     ///
     /// Creates an in-kernel interrupt controller.
     ///
     fn create_irq_chip(&self) -> vm::Result<()> {
         Ok(())
     }
+
     ///
     /// Registers an event that will, when signaled, trigger the `gsi` IRQ.
     ///
@@ -1477,6 +1502,7 @@ impl vm::Vm for MshvVm {
 
         Ok(())
     }
+
     ///
     /// Unregisters an event that will, when signaled, trigger the `gsi` IRQ.
     ///
@@ -1489,6 +1515,7 @@ impl vm::Vm for MshvVm {
 
         Ok(())
     }
+
     ///
     /// Creates a VcpuFd object from a vcpu RawFd.
     ///
@@ -1512,14 +1539,17 @@ impl vm::Vm for MshvVm {
         };
         Ok(Arc::new(vcpu))
     }
+
     #[cfg(target_arch = "x86_64")]
     fn enable_split_irq(&self) -> vm::Result<()> {
         Ok(())
     }
+
     #[cfg(target_arch = "x86_64")]
     fn enable_sgx_attribute(&self, _file: File) -> vm::Result<()> {
         Ok(())
     }
+
     fn register_ioevent(
         &self,
         fd: &EventFd,
@@ -1550,6 +1580,7 @@ impl vm::Vm for MshvVm {
                 .map_err(|e| vm::HypervisorVmError::RegisterIoEvent(e.into()))
         }
     }
+
     /// Unregister an event from a certain address it has been previously registered to.
     fn unregister_ioevent(&self, fd: &EventFd, addr: &IoEventAddress) -> vm::Result<()> {
         let addr = &mshv_ioctls::IoEventAddress::from(*addr);
@@ -1674,6 +1705,7 @@ impl vm::Vm for MshvVm {
             .set_msi_routing(&msi_routing[0])
             .map_err(|e| vm::HypervisorVmError::SetGsiRouting(e.into()))
     }
+
     ///
     /// Start logging dirty pages
     ///
@@ -1682,6 +1714,7 @@ impl vm::Vm for MshvVm {
             .enable_dirty_page_tracking()
             .map_err(|e| vm::HypervisorVmError::StartDirtyLog(e.into()))
     }
+
     ///
     /// Stop logging dirty pages
     ///
@@ -1700,6 +1733,7 @@ impl vm::Vm for MshvVm {
             .map_err(|e| vm::HypervisorVmError::StartDirtyLog(e.into()))?;
         Ok(())
     }
+
     ///
     /// Get dirty pages bitmap (one bit per page)
     ///
@@ -1712,20 +1746,24 @@ impl vm::Vm for MshvVm {
             )
             .map_err(|e| vm::HypervisorVmError::GetDirtyLog(e.into()))
     }
+
     /// Retrieve guest clock.
     #[cfg(target_arch = "x86_64")]
     fn get_clock(&self) -> vm::Result<ClockData> {
         Ok(ClockData::Mshv)
     }
+
     /// Set guest clock.
     #[cfg(target_arch = "x86_64")]
     fn set_clock(&self, _data: &ClockData) -> vm::Result<()> {
         Ok(())
     }
+
     /// Downcast to the underlying MshvVm type
     fn as_any(&self) -> &dyn Any {
         self
     }
+
     /// Initialize the SEV-SNP VM
     #[cfg(feature = "sev_snp")]
     fn sev_snp_init(&self) -> vm::Result<()> {
@@ -1737,6 +1775,9 @@ impl vm::Vm for MshvVm {
             .map_err(|e| vm::HypervisorVmError::InitializeSevSnp(e.into()))
     }
 
+    ///
+    /// Importing isolated pages, these pages will be used
+    /// for the PSP(Platform Security Processor) measurement.
     #[cfg(feature = "sev_snp")]
     fn import_isolated_pages(
         &self,
@@ -1764,6 +1805,11 @@ impl vm::Vm for MshvVm {
             .import_isolated_pages(&isolated_pages[0])
             .map_err(|e| vm::HypervisorVmError::ImportIsolatedPages(e.into()))
     }
+
+    ///
+    /// Complete isolated import, telling the hypervisor that
+    /// importing the pages to guest memory is complete.
+    ///
     #[cfg(feature = "sev_snp")]
     fn complete_isolated_import(
         &self,
