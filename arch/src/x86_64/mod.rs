@@ -926,6 +926,112 @@ pub fn configure_system(
     )
 }
 
+type RamRange = (u64, u64);
+
+/// Returns usable physical memory ranges for the guest
+/// These should be used to create e820_RAM memory maps
+///
+/// There are up to two usable physical memory ranges,
+/// divided by the gap at the end of 32bit address space.
+pub fn generate_ram_ranges(
+    guest_mem: &GuestMemoryMmap,
+) -> super::Result<(RamRange, Option<RamRange>)> {
+    // Merge continuous memory regions into one region.
+    // Note: memory regions from "GuestMemory" are sorted and non-zero sized.
+    let ram_regions = {
+        let mut ram_regions = Vec::new();
+        let mut current_start = guest_mem
+            .iter()
+            .next()
+            .map(GuestMemoryRegion::start_addr)
+            .expect("GuestMemory must have one memory region at least")
+            .raw_value();
+        let mut current_end = current_start;
+
+        for (start, size) in guest_mem
+            .iter()
+            .map(|m| (m.start_addr().raw_value(), m.len()))
+        {
+            if current_end == start {
+                // This zone is continuous with the previous one.
+                current_end += size;
+            } else {
+                ram_regions.push((current_start, current_end));
+
+                current_start = start;
+                current_end = start + size;
+            }
+        }
+
+        ram_regions.push((current_start, current_end));
+
+        ram_regions
+    };
+
+    if ram_regions.len() > 2 {
+        error!(
+            "There should be up to two usable physical memory ranges, devidided by the
+            gap at the end of 32bit address space (e.g. between 3G and 4G)."
+        );
+        return Err(super::Error::MemmapTableSetup);
+    }
+
+    // Generate the first usable physical memory range before the gap
+    let first_ram_range = {
+        let (first_region_start, first_region_end) =
+            ram_regions.first().ok_or(super::Error::MemmapTableSetup)?;
+        let high_ram_start = layout::HIGH_RAM_START.raw_value();
+        let mem_32bit_reserved_start = layout::MEM_32BIT_RESERVED_START.raw_value();
+
+        if !((first_region_start <= &high_ram_start)
+            && (first_region_end > &high_ram_start)
+            && (first_region_end <= &mem_32bit_reserved_start))
+        {
+            error!(
+                "Unexpected first memory region layout: (start: 0x{:08x}, end: 0x{:08x}).
+                high_ram_start: 0x{:08x}, mem_32bit_reserved_start: 0x{:08x}",
+                first_region_start, first_region_end, high_ram_start, mem_32bit_reserved_start
+            );
+
+            return Err(super::Error::MemmapTableSetup);
+        }
+
+        info!(
+            "first usable physical memory range, start: 0x{:08x}, end: 0x{:08x}",
+            high_ram_start, first_region_end
+        );
+
+        (high_ram_start, *first_region_end)
+    };
+
+    // Generate the second usable physical memory range after the gap if any
+    let second_ram_range = if let Some((second_region_start, second_region_end)) =
+        ram_regions.get(1)
+    {
+        let ram_64bit_start = layout::RAM_64BIT_START.raw_value();
+
+        if second_region_start != &ram_64bit_start {
+            error!(
+                "Unexpected second memory region layout: start: 0x{:08x}, ram_64bit_start: 0x{:08x}",
+                second_region_start, ram_64bit_start
+            );
+
+            return Err(super::Error::MemmapTableSetup);
+        }
+
+        info!(
+            "Second usable physical memory range, start: 0x{:08x}, end: 0x{:08x}",
+            ram_64bit_start, second_region_end
+        );
+
+        Some((ram_64bit_start, *second_region_end))
+    } else {
+        None
+    };
+
+    Ok((first_ram_range, second_ram_range))
+}
+
 fn configure_pvh(
     guest_mem: &GuestMemoryMmap,
     cmdline_addr: GuestAddress,
@@ -972,100 +1078,31 @@ fn configure_pvh(
     // Create the memory map entries.
     add_memmap_entry(&mut memmap, 0, layout::EBDA_START.raw_value(), E820_RAM);
 
-    // Merge continuous memory regions into one region.
-    // Note: memory regions from "GuestMemory" are sorted and non-zero sized.
-    let ram_regions = {
-        let mut ram_regions = Vec::new();
-        let mut current_start = guest_mem
-            .iter()
-            .next()
-            .map(GuestMemoryRegion::start_addr)
-            .expect("GuestMemory must have one memory region at least")
-            .raw_value();
-        let mut current_end = current_start;
+    // Get usable physical memory ranges
+    let (first_ram_range, second_ram_range) = generate_ram_ranges(guest_mem)?;
 
-        for (start, size) in guest_mem
-            .iter()
-            .map(|m| (m.start_addr().raw_value(), m.len()))
-        {
-            if current_end == start {
-                // This zone is continuous with the previous one.
-                current_end += size;
-            } else {
-                ram_regions.push((current_start, current_end));
+    // Create e820 memory map entry before the gap
+    info!(
+        "create_memmap_entry, start: 0x{:08x}, end: 0x{:08x}",
+        first_ram_range.0, first_ram_range.1
+    );
+    add_memmap_entry(
+        &mut memmap,
+        first_ram_range.0,
+        first_ram_range.1 - first_ram_range.0,
+        E820_RAM,
+    );
 
-                current_start = start;
-                current_end = start + size;
-            }
-        }
-
-        ram_regions.push((current_start, current_end));
-
-        ram_regions
-    };
-
-    if ram_regions.len() > 2 {
-        error!(
-            "There should be up to two non-continuous regions, devidided by the
-            gap at the end of 32bit address space (e.g. between 3G and 4G)."
-        );
-        return Err(super::Error::MemmapTableSetup);
-    }
-
-    // Create the memory map entry for memory region before the gap
-    {
-        let (first_region_start, first_region_end) =
-            ram_regions.first().ok_or(super::Error::MemmapTableSetup)?;
-        let high_ram_start = layout::HIGH_RAM_START.raw_value();
-        let mem_32bit_reserved_start = layout::MEM_32BIT_RESERVED_START.raw_value();
-
-        if !((first_region_start <= &high_ram_start)
-            && (first_region_end > &high_ram_start)
-            && (first_region_end <= &mem_32bit_reserved_start))
-        {
-            error!(
-                "Unexpected first memory region layout: (start: 0x{:08x}, end: 0x{:08x}).
-                high_ram_start: 0x{:08x}, mem_32bit_reserved_start: 0x{:08x}",
-                first_region_start, first_region_end, high_ram_start, mem_32bit_reserved_start
-            );
-
-            return Err(super::Error::MemmapTableSetup);
-        }
-
+    // Create e820 memory map after the gap if any
+    if let Some(second_ram_range) = second_ram_range {
         info!(
             "create_memmap_entry, start: 0x{:08x}, end: 0x{:08x}",
-            high_ram_start, first_region_end
-        );
-
-        add_memmap_entry(
-            &mut memmap,
-            high_ram_start,
-            first_region_end - high_ram_start,
-            E820_RAM,
-        );
-    }
-
-    // Create the memory map entry for memory region after the gap if any
-    if let Some((second_region_start, second_region_end)) = ram_regions.get(1) {
-        let ram_64bit_start = layout::RAM_64BIT_START.raw_value();
-
-        if second_region_start != &ram_64bit_start {
-            error!(
-                "Unexpected second memory region layout: start: 0x{:08x}, ram_64bit_start: 0x{:08x}",
-                second_region_start, ram_64bit_start
-            );
-
-            return Err(super::Error::MemmapTableSetup);
-        }
-
-        info!(
-            "create_memmap_entry, start: 0x{:08x}, end: 0x{:08x}",
-            ram_64bit_start, second_region_end
+            second_ram_range.0, second_ram_range.1
         );
         add_memmap_entry(
             &mut memmap,
-            ram_64bit_start,
-            second_region_end - ram_64bit_start,
+            second_ram_range.0,
+            second_ram_range.1 - second_ram_range.0,
             E820_RAM,
         );
     }
