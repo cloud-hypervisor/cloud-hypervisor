@@ -95,12 +95,12 @@ pub enum HypervisorCpuError {
     #[error("Failed to get Msr entries: {0}")]
     GetMsrEntries(#[source] anyhow::Error),
     ///
-    /// Setting MSR entries error
+    /// Setting multi-processing  state error
     ///
     #[error("Failed to set MP state: {0}")]
     SetMpState(#[source] anyhow::Error),
     ///
-    /// Getting Msr entries error
+    /// Getting multi-processing  state error
     ///
     #[error("Failed to get MP state: {0}")]
     GetMpState(#[source] anyhow::Error),
