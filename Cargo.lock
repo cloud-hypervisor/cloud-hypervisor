@@ -1780,8 +1780,10 @@ checksum = "8edc89eaa583cf6bc4c6ef16a219f0a60d342ca3bf0eae793560038ac8af1795"
 name = "rate_limiter"
 version = "0.1.0"
 dependencies = [
+ "epoll",
  "libc",
  "log",
+ "thiserror",
  "vmm-sys-util",
 ]
 
