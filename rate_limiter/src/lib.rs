@@ -53,6 +53,9 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use vmm_sys_util::timerfd::TimerFd;
 
+/// Module for group rate limiting.
+pub mod group;
+
 #[derive(Debug)]
 /// Describes the errors that may occur while handling rate limiter events.
 pub enum Error {
