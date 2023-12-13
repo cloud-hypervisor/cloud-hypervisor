@@ -419,6 +419,61 @@ pub fn load_igvm(
         }
     }
 
+    #[cfg(feature = "sev_snp")]
+    {
+        use std::time::Instant;
+
+        let now = Instant::now();
+
+        // Sort the gpas to group them by the page type
+        gpas.sort_by(|a, b| a.gpa.cmp(&b.gpa));
+
+        let gpas_grouped = gpas
+            .iter()
+            .fold(Vec::<Vec<GpaPages>>::new(), |mut acc, gpa| {
+                if let Some(last_vec) = acc.last_mut() {
+                    if last_vec[0].page_type == gpa.page_type {
+                        last_vec.push(*gpa);
+                        return acc;
+                    }
+                }
+                acc.push(vec![*gpa]);
+                acc
+            });
+
+        // Import the pages as a group(by page type) of PFNs to reduce the
+        // hypercall.
+        for group in gpas_grouped.iter() {
+            info!(
+                "Importing {} page{}",
+                group.len(),
+                if group.len() > 1 { "s" } else { "" }
+            );
+            // Convert the gpa into PFN as MSHV hypercall takes an array
+            // of PFN for importing the isolated pages
+            let pfns: Vec<u64> = group
+                .iter()
+                .map(|gpa| gpa.gpa >> HV_HYP_PAGE_SHIFT)
+                .collect();
+            memory_manager
+                .lock()
+                .unwrap()
+                .vm
+                .import_isolated_pages(
+                    group[0].page_type,
+                    hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB,
+                    &pfns,
+                )
+                .map_err(Error::ImportIsolatedPages)?;
+        }
+
+        info!(
+            "Time it took to for hashing pages {:.2?} and page_count {:?}",
+            now.elapsed(),
+            gpas.len()
+        );
+    }
+
     debug!("Dumping the contents of VMSA page: {:x?}", loaded_info.vmsa);
     Ok(loaded_info)
 }
