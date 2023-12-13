@@ -718,6 +718,20 @@ pub fn ssh_command_ip(
     )
 }
 
+pub fn exec_host_command_with_retries(command: &str, retries: u32, interval: Duration) -> bool {
+    for _ in 0..retries {
+        let s = exec_host_command_output(command).status;
+        if !s.success() {
+            eprintln!("\n\n==== retrying in {:?} ===\n\n", interval);
+            thread::sleep(interval);
+        } else {
+            return true;
+        }
+    }
+
+    false
+}
+
 pub fn exec_host_command_status(command: &str) -> ExitStatus {
     exec_host_command_output(command).status
 }
