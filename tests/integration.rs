@@ -9822,9 +9822,8 @@ mod rate_limiter {
         _test_rate_limiter_net(false);
     }
 
-    fn _test_rate_limiter_block(bandwidth: bool) {
+    fn _test_rate_limiter_block(bandwidth: bool, num_queues: u32) {
         let test_timeout = 10;
-        let num_queues = 1;
         let fio_ops = FioOps::RandRW;
 
         let bw_size = if bandwidth {
@@ -9851,11 +9850,11 @@ mod rate_limiter {
 
         let test_blk_params = if bandwidth {
             format!(
-                "path={blk_rate_limiter_test_img},bw_size={bw_size},bw_refill_time={bw_refill_time}"
+                "path={blk_rate_limiter_test_img},num_queues={num_queues},bw_size={bw_size},bw_refill_time={bw_refill_time}"
             )
         } else {
             format!(
-                "path={blk_rate_limiter_test_img},ops_size={bw_size},ops_refill_time={bw_refill_time}"
+                "path={blk_rate_limiter_test_img},num_queues={num_queues},ops_size={bw_size},ops_refill_time={bw_refill_time}"
             )
         };
 
@@ -9908,13 +9907,137 @@ mod rate_limiter {
         handle_child_output(r, &output);
     }
 
+    fn _test_rate_limiter_group_block(bandwidth: bool, num_queues: u32, num_disks: u32) {
+        let test_timeout = 10;
+        let fio_ops = FioOps::RandRW;
+
+        let bw_size = if bandwidth {
+            10485760_u64 // bytes
+        } else {
+            100_u64 // I/O
+        };
+        let bw_refill_time = 100; // ms
+        let limit_rate = (bw_size * 1000) as f64 / bw_refill_time as f64;
+
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+        let api_socket = temp_api_path(&guest.tmp_dir);
+        let test_img_dir = TempDir::new_with_prefix("/var/tmp/ch").unwrap();
+
+        let rate_limit_group_arg = if bandwidth {
+            format!("id=group0,bw_size={bw_size},bw_refill_time={bw_refill_time}")
+        } else {
+            format!("id=group0,ops_size={bw_size},ops_refill_time={bw_refill_time}")
+        };
+
+        let mut disk_args = vec![
+            "--disk".to_string(),
+            format!(
+                "path={}",
+                guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+            ),
+            format!(
+                "path={}",
+                guest.disk_config.disk(DiskType::CloudInit).unwrap()
+            ),
+        ];
+
+        for i in 0..num_disks {
+            let test_img_path = String::from(
+                test_img_dir
+                    .as_path()
+                    .join(format!("blk{}.img", i))
+                    .to_str()
+                    .unwrap(),
+            );
+
+            assert!(exec_host_command_output(&format!(
+                "dd if=/dev/zero of={test_img_path} bs=1M count=1024"
+            ))
+            .status
+            .success());
+
+            disk_args.push(format!(
+                "path={test_img_path},num_queues={num_queues},rate_limit_group=group0"
+            ));
+        }
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", &format!("boot={}", num_queues * num_disks)])
+            .args(["--memory", "size=4G"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--rate-limit-group", &rate_limit_group_arg])
+            .args(disk_args)
+            .default_net()
+            .args(["--api-socket", &api_socket])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            let mut fio_command = format!(
+                "sudo fio --name=global --output-format=json \
+                --direct=1 --bs=4k --ioengine=io_uring --iodepth=64 \
+                --rw={fio_ops} --runtime={test_timeout} --numjobs={num_queues}"
+            );
+
+            // Generate additional argument for each disk:
+            // --name=job0 --filename=/dev/vdc \
+            // --name=job1 --filename=/dev/vdd \
+            // --name=job2 --filename=/dev/vde \
+            // ...
+            for i in 0..num_disks {
+                let c: char = 'c';
+                let arg = format!(
+                    " --name=job{i} --filename=/dev/vd{}",
+                    char::from_u32((c as u32) + i).unwrap()
+                );
+                fio_command += &arg;
+            }
+            let output = guest.ssh_command(&fio_command).unwrap();
+
+            // Parse fio output
+            let measured_rate = if bandwidth {
+                parse_fio_output(&output, &fio_ops, num_queues * num_disks).unwrap()
+            } else {
+                parse_fio_output_iops(&output, &fio_ops, num_queues * num_disks).unwrap()
+            };
+            assert!(check_rate_limit(measured_rate, limit_rate, 0.1));
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+    }
+
     #[test]
     fn test_rate_limiter_block_bandwidth() {
-        _test_rate_limiter_block(true)
+        _test_rate_limiter_block(true, 1);
+        _test_rate_limiter_block(true, 2)
+    }
+
+    #[test]
+    fn test_rate_limiter_group_block_bandwidth() {
+        _test_rate_limiter_group_block(true, 1, 1);
+        _test_rate_limiter_group_block(true, 2, 1);
+        _test_rate_limiter_group_block(true, 1, 2);
+        _test_rate_limiter_group_block(true, 2, 2);
     }
 
     #[test]
     fn test_rate_limiter_block_iops() {
-        _test_rate_limiter_block(false)
+        _test_rate_limiter_block(false, 1);
+        _test_rate_limiter_block(false, 2);
+    }
+
+    #[test]
+    fn test_rate_limiter_group_block_iops() {
+        _test_rate_limiter_group_block(false, 1, 1);
+        _test_rate_limiter_group_block(false, 2, 1);
+        _test_rate_limiter_group_block(false, 1, 2);
+        _test_rate_limiter_group_block(false, 2, 2);
     }
 }
