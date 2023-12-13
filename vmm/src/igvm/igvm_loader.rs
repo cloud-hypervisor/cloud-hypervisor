@@ -423,7 +423,7 @@ pub fn load_igvm(
     {
         use std::time::Instant;
 
-        let now = Instant::now();
+        let mut now = Instant::now();
 
         // Sort the gpas to group them by the page type
         gpas.sort_by(|a, b| a.gpa.cmp(&b.gpa));
@@ -471,6 +471,21 @@ pub fn load_igvm(
             "Time it took to for hashing pages {:.2?} and page_count {:?}",
             now.elapsed(),
             gpas.len()
+        );
+
+        now = Instant::now();
+        // Call Complete Isolated Import since we are done importing isolated pages
+        let host_data: [u8; 32] = [0; 32];
+        memory_manager
+            .lock()
+            .unwrap()
+            .vm
+            .complete_isolated_import(loaded_info.snp_id_block, host_data, 1)
+            .map_err(Error::CompleteIsolatedImport)?;
+
+        info!(
+            "Time it took to for launch complete command  {:.2?}",
+            now.elapsed()
         );
     }
 
