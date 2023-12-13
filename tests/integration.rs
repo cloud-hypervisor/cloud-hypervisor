@@ -6776,10 +6776,11 @@ mod common_parallel {
             .unwrap();
         thread::sleep(std::time::Duration::new(2, 0));
 
-        assert!(exec_host_command_status(
-            "/usr/local/bin/spdk-nvme/rpc.py nvmf_create_transport -t VFIOUSER"
-        )
-        .success());
+        assert!(exec_host_command_with_retries(
+            "/usr/local/bin/spdk-nvme/rpc.py nvmf_create_transport -t VFIOUSER",
+            3,
+            std::time::Duration::new(5, 0),
+        ));
         assert!(exec_host_command_status(&format!(
             "/usr/local/bin/spdk-nvme/rpc.py bdev_aio_create {} test 512",
             nvme_dir.join("test-disk.raw").to_str().unwrap()
