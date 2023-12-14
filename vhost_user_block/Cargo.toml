@@ -8,7 +8,7 @@ build = "../build.rs"
 [dependencies]
 clap = { version = "4.4.7", features = ["wrap_help","cargo"] }
 block = { path = "../block" }
-env_logger = "0.10.0"
+env_logger = "0.10.1"
 epoll = "4.3.3"
 libc = "0.2.147"
 log = "0.4.20"
