@@ -11,6 +11,9 @@ build_spdk_nvme() {
     SPDK_DIR="$WORKLOADS_DIR/spdk"
     SPDK_REPO="https://github.com/spdk/spdk.git"
     SPDK_DEPLOY_DIR="/usr/local/bin/spdk-nvme"
+
+    rm -rf "$SPDK_DIR"
+
     checkout_repo "$SPDK_DIR" "$SPDK_REPO" master "ef8bcce58f3f02b79c0619a297e4f17e81e62b24"
 
     if [ ! -f "$SPDK_DIR/.built" ]; then
@@ -32,6 +35,8 @@ build_spdk_nvme() {
     cp "$WORKLOADS_DIR/spdk/scripts/rpc.py" $SPDK_DEPLOY_DIR/rpc.py
     cp -r "$WORKLOADS_DIR/spdk/python/spdk/" $SPDK_DEPLOY_DIR/
     cp -r "$WORKLOADS_DIR/spdk/python" $SPDK_DEPLOY_DIR/../
+
+    rm -rf "$SPDK_DIR"
 }
 
 build_virtiofsd() {
