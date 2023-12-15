@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -x
 
 # This set of vfio tests require to be ran on a specific machine with
@@ -14,7 +14,7 @@ process_common_args "$@"
 
 WORKLOADS_DIR="$HOME/workloads"
 
-download_hypervisor_fw 
+download_hypervisor_fw
 
 CFLAGS=""
 if [[ "${BUILD_TARGET}" == "x86_64-unknown-linux-musl" ]]; then

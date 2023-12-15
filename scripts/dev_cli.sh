@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # Copyright © 2020 Intel Corporation
