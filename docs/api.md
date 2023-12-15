@@ -147,7 +147,7 @@ We want to create a virtual machine with the following characteristics:
   `/opt/clh/images/focal-server-cloudimg-amd64.raw`
 
 ```shell
-#!/bin/bash
+#!/usr/bin/env bash
 
 curl --unix-socket /tmp/cloud-hypervisor.sock -i \
      -X PUT 'http://localhost/api/v1/vm.create'  \
@@ -167,7 +167,7 @@ curl --unix-socket /tmp/cloud-hypervisor.sock -i \
 Once the VM is created, we can boot it:
 
 ```shell
-#!/bin/bash
+#!/usr/bin/env bash
 
 curl --unix-socket /tmp/cloud-hypervisor.sock -i -X PUT 'http://localhost/api/v1/vm.boot'
 ```
@@ -177,7 +177,7 @@ curl --unix-socket /tmp/cloud-hypervisor.sock -i -X PUT 'http://localhost/api/v1
 We can fetch information about any VM, as soon as it's created:
 
 ```shell
-#!/bin/bash
+#!/usr/bin/env bash
 
 curl --unix-socket /tmp/cloud-hypervisor.sock -i \
      -X GET 'http://localhost/api/v1/vm.info' \
@@ -189,7 +189,7 @@ curl --unix-socket /tmp/cloud-hypervisor.sock -i \
 We can reboot a VM that's already booted:
 
 ```shell
-#!/bin/bash
+#!/usr/bin/env bash
 
 curl --unix-socket /tmp/cloud-hypervisor.sock -i -X PUT 'http://localhost/api/v1/vm.reboot'
 ```
@@ -199,7 +199,7 @@ curl --unix-socket /tmp/cloud-hypervisor.sock -i -X PUT 'http://localhost/api/v1
 Once booted, we can shut a VM down from the REST API:
 
 ```shell
-#!/bin/bash
+#!/usr/bin/env bash
 
 curl --unix-socket /tmp/cloud-hypervisor.sock -i -X PUT 'http://localhost/api/v1/vm.shutdown'
 ```
@@ -385,7 +385,7 @@ APIs work together, let's look at a complete VM creation flow, from the
    [REST API](#rest-api) in order to creates a virtual machine:
    ```
    shell
-   #!/bin/bash
+   #!/usr/bin/env bash
 
 	curl --unix-socket /tmp/cloud-hypervisor.sock -i \
 		-X PUT 'http://localhost/api/v1/vm.create'  \
