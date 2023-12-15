@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 source $HOME/.cargo/env
 source $(dirname "$0")/test-util.sh

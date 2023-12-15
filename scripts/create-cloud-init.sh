@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -x
 
 rm -f /tmp/ubuntu-cloudinit.img

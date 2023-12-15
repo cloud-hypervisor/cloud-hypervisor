@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 : '
     This script checks if an image is compatible with Cloud Hypervisor.
     At first, it detects the image type(raw or qcow2),
