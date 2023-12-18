@@ -297,6 +297,7 @@ fn rest_api_do_command(matches: &ArgMatches, socket: &mut UnixStream) -> ApiResu
         Some("shutdown") => {
             simple_api_command(socket, "PUT", "shutdown", None).map_err(Error::HttpApiClient)
         }
+        Some("nmi") => simple_api_command(socket, "PUT", "nmi", None).map_err(Error::HttpApiClient),
         Some("resize") => {
             let resize = resize_config(
                 matches
@@ -1089,7 +1090,8 @@ fn main() {
                 .arg(Arg::new("path").index(1).default_value("-")),
         )
         .subcommand(Command::new("ping").about("Ping the VMM to check for API server availability"))
-        .subcommand(Command::new("shutdown-vmm").about("Shutdown the VMM"));
+        .subcommand(Command::new("shutdown-vmm").about("Shutdown the VMM"))
+        .subcommand(Command::new("nmi").about("Trigger NMI"));
 
     let matches = app.get_matches();
 
