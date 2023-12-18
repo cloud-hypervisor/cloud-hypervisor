@@ -110,6 +110,7 @@ The Cloud Hypervisor API exposes the following actions through its endpoints:
 | Add vsock device to the VM         | `/vm.add-vsock`         | `/schemas/VsockConfig`          | `/schemas/PciDeviceInfo` | The VM is booted                                       |
 | Remove device from the VM          | `/vm.remove-device`     | `/schemas/VmRemoveDevice`       | N/A                      | The VM is booted                                       |
 | Dump the VM counters               | `/vm.counters`          | N/A                             | `/schemas/VmCounters`    | The VM is booted                                       |
+| Inject an NMI                      | `/vm.nmi`               | N/A                             | N/A                      | The VM is booted                                       |
 | Prepare to receive a migration     | `/vm.receive-migration` | `/schemas/ReceiveMigrationData` | N/A                      | N/A                                                    |
 | Start to send migration to target  | `/vm.send-migration`    | `/schemas/SendMigrationData`    | N/A                      | The VM is booted and (shared mem or hugepages enabled) |
 
