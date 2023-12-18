@@ -299,7 +299,6 @@ pipeline {
                 stage('Worker build - Metrics') {
                     agent { node { label 'jammy-metrics' } }
                     when {
-                        branch 'main'
                         beforeAgent true
                         expression {
                             return runWorkers
@@ -322,17 +321,11 @@ pipeline {
                                 sh 'scripts/dev_cli.sh tests --metrics -- -- --report-file /root/workloads/metrics.json'
                             }
                         }
-                        stage('Upload metrics report') {
-                            steps {
-                                sh 'curl -X PUT https://cloud-hypervisor-metrics.azurewebsites.net/api/publishmetrics -H "x-functions-key: $METRICS_PUBLISH_KEY" -T ~/workloads/metrics.json'
-                            }
-                        }
                     }
                 }
                 stage('Worker build - Rate Limiter') {
                     agent { node { label 'focal-metrics' } }
                     when {
-                        branch 'main'
                         beforeAgent true
                         expression {
                             return runWorkers
@@ -359,7 +352,6 @@ pipeline {
                     when {
                         beforeAgent true
                         allOf {
-                            branch 'main'
                             expression {
                                 return runWorkers
                             }
@@ -403,7 +395,6 @@ pipeline {
                     when {
                         beforeAgent true
                         allOf {
-                            branch 'main'
                             expression {
                                 return runWorkers
                             }
