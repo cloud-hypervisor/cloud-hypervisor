@@ -6,7 +6,7 @@
 // found in the LICENSE-BSD-3-Clause file.
 
 use crate::layout::{APIC_START, HIGH_RAM_START, IOAPIC_START};
-use crate::x86_64::mpspec;
+use crate::x86_64::{get_x2apic_id, mpspec};
 use crate::GuestMemoryMmap;
 use libc::c_char;
 use std::mem;
@@ -125,9 +125,18 @@ fn compute_mp_size(num_cpus: u8) -> usize {
 }
 
 /// Performs setup of the MP table for the given `num_cpus`.
-pub fn setup_mptable(offset: GuestAddress, mem: &GuestMemoryMmap, num_cpus: u8) -> Result<()> {
-    if num_cpus as u32 > MAX_SUPPORTED_CPUS {
-        return Err(Error::TooManyCpus);
+pub fn setup_mptable(
+    offset: GuestAddress,
+    mem: &GuestMemoryMmap,
+    num_cpus: u8,
+    topology: Option<(u8, u8, u8)>,
+) -> Result<()> {
+    if num_cpus > 0 {
+        let cpu_id_max = num_cpus - 1;
+        let x2apic_id_max = get_x2apic_id(cpu_id_max.into(), topology);
+        if x2apic_id_max >= MAX_SUPPORTED_CPUS {
+            return Err(Error::TooManyCpus);
+        }
     }
 
     // Used to keep track of the next base pointer into the MP table.
@@ -141,7 +150,7 @@ pub fn setup_mptable(offset: GuestAddress, mem: &GuestMemoryMmap, num_cpus: u8) 
     }
 
     let mut checksum: u8 = 0;
-    let ioapicid: u8 = num_cpus + 1;
+    let ioapicid: u8 = MAX_SUPPORTED_CPUS as u8 + 1;
 
     // The checked_add here ensures the all of the following base_mp.unchecked_add's will be without
     // overflow.
@@ -179,7 +188,7 @@ pub fn setup_mptable(offset: GuestAddress, mem: &GuestMemoryMmap, num_cpus: u8) 
         for cpu_id in 0..num_cpus {
             let mut mpc_cpu = MpcCpuWrapper(mpspec::mpc_cpu::default());
             mpc_cpu.0.type_ = mpspec::MP_PROCESSOR as u8;
-            mpc_cpu.0.apicid = cpu_id;
+            mpc_cpu.0.apicid = get_x2apic_id(cpu_id as u32, topology) as u8;
             mpc_cpu.0.apicver = APIC_VERSION;
             mpc_cpu.0.cpuflag = mpspec::CPU_ENABLED as u8
                 | if cpu_id == 0 {
@@ -312,7 +321,7 @@ mod tests {
         let mem =
             GuestMemoryMmap::from_ranges(&[(MPTABLE_START, compute_mp_size(num_cpus))]).unwrap();
 
-        setup_mptable(MPTABLE_START, &mem, num_cpus).unwrap();
+        setup_mptable(MPTABLE_START, &mem, num_cpus, None).unwrap();
     }
 
     #[test]
@@ -321,7 +330,7 @@ mod tests {
         let mem = GuestMemoryMmap::from_ranges(&[(MPTABLE_START, compute_mp_size(num_cpus) - 1)])
             .unwrap();
 
-        assert!(setup_mptable(MPTABLE_START, &mem, num_cpus).is_err());
+        assert!(setup_mptable(MPTABLE_START, &mem, num_cpus, None).is_err());
     }
 
     #[test]
@@ -330,7 +339,7 @@ mod tests {
         let mem =
             GuestMemoryMmap::from_ranges(&[(MPTABLE_START, compute_mp_size(num_cpus))]).unwrap();
 
-        setup_mptable(MPTABLE_START, &mem, num_cpus).unwrap();
+        setup_mptable(MPTABLE_START, &mem, num_cpus, None).unwrap();
 
         let mpf_intel: MpfIntelWrapper = mem.read_obj(MPTABLE_START).unwrap();
 
@@ -346,7 +355,7 @@ mod tests {
         let mem =
             GuestMemoryMmap::from_ranges(&[(MPTABLE_START, compute_mp_size(num_cpus))]).unwrap();
 
-        setup_mptable(MPTABLE_START, &mem, num_cpus).unwrap();
+        setup_mptable(MPTABLE_START, &mem, num_cpus, None).unwrap();
 
         let mpf_intel: MpfIntelWrapper = mem.read_obj(MPTABLE_START).unwrap();
         let mpc_offset = GuestAddress(mpf_intel.0.physptr as GuestUsize);
@@ -384,7 +393,7 @@ mod tests {
         .unwrap();
 
         for i in 0..MAX_SUPPORTED_CPUS as u8 {
-            setup_mptable(MPTABLE_START, &mem, i).unwrap();
+            setup_mptable(MPTABLE_START, &mem, i, None).unwrap();
 
             let mpf_intel: MpfIntelWrapper = mem.read_obj(MPTABLE_START).unwrap();
             let mpc_offset = GuestAddress(mpf_intel.0.physptr as GuestUsize);
@@ -417,7 +426,7 @@ mod tests {
         let mem =
             GuestMemoryMmap::from_ranges(&[(MPTABLE_START, compute_mp_size(cpus as u8))]).unwrap();
 
-        let result = setup_mptable(MPTABLE_START, &mem, cpus as u8);
+        let result = setup_mptable(MPTABLE_START, &mem, cpus as u8, None);
         assert!(result.is_err());
     }
 }
