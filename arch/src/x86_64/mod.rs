@@ -221,6 +221,26 @@ impl From<Error> for super::Error {
     }
 }
 
+pub fn get_x2apic_id(cpu_id: u32, topology: Option<(u8, u8, u8)>) -> u32 {
+    if let Some(t) = topology {
+        let thread_mask_width = u8::BITS - (t.0 - 1).leading_zeros();
+        let core_mask_width = u8::BITS - (t.1 - 1).leading_zeros();
+        let die_mask_width = u8::BITS - (t.2 - 1).leading_zeros();
+
+        let thread_id = cpu_id % (t.0 as u32);
+        let core_id = cpu_id / (t.0 as u32) % (t.1 as u32);
+        let die_id = cpu_id / ((t.0 * t.1) as u32) % (t.2 as u32);
+        let socket_id = cpu_id / ((t.0 * t.1 * t.2) as u32);
+
+        return thread_id
+            | (core_id << thread_mask_width)
+            | (die_id << (thread_mask_width + core_mask_width))
+            | (socket_id << (thread_mask_width + core_mask_width + die_mask_width));
+    }
+
+    cpu_id
+}
+
 #[derive(Copy, Clone, Debug)]
 pub enum CpuidReg {
     EAX,
@@ -777,18 +797,14 @@ pub fn configure_vcpu(
     cpu_vendor: CpuVendor,
     topology: Option<(u8, u8, u8)>,
 ) -> super::Result<()> {
+    let x2apic_id = get_x2apic_id(id as u32, topology);
+
     // Per vCPU CPUID changes; common are handled via generate_common_cpuid()
     let mut cpuid = cpuid;
-    CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(id));
-    CpuidPatch::set_cpuid_reg(&mut cpuid, 0x1f, None, CpuidReg::EDX, u32::from(id));
+    CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, x2apic_id);
+    CpuidPatch::set_cpuid_reg(&mut cpuid, 0x1f, None, CpuidReg::EDX, x2apic_id);
     if matches!(cpu_vendor, CpuVendor::AMD) {
-        CpuidPatch::set_cpuid_reg(
-            &mut cpuid,
-            0x8000_001e,
-            Some(0),
-            CpuidReg::EAX,
-            u32::from(id),
-        );
+        CpuidPatch::set_cpuid_reg(&mut cpuid, 0x8000_001e, Some(0), CpuidReg::EAX, x2apic_id);
     }
 
     if let Some(t) = topology {
@@ -799,7 +815,7 @@ pub fn configure_vcpu(
     // SAFETY: get host cpuid when eax=1
     let mut cpu_ebx = unsafe { core::arch::x86_64::__cpuid(1) }.ebx;
     cpu_ebx &= 0xffffff;
-    cpu_ebx |= (id as u32) << 24;
+    cpu_ebx |= x2apic_id << 24;
     CpuidPatch::set_cpuid_reg(&mut cpuid, 0x1, None, CpuidReg::EBX, cpu_ebx);
 
     // The TSC frequency CPUID leaf should not be included when running with HyperV emulation
@@ -896,6 +912,7 @@ pub fn configure_system(
     serial_number: Option<&str>,
     uuid: Option<&str>,
     oem_strings: Option<&[&str]>,
+    topology: Option<(u8, u8, u8)>,
 ) -> super::Result<()> {
     // Write EBDA address to location where ACPICA expects to find it
     guest_mem
@@ -908,7 +925,7 @@ pub fn configure_system(
     // Place the MP table after the SMIOS table aligned to 16 bytes
     let offset = GuestAddress(layout::SMBIOS_START).unchecked_add(size);
     let offset = GuestAddress((offset.0 + 16) & !0xf);
-    mptable::setup_mptable(offset, guest_mem, _num_cpus).map_err(Error::MpTableSetup)?;
+    mptable::setup_mptable(offset, guest_mem, _num_cpus, topology).map_err(Error::MpTableSetup)?;
 
     // Check that the RAM is not smaller than the RSDP start address
     if let Some(rsdp_addr) = rsdp_addr {
@@ -1228,6 +1245,11 @@ fn update_cpuid_topology(
     cpu_vendor: CpuVendor,
     id: u8,
 ) {
+    let x2apic_id = get_x2apic_id(
+        id as u32,
+        Some((threads_per_core, cores_per_die, dies_per_package)),
+    );
+
     let thread_width = 8 - (threads_per_core - 1).leading_zeros();
     let core_width = (8 - (cores_per_die - 1).leading_zeros()) + thread_width;
     let die_width = (8 - (dies_per_package - 1).leading_zeros()) + core_width;
@@ -1290,7 +1312,7 @@ fn update_cpuid_topology(
             0x8000_001e,
             Some(0),
             CpuidReg::EBX,
-            ((threads_per_core as u32 - 1) << 8) | (id as u32 & 0xff),
+            ((threads_per_core as u32 - 1) << 8) | (x2apic_id & 0xff),
         );
         CpuidPatch::set_cpuid_reg(
             cpuid,
@@ -1313,9 +1335,7 @@ fn update_cpuid_topology(
                 0x0000_0001,
                 Some(0),
                 CpuidReg::EBX,
-                ((id as u32) << 24)
-                    | (8 << 8)
-                    | (((cores_per_die * threads_per_core) as u32) << 16),
+                (x2apic_id << 24) | (8 << 8) | (((cores_per_die * threads_per_core) as u32) << 16),
             );
             let cpuid_patches = vec![
                 // Patch tsc deadline timer bit
@@ -1420,6 +1440,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert!(config_err.is_err());
 
@@ -1437,6 +1458,7 @@ mod tests {
             GuestAddress(0),
             &None,
             no_vcpus,
+            None,
             None,
             None,
             None,
@@ -1469,6 +1491,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         )
         .unwrap();
 
@@ -1477,6 +1500,7 @@ mod tests {
             GuestAddress(0),
             &None,
             no_vcpus,
+            None,
             None,
             None,
             None,
@@ -1509,5 +1533,26 @@ mod tests {
         add_memmap_entry(&mut memmap, 0x10000, 0xa000, E820_RESERVED);
 
         assert_eq!(format!("{memmap:?}"), format!("{expected_memmap:?}"));
+    }
+
+    #[test]
+    fn test_get_x2apic_id() {
+        let x2apic_id = get_x2apic_id(0, Some((2, 3, 1)));
+        assert_eq!(x2apic_id, 0);
+
+        let x2apic_id = get_x2apic_id(1, Some((2, 3, 1)));
+        assert_eq!(x2apic_id, 1);
+
+        let x2apic_id = get_x2apic_id(2, Some((2, 3, 1)));
+        assert_eq!(x2apic_id, 2);
+
+        let x2apic_id = get_x2apic_id(6, Some((2, 3, 1)));
+        assert_eq!(x2apic_id, 8);
+
+        let x2apic_id = get_x2apic_id(7, Some((2, 3, 1)));
+        assert_eq!(x2apic_id, 9);
+
+        let x2apic_id = get_x2apic_id(8, Some((2, 3, 1)));
+        assert_eq!(x2apic_id, 10);
     }
 }
