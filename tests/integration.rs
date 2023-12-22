@@ -1035,6 +1035,40 @@ fn test_cpu_topology(threads_per_core: u8, cores_per_package: u8, packages: u8, 
                 .unwrap_or(0),
             packages
         );
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            let mut cpu_id = 0;
+            for package_id in 0..packages {
+                for core_id in 0..cores_per_package {
+                    for _ in 0..threads_per_core {
+                        assert_eq!(
+                            guest
+                                .ssh_command(&format!("cat /sys/devices/system/cpu/cpu{cpu_id}/topology/physical_package_id"))
+                                .unwrap()
+                                .trim()
+                                .parse::<u8>()
+                                .unwrap_or(0),
+                            package_id
+                        );
+
+                        assert_eq!(
+                            guest
+                                .ssh_command(&format!(
+                                    "cat /sys/devices/system/cpu/cpu{cpu_id}/topology/core_id"
+                                ))
+                                .unwrap()
+                                .trim()
+                                .parse::<u8>()
+                                .unwrap_or(0),
+                            core_id
+                        );
+
+                        cpu_id += 1;
+                    }
+                }
+            }
+        }
     });
 
     let _ = child.kill();

@@ -277,7 +277,10 @@ fn create_tpm2_table() -> Sdt {
     tpm
 }
 
-fn create_srat_table(numa_nodes: &NumaNodes) -> Sdt {
+fn create_srat_table(
+    numa_nodes: &NumaNodes,
+    #[cfg(target_arch = "x86_64")] topology: Option<(u8, u8, u8)>,
+) -> Sdt {
     let mut srat = Sdt::new(*b"SRAT", 36, 3, *b"CLOUDH", *b"CHSRAT  ", 1);
     // SRAT reserved 12 bytes
     srat.append_slice(&[0u8; 12]);
@@ -316,6 +319,9 @@ fn create_srat_table(numa_nodes: &NumaNodes) -> Sdt {
         }
 
         for cpu in &node.cpus {
+            #[cfg(target_arch = "x86_64")]
+            let x2apic_id = arch::x86_64::get_x2apic_id(*cpu as u32, topology);
+            #[cfg(target_arch = "aarch64")]
             let x2apic_id = *cpu as u32;
 
             // Flags
@@ -752,8 +758,14 @@ pub fn create_acpi_tables(
     // SRAT and SLIT
     // Only created if the NUMA nodes list is not empty.
     if !numa_nodes.is_empty() {
+        #[cfg(target_arch = "x86_64")]
+        let topology = cpu_manager.lock().unwrap().get_vcpu_topology();
         // SRAT
-        let srat = create_srat_table(numa_nodes);
+        let srat = create_srat_table(
+            numa_nodes,
+            #[cfg(target_arch = "x86_64")]
+            topology,
+        );
         let srat_offset = prev_tbl_off.checked_add(prev_tbl_len).unwrap();
         guest_mem
             .write_slice(srat.as_slice(), srat_offset)
@@ -851,8 +863,15 @@ pub fn create_acpi_tables_tdx(
     // SRAT and SLIT
     // Only created if the NUMA nodes list is not empty.
     if !numa_nodes.is_empty() {
+        #[cfg(target_arch = "x86_64")]
+        let topology = cpu_manager.lock().unwrap().get_vcpu_topology();
+
         // SRAT
-        tables.push(create_srat_table(numa_nodes));
+        tables.push(create_srat_table(
+            numa_nodes,
+            #[cfg(target_arch = "x86_64")]
+            topology,
+        ));
 
         // SLIT
         tables.push(create_slit_table(numa_nodes));
