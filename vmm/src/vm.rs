@@ -1177,6 +1177,8 @@ impl Vm {
             .as_deref()
             .map(|strings| strings.iter().map(|s| s.as_ref()).collect::<Vec<&str>>());
 
+        let topology = self.cpu_manager.lock().unwrap().get_vcpu_topology();
+
         arch::configure_system(
             &mem,
             arch::layout::CMDLINE_START,
@@ -1187,6 +1189,7 @@ impl Vm {
             serial_number.as_deref(),
             uuid.as_deref(),
             oem_strings.as_deref(),
+            topology,
         )
         .map_err(Error::ConfigureSystem)?;
         Ok(())
