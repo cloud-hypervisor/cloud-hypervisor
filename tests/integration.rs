@@ -3960,7 +3960,7 @@ mod common_parallel {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
 
-        let serial_path = guest.tmp_dir.as_path().join("/tmp/serial-output");
+        let serial_path = guest.tmp_dir.as_path().join("serial-output");
         #[cfg(target_arch = "x86_64")]
         let console_str: &str = "console=ttyS0";
         #[cfg(target_arch = "aarch64")]
@@ -4073,8 +4073,8 @@ mod common_parallel {
     fn test_serial_socket_interaction() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
-        let serial_socket = guest.tmp_dir.as_path().join("/tmp/serial.socket");
-        let serial_socket_pty = guest.tmp_dir.as_path().join("/tmp/serial.pty");
+        let serial_socket = guest.tmp_dir.as_path().join("serial.socket");
+        let serial_socket_pty = guest.tmp_dir.as_path().join("serial.pty");
         let serial_option = if cfg!(target_arch = "x86_64") {
             " console=ttyS0"
         } else {
@@ -4187,7 +4187,7 @@ mod common_parallel {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
 
-        let console_path = guest.tmp_dir.as_path().join("/tmp/console-output");
+        let console_path = guest.tmp_dir.as_path().join("console-output");
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
