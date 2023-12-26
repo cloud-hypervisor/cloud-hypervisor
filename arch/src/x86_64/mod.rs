@@ -1399,7 +1399,7 @@ fn update_cpuid_topology(
 // sections exposed to the guest.
 fn update_cpuid_sgx(
     cpuid: &mut Vec<CpuIdEntry>,
-    epc_sections: &Vec<SgxEpcSection>,
+    epc_sections: &[SgxEpcSection],
 ) -> Result<(), Error> {
     // Something's wrong if there's no EPC section.
     if epc_sections.is_empty() {
