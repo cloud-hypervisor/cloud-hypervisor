@@ -25,3 +25,4 @@ virtio-queue = "0.10.0"
 vm-memory = { version = "0.13.1", features = ["backend-mmap", "backend-atomic", "backend-bitmap"] }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = "0.11.0"
+libdeflater = "1.19.0"

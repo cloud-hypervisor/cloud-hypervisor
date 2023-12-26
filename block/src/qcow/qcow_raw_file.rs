@@ -125,6 +125,11 @@ impl QcowRawFile {
         self.cluster_size
     }
 
+    /// Returns the start offset of address that aligned a cluster
+    pub fn start_of_cluster(&self, address: u64) -> u64 {
+        address & !(self.cluster_mask)
+    }
+
     /// Returns the offset of `address` within a cluster.
     pub fn cluster_offset(&self, address: u64) -> u64 {
         address & self.cluster_mask
