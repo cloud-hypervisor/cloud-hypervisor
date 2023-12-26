@@ -90,7 +90,7 @@ impl GuestNetworkConfig {
             None => DEFAULT_TCP_LISTENER_TIMEOUT,
         };
 
-        match (|| -> Result<(), WaitForBootError> {
+        let mut closure = || -> Result<(), WaitForBootError> {
             let listener =
                 TcpListener::bind(listen_addr.as_str()).map_err(WaitForBootError::Listen)?;
             listener
@@ -143,7 +143,9 @@ impl GuestNetworkConfig {
                     Err(WaitForBootError::Accept(e))
                 }
             }
-        })() {
+        };
+
+        match closure() {
             Err(e) => {
                 let duration = start.elapsed();
                 eprintln!(
@@ -559,7 +561,7 @@ fn scp_to_guest_with_auth(
 ) -> Result<(), SshCommandError> {
     let mut counter = 0;
     loop {
-        match (|| -> Result<(), SshCommandError> {
+        let closure = || -> Result<(), SshCommandError> {
             let tcp =
                 TcpStream::connect(format!("{ip}:22")).map_err(SshCommandError::Connection)?;
             let mut sess = Session::new().unwrap();
@@ -592,7 +594,9 @@ fn scp_to_guest_with_auth(
             let _ = channel.wait_close();
 
             Ok(())
-        })() {
+        };
+
+        match closure() {
             Ok(_) => break,
             Err(e) => {
                 counter += 1;
@@ -647,7 +651,7 @@ pub fn ssh_command_ip_with_auth(
 
     let mut counter = 0;
     loop {
-        match (|| -> Result<(), SshCommandError> {
+        let mut closure = || -> Result<(), SshCommandError> {
             let tcp =
                 TcpStream::connect(format!("{ip}:22")).map_err(SshCommandError::Connection)?;
             let mut sess = Session::new().unwrap();
@@ -676,7 +680,9 @@ pub fn ssh_command_ip_with_auth(
             } else {
                 Ok(())
             }
-        })() {
+        };
+
+        match closure() {
             Ok(_) => break,
             Err(e) => {
                 counter += 1;
