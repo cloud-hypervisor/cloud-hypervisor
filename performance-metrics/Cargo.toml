@@ -11,5 +11,5 @@ dirs = "5.0.0"
 serde = { version = "1.0.168", features = ["rc", "derive"] }
 serde_json = "1.0.107"
 test_infra = { path = "../test_infra" }
-thiserror = "1.0.40"
+thiserror = "1.0.52"
 wait-timeout = "0.2.0"

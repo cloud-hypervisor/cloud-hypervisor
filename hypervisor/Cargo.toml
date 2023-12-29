@@ -27,7 +27,7 @@ serde_with = { version = "3.4.0", default-features = false, features = ["macros"
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
 vm-memory = { version = "0.13.1", features = ["backend-mmap", "backend-atomic"] }
 vmm-sys-util = { version = "0.11.0", features = ["with-serde"] }
-thiserror = "1.0.40"
+thiserror = "1.0.52"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies.iced-x86]
 optional = true
