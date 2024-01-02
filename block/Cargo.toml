@@ -24,4 +24,4 @@ virtio-bindings = { version = "0.2.0", features = ["virtio-v5_0_0"] }
 virtio-queue = "0.10.0"
 vm-memory = { version = "0.13.1", features = ["backend-mmap", "backend-atomic", "backend-bitmap"] }
 vm-virtio = { path = "../vm-virtio" }
-vmm-sys-util = "0.11.0"
+vmm-sys-util = "0.12.0"
