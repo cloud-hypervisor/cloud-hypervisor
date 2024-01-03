@@ -92,7 +92,7 @@ checksum = "a4668cab20f66d8d020e1fbc0ebe47217433c1b6c8f2040faf858554e394ace6"
 name = "api_client"
 version = "0.1.0"
 dependencies = [
- "vmm-sys-util 0.11.1",
+ "vmm-sys-util 0.12.1",
 ]
 
 [[package]]
@@ -120,7 +120,7 @@ dependencies = [
  "vm-fdt",
  "vm-memory",
  "vm-migration",
- "vmm-sys-util 0.11.1",
+ "vmm-sys-util 0.12.1",
 ]
 
 [[package]]
@@ -354,7 +354,7 @@ dependencies = [
  "virtio-queue",
  "vm-memory",
  "vm-virtio",
- "vmm-sys-util 0.11.1",
+ "vmm-sys-util 0.12.1",
 ]
 
 [[package]]
@@ -463,7 +463,7 @@ dependencies = [
  "tracer",
  "vm-memory",
  "vmm",
- "vmm-sys-util 0.11.1",
+ "vmm-sys-util 0.12.1",
  "wait-timeout",
  "zbus",
 ]
@@ -603,7 +603,7 @@ dependencies = [
  "vm-device",
  "vm-memory",
  "vm-migration",
- "vmm-sys-util 0.11.1",
+ "vmm-sys-util 0.12.1",
 ]
 
 [[package]]
@@ -1023,7 +1023,7 @@ dependencies = [
  "thiserror",
  "vfio-ioctls",
  "vm-memory",
- "vmm-sys-util 0.11.1",
+ "vmm-sys-util 0.12.1",
 ]
 
 [[package]]
@@ -1343,7 +1343,7 @@ dependencies = [
 name = "net_gen"
 version = "0.1.0"
 dependencies = [
- "vmm-sys-util 0.11.1",
+ "vmm-sys-util 0.12.1",
 ]
 
 [[package]]
@@ -1368,7 +1368,7 @@ dependencies = [
  "virtio-queue",
  "vm-memory",
  "vm-virtio",
- "vmm-sys-util 0.11.1",
+ "vmm-sys-util 0.12.1",
 ]
 
 [[package]]
@@ -1555,7 +1555,7 @@ dependencies = [
  "vm-device",
  "vm-memory",
  "vm-migration",
- "vmm-sys-util 0.11.1",
+ "vmm-sys-util 0.12.1",
 ]
 
 [[package]]
@@ -1803,7 +1803,7 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "log",
- "vmm-sys-util 0.11.1",
+ "vmm-sys-util 0.12.1",
 ]
 
 [[package]]
@@ -2181,7 +2181,7 @@ dependencies = [
  "serde",
  "serde_json",
  "ssh2",
- "vmm-sys-util 0.11.1",
+ "vmm-sys-util 0.12.1",
  "wait-timeout",
 ]
 
@@ -2238,7 +2238,7 @@ dependencies = [
  "log",
  "net_gen",
  "thiserror",
- "vmm-sys-util 0.11.1",
+ "vmm-sys-util 0.12.1",
 ]
 
 [[package]]
@@ -2445,7 +2445,7 @@ dependencies = [
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
- "vmm-sys-util 0.11.1",
+ "vmm-sys-util 0.12.1",
 ]
 
 [[package]]
@@ -2463,7 +2463,7 @@ dependencies = [
  "vhost-user-backend",
  "virtio-bindings",
  "vm-memory",
- "vmm-sys-util 0.11.1",
+ "vmm-sys-util 0.12.1",
 ]
 
 [[package]]
@@ -2503,7 +2503,7 @@ dependencies = [
  "vm-memory",
  "vm-migration",
  "vm-virtio",
- "vmm-sys-util 0.11.1",
+ "vmm-sys-util 0.12.1",
 ]
 
 [[package]]
@@ -2537,7 +2537,7 @@ dependencies = [
  "thiserror",
  "vfio-ioctls",
  "vm-memory",
- "vmm-sys-util 0.11.1",
+ "vmm-sys-util 0.12.1",
 ]
 
 [[package]]
@@ -2632,7 +2632,7 @@ dependencies = [
  "vm-memory",
  "vm-migration",
  "vm-virtio",
- "vmm-sys-util 0.11.1",
+ "vmm-sys-util 0.12.1",
  "zbus",
  "zerocopy",
 ]
@@ -2645,8 +2645,6 @@ checksum = "dd64fe09d8e880e600c324e7d664760a17f56e9672b7495a86381b49e4f72f46"
 dependencies = [
  "bitflags 1.3.2",
  "libc",
- "serde",
- "serde_derive",
 ]
 
 [[package]]
@@ -2657,6 +2655,8 @@ checksum = "1d1435039746e20da4f8d507a72ee1b916f7b4b05af7a91c093d2c6561934ede"
 dependencies = [
  "bitflags 1.3.2",
  "libc",
+ "serde",
+ "serde_derive",
 ]
 
 [[package]]

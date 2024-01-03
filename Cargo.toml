@@ -46,7 +46,7 @@ thiserror = "1.0.52"
 tpm = { path = "tpm"}
 tracer = { path = "tracer" }
 vmm = { path = "vmm" }
-vmm-sys-util = "0.11.0"
+vmm-sys-util = "0.12.1"
 vm-memory = "0.13.1"
 zbus = { version = "3.11.1", optional = true }
 
