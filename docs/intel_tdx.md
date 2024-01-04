@@ -103,7 +103,7 @@ firmware:
 ### TDShim
 
 > **Note**
-> The latest version of TDShim being tested is [_66bb334_](https://github.com/confidential-containers/td-shim/tree/66bb33451befbf1291abe3cfea7ee9e99d922b0d).
+> The latest version of TDShim being tested is [_v0.8.0_](https://github.com/confidential-containers/td-shim/releases/tag/v0.8.0).
 
 This is a lightweight version of the TDVF, written in Rust and designed for
 direct kernel boot, which is useful for containers use cases.
@@ -113,7 +113,7 @@ and `LLVM` first. The TDshim can be build as follows:
 ```bash
 git clone https://github.com/confidential-containers/td-shim
 cd td-shim
-git checkout 66bb33451befbf1291abe3cfea7ee9e99d922b0d
+git checkout v0.8.0
 cargo install cargo-xbuild
 export CC=clang
 export AR=llvm-ar
@@ -121,15 +121,13 @@ export CC_x86_64_unknown_none=clang
 export AR_x86_64_unknown_none=llvm-ar
 git submodule update --init --recursive
 ./sh_script/preparation.sh
-cargo xbuild -p td-shim --target x86_64-unknown-none --release --features=main,tdx
-cargo run -p td-shim-tools --bin td-shim-ld --features=linker -- target/x86_64-unknown-none/release/ResetVector.bin target/x86_64-unknown-none/release/td-shim -o target/release/final.bin
+cargo image --release
 ```
 
 If debug logs from the TDShim is needed, here are the alternative
 commands:
 ```bash
-cargo xbuild -p td-shim --target x86_64-unknown-none --features=main,tdx
-cargo run -p td-shim-tools --bin td-shim-ld --features=linker -- target/x86_64-unknown-none/debug/ResetVector.bin target/x86_64-unknown-none/debug/td-shim -o target/debug/final.bin
+cargo image
 ```
 
 And run a TDX VM by providing the firmware previously built, along with a guest
