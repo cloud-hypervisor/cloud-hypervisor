@@ -385,7 +385,7 @@ pub trait Vm: Send + Sync + Any {
     fn complete_isolated_import(
         &self,
         _snp_id_block: IGVM_VHS_SNP_ID_BLOCK,
-        _host_data: &[u8],
+        _host_data: [u8; 32],
         _id_block_enabled: u8,
     ) -> Result<()> {
         unimplemented!()
