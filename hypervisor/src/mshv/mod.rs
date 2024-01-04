@@ -1814,7 +1814,7 @@ impl vm::Vm for MshvVm {
     fn complete_isolated_import(
         &self,
         snp_id_block: IGVM_VHS_SNP_ID_BLOCK,
-        host_data: &[u8],
+        host_data: [u8; 32],
         id_block_enabled: u8,
     ) -> vm::Result<()> {
         let mut auth_info = hv_snp_id_auth_info {
@@ -1847,7 +1847,7 @@ impl vm::Vm for MshvVm {
                         policy: get_default_snp_guest_policy(),
                     },
                     id_auth_info: auth_info,
-                    host_data: host_data[0..32].try_into().unwrap(),
+                    host_data,
                     id_block_enabled,
                     author_key_enabled: 0,
                 },
