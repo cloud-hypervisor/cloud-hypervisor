@@ -4,7 +4,14 @@
 //
 
 use self::http_endpoint::{VmActionHandler, VmCreate, VmInfo, VmmPing, VmmShutdown};
-use crate::api::{ApiError, ApiRequest, VmAction};
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use crate::api::VmCoredump;
+use crate::api::{
+    AddDisk, ApiError, ApiRequest, VmAddDevice, VmAddFs, VmAddNet, VmAddPmem, VmAddUserDevice,
+    VmAddVdpa, VmAddVsock, VmBoot, VmCounters, VmDelete, VmPause, VmPowerButton, VmReboot,
+    VmReceiveMigration, VmRemoveDevice, VmResize, VmResizeZone, VmRestore, VmResume,
+    VmSendMigration, VmShutdown, VmSnapshot,
+};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{Error as VmmError, Result};
 use hypervisor::HypervisorType;
@@ -19,7 +26,6 @@ use std::os::unix::net::UnixListener;
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
-use std::sync::Arc;
 use std::thread;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -141,109 +147,103 @@ pub static HTTP_ROUTES: Lazy<HttpRoutes> = Lazy::new(|| {
 
     r.routes.insert(
         endpoint!("/vm.add-device"),
-        Box::new(VmActionHandler::new(VmAction::AddDevice(Arc::default()))),
+        Box::new(VmActionHandler::new(&VmAddDevice)),
     );
     r.routes.insert(
         endpoint!("/vm.add-user-device"),
-        Box::new(VmActionHandler::new(
-            VmAction::AddUserDevice(Arc::default()),
-        )),
+        Box::new(VmActionHandler::new(&VmAddUserDevice)),
     );
     r.routes.insert(
         endpoint!("/vm.add-disk"),
-        Box::new(VmActionHandler::new(VmAction::AddDisk(Arc::default()))),
+        Box::new(VmActionHandler::new(&AddDisk)),
     );
     r.routes.insert(
         endpoint!("/vm.add-fs"),
-        Box::new(VmActionHandler::new(VmAction::AddFs(Arc::default()))),
+        Box::new(VmActionHandler::new(&VmAddFs)),
     );
     r.routes.insert(
         endpoint!("/vm.add-net"),
-        Box::new(VmActionHandler::new(VmAction::AddNet(Arc::default()))),
+        Box::new(VmActionHandler::new(&VmAddNet)),
     );
     r.routes.insert(
         endpoint!("/vm.add-pmem"),
-        Box::new(VmActionHandler::new(VmAction::AddPmem(Arc::default()))),
+        Box::new(VmActionHandler::new(&VmAddPmem)),
     );
     r.routes.insert(
         endpoint!("/vm.add-vdpa"),
-        Box::new(VmActionHandler::new(VmAction::AddVdpa(Arc::default()))),
+        Box::new(VmActionHandler::new(&VmAddVdpa)),
     );
     r.routes.insert(
         endpoint!("/vm.add-vsock"),
-        Box::new(VmActionHandler::new(VmAction::AddVsock(Arc::default()))),
+        Box::new(VmActionHandler::new(&VmAddVsock)),
     );
     r.routes.insert(
         endpoint!("/vm.boot"),
-        Box::new(VmActionHandler::new(VmAction::Boot)),
+        Box::new(VmActionHandler::new(&VmBoot)),
     );
     r.routes.insert(
         endpoint!("/vm.counters"),
-        Box::new(VmActionHandler::new(VmAction::Counters)),
+        Box::new(VmActionHandler::new(&VmCounters)),
     );
     r.routes
         .insert(endpoint!("/vm.create"), Box::new(VmCreate {}));
     r.routes.insert(
         endpoint!("/vm.delete"),
-        Box::new(VmActionHandler::new(VmAction::Delete)),
+        Box::new(VmActionHandler::new(&VmDelete)),
     );
     r.routes.insert(endpoint!("/vm.info"), Box::new(VmInfo {}));
     r.routes.insert(
         endpoint!("/vm.pause"),
-        Box::new(VmActionHandler::new(VmAction::Pause)),
+        Box::new(VmActionHandler::new(&VmPause)),
     );
     r.routes.insert(
         endpoint!("/vm.power-button"),
-        Box::new(VmActionHandler::new(VmAction::PowerButton)),
+        Box::new(VmActionHandler::new(&VmPowerButton)),
     );
     r.routes.insert(
         endpoint!("/vm.reboot"),
-        Box::new(VmActionHandler::new(VmAction::Reboot)),
+        Box::new(VmActionHandler::new(&VmReboot)),
     );
     r.routes.insert(
         endpoint!("/vm.receive-migration"),
-        Box::new(VmActionHandler::new(VmAction::ReceiveMigration(
-            Arc::default(),
-        ))),
+        Box::new(VmActionHandler::new(&VmReceiveMigration)),
     );
     r.routes.insert(
         endpoint!("/vm.remove-device"),
-        Box::new(VmActionHandler::new(VmAction::RemoveDevice(Arc::default()))),
+        Box::new(VmActionHandler::new(&VmRemoveDevice)),
     );
     r.routes.insert(
         endpoint!("/vm.resize"),
-        Box::new(VmActionHandler::new(VmAction::Resize(Arc::default()))),
+        Box::new(VmActionHandler::new(&VmResize)),
     );
     r.routes.insert(
         endpoint!("/vm.resize-zone"),
-        Box::new(VmActionHandler::new(VmAction::ResizeZone(Arc::default()))),
+        Box::new(VmActionHandler::new(&VmResizeZone)),
     );
     r.routes.insert(
         endpoint!("/vm.restore"),
-        Box::new(VmActionHandler::new(VmAction::Restore(Arc::default()))),
+        Box::new(VmActionHandler::new(&VmRestore)),
     );
     r.routes.insert(
         endpoint!("/vm.resume"),
-        Box::new(VmActionHandler::new(VmAction::Resume)),
+        Box::new(VmActionHandler::new(&VmResume)),
     );
     r.routes.insert(
         endpoint!("/vm.send-migration"),
-        Box::new(VmActionHandler::new(
-            VmAction::SendMigration(Arc::default()),
-        )),
+        Box::new(VmActionHandler::new(&VmSendMigration)),
     );
     r.routes.insert(
         endpoint!("/vm.shutdown"),
-        Box::new(VmActionHandler::new(VmAction::Shutdown)),
+        Box::new(VmActionHandler::new(&VmShutdown)),
     );
     r.routes.insert(
         endpoint!("/vm.snapshot"),
-        Box::new(VmActionHandler::new(VmAction::Snapshot(Arc::default()))),
+        Box::new(VmActionHandler::new(&VmSnapshot)),
     );
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
     r.routes.insert(
         endpoint!("/vm.coredump"),
-        Box::new(VmActionHandler::new(VmAction::Coredump(Arc::default()))),
+        Box::new(VmActionHandler::new(&VmCoredump)),
     );
     r.routes
         .insert(endpoint!("/vmm.ping"), Box::new(VmmPing {}));

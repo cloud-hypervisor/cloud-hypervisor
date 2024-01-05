@@ -9,7 +9,7 @@ extern crate event_monitor;
 extern crate log;
 
 use crate::api::{
-    ApiError, ApiRequest, ApiResponse, ApiResponsePayload, VmInfo, VmReceiveMigrationData,
+    ApiRequest, ApiResponse, RequestHandler, VmInfoResponse, VmReceiveMigrationData,
     VmSendMigrationData, VmmPingResponse,
 };
 use crate::config::{
@@ -680,6 +680,523 @@ impl Vmm {
         })
     }
 
+    fn vm_receive_config<T>(
+        &mut self,
+        req: &Request,
+        socket: &mut T,
+        existing_memory_files: Option<HashMap<u32, File>>,
+    ) -> std::result::Result<Arc<Mutex<MemoryManager>>, MigratableError>
+    where
+        T: Read + Write,
+    {
+        // Read in config data along with memory manager data
+        let mut data: Vec<u8> = Vec::new();
+        data.resize_with(req.length() as usize, Default::default);
+        socket
+            .read_exact(&mut data)
+            .map_err(MigratableError::MigrateSocket)?;
+
+        let vm_migration_config: VmMigrationConfig =
+            serde_json::from_slice(&data).map_err(|e| {
+                MigratableError::MigrateReceive(anyhow!("Error deserialising config: {}", e))
+            })?;
+
+        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+        self.vm_check_cpuid_compatibility(
+            &vm_migration_config.vm_config,
+            &vm_migration_config.common_cpuid,
+        )?;
+
+        let config = vm_migration_config.vm_config.clone();
+        self.vm_config = Some(vm_migration_config.vm_config);
+
+        let vm = Vm::create_hypervisor_vm(
+            &self.hypervisor,
+            #[cfg(feature = "tdx")]
+            false,
+            #[cfg(feature = "sev_snp")]
+            false,
+        )
+        .map_err(|e| {
+            MigratableError::MigrateReceive(anyhow!(
+                "Error creating hypervisor VM from snapshot: {:?}",
+                e
+            ))
+        })?;
+
+        let phys_bits =
+            vm::physical_bits(&self.hypervisor, config.lock().unwrap().cpus.max_phys_bits);
+
+        let memory_manager = MemoryManager::new(
+            vm,
+            &config.lock().unwrap().memory.clone(),
+            None,
+            phys_bits,
+            #[cfg(feature = "tdx")]
+            false,
+            Some(&vm_migration_config.memory_manager_data),
+            existing_memory_files,
+            #[cfg(target_arch = "x86_64")]
+            None,
+        )
+        .map_err(|e| {
+            MigratableError::MigrateReceive(anyhow!(
+                "Error creating MemoryManager from snapshot: {:?}",
+                e
+            ))
+        })?;
+
+        Response::ok().write_to(socket)?;
+
+        Ok(memory_manager)
+    }
+
+    fn vm_receive_state<T>(
+        &mut self,
+        req: &Request,
+        socket: &mut T,
+        mm: Arc<Mutex<MemoryManager>>,
+    ) -> std::result::Result<(), MigratableError>
+    where
+        T: Read + Write,
+    {
+        // Read in state data
+        let mut data: Vec<u8> = Vec::new();
+        data.resize_with(req.length() as usize, Default::default);
+        socket
+            .read_exact(&mut data)
+            .map_err(MigratableError::MigrateSocket)?;
+        let snapshot: Snapshot = serde_json::from_slice(&data).map_err(|e| {
+            MigratableError::MigrateReceive(anyhow!("Error deserialising snapshot: {}", e))
+        })?;
+
+        let exit_evt = self.exit_evt.try_clone().map_err(|e| {
+            MigratableError::MigrateReceive(anyhow!("Error cloning exit EventFd: {}", e))
+        })?;
+        let reset_evt = self.reset_evt.try_clone().map_err(|e| {
+            MigratableError::MigrateReceive(anyhow!("Error cloning reset EventFd: {}", e))
+        })?;
+        #[cfg(feature = "guest_debug")]
+        let debug_evt = self.vm_debug_evt.try_clone().map_err(|e| {
+            MigratableError::MigrateReceive(anyhow!("Error cloning debug EventFd: {}", e))
+        })?;
+        let activate_evt = self.activate_evt.try_clone().map_err(|e| {
+            MigratableError::MigrateReceive(anyhow!("Error cloning activate EventFd: {}", e))
+        })?;
+
+        let timestamp = Instant::now();
+        let hypervisor_vm = mm.lock().unwrap().vm.clone();
+        let mut vm = Vm::new_from_memory_manager(
+            self.vm_config.clone().unwrap(),
+            mm,
+            hypervisor_vm,
+            exit_evt,
+            reset_evt,
+            #[cfg(feature = "guest_debug")]
+            debug_evt,
+            &self.seccomp_action,
+            self.hypervisor.clone(),
+            activate_evt,
+            timestamp,
+            None,
+            None,
+            None,
+            Arc::clone(&self.original_termios_opt),
+            Some(snapshot),
+        )
+        .map_err(|e| {
+            MigratableError::MigrateReceive(anyhow!("Error creating VM from snapshot: {:?}", e))
+        })?;
+
+        // Create VM
+        vm.restore().map_err(|e| {
+            Response::error().write_to(socket).ok();
+            MigratableError::MigrateReceive(anyhow!("Failed restoring the Vm: {}", e))
+        })?;
+        self.vm = Some(vm);
+
+        Response::ok().write_to(socket)?;
+
+        Ok(())
+    }
+
+    fn vm_receive_memory<T>(
+        &mut self,
+        req: &Request,
+        socket: &mut T,
+        memory_manager: &mut MemoryManager,
+    ) -> std::result::Result<(), MigratableError>
+    where
+        T: Read + ReadVolatile + Write,
+    {
+        // Read table
+        let table = MemoryRangeTable::read_from(socket, req.length())?;
+
+        // And then read the memory itself
+        memory_manager
+            .receive_memory_regions(&table, socket)
+            .map_err(|e| {
+                Response::error().write_to(socket).ok();
+                e
+            })?;
+        Response::ok().write_to(socket)?;
+        Ok(())
+    }
+
+    fn socket_url_to_path(url: &str) -> result::Result<PathBuf, MigratableError> {
+        url.strip_prefix("unix:")
+            .ok_or_else(|| {
+                MigratableError::MigrateSend(anyhow!("Could not extract path from URL: {}", url))
+            })
+            .map(|s| s.into())
+    }
+
+    // Returns true if there were dirty pages to send
+    fn vm_maybe_send_dirty_pages<T>(
+        vm: &mut Vm,
+        socket: &mut T,
+    ) -> result::Result<bool, MigratableError>
+    where
+        T: Read + Write + WriteVolatile,
+    {
+        // Send (dirty) memory table
+        let table = vm.dirty_log()?;
+
+        // But if there are no regions go straight to pause
+        if table.regions().is_empty() {
+            return Ok(false);
+        }
+
+        Request::memory(table.length()).write_to(socket).unwrap();
+        table.write_to(socket)?;
+        // And then the memory itself
+        vm.send_memory_regions(&table, socket)?;
+        let res = Response::read_from(socket)?;
+        if res.status() != Status::Ok {
+            warn!("Error during dirty memory migration");
+            Request::abandon().write_to(socket)?;
+            Response::read_from(socket).ok();
+            return Err(MigratableError::MigrateSend(anyhow!(
+                "Error during dirty memory migration"
+            )));
+        }
+
+        Ok(true)
+    }
+
+    fn send_migration(
+        vm: &mut Vm,
+        #[cfg(all(feature = "kvm", target_arch = "x86_64"))] hypervisor: Arc<
+            dyn hypervisor::Hypervisor,
+        >,
+        send_data_migration: VmSendMigrationData,
+    ) -> result::Result<(), MigratableError> {
+        let path = Self::socket_url_to_path(&send_data_migration.destination_url)?;
+        let mut socket = UnixStream::connect(path).map_err(|e| {
+            MigratableError::MigrateSend(anyhow!("Error connecting to UNIX socket: {}", e))
+        })?;
+
+        // Start the migration
+        Request::start().write_to(&mut socket)?;
+        let res = Response::read_from(&mut socket)?;
+        if res.status() != Status::Ok {
+            warn!("Error starting migration");
+            Request::abandon().write_to(&mut socket)?;
+            Response::read_from(&mut socket).ok();
+            return Err(MigratableError::MigrateSend(anyhow!(
+                "Error starting migration"
+            )));
+        }
+
+        // Send config
+        let vm_config = vm.get_config();
+        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+        let common_cpuid = {
+            #[cfg(feature = "tdx")]
+            if vm_config.lock().unwrap().is_tdx_enabled() {
+                return Err(MigratableError::MigrateSend(anyhow!(
+                    "Live Migration is not supported when TDX is enabled"
+                )));
+            };
+
+            let amx = vm_config.lock().unwrap().cpus.features.amx;
+            let phys_bits =
+                vm::physical_bits(&hypervisor, vm_config.lock().unwrap().cpus.max_phys_bits);
+            arch::generate_common_cpuid(
+                &hypervisor,
+                &arch::CpuidConfig {
+                    sgx_epc_sections: None,
+                    phys_bits,
+                    kvm_hyperv: vm_config.lock().unwrap().cpus.kvm_hyperv,
+                    #[cfg(feature = "tdx")]
+                    tdx: false,
+                    amx,
+                },
+            )
+            .map_err(|e| {
+                MigratableError::MigrateSend(anyhow!("Error generating common cpuid': {:?}", e))
+            })?
+        };
+
+        if send_data_migration.local {
+            vm.send_memory_fds(&mut socket)?;
+        }
+
+        let vm_migration_config = VmMigrationConfig {
+            vm_config,
+            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+            common_cpuid,
+            memory_manager_data: vm.memory_manager_data(),
+        };
+        let config_data = serde_json::to_vec(&vm_migration_config).unwrap();
+        Request::config(config_data.len() as u64).write_to(&mut socket)?;
+        socket
+            .write_all(&config_data)
+            .map_err(MigratableError::MigrateSocket)?;
+        let res = Response::read_from(&mut socket)?;
+        if res.status() != Status::Ok {
+            warn!("Error during config migration");
+            Request::abandon().write_to(&mut socket)?;
+            Response::read_from(&mut socket).ok();
+            return Err(MigratableError::MigrateSend(anyhow!(
+                "Error during config migration"
+            )));
+        }
+
+        // Let every Migratable object know about the migration being started.
+        vm.start_migration()?;
+
+        if send_data_migration.local {
+            // Now pause VM
+            vm.pause()?;
+        } else {
+            // Start logging dirty pages
+            vm.start_dirty_log()?;
+
+            // Send memory table
+            let table = vm.memory_range_table()?;
+            Request::memory(table.length())
+                .write_to(&mut socket)
+                .unwrap();
+            table.write_to(&mut socket)?;
+            // And then the memory itself
+            vm.send_memory_regions(&table, &mut socket)?;
+            let res = Response::read_from(&mut socket)?;
+            if res.status() != Status::Ok {
+                warn!("Error during memory migration");
+                Request::abandon().write_to(&mut socket)?;
+                Response::read_from(&mut socket).ok();
+                return Err(MigratableError::MigrateSend(anyhow!(
+                    "Error during memory migration"
+                )));
+            }
+
+            // Try at most 5 passes of dirty memory sending
+            const MAX_DIRTY_MIGRATIONS: usize = 5;
+            for i in 0..MAX_DIRTY_MIGRATIONS {
+                info!("Dirty memory migration {} of {}", i, MAX_DIRTY_MIGRATIONS);
+                if !Self::vm_maybe_send_dirty_pages(vm, &mut socket)? {
+                    break;
+                }
+            }
+
+            // Now pause VM
+            vm.pause()?;
+
+            // Send last batch of dirty pages
+            Self::vm_maybe_send_dirty_pages(vm, &mut socket)?;
+
+            // Stop logging dirty pages
+            vm.stop_dirty_log()?;
+        }
+        // Capture snapshot and send it
+        let vm_snapshot = vm.snapshot()?;
+        let snapshot_data = serde_json::to_vec(&vm_snapshot).unwrap();
+        Request::state(snapshot_data.len() as u64).write_to(&mut socket)?;
+        socket
+            .write_all(&snapshot_data)
+            .map_err(MigratableError::MigrateSocket)?;
+        let res = Response::read_from(&mut socket)?;
+        if res.status() != Status::Ok {
+            warn!("Error during state migration");
+            Request::abandon().write_to(&mut socket)?;
+            Response::read_from(&mut socket).ok();
+            return Err(MigratableError::MigrateSend(anyhow!(
+                "Error during state migration"
+            )));
+        }
+
+        // Complete the migration
+        Request::complete().write_to(&mut socket)?;
+        let res = Response::read_from(&mut socket)?;
+        if res.status() != Status::Ok {
+            warn!("Error completing migration");
+            Request::abandon().write_to(&mut socket)?;
+            Response::read_from(&mut socket).ok();
+            return Err(MigratableError::MigrateSend(anyhow!(
+                "Error completing migration"
+            )));
+        }
+        info!("Migration complete");
+
+        // Let every Migratable object know about the migration being complete
+        vm.complete_migration()
+    }
+
+    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+    fn vm_check_cpuid_compatibility(
+        &self,
+        src_vm_config: &Arc<Mutex<VmConfig>>,
+        src_vm_cpuid: &[hypervisor::arch::x86::CpuIdEntry],
+    ) -> result::Result<(), MigratableError> {
+        #[cfg(feature = "tdx")]
+        if src_vm_config.lock().unwrap().is_tdx_enabled() {
+            return Err(MigratableError::MigrateReceive(anyhow!(
+                "Live Migration is not supported when TDX is enabled"
+            )));
+        };
+
+        // We check the `CPUID` compatibility of between the source vm and destination, which is
+        // mostly about feature compatibility and "topology/sgx" leaves are not relevant.
+        let dest_cpuid = &{
+            let vm_config = &src_vm_config.lock().unwrap();
+
+            let phys_bits = vm::physical_bits(&self.hypervisor, vm_config.cpus.max_phys_bits);
+            arch::generate_common_cpuid(
+                &self.hypervisor.clone(),
+                &arch::CpuidConfig {
+                    sgx_epc_sections: None,
+                    phys_bits,
+                    kvm_hyperv: vm_config.cpus.kvm_hyperv,
+                    #[cfg(feature = "tdx")]
+                    tdx: false,
+                    amx: vm_config.cpus.features.amx,
+                },
+            )
+            .map_err(|e| {
+                MigratableError::MigrateReceive(anyhow!("Error generating common cpuid: {:?}", e))
+            })?
+        };
+        arch::CpuidFeatureEntry::check_cpuid_compatibility(src_vm_cpuid, dest_cpuid).map_err(|e| {
+            MigratableError::MigrateReceive(anyhow!(
+                "Error checking cpu feature compatibility': {:?}",
+                e
+            ))
+        })
+    }
+
+    fn control_loop(
+        &mut self,
+        api_receiver: Rc<Receiver<ApiRequest>>,
+        #[cfg(feature = "guest_debug")] gdb_receiver: Rc<Receiver<gdb::GdbRequest>>,
+    ) -> Result<()> {
+        const EPOLL_EVENTS_LEN: usize = 100;
+
+        let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
+        let epoll_fd = self.epoll.as_raw_fd();
+
+        'outer: loop {
+            let num_events = match epoll::wait(epoll_fd, -1, &mut events[..]) {
+                Ok(res) => res,
+                Err(e) => {
+                    if e.kind() == io::ErrorKind::Interrupted {
+                        // It's well defined from the epoll_wait() syscall
+                        // documentation that the epoll loop can be interrupted
+                        // before any of the requested events occurred or the
+                        // timeout expired. In both those cases, epoll_wait()
+                        // returns an error of type EINTR, but this should not
+                        // be considered as a regular error. Instead it is more
+                        // appropriate to retry, by calling into epoll_wait().
+                        continue;
+                    }
+                    return Err(Error::Epoll(e));
+                }
+            };
+
+            for event in events.iter().take(num_events) {
+                let dispatch_event: EpollDispatch = event.data.into();
+                match dispatch_event {
+                    EpollDispatch::Unknown => {
+                        let event = event.data;
+                        warn!("Unknown VMM loop event: {}", event);
+                    }
+                    EpollDispatch::Exit => {
+                        info!("VM exit event");
+                        // Consume the event.
+                        self.exit_evt.read().map_err(Error::EventFdRead)?;
+                        self.vmm_shutdown().map_err(Error::VmmShutdown)?;
+
+                        break 'outer;
+                    }
+                    EpollDispatch::Reset => {
+                        info!("VM reset event");
+                        // Consume the event.
+                        self.reset_evt.read().map_err(Error::EventFdRead)?;
+                        self.vm_reboot().map_err(Error::VmReboot)?;
+                    }
+                    EpollDispatch::ActivateVirtioDevices => {
+                        if let Some(ref vm) = self.vm {
+                            let count = self.activate_evt.read().map_err(Error::EventFdRead)?;
+                            info!(
+                                "Trying to activate pending virtio devices: count = {}",
+                                count
+                            );
+                            vm.activate_virtio_devices()
+                                .map_err(Error::ActivateVirtioDevices)?;
+                        }
+                    }
+                    EpollDispatch::Api => {
+                        // Consume the events.
+                        for _ in 0..self.api_evt.read().map_err(Error::EventFdRead)? {
+                            // Read from the API receiver channel
+                            let api_request = api_receiver.recv().map_err(Error::ApiRequestRecv)?;
+
+                            if api_request(self)? {
+                                break 'outer;
+                            }
+                        }
+                    }
+                    #[cfg(feature = "guest_debug")]
+                    EpollDispatch::Debug => {
+                        // Consume the events.
+                        for _ in 0..self.debug_evt.read().map_err(Error::EventFdRead)? {
+                            // Read from the API receiver channel
+                            let gdb_request = gdb_receiver.recv().map_err(Error::GdbRequestRecv)?;
+
+                            let response = if let Some(ref mut vm) = self.vm {
+                                vm.debug_request(&gdb_request.payload, gdb_request.cpu_id)
+                            } else {
+                                Err(VmError::VmNotRunning)
+                            }
+                            .map_err(gdb::Error::Vm);
+
+                            gdb_request
+                                .sender
+                                .send(response)
+                                .map_err(Error::GdbResponseSend)?;
+                        }
+                    }
+                    #[cfg(not(feature = "guest_debug"))]
+                    EpollDispatch::Debug => {}
+                }
+            }
+        }
+
+        // Trigger the termination of the signal_handler thread
+        if let Some(signals) = self.signals.take() {
+            signals.close();
+        }
+
+        // Wait for all the threads to finish
+        for thread in self.threads.drain(..) {
+            thread.join().map_err(Error::ThreadCleanup)?
+        }
+
+        Ok(())
+    }
+}
+
+impl RequestHandler for Vmm {
     fn vm_create(&mut self, config: Arc<Mutex<VmConfig>>) -> result::Result<(), VmError> {
         // We only store the passed VM config.
         // The VM will be created when being asked to boot it.
@@ -921,7 +1438,7 @@ impl Vmm {
         Ok(())
     }
 
-    fn vm_info(&self) -> result::Result<VmInfo, VmError> {
+    fn vm_info(&self) -> result::Result<VmInfoResponse, VmError> {
         match &self.vm_config {
             Some(config) => {
                 let state = match &self.vm {
@@ -938,7 +1455,7 @@ impl Vmm {
 
                 let device_tree = self.vm.as_ref().map(|vm| vm.device_tree());
 
-                Ok(VmInfo {
+                Ok(VmInfoResponse {
                     config,
                     state,
                     memory_actual_size,
@@ -1307,177 +1824,6 @@ impl Vmm {
         }
     }
 
-    fn vm_receive_config<T>(
-        &mut self,
-        req: &Request,
-        socket: &mut T,
-        existing_memory_files: Option<HashMap<u32, File>>,
-    ) -> std::result::Result<Arc<Mutex<MemoryManager>>, MigratableError>
-    where
-        T: Read + Write,
-    {
-        // Read in config data along with memory manager data
-        let mut data: Vec<u8> = Vec::new();
-        data.resize_with(req.length() as usize, Default::default);
-        socket
-            .read_exact(&mut data)
-            .map_err(MigratableError::MigrateSocket)?;
-
-        let vm_migration_config: VmMigrationConfig =
-            serde_json::from_slice(&data).map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!("Error deserialising config: {}", e))
-            })?;
-
-        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-        self.vm_check_cpuid_compatibility(
-            &vm_migration_config.vm_config,
-            &vm_migration_config.common_cpuid,
-        )?;
-
-        let config = vm_migration_config.vm_config.clone();
-        self.vm_config = Some(vm_migration_config.vm_config);
-
-        let vm = Vm::create_hypervisor_vm(
-            &self.hypervisor,
-            #[cfg(feature = "tdx")]
-            false,
-            #[cfg(feature = "sev_snp")]
-            false,
-        )
-        .map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!(
-                "Error creating hypervisor VM from snapshot: {:?}",
-                e
-            ))
-        })?;
-
-        let phys_bits =
-            vm::physical_bits(&self.hypervisor, config.lock().unwrap().cpus.max_phys_bits);
-
-        let memory_manager = MemoryManager::new(
-            vm,
-            &config.lock().unwrap().memory.clone(),
-            None,
-            phys_bits,
-            #[cfg(feature = "tdx")]
-            false,
-            Some(&vm_migration_config.memory_manager_data),
-            existing_memory_files,
-            #[cfg(target_arch = "x86_64")]
-            None,
-        )
-        .map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!(
-                "Error creating MemoryManager from snapshot: {:?}",
-                e
-            ))
-        })?;
-
-        Response::ok().write_to(socket)?;
-
-        Ok(memory_manager)
-    }
-
-    fn vm_receive_state<T>(
-        &mut self,
-        req: &Request,
-        socket: &mut T,
-        mm: Arc<Mutex<MemoryManager>>,
-    ) -> std::result::Result<(), MigratableError>
-    where
-        T: Read + Write,
-    {
-        // Read in state data
-        let mut data: Vec<u8> = Vec::new();
-        data.resize_with(req.length() as usize, Default::default);
-        socket
-            .read_exact(&mut data)
-            .map_err(MigratableError::MigrateSocket)?;
-        let snapshot: Snapshot = serde_json::from_slice(&data).map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error deserialising snapshot: {}", e))
-        })?;
-
-        let exit_evt = self.exit_evt.try_clone().map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error cloning exit EventFd: {}", e))
-        })?;
-        let reset_evt = self.reset_evt.try_clone().map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error cloning reset EventFd: {}", e))
-        })?;
-        #[cfg(feature = "guest_debug")]
-        let debug_evt = self.vm_debug_evt.try_clone().map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error cloning debug EventFd: {}", e))
-        })?;
-        let activate_evt = self.activate_evt.try_clone().map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error cloning activate EventFd: {}", e))
-        })?;
-
-        let timestamp = Instant::now();
-        let hypervisor_vm = mm.lock().unwrap().vm.clone();
-        let mut vm = Vm::new_from_memory_manager(
-            self.vm_config.clone().unwrap(),
-            mm,
-            hypervisor_vm,
-            exit_evt,
-            reset_evt,
-            #[cfg(feature = "guest_debug")]
-            debug_evt,
-            &self.seccomp_action,
-            self.hypervisor.clone(),
-            activate_evt,
-            timestamp,
-            None,
-            None,
-            None,
-            Arc::clone(&self.original_termios_opt),
-            Some(snapshot),
-        )
-        .map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error creating VM from snapshot: {:?}", e))
-        })?;
-
-        // Create VM
-        vm.restore().map_err(|e| {
-            Response::error().write_to(socket).ok();
-            MigratableError::MigrateReceive(anyhow!("Failed restoring the Vm: {}", e))
-        })?;
-        self.vm = Some(vm);
-
-        Response::ok().write_to(socket)?;
-
-        Ok(())
-    }
-
-    fn vm_receive_memory<T>(
-        &mut self,
-        req: &Request,
-        socket: &mut T,
-        memory_manager: &mut MemoryManager,
-    ) -> std::result::Result<(), MigratableError>
-    where
-        T: Read + ReadVolatile + Write,
-    {
-        // Read table
-        let table = MemoryRangeTable::read_from(socket, req.length())?;
-
-        // And then read the memory itself
-        memory_manager
-            .receive_memory_regions(&table, socket)
-            .map_err(|e| {
-                Response::error().write_to(socket).ok();
-                e
-            })?;
-        Response::ok().write_to(socket)?;
-        Ok(())
-    }
-
-    fn socket_url_to_path(url: &str) -> result::Result<PathBuf, MigratableError> {
-        url.strip_prefix("unix:")
-            .ok_or_else(|| {
-                MigratableError::MigrateSend(anyhow!("Could not extract path from URL: {}", url))
-            })
-            .map(|s| s.into())
-    }
-
     fn vm_receive_migration(
         &mut self,
         receive_data_migration: VmReceiveMigrationData,
@@ -1607,198 +1953,6 @@ impl Vmm {
         Ok(())
     }
 
-    // Returns true if there were dirty pages to send
-    fn vm_maybe_send_dirty_pages<T>(
-        vm: &mut Vm,
-        socket: &mut T,
-    ) -> result::Result<bool, MigratableError>
-    where
-        T: Read + Write + WriteVolatile,
-    {
-        // Send (dirty) memory table
-        let table = vm.dirty_log()?;
-
-        // But if there are no regions go straight to pause
-        if table.regions().is_empty() {
-            return Ok(false);
-        }
-
-        Request::memory(table.length()).write_to(socket).unwrap();
-        table.write_to(socket)?;
-        // And then the memory itself
-        vm.send_memory_regions(&table, socket)?;
-        let res = Response::read_from(socket)?;
-        if res.status() != Status::Ok {
-            warn!("Error during dirty memory migration");
-            Request::abandon().write_to(socket)?;
-            Response::read_from(socket).ok();
-            return Err(MigratableError::MigrateSend(anyhow!(
-                "Error during dirty memory migration"
-            )));
-        }
-
-        Ok(true)
-    }
-
-    fn send_migration(
-        vm: &mut Vm,
-        #[cfg(all(feature = "kvm", target_arch = "x86_64"))] hypervisor: Arc<
-            dyn hypervisor::Hypervisor,
-        >,
-        send_data_migration: VmSendMigrationData,
-    ) -> result::Result<(), MigratableError> {
-        let path = Self::socket_url_to_path(&send_data_migration.destination_url)?;
-        let mut socket = UnixStream::connect(path).map_err(|e| {
-            MigratableError::MigrateSend(anyhow!("Error connecting to UNIX socket: {}", e))
-        })?;
-
-        // Start the migration
-        Request::start().write_to(&mut socket)?;
-        let res = Response::read_from(&mut socket)?;
-        if res.status() != Status::Ok {
-            warn!("Error starting migration");
-            Request::abandon().write_to(&mut socket)?;
-            Response::read_from(&mut socket).ok();
-            return Err(MigratableError::MigrateSend(anyhow!(
-                "Error starting migration"
-            )));
-        }
-
-        // Send config
-        let vm_config = vm.get_config();
-        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-        let common_cpuid = {
-            #[cfg(feature = "tdx")]
-            if vm_config.lock().unwrap().is_tdx_enabled() {
-                return Err(MigratableError::MigrateSend(anyhow!(
-                    "Live Migration is not supported when TDX is enabled"
-                )));
-            };
-
-            let amx = vm_config.lock().unwrap().cpus.features.amx;
-            let phys_bits =
-                vm::physical_bits(&hypervisor, vm_config.lock().unwrap().cpus.max_phys_bits);
-            arch::generate_common_cpuid(
-                &hypervisor,
-                &arch::CpuidConfig {
-                    sgx_epc_sections: None,
-                    phys_bits,
-                    kvm_hyperv: vm_config.lock().unwrap().cpus.kvm_hyperv,
-                    #[cfg(feature = "tdx")]
-                    tdx: false,
-                    amx,
-                },
-            )
-            .map_err(|e| {
-                MigratableError::MigrateSend(anyhow!("Error generating common cpuid': {:?}", e))
-            })?
-        };
-
-        if send_data_migration.local {
-            vm.send_memory_fds(&mut socket)?;
-        }
-
-        let vm_migration_config = VmMigrationConfig {
-            vm_config,
-            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-            common_cpuid,
-            memory_manager_data: vm.memory_manager_data(),
-        };
-        let config_data = serde_json::to_vec(&vm_migration_config).unwrap();
-        Request::config(config_data.len() as u64).write_to(&mut socket)?;
-        socket
-            .write_all(&config_data)
-            .map_err(MigratableError::MigrateSocket)?;
-        let res = Response::read_from(&mut socket)?;
-        if res.status() != Status::Ok {
-            warn!("Error during config migration");
-            Request::abandon().write_to(&mut socket)?;
-            Response::read_from(&mut socket).ok();
-            return Err(MigratableError::MigrateSend(anyhow!(
-                "Error during config migration"
-            )));
-        }
-
-        // Let every Migratable object know about the migration being started.
-        vm.start_migration()?;
-
-        if send_data_migration.local {
-            // Now pause VM
-            vm.pause()?;
-        } else {
-            // Start logging dirty pages
-            vm.start_dirty_log()?;
-
-            // Send memory table
-            let table = vm.memory_range_table()?;
-            Request::memory(table.length())
-                .write_to(&mut socket)
-                .unwrap();
-            table.write_to(&mut socket)?;
-            // And then the memory itself
-            vm.send_memory_regions(&table, &mut socket)?;
-            let res = Response::read_from(&mut socket)?;
-            if res.status() != Status::Ok {
-                warn!("Error during memory migration");
-                Request::abandon().write_to(&mut socket)?;
-                Response::read_from(&mut socket).ok();
-                return Err(MigratableError::MigrateSend(anyhow!(
-                    "Error during memory migration"
-                )));
-            }
-
-            // Try at most 5 passes of dirty memory sending
-            const MAX_DIRTY_MIGRATIONS: usize = 5;
-            for i in 0..MAX_DIRTY_MIGRATIONS {
-                info!("Dirty memory migration {} of {}", i, MAX_DIRTY_MIGRATIONS);
-                if !Self::vm_maybe_send_dirty_pages(vm, &mut socket)? {
-                    break;
-                }
-            }
-
-            // Now pause VM
-            vm.pause()?;
-
-            // Send last batch of dirty pages
-            Self::vm_maybe_send_dirty_pages(vm, &mut socket)?;
-
-            // Stop logging dirty pages
-            vm.stop_dirty_log()?;
-        }
-        // Capture snapshot and send it
-        let vm_snapshot = vm.snapshot()?;
-        let snapshot_data = serde_json::to_vec(&vm_snapshot).unwrap();
-        Request::state(snapshot_data.len() as u64).write_to(&mut socket)?;
-        socket
-            .write_all(&snapshot_data)
-            .map_err(MigratableError::MigrateSocket)?;
-        let res = Response::read_from(&mut socket)?;
-        if res.status() != Status::Ok {
-            warn!("Error during state migration");
-            Request::abandon().write_to(&mut socket)?;
-            Response::read_from(&mut socket).ok();
-            return Err(MigratableError::MigrateSend(anyhow!(
-                "Error during state migration"
-            )));
-        }
-
-        // Complete the migration
-        Request::complete().write_to(&mut socket)?;
-        let res = Response::read_from(&mut socket)?;
-        if res.status() != Status::Ok {
-            warn!("Error completing migration");
-            Request::abandon().write_to(&mut socket)?;
-            Response::read_from(&mut socket).ok();
-            return Err(MigratableError::MigrateSend(anyhow!(
-                "Error completing migration"
-            )));
-        }
-        info!("Migration complete");
-
-        // Let every Migratable object know about the migration being complete
-        vm.complete_migration()
-    }
-
     fn vm_send_migration(
         &mut self,
         send_data_migration: VmSendMigrationData,
@@ -1856,377 +2010,6 @@ impl Vmm {
         } else {
             Err(MigratableError::MigrateSend(anyhow!("VM is not running")))
         }
-    }
-
-    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-    fn vm_check_cpuid_compatibility(
-        &self,
-        src_vm_config: &Arc<Mutex<VmConfig>>,
-        src_vm_cpuid: &[hypervisor::arch::x86::CpuIdEntry],
-    ) -> result::Result<(), MigratableError> {
-        #[cfg(feature = "tdx")]
-        if src_vm_config.lock().unwrap().is_tdx_enabled() {
-            return Err(MigratableError::MigrateReceive(anyhow!(
-                "Live Migration is not supported when TDX is enabled"
-            )));
-        };
-
-        // We check the `CPUID` compatibility of between the source vm and destination, which is
-        // mostly about feature compatibility and "topology/sgx" leaves are not relevant.
-        let dest_cpuid = &{
-            let vm_config = &src_vm_config.lock().unwrap();
-
-            let phys_bits = vm::physical_bits(&self.hypervisor, vm_config.cpus.max_phys_bits);
-            arch::generate_common_cpuid(
-                &self.hypervisor.clone(),
-                &arch::CpuidConfig {
-                    sgx_epc_sections: None,
-                    phys_bits,
-                    kvm_hyperv: vm_config.cpus.kvm_hyperv,
-                    #[cfg(feature = "tdx")]
-                    tdx: false,
-                    amx: vm_config.cpus.features.amx,
-                },
-            )
-            .map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!("Error generating common cpuid: {:?}", e))
-            })?
-        };
-        arch::CpuidFeatureEntry::check_cpuid_compatibility(src_vm_cpuid, dest_cpuid).map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!(
-                "Error checking cpu feature compatibility': {:?}",
-                e
-            ))
-        })
-    }
-
-    fn control_loop(
-        &mut self,
-        api_receiver: Rc<Receiver<ApiRequest>>,
-        #[cfg(feature = "guest_debug")] gdb_receiver: Rc<Receiver<gdb::GdbRequest>>,
-    ) -> Result<()> {
-        const EPOLL_EVENTS_LEN: usize = 100;
-
-        let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
-        let epoll_fd = self.epoll.as_raw_fd();
-
-        'outer: loop {
-            let num_events = match epoll::wait(epoll_fd, -1, &mut events[..]) {
-                Ok(res) => res,
-                Err(e) => {
-                    if e.kind() == io::ErrorKind::Interrupted {
-                        // It's well defined from the epoll_wait() syscall
-                        // documentation that the epoll loop can be interrupted
-                        // before any of the requested events occurred or the
-                        // timeout expired. In both those cases, epoll_wait()
-                        // returns an error of type EINTR, but this should not
-                        // be considered as a regular error. Instead it is more
-                        // appropriate to retry, by calling into epoll_wait().
-                        continue;
-                    }
-                    return Err(Error::Epoll(e));
-                }
-            };
-
-            for event in events.iter().take(num_events) {
-                let dispatch_event: EpollDispatch = event.data.into();
-                match dispatch_event {
-                    EpollDispatch::Unknown => {
-                        let event = event.data;
-                        warn!("Unknown VMM loop event: {}", event);
-                    }
-                    EpollDispatch::Exit => {
-                        info!("VM exit event");
-                        // Consume the event.
-                        self.exit_evt.read().map_err(Error::EventFdRead)?;
-                        self.vmm_shutdown().map_err(Error::VmmShutdown)?;
-
-                        break 'outer;
-                    }
-                    EpollDispatch::Reset => {
-                        info!("VM reset event");
-                        // Consume the event.
-                        self.reset_evt.read().map_err(Error::EventFdRead)?;
-                        self.vm_reboot().map_err(Error::VmReboot)?;
-                    }
-                    EpollDispatch::ActivateVirtioDevices => {
-                        if let Some(ref vm) = self.vm {
-                            let count = self.activate_evt.read().map_err(Error::EventFdRead)?;
-                            info!(
-                                "Trying to activate pending virtio devices: count = {}",
-                                count
-                            );
-                            vm.activate_virtio_devices()
-                                .map_err(Error::ActivateVirtioDevices)?;
-                        }
-                    }
-                    EpollDispatch::Api => {
-                        // Consume the events.
-                        for _ in 0..self.api_evt.read().map_err(Error::EventFdRead)? {
-                            // Read from the API receiver channel
-                            let api_request = api_receiver.recv().map_err(Error::ApiRequestRecv)?;
-
-                            info!("API request event: {:?}", api_request);
-                            match api_request {
-                                ApiRequest::VmCreate(config, sender) => {
-                                    let response = self
-                                        .vm_create(config)
-                                        .map_err(ApiError::VmCreate)
-                                        .map(|_| ApiResponsePayload::Empty);
-
-                                    sender.send(response).map_err(Error::ApiResponseSend)?;
-                                }
-                                ApiRequest::VmDelete(sender) => {
-                                    let response = self
-                                        .vm_delete()
-                                        .map_err(ApiError::VmDelete)
-                                        .map(|_| ApiResponsePayload::Empty);
-
-                                    sender.send(response).map_err(Error::ApiResponseSend)?;
-                                }
-                                ApiRequest::VmBoot(sender) => {
-                                    let response = self
-                                        .vm_boot()
-                                        .map_err(ApiError::VmBoot)
-                                        .map(|_| ApiResponsePayload::Empty);
-
-                                    sender.send(response).map_err(Error::ApiResponseSend)?;
-                                }
-                                ApiRequest::VmShutdown(sender) => {
-                                    let response = self
-                                        .vm_shutdown()
-                                        .map_err(ApiError::VmShutdown)
-                                        .map(|_| ApiResponsePayload::Empty);
-
-                                    sender.send(response).map_err(Error::ApiResponseSend)?;
-                                }
-                                ApiRequest::VmReboot(sender) => {
-                                    let response = self
-                                        .vm_reboot()
-                                        .map_err(ApiError::VmReboot)
-                                        .map(|_| ApiResponsePayload::Empty);
-
-                                    sender.send(response).map_err(Error::ApiResponseSend)?;
-                                }
-                                ApiRequest::VmInfo(sender) => {
-                                    let response = self
-                                        .vm_info()
-                                        .map_err(ApiError::VmInfo)
-                                        .map(ApiResponsePayload::VmInfo);
-
-                                    sender.send(response).map_err(Error::ApiResponseSend)?;
-                                }
-                                ApiRequest::VmmPing(sender) => {
-                                    let response = ApiResponsePayload::VmmPing(self.vmm_ping());
-
-                                    sender.send(Ok(response)).map_err(Error::ApiResponseSend)?;
-                                }
-                                ApiRequest::VmPause(sender) => {
-                                    let response = self
-                                        .vm_pause()
-                                        .map_err(ApiError::VmPause)
-                                        .map(|_| ApiResponsePayload::Empty);
-
-                                    sender.send(response).map_err(Error::ApiResponseSend)?;
-                                }
-                                ApiRequest::VmResume(sender) => {
-                                    let response = self
-                                        .vm_resume()
-                                        .map_err(ApiError::VmResume)
-                                        .map(|_| ApiResponsePayload::Empty);
-
-                                    sender.send(response).map_err(Error::ApiResponseSend)?;
-                                }
-                                ApiRequest::VmSnapshot(snapshot_data, sender) => {
-                                    let response = self
-                                        .vm_snapshot(&snapshot_data.destination_url)
-                                        .map_err(ApiError::VmSnapshot)
-                                        .map(|_| ApiResponsePayload::Empty);
-
-                                    sender.send(response).map_err(Error::ApiResponseSend)?;
-                                }
-                                ApiRequest::VmRestore(restore_data, sender) => {
-                                    let response = self
-                                        .vm_restore(restore_data.as_ref().clone())
-                                        .map_err(ApiError::VmRestore)
-                                        .map(|_| ApiResponsePayload::Empty);
-
-                                    sender.send(response).map_err(Error::ApiResponseSend)?;
-                                }
-                                #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-                                ApiRequest::VmCoredump(coredump_data, sender) => {
-                                    let response = self
-                                        .vm_coredump(&coredump_data.destination_url)
-                                        .map_err(ApiError::VmCoredump)
-                                        .map(|_| ApiResponsePayload::Empty);
-
-                                    sender.send(response).map_err(Error::ApiResponseSend)?;
-                                }
-                                ApiRequest::VmmShutdown(sender) => {
-                                    let response = self
-                                        .vmm_shutdown()
-                                        .map_err(ApiError::VmmShutdown)
-                                        .map(|_| ApiResponsePayload::Empty);
-
-                                    sender.send(response).map_err(Error::ApiResponseSend)?;
-
-                                    break 'outer;
-                                }
-                                ApiRequest::VmResize(resize_data, sender) => {
-                                    let response = self
-                                        .vm_resize(
-                                            resize_data.desired_vcpus,
-                                            resize_data.desired_ram,
-                                            resize_data.desired_balloon,
-                                        )
-                                        .map_err(ApiError::VmResize)
-                                        .map(|_| ApiResponsePayload::Empty);
-                                    sender.send(response).map_err(Error::ApiResponseSend)?;
-                                }
-                                ApiRequest::VmResizeZone(resize_zone_data, sender) => {
-                                    let response = self
-                                        .vm_resize_zone(
-                                            resize_zone_data.id.clone(),
-                                            resize_zone_data.desired_ram,
-                                        )
-                                        .map_err(ApiError::VmResizeZone)
-                                        .map(|_| ApiResponsePayload::Empty);
-                                    sender.send(response).map_err(Error::ApiResponseSend)?;
-                                }
-                                ApiRequest::VmAddDevice(add_device_data, sender) => {
-                                    let response = self
-                                        .vm_add_device(add_device_data.as_ref().clone())
-                                        .map_err(ApiError::VmAddDevice)
-                                        .map(ApiResponsePayload::VmAction);
-                                    sender.send(response).map_err(Error::ApiResponseSend)?;
-                                }
-                                ApiRequest::VmAddUserDevice(add_device_data, sender) => {
-                                    let response = self
-                                        .vm_add_user_device(add_device_data.as_ref().clone())
-                                        .map_err(ApiError::VmAddUserDevice)
-                                        .map(ApiResponsePayload::VmAction);
-                                    sender.send(response).map_err(Error::ApiResponseSend)?;
-                                }
-                                ApiRequest::VmRemoveDevice(remove_device_data, sender) => {
-                                    let response = self
-                                        .vm_remove_device(remove_device_data.id.clone())
-                                        .map_err(ApiError::VmRemoveDevice)
-                                        .map(|_| ApiResponsePayload::Empty);
-                                    sender.send(response).map_err(Error::ApiResponseSend)?;
-                                }
-                                ApiRequest::VmAddDisk(add_disk_data, sender) => {
-                                    let response = self
-                                        .vm_add_disk(add_disk_data.as_ref().clone())
-                                        .map_err(ApiError::VmAddDisk)
-                                        .map(ApiResponsePayload::VmAction);
-                                    sender.send(response).map_err(Error::ApiResponseSend)?;
-                                }
-                                ApiRequest::VmAddFs(add_fs_data, sender) => {
-                                    let response = self
-                                        .vm_add_fs(add_fs_data.as_ref().clone())
-                                        .map_err(ApiError::VmAddFs)
-                                        .map(ApiResponsePayload::VmAction);
-                                    sender.send(response).map_err(Error::ApiResponseSend)?;
-                                }
-                                ApiRequest::VmAddPmem(add_pmem_data, sender) => {
-                                    let response = self
-                                        .vm_add_pmem(add_pmem_data.as_ref().clone())
-                                        .map_err(ApiError::VmAddPmem)
-                                        .map(ApiResponsePayload::VmAction);
-                                    sender.send(response).map_err(Error::ApiResponseSend)?;
-                                }
-                                ApiRequest::VmAddNet(add_net_data, sender) => {
-                                    let response = self
-                                        .vm_add_net(add_net_data.as_ref().clone())
-                                        .map_err(ApiError::VmAddNet)
-                                        .map(ApiResponsePayload::VmAction);
-                                    sender.send(response).map_err(Error::ApiResponseSend)?;
-                                }
-                                ApiRequest::VmAddVdpa(add_vdpa_data, sender) => {
-                                    let response = self
-                                        .vm_add_vdpa(add_vdpa_data.as_ref().clone())
-                                        .map_err(ApiError::VmAddVdpa)
-                                        .map(ApiResponsePayload::VmAction);
-                                    sender.send(response).map_err(Error::ApiResponseSend)?;
-                                }
-                                ApiRequest::VmAddVsock(add_vsock_data, sender) => {
-                                    let response = self
-                                        .vm_add_vsock(add_vsock_data.as_ref().clone())
-                                        .map_err(ApiError::VmAddVsock)
-                                        .map(ApiResponsePayload::VmAction);
-                                    sender.send(response).map_err(Error::ApiResponseSend)?;
-                                }
-                                ApiRequest::VmCounters(sender) => {
-                                    let response = self
-                                        .vm_counters()
-                                        .map_err(ApiError::VmInfo)
-                                        .map(ApiResponsePayload::VmAction);
-                                    sender.send(response).map_err(Error::ApiResponseSend)?;
-                                }
-                                ApiRequest::VmReceiveMigration(receive_migration_data, sender) => {
-                                    let response = self
-                                        .vm_receive_migration(
-                                            receive_migration_data.as_ref().clone(),
-                                        )
-                                        .map_err(ApiError::VmReceiveMigration)
-                                        .map(|_| ApiResponsePayload::Empty);
-                                    sender.send(response).map_err(Error::ApiResponseSend)?;
-                                }
-                                ApiRequest::VmSendMigration(send_migration_data, sender) => {
-                                    let response = self
-                                        .vm_send_migration(send_migration_data.as_ref().clone())
-                                        .map_err(ApiError::VmSendMigration)
-                                        .map(|_| ApiResponsePayload::Empty);
-                                    sender.send(response).map_err(Error::ApiResponseSend)?;
-                                }
-                                ApiRequest::VmPowerButton(sender) => {
-                                    let response = self
-                                        .vm_power_button()
-                                        .map_err(ApiError::VmPowerButton)
-                                        .map(|_| ApiResponsePayload::Empty);
-
-                                    sender.send(response).map_err(Error::ApiResponseSend)?;
-                                }
-                            }
-                        }
-                    }
-                    #[cfg(feature = "guest_debug")]
-                    EpollDispatch::Debug => {
-                        // Consume the events.
-                        for _ in 0..self.debug_evt.read().map_err(Error::EventFdRead)? {
-                            // Read from the API receiver channel
-                            let gdb_request = gdb_receiver.recv().map_err(Error::GdbRequestRecv)?;
-
-                            let response = if let Some(ref mut vm) = self.vm {
-                                vm.debug_request(&gdb_request.payload, gdb_request.cpu_id)
-                            } else {
-                                Err(VmError::VmNotRunning)
-                            }
-                            .map_err(gdb::Error::Vm);
-
-                            gdb_request
-                                .sender
-                                .send(response)
-                                .map_err(Error::GdbResponseSend)?;
-                        }
-                    }
-                    #[cfg(not(feature = "guest_debug"))]
-                    EpollDispatch::Debug => {}
-                }
-            }
-        }
-
-        // Trigger the termination of the signal_handler thread
-        if let Some(signals) = self.signals.take() {
-            signals.close();
-        }
-
-        // Wait for all the threads to finish
-        for thread in self.threads.drain(..) {
-            thread.join().map_err(Error::ThreadCleanup)?
-        }
-
-        Ok(())
     }
 }
 

@@ -2,7 +2,15 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-use super::{ApiRequest, VmAction};
+use super::{ApiAction, ApiRequest};
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use crate::api::VmCoredump;
+use crate::api::{
+    AddDisk, Body, VmAddDevice, VmAddFs, VmAddNet, VmAddPmem, VmAddUserDevice, VmAddVdpa,
+    VmAddVsock, VmBoot, VmCounters, VmCreate, VmDelete, VmInfo, VmPause, VmPowerButton, VmReboot,
+    VmReceiveMigration, VmRemoveDevice, VmResize, VmResizeZone, VmRestore, VmResume,
+    VmSendMigration, VmShutdown, VmSnapshot, VmmPing, VmmShutdown,
+};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{Error as VmmError, Result as VmmResult};
 use crate::{NetConfig, VmConfig};
@@ -78,11 +86,15 @@ impl DBusApi {
             .map_err(|err| fdo::Error::IOError(format!("{err:?}")))
     }
 
-    async fn vm_action(&self, action: VmAction) -> Result<Optional<String>> {
+    async fn vm_action<Action: ApiAction<ResponseBody = Option<Body>>>(
+        &self,
+        action: &'static Action,
+        body: Action::RequestBody,
+    ) -> Result<Optional<String>> {
         let api_sender = self.clone_api_sender().await;
         let api_notifier = self.clone_api_notifier()?;
 
-        let result = blocking::unblock(move || super::vm_action(api_notifier, api_sender, action))
+        let result = blocking::unblock(move || action.send(api_notifier, api_sender, body))
             .await
             .map_err(api_error)?
             // We're using `from_utf8_lossy` here to not deal with the
@@ -99,7 +111,7 @@ impl DBusApi {
         let api_sender = self.clone_api_sender().await;
         let api_notifier = self.clone_api_notifier()?;
 
-        let result = blocking::unblock(move || super::vmm_ping(api_notifier, api_sender))
+        let result = blocking::unblock(move || VmmPing.send(api_notifier, api_sender, ()))
             .await
             .map_err(api_error)?;
         serde_json::to_string(&result).map_err(api_error)
@@ -109,26 +121,24 @@ impl DBusApi {
         let api_sender = self.clone_api_sender().await;
         let api_notifier = self.clone_api_notifier()?;
 
-        blocking::unblock(move || super::vmm_shutdown(api_notifier, api_sender))
+        blocking::unblock(move || VmmShutdown.send(api_notifier, api_sender, ()))
             .await
             .map_err(api_error)
     }
 
     async fn vm_add_device(&self, device_config: String) -> Result<Optional<String>> {
         let device_config = serde_json::from_str(&device_config).map_err(api_error)?;
-        self.vm_action(VmAction::AddDevice(Arc::new(device_config)))
-            .await
+        self.vm_action(&VmAddDevice, device_config).await
     }
 
     async fn vm_add_disk(&self, disk_config: String) -> Result<Optional<String>> {
         let disk_config = serde_json::from_str(&disk_config).map_err(api_error)?;
-        self.vm_action(VmAction::AddDisk(Arc::new(disk_config)))
-            .await
+        self.vm_action(&AddDisk, disk_config).await
     }
 
     async fn vm_add_fs(&self, fs_config: String) -> Result<Optional<String>> {
         let fs_config = serde_json::from_str(&fs_config).map_err(api_error)?;
-        self.vm_action(VmAction::AddFs(Arc::new(fs_config))).await
+        self.vm_action(&VmAddFs, fs_config).await
     }
 
     async fn vm_add_net(&self, net_config: String) -> Result<Optional<String>> {
@@ -137,35 +147,31 @@ impl DBusApi {
             warn!("Ignoring FDs sent via the D-Bus request body");
             net_config.fds = None;
         }
-        self.vm_action(VmAction::AddNet(Arc::new(net_config))).await
+        self.vm_action(&VmAddNet, net_config).await
     }
 
     async fn vm_add_pmem(&self, pmem_config: String) -> Result<Optional<String>> {
         let pmem_config = serde_json::from_str(&pmem_config).map_err(api_error)?;
-        self.vm_action(VmAction::AddPmem(Arc::new(pmem_config)))
-            .await
+        self.vm_action(&VmAddPmem, pmem_config).await
     }
 
     async fn vm_add_user_device(&self, vm_add_user_device: String) -> Result<Optional<String>> {
         let vm_add_user_device = serde_json::from_str(&vm_add_user_device).map_err(api_error)?;
-        self.vm_action(VmAction::AddUserDevice(Arc::new(vm_add_user_device)))
-            .await
+        self.vm_action(&VmAddUserDevice, vm_add_user_device).await
     }
 
     async fn vm_add_vdpa(&self, vdpa_config: String) -> Result<Optional<String>> {
         let vdpa_config = serde_json::from_str(&vdpa_config).map_err(api_error)?;
-        self.vm_action(VmAction::AddVdpa(Arc::new(vdpa_config)))
-            .await
+        self.vm_action(&VmAddVdpa, vdpa_config).await
     }
 
     async fn vm_add_vsock(&self, vsock_config: String) -> Result<Optional<String>> {
         let vsock_config = serde_json::from_str(&vsock_config).map_err(api_error)?;
-        self.vm_action(VmAction::AddVsock(Arc::new(vsock_config)))
-            .await
+        self.vm_action(&VmAddVsock, vsock_config).await
     }
 
     async fn vm_boot(&self) -> Result<()> {
-        self.vm_action(VmAction::Boot).await.map(|_| ())
+        self.vm_action(&VmBoot, ()).await.map(|_| ())
     }
 
     #[allow(unused_variables)]
@@ -176,7 +182,7 @@ impl DBusApi {
         #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
         {
             let vm_coredump_data = serde_json::from_str(&vm_coredump_data).map_err(api_error)?;
-            self.vm_action(VmAction::Coredump(Arc::new(vm_coredump_data)))
+            self.vm_action(&VmCoredump, vm_coredump_data)
                 .await
                 .map(|_| ())
         }
@@ -188,7 +194,7 @@ impl DBusApi {
     }
 
     async fn vm_counters(&self) -> Result<Optional<String>> {
-        self.vm_action(VmAction::Counters).await
+        self.vm_action(&VmCounters, ()).await
     }
 
     async fn vm_create(&self, vm_config: String) -> Result<()> {
@@ -207,7 +213,7 @@ impl DBusApi {
         }
 
         blocking::unblock(move || {
-            super::vm_create(api_notifier, api_sender, Arc::new(Mutex::new(vm_config)))
+            VmCreate.send(api_notifier, api_sender, Arc::new(Mutex::new(vm_config)))
         })
         .await
         .map_err(api_error)?;
@@ -216,85 +222,81 @@ impl DBusApi {
     }
 
     async fn vm_delete(&self) -> Result<()> {
-        self.vm_action(VmAction::Delete).await.map(|_| ())
+        self.vm_action(&VmDelete, ()).await.map(|_| ())
     }
 
     async fn vm_info(&self) -> Result<String> {
         let api_sender = self.clone_api_sender().await;
         let api_notifier = self.clone_api_notifier()?;
 
-        let result = blocking::unblock(move || super::vm_info(api_notifier, api_sender))
+        let result = blocking::unblock(move || VmInfo.send(api_notifier, api_sender, ()))
             .await
             .map_err(api_error)?;
         serde_json::to_string(&result).map_err(api_error)
     }
 
     async fn vm_pause(&self) -> Result<()> {
-        self.vm_action(VmAction::Pause).await.map(|_| ())
+        self.vm_action(&VmPause, ()).await.map(|_| ())
     }
 
     async fn vm_power_button(&self) -> Result<()> {
-        self.vm_action(VmAction::PowerButton).await.map(|_| ())
+        self.vm_action(&VmPowerButton, ()).await.map(|_| ())
     }
 
     async fn vm_reboot(&self) -> Result<()> {
-        self.vm_action(VmAction::Reboot).await.map(|_| ())
+        self.vm_action(&VmReboot, ()).await.map(|_| ())
     }
 
     async fn vm_remove_device(&self, vm_remove_device: String) -> Result<()> {
         let vm_remove_device = serde_json::from_str(&vm_remove_device).map_err(api_error)?;
-        self.vm_action(VmAction::RemoveDevice(Arc::new(vm_remove_device)))
+        self.vm_action(&VmRemoveDevice, vm_remove_device)
             .await
             .map(|_| ())
     }
 
     async fn vm_resize(&self, vm_resize: String) -> Result<()> {
         let vm_resize = serde_json::from_str(&vm_resize).map_err(api_error)?;
-        self.vm_action(VmAction::Resize(Arc::new(vm_resize)))
-            .await
-            .map(|_| ())
+        self.vm_action(&VmResize, vm_resize).await.map(|_| ())
     }
 
     async fn vm_resize_zone(&self, vm_resize_zone: String) -> Result<()> {
         let vm_resize_zone = serde_json::from_str(&vm_resize_zone).map_err(api_error)?;
-        self.vm_action(VmAction::ResizeZone(Arc::new(vm_resize_zone)))
+        self.vm_action(&VmResizeZone, vm_resize_zone)
             .await
             .map(|_| ())
     }
 
     async fn vm_restore(&self, restore_config: String) -> Result<()> {
         let restore_config = serde_json::from_str(&restore_config).map_err(api_error)?;
-        self.vm_action(VmAction::Restore(Arc::new(restore_config)))
-            .await
-            .map(|_| ())
+        self.vm_action(&VmRestore, restore_config).await.map(|_| ())
     }
 
     async fn vm_receive_migration(&self, receive_migration_data: String) -> Result<()> {
         let receive_migration_data =
             serde_json::from_str(&receive_migration_data).map_err(api_error)?;
-        self.vm_action(VmAction::ReceiveMigration(Arc::new(receive_migration_data)))
+        self.vm_action(&VmReceiveMigration, receive_migration_data)
             .await
             .map(|_| ())
     }
 
     async fn vm_send_migration(&self, send_migration_data: String) -> Result<()> {
         let send_migration_data = serde_json::from_str(&send_migration_data).map_err(api_error)?;
-        self.vm_action(VmAction::SendMigration(Arc::new(send_migration_data)))
+        self.vm_action(&VmSendMigration, send_migration_data)
             .await
             .map(|_| ())
     }
 
     async fn vm_resume(&self) -> Result<()> {
-        self.vm_action(VmAction::Resume).await.map(|_| ())
+        self.vm_action(&VmResume, ()).await.map(|_| ())
     }
 
     async fn vm_shutdown(&self) -> Result<()> {
-        self.vm_action(VmAction::Shutdown).await.map(|_| ())
+        self.vm_action(&VmShutdown, ()).await.map(|_| ())
     }
 
     async fn vm_snapshot(&self, vm_snapshot_config: String) -> Result<()> {
         let vm_snapshot_config = serde_json::from_str(&vm_snapshot_config).map_err(api_error)?;
-        self.vm_action(VmAction::Snapshot(Arc::new(vm_snapshot_config)))
+        self.vm_action(&VmSnapshot, vm_snapshot_config)
             .await
             .map(|_| ())
     }
