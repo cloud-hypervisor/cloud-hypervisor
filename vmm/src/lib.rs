@@ -2672,7 +2672,7 @@ mod unit_tests {
     #[test]
     fn test_vmm_vm_cold_add_vsock() {
         let mut vmm = create_dummy_vmm();
-        let vsock_config = VsockConfig::parse("socket=/tmp/sock,cid=1,iommu=on").unwrap();
+        let vsock_config = VsockConfig::parse("socket=/tmp/sock,cid=3,iommu=on").unwrap();
 
         assert!(matches!(
             vmm.vm_add_vsock(vsock_config.clone()),
