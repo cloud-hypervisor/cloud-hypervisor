@@ -1,17 +1,17 @@
 // Copyright © 2019 Intel Corporation
+// Copyright 2024 Alyssa Ross <hi@alyssa.is>
 //
 // SPDX-License-Identifier: Apache-2.0
 //
 
 use crate::api::http::{error_response, EndpointHandler, HttpError};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use crate::api::vm_coredump;
+use crate::api::VmCoredump;
 use crate::api::{
-    vm_add_device, vm_add_disk, vm_add_fs, vm_add_net, vm_add_pmem, vm_add_user_device,
-    vm_add_vdpa, vm_add_vsock, vm_boot, vm_counters, vm_create, vm_delete, vm_info, vm_pause,
-    vm_power_button, vm_reboot, vm_receive_migration, vm_remove_device, vm_resize, vm_resize_zone,
-    vm_restore, vm_resume, vm_send_migration, vm_shutdown, vm_snapshot, vmm_ping, vmm_shutdown,
-    ApiRequest, VmAction, VmConfig,
+    AddDisk, ApiAction, ApiRequest, VmAddDevice, VmAddFs, VmAddNet, VmAddPmem, VmAddUserDevice,
+    VmAddVdpa, VmAddVsock, VmBoot, VmConfig, VmCounters, VmDelete, VmPause, VmPowerButton,
+    VmReboot, VmReceiveMigration, VmRemoveDevice, VmResize, VmResizeZone, VmRestore, VmResume,
+    VmSendMigration, VmShutdown, VmSnapshot,
 };
 use crate::config::NetConfig;
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
@@ -52,8 +52,8 @@ impl EndpointHandler for VmCreate {
                             }
                         }
 
-                        // Call vm_create()
-                        match vm_create(api_notifier, api_sender, Arc::new(Mutex::new(vm_config)))
+                        match crate::api::VmCreate
+                            .send(api_notifier, api_sender, Arc::new(Mutex::new(vm_config)))
                             .map_err(HttpError::ApiError)
                         {
                             Ok(_) => Response::new(Version::Http11, StatusCode::NoContent),
@@ -70,13 +70,162 @@ impl EndpointHandler for VmCreate {
     }
 }
 
+pub trait GetHandler {
+    fn handle_request(
+        &'static self,
+        _api_notifier: EventFd,
+        _api_sender: Sender<ApiRequest>,
+    ) -> std::result::Result<Option<Body>, HttpError> {
+        Err(HttpError::BadRequest)
+    }
+}
+
+pub trait PutHandler {
+    fn handle_request(
+        &'static self,
+        _api_notifier: EventFd,
+        _api_sender: Sender<ApiRequest>,
+        _body: &Option<Body>,
+        _files: Vec<File>,
+    ) -> std::result::Result<Option<Body>, HttpError> {
+        Err(HttpError::BadRequest)
+    }
+}
+
+pub trait HttpVmAction: GetHandler + PutHandler + Sync {}
+
+impl<T: GetHandler + PutHandler + Sync> HttpVmAction for T {}
+
+macro_rules! vm_action_get_handler {
+    ($action:ty) => {
+        impl GetHandler for $action {
+            fn handle_request(
+                &'static self,
+                api_notifier: EventFd,
+                api_sender: Sender<ApiRequest>,
+            ) -> std::result::Result<Option<Body>, HttpError> {
+                self.send(api_notifier, api_sender, ())
+                    .map_err(HttpError::ApiError)
+            }
+        }
+
+        impl PutHandler for $action {}
+    };
+}
+
+macro_rules! vm_action_put_handler {
+    ($action:ty) => {
+        impl PutHandler for $action {
+            fn handle_request(
+                &'static self,
+                api_notifier: EventFd,
+                api_sender: Sender<ApiRequest>,
+                body: &Option<Body>,
+                _files: Vec<File>,
+            ) -> std::result::Result<Option<Body>, HttpError> {
+                if body.is_some() {
+                    Err(HttpError::BadRequest)
+                } else {
+                    self.send(api_notifier, api_sender, ())
+                        .map_err(HttpError::ApiError)
+                }
+            }
+        }
+
+        impl GetHandler for $action {}
+    };
+}
+
+macro_rules! vm_action_put_handler_body {
+    ($action:ty) => {
+        impl PutHandler for $action {
+            fn handle_request(
+                &'static self,
+                api_notifier: EventFd,
+                api_sender: Sender<ApiRequest>,
+                body: &Option<Body>,
+                _files: Vec<File>,
+            ) -> std::result::Result<Option<Body>, HttpError> {
+                if let Some(body) = body {
+                    self.send(
+                        api_notifier,
+                        api_sender,
+                        serde_json::from_slice(body.raw())?,
+                    )
+                    .map_err(HttpError::ApiError)
+                } else {
+                    Err(HttpError::BadRequest)
+                }
+            }
+        }
+
+        impl GetHandler for $action {}
+    };
+}
+
+vm_action_get_handler!(VmCounters);
+
+vm_action_put_handler!(VmBoot);
+vm_action_put_handler!(VmDelete);
+vm_action_put_handler!(VmShutdown);
+vm_action_put_handler!(VmReboot);
+vm_action_put_handler!(VmPause);
+vm_action_put_handler!(VmResume);
+vm_action_put_handler!(VmPowerButton);
+
+vm_action_put_handler_body!(VmAddDevice);
+vm_action_put_handler_body!(AddDisk);
+vm_action_put_handler_body!(VmAddFs);
+vm_action_put_handler_body!(VmAddPmem);
+vm_action_put_handler_body!(VmAddVdpa);
+vm_action_put_handler_body!(VmAddVsock);
+vm_action_put_handler_body!(VmAddUserDevice);
+vm_action_put_handler_body!(VmRemoveDevice);
+vm_action_put_handler_body!(VmResize);
+vm_action_put_handler_body!(VmResizeZone);
+vm_action_put_handler_body!(VmRestore);
+vm_action_put_handler_body!(VmSnapshot);
+vm_action_put_handler_body!(VmReceiveMigration);
+vm_action_put_handler_body!(VmSendMigration);
+
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+vm_action_put_handler_body!(VmCoredump);
+
+impl PutHandler for VmAddNet {
+    fn handle_request(
+        &'static self,
+        api_notifier: EventFd,
+        api_sender: Sender<ApiRequest>,
+        body: &Option<Body>,
+        mut files: Vec<File>,
+    ) -> std::result::Result<Option<Body>, HttpError> {
+        if let Some(body) = body {
+            let mut net_cfg: NetConfig = serde_json::from_slice(body.raw())?;
+            if net_cfg.fds.is_some() {
+                warn!("Ignoring FDs sent via the HTTP request body");
+                net_cfg.fds = None;
+            }
+            if !files.is_empty() {
+                let fds = files.drain(..).map(|f| f.into_raw_fd()).collect();
+                net_cfg.fds = Some(fds);
+            }
+            self.send(api_notifier, api_sender, net_cfg)
+                .map_err(HttpError::ApiError)
+        } else {
+            Err(HttpError::BadRequest)
+        }
+    }
+}
+
+impl GetHandler for VmAddNet {}
+
 // Common handler for boot, shutdown and reboot
 pub struct VmActionHandler {
-    action: VmAction,
+    action: &'static dyn HttpVmAction,
 }
 
 impl VmActionHandler {
-    pub fn new(action: VmAction) -> Self {
+    pub fn new(action: &'static dyn HttpVmAction) -> Self {
         VmActionHandler { action }
     }
 }
@@ -87,117 +236,9 @@ impl EndpointHandler for VmActionHandler {
         api_notifier: EventFd,
         api_sender: Sender<ApiRequest>,
         body: &Option<Body>,
-        mut files: Vec<File>,
+        files: Vec<File>,
     ) -> std::result::Result<Option<Body>, HttpError> {
-        use VmAction::*;
-        if let Some(body) = body {
-            match self.action {
-                AddDevice(_) => vm_add_device(
-                    api_notifier,
-                    api_sender,
-                    Arc::new(serde_json::from_slice(body.raw())?),
-                ),
-                AddDisk(_) => vm_add_disk(
-                    api_notifier,
-                    api_sender,
-                    Arc::new(serde_json::from_slice(body.raw())?),
-                ),
-                AddFs(_) => vm_add_fs(
-                    api_notifier,
-                    api_sender,
-                    Arc::new(serde_json::from_slice(body.raw())?),
-                ),
-                AddPmem(_) => vm_add_pmem(
-                    api_notifier,
-                    api_sender,
-                    Arc::new(serde_json::from_slice(body.raw())?),
-                ),
-                AddNet(_) => {
-                    let mut net_cfg: NetConfig = serde_json::from_slice(body.raw())?;
-                    if net_cfg.fds.is_some() {
-                        warn!("Ignoring FDs sent via the HTTP request body");
-                        net_cfg.fds = None;
-                    }
-                    // Update network config with optional files that might have
-                    // been sent through control message.
-                    if !files.is_empty() {
-                        let fds = files.drain(..).map(|f| f.into_raw_fd()).collect();
-                        net_cfg.fds = Some(fds);
-                    }
-                    vm_add_net(api_notifier, api_sender, Arc::new(net_cfg))
-                }
-                AddVdpa(_) => vm_add_vdpa(
-                    api_notifier,
-                    api_sender,
-                    Arc::new(serde_json::from_slice(body.raw())?),
-                ),
-                AddVsock(_) => vm_add_vsock(
-                    api_notifier,
-                    api_sender,
-                    Arc::new(serde_json::from_slice(body.raw())?),
-                ),
-                AddUserDevice(_) => vm_add_user_device(
-                    api_notifier,
-                    api_sender,
-                    Arc::new(serde_json::from_slice(body.raw())?),
-                ),
-                RemoveDevice(_) => vm_remove_device(
-                    api_notifier,
-                    api_sender,
-                    Arc::new(serde_json::from_slice(body.raw())?),
-                ),
-                Resize(_) => vm_resize(
-                    api_notifier,
-                    api_sender,
-                    Arc::new(serde_json::from_slice(body.raw())?),
-                ),
-                ResizeZone(_) => vm_resize_zone(
-                    api_notifier,
-                    api_sender,
-                    Arc::new(serde_json::from_slice(body.raw())?),
-                ),
-                Restore(_) => vm_restore(
-                    api_notifier,
-                    api_sender,
-                    Arc::new(serde_json::from_slice(body.raw())?),
-                ),
-                Snapshot(_) => vm_snapshot(
-                    api_notifier,
-                    api_sender,
-                    Arc::new(serde_json::from_slice(body.raw())?),
-                ),
-                #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-                Coredump(_) => vm_coredump(
-                    api_notifier,
-                    api_sender,
-                    Arc::new(serde_json::from_slice(body.raw())?),
-                ),
-                ReceiveMigration(_) => vm_receive_migration(
-                    api_notifier,
-                    api_sender,
-                    Arc::new(serde_json::from_slice(body.raw())?),
-                ),
-                SendMigration(_) => vm_send_migration(
-                    api_notifier,
-                    api_sender,
-                    Arc::new(serde_json::from_slice(body.raw())?),
-                ),
-
-                _ => return Err(HttpError::BadRequest),
-            }
-        } else {
-            match self.action {
-                Boot => vm_boot(api_notifier, api_sender),
-                Delete => vm_delete(api_notifier, api_sender),
-                Shutdown => vm_shutdown(api_notifier, api_sender),
-                Reboot => vm_reboot(api_notifier, api_sender),
-                Pause => vm_pause(api_notifier, api_sender),
-                Resume => vm_resume(api_notifier, api_sender),
-                PowerButton => vm_power_button(api_notifier, api_sender),
-                _ => return Err(HttpError::BadRequest),
-            }
-        }
-        .map_err(HttpError::ApiError)
+        PutHandler::handle_request(self.action, api_notifier, api_sender, body, files)
     }
 
     fn get_handler(
@@ -206,11 +247,7 @@ impl EndpointHandler for VmActionHandler {
         api_sender: Sender<ApiRequest>,
         _body: &Option<Body>,
     ) -> std::result::Result<Option<Body>, HttpError> {
-        use VmAction::*;
-        match self.action {
-            Counters => vm_counters(api_notifier, api_sender).map_err(HttpError::ApiError),
-            _ => Err(HttpError::BadRequest),
-        }
+        GetHandler::handle_request(self.action, api_notifier, api_sender)
     }
 }
 
@@ -225,7 +262,10 @@ impl EndpointHandler for VmInfo {
         api_sender: Sender<ApiRequest>,
     ) -> Response {
         match req.method() {
-            Method::Get => match vm_info(api_notifier, api_sender).map_err(HttpError::ApiError) {
+            Method::Get => match crate::api::VmInfo
+                .send(api_notifier, api_sender, ())
+                .map_err(HttpError::ApiError)
+            {
                 Ok(info) => {
                     let mut response = Response::new(Version::Http11, StatusCode::OK);
                     let info_serialized = serde_json::to_string(&info).unwrap();
@@ -251,7 +291,10 @@ impl EndpointHandler for VmmPing {
         api_sender: Sender<ApiRequest>,
     ) -> Response {
         match req.method() {
-            Method::Get => match vmm_ping(api_notifier, api_sender).map_err(HttpError::ApiError) {
+            Method::Get => match crate::api::VmmPing
+                .send(api_notifier, api_sender, ())
+                .map_err(HttpError::ApiError)
+            {
                 Ok(pong) => {
                     let mut response = Response::new(Version::Http11, StatusCode::OK);
                     let info_serialized = serde_json::to_string(&pong).unwrap();
@@ -279,7 +322,10 @@ impl EndpointHandler for VmmShutdown {
     ) -> Response {
         match req.method() {
             Method::Put => {
-                match vmm_shutdown(api_notifier, api_sender).map_err(HttpError::ApiError) {
+                match crate::api::VmmShutdown
+                    .send(api_notifier, api_sender, ())
+                    .map_err(HttpError::ApiError)
+                {
                     Ok(_) => Response::new(Version::Http11, StatusCode::OK),
                     Err(e) => error_response(e, StatusCode::InternalServerError),
                 }

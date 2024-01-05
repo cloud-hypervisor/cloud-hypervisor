@@ -1,4 +1,5 @@
 // Copyright © 2019 Intel Corporation
+// Copyright 2024 Alyssa Ross <hi@alyssa.is>
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -20,8 +21,8 @@
 //!
 //! 1. The thread creates an mpsc channel for receiving the command response.
 //! 2. The thread sends an ApiRequest to the Sender endpoint. The ApiRequest
-//!    contains the response channel Sender, for the VMM API server to be able
-//!    to send the response back.
+//!    encapsulates the response channel Sender, for the VMM API server to be
+//!    able to send the response back.
 //! 3. The thread writes to the API event file descriptor to notify the VMM
 //!    API server about a pending command.
 //! 4. The thread reads the response back from the VMM API server, from the
@@ -43,6 +44,7 @@ use crate::config::{
 };
 use crate::device_tree::DeviceTree;
 use crate::vm::{Error as VmError, VmState};
+use crate::Error as VmmError;
 use micro_http::Body;
 use serde::{Deserialize, Serialize};
 use std::io;
@@ -156,10 +158,10 @@ pub enum ApiError {
     /// Error triggering power button
     VmPowerButton(VmError),
 }
-pub type ApiResult<T> = std::result::Result<T, ApiError>;
+pub type ApiResult<T> = Result<T, ApiError>;
 
 #[derive(Clone, Deserialize, Serialize)]
-pub struct VmInfo {
+pub struct VmInfoResponse {
     pub config: Arc<Mutex<VmConfig>>,
     pub state: VmState,
     pub memory_actual_size: u64,
@@ -224,7 +226,7 @@ pub enum ApiResponsePayload {
     Empty,
 
     /// Virtual machine information
-    VmInfo(VmInfo),
+    VmInfo(VmInfoResponse),
 
     /// Vmm ping response
     VmmPing(VmmPingResponse),
@@ -234,247 +236,120 @@ pub enum ApiResponsePayload {
 }
 
 /// This is the response sent by the VMM API server through the mpsc channel.
-pub type ApiResponse = std::result::Result<ApiResponsePayload, ApiError>;
+pub type ApiResponse = Result<ApiResponsePayload, ApiError>;
 
-#[derive(Debug)]
-pub enum ApiRequest {
-    /// Create the virtual machine. This request payload is a VM configuration
-    /// (VmConfig).
-    /// If the VMM API server could not create the VM, it will send a VmCreate
-    /// error back.
-    VmCreate(Arc<Mutex<VmConfig>>, Sender<ApiResponse>),
+pub trait RequestHandler {
+    fn vm_create(&mut self, config: Arc<Mutex<VmConfig>>) -> Result<(), VmError>;
 
-    /// Boot the previously created virtual machine.
-    /// If the VM was not previously created, the VMM API server will send a
-    /// VmBoot error back.
-    VmBoot(Sender<ApiResponse>),
+    fn vm_boot(&mut self) -> Result<(), VmError>;
 
-    /// Delete the previously created virtual machine.
-    /// If the VM was not previously created, the VMM API server will send a
-    /// VmDelete error back.
-    /// If the VM is booted, we shut it down first.
-    VmDelete(Sender<ApiResponse>),
+    fn vm_pause(&mut self) -> Result<(), VmError>;
 
-    /// Request the VM information.
-    VmInfo(Sender<ApiResponse>),
+    fn vm_resume(&mut self) -> Result<(), VmError>;
 
-    /// Request the VMM API server status
-    VmmPing(Sender<ApiResponse>),
+    fn vm_snapshot(&mut self, destination_url: &str) -> Result<(), VmError>;
 
-    /// Pause a VM.
-    VmPause(Sender<ApiResponse>),
+    fn vm_restore(&mut self, restore_cfg: RestoreConfig) -> Result<(), VmError>;
 
-    /// Resume a VM.
-    VmResume(Sender<ApiResponse>),
-
-    /// Get counters for a VM.
-    VmCounters(Sender<ApiResponse>),
-
-    /// Shut the previously booted virtual machine down.
-    /// If the VM was not previously booted or created, the VMM API server
-    /// will send a VmShutdown error back.
-    VmShutdown(Sender<ApiResponse>),
-
-    /// Reboot the previously booted virtual machine.
-    /// If the VM was not previously booted or created, the VMM API server
-    /// will send a VmReboot error back.
-    VmReboot(Sender<ApiResponse>),
-
-    /// Shut the VMM down.
-    /// This will shutdown and delete the current VM, if any, and then exit the
-    /// VMM process.
-    VmmShutdown(Sender<ApiResponse>),
-
-    /// Resize the VM.
-    VmResize(Arc<VmResizeData>, Sender<ApiResponse>),
-
-    /// Resize the memory zone.
-    VmResizeZone(Arc<VmResizeZoneData>, Sender<ApiResponse>),
-
-    /// Add a device to the VM.
-    VmAddDevice(Arc<DeviceConfig>, Sender<ApiResponse>),
-
-    /// Add a user device to the VM.
-    VmAddUserDevice(Arc<UserDeviceConfig>, Sender<ApiResponse>),
-
-    /// Remove a device from the VM.
-    VmRemoveDevice(Arc<VmRemoveDeviceData>, Sender<ApiResponse>),
-
-    /// Add a disk to the VM.
-    VmAddDisk(Arc<DiskConfig>, Sender<ApiResponse>),
-
-    /// Add a fs to the VM.
-    VmAddFs(Arc<FsConfig>, Sender<ApiResponse>),
-
-    /// Add a pmem device to the VM.
-    VmAddPmem(Arc<PmemConfig>, Sender<ApiResponse>),
-
-    /// Add a network device to the VM.
-    VmAddNet(Arc<NetConfig>, Sender<ApiResponse>),
-
-    /// Add a vDPA device to the VM.
-    VmAddVdpa(Arc<VdpaConfig>, Sender<ApiResponse>),
-
-    /// Add a vsock device to the VM.
-    VmAddVsock(Arc<VsockConfig>, Sender<ApiResponse>),
-
-    /// Take a VM snapshot
-    VmSnapshot(Arc<VmSnapshotConfig>, Sender<ApiResponse>),
-
-    /// Restore from a VM snapshot
-    VmRestore(Arc<RestoreConfig>, Sender<ApiResponse>),
-
-    /// Take a VM coredump
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-    VmCoredump(Arc<VmCoredumpData>, Sender<ApiResponse>),
+    fn vm_coredump(&mut self, destination_url: &str) -> Result<(), VmError>;
 
-    /// Incoming migration
-    VmReceiveMigration(Arc<VmReceiveMigrationData>, Sender<ApiResponse>),
+    fn vm_shutdown(&mut self) -> Result<(), VmError>;
 
-    /// Outgoing migration
-    VmSendMigration(Arc<VmSendMigrationData>, Sender<ApiResponse>),
+    fn vm_reboot(&mut self) -> Result<(), VmError>;
 
-    // Trigger power button
-    VmPowerButton(Sender<ApiResponse>),
+    fn vm_info(&self) -> Result<VmInfoResponse, VmError>;
+
+    fn vmm_ping(&self) -> VmmPingResponse;
+
+    fn vm_delete(&mut self) -> Result<(), VmError>;
+
+    fn vmm_shutdown(&mut self) -> Result<(), VmError>;
+
+    fn vm_resize(
+        &mut self,
+        desired_vcpus: Option<u8>,
+        desired_ram: Option<u64>,
+        desired_balloon: Option<u64>,
+    ) -> Result<(), VmError>;
+
+    fn vm_resize_zone(&mut self, id: String, desired_ram: u64) -> Result<(), VmError>;
+
+    fn vm_add_device(&mut self, device_cfg: DeviceConfig) -> Result<Option<Vec<u8>>, VmError>;
+
+    fn vm_add_user_device(
+        &mut self,
+        device_cfg: UserDeviceConfig,
+    ) -> Result<Option<Vec<u8>>, VmError>;
+
+    fn vm_remove_device(&mut self, id: String) -> Result<(), VmError>;
+
+    fn vm_add_disk(&mut self, disk_cfg: DiskConfig) -> Result<Option<Vec<u8>>, VmError>;
+
+    fn vm_add_fs(&mut self, fs_cfg: FsConfig) -> Result<Option<Vec<u8>>, VmError>;
+
+    fn vm_add_pmem(&mut self, pmem_cfg: PmemConfig) -> Result<Option<Vec<u8>>, VmError>;
+
+    fn vm_add_net(&mut self, net_cfg: NetConfig) -> Result<Option<Vec<u8>>, VmError>;
+
+    fn vm_add_vdpa(&mut self, vdpa_cfg: VdpaConfig) -> Result<Option<Vec<u8>>, VmError>;
+
+    fn vm_add_vsock(&mut self, vsock_cfg: VsockConfig) -> Result<Option<Vec<u8>>, VmError>;
+
+    fn vm_counters(&mut self) -> Result<Option<Vec<u8>>, VmError>;
+
+    fn vm_power_button(&mut self) -> Result<(), VmError>;
+
+    fn vm_receive_migration(
+        &mut self,
+        receive_data_migration: VmReceiveMigrationData,
+    ) -> Result<(), MigratableError>;
+
+    fn vm_send_migration(
+        &mut self,
+        send_data_migration: VmSendMigrationData,
+    ) -> Result<(), MigratableError>;
 }
 
-pub fn vm_create(
+/// It would be nice if we could pass around an object like this:
+///
+/// ```
+/// # use vmm::api::ApiAction;
+/// struct ApiRequest<Action: ApiAction + 'static> {
+///     action: &'static Action,
+///     body: Action::RequestBody,
+/// }
+/// ```
+///
+/// Unfortunately, it's not possible to use such a type in a trait object,
+/// so as a workaround, we instead encapsulate that data in a closure, and have
+/// the event loop call that closure to process a request.
+pub type ApiRequest =
+    Box<dyn FnOnce(&mut dyn RequestHandler) -> Result<bool, VmmError> + Send + 'static>;
+
+fn get_response<Action: ApiAction>(
+    action: &Action,
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
-    config: Arc<Mutex<VmConfig>>,
-) -> ApiResult<()> {
+    data: Action::RequestBody,
+) -> ApiResult<ApiResponsePayload> {
     let (response_sender, response_receiver) = channel();
 
-    // Send the VM creation request.
-    api_sender
-        .send(ApiRequest::VmCreate(config, response_sender))
-        .map_err(ApiError::RequestSend)?;
-    api_evt.write(1).map_err(ApiError::EventFdWrite)?;
-
-    response_receiver.recv().map_err(ApiError::ResponseRecv)??;
-
-    Ok(())
-}
-
-/// Represents a VM related action.
-/// This is mostly used to factorize code between VM routines
-/// that only differ by the IPC command they send.
-pub enum VmAction {
-    /// Boot a VM
-    Boot,
-
-    /// Delete a VM
-    Delete,
-
-    /// Shut a VM down
-    Shutdown,
-
-    /// Reboot a VM
-    Reboot,
-
-    /// Pause a VM
-    Pause,
-
-    /// Resume a VM
-    Resume,
-
-    /// Return VM counters
-    Counters,
-
-    /// Add VFIO device
-    AddDevice(Arc<DeviceConfig>),
-
-    /// Add disk
-    AddDisk(Arc<DiskConfig>),
-
-    /// Add filesystem
-    AddFs(Arc<FsConfig>),
-
-    /// Add pmem
-    AddPmem(Arc<PmemConfig>),
-
-    /// Add network
-    AddNet(Arc<NetConfig>),
-
-    /// Add vdpa
-    AddVdpa(Arc<VdpaConfig>),
-
-    /// Add vsock
-    AddVsock(Arc<VsockConfig>),
-
-    /// Add user  device
-    AddUserDevice(Arc<UserDeviceConfig>),
-
-    /// Remove VFIO device
-    RemoveDevice(Arc<VmRemoveDeviceData>),
-
-    /// Resize VM
-    Resize(Arc<VmResizeData>),
-
-    /// Resize memory zone
-    ResizeZone(Arc<VmResizeZoneData>),
-
-    /// Restore VM
-    Restore(Arc<RestoreConfig>),
-
-    /// Snapshot VM
-    Snapshot(Arc<VmSnapshotConfig>),
-
-    /// Coredump VM
-    #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-    Coredump(Arc<VmCoredumpData>),
-
-    /// Incoming migration
-    ReceiveMigration(Arc<VmReceiveMigrationData>),
-
-    /// Outgoing migration
-    SendMigration(Arc<VmSendMigrationData>),
-
-    /// Power Button for clean shutdown
-    PowerButton,
-}
-
-fn vm_action(
-    api_evt: EventFd,
-    api_sender: Sender<ApiRequest>,
-    action: VmAction,
-) -> ApiResult<Option<Body>> {
-    let (response_sender, response_receiver) = channel();
-
-    use VmAction::*;
-    let request = match action {
-        Boot => ApiRequest::VmBoot(response_sender),
-        Delete => ApiRequest::VmDelete(response_sender),
-        Shutdown => ApiRequest::VmShutdown(response_sender),
-        Reboot => ApiRequest::VmReboot(response_sender),
-        Pause => ApiRequest::VmPause(response_sender),
-        Resume => ApiRequest::VmResume(response_sender),
-        Counters => ApiRequest::VmCounters(response_sender),
-        AddDevice(v) => ApiRequest::VmAddDevice(v, response_sender),
-        AddDisk(v) => ApiRequest::VmAddDisk(v, response_sender),
-        AddFs(v) => ApiRequest::VmAddFs(v, response_sender),
-        AddPmem(v) => ApiRequest::VmAddPmem(v, response_sender),
-        AddNet(v) => ApiRequest::VmAddNet(v, response_sender),
-        AddVdpa(v) => ApiRequest::VmAddVdpa(v, response_sender),
-        AddVsock(v) => ApiRequest::VmAddVsock(v, response_sender),
-        AddUserDevice(v) => ApiRequest::VmAddUserDevice(v, response_sender),
-        RemoveDevice(v) => ApiRequest::VmRemoveDevice(v, response_sender),
-        Resize(v) => ApiRequest::VmResize(v, response_sender),
-        ResizeZone(v) => ApiRequest::VmResizeZone(v, response_sender),
-        Restore(v) => ApiRequest::VmRestore(v, response_sender),
-        Snapshot(v) => ApiRequest::VmSnapshot(v, response_sender),
-        #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-        Coredump(v) => ApiRequest::VmCoredump(v, response_sender),
-        ReceiveMigration(v) => ApiRequest::VmReceiveMigration(v, response_sender),
-        SendMigration(v) => ApiRequest::VmSendMigration(v, response_sender),
-        PowerButton => ApiRequest::VmPowerButton(response_sender),
-    };
-
+    let request = action.request(data, response_sender);
     // Send the VM request.
     api_sender.send(request).map_err(ApiError::RequestSend)?;
     api_evt.write(1).map_err(ApiError::EventFdWrite)?;
 
-    let body = match response_receiver.recv().map_err(ApiError::ResponseRecv)?? {
+    response_receiver.recv().map_err(ApiError::ResponseRecv)?
+}
+
+fn get_response_body<Action: ApiAction<ResponseBody = Option<Body>>>(
+    action: &Action,
+    api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
+    data: Action::RequestBody,
+) -> ApiResult<Option<Body>> {
+    let body = match get_response(action, api_evt, api_sender, data)? {
         ApiResponsePayload::VmAction(response) => response.map(Body::new),
         ApiResponsePayload::Empty => None,
         _ => return Err(ApiError::ResponsePayloadType),
@@ -483,213 +358,1016 @@ fn vm_action(
     Ok(body)
 }
 
-pub fn vm_boot(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<Option<Body>> {
-    vm_action(api_evt, api_sender, VmAction::Boot)
+pub trait ApiAction: Send + Sync {
+    type RequestBody: Send + Sync + Sized;
+    type ResponseBody: Send + Sized;
+
+    fn request(&self, body: Self::RequestBody, response_sender: Sender<ApiResponse>) -> ApiRequest;
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody>;
 }
 
-pub fn vm_delete(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<Option<Body>> {
-    vm_action(api_evt, api_sender, VmAction::Delete)
+pub struct VmAddDevice;
+
+impl ApiAction for VmAddDevice {
+    type RequestBody = DeviceConfig;
+    type ResponseBody = Option<Body>;
+
+    fn request(
+        &self,
+        config: Self::RequestBody,
+        response_sender: Sender<ApiResponse>,
+    ) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmAddDevice {:?}", config);
+
+            let response = vmm
+                .vm_add_device(config)
+                .map_err(ApiError::VmAddDevice)
+                .map(ApiResponsePayload::VmAction);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
+    }
 }
 
-pub fn vm_shutdown(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<Option<Body>> {
-    vm_action(api_evt, api_sender, VmAction::Shutdown)
+pub struct AddDisk;
+
+impl ApiAction for AddDisk {
+    type RequestBody = DiskConfig;
+    type ResponseBody = Option<Body>;
+
+    fn request(
+        &self,
+        config: Self::RequestBody,
+        response_sender: Sender<ApiResponse>,
+    ) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: AddDisk {:?}", config);
+
+            let response = vmm
+                .vm_add_disk(config)
+                .map_err(ApiError::VmAddDisk)
+                .map(ApiResponsePayload::VmAction);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
+    }
 }
 
-pub fn vm_reboot(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<Option<Body>> {
-    vm_action(api_evt, api_sender, VmAction::Reboot)
+pub struct VmAddFs;
+
+impl ApiAction for VmAddFs {
+    type RequestBody = FsConfig;
+    type ResponseBody = Option<Body>;
+
+    fn request(
+        &self,
+        config: Self::RequestBody,
+        response_sender: Sender<ApiResponse>,
+    ) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmAddFs {:?}", config);
+
+            let response = vmm
+                .vm_add_fs(config)
+                .map_err(ApiError::VmAddFs)
+                .map(ApiResponsePayload::VmAction);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
+    }
 }
 
-pub fn vm_pause(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<Option<Body>> {
-    vm_action(api_evt, api_sender, VmAction::Pause)
+pub struct VmAddPmem;
+
+impl ApiAction for VmAddPmem {
+    type RequestBody = PmemConfig;
+    type ResponseBody = Option<Body>;
+
+    fn request(
+        &self,
+        config: Self::RequestBody,
+        response_sender: Sender<ApiResponse>,
+    ) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmAddPmem {:?}", config);
+
+            let response = vmm
+                .vm_add_pmem(config)
+                .map_err(ApiError::VmAddPmem)
+                .map(ApiResponsePayload::VmAction);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
+    }
 }
 
-pub fn vm_resume(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<Option<Body>> {
-    vm_action(api_evt, api_sender, VmAction::Resume)
+pub struct VmAddNet;
+
+impl ApiAction for VmAddNet {
+    type RequestBody = NetConfig;
+    type ResponseBody = Option<Body>;
+
+    fn request(
+        &self,
+        config: Self::RequestBody,
+        response_sender: Sender<ApiResponse>,
+    ) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmAddNet {:?}", config);
+
+            let response = vmm
+                .vm_add_net(config)
+                .map_err(ApiError::VmAddNet)
+                .map(ApiResponsePayload::VmAction);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
+    }
 }
 
-pub fn vm_counters(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<Option<Body>> {
-    vm_action(api_evt, api_sender, VmAction::Counters)
+pub struct VmAddVdpa;
+
+impl ApiAction for VmAddVdpa {
+    type RequestBody = VdpaConfig;
+    type ResponseBody = Option<Body>;
+
+    fn request(
+        &self,
+        config: Self::RequestBody,
+        response_sender: Sender<ApiResponse>,
+    ) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmAddVdpa {:?}", config);
+
+            let response = vmm
+                .vm_add_vdpa(config)
+                .map_err(ApiError::VmAddVdpa)
+                .map(ApiResponsePayload::VmAction);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
+    }
 }
 
-pub fn vm_power_button(
-    api_evt: EventFd,
-    api_sender: Sender<ApiRequest>,
-) -> ApiResult<Option<Body>> {
-    vm_action(api_evt, api_sender, VmAction::PowerButton)
+pub struct VmAddVsock;
+
+impl ApiAction for VmAddVsock {
+    type RequestBody = VsockConfig;
+    type ResponseBody = Option<Body>;
+
+    fn request(
+        &self,
+        config: Self::RequestBody,
+        response_sender: Sender<ApiResponse>,
+    ) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmAddVsock {:?}", config);
+
+            let response = vmm
+                .vm_add_vsock(config)
+                .map_err(ApiError::VmAddVsock)
+                .map(ApiResponsePayload::VmAction);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
+    }
 }
 
-pub fn vm_receive_migration(
-    api_evt: EventFd,
-    api_sender: Sender<ApiRequest>,
-    data: Arc<VmReceiveMigrationData>,
-) -> ApiResult<Option<Body>> {
-    vm_action(api_evt, api_sender, VmAction::ReceiveMigration(data))
+pub struct VmAddUserDevice;
+
+impl ApiAction for VmAddUserDevice {
+    type RequestBody = UserDeviceConfig;
+    type ResponseBody = Option<Body>;
+
+    fn request(
+        &self,
+        config: Self::RequestBody,
+        response_sender: Sender<ApiResponse>,
+    ) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmAddUserDevice {:?}", config);
+
+            let response = vmm
+                .vm_add_user_device(config)
+                .map_err(ApiError::VmAddUserDevice)
+                .map(ApiResponsePayload::VmAction);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
+    }
 }
 
-pub fn vm_send_migration(
-    api_evt: EventFd,
-    api_sender: Sender<ApiRequest>,
-    data: Arc<VmSendMigrationData>,
-) -> ApiResult<Option<Body>> {
-    vm_action(api_evt, api_sender, VmAction::SendMigration(data))
-}
+pub struct VmBoot;
 
-pub fn vm_snapshot(
-    api_evt: EventFd,
-    api_sender: Sender<ApiRequest>,
-    data: Arc<VmSnapshotConfig>,
-) -> ApiResult<Option<Body>> {
-    vm_action(api_evt, api_sender, VmAction::Snapshot(data))
-}
+impl ApiAction for VmBoot {
+    type RequestBody = ();
+    type ResponseBody = Option<Body>;
 
-pub fn vm_restore(
-    api_evt: EventFd,
-    api_sender: Sender<ApiRequest>,
-    data: Arc<RestoreConfig>,
-) -> ApiResult<Option<Body>> {
-    vm_action(api_evt, api_sender, VmAction::Restore(data))
+    fn request(&self, _: Self::RequestBody, response_sender: Sender<ApiResponse>) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmBoot");
+
+            let response = vmm
+                .vm_boot()
+                .map_err(ApiError::VmBoot)
+                .map(|_| ApiResponsePayload::Empty);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
+    }
 }
 
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-pub fn vm_coredump(
-    api_evt: EventFd,
-    api_sender: Sender<ApiRequest>,
-    data: Arc<VmCoredumpData>,
-) -> ApiResult<Option<Body>> {
-    vm_action(api_evt, api_sender, VmAction::Coredump(data))
-}
+pub struct VmCoredump;
 
-pub fn vm_info(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<VmInfo> {
-    let (response_sender, response_receiver) = channel();
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+impl ApiAction for VmCoredump {
+    type RequestBody = VmCoredumpData;
+    type ResponseBody = Option<Body>;
 
-    // Send the VM request.
-    api_sender
-        .send(ApiRequest::VmInfo(response_sender))
-        .map_err(ApiError::RequestSend)?;
-    api_evt.write(1).map_err(ApiError::EventFdWrite)?;
+    fn request(
+        &self,
+        coredump_data: Self::RequestBody,
+        response_sender: Sender<ApiResponse>,
+    ) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmCoredump {:?}", coredump_data);
 
-    let vm_info = response_receiver.recv().map_err(ApiError::ResponseRecv)??;
+            let response = vmm
+                .vm_coredump(&coredump_data.destination_url)
+                .map_err(ApiError::VmCoredump)
+                .map(|_| ApiResponsePayload::Empty);
 
-    match vm_info {
-        ApiResponsePayload::VmInfo(info) => Ok(info),
-        _ => Err(ApiError::ResponsePayloadType),
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
     }
 }
 
-pub fn vmm_ping(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<VmmPingResponse> {
-    let (response_sender, response_receiver) = channel();
+pub struct VmCounters;
 
-    api_sender
-        .send(ApiRequest::VmmPing(response_sender))
-        .map_err(ApiError::RequestSend)?;
-    api_evt.write(1).map_err(ApiError::EventFdWrite)?;
+impl ApiAction for VmCounters {
+    type RequestBody = ();
+    type ResponseBody = Option<Body>;
 
-    let vmm_pong = response_receiver.recv().map_err(ApiError::ResponseRecv)??;
+    fn request(&self, _: Self::RequestBody, response_sender: Sender<ApiResponse>) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmCounters");
 
-    match vmm_pong {
-        ApiResponsePayload::VmmPing(pong) => Ok(pong),
-        _ => Err(ApiError::ResponsePayloadType),
+            let response = vmm
+                .vm_counters()
+                .map_err(ApiError::VmInfo)
+                .map(ApiResponsePayload::VmAction);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
     }
 }
 
-pub fn vmm_shutdown(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<()> {
-    let (response_sender, response_receiver) = channel();
+pub struct VmCreate;
 
-    // Send the VMM shutdown request.
-    api_sender
-        .send(ApiRequest::VmmShutdown(response_sender))
-        .map_err(ApiError::RequestSend)?;
-    api_evt.write(1).map_err(ApiError::EventFdWrite)?;
+impl ApiAction for VmCreate {
+    type RequestBody = Arc<Mutex<VmConfig>>;
+    type ResponseBody = ();
 
-    response_receiver.recv().map_err(ApiError::ResponseRecv)??;
+    fn request(
+        &self,
+        config: Self::RequestBody,
+        response_sender: Sender<ApiResponse>,
+    ) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmCreate {:?}", config);
 
-    Ok(())
+            let response = vmm
+                .vm_create(config)
+                .map_err(ApiError::VmCreate)
+                .map(|_| ApiResponsePayload::Empty);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<()> {
+        get_response(self, api_evt, api_sender, data)?;
+
+        Ok(())
+    }
 }
 
-pub fn vm_resize(
-    api_evt: EventFd,
-    api_sender: Sender<ApiRequest>,
-    data: Arc<VmResizeData>,
-) -> ApiResult<Option<Body>> {
-    vm_action(api_evt, api_sender, VmAction::Resize(data))
+pub struct VmDelete;
+
+impl ApiAction for VmDelete {
+    type RequestBody = ();
+    type ResponseBody = Option<Body>;
+
+    fn request(&self, _: Self::RequestBody, response_sender: Sender<ApiResponse>) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmDelete");
+
+            let response = vmm
+                .vm_delete()
+                .map_err(ApiError::VmDelete)
+                .map(|_| ApiResponsePayload::Empty);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
+    }
 }
 
-pub fn vm_resize_zone(
-    api_evt: EventFd,
-    api_sender: Sender<ApiRequest>,
-    data: Arc<VmResizeZoneData>,
-) -> ApiResult<Option<Body>> {
-    vm_action(api_evt, api_sender, VmAction::ResizeZone(data))
+pub struct VmInfo;
+
+impl ApiAction for VmInfo {
+    type RequestBody = ();
+    type ResponseBody = VmInfoResponse;
+
+    fn request(&self, _: Self::RequestBody, response_sender: Sender<ApiResponse>) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmInfo");
+
+            let response = vmm
+                .vm_info()
+                .map_err(ApiError::VmInfo)
+                .map(ApiResponsePayload::VmInfo);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: (),
+    ) -> ApiResult<VmInfoResponse> {
+        let vm_info = get_response(self, api_evt, api_sender, data)?;
+
+        match vm_info {
+            ApiResponsePayload::VmInfo(info) => Ok(info),
+            _ => Err(ApiError::ResponsePayloadType),
+        }
+    }
 }
 
-pub fn vm_add_device(
-    api_evt: EventFd,
-    api_sender: Sender<ApiRequest>,
-    data: Arc<DeviceConfig>,
-) -> ApiResult<Option<Body>> {
-    vm_action(api_evt, api_sender, VmAction::AddDevice(data))
+pub struct VmPause;
+
+impl ApiAction for VmPause {
+    type RequestBody = ();
+    type ResponseBody = Option<Body>;
+
+    fn request(&self, _: Self::RequestBody, response_sender: Sender<ApiResponse>) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmPause");
+
+            let response = vmm
+                .vm_pause()
+                .map_err(ApiError::VmPause)
+                .map(|_| ApiResponsePayload::Empty);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
+    }
 }
 
-pub fn vm_add_user_device(
-    api_evt: EventFd,
-    api_sender: Sender<ApiRequest>,
-    data: Arc<UserDeviceConfig>,
-) -> ApiResult<Option<Body>> {
-    vm_action(api_evt, api_sender, VmAction::AddUserDevice(data))
+pub struct VmPowerButton;
+
+impl ApiAction for VmPowerButton {
+    type RequestBody = ();
+    type ResponseBody = Option<Body>;
+
+    fn request(&self, _: Self::RequestBody, response_sender: Sender<ApiResponse>) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmPowerButton");
+
+            let response = vmm
+                .vm_power_button()
+                .map_err(ApiError::VmPowerButton)
+                .map(|_| ApiResponsePayload::Empty);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
+    }
 }
 
-pub fn vm_remove_device(
-    api_evt: EventFd,
-    api_sender: Sender<ApiRequest>,
-    data: Arc<VmRemoveDeviceData>,
-) -> ApiResult<Option<Body>> {
-    vm_action(api_evt, api_sender, VmAction::RemoveDevice(data))
+pub struct VmReboot;
+
+impl ApiAction for VmReboot {
+    type RequestBody = ();
+    type ResponseBody = Option<Body>;
+
+    fn request(&self, _: Self::RequestBody, response_sender: Sender<ApiResponse>) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmReboot");
+
+            let response = vmm
+                .vm_reboot()
+                .map_err(ApiError::VmReboot)
+                .map(|_| ApiResponsePayload::Empty);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
+    }
 }
 
-pub fn vm_add_disk(
-    api_evt: EventFd,
-    api_sender: Sender<ApiRequest>,
-    data: Arc<DiskConfig>,
-) -> ApiResult<Option<Body>> {
-    vm_action(api_evt, api_sender, VmAction::AddDisk(data))
+pub struct VmReceiveMigration;
+
+impl ApiAction for VmReceiveMigration {
+    type RequestBody = VmReceiveMigrationData;
+    type ResponseBody = Option<Body>;
+
+    fn request(&self, data: Self::RequestBody, response_sender: Sender<ApiResponse>) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmReceiveMigration {:?}", data);
+
+            let response = vmm
+                .vm_receive_migration(data)
+                .map_err(ApiError::VmReceiveMigration)
+                .map(|_| ApiResponsePayload::Empty);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
+    }
 }
 
-pub fn vm_add_fs(
-    api_evt: EventFd,
-    api_sender: Sender<ApiRequest>,
-    data: Arc<FsConfig>,
-) -> ApiResult<Option<Body>> {
-    vm_action(api_evt, api_sender, VmAction::AddFs(data))
+pub struct VmRemoveDevice;
+
+impl ApiAction for VmRemoveDevice {
+    type RequestBody = VmRemoveDeviceData;
+    type ResponseBody = Option<Body>;
+
+    fn request(
+        &self,
+        remove_device_data: Self::RequestBody,
+        response_sender: Sender<ApiResponse>,
+    ) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmRemoveDevice {:?}", remove_device_data);
+
+            let response = vmm
+                .vm_remove_device(remove_device_data.id)
+                .map_err(ApiError::VmRemoveDevice)
+                .map(|_| ApiResponsePayload::Empty);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
+    }
 }
 
-pub fn vm_add_pmem(
-    api_evt: EventFd,
-    api_sender: Sender<ApiRequest>,
-    data: Arc<PmemConfig>,
-) -> ApiResult<Option<Body>> {
-    vm_action(api_evt, api_sender, VmAction::AddPmem(data))
+pub struct VmResize;
+
+impl ApiAction for VmResize {
+    type RequestBody = VmResizeData;
+    type ResponseBody = Option<Body>;
+
+    fn request(
+        &self,
+        resize_data: Self::RequestBody,
+        response_sender: Sender<ApiResponse>,
+    ) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmResize {:?}", resize_data);
+
+            let response = vmm
+                .vm_resize(
+                    resize_data.desired_vcpus,
+                    resize_data.desired_ram,
+                    resize_data.desired_balloon,
+                )
+                .map_err(ApiError::VmResize)
+                .map(|_| ApiResponsePayload::Empty);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
+    }
 }
 
-pub fn vm_add_net(
-    api_evt: EventFd,
-    api_sender: Sender<ApiRequest>,
-    data: Arc<NetConfig>,
-) -> ApiResult<Option<Body>> {
-    vm_action(api_evt, api_sender, VmAction::AddNet(data))
+pub struct VmResizeZone;
+
+impl ApiAction for VmResizeZone {
+    type RequestBody = VmResizeZoneData;
+    type ResponseBody = Option<Body>;
+
+    fn request(
+        &self,
+        resize_zone_data: Self::RequestBody,
+        response_sender: Sender<ApiResponse>,
+    ) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmResizeZone {:?}", resize_zone_data);
+
+            let response = vmm
+                .vm_resize_zone(resize_zone_data.id, resize_zone_data.desired_ram)
+                .map_err(ApiError::VmResizeZone)
+                .map(|_| ApiResponsePayload::Empty);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
+    }
 }
 
-pub fn vm_add_vdpa(
-    api_evt: EventFd,
-    api_sender: Sender<ApiRequest>,
-    data: Arc<VdpaConfig>,
-) -> ApiResult<Option<Body>> {
-    vm_action(api_evt, api_sender, VmAction::AddVdpa(data))
+pub struct VmRestore;
+
+impl ApiAction for VmRestore {
+    type RequestBody = RestoreConfig;
+    type ResponseBody = Option<Body>;
+
+    fn request(
+        &self,
+        config: Self::RequestBody,
+        response_sender: Sender<ApiResponse>,
+    ) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmRestore {:?}", config);
+
+            let response = vmm
+                .vm_restore(config)
+                .map_err(ApiError::VmRestore)
+                .map(|_| ApiResponsePayload::Empty);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
+    }
 }
 
-pub fn vm_add_vsock(
-    api_evt: EventFd,
-    api_sender: Sender<ApiRequest>,
-    data: Arc<VsockConfig>,
-) -> ApiResult<Option<Body>> {
-    vm_action(api_evt, api_sender, VmAction::AddVsock(data))
+pub struct VmResume;
+
+impl ApiAction for VmResume {
+    type RequestBody = ();
+    type ResponseBody = Option<Body>;
+
+    fn request(&self, _: Self::RequestBody, response_sender: Sender<ApiResponse>) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmResume");
+
+            let response = vmm
+                .vm_resume()
+                .map_err(ApiError::VmResume)
+                .map(|_| ApiResponsePayload::Empty);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
+    }
+}
+
+pub struct VmSendMigration;
+
+impl ApiAction for VmSendMigration {
+    type RequestBody = VmSendMigrationData;
+    type ResponseBody = Option<Body>;
+
+    fn request(&self, data: Self::RequestBody, response_sender: Sender<ApiResponse>) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmSendMigration {:?}", data);
+
+            let response = vmm
+                .vm_send_migration(data)
+                .map_err(ApiError::VmSendMigration)
+                .map(|_| ApiResponsePayload::Empty);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
+    }
+}
+
+pub struct VmShutdown;
+
+impl ApiAction for VmShutdown {
+    type RequestBody = ();
+    type ResponseBody = Option<Body>;
+
+    fn request(
+        &self,
+        config: Self::RequestBody,
+        response_sender: Sender<ApiResponse>,
+    ) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmShutdown {:?}", config);
+
+            let response = vmm
+                .vm_shutdown()
+                .map_err(ApiError::VmShutdown)
+                .map(|_| ApiResponsePayload::Empty);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
+    }
+}
+
+pub struct VmSnapshot;
+
+impl ApiAction for VmSnapshot {
+    type RequestBody = VmSnapshotConfig;
+    type ResponseBody = Option<Body>;
+
+    fn request(
+        &self,
+        config: Self::RequestBody,
+        response_sender: Sender<ApiResponse>,
+    ) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmSnapshot {:?}", config);
+
+            let response = vmm
+                .vm_snapshot(&config.destination_url)
+                .map_err(ApiError::VmSnapshot)
+                .map(|_| ApiResponsePayload::Empty);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
+    }
+}
+
+pub struct VmmPing;
+
+impl ApiAction for VmmPing {
+    type RequestBody = ();
+    type ResponseBody = VmmPingResponse;
+
+    fn request(&self, _: Self::RequestBody, response_sender: Sender<ApiResponse>) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmmPing");
+
+            let response = ApiResponsePayload::VmmPing(vmm.vmm_ping());
+
+            response_sender
+                .send(Ok(response))
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: (),
+    ) -> ApiResult<VmmPingResponse> {
+        let vmm_pong = get_response(self, api_evt, api_sender, data)?;
+
+        match vmm_pong {
+            ApiResponsePayload::VmmPing(pong) => Ok(pong),
+            _ => Err(ApiError::ResponsePayloadType),
+        }
+    }
+}
+
+pub struct VmmShutdown;
+
+impl ApiAction for VmmShutdown {
+    type RequestBody = ();
+    type ResponseBody = ();
+
+    fn request(&self, _: Self::RequestBody, response_sender: Sender<ApiResponse>) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmmShutdown");
+
+            let response = vmm
+                .vmm_shutdown()
+                .map_err(ApiError::VmmShutdown)
+                .map(|_| ApiResponsePayload::Empty);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(true)
+        })
+    }
+
+    fn send(&self, api_evt: EventFd, api_sender: Sender<ApiRequest>, data: ()) -> ApiResult<()> {
+        get_response(self, api_evt, api_sender, data)?;
+
+        Ok(())
+    }
 }

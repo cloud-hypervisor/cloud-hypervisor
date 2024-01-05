@@ -20,6 +20,7 @@ use std::sync::{Arc, Mutex};
 use thiserror::Error;
 #[cfg(feature = "dbus_api")]
 use vmm::api::dbus::{dbus_api_graceful_shutdown, DBusApiOptions};
+use vmm::api::ApiAction;
 use vmm::config;
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::block_signal;
@@ -695,22 +696,24 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
 
             // Create and boot the VM based off the VM config we just built.
             let sender = api_request_sender.clone();
-            vmm::api::vm_create(
-                api_evt.try_clone().unwrap(),
-                api_request_sender,
-                Arc::new(Mutex::new(vm_config)),
-            )
-            .map_err(Error::VmCreate)?;
-            vmm::api::vm_boot(api_evt.try_clone().unwrap(), sender).map_err(Error::VmBoot)?;
+            vmm::api::VmCreate
+                .send(
+                    api_evt.try_clone().unwrap(),
+                    api_request_sender,
+                    Arc::new(Mutex::new(vm_config)),
+                )
+                .map_err(Error::VmCreate)?;
+            vmm::api::VmBoot
+                .send(api_evt.try_clone().unwrap(), sender, ())
+                .map_err(Error::VmBoot)?;
         } else if let Some(restore_params) = cmd_arguments.get_one::<String>("restore") {
-            vmm::api::vm_restore(
-                api_evt.try_clone().unwrap(),
-                api_request_sender,
-                Arc::new(
+            vmm::api::VmRestore
+                .send(
+                    api_evt.try_clone().unwrap(),
+                    api_request_sender,
                     config::RestoreConfig::parse(restore_params).map_err(Error::ParsingRestore)?,
-                ),
-            )
-            .map_err(Error::VmRestore)?;
+                )
+                .map_err(Error::VmRestore)?;
         }
 
         Ok(())

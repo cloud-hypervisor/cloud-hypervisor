@@ -7,9 +7,18 @@ use libfuzzer_sys::fuzz_target;
 use micro_http::Request;
 use once_cell::sync::Lazy;
 use std::os::unix::io::AsRawFd;
+use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver};
+use std::sync::{Arc, Mutex};
 use std::thread;
-use vmm::api::{http::*, ApiRequest, ApiResponsePayload};
+use vm_migration::MigratableError;
+use vmm::api::{
+    http::*, ApiRequest, RequestHandler, VmInfoResponse, VmReceiveMigrationData,
+    VmSendMigrationData, VmmPingResponse,
+};
+use vmm::config::RestoreConfig;
+use vmm::vm::{Error as VmError, VmState};
+use vmm::vm_config::*;
 use vmm::{EpollContext, EpollDispatch};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -69,6 +78,197 @@ fn generate_request(bytes: &[u8]) -> Option<Request> {
     Request::try_from(&request, None).ok()
 }
 
+struct StubApiRequestHandler;
+
+impl RequestHandler for StubApiRequestHandler {
+    fn vm_create(&mut self, _: Arc<Mutex<VmConfig>>) -> Result<(), VmError> {
+        Ok(())
+    }
+
+    fn vm_boot(&mut self) -> Result<(), VmError> {
+        Ok(())
+    }
+
+    fn vm_pause(&mut self) -> Result<(), VmError> {
+        Ok(())
+    }
+
+    fn vm_resume(&mut self) -> Result<(), VmError> {
+        Ok(())
+    }
+
+    fn vm_snapshot(&mut self, _: &str) -> Result<(), VmError> {
+        Ok(())
+    }
+
+    fn vm_restore(&mut self, _: RestoreConfig) -> Result<(), VmError> {
+        Ok(())
+    }
+
+    #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+    fn vm_coredump(&mut self, _: &str) -> Result<(), VmError> {
+        Ok(())
+    }
+
+    fn vm_shutdown(&mut self) -> Result<(), VmError> {
+        Ok(())
+    }
+
+    fn vm_reboot(&mut self) -> Result<(), VmError> {
+        Ok(())
+    }
+
+    fn vm_info(&self) -> Result<VmInfoResponse, VmError> {
+        Ok(VmInfoResponse {
+            config: Arc::new(Mutex::new(VmConfig {
+                cpus: CpusConfig {
+                    boot_vcpus: 1,
+                    max_vcpus: 1,
+                    topology: None,
+                    kvm_hyperv: false,
+                    max_phys_bits: 46,
+                    affinity: None,
+                    features: CpuFeatures::default(),
+                },
+                memory: MemoryConfig {
+                    size: 536_870_912,
+                    mergeable: false,
+                    hotplug_method: HotplugMethod::Acpi,
+                    hotplug_size: None,
+                    hotplugged_size: None,
+                    shared: false,
+                    hugepages: false,
+                    hugepage_size: None,
+                    prefault: false,
+                    zones: None,
+                    thp: true,
+                },
+                payload: Some(PayloadConfig {
+                    kernel: Some(PathBuf::from("/path/to/kernel")),
+                    ..Default::default()
+                }),
+                rate_limit_groups: None,
+                disks: None,
+                net: None,
+                rng: RngConfig {
+                    src: PathBuf::from("/dev/urandom"),
+                    iommu: false,
+                },
+                balloon: None,
+                fs: None,
+                pmem: None,
+                serial: ConsoleConfig {
+                    file: None,
+                    mode: ConsoleOutputMode::Null,
+                    iommu: false,
+                    socket: None,
+                },
+                console: ConsoleConfig {
+                    file: None,
+                    mode: ConsoleOutputMode::Tty,
+                    iommu: false,
+                    socket: None,
+                },
+                devices: None,
+                user_devices: None,
+                vdpa: None,
+                vsock: None,
+                pvpanic: false,
+                iommu: false,
+                #[cfg(target_arch = "x86_64")]
+                sgx_epc: None,
+                numa: None,
+                watchdog: false,
+                #[cfg(feature = "guest_debug")]
+                gdb: false,
+                platform: None,
+                tpm: None,
+                preserved_fds: None,
+            })),
+            state: VmState::Running,
+            memory_actual_size: 0,
+            device_tree: None,
+        })
+    }
+
+    fn vmm_ping(&self) -> VmmPingResponse {
+        VmmPingResponse {
+            build_version: String::new(),
+            version: String::new(),
+            pid: 0,
+            features: Vec::new(),
+        }
+    }
+
+    fn vm_delete(&mut self) -> Result<(), VmError> {
+        Ok(())
+    }
+
+    fn vmm_shutdown(&mut self) -> Result<(), VmError> {
+        Ok(())
+    }
+
+    fn vm_resize(&mut self, _: Option<u8>, _: Option<u64>, _: Option<u64>) -> Result<(), VmError> {
+        Ok(())
+    }
+
+    fn vm_resize_zone(&mut self, _: String, _: u64) -> Result<(), VmError> {
+        Ok(())
+    }
+
+    fn vm_add_device(&mut self, _: DeviceConfig) -> Result<Option<Vec<u8>>, VmError> {
+        Ok(None)
+    }
+
+    fn vm_add_user_device(&mut self, _: UserDeviceConfig) -> Result<Option<Vec<u8>>, VmError> {
+        Ok(None)
+    }
+
+    fn vm_remove_device(&mut self, _: String) -> Result<(), VmError> {
+        Ok(())
+    }
+
+    fn vm_add_disk(&mut self, _: DiskConfig) -> Result<Option<Vec<u8>>, VmError> {
+        Ok(None)
+    }
+
+    fn vm_add_fs(&mut self, _: FsConfig) -> Result<Option<Vec<u8>>, VmError> {
+        Ok(None)
+    }
+
+    fn vm_add_pmem(&mut self, _: PmemConfig) -> Result<Option<Vec<u8>>, VmError> {
+        Ok(None)
+    }
+
+    fn vm_add_net(&mut self, _: NetConfig) -> Result<Option<Vec<u8>>, VmError> {
+        Ok(None)
+    }
+
+    fn vm_add_vdpa(&mut self, _: VdpaConfig) -> Result<Option<Vec<u8>>, VmError> {
+        Ok(None)
+    }
+
+    fn vm_add_vsock(&mut self, _: VsockConfig) -> Result<Option<Vec<u8>>, VmError> {
+        Ok(None)
+    }
+
+    fn vm_counters(&mut self) -> Result<Option<Vec<u8>>, VmError> {
+        Ok(None)
+    }
+
+    fn vm_power_button(&mut self) -> Result<(), VmError> {
+        Ok(())
+    }
+
+    fn vm_receive_migration(&mut self, _: VmReceiveMigrationData) -> Result<(), MigratableError> {
+        Ok(())
+    }
+
+    fn vm_send_migration(&mut self, _: VmSendMigrationData) -> Result<(), MigratableError> {
+        Ok(())
+    }
+}
+
 fn http_receiver_stub(exit_evt: EventFd, api_evt: EventFd, api_receiver: Receiver<ApiRequest>) {
     let mut epoll = EpollContext::new().unwrap();
     epoll.add_event(&exit_evt, EpollDispatch::Exit).unwrap();
@@ -98,89 +298,7 @@ fn http_receiver_stub(exit_evt: EventFd, api_evt: EventFd, api_receiver: Receive
             EpollDispatch::Api => {
                 for _ in 0..api_evt.read().unwrap() {
                     let api_request = api_receiver.recv().unwrap();
-                    match api_request {
-                        ApiRequest::VmCreate(_, sender) => {
-                            sender.send(Ok(ApiResponsePayload::Empty)).unwrap();
-                        }
-                        ApiRequest::VmDelete(sender) => {
-                            sender.send(Ok(ApiResponsePayload::Empty)).unwrap();
-                        }
-                        ApiRequest::VmBoot(sender) => {
-                            sender.send(Ok(ApiResponsePayload::Empty)).unwrap();
-                        }
-                        ApiRequest::VmShutdown(sender) => {
-                            sender.send(Ok(ApiResponsePayload::Empty)).unwrap();
-                        }
-                        ApiRequest::VmReboot(sender) => {
-                            sender.send(Ok(ApiResponsePayload::Empty)).unwrap();
-                        }
-                        ApiRequest::VmInfo(sender) => {
-                            sender.send(Ok(ApiResponsePayload::Empty)).unwrap();
-                        }
-                        ApiRequest::VmmPing(sender) => {
-                            sender.send(Ok(ApiResponsePayload::Empty)).unwrap();
-                        }
-                        ApiRequest::VmPause(sender) => {
-                            sender.send(Ok(ApiResponsePayload::Empty)).unwrap();
-                        }
-                        ApiRequest::VmResume(sender) => {
-                            sender.send(Ok(ApiResponsePayload::Empty)).unwrap();
-                        }
-                        ApiRequest::VmSnapshot(_, sender) => {
-                            sender.send(Ok(ApiResponsePayload::Empty)).unwrap();
-                        }
-                        ApiRequest::VmRestore(_, sender) => {
-                            sender.send(Ok(ApiResponsePayload::Empty)).unwrap();
-                        }
-                        ApiRequest::VmmShutdown(sender) => {
-                            sender.send(Ok(ApiResponsePayload::Empty)).unwrap();
-                        }
-                        ApiRequest::VmResize(_, sender) => {
-                            sender.send(Ok(ApiResponsePayload::Empty)).unwrap();
-                        }
-                        ApiRequest::VmResizeZone(_, sender) => {
-                            sender.send(Ok(ApiResponsePayload::Empty)).unwrap();
-                        }
-                        ApiRequest::VmAddDevice(_, sender) => {
-                            sender.send(Ok(ApiResponsePayload::Empty)).unwrap();
-                        }
-                        ApiRequest::VmAddUserDevice(_, sender) => {
-                            sender.send(Ok(ApiResponsePayload::Empty)).unwrap();
-                        }
-                        ApiRequest::VmRemoveDevice(_, sender) => {
-                            sender.send(Ok(ApiResponsePayload::Empty)).unwrap();
-                        }
-                        ApiRequest::VmAddDisk(_, sender) => {
-                            sender.send(Ok(ApiResponsePayload::Empty)).unwrap();
-                        }
-                        ApiRequest::VmAddFs(_, sender) => {
-                            sender.send(Ok(ApiResponsePayload::Empty)).unwrap();
-                        }
-                        ApiRequest::VmAddPmem(_, sender) => {
-                            sender.send(Ok(ApiResponsePayload::Empty)).unwrap();
-                        }
-                        ApiRequest::VmAddNet(_, sender) => {
-                            sender.send(Ok(ApiResponsePayload::Empty)).unwrap();
-                        }
-                        ApiRequest::VmAddVdpa(_, sender) => {
-                            sender.send(Ok(ApiResponsePayload::Empty)).unwrap();
-                        }
-                        ApiRequest::VmAddVsock(_, sender) => {
-                            sender.send(Ok(ApiResponsePayload::Empty)).unwrap();
-                        }
-                        ApiRequest::VmCounters(sender) => {
-                            sender.send(Ok(ApiResponsePayload::Empty)).unwrap();
-                        }
-                        ApiRequest::VmReceiveMigration(_, sender) => {
-                            sender.send(Ok(ApiResponsePayload::Empty)).unwrap();
-                        }
-                        ApiRequest::VmSendMigration(_, sender) => {
-                            sender.send(Ok(ApiResponsePayload::Empty)).unwrap();
-                        }
-                        ApiRequest::VmPowerButton(sender) => {
-                            sender.send(Ok(ApiResponsePayload::Empty)).unwrap();
-                        }
-                    }
+                    api_request(&mut StubApiRequestHandler).unwrap();
                 }
             }
             _ => {
