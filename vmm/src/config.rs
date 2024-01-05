@@ -155,6 +155,8 @@ pub enum ValidationError {
     TooManyQueues,
     /// Need shared memory for vfio-user
     UserDevicesRequireSharedMemory,
+    /// VSOCK Context Identifier has a special meaning, unsuitable for a VM.
+    VsockSpecialCid(u64),
     /// Memory zone is reused across NUMA nodes
     MemoryZoneReused(String, u32, u32),
     /// Invalid number of PCI segments
@@ -244,6 +246,9 @@ impl fmt::Display for ValidationError {
                     f,
                     "Using user devices requires using shared memory or huge pages"
                 )
+            }
+            VsockSpecialCid(cid) => {
+                write!(f, "{cid} is a special VSOCK CID")
             }
             MemoryZoneReused(s, u1, u2) => {
                 write!(
@@ -2193,6 +2198,12 @@ impl VmConfig {
             }
         }
 
+        if let Some(vsock) = &self.vsock {
+            if [u32::MAX as u64, 0, 1, 2].contains(&vsock.cid) {
+                return Err(ValidationError::VsockSpecialCid(vsock.cid));
+            }
+        }
+
         if let Some(balloon) = &self.balloon {
             let mut ram_size = self.memory.size;
 
@@ -3222,9 +3233,9 @@ mod tests {
         // socket and cid is required
         assert!(VsockConfig::parse("").is_err());
         assert_eq!(
-            VsockConfig::parse("socket=/tmp/sock,cid=1")?,
+            VsockConfig::parse("socket=/tmp/sock,cid=3")?,
             VsockConfig {
-                cid: 1,
+                cid: 3,
                 socket: PathBuf::from("/tmp/sock"),
                 iommu: false,
                 id: None,
@@ -3232,9 +3243,9 @@ mod tests {
             }
         );
         assert_eq!(
-            VsockConfig::parse("socket=/tmp/sock,cid=1,iommu=on")?,
+            VsockConfig::parse("socket=/tmp/sock,cid=3,iommu=on")?,
             VsockConfig {
-                cid: 1,
+                cid: 3,
                 socket: PathBuf::from("/tmp/sock"),
                 iommu: true,
                 id: None,
@@ -3568,9 +3579,11 @@ mod tests {
             ..Default::default()
         });
         still_valid_config.vsock = Some(VsockConfig {
+            cid: 3,
+            socket: PathBuf::new(),
+            id: None,
             iommu: true,
             pci_segment: 1,
-            ..Default::default()
         });
         assert!(still_valid_config.validate().is_ok());
 
@@ -3645,9 +3658,11 @@ mod tests {
             ..Default::default()
         });
         invalid_config.vsock = Some(VsockConfig {
+            cid: 3,
+            socket: PathBuf::new(),
+            id: None,
             iommu: false,
             pci_segment: 1,
-            ..Default::default()
         });
         assert_eq!(
             invalid_config.validate(),
