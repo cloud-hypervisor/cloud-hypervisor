@@ -16,11 +16,12 @@ use crate::thread_helper::spawn_virtio_thread;
 use crate::GuestMemoryMmap;
 use crate::VirtioInterrupt;
 use anyhow::anyhow;
+#[cfg(not(fuzzing))]
+use net_util::virtio_features_to_tap_offload;
 use net_util::CtrlQueue;
 use net_util::{
-    build_net_config_space, build_net_config_space_with_mq, open_tap,
-    virtio_features_to_tap_offload, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio,
-    Tap, TapError, TxVirtio, VirtioNetConfig,
+    build_net_config_space, build_net_config_space_with_mq, open_tap, MacAddr, NetCounters,
+    NetQueuePair, OpenTapError, RxVirtio, Tap, TapError, TxVirtio, VirtioNetConfig,
 };
 use seccompiler::SeccompAction;
 use std::net::Ipv4Addr;
