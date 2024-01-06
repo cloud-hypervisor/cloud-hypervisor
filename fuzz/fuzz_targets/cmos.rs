@@ -6,8 +6,6 @@
 use devices::legacy::Cmos;
 use libc::EFD_NONBLOCK;
 use libfuzzer_sys::fuzz_target;
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
 use vm_device::BusDevice;
 use vmm_sys_util::eventfd::EventFd;
 
