@@ -776,16 +776,33 @@ fn http_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError>
         (libc::SYS_epoll_wait, vec![]),
         (libc::SYS_exit, vec![]),
         (libc::SYS_fcntl, vec![]),
+        (libc::SYS_fstat, vec![]),
         (libc::SYS_futex, vec![]),
+        (libc::SYS_getcwd, vec![]),
         (libc::SYS_getrandom, vec![]),
+        (libc::SYS_gettid, vec![]),
         (libc::SYS_ioctl, create_api_ioctl_seccomp_rule()?),
         (libc::SYS_madvise, vec![]),
         (libc::SYS_mmap, vec![]),
         (libc::SYS_mprotect, vec![]),
         (libc::SYS_munmap, vec![]),
+        #[cfg(target_arch = "aarch64")]
+        (libc::SYS_newfstatat, vec![]),
+        #[cfg(target_arch = "x86_64")]
+        (libc::SYS_open, vec![]),
+        (libc::SYS_openat, vec![]),
+        #[cfg(target_arch = "x86_64")]
+        (libc::SYS_readlink, vec![]),
+        #[cfg(target_arch = "aarch64")]
+        (libc::SYS_readlinkat, vec![]),
         (libc::SYS_recvfrom, vec![]),
         (libc::SYS_recvmsg, vec![]),
+        (libc::SYS_rt_sigaction, vec![]),
+        (libc::SYS_rt_sigprocmask, vec![]),
         (libc::SYS_sigaltstack, vec![]),
+        #[cfg(target_arch = "x86_64")]
+        (libc::SYS_stat, vec![]),
+        (libc::SYS_statx, vec![]),
         (libc::SYS_write, vec![]),
     ])
 }
@@ -803,13 +820,26 @@ fn dbus_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError>
         (libc::SYS_dup, vec![]),
         (libc::SYS_epoll_ctl, vec![]),
         (libc::SYS_exit, vec![]),
+        (libc::SYS_fcntl, vec![]),
+        (libc::SYS_fstat, vec![]),
         (libc::SYS_futex, vec![]),
+        (libc::SYS_getcwd, vec![]),
         (libc::SYS_getrandom, vec![]),
+        (libc::SYS_gettid, vec![]),
         (libc::SYS_madvise, vec![]),
         (libc::SYS_mmap, vec![]),
         (libc::SYS_mprotect, vec![]),
         (libc::SYS_munmap, vec![]),
+        #[cfg(target_arch = "aarch64")]
+        (libc::SYS_newfstatat, vec![]),
+        #[cfg(target_arch = "x86_64")]
+        (libc::SYS_open, vec![]),
+        (libc::SYS_openat, vec![]),
         (libc::SYS_prctl, vec![]),
+        #[cfg(target_arch = "x86_64")]
+        (libc::SYS_readlink, vec![]),
+        #[cfg(target_arch = "aarch64")]
+        (libc::SYS_readlinkat, vec![]),
         (libc::SYS_recvmsg, vec![]),
         // musl is missing this constant
         // (libc::SYS_rseq, vec![]),
@@ -817,11 +847,15 @@ fn dbus_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError>
         (334, vec![]),
         #[cfg(target_arch = "aarch64")]
         (293, vec![]),
+        (libc::SYS_rt_sigaction, vec![]),
         (libc::SYS_rt_sigprocmask, vec![]),
         (libc::SYS_sched_getaffinity, vec![]),
         (libc::SYS_sendmsg, vec![]),
         (libc::SYS_set_robust_list, vec![]),
         (libc::SYS_sigaltstack, vec![]),
+        #[cfg(target_arch = "x86_64")]
+        (libc::SYS_stat, vec![]),
+        (libc::SYS_statx, vec![]),
         (libc::SYS_write, vec![]),
     ])
 }

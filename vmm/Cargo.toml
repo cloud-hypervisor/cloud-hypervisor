@@ -18,7 +18,7 @@ tracing = ["tracer/tracing"]
 
 [dependencies]
 acpi_tables = { git = "https://github.com/rust-vmm/acpi_tables", branch = "main"  }
-anyhow = "1.0.75"
+anyhow = "1.0.79"
 arc-swap = "1.5.1"
 arch = { path = "../arch" }
 bitflags = "2.4.1"
