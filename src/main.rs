@@ -730,7 +730,7 @@ mod unit_tests {
 
     #[test]
     fn test_valid_vm_config_cpus() {
-        vec![
+        [
             (
                 vec![
                     "cloud-hypervisor",
@@ -848,7 +848,7 @@ mod unit_tests {
 
     #[test]
     fn test_valid_vm_config_kernel() {
-        vec![(
+        [(
             vec!["cloud-hypervisor", "--kernel", "/path/to/kernel"],
             r#"{
                 "payload": {"kernel": "/path/to/kernel"}
@@ -863,7 +863,7 @@ mod unit_tests {
 
     #[test]
     fn test_valid_vm_config_cmdline() {
-        vec![(
+        [(
             vec![
                 "cloud-hypervisor",
                 "--kernel",
@@ -884,7 +884,7 @@ mod unit_tests {
 
     #[test]
     fn test_valid_vm_config_disks() {
-        vec![
+        [
             (
                 vec![
                     "cloud-hypervisor",
@@ -1156,7 +1156,7 @@ mod unit_tests {
 
     #[test]
     fn test_valid_vm_config_rng() {
-        vec![(
+        [(
             vec![
                 "cloud-hypervisor",
                 "--kernel",
@@ -1178,8 +1178,7 @@ mod unit_tests {
 
     #[test]
     fn test_valid_vm_config_fs() {
-        vec![
-            (
+        [(
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--memory", "shared=true",
@@ -1247,8 +1246,7 @@ mod unit_tests {
                     ]
                 }"#,
                 true,
-            ),
-        ]
+            )]
         .iter()
         .for_each(|(cli, openapi, equal)| {
             compare_vm_config_cli_vs_json(cli, openapi, *equal);
@@ -1257,7 +1255,7 @@ mod unit_tests {
 
     #[test]
     fn test_valid_vm_config_pmem() {
-        vec![
+        [
             (
                 vec![
                     "cloud-hypervisor",
@@ -1320,7 +1318,7 @@ mod unit_tests {
 
     #[test]
     fn test_valid_vm_config_serial_console() {
-        vec![
+        [
             (
                 vec!["cloud-hypervisor", "--kernel", "/path/to/kernel"],
                 r#"{
@@ -1371,7 +1369,7 @@ mod unit_tests {
 
     #[test]
     fn test_valid_vm_config_serial_pty_console_pty() {
-        vec![
+        [
             (
                 vec!["cloud-hypervisor", "--kernel", "/path/to/kernel"],
                 r#"{
@@ -1517,7 +1515,7 @@ mod unit_tests {
 
     #[test]
     fn test_valid_vm_config_vdpa() {
-        vec![
+        [
             (
                 vec![
                     "cloud-hypervisor",
@@ -1645,7 +1643,7 @@ mod unit_tests {
 
     #[test]
     fn test_valid_vm_config_tpm_socket() {
-        vec![(
+        [(
             vec![
                 "cloud-hypervisor",
                 "--kernel",

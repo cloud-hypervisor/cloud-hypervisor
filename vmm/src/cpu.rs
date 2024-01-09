@@ -1148,7 +1148,7 @@ impl CpuManager {
 
     fn remove_vcpu(&mut self, cpu_id: u8) -> Result<()> {
         info!("Removing vCPU: cpu_id = {}", cpu_id);
-        let mut state = &mut self.vcpu_states[usize::from(cpu_id)];
+        let state = &mut self.vcpu_states[usize::from(cpu_id)];
         state.kill.store(true, Ordering::SeqCst);
         state.signal_thread();
         state.join_thread()?;
