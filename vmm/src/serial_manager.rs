@@ -225,7 +225,7 @@ impl SerialManager {
                     const EPOLL_EVENTS_LEN: usize = 3;
 
                     let mut events =
-                        vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
+                        [epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
 
                     loop {
                         let num_events = match epoll::wait(epoll_fd, timeout, &mut events[..]) {

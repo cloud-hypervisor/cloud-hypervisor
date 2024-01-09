@@ -1083,7 +1083,7 @@ impl<'a, T> CreateField<'a, T> {
             buffer,
             offset,
             field,
-            phantom: PhantomData::default(),
+            phantom: PhantomData,
         }
     }
 }

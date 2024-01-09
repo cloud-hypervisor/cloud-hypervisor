@@ -277,11 +277,7 @@ impl Emulator {
         }
 
         self.established_flag_cached = true;
-        if est.resp.bit != 0 {
-            self.established_flag = false;
-        } else {
-            self.established_flag = true;
-        }
+        self.established_flag = est.resp.bit == 0;
 
         self.established_flag
     }

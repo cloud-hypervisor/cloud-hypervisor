@@ -145,11 +145,7 @@ impl DiskSpec {
                 let bits = f
                     .read_u32::<LittleEndian>()
                     .map_err(VhdxMetadataError::ReadMetadata)?;
-                if bits & BLOCK_HAS_PARENT != 0 {
-                    disk_spec.has_parent = true;
-                } else {
-                    disk_spec.has_parent = false;
-                }
+                disk_spec.has_parent = bits & BLOCK_HAS_PARENT != 0;
 
                 metadata_presence |= METADATA_FILE_PARAMETER_PRESENT;
             } else if metadata_entry.item_id

@@ -321,11 +321,8 @@ impl Client {
 
         debug!("Reply: {:?}", server_version);
 
-        let mut server_version_data = Vec::new();
-        server_version_data.resize(
-            server_version.header.message_size as usize - size_of::<Version>(),
-            0,
-        );
+        let mut server_version_data =
+            vec![0; server_version.header.message_size as usize - size_of::<Version>()];
         self.stream
             .read_exact(server_version_data.as_mut_slice())
             .map_err(Error::StreamRead)?;
@@ -566,7 +563,7 @@ impl Client {
         let mmap_cap_size = size_of::<vfio_region_info_cap_sparse_mmap>() as u32;
         let mmap_area_size = size_of::<vfio_region_sparse_mmap_area>() as u32;
 
-        let cap_data_ptr = cap_data.as_ptr() as *const u8;
+        let cap_data_ptr = cap_data.as_ptr();
         let mut region_info_offset = region_info.cap_offset;
         while region_info_offset != 0 {
             // calculate the offset from the begining of the cap_data based on the offset
