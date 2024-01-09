@@ -133,7 +133,7 @@ impl DiskSpec {
                     .map_err(VhdxMetadataError::ReadMetadata)?;
 
                 // MUST be at least 1 MiB and not greater than 256 MiB
-                if disk_spec.block_size < BLOCK_SIZE_MIN && disk_spec.block_size > BLOCK_SIZE_MAX {
+                if disk_spec.block_size < BLOCK_SIZE_MIN || disk_spec.block_size > BLOCK_SIZE_MAX {
                     return Err(VhdxMetadataError::InvalidBlockSize);
                 }
 
