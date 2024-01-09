@@ -72,6 +72,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
+name = "bitflags"
+version = "2.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "327762f6e5a765692301e5bb513e0d9fef63be86bbc14528052b1cd3e6f03e07"
+
+[[package]]
 name = "block_util"
 version = "0.1.0"
 dependencies = [
@@ -117,7 +123,7 @@ version = "4.0.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4d63b9e9c07271b9957ad22c173bae2a4d9a81127680962039296abcd2f8251d"
 dependencies = [
- "bitflags",
+ "bitflags 1.3.2",
  "clap_lex",
  "is-terminal",
  "once_cell",
@@ -137,7 +143,7 @@ dependencies = [
 
 [[package]]
 name = "cloud-hypervisor"
-version = "28.0.0"
+version = "28.3.0"
 dependencies = [
  "anyhow",
  "api_client",
@@ -240,7 +246,7 @@ dependencies = [
  "acpi_tables",
  "anyhow",
  "arch",
- "bitflags",
+ "bitflags 2.4.1",
  "byteorder",
  "hypervisor",
  "libc",
@@ -262,7 +268,7 @@ version = "4.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20df693c700404f7e19d4d6fae6b15215d2913c27955d2b9d6f2c0f537511cd0"
 dependencies = [
- "bitflags",
+ "bitflags 1.3.2",
  "libc",
 ]
 
@@ -292,6 +298,7 @@ name = "event_monitor"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "once_cell",
  "serde",
  "serde_json",
 ]
@@ -379,7 +386,7 @@ version = "0.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ba34abb5175052fc1a2227a10d2275b7386c9990167de9786c0b88d8b062330"
 dependencies = [
- "bitflags",
+ "bitflags 1.3.2",
  "libc",
 ]
 
@@ -675,7 +682,7 @@ version = "0.36.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a3807b5d10909833d3e9acd1eb5fb988f79376ff10fce42937de71a449c4c588"
 dependencies = [
- "bitflags",
+ "bitflags 1.3.2",
  "errno",
  "io-lifetimes",
  "libc",
@@ -971,7 +978,7 @@ version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c9b791c5b0717a0558888a4cf7240cea836f39a99cb342e12ce633dcaa078072"
 dependencies = [
- "bitflags",
+ "bitflags 1.3.2",
  "libc",
  "vm-memory",
  "vmm-sys-util",
@@ -1098,7 +1105,7 @@ dependencies = [
  "anyhow",
  "arc-swap",
  "arch",
- "bitflags",
+ "bitflags 2.4.1",
  "block_util",
  "clap",
  "devices",
@@ -1143,7 +1150,7 @@ version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cc06a16ee8ebf0d9269aed304030b0d20a866b8b3dd3d4ce532596ac567a0d24"
 dependencies = [
- "bitflags",
+ "bitflags 1.3.2",
  "libc",
  "serde",
  "serde_derive",
