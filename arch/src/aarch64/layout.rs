@@ -111,8 +111,9 @@ pub const RAM_64BIT_START: GuestAddress = GuestAddress(0x1_0000_0000);
 pub const CMDLINE_MAX_SIZE: usize = 2048;
 
 /// FDT is at the beginning of RAM.
-/// Maximum size of the device tree blob as specified in https://www.kernel.org/doc/Documentation/arm64/booting.txt.
 pub const FDT_START: GuestAddress = RAM_START;
+/// Maximum size of the device tree blob as specified in [the kernel
+/// documentation](https://www.kernel.org/doc/Documentation/arm64/booting.txt).
 pub const FDT_MAX_SIZE: u64 = 0x20_0000;
 
 /// Put ACPI table above dtb
