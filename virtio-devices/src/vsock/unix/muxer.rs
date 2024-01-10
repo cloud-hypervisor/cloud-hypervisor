@@ -347,7 +347,7 @@ impl VsockBackend for VsockMuxer {}
 impl VsockMuxer {
     /// Muxer constructor.
     ///
-    pub fn new(cid: u64, host_sock_path: String) -> Result<Self> {
+    pub fn new(cid: u32, host_sock_path: String) -> Result<Self> {
         // Create the nested epoll FD. This FD will be added to the VMM `EpollContext`, at
         // device activation time.
         let epoll_fd = epoll::create(true).map_err(Error::EpollFdCreate)?;
@@ -362,7 +362,7 @@ impl VsockMuxer {
             .map_err(Error::UnixBind)?;
 
         let mut muxer = Self {
-            cid,
+            cid: cid.into(),
             host_sock,
             host_sock_path,
             epoll_file,
@@ -862,7 +862,7 @@ mod tests {
     use super::super::super::tests::TestContext as VsockTestContext;
     use super::*;
 
-    const PEER_CID: u64 = 3;
+    const PEER_CID: u32 = 3;
     const PEER_BUF_ALLOC: u32 = 64 * 1024;
 
     struct MuxerTestContext {
@@ -906,7 +906,7 @@ mod tests {
             }
             self.pkt
                 .set_type(uapi::VSOCK_TYPE_STREAM)
-                .set_src_cid(PEER_CID)
+                .set_src_cid(PEER_CID.into())
                 .set_dst_cid(uapi::VSOCK_HOST_CID)
                 .set_src_port(peer_port)
                 .set_dst_port(local_port)
@@ -1060,7 +1060,7 @@ mod tests {
         ctx.recv();
         assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RST);
         assert_eq!(ctx.pkt.src_cid(), uapi::VSOCK_HOST_CID);
-        assert_eq!(ctx.pkt.dst_cid(), PEER_CID);
+        assert_eq!(ctx.pkt.dst_cid(), PEER_CID as u64);
         assert_eq!(ctx.pkt.src_port(), LOCAL_PORT);
         assert_eq!(ctx.pkt.dst_port(), PEER_PORT);
 
@@ -1105,7 +1105,7 @@ mod tests {
         assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RST);
         assert_eq!(ctx.pkt.len(), 0);
         assert_eq!(ctx.pkt.src_cid(), uapi::VSOCK_HOST_CID);
-        assert_eq!(ctx.pkt.dst_cid(), PEER_CID);
+        assert_eq!(ctx.pkt.dst_cid(), PEER_CID as u64);
         assert_eq!(ctx.pkt.src_port(), LOCAL_PORT);
         assert_eq!(ctx.pkt.dst_port(), PEER_PORT);
 
@@ -1119,7 +1119,7 @@ mod tests {
         assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RESPONSE);
         assert_eq!(ctx.pkt.len(), 0);
         assert_eq!(ctx.pkt.src_cid(), uapi::VSOCK_HOST_CID);
-        assert_eq!(ctx.pkt.dst_cid(), PEER_CID);
+        assert_eq!(ctx.pkt.dst_cid(), PEER_CID as u64);
         assert_eq!(ctx.pkt.src_port(), LOCAL_PORT);
         assert_eq!(ctx.pkt.dst_port(), PEER_PORT);
         let key = ConnMapKey {

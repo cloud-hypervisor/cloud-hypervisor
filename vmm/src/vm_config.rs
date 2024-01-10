@@ -521,7 +521,7 @@ pub fn default_vdpaconfig_num_queues() -> usize {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct VsockConfig {
-    pub cid: u64,
+    pub cid: u32,
     pub socket: PathBuf,
     #[serde(default)]
     pub iommu: bool,
