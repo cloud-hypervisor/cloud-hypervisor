@@ -1,3 +1,4 @@
+- [v35.1](#v351)
 - [v35.0](#v350)
     - [`virtio-vsock` Support for Linux Guest Kernel v6.3+](#virtio-vsock-support-for-linux-guest-kernel-v63)
     - [User Specified Serial Number for `virtio-block`](#user-specified-serial-number-for-virtio-block)
@@ -299,6 +300,16 @@
     - [Console over virtio](#console-over-virtio)
     - [Unit testing](#unit-testing)
     - [Integration tests parallelization](#integration-tests-parallelization)
+
+# v35.1
+
+This is a bug fix release. The following issues have been addressed:
+
+* Fix a deadlock when TDX is enabled (#5845)
+* Correct default value for vCPU topology on AArch64 (#5893)
+* Fix PvPanic device PCI BAR alignment (#5956)
+* Bug fix to OpenAPI specification file (#5967)
+* Error out early for live migration when TDX is enabled (#6025)
 
 # v35.0
 
