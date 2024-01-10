@@ -1,12 +1,12 @@
 // Copyright 2021, 2023 Alyssa Ross <hi@alyssa.is>
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::clone3::{clone3, clone_args, CLONE_CLEAR_SIGHAND};
 use arch::_NSIG;
 use libc::{
-    c_int, c_void, close, fork, getpgrp, ioctl, pipe2, poll, pollfd, setsid, sigemptyset,
-    siginfo_t, signal, sigprocmask, syscall, tcgetpgrp, tcsetpgrp, SYS_close_range, EINVAL, ENOSYS,
-    ENOTTY, O_CLOEXEC, POLLERR, SIGWINCH, SIG_DFL, SIG_SETMASK, STDERR_FILENO, TIOCSCTTY,
+    c_int, c_void, clone_args, close, fork, getpgrp, ioctl, pipe2, poll, pollfd, setsid,
+    sigemptyset, siginfo_t, signal, sigprocmask, syscall, tcgetpgrp, tcsetpgrp, SYS_clone3,
+    SYS_close_range, CLONE_CLEAR_SIGHAND, EINVAL, ENOSYS, ENOTTY, O_CLOEXEC, POLLERR, SIGWINCH,
+    SIG_DFL, SIG_SETMASK, STDERR_FILENO, TIOCSCTTY,
 };
 use seccompiler::{apply_filter, BpfProgram};
 use std::cell::RefCell;
@@ -15,7 +15,7 @@ use std::fs::{read_dir, File};
 use std::io::{self, ErrorKind, Read, Write};
 use std::iter::once;
 use std::mem::size_of;
-use std::mem::MaybeUninit;
+use std::mem::{zeroed, MaybeUninit};
 use std::os::unix::prelude::*;
 use std::process::exit;
 use std::ptr::null_mut;
@@ -204,9 +204,10 @@ fn sigwinch_listener_main(seccomp_filter: BpfProgram, tx: File, tty: File) -> ! 
 ///
 /// Same as [`fork`].
 unsafe fn clone_clear_sighand() -> io::Result<u64> {
-    let mut args = clone_args::default();
-    args.flags |= CLONE_CLEAR_SIGHAND;
-    let r = clone3(&mut args, size_of::<clone_args>());
+    // SAFETY: an all-zero clone_args is valid.
+    let mut args: clone_args = zeroed();
+    args.flags |= CLONE_CLEAR_SIGHAND as u64;
+    let r = syscall(SYS_clone3, &mut args, size_of::<clone_args>());
     if r != -1 {
         return Ok(r.try_into().unwrap());
     }
