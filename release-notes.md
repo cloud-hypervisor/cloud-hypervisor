@@ -1,3 +1,4 @@
+- [v36.1](#v361)
 - [v36.0](#v360)
     - [Command Line Changes](#command-line-changes)
     - [Enabled Features Reported via API Endpoint and CLI](#enabled-features-reported-via-api-endpoint-and-cli)
@@ -309,6 +310,16 @@
     - [Console over virtio](#console-over-virtio)
     - [Unit testing](#unit-testing)
     - [Integration tests parallelization](#integration-tests-parallelization)
+
+# v36.1
+
+This is a bug fix release. The following issues have been addressed:
+
+* Fix aio backend behavior for block devices when writeback cache
+disabled (#5930)
+* Fix PvPanic device PCI BAR alignment (#5956)
+* Bug fix to OpenAPI specification file (#5967)
+* Error out early for live migration when TDX is enabled (#6025)
 
 # v36.0
 
