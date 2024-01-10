@@ -17,7 +17,7 @@ pub use self::device::Vsock;
 pub use self::unix::VsockUnixBackend;
 pub use self::unix::VsockUnixError;
 
-pub use packet::VsockPacket;
+use packet::VsockPacket;
 use std::os::unix::io::RawFd;
 
 mod defs {
@@ -262,10 +262,10 @@ mod tests {
 
     impl TestContext {
         pub fn new() -> Self {
-            const CID: u64 = 52;
+            const CID: u32 = 52;
             const MEM_SIZE: usize = 1024 * 1024 * 128;
             Self {
-                cid: CID,
+                cid: CID as u64,
                 mem: GuestMemoryMmap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).unwrap(),
                 mem_size: MEM_SIZE,
                 device: Vsock::new(

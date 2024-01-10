@@ -154,7 +154,7 @@ pub enum ValidationError {
     /// Need shared memory for vfio-user
     UserDevicesRequireSharedMemory,
     /// VSOCK Context Identifier has a special meaning, unsuitable for a VM.
-    VsockSpecialCid(u64),
+    VsockSpecialCid(u32),
     /// Memory zone is reused across NUMA nodes
     MemoryZoneReused(String, u32, u32),
     /// Invalid number of PCI segments
@@ -2071,7 +2071,7 @@ impl VmConfig {
         }
 
         if let Some(vsock) = &self.vsock {
-            if [u32::MAX as u64, 0, 1, 2].contains(&vsock.cid) {
+            if [!0, 0, 1, 2].contains(&vsock.cid) {
                 return Err(ValidationError::VsockSpecialCid(vsock.cid));
             }
         }
