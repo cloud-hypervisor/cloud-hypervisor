@@ -263,6 +263,26 @@ pub struct CpuidPatch {
 }
 
 impl CpuidPatch {
+    pub fn get_cpuid_reg(
+        cpuid: &[CpuIdEntry],
+        function: u32,
+        index: Option<u32>,
+        reg: CpuidReg,
+    ) -> Option<u32> {
+        for entry in cpuid.iter() {
+            if entry.function == function && (index.is_none() || index.unwrap() == entry.index) {
+                return match reg {
+                    CpuidReg::EAX => Some(entry.eax),
+                    CpuidReg::EBX => Some(entry.ebx),
+                    CpuidReg::ECX => Some(entry.ecx),
+                    CpuidReg::EDX => Some(entry.edx),
+                };
+            }
+        }
+
+        None
+    }
+
     pub fn set_cpuid_reg(
         cpuid: &mut Vec<CpuIdEntry>,
         function: u32,
@@ -1326,12 +1346,14 @@ fn update_cpuid_topology(
         );
         CpuidPatch::set_cpuid_reg(cpuid, 0x8000_001e, Some(0), CpuidReg::EDX, 0);
         if cores_per_die * threads_per_core > 1 {
+            let ecx =
+                CpuidPatch::get_cpuid_reg(cpuid, 0x8000_0001, Some(0), CpuidReg::ECX).unwrap_or(0);
             CpuidPatch::set_cpuid_reg(
                 cpuid,
                 0x8000_0001,
                 Some(0),
                 CpuidReg::ECX,
-                (1u32 << 1) | (1u32 << 22),
+                ecx | (1u32 << 1) | (1u32 << 22),
             );
             CpuidPatch::set_cpuid_reg(
                 cpuid,
