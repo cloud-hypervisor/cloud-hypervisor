@@ -994,7 +994,7 @@ components:
           type: string
         mode:
           type: string
-          enum: [Off, Pty, Tty, File, Socket, Null]
+          enum: ["Off", "Pty", "Tty", "File", "Socket", "Null"]
         iommu:
           type: boolean
           default: false
