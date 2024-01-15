@@ -143,7 +143,7 @@ pipeline {
                             }
                             steps {
                                 sh 'sudo modprobe openvswitch'
-                                sh 'scripts/dev_cli.sh tests --integration -- -- --skip common_parallel::test_vfio'
+                                sh 'scripts/dev_cli.sh tests --integration'
                             }
                         }
                         stage('Run live-migration integration tests') {
@@ -161,7 +161,7 @@ pipeline {
                             }
                             steps {
                                 sh 'sudo modprobe openvswitch'
-                                sh 'scripts/dev_cli.sh tests --integration --libc musl -- -- --skip common_parallel::test_vfio'
+                                sh 'scripts/dev_cli.sh tests --integration --libc musl'
                             }
                         }
                         stage('Run live-migration integration tests for musl') {
