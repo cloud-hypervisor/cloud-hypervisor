@@ -290,6 +290,17 @@ impl TupleValue for Vec<u64> {
     }
 }
 
+impl TupleValue for Vec<usize> {
+    fn parse_value(input: &str) -> Result<Self, TupleError> {
+        Ok(IntegerList::from_str(input)
+            .map_err(TupleError::InvalidIntegerList)?
+            .0
+            .iter()
+            .map(|v| *v as usize)
+            .collect())
+    }
+}
+
 pub struct Tuple<S, T>(pub Vec<(S, T)>);
 
 pub enum TupleError {

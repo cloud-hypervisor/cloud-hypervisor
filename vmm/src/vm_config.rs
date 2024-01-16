@@ -10,7 +10,7 @@ use virtio_devices::RateLimiterConfig;
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CpuAffinity {
     pub vcpu: u8,
-    pub host_cpus: Vec<u8>,
+    pub host_cpus: Vec<usize>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]

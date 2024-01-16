@@ -479,7 +479,7 @@ pub struct CpuManager {
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     acpi_address: Option<GuestAddress>,
     proximity_domain_per_cpu: BTreeMap<u8, u32>,
-    affinity: BTreeMap<u8, Vec<u8>>,
+    affinity: BTreeMap<u8, Vec<usize>>,
     dynamic: bool,
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
 }
@@ -921,7 +921,7 @@ impl CpuManager {
             unsafe { libc::CPU_ZERO(&mut cpuset) };
             for host_cpu in host_cpus {
                 // SAFETY: FFI call, trivially safe
-                unsafe { libc::CPU_SET(*host_cpu as usize, &mut cpuset) };
+                unsafe { libc::CPU_SET(*host_cpu, &mut cpuset) };
             }
             cpuset
         });
