@@ -1,7 +1,16 @@
-# `cloud-hypervisor` debug IO port
+# `cloud-hypervisor` debug IO ports
 
-`cloud-hypervisor` uses the [`0x80`](https://www.intel.com/content/www/us/en/support/articles/000005500/boards-and-kits.html)
-I/O port to trace user defined guest events.
+When running x86 guests, `cloud-hypervisor` provides different kinds of debug ports:
+- [`0x80` debug port](https://www.intel.com/content/www/us/en/support/articles/000005500/boards-and-kits.html) 
+- Debug console (by default at `0xe9`). 
+- Firmware debug port at `0x402`.
+
+All of them can be used to trace user-defined guest events and all of them can
+be used simultaneously.
+
+## Debug Ports Overview
+
+### `0x80` I/O port
 
 Whenever the guest write one byte between `0x0` and `0xF` on this particular
 I/O port, `cloud-hypervisor` will log and timestamp that event at the `debug`
@@ -30,7 +39,7 @@ guest will have `cloud-hypervisor` generate timestamped logs of all those steps.
 That provides a basic but convenient way of measuring not only the overall guest
 boot time but all intermediate steps as well.
 
-## Logging
+#### Logging
 
 Assuming parts of the guest software stack have been instrumented to use the
 `cloud-hypervisor` debug I/O port, we may want to gather the related logs.
@@ -59,3 +68,29 @@ $ grep "Debug I/O port" /tmp/ch-fw.log
 cloud-hypervisor: 19.762449ms: DEBUG:vmm/src/vm.rs:510 -- [Debug I/O port: Firmware code 0x0] 0.019004 seconds
 cloud-hypervisor: 403.499628ms: DEBUG:vmm/src/vm.rs:510 -- [Debug I/O port: Firmware code 0x1] 0.402744 seconds
 ```
+
+### Debug console port
+
+The debug console is inspired by QEMU and Bochs, which have a similar feature. 
+By default, the I/O port `0xe9` is used. This port can be configured like a 
+console. Thus, it can print to a tty, a file, or a pty, for example.
+
+### Firmware debug port
+
+The firmware debug port is also a simple port that prints all bytes written to
+it. The firmware debug port only prints to stdout.
+
+## When do I need these ports?
+
+The ports are on the one hand interesting for firmware or kernel developers, as
+they provide an easy way to print debug information from within a guest. 
+Furthermore, you can patch "normal" software to measure certain events, such as
+the boot time of a guest.
+
+## Which port should I choose?
+
+The `0x80` debug port and the port of the firmware debug device are always
+available. The debug console must be activated via the command line, but
+provides more configuration options. 
+
+You can use different ports for different aspect of your logging messages. 

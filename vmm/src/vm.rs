@@ -479,6 +479,7 @@ impl Vm {
         timestamp: Instant,
         serial_pty: Option<PtyPair>,
         console_pty: Option<PtyPair>,
+        debug_console_pty: Option<PtyPair>,
         console_resize_pipe: Option<File>,
         original_termios: Arc<Mutex<Option<termios>>>,
         snapshot: Option<Snapshot>,
@@ -631,6 +632,7 @@ impl Vm {
             .create_devices(
                 serial_pty,
                 console_pty,
+                debug_console_pty,
                 console_resize_pipe,
                 original_termios,
             )
@@ -786,6 +788,7 @@ impl Vm {
         activate_evt: EventFd,
         serial_pty: Option<PtyPair>,
         console_pty: Option<PtyPair>,
+        debug_console_pty: Option<PtyPair>,
         console_resize_pipe: Option<File>,
         original_termios: Arc<Mutex<Option<termios>>>,
         snapshot: Option<Snapshot>,
@@ -865,6 +868,7 @@ impl Vm {
             timestamp,
             serial_pty,
             console_pty,
+            debug_console_pty,
             console_resize_pipe,
             original_termios,
             snapshot,
@@ -1297,6 +1301,10 @@ impl Vm {
 
     pub fn console_pty(&self) -> Option<PtyPair> {
         self.device_manager.lock().unwrap().console_pty()
+    }
+
+    pub fn debug_console_pty(&self) -> Option<PtyPair> {
+        self.device_manager.lock().unwrap().debug_console_pty()
     }
 
     pub fn console_resize_pipe(&self) -> Option<Arc<File>> {

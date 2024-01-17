@@ -582,6 +582,8 @@ components:
           $ref: "#/components/schemas/ConsoleConfig"
         console:
           $ref: "#/components/schemas/ConsoleConfig"
+        debug_console:
+          $ref: "#/components/schemas/DebugConsoleConfig"
         devices:
           type: array
           items:
@@ -998,6 +1000,19 @@ components:
         iommu:
           type: boolean
           default: false
+
+    DebugConsoleConfig:
+      required:
+        - mode
+      type: object
+      properties:
+        file:
+          type: string
+        mode:
+          type: string
+          enum: ["Off", "Pty", "Tty", "File", "Null"]
+        iobase:
+          type: integer
 
     DeviceConfig:
       required:

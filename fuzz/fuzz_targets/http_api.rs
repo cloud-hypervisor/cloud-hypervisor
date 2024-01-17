@@ -173,6 +173,8 @@ impl RequestHandler for StubApiRequestHandler {
                     iommu: false,
                     socket: None,
                 },
+                #[cfg(target_arch = "x86_64")]
+                debug_console: DebugConsoleConfig::default(),
                 devices: None,
                 user_devices: None,
                 vdpa: None,
