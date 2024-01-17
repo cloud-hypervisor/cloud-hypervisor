@@ -2,8 +2,8 @@
 
 The purpose of this document is to illustrate how to test vhost-user-net
 in cloud-hypervisor with OVS/DPDK as the backend. This document was
-tested with Open vSwitch v2.13.1, DPDK v19.11.3, and Cloud Hypervisor
-v15.0 on Ubuntu 20.04.1 (host kernel v5.4.0).
+tested with Open vSwitch v2.17.8, DPDK v21.11.4, and Cloud Hypervisor
+v37.0 on Ubuntu 22.04.3 (host kernel v5.15.0).
 
 ## Framework
 
@@ -74,8 +74,8 @@ Here is an example how to create a bridge and add two DPDK ports to it
 # create a bridge
 ovs-vsctl add-br ovsbr0 -- set bridge ovsbr0 datapath_type=netdev
 # create two DPDK ports and add them to the bridge
-ovs-vsctl add-port ovsbr0 vhost-user1 -- set Interface vhost-user1 type=dpdkvhostuser
-ovs-vsctl add-port ovsbr0 vhost-user2 -- set Interface vhost-user2 type=dpdkvhostuser
+ovs-vsctl add-port ovsbr0 vhost-user1 -- set Interface vhost-user1 type=dpdkvhostuserclient options:vhost-server-path=/tmp/vhost-user1
+ovs-vsctl add-port ovsbr0 vhost-user2 -- set Interface vhost-user2 type=dpdkvhostuserclient options:vhost-server-path=/tmp/vhost-user2
 # set the number of rx queues
 ovs-vsctl set Interface vhost-user1 options:n_rxq=2
 ovs-vsctl set Interface vhost-user2 options:n_rxq=2
@@ -92,7 +92,7 @@ VMs run in client mode. They connect to the socket created by the `dpdkvhostuser
         --kernel vmlinux \
         --cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw" \
         --disk path=focal-server-cloudimg-amd64.raw   \
-        --net mac=52:54:00:02:d9:01,vhost_user=true,socket=/var/run/openvswitch/vhost-user1,num_queues=4
+        --net mac=52:54:00:02:d9:01,vhost_user=true,socket=/tmp/vhost-user1,num_queues=4,vhost_mode=server
 
 # From another terminal. We need to give the cloud-hypervisor binary the NET_ADMIN capabilities for it to set TAP interfaces up on the host.
 ./cloud-hypervisor \
@@ -101,21 +101,21 @@ VMs run in client mode. They connect to the socket created by the `dpdkvhostuser
         --kernel vmlinux \
         --cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw" \
         --disk path=focal-server-cloudimg-amd64.raw   \
-        --net mac=52:54:20:11:C5:02,vhost_user=true,socket=/var/run/openvswitch/vhost-user2,num_queues=4
+        --net mac=52:54:20:11:C5:02,vhost_user=true,socket=/tmp/vhost-user2,num_queues=4,vhost_mode=server
 ```
 
 _Setup VM1_
 ```bash
 # From inside the guest
-sudo ip addr add 172.100.0.1/24 dev ens2
-sudo ip link set up dev ens2
+sudo ip addr add 172.100.0.1/24 dev ens3
+sudo ip link set up dev ens3
 ```
 
 _Setup VM2_
 ```bash
 # From inside the guest
-sudo ip addr add 172.100.0.2/24 dev ens2
-sudo ip link set up dev ens2
+sudo ip addr add 172.100.0.2/24 dev ens3
+sudo ip link set up dev ens3
 ```
 
 _Ping VM1 from VM2_
