@@ -801,6 +801,7 @@ impl Vmm {
             None,
             None,
             None,
+            None,
             Arc::clone(&self.original_termios_opt),
             Some(snapshot),
         )
@@ -1244,6 +1245,7 @@ impl RequestHandler for Vmm {
                         None,
                         None,
                         None,
+                        None,
                         Arc::clone(&self.original_termios_opt),
                         None,
                         None,
@@ -1343,6 +1345,7 @@ impl RequestHandler for Vmm {
             None,
             None,
             None,
+            None,
             Arc::clone(&self.original_termios_opt),
             Some(snapshot),
             Some(source_url),
@@ -1377,17 +1380,24 @@ impl RequestHandler for Vmm {
 
     fn vm_reboot(&mut self) -> result::Result<(), VmError> {
         // First we stop the current VM
-        let (config, serial_pty, console_pty, console_resize_pipe) =
+        let (config, serial_pty, console_pty, debug_console_pty, console_resize_pipe) =
             if let Some(mut vm) = self.vm.take() {
                 let config = vm.get_config();
                 let serial_pty = vm.serial_pty();
                 let console_pty = vm.console_pty();
+                let debug_console_pty = vm.debug_console_pty();
                 let console_resize_pipe = vm
                     .console_resize_pipe()
                     .as_ref()
                     .map(|pipe| pipe.try_clone().unwrap());
                 vm.shutdown()?;
-                (config, serial_pty, console_pty, console_resize_pipe)
+                (
+                    config,
+                    serial_pty,
+                    console_pty,
+                    debug_console_pty,
+                    console_resize_pipe,
+                )
             } else {
                 return Err(VmError::VmNotCreated);
             };
@@ -1423,6 +1433,7 @@ impl RequestHandler for Vmm {
             activate_evt,
             serial_pty,
             console_pty,
+            debug_console_pty,
             console_resize_pipe,
             Arc::clone(&self.original_termios_opt),
             None,
@@ -2020,6 +2031,8 @@ const DEVICE_MANAGER_SNAPSHOT_ID: &str = "device-manager";
 #[cfg(test)]
 mod unit_tests {
     use super::*;
+    #[cfg(target_arch = "x86_64")]
+    use crate::config::DebugConsoleConfig;
     use config::{
         ConsoleConfig, ConsoleOutputMode, CpusConfig, HotplugMethod, MemoryConfig, PayloadConfig,
         RngConfig, VmConfig,
@@ -2094,6 +2107,8 @@ mod unit_tests {
                 iommu: false,
                 socket: None,
             },
+            #[cfg(target_arch = "x86_64")]
+            debug_console: DebugConsoleConfig::default(),
             devices: None,
             user_devices: None,
             vdpa: None,

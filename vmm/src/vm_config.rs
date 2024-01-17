@@ -396,6 +396,27 @@ pub fn default_consoleconfig_file() -> Option<PathBuf> {
     None
 }
 
+#[cfg(target_arch = "x86_64")]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct DebugConsoleConfig {
+    #[serde(default)]
+    pub file: Option<PathBuf>,
+    pub mode: ConsoleOutputMode,
+    /// Optionally dedicated I/O-port, if the default port should not be used.
+    pub iobase: Option<u16>,
+}
+
+#[cfg(target_arch = "x86_64")]
+impl Default for DebugConsoleConfig {
+    fn default() -> Self {
+        Self {
+            file: None,
+            mode: ConsoleOutputMode::Off,
+            iobase: Some(devices::debug_console::DEFAULT_PORT as u16),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct DeviceConfig {
     pub path: PathBuf,
@@ -537,6 +558,9 @@ pub struct VmConfig {
     pub serial: ConsoleConfig,
     #[serde(default = "default_console")]
     pub console: ConsoleConfig,
+    #[cfg(target_arch = "x86_64")]
+    #[serde(default)]
+    pub debug_console: DebugConsoleConfig,
     pub devices: Option<Vec<DeviceConfig>>,
     pub user_devices: Option<Vec<UserDeviceConfig>>,
     pub vdpa: Option<Vec<VdpaConfig>>,

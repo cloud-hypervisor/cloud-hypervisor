@@ -41,14 +41,14 @@ use block::{
 };
 #[cfg(feature = "io_uring")]
 use block::{fixed_vhd_async::FixedVhdDiskAsync, raw_async::RawFileDisk};
+#[cfg(target_arch = "x86_64")]
+use devices::debug_console::DebugConsole;
 #[cfg(target_arch = "aarch64")]
 use devices::gic;
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
 #[cfg(target_arch = "aarch64")]
 use devices::legacy::Pl011;
-#[cfg(target_arch = "x86_64")]
-use devices::legacy::Serial;
 use devices::{
     interrupt_controller, interrupt_controller::InterruptController, AcpiNotificationFlags,
 };
@@ -103,6 +103,8 @@ use vm_migration::{
 use vm_virtio::AccessPlatform;
 use vm_virtio::VirtioDeviceType;
 use vmm_sys_util::eventfd::EventFd;
+#[cfg(target_arch = "x86_64")]
+use {devices::debug_console, devices::legacy::Serial};
 
 #[cfg(target_arch = "aarch64")]
 const MMIO_LEN: u64 = 0x1000;
@@ -111,6 +113,8 @@ const MMIO_LEN: u64 = 0x1000;
 #[cfg(target_arch = "x86_64")]
 const IOAPIC_DEVICE_NAME: &str = "__ioapic";
 const SERIAL_DEVICE_NAME: &str = "__serial";
+#[cfg(target_arch = "x86_64")]
+const DEBUGCON_DEVICE_NAME: &str = "__debug_console";
 #[cfg(target_arch = "aarch64")]
 const GPIO_DEVICE_NAME: &str = "__gpio";
 const RNG_DEVICE_NAME: &str = "__rng";
@@ -249,6 +253,10 @@ pub enum DeviceManagerError {
     /// Error creating serial output file
     SerialOutputFileOpen(io::Error),
 
+    #[cfg(target_arch = "x86_64")]
+    /// Error creating debug-console output file
+    DebugconOutputFileOpen(io::Error),
+
     /// Error creating console output file
     ConsoleOutputFileOpen(io::Error),
 
@@ -257,6 +265,9 @@ pub enum DeviceManagerError {
 
     /// Error creating console pty
     ConsolePtyOpen(io::Error),
+
+    /// Error creating console pty
+    DebugconPtyOpen(io::Error),
 
     /// Error setting pty raw mode
     SetPtyRaw(vmm_sys_util::errno::Error),
@@ -819,6 +830,9 @@ pub struct DeviceManager {
     // serial PTY
     serial_pty: Option<Arc<Mutex<PtyPair>>>,
 
+    // debug-console PTY
+    debug_console_pty: Option<Arc<Mutex<PtyPair>>>,
+
     // Serial Manager
     serial_manager: Option<Arc<SerialManager>>,
 
@@ -1166,6 +1180,7 @@ impl DeviceManager {
             serial_pty: None,
             serial_manager: None,
             console_pty: None,
+            debug_console_pty: None,
             console_resize_pipe: None,
             original_termios_opt: Arc::new(Mutex::new(None)),
             virtio_mem_devices: Vec::new(),
@@ -1209,6 +1224,12 @@ impl DeviceManager {
             .map(|pty| pty.lock().unwrap().clone())
     }
 
+    pub fn debug_console_pty(&self) -> Option<PtyPair> {
+        self.debug_console_pty
+            .as_ref()
+            .map(|pty| pty.lock().unwrap().clone())
+    }
+
     pub fn console_resize_pipe(&self) -> Option<Arc<File>> {
         self.console_resize_pipe.as_ref().map(Arc::clone)
     }
@@ -1217,6 +1238,7 @@ impl DeviceManager {
         &mut self,
         serial_pty: Option<PtyPair>,
         console_pty: Option<PtyPair>,
+        debug_console_pty: Option<PtyPair>,
         console_resize_pipe: Option<File>,
         original_termios_opt: Arc<Mutex<Option<termios>>>,
     ) -> DeviceManagerResult<()> {
@@ -1276,11 +1298,12 @@ impl DeviceManager {
 
         self.original_termios_opt = original_termios_opt;
 
-        self.console = self.add_console_device(
+        self.console = self.add_console_devices(
             &legacy_interrupt_manager,
             &mut virtio_devices,
             serial_pty,
             console_pty,
+            debug_console_pty,
             console_resize_pipe,
         )?;
 
@@ -1800,6 +1823,53 @@ impl DeviceManager {
     }
 
     #[cfg(target_arch = "x86_64")]
+    fn add_debug_console_device(
+        &mut self,
+        debug_console_writer: Box<dyn io::Write + Send>,
+    ) -> DeviceManagerResult<Arc<Mutex<DebugConsole>>> {
+        let id = String::from(DEBUGCON_DEVICE_NAME);
+        let debug_console = Arc::new(Mutex::new(DebugConsole::new(
+            id.clone(),
+            debug_console_writer,
+        )));
+
+        let port = self
+            .config
+            .lock()
+            .unwrap()
+            .debug_console
+            .clone()
+            .iobase
+            .map(|port| port as u64)
+            .unwrap_or(debug_console::DEFAULT_PORT);
+
+        self.bus_devices
+            .push(Arc::clone(&debug_console) as Arc<Mutex<dyn BusDevice>>);
+
+        self.address_manager
+            .allocator
+            .lock()
+            .unwrap()
+            .allocate_io_addresses(Some(GuestAddress(port)), 0x1, None)
+            .ok_or(DeviceManagerError::AllocateIoPort)?;
+
+        self.address_manager
+            .io_bus
+            .insert(debug_console.clone(), port, 0x1)
+            .map_err(DeviceManagerError::BusError)?;
+
+        // Fill the device tree with a new node. In case of restore, we
+        // know there is nothing to do, so we can simply override the
+        // existing entry.
+        self.device_tree
+            .lock()
+            .unwrap()
+            .insert(id.clone(), device_node!(id, debug_console));
+
+        Ok(debug_console)
+    }
+
+    #[cfg(target_arch = "x86_64")]
     fn add_serial_device(
         &mut self,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
@@ -2086,12 +2156,19 @@ impl DeviceManager {
         })
     }
 
-    fn add_console_device(
+    /// Adds all devices that behave like a console with respect to the VM
+    /// configuration. This includes:
+    /// - debug-console
+    /// - serial-console
+    /// - virtio-console
+    fn add_console_devices(
         &mut self,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
         virtio_devices: &mut Vec<MetaVirtioDevice>,
         serial_pty: Option<PtyPair>,
         console_pty: Option<PtyPair>,
+        #[cfg(target_arch = "x86_64")] debug_console_pty: Option<PtyPair>,
+        #[cfg(not(target_arch = "x86_64"))] _: Option<PtyPair>,
         console_resize_pipe: Option<File>,
     ) -> DeviceManagerResult<Arc<Console>> {
         let serial_config = self.config.lock().unwrap().serial.clone();
@@ -2101,7 +2178,7 @@ impl DeviceManager {
                     .map_err(DeviceManagerError::SerialOutputFileOpen)?,
             )),
             ConsoleOutputMode::Pty => {
-                if let Some(pty) = serial_pty {
+                if let Some(pty) = serial_pty.clone() {
                     self.config.lock().unwrap().serial.file = Some(pty.path.clone());
                     self.serial_pty = Some(Arc::new(Mutex::new(pty)));
                 } else {
@@ -2147,6 +2224,44 @@ impl DeviceManager {
                 }
                 _ => None,
             };
+        }
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            let debug_console_config = self.config.lock().unwrap().debug_console.clone();
+            let debug_console_writer: Option<Box<dyn io::Write + Send>> = match debug_console_config
+                .mode
+            {
+                ConsoleOutputMode::File => Some(Box::new(
+                    File::create(debug_console_config.file.as_ref().unwrap())
+                        .map_err(DeviceManagerError::DebugconOutputFileOpen)?,
+                )),
+                ConsoleOutputMode::Pty => {
+                    if let Some(pty) = debug_console_pty {
+                        self.config.lock().unwrap().debug_console.file = Some(pty.path.clone());
+                        self.debug_console_pty = Some(Arc::new(Mutex::new(pty)));
+                    } else {
+                        let (main, sub, path) =
+                            create_pty().map_err(DeviceManagerError::DebugconPtyOpen)?;
+                        self.set_raw_mode(&sub)
+                            .map_err(DeviceManagerError::SetPtyRaw)?;
+                        self.config.lock().unwrap().debug_console.file = Some(path.clone());
+                        self.debug_console_pty = Some(Arc::new(Mutex::new(PtyPair { main, path })));
+                    }
+                    None
+                }
+                ConsoleOutputMode::Tty => {
+                    let out = stdout();
+                    let _ = self.set_raw_mode(&out);
+                    Some(Box::new(out))
+                }
+                ConsoleOutputMode::Off | ConsoleOutputMode::Null | ConsoleOutputMode::Socket => {
+                    None
+                }
+            };
+            if let Some(writer) = debug_console_writer {
+                let _ = self.add_debug_console_device(writer)?;
+            }
         }
 
         let console_resizer =

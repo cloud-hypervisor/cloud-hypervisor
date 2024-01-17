@@ -61,6 +61,9 @@ pub enum Error {
     ParsePersistentMemory(OptionParserError),
     /// Failed parsing console
     ParseConsole(OptionParserError),
+    #[cfg(target_arch = "x86_64")]
+    /// Failed parsing debug-console
+    ParseDebugConsole(OptionParserError),
     /// No mode given for console
     ParseConsoleInvalidModeGiven,
     /// Failed parsing device parameters
@@ -116,6 +119,9 @@ pub enum ValidationError {
     ConsoleSocketPathMissing,
     /// Max is less than boot
     CpusMaxLowerThanBoot,
+    /// Missing file value for debug-console
+    #[cfg(target_arch = "x86_64")]
+    DebugconFileMissing,
     /// Both socket and path specified
     DiskSocketAndPath,
     /// Using vhost user requires shared memory
@@ -185,6 +191,9 @@ pub enum ValidationError {
     DefaultPciSegmentInvalidNode(u32),
     /// Invalid rate-limiter group
     InvalidRateLimiterGroup,
+    /// The specified I/O port was invalid. It should be provided in hex, such as `0xe9`.
+    #[cfg(target_arch = "x86_64")]
+    InvalidIoPortHex(String),
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -197,6 +206,8 @@ impl fmt::Display for ValidationError {
             ConsoleFileMissing => write!(f, "Path missing when using file console mode"),
             ConsoleSocketPathMissing => write!(f, "Path missing when using socket console mode"),
             CpusMaxLowerThanBoot => write!(f, "Max CPUs lower than boot CPUs"),
+            #[cfg(target_arch = "x86_64")]
+            DebugconFileMissing => write!(f, "Path missing when using file mode for debug console"),
             DiskSocketAndPath => write!(f, "Disk path and vhost socket both provided"),
             VhostUserRequiresSharedMemory => {
                 write!(
@@ -311,6 +322,13 @@ impl fmt::Display for ValidationError {
             InvalidRateLimiterGroup => {
                 write!(f, "Invalid rate-limiter group")
             }
+            #[cfg(target_arch = "x86_64")]
+            InvalidIoPortHex(s) => {
+                write!(
+                    f,
+                    "The IO port was not properly provided in hex or a `0x` prefix is missing: {s}"
+                )
+            }
         }
     }
 }
@@ -320,6 +338,8 @@ impl fmt::Display for Error {
         use self::Error::*;
         match self {
             ParseConsole(o) => write!(f, "Error parsing --console: {o}"),
+            #[cfg(target_arch = "x86_64")]
+            ParseDebugConsole(o) => write!(f, "Error parsing --debug-console: {o}"),
             ParseConsoleInvalidModeGiven => {
                 write!(f, "Error parsing --console: invalid console mode given")
             }
@@ -399,6 +419,8 @@ pub struct VmParams<'a> {
     pub pmem: Option<Vec<&'a str>>,
     pub serial: &'a str,
     pub console: &'a str,
+    #[cfg(target_arch = "x86_64")]
+    pub debug_console: &'a str,
     pub devices: Option<Vec<&'a str>>,
     pub user_devices: Option<Vec<&'a str>>,
     pub vdpa: Option<Vec<&'a str>>,
@@ -440,6 +462,8 @@ impl<'a> VmParams<'a> {
             .get_many::<String>("net")
             .map(|x| x.map(|y| y as &str).collect());
         let console = args.get_one::<String>("console").unwrap();
+        #[cfg(target_arch = "x86_64")]
+        let debug_console = args.get_one::<String>("debug-console").unwrap().as_str();
         let balloon = args.get_one::<String>("balloon").map(|x| x as &str);
         let fs: Option<Vec<&str>> = args
             .get_many::<String>("fs")
@@ -489,6 +513,8 @@ impl<'a> VmParams<'a> {
             pmem,
             serial,
             console,
+            #[cfg(target_arch = "x86_64")]
+            debug_console,
             devices,
             user_devices,
             vdpa,
@@ -1636,6 +1662,59 @@ impl ConsoleConfig {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
+impl DebugConsoleConfig {
+    pub fn parse(debug_console_ops: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        parser
+            .add_valueless("off")
+            .add_valueless("pty")
+            .add_valueless("tty")
+            .add_valueless("null")
+            .add("file")
+            .add("iobase");
+        parser
+            .parse(debug_console_ops)
+            .map_err(Error::ParseConsole)?;
+
+        let mut file: Option<PathBuf> = default_consoleconfig_file();
+        let mut iobase: Option<u16> = None;
+        let mut mode: ConsoleOutputMode = ConsoleOutputMode::Off;
+
+        if parser.is_set("off") {
+        } else if parser.is_set("pty") {
+            mode = ConsoleOutputMode::Pty
+        } else if parser.is_set("tty") {
+            mode = ConsoleOutputMode::Tty
+        } else if parser.is_set("null") {
+            mode = ConsoleOutputMode::Null
+        } else if parser.is_set("file") {
+            mode = ConsoleOutputMode::File;
+            file =
+                Some(PathBuf::from(parser.get("file").ok_or(
+                    Error::Validation(ValidationError::ConsoleFileMissing),
+                )?));
+        } else {
+            return Err(Error::ParseConsoleInvalidModeGiven);
+        }
+
+        if parser.is_set("iobase") {
+            if let Some(iobase_opt) = parser.get("iobase") {
+                if !iobase_opt.starts_with("0x") {
+                    return Err(Error::Validation(ValidationError::InvalidIoPortHex(
+                        iobase_opt,
+                    )));
+                }
+                iobase = Some(u16::from_str_radix(&iobase_opt[2..], 16).map_err(|_| {
+                    Error::Validation(ValidationError::InvalidIoPortHex(iobase_opt))
+                })?);
+            }
+        }
+
+        Ok(Self { file, mode, iobase })
+    }
+}
+
 impl DeviceConfig {
     pub const SYNTAX: &'static str =
         "Direct device assignment parameters \"path=<device_path>,iommu=on|off,id=<device_id>,pci_segment=<segment_id>\"";
@@ -2054,9 +2133,20 @@ impl VmConfig {
         // Using such double tty mode, you need to configure the kernel
         // properly, such as:
         // "console=hvc0 earlyprintk=ttyS0"
-        if self.console.mode == ConsoleOutputMode::Tty && self.serial.mode == ConsoleOutputMode::Tty
-        {
-            warn!("Using TTY output for both virtio-console and serial port");
+
+        let mut tty_consoles = Vec::new();
+        if self.console.mode == ConsoleOutputMode::Tty {
+            tty_consoles.push("virtio-console");
+        };
+        if self.serial.mode == ConsoleOutputMode::Tty {
+            tty_consoles.push("serial-console");
+        };
+        #[cfg(target_arch = "x86_64")]
+        if self.debug_console.mode == ConsoleOutputMode::Tty {
+            tty_consoles.push("debug-console");
+        };
+        if tty_consoles.len() > 1 {
+            warn!("Using TTY output for multiple consoles: {:?}", tty_consoles);
         }
 
         if self.console.mode == ConsoleOutputMode::File && self.console.file.is_none() {
@@ -2375,6 +2465,8 @@ impl VmConfig {
 
         let console = ConsoleConfig::parse(vm_params.console)?;
         let serial = ConsoleConfig::parse(vm_params.serial)?;
+        #[cfg(target_arch = "x86_64")]
+        let debug_console = DebugConsoleConfig::parse(vm_params.debug_console)?;
 
         let mut devices: Option<Vec<DeviceConfig>> = None;
         if let Some(device_list) = &vm_params.devices {
@@ -2482,6 +2574,8 @@ impl VmConfig {
             pmem,
             serial,
             console,
+            #[cfg(target_arch = "x86_64")]
+            debug_console,
             devices,
             user_devices,
             vdpa,
@@ -2606,6 +2700,8 @@ impl Clone for VmConfig {
             pmem: self.pmem.clone(),
             serial: self.serial.clone(),
             console: self.console.clone(),
+            #[cfg(target_arch = "x86_64")]
+            debug_console: self.debug_console.clone(),
             devices: self.devices.clone(),
             user_devices: self.user_devices.clone(),
             vdpa: self.vdpa.clone(),
@@ -3341,6 +3437,8 @@ mod tests {
                 iommu: false,
                 socket: None,
             },
+            #[cfg(target_arch = "x86_64")]
+            debug_console: DebugConsoleConfig::default(),
             devices: None,
             user_devices: None,
             vdpa: None,

@@ -418,6 +418,15 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
             .group("vm-config"),
     );
 
+    #[cfg(target_arch = "x86_64")]
+    let app = app.arg(
+        Arg::new("debug-console")
+            .long("debug-console")
+            .help("Debug console: off|pty|tty|file=</path/to/a/file>,iobase=<port in hex>")
+            .default_value("off,iobase=0xe9")
+            .group("vm-config"),
+    );
+
     #[cfg(feature = "guest_debug")]
     let app = app.arg(
         Arg::new("gdb")
@@ -792,6 +801,8 @@ mod unit_tests {
         ConsoleConfig, ConsoleOutputMode, CpuFeatures, CpusConfig, MemoryConfig, PayloadConfig,
         RngConfig, VmConfig, VmParams,
     };
+    #[cfg(target_arch = "x86_64")]
+    use vmm::vm_config::DebugConsoleConfig;
 
     fn get_vm_config_from_vec(args: &[&str]) -> VmConfig {
         let (default_vcpus, default_memory, default_rng) = prepare_default_values();
@@ -881,6 +892,8 @@ mod unit_tests {
                 iommu: false,
                 socket: None,
             },
+            #[cfg(target_arch = "x86_64")]
+            debug_console: DebugConsoleConfig::default(),
             devices: None,
             user_devices: None,
             vdpa: None,
@@ -1506,6 +1519,30 @@ mod unit_tests {
                 false,
             ),
         ]
+        .iter()
+        .for_each(|(cli, openapi, equal)| {
+            compare_vm_config_cli_vs_json(cli, openapi, *equal);
+        });
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn test_valid_vm_config_debug_console() {
+        [(
+            vec![
+                "cloud-hypervisor",
+                "--kernel",
+                "/path/to/kernel",
+                "--debug-console",
+                "tty,iobase=0xe9",
+            ],
+            // 233 == 0xe9
+            r#"{
+                "payload": {"kernel": "/path/to/kernel" },
+                "debug_console": {"mode": "Tty", "iobase": 233 }
+            }"#,
+            true,
+        )]
         .iter()
         .for_each(|(cli, openapi, equal)| {
             compare_vm_config_cli_vs_json(cli, openapi, *equal);
