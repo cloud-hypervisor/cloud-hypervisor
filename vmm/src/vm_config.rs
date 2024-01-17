@@ -94,22 +94,6 @@ pub struct PlatformConfig {
     pub sev_snp: bool,
 }
 
-impl Default for PlatformConfig {
-    fn default() -> Self {
-        PlatformConfig {
-            num_pci_segments: DEFAULT_NUM_PCI_SEGMENTS,
-            iommu_segments: None,
-            serial_number: None,
-            uuid: None,
-            oem_strings: None,
-            #[cfg(feature = "tdx")]
-            tdx: false,
-            #[cfg(feature = "sev_snp")]
-            sev_snp: false,
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct MemoryZoneConfig {
     pub id: String,
@@ -203,15 +187,6 @@ pub struct RateLimiterGroupConfig {
     pub rate_limiter_config: RateLimiterConfig,
 }
 
-impl Default for RateLimiterGroupConfig {
-    fn default() -> Self {
-        RateLimiterGroupConfig {
-            id: "".to_string(),
-            rate_limiter_config: RateLimiterConfig::default(),
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct DiskConfig {
     pub path: Option<PathBuf>,
@@ -256,28 +231,6 @@ pub const DEFAULT_DISK_QUEUE_SIZE: u16 = 128;
 
 pub fn default_diskconfig_queue_size() -> u16 {
     DEFAULT_DISK_QUEUE_SIZE
-}
-
-impl Default for DiskConfig {
-    fn default() -> Self {
-        Self {
-            path: None,
-            readonly: false,
-            direct: false,
-            iommu: false,
-            num_queues: default_diskconfig_num_queues(),
-            queue_size: default_diskconfig_queue_size(),
-            vhost_user: false,
-            vhost_socket: None,
-            id: None,
-            disable_io_uring: false,
-            disable_aio: false,
-            rate_limit_group: None,
-            rate_limiter_config: None,
-            pci_segment: 0,
-            serial: None,
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -353,32 +306,6 @@ pub fn default_netconfig_queue_size() -> u16 {
     DEFAULT_NET_QUEUE_SIZE
 }
 
-impl Default for NetConfig {
-    fn default() -> Self {
-        Self {
-            tap: default_netconfig_tap(),
-            ip: default_netconfig_ip(),
-            mask: default_netconfig_mask(),
-            mac: default_netconfig_mac(),
-            host_mac: None,
-            mtu: None,
-            iommu: false,
-            num_queues: default_netconfig_num_queues(),
-            queue_size: default_netconfig_queue_size(),
-            vhost_user: false,
-            vhost_socket: None,
-            vhost_mode: VhostMode::Client,
-            id: None,
-            fds: None,
-            rate_limiter_config: None,
-            pci_segment: 0,
-            offload_tso: true,
-            offload_ufo: true,
-            offload_csum: true,
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct RngConfig {
     pub src: PathBuf,
@@ -430,20 +357,7 @@ pub fn default_fsconfig_queue_size() -> u16 {
     1024
 }
 
-impl Default for FsConfig {
-    fn default() -> Self {
-        Self {
-            tag: "".to_owned(),
-            socket: PathBuf::new(),
-            num_queues: default_fsconfig_num_queues(),
-            queue_size: default_fsconfig_queue_size(),
-            id: None,
-            pci_segment: 0,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PmemConfig {
     pub file: PathBuf,
     #[serde(default)]
@@ -482,7 +396,7 @@ pub fn default_consoleconfig_file() -> Option<PathBuf> {
     None
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct DeviceConfig {
     pub path: PathBuf,
     #[serde(default)]
@@ -493,7 +407,7 @@ pub struct DeviceConfig {
     pub pci_segment: u16,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct UserDeviceConfig {
     pub socket: PathBuf,
     #[serde(default)]
@@ -502,7 +416,7 @@ pub struct UserDeviceConfig {
     pub pci_segment: u16,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct VdpaConfig {
     pub path: PathBuf,
     #[serde(default = "default_vdpaconfig_num_queues")]
@@ -519,7 +433,7 @@ pub fn default_vdpaconfig_num_queues() -> usize {
     1
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct VsockConfig {
     pub cid: u32,
     pub socket: PathBuf,
@@ -532,7 +446,7 @@ pub struct VsockConfig {
 }
 
 #[cfg(target_arch = "x86_64")]
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct SgxEpcConfig {
     pub id: String,
     #[serde(default)]
@@ -541,7 +455,7 @@ pub struct SgxEpcConfig {
     pub prefault: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct NumaDistance {
     #[serde(default)]
     pub destination: u32,
@@ -549,7 +463,7 @@ pub struct NumaDistance {
     pub distance: u8,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct NumaConfig {
     #[serde(default)]
     pub guest_numa_id: u32,
@@ -566,7 +480,7 @@ pub struct NumaConfig {
     pub pci_segments: Option<Vec<u16>>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct PayloadConfig {
     #[serde(default)]
     pub firmware: Option<PathBuf>,

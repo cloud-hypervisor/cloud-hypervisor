@@ -2066,7 +2066,11 @@ mod unit_tests {
             },
             payload: Some(PayloadConfig {
                 kernel: Some(PathBuf::from("/path/to/kernel")),
-                ..Default::default()
+                firmware: None,
+                cmdline: None,
+                initramfs: None,
+                #[cfg(feature = "igvm")]
+                igvm: None,
             }),
             rate_limit_groups: None,
             disks: None,

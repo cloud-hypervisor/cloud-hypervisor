@@ -2641,6 +2641,7 @@ mod tests {
     use super::*;
     use net_util::MacAddr;
     use std::fs::File;
+    use std::net::Ipv4Addr;
     use std::os::unix::io::AsRawFd;
 
     #[test]
@@ -2808,83 +2809,118 @@ mod tests {
         Ok(())
     }
 
+    fn disk_fixture() -> DiskConfig {
+        DiskConfig {
+            path: Some(PathBuf::from("/path/to_file")),
+            readonly: false,
+            direct: false,
+            iommu: false,
+            num_queues: 1,
+            queue_size: 128,
+            vhost_user: false,
+            vhost_socket: None,
+            id: None,
+            disable_io_uring: false,
+            disable_aio: false,
+            rate_limit_group: None,
+            rate_limiter_config: None,
+            pci_segment: 0,
+            serial: None,
+        }
+    }
+
     #[test]
     fn test_disk_parsing() -> Result<()> {
         assert_eq!(
             DiskConfig::parse("path=/path/to_file")?,
-            DiskConfig {
-                path: Some(PathBuf::from("/path/to_file")),
-                ..Default::default()
-            }
+            DiskConfig { ..disk_fixture() }
         );
         assert_eq!(
             DiskConfig::parse("path=/path/to_file,id=mydisk0")?,
             DiskConfig {
-                path: Some(PathBuf::from("/path/to_file")),
                 id: Some("mydisk0".to_owned()),
-                ..Default::default()
+                ..disk_fixture()
             }
         );
         assert_eq!(
             DiskConfig::parse("vhost_user=true,socket=/tmp/sock")?,
             DiskConfig {
+                path: None,
                 vhost_socket: Some(String::from("/tmp/sock")),
                 vhost_user: true,
-                ..Default::default()
+                ..disk_fixture()
             }
         );
         assert_eq!(
             DiskConfig::parse("path=/path/to_file,iommu=on")?,
             DiskConfig {
-                path: Some(PathBuf::from("/path/to_file")),
                 iommu: true,
-                ..Default::default()
+                ..disk_fixture()
             }
         );
         assert_eq!(
             DiskConfig::parse("path=/path/to_file,iommu=on,queue_size=256")?,
             DiskConfig {
-                path: Some(PathBuf::from("/path/to_file")),
                 iommu: true,
                 queue_size: 256,
-                ..Default::default()
+                ..disk_fixture()
             }
         );
         assert_eq!(
             DiskConfig::parse("path=/path/to_file,iommu=on,queue_size=256,num_queues=4")?,
             DiskConfig {
-                path: Some(PathBuf::from("/path/to_file")),
                 iommu: true,
                 queue_size: 256,
                 num_queues: 4,
-                ..Default::default()
+                ..disk_fixture()
             }
         );
         assert_eq!(
             DiskConfig::parse("path=/path/to_file,direct=on")?,
             DiskConfig {
-                path: Some(PathBuf::from("/path/to_file")),
                 direct: true,
-                ..Default::default()
+                ..disk_fixture()
             }
         );
         assert_eq!(
             DiskConfig::parse("path=/path/to_file,serial=test")?,
             DiskConfig {
-                path: Some(PathBuf::from("/path/to_file")),
                 serial: Some(String::from("test")),
-                ..Default::default()
+                ..disk_fixture()
             }
         );
         assert_eq!(
             DiskConfig::parse("path=/path/to_file,rate_limit_group=group0")?,
             DiskConfig {
-                path: Some(PathBuf::from("/path/to_file")),
                 rate_limit_group: Some("group0".to_string()),
-                ..Default::default()
+                ..disk_fixture()
             }
         );
         Ok(())
+    }
+
+    fn net_fixture() -> NetConfig {
+        NetConfig {
+            tap: None,
+            ip: Ipv4Addr::new(192, 168, 249, 1),
+            mask: Ipv4Addr::new(255, 255, 255, 0),
+            mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
+            host_mac: Some(MacAddr::parse_str("12:34:de:ad:be:ef").unwrap()),
+            mtu: None,
+            iommu: false,
+            num_queues: 2,
+            queue_size: 256,
+            vhost_user: false,
+            vhost_socket: None,
+            vhost_mode: VhostMode::Client,
+            id: None,
+            fds: None,
+            rate_limiter_config: None,
+            pci_segment: 0,
+            offload_tso: true,
+            offload_ufo: true,
+            offload_csum: true,
+        }
     }
 
     #[test]
@@ -2892,20 +2928,14 @@ mod tests {
         // mac address is random
         assert_eq!(
             NetConfig::parse("mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef")?,
-            NetConfig {
-                mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
-                host_mac: Some(MacAddr::parse_str("12:34:de:ad:be:ef").unwrap()),
-                ..Default::default()
-            }
+            net_fixture(),
         );
 
         assert_eq!(
             NetConfig::parse("mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,id=mynet0")?,
             NetConfig {
-                mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
-                host_mac: Some(MacAddr::parse_str("12:34:de:ad:be:ef").unwrap()),
                 id: Some("mynet0".to_owned()),
-                ..Default::default()
+                ..net_fixture()
             }
         );
 
@@ -2914,12 +2944,10 @@ mod tests {
                 "mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,tap=tap0,ip=192.168.100.1,mask=255.255.255.128"
             )?,
             NetConfig {
-                mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
-                host_mac: Some(MacAddr::parse_str("12:34:de:ad:be:ef").unwrap()),
                 tap: Some("tap0".to_owned()),
                 ip: "192.168.100.1".parse().unwrap(),
                 mask: "255.255.255.128".parse().unwrap(),
-                ..Default::default()
+                ..net_fixture()
             }
         );
 
@@ -2928,33 +2956,29 @@ mod tests {
                 "mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,vhost_user=true,socket=/tmp/sock"
             )?,
             NetConfig {
-                mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
-                host_mac: Some(MacAddr::parse_str("12:34:de:ad:be:ef").unwrap()),
                 vhost_user: true,
                 vhost_socket: Some("/tmp/sock".to_owned()),
-                ..Default::default()
+                ..net_fixture()
             }
         );
 
         assert_eq!(
             NetConfig::parse("mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,num_queues=4,queue_size=1024,iommu=on")?,
             NetConfig {
-                mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
-                host_mac: Some(MacAddr::parse_str("12:34:de:ad:be:ef").unwrap()),
                 num_queues: 4,
                 queue_size: 1024,
                 iommu: true,
-                ..Default::default()
+                ..net_fixture()
             }
         );
 
         assert_eq!(
             NetConfig::parse("mac=de:ad:be:ef:12:34,fd=[3,7],num_queues=4")?,
             NetConfig {
-                mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
+                host_mac: None,
                 fds: Some(vec![3, 7]),
                 num_queues: 4,
-                ..Default::default()
+                ..net_fixture()
             }
         );
 
@@ -2988,32 +3012,45 @@ mod tests {
         Ok(())
     }
 
+    fn fs_fixture() -> FsConfig {
+        FsConfig {
+            socket: PathBuf::from("/tmp/sock"),
+            tag: "mytag".to_owned(),
+            num_queues: 1,
+            queue_size: 1024,
+            id: None,
+            pci_segment: 0,
+        }
+    }
+
     #[test]
     fn test_parse_fs() -> Result<()> {
         // "tag" and "socket" must be supplied
         assert!(FsConfig::parse("").is_err());
         assert!(FsConfig::parse("tag=mytag").is_err());
         assert!(FsConfig::parse("socket=/tmp/sock").is_err());
-        assert_eq!(
-            FsConfig::parse("tag=mytag,socket=/tmp/sock")?,
-            FsConfig {
-                socket: PathBuf::from("/tmp/sock"),
-                tag: "mytag".to_owned(),
-                ..Default::default()
-            }
-        );
+        assert_eq!(FsConfig::parse("tag=mytag,socket=/tmp/sock")?, fs_fixture());
         assert_eq!(
             FsConfig::parse("tag=mytag,socket=/tmp/sock,num_queues=4,queue_size=1024")?,
             FsConfig {
-                socket: PathBuf::from("/tmp/sock"),
-                tag: "mytag".to_owned(),
                 num_queues: 4,
                 queue_size: 1024,
-                ..Default::default()
+                ..fs_fixture()
             }
         );
 
         Ok(())
+    }
+
+    fn pmem_fixture() -> PmemConfig {
+        PmemConfig {
+            file: PathBuf::from("/tmp/pmem"),
+            size: Some(128 << 20),
+            iommu: false,
+            discard_writes: false,
+            id: None,
+            pci_segment: 0,
+        }
     }
 
     #[test]
@@ -3023,29 +3060,21 @@ mod tests {
         assert!(PmemConfig::parse("size=128M").is_err());
         assert_eq!(
             PmemConfig::parse("file=/tmp/pmem,size=128M")?,
-            PmemConfig {
-                file: PathBuf::from("/tmp/pmem"),
-                size: Some(128 << 20),
-                ..Default::default()
-            }
+            pmem_fixture()
         );
         assert_eq!(
             PmemConfig::parse("file=/tmp/pmem,size=128M,id=mypmem0")?,
             PmemConfig {
-                file: PathBuf::from("/tmp/pmem"),
-                size: Some(128 << 20),
                 id: Some("mypmem0".to_owned()),
-                ..Default::default()
+                ..pmem_fixture()
             }
         );
         assert_eq!(
             PmemConfig::parse("file=/tmp/pmem,size=128M,iommu=on,discard_writes=on")?,
             PmemConfig {
-                file: PathBuf::from("/tmp/pmem"),
-                size: Some(128 << 20),
                 discard_writes: true,
                 iommu: true,
-                ..Default::default()
+                ..pmem_fixture()
             }
         );
 
@@ -3131,63 +3160,65 @@ mod tests {
         Ok(())
     }
 
+    fn device_fixture() -> DeviceConfig {
+        DeviceConfig {
+            path: PathBuf::from("/path/to/device"),
+            id: None,
+            iommu: false,
+            pci_segment: 0,
+        }
+    }
+
     #[test]
     fn test_device_parsing() -> Result<()> {
         // Device must have a path provided
         assert!(DeviceConfig::parse("").is_err());
         assert_eq!(
             DeviceConfig::parse("path=/path/to/device")?,
-            DeviceConfig {
-                path: PathBuf::from("/path/to/device"),
-                id: None,
-                iommu: false,
-                ..Default::default()
-            }
+            device_fixture()
         );
 
         assert_eq!(
             DeviceConfig::parse("path=/path/to/device,iommu=on")?,
             DeviceConfig {
-                path: PathBuf::from("/path/to/device"),
-                id: None,
                 iommu: true,
-                ..Default::default()
+                ..device_fixture()
             }
         );
 
         assert_eq!(
             DeviceConfig::parse("path=/path/to/device,iommu=on,id=mydevice0")?,
             DeviceConfig {
-                path: PathBuf::from("/path/to/device"),
                 id: Some("mydevice0".to_owned()),
                 iommu: true,
-                ..Default::default()
+                ..device_fixture()
             }
         );
 
         Ok(())
     }
 
+    fn vdpa_fixture() -> VdpaConfig {
+        VdpaConfig {
+            path: PathBuf::from("/dev/vhost-vdpa"),
+            num_queues: 1,
+            iommu: false,
+            id: None,
+            pci_segment: 0,
+        }
+    }
+
     #[test]
     fn test_vdpa_parsing() -> Result<()> {
         // path is required
         assert!(VdpaConfig::parse("").is_err());
-        assert_eq!(
-            VdpaConfig::parse("path=/dev/vhost-vdpa")?,
-            VdpaConfig {
-                path: PathBuf::from("/dev/vhost-vdpa"),
-                num_queues: 1,
-                id: None,
-                ..Default::default()
-            }
-        );
+        assert_eq!(VdpaConfig::parse("path=/dev/vhost-vdpa")?, vdpa_fixture());
         assert_eq!(
             VdpaConfig::parse("path=/dev/vhost-vdpa,num_queues=2,id=my_vdpa")?,
             VdpaConfig {
-                path: PathBuf::from("/dev/vhost-vdpa"),
                 num_queues: 2,
                 id: Some("my_vdpa".to_owned()),
-                ..Default::default()
+                ..vdpa_fixture()
             }
         );
         Ok(())
@@ -3217,7 +3248,7 @@ mod tests {
                 socket: PathBuf::from("/tmp/sock"),
                 iommu: false,
                 id: None,
-                ..Default::default()
+                pci_segment: 0,
             }
         );
         assert_eq!(
@@ -3227,10 +3258,36 @@ mod tests {
                 socket: PathBuf::from("/tmp/sock"),
                 iommu: true,
                 id: None,
-                ..Default::default()
+                pci_segment: 0,
             }
         );
         Ok(())
+    }
+
+    fn platform_fixture() -> PlatformConfig {
+        PlatformConfig {
+            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
+            iommu_segments: None,
+            serial_number: None,
+            uuid: None,
+            oem_strings: None,
+            #[cfg(feature = "tdx")]
+            tdx: false,
+            #[cfg(feature = "sev_snp")]
+            sev_snp: false,
+        }
+    }
+
+    fn numa_fixture() -> NumaConfig {
+        NumaConfig {
+            guest_numa_id: 0,
+            cpus: None,
+            distances: None,
+            memory_zones: None,
+            #[cfg(target_arch = "x86_64")]
+            sgx_epc_sections: None,
+            pci_segments: None,
+        }
     }
 
     #[test]
@@ -3256,7 +3313,11 @@ mod tests {
             },
             payload: Some(PayloadConfig {
                 kernel: Some(PathBuf::from("/path/to/kernel")),
-                ..Default::default()
+                firmware: None,
+                cmdline: None,
+                initramfs: None,
+                #[cfg(feature = "igvm")]
+                igvm: None,
             }),
             rate_limit_groups: None,
             disks: None,
@@ -3345,7 +3406,7 @@ mod tests {
         invalid_config.disks = Some(vec![DiskConfig {
             vhost_socket: Some("/path/to/sock".to_owned()),
             path: Some(PathBuf::from("/path/to/image")),
-            ..Default::default()
+            ..disk_fixture()
         }]);
         assert_eq!(
             invalid_config.validate(),
@@ -3355,8 +3416,9 @@ mod tests {
         let mut invalid_config = valid_config.clone();
         invalid_config.memory.shared = true;
         invalid_config.disks = Some(vec![DiskConfig {
+            path: None,
             vhost_user: true,
-            ..Default::default()
+            ..disk_fixture()
         }]);
         assert_eq!(
             invalid_config.validate(),
@@ -3365,9 +3427,10 @@ mod tests {
 
         let mut invalid_config = valid_config.clone();
         invalid_config.disks = Some(vec![DiskConfig {
+            path: None,
             vhost_user: true,
             vhost_socket: Some("/path/to/sock".to_owned()),
-            ..Default::default()
+            ..disk_fixture()
         }]);
         assert_eq!(
             invalid_config.validate(),
@@ -3376,9 +3439,10 @@ mod tests {
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.disks = Some(vec![DiskConfig {
+            path: None,
             vhost_user: true,
             vhost_socket: Some("/path/to/sock".to_owned()),
-            ..Default::default()
+            ..disk_fixture()
         }]);
         still_valid_config.memory.shared = true;
         assert!(still_valid_config.validate().is_ok());
@@ -3386,7 +3450,7 @@ mod tests {
         let mut invalid_config = valid_config.clone();
         invalid_config.net = Some(vec![NetConfig {
             vhost_user: true,
-            ..Default::default()
+            ..net_fixture()
         }]);
         assert_eq!(
             invalid_config.validate(),
@@ -3397,7 +3461,7 @@ mod tests {
         still_valid_config.net = Some(vec![NetConfig {
             vhost_user: true,
             vhost_socket: Some("/path/to/sock".to_owned()),
-            ..Default::default()
+            ..net_fixture()
         }]);
         still_valid_config.memory.shared = true;
         assert!(still_valid_config.validate().is_ok());
@@ -3405,7 +3469,7 @@ mod tests {
         let mut invalid_config = valid_config.clone();
         invalid_config.net = Some(vec![NetConfig {
             fds: Some(vec![0]),
-            ..Default::default()
+            ..net_fixture()
         }]);
         assert_eq!(
             invalid_config.validate(),
@@ -3415,7 +3479,7 @@ mod tests {
         let mut invalid_config = valid_config.clone();
         invalid_config.net = Some(vec![NetConfig {
             offload_csum: false,
-            ..Default::default()
+            ..net_fixture()
         }]);
         assert_eq!(
             invalid_config.validate(),
@@ -3423,9 +3487,7 @@ mod tests {
         );
 
         let mut invalid_config = valid_config.clone();
-        invalid_config.fs = Some(vec![FsConfig {
-            ..Default::default()
-        }]);
+        invalid_config.fs = Some(vec![fs_fixture()]);
         assert_eq!(
             invalid_config.validate(),
             Err(ValidationError::VhostUserRequiresSharedMemory)
@@ -3461,16 +3523,13 @@ mod tests {
         );
 
         let mut still_valid_config = valid_config.clone();
-        still_valid_config.platform = Some(PlatformConfig {
-            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
-            ..Default::default()
-        });
+        still_valid_config.platform = Some(platform_fixture());
         assert!(still_valid_config.validate().is_ok());
 
         let mut invalid_config = valid_config.clone();
         invalid_config.platform = Some(PlatformConfig {
             num_pci_segments: MAX_NUM_PCI_SEGMENTS + 1,
-            ..Default::default()
+            ..platform_fixture()
         });
         assert_eq!(
             invalid_config.validate(),
@@ -3481,17 +3540,15 @@ mod tests {
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.platform = Some(PlatformConfig {
-            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: Some(vec![1, 2, 3]),
-            ..Default::default()
+            ..platform_fixture()
         });
         assert!(still_valid_config.validate().is_ok());
 
         let mut invalid_config = valid_config.clone();
         invalid_config.platform = Some(PlatformConfig {
-            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: Some(vec![MAX_NUM_PCI_SEGMENTS + 1, MAX_NUM_PCI_SEGMENTS + 2]),
-            ..Default::default()
+            ..platform_fixture()
         });
         assert_eq!(
             invalid_config.validate(),
@@ -3500,61 +3557,56 @@ mod tests {
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.platform = Some(PlatformConfig {
-            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: Some(vec![1, 2, 3]),
-            ..Default::default()
+            ..platform_fixture()
         });
         still_valid_config.disks = Some(vec![DiskConfig {
             iommu: true,
             pci_segment: 1,
-            ..Default::default()
+            ..disk_fixture()
         }]);
         assert!(still_valid_config.validate().is_ok());
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.platform = Some(PlatformConfig {
-            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: Some(vec![1, 2, 3]),
-            ..Default::default()
+            ..platform_fixture()
         });
         still_valid_config.net = Some(vec![NetConfig {
             iommu: true,
             pci_segment: 1,
-            ..Default::default()
+            ..net_fixture()
         }]);
         assert!(still_valid_config.validate().is_ok());
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.platform = Some(PlatformConfig {
-            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: Some(vec![1, 2, 3]),
-            ..Default::default()
+            ..platform_fixture()
         });
         still_valid_config.pmem = Some(vec![PmemConfig {
             iommu: true,
             pci_segment: 1,
-            ..Default::default()
+            ..pmem_fixture()
         }]);
         assert!(still_valid_config.validate().is_ok());
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.platform = Some(PlatformConfig {
-            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: Some(vec![1, 2, 3]),
-            ..Default::default()
+            ..platform_fixture()
         });
         still_valid_config.devices = Some(vec![DeviceConfig {
             iommu: true,
             pci_segment: 1,
-            ..Default::default()
+            ..device_fixture()
         }]);
         assert!(still_valid_config.validate().is_ok());
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.platform = Some(PlatformConfig {
-            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: Some(vec![1, 2, 3]),
-            ..Default::default()
+            ..platform_fixture()
         });
         still_valid_config.vsock = Some(VsockConfig {
             cid: 3,
@@ -3567,14 +3619,13 @@ mod tests {
 
         let mut invalid_config = valid_config.clone();
         invalid_config.platform = Some(PlatformConfig {
-            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: Some(vec![1, 2, 3]),
-            ..Default::default()
+            ..platform_fixture()
         });
         invalid_config.disks = Some(vec![DiskConfig {
             iommu: false,
             pci_segment: 1,
-            ..Default::default()
+            ..disk_fixture()
         }]);
         assert_eq!(
             invalid_config.validate(),
@@ -3583,14 +3634,13 @@ mod tests {
 
         let mut invalid_config = valid_config.clone();
         invalid_config.platform = Some(PlatformConfig {
-            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: Some(vec![1, 2, 3]),
-            ..Default::default()
+            ..platform_fixture()
         });
         invalid_config.net = Some(vec![NetConfig {
             iommu: false,
             pci_segment: 1,
-            ..Default::default()
+            ..net_fixture()
         }]);
         assert_eq!(
             invalid_config.validate(),
@@ -3601,12 +3651,12 @@ mod tests {
         invalid_config.platform = Some(PlatformConfig {
             num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: Some(vec![1, 2, 3]),
-            ..Default::default()
+            ..platform_fixture()
         });
         invalid_config.pmem = Some(vec![PmemConfig {
             iommu: false,
             pci_segment: 1,
-            ..Default::default()
+            ..pmem_fixture()
         }]);
         assert_eq!(
             invalid_config.validate(),
@@ -3617,12 +3667,12 @@ mod tests {
         invalid_config.platform = Some(PlatformConfig {
             num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: Some(vec![1, 2, 3]),
-            ..Default::default()
+            ..platform_fixture()
         });
         invalid_config.devices = Some(vec![DeviceConfig {
             iommu: false,
             pci_segment: 1,
-            ..Default::default()
+            ..device_fixture()
         }]);
         assert_eq!(
             invalid_config.validate(),
@@ -3631,9 +3681,8 @@ mod tests {
 
         let mut invalid_config = valid_config.clone();
         invalid_config.platform = Some(PlatformConfig {
-            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: Some(vec![1, 2, 3]),
-            ..Default::default()
+            ..platform_fixture()
         });
         invalid_config.vsock = Some(VsockConfig {
             cid: 3,
@@ -3650,13 +3699,13 @@ mod tests {
         let mut invalid_config = valid_config.clone();
         invalid_config.memory.shared = true;
         invalid_config.platform = Some(PlatformConfig {
-            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: Some(vec![1, 2, 3]),
-            ..Default::default()
+            ..platform_fixture()
         });
         invalid_config.user_devices = Some(vec![UserDeviceConfig {
             pci_segment: 1,
-            ..Default::default()
+            socket: PathBuf::new(),
+            id: None,
         }]);
         assert_eq!(
             invalid_config.validate(),
@@ -3665,13 +3714,12 @@ mod tests {
 
         let mut invalid_config = valid_config.clone();
         invalid_config.platform = Some(PlatformConfig {
-            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: Some(vec![1, 2, 3]),
-            ..Default::default()
+            ..platform_fixture()
         });
         invalid_config.vdpa = Some(vec![VdpaConfig {
             pci_segment: 1,
-            ..Default::default()
+            ..vdpa_fixture()
         }]);
         assert_eq!(
             invalid_config.validate(),
@@ -3681,13 +3729,12 @@ mod tests {
         let mut invalid_config = valid_config.clone();
         invalid_config.memory.shared = true;
         invalid_config.platform = Some(PlatformConfig {
-            num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: Some(vec![1, 2, 3]),
-            ..Default::default()
+            ..platform_fixture()
         });
         invalid_config.fs = Some(vec![FsConfig {
             pci_segment: 1,
-            ..Default::default()
+            ..fs_fixture()
         }]);
         assert_eq!(
             invalid_config.validate(),
@@ -3697,18 +3744,18 @@ mod tests {
         let mut invalid_config = valid_config.clone();
         invalid_config.platform = Some(PlatformConfig {
             num_pci_segments: 2,
-            ..Default::default()
+            ..platform_fixture()
         });
         invalid_config.numa = Some(vec![
             NumaConfig {
                 guest_numa_id: 0,
                 pci_segments: Some(vec![1]),
-                ..Default::default()
+                ..numa_fixture()
             },
             NumaConfig {
                 guest_numa_id: 1,
                 pci_segments: Some(vec![1]),
-                ..Default::default()
+                ..numa_fixture()
             },
         ]);
         assert_eq!(
@@ -3720,12 +3767,12 @@ mod tests {
         invalid_config.numa = Some(vec![
             NumaConfig {
                 guest_numa_id: 0,
-                ..Default::default()
+                ..numa_fixture()
             },
             NumaConfig {
                 guest_numa_id: 1,
                 pci_segments: Some(vec![0]),
-                ..Default::default()
+                ..numa_fixture()
             },
         ]);
         assert_eq!(
@@ -3738,12 +3785,12 @@ mod tests {
             NumaConfig {
                 guest_numa_id: 0,
                 pci_segments: Some(vec![0]),
-                ..Default::default()
+                ..numa_fixture()
             },
             NumaConfig {
                 guest_numa_id: 1,
                 pci_segments: Some(vec![1]),
-                ..Default::default()
+                ..numa_fixture()
             },
         ]);
         assert_eq!(
@@ -3753,9 +3800,8 @@ mod tests {
 
         let mut invalid_config = valid_config.clone();
         invalid_config.disks = Some(vec![DiskConfig {
-            path: Some(PathBuf::from("/path/to/image")),
             rate_limit_group: Some("foo".into()),
-            ..Default::default()
+            ..disk_fixture()
         }]);
         assert_eq!(
             invalid_config.validate(),
@@ -3766,11 +3812,11 @@ mod tests {
         still_valid_config.devices = Some(vec![
             DeviceConfig {
                 path: "/device1".into(),
-                ..Default::default()
+                ..device_fixture()
             },
             DeviceConfig {
                 path: "/device2".into(),
-                ..Default::default()
+                ..device_fixture()
             },
         ]);
         assert!(still_valid_config.validate().is_ok());
@@ -3779,11 +3825,11 @@ mod tests {
         invalid_config.devices = Some(vec![
             DeviceConfig {
                 path: "/device1".into(),
-                ..Default::default()
+                ..device_fixture()
             },
             DeviceConfig {
                 path: "/device1".into(),
-                ..Default::default()
+                ..device_fixture()
             },
         ]);
         assert!(invalid_config.validate().is_err());
