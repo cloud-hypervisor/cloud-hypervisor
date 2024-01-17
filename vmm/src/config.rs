@@ -2869,20 +2869,6 @@ mod tests {
             }
         );
         assert_eq!(
-            DiskConfig::parse("path=/path/to_file")?,
-            DiskConfig {
-                path: Some(PathBuf::from("/path/to_file")),
-                ..Default::default()
-            }
-        );
-        assert_eq!(
-            DiskConfig::parse("path=/path/to_file")?,
-            DiskConfig {
-                path: Some(PathBuf::from("/path/to_file")),
-                ..Default::default()
-            }
-        );
-        assert_eq!(
             DiskConfig::parse("path=/path/to_file,serial=test")?,
             DiskConfig {
                 path: Some(PathBuf::from("/path/to_file")),
@@ -3008,14 +2994,6 @@ mod tests {
         assert!(FsConfig::parse("").is_err());
         assert!(FsConfig::parse("tag=mytag").is_err());
         assert!(FsConfig::parse("socket=/tmp/sock").is_err());
-        assert_eq!(
-            FsConfig::parse("tag=mytag,socket=/tmp/sock")?,
-            FsConfig {
-                socket: PathBuf::from("/tmp/sock"),
-                tag: "mytag".to_owned(),
-                ..Default::default()
-            }
-        );
         assert_eq!(
             FsConfig::parse("tag=mytag,socket=/tmp/sock")?,
             FsConfig {
