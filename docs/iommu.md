@@ -60,10 +60,7 @@ implement a full emulation of a physical IOMMU.
 
 ### Kernel
 
-Since virtio-iommu has landed partially into the version 5.3 of the Linux
-kernel, a special branch is needed to get things working with Cloud Hypervisor.
-By partially, we are talking about x86 specifically, as it is already fully
-functional for ARM architectures.
+As of Kernel 5.14, virtio-iommu is available for both X86-64 and Aarch64.
 
 ## Usage
 
