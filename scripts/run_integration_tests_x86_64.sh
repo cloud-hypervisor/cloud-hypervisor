@@ -20,7 +20,7 @@ cp scripts/sha1sums-x86_64 $WORKLOADS_DIR
 
 download_hypervisor_fw
 
-OVMF_FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/edk2/releases/latest | grep "browser_download_url" | grep -o 'https://.*[^ "]')
+OVMF_FW_URL=$(curl --silent https://api.github.com/repos/thomasbarrett/edk2/releases/latest | grep "browser_download_url" | grep -o 'https://.*[^ "]')
 OVMF_FW="$WORKLOADS_DIR/CLOUDHV.fd"
 if [ ! -f "$OVMF_FW" ]; then
     pushd $WORKLOADS_DIR
