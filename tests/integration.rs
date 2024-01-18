@@ -7642,7 +7642,7 @@ mod windows {
         let windows_guest = WindowsGuest::new();
 
         let mut child = GuestCommand::new(windows_guest.guest())
-            .args(["--cpus", "boot=2,kvm_hyperv=on"])
+            .args(["--cpus", "boot=2,kvm_hyperv=on,max_phys_bits=39"])
             .args(["--memory", "size=4G"])
             .args(["--kernel", edk2_path().to_str().unwrap()])
             .args(["--serial", "tty"])
@@ -7688,7 +7688,7 @@ mod windows {
         ovmf_path.push(OVMF_NAME);
 
         let mut child = GuestCommand::new(windows_guest.guest())
-            .args(["--cpus", "boot=4,kvm_hyperv=on"])
+            .args(["--cpus", "boot=4,kvm_hyperv=on,max_phys_bits=39"])
             .args(["--memory", "size=4G"])
             .args(["--kernel", ovmf_path.to_str().unwrap()])
             .args(["--serial", "tty"])
@@ -7759,7 +7759,7 @@ mod windows {
 
         let mut child = GuestCommand::new(windows_guest.guest())
             .args(["--api-socket", &api_socket_source])
-            .args(["--cpus", "boot=2,kvm_hyperv=on"])
+            .args(["--cpus", "boot=2,kvm_hyperv=on,max_phys_bits=39"])
             .args(["--memory", "size=4G"])
             .args(["--kernel", ovmf_path.to_str().unwrap()])
             .args(["--serial", "tty"])
@@ -7848,7 +7848,7 @@ mod windows {
 
         let mut child = GuestCommand::new(windows_guest.guest())
             .args(["--api-socket", &api_socket])
-            .args(["--cpus", "boot=2,max=8,kvm_hyperv=on"])
+            .args(["--cpus", "boot=2,max=8,kvm_hyperv=on,max_phys_bits=39"])
             .args(["--memory", "size=4G"])
             .args(["--kernel", ovmf_path.to_str().unwrap()])
             .args(["--serial", "tty"])
@@ -7923,7 +7923,7 @@ mod windows {
 
         let mut child = GuestCommand::new(windows_guest.guest())
             .args(["--api-socket", &api_socket])
-            .args(["--cpus", "boot=2,kvm_hyperv=on"])
+            .args(["--cpus", "boot=2,kvm_hyperv=on,max_phys_bits=39"])
             .args(["--memory", "size=2G,hotplug_size=5G"])
             .args(["--kernel", ovmf_path.to_str().unwrap()])
             .args(["--serial", "tty"])
@@ -7997,7 +7997,7 @@ mod windows {
 
         let mut child = GuestCommand::new(windows_guest.guest())
             .args(["--api-socket", &api_socket])
-            .args(["--cpus", "boot=2,kvm_hyperv=on"])
+            .args(["--cpus", "boot=2,kvm_hyperv=on,max_phys_bits=39"])
             .args(["--memory", "size=4G"])
             .args(["--kernel", ovmf_path.to_str().unwrap()])
             .args(["--serial", "tty"])
@@ -8071,7 +8071,7 @@ mod windows {
 
         let mut child = GuestCommand::new(windows_guest.guest())
             .args(["--api-socket", &api_socket])
-            .args(["--cpus", "boot=2,kvm_hyperv=on"])
+            .args(["--cpus", "boot=2,kvm_hyperv=on,max_phys_bits=39"])
             .args(["--memory", "size=4G"])
             .args(["--kernel", ovmf_path.to_str().unwrap()])
             .args(["--serial", "tty"])
@@ -8167,7 +8167,7 @@ mod windows {
 
         let mut child = GuestCommand::new(windows_guest.guest())
             .args(["--api-socket", &api_socket])
-            .args(["--cpus", "boot=2,kvm_hyperv=on"])
+            .args(["--cpus", "boot=2,kvm_hyperv=on,max_phys_bits=39"])
             .args(["--memory", "size=2G"])
             .args(["--kernel", ovmf_path.to_str().unwrap()])
             .args(["--serial", "tty"])
@@ -8297,7 +8297,7 @@ mod windows {
 
         let mut child = GuestCommand::new(windows_guest.guest())
             .args(["--api-socket", &api_socket])
-            .args(["--cpus", "boot=2,kvm_hyperv=on"])
+            .args(["--cpus", "boot=2,kvm_hyperv=on,max_phys_bits=39"])
             .args(["--memory", "size=4G"])
             .args(["--kernel", ovmf_path.to_str().unwrap()])
             .args(["--serial", "tty"])
