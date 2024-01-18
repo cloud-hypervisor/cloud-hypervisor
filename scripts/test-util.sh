@@ -124,3 +124,13 @@ download_hypervisor_fw() {
     time wget --quiet $FW_URL || exit 1
     popd
 }
+
+download_ovmf() {
+    OVMF_FW_TAG="ch-6624aa331f"
+    OVMF_FW_URL="https://github.com/cloud-hypervisor/edk2/releases/download/$OVMF_FW_TAG/CLOUDHV.fd"
+    OVMF_FW="$WORKLOADS_DIR/CLOUDHV.fd"
+    pushd $WORKLOADS_DIR
+    rm -f $OVMF_FW
+    time wget --quiet $OVMF_FW_URL || exit 1
+    popd
+}

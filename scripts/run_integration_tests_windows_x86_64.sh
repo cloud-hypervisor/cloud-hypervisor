@@ -14,13 +14,8 @@ fi
 WIN_IMAGE_FILE="/root/workloads/windows-server-2022-amd64-2.raw"
 
 WORKLOADS_DIR="/root/workloads"
-OVMF_FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/edk2/releases/latest | grep "browser_download_url" | grep -o 'https://.*[^ "]')
-OVMF_FW="$WORKLOADS_DIR/CLOUDHV.fd"
-if [ ! -f "$OVMF_FW" ]; then
-    pushd $WORKLOADS_DIR
-    time wget --quiet $OVMF_FW_URL || exit 1
-    popd
-fi
+
+download_ovmf
 
 CFLAGS=""
 if [[ "${BUILD_TARGET}" == "x86_64-unknown-linux-musl" ]]; then
