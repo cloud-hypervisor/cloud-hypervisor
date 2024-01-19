@@ -184,6 +184,10 @@ pub enum Error {
 
     #[error("Maximum number of vCPUs exceeds host limit")]
     MaximumVcpusExceeded,
+
+    #[cfg(feature = "sev_snp")]
+    #[error("Failed to set sev control register: {0}")]
+    SetSevControlRegister(#[source] hypervisor::HypervisorCpuError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -434,6 +438,13 @@ impl Vcpu {
     pub fn run(&self) -> std::result::Result<VmExit, HypervisorCpuError> {
         self.vcpu.run()
     }
+
+    #[cfg(feature = "sev_snp")]
+    pub fn set_sev_control_register(&self, vmsa_pfn: u64) -> Result<()> {
+        self.vcpu
+            .set_sev_control_register(vmsa_pfn)
+            .map_err(Error::SetSevControlRegister)
+    }
 }
 
 impl Pausable for Vcpu {}
@@ -482,6 +493,8 @@ pub struct CpuManager {
     affinity: BTreeMap<u8, Vec<usize>>,
     dynamic: bool,
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
+    #[cfg(feature = "sev_snp")]
+    sev_snp_enabled: bool,
 }
 
 const CPU_ENABLE_FLAG: usize = 0;
@@ -630,6 +643,7 @@ impl CpuManager {
         vm_ops: Arc<dyn VmOps>,
         #[cfg(feature = "tdx")] tdx_enabled: bool,
         numa_nodes: &NumaNodes,
+        #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
     ) -> Result<Arc<Mutex<CpuManager>>> {
         if u32::from(config.max_vcpus) > hypervisor.get_max_vcpus() {
             return Err(Error::MaximumVcpusExceeded);
@@ -721,6 +735,8 @@ impl CpuManager {
             affinity,
             dynamic,
             hypervisor: hypervisor.clone(),
+            #[cfg(feature = "sev_snp")]
+            sev_snp_enabled,
         })))
     }
 
@@ -806,6 +822,14 @@ impl CpuManager {
     ) -> Result<()> {
         let mut vcpu = vcpu.lock().unwrap();
 
+        #[cfg(feature = "sev_snp")]
+        if self.sev_snp_enabled {
+            if let Some((kernel_entry_point, _)) = boot_setup {
+                vcpu.set_sev_control_register(
+                    kernel_entry_point.entry_addr.0 / crate::igvm::HV_PAGE_SIZE,
+                )?;
+            }
+        }
         #[cfg(target_arch = "x86_64")]
         assert!(!self.cpuid.is_empty());
 
@@ -1813,6 +1837,11 @@ impl CpuManager {
             .get_cpuid_values(eax, ecx, xfem, xss)
             .unwrap();
         Ok(leaf_info)
+    }
+
+    #[cfg(feature = "sev_snp")]
+    pub(crate) fn sev_snp_enabled(&self) -> bool {
+        self.sev_snp_enabled
     }
 }
 
