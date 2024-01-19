@@ -1,3 +1,4 @@
+- [v28.4](#v284)
 - [v28.3](#v283)
 - [v28.2](#v282)
 - [v28.1](#v281)
@@ -250,6 +251,22 @@
     - [Unit testing](#unit-testing)
     - [Integration tests parallelization](#integration-tests-parallelization)
 
+
+# v28.4
+
+This is a bug fix release. The following issues have been addressed:
+
+* Fix VFIO on platforms with non-4k page size (#5450)
+* Fix seccomp filter lists related to virtio-console, serial and pty
+(#5506, #5524)
+* Populate APIC ID properly (#5512)
+* Ignore and warn TAP FDs in more situations (#5522)
+* Disallow concurrent CPU resizing (#5668)
+* Use wrapping add for memory offset from instruction emulator (#5719)
+* Replace unsound `static mut` with `once_cell` (#5772)
+* Fix a deadlock when TDX is enabled (#5845)
+* Bug fix to OpenAPI specification file (#5967)
+* Error out early for live migration when TDX is enabled (#6025)
 
 # v28.3
 
