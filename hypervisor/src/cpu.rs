@@ -272,6 +272,12 @@ pub enum HypervisorCpuError {
     ///
     #[error("Failed to get CPUID entries: {0}")]
     GetCpuidVales(#[source] anyhow::Error),
+    ///
+    /// Setting SEV control register error
+    ///
+    #[cfg(feature = "sev_snp")]
+    #[error("Failed to set sev control register: {0}")]
+    SetSevControlRegister(#[source] anyhow::Error),
 }
 
 #[derive(Debug)]
@@ -493,6 +499,10 @@ pub trait Vcpu: Send + Sync {
         _xfem: u64,
         _xss: u64,
     ) -> Result<[u32; 4]> {
+        unimplemented!()
+    }
+    #[cfg(feature = "mshv")]
+    fn set_sev_control_register(&self, _reg: u64) -> Result<()> {
         unimplemented!()
     }
 }
