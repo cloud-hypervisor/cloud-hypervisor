@@ -544,6 +544,8 @@ impl Vm {
             #[cfg(feature = "tdx")]
             tdx_enabled,
             &numa_nodes,
+            #[cfg(feature = "sev_snp")]
+            sev_snp_enabled,
         )
         .map_err(Error::CpuManager)?;
 
@@ -998,12 +1000,21 @@ impl Vm {
         memory_manager: Arc<Mutex<MemoryManager>>,
         cpu_manager: Arc<Mutex<cpu::CpuManager>>,
     ) -> Result<EntryPoint> {
-        let res = igvm_loader::load_igvm(&igvm, memory_manager, cpu_manager, "")
+        let res = igvm_loader::load_igvm(&igvm, memory_manager, cpu_manager.clone(), "")
             .map_err(Error::IgvmLoad)?;
 
-        Ok(EntryPoint {
-            entry_addr: vm_memory::GuestAddress(res.vmsa.rip),
-        })
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "sev_snp")] {
+                let entry_point = if cpu_manager.lock().unwrap().sev_snp_enabled() {
+                    EntryPoint { entry_addr: vm_memory::GuestAddress(res.vmsa_gpa) }
+                } else {
+                    EntryPoint {entry_addr: vm_memory::GuestAddress(res.vmsa.rip) }
+                };
+            } else {
+               let entry_point = EntryPoint { entry_addr: vm_memory::GuestAddress(res.vmsa.rip) };
+            }
+        };
+        Ok(entry_point)
     }
 
     #[cfg(target_arch = "x86_64")]
