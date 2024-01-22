@@ -1,0 +1,20 @@
+name: Shell scripts check
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  sh-checker:
+    name: Check shell scripts
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    - name: Run the shell script checkers
+      uses: luizm/action-sh-checker@master
+      env:
+        SHFMT_OPTS: -i 4 -d
+        SHELLCHECK_OPTS: -x --source-path scripts
