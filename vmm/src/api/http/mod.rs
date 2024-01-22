@@ -14,12 +14,14 @@ use crate::api::{
 };
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{Error as VmmError, Result};
+use core::fmt;
 use hypervisor::HypervisorType;
 use micro_http::{Body, HttpServer, MediaType, Method, Request, Response, StatusCode, Version};
 use once_cell::sync::Lazy;
 use seccompiler::{apply_filter, SeccompAction};
 use serde_json::Error as SerdeError;
 use std::collections::BTreeMap;
+use std::fmt::Display;
 use std::fs::File;
 use std::os::unix::io::{IntoRawFd, RawFd};
 use std::os::unix::net::UnixListener;
@@ -50,6 +52,19 @@ pub enum HttpError {
     ApiError(ApiError),
 }
 
+impl Display for HttpError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use self::HttpError::*;
+        match self {
+            BadRequest => write!(f, "Bad Request"),
+            NotFound => write!(f, "Not Found"),
+            InternalServerError => write!(f, "Internal Server Error"),
+            SerdeJsonDeserialize(serde_error) => write!(f, "{}", serde_error),
+            ApiError(api_error) => write!(f, "{}", api_error),
+        }
+    }
+}
+
 impl From<serde_json::Error> for HttpError {
     fn from(e: serde_json::Error) -> Self {
         HttpError::SerdeJsonDeserialize(e)
@@ -60,7 +75,7 @@ const HTTP_ROOT: &str = "/api/v1";
 
 pub fn error_response(error: HttpError, status: StatusCode) -> Response {
     let mut response = Response::new(Version::Http11, status);
-    response.set_body(Body::new(format!("{error:?}")));
+    response.set_body(Body::new(format!("{error}")));
 
     response
 }

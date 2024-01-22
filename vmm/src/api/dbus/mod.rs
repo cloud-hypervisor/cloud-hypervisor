@@ -41,8 +41,8 @@ pub struct DBusApi {
     api_sender: futures::lock::Mutex<Sender<ApiRequest>>,
 }
 
-fn api_error(error: impl std::fmt::Debug) -> fdo::Error {
-    fdo::Error::Failed(format!("{error:?}"))
+fn api_error(error: impl std::fmt::Debug + std::fmt::Display) -> fdo::Error {
+    fdo::Error::Failed(format!("{error}"))
 }
 
 // This method is intended to ensure that the DBusApi thread has enough time to
