@@ -10,7 +10,7 @@
 
 use crate::arch::x86::{
     CpuIdEntry, DescriptorTable, FpuState, LapicState, MsrEntry, SegmentRegister, SpecialRegisters,
-    StandardRegisters, CPUID_FLAG_VALID_INDEX,
+    StandardRegisters, XsaveState, CPUID_FLAG_VALID_INDEX,
 };
 use crate::kvm::{Cap, Kvm, KvmError, KvmResult};
 use serde::{Deserialize, Serialize};
@@ -23,7 +23,7 @@ pub use {
     kvm_bindings::kvm_lapic_state, kvm_bindings::kvm_mp_state as MpState,
     kvm_bindings::kvm_msr_entry, kvm_bindings::kvm_regs, kvm_bindings::kvm_segment,
     kvm_bindings::kvm_sregs, kvm_bindings::kvm_vcpu_events as VcpuEvents,
-    kvm_bindings::kvm_xcrs as ExtendedControlRegisters, kvm_bindings::kvm_xsave as Xsave,
+    kvm_bindings::kvm_xcrs as ExtendedControlRegisters, kvm_bindings::kvm_xsave,
     kvm_bindings::CpuId, kvm_bindings::MsrList, kvm_bindings::Msrs as MsrEntries,
     kvm_bindings::KVM_CPUID_FLAG_SIGNIFCANT_INDEX,
 };
@@ -64,7 +64,7 @@ pub struct VcpuKvmState {
     pub sregs: kvm_sregs,
     pub fpu: FpuState,
     pub lapic_state: LapicState,
-    pub xsave: Xsave,
+    pub xsave: XsaveState,
     pub xcrs: ExtendedControlRegisters,
     pub mp_state: MpState,
     pub tsc_khz: Option<u32>,
@@ -327,6 +327,21 @@ impl From<MsrEntry> for kvm_msr_entry {
             index: e.index,
             data: e.data,
             ..Default::default()
+        }
+    }
+}
+
+impl From<kvm_xsave> for XsaveState {
+    fn from(s: kvm_xsave) -> Self {
+        Self { region: s.region }
+    }
+}
+
+impl From<XsaveState> for kvm_xsave {
+    fn from(s: XsaveState) -> Self {
+        Self {
+            region: s.region,
+            extra: Default::default(),
         }
     }
 }
