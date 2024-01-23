@@ -1568,6 +1568,16 @@ impl VfioPciDevice {
                     self.vm
                         .create_user_memory_region(mem_region)
                         .map_err(VfioPciError::CreateUserMemoryRegion)?;
+
+                    if !self.iommu_attached {
+                        self.container
+                            .vfio_dma_map(
+                                user_memory_region.start,
+                                user_memory_region.size,
+                                user_memory_region.host_addr,
+                            )
+                            .map_err(VfioPciError::DmaMap)?;
+                    }
                 }
             }
         }
@@ -1578,6 +1588,16 @@ impl VfioPciDevice {
     pub fn unmap_mmio_regions(&mut self) {
         for region in self.common.mmio_regions.iter() {
             for user_memory_region in region.user_memory_regions.iter() {
+                // Unmap from vfio container
+                if !self.iommu_attached {
+                    if let Err(e) = self
+                        .container
+                        .vfio_dma_unmap(user_memory_region.start, user_memory_region.size)
+                    {
+                        error!("Could not unmap mmio region from vfio container: {}", e);
+                    }
+                }
+
                 // Remove region
                 let r = self.vm.make_user_memory_region(
                     user_memory_region.slot,
