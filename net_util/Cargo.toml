@@ -13,13 +13,13 @@ net_gen = { path = "../net_gen" }
 rate_limiter = { path = "../rate_limiter" }
 serde = "1.0.168"
 thiserror = "1.0.52"
-versionize = "0.1.10"
-versionize_derive = "0.1.4"
+versionize = "0.2.0"
+versionize_derive = "0.1.6"
 virtio-bindings = "0.2.0"
-virtio-queue = "0.10.0"
-vm-memory = { version = "0.13.1", features = ["backend-mmap", "backend-atomic", "backend-bitmap"] }
+virtio-queue = "0.11.0"
+vm-memory = { version = "0.14.0", features = ["backend-mmap", "backend-atomic", "backend-bitmap"] }
 vm-virtio = { path = "../vm-virtio" }
-vmm-sys-util = "0.11.0"
+vmm-sys-util = "0.12.1"
 
 [dev-dependencies]
 once_cell = "1.19.0"

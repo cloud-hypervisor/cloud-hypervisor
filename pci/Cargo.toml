@@ -17,14 +17,14 @@ vfio-bindings = { git = "https://github.com/rust-vmm/vfio", branch = "main", fea
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
 vfio_user = { git = "https://github.com/rust-vmm/vfio-user", branch = "main" }
 
-vmm-sys-util = "0.11.0"
+vmm-sys-util = "0.12.1"
 libc = "0.2.147"
 log = "0.4.20"
 serde = { version = "1.0.168", features = ["derive"] }
 thiserror = "1.0.52"
-versionize = "0.1.10"
-versionize_derive = "0.1.4"
+versionize = "0.2.0"
+versionize_derive = "0.1.6"
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
-vm-memory = { version = "0.13.1", features = ["backend-mmap", "backend-atomic", "backend-bitmap"] }
+vm-memory = { version = "0.14.0", features = ["backend-mmap", "backend-atomic", "backend-bitmap"] }
 vm-migration = { path = "../vm-migration" }

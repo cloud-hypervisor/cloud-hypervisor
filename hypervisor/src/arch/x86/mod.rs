@@ -311,3 +311,17 @@ pub struct MsrEntry {
     pub index: u32,
     pub data: u64,
 }
+
+#[serde_with::serde_as]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct XsaveState {
+    #[serde_as(as = "[_; 1024usize]")]
+    pub region: [u32; 1024usize],
+}
+
+impl Default for XsaveState {
+    fn default() -> Self {
+        // SAFETY: this is plain old data structure
+        unsafe { ::std::mem::zeroed() }
+    }
+}

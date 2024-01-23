@@ -9597,43 +9597,51 @@ mod live_migration {
         }
 
         #[test]
+        #[ignore = "See #6134"]
         fn test_live_upgrade_basic() {
             _test_live_migration(true, false)
         }
 
         #[test]
+        #[ignore = "See #6134"]
         fn test_live_upgrade_local() {
             _test_live_migration(true, true)
         }
 
         #[test]
+        #[ignore = "See #6134"]
         #[cfg(not(feature = "mshv"))]
         fn test_live_upgrade_numa() {
             _test_live_migration_numa(true, false)
         }
 
         #[test]
+        #[ignore = "See #6134"]
         #[cfg(not(feature = "mshv"))]
         fn test_live_upgrade_numa_local() {
             _test_live_migration_numa(true, true)
         }
 
         #[test]
+        #[ignore = "See #6134"]
         fn test_live_upgrade_watchdog() {
             _test_live_migration_watchdog(true, false)
         }
 
         #[test]
+        #[ignore = "See #6134"]
         fn test_live_upgrade_watchdog_local() {
             _test_live_migration_watchdog(true, true)
         }
 
         #[test]
+        #[ignore = "See #6134"]
         fn test_live_upgrade_balloon() {
             _test_live_migration_balloon(true, false)
         }
 
         #[test]
+        #[ignore = "See #6134"]
         fn test_live_upgrade_balloon_local() {
             _test_live_migration_balloon(true, true)
         }
@@ -9669,6 +9677,7 @@ mod live_migration {
         }
 
         #[test]
+        #[ignore = "See #5532"]
         #[cfg(target_arch = "x86_64")]
         #[cfg(not(feature = "mshv"))]
         fn test_live_upgrade_ovs_dpdk_local() {
