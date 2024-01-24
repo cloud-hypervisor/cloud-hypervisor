@@ -71,8 +71,6 @@ pub use x86_64::{CpuId, ExtendedControlRegisters, MsrEntries, VcpuKvmState};
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;
 pub use kvm_bindings;
-#[cfg(feature = "tdx")]
-use kvm_bindings::KVMIO;
 pub use kvm_bindings::{
     kvm_clock_data, kvm_create_device, kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_guest_debug,
     kvm_irq_routing, kvm_irq_routing_entry, kvm_mp_state, kvm_userspace_memory_region,
@@ -86,6 +84,8 @@ use kvm_bindings::{
     KVM_REG_ARM64_SYSREG_OP0_MASK, KVM_REG_ARM64_SYSREG_OP1_MASK, KVM_REG_ARM64_SYSREG_OP2_MASK,
     KVM_REG_ARM_CORE, KVM_REG_SIZE_U128, KVM_REG_SIZE_U32, KVM_REG_SIZE_U64,
 };
+#[cfg(feature = "tdx")]
+use kvm_bindings::{kvm_run__bindgen_ty_1, KVMIO};
 pub use kvm_ioctls;
 pub use kvm_ioctls::{Cap, Kvm};
 #[cfg(target_arch = "aarch64")]
@@ -167,6 +167,52 @@ pub struct TdxCapabilities {
     pub nr_cpuid_configs: u32,
     pub padding: u32,
     pub cpuid_configs: [TdxCpuidConfig; TDX_MAX_NR_CPUID_CONFIGS],
+}
+
+#[cfg(feature = "tdx")]
+#[derive(Copy, Clone)]
+pub struct KvmTdxExit {
+    pub type_: u32,
+    pub pad: u32,
+    pub u: KvmTdxExitU,
+}
+
+#[cfg(feature = "tdx")]
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub union KvmTdxExitU {
+    pub vmcall: KvmTdxExitVmcall,
+}
+
+#[cfg(feature = "tdx")]
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+pub struct KvmTdxExitVmcall {
+    pub type_: u64,
+    pub subfunction: u64,
+    pub reg_mask: u64,
+    pub in_r12: u64,
+    pub in_r13: u64,
+    pub in_r14: u64,
+    pub in_r15: u64,
+    pub in_rbx: u64,
+    pub in_rdi: u64,
+    pub in_rsi: u64,
+    pub in_r8: u64,
+    pub in_r9: u64,
+    pub in_rdx: u64,
+    pub status_code: u64,
+    pub out_r11: u64,
+    pub out_r12: u64,
+    pub out_r13: u64,
+    pub out_r14: u64,
+    pub out_r15: u64,
+    pub out_rbx: u64,
+    pub out_rdi: u64,
+    pub out_rsi: u64,
+    pub out_r8: u64,
+    pub out_r9: u64,
+    pub out_rdx: u64,
 }
 
 impl From<kvm_userspace_memory_region> for UserMemoryRegion {
@@ -2132,7 +2178,12 @@ impl cpu::Vcpu for KvmVcpu {
     fn get_tdx_exit_details(&mut self) -> cpu::Result<TdxExitDetails> {
         let kvm_run = self.fd.get_kvm_run();
         // SAFETY: accessing a union field in a valid structure
-        let tdx_vmcall = unsafe { &mut kvm_run.__bindgen_anon_1.tdx.u.vmcall };
+        let tdx_vmcall = unsafe {
+            &mut (*((&mut kvm_run.__bindgen_anon_1) as *mut kvm_run__bindgen_ty_1
+                as *mut KvmTdxExit))
+                .u
+                .vmcall
+        };
 
         tdx_vmcall.status_code = TDG_VP_VMCALL_INVALID_OPERAND;
 
@@ -2156,7 +2207,12 @@ impl cpu::Vcpu for KvmVcpu {
     fn set_tdx_status(&mut self, status: TdxExitStatus) {
         let kvm_run = self.fd.get_kvm_run();
         // SAFETY: accessing a union field in a valid structure
-        let tdx_vmcall = unsafe { &mut kvm_run.__bindgen_anon_1.tdx.u.vmcall };
+        let tdx_vmcall = unsafe {
+            &mut (*((&mut kvm_run.__bindgen_anon_1) as *mut kvm_run__bindgen_ty_1
+                as *mut KvmTdxExit))
+                .u
+                .vmcall
+        };
 
         tdx_vmcall.status_code = match status {
             TdxExitStatus::Success => TDG_VP_VMCALL_SUCCESS,
