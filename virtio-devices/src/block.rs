@@ -25,6 +25,7 @@ use block::{
 use rate_limiter::group::{RateLimiterGroup, RateLimiterGroupHandle};
 use rate_limiter::TokenType;
 use seccompiler::SeccompAction;
+use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::io;
 use std::num::Wrapping;
@@ -134,6 +135,7 @@ struct BlockEpollHandler {
     rate_limiter: Option<RateLimiterGroupHandle>,
     access_platform: Option<Arc<dyn AccessPlatform>>,
     read_only: bool,
+    host_cpus: Option<Vec<usize>>,
 }
 
 impl BlockEpollHandler {
@@ -408,6 +410,41 @@ impl BlockEpollHandler {
             })
     }
 
+    fn set_queue_thread_affinity(&self) {
+        // Prepare the CPU set the current queue thread is expected to run onto.
+        let cpuset = self.host_cpus.as_ref().map(|host_cpus| {
+            // SAFETY: all zeros is a valid pattern
+            let mut cpuset: libc::cpu_set_t = unsafe { std::mem::zeroed() };
+            // SAFETY: FFI call, trivially safe
+            unsafe { libc::CPU_ZERO(&mut cpuset) };
+            for host_cpu in host_cpus {
+                // SAFETY: FFI call, trivially safe
+                unsafe { libc::CPU_SET(*host_cpu, &mut cpuset) };
+            }
+            cpuset
+        });
+
+        // Schedule the thread to run on the expected CPU set
+        if let Some(cpuset) = cpuset.as_ref() {
+            // SAFETY: FFI call with correct arguments
+            let ret = unsafe {
+                libc::sched_setaffinity(
+                    0,
+                    std::mem::size_of::<libc::cpu_set_t>(),
+                    cpuset as *const libc::cpu_set_t,
+                )
+            };
+
+            if ret != 0 {
+                error!(
+                    "Failed scheduling the virtqueue thread {} on the expected CPU set: {}",
+                    self.queue_index,
+                    io::Error::last_os_error()
+                )
+            }
+        }
+    }
+
     fn run(
         &mut self,
         paused: Arc<AtomicBool>,
@@ -419,6 +456,7 @@ impl BlockEpollHandler {
         if let Some(rate_limiter) = &self.rate_limiter {
             helper.add_event(rate_limiter.as_raw_fd(), RATE_LIMITER_EVENT)?;
         }
+        self.set_queue_thread_affinity();
         helper.run(paused, paused_sync, self)?;
 
         Ok(())
@@ -511,6 +549,7 @@ pub struct Block {
     exit_evt: EventFd,
     read_only: bool,
     serial: Vec<u8>,
+    queue_affinity: BTreeMap<u16, Vec<usize>>,
 }
 
 #[derive(Versionize)]
@@ -540,6 +579,7 @@ impl Block {
         rate_limiter: Option<Arc<RateLimiterGroup>>,
         exit_evt: EventFd,
         state: Option<BlockState>,
+        queue_affinity: BTreeMap<u16, Vec<usize>>,
     ) -> io::Result<Self> {
         let (disk_nsectors, avail_features, acked_features, config, paused) =
             if let Some(state) = state {
@@ -643,6 +683,7 @@ impl Block {
             exit_evt,
             read_only,
             serial,
+            queue_affinity,
         })
     }
 
@@ -746,9 +787,10 @@ impl VirtioDevice for Block {
             let (_, queue, queue_evt) = queues.remove(0);
             let queue_size = queue.size();
             let (kill_evt, pause_evt) = self.common.dup_eventfds();
+            let queue_idx = i as u16;
 
             let mut handler = BlockEpollHandler {
-                queue_index: i as u16,
+                queue_index: queue_idx,
                 queue,
                 mem: mem.clone(),
                 disk_image: self
@@ -778,6 +820,7 @@ impl VirtioDevice for Block {
                     .unwrap(),
                 access_platform: self.common.access_platform.clone(),
                 read_only: self.read_only,
+                host_cpus: self.queue_affinity.get(&queue_idx).cloned(),
             };
 
             let paused = self.common.paused.clone();

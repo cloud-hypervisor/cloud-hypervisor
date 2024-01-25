@@ -828,6 +828,19 @@ components:
           type: string
         rate_limiter_config:
           $ref: "#/components/schemas/RateLimiterConfig"
+    
+    VirtQueueAffinity:
+      required:
+        - queue_index
+        - host_cpus
+      type: object
+      properties:
+        queue_index:
+          type: integer
+        host_cpus:
+          type: array
+          items:
+            type: integer
 
     DiskConfig:
       required:
@@ -867,6 +880,10 @@ components:
           type: string
         rate_limit_group:
           type: string
+        affinity:
+          type: array
+          items:
+            $ref: "#/components/schemas/VirtQueueAffinity"
 
     NetConfig:
       type: object

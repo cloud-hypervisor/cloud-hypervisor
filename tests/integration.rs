@@ -2575,7 +2575,63 @@ mod common_parallel {
 
         let _ = child.kill();
         let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+    }
 
+    #[test]
+    fn test_virtio_queue_affinity() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+
+        // We need the host to have at least 4 CPUs if we want to be able
+        // to run this test.
+        let host_cpus_count = exec_host_command_output("nproc");
+        assert!(
+            String::from_utf8_lossy(&host_cpus_count.stdout)
+                .trim()
+                .parse::<u16>()
+                .unwrap_or(0)
+                >= 4
+        );
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=4"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args([
+                "--disk",
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                )
+                .as_str(),
+                format!(
+                    "path={},num_queues=4,queue_affinity=[0@[0,2],1@[1,3],2@[1],3@[3]]",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                )
+                .as_str(),
+            ])
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+            let pid = child.id();
+            let taskset_q0 = exec_host_command_output(format!("taskset -pc $(ps -T -p {pid} | grep disk1_q0 | xargs | cut -f 2 -d \" \") | cut -f 6 -d \" \"").as_str());
+            assert_eq!(String::from_utf8_lossy(&taskset_q0.stdout).trim(), "0,2");
+            let taskset_q1 = exec_host_command_output(format!("taskset -pc $(ps -T -p {pid} | grep disk1_q1 | xargs | cut -f 2 -d \" \") | cut -f 6 -d \" \"").as_str());
+            assert_eq!(String::from_utf8_lossy(&taskset_q1.stdout).trim(), "1,3");
+            let taskset_q2 = exec_host_command_output(format!("taskset -pc $(ps -T -p {pid} | grep disk1_q2 | xargs | cut -f 2 -d \" \") | cut -f 6 -d \" \"").as_str());
+            assert_eq!(String::from_utf8_lossy(&taskset_q2.stdout).trim(), "1");
+            let taskset_q3 = exec_host_command_output(format!("taskset -pc $(ps -T -p {pid} | grep disk1_q3 | xargs | cut -f 2 -d \" \") | cut -f 6 -d \" \"").as_str());
+            assert_eq!(String::from_utf8_lossy(&taskset_q3.stdout).trim(), "3");
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
         handle_child_output(r, &output);
     }
 
