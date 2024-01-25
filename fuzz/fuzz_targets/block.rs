@@ -21,6 +21,7 @@ use virtio_devices::{Block, VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
 use vm_memory::{bitmap::AtomicBitmap, Bytes, GuestAddress, GuestMemoryAtomic};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
+use std::collections::BTreeMap;
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
@@ -49,6 +50,7 @@ fuzz_target!(|bytes| {
     let shm = memfd_create(&ffi::CString::new("fuzz").unwrap(), 0).unwrap();
     let disk_file: File = unsafe { File::from_raw_fd(shm) };
     let qcow_disk = Box::new(RawFileDiskSync::new(disk_file)) as Box<dyn DiskFile>;
+    let queue_affinity = BTreeMap::new();
     let mut block = Block::new(
         "tmp".to_owned(),
         qcow_disk,
@@ -62,6 +64,7 @@ fuzz_target!(|bytes| {
         None,
         EventFd::new(EFD_NONBLOCK).unwrap(),
         None,
+        queue_affinity,
     )
     .unwrap();
 

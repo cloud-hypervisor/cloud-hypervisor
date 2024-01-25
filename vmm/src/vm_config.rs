@@ -188,6 +188,12 @@ pub struct RateLimiterGroupConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct VirtQueueAffinity {
+    pub queue_index: u16,
+    pub host_cpus: Vec<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct DiskConfig {
     pub path: Option<PathBuf>,
     #[serde(default)]
@@ -219,6 +225,8 @@ pub struct DiskConfig {
     pub pci_segment: u16,
     #[serde(default)]
     pub serial: Option<String>,
+    #[serde(default)]
+    pub queue_affinity: Option<Vec<VirtQueueAffinity>>,
 }
 
 pub const DEFAULT_DISK_NUM_QUEUES: usize = 1;

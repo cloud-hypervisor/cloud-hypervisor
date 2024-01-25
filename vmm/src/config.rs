@@ -1001,7 +1001,8 @@ impl DiskConfig {
          vhost_user=on|off,socket=<vhost_user_socket_path>,\
          bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,\
          ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,\
-         id=<device_id>,pci_segment=<segment_id>,rate_limit_group=<group_id>\"";
+         id=<device_id>,pci_segment=<segment_id>,rate_limit_group=<group_id>,\
+         queue_affinity=<list_of_queue_indices_with_their_associated_cpuset>";
 
     pub fn parse(disk: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -1025,7 +1026,8 @@ impl DiskConfig {
             .add("_disable_aio")
             .add("pci_segment")
             .add("serial")
-            .add("rate_limit_group");
+            .add("rate_limit_group")
+            .add("queue_affinity");
         parser.parse(disk).map_err(Error::ParseDisk)?;
 
         let path = parser.get("path").map(PathBuf::from);
@@ -1099,6 +1101,17 @@ impl DiskConfig {
             .map_err(Error::ParseDisk)?
             .unwrap_or_default();
         let serial = parser.get("serial");
+        let queue_affinity = parser
+            .convert::<Tuple<u16, Vec<usize>>>("queue_affinity")
+            .map_err(Error::ParseDisk)?
+            .map(|v| {
+                v.0.iter()
+                    .map(|(e1, e2)| VirtQueueAffinity {
+                        queue_index: *e1,
+                        host_cpus: e2.clone(),
+                    })
+                    .collect()
+            });
         let bw_tb_config = if bw_size != 0 && bw_refill_time != 0 {
             Some(TokenBucketConfig {
                 size: bw_size,
@@ -1142,6 +1155,7 @@ impl DiskConfig {
             disable_aio,
             pci_segment,
             serial,
+            queue_affinity,
         })
     }
 
@@ -2922,6 +2936,7 @@ mod tests {
             rate_limiter_config: None,
             pci_segment: 0,
             serial: None,
+            queue_affinity: None,
         }
     }
 
@@ -2989,6 +3004,30 @@ mod tests {
             DiskConfig::parse("path=/path/to_file,rate_limit_group=group0")?,
             DiskConfig {
                 rate_limit_group: Some("group0".to_string()),
+                ..disk_fixture()
+            }
+        );
+        assert_eq!(
+            DiskConfig::parse("path=/path/to_file,queue_affinity=[0@[1],1@[2],2@[3,4],3@[5-8]]")?,
+            DiskConfig {
+                queue_affinity: Some(vec![
+                    VirtQueueAffinity {
+                        queue_index: 0,
+                        host_cpus: vec![1],
+                    },
+                    VirtQueueAffinity {
+                        queue_index: 1,
+                        host_cpus: vec![2],
+                    },
+                    VirtQueueAffinity {
+                        queue_index: 2,
+                        host_cpus: vec![3, 4],
+                    },
+                    VirtQueueAffinity {
+                        queue_index: 3,
+                        host_cpus: vec![5, 6, 7, 8],
+                    }
+                ]),
                 ..disk_fixture()
             }
         );

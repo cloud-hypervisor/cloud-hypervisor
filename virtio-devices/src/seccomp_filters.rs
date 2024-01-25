@@ -96,6 +96,7 @@ fn virtio_block_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_pwritev, vec![]),
         (libc::SYS_pwrite64, vec![]),
         (libc::SYS_sched_getaffinity, vec![]),
+        (libc::SYS_sched_setaffinity, vec![]),
         (libc::SYS_set_robust_list, vec![]),
         (libc::SYS_timerfd_settime, vec![]),
     ]

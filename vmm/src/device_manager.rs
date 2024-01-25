@@ -64,7 +64,7 @@ use pci::{
 use rate_limiter::group::RateLimiterGroup;
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::{read_link, File, OpenOptions};
 use std::io::{self, stdout, Seek, SeekFrom};
 use std::mem::zeroed;
@@ -2512,6 +2512,15 @@ impl DeviceManager {
                     None
                 };
 
+            let queue_affinity = if let Some(queue_affinity) = disk_cfg.queue_affinity.as_ref() {
+                queue_affinity
+                    .iter()
+                    .map(|a| (a.queue_index, a.host_cpus.clone()))
+                    .collect()
+            } else {
+                BTreeMap::new()
+            };
+
             let virtio_block = Arc::new(Mutex::new(
                 virtio_devices::Block::new(
                     id.clone(),
@@ -2535,6 +2544,7 @@ impl DeviceManager {
                         .map(|s| s.to_versioned_state())
                         .transpose()
                         .map_err(DeviceManagerError::RestoreGetState)?,
+                    queue_affinity,
                 )
                 .map_err(DeviceManagerError::CreateVirtioBlock)?,
             ));
