@@ -17,7 +17,7 @@ build_fio() {
     if [ ! -f "$FIO_DIR/.built" ]; then
         pushd $FIO_DIR
         ./configure
-        make -j `nproc`
+        make -j $(nproc)
         cp fio "$WORKLOADS_DIR/fio"
         touch .built
         popd
@@ -29,9 +29,9 @@ process_common_args "$@"
 cp scripts/sha1sums-${TEST_ARCH} $WORKLOADS_DIR
 
 if [ ${TEST_ARCH} == "aarch64" ]; then
-     FOCAL_OS_IMAGE_NAME="focal-server-cloudimg-arm64-custom-20210929-0.qcow2"
+    FOCAL_OS_IMAGE_NAME="focal-server-cloudimg-arm64-custom-20210929-0.qcow2"
 else
-     FOCAL_OS_IMAGE_NAME="focal-server-cloudimg-amd64-custom-20210609-0.qcow2"
+    FOCAL_OS_IMAGE_NAME="focal-server-cloudimg-amd64-custom-20210609-0.qcow2"
 fi
 
 FOCAL_OS_IMAGE_URL="https://cloud-hypervisor.azureedge.net/$FOCAL_OS_IMAGE_NAME"
@@ -90,8 +90,8 @@ fi
 cargo build --features mshv --all --release --target $BUILD_TARGET
 
 # setup hugepages
-HUGEPAGESIZE=`grep Hugepagesize /proc/meminfo | awk '{print $2}'`
-PAGE_NUM=`echo $((12288 * 1024 / $HUGEPAGESIZE))`
+HUGEPAGESIZE=$(grep Hugepagesize /proc/meminfo | awk '{print $2}')
+PAGE_NUM=$(echo $((12288 * 1024 / $HUGEPAGESIZE)))
 echo $PAGE_NUM | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
@@ -102,11 +102,11 @@ fi
 # Ensure that git commands can be run in this directory (for metrics report)
 git config --global --add safe.directory $PWD
 
-RUST_BACKTRACE_VALUE=`echo $RUST_BACKTRACE`
-if [ -z $RUST_BACKTRACE_VALUE ];then
-	export RUST_BACKTRACE=1
+RUST_BACKTRACE_VALUE=$(echo $RUST_BACKTRACE)
+if [ -z $RUST_BACKTRACE_VALUE ]; then
+    export RUST_BACKTRACE=1
 else
-	echo "RUST_BACKTRACE is set to: $RUST_BACKTRACE_VALUE"
+    echo "RUST_BACKTRACE is set to: $RUST_BACKTRACE_VALUE"
 fi
 time target/$BUILD_TARGET/release/performance-metrics ${test_binary_args[*]}
 RES=$?

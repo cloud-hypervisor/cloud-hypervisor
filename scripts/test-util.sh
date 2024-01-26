@@ -54,12 +54,12 @@ build_custom_linux() {
     cp $SRCDIR/resources/linux-config-${ARCH} $LINUX_CUSTOM_DIR/.config
 
     pushd $LINUX_CUSTOM_DIR
-    make -j `nproc`
+    make -j $(nproc)
     if [ ${ARCH} == "x86_64" ]; then
-       cp vmlinux "$WORKLOADS_DIR/" || exit 1
+        cp vmlinux "$WORKLOADS_DIR/" || exit 1
     elif [ ${ARCH} == "aarch64" ]; then
-       cp arch/arm64/boot/Image "$WORKLOADS_DIR/" || exit 1
-       cp arch/arm64/boot/Image.gz "$WORKLOADS_DIR/" || exit 1
+        cp arch/arm64/boot/Image "$WORKLOADS_DIR/" || exit 1
+        cp arch/arm64/boot/Image.gz "$WORKLOADS_DIR/" || exit 1
     fi
     popd
 }
@@ -80,28 +80,31 @@ cmd_help() {
 
 process_common_args() {
     while [ $# -gt 0 ]; do
-	case "$1" in
-            "-h"|"--help")  { cmd_help; exit 1; } ;;
-            "--hypervisor")
-                shift
-                hypervisor="$1"
-                ;;
-            "--test-filter")
-                shift
-                test_filter="$1"
-                ;;
-            "--") {
-                shift
-                break
-            } ;;
-            *)
-                echo "Unknown test scripts argument: $1. Please use '-- --help' for help."
-                exit
-                ;;
-	esac
-	shift
+        case "$1" in
+        "-h" | "--help") {
+            cmd_help
+            exit 1
+        } ;;
+        "--hypervisor")
+            shift
+            hypervisor="$1"
+            ;;
+        "--test-filter")
+            shift
+            test_filter="$1"
+            ;;
+        "--") {
+            shift
+            break
+        } ;;
+        *)
+            echo "Unknown test scripts argument: $1. Please use '-- --help' for help."
+            exit
+            ;;
+        esac
+        shift
     done
-    if [[ ! ("$hypervisor" = "kvm" ||  "$hypervisor" = "mshv") ]]; then
+    if [[ ! ("$hypervisor" = "kvm" || "$hypervisor" = "mshv") ]]; then
         die "Hypervisor value must be kvm or mshv"
     fi
 
@@ -112,8 +115,8 @@ download_hypervisor_fw() {
     if [ -n "$AUTH_DOWNLOAD_TOKEN" ]; then
         echo "Using authenticated download from GitHub"
         FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/rust-hypervisor-firmware/releases/latest \
-                 --header "Authorization: Token $AUTH_DOWNLOAD_TOKEN" \
-                 --header "X-GitHub-Api-Version: 2022-11-28" | grep "browser_download_url" | grep -o 'https://.*[^ "]')
+            --header "Authorization: Token $AUTH_DOWNLOAD_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" | grep "browser_download_url" | grep -o 'https://.*[^ "]')
     else
         echo "Using anonymous download from GitHub"
         FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/rust-hypervisor-firmware/releases/latest | grep "browser_download_url" | grep -o 'https://.*[^ "]')

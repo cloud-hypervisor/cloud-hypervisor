@@ -12,7 +12,7 @@ process_common_args "$@"
 # For now these values are default for kvm
 test_features=""
 
-if [ "$hypervisor" = "mshv" ] ;  then
+if [ "$hypervisor" = "mshv" ]; then
     test_features="--features mshv"
 fi
 
@@ -77,7 +77,7 @@ if [ ! -f "$ALPINE_INITRAMFS_IMAGE" ]; then
     pushd $WORKLOADS_DIR
     mkdir alpine-minirootfs
     tar xf "$ALPINE_MINIROOTFS_TARBALL" -C alpine-minirootfs
-    cat > alpine-minirootfs/init <<-EOF
+    cat >alpine-minirootfs/init <<-EOF
 		#! /bin/sh
 		mount -t devtmpfs dev /dev
 		echo \$TEST_STRING > /dev/console
@@ -86,7 +86,7 @@ if [ ! -f "$ALPINE_INITRAMFS_IMAGE" ]; then
     chmod +x alpine-minirootfs/init
     cd alpine-minirootfs
     find . -print0 |
-        cpio --null --create --verbose --owner root:root --format=newc > "$ALPINE_INITRAMFS_IMAGE"
+        cpio --null --create --verbose --owner root:root --format=newc >"$ALPINE_INITRAMFS_IMAGE"
     popd
 fi
 
@@ -118,26 +118,25 @@ if [ ! -f "$VIRTIOFSD" ]; then
     popd
 fi
 
-
 BLK_IMAGE="$WORKLOADS_DIR/blk.img"
 MNT_DIR="mount_image"
 if [ ! -f "$BLK_IMAGE" ]; then
-   pushd $WORKLOADS_DIR
-   fallocate -l 16M $BLK_IMAGE
-   mkfs.ext4 -j $BLK_IMAGE
-   mkdir $MNT_DIR
-   sudo mount -t ext4 $BLK_IMAGE $MNT_DIR
-   sudo bash -c "echo bar > $MNT_DIR/foo" || exit 1
-   sudo umount $BLK_IMAGE
-   rm -r $MNT_DIR
-   popd
+    pushd $WORKLOADS_DIR
+    fallocate -l 16M $BLK_IMAGE
+    mkfs.ext4 -j $BLK_IMAGE
+    mkdir $MNT_DIR
+    sudo mount -t ext4 $BLK_IMAGE $MNT_DIR
+    sudo bash -c "echo bar > $MNT_DIR/foo" || exit 1
+    sudo umount $BLK_IMAGE
+    rm -r $MNT_DIR
+    popd
 fi
 
 SHARED_DIR="$WORKLOADS_DIR/shared_dir"
 if [ ! -d "$SHARED_DIR" ]; then
     mkdir -p $SHARED_DIR
-    echo "foo" > "$SHARED_DIR/file1"
-    echo "bar" > "$SHARED_DIR/file3" || exit 1
+    echo "foo" >"$SHARED_DIR/file1"
+    echo "bar" >"$SHARED_DIR/file3" || exit 1
 fi
 
 VFIO_DIR="$WORKLOADS_DIR/vfio"
@@ -148,7 +147,7 @@ cp $FOCAL_OS_RAW_IMAGE $VFIO_DIR
 cp $FW $VFIO_DIR
 cp $VMLINUX_IMAGE $VFIO_DIR || exit 1
 
-cargo build --features mshv --all  --release --target $BUILD_TARGET
+cargo build --features mshv --all --release --target $BUILD_TARGET
 
 # We always copy a fresh version of our binary for our L2 guest.
 cp target/$BUILD_TARGET/release/cloud-hypervisor $VFIO_DIR
@@ -161,8 +160,8 @@ sudo bash -c "echo 10 > /sys/kernel/mm/ksm/sleep_millisecs"
 sudo bash -c "echo 1 > /sys/kernel/mm/ksm/run"
 
 # Both test_vfio, ovs-dpdk and vDPA tests rely on hugepages
-HUGEPAGESIZE=`grep Hugepagesize /proc/meminfo | awk '{print $2}'`
-PAGE_NUM=`echo $((12288 * 1024 / $HUGEPAGESIZE))`
+HUGEPAGESIZE=$(grep Hugepagesize /proc/meminfo | awk '{print $2}')
+PAGE_NUM=$(echo $((12288 * 1024 / $HUGEPAGESIZE)))
 echo $PAGE_NUM | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
@@ -186,7 +185,7 @@ fi
 
 # Run tests on dbus_api
 if [ $RES -eq 0 ]; then
-    cargo build --features "mshv,dbus_api" --all  --release --target $BUILD_TARGET
+    cargo build --features "mshv,dbus_api" --all --release --target $BUILD_TARGET
     export RUST_BACKTRACE=1
     # integration tests now do not reply on build feature "dbus_api"
     time cargo test $test_features "dbus_api::$test_filter" -- ${test_binary_args[*]}

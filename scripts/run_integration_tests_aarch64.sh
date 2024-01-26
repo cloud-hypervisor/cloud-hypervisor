@@ -21,7 +21,7 @@ build_spdk_nvme() {
         ./scripts/pkgdep.sh
         ./configure --with-vfio-user
         chmod +x /usr/local/lib/python3.10/dist-packages/ninja/data/bin/ninja
-        make -j `nproc` || exit 1
+        make -j $(nproc) || exit 1
         touch .built
         popd
     fi
@@ -137,7 +137,7 @@ update_workloads() {
         pushd $WORKLOADS_DIR
         mkdir alpine-minirootfs
         tar xf "$ALPINE_MINIROOTFS_TARBALL" -C alpine-minirootfs
-        cat > alpine-minirootfs/init <<-EOF
+        cat >alpine-minirootfs/init <<-EOF
 			#! /bin/sh
 			mount -t devtmpfs dev /dev
 			echo \$TEST_STRING > /dev/console
@@ -146,7 +146,7 @@ update_workloads() {
         chmod +x alpine-minirootfs/init
         cd alpine-minirootfs
         find . -print0 |
-            cpio --null --create --verbose --owner root:root --format=newc > "$ALPINE_INITRAMFS_IMAGE"
+            cpio --null --create --verbose --owner root:root --format=newc >"$ALPINE_INITRAMFS_IMAGE"
         popd
     fi
 
@@ -167,10 +167,9 @@ update_workloads() {
     WGET_RETRY_MAX=10
     wget_retry=0
 
-    until [ "$wget_retry" -ge "$WGET_RETRY_MAX" ]
-    do
+    until [ "$wget_retry" -ge "$WGET_RETRY_MAX" ]; do
         time wget $CH_RELEASE_URL -O "$CH_RELEASE_NAME" && break
-        wget_retry=$((wget_retry+1))
+        wget_retry=$((wget_retry + 1))
     done
 
     if [ $wget_retry -ge "$WGET_RETRY_MAX" ]; then
@@ -213,8 +212,8 @@ update_workloads() {
     SHARED_DIR="$WORKLOADS_DIR/shared_dir"
     if [ ! -d "$SHARED_DIR" ]; then
         mkdir -p $SHARED_DIR
-        echo "foo" > "$SHARED_DIR/file1"
-        echo "bar" > "$SHARED_DIR/file3" || exit 1
+        echo "foo" >"$SHARED_DIR/file1"
+        echo "bar" >"$SHARED_DIR/file3" || exit 1
     fi
 
     # Checkout and build SPDK NVMe
@@ -231,7 +230,6 @@ if [[ "$hypervisor" = "mshv" ]]; then
     echo "AArch64 is not supported in Microsoft Hypervisor"
     exit 1
 fi
-
 
 # lock the workloads folder to avoid parallel updating by different containers
 (
@@ -258,8 +256,8 @@ sudo bash -c "echo 10 > /sys/kernel/mm/ksm/sleep_millisecs"
 sudo bash -c "echo 1 > /sys/kernel/mm/ksm/run"
 
 # Both test_vfio and ovs-dpdk rely on hugepages
-HUGEPAGESIZE=`grep Hugepagesize /proc/meminfo | awk '{print $2}'`
-PAGE_NUM=`echo $((12288 * 1024 / $HUGEPAGESIZE))`
+HUGEPAGESIZE=$(grep Hugepagesize /proc/meminfo | awk '{print $2}')
+PAGE_NUM=$(echo $((12288 * 1024 / $HUGEPAGESIZE)))
 echo $PAGE_NUM | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
