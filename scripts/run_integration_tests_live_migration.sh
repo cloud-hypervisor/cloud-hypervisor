@@ -12,7 +12,7 @@ process_common_args "$@"
 # For now these values are default for kvm
 test_features=""
 
-if [ "$hypervisor" = "mshv" ] ;  then
+if [ "$hypervisor" = "mshv" ]; then
     test_features="--features mshv"
 fi
 
@@ -66,8 +66,8 @@ fi
 cargo build --features mshv --all --release --target $BUILD_TARGET
 
 # Test ovs-dpdk relies on hugepages
-HUGEPAGESIZE=`grep Hugepagesize /proc/meminfo | awk '{print $2}'`
-PAGE_NUM=`echo $((12288 * 1024 / $HUGEPAGESIZE))`
+HUGEPAGESIZE=$(grep Hugepagesize /proc/meminfo | awk '{print $2}')
+PAGE_NUM=$(echo $((12288 * 1024 / $HUGEPAGESIZE)))
 echo $PAGE_NUM | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 

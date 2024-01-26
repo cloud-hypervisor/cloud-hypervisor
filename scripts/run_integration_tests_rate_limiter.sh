@@ -12,7 +12,7 @@ process_common_args "$@"
 # For now these values are default for kvm
 test_features=""
 
-if [ "$hypervisor" = "mshv" ] ;  then
+if [ "$hypervisor" = "mshv" ]; then
     test_features="--features mshv"
 fi
 

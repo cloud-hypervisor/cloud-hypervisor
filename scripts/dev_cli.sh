@@ -233,10 +233,10 @@ cmd_build() {
         "--debug") { build="debug"; } ;;
         "--release") { build="release"; } ;;
         "--runtime")
-	    shift
-	    DOCKER_RUNTIME="$1"
-	    export DOCKER_RUNTIME
-	    ;;
+            shift
+            DOCKER_RUNTIME="$1"
+            export DOCKER_RUNTIME
+            ;;
         "--libc")
             shift
             [[ "$1" =~ ^(musl|gnu)$ ]] ||
@@ -382,7 +382,7 @@ cmd_tests() {
         exported_device="/dev/mshv"
     fi
 
-    if [ ! -e "${exported_device}" ] ; then
+    if [ ! -e "${exported_device}" ]; then
         die "${exported_device} does not exist on the system"
     fi
 

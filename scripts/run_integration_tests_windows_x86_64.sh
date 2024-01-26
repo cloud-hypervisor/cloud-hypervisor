@@ -8,7 +8,7 @@ process_common_args "$@"
 # For now these values are default for kvm
 test_features=""
 
-if [ "$hypervisor" = "mshv" ] ;  then
+if [ "$hypervisor" = "mshv" ]; then
     test_features="--features mshv"
 fi
 WIN_IMAGE_FILE="/root/workloads/windows-server-2022-amd64-2.raw"
