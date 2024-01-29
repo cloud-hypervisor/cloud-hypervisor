@@ -21,6 +21,7 @@ use arch::RegionType;
 use devices::ioapic;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::HypervisorVmError;
+use libc::_SC_NPROCESSORS_ONLN;
 #[cfg(target_arch = "x86_64")]
 use libc::{MAP_NORESERVE, MAP_POPULATE, MAP_SHARED, PROT_READ, PROT_WRITE};
 use serde::{Deserialize, Serialize};
@@ -28,7 +29,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::convert::TryInto;
-use std::ffi;
 use std::fs::{File, OpenOptions};
 use std::io::{self};
 use std::ops::{BitAnd, Deref, Not, Sub};
@@ -38,6 +38,7 @@ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
 use std::result;
 use std::sync::{Arc, Barrier, Mutex};
+use std::{ffi, thread};
 use tracer::trace_scoped;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
@@ -79,6 +80,8 @@ const MPOL_MF_MOVE: u32 = 1 << 1;
 
 // Reserve 1 MiB for platform MMIO devices (e.g. ACPI control devices)
 const PLATFORM_DEVICE_AREA_SIZE: u64 = 1 << 20;
+
+const MAX_PREFAULT_THREAD_COUNT: usize = 16;
 
 #[derive(Clone, Default, Serialize, Deserialize, Versionize)]
 struct HotPlugState {
@@ -1420,30 +1423,12 @@ impl MemoryManager {
             None
         };
 
-        if prefault {
-            mmap_flags |= libc::MAP_POPULATE;
-        }
-
         let region = GuestRegionMmap::new(
             MmapRegion::build(fo, size, libc::PROT_READ | libc::PROT_WRITE, mmap_flags)
                 .map_err(Error::GuestMemoryRegion)?,
             start_addr,
         )
         .map_err(Error::GuestMemory)?;
-
-        if region.file_offset().is_none() && thp {
-            info!(
-                "Anonymous mapping at 0x{:x} (size = 0x{:x})",
-                region.as_ptr() as u64,
-                size
-            );
-            // SAFETY: FFI call with correct arguments
-            let ret = unsafe { libc::madvise(region.as_ptr() as _, size, libc::MADV_HUGEPAGE) };
-            if ret != 0 {
-                let e = io::Error::last_os_error();
-                warn!("Failed to mark pages as THP eligible: {}", e);
-            }
-        }
 
         // Apply NUMA policy if needed.
         if let Some(node) = host_numa_node {
@@ -1477,7 +1462,118 @@ impl MemoryManager {
                 .map_err(Error::ApplyNumaPolicy)?;
         }
 
+        // Prefault the region if needed, in parallel.
+        if prefault {
+            let page_size =
+                Self::get_prefault_align_size(backing_file, hugepages, hugepage_size)? as usize;
+
+            if !is_aligned(size, page_size) {
+                warn!(
+                    "Prefaulting memory size {} misaligned with page size {}",
+                    size, page_size
+                );
+            }
+
+            let num_pages = size / page_size;
+
+            let num_threads = Self::get_prefault_num_threads(page_size, num_pages);
+
+            let pages_per_thread = num_pages / num_threads;
+            let remainder = num_pages % num_threads;
+
+            let barrier = Arc::new(Barrier::new(num_threads));
+            thread::scope(|s| {
+                let r = &region;
+                for i in 0..num_threads {
+                    let barrier = Arc::clone(&barrier);
+                    s.spawn(move || {
+                        // Wait until all threads have been spawned to avoid contention
+                        // over mmap_sem between thread stack allocation and page faulting.
+                        barrier.wait();
+                        let pages = pages_per_thread + if i < remainder { 1 } else { 0 };
+                        let offset =
+                            page_size * ((i * pages_per_thread) + std::cmp::min(i, remainder));
+                        // SAFETY: FFI call with correct arguments
+                        let ret = unsafe {
+                            let addr = r.as_ptr().add(offset);
+                            libc::madvise(addr as _, pages * page_size, libc::MADV_POPULATE_WRITE)
+                        };
+                        if ret != 0 {
+                            let e = io::Error::last_os_error();
+                            warn!("Failed to prefault pages: {}", e);
+                        }
+                    });
+                }
+            });
+        }
+
+        if region.file_offset().is_none() && thp {
+            info!(
+                "Anonymous mapping at 0x{:x} (size = 0x{:x})",
+                region.as_ptr() as u64,
+                size
+            );
+            // SAFETY: FFI call with correct arguments
+            let ret = unsafe { libc::madvise(region.as_ptr() as _, size, libc::MADV_HUGEPAGE) };
+            if ret != 0 {
+                let e = io::Error::last_os_error();
+                warn!("Failed to mark pages as THP eligible: {}", e);
+            }
+        }
+
         Ok(Arc::new(region))
+    }
+
+    // Duplicate of `memory_zone_get_align_size` that does not require a `zone`
+    fn get_prefault_align_size(
+        backing_file: &Option<PathBuf>,
+        hugepages: bool,
+        hugepage_size: Option<u64>,
+    ) -> Result<u64, Error> {
+        // SAFETY: FFI call. Trivially safe.
+        let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) as u64 };
+        match (hugepages, hugepage_size, backing_file) {
+            (false, _, _) => Ok(page_size),
+            (true, Some(hugepage_size), _) => Ok(hugepage_size),
+            (true, None, _) => {
+                // There are two scenarios here:
+                //  - `hugepages` is enabled but `hugepage_size` is not specified:
+                //     Call `statfs` for `/dev/hugepages` for getting the default size of hugepage
+                //  - The backing file is specified:
+                //     Call `statfs` for the file and get its `f_bsize`.  If the value is larger than the page
+                //     size of normal page, just use the `f_bsize` because the file is in a hugetlbfs.  If the
+                //     value is less than or equal to the page size, just use the page size.
+                let path = backing_file
+                    .as_ref()
+                    .map_or(Ok("/dev/hugepages"), |pathbuf| {
+                        pathbuf.to_str().ok_or(Error::InvalidMemoryParameters)
+                    })?;
+                let align_size = std::cmp::max(page_size, statfs_get_bsize(path)?);
+                Ok(align_size)
+            }
+        }
+    }
+
+    fn get_prefault_num_threads(page_size: usize, num_pages: usize) -> usize {
+        let mut n: usize = 1;
+
+        // Do not create more threads than processors available.
+        // SAFETY: FFI call. Trivially safe.
+        let procs = unsafe { libc::sysconf(_SC_NPROCESSORS_ONLN) };
+        if procs > 0 {
+            n = std::cmp::min(procs as usize, MAX_PREFAULT_THREAD_COUNT);
+        }
+
+        // Do not create more threads than pages being allocated.
+        n = std::cmp::min(n, num_pages);
+
+        // Do not create threads to allocate less than 64 MiB of memory.
+        n = std::cmp::min(
+            n,
+            std::cmp::max(1, page_size * num_pages / (64 * (1 << 26))),
+        );
+
+        n
     }
 
     // Update the GuestMemoryMmap with the new range
