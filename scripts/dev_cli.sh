@@ -121,9 +121,7 @@ ensure_latest_ctr() {
     if [ "$CTR_IMAGE_VERSION" = "local" ]; then
         build_container
     else
-        $DOCKER_RUNTIME pull "$CTR_IMAGE"
-
-        if [ $? -ne 0 ]; then
+        if ! $DOCKER_RUNTIME pull "$CTR_IMAGE"; then
             build_container
         fi
 
@@ -143,7 +141,8 @@ fix_dir_perms() {
         --workdir "$CTR_CLH_ROOT_DIR" \
         --rm \
         --volume /dev:/dev \
-        --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
+        --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+        ${exported_volumes:+"$exported_volumes"} \
         "$CTR_IMAGE" \
         chown -R "$(id -u):$(id -g)" "$CTR_CLH_ROOT_DIR"
 
@@ -158,9 +157,9 @@ process_volumes_args() {
         return
     fi
     exported_volumes=""
-    arr_vols=(${arg_vols//#/ })
+    arr_vols=("${arg_vols//#/ }")
     for var in "${arr_vols[@]}"; do
-        parts=(${var//:/ })
+        parts=("${var//:/ }")
         if [[ ! -e "${parts[0]}" ]]; then
             echo "The volume ${parts[0]} does not exist."
             exit 1
@@ -282,6 +281,7 @@ cmd_build() {
     [ $build = "release" ] && cargo_args+=("--release")
     cargo_args+=(--target "$target")
 
+    # shellcheck disable=SC2153
     rustflags="$RUSTFLAGS"
     target_cc=""
     if [ "$(uname -m)" = "aarch64" ] && [ "$libc" = "musl" ]; then
@@ -293,11 +293,12 @@ cmd_build() {
         --workdir "$CTR_CLH_ROOT_DIR" \
         --rm \
         --volume $exported_device \
-        --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
+        --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+        ${exported_volumes:+"$exported_volumes"} \
         --env RUSTFLAGS="$rustflags" \
         --env TARGET_CC="$target_cc" \
         "$CTR_IMAGE" \
-        cargo build --all $features_build \
+        cargo build --all "$features_build" \
         --target-dir "$CTR_CLH_CARGO_TARGET" \
         "${cargo_args[@]}" && say "Binaries placed under $CLH_CARGO_TARGET/$target/$build"
 }
@@ -312,7 +313,8 @@ cmd_clean() {
         --user "$(id -u):$(id -g)" \
         --workdir "$CTR_CLH_ROOT_DIR" \
         --rm \
-        --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
+        --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+        ${exported_volumes:+"$exported_volumes"} \
         "$CTR_IMAGE" \
         cargo clean \
         --target-dir "$CTR_CLH_CARGO_TARGET" \
@@ -408,7 +410,8 @@ cmd_tests() {
             --device $exported_device \
             --device /dev/net/tun \
             --cap-add net_admin \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
+            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+            ${exported_volumes:+"$exported_volumes"} \
             --env BUILD_TARGET="$target" \
             --env RUSTFLAGS="$rustflags" \
             --env TARGET_CC="$target_cc" \
@@ -427,7 +430,8 @@ cmd_tests() {
             --net="$CTR_CLH_NET" \
             --mount type=tmpfs,destination=/tmp \
             --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
+            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+            ${exported_volumes:+"$exported_volumes"} \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
             --env USER="root" \
             --env BUILD_TARGET="$target" \
@@ -449,7 +453,8 @@ cmd_tests() {
             --net="$CTR_CLH_NET" \
             --mount type=tmpfs,destination=/tmp \
             --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
+            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+            ${exported_volumes:+"$exported_volumes"} \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
             --env USER="root" \
             --env BUILD_TARGET="$target" \
@@ -471,7 +476,8 @@ cmd_tests() {
             --net="$CTR_CLH_NET" \
             --mount type=tmpfs,destination=/tmp \
             --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
+            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+            ${exported_volumes:+"$exported_volumes"} \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
             --env USER="root" \
             --env BUILD_TARGET="$target" \
@@ -493,7 +499,8 @@ cmd_tests() {
             --net="$CTR_CLH_NET" \
             --mount type=tmpfs,destination=/tmp \
             --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
+            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+            ${exported_volumes:+"$exported_volumes"} \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
             --env USER="root" \
             --env BUILD_TARGET="$target" \
@@ -515,7 +522,8 @@ cmd_tests() {
             --net="$CTR_CLH_NET" \
             --mount type=tmpfs,destination=/tmp \
             --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
+            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+            ${exported_volumes:+"$exported_volumes"} \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
             --env USER="root" \
             --env BUILD_TARGET="$target" \
@@ -537,7 +545,8 @@ cmd_tests() {
             --net="$CTR_CLH_NET" \
             --mount type=tmpfs,destination=/tmp \
             --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
+            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+            ${exported_volumes:+"$exported_volumes"} \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
             --env USER="root" \
             --env BUILD_TARGET="$target" \
@@ -559,7 +568,8 @@ cmd_tests() {
             --net="$CTR_CLH_NET" \
             --mount type=tmpfs,destination=/tmp \
             --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
+            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+            ${exported_volumes:+"$exported_volumes"} \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
             --env USER="root" \
             --env BUILD_TARGET="$target" \
@@ -587,9 +597,9 @@ build_container() {
 
     $DOCKER_RUNTIME build \
         --target dev \
-        -t $CTR_IMAGE \
+        -t "$CTR_IMAGE" \
         -f $BUILD_DIR/Dockerfile \
-        --build-arg TARGETARCH=$TARGETARCH \
+        --build-arg TARGETARCH="$TARGETARCH" \
         $BUILD_DIR
 }
 
@@ -649,7 +659,8 @@ cmd_shell() {
         --net="$CTR_CLH_NET" \
         --tmpfs /tmp:exec \
         --volume /dev:/dev \
-        --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
+        --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+        ${exported_volumes:+"$exported_volumes"} \
         --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
         --env USER="root" \
         --entrypoint bash \

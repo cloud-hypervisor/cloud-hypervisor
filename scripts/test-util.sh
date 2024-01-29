@@ -18,13 +18,13 @@ checkout_repo() {
     # If commit is not specified, compare local HEAD and remote HEAD.
     # Remove the folder if there is difference.
     if [ -d "$SRC_DIR" ]; then
-        pushd $SRC_DIR
+        pushd "$SRC_DIR" || exit
         git fetch
         SRC_LOCAL_COMMIT=$(git rev-parse HEAD)
         if [ -z "$GIT_COMMIT" ]; then
             GIT_COMMIT=$(git rev-parse remotes/origin/"$GIT_BRANCH")
         fi
-        popd
+        popd || exit
         if [ "$SRC_LOCAL_COMMIT" != "$GIT_COMMIT" ]; then
             rm -rf "$SRC_DIR"
         fi
@@ -34,10 +34,10 @@ checkout_repo() {
     if [ ! -d "$SRC_DIR" ]; then
         git clone --depth 1 "$GIT_URL" -b "$GIT_BRANCH" "$SRC_DIR"
         if [ "$GIT_COMMIT" ]; then
-            pushd "$SRC_DIR"
+            pushd "$SRC_DIR" || exit
             git fetch --depth 1 origin "$GIT_COMMIT"
             git reset --hard FETCH_HEAD
-            popd
+            popd || exit
         fi
     fi
 }
@@ -51,23 +51,23 @@ build_custom_linux() {
 
     checkout_repo "$LINUX_CUSTOM_DIR" "$LINUX_CUSTOM_URL" "$LINUX_CUSTOM_BRANCH"
 
-    cp $SRCDIR/resources/linux-config-${ARCH} $LINUX_CUSTOM_DIR/.config
+    cp "$SRCDIR"/resources/linux-config-"${ARCH}" "$LINUX_CUSTOM_DIR"/.config
 
-    pushd $LINUX_CUSTOM_DIR
-    make -j $(nproc)
-    if [ ${ARCH} == "x86_64" ]; then
+    pushd "$LINUX_CUSTOM_DIR" || exit
+    make -j "$(nproc)"
+    if [ "${ARCH}" == "x86_64" ]; then
         cp vmlinux "$WORKLOADS_DIR/" || exit 1
-    elif [ ${ARCH} == "aarch64" ]; then
+    elif [ "${ARCH}" == "aarch64" ]; then
         cp arch/arm64/boot/Image "$WORKLOADS_DIR/" || exit 1
         cp arch/arm64/boot/Image.gz "$WORKLOADS_DIR/" || exit 1
     fi
-    popd
+    popd || exit
 }
 
 cmd_help() {
     echo ""
-    echo "Cloud Hypervisor $(basename $0)"
-    echo "Usage: $(basename $0) [<args>]"
+    echo "Cloud Hypervisor $(basename "$0")"
+    echo "Usage: $(basename "$0") [<args>]"
     echo ""
     echo "Available arguments:"
     echo ""
@@ -91,6 +91,7 @@ process_common_args() {
             ;;
         "--test-filter")
             shift
+            # shellcheck disable=SC2034
             test_filter="$1"
             ;;
         "--") {
@@ -107,8 +108,8 @@ process_common_args() {
     if [[ ! ("$hypervisor" = "kvm" || "$hypervisor" = "mshv") ]]; then
         die "Hypervisor value must be kvm or mshv"
     fi
-
-    test_binary_args=($@)
+    # shellcheck disable=SC2034
+    test_binary_args=("$@")
 }
 
 download_hypervisor_fw() {
@@ -122,18 +123,18 @@ download_hypervisor_fw() {
         FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/rust-hypervisor-firmware/releases/latest | grep "browser_download_url" | grep -o 'https://.*[^ "]')
     fi
     FW="$WORKLOADS_DIR/hypervisor-fw"
-    pushd $WORKLOADS_DIR
-    rm -f $FW
-    time wget --quiet $FW_URL || exit 1
-    popd
+    pushd "$WORKLOADS_DIR" || exit
+    rm -f "$FW"
+    time wget --quiet "$FW_URL" || exit 1
+    popd || exit
 }
 
 download_ovmf() {
     OVMF_FW_TAG="ch-6624aa331f"
     OVMF_FW_URL="https://github.com/cloud-hypervisor/edk2/releases/download/$OVMF_FW_TAG/CLOUDHV.fd"
     OVMF_FW="$WORKLOADS_DIR/CLOUDHV.fd"
-    pushd $WORKLOADS_DIR
-    rm -f $OVMF_FW
+    pushd "$WORKLOADS_DIR" || exit
+    rm -f "$OVMF_FW"
     time wget --quiet $OVMF_FW_URL || exit 1
-    popd
+    popd || exit
 }

@@ -16,7 +16,7 @@ where:
     -w  directory to be used for temporary files"
 
 function check_command {
-    if ! command -v $1 &>/dev/null; then
+    if ! command -v "$1" &>/dev/null; then
         echo "Command $1 could not be found"
         exit 1
     fi
@@ -68,7 +68,7 @@ if [[ ! -f ${file_name} ]]; then
     exit 1
 fi
 
-file_abs_path=$(readlink -m ${file_name})
+file_abs_path=$(readlink -m "${file_name}")
 if [[ "${working_dir}" != "" && ! -d "${working_dir}" ]]; then
     echo "Directory ${working_dir} does not exist"
     exit 1
@@ -76,12 +76,12 @@ elif [[ "${working_dir}" == "" ]]; then
     working_dir=$(mktemp -d)
     tmp_created=1
 else
-    working_dir=$(readlink -m ${working_dir})
+    working_dir=$(readlink -m "${working_dir}")
 fi
 
 filename="${file_name%.*}"
 dest_file=${working_dir}/${filename}.raw
-image_type=$(qemu-img info ${file_abs_path} | grep 'file format:' | awk '{ print $3 }')
+image_type=$(qemu-img info "${file_abs_path}" | grep 'file format:' | awk '{ print $3 }')
 echo "Image type detected as ${image_type}"
 
 if [[ "${image_type}" == "raw" ]]; then
@@ -91,26 +91,26 @@ elif [[ "$image_type" == "qcow2" ]]; then
         echo "Module nbd is loaded!"
     else
         echo "Module nbd is not loaded. Trying to load the module"
-        modprobe nbd max_part=8
-        if [ $? != 0 ]; then
+
+        if ! modprobe nbd max_part=8; then
             echo "failed to load nbd module. Exiting"
             exit 1
         fi
     fi
     check_command qemu-img
     dest_file=/dev/nbd0
-    qemu-nbd --connect=${dest_file} ${file_abs_path} --read-only
+    qemu-nbd --connect=${dest_file} "${file_abs_path}" --read-only
 fi
 
 check_command blkid
 #get part info
-part_type=$(blkid -o value -s PTTYPE ${dest_file})
+part_type=$(blkid -o value -s PTTYPE "${dest_file}")
 
 check_command partx
-nr_partitions=$(partx -g ${dest_file} | wc -l)
+nr_partitions=$(partx -g "${dest_file}" | wc -l)
 
 check_command fdisk
-out=$(fdisk -l ${dest_file} --bytes | grep -i -A ${nr_partitions} 'Device' | tail -n +2)
+out=$(fdisk -l "${dest_file}" --bytes | grep -i -A "${nr_partitions}" 'Device' | tail -n +2)
 
 IFS='
 '
@@ -128,7 +128,7 @@ ROWS=${#lines[@]}
 
 for line in "${lines[@]}"; do
     j=0
-    read -a str_arr <<<"$line"
+    read -a -r str_arr <<<"$line"
     for val in "${str_arr[@]}"; do
         if [[ "$val" != "*" ]]; then
             partitions[$i, $j]=$val
@@ -163,9 +163,9 @@ MOUNT_DIR=/mnt/clh-img-check/
 rm -rf ${MOUNT_DIR}
 mkdir ${MOUNT_DIR}
 if [[ "${image_type}" == "raw" ]]; then
-    mount -o ro,loop,offset=$offset ${dest_file} ${MOUNT_DIR}
+    mount -o ro,loop,offset=$offset "${dest_file}" ${MOUNT_DIR}
 elif [[ "${image_type}" == "qcow2" ]]; then
-    mount -o ro ${partitions[${MOUNT_ROW}, ${DEVICE_INDEX}]} ${MOUNT_DIR}
+    mount -o ro "${partitions[${MOUNT_ROW}, ${DEVICE_INDEX}]}" ${MOUNT_DIR}
 fi
 
 CONFIG_DIR=${MOUNT_DIR}boot/
@@ -175,8 +175,8 @@ fi
 
 #check VIRTIO
 HAS_VIRTIO=1
-for conf_file in ${CONFIG_DIR}config*; do
-    out=$(grep -E "CONFIG_VIRTIO=y|CONFIG_VIRTIO_BLK=y|CONFIG_VIRTIO_BLK=m" ${conf_file} | wc -l)
+for conf_file in "${CONFIG_DIR}"config*; do
+    out=$(grep -cE "CONFIG_VIRTIO=y|CONFIG_VIRTIO_BLK=y|CONFIG_VIRTIO_BLK=m" "${conf_file}")
     if [[ "$out" != "2" ]]; then
         echo "VIRTIO not found"
         HAS_VIRTIO=0
@@ -187,11 +187,11 @@ done
 umount ${MOUNT_DIR}
 
 if [[ "${tmp_created}" == "1" ]]; then
-    rm -rf ${working_dir}
+    rm -rf "${working_dir}"
 fi
 
 if [[ "${image_type}" == "qcow2" ]]; then
-    qemu-nbd --disconnect ${dest_file} >/dev/null
+    qemu-nbd --disconnect "${dest_file}" >/dev/null
 fi
 
 result=""

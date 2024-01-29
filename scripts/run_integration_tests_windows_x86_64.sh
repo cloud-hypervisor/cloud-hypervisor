@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2048,SC2086
 set -x
 
-source $HOME/.cargo/env
-source $(dirname "$0")/test-util.sh
+# shellcheck source=/dev/null
+source "$HOME"/.cargo/env
+source "$(dirname "$0")"/test-util.sh
 
 process_common_args "$@"
 # For now these values are default for kvm
@@ -19,6 +21,7 @@ download_ovmf
 
 CFLAGS=""
 if [[ "${BUILD_TARGET}" == "x86_64-unknown-linux-musl" ]]; then
+    # shellcheck disable=SC2034
     CFLAGS="-I /usr/include/x86_64-linux-musl/ -idirafter /usr/include/"
 fi
 
@@ -36,7 +39,7 @@ dmsetup mknodes
 dmsetup create windows-snapshot-base --table "0 $img_blk_size snapshot-origin /dev/mapper/windows-base"
 dmsetup mknodes
 
-cargo build --features mshv --all --release --target $BUILD_TARGET
+cargo build --features mshv --all --release --target "$BUILD_TARGET"
 
 export RUST_BACKTRACE=1
 
