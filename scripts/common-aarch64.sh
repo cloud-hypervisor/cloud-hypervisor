@@ -22,25 +22,26 @@ build_edk2() {
 
     # Prepare source code
     checkout_repo "$EDK2_DIR" "$EDK2_REPO" master "46b4606ba23498d3d0e66b53e498eb3d5d592586"
-    pushd "$EDK2_DIR"
+    pushd "$EDK2_DIR" || exit
     git submodule update --init
-    popd
+    popd || exit
     checkout_repo "$EDK2_PLAT_DIR" "$EDK2_PLAT_REPO" master "8227e9e9f6a8aefbd772b40138f835121ccb2307"
     checkout_repo "$ACPICA_DIR" "$ACPICA_REPO" master "b9c69f81a05c45611c91ea9cbce8756078d76233"
 
     if [[ ! -f "$EDK2_DIR/.built" ||
         ! -f "$EDK2_PLAT_DIR/.built" ||
         ! -f "$ACPICA_DIR/.built" ]]; then
-        pushd "$EDK2_BUILD_DIR"
+        pushd "$EDK2_BUILD_DIR" || exit
         # Build
-        make -C acpica -j $(nproc)
+        make -C acpica -j "$(nproc)"
+        # shellcheck disable=SC1091
         source edk2/edksetup.sh
-        make -C edk2/BaseTools -j $(nproc)
+        make -C edk2/BaseTools -j "$(nproc)"
         build -a AARCH64 -t GCC5 -p ArmVirtPkg/ArmVirtCloudHv.dsc -b RELEASE -n 0
         cp Build/ArmVirtCloudHv-AARCH64/RELEASE_GCC5/FV/CLOUDHV_EFI.fd "$WORKLOADS_DIR"
         touch "$EDK2_DIR"/.built
         touch "$EDK2_PLAT_DIR"/.built
         touch "$ACPICA_DIR"/.built
-        popd
+        popd || exit
     fi
 }

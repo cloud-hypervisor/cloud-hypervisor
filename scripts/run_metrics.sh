@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -x
 
-source $HOME/.cargo/env
-source $(dirname "$0")/test-util.sh
+# shellcheck source=/dev/null
+source "$HOME"/.cargo/env
+source "$(dirname "$0")"/test-util.sh
 
-export TEST_ARCH=$(uname -m)
+TEST_ARCH=$(uname -m)
+export TEST_ARCH
 
 WORKLOADS_DIR="$HOME/workloads"
 mkdir -p "$WORKLOADS_DIR"
@@ -15,20 +17,20 @@ build_fio() {
 
     checkout_repo "$FIO_DIR" "$FIO_REPO" master "1953e1adb5a28ed21370e85991d7f5c3cdc699f3"
     if [ ! -f "$FIO_DIR/.built" ]; then
-        pushd $FIO_DIR
+        pushd "$FIO_DIR" || exit
         ./configure
-        make -j $(nproc)
+        make -j "$(nproc)"
         cp fio "$WORKLOADS_DIR/fio"
         touch .built
-        popd
+        popd || exit
     fi
 }
 
 process_common_args "$@"
 
-cp scripts/sha1sums-${TEST_ARCH} $WORKLOADS_DIR
+cp scripts/sha1sums-"${TEST_ARCH}" "$WORKLOADS_DIR"
 
-if [ ${TEST_ARCH} == "aarch64" ]; then
+if [ "${TEST_ARCH}" == "aarch64" ]; then
     FOCAL_OS_IMAGE_NAME="focal-server-cloudimg-arm64-custom-20210929-0.qcow2"
 else
     FOCAL_OS_IMAGE_NAME="focal-server-cloudimg-amd64-custom-20210609-0.qcow2"
@@ -37,12 +39,12 @@ fi
 FOCAL_OS_IMAGE_URL="https://cloud-hypervisor.azureedge.net/$FOCAL_OS_IMAGE_NAME"
 FOCAL_OS_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_IMAGE_NAME"
 if [ ! -f "$FOCAL_OS_IMAGE" ]; then
-    pushd $WORKLOADS_DIR
+    pushd "$WORKLOADS_DIR" || exit
     time wget --quiet $FOCAL_OS_IMAGE_URL || exit 1
-    popd
+    popd || exit
 fi
 
-if [ ${TEST_ARCH} == "aarch64" ]; then
+if [ "${TEST_ARCH}" == "aarch64" ]; then
     FOCAL_OS_RAW_IMAGE_NAME="focal-server-cloudimg-arm64-custom-20210929-0.raw"
 else
     FOCAL_OS_RAW_IMAGE_NAME="focal-server-cloudimg-amd64-custom-20210609-0.raw"
@@ -50,20 +52,19 @@ fi
 
 FOCAL_OS_RAW_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_NAME"
 if [ ! -f "$FOCAL_OS_RAW_IMAGE" ]; then
-    pushd $WORKLOADS_DIR
+    pushd "$WORKLOADS_DIR" || exit
     time qemu-img convert -p -f qcow2 -O raw $FOCAL_OS_IMAGE_NAME $FOCAL_OS_RAW_IMAGE_NAME || exit 1
-    popd
+    popd || exit
 fi
 
-pushd $WORKLOADS_DIR
-grep focal sha1sums-${TEST_ARCH} | sha1sum --check
-if [ $? -ne 0 ]; then
+pushd "$WORKLOADS_DIR" || exit
+if ! grep focal sha1sums-"${TEST_ARCH}" | sha1sum --check; then
     echo "sha1sum validation of images failed, remove invalid images to fix the issue."
     exit 1
 fi
-popd
+popd || exit
 
-if [ ${TEST_ARCH} == "aarch64" ]; then
+if [ "${TEST_ARCH}" == "aarch64" ]; then
     build_fio
 
     # Update the fio in the cloud image to use io_uring on AArch64
@@ -84,15 +85,16 @@ build_custom_linux
 
 CFLAGS=""
 if [[ "${BUILD_TARGET}" == "${TEST_ARCH}-unknown-linux-musl" ]]; then
+    # shellcheck disable=SC2034
     CFLAGS="-I /usr/include/${TEST_ARCH}-linux-musl/ -idirafter /usr/include/"
 fi
 
-cargo build --features mshv --all --release --target $BUILD_TARGET
+cargo build --features mshv --all --release --target "$BUILD_TARGET"
 
 # setup hugepages
 HUGEPAGESIZE=$(grep Hugepagesize /proc/meminfo | awk '{print $2}')
-PAGE_NUM=$(echo $((12288 * 1024 / $HUGEPAGESIZE)))
-echo $PAGE_NUM | sudo tee /proc/sys/vm/nr_hugepages
+PAGE_NUM=$((12288 * 1024 / HUGEPAGESIZE))
+echo "$PAGE_NUM" | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
 if [ -n "$test_filter" ]; then
@@ -100,15 +102,16 @@ if [ -n "$test_filter" ]; then
 fi
 
 # Ensure that git commands can be run in this directory (for metrics report)
-git config --global --add safe.directory $PWD
+git config --global --add safe.directory "$PWD"
 
-RUST_BACKTRACE_VALUE=$(echo $RUST_BACKTRACE)
-if [ -z $RUST_BACKTRACE_VALUE ]; then
+RUST_BACKTRACE_VALUE=$RUST_BACKTRACE
+if [ -z "$RUST_BACKTRACE_VALUE" ]; then
     export RUST_BACKTRACE=1
 else
     echo "RUST_BACKTRACE is set to: $RUST_BACKTRACE_VALUE"
 fi
-time target/$BUILD_TARGET/release/performance-metrics ${test_binary_args[*]}
+# shellcheck disable=SC2048,SC2086
+time target/"$BUILD_TARGET"/release/performance-metrics ${test_binary_args[*]}
 RES=$?
 
 exit $RES

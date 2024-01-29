@@ -4,17 +4,17 @@ set -x
 sudo apt install -y libncurses-dev gawk flex bison openssl libssl-dev dkms libelf-dev libudev-dev libpci-dev libiberty-dev autoconf git make dpkg-dev libmnl-dev pkg-config iproute2
 sudo sed -i -- 's/# deb-src/deb-src/g' /etc/apt/sources.list
 sudo apt update
-apt-get source linux-image-unsigned-$(uname -r)
-pushd linux-azure*/drivers/vdpa/vdpa_sim/
+apt-get source linux-image-unsigned-"$(uname -r)"
+pushd linux-azure*/drivers/vdpa/vdpa_sim/ || exit
 cat <<'EOF' >Makefile
 # SPDX-License-Identifier: GPL-2.0
 obj-m += vdpa_sim.o
 obj-m += vdpa_sim_net.o
 obj-m += vdpa_sim_blk.o
 EOF
-make -C /lib/modules/$(uname -r)/build M=$PWD
-sudo make -C /lib/modules/$(uname -r)/build M=$PWD modules_install
-popd
+make -C /lib/modules/"$(uname -r)"/build M="$PWD"
+sudo make -C /lib/modules/"$(uname -r)"/build M="$PWD" modules_install
+popd || exit
 sudo depmod -a
 sudo modprobe vdpa
 sudo modprobe vhost_vdpa

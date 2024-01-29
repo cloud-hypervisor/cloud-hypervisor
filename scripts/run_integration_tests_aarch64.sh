@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2048,SC2086
 set -x
 
-source $HOME/.cargo/env
-source $(dirname "$0")/test-util.sh
-source $(dirname "$0")/common-aarch64.sh
+# shellcheck source=/dev/null
+source "$HOME"/.cargo/env
+source "$(dirname "$0")"/test-util.sh
+source "$(dirname "$0")"/common-aarch64.sh
 
 WORKLOADS_LOCK="$WORKLOADS_DIR/integration_test.lock"
 
@@ -14,16 +16,16 @@ build_spdk_nvme() {
     checkout_repo "$SPDK_DIR" "$SPDK_REPO" master "ef8bcce58f3f02b79c0619a297e4f17e81e62b24"
 
     if [ ! -f "$SPDK_DIR/.built" ]; then
-        pushd $SPDK_DIR
+        pushd "$SPDK_DIR" || exit
         git submodule update --init
         apt-get update
         sed -i "/grpcio/d" scripts/pkgdep/debian.sh
         ./scripts/pkgdep.sh
         ./configure --with-vfio-user
         chmod +x /usr/local/lib/python3.10/dist-packages/ninja/data/bin/ninja
-        make -j $(nproc) || exit 1
+        make -j "$(nproc)" || exit 1
         touch .built
-        popd
+        popd || exit
     fi
     if [ ! -d "/usr/local/bin/spdk-nvme" ]; then
         mkdir -p $SPDK_DEPLOY_DIR
@@ -41,33 +43,33 @@ build_virtiofsd() {
     checkout_repo "$VIRTIOFSD_DIR" "$VIRTIOFSD_REPO" v1.8.0 "97ea7908fe7f9bc59916671a771bdcfaf4044b45"
 
     if [ ! -f "$VIRTIOFSD_DIR/.built" ]; then
-        pushd $VIRTIOFSD_DIR
+        pushd "$VIRTIOFSD_DIR" || exit
         rm -rf target/
         time RUSTFLAGS="" TARGET_CC="" cargo build --release
         cp target/release/virtiofsd "$WORKLOADS_DIR/" || exit 1
         touch .built
-        popd
+        popd || exit
     fi
 }
 
 update_workloads() {
-    cp scripts/sha1sums-aarch64 $WORKLOADS_DIR
+    cp scripts/sha1sums-aarch64 "$WORKLOADS_DIR"
 
     BIONIC_OS_IMAGE_DOWNLOAD_NAME="bionic-server-cloudimg-arm64.img"
     BIONIC_OS_IMAGE_DOWNLOAD_URL="https://cloud-hypervisor.azureedge.net/$BIONIC_OS_IMAGE_DOWNLOAD_NAME"
     BIONIC_OS_DOWNLOAD_IMAGE="$WORKLOADS_DIR/$BIONIC_OS_IMAGE_DOWNLOAD_NAME"
     if [ ! -f "$BIONIC_OS_DOWNLOAD_IMAGE" ]; then
-        pushd $WORKLOADS_DIR
+        pushd "$WORKLOADS_DIR" || exit
         time wget --quiet $BIONIC_OS_IMAGE_DOWNLOAD_URL || exit 1
-        popd
+        popd || exit
     fi
 
     BIONIC_OS_RAW_IMAGE_NAME="bionic-server-cloudimg-arm64.raw"
     BIONIC_OS_RAW_IMAGE="$WORKLOADS_DIR/$BIONIC_OS_RAW_IMAGE_NAME"
     if [ ! -f "$BIONIC_OS_RAW_IMAGE" ]; then
-        pushd $WORKLOADS_DIR
+        pushd "$WORKLOADS_DIR" || exit
         time qemu-img convert -p -f qcow2 -O raw $BIONIC_OS_IMAGE_DOWNLOAD_NAME $BIONIC_OS_RAW_IMAGE_NAME || exit 1
-        popd
+        popd || exit
     fi
 
     # Convert the raw image to qcow2 image to remove compressed blocks from the disk. Therefore letting the
@@ -75,66 +77,66 @@ update_workloads() {
     BIONIC_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME="bionic-server-cloudimg-arm64.qcow2"
     BIONIC_OS_QCOW2_UNCOMPRESSED_IMAGE="$WORKLOADS_DIR/$BIONIC_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME"
     if [ ! -f "$BIONIC_OS_QCOW2_UNCOMPRESSED_IMAGE" ]; then
-        pushd $WORKLOADS_DIR
-        time qemu-img convert -p -f raw -O qcow2 $BIONIC_OS_RAW_IMAGE_NAME $BIONIC_OS_QCOW2_UNCOMPRESSED_IMAGE || exit 1
-        popd
+        pushd "$WORKLOADS_DIR" || exit
+        time qemu-img convert -p -f raw -O qcow2 $BIONIC_OS_RAW_IMAGE_NAME "$BIONIC_OS_QCOW2_UNCOMPRESSED_IMAGE" || exit 1
+        popd || exit
     fi
 
     FOCAL_OS_RAW_IMAGE_NAME="focal-server-cloudimg-arm64-custom-20210929-0.raw"
     FOCAL_OS_RAW_IMAGE_DOWNLOAD_URL="https://cloud-hypervisor.azureedge.net/$FOCAL_OS_RAW_IMAGE_NAME"
     FOCAL_OS_RAW_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_NAME"
     if [ ! -f "$FOCAL_OS_RAW_IMAGE" ]; then
-        pushd $WORKLOADS_DIR
+        pushd "$WORKLOADS_DIR" || exit
         time wget --quiet $FOCAL_OS_RAW_IMAGE_DOWNLOAD_URL || exit 1
-        popd
+        popd || exit
     fi
 
     FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME="focal-server-cloudimg-arm64-custom-20210929-0.qcow2"
     FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_DOWNLOAD_URL="https://cloud-hypervisor.azureedge.net/$FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME"
     FOCAL_OS_QCOW2_UNCOMPRESSED_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME"
     if [ ! -f "$FOCAL_OS_QCOW2_UNCOMPRESSED_IMAGE" ]; then
-        pushd $WORKLOADS_DIR
+        pushd "$WORKLOADS_DIR" || exit
         time wget --quiet $FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_DOWNLOAD_URL || exit 1
-        popd
+        popd || exit
     fi
 
     FOCAL_OS_QCOW2_IMAGE_BACKING_FILE_NAME="focal-server-cloudimg-arm64-custom-20210929-0-backing.qcow2"
     FOCAL_OS_QCOW2_BACKING_FILE_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_QCOW2_IMAGE_BACKING_FILE_NAME"
     if [ ! -f "$FOCAL_OS_QCOW2_BACKING_FILE_IMAGE" ]; then
-        pushd $WORKLOADS_DIR
-        time qemu-img create -f qcow2 -b $FOCAL_OS_QCOW2_UNCOMPRESSED_IMAGE -F qcow2 $FOCAL_OS_QCOW2_IMAGE_BACKING_FILE_NAME
-        popd
+        pushd "$WORKLOADS_DIR" || exit
+        time qemu-img create -f qcow2 -b "$FOCAL_OS_QCOW2_UNCOMPRESSED_IMAGE" -F qcow2 $FOCAL_OS_QCOW2_IMAGE_BACKING_FILE_NAME
+        popd || exit
     fi
 
     JAMMY_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0.raw"
     JAMMY_OS_RAW_IMAGE_DOWNLOAD_URL="https://cloud-hypervisor.azureedge.net/$JAMMY_OS_RAW_IMAGE_NAME"
     JAMMY_OS_RAW_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_RAW_IMAGE_NAME"
     if [ ! -f "$JAMMY_OS_RAW_IMAGE" ]; then
-        pushd $WORKLOADS_DIR
+        pushd "$WORKLOADS_DIR" || exit
         time wget --quiet $JAMMY_OS_RAW_IMAGE_DOWNLOAD_URL || exit 1
-        popd
+        popd || exit
     fi
 
     JAMMY_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME="jammy-server-cloudimg-arm64-custom-20220329-0.qcow2"
     JAMMY_OS_QCOW2_IMAGE_UNCOMPRESSED_DOWNLOAD_URL="https://cloud-hypervisor.azureedge.net/$JAMMY_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME"
     JAMMY_OS_QCOW2_UNCOMPRESSED_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME"
     if [ ! -f "$JAMMY_OS_QCOW2_UNCOMPRESSED_IMAGE" ]; then
-        pushd $WORKLOADS_DIR
+        pushd "$WORKLOADS_DIR" || exit
         time wget --quiet $JAMMY_OS_QCOW2_IMAGE_UNCOMPRESSED_DOWNLOAD_URL || exit 1
-        popd
+        popd || exit
     fi
 
     ALPINE_MINIROOTFS_URL="http://dl-cdn.alpinelinux.org/alpine/v3.11/releases/aarch64/alpine-minirootfs-3.11.3-aarch64.tar.gz"
     ALPINE_MINIROOTFS_TARBALL="$WORKLOADS_DIR/alpine-minirootfs-aarch64.tar.gz"
     if [ ! -f "$ALPINE_MINIROOTFS_TARBALL" ]; then
-        pushd $WORKLOADS_DIR
-        time wget --quiet $ALPINE_MINIROOTFS_URL -O $ALPINE_MINIROOTFS_TARBALL || exit 1
-        popd
+        pushd "$WORKLOADS_DIR" || exit
+        time wget --quiet $ALPINE_MINIROOTFS_URL -O "$ALPINE_MINIROOTFS_TARBALL" || exit 1
+        popd || exit
     fi
 
     ALPINE_INITRAMFS_IMAGE="$WORKLOADS_DIR/alpine_initramfs.img"
     if [ ! -f "$ALPINE_INITRAMFS_IMAGE" ]; then
-        pushd $WORKLOADS_DIR
+        pushd "$WORKLOADS_DIR" || exit
         mkdir alpine-minirootfs
         tar xf "$ALPINE_MINIROOTFS_TARBALL" -C alpine-minirootfs
         cat >alpine-minirootfs/init <<-EOF
@@ -144,25 +146,25 @@ update_workloads() {
 			poweroff -f
 		EOF
         chmod +x alpine-minirootfs/init
-        cd alpine-minirootfs
+        cd alpine-minirootfs || exit
         find . -print0 |
             cpio --null --create --verbose --owner root:root --format=newc >"$ALPINE_INITRAMFS_IMAGE"
-        popd
+        popd || exit
     fi
 
-    pushd $WORKLOADS_DIR
-    sha1sum sha1sums-aarch64 --check
-    if [ $? -ne 0 ]; then
+    pushd "$WORKLOADS_DIR" || exit
+
+    if ! sha1sum sha1sums-aarch64 --check; then
         echo "sha1sum validation of images failed, remove invalid images to fix the issue."
         exit 1
     fi
-    popd
+    popd || exit
 
     # Download Cloud Hypervisor binary from its last stable release
     LAST_RELEASE_VERSION="v36.0"
     CH_RELEASE_URL="https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/$LAST_RELEASE_VERSION/cloud-hypervisor-static-aarch64"
     CH_RELEASE_NAME="cloud-hypervisor-static-aarch64"
-    pushd $WORKLOADS_DIR
+    pushd "$WORKLOADS_DIR" || exit
     # Repeat a few times to workaround a random wget failure
     WGET_RETRY_MAX=10
     wget_retry=0
@@ -177,7 +179,7 @@ update_workloads() {
     else
         chmod +x $CH_RELEASE_NAME
     fi
-    popd
+    popd || exit
 
     # Build custom kernel for guest VMs
     build_custom_linux
@@ -198,20 +200,20 @@ update_workloads() {
     BLK_IMAGE="$WORKLOADS_DIR/blk.img"
     MNT_DIR="mount_image"
     if [ ! -f "$BLK_IMAGE" ]; then
-        pushd $WORKLOADS_DIR
-        fallocate -l 16M $BLK_IMAGE
-        mkfs.ext4 -j $BLK_IMAGE
+        pushd "$WORKLOADS_DIR" || exit
+        fallocate -l 16M "$BLK_IMAGE"
+        mkfs.ext4 -j "$BLK_IMAGE"
         mkdir $MNT_DIR
-        sudo mount -t ext4 $BLK_IMAGE $MNT_DIR
+        sudo mount -t ext4 "$BLK_IMAGE" $MNT_DIR
         sudo bash -c "echo bar > $MNT_DIR/foo" || exit 1
-        sudo umount $BLK_IMAGE
+        sudo umount "$BLK_IMAGE"
         rm -r $MNT_DIR
-        popd
+        popd || exit
     fi
 
     SHARED_DIR="$WORKLOADS_DIR/shared_dir"
     if [ ! -d "$SHARED_DIR" ]; then
-        mkdir -p $SHARED_DIR
+        mkdir -p "$SHARED_DIR"
         echo "foo" >"$SHARED_DIR/file1"
         echo "bar" >"$SHARED_DIR/file3" || exit 1
     fi
@@ -235,7 +237,7 @@ fi
 (
     echo "try to lock $WORKLOADS_DIR folder and update"
     flock -x 12 && update_workloads
-) 12>$WORKLOADS_LOCK
+) 12>"$WORKLOADS_LOCK"
 
 # Check if there is any error in the execution of `update_workloads`.
 # If there is any error, then kill the shell. Otherwise the script will continue
@@ -247,7 +249,7 @@ fi
 
 export RUST_BACKTRACE=1
 
-cargo build --all --release --target $BUILD_TARGET
+cargo build --all --release --target "$BUILD_TARGET"
 
 # Enable KSM with some reasonable parameters so that it won't take too long
 # for the memory to be merged between two processes.
@@ -257,18 +259,18 @@ sudo bash -c "echo 1 > /sys/kernel/mm/ksm/run"
 
 # Both test_vfio and ovs-dpdk rely on hugepages
 HUGEPAGESIZE=$(grep Hugepagesize /proc/meminfo | awk '{print $2}')
-PAGE_NUM=$(echo $((12288 * 1024 / $HUGEPAGESIZE)))
-echo $PAGE_NUM | sudo tee /proc/sys/vm/nr_hugepages
+PAGE_NUM=$((12288 * 1024 / HUGEPAGESIZE))
+echo "$PAGE_NUM" | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
 # Run all direct kernel boot (Device Tree) test cases in mod `parallel`
-time cargo test "common_parallel::$test_filter" --target $BUILD_TARGET -- ${test_binary_args[*]}
+time cargo test "common_parallel::$test_filter" --target "$BUILD_TARGET" -- ${test_binary_args[*]}
 RES=$?
 
 # Run some tests in sequence since the result could be affected by other tests
 # running in parallel.
 if [ $RES -eq 0 ]; then
-    time cargo test "common_sequential::$test_filter" --target $BUILD_TARGET -- --test-threads=1 ${test_binary_args[*]}
+    time cargo test "common_sequential::$test_filter" --target "$BUILD_TARGET" -- --test-threads=1 ${test_binary_args[*]}
     RES=$?
 else
     exit $RES
@@ -276,7 +278,7 @@ fi
 
 # Run all ACPI test cases
 if [ $RES -eq 0 ]; then
-    time cargo test "aarch64_acpi::$test_filter" --target $BUILD_TARGET -- ${test_binary_args[*]}
+    time cargo test "aarch64_acpi::$test_filter" --target "$BUILD_TARGET" -- ${test_binary_args[*]}
     RES=$?
 else
     exit $RES
@@ -284,14 +286,14 @@ fi
 
 # Run all test cases related to live migration
 if [ $RES -eq 0 ]; then
-    time cargo test "live_migration_parallel::$test_filter" --target $BUILD_TARGET -- ${test_binary_args[*]}
+    time cargo test "live_migration_parallel::$test_filter" --target "$BUILD_TARGET" -- ${test_binary_args[*]}
     RES=$?
 else
     exit $RES
 fi
 
 if [ $RES -eq 0 ]; then
-    time cargo test "live_migration_sequential::$test_filter" --target $BUILD_TARGET -- --test-threads=1 ${test_binary_args[*]}
+    time cargo test "live_migration_sequential::$test_filter" --target "$BUILD_TARGET" -- --test-threads=1 ${test_binary_args[*]}
     RES=$?
 else
     exit $RES
@@ -299,9 +301,9 @@ fi
 
 # Run tests on dbus_api
 if [ $RES -eq 0 ]; then
-    cargo build --features "dbus_api" --all --release --target $BUILD_TARGET
+    cargo build --features "dbus_api" --all --release --target "$BUILD_TARGET"
     export RUST_BACKTRACE=1
-    time cargo test "dbus_api::$test_filter" --target $BUILD_TARGET -- ${test_binary_args[*]}
+    time cargo test "dbus_api::$test_filter" --target "$BUILD_TARGET" -- ${test_binary_args[*]}
     RES=$?
 fi
 
