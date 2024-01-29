@@ -361,7 +361,6 @@ cmd_tests() {
             hypervisor="$1"
             ;;
         "--all") {
-            cargo=true
             unit=true
             integration=true
         } ;;
