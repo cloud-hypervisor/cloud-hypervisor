@@ -77,8 +77,6 @@ else
     working_dir=`readlink -m ${working_dir}`
 fi
 
-#get file extension and image type
-extension="${file_name##*.}"
 filename="${file_name%.*}"
 dest_file=${working_dir}/${filename}.raw
 image_type=$(qemu-img info ${file_abs_path} | grep 'file format:' | awk '{ print $3 }')
