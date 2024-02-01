@@ -1046,7 +1046,9 @@ components:
           format: int16
         id:
           type: string
-
+        x_nv_gpudirect_clique:
+          type: integer
+          format: int8
     TpmConfig:
       required:
         - socket

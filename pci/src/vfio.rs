@@ -419,6 +419,7 @@ pub(crate) struct VfioCommon {
     pub(crate) legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
     pub(crate) vfio_wrapper: Arc<dyn Vfio>,
     pub(crate) patches: HashMap<usize, ConfigPatch>,
+    x_nv_gpudirect_clique: Option<u8>,
 }
 
 impl VfioCommon {
@@ -429,6 +430,7 @@ impl VfioCommon {
         subclass: &dyn PciSubclass,
         bdf: PciBdf,
         snapshot: Option<Snapshot>,
+        x_nv_gpudirect_clique: Option<u8>,
     ) -> Result<Self, VfioPciError> {
         let pci_configuration_state =
             vm_migration::versioned_state_from_id(snapshot.as_ref(), PCI_CONFIGURATION_ID)
@@ -465,6 +467,7 @@ impl VfioCommon {
             legacy_interrupt_group,
             vfio_wrapper,
             patches: HashMap::new(),
+            x_nv_gpudirect_clique,
         };
 
         let state: Option<VfioCommonState> = snapshot
@@ -859,15 +862,15 @@ impl VfioCommon {
     }
 
     pub(crate) fn parse_capabilities(&mut self, bdf: PciBdf) {
-        let mut cap_next = self
+        let mut cap_iter = self
             .vfio_wrapper
             .read_config_byte(PCI_CONFIG_CAPABILITY_OFFSET);
 
         let mut pci_express_cap_found = false;
         let mut power_management_cap_found = false;
 
-        while cap_next != 0 {
-            let cap_id = self.vfio_wrapper.read_config_byte(cap_next.into());
+        while cap_iter != 0 {
+            let cap_id = self.vfio_wrapper.read_config_byte(cap_iter.into());
 
             match PciCapabilityId::from(cap_id) {
                 PciCapabilityId::MessageSignalledInterrupts => {
@@ -875,8 +878,8 @@ impl VfioCommon {
                         if irq_info.count > 0 {
                             // Parse capability only if the VFIO device
                             // supports MSI.
-                            let msg_ctl = self.parse_msi_capabilities(cap_next);
-                            self.initialize_msi(msg_ctl, cap_next as u32, None);
+                            let msg_ctl = self.parse_msi_capabilities(cap_iter);
+                            self.initialize_msi(msg_ctl, cap_iter as u32, None);
                         }
                     }
                 }
@@ -886,8 +889,8 @@ impl VfioCommon {
                         if irq_info.count > 0 {
                             // Parse capability only if the VFIO device
                             // supports MSI-X.
-                            let msix_cap = self.parse_msix_capabilities(cap_next);
-                            self.initialize_msix(msix_cap, cap_next as u32, bdf, None);
+                            let msix_cap = self.parse_msix_capabilities(cap_iter);
+                            self.initialize_msix(msix_cap, cap_iter as u32, bdf, None);
                         }
                     }
                 }
@@ -896,12 +899,52 @@ impl VfioCommon {
                 _ => {}
             };
 
-            cap_next = self.vfio_wrapper.read_config_byte((cap_next + 1).into());
+            let cap_next = self.vfio_wrapper.read_config_byte((cap_iter + 1).into());
+            if cap_next == 0 {
+                break;
+            }
+
+            cap_iter = cap_next;
+        }
+
+        if let Some(clique_id) = self.x_nv_gpudirect_clique {
+            self.add_nv_gpudirect_clique_cap(cap_iter, clique_id);
         }
 
         if pci_express_cap_found && power_management_cap_found {
             self.parse_extended_capabilities();
         }
+    }
+
+    fn add_nv_gpudirect_clique_cap(&mut self, cap_iter: u8, clique_id: u8) {
+        // Turing, Ampere, Hopper, and Lovelace GPUs have dedicated space
+        // at 0xD4 for this capability.
+        let cap_offset = 0xd4u32;
+
+        let reg_idx = (cap_iter / 4) as usize;
+        self.patches.insert(
+            reg_idx,
+            ConfigPatch {
+                mask: 0x0000_ff00,
+                patch: cap_offset << 8,
+            },
+        );
+
+        let reg_idx = (cap_offset / 4) as usize;
+        self.patches.insert(
+            reg_idx,
+            ConfigPatch {
+                mask: 0xffff_ffff,
+                patch: 0x50080009u32,
+            },
+        );
+        self.patches.insert(
+            reg_idx + 1,
+            ConfigPatch {
+                mask: 0xffff_ffff,
+                patch: u32::from(clique_id) << 19 | 0x5032,
+            },
+        );
     }
 
     fn parse_extended_capabilities(&mut self) {
@@ -1351,6 +1394,7 @@ impl VfioPciDevice {
         bdf: PciBdf,
         memory_slot: Arc<dyn Fn() -> u32 + Send + Sync>,
         snapshot: Option<Snapshot>,
+        x_nv_gpudirect_clique: Option<u8>,
     ) -> Result<Self, VfioPciError> {
         let device = Arc::new(device);
         device.reset();
@@ -1364,6 +1408,7 @@ impl VfioPciDevice {
             &PciVfioSubclass::VfioSubclass,
             bdf,
             vm_migration::snapshot_from_id(snapshot.as_ref(), VFIO_COMMON_ID),
+            x_nv_gpudirect_clique,
         )?;
 
         let vfio_pci_device = VfioPciDevice {

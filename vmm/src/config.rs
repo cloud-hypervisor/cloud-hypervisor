@@ -1746,7 +1746,12 @@ impl DeviceConfig {
 
     pub fn parse(device: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
-        parser.add("path").add("id").add("iommu").add("pci_segment");
+        parser
+            .add("path")
+            .add("id")
+            .add("iommu")
+            .add("pci_segment")
+            .add("x_nv_gpudirect_clique");
         parser.parse(device).map_err(Error::ParseDevice)?;
 
         let path = parser
@@ -1763,12 +1768,15 @@ impl DeviceConfig {
             .convert::<u16>("pci_segment")
             .map_err(Error::ParseDevice)?
             .unwrap_or_default();
-
+        let x_nv_gpudirect_clique = parser
+            .convert::<u8>("x_nv_gpudirect_clique")
+            .map_err(Error::ParseDevice)?;
         Ok(DeviceConfig {
             path,
             iommu,
             id,
             pci_segment,
+            x_nv_gpudirect_clique,
         })
     }
 
@@ -3324,6 +3332,7 @@ mod tests {
             id: None,
             iommu: false,
             pci_segment: 0,
+            x_nv_gpudirect_clique: None,
         }
     }
 
