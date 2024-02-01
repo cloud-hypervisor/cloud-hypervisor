@@ -434,6 +434,8 @@ pub struct DeviceConfig {
     pub id: Option<String>,
     #[serde(default)]
     pub pci_segment: u16,
+    #[serde(default)]
+    pub x_nv_gpudirect_clique: Option<u8>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]

@@ -3510,6 +3510,7 @@ impl DeviceManager {
             pci_device_bdf,
             Arc::new(move || memory_manager.lock().unwrap().allocate_memory_slot()),
             vm_migration::snapshot_from_id(self.snapshot.as_ref(), vfio_name.as_str()),
+            device_cfg.x_nv_gpudirect_clique,
         )
         .map_err(DeviceManagerError::VfioPciCreate)?;
 
