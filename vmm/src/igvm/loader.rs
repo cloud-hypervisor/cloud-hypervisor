@@ -82,6 +82,15 @@ impl Loader {
         acceptance: BootPageAcceptance,
         data: &[u8],
     ) -> Result<(), Error> {
+        // Once we are here at this point, we have a page with
+        // some data or empty, empty does not mean there is no data,
+        // it rather means it's full of zeros. We can skip writing the
+        // data as the guest page is already zeroed. So we return with
+        // updating the bytes_written variable
+        if data.is_empty() {
+            self.bytes_written += page_count * HV_PAGE_SIZE;
+            return Ok(());
+        }
         // Page count must be larger or equal to data.
         if page_count * HV_PAGE_SIZE < data.len() as u64 {
             return Err(Error::DataTooLarge);
@@ -98,10 +107,16 @@ impl Loader {
                 debug!("Importing pages failed due to MemoryError");
                 Error::MemoryUnavailable
             })?;
-        if bytes_written != (page_count * HV_PAGE_SIZE) as usize {
+
+        // A page could be partially filled and the rest of the content is zero.
+        // Our IGVM generation tool only fills data here if there is some data without zeros.
+        // Rest of them are padded. We only write data without padding and compare whether we
+        // complete writing the buffer content. Still it's a full page and update the variable
+        // with length of the page.
+        if bytes_written != data.len() {
             return Err(Error::ImportPagesFailed);
         }
-        self.bytes_written += bytes_written as u64;
+        self.bytes_written += page_count * HV_PAGE_SIZE;
         Ok(())
     }
 
