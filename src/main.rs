@@ -697,6 +697,11 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
     .map_err(Error::StartVmmThread)?;
 
     let r: Result<(), Error> = (|| {
+        #[cfg(feature = "igvm")]
+        let payload_present = cmd_arguments.contains_id("kernel")
+            || cmd_arguments.contains_id("firmware")
+            || cmd_arguments.contains_id("igvm");
+        #[cfg(not(feature = "igvm"))]
         let payload_present =
             cmd_arguments.contains_id("kernel") || cmd_arguments.contains_id("firmware");
 
