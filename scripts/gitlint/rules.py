@@ -43,6 +43,7 @@ class TitleStartsWithComponent(LineRule):
             'gitlint',
             'hypervisor',
             'Jenkinsfile',
+            'main',
             'misc',
             'net_gen',
             'net_util',
