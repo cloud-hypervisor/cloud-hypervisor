@@ -597,6 +597,17 @@ impl cpu::Vcpu for MshvVcpu {
 
                     Ok(cpu::VmExit::Ignore)
                 }
+                hv_message_type_HVMSG_UNACCEPTED_GPA => {
+                    let info = x.to_memory_info().unwrap();
+                    let gva = info.guest_virtual_address;
+                    let gpa = info.guest_physical_address;
+
+                    Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
+                        "Unhandled VCPU exit: Unaccepted GPA({:x}) found at GVA({:x})",
+                        gpa,
+                        gva,
+                    )))
+                }
                 hv_message_type_HVMSG_X64_CPUID_INTERCEPT => {
                     let info = x.to_cpuid_info().unwrap();
                     debug!("cpuid eax: {:x}", { info.rax });
