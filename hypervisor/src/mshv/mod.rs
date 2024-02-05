@@ -251,7 +251,6 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         }
 
         // Set additional partition property for SEV-SNP partition.
-        let mut _sev_snp_enabled = mshv_vm_type == VmType::Snp;
         if mshv_vm_type == VmType::Snp {
             let snp_policy = snp::get_default_snp_guest_policy();
             let vmgexit_offloads = snp::get_default_vmgexit_offload_features();
@@ -308,7 +307,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
             msrs,
             dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
             #[cfg(feature = "sev_snp")]
-            sev_snp_enabled: _sev_snp_enabled,
+            sev_snp_enabled: mshv_vm_type == VmType::Snp,
         }))
     }
 
@@ -1591,6 +1590,11 @@ impl vm::Vm for MshvVm {
         addr: &IoEventAddress,
         datamatch: Option<DataMatch>,
     ) -> vm::Result<()> {
+        #[cfg(feature = "sev_snp")]
+        if self.sev_snp_enabled {
+            return Ok(());
+        }
+
         let addr = &mshv_ioctls::IoEventAddress::from(*addr);
         debug!(
             "register_ioevent fd {} addr {:x?} datamatch {:?}",
