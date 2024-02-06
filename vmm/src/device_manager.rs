@@ -1177,7 +1177,7 @@ impl DeviceManager {
     }
 
     pub fn console_resize_pipe(&self) -> Option<Arc<File>> {
-        self.console_resize_pipe.as_ref().map(Arc::clone)
+        self.console_resize_pipe.clone()
     }
 
     pub fn create_devices(
