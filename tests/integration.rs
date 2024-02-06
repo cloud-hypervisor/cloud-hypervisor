@@ -5842,7 +5842,7 @@ mod common_parallel {
         #[cfg(target_arch = "x86_64")]
         let mut kernels = vec![direct_kernel_boot_path()];
         #[cfg(target_arch = "aarch64")]
-        let kernels = vec![direct_kernel_boot_path()];
+        let kernels = [direct_kernel_boot_path()];
 
         #[cfg(target_arch = "x86_64")]
         {
