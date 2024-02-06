@@ -124,11 +124,11 @@ impl SgxEpcRegion {
 #[derive(Copy, Clone, Default)]
 struct StartInfoWrapper(hvm_start_info);
 
-#[cfg_attr(fuzzing, allow(dead_code))]
+#[allow(dead_code)]
 #[derive(Copy, Clone, Default)]
 struct MemmapTableEntryWrapper(hvm_memmap_table_entry);
 
-#[cfg_attr(fuzzing, allow(dead_code))]
+#[allow(dead_code)]
 #[derive(Copy, Clone, Default)]
 struct ModlistEntryWrapper(hvm_modlist_entry);
 
@@ -144,7 +144,7 @@ unsafe impl ByteValued for ModlistEntryWrapper {}
 // *    the type that is implementing the trait is foreign or
 // *    all of the parameters being passed to the trait (if there are any) are also foreign
 // is prohibited.
-#[cfg_attr(fuzzing, allow(dead_code))]
+#[allow(dead_code)]
 #[derive(Copy, Clone, Default)]
 struct BootParamsWrapper(boot_params);
 
