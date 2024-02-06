@@ -622,6 +622,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
                     std::fs::OpenOptions::new()
                         .write(true)
                         .create(true)
+                        .truncate(true)
                         .open(parser.get("path").unwrap())
                         .map_err(Error::EventMonitorIo)?,
                 ))
