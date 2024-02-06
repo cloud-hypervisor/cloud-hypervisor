@@ -829,7 +829,12 @@ impl CpuManager {
                     kernel_entry_point.entry_addr.0 / crate::igvm::HV_PAGE_SIZE,
                 )?;
             }
+
+            // Traditional way to configure vcpu doesn't work for SEV-SNP guests.
+            // All the vCPU configuration for SEV-SNP guest is provided via VMSA.
+            return Ok(());
         }
+
         #[cfg(target_arch = "x86_64")]
         assert!(!self.cpuid.is_empty());
 
