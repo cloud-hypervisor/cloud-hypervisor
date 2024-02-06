@@ -2118,7 +2118,7 @@ fn pty_read(mut pty: std::fs::File) -> Receiver<String> {
         thread::sleep(std::time::Duration::new(1, 0));
         let mut buf = [0; 512];
         match pty.read(&mut buf) {
-            Ok(_) => {
+            Ok(_bytes) => {
                 let output = std::str::from_utf8(&buf).unwrap().to_string();
                 match tx.send(output) {
                     Ok(_) => (),
