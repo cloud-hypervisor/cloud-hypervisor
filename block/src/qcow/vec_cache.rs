@@ -136,7 +136,7 @@ impl<T: Cacheable> CacheMap<T> {
 mod tests {
     use super::*;
 
-    struct NumCache(pub u64);
+    struct NumCache(());
     impl Cacheable for NumCache {
         fn dirty(&self) -> bool {
             true
@@ -148,28 +148,28 @@ mod tests {
         let mut cache = CacheMap::<NumCache>::new(3);
         let mut evicted = None;
         cache
-            .insert(0, NumCache(5), |index, _| {
+            .insert(0, NumCache(()), |index, _| {
                 evicted = Some(index);
                 Ok(())
             })
             .unwrap();
         assert_eq!(evicted, None);
         cache
-            .insert(1, NumCache(6), |index, _| {
+            .insert(1, NumCache(()), |index, _| {
                 evicted = Some(index);
                 Ok(())
             })
             .unwrap();
         assert_eq!(evicted, None);
         cache
-            .insert(2, NumCache(7), |index, _| {
+            .insert(2, NumCache(()), |index, _| {
                 evicted = Some(index);
                 Ok(())
             })
             .unwrap();
         assert_eq!(evicted, None);
         cache
-            .insert(3, NumCache(8), |index, _| {
+            .insert(3, NumCache(()), |index, _| {
                 evicted = Some(index);
                 Ok(())
             })
