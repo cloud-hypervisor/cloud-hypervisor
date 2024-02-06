@@ -17,14 +17,13 @@ use crate::InitramfsConfig;
 use crate::RegionType;
 use hypervisor::arch::x86::{CpuIdEntry, CPUID_FLAG_VALID_INDEX};
 use hypervisor::{CpuVendor, HypervisorCpuError, HypervisorError};
-use linux_loader::loader::bootparam::boot_params;
 use linux_loader::loader::elf::start_info::{
     hvm_memmap_table_entry, hvm_modlist_entry, hvm_start_info,
 };
 use std::collections::BTreeMap;
 use std::mem;
 use vm_memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
+    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
     GuestMemoryRegion, GuestUsize,
 };
 mod smbios;
@@ -115,41 +114,6 @@ impl SgxEpcRegion {
         self.epc_sections.insert(id, epc_section);
     }
 }
-
-// This is a workaround to the Rust enforcement specifying that any implementation of a foreign
-// trait (in this case `DataInit`) where:
-// *    the type that is implementing the trait is foreign or
-// *    all of the parameters being passed to the trait (if there are any) are also foreign
-// is prohibited.
-#[derive(Copy, Clone, Default)]
-struct StartInfoWrapper(hvm_start_info);
-
-#[allow(dead_code)]
-#[derive(Copy, Clone, Default)]
-struct MemmapTableEntryWrapper(hvm_memmap_table_entry);
-
-#[allow(dead_code)]
-#[derive(Copy, Clone, Default)]
-struct ModlistEntryWrapper(hvm_modlist_entry);
-
-// SAFETY: data structure only contain a series of integers
-unsafe impl ByteValued for StartInfoWrapper {}
-// SAFETY: data structure only contain a series of integers
-unsafe impl ByteValued for MemmapTableEntryWrapper {}
-// SAFETY: data structure only contain a series of integers
-unsafe impl ByteValued for ModlistEntryWrapper {}
-
-// This is a workaround to the Rust enforcement specifying that any implementation of a foreign
-// trait (in this case `DataInit`) where:
-// *    the type that is implementing the trait is foreign or
-// *    all of the parameters being passed to the trait (if there are any) are also foreign
-// is prohibited.
-#[allow(dead_code)]
-#[derive(Copy, Clone, Default)]
-struct BootParamsWrapper(boot_params);
-
-// SAFETY: BootParamsWrap is a wrapper over `boot_params` (a series of ints).
-unsafe impl ByteValued for BootParamsWrapper {}
 
 pub struct CpuidConfig {
     pub sgx_epc_sections: Option<Vec<SgxEpcSection>>,
@@ -1081,29 +1045,30 @@ fn configure_pvh(
 ) -> super::Result<()> {
     const XEN_HVM_START_MAGIC_VALUE: u32 = 0x336ec578;
 
-    let mut start_info: StartInfoWrapper = StartInfoWrapper(hvm_start_info::default());
-
-    start_info.0.magic = XEN_HVM_START_MAGIC_VALUE;
-    start_info.0.version = 1; // pvh has version 1
-    start_info.0.nr_modules = 0;
-    start_info.0.cmdline_paddr = cmdline_addr.raw_value();
-    start_info.0.memmap_paddr = layout::MEMMAP_START.raw_value();
+    let mut start_info = hvm_start_info {
+        magic: XEN_HVM_START_MAGIC_VALUE,
+        version: 1, // pvh has version 1
+        nr_modules: 0,
+        cmdline_paddr: cmdline_addr.raw_value(),
+        memmap_paddr: layout::MEMMAP_START.raw_value(),
+        ..Default::default()
+    };
 
     if let Some(rsdp_addr) = rsdp_addr {
-        start_info.0.rsdp_paddr = rsdp_addr.0;
+        start_info.rsdp_paddr = rsdp_addr.0;
     }
 
     if let Some(initramfs_config) = initramfs {
         // The initramfs has been written to guest memory already, here we just need to
         // create the module structure that describes it.
-        let ramdisk_mod: ModlistEntryWrapper = ModlistEntryWrapper(hvm_modlist_entry {
+        let ramdisk_mod = hvm_modlist_entry {
             paddr: initramfs_config.address.raw_value(),
             size: initramfs_config.size as u64,
             ..Default::default()
-        });
+        };
 
-        start_info.0.nr_modules += 1;
-        start_info.0.modlist_paddr = layout::MODLIST_START.raw_value();
+        start_info.nr_modules += 1;
+        start_info.modlist_paddr = layout::MODLIST_START.raw_value();
 
         // Write the modlist struct to guest memory.
         guest_mem
@@ -1163,7 +1128,7 @@ fn configure_pvh(
         );
     }
 
-    start_info.0.memmap_entries = memmap.len() as u32;
+    start_info.memmap_entries = memmap.len() as u32;
 
     // Copy the vector with the memmap table to the MEMMAP_START address
     // which is already saved in the memmap_paddr field of hvm_start_info struct.
@@ -1172,17 +1137,14 @@ fn configure_pvh(
     guest_mem
         .checked_offset(
             memmap_start_addr,
-            mem::size_of::<hvm_memmap_table_entry>() * start_info.0.memmap_entries as usize,
+            mem::size_of::<hvm_memmap_table_entry>() * start_info.memmap_entries as usize,
         )
         .ok_or(super::Error::MemmapTablePastRamEnd)?;
 
-    // For every entry in the memmap vector, create a MemmapTableEntryWrapper
-    // and write it to guest memory.
+    // For every entry in the memmap vector, write it to guest memory.
     for memmap_entry in memmap {
-        let map_entry_wrapper: MemmapTableEntryWrapper = MemmapTableEntryWrapper(memmap_entry);
-
         guest_mem
-            .write_obj(map_entry_wrapper, memmap_start_addr)
+            .write_obj(memmap_entry, memmap_start_addr)
             .map_err(|_| super::Error::MemmapTableSetup)?;
         memmap_start_addr =
             memmap_start_addr.unchecked_add(mem::size_of::<hvm_memmap_table_entry>() as u64);
