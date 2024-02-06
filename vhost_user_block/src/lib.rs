@@ -58,6 +58,7 @@ impl<D: Read + Seek + Write + Send> DiskFile for D {}
 type Result<T> = std::result::Result<T, Error>;
 type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
 
+#[allow(dead_code)]
 #[derive(Debug)]
 enum Error {
     /// Failed to create kill eventfd
