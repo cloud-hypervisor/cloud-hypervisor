@@ -31,7 +31,8 @@ use snp_constants::*;
 
 use crate::{
     ClockData, CpuState, IoEventAddress, IrqRoutingEntry, MpState, UserMemoryRegion,
-    USER_MEMORY_REGION_EXECUTE, USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
+    USER_MEMORY_REGION_ADJUSTABLE, USER_MEMORY_REGION_EXECUTE, USER_MEMORY_REGION_READ,
+    USER_MEMORY_REGION_WRITE,
 };
 #[cfg(feature = "sev_snp")]
 use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
@@ -73,6 +74,9 @@ impl From<mshv_user_mem_region> for UserMemoryRegion {
         if region.flags & HV_MAP_GPA_EXECUTABLE != 0 {
             flags |= USER_MEMORY_REGION_EXECUTE;
         }
+        if region.flags & HV_MAP_GPA_ADJUSTABLE != 0 {
+            flags |= USER_MEMORY_REGION_ADJUSTABLE;
+        }
 
         UserMemoryRegion {
             guest_phys_addr: (region.guest_pfn << PAGE_SHIFT as u64)
@@ -96,6 +100,9 @@ impl From<UserMemoryRegion> for mshv_user_mem_region {
         }
         if region.flags & USER_MEMORY_REGION_EXECUTE != 0 {
             flags |= HV_MAP_GPA_EXECUTABLE;
+        }
+        if region.flags & USER_MEMORY_REGION_ADJUSTABLE != 0 {
+            flags |= HV_MAP_GPA_ADJUSTABLE;
         }
 
         mshv_user_mem_region {
@@ -1658,7 +1665,7 @@ impl vm::Vm for MshvVm {
         readonly: bool,
         _log_dirty_pages: bool,
     ) -> UserMemoryRegion {
-        let mut flags = HV_MAP_GPA_READABLE | HV_MAP_GPA_EXECUTABLE;
+        let mut flags = HV_MAP_GPA_READABLE | HV_MAP_GPA_EXECUTABLE | HV_MAP_GPA_ADJUSTABLE;
         if !readonly {
             flags |= HV_MAP_GPA_WRITABLE;
         }

@@ -134,6 +134,7 @@ pub const USER_MEMORY_REGION_READ: u32 = 1;
 pub const USER_MEMORY_REGION_WRITE: u32 = 1 << 1;
 pub const USER_MEMORY_REGION_EXECUTE: u32 = 1 << 2;
 pub const USER_MEMORY_REGION_LOG_DIRTY: u32 = 1 << 3;
+pub const USER_MEMORY_REGION_ADJUSTABLE: u32 = 1 << 4;
 
 #[derive(Debug)]
 pub enum MpState {
