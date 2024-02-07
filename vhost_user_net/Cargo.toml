@@ -9,7 +9,7 @@ build = "../build.rs"
 clap = { version = "4.4.7", features = ["wrap_help","cargo"] }
 env_logger = "0.10.1"
 epoll = "4.3.3"
-libc = "0.2.147"
+libc = "0.2.153"
 log = "0.4.20"
 net_util = { path = "../net_util" }
 option_parser = { path = "../option_parser" }
