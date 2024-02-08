@@ -2022,7 +2022,21 @@ impl Vm {
 
         // Do earlier to parallelise with loading kernel
         #[cfg(target_arch = "x86_64")]
-        let rsdp_addr = self.create_acpi_tables();
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "sev_snp")] {
+                let sev_snp_enabled = self.config.lock().unwrap().is_sev_snp_enabled();
+                let rsdp_addr = if sev_snp_enabled {
+                    // In case of SEV-SNP guest ACPI tables are provided via
+                    // IGVM. So skip the creation of ACPI tables and set the
+                    // rsdp addr to None.
+                    None
+                } else {
+                    self.create_acpi_tables()
+                };
+            } else {
+                let rsdp_addr = self.create_acpi_tables();
+            }
+        }
 
         // Load kernel synchronously or if asynchronous then wait for load to
         // finish.
