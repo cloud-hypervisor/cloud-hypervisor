@@ -51,6 +51,8 @@ use crate::arch::x86::{CpuIdEntry, FpuState, MsrEntry};
 
 const DIRTY_BITMAP_CLEAR_DIRTY: u64 = 0x4;
 const DIRTY_BITMAP_SET_DIRTY: u64 = 0x8;
+#[cfg(feature = "sev_snp")]
+const HV_PAGE_SIZE: u64 = 4096;
 
 ///
 /// Export generically-named wrappers of mshv-bindings for Unix-based platforms
@@ -604,6 +606,59 @@ impl cpu::Vcpu for MshvVcpu {
                         .set_cpu_state(self.vp_index as usize, new_state)
                         .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
 
+                    Ok(cpu::VmExit::Ignore)
+                }
+                #[cfg(feature = "sev_snp")]
+                hv_message_type_HVMSG_GPA_ATTRIBUTE_INTERCEPT => {
+                    let info = x.to_gpa_attribute_info().unwrap();
+                    let host_vis = info.__bindgen_anon_1.host_visibility();
+                    if host_vis >= HV_MAP_GPA_READABLE | HV_MAP_GPA_WRITABLE {
+                        warn!("Ignored attribute intercept with full host visibility");
+                        return Ok(cpu::VmExit::Ignore);
+                    }
+
+                    let num_ranges = info.__bindgen_anon_1.range_count();
+                    assert!(num_ranges >= 1);
+                    if num_ranges > 1 {
+                        return Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
+                            "Unhandled VCPU exit(GPA_ATTRIBUTE_INTERCEPT): Expected num_ranges to be 1 but found num_ranges {:?}",
+                            num_ranges
+                        )));
+                    }
+
+                    // TODO: we could also deny the request with HvCallCompleteIntercept
+                    let mut gpas = Vec::new();
+                    let ranges = info.ranges;
+                    let (gfn_start, gfn_count) = snp::parse_gpa_range(ranges[0]).unwrap();
+                    debug!(
+                        "Releasing pages: gfn_start: {:x?}, gfn_count: {:?}",
+                        gfn_start, gfn_count
+                    );
+                    let gpa_start = gfn_start * HV_PAGE_SIZE;
+                    for i in 0..gfn_count {
+                        gpas.push(gpa_start + i * HV_PAGE_SIZE);
+                    }
+
+                    let mut gpa_list =
+                        vec_with_array_field::<mshv_modify_gpa_host_access, u64>(gpas.len());
+                    gpa_list[0].gpa_list_size = gpas.len() as u64;
+                    gpa_list[0].host_access = host_vis;
+                    gpa_list[0].acquire = 0;
+                    gpa_list[0].flags = 0;
+
+                    // SAFETY: gpa_list initialized with gpas.len() and now it is being turned into
+                    // gpas_slice with gpas.len() again. It is guaranteed to be large enough to hold
+                    // everything from gpas.
+                    unsafe {
+                        let gpas_slice: &mut [u64] = gpa_list[0].gpa_list.as_mut_slice(gpas.len());
+                        gpas_slice.copy_from_slice(gpas.as_slice());
+                    }
+
+                    self.vm_fd
+                        .modify_gpa_host_access(&gpa_list[0])
+                        .map_err(|e| cpu::HypervisorCpuError::RunVcpu(anyhow!(
+                            "Unhandled VCPU exit: attribute intercept - couldn't modify host access {}", e
+                        )))?;
                     Ok(cpu::VmExit::Ignore)
                 }
                 hv_message_type_HVMSG_UNACCEPTED_GPA => {
