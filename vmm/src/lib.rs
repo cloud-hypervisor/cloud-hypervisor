@@ -2084,6 +2084,8 @@ mod unit_tests {
                 initramfs: None,
                 #[cfg(feature = "igvm")]
                 igvm: None,
+                #[cfg(feature = "sev_snp")]
+                host_data: None,
             }),
             rate_limit_groups: None,
             disks: None,
