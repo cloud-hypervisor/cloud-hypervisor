@@ -53,6 +53,8 @@ pub enum Error {
     ImportIsolatedPages(#[source] hypervisor::HypervisorVmError),
     #[error("Error completing importing isolated pages: {0}")]
     CompleteIsolatedImport(#[source] hypervisor::HypervisorVmError),
+    #[error("Error decoding host data: {0}")]
+    FailedToDecodeHostData(#[source] hex::FromHexError),
 }
 
 #[allow(dead_code)]
@@ -141,6 +143,7 @@ pub fn load_igvm(
     memory_manager: Arc<Mutex<MemoryManager>>,
     cpu_manager: Arc<Mutex<CpuManager>>,
     cmdline: &str,
+    #[cfg(feature = "sev_snp")] host_data: &Option<String>,
 ) -> Result<Box<IgvmLoadedInfo>, Error> {
     let mut loaded_info: Box<IgvmLoadedInfo> = Box::default();
     let command_line = CString::new(cmdline).map_err(Error::InvalidCommandLine)?;
@@ -148,6 +151,14 @@ pub fn load_igvm(
     let memory = memory_manager.lock().as_ref().unwrap().guest_memory();
     let mut gpas: Vec<GpaPages> = Vec::new();
     let proc_count = cpu_manager.lock().unwrap().vcpus().len() as u32;
+
+    #[cfg(feature = "sev_snp")]
+    let mut host_data_contents = [0; 32];
+    #[cfg(feature = "sev_snp")]
+    if let Some(host_data_str) = host_data {
+        hex::decode_to_slice(host_data_str, &mut host_data_contents as &mut [u8])
+            .map_err(Error::FailedToDecodeHostData)?;
+    }
 
     file.seek(SeekFrom::Start(0)).map_err(Error::Igvm)?;
     file.read_to_end(&mut file_contents).map_err(Error::Igvm)?;
@@ -470,12 +481,11 @@ pub fn load_igvm(
 
         now = Instant::now();
         // Call Complete Isolated Import since we are done importing isolated pages
-        let host_data: [u8; 32] = [0; 32];
         memory_manager
             .lock()
             .unwrap()
             .vm
-            .complete_isolated_import(loaded_info.snp_id_block, host_data, 1)
+            .complete_isolated_import(loaded_info.snp_id_block, host_data_contents, 1)
             .map_err(Error::CompleteIsolatedImport)?;
 
         info!(
