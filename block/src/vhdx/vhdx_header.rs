@@ -352,12 +352,6 @@ impl RegionTableEntry {
     }
 }
 
-#[derive(Clone, Debug)]
-struct RegionEntry {
-    _start: u64,
-    _end: u64,
-}
-
 enum HeaderNo {
     First,
     Second,
