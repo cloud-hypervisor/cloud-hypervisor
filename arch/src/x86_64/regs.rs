@@ -6,8 +6,10 @@
 // Portions Copyright 2017 The Chromium OS Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
-use crate::layout::{BOOT_GDT_START, BOOT_IDT_START, PVH_INFO_START};
-use crate::GuestMemoryMmap;
+use crate::layout::{
+    BOOT_GDT_START, BOOT_IDT_START, BOOT_STACK_POINTER, PVH_INFO_START, ZERO_PAGE_START,
+};
+use crate::{EntryPoint, GuestMemoryMmap};
 use hypervisor::arch::x86::gdt::{gdt_entry, segment_from_gdt};
 use hypervisor::arch::x86::regs::CR0_PE;
 use hypervisor::arch::x86::{FpuState, SpecialRegisters, StandardRegisters};
@@ -77,13 +79,22 @@ pub fn setup_msrs(vcpu: &Arc<dyn hypervisor::Vcpu>) -> Result<()> {
 /// # Arguments
 ///
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
-/// * `boot_ip` - Starting instruction pointer.
-pub fn setup_regs(vcpu: &Arc<dyn hypervisor::Vcpu>, boot_ip: u64) -> Result<()> {
-    let regs = StandardRegisters {
-        rflags: 0x0000000000000002u64,
-        rbx: PVH_INFO_START.raw_value(),
-        rip: boot_ip,
-        ..Default::default()
+/// * `entry_point` - Description of the boot entry to set up.
+pub fn setup_regs(vcpu: &Arc<dyn hypervisor::Vcpu>, entry_point: EntryPoint) -> Result<()> {
+    let regs = match entry_point.setup_header {
+        None => StandardRegisters {
+            rflags: 0x0000000000000002u64,
+            rip: entry_point.entry_addr.raw_value(),
+            rbx: PVH_INFO_START.raw_value(),
+            ..Default::default()
+        },
+        Some(_) => StandardRegisters {
+            rflags: 0x0000000000000002u64,
+            rip: entry_point.entry_addr.raw_value(),
+            rsp: BOOT_STACK_POINTER.raw_value(),
+            rsi: ZERO_PAGE_START.raw_value(),
+            ..Default::default()
+        },
     };
     vcpu.set_regs(&regs).map_err(Error::SetBaseRegisters)
 }
