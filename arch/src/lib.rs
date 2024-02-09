@@ -48,6 +48,10 @@ pub enum Error {
     ModlistSetup(#[source] vm_memory::GuestMemoryError),
     #[error("RSDP extends past the end of guest memory")]
     RsdpPastRamEnd,
+    #[error("Failed to setup Zero Page for bzImage")]
+    ZeroPageSetup(#[source] vm_memory::GuestMemoryError),
+    #[error("Zero Page for bzImage past RAM end")]
+    ZeroPagePastRamEnd,
 }
 
 /// Type for returning public functions outcome.
