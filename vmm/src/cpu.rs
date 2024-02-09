@@ -2715,9 +2715,12 @@ impl CpuElf64Writable for CpuManager {
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 #[cfg(test)]
 mod tests {
+    use arch::layout::BOOT_STACK_POINTER;
+    use arch::layout::ZERO_PAGE_START;
     use arch::x86_64::interrupts::*;
     use arch::x86_64::regs::*;
     use hypervisor::arch::x86::{FpuState, LapicState, StandardRegisters};
+    use linux_loader::loader::bootparam::setup_header;
 
     #[test]
     fn test_setlint() {
@@ -2796,7 +2799,7 @@ mod tests {
     }
 
     #[test]
-    fn test_setup_regs() {
+    fn test_setup_regs_for_pvh() {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().expect("new VM fd creation failed");
         let vcpu = vm.create_vcpu(0, None).unwrap();
@@ -2808,7 +2811,43 @@ mod tests {
             ..Default::default()
         };
 
-        setup_regs(&vcpu, expected_regs.rip).unwrap();
+        setup_regs(
+            &vcpu,
+            arch::EntryPoint {
+                entry_addr: vm_memory::GuestAddress(expected_regs.rip),
+                setup_header: None,
+            },
+        )
+        .unwrap();
+
+        let actual_regs: StandardRegisters = vcpu.get_regs().unwrap();
+        assert_eq!(actual_regs, expected_regs);
+    }
+
+    #[test]
+    fn test_setup_regs_for_bzimage() {
+        let hv = hypervisor::new().unwrap();
+        let vm = hv.create_vm().expect("new VM fd creation failed");
+        let vcpu = vm.create_vcpu(0, None).unwrap();
+
+        let expected_regs: StandardRegisters = StandardRegisters {
+            rflags: 0x0000000000000002u64,
+            rip: 1,
+            rsp: BOOT_STACK_POINTER.0,
+            rsi: ZERO_PAGE_START.0,
+            ..Default::default()
+        };
+
+        setup_regs(
+            &vcpu,
+            arch::EntryPoint {
+                entry_addr: vm_memory::GuestAddress(expected_regs.rip),
+                setup_header: Some(setup_header {
+                    ..Default::default()
+                }),
+            },
+        )
+        .unwrap();
 
         let actual_regs: StandardRegisters = vcpu.get_regs().unwrap();
         assert_eq!(actual_regs, expected_regs);

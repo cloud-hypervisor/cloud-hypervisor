@@ -62,6 +62,8 @@ use linux_loader::cmdline::Cmdline;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use linux_loader::elf;
 #[cfg(target_arch = "x86_64")]
+use linux_loader::loader::bzimage::BzImage;
+#[cfg(target_arch = "x86_64")]
 use linux_loader::loader::elf::PvhBootCapability::PvhEntryPresent;
 #[cfg(target_arch = "aarch64")]
 use linux_loader::loader::pe::Error::InvalidImageMagicNumber;
@@ -1012,12 +1014,12 @@ impl Vm {
         cfg_if::cfg_if! {
             if #[cfg(feature = "sev_snp")] {
                 let entry_point = if cpu_manager.lock().unwrap().sev_snp_enabled() {
-                    EntryPoint { entry_addr: vm_memory::GuestAddress(res.vmsa_gpa) }
+                    EntryPoint { entry_addr: vm_memory::GuestAddress(res.vmsa_gpa), setup_header: None }
                 } else {
-                    EntryPoint {entry_addr: vm_memory::GuestAddress(res.vmsa.rip) }
+                    EntryPoint {entry_addr: vm_memory::GuestAddress(res.vmsa.rip), setup_header: None }
                 };
             } else {
-               let entry_point = EntryPoint { entry_addr: vm_memory::GuestAddress(res.vmsa.rip) };
+               let entry_point = EntryPoint { entry_addr: vm_memory::GuestAddress(res.vmsa.rip), setup_header: None };
             }
         };
         Ok(entry_point)
@@ -1035,12 +1037,23 @@ impl Vm {
             let guest_memory = memory_manager.lock().as_ref().unwrap().guest_memory();
             guest_memory.memory()
         };
+
+        // Try ELF binary with PVH boot.
         let entry_addr = linux_loader::loader::elf::Elf::load(
             mem.deref(),
             None,
             &mut kernel,
             Some(arch::layout::HIGH_RAM_START),
         )
+        // Try loading kernel as bzImage.
+        .or_else(|_| {
+            BzImage::load(
+                mem.deref(),
+                None,
+                &mut kernel,
+                Some(arch::layout::HIGH_RAM_START),
+            )
+        })
         .map_err(Error::KernelLoad)?;
 
         if let Some(cmdline) = cmdline {
@@ -1050,8 +1063,21 @@ impl Vm {
 
         if let PvhEntryPresent(entry_addr) = entry_addr.pvh_boot_cap {
             // Use the PVH kernel entry point to boot the guest
-            info!("Kernel loaded: entry_addr = 0x{:x}", entry_addr.0);
-            Ok(EntryPoint { entry_addr })
+            info!("PVH kernel loaded: entry_addr = 0x{:x}", entry_addr.0);
+            Ok(EntryPoint {
+                entry_addr,
+                setup_header: None,
+            })
+        } else if entry_addr.setup_header.is_some() {
+            // Use the bzImage 32bit entry point to boot the guest
+            info!(
+                "bzImage kernel loaded: entry_addr = 0x{:x}",
+                entry_addr.kernel_load.0
+            );
+            Ok(EntryPoint {
+                entry_addr: entry_addr.kernel_load,
+                setup_header: entry_addr.setup_header,
+            })
         } else {
             Err(Error::KernelMissingPvhHeader)
         }
@@ -1144,7 +1170,7 @@ impl Vm {
     }
 
     #[cfg(target_arch = "x86_64")]
-    fn configure_system(&mut self, rsdp_addr: GuestAddress) -> Result<()> {
+    fn configure_system(&mut self, rsdp_addr: GuestAddress, entry_addr: EntryPoint) -> Result<()> {
         trace_scoped!("configure_system");
         info!("Configuring system");
         let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
@@ -1197,8 +1223,10 @@ impl Vm {
         arch::configure_system(
             &mem,
             arch::layout::CMDLINE_START,
+            arch::layout::CMDLINE_MAX_SIZE,
             &initramfs_config,
             boot_vcpus,
+            entry_addr.setup_header,
             rsdp_addr,
             sgx_epc_region,
             serial_number.as_deref(),
@@ -1211,7 +1239,11 @@ impl Vm {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn configure_system(&mut self, _rsdp_addr: GuestAddress) -> Result<()> {
+    fn configure_system(
+        &mut self,
+        _rsdp_addr: GuestAddress,
+        _entry_addr: EntryPoint,
+    ) -> Result<()> {
         let cmdline = Self::generate_cmdline(
             self.config.lock().unwrap().payload.as_ref().unwrap(),
             &self.device_manager,
@@ -2082,10 +2114,10 @@ impl Vm {
 
         // Configure shared state based on loaded kernel
         entry_point
-            .map(|_| {
+            .map(|entry_point| {
                 // Safe to unwrap rsdp_addr as we know it can't be None when
                 // the entry_point is Some.
-                self.configure_system(rsdp_addr.unwrap())
+                self.configure_system(rsdp_addr.unwrap(), entry_point)
             })
             .transpose()?;
 
