@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use crate::landlock::LandlockAccess;
 pub use crate::vm_config::*;
 use clap::ArgMatches;
 use option_parser::{
@@ -211,6 +212,8 @@ pub enum ValidationError {
     RestoreNetFdCountMismatch(String, usize, usize),
     /// Path provided in landlock-rules doesn't exist
     LandlockPathDoesNotExist(PathBuf),
+    /// Access provided in landlock-rules in invalid
+    InvalidLandlockAccess(String),
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -368,6 +371,9 @@ impl fmt::Display for ValidationError {
                     "Path {:?} provided in landlock-rules does not exist",
                     s.as_path()
                 )
+            }
+            InvalidLandlockAccess(s) => {
+                write!(f, "{s}")
             }
         }
     }
@@ -2361,6 +2367,8 @@ impl LandlockConfig {
         if !self.path.exists() {
             return Err(ValidationError::LandlockPathDoesNotExist(self.path.clone()));
         }
+        LandlockAccess::try_from(self.access.as_str())
+            .map_err(|e| ValidationError::InvalidLandlockAccess(e.to_string()))?;
         Ok(())
     }
 }
