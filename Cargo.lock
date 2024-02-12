@@ -1119,6 +1119,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "landlock"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dafb8a4afee64f167eb2b52d32f0eea002e41a7a6450e68c799c8ec3a81a634c"
+dependencies = [
+ "enumflags2",
+ "libc",
+ "thiserror",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2450,6 +2461,7 @@ dependencies = [
  "hypervisor",
  "igvm",
  "igvm_defs",
+ "landlock",
  "libc",
  "linux-loader",
  "log",
