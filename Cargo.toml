@@ -32,7 +32,7 @@ debug = true
 anyhow = "1.0.79"
 api_client = { path = "api_client" }
 clap = { version = "4.4.7", features = ["string"] }
-dhat = { version = "0.3.2", optional = true }
+dhat = { version = "0.3.3", optional = true }
 epoll = "4.3.3"
 event_monitor = { path = "event_monitor" }
 hypervisor = { path = "hypervisor" }
