@@ -154,7 +154,7 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
         // 'BUILD_VERSION' is set by the build script 'build.rs' at
         // compile time
         .author(env!("CARGO_PKG_AUTHORS"))
-        .about("Launch a cloud-hypervisor VMM.")
+        .about("Launch a cloud-hypervisor VMM. This LTS version is supported by Cyberus Technology GmbH.")
         .group(ArgGroup::new("vm-config").multiple(true))
         .group(ArgGroup::new("vmm-config").multiple(true))
         .group(ArgGroup::new("logging").multiple(true))
@@ -744,7 +744,11 @@ fn main() {
     let cmd_arguments = create_app(default_vcpus, default_memory, default_rng).get_matches();
 
     if cmd_arguments.get_flag("version") {
-        println!("{} {}", env!("CARGO_BIN_NAME"), env!("BUILD_VERSION"));
+        println!(
+            "{} {} (LTS version supported by Cyberus Technology GmbH)",
+            env!("CARGO_BIN_NAME"),
+            env!("BUILD_VERSION")
+        );
 
         if cmd_arguments.get_count("v") != 0 {
             println!("Enabled features: {:?}", vmm::feature_list());
