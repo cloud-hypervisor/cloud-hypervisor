@@ -1179,7 +1179,14 @@ impl PciDevice for VirtioPciDevice {
             o if (NOTIFICATION_BAR_OFFSET..NOTIFICATION_BAR_OFFSET + NOTIFICATION_SIZE)
                 .contains(&o) =>
             {
+                #[cfg(feature = "sev_snp")]
+                for (_event, _addr) in self.ioeventfds(_base) {
+                    if _addr == _base + offset {
+                        _event.write(1).unwrap();
+                    }
+                }
                 // Handled with ioeventfds.
+                #[cfg(not(feature = "sev_snp"))]
                 error!("Unexpected write to notification BAR: offset = 0x{:x}", o);
             }
             o if (MSIX_TABLE_BAR_OFFSET..MSIX_TABLE_BAR_OFFSET + MSIX_TABLE_SIZE).contains(&o) => {
