@@ -749,6 +749,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         exit_evt.try_clone().unwrap(),
         &seccomp_action,
         hypervisor,
+        landlock_enable,
     )
     .map_err(Error::StartVmmThread)?;
 
