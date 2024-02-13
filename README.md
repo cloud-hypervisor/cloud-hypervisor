@@ -119,7 +119,7 @@ do not wish to use the pre-built binaries.
 ## Booting Linux
 
 Cloud Hypervisor supports direct kernel boot (the x86-64 kernel requires the kernel
-built with PVH support) or booting via a firmware (either [Rust Hypervisor
+built with PVH support or a bzImage) or booting via a firmware (either [Rust Hypervisor
 Firmware](https://github.com/cloud-hypervisor/rust-hypervisor-firmware) or an
 edk2 UEFI firmware called `CLOUDHV` / `CLOUDHV_EFI`.)
 
@@ -186,7 +186,7 @@ $ ./cloud-hypervisor \
 
 #### Building your Kernel
 
-Cloud Hypervisor also supports direct kernel boot. For x86-64, a `vmlinux` ELF kernel (compiled with PVH support) is needed. In order to support development there is a custom branch; however provided the required options are enabled any recent kernel will suffice.
+Cloud Hypervisor also supports direct kernel boot. For x86-64, a `vmlinux` ELF kernel (compiled with PVH support) or a regular bzImage are supported. In order to support development there is a custom branch; however provided the required options are enabled any recent kernel will suffice.
 
 To build the kernel:
 
