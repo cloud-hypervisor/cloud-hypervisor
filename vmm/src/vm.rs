@@ -511,7 +511,9 @@ impl Vm {
         let sev_snp_enabled = config.lock().unwrap().is_sev_snp_enabled();
         #[cfg(feature = "tdx")]
         let force_iommu = tdx_enabled;
-        #[cfg(not(feature = "tdx"))]
+        #[cfg(feature = "sev_snp")]
+        let force_iommu = sev_snp_enabled;
+        #[cfg(not(any(feature = "tdx", feature = "sev_snp")))]
         let force_iommu = false;
 
         #[cfg(feature = "guest_debug")]
