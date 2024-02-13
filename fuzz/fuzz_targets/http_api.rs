@@ -190,6 +190,7 @@ impl RequestHandler for StubApiRequestHandler {
                 platform: None,
                 tpm: None,
                 preserved_fds: None,
+                landlock_enable: false,
             })),
             state: VmState::Running,
             memory_actual_size: 0,

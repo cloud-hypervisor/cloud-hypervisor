@@ -2189,6 +2189,7 @@ mod unit_tests {
             platform: None,
             tpm: None,
             preserved_fds: None,
+            landlock_enable: false,
         }))
     }
 
