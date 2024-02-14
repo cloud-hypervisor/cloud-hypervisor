@@ -28,6 +28,7 @@ use crate::device_tree::DeviceTree;
 use crate::gdb::{Debuggable, DebuggableError, GdbRequestPayload, GdbResponsePayload};
 #[cfg(feature = "igvm")]
 use crate::igvm::igvm_loader;
+use crate::landlock::LandlockError;
 use crate::memory_manager::{
     Error as MemoryManagerError, MemoryManager, MemoryManagerSnapshotData,
 };
@@ -121,6 +122,9 @@ pub enum Error {
 
     #[error("Cannot load the kernel command line in memory: {0}")]
     LoadCmdLine(#[source] linux_loader::loader::Error),
+
+    #[error("Failed to apply landlock config during vm_create: {0}")]
+    ApplyLandlock(#[source] LandlockError),
 
     #[error("Cannot modify the kernel command line: {0}")]
     CmdLineInsertStr(#[source] linux_loader::cmdline::Error),
