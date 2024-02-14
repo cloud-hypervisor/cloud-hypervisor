@@ -675,6 +675,7 @@ impl Vmm {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn new(
         vmm_version: VmmVersionInfo,
         api_evt: EventFd,
@@ -1250,6 +1251,11 @@ impl Vmm {
     }
 }
 
+fn apply_landlock(vm_config: Arc<Mutex<VmConfig>>) -> result::Result<(), LandlockError> {
+    vm_config.lock().unwrap().apply_landlock()?;
+    Ok(())
+}
+
 impl RequestHandler for Vmm {
     fn vm_create(&mut self, config: Arc<Mutex<VmConfig>>) -> result::Result<(), VmError> {
         // We only store the passed VM config.
@@ -1258,6 +1264,18 @@ impl RequestHandler for Vmm {
             self.vm_config = Some(config);
             self.console_info =
                 Some(pre_create_console_devices(self).map_err(VmError::CreateConsoleDevices)?);
+
+            if self
+                .vm_config
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .landlock_enable
+            {
+                apply_landlock(self.vm_config.as_ref().unwrap().clone())
+                    .map_err(VmError::ApplyLandlock)?;
+            }
             Ok(())
         } else {
             Err(VmError::VmAlreadyCreated)
