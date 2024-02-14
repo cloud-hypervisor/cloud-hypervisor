@@ -46,7 +46,7 @@ pipeline {
         stage('Build') {
             parallel {
                 stage('Worker build') {
-                    agent { node { label 'jammy' } }
+                    agent { node { label 'jammy-ch' } }
                     when {
                         beforeAgent true
                         expression {
