@@ -934,12 +934,7 @@ type RamRange = (u64, u64);
 
 /// Returns usable physical memory ranges for the guest
 /// These should be used to create e820_RAM memory maps
-///
-/// There are up to two usable physical memory ranges,
-/// divided by the gap at the end of 32bit address space.
-pub fn generate_ram_ranges(
-    guest_mem: &GuestMemoryMmap,
-) -> super::Result<(RamRange, Option<RamRange>)> {
+pub fn generate_ram_ranges(guest_mem: &GuestMemoryMmap) -> super::Result<Vec<RamRange>> {
     // Merge continuous memory regions into one region.
     // Note: memory regions from "GuestMemory" are sorted and non-zero sized.
     let ram_regions = {
@@ -972,15 +967,11 @@ pub fn generate_ram_ranges(
         ram_regions
     };
 
-    if ram_regions.len() > 2 {
-        error!(
-            "There should be up to two usable physical memory ranges, devidided by the
-            gap at the end of 32bit address space (e.g. between 3G and 4G)."
-        );
-        return Err(super::Error::MemmapTableSetup);
-    }
+    // Create the memory map entry for memory region before the gap
+    let mut ram_ranges = vec![];
 
-    // Generate the first usable physical memory range before the gap
+    // Generate the first usable physical memory range before the gap. The e820 map
+    // should only report memory above 1MiB.
     let first_ram_range = {
         let (first_region_start, first_region_end) =
             ram_regions.first().ok_or(super::Error::MemmapTableSetup)?;
@@ -1007,33 +998,19 @@ pub fn generate_ram_ranges(
 
         (high_ram_start, *first_region_end)
     };
+    ram_ranges.push(first_ram_range);
 
-    // Generate the second usable physical memory range after the gap if any
-    let second_ram_range = if let Some((second_region_start, second_region_end)) =
-        ram_regions.get(1)
-    {
-        let ram_64bit_start = layout::RAM_64BIT_START.raw_value();
-
-        if second_region_start != &ram_64bit_start {
-            error!(
-                "Unexpected second memory region layout: start: 0x{:08x}, ram_64bit_start: 0x{:08x}",
-                second_region_start, ram_64bit_start
-            );
-
-            return Err(super::Error::MemmapTableSetup);
-        }
-
+    // Generate additional usable physical memory range after the gap if any.
+    for ram_region in ram_regions.iter().skip(1) {
         info!(
-            "Second usable physical memory range, start: 0x{:08x}, end: 0x{:08x}",
-            ram_64bit_start, second_region_end
+            "found usable physical memory range, start: 0x{:08x}, end: 0x{:08x}",
+            ram_region.0, ram_region.1
         );
 
-        Some((ram_64bit_start, *second_region_end))
-    } else {
-        None
-    };
+        ram_ranges.push(*ram_region);
+    }
 
-    Ok((first_ram_range, second_ram_range))
+    Ok(ram_ranges)
 }
 
 fn configure_pvh(
@@ -1084,30 +1061,18 @@ fn configure_pvh(
     add_memmap_entry(&mut memmap, 0, layout::EBDA_START.raw_value(), E820_RAM);
 
     // Get usable physical memory ranges
-    let (first_ram_range, second_ram_range) = generate_ram_ranges(guest_mem)?;
+    let ram_ranges = generate_ram_ranges(guest_mem)?;
 
-    // Create e820 memory map entry before the gap
-    info!(
-        "create_memmap_entry, start: 0x{:08x}, end: 0x{:08x}",
-        first_ram_range.0, first_ram_range.1
-    );
-    add_memmap_entry(
-        &mut memmap,
-        first_ram_range.0,
-        first_ram_range.1 - first_ram_range.0,
-        E820_RAM,
-    );
-
-    // Create e820 memory map after the gap if any
-    if let Some(second_ram_range) = second_ram_range {
+    // Create e820 memory map entries
+    for ram_range in ram_ranges {
         info!(
             "create_memmap_entry, start: 0x{:08x}, end: 0x{:08x}",
-            second_ram_range.0, second_ram_range.1
+            ram_range.0, ram_range.1
         );
         add_memmap_entry(
             &mut memmap,
-            second_ram_range.0,
-            second_ram_range.1 - second_ram_range.0,
+            ram_range.0,
+            ram_range.1 - ram_range.0,
             E820_RAM,
         );
     }
