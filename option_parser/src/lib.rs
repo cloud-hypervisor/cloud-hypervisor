@@ -23,6 +23,7 @@ pub enum OptionParserError {
     UnknownOption(String),
     InvalidSyntax(String),
     Conversion(String, String),
+    InvalidValue(String),
 }
 
 impl fmt::Display for OptionParserError {
@@ -33,6 +34,7 @@ impl fmt::Display for OptionParserError {
             OptionParserError::Conversion(field, value) => {
                 write!(f, "unable to convert {value} for {field}")
             }
+            OptionParserError::InvalidValue(s) => write!(f, "invalid value: {s}"),
         }
     }
 }
