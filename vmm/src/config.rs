@@ -193,6 +193,8 @@ pub enum ValidationError {
     /// The specified I/O port was invalid. It should be provided in hex, such as `0xe9`.
     #[cfg(target_arch = "x86_64")]
     InvalidIoPortHex(String),
+    #[cfg(feature = "sev_snp")]
+    InvalidHostData,
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -327,6 +329,10 @@ impl fmt::Display for ValidationError {
                     f,
                     "The IO port was not properly provided in hex or a `0x` prefix is missing: {s}"
                 )
+            }
+            #[cfg(feature = "sev_snp")]
+            InvalidHostData => {
+                write!(f, "Invalid host data format")
             }
         }
     }
@@ -2143,6 +2149,16 @@ impl VmConfig {
             }
         }
 
+        #[cfg(feature = "sev_snp")]
+        {
+            let host_data_opt = &self.payload.as_ref().unwrap().host_data;
+
+            if let Some(host_data) = host_data_opt {
+                if host_data.len() != 64 {
+                    return Err(ValidationError::InvalidHostData);
+                }
+            }
+        }
         // The 'conflict' check is introduced in commit 24438e0390d3
         // (vm-virtio: Enable the vmm support for virtio-console).
         //
@@ -3461,7 +3477,9 @@ mod tests {
                 #[cfg(feature = "igvm")]
                 igvm: None,
                 #[cfg(feature = "sev_snp")]
-                host_data: None,
+                host_data: Some(
+                    "243eb7dc1a21129caa91dcbb794922b933baecb5823a377eb431188673288c07".to_string(),
+                ),
             }),
             rate_limit_groups: None,
             disks: None,
@@ -3979,6 +3997,52 @@ mod tests {
             },
         ]);
         assert!(invalid_config.validate().is_err());
+        #[cfg(feature = "sev_snp")]
+        {
+            // Payload with empty host data
+            let mut config_with_no_host_data = valid_config.clone();
+            config_with_no_host_data.payload = Some(PayloadConfig {
+                kernel: Some(PathBuf::from("/path/to/kernel")),
+                firmware: None,
+                cmdline: None,
+                initramfs: None,
+                #[cfg(feature = "igvm")]
+                igvm: None,
+                #[cfg(feature = "sev_snp")]
+                host_data: Some("".to_string()),
+            });
+            assert!(config_with_no_host_data.validate().is_err());
+
+            // Payload with no host data provided
+            let mut valid_config_with_no_host_data = valid_config.clone();
+            valid_config_with_no_host_data.payload = Some(PayloadConfig {
+                kernel: Some(PathBuf::from("/path/to/kernel")),
+                firmware: None,
+                cmdline: None,
+                initramfs: None,
+                #[cfg(feature = "igvm")]
+                igvm: None,
+                #[cfg(feature = "sev_snp")]
+                host_data: None,
+            });
+            assert!(valid_config_with_no_host_data.validate().is_ok());
+
+            // Payload with invalid host data length i.e less than 64
+            let mut config_with_invalid_host_data = valid_config.clone();
+            config_with_invalid_host_data.payload = Some(PayloadConfig {
+                kernel: Some(PathBuf::from("/path/to/kernel")),
+                firmware: None,
+                cmdline: None,
+                initramfs: None,
+                #[cfg(feature = "igvm")]
+                igvm: None,
+                #[cfg(feature = "sev_snp")]
+                host_data: Some(
+                    "243eb7dc1a21129caa91dcbb794922b933baecb5823a377eb43118867328".to_string(),
+                ),
+            });
+            assert!(config_with_invalid_host_data.validate().is_err());
+        }
 
         let mut still_valid_config = valid_config;
         // SAFETY: Safe as the file was just opened
