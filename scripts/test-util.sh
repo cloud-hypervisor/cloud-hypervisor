@@ -57,6 +57,7 @@ build_custom_linux() {
     make -j "$(nproc)"
     if [ "${ARCH}" == "x86_64" ]; then
         cp vmlinux "$WORKLOADS_DIR/" || exit 1
+        cp arch/x86/boot/bzImage "$WORKLOADS_DIR/" || exit 1
     elif [ "${ARCH}" == "aarch64" ]; then
         cp arch/arm64/boot/Image "$WORKLOADS_DIR/" || exit 1
         cp arch/arm64/boot/Image.gz "$WORKLOADS_DIR/" || exit 1
