@@ -3083,6 +3083,56 @@ mod common_parallel {
         handle_child_output(r, &output);
     }
 
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_direct_kernel_boot_bzimage() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+
+        let mut kernel_path = direct_kernel_boot_path();
+        // Replace the default kernel with the bzImage.
+        kernel_path.pop();
+        kernel_path.push("bzImage");
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
+            assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+
+            let grep_cmd = if cfg!(target_arch = "x86_64") {
+                "grep -c PCI-MSI /proc/interrupts"
+            } else {
+                "grep -c ITS-MSI /proc/interrupts"
+            };
+            assert_eq!(
+                guest
+                    .ssh_command(grep_cmd)
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                12
+            );
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
     fn _test_virtio_block(image_name: &str, disable_io_uring: bool, disable_aio: bool) {
         let focal = UbuntuDiskConfig::new(image_name.to_string());
         let guest = Guest::new(Box::new(focal));
