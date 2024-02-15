@@ -75,6 +75,7 @@ mod gdb;
 #[cfg(feature = "igvm")]
 mod igvm;
 pub mod interrupt;
+pub mod landlock;
 pub mod memory_manager;
 pub mod migration;
 mod pci_segment;
@@ -2190,6 +2191,7 @@ mod unit_tests {
             tpm: None,
             preserved_fds: None,
             landlock_enable: false,
+            landlock_config: None,
         }))
     }
 
