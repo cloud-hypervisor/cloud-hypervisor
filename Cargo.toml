@@ -1,7 +1,7 @@
 [package]
 name = "cloud-hypervisor"
 version = "37.0.0"
-authors = ["The Cloud Hypervisor Authors"]
+authors = ["The Cloud Hypervisor Authors", "Cyberus Technology GmbH"]
 edition = "2021"
 default-run = "cloud-hypervisor"
 build = "build.rs"
