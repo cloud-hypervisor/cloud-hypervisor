@@ -11,7 +11,7 @@ use crate::{
     VirtioInterrupt, VirtioSharedMemoryList, VIRTIO_F_IOMMU_PLATFORM,
 };
 use crate::{GuestMemoryMmap, GuestRegionMmap, MmapRegion};
-use libc::{self, c_void, off64_t, pread64, pwrite64};
+use libc::{c_void, off64_t, pread64, pwrite64};
 use seccompiler::SeccompAction;
 use std::io;
 use std::os::unix::io::AsRawFd;

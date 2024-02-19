@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{read_aligned_block_size, DiskTopology};
-use std::convert::TryInto;
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
 

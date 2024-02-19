@@ -9,7 +9,6 @@ use crate::{TPM_CRB_BUFFER_MAX, TPM_SUCCESS};
 use anyhow::anyhow;
 use libc::c_void;
 use libc::{sockaddr_storage, socklen_t};
-use std::convert::TryInto;
 use std::os::unix::io::RawFd;
 use std::path::Path;
 use std::{mem, ptr};

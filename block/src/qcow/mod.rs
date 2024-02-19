@@ -1822,7 +1822,6 @@ pub fn detect_image_type(file: &mut RawFile) -> Result<ImageType> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{Read, Seek, SeekFrom, Write};
     use vmm_sys_util::tempfile::TempFile;
     use vmm_sys_util::write_zeroes::WriteZeroes;
 

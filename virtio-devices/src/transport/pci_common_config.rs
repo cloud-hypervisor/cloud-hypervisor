@@ -330,8 +330,6 @@ mod tests {
     use super::*;
     use crate::GuestMemoryMmap;
     use crate::{ActivateResult, VirtioInterrupt};
-    use std::sync::Arc;
-    use virtio_queue::Queue;
     use vm_memory::GuestMemoryAtomic;
     use vmm_sys_util::eventfd::EventFd;
 

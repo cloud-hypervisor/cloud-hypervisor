@@ -7,7 +7,7 @@ use crate::PciBarConfiguration;
 use std::any::Any;
 use std::fmt::{self, Display};
 use std::sync::{Arc, Barrier, Mutex};
-use std::{self, io, result};
+use std::{io, result};
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::{BusDevice, Resource};
 

@@ -530,7 +530,6 @@ mod tests {
     use super::super::tests::{NoopVirtioInterrupt, TestContext};
     use super::super::*;
     use super::*;
-    use crate::vsock::device::{BACKEND_EVENT, EVT_QUEUE_EVENT, RX_QUEUE_EVENT, TX_QUEUE_EVENT};
     use crate::ActivateError;
     use libc::EFD_NONBLOCK;
 

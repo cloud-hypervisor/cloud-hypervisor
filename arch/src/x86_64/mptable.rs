@@ -300,8 +300,7 @@ mod tests {
     use super::*;
     use crate::layout::MPTABLE_START;
     use vm_memory::{
-        bitmap::BitmapSlice, GuestAddress, GuestUsize, VolatileMemoryError, VolatileSlice,
-        WriteVolatile,
+        bitmap::BitmapSlice, GuestUsize, VolatileMemoryError, VolatileSlice, WriteVolatile,
     };
 
     fn table_entry_size(type_: u8) -> usize {

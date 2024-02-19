@@ -24,6 +24,7 @@ use net_util::{
     NetQueuePair, OpenTapError, RxVirtio, Tap, TapError, TxVirtio, VirtioNetConfig,
 };
 use seccompiler::SeccompAction;
+use std::collections::HashMap;
 use std::net::Ipv4Addr;
 use std::num::Wrapping;
 use std::ops::Deref;
@@ -32,8 +33,6 @@ use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;
-use std::vec::Vec;
-use std::{collections::HashMap, convert::TryInto};
 use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;

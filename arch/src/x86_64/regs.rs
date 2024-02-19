@@ -175,7 +175,6 @@ pub fn configure_segments_and_sregs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::GuestMemoryMmap;
     use vm_memory::GuestAddress;
 
     fn create_guest_mem() -> GuestMemoryMmap {

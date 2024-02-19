@@ -7,7 +7,6 @@
 
 use std::fmt;
 use std::io;
-use std::result::Result;
 use std::str::FromStr;
 
 use serde::de::{Deserialize, Deserializer, Error};

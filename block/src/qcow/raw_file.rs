@@ -11,7 +11,6 @@
 use crate::BlockBackend;
 use libc::c_void;
 use std::alloc::{alloc_zeroed, dealloc, Layout};
-use std::convert::TryInto;
 use std::fs::{File, Metadata};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::unix::io::{AsRawFd, RawFd};

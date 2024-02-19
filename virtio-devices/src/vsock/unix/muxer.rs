@@ -851,16 +851,12 @@ impl VsockMuxer {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{Read, Write};
-    use std::ops::Drop;
-    use std::os::unix::net::{UnixListener, UnixStream};
-    use std::path::{Path, PathBuf};
-
-    use virtio_queue::QueueOwnedT;
-
     use super::super::super::csm::defs as csm_defs;
     use super::super::super::tests::TestContext as VsockTestContext;
     use super::*;
+    use std::io::Write;
+    use std::path::{Path, PathBuf};
+    use virtio_queue::QueueOwnedT;
 
     const PEER_CID: u32 = 3;
     const PEER_BUF_ALLOC: u32 = 64 * 1024;
