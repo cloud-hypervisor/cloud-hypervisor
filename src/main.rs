@@ -561,6 +561,11 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         .ok();
     }
 
+    // SAFETY: Trivially safe.
+    unsafe {
+        libc::signal(libc::SIGCHLD, libc::SIG_IGN);
+    }
+
     // Before we start any threads, mask the signals we'll be
     // installing handlers for, to make sure they only ever run on the
     // dedicated signal handling thread we'll start in a bit.

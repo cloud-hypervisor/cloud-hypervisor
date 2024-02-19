@@ -6,7 +6,7 @@ use arch::_NSIG;
 use libc::{
     c_int, c_void, close, fork, getpgrp, ioctl, pipe2, poll, pollfd, setsid, sigemptyset,
     siginfo_t, signal, sigprocmask, syscall, tcgetpgrp, tcsetpgrp, SYS_close_range, EINVAL, ENOSYS,
-    ENOTTY, O_CLOEXEC, POLLERR, SIGWINCH, SIG_DFL, SIG_SETMASK, STDERR_FILENO, TIOCSCTTY,
+    ENOTTY, O_CLOEXEC, POLLERR, SIGCHLD, SIGWINCH, SIG_DFL, SIG_SETMASK, STDERR_FILENO, TIOCSCTTY,
 };
 use seccompiler::{apply_filter, BpfProgram};
 use std::cell::RefCell;
@@ -204,7 +204,10 @@ fn sigwinch_listener_main(seccomp_filter: BpfProgram, tx: File, tty: File) -> ! 
 ///
 /// Same as [`fork`].
 unsafe fn clone_clear_sighand() -> io::Result<u64> {
-    let mut args = clone_args::default();
+    let mut args = clone_args {
+        exit_signal: SIGCHLD as u64,
+        ..Default::default()
+    };
     args.flags |= CLONE_CLEAR_SIGHAND;
     let r = clone3(&mut args, size_of::<clone_args>());
     if r != -1 {
