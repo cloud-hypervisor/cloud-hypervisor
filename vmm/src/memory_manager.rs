@@ -27,7 +27,6 @@ use serde::{Deserialize, Serialize};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::convert::TryInto;
 use std::ffi;
 use std::fs::{File, OpenOptions};
 use std::io::{self};

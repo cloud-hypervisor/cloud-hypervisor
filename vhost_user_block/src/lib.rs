@@ -29,7 +29,6 @@ use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
 use std::time::Instant;
-use std::vec::Vec;
 use std::{convert, error, fmt, io};
 use vhost::vhost_user::message::*;
 use vhost::vhost_user::Listener;

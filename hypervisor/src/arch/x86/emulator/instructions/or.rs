@@ -10,9 +10,7 @@
 // OR - Logical inclusive OR
 //
 
-use crate::arch::emulator::{EmulationError, PlatformEmulator};
 use crate::arch::x86::emulator::instructions::*;
-use crate::arch::x86::Exception;
 
 macro_rules! or_rm_r {
     ($bound:ty) => {

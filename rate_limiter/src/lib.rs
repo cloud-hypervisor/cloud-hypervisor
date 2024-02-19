@@ -519,7 +519,6 @@ pub(crate) mod tests {
     use super::*;
     use std::fmt;
     use std::thread;
-    use std::time::Duration;
 
     impl TokenBucket {
         // Resets the token bucket: budget set to max capacity and last-updated set to now.

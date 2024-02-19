@@ -2239,7 +2239,7 @@ mod unit_tests {
     use super::*;
     use config::{
         ConsoleConfig, ConsoleOutputMode, CpusConfig, HotplugMethod, MemoryConfig, PayloadConfig,
-        RngConfig, VmConfig,
+        RngConfig,
     };
 
     fn create_dummy_vmm() -> Vmm {

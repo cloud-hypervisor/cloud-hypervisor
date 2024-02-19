@@ -10,7 +10,6 @@ pub mod emulator;
 pub mod socket;
 
 use anyhow::anyhow;
-use std::convert::TryInto;
 use thiserror::Error;
 
 pub const TPM_CRB_BUFFER_MAX: usize = 3968; // 0x1_000 - 0x80

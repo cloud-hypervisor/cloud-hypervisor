@@ -9,7 +9,6 @@ use seccompiler::{
     BackendError, BpfProgram, Error, SeccompAction, SeccompCmpArgLen as ArgLen, SeccompCmpOp::Eq,
     SeccompCondition as Cond, SeccompFilter, SeccompRule,
 };
-use std::convert::TryInto;
 
 pub enum Thread {
     HttpApi,

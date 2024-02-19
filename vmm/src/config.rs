@@ -10,7 +10,6 @@ use option_parser::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
-use std::convert::From;
 use std::fmt;
 use std::path::PathBuf;
 use std::result;

@@ -25,6 +25,7 @@ use block::{
 };
 use rate_limiter::{RateLimiter, TokenType};
 use seccompiler::SeccompAction;
+use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::io;
 use std::num::Wrapping;
@@ -34,7 +35,6 @@ use std::path::PathBuf;
 use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
-use std::{collections::HashMap, convert::TryInto};
 use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;

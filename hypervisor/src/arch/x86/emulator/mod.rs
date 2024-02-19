@@ -649,10 +649,8 @@ impl<'a, T: CpuStateManager> Emulator<'a, T> {
 #[cfg(test)]
 mod mock_vmm {
     use super::*;
-    use crate::arch::emulator::{EmulationError, PlatformEmulator};
-    use crate::arch::x86::emulator::{Emulator, EmulatorCpuState as CpuState};
+    use crate::arch::x86::emulator::EmulatorCpuState as CpuState;
     use crate::arch::x86::gdt::{gdt_entry, segment_from_gdt};
-    use crate::arch::x86::Exception;
     use std::sync::{Arc, Mutex};
 
     #[derive(Debug, Clone)]

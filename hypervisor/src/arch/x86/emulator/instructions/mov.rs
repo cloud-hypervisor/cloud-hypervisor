@@ -12,9 +12,7 @@
 //   Copies the second operand (source operand) to the first operand (destination operand).
 //
 
-use crate::arch::emulator::{EmulationError, PlatformEmulator};
 use crate::arch::x86::emulator::instructions::*;
-use crate::arch::x86::Exception;
 
 macro_rules! mov_rm_r {
     ($bound:ty) => {
