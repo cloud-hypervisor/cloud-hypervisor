@@ -757,7 +757,6 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
 fn main() {
     #[cfg(all(feature = "tdx", feature = "sev_snp"))]
     compile_error!("Feature 'tdx' and 'sev_snp' are mutually exclusive.");
-
     #[cfg(all(feature = "sev_snp", not(target_arch = "x86_64")))]
     compile_error!("Feature 'sev_snp' needs target 'x86_64'");
 

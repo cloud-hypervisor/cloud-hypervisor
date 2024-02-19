@@ -6,7 +6,7 @@
 //
 // SPDX-License-Identifier: (Apache-2.0 AND BSD-3-Clause)
 
-use libc::{self, EFD_NONBLOCK};
+use libc::EFD_NONBLOCK;
 use log::*;
 use net_util::{
     open_tap, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TxVirtio,
@@ -20,7 +20,6 @@ use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::process;
 use std::sync::{Arc, Mutex, RwLock};
-use std::vec::Vec;
 use vhost::vhost_user::message::*;
 use vhost::vhost_user::Listener;
 use vhost_user_backend::{VhostUserBackendMut, VhostUserDaemon, VringRwLock, VringT};

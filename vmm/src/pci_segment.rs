@@ -10,7 +10,7 @@
 //
 
 use crate::device_manager::{AddressManager, DeviceManagerError, DeviceManagerResult};
-use acpi_tables::{self, aml, Aml};
+use acpi_tables::{aml, Aml};
 use arch::layout;
 use pci::{DeviceRelocation, PciBdf, PciBus, PciConfigMmio, PciRoot};
 #[cfg(target_arch = "x86_64")]

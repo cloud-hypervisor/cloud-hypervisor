@@ -16,7 +16,6 @@ extern crate event_monitor;
 extern crate log;
 
 use serde::{Deserialize, Serialize};
-use std::convert::TryInto;
 use std::io;
 use thiserror::Error;
 

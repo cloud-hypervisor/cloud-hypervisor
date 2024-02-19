@@ -146,8 +146,8 @@ impl TxBuf {
 mod tests {
     use super::*;
     use std::io::Error as IoError;
+    use std::io::ErrorKind;
     use std::io::Result as IoResult;
-    use std::io::{ErrorKind, Write};
 
     struct TestSink {
         data: Vec<u8>,

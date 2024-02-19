@@ -10,10 +10,8 @@
 // CMP-Compare Two Operands
 //
 
-use crate::arch::emulator::{EmulationError, PlatformEmulator};
 use crate::arch::x86::emulator::instructions::*;
 use crate::arch::x86::regs::*;
-use crate::arch::x86::Exception;
 
 // CMP affects OF, SF, ZF, AF, PF and CF
 const FLAGS_MASK: u64 = CF | PF | AF | ZF | SF | OF;

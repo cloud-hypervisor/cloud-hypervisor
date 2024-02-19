@@ -10,10 +10,8 @@
 // MOVS - Move Data from String to String
 //
 
-use crate::arch::emulator::{EmulationError, PlatformEmulator};
 use crate::arch::x86::emulator::instructions::*;
 use crate::arch::x86::regs::DF;
-use crate::arch::x86::Exception;
 
 macro_rules! movs {
     ($bound:ty) => {

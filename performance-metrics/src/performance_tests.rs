@@ -8,7 +8,6 @@
 use crate::{mean, PerformanceTestControl};
 use std::fs;
 use std::path::PathBuf;
-use std::string::String;
 use std::thread;
 use std::time::Duration;
 use test_infra::Error as InfraError;
