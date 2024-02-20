@@ -1622,6 +1622,11 @@ impl vm::Vm for MshvVm {
 
     /// Unregister an event from a certain address it has been previously registered to.
     fn unregister_ioevent(&self, fd: &EventFd, addr: &IoEventAddress) -> vm::Result<()> {
+        #[cfg(feature = "sev_snp")]
+        if self.sev_snp_enabled {
+            return Ok(());
+        }
+
         let addr = &mshv_ioctls::IoEventAddress::from(*addr);
         debug!("unregister_ioevent fd {} addr {:x?}", fd.as_raw_fd(), addr);
 
