@@ -4,6 +4,7 @@ on: [pull_request, create]
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
           runner: ["garm-jammy", "garm-jammy-amd"]
     if: github.event_name == 'pull_request'
