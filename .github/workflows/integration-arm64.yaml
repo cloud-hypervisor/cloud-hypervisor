@@ -3,6 +3,7 @@ on: [pull_request, create]
 
 jobs:
   build:
+    timeout-minutes: 60
     if: github.event_name == 'pull_request'
     name: Tests (ARM64)
     runs-on: focal-arm64
@@ -16,4 +17,5 @@ jobs:
       - name: Load openvswitch module
         run: sudo modprobe openvswitch
       - name: Run integration tests (musl)
+        timeout-minutes: 30
         run: scripts/dev_cli.sh tests --integration --libc musl
