@@ -1,0 +1,19 @@
+name: Cloud Hypervisor Tests (ARM64)
+on: [pull_request, create]
+
+jobs:
+  build:
+    if: github.event_name == 'pull_request'
+    name: Tests (ARM64)
+    runs-on: focal-arm64
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run unit tests
+        run: scripts/dev_cli.sh tests --unit
+      - name: Load openvswitch module
+        run: sudo modprobe openvswitch
+      - name: Run integration tests
+        run: scripts/dev_cli.sh tests --integration
