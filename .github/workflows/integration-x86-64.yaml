@@ -3,9 +3,12 @@ on: [pull_request, create]
 
 jobs:
   build:
+    strategy:
+      matrix:
+          runner: ["garm-jammy", "garm-jammy-amd"]
     if: github.event_name == 'pull_request'
     name: Tests (x86-64)
-    runs-on: garm-jammy
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Code checkout
         uses: actions/checkout@v4
