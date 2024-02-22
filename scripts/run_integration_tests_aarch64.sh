@@ -53,33 +53,6 @@ build_virtiofsd() {
 update_workloads() {
     cp scripts/sha1sums-aarch64 $WORKLOADS_DIR
 
-    BIONIC_OS_IMAGE_DOWNLOAD_NAME="bionic-server-cloudimg-arm64.img"
-    BIONIC_OS_IMAGE_DOWNLOAD_URL="https://cloud-hypervisor.azureedge.net/$BIONIC_OS_IMAGE_DOWNLOAD_NAME"
-    BIONIC_OS_DOWNLOAD_IMAGE="$WORKLOADS_DIR/$BIONIC_OS_IMAGE_DOWNLOAD_NAME"
-    if [ ! -f "$BIONIC_OS_DOWNLOAD_IMAGE" ]; then
-        pushd $WORKLOADS_DIR
-        time wget --quiet $BIONIC_OS_IMAGE_DOWNLOAD_URL || exit 1
-        popd
-    fi
-
-    BIONIC_OS_RAW_IMAGE_NAME="bionic-server-cloudimg-arm64.raw"
-    BIONIC_OS_RAW_IMAGE="$WORKLOADS_DIR/$BIONIC_OS_RAW_IMAGE_NAME"
-    if [ ! -f "$BIONIC_OS_RAW_IMAGE" ]; then
-        pushd $WORKLOADS_DIR
-        time qemu-img convert -p -f qcow2 -O raw $BIONIC_OS_IMAGE_DOWNLOAD_NAME $BIONIC_OS_RAW_IMAGE_NAME || exit 1
-        popd
-    fi
-
-    # Convert the raw image to qcow2 image to remove compressed blocks from the disk. Therefore letting the
-    # qcow2 format image can be directly used in the integration test.
-    BIONIC_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME="bionic-server-cloudimg-arm64.qcow2"
-    BIONIC_OS_QCOW2_UNCOMPRESSED_IMAGE="$WORKLOADS_DIR/$BIONIC_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME"
-    if [ ! -f "$BIONIC_OS_QCOW2_UNCOMPRESSED_IMAGE" ]; then
-        pushd $WORKLOADS_DIR
-        time qemu-img convert -p -f raw -O qcow2 $BIONIC_OS_RAW_IMAGE_NAME $BIONIC_OS_QCOW2_UNCOMPRESSED_IMAGE || exit 1
-        popd
-    fi
-
     FOCAL_OS_RAW_IMAGE_NAME="focal-server-cloudimg-arm64-custom-20210929-0.raw"
     FOCAL_OS_RAW_IMAGE_DOWNLOAD_URL="https://cloud-hypervisor.azureedge.net/$FOCAL_OS_RAW_IMAGE_NAME"
     FOCAL_OS_RAW_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_NAME"
