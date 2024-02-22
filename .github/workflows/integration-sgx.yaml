@@ -1,0 +1,22 @@
+name: Cloud Hypervisor Tests (SGX)
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    if: github.event_name == 'push'
+    name: Tests (SGX)
+    runs-on: jammy-sgx
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run SGX integration tests
+        timeout-minutes: 10
+        run: scripts/dev_cli.sh tests --integration-sgx
+      - name: Run SGX integration tests for musl
+        timeout-minutes: 10
+        run: scripts/dev_cli.sh tests --integration-sgx --libc musl
