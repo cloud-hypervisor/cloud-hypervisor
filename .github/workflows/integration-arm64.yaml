@@ -1,9 +1,11 @@
 name: Cloud Hypervisor Tests (ARM64)
-on: [pull_request, create]
-
+on:
+  workflow_run:
+    workflows: [Cloud Hypervisor Quality Checks]
+    types: [completed]
 jobs:
   build:
-    if: github.event_name == 'pull_request'
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     name: Tests (ARM64)
     runs-on: focal-arm64
     steps:

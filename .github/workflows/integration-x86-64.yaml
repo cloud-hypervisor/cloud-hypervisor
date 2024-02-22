@@ -1,12 +1,14 @@
 name: Cloud Hypervisor Tests (x86-64)
-on: [pull_request, create]
-
+on:
+  workflow_run:
+    workflows: ["Cloud Hypervisor Quality Checks"]
+    types: [completed]
 jobs:
   build:
     strategy:
       matrix:
           runner: ["garm-jammy", "garm-jammy-amd"]
-    if: github.event_name == 'pull_request'
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     name: Tests (x86-64)
     runs-on: ${{ matrix.runner }}
     steps:
