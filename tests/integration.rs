@@ -53,7 +53,6 @@ use x86_64::*;
 
 #[cfg(target_arch = "aarch64")]
 mod aarch64 {
-    pub const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-arm64.raw";
     pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64-custom-20210929-0.raw";
     pub const FOCAL_IMAGE_UPDATE_KERNEL_NAME: &str =
         "focal-server-cloudimg-arm64-custom-20210929-0-update-kernel.raw";
