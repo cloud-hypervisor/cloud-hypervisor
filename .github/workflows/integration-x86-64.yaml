@@ -1,0 +1,38 @@
+name: Cloud Hypervisor Tests (x86-64)
+on: [pull_request, create]
+
+jobs:
+  build:
+    if: github.event_name == 'pull_request'
+    name: Tests (x86-64)
+    runs-on: garm-jammy
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install Docker
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install ca-certificates curl gnupg
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+          sudo chmod a+r /usr/share/keyrings/docker-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+          sudo apt-get update
+          sudo apt install -y docker-ce docker-ce-cli
+      - name: Prepare for VDPA
+        run: scripts/prepare_vdpa.sh
+      - name: Run unit tests
+        run: scripts/dev_cli.sh tests --unit
+      - name: Load openvswitch module
+        run: sudo modprobe openvswitch
+      - name: Run integration tests
+        run: scripts/dev_cli.sh tests --integration
+      - name: Run live-migration integration tests
+        run: scripts/dev_cli.sh tests --integration-live-migration
+      - name: Run unit tests (musl)
+        run: scripts/dev_cli.sh tests --unit --libc musl
+      - name: Run integration tests (musl)
+        run: scripts/dev_cli.sh tests --integration --libc musl
+      - name: Run live-migration integration tests (musl)
+        run: scripts/dev_cli.sh tests --integration-live-migration --libc musl
