@@ -11,9 +11,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Run unit tests
-        run: scripts/dev_cli.sh tests --unit
+      - name: Run unit tests (musl)
+        run: scripts/dev_cli.sh tests --unit --libc musl
       - name: Load openvswitch module
         run: sudo modprobe openvswitch
-      - name: Run integration tests
-        run: scripts/dev_cli.sh tests --integration
+      - name: Run integration tests (musl)
+        run: scripts/dev_cli.sh tests --integration --libc musl
