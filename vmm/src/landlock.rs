@@ -26,6 +26,10 @@ pub enum LandlockError {
     /// Invalid Landlock access
     #[error("Invalid Landlock access: {0}")]
     InvalidLandlockAccess(String),
+
+    /// Invalid Path
+    #[error("Invalid path")]
+    InvalidPath,
 }
 
 // https://docs.rs/landlock/latest/landlock/enum.ABI.html for more info on ABI
