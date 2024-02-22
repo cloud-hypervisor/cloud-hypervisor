@@ -16,7 +16,9 @@ use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{Error as VmmError, Result};
 use core::fmt;
 use hypervisor::HypervisorType;
-use micro_http::{Body, HttpServer, MediaType, Method, Request, Response, StatusCode, Version};
+use micro_http::{
+    Body, HttpServer, MediaType, Method, Request, Response, ServerError, StatusCode, Version,
+};
 use once_cell::sync::Lazy;
 use seccompiler::{apply_filter, SeccompAction};
 use serde_json::Error as SerdeError;
@@ -32,6 +34,8 @@ use std::thread;
 use vmm_sys_util::eventfd::EventFd;
 
 pub mod http_endpoint;
+
+pub type HttpApiHandle = (thread::JoinHandle<Result<()>>, EventFd);
 
 /// Errors associated with VMM management
 #[derive(Debug)]
@@ -297,12 +301,19 @@ fn start_http_thread(
     seccomp_action: &SeccompAction,
     exit_evt: EventFd,
     hypervisor_type: HypervisorType,
-) -> Result<thread::JoinHandle<Result<()>>> {
+) -> Result<HttpApiHandle> {
     // Retrieve seccomp filter for API thread
     let api_seccomp_filter = get_seccomp_filter(seccomp_action, Thread::HttpApi, hypervisor_type)
         .map_err(VmmError::CreateSeccompFilter)?;
 
-    thread::Builder::new()
+    let api_shutdown_fd = EventFd::new(libc::EFD_NONBLOCK).map_err(VmmError::EventFdCreate)?;
+    let api_shutdown_fd_clone = api_shutdown_fd.try_clone().unwrap();
+
+    server
+        .add_kill_switch(api_shutdown_fd_clone)
+        .map_err(VmmError::CreateApiServer)?;
+
+    let thread = thread::Builder::new()
         .name("http-server".to_string())
         .spawn(move || {
             // Apply seccomp filter for API thread.
@@ -329,6 +340,10 @@ fn start_http_thread(
                                 }
                             }
                         }
+                        Err(ServerError::ShutdownEvent) => {
+                            server.flush_outgoing_writes();
+                            return;
+                        }
                         Err(e) => {
                             error!(
                                 "HTTP server error on retrieving incoming request. Error: {}",
@@ -346,7 +361,9 @@ fn start_http_thread(
 
             Ok(())
         })
-        .map_err(VmmError::HttpThreadSpawn)
+        .map_err(VmmError::HttpThreadSpawn)?;
+
+    Ok((thread, api_shutdown_fd))
 }
 
 pub fn start_http_path_thread(
@@ -356,12 +373,13 @@ pub fn start_http_path_thread(
     seccomp_action: &SeccompAction,
     exit_evt: EventFd,
     hypervisor_type: HypervisorType,
-) -> Result<thread::JoinHandle<Result<()>>> {
+) -> Result<HttpApiHandle> {
     let socket_path = PathBuf::from(path);
     let socket_fd = UnixListener::bind(socket_path).map_err(VmmError::CreateApiServerSocket)?;
     // SAFETY: Valid FD just opened
     let server = unsafe { HttpServer::new_from_fd(socket_fd.into_raw_fd()) }
         .map_err(VmmError::CreateApiServer)?;
+
     start_http_thread(
         server,
         api_notifier,
@@ -379,7 +397,7 @@ pub fn start_http_fd_thread(
     seccomp_action: &SeccompAction,
     exit_evt: EventFd,
     hypervisor_type: HypervisorType,
-) -> Result<thread::JoinHandle<Result<()>>> {
+) -> Result<HttpApiHandle> {
     // SAFETY: Valid FD
     let server = unsafe { HttpServer::new_from_fd(fd) }.map_err(VmmError::CreateApiServer)?;
     start_http_thread(
@@ -390,4 +408,11 @@ pub fn start_http_fd_thread(
         exit_evt,
         hypervisor_type,
     )
+}
+
+pub fn http_api_graceful_shutdown(http_handle: HttpApiHandle) -> Result<()> {
+    let (api_thread, api_shutdown_fd) = http_handle;
+
+    api_shutdown_fd.write(1).unwrap();
+    api_thread.join().map_err(VmmError::ThreadCleanup)?
 }
