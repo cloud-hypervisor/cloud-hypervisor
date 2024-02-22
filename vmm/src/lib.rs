@@ -27,6 +27,7 @@ use crate::vm::{Error as VmError, Vm, VmState};
 use anyhow::anyhow;
 #[cfg(feature = "dbus_api")]
 use api::dbus::{DBusApiOptions, DBusApiShutdownChannels};
+use api::http::HttpApiHandle;
 use libc::{tcsetattr, termios, EFD_NONBLOCK, SIGINT, SIGTERM, TCSANOW};
 use memory_manager::MemoryManagerSnapshotData;
 use pci::PciBdf;
@@ -455,25 +456,27 @@ pub fn start_vmm_thread(
         None => None,
     };
 
-    if let Some(http_path) = http_path {
-        api::start_http_path_thread(
+    let http_api_handle = if let Some(http_path) = http_path {
+        Some(api::start_http_path_thread(
             http_path,
             api_event_clone,
             api_sender,
             seccomp_action,
             exit_event,
             hypervisor_type,
-        )?;
+        )?)
     } else if let Some(http_fd) = http_fd {
-        api::start_http_fd_thread(
+        Some(api::start_http_fd_thread(
             http_fd,
             api_event_clone,
             api_sender,
             seccomp_action,
             exit_event,
             hypervisor_type,
-        )?;
-    }
+        )?)
+    } else {
+        None
+    };
 
     #[cfg(feature = "guest_debug")]
     if let Some(debug_path) = debug_path {
@@ -493,6 +496,7 @@ pub fn start_vmm_thread(
         thread_handle: thread,
         #[cfg(feature = "dbus_api")]
         dbus_shutdown_chs,
+        http_api_handle,
     })
 }
 
@@ -523,6 +527,7 @@ pub struct VmmThreadHandle {
     pub thread_handle: thread::JoinHandle<Result<()>>,
     #[cfg(feature = "dbus_api")]
     pub dbus_shutdown_chs: Option<DBusApiShutdownChannels>,
+    pub http_api_handle: Option<HttpApiHandle>,
 }
 
 pub struct Vmm {

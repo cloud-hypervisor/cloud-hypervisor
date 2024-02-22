@@ -838,6 +838,7 @@ fn http_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError>
         (libc::SYS_sched_yield, vec![]),
         (libc::SYS_sigaltstack, vec![]),
         (libc::SYS_write, vec![]),
+        (libc::SYS_rt_sigprocmask, vec![]),
     ])
 }
 

@@ -20,6 +20,7 @@ use std::sync::{Arc, Mutex};
 use thiserror::Error;
 #[cfg(feature = "dbus_api")]
 use vmm::api::dbus::{dbus_api_graceful_shutdown, DBusApiOptions};
+use vmm::api::http::http_api_graceful_shutdown;
 use vmm::api::ApiAction;
 use vmm::config;
 use vmm_sys_util::eventfd::EventFd;
@@ -82,6 +83,8 @@ enum Error {
     LogFileCreation(std::io::Error),
     #[error("Error setting up logger: {0}")]
     LoggerSetup(log::SetLoggerError),
+    #[error("Failed to gracefully shutdown http api: {0}")]
+    HttpApiShutdown(#[source] vmm::Error),
 }
 
 struct Logger {
@@ -759,6 +762,10 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         .join()
         .map_err(Error::ThreadJoin)?
         .map_err(Error::VmmThread)?;
+
+    if let Some(api_handle) = vmm_thread_handle.http_api_handle {
+        http_api_graceful_shutdown(api_handle).map_err(Error::HttpApiShutdown)?
+    }
 
     #[cfg(feature = "dbus_api")]
     if let Some(chs) = vmm_thread_handle.dbus_shutdown_chs {
