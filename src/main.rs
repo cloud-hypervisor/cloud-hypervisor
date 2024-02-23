@@ -156,6 +156,7 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
         // compile time
         .author(env!("CARGO_PKG_AUTHORS"))
         .about("Launch a cloud-hypervisor VMM.")
+        .arg_required_else_help(true)
         .group(ArgGroup::new("vm-config").multiple(true))
         .group(ArgGroup::new("vmm-config").multiple(true))
         .group(ArgGroup::new("logging").multiple(true))

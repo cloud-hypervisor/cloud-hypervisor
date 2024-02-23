@@ -16,6 +16,7 @@ fn main() {
         .version(env!("CARGO_PKG_VERSION"))
         .author(env!("CARGO_PKG_AUTHORS"))
         .about("Launch a vhost-user-net backend.")
+        .arg_required_else_help(true)
         .arg(
             Arg::new("net-backend")
                 .long("net-backend")

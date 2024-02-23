@@ -898,6 +898,7 @@ fn main() {
         .author(env!("CARGO_PKG_AUTHORS"))
         .version(env!("BUILD_VERSION"))
         .about("Remotely control a cloud-hypervisor VMM.")
+        .arg_required_else_help(true)
         .subcommand_required(true)
         .args([
             Arg::new("api-socket")
