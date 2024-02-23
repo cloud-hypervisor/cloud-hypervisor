@@ -173,6 +173,14 @@ mod mshv {
     pub const MSHV_CREATE_DEVICE: u64 = 0xc00c_b813;
     pub const MSHV_SET_DEVICE_ATTR: u64 = 0x4018_b814;
     pub const MSHV_VP_REGISTER_INTERCEPT_RESULT: u64 = 0x4030_b817;
+    pub const MSHV_GET_VP_CPUID_VALUES: u64 = 0xc028_b81b;
+    pub const MSHV_MODIFY_GPA_HOST_ACCESS: u64 = 0x4018_b828;
+    pub const MSHV_IMPORT_ISOLATED_PAGES: u64 = 0x4010_b829;
+    pub const MSHV_COMPLETE_ISOLATED_IMPORT: u64 = 0x4d06_b830;
+    pub const MSHV_READ_GPA: u64 = 0xc020_b832;
+    pub const MSHV_WRITE_GPA: u64 = 0x4020_b833;
+    pub const MSHV_SEV_SNP_AP_CREATE: u64 = 0x4010_b834;
+    pub const MSHV_ISSUE_PSP_GUEST_REQUEST: u64 = 0x4010_b831;
 }
 #[cfg(feature = "mshv")]
 use mshv::*;
@@ -210,6 +218,29 @@ fn create_vmm_ioctl_seccomp_rule_common_mshv() -> Result<Vec<SeccompRule>, Backe
         )?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_CREATE_DEVICE)?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_SET_DEVICE_ATTR)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, MSHV_GET_VP_CPUID_VALUES)?],
+        and![Cond::new(
+            1,
+            ArgLen::Dword,
+            Eq,
+            MSHV_MODIFY_GPA_HOST_ACCESS
+        )?],
+        and![Cond::new(1, ArgLen::Dword, Eq, MSHV_IMPORT_ISOLATED_PAGES)?],
+        and![Cond::new(
+            1,
+            ArgLen::Dword,
+            Eq,
+            MSHV_COMPLETE_ISOLATED_IMPORT
+        )?],
+        and![Cond::new(1, ArgLen::Dword, Eq, MSHV_READ_GPA)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, MSHV_WRITE_GPA)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, MSHV_SEV_SNP_AP_CREATE)?],
+        and![Cond::new(
+            1,
+            ArgLen::Dword,
+            Eq,
+            MSHV_ISSUE_PSP_GUEST_REQUEST
+        )?],
     ])
 }
 
@@ -672,6 +703,22 @@ fn create_vcpu_ioctl_seccomp_rule_mshv() -> Result<Vec<SeccompRule>, BackendErro
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_MAP_GUEST_MEMORY)?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_UNMAP_GUEST_MEMORY)?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_VP_TRANSLATE_GVA)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, MSHV_GET_VP_CPUID_VALUES)?],
+        and![Cond::new(
+            1,
+            ArgLen::Dword,
+            Eq,
+            MSHV_MODIFY_GPA_HOST_ACCESS
+        )?],
+        and![Cond::new(1, ArgLen::Dword, Eq, MSHV_READ_GPA)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, MSHV_WRITE_GPA)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, MSHV_SEV_SNP_AP_CREATE)?],
+        and![Cond::new(
+            1,
+            ArgLen::Dword,
+            Eq,
+            MSHV_ISSUE_PSP_GUEST_REQUEST
+        )?],
     ])
 }
 
