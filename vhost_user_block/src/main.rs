@@ -20,6 +20,7 @@ fn main() {
         .version(env!("CARGO_PKG_VERSION"))
         .author(env!("CARGO_PKG_AUTHORS"))
         .about("Launch a vhost-user-blk backend.")
+        .arg_required_else_help(true)
         .arg(
             Arg::new("block-backend")
                 .long("block-backend")
