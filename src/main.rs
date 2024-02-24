@@ -408,6 +408,14 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
                 .num_args(1)
                 .help(config::TpmConfig::SYNTAX)
                 .group("vmm-config"),
+        )
+        .arg(
+            Arg::new("once")
+                .long("once")
+                .help("Exit on VM reboot or reset")
+                .num_args(0)
+                .action(ArgAction::SetTrue)
+                .group("vmm-config"),
         );
 
     #[cfg(target_arch = "x86_64")]
@@ -707,6 +715,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         exit_evt.try_clone().unwrap(),
         &seccomp_action,
         hypervisor,
+        cmd_arguments.get_flag("once"),
     )
     .map_err(Error::StartVmmThread)?;
 
