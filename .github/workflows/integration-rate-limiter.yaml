@@ -1,0 +1,18 @@
+name: Cloud Hypervisor Tests (Rate-Limiter)
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Tests (Rate-Limiter)
+    runs-on: jammy-rate-limiter
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run rate-limiter integration tests
+        timeout-minutes: 10
+        run: scripts/dev_cli.sh tests --integration-rate-limiter
