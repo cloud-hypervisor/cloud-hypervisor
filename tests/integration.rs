@@ -7325,6 +7325,55 @@ mod common_parallel {
 
         handle_child_output(r, &output);
     }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_nmi() {
+        let jammy = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(jammy));
+        let api_socket = temp_api_path(&guest.tmp_dir);
+        let event_path = temp_event_monitor_path(&guest.tmp_dir);
+
+        let kernel_path = direct_kernel_boot_path();
+        let cmd_line = format!("{} {}", DIRECT_KERNEL_BOOT_CMDLINE, "unknown_nmi_panic=1");
+
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", "boot=4"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", cmd_line.as_str()])
+            .default_disks()
+            .args(["--net", guest.default_net_string().as_str()])
+            .args(["--pvpanic"])
+            .args(["--api-socket", &api_socket])
+            .args(["--event-monitor", format!("path={event_path}").as_str()])
+            .capture_output();
+
+        let mut child = cmd.spawn().unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            assert!(remote_command(&api_socket, "nmi", None));
+
+            // Wait a while for guest
+            thread::sleep(std::time::Duration::new(3, 0));
+
+            let expected_sequential_events = [&MetaEvent {
+                event: "panic".to_string(),
+                device_id: None,
+            }];
+            assert!(check_latest_events_exact(
+                &expected_sequential_events,
+                &event_path
+            ));
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
 }
 
 mod dbus_api {
