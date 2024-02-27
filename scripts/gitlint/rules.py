@@ -42,7 +42,6 @@ class TitleStartsWithComponent(LineRule):
             'gitignore',
             'gitlint',
             'hypervisor',
-            'Jenkinsfile',
             'main',
             'misc',
             'net_gen',
