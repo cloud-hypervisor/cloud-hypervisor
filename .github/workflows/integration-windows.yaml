@@ -1,0 +1,39 @@
+name: Cloud Hypervisor Tests (Wingows Guest)
+on: [pull_request, create]
+
+jobs:
+  build:
+    if: github.event_name == 'pull_request'
+    name: Tests (Windows Guest)
+    runs-on: garm-jammy
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install Docker
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install ca-certificates curl gnupg
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+          sudo chmod a+r /usr/share/keyrings/docker-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+          sudo apt-get update
+          sudo apt install -y docker-ce docker-ce-cli
+      - name: Install Azure CLI
+        run: |
+          sudo apt install -y ca-certificates curl apt-transport-https lsb-release gnupg
+          curl -sL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null
+          echo "deb [arch=amd64] https://packages.microsoft.com/repos/azure-cli/ jammy main" | sudo tee /etc/apt/sources.list.d/azure-cli.list
+          sudo apt update
+          sudo apt install -y azure-cli
+      - name: Download assets
+        run: |
+          mkdir $HOME/workloads
+          az storage blob download --container-name private-images --file "$HOME/workloads/windows-server-2022-amd64-2.raw" --name windows-server-2022-amd64-2.raw --connection-string "${{ secrets.CH_PRIVATE_IMAGES }}"
+      - name: Run Windows guest integration tests
+        timeout-minutes: 60
+        run: scripts/dev_cli.sh tests --integration-windows
+      - name: Run Windows guest integration tests for musl
+        timeout-minutes: 60
+        run: scripts/dev_cli.sh tests --integration-windows --libc musl
