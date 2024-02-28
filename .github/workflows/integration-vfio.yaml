@@ -6,7 +6,6 @@ on:
 
 jobs:
   build:
-    if: github.event_name == 'push'
     name: Tests (VFIO)
     runs-on: jammy-vfio
     steps:
