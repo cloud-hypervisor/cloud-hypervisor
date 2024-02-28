@@ -1,9 +1,8 @@
 name: Cloud Hypervisor Build
-on: [pull_request, create]
+on: [pull_request, merge_group]
 
 jobs:
   build:
-    if: github.event_name == 'pull_request'
     name: Build
     runs-on: ubuntu-latest
     strategy:

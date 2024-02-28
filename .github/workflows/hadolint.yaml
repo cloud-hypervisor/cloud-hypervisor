@@ -1,5 +1,4 @@
 name: Lint Dockerfile
-
 on:
   push:
     paths:
