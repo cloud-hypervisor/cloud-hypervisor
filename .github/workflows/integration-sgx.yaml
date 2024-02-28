@@ -6,7 +6,6 @@ on:
 
 jobs:
   build:
-    if: github.event_name == 'push'
     name: Tests (SGX)
     runs-on: jammy-sgx
     steps:
