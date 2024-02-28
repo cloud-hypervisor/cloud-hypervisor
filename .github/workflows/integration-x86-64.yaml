@@ -1,5 +1,5 @@
 name: Cloud Hypervisor Tests (x86-64)
-on: [pull_request, create]
+on: [pull_request, merge_group]
 
 jobs:
   build:
@@ -9,7 +9,6 @@ jobs:
       matrix:
         runner: ["garm-jammy", "garm-jammy-amd"]
         libc: ["musl", "gnu"]
-    if: github.event_name == 'pull_request'
     name: Tests (x86-64)
     runs-on: ${{ matrix.runner }}
     steps:
