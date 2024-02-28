@@ -1,0 +1,17 @@
+name: Cloud Hypervisor Tests (Metrics)
+on: [pull_request, create]
+
+jobs:
+  build:
+    name: Tests (Metrics)
+    runs-on: jammy-metrics
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run metrics tests
+        timeout-minutes: 60
+        run: scripts/dev_cli.sh tests --metrics -- -- --report-file /root/workloads/metrics.json
+      - name: Upload metrics report
+        run: echo "Uploading setup in Azure not done"
