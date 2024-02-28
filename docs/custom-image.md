@@ -170,7 +170,7 @@ We usually start from one of the custom cloud image we have previously created
 but we can use a stock cloud image as well.
 
 ```bash
-wget https://cloud-hypervisor.azureedge.net/jammy-server-cloudimg-amd64-custom-20230119-0.raw
+wget https://ch-images.azureedge.net/jammy-server-cloudimg-amd64-custom-20230119-0.raw
 mv jammy-server-cloudimg-amd64-custom-20230119-0.raw jammy-server-cloudimg-amd64-nvidia.raw
 ```
 
