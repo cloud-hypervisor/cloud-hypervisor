@@ -1,9 +1,9 @@
 name: Cloud Hypervisor Release
-on: [pull_request, create]
+on: [pull_request, create, merge_group]
 
 jobs:
   release:
-    if: (github.event_name == 'create' && github.event.ref_type == 'tag') || github.event_name == 'pull_request'
+    if: (github.event_name == 'create' && github.event.ref_type == 'tag') || github.event_name == 'pull_request' || github.event_name == 'merge_group'
     name: Release
     runs-on: ubuntu-latest
     steps:

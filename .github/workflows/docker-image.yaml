@@ -1,5 +1,4 @@
 name: Cloud Hypervisor's Docker image update
-
 on:
   push:
     branches: main

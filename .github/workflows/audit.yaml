@@ -4,6 +4,7 @@ on:
     paths: 
       - '**/Cargo.toml'
       - '**/Cargo.lock'
+
 jobs:
   security_audit:
     name: Audit

@@ -1,9 +1,8 @@
 name: Cloud Hypervisor Quality Checks
-on: [pull_request, create]
+on: [pull_request, merge_group]
 
 jobs:
   build:
-    if: github.event_name == 'pull_request'
     name: Quality (clippy, rustfmt)
     runs-on: ubuntu-latest
     continue-on-error: ${{ matrix.experimental }}
