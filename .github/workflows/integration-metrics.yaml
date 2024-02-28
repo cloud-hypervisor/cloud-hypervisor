@@ -1,0 +1,22 @@
+name: Cloud Hypervisor Tests (Metrics)
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Tests (Metrics)
+    runs-on: jammy-metrics
+    env:
+      METRICS_PUBLISH_KEY: ${{ secrets.METRICS_PUBLISH_KEY }}
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run metrics tests
+        timeout-minutes: 60
+        run: scripts/dev_cli.sh tests --metrics -- -- --report-file /root/workloads/metrics.json
+      - name: Upload metrics report
+        run: 'curl -X PUT https://ch-metrics.azurewebsites.net/api/publishmetrics -H "x-functions-key: $METRICS_PUBLISH_KEY" -T ~/workloads/metrics.json'
