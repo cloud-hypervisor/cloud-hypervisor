@@ -1,9 +1,8 @@
 name: Cloud Hypervisor Cargo Fuzz Build
-on: [pull_request, create]
+on: [pull_request, merge_group]
 
 jobs:
   build:
-    if: github.event_name == 'pull_request'
     name: Cargo Fuzz Build
     runs-on: ubuntu-latest
     strategy:

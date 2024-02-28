@@ -1,6 +1,6 @@
 name: DCO
-on:
-  pull_request:
+on: [pull_request, merge_group]
+
 jobs:
   check:
     runs-on: ubuntu-latest

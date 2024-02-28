@@ -1,10 +1,9 @@
 name: Cloud Hypervisor Tests (ARM64)
-on: [pull_request, create]
+on: [pull_request, merge_group]
 
 jobs:
   build:
     timeout-minutes: 60
-    if: github.event_name == 'pull_request'
     name: Tests (ARM64)
     runs-on: focal-arm64
     steps:

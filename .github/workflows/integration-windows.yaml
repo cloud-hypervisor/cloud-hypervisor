@@ -1,5 +1,5 @@
 name: Cloud Hypervisor Tests (Windows Guest)
-on: [pull_request, create]
+on: [merge_group]
 
 jobs:
   build:
