@@ -221,7 +221,7 @@ cmd_build() {
     build="debug"
     libc="gnu"
     hypervisor="kvm"
-    features_build=""
+    features_build=()
     exported_device="/dev/kvm"
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -252,7 +252,7 @@ cmd_build() {
             ;;
         "--features")
             shift
-            features_build="--features $1"
+            features_build=(--features "$1")
             ;;
         "--") {
             shift
@@ -298,7 +298,7 @@ cmd_build() {
         --env RUSTFLAGS="$rustflags" \
         --env TARGET_CC="$target_cc" \
         "$CTR_IMAGE" \
-        cargo build --all "$features_build" \
+        cargo build --all "${features_build[@]}" \
         --target-dir "$CTR_CLH_CARGO_TARGET" \
         "${cargo_args[@]}" && say "Binaries placed under $CLH_CARGO_TARGET/$target/$build"
 }
