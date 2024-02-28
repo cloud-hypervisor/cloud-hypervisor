@@ -21,7 +21,7 @@ fi
 cp scripts/sha1sums-x86_64 "$WORKLOADS_DIR"
 
 FOCAL_OS_IMAGE_NAME="focal-server-cloudimg-amd64-custom-20210609-0.qcow2"
-FOCAL_OS_IMAGE_URL="https://cloud-hypervisor.azureedge.net/$FOCAL_OS_IMAGE_NAME"
+FOCAL_OS_IMAGE_URL="https://ch-images.azureedge.net/$FOCAL_OS_IMAGE_NAME"
 FOCAL_OS_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_IMAGE_NAME"
 if [ ! -f "$FOCAL_OS_IMAGE" ]; then
     pushd "$WORKLOADS_DIR" || exit
