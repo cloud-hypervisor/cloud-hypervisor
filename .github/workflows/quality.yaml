@@ -45,8 +45,8 @@ jobs:
           override: true
           components: rustfmt, clippy
 
-      - name: Debug Check (default features)
-        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+      - name: Bisectability Check (default features)
+        if: ${{ github.event_name == 'pull_request' && matrix.target == 'x86_64-unknown-linux-gnu' }}
         run: |
           set -e
           commits=$(git rev-list origin/${{ github.base_ref }}..${{ github.sha }})
