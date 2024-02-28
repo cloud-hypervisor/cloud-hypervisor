@@ -12,6 +12,7 @@ jobs:
       with:
         python-version: '3.x'
     - name: Check DCO
+      if: ${{ github.event_name == 'pull_request' }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
