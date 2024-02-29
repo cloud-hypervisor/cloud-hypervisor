@@ -6057,7 +6057,7 @@ mod common_parallel {
             .unwrap();
 
         // Wait for the VM to be restored
-        thread::sleep(std::time::Duration::new(10, 0));
+        thread::sleep(std::time::Duration::new(20, 0));
         let expected_events = [
             &MetaEvent {
                 event: "starting".to_string(),
