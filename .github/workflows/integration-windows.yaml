@@ -7,7 +7,7 @@ concurrency:
 jobs:
   build:
     name: Tests (Windows Guest)
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'garm-jammy' }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'garm-jammy-16' }}
     steps:
       - name: Code checkout
         if: ${{ github.event_name != 'pull_request' }}
