@@ -6,7 +6,7 @@ edition = "2021"
 build = "../build.rs"
 
 [dependencies]
-clap = { version = "4.4.7", features = ["wrap_help","cargo"] }
+clap = { version = "4.5.1", features = ["wrap_help","cargo"] }
 env_logger = "0.10.1"
 epoll = "4.3.3"
 libc = "0.2.153"

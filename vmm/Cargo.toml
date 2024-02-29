@@ -25,7 +25,7 @@ bitflags = "2.4.2"
 block = { path = "../block" }
 blocking = { version = "1.5.1", optional = true }
 cfg-if = "1.0.0"
-clap = "4.4.7"
+clap = "4.5.1"
 devices = { path = "../devices" }
 epoll = "4.3.3"
 event_monitor = { path = "../event_monitor" }
