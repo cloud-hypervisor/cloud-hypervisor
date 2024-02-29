@@ -13,7 +13,7 @@ jobs:
         runner: ['garm-jammy', "garm-jammy-amd"]
         libc: ["musl", 'gnu']
     name: Tests (x86-64)
-    runs-on: ${{ github.event_name == 'pull_request' && !(matrix.runner == 'garm-jammy' && matrix.libc == 'gnu') && 'ubuntu-latest' || matrix.runner }}
+    runs-on: ${{ github.event_name == 'pull_request' && !(matrix.runner == 'garm-jammy' && matrix.libc == 'gnu') && 'ubuntu-latest' || format('{0}-16', matrix.runner) }}
     steps:
       - name: Code checkout
         if: ${{ github.event_name != 'pull_request' || (matrix.runner == 'garm-jammy' && matrix.libc == 'gnu') }}
