@@ -883,6 +883,7 @@ fn event_monitor_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendE
         (libc::SYS_brk, vec![]),
         (libc::SYS_futex, vec![]),
         (libc::SYS_mmap, vec![]),
+        (libc::SYS_munmap, vec![]),
         (libc::SYS_sched_yield, vec![]),
         (libc::SYS_write, vec![]),
     ])
