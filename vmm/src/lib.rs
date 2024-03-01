@@ -1459,6 +1459,18 @@ impl RequestHandler for Vmm {
         )?;
         self.vm = Some(vm);
 
+        if self
+            .vm_config
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .landlock_enable
+        {
+            apply_landlock(self.vm_config.as_ref().unwrap().clone())
+                .map_err(VmError::ApplyLandlock)?;
+        }
+
         // Now we can restore the rest of the VM.
         if let Some(ref mut vm) = self.vm {
             vm.restore()
