@@ -1,7 +1,7 @@
 name: Cloud Hypervisor Release
 on: [create, merge_group]
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
