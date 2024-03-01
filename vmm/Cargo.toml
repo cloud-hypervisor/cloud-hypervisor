@@ -50,7 +50,7 @@ range_map_vec = { version = "0.1.0", optional = true }
 rate_limiter = { path = "../rate_limiter" }
 seccompiler = "0.4.0"
 serde = { version = "1.0.196", features = ["rc", "derive"] }
-serde_json = "1.0.109"
+serde_json = "1.0.114"
 serial_buffer = { path = "../serial_buffer" }
 signal-hook = "0.3.17"
 thiserror = "1.0.52"
