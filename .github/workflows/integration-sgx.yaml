@@ -1,5 +1,8 @@
 name: Cloud Hypervisor Tests (SGX)
 on: [merge_group, pull_request]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
