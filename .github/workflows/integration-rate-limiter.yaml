@@ -1,5 +1,8 @@
 name: Cloud Hypervisor Tests (Rate-Limiter)
 on: [merge_group, pull_request]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
