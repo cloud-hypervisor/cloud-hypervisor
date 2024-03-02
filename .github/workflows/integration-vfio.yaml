@@ -8,6 +8,8 @@ jobs:
   build:
     name: Tests (VFIO)
     runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'jammy-vfio' }}
+    env:
+      AUTH_DOWNLOAD_TOKEN: ${{ secrets.AUTH_DOWNLOAD_TOKEN }}
     steps:
       - name: Fix workspace permissions
         if: ${{ github.event_name != 'pull_request' }}
