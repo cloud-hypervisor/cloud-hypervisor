@@ -182,6 +182,7 @@ mod mshv {
     pub const MSHV_WRITE_GPA: u64 = 0x4020_b833;
     pub const MSHV_SEV_SNP_AP_CREATE: u64 = 0x4010_b834;
     pub const MSHV_ISSUE_PSP_GUEST_REQUEST: u64 = 0x4010_b831;
+    pub const MSHV_ASSERT_INTERRUPT: u64 = 0x4018_b809;
 }
 #[cfg(feature = "mshv")]
 use mshv::*;
@@ -200,6 +201,7 @@ fn create_vmm_ioctl_seccomp_rule_common_mshv() -> Result<Vec<SeccompRule>, Backe
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_GET_VP_REGISTERS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_SET_VP_REGISTERS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_RUN_VP)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, MSHV_ASSERT_INTERRUPT)?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_GET_VP_STATE)?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_SET_VP_STATE)?],
         and![Cond::new(
@@ -705,6 +707,7 @@ fn create_vcpu_ioctl_seccomp_rule_mshv() -> Result<Vec<SeccompRule>, BackendErro
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_SET_VP_REGISTERS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_MAP_GUEST_MEMORY)?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_UNMAP_GUEST_MEMORY)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, MSHV_ASSERT_INTERRUPT)?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_VP_TRANSLATE_GVA)?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_GET_VP_CPUID_VALUES)?],
         and![Cond::new(

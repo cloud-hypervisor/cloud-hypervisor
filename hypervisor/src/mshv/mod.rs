@@ -14,7 +14,7 @@ use crate::vec_with_array_field;
 use crate::vm::{self, InterruptSourceConfig, VmOps};
 use crate::HypervisorType;
 pub use mshv_bindings::*;
-use mshv_ioctls::{set_registers_64, Mshv, NoDatamatch, VcpuFd, VmFd, VmType};
+use mshv_ioctls::{set_registers_64, InterruptRequest, Mshv, NoDatamatch, VcpuFd, VmFd, VmType};
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -348,7 +348,6 @@ pub struct MshvVcpu {
     cpuid: Vec<CpuIdEntry>,
     msrs: Vec<MsrEntry>,
     vm_ops: Option<Arc<dyn vm::VmOps>>,
-    #[cfg(feature = "sev_snp")]
     vm_fd: Arc<VmFd>,
 }
 
@@ -1273,6 +1272,22 @@ impl cpu::Vcpu for MshvVcpu {
             .set_sev_control_register(sev_control_reg)
             .map_err(|e| cpu::HypervisorCpuError::SetSevControlRegister(e.into()))
     }
+    ///
+    /// Trigger NMI interrupt
+    ///
+    fn nmi(&self) -> cpu::Result<()> {
+        let cfg = InterruptRequest {
+            interrupt_type: hv_interrupt_type_HV_X64_INTERRUPT_TYPE_NMI,
+            apic_id: self.vp_index as u64,
+            level_triggered: false,
+            vector: 0,
+            logical_destination_mode: false,
+            long_mode: false,
+        };
+        self.vm_fd
+            .request_virtual_interrupt(&cfg)
+            .map_err(|e| cpu::HypervisorCpuError::Nmi(e.into()))
+    }
 }
 
 impl MshvVcpu {
@@ -1568,7 +1583,6 @@ impl vm::Vm for MshvVm {
             cpuid: Vec::new(),
             msrs: self.msrs.clone(),
             vm_ops,
-            #[cfg(feature = "sev_snp")]
             vm_fd: self.fd.clone(),
         };
         Ok(Arc::new(vcpu))
