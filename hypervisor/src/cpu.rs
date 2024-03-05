@@ -515,7 +515,5 @@ pub trait Vcpu: Send + Sync {
     ///
     /// Trigger NMI interrupt
     ///
-    fn nmi(&self) -> Result<()> {
-        unimplemented!()
-    }
+    fn nmi(&self) -> Result<()>;
 }
