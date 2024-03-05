@@ -887,7 +887,7 @@ components:
           type: string
         rate_limit_group:
           type: string
-        affinity:
+        queue_affinity:
           type: array
           items:
             $ref: "#/components/schemas/VirtQueueAffinity"
