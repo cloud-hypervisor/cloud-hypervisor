@@ -1384,6 +1384,8 @@ impl RequestHandler for Vmm {
     }
 
     fn vm_reboot(&mut self) -> result::Result<(), VmError> {
+        event!("vm", "rebooting");
+
         // First we stop the current VM
         let (config, serial_pty, console_pty, debug_console_pty, console_resize_pipe) =
             if let Some(mut vm) = self.vm.take() {
@@ -1450,6 +1452,8 @@ impl RequestHandler for Vmm {
         vm.boot()?;
 
         self.vm = Some(vm);
+
+        event!("vm", "rebooted");
 
         Ok(())
     }
