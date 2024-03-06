@@ -33,9 +33,8 @@ The Cyberus Hypervisor is a commercially supported virtualization
 stack by Cyberus Technology. It includes a variant of Cloud Hypervisor
 as its userspace part (VMM). The version of Cloud Hypervisor included
 in the Cyberus Hypervisor tracks the latest LTS branch of Cloud
-Hypervisor.
-
-See the `LICENSE` file for licensing details.
+Hypervisor and may include additional patches. It is available under
+the same licensing terms as the Cloud Hypervisor code it is based on.
 
 # 1. What is Cloud Hypervisor?
 
