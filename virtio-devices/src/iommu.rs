@@ -399,6 +399,7 @@ impl Request {
                         .memory()
                         .read_obj(req_addr as GuestAddress)
                         .map_err(Error::GuestMemory)?;
+
                     debug!("Attach request {:?}", req);
 
                     // Copy the value to use it as a proper reference.
@@ -407,12 +408,34 @@ impl Request {
                     let bypass =
                         (req.flags & VIRTIO_IOMMU_ATTACH_F_BYPASS) == VIRTIO_IOMMU_ATTACH_F_BYPASS;
 
+                    let mut old_domain_id = domain_id;
+                    if let Some(&id) = mapping.endpoints.read().unwrap().get(&endpoint) {
+                        old_domain_id = id;
+                    }
+
+                    if old_domain_id != domain_id {
+                        detach_endpoint_from_domain(endpoint, old_domain_id, mapping, ext_mapping)?;
+                    }
+
                     // Add endpoint associated with specific domain
                     mapping
                         .endpoints
                         .write()
                         .unwrap()
                         .insert(endpoint, domain_id);
+
+
+                    // If any other mappings exist in the domain for other containers,
+                    // make sure to issue these mappings for the new endpoint/container
+                    if let Some(domain_mappings) = &mapping.domains.read().unwrap().get(&domain_id) {
+                        if let Some(ext_map) = ext_mapping.get(&endpoint) {
+                            for (virt_start, addr_map) in &domain_mappings.mappings {
+                                ext_map
+                                    .map(*virt_start, addr_map.gpa, addr_map.size)
+                                    .map_err(Error::ExternalUnmapping)?;
+                            }
+                        }
+                    } 
 
                     // Add new domain with no mapping if the entry didn't exist yet
                     let mut domains = mapping.domains.write().unwrap();
@@ -421,6 +444,7 @@ impl Request {
                         bypass,
                     };
                     domains.entry(domain_id).or_insert_with(|| domain);
+
                 }
                 VIRTIO_IOMMU_T_DETACH => {
                     if desc_size_left != size_of::<VirtioIommuReqDetach>() {
@@ -432,29 +456,16 @@ impl Request {
                         .memory()
                         .read_obj(req_addr as GuestAddress)
                         .map_err(Error::GuestMemory)?;
+
                     debug!("Detach request {:?}", req);
+
 
                     // Copy the value to use it as a proper reference.
                     let domain_id = req.domain;
                     let endpoint = req.endpoint;
 
                     // Remove endpoint associated with specific domain
-                    mapping.endpoints.write().unwrap().remove(&endpoint);
-
-                    // After all endpoints have been successfully detached from a
-                    // domain, the domain can be removed. This means we must remove
-                    // the mappings associated with this domain.
-                    if mapping
-                        .endpoints
-                        .write()
-                        .unwrap()
-                        .iter()
-                        .filter(|(_, &d)| d == domain_id)
-                        .count()
-                        == 0
-                    {
-                        mapping.domains.write().unwrap().remove(&domain_id);
-                    }
+                    detach_endpoint_from_domain(endpoint, domain_id, mapping, ext_mapping)?;
                 }
                 VIRTIO_IOMMU_T_MAP => {
                     if desc_size_left != size_of::<VirtioIommuReqMap>() {
@@ -466,6 +477,7 @@ impl Request {
                         .memory()
                         .read_obj(req_addr as GuestAddress)
                         .map_err(Error::GuestMemory)?;
+                    
                     debug!("Map request {:?}", req);
 
                     // Copy the value to use it as a proper reference.
@@ -491,7 +503,9 @@ impl Request {
                         .map(|(&e, _)| e)
                         .collect();
 
-                    // Trigger external mapping if necessary.
+                    // For viommu all endpoints receive their own VFIO container, as a result
+                    // Each endpoint within the domain needs to be separately mapped, as the
+                    // mapping is done on a per-container level, not a per-domain level
                     for endpoint in endpoints {
                         if let Some(ext_map) = ext_mapping.get(&endpoint) {
                             let size = req.virt_end - req.virt_start + 1;
@@ -527,6 +541,7 @@ impl Request {
                         .memory()
                         .read_obj(req_addr as GuestAddress)
                         .map_err(Error::GuestMemory)?;
+                    
                     debug!("Unmap request {:?}", req);
 
                     // Copy the value to use it as a proper reference.
@@ -553,6 +568,7 @@ impl Request {
                         .map(|(&e, _)| e)
                         .collect();
 
+
                     // Trigger external unmapping if necessary.
                     for endpoint in endpoints {
                         if let Some(ext_map) = ext_mapping.get(&endpoint) {
@@ -563,15 +579,25 @@ impl Request {
                         }
                     }
 
-                    // Remove mapping associated with the domain
-                    mapping
-                        .domains
-                        .write()
-                        .unwrap()
-                        .get_mut(&domain_id)
-                        .unwrap()
-                        .mappings
-                        .remove(&virt_start);
+                    // Remove all mappings associated with the domain
+                    let mut size = req.virt_end - virt_start + 1;
+                    let mut virt_start = req.virt_start;
+                    while size > 0 {
+                        if let Some(addr_map) = mapping
+                            .domains
+                            .write()
+                            .unwrap()
+                            .get_mut(&domain_id)
+                            .unwrap()
+                            .mappings
+                            .remove(&virt_start)
+                        {
+                            size -= addr_map.size;
+                            virt_start += addr_map.size;
+                        } else {
+                            break;
+                        }
+                    }
                 }
                 VIRTIO_IOMMU_T_PROBE => {
                     if desc_size_left != size_of::<VirtioIommuReqProbe>() {
@@ -638,6 +664,41 @@ impl Request {
 
         Ok((hdr_len as usize) + size_of::<VirtioIommuReqTail>())
     }
+}
+
+fn detach_endpoint_from_domain(
+    endpoint: u32,
+    domain_id: u32,
+    mapping: &Arc<IommuMapping>,
+    ext_mapping: &BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
+) -> result::Result<(), Error> {
+    // Remove endpoint associated with specific domain
+    mapping.endpoints.write().unwrap().remove(&endpoint);
+    
+    // Trigger external unmapping for the endpoint if necessary.
+    if let Some(domain_mappings) = &mapping.domains.read().unwrap().get(&domain_id) {
+        if let Some(ext_map) = ext_mapping.get(&endpoint) {
+            for (virt_start, addr_map) in &domain_mappings.mappings {
+                ext_map
+                    .unmap(*virt_start, addr_map.size)
+                    .map_err(Error::ExternalUnmapping)?;
+            }
+        }
+    }
+  
+    if mapping
+        .endpoints
+        .write()
+        .unwrap()
+        .iter()
+        .filter(|(_, &d)| d == domain_id)
+        .count()
+        == 0
+    {
+        mapping.domains.write().unwrap().remove(&domain_id);
+    }
+
+    Ok(())
 }
 
 struct IommuEpollHandler {
@@ -770,7 +831,6 @@ impl DmaRemapping for IommuMapping {
                 if domain.bypass {
                     return Ok(addr);
                 }
-
                 let range_start = if VIRTIO_IOMMU_PAGE_SIZE_MASK > addr {
                     0
                 } else {
@@ -790,7 +850,6 @@ impl DmaRemapping for IommuMapping {
         } else if self.bypass.load(Ordering::Acquire) {
             return Ok(addr);
         }
-
         Err(io::Error::new(
             io::ErrorKind::Other,
             format!("failed to translate GVA addr 0x{addr:x}"),
@@ -806,7 +865,6 @@ impl DmaRemapping for IommuMapping {
                 if domain.bypass {
                     return Ok(addr);
                 }
-
                 for (&key, &value) in domain.mappings.iter() {
                     if addr >= value.gpa && addr < value.gpa + value.size {
                         let new_addr = addr - value.gpa + key;

@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::vfio::{UserMemoryRegion, Vfio, VfioCommon, VfioError, VFIO_COMMON_ID};
+use crate::vfio::{UserMemoryRegion, Vfio, VfioCommon, VfioError, VFIO_COMMON_ID, MmioRegion};
 use crate::{BarReprogrammingParams, PciBarConfiguration, VfioPciError};
 use crate::{PciBdf, PciDevice, PciDeviceError, PciSubclass};
 use hypervisor::HypervisorVmError;
@@ -263,6 +263,10 @@ impl VfioUserPciDevice {
             .unwrap()
             .dma_unmap(region.start_addr().raw_value(), region.len())
             .map_err(VfioUserPciDeviceError::DmaUnmap)
+    }
+    
+    pub fn mmio_regions(&self) -> Vec<MmioRegion> {
+        self.common.mmio_regions.clone()
     }
 }
 

@@ -58,8 +58,8 @@ use libc::{
     O_TMPFILE, PROT_READ, PROT_WRITE, TCSANOW,
 };
 use pci::{
-    DeviceRelocation, PciBarRegionType, PciBdf, PciDevice, VfioPciDevice, VfioUserDmaMapping,
-    VfioUserPciDevice, VfioUserPciDeviceError,
+    DeviceRelocation, PciBarRegionType, PciBdf, PciDevice, VfioDmaMapping, VfioPciDevice,
+    VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError, MmioRegion,
 };
 use rate_limiter::group::RateLimiterGroup;
 use seccompiler::SeccompAction;
@@ -85,7 +85,6 @@ use virtio_devices::{
 };
 use virtio_devices::{Endpoint, IommuMapping};
 use vm_allocator::{AddressAllocator, SystemAllocator};
-use vm_device::dma_mapping::vfio::VfioDmaMapping;
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, LegacyIrqGroupConfig, MsiIrqGroupConfig,
@@ -966,6 +965,8 @@ pub struct DeviceManager {
     snapshot: Option<Snapshot>,
 
     rate_limit_groups: HashMap<String, Arc<RateLimiterGroup>>,
+
+    mmio_regions: Arc<Mutex<Vec<MmioRegion>>>,
 }
 
 impl DeviceManager {
@@ -1196,6 +1197,7 @@ impl DeviceManager {
             acpi_platform_addresses: AcpiPlatformAddresses::default(),
             snapshot,
             rate_limit_groups,
+            mmio_regions: Arc::new(Mutex::new(Vec::new())),
         };
 
         let device_manager = Arc::new(Mutex::new(device_manager));
@@ -3424,6 +3426,7 @@ impl DeviceManager {
             let vfio_mapping = Arc::new(VfioDmaMapping::new(
                 Arc::clone(&vfio_container),
                 Arc::new(self.memory_manager.lock().unwrap().guest_memory()),
+                Arc::clone(&self.mmio_regions),
             ));
 
             if let Some(iommu) = &self.iommu_device {
@@ -3442,10 +3445,8 @@ impl DeviceManager {
             let vfio_container = self.create_vfio_container()?;
             needs_dma_mapping = true;
             self.vfio_container = Some(Arc::clone(&vfio_container));
-
             vfio_container
         };
-
         let vfio_device = VfioDevice::new(&device_cfg.path, Arc::clone(&vfio_container))
             .map_err(DeviceManagerError::VfioCreate)?;
 
@@ -3468,6 +3469,7 @@ impl DeviceManager {
             let vfio_mapping = Arc::new(VfioDmaMapping::new(
                 Arc::clone(&vfio_container),
                 Arc::new(self.memory_manager.lock().unwrap().guest_memory()),
+                Arc::clone(&self.mmio_regions),
             ));
 
             for virtio_mem_device in self.virtio_mem_devices.iter() {
@@ -3496,9 +3498,7 @@ impl DeviceManager {
             } else {
                 None
             };
-
         let memory_manager = self.memory_manager.clone();
-
         let vfio_pci_device = VfioPciDevice::new(
             vfio_name.clone(),
             &self.address_manager.vm,
@@ -3513,9 +3513,7 @@ impl DeviceManager {
             device_cfg.x_nv_gpudirect_clique,
         )
         .map_err(DeviceManagerError::VfioPciCreate)?;
-
         let vfio_pci_device = Arc::new(Mutex::new(vfio_pci_device));
-
         let new_resources = self.add_pci_device(
             vfio_pci_device.clone(),
             vfio_pci_device.clone(),
@@ -3523,12 +3521,15 @@ impl DeviceManager {
             pci_device_bdf,
             resources,
         )?;
-
         vfio_pci_device
             .lock()
             .unwrap()
             .map_mmio_regions()
             .map_err(DeviceManagerError::VfioMapRegion)?;
+
+        for mmio_region in vfio_pci_device.lock().unwrap().mmio_regions() {
+            self.mmio_regions.lock().unwrap().push(mmio_region);
+        }
 
         let mut node = device_node!(vfio_name, vfio_pci_device);
 
@@ -3601,6 +3602,7 @@ impl DeviceManager {
                 prefetchable: bar.prefetchable().into(),
             });
         }
+        
 
         Ok(new_resources)
     }
@@ -3711,6 +3713,10 @@ impl DeviceManager {
             .unwrap()
             .map_mmio_regions()
             .map_err(DeviceManagerError::VfioUserMapRegion)?;
+
+        for mmio_region in vfio_user_pci_device.lock().unwrap().mmio_regions() {
+            self.mmio_regions.lock().unwrap().push(mmio_region);
+        }
 
         let mut node = device_node!(vfio_user_name, vfio_user_pci_device);
 
