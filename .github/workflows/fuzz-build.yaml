@@ -20,11 +20,10 @@ jobs:
       - name: Code checkout
         uses: actions/checkout@v4
       - name: Install Rust toolchain (${{ matrix.rust }})
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
             toolchain: ${{ matrix.rust }}
             target: ${{ matrix.target }}
-            override: true
       - name: Install Cargo fuzz
         run: cargo install cargo-fuzz
       - name: Fuzz Build

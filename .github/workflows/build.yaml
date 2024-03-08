@@ -29,11 +29,10 @@ jobs:
         run: sudo apt install -y musl-tools
 
       - name: Install Rust toolchain (${{ matrix.rust }})
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
-          override: true
 
       - name: Build (default features)
         run: cargo rustc --locked --bin cloud-hypervisor -- -D warnings -D clippy::undocumented_unsafe_blocks
