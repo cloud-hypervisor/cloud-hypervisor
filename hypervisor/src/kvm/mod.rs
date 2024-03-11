@@ -315,7 +315,7 @@ impl From<CpuState> for VcpuKvmState {
 #[cfg(target_arch = "x86_64")]
 impl From<kvm_clock_data> for ClockData {
     fn from(d: kvm_clock_data) -> Self {
-        ClockData::Kvm(d)
+        ClockData::Kvm(d.into())
     }
 }
 
@@ -323,7 +323,7 @@ impl From<kvm_clock_data> for ClockData {
 impl From<ClockData> for kvm_clock_data {
     fn from(ms: ClockData) -> Self {
         match ms {
-            ClockData::Kvm(s) => s,
+            ClockData::Kvm(s) => s.into(),
             /* Needed in case other hypervisors are enabled */
             #[allow(unreachable_patterns)]
             _ => panic!("CpuState is not valid"),
@@ -1977,7 +1977,7 @@ impl cpu::Vcpu for KvmVcpu {
             msr_entries
         };
 
-        let vcpu_events = self.get_vcpu_events()?;
+        let vcpu_events = self.get_vcpu_events()?.into();
         let tsc_khz = self.tsc_khz()?;
 
         Ok(VcpuKvmState {
@@ -2130,7 +2130,7 @@ impl cpu::Vcpu for KvmVcpu {
             }
         }
 
-        self.set_vcpu_events(&state.vcpu_events)?;
+        self.set_vcpu_events(&state.vcpu_events.into())?;
 
         Ok(())
     }

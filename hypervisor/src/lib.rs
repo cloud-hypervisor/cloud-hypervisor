@@ -162,7 +162,7 @@ pub enum CpuState {
 #[cfg(target_arch = "x86_64")]
 pub enum ClockData {
     #[cfg(feature = "kvm")]
-    Kvm(kvm_bindings::kvm_clock_data),
+    Kvm(kvm_bindings::kvm_clock_data_old),
     #[cfg(feature = "mshv")]
     Mshv, /* MSHV does not support ClockData yet */
 }

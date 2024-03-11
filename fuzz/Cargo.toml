@@ -35,7 +35,7 @@ vm-virtio = { path = "../vm-virtio" }
 path = ".."
 
 [patch.crates-io]
-kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch-v0.7.0" }
+kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch-live-upgrade-stable-37.x" }
 versionize_derive = { git = "https://github.com/cloud-hypervisor/versionize_derive", branch = "ch-0.1.6" }
 
 # Prevent this from interfering with workspaces
