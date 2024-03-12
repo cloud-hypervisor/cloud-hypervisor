@@ -185,11 +185,30 @@ dependencies = [
  "futures-lite 1.13.0",
  "log",
  "parking",
- "polling",
+ "polling 2.8.0",
  "rustix 0.37.27",
  "slab",
  "socket2",
  "waker-fn",
+]
+
+[[package]]
+name = "async-io"
+version = "2.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dcccb0f599cfa2f8ace422d3555572f47424da5648a4382a9dd0310ff8210884"
+dependencies = [
+ "async-lock 3.2.0",
+ "cfg-if",
+ "concurrent-queue",
+ "futures-io",
+ "futures-lite 2.1.0",
+ "parking",
+ "polling 3.5.0",
+ "rustix 0.38.31",
+ "slab",
+ "tracing",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -214,18 +233,18 @@ dependencies = [
 
 [[package]]
 name = "async-process"
-version = "1.8.0"
+version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf012553ce51eb7aa6dc2143804cc8252bd1cb681a1c5cb7fa94ca88682dee1d"
+checksum = "ea6438ba0a08d81529c69b36700fa2f95837bfe3e776ab39cde9c14d9149da88"
 dependencies = [
- "async-io",
+ "async-io 1.13.0",
  "async-lock 2.7.0",
  "async-signal",
  "blocking",
  "cfg-if",
  "event-listener 3.0.0",
  "futures-lite 1.13.0",
- "rustix 0.38.25",
+ "rustix 0.38.31",
  "windows-sys 0.48.0",
 ]
 
@@ -242,18 +261,17 @@ dependencies = [
 
 [[package]]
 name = "async-signal"
-version = "0.2.2"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c99f3cb3f9ff89f7d718fbb942c9eb91bedff12e396adf09a622dfe7ffec2bc2"
+checksum = "9e47d90f65a225c4527103a8d747001fc56e375203592b25ad103e1ca13124c5"
 dependencies = [
- "async-io",
+ "async-io 2.3.2",
  "async-lock 2.7.0",
  "atomic-waker",
  "cfg-if",
- "concurrent-queue",
  "futures-core",
  "futures-io",
- "libc",
+ "rustix 0.38.31",
  "signal-hook-registry",
  "slab",
  "windows-sys 0.48.0",
@@ -708,12 +726,12 @@ checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
 
 [[package]]
 name = "errno"
-version = "0.3.5"
+version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac3e13f66a2f95e32a39eaa81f6b95d42878ca0e1db0c7543723dfe12557e860"
+checksum = "a258e46cdc063eb8519c00b9fc845fc47bcfca4130e2f08e88665ceda8474245"
 dependencies = [
  "libc",
- "windows-sys 0.48.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1127,7 +1145,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb0889898416213fab133e1d33a0e5858a48177452750691bde3666d0fdbaf8b"
 dependencies = [
  "hermit-abi",
- "rustix 0.38.25",
+ "rustix 0.38.31",
  "windows-sys 0.48.0",
 ]
 
@@ -1708,6 +1726,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "polling"
+version = "3.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24f040dee2588b4963afb4e420540439d126f73fdacf4a9c486a96d840bac3c9"
+dependencies = [
+ "cfg-if",
+ "concurrent-queue",
+ "pin-project-lite",
+ "rustix 0.38.31",
+ "tracing",
+ "windows-sys 0.52.0",
+]
+
+[[package]]
 name = "ppv-lite86"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1885,15 +1917,15 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "0.38.25"
+version = "0.38.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc99bc2d4f1fed22595588a013687477aedf3cdcfb26558c559edb67b4d9b22e"
+checksum = "6ea3e1a662af26cd7a3ba09c0297a31af215563ecf42817c98df621387f4e949"
 dependencies = [
  "bitflags 2.4.2",
  "errno",
  "libc",
  "linux-raw-sys 0.4.13",
- "windows-sys 0.48.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2111,7 +2143,7 @@ dependencies = [
  "cfg-if",
  "fastrand 2.0.0",
  "redox_syscall 0.3.5",
- "rustix 0.38.25",
+ "rustix 0.38.31",
  "windows-sys 0.48.0",
 ]
 
@@ -2130,7 +2162,7 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "21bebf2b7c9e0a515f6e0f8c51dc0f8e4696391e6f1ff30379559f8365fb0df7"
 dependencies = [
- "rustix 0.38.25",
+ "rustix 0.38.31",
  "windows-sys 0.48.0",
 ]
 
@@ -2946,7 +2978,7 @@ dependencies = [
  "async-broadcast",
  "async-executor",
  "async-fs",
- "async-io",
+ "async-io 1.13.0",
  "async-lock 2.7.0",
  "async-process",
  "async-recursion",
