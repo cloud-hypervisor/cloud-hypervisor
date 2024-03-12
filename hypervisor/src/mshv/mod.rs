@@ -1104,13 +1104,14 @@ impl cpu::Vcpu for MshvVcpu {
                                         .sev_snp_ap_create(&mshv_ap_create_req)
                                         .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
 
-                                    let mut swei2_rw_gpa_arg = mshv_bindings::mshv_read_write_gpa {
-                                        base_gpa: ghcb_gpa + GHCB_SW_EXITINFO2_OFFSET,
+                                    let mut swei1_rw_gpa_arg = mshv_bindings::mshv_read_write_gpa {
+                                        base_gpa: ghcb_gpa + GHCB_SW_EXITINFO1_OFFSET,
                                         byte_count: std::mem::size_of::<u64>() as u32,
                                         ..Default::default()
                                     };
+
                                     self.fd
-                                        .gpa_write(&mut swei2_rw_gpa_arg)
+                                        .gpa_write(&mut swei1_rw_gpa_arg)
                                         .map_err(|e| cpu::HypervisorCpuError::GpaWrite(e.into()))?;
                                 }
                                 _ => panic!(
