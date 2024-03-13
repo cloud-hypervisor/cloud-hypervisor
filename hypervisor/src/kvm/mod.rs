@@ -34,6 +34,8 @@ use std::fs::File;
 #[cfg(target_arch = "x86_64")]
 use std::os::unix::io::AsRawFd;
 #[cfg(feature = "tdx")]
+use std::mem::MaybeUninit;
+#[cfg(feature = "tdx")]
 use std::os::unix::io::RawFd;
 use std::result;
 #[cfg(target_arch = "x86_64")]
@@ -151,7 +153,7 @@ pub enum TdxExitStatus {
 }
 
 #[cfg(feature = "tdx")]
-const TDX_MAX_NR_CPUID_CONFIGS: usize = 6;
+const TDX_MAX_NR_CPUID_CONFIGS: usize = 37;
 
 #[cfg(feature = "tdx")]
 #[repr(C)]
@@ -167,7 +169,7 @@ pub struct TdxCpuidConfig {
 
 #[cfg(feature = "tdx")]
 #[repr(C)]
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct TdxCapabilities {
     pub attrs_fixed0: u64,
     pub attrs_fixed1: u64,
@@ -176,6 +178,23 @@ pub struct TdxCapabilities {
     pub nr_cpuid_configs: u32,
     pub padding: u32,
     pub cpuid_configs: [TdxCpuidConfig; TDX_MAX_NR_CPUID_CONFIGS],
+}
+
+#[cfg(feature = "tdx")]
+impl Default for TdxCapabilities {
+    /// Creates an empty TdxCapabilities struct
+    #[inline]
+    fn default() -> Self {
+        TdxCapabilities {
+            attrs_fixed0: 0u64,
+            attrs_fixed1: 0u64,
+            xfam_fixed0: 0u64,
+            xfam_fixed1: 0u64,
+            nr_cpuid_configs: 0u32,
+            padding: 0u32,
+            cpuid_configs: unsafe { MaybeUninit::zeroed().assume_init() },
+        }
+    }
 }
 
 #[cfg(feature = "tdx")]
