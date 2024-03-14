@@ -9606,6 +9606,7 @@ mod live_migration {
         }
 
         #[test]
+        #[cfg(target_arch = "aarch64")] // see: #6272
         #[cfg(not(feature = "mshv"))]
         fn test_live_upgrade_numa() {
             _test_live_migration_numa(true, false)
