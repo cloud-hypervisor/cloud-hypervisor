@@ -465,8 +465,7 @@ impl Migratable for Pl011 {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Mutex;
     use vm_device::interrupt::{InterruptIndex, InterruptSourceConfig};
     use vmm_sys_util::eventfd::EventFd;
 
