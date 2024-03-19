@@ -3133,7 +3133,6 @@ mod tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::GuestMemoryMmap;
     use arch::aarch64::fdt::create_fdt;
     use arch::aarch64::layout;
     use arch::{DeviceType, MmioDeviceInfo};
