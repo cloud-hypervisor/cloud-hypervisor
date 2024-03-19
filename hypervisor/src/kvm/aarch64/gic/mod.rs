@@ -14,7 +14,6 @@ use kvm_ioctls::DeviceFd;
 use redist_regs::{construct_gicr_typers, get_redist_regs, set_redist_regs};
 use serde::{Deserialize, Serialize};
 use std::any::Any;
-use std::convert::TryInto;
 
 const GITS_CTLR: u32 = 0x0000;
 const GITS_IIDR: u32 = 0x0004;
