@@ -211,8 +211,6 @@ impl<T: CpuStateManager> InstructionHandler<T> for Cmp_rm64_imm8 {
 
 #[cfg(test)]
 mod tests {
-    #![allow(unused_mut)]
-
     use super::*;
     use crate::arch::x86::emulator::mock_vmm::*;
 

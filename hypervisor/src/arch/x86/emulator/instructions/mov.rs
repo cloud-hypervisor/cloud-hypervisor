@@ -271,7 +271,6 @@ impl<T: CpuStateManager> InstructionHandler<T> for Mov_RAX_moffs64 {
 
 #[cfg(test)]
 mod tests {
-    #![allow(unused_mut)]
     use super::*;
     use crate::arch::x86::emulator::mock_vmm::*;
 

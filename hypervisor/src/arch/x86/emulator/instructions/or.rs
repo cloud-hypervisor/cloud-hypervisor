@@ -52,7 +52,6 @@ impl<T: CpuStateManager> InstructionHandler<T> for Or_rm8_r8 {
 
 #[cfg(test)]
 mod tests {
-    #![allow(unused_mut)]
     use super::*;
 
     use crate::arch::x86::emulator::mock_vmm::*;
