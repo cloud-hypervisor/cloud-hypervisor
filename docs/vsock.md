@@ -1,6 +1,6 @@
 # VSOCK support
 
-VSOCK provides a way for guest and host to communicate through a socket. VSOCK sockets support both stream and datagram types.
+VSOCK provides a way for guest and host to communicate through a socket. `cloud-hypervisor` only supports stream VSOCK sockets.
 
 The `virtio-vsock` is based on the [Firecracker](https://github.com/firecracker-microvm/firecracker/blob/main/docs/vsock.md) implementation, where additional details can be found.
 
