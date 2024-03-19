@@ -10,6 +10,7 @@ use serde_json::Value;
 use ssh2::Session;
 use std::env;
 use std::ffi::OsStr;
+use std::fmt::Display;
 use std::io;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -1211,14 +1212,15 @@ impl Default for VerbosityLevel {
     }
 }
 
-impl ToString for VerbosityLevel {
-    fn to_string(&self) -> String {
+impl Display for VerbosityLevel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use VerbosityLevel::*;
         match self {
-            Warn => "".to_string(),
-            Info => "-v".to_string(),
-            Debug => "-vv".to_string(),
+            Warn => (),
+            Info => write!(f, "-v")?,
+            Debug => write!(f, "-vv")?,
         }
+        Ok(())
     }
 }
 
