@@ -329,10 +329,9 @@ impl BusDevice for Rtc {
 mod tests {
     use super::*;
     use crate::{
-        read_be_u16, read_be_u32, read_le_i32, read_le_u16, read_le_u32, read_le_u64, write_be_u16,
-        write_be_u32, write_le_i32, write_le_u16, write_le_u32, write_le_u64,
+        read_be_u16, read_be_u32, read_le_i32, read_le_u16, read_le_u64, write_be_u16,
+        write_be_u32, write_le_i32, write_le_u16, write_le_u64,
     };
-    use std::sync::Arc;
     use vm_device::interrupt::{InterruptIndex, InterruptSourceConfig};
     use vmm_sys_util::eventfd::EventFd;
 
