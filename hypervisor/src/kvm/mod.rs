@@ -27,8 +27,6 @@ use crate::{arm64_core_reg_id, offset_of};
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
 use std::any::Any;
 use std::collections::HashMap;
-#[cfg(target_arch = "aarch64")]
-use std::convert::TryInto;
 #[cfg(target_arch = "x86_64")]
 use std::fs::File;
 #[cfg(target_arch = "x86_64")]
