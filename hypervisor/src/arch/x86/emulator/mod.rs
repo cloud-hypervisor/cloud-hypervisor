@@ -647,9 +647,8 @@ impl<'a, T: CpuStateManager> Emulator<'a, T> {
 }
 
 #[cfg(test)]
+#[allow(unused_mut)]
 mod mock_vmm {
-    #![allow(unused_mut)]
-
     use super::*;
     use crate::arch::x86::emulator::EmulatorCpuState as CpuState;
     use crate::arch::x86::gdt::{gdt_entry, segment_from_gdt};
@@ -769,8 +768,8 @@ mod mock_vmm {
 }
 
 #[cfg(test)]
+#[allow(unused_mut)]
 mod tests {
-    #![allow(unused_mut)]
     use super::*;
     use crate::arch::x86::emulator::mock_vmm::*;
 

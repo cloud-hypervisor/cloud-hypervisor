@@ -6,7 +6,7 @@ mod redist_regs;
 
 use crate::arch::aarch64::gic::{Error, Result, Vgic, VgicConfig};
 use crate::device::HypervisorDeviceError;
-use crate::kvm::{kvm_bindings, KvmVm};
+use crate::kvm::KvmVm;
 use crate::{CpuState, Vm};
 use dist_regs::{get_dist_regs, read_ctlr, set_dist_regs, write_ctlr};
 use icc_regs::{get_icc_regs, set_icc_regs};
@@ -14,7 +14,6 @@ use kvm_ioctls::DeviceFd;
 use redist_regs::{construct_gicr_typers, get_redist_regs, set_redist_regs};
 use serde::{Deserialize, Serialize};
 use std::any::Any;
-use std::convert::TryInto;
 
 const GITS_CTLR: u32 = 0x0000;
 const GITS_IIDR: u32 = 0x0004;

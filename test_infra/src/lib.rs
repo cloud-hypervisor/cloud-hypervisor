@@ -1211,13 +1211,13 @@ impl Default for VerbosityLevel {
     }
 }
 
-impl ToString for VerbosityLevel {
-    fn to_string(&self) -> String {
+impl fmt::Display for VerbosityLevel {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use VerbosityLevel::*;
         match self {
-            Warn => "".to_string(),
-            Info => "-v".to_string(),
-            Debug => "-vv".to_string(),
+            Warn => write!(f, ""),
+            Info => write!(f, "-v"),
+            Debug => write!(f, "-vv"),
         }
     }
 }

@@ -1070,7 +1070,7 @@ impl PciDevice for VirtioPciDevice {
             bars.push(bar);
         }
 
-        self.bar_regions = bars.clone();
+        self.bar_regions.clone_from(&bars);
 
         Ok(bars)
     }

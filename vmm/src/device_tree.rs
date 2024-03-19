@@ -175,7 +175,7 @@ mod tests {
 
         // Check get_mut()
         let node = device_tree.get_mut(&id).unwrap();
-        node.id = id2.clone();
+        node.id.clone_from(&id2);
         let node = device_tree.0.get(&id).unwrap();
         assert_eq!(node.id, id2);
 

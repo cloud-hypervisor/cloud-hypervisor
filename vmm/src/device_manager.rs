@@ -4185,7 +4185,7 @@ impl DeviceManager {
             if !pci_device_node.children.is_empty() {
                 assert_eq!(pci_device_node.children.len(), 1);
                 let child_id = &pci_device_node.children[0];
-                id = child_id.clone();
+                id.clone_from(child_id);
             }
         }
         for child in pci_device_node.children.iter() {
