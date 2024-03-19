@@ -16,7 +16,6 @@ use crate::{DeviceType, GuestMemoryMmap, NumaNodes, PciSpaceInfo, RegionType};
 use hypervisor::arch::aarch64::gic::Vgic;
 use log::{log_enabled, Level};
 use std::collections::HashMap;
-use std::convert::TryInto;
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 use vm_memory::{Address, GuestAddress, GuestMemory, GuestMemoryAtomic};
