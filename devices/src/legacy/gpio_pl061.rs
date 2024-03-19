@@ -339,8 +339,6 @@ impl Migratable for Gpio {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{read_le_u32, write_le_u32};
-    use std::sync::Arc;
     use vm_device::interrupt::{InterruptIndex, InterruptSourceConfig};
     use vmm_sys_util::eventfd::EventFd;
 
