@@ -6,7 +6,7 @@ mod redist_regs;
 
 use crate::arch::aarch64::gic::{Error, Result, Vgic, VgicConfig};
 use crate::device::HypervisorDeviceError;
-use crate::kvm::{kvm_bindings, KvmVm};
+use crate::kvm::KvmVm;
 use crate::{CpuState, Vm};
 use dist_regs::{get_dist_regs, read_ctlr, set_dist_regs, write_ctlr};
 use icc_regs::{get_icc_regs, set_icc_regs};
