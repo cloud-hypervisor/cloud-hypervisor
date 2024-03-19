@@ -290,27 +290,39 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         )
         .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
 
-        let msr_list = self.get_msr_list()?;
-        let num_msrs = msr_list.as_fam_struct_ref().nmsrs as usize;
-        let mut msrs: Vec<MsrEntry> = vec![
-            MsrEntry {
-                ..Default::default()
-            };
-            num_msrs
-        ];
-        let indices = msr_list.as_slice();
-        for (pos, index) in indices.iter().enumerate() {
-            msrs[pos].index = *index;
-        }
         let vm_fd = Arc::new(fd);
 
-        Ok(Arc::new(MshvVm {
-            fd: vm_fd,
-            msrs,
-            dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
-            #[cfg(feature = "sev_snp")]
-            sev_snp_enabled: mshv_vm_type == VmType::Snp,
-        }))
+        #[cfg(target_arch = "x86_64")]
+        {
+            let msr_list = self.get_msr_list()?;
+            let num_msrs = msr_list.as_fam_struct_ref().nmsrs as usize;
+            let mut msrs: Vec<MsrEntry> = vec![
+                MsrEntry {
+                    ..Default::default()
+                };
+                num_msrs
+            ];
+            let indices = msr_list.as_slice();
+            for (pos, index) in indices.iter().enumerate() {
+                msrs[pos].index = *index;
+            }
+
+            Ok(Arc::new(MshvVm {
+                fd: vm_fd,
+                msrs,
+                dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
+                #[cfg(feature = "sev_snp")]
+                sev_snp_enabled: mshv_vm_type == VmType::Snp,
+            }))
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        {
+            Ok(Arc::new(MshvVm {
+                fd: vm_fd,
+                dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
+            }))
+        }
     }
 
     /// Create a mshv vm object and return the object as Vm trait object
@@ -1538,6 +1550,7 @@ impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
 /// Wrapper over Mshv VM ioctls.
 pub struct MshvVm {
     fd: Arc<VmFd>,
+    #[cfg(target_arch = "x86_64")]
     msrs: Vec<MsrEntry>,
     dirty_log_slots: Arc<RwLock<HashMap<u64, MshvDirtyLogSlot>>>,
     #[cfg(feature = "sev_snp")]
