@@ -340,6 +340,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         let vm_type = 0;
         self.create_vm_with_type(vm_type)
     }
+    #[cfg(target_arch = "x86_64")]
     ///
     /// Get the supported CpuID
     ///
