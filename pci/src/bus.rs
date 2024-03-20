@@ -14,7 +14,7 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::ops::DerefMut;
 use std::sync::{Arc, Barrier, Mutex};
-use vm_device::{Bus, BusDevice};
+use vm_device::{Bus, BusDevice, BusDeviceSync};
 
 const VENDOR_ID_INTEL: u16 = 0x8086;
 const DEVICE_ID_INTEL_VIRT_PCIE_HOST: u16 = 0x0d57;
@@ -122,7 +122,7 @@ impl PciBus {
 
     pub fn register_mapping(
         &self,
-        dev: Arc<Mutex<dyn BusDevice>>,
+        dev: Arc<dyn BusDeviceSync>,
         #[cfg(target_arch = "x86_64")] io_bus: &Bus,
         mmio_bus: &Bus,
         bars: Vec<PciBarConfiguration>,
