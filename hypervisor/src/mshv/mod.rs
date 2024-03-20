@@ -359,7 +359,9 @@ impl hypervisor::Hypervisor for MshvHypervisor {
 pub struct MshvVcpu {
     fd: VcpuFd,
     vp_index: u8,
+    #[cfg(target_arch = "x86_64")]
     cpuid: Vec<CpuIdEntry>,
+    #[cfg(target_arch = "x86_64")]
     msrs: Vec<MsrEntry>,
     vm_ops: Option<Arc<dyn vm::VmOps>>,
     vm_fd: Arc<VmFd>,
@@ -1228,8 +1230,9 @@ impl cpu::Vcpu for MshvVcpu {
         Ok(())
     }
 
+    #[cfg(target_arch = "x86_64")]
     ///
-    /// Set CPU state
+    /// Set CPU state for x86_64 guest.
     ///
     fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
         let state: VcpuMshvState = state.clone().into();
@@ -1254,8 +1257,17 @@ impl cpu::Vcpu for MshvVcpu {
         Ok(())
     }
 
+    #[cfg(target_arch = "aarch64")]
     ///
-    /// Get CPU State
+    /// Set CPU state for aarch64 guest.
+    ///
+    fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
+        unimplemented!()
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Get CPU State for x86_64 guest
     ///
     fn state(&self) -> cpu::Result<CpuState> {
         let regs = self.get_regs()?;
@@ -1289,6 +1301,14 @@ impl cpu::Vcpu for MshvVcpu {
             misc,
         }
         .into())
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    ///
+    /// Get CPU state for aarch64 guest.
+    ///
+    fn state(&self) -> cpu::Result<CpuState> {
+        unimplemented!()
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -1649,7 +1669,9 @@ impl vm::Vm for MshvVm {
         let vcpu = MshvVcpu {
             fd: vcpu_fd,
             vp_index: id,
+            #[cfg(target_arch = "x86_64")]
             cpuid: Vec::new(),
+            #[cfg(target_arch = "x86_64")]
             msrs: self.msrs.clone(),
             vm_ops,
             vm_fd: self.fd.clone(),
