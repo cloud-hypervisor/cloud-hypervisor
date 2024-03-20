@@ -26,6 +26,31 @@ pub trait BusDevice: Send {
     }
 }
 
+#[allow(unused_variables)]
+pub trait BusDeviceSync: Send + Sync {
+    /// Reads at `offset` from this device
+    fn read(&self, base: u64, offset: u64, data: &mut [u8]) {}
+    /// Writes at `offset` into this device
+    fn write(&self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
+        None
+    }
+}
+
+impl<B: BusDevice> BusDeviceSync for Mutex<B> {
+    /// Reads at `offset` from this device
+    fn read(&self, base: u64, offset: u64, data: &mut [u8]) {
+        self.lock()
+            .expect("Failed to acquire device lock")
+            .read(base, offset, data)
+    }
+    /// Writes at `offset` into this device
+    fn write(&self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
+        self.lock()
+            .expect("Failed to acquire device lock")
+            .write(base, offset, data)
+    }
+}
+
 #[derive(Debug)]
 pub enum Error {
     /// The insertion failed because the new device overlapped with an old device.
@@ -95,7 +120,7 @@ impl PartialOrd for BusRange {
 /// only restriction is that no two devices can overlap in this address space.
 #[derive(Default)]
 pub struct Bus {
-    devices: RwLock<BTreeMap<BusRange, Weak<Mutex<dyn BusDevice>>>>,
+    devices: RwLock<BTreeMap<BusRange, Weak<dyn BusDeviceSync>>>,
 }
 
 impl Bus {
@@ -106,7 +131,7 @@ impl Bus {
         }
     }
 
-    fn first_before(&self, addr: u64) -> Option<(BusRange, Arc<Mutex<dyn BusDevice>>)> {
+    fn first_before(&self, addr: u64) -> Option<(BusRange, Arc<dyn BusDeviceSync>)> {
         let devices = self.devices.read().unwrap();
         let (range, dev) = devices
             .range(..=BusRange { base: addr, len: 1 })
@@ -115,7 +140,7 @@ impl Bus {
     }
 
     #[allow(clippy::type_complexity)]
-    pub fn resolve(&self, addr: u64) -> Option<(u64, u64, Arc<Mutex<dyn BusDevice>>)> {
+    fn resolve(&self, addr: u64) -> Option<(u64, u64, Arc<dyn BusDeviceSync>)> {
         if let Some((range, dev)) = self.first_before(addr) {
             let offset = addr - range.base;
             if offset < range.len {
@@ -125,8 +150,7 @@ impl Bus {
         None
     }
 
-    /// Puts the given device at the given address space.
-    pub fn insert(&self, device: Arc<Mutex<dyn BusDevice>>, base: u64, len: u64) -> Result<()> {
+    pub fn insert(&self, device: Arc<dyn BusDeviceSync>, base: u64, len: u64) -> Result<()> {
         if len == 0 {
             return Err(Error::ZeroSizedRange);
         }
@@ -171,7 +195,7 @@ impl Bus {
     }
 
     /// Removes all entries referencing the given device.
-    pub fn remove_by_device(&self, device: &Arc<Mutex<dyn BusDevice>>) -> Result<()> {
+    pub fn remove_by_device(&self, device: &Arc<dyn BusDeviceSync>) -> Result<()> {
         let mut device_list = self.devices.write().unwrap();
         let mut remove_key_list = Vec::new();
 
@@ -216,9 +240,7 @@ impl Bus {
     pub fn read(&self, addr: u64, data: &mut [u8]) -> Result<()> {
         if let Some((base, offset, dev)) = self.resolve(addr) {
             // OK to unwrap as lock() failing is a serious error condition and should panic.
-            dev.lock()
-                .expect("Failed to acquire device lock")
-                .read(base, offset, data);
+            dev.read(base, offset, data);
             Ok(())
         } else {
             Err(Error::MissingAddressRange)
@@ -231,10 +253,7 @@ impl Bus {
     pub fn write(&self, addr: u64, data: &[u8]) -> Result<Option<Arc<Barrier>>> {
         if let Some((base, offset, dev)) = self.resolve(addr) {
             // OK to unwrap as lock() failing is a serious error condition and should panic.
-            Ok(dev
-                .lock()
-                .expect("Failed to acquire device lock")
-                .write(base, offset, data))
+            Ok(dev.write(base, offset, data))
         } else {
             Err(Error::MissingAddressRange)
         }
@@ -246,17 +265,17 @@ mod tests {
     use super::*;
 
     struct DummyDevice;
-    impl BusDevice for DummyDevice {}
+    impl BusDeviceSync for DummyDevice {}
 
     struct ConstantDevice;
-    impl BusDevice for ConstantDevice {
-        fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
+    impl BusDeviceSync for ConstantDevice {
+        fn read(&self, _base: u64, offset: u64, data: &mut [u8]) {
             for (i, v) in data.iter_mut().enumerate() {
                 *v = (offset as u8) + (i as u8);
             }
         }
 
-        fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
+        fn write(&self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
             for (i, v) in data.iter().enumerate() {
                 assert_eq!(*v, (offset as u8) + (i as u8))
             }
@@ -268,7 +287,7 @@ mod tests {
     #[test]
     fn bus_insert() {
         let bus = Bus::new();
-        let dummy = Arc::new(Mutex::new(DummyDevice));
+        let dummy = Arc::new(DummyDevice);
         assert!(bus.insert(dummy.clone(), 0x10, 0).is_err());
         assert!(bus.insert(dummy.clone(), 0x10, 0x10).is_ok());
 
@@ -290,7 +309,7 @@ mod tests {
     #[allow(clippy::redundant_clone)]
     fn bus_read_write() {
         let bus = Bus::new();
-        let dummy = Arc::new(Mutex::new(DummyDevice));
+        let dummy = Arc::new(DummyDevice);
         assert!(bus.insert(dummy.clone(), 0x10, 0x10).is_ok());
         assert!(bus.read(0x10, &mut [0, 0, 0, 0]).is_ok());
         assert!(bus.write(0x10, &[0, 0, 0, 0]).is_ok());
@@ -308,7 +327,7 @@ mod tests {
     #[allow(clippy::redundant_clone)]
     fn bus_read_write_values() {
         let bus = Bus::new();
-        let dummy = Arc::new(Mutex::new(ConstantDevice));
+        let dummy = Arc::new(ConstantDevice);
         assert!(bus.insert(dummy.clone(), 0x10, 0x10).is_ok());
 
         let mut values = [0, 1, 2, 3];
@@ -334,7 +353,7 @@ mod tests {
 
         let bus = Bus::new();
         let mut data = [1, 2, 3, 4];
-        let device = Arc::new(Mutex::new(DummyDevice));
+        let device = Arc::new(DummyDevice);
         assert!(bus.insert(device.clone(), 0x10, 0x10).is_ok());
         assert!(bus.write(0x10, &data).is_ok());
         assert!(bus.read(0x10, &mut data).is_ok());

@@ -18,7 +18,7 @@ use pci::{PciConfigIo, PCI_CONFIG_IO_PORT, PCI_CONFIG_IO_PORT_SIZE};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 use vm_allocator::AddressAllocator;
-use vm_device::BusDevice;
+use vm_device::BusDeviceSync;
 
 pub(crate) struct PciSegment {
     pub(crate) id: u16,
@@ -70,7 +70,7 @@ impl PciSegment {
         address_manager
             .mmio_bus
             .insert(
-                Arc::clone(&pci_config_mmio) as Arc<Mutex<dyn BusDevice>>,
+                Arc::clone(&pci_config_mmio) as Arc<dyn BusDeviceSync>,
                 mmio_config_address,
                 layout::PCI_MMIO_CONFIG_SIZE_PER_SEGMENT,
             )
