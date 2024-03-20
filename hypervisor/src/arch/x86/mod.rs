@@ -311,3 +311,40 @@ pub struct MsrEntry {
     pub index: u32,
     pub data: u64,
 }
+
+#[repr(C)]
+#[serde_with::serde_as]
+#[derive(Debug, Clone)]
+pub struct XsaveState {
+    pub region: [u32; 1024usize],
+}
+
+impl Default for XsaveState {
+    fn default() -> Self {
+        // SAFETY: this is plain old data structure
+        unsafe { ::std::mem::zeroed() }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for XsaveState {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let region: Vec<u32> = Vec::deserialize(deserializer)?;
+        let mut val: XsaveState = XsaveState::default();
+        // This panics if the source and destination have different lengths.
+        val.region.copy_from_slice(&region[..]);
+        Ok(val)
+    }
+}
+
+impl serde::Serialize for XsaveState {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let region = &self.region[..];
+        region.serialize(serializer)
+    }
+}

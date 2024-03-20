@@ -20,7 +20,7 @@ build_spdk_nvme() {
         sed -i "/grpcio/d" scripts/pkgdep/debian.sh
         ./scripts/pkgdep.sh
         ./configure --with-vfio-user
-        chmod +x /usr/local/lib/python3.8/dist-packages/ninja/data/bin/ninja
+        chmod +x /usr/local/lib/python3.10/dist-packages/ninja/data/bin/ninja
         make -j `nproc` || exit 1
         touch .built
         popd
@@ -30,7 +30,7 @@ build_spdk_nvme() {
     fi
     cp "$WORKLOADS_DIR/spdk/build/bin/nvmf_tgt" $SPDK_DEPLOY_DIR/nvmf_tgt
     cp "$WORKLOADS_DIR/spdk/scripts/rpc.py" $SPDK_DEPLOY_DIR/rpc.py
-    cp -r "$WORKLOADS_DIR/spdk/scripts/rpc" $SPDK_DEPLOY_DIR/rpc
+    cp -r "$WORKLOADS_DIR/spdk/python/spdk/" $SPDK_DEPLOY_DIR/
     cp -r "$WORKLOADS_DIR/spdk/python" $SPDK_DEPLOY_DIR/../
 }
 
@@ -38,7 +38,7 @@ build_virtiofsd() {
     VIRTIOFSD_DIR="$WORKLOADS_DIR/virtiofsd_build"
     VIRTIOFSD_REPO="https://gitlab.com/virtio-fs/virtiofsd.git"
 
-    checkout_repo "$VIRTIOFSD_DIR" "$VIRTIOFSD_REPO" v1.1.0 "220405d7a2606c92636d31992b5cb3036a41047b"
+    checkout_repo "$VIRTIOFSD_DIR" "$VIRTIOFSD_REPO" v1.8.0 "97ea7908fe7f9bc59916671a771bdcfaf4044b45"
 
     if [ ! -f "$VIRTIOFSD_DIR/.built" ]; then
         pushd $VIRTIOFSD_DIR
@@ -53,35 +53,8 @@ build_virtiofsd() {
 update_workloads() {
     cp scripts/sha1sums-aarch64 $WORKLOADS_DIR
 
-    BIONIC_OS_IMAGE_DOWNLOAD_NAME="bionic-server-cloudimg-arm64.img"
-    BIONIC_OS_IMAGE_DOWNLOAD_URL="https://cloud-hypervisor.azureedge.net/$BIONIC_OS_IMAGE_DOWNLOAD_NAME"
-    BIONIC_OS_DOWNLOAD_IMAGE="$WORKLOADS_DIR/$BIONIC_OS_IMAGE_DOWNLOAD_NAME"
-    if [ ! -f "$BIONIC_OS_DOWNLOAD_IMAGE" ]; then
-        pushd $WORKLOADS_DIR
-        time wget --quiet $BIONIC_OS_IMAGE_DOWNLOAD_URL || exit 1
-        popd
-    fi
-
-    BIONIC_OS_RAW_IMAGE_NAME="bionic-server-cloudimg-arm64.raw"
-    BIONIC_OS_RAW_IMAGE="$WORKLOADS_DIR/$BIONIC_OS_RAW_IMAGE_NAME"
-    if [ ! -f "$BIONIC_OS_RAW_IMAGE" ]; then
-        pushd $WORKLOADS_DIR
-        time qemu-img convert -p -f qcow2 -O raw $BIONIC_OS_IMAGE_DOWNLOAD_NAME $BIONIC_OS_RAW_IMAGE_NAME || exit 1
-        popd
-    fi
-
-    # Convert the raw image to qcow2 image to remove compressed blocks from the disk. Therefore letting the
-    # qcow2 format image can be directly used in the integration test.
-    BIONIC_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME="bionic-server-cloudimg-arm64.qcow2"
-    BIONIC_OS_QCOW2_UNCOMPRESSED_IMAGE="$WORKLOADS_DIR/$BIONIC_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME"
-    if [ ! -f "$BIONIC_OS_QCOW2_UNCOMPRESSED_IMAGE" ]; then
-        pushd $WORKLOADS_DIR
-        time qemu-img convert -p -f raw -O qcow2 $BIONIC_OS_RAW_IMAGE_NAME $BIONIC_OS_QCOW2_UNCOMPRESSED_IMAGE || exit 1
-        popd
-    fi
-
     FOCAL_OS_RAW_IMAGE_NAME="focal-server-cloudimg-arm64-custom-20210929-0.raw"
-    FOCAL_OS_RAW_IMAGE_DOWNLOAD_URL="https://cloud-hypervisor.azureedge.net/$FOCAL_OS_RAW_IMAGE_NAME"
+    FOCAL_OS_RAW_IMAGE_DOWNLOAD_URL="https://ch-images.azureedge.net/$FOCAL_OS_RAW_IMAGE_NAME"
     FOCAL_OS_RAW_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_NAME"
     if [ ! -f "$FOCAL_OS_RAW_IMAGE" ]; then
         pushd $WORKLOADS_DIR
@@ -90,7 +63,7 @@ update_workloads() {
     fi
 
     FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME="focal-server-cloudimg-arm64-custom-20210929-0.qcow2"
-    FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_DOWNLOAD_URL="https://cloud-hypervisor.azureedge.net/$FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME"
+    FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_DOWNLOAD_URL="https://ch-images.azureedge.net/$FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME"
     FOCAL_OS_QCOW2_UNCOMPRESSED_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME"
     if [ ! -f "$FOCAL_OS_QCOW2_UNCOMPRESSED_IMAGE" ]; then
         pushd $WORKLOADS_DIR
@@ -107,7 +80,7 @@ update_workloads() {
     fi
 
     JAMMY_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0.raw"
-    JAMMY_OS_RAW_IMAGE_DOWNLOAD_URL="https://cloud-hypervisor.azureedge.net/$JAMMY_OS_RAW_IMAGE_NAME"
+    JAMMY_OS_RAW_IMAGE_DOWNLOAD_URL="https://ch-images.azureedge.net/$JAMMY_OS_RAW_IMAGE_NAME"
     JAMMY_OS_RAW_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_RAW_IMAGE_NAME"
     if [ ! -f "$JAMMY_OS_RAW_IMAGE" ]; then
         pushd $WORKLOADS_DIR
@@ -116,7 +89,7 @@ update_workloads() {
     fi
 
     JAMMY_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME="jammy-server-cloudimg-arm64-custom-20220329-0.qcow2"
-    JAMMY_OS_QCOW2_IMAGE_UNCOMPRESSED_DOWNLOAD_URL="https://cloud-hypervisor.azureedge.net/$JAMMY_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME"
+    JAMMY_OS_QCOW2_IMAGE_UNCOMPRESSED_DOWNLOAD_URL="https://ch-images.azureedge.net/$JAMMY_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME"
     JAMMY_OS_QCOW2_UNCOMPRESSED_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME"
     if [ ! -f "$JAMMY_OS_QCOW2_UNCOMPRESSED_IMAGE" ]; then
         pushd $WORKLOADS_DIR

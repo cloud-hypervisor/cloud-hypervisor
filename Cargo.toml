@@ -1,6 +1,6 @@
 [package]
 name = "cloud-hypervisor"
-version = "37.0.0"
+version = "37.1.0"
 authors = ["The Cloud Hypervisor Authors", "Cyberus Technology GmbH"]
 edition = "2021"
 default-run = "cloud-hypervisor"
@@ -46,15 +46,14 @@ thiserror = "1.0.40"
 tpm = { path = "tpm"}
 tracer = { path = "tracer" }
 vmm = { path = "vmm" }
-vmm-sys-util = "0.11.0"
-vm-memory = "0.13.1"
+vmm-sys-util = "0.12.1"
+vm-memory = "0.14.0"
 zbus = { version = "3.11.1", optional = true }
 
 # List of patched crates
 [patch.crates-io]
-kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch-v0.6.0-tdx" }
-kvm-ioctls = { git = "https://github.com/rust-vmm/kvm-ioctls", branch = "main" }
-versionize_derive = { git = "https://github.com/cloud-hypervisor/versionize_derive", branch = "ch" }
+kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch-live-upgrade-stable-37.x" }
+versionize_derive = { git = "https://github.com/cloud-hypervisor/versionize_derive", branch = "ch-0.1.6" }
 
 [dev-dependencies]
 dirs = "5.0.0"

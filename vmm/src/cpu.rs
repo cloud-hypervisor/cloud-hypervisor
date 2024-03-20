@@ -31,6 +31,8 @@ use acpi_tables::{aml, sdt::Sdt, Aml};
 use anyhow::anyhow;
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 use arch::aarch64::regs;
+#[cfg(target_arch = "x86_64")]
+use arch::x86_64::get_x2apic_id;
 use arch::EntryPoint;
 use arch::NumaNodes;
 #[cfg(target_arch = "aarch64")]
@@ -331,12 +333,13 @@ impl Vcpu {
     /// * `cpu_vendor` - CPU vendor as reported by __cpuid(0x0)
     pub fn new(
         id: u8,
+        apic_id: u8,
         vm: &Arc<dyn hypervisor::Vm>,
         vm_ops: Option<Arc<dyn VmOps>>,
         #[cfg(target_arch = "x86_64")] cpu_vendor: CpuVendor,
     ) -> Result<Self> {
         let vcpu = vm
-            .create_vcpu(id, vm_ops)
+            .create_vcpu(apic_id, vm_ops)
             .map_err(|e| Error::VcpuCreate(e.into()))?;
         // Initially the cpuid per vCPU is the one supported by this VM.
         Ok(Vcpu {
@@ -757,8 +760,16 @@ impl CpuManager {
     fn create_vcpu(&mut self, cpu_id: u8, snapshot: Option<Snapshot>) -> Result<Arc<Mutex<Vcpu>>> {
         info!("Creating vCPU: cpu_id = {}", cpu_id);
 
+        #[cfg(target_arch = "x86_64")]
+        let topology = self.get_vcpu_topology();
+        #[cfg(target_arch = "x86_64")]
+        let x2apic_id = arch::x86_64::get_x2apic_id(cpu_id as u32, topology);
+        #[cfg(target_arch = "aarch64")]
+        let x2apic_id = cpu_id as u32;
+
         let mut vcpu = Vcpu::new(
             cpu_id,
+            x2apic_id as u8,
             &self.vm,
             Some(self.vm_ops.clone()),
             #[cfg(target_arch = "x86_64")]
@@ -1334,7 +1345,6 @@ impl CpuManager {
             .collect()
     }
 
-    #[cfg(target_arch = "aarch64")]
     pub fn get_vcpu_topology(&self) -> Option<(u8, u8, u8)> {
         self.config
             .topology
@@ -1353,11 +1363,13 @@ impl CpuManager {
             madt.write(36, arch::layout::APIC_START.0);
 
             for cpu in 0..self.config.max_vcpus {
+                let x2apic_id = get_x2apic_id(cpu.into(), self.get_vcpu_topology());
+
                 let lapic = LocalX2Apic {
                     r#type: acpi::ACPI_X2APIC_PROCESSOR,
                     length: 16,
                     processor_id: cpu.into(),
-                    apic_id: cpu.into(),
+                    apic_id: x2apic_id,
                     flags: if cpu < self.config.boot_vcpus {
                         1 << MADT_CPU_ENABLE_FLAG
                     } else {
@@ -1808,6 +1820,8 @@ struct Cpu {
     cpu_id: u8,
     proximity_domain: u32,
     dynamic: bool,
+    #[cfg(target_arch = "x86_64")]
+    topology: Option<(u8, u8, u8)>,
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -1819,11 +1833,13 @@ const MADT_CPU_ONLINE_CAPABLE_FLAG: usize = 1;
 impl Cpu {
     #[cfg(target_arch = "x86_64")]
     fn generate_mat(&self) -> Vec<u8> {
+        let x2apic_id = arch::x86_64::get_x2apic_id(self.cpu_id.into(), self.topology);
+
         let lapic = LocalX2Apic {
             r#type: crate::acpi::ACPI_X2APIC_PROCESSOR,
             length: 16,
             processor_id: self.cpu_id.into(),
-            apic_id: self.cpu_id.into(),
+            apic_id: x2apic_id,
             flags: 1 << MADT_CPU_ENABLE_FLAG,
             _reserved: 0,
         };
@@ -2126,6 +2142,8 @@ impl Aml for CpuManager {
         };
         let mut cpu_data_inner: Vec<&dyn Aml> = vec![&hid, &uid, &methods];
 
+        #[cfg(target_arch = "x86_64")]
+        let topology = self.get_vcpu_topology();
         let mut cpu_devices = Vec::new();
         for cpu_id in 0..self.config.max_vcpus {
             let proximity_domain = *self.proximity_domain_per_cpu.get(&cpu_id).unwrap_or(&0);
@@ -2133,6 +2151,8 @@ impl Aml for CpuManager {
                 cpu_id,
                 proximity_domain,
                 dynamic: self.dynamic,
+                #[cfg(target_arch = "x86_64")]
+                topology,
             };
 
             cpu_devices.push(cpu_device);

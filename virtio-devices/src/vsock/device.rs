@@ -340,7 +340,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: String,
-        cid: u64,
+        cid: u32,
         path: PathBuf,
         backend: B,
         iommu: bool,
@@ -372,7 +372,7 @@ where
                 ..Default::default()
             },
             id,
-            cid,
+            cid: cid.into(),
             backend: Arc::new(RwLock::new(backend)),
             path,
             seccomp_action,

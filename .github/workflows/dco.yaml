@@ -1,8 +1,9 @@
 name: DCO
-on:
-  pull_request:
+on: [pull_request, merge_group]
+
 jobs:
   check:
+    name: DCO Check ("Signed-Off-By")
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -11,6 +12,7 @@ jobs:
       with:
         python-version: '3.x'
     - name: Check DCO
+      if: ${{ github.event_name == 'pull_request' }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |

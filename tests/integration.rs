@@ -53,7 +53,6 @@ use x86_64::*;
 
 #[cfg(target_arch = "aarch64")]
 mod aarch64 {
-    pub const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-arm64.raw";
     pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64-custom-20210929-0.raw";
     pub const FOCAL_IMAGE_UPDATE_KERNEL_NAME: &str =
         "focal-server-cloudimg-arm64-custom-20210929-0-update-kernel.raw";
@@ -1035,6 +1034,40 @@ fn test_cpu_topology(threads_per_core: u8, cores_per_package: u8, packages: u8, 
                 .unwrap_or(0),
             packages
         );
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            let mut cpu_id = 0;
+            for package_id in 0..packages {
+                for core_id in 0..cores_per_package {
+                    for _ in 0..threads_per_core {
+                        assert_eq!(
+                            guest
+                                .ssh_command(&format!("cat /sys/devices/system/cpu/cpu{cpu_id}/topology/physical_package_id"))
+                                .unwrap()
+                                .trim()
+                                .parse::<u8>()
+                                .unwrap_or(0),
+                            package_id
+                        );
+
+                        assert_eq!(
+                            guest
+                                .ssh_command(&format!(
+                                    "cat /sys/devices/system/cpu/cpu{cpu_id}/topology/core_id"
+                                ))
+                                .unwrap()
+                                .trim()
+                                .parse::<u8>()
+                                .unwrap_or(0),
+                            core_id
+                        );
+
+                        cpu_id += 1;
+                    }
+                }
+            }
+        }
     });
 
     let _ = child.kill();
@@ -2085,7 +2118,7 @@ fn pty_read(mut pty: std::fs::File) -> Receiver<String> {
         thread::sleep(std::time::Duration::new(1, 0));
         let mut buf = [0; 512];
         match pty.read(&mut buf) {
-            Ok(_) => {
+            Ok(_bytes) => {
                 let output = std::str::from_utf8(&buf).unwrap().to_string();
                 match tx.send(output) {
                     Ok(_) => (),
@@ -4010,7 +4043,7 @@ mod common_parallel {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
 
-        let serial_path = guest.tmp_dir.as_path().join("/tmp/serial-output");
+        let serial_path = guest.tmp_dir.as_path().join("serial-output");
         #[cfg(target_arch = "x86_64")]
         let console_str: &str = "console=ttyS0";
         #[cfg(target_arch = "aarch64")]
@@ -4123,8 +4156,8 @@ mod common_parallel {
     fn test_serial_socket_interaction() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
-        let serial_socket = guest.tmp_dir.as_path().join("/tmp/serial.socket");
-        let serial_socket_pty = guest.tmp_dir.as_path().join("/tmp/serial.pty");
+        let serial_socket = guest.tmp_dir.as_path().join("serial.socket");
+        let serial_socket_pty = guest.tmp_dir.as_path().join("serial.pty");
         let serial_option = if cfg!(target_arch = "x86_64") {
             " console=ttyS0"
         } else {
@@ -4237,7 +4270,7 @@ mod common_parallel {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
 
-        let console_path = guest.tmp_dir.as_path().join("/tmp/console-output");
+        let console_path = guest.tmp_dir.as_path().join("console-output");
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
@@ -4298,8 +4331,8 @@ mod common_parallel {
     fn test_vfio() {
         setup_vfio_network_interfaces();
 
-        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-        let guest = Guest::new_from_ip_range(Box::new(focal), "172.18", 0);
+        let jammy = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new_from_ip_range(Box::new(jammy), "172.18", 0);
 
         let mut workload_path = dirs::home_dir().unwrap();
         workload_path.push("workloads");
@@ -5858,7 +5891,7 @@ mod common_parallel {
         #[cfg(target_arch = "x86_64")]
         let mut kernels = vec![direct_kernel_boot_path()];
         #[cfg(target_arch = "aarch64")]
-        let kernels = vec![direct_kernel_boot_path()];
+        let kernels = [direct_kernel_boot_path()];
 
         #[cfg(target_arch = "x86_64")]
         {
@@ -6108,7 +6141,7 @@ mod common_parallel {
             .unwrap();
 
         // Wait for the VM to be restored
-        thread::sleep(std::time::Duration::new(10, 0));
+        thread::sleep(std::time::Duration::new(20, 0));
         let expected_events = [
             &MetaEvent {
                 event: "starting".to_string(),
@@ -8072,6 +8105,7 @@ mod windows {
     }
 
     #[test]
+    #[ignore = "See #6037"]
     #[cfg(not(feature = "mshv"))]
     #[cfg(not(target_arch = "aarch64"))]
     fn test_windows_guest_disk_hotplug() {
@@ -8167,6 +8201,7 @@ mod windows {
     }
 
     #[test]
+    #[ignore = "See #6037"]
     #[cfg(not(feature = "mshv"))]
     #[cfg(not(target_arch = "aarch64"))]
     fn test_windows_guest_disk_hotplug_multi() {
@@ -9621,6 +9656,7 @@ mod live_migration {
         }
 
         #[test]
+        #[cfg(target_arch = "aarch64")] // see: #6272
         #[cfg(not(feature = "mshv"))]
         fn test_live_upgrade_numa() {
             _test_live_migration_numa(true, false)
@@ -9660,6 +9696,7 @@ mod live_migration {
 
         // Require to run ovs-dpdk tests sequentially because they rely on the same ovs-dpdk setup
         #[test]
+        #[ignore = "See #5532"]
         #[cfg(target_arch = "x86_64")]
         #[cfg(not(feature = "mshv"))]
         fn test_live_migration_ovs_dpdk() {
@@ -9674,6 +9711,7 @@ mod live_migration {
         }
 
         #[test]
+        #[ignore = "See #5532"]
         #[cfg(target_arch = "x86_64")]
         #[cfg(not(feature = "mshv"))]
         fn test_live_upgrade_ovs_dpdk() {
@@ -9681,6 +9719,7 @@ mod live_migration {
         }
 
         #[test]
+        #[ignore = "See #5532"]
         #[cfg(target_arch = "x86_64")]
         #[cfg(not(feature = "mshv"))]
         fn test_live_upgrade_ovs_dpdk_local() {
