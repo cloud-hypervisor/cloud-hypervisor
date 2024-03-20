@@ -24,7 +24,7 @@ use vmm_sys_util::signal::register_signal_handler;
 thread_local! {
     // The tty file descriptor is stored in a global variable so it
     // can be accessed by a signal handler.
-    static TX: RefCell<Option<File>> = RefCell::new(None);
+    static TX: RefCell<Option<File>> = const { RefCell::new(None) };
 }
 
 fn with_tx<R, F: FnOnce(&File) -> R>(f: F) -> R {

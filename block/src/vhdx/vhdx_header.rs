@@ -192,7 +192,9 @@ impl Header {
         };
 
         new_header.get_header_as_buffer(&mut buffer);
-        new_header.checksum = crc32c::crc32c(&buffer);
+        let mut crc = crc_any::CRC::crc32c();
+        crc.digest(&buffer);
+        new_header.checksum = crc.get_crc() as u32;
         new_header.get_header_as_buffer(&mut buffer);
 
         f.seek(SeekFrom::Start(start))
@@ -480,7 +482,10 @@ pub fn calculate_checksum(buffer: &mut [u8], csum_offset: usize) -> Result<u32> 
     // Zero the checksum in the buffer
     LittleEndian::write_u32(csum_buf, 0);
     // Calculate the checksum on the resulting buffer
-    let new_csum = crc32c::crc32c(buffer);
+    let mut crc = crc_any::CRC::crc32c();
+    crc.digest(&buffer);
+    let new_csum = crc.get_crc() as u32;
+
     // Put back the original checksum in the buffer
     LittleEndian::write_u32(&mut buffer[csum_offset..csum_offset + 4], orig_csum);
 

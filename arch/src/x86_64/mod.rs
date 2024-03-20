@@ -24,7 +24,7 @@ use linux_loader::loader::elf::start_info::{
 use std::collections::BTreeMap;
 use std::mem;
 use vm_memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
+    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
     GuestMemoryRegion, GuestUsize,
 };
 mod smbios;
@@ -118,38 +118,6 @@ impl SgxEpcRegion {
     }
 }
 
-// This is a workaround to the Rust enforcement specifying that any implementation of a foreign
-// trait (in this case `DataInit`) where:
-// *    the type that is implementing the trait is foreign or
-// *    all of the parameters being passed to the trait (if there are any) are also foreign
-// is prohibited.
-#[derive(Copy, Clone, Default)]
-struct StartInfoWrapper(hvm_start_info);
-
-#[derive(Copy, Clone, Default)]
-struct MemmapTableEntryWrapper(hvm_memmap_table_entry);
-
-#[derive(Copy, Clone, Default)]
-struct ModlistEntryWrapper(hvm_modlist_entry);
-
-// SAFETY: data structure only contain a series of integers
-unsafe impl ByteValued for StartInfoWrapper {}
-// SAFETY: data structure only contain a series of integers
-unsafe impl ByteValued for MemmapTableEntryWrapper {}
-// SAFETY: data structure only contain a series of integers
-unsafe impl ByteValued for ModlistEntryWrapper {}
-
-// This is a workaround to the Rust enforcement specifying that any implementation of a foreign
-// trait (in this case `DataInit`) where:
-// *    the type that is implementing the trait is foreign or
-// *    all of the parameters being passed to the trait (if there are any) are also foreign
-// is prohibited.
-#[derive(Copy, Clone, Default)]
-struct BootParamsWrapper(boot_params);
-
-// SAFETY: BootParamsWrap is a wrapper over `boot_params` (a series of ints).
-unsafe impl ByteValued for BootParamsWrapper {}
-
 pub struct CpuidConfig {
     pub sgx_epc_sections: Option<Vec<SgxEpcSection>>,
     pub phys_bits: u8,
@@ -226,6 +194,26 @@ impl From<Error> for super::Error {
     }
 }
 
+pub fn get_x2apic_id(cpu_id: u32, topology: Option<(u8, u8, u8)>) -> u32 {
+    if let Some(t) = topology {
+        let thread_mask_width = u8::BITS - (t.0 - 1).leading_zeros();
+        let core_mask_width = u8::BITS - (t.1 - 1).leading_zeros();
+        let die_mask_width = u8::BITS - (t.2 - 1).leading_zeros();
+
+        let thread_id = cpu_id % (t.0 as u32);
+        let core_id = cpu_id / (t.0 as u32) % (t.1 as u32);
+        let die_id = cpu_id / ((t.0 * t.1) as u32) % (t.2 as u32);
+        let socket_id = cpu_id / ((t.0 * t.1 * t.2) as u32);
+
+        return thread_id
+            | (core_id << thread_mask_width)
+            | (die_id << (thread_mask_width + core_mask_width))
+            | (socket_id << (thread_mask_width + core_mask_width + die_mask_width));
+    }
+
+    cpu_id
+}
+
 #[derive(Copy, Clone, Debug)]
 pub enum CpuidReg {
     EAX,
@@ -245,6 +233,26 @@ pub struct CpuidPatch {
 }
 
 impl CpuidPatch {
+    pub fn get_cpuid_reg(
+        cpuid: &[CpuIdEntry],
+        function: u32,
+        index: Option<u32>,
+        reg: CpuidReg,
+    ) -> Option<u32> {
+        for entry in cpuid.iter() {
+            if entry.function == function && (index.is_none() || index.unwrap() == entry.index) {
+                return match reg {
+                    CpuidReg::EAX => Some(entry.eax),
+                    CpuidReg::EBX => Some(entry.ebx),
+                    CpuidReg::ECX => Some(entry.ecx),
+                    CpuidReg::EDX => Some(entry.edx),
+                };
+            }
+        }
+
+        None
+    }
+
     pub fn set_cpuid_reg(
         cpuid: &mut Vec<CpuIdEntry>,
         function: u32,
@@ -782,30 +790,26 @@ pub fn configure_vcpu(
     cpu_vendor: CpuVendor,
     topology: Option<(u8, u8, u8)>,
 ) -> super::Result<()> {
+    let x2apic_id = get_x2apic_id(id as u32, topology);
+
     // Per vCPU CPUID changes; common are handled via generate_common_cpuid()
     let mut cpuid = cpuid;
-    CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(id));
-    CpuidPatch::set_cpuid_reg(&mut cpuid, 0x1f, None, CpuidReg::EDX, u32::from(id));
+    CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, x2apic_id);
+    CpuidPatch::set_cpuid_reg(&mut cpuid, 0x1f, None, CpuidReg::EDX, x2apic_id);
     if matches!(cpu_vendor, CpuVendor::AMD) {
-        CpuidPatch::set_cpuid_reg(
-            &mut cpuid,
-            0x8000_001e,
-            Some(0),
-            CpuidReg::EAX,
-            u32::from(id),
-        );
-    }
-
-    if let Some(t) = topology {
-        update_cpuid_topology(&mut cpuid, t.0, t.1, t.2, cpu_vendor, id);
+        CpuidPatch::set_cpuid_reg(&mut cpuid, 0x8000_001e, Some(0), CpuidReg::EAX, x2apic_id);
     }
 
     // Set ApicId in cpuid for each vcpu
     // SAFETY: get host cpuid when eax=1
     let mut cpu_ebx = unsafe { core::arch::x86_64::__cpuid(1) }.ebx;
     cpu_ebx &= 0xffffff;
-    cpu_ebx |= (id as u32) << 24;
+    cpu_ebx |= x2apic_id << 24;
     CpuidPatch::set_cpuid_reg(&mut cpuid, 0x1, None, CpuidReg::EBX, cpu_ebx);
+
+    if let Some(t) = topology {
+        update_cpuid_topology(&mut cpuid, t.0, t.1, t.2, cpu_vendor, id);
+    }
 
     // The TSC frequency CPUID leaf should not be included when running with HyperV emulation
     if !kvm_hyperv {
@@ -902,6 +906,7 @@ pub fn configure_system(
     serial_number: Option<&str>,
     uuid: Option<&str>,
     oem_strings: Option<&[&str]>,
+    topology: Option<(u8, u8, u8)>,
 ) -> super::Result<()> {
     // Write EBDA address to location where ACPICA expects to find it
     guest_mem
@@ -914,7 +919,7 @@ pub fn configure_system(
     // Place the MP table after the SMIOS table aligned to 16 bytes
     let offset = GuestAddress(layout::SMBIOS_START).unchecked_add(size);
     let offset = GuestAddress((offset.0 + 16) & !0xf);
-    mptable::setup_mptable(offset, guest_mem, _num_cpus).map_err(Error::MpTableSetup)?;
+    mptable::setup_mptable(offset, guest_mem, _num_cpus, topology).map_err(Error::MpTableSetup)?;
 
     // Check that the RAM is not smaller than the RSDP start address
     if let Some(rsdp_addr) = rsdp_addr {
@@ -1058,29 +1063,30 @@ fn configure_pvh(
 ) -> super::Result<()> {
     const XEN_HVM_START_MAGIC_VALUE: u32 = 0x336ec578;
 
-    let mut start_info: StartInfoWrapper = StartInfoWrapper(hvm_start_info::default());
-
-    start_info.0.magic = XEN_HVM_START_MAGIC_VALUE;
-    start_info.0.version = 1; // pvh has version 1
-    start_info.0.nr_modules = 0;
-    start_info.0.cmdline_paddr = cmdline_addr.raw_value();
-    start_info.0.memmap_paddr = layout::MEMMAP_START.raw_value();
+    let mut start_info = hvm_start_info {
+        magic: XEN_HVM_START_MAGIC_VALUE,
+        version: 1, // pvh has version 1
+        nr_modules: 0,
+        cmdline_paddr: cmdline_addr.raw_value(),
+        memmap_paddr: layout::MEMMAP_START.raw_value(),
+        ..Default::default()
+    };
 
     if let Some(rsdp_addr) = rsdp_addr {
-        start_info.0.rsdp_paddr = rsdp_addr.0;
+        start_info.rsdp_paddr = rsdp_addr.0;
     }
 
     if let Some(initramfs_config) = initramfs {
         // The initramfs has been written to guest memory already, here we just need to
         // create the module structure that describes it.
-        let ramdisk_mod: ModlistEntryWrapper = ModlistEntryWrapper(hvm_modlist_entry {
+        let ramdisk_mod = hvm_modlist_entry {
             paddr: initramfs_config.address.raw_value(),
             size: initramfs_config.size as u64,
             ..Default::default()
-        });
+        };
 
-        start_info.0.nr_modules += 1;
-        start_info.0.modlist_paddr = layout::MODLIST_START.raw_value();
+        start_info.nr_modules += 1;
+        start_info.modlist_paddr = layout::MODLIST_START.raw_value();
 
         // Write the modlist struct to guest memory.
         guest_mem
@@ -1140,7 +1146,7 @@ fn configure_pvh(
         );
     }
 
-    start_info.0.memmap_entries = memmap.len() as u32;
+    start_info.memmap_entries = memmap.len() as u32;
 
     // Copy the vector with the memmap table to the MEMMAP_START address
     // which is already saved in the memmap_paddr field of hvm_start_info struct.
@@ -1149,17 +1155,14 @@ fn configure_pvh(
     guest_mem
         .checked_offset(
             memmap_start_addr,
-            mem::size_of::<hvm_memmap_table_entry>() * start_info.0.memmap_entries as usize,
+            mem::size_of::<hvm_memmap_table_entry>() * start_info.memmap_entries as usize,
         )
         .ok_or(super::Error::MemmapTablePastRamEnd)?;
 
-    // For every entry in the memmap vector, create a MemmapTableEntryWrapper
-    // and write it to guest memory.
+    // For every entry in the memmap vector, write it to guest memory.
     for memmap_entry in memmap {
-        let map_entry_wrapper: MemmapTableEntryWrapper = MemmapTableEntryWrapper(memmap_entry);
-
         guest_mem
-            .write_obj(map_entry_wrapper, memmap_start_addr)
+            .write_obj(memmap_entry, memmap_start_addr)
             .map_err(|_| super::Error::MemmapTableSetup)?;
         memmap_start_addr =
             memmap_start_addr.unchecked_add(mem::size_of::<hvm_memmap_table_entry>() as u64);
@@ -1352,9 +1355,23 @@ fn update_cpuid_topology(
     cpu_vendor: CpuVendor,
     id: u8,
 ) {
+    let x2apic_id = get_x2apic_id(
+        id as u32,
+        Some((threads_per_core, cores_per_die, dies_per_package)),
+    );
+
     let thread_width = 8 - (threads_per_core - 1).leading_zeros();
     let core_width = (8 - (cores_per_die - 1).leading_zeros()) + thread_width;
     let die_width = (8 - (dies_per_package - 1).leading_zeros()) + core_width;
+
+    let mut cpu_ebx = CpuidPatch::get_cpuid_reg(cpuid, 0x1, None, CpuidReg::EBX).unwrap_or(0);
+    cpu_ebx |= ((dies_per_package as u32) * (cores_per_die as u32) * (threads_per_core as u32))
+        & 0xff << 16;
+    CpuidPatch::set_cpuid_reg(cpuid, 0x1, None, CpuidReg::EBX, cpu_ebx);
+
+    let mut cpu_edx = CpuidPatch::get_cpuid_reg(cpuid, 0x1, None, CpuidReg::EDX).unwrap_or(0);
+    cpu_edx |= 1 << 28;
+    CpuidPatch::set_cpuid_reg(cpuid, 0x1, None, CpuidReg::EDX, cpu_edx);
 
     // CPU Topology leaf 0xb
     CpuidPatch::set_cpuid_reg(cpuid, 0xb, Some(0), CpuidReg::EAX, thread_width);
@@ -1414,7 +1431,7 @@ fn update_cpuid_topology(
             0x8000_001e,
             Some(0),
             CpuidReg::EBX,
-            ((threads_per_core as u32 - 1) << 8) | (id as u32 & 0xff),
+            ((threads_per_core as u32 - 1) << 8) | (x2apic_id & 0xff),
         );
         CpuidPatch::set_cpuid_reg(
             cpuid,
@@ -1425,21 +1442,21 @@ fn update_cpuid_topology(
         );
         CpuidPatch::set_cpuid_reg(cpuid, 0x8000_001e, Some(0), CpuidReg::EDX, 0);
         if cores_per_die * threads_per_core > 1 {
+            let ecx =
+                CpuidPatch::get_cpuid_reg(cpuid, 0x8000_0001, Some(0), CpuidReg::ECX).unwrap_or(0);
             CpuidPatch::set_cpuid_reg(
                 cpuid,
                 0x8000_0001,
                 Some(0),
                 CpuidReg::ECX,
-                (1u32 << 1) | (1u32 << 22),
+                ecx | (1u32 << 1) | (1u32 << 22),
             );
             CpuidPatch::set_cpuid_reg(
                 cpuid,
                 0x0000_0001,
                 Some(0),
                 CpuidReg::EBX,
-                ((id as u32) << 24)
-                    | (8 << 8)
-                    | (((cores_per_die * threads_per_core) as u32) << 16),
+                (x2apic_id << 24) | (8 << 8) | (((cores_per_die * threads_per_core) as u32) << 16),
             );
             let cpuid_patches = vec![
                 // Patch tsc deadline timer bit
@@ -1472,7 +1489,7 @@ fn update_cpuid_topology(
 // sections exposed to the guest.
 fn update_cpuid_sgx(
     cpuid: &mut Vec<CpuIdEntry>,
-    epc_sections: &Vec<SgxEpcSection>,
+    epc_sections: &[SgxEpcSection],
 ) -> Result<(), Error> {
     // Something's wrong if there's no EPC section.
     if epc_sections.is_empty() {
@@ -1547,6 +1564,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert!(config_err.is_err());
 
@@ -1565,6 +1583,7 @@ mod tests {
             0,
             &None,
             no_vcpus,
+            None,
             None,
             None,
             None,
@@ -1600,6 +1619,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         )
         .unwrap();
 
@@ -1609,6 +1629,7 @@ mod tests {
             0,
             &None,
             no_vcpus,
+            None,
             None,
             None,
             None,
@@ -1682,5 +1703,26 @@ mod tests {
         add_memmap_entry(&mut memmap, 0x10000, 0xa000, E820_RESERVED);
 
         assert_eq!(format!("{memmap:?}"), format!("{expected_memmap:?}"));
+    }
+
+    #[test]
+    fn test_get_x2apic_id() {
+        let x2apic_id = get_x2apic_id(0, Some((2, 3, 1)));
+        assert_eq!(x2apic_id, 0);
+
+        let x2apic_id = get_x2apic_id(1, Some((2, 3, 1)));
+        assert_eq!(x2apic_id, 1);
+
+        let x2apic_id = get_x2apic_id(2, Some((2, 3, 1)));
+        assert_eq!(x2apic_id, 2);
+
+        let x2apic_id = get_x2apic_id(6, Some((2, 3, 1)));
+        assert_eq!(x2apic_id, 8);
+
+        let x2apic_id = get_x2apic_id(7, Some((2, 3, 1)));
+        assert_eq!(x2apic_id, 9);
+
+        let x2apic_id = get_x2apic_id(8, Some((2, 3, 1)));
+        assert_eq!(x2apic_id, 10);
     }
 }

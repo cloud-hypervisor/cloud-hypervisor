@@ -18,16 +18,16 @@ igvm_defs = { git = "https://github.com/microsoft/igvm", branch = "main", packag
 igvm_parser = { git = "https://github.com/microsoft/igvm", branch = "main", package = "igvm", optional  = true }
 libc = "0.2.147"
 log = "0.4.20"
-kvm-ioctls = { version = "0.13.0", optional = true }
-kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch-v0.6.0-tdx", features = ["with-serde", "fam-wrappers"], optional  = true }
+kvm-ioctls = { version = "0.16.0", optional = true }
+kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch-live-upgrade-stable-37.x", features = ["with-serde", "fam-wrappers"], optional  = true }
 mshv-bindings = { git = "https://github.com/rust-vmm/mshv", branch = "main", features = ["with-serde", "fam-wrappers"], optional  = true }
 mshv-ioctls = { git = "https://github.com/rust-vmm/mshv", branch = "main", optional  = true}
 serde = { version = "1.0.168", features = ["rc", "derive"] }
 serde_with = { version = "3.4.0", default-features = false, features = ["macros"] }
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
-vm-memory = { version = "0.13.1", features = ["backend-mmap", "backend-atomic"] }
-vmm-sys-util = { version = "0.11.0", features = ["with-serde"] }
-thiserror = "1.0.40"
+vm-memory = { version = "0.14.0", features = ["backend-mmap", "backend-atomic"] }
+vmm-sys-util = { version = "0.12.1", features = ["with-serde"] }
+thiserror = "1.0.52"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies.iced-x86]
 optional = true

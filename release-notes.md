@@ -1,3 +1,4 @@
+- [v37.1](#v371)
 - [v37.0](#v370)
     - [Long Term Support (LTS) Release](#long-term-support-lts-release)
     - [Improved VFIO Device Passthrough with Multiple PCI Segments](#improved-vfio-device-passthrough-with-multiple-pci-segments)
@@ -317,6 +318,18 @@
     - [Console over virtio](#console-over-virtio)
     - [Unit testing](#unit-testing)
     - [Integration tests parallelization](#integration-tests-parallelization)
+
+# v37.1
+
+This is a bug fix release. The following issues have been addressed:
+
+* Fix several security advisories from dependencies (#6134, #6141)
+* Enable HTT flag to avoid crashing cpu topology enumeration software
+such as hwloc in the guest (#6146)
+* Enable nested virtualization on AMD if supported (#6106)
+* Handle non-power-of-two CPU topology properly (#6062)
+* Various bug fixes around virtio-vsock(#6080, #6091, #6095)
+* Align VFIO devices PCI BARs naturally (#6196)
 
 # v37.0
 

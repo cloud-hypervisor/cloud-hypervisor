@@ -1,11 +1,13 @@
 name: Cloud Hypervisor's Docker image update
-
 on:
   push:
     branches: main
     paths: resources/Dockerfile
   pull_request:
     paths: resources/Dockerfile
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io

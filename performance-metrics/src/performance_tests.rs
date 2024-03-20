@@ -19,6 +19,7 @@ pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-
 #[cfg(target_arch = "aarch64")]
 pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64-custom-20210929-0-update-tool.raw";
 
+#[allow(dead_code)]
 #[derive(Debug)]
 enum Error {
     BootTimeParse,

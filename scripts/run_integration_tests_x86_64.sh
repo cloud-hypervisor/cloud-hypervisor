@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -x
 
 source $HOME/.cargo/env
@@ -29,7 +29,7 @@ if [ ! -f "$OVMF_FW" ]; then
 fi
 
 FOCAL_OS_IMAGE_NAME="focal-server-cloudimg-amd64-custom-20210609-0.qcow2"
-FOCAL_OS_IMAGE_URL="https://cloud-hypervisor.azureedge.net/$FOCAL_OS_IMAGE_NAME"
+FOCAL_OS_IMAGE_URL="https://ch-images.azureedge.net/$FOCAL_OS_IMAGE_NAME"
 FOCAL_OS_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_IMAGE_NAME"
 if [ ! -f "$FOCAL_OS_IMAGE" ]; then
     pushd $WORKLOADS_DIR
@@ -54,7 +54,7 @@ if [ ! -f "$FOCAL_OS_QCOW_BACKING_FILE_IMAGE" ]; then
 fi
 
 JAMMY_OS_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20230119-0.qcow2"
-JAMMY_OS_IMAGE_URL="https://cloud-hypervisor.azureedge.net/$JAMMY_OS_IMAGE_NAME"
+JAMMY_OS_IMAGE_URL="https://ch-images.azureedge.net/$JAMMY_OS_IMAGE_NAME"
 JAMMY_OS_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_IMAGE_NAME"
 if [ ! -f "$JAMMY_OS_IMAGE" ]; then
     pushd $WORKLOADS_DIR
@@ -116,7 +116,7 @@ if [ ! -f "$VIRTIOFSD" ]; then
     pushd $WORKLOADS_DIR
     git clone "https://gitlab.com/virtio-fs/virtiofsd.git" $VIRTIOFSD_DIR
     pushd $VIRTIOFSD_DIR
-    git checkout v1.1.0
+    git checkout v1.8.0
     time cargo build --release
     cp target/release/virtiofsd $VIRTIOFSD || exit 1
     popd

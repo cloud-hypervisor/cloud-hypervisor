@@ -1,9 +1,11 @@
 name: Cloud Hypervisor Quality Checks
-on: [pull_request, create]
+on: [pull_request, merge_group]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
-    if: github.event_name == 'pull_request'
     name: Quality (clippy, rustfmt)
     runs-on: ubuntu-latest
     continue-on-error: ${{ matrix.experimental }}
@@ -46,8 +48,8 @@ jobs:
           override: true
           components: rustfmt, clippy
 
-      - name: Debug Check (default features)
-        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+      - name: Bisectability Check (default features)
+        if: ${{ github.event_name == 'pull_request' && matrix.target == 'x86_64-unknown-linux-gnu' }}
         run: |
           set -e
           commits=$(git rev-list origin/${{ github.base_ref }}..${{ github.sha }})
