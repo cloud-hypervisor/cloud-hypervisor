@@ -1216,6 +1216,8 @@ impl RequestHandler for Vmm {
 
     fn vm_boot(&mut self) -> result::Result<(), VmError> {
         tracer::start();
+        info!("Booting VM");
+        event!("vm", "booting");
         let r = {
             trace_scoped!("vm_boot");
             // If we don't have a config, we can not boot a VM.
@@ -1269,6 +1271,9 @@ impl RequestHandler for Vmm {
             }
         };
         tracer::end();
+        if r.is_ok() {
+            event!("vm", "booted");
+        }
         r
     }
 

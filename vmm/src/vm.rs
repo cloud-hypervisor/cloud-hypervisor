@@ -2067,8 +2067,6 @@ impl Vm {
 
     pub fn boot(&mut self) -> Result<()> {
         trace_scoped!("Vm::boot");
-        info!("Booting VM");
-        event!("vm", "booting");
         let current_state = self.get_state()?;
         if current_state == VmState::Paused {
             return self.resume().map_err(Error::Resume);
@@ -2185,7 +2183,6 @@ impl Vm {
 
         let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
         *state = new_state;
-        event!("vm", "booted");
         Ok(())
     }
 
