@@ -1450,11 +1450,13 @@ impl MshvVcpu {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 struct MshvEmulatorContext<'a> {
     vcpu: &'a MshvVcpu,
     map: (u64, u64), // Initial GVA to GPA mapping provided by the hypervisor
 }
 
+#[cfg(target_arch = "x86_64")]
 impl<'a> MshvEmulatorContext<'a> {
     // Do the actual gva -> gpa translation
     #[allow(non_upper_case_globals)]
@@ -1478,6 +1480,7 @@ impl<'a> MshvEmulatorContext<'a> {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 /// Platform emulation for Hyper-V
 impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
     type CpuState = EmulatorCpuState;
