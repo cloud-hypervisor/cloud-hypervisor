@@ -1397,8 +1397,6 @@ impl Vm {
         }
         *state = new_state;
 
-        event!("vm", "shutdown");
-
         Ok(())
     }
 
