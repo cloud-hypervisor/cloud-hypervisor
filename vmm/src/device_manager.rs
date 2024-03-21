@@ -58,7 +58,7 @@ use libc::{
     O_TMPFILE, PROT_READ, PROT_WRITE, TCSANOW,
 };
 use pci::{
-    DeviceRelocation, PciBarRegionType, PciBdf, PciDevice, VfioDmaMapping,
+    DeviceRelocation, MmioRegion, PciBarRegionType, PciBdf, PciDevice, VfioDmaMapping,
     VfioPciDevice, VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError,
 };
 use rate_limiter::group::RateLimiterGroup;
@@ -965,6 +965,8 @@ pub struct DeviceManager {
     snapshot: Option<Snapshot>,
 
     rate_limit_groups: HashMap<String, Arc<RateLimiterGroup>>,
+
+    mmio_regions: Arc<Mutex<Vec<MmioRegion>>>,
 }
 
 impl DeviceManager {
@@ -1195,6 +1197,7 @@ impl DeviceManager {
             acpi_platform_addresses: AcpiPlatformAddresses::default(),
             snapshot,
             rate_limit_groups,
+            mmio_regions: Arc::new(Mutex::new(Vec::new())),
         };
 
         let device_manager = Arc::new(Mutex::new(device_manager));
@@ -3423,6 +3426,7 @@ impl DeviceManager {
             let vfio_mapping = Arc::new(VfioDmaMapping::new(
                 Arc::clone(&vfio_container),
                 Arc::new(self.memory_manager.lock().unwrap().guest_memory()),
+                Arc::clone(&self.mmio_regions),
             ));
 
             if let Some(iommu) = &self.iommu_device {
@@ -3467,6 +3471,7 @@ impl DeviceManager {
             let vfio_mapping = Arc::new(VfioDmaMapping::new(
                 Arc::clone(&vfio_container),
                 Arc::new(self.memory_manager.lock().unwrap().guest_memory()),
+                Arc::clone(&self.mmio_regions),
             ));
 
             for virtio_mem_device in self.virtio_mem_devices.iter() {
@@ -3528,6 +3533,10 @@ impl DeviceManager {
             .unwrap()
             .map_mmio_regions()
             .map_err(DeviceManagerError::VfioMapRegion)?;
+
+        for mmio_region in vfio_pci_device.lock().unwrap().mmio_regions() {
+            self.mmio_regions.lock().unwrap().push(mmio_region);
+        }
 
         let mut node = device_node!(vfio_name, vfio_pci_device);
 
@@ -4200,12 +4209,21 @@ impl DeviceManager {
 
         let (pci_device, bus_device, virtio_device, remove_dma_handler) = match pci_device_handle {
             // No need to remove any virtio-mem mapping here as the container outlives all devices
-            PciDeviceHandle::Vfio(vfio_pci_device) => (
-                Arc::clone(&vfio_pci_device) as Arc<Mutex<dyn PciDevice>>,
-                Arc::clone(&vfio_pci_device) as Arc<Mutex<dyn BusDevice>>,
-                None as Option<Arc<Mutex<dyn virtio_devices::VirtioDevice>>>,
-                false,
-            ),
+            PciDeviceHandle::Vfio(vfio_pci_device) => {
+                for mmio_region in vfio_pci_device.lock().unwrap().mmio_regions() {
+                    self.mmio_regions
+                        .lock()
+                        .unwrap()
+                        .retain(|x| x.start != mmio_region.start)
+                }
+
+                (
+                    Arc::clone(&vfio_pci_device) as Arc<Mutex<dyn PciDevice>>,
+                    Arc::clone(&vfio_pci_device) as Arc<Mutex<dyn BusDevice>>,
+                    None as Option<Arc<Mutex<dyn virtio_devices::VirtioDevice>>>,
+                    false,
+                )
+            }
             PciDeviceHandle::Virtio(virtio_pci_device) => {
                 let dev = virtio_pci_device.lock().unwrap();
                 let bar_addr = dev.config_bar_addr();
