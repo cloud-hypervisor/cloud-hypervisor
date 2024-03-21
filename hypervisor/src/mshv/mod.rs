@@ -1361,6 +1361,7 @@ impl cpu::Vcpu for MshvVcpu {
             .set_sev_control_register(sev_control_reg)
             .map_err(|e| cpu::HypervisorCpuError::SetSevControlRegister(e.into()))
     }
+    #[cfg(target_arch = "x86_64")]
     ///
     /// Trigger NMI interrupt
     ///
