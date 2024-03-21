@@ -598,6 +598,7 @@ impl cpu::Vcpu for MshvVcpu {
                         .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
                     Ok(cpu::VmExit::Ignore)
                 }
+                #[cfg(target_arch = "x86_64")]
                 hv_message_type_HVMSG_UNMAPPED_GPA => {
                     let info = x.to_memory_info().unwrap();
                     let insn_len = info.instruction_byte_count as usize;
