@@ -20,7 +20,7 @@
 
 #[macro_use]
 extern crate anyhow;
-#[cfg(target_arch = "x86_64")]
+#[allow(unused_imports)]
 #[macro_use]
 extern crate log;
 
