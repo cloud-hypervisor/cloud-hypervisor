@@ -275,6 +275,48 @@ pub struct MmioRegion {
     pub(crate) index: u32,
     pub(crate) user_memory_regions: Vec<UserMemoryRegion>,
 }
+
+trait MmioRegionRange {
+    fn check_range(&self, guest_addr: u64, size: u64) -> bool;
+    fn find_user_address(&self, guest_addr: u64) -> Result<u64, io::Error>;
+}
+
+impl MmioRegionRange for Vec<MmioRegion> {
+    // Check if a guest address is within the range of mmio regions
+    fn check_range(&self, guest_addr: u64, size: u64) -> bool {
+        for region in self.iter() {
+            let Some(guest_addr_end) = guest_addr.checked_add(size) else {
+                return false;
+            };
+            let Some(region_end) = region.start.raw_value().checked_add(region.length) else {
+                return false;
+            };
+            if guest_addr >= region.start.raw_value() && guest_addr_end <= region_end {
+                return true;
+            }
+        }
+        false
+    }
+
+    // Locate the user region address for a guest address within all mmio regions
+    fn find_user_address(&self, guest_addr: u64) -> Result<u64, io::Error> {
+        for region in self.iter() {
+            for user_region in region.user_memory_regions.iter() {
+                if guest_addr >= user_region.start
+                    && guest_addr < user_region.start + user_region.size
+                {
+                    return Ok(user_region.host_addr + (guest_addr - user_region.start));
+                }
+            }
+        }
+
+        Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("unable to find user address: 0x{guest_addr:x}"),
+        ))
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum VfioError {
     #[error("Kernel VFIO error: {0}")]
@@ -1893,16 +1935,25 @@ impl Migratable for VfioPciDevice {}
 pub struct VfioDmaMapping<M: GuestAddressSpace> {
     container: Arc<VfioContainer>,
     memory: Arc<M>,
+    mmio_regions: Arc<Mutex<Vec<MmioRegion>>>,
 }
 
 impl<M: GuestAddressSpace> VfioDmaMapping<M> {
     /// Create a DmaMapping object.
-    ///
     /// # Parameters
     /// * `container`: VFIO container object.
-    /// * `memory·: guest memory to mmap.
-    pub fn new(container: Arc<VfioContainer>, memory: Arc<M>) -> Self {
-        VfioDmaMapping { container, memory }
+    /// * `memory`: guest memory to mmap.
+    /// * `mmio_regions`: mmio_regions to mmap.
+    pub fn new(
+        container: Arc<VfioContainer>,
+        memory: Arc<M>,
+        mmio_regions: Arc<Mutex<Vec<MmioRegion>>>,
+    ) -> Self {
+        VfioDmaMapping {
+            container,
+            memory,
+            mmio_regions,
+        }
     }
 }
 
@@ -1911,14 +1962,21 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioDmaMapping<M
         let mem = self.memory.memory();
         let guest_addr = GuestAddress(gpa);
         let user_addr = if mem.check_range(guest_addr, size as usize) {
-            mem.get_host_address(guest_addr).unwrap() as u64
+            match mem.get_host_address(guest_addr) {
+                Ok(t) => t as u64,
+                Err(e) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("unable to retrieve user address for gpa 0x{gpa:x} from guest memory region: {e}")
+                    ));
+                }
+            }
+        } else if self.mmio_regions.lock().unwrap().check_range(gpa, size) {
+            self.mmio_regions.lock().unwrap().find_user_address(gpa)?
         } else {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
-                format!(
-                    "failed to convert guest address 0x{gpa:x} into \
-                     host user virtual address"
-                ),
+                format!("failed to locate guest address 0x{gpa:x} in guest memory"),
             ));
         };
 
