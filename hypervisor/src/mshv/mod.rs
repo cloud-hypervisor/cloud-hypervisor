@@ -507,6 +507,7 @@ impl cpu::Vcpu for MshvVcpu {
                     warn!("TRIPLE FAULT");
                     Ok(cpu::VmExit::Shutdown)
                 }
+                #[cfg(target_arch = "x86_64")]
                 hv_message_type_HVMSG_X64_IO_PORT_INTERCEPT => {
                     let info = x.to_ioport_info().unwrap();
                     let access_info = info.access_info;
