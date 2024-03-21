@@ -32,11 +32,12 @@ use vm_allocator::page_size::{
     align_page_size_down, align_page_size_up, is_4k_aligned, is_4k_multiple, is_page_size_aligned,
 };
 use vm_allocator::{AddressAllocator, SystemAllocator};
+use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
 };
 use vm_device::{BusDevice, Resource};
-use vm_memory::{Address, GuestAddress, GuestUsize};
+use vm_memory::{Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestUsize};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
 };
@@ -1885,3 +1886,64 @@ impl Snapshottable for VfioPciDevice {
 }
 impl Transportable for VfioPciDevice {}
 impl Migratable for VfioPciDevice {}
+
+/// This structure implements the ExternalDmaMapping trait. It is meant to
+/// be used when the caller tries to provide a way to update the mappings
+/// associated with a specific VFIO container.
+pub struct VfioDmaMapping<M: GuestAddressSpace> {
+    container: Arc<VfioContainer>,
+    memory: Arc<M>,
+}
+
+impl<M: GuestAddressSpace> VfioDmaMapping<M> {
+    /// Create a DmaMapping object.
+    ///
+    /// # Parameters
+    /// * `container`: VFIO container object.
+    /// * `memory·: guest memory to mmap.
+    pub fn new(container: Arc<VfioContainer>, memory: Arc<M>) -> Self {
+        VfioDmaMapping { container, memory }
+    }
+}
+
+impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioDmaMapping<M> {
+    fn map(&self, iova: u64, gpa: u64, size: u64) -> std::result::Result<(), io::Error> {
+        let mem = self.memory.memory();
+        let guest_addr = GuestAddress(gpa);
+        let user_addr = if mem.check_range(guest_addr, size as usize) {
+            mem.get_host_address(guest_addr).unwrap() as u64
+        } else {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!(
+                    "failed to convert guest address 0x{gpa:x} into \
+                     host user virtual address"
+                ),
+            ));
+        };
+
+        self.container
+            .vfio_dma_map(iova, size, user_addr)
+            .map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!(
+                        "failed to map memory for VFIO container, \
+                         iova 0x{iova:x}, gpa 0x{gpa:x}, size 0x{size:x}: {e:?}"
+                    ),
+                )
+            })
+    }
+
+    fn unmap(&self, iova: u64, size: u64) -> std::result::Result<(), io::Error> {
+        self.container.vfio_dma_unmap(iova, size).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!(
+                    "failed to unmap memory for VFIO container, \
+                     iova 0x{iova:x}, size 0x{size:x}: {e:?}"
+                ),
+            )
+        })
+    }
+}

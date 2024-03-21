@@ -58,8 +58,8 @@ use libc::{
     O_TMPFILE, PROT_READ, PROT_WRITE, TCSANOW,
 };
 use pci::{
-    DeviceRelocation, PciBarRegionType, PciBdf, PciDevice, VfioPciDevice, VfioUserDmaMapping,
-    VfioUserPciDevice, VfioUserPciDeviceError,
+    DeviceRelocation, PciBarRegionType, PciBdf, PciDevice, VfioDmaMapping,
+    VfioPciDevice, VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError,
 };
 use rate_limiter::group::RateLimiterGroup;
 use seccompiler::SeccompAction;
@@ -85,7 +85,6 @@ use virtio_devices::{
 };
 use virtio_devices::{Endpoint, IommuMapping};
 use vm_allocator::{AddressAllocator, SystemAllocator};
-use vm_device::dma_mapping::vfio::VfioDmaMapping;
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, LegacyIrqGroupConfig, MsiIrqGroupConfig,
