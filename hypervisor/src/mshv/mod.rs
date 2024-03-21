@@ -706,6 +706,7 @@ impl cpu::Vcpu for MshvVcpu {
                     debug!("Exception Info {:?}", { info.exception_vector });
                     Ok(cpu::VmExit::Ignore)
                 }
+                #[cfg(target_arch = "x86_64")]
                 hv_message_type_HVMSG_X64_APIC_EOI => {
                     let info = x.to_apic_eoi_info().unwrap();
                     // The kernel should dispatch the EOI to the correct thread.
