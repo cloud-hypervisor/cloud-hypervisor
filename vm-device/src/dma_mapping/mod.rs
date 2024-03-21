@@ -2,8 +2,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
 
-pub mod vfio;
-
 /// Trait meant for triggering the DMA mapping update related to an external
 /// device not managed fully through virtio. It is dedicated to virtio-iommu
 /// in order to trigger the map update anytime the mapping is updated from the
