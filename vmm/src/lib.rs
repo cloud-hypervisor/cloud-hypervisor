@@ -1381,11 +1381,17 @@ impl RequestHandler for Vmm {
     }
 
     fn vm_shutdown(&mut self) -> result::Result<(), VmError> {
-        if let Some(ref mut vm) = self.vm.take() {
+        let r = if let Some(ref mut vm) = self.vm.take() {
             vm.shutdown()
         } else {
             Err(VmError::VmNotRunning)
+        };
+
+        if r.is_ok() {
+            event!("vm", "shutdown");
         }
+
+        r
     }
 
     fn vm_reboot(&mut self) -> result::Result<(), VmError> {
