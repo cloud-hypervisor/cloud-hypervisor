@@ -414,6 +414,19 @@ impl Request {
                         .unwrap()
                         .insert(endpoint, domain_id);
 
+                    // If any other mappings exist in the domain for other containers,
+                    // make sure to issue these mappings for the new endpoint/container
+                    if let Some(domain_mappings) = &mapping.domains.read().unwrap().get(&domain_id)
+                    {
+                        if let Some(ext_map) = ext_mapping.get(&endpoint) {
+                            for (virt_start, addr_map) in &domain_mappings.mappings {
+                                ext_map
+                                    .map(*virt_start, addr_map.gpa, addr_map.size)
+                                    .map_err(Error::ExternalUnmapping)?;
+                            }
+                        }
+                    }
+
                     // Add new domain with no mapping if the entry didn't exist yet
                     let mut domains = mapping.domains.write().unwrap();
                     let domain = Domain {
