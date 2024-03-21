@@ -29,8 +29,11 @@ pub mod x86_64;
 #[cfg(feature = "sev_snp")]
 use snp_constants::*;
 
+#[cfg(target_arch = "x86_64")]
+use crate::ClockData;
+
 use crate::{
-    ClockData, CpuState, IoEventAddress, IrqRoutingEntry, MpState, UserMemoryRegion,
+    CpuState, IoEventAddress, IrqRoutingEntry, MpState, UserMemoryRegion,
     USER_MEMORY_REGION_ADJUSTABLE, USER_MEMORY_REGION_EXECUTE, USER_MEMORY_REGION_READ,
     USER_MEMORY_REGION_WRITE,
 };
