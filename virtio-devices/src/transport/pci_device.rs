@@ -278,6 +278,8 @@ pub struct VirtioPciDeviceState {
     device_activated: bool,
     queues: Vec<QueueState>,
     interrupt_status: usize,
+    cap_pci_cfg_offset: usize,
+    cap_pci_cfg: Vec<u8>,
 }
 
 impl VersionMapped for VirtioPciDeviceState {}
@@ -530,7 +532,7 @@ impl VirtioPciDevice {
                 ))
             })?;
 
-        let (device_activated, interrupt_status) = if let Some(state) = state {
+        let (device_activated, interrupt_status, cap_pci_cfg_info) = if let Some(state) = state {
             // Update virtqueues indexes for both available and used rings.
             for (i, queue) in queues.iter_mut().enumerate() {
                 queue.set_size(state.queues[i].size);
@@ -558,9 +560,16 @@ impl VirtioPciDevice {
                 );
             }
 
-            (state.device_activated, state.interrupt_status)
+            (
+                state.device_activated,
+                state.interrupt_status,
+                VirtioPciCfgCapInfo {
+                    offset: state.cap_pci_cfg_offset,
+                    cap: *VirtioPciCfgCap::from_slice(&state.cap_pci_cfg).unwrap(),
+                },
+            )
         } else {
-            (false, 0)
+            (false, 0, VirtioPciCfgCapInfo::default())
         };
 
         // Dropping the MutexGuard to unlock the VirtioDevice. This is required
@@ -585,7 +594,7 @@ impl VirtioPciDevice {
             settings_bar: 0,
             use_64bit_bar,
             interrupt_source_group,
-            cap_pci_cfg_info: VirtioPciCfgCapInfo::default(),
+            cap_pci_cfg_info,
             bar_regions: vec![],
             activate_evt,
             dma_handler,
@@ -634,6 +643,8 @@ impl VirtioPciDevice {
                     used_ring: q.used_ring(),
                 })
                 .collect(),
+            cap_pci_cfg_offset: self.cap_pci_cfg_info.offset,
+            cap_pci_cfg: self.cap_pci_cfg_info.cap.bytes().to_vec(),
         }
     }
 
