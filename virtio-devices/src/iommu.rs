@@ -407,6 +407,15 @@ impl Request {
                     let bypass =
                         (req.flags & VIRTIO_IOMMU_ATTACH_F_BYPASS) == VIRTIO_IOMMU_ATTACH_F_BYPASS;
 
+                    let mut old_domain_id = domain_id;
+                    if let Some(&id) = mapping.endpoints.read().unwrap().get(&endpoint) {
+                        old_domain_id = id;
+                    }
+
+                    if old_domain_id != domain_id {
+                        detach_endpoint_from_domain(endpoint, old_domain_id, mapping, ext_mapping)?;
+                    }
+
                     // Add endpoint associated with specific domain
                     mapping
                         .endpoints
@@ -452,22 +461,7 @@ impl Request {
                     let endpoint = req.endpoint;
 
                     // Remove endpoint associated with specific domain
-                    mapping.endpoints.write().unwrap().remove(&endpoint);
-
-                    // After all endpoints have been successfully detached from a
-                    // domain, the domain can be removed. This means we must remove
-                    // the mappings associated with this domain.
-                    if mapping
-                        .endpoints
-                        .write()
-                        .unwrap()
-                        .iter()
-                        .filter(|(_, &d)| d == domain_id)
-                        .count()
-                        == 0
-                    {
-                        mapping.domains.write().unwrap().remove(&domain_id);
-                    }
+                    detach_endpoint_from_domain(endpoint, domain_id, mapping, ext_mapping)?;
                 }
                 VIRTIO_IOMMU_T_MAP => {
                     if desc_size_left != size_of::<VirtioIommuReqMap>() {
@@ -504,7 +498,9 @@ impl Request {
                         .map(|(&e, _)| e)
                         .collect();
 
-                    // Trigger external mapping if necessary.
+                    // For viommu all endpoints receive their own VFIO container, as a result
+                    // Each endpoint within the domain needs to be separately mapped, as the
+                    // mapping is done on a per-container level, not a per-domain level
                     for endpoint in endpoints {
                         if let Some(ext_map) = ext_mapping.get(&endpoint) {
                             let size = req.virt_end - req.virt_start + 1;
@@ -651,6 +647,41 @@ impl Request {
 
         Ok((hdr_len as usize) + size_of::<VirtioIommuReqTail>())
     }
+}
+
+fn detach_endpoint_from_domain(
+    endpoint: u32,
+    domain_id: u32,
+    mapping: &Arc<IommuMapping>,
+    ext_mapping: &BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
+) -> result::Result<(), Error> {
+    // Remove endpoint associated with specific domain
+    mapping.endpoints.write().unwrap().remove(&endpoint);
+
+    // Trigger external unmapping for the endpoint if necessary.
+    if let Some(domain_mappings) = &mapping.domains.read().unwrap().get(&domain_id) {
+        if let Some(ext_map) = ext_mapping.get(&endpoint) {
+            for (virt_start, addr_map) in &domain_mappings.mappings {
+                ext_map
+                    .unmap(*virt_start, addr_map.size)
+                    .map_err(Error::ExternalUnmapping)?;
+            }
+        }
+    }
+
+    if mapping
+        .endpoints
+        .write()
+        .unwrap()
+        .iter()
+        .filter(|(_, &d)| d == domain_id)
+        .count()
+        == 0
+    {
+        mapping.domains.write().unwrap().remove(&domain_id);
+    }
+
+    Ok(())
 }
 
 struct IommuEpollHandler {
