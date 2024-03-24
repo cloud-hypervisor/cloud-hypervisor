@@ -2017,4 +2017,14 @@ impl vm::Vm for MshvVm {
             .complete_isolated_import(&data)
             .map_err(|e| vm::HypervisorVmError::CompleteIsolatedImport(e.into()))
     }
+
+    #[cfg(target_arch = "aarch64")]
+    fn create_vgic(&self, config: VgicConfig) -> vm::Result<Arc<Mutex<dyn Vgic>>> {
+        unimplemented!()
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn get_preferred_target(&self, kvi: &mut VcpuInit) -> vm::Result<()> {
+        unimplemented!()
+    }
 }
