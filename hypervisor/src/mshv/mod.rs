@@ -1162,6 +1162,46 @@ impl cpu::Vcpu for MshvVcpu {
         }
     }
 
+    #[cfg(target_arch = "aarch64")]
+    fn init_pmu(&self, irq: u32) -> cpu::Result<()> {
+        unimplemented!()
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn has_pmu_support(&self) -> bool {
+        unimplemented!()
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn setup_regs(&self, cpu_id: u8, boot_ip: u64, fdt_start: u64) -> cpu::Result<()> {
+        unimplemented!()
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn get_sys_reg(&self, sys_reg: u32) -> cpu::Result<u64> {
+        unimplemented!()
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn get_reg_list(&self, reg_list: &mut RegList) -> cpu::Result<()> {
+        unimplemented!()
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn vcpu_init(&self, kvi: &VcpuInit) -> cpu::Result<()> {
+        unimplemented!()
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn set_regs(&self, regs: &StandardRegisters) -> cpu::Result<()> {
+        unimplemented!()
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn get_regs(&self) -> cpu::Result<StandardRegisters> {
+        unimplemented!()
+    }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// X86 specific call to setup the CPUID registers.
