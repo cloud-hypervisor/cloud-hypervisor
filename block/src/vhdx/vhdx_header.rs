@@ -91,7 +91,7 @@ pub type Result<T> = std::result::Result<T, VhdxHeaderError>;
 
 #[derive(Clone, Debug)]
 pub struct FileTypeIdentifier {
-    pub signature: u64,
+    pub _signature: u64,
 }
 
 impl FileTypeIdentifier {
@@ -99,14 +99,14 @@ impl FileTypeIdentifier {
     pub fn new(f: &mut File) -> Result<FileTypeIdentifier> {
         f.seek(SeekFrom::Start(FILE_START))
             .map_err(VhdxHeaderError::SeekFileTypeIdentifier)?;
-        let signature = f
+        let _signature = f
             .read_u64::<LittleEndian>()
             .map_err(VhdxHeaderError::ReadFileTypeIdentifier)?;
-        if signature != VHDX_SIGN {
+        if _signature != VHDX_SIGN {
             return Err(VhdxHeaderError::InvalidVHDXSign);
         }
 
-        Ok(FileTypeIdentifier { signature })
+        Ok(FileTypeIdentifier { _signature })
     }
 }
 
