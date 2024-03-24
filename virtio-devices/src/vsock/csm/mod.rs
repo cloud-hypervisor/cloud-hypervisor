@@ -4,6 +4,8 @@
 //! This module implements our vsock connection state machine. The heavy lifting is done by
 //! `connection::VsockConnection`, while this file only defines some constants and helper structs.
 
+use thiserror::Error;
+
 mod connection;
 mod txbuf;
 
@@ -24,13 +26,16 @@ pub mod defs {
     pub const CONN_SHUTDOWN_TIMEOUT_MS: u64 = 2000;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
     /// Attempted to push data to a full TX buffer.
+    #[error("TX buffer full")]
     TxBufFull,
     /// An I/O error occurred, when attempting to flush the connection TX buffer.
+    #[error("Error flushing TX buffer: {0}")]
     TxBufFlush(std::io::Error),
     /// An I/O error occurred, when attempting to write data to the host-side stream.
+    #[error("Error writing to host side stream: {0}")]
     StreamWrite(std::io::Error),
 }
 
