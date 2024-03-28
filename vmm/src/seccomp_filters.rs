@@ -165,8 +165,8 @@ mod mshv {
     pub const MSHV_GET_VP_REGISTERS: u64 = 0xc010_b805;
     pub const MSHV_SET_VP_REGISTERS: u64 = 0x4010_b806;
     pub const MSHV_RUN_VP: u64 = 0x8100_b807;
-    pub const MSHV_GET_VP_STATE: u64 = 0xc028_b80a;
-    pub const MSHV_SET_VP_STATE: u64 = 0xc028_b80b;
+    pub const MSHV_GET_VP_STATE: u64 = 0xc010_b80a;
+    pub const MSHV_SET_VP_STATE: u64 = 0xc010_b80b;
     pub const MSHV_SET_PARTITION_PROPERTY: u64 = 0x4010_b80c;
     pub const MSHV_GET_GPA_ACCESS_STATES: u64 = 0xc01c_b812;
     pub const MSHV_VP_TRANSLATE_GVA: u64 = 0xc020_b80e;
@@ -183,6 +183,7 @@ mod mshv {
     pub const MSHV_SEV_SNP_AP_CREATE: u64 = 0x4010_b834;
     pub const MSHV_ISSUE_PSP_GUEST_REQUEST: u64 = 0x4010_b831;
     pub const MSHV_ASSERT_INTERRUPT: u64 = 0x4018_b809;
+    pub const MSHV_ROOT_HVCALL: u64 = 0xc020_b835;
 }
 #[cfg(feature = "mshv")]
 use mshv::*;
@@ -244,6 +245,7 @@ fn create_vmm_ioctl_seccomp_rule_common_mshv() -> Result<Vec<SeccompRule>, Backe
             Eq,
             MSHV_ISSUE_PSP_GUEST_REQUEST
         )?],
+        and![Cond::new(1, ArgLen::Dword, Eq, MSHV_ROOT_HVCALL)?],
     ])
 }
 
@@ -725,6 +727,7 @@ fn create_vcpu_ioctl_seccomp_rule_mshv() -> Result<Vec<SeccompRule>, BackendErro
             Eq,
             MSHV_ISSUE_PSP_GUEST_REQUEST
         )?],
+        and![Cond::new(1, ArgLen::Dword, Eq, MSHV_ROOT_HVCALL)?],
     ])
 }
 

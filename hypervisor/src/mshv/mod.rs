@@ -54,8 +54,6 @@ use crate::arch::x86::{CpuIdEntry, FpuState, MsrEntry};
 
 const DIRTY_BITMAP_CLEAR_DIRTY: u64 = 0x4;
 const DIRTY_BITMAP_SET_DIRTY: u64 = 0x8;
-#[cfg(feature = "sev_snp")]
-const HV_PAGE_SIZE: u64 = 4096;
 
 ///
 /// Export generically-named wrappers of mshv-bindings for Unix-based platforms
@@ -653,9 +651,9 @@ impl cpu::Vcpu for MshvVcpu {
                         "Releasing pages: gfn_start: {:x?}, gfn_count: {:?}",
                         gfn_start, gfn_count
                     );
-                    let gpa_start = gfn_start * HV_PAGE_SIZE;
+                    let gpa_start = gfn_start * HV_PAGE_SIZE as u64;
                     for i in 0..gfn_count {
-                        gpas.push(gpa_start + i * HV_PAGE_SIZE);
+                        gpas.push(gpa_start + i * HV_PAGE_SIZE as u64);
                     }
 
                     let mut gpa_list =
