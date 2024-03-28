@@ -54,7 +54,7 @@ const DIRTY_BITMAP_SET_DIRTY: u64 = 0x8;
 ///
 pub use {
     mshv_bindings::mshv_create_device as CreateDevice,
-    mshv_bindings::mshv_device_attr as DeviceAttr, mshv_ioctls::DeviceFd,
+    mshv_bindings::mshv_device_attr as DeviceAttr, mshv_ioctls, mshv_ioctls::DeviceFd,
 };
 
 pub const PAGE_SHIFT: usize = 12;
