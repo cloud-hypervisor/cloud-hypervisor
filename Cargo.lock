@@ -352,6 +352,9 @@ name = "bitflags"
 version = "2.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed570934406eb16438a4e976b1b4500774099c13b8cb96eec99f620f05090ddf"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "block"
@@ -1202,6 +1205,17 @@ dependencies = [
  "kvm-bindings",
  "libc",
  "vmm-sys-util",
+]
+
+[[package]]
+name = "landlock"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1530c5b973eeed4ac216af7e24baf5737645a6272e361f1fb95710678b67d9cc"
+dependencies = [
+ "enumflags2",
+ "libc",
+ "thiserror",
 ]
 
 [[package]]
@@ -2637,6 +2651,7 @@ dependencies = [
  "hypervisor",
  "igvm",
  "igvm_defs",
+ "landlock",
  "libc",
  "linux-loader",
  "log",

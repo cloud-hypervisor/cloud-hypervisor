@@ -260,6 +260,24 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
                 .group("vm-config"),
         )
         .arg(
+            Arg::new("landlock")
+                .long("landlock")
+                .num_args(0)
+                .help(
+                    "eanble/disable landlock.",
+                )
+                .action(ArgAction::SetTrue)
+                .default_value("false")
+                .group("vm-config"),
+        )
+        .arg(
+            Arg::new("landlock-rules")
+            .long("landlock-rules")
+            .help(config::LandlockConfig::SYNTAX)
+            .num_args(1..)
+            .group("vm-config"),
+        )
+        .arg(
             Arg::new("net")
                 .long("net")
                 .help(config::NetConfig::SYNTAX)
@@ -615,6 +633,8 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
     let vm_debug_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateDebugEventFd)?;
 
     let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateExitEventFd)?;
+    // TODO: landlock_enable is being parsed in 2 places: here and VMparams:parse() how to merge both?
+    let landlock_enable = cmd_arguments.get_flag("landlock");
 
     #[allow(unused_mut)]
     let mut event_monitor = cmd_arguments
@@ -684,6 +704,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         vmm::start_event_monitor_thread(
             monitor,
             &seccomp_action,
+            landlock_enable,
             hypervisor.hypervisor_type(),
             exit_evt.try_clone().unwrap(),
         )
@@ -710,6 +731,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         exit_evt.try_clone().unwrap(),
         &seccomp_action,
         hypervisor,
+        landlock_enable,
     )
     .map_err(Error::StartVmmThread)?;
 
@@ -937,6 +959,8 @@ mod unit_tests {
             platform: None,
             tpm: None,
             preserved_fds: None,
+            landlock_enable: false,
+            landlock_config: None,
         };
 
         assert_eq!(expected_vm_config, result_vm_config);

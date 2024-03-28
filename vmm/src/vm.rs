@@ -57,6 +57,7 @@ use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
 use hypervisor::{HypervisorVmError, VmOps};
+use landlock::RulesetError;
 use libc::{termios, SIGWINCH};
 use linux_loader::cmdline::Cmdline;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -120,6 +121,9 @@ pub enum Error {
 
     #[error("Cannot load the kernel command line in memory: {0}")]
     LoadCmdLine(#[source] linux_loader::loader::Error),
+
+    #[error("Failed to apply landlock config during vm_create: {0}")]
+    ApplyLandlock(#[source] RulesetError),
 
     #[error("Cannot modify the kernel command line: {0}")]
     CmdLineInsertStr(#[source] linux_loader::cmdline::Error),

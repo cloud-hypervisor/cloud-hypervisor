@@ -21,7 +21,7 @@ acpi_tables = { git = "https://github.com/rust-vmm/acpi_tables", branch = "main"
 anyhow = "1.0.79"
 arc-swap = "1.5.1"
 arch = { path = "../arch" }
-bitflags = "2.4.2"
+bitflags = { version = "2.4.2", features = ["serde"] }
 block = { path = "../block" }
 blocking = { version = "1.5.1", optional = true }
 cfg-if = "1.0.0"
@@ -37,6 +37,7 @@ hex = { version = "0.4.3", optional = true }
 hypervisor = { path = "../hypervisor" }
 igvm_defs = { git = "https://github.com/microsoft/igvm", branch = "main", package = "igvm_defs", optional  = true }
 igvm_parser = { git = "https://github.com/microsoft/igvm", branch = "main", package = "igvm", optional  = true }
+landlock = "0.3.0"
 libc = "0.2.153"
 linux-loader = { version = "0.11.0", features = ["elf", "bzimage", "pe"] }
 log = "0.4.20"
