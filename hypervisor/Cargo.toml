@@ -13,7 +13,7 @@ tdx = []
 
 [dependencies]
 anyhow = "1.0.79"
-byteorder = "1.4.3"
+byteorder = "1.5.0"
 igvm_defs = { git = "https://github.com/microsoft/igvm", branch = "main", package = "igvm_defs", optional  = true }
 igvm_parser = { git = "https://github.com/microsoft/igvm", branch = "main", package = "igvm", optional  = true }
 libc = "0.2.153"

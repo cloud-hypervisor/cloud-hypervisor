@@ -9,7 +9,7 @@ default = []
 io_uring = ["dep:io-uring"]
 
 [dependencies]
-byteorder = "1.4.3"
+byteorder = "1.5.0"
 crc-any = "2.4.4"
 io-uring = { version = "0.6.2", optional = true }
 libc = "0.2.153"

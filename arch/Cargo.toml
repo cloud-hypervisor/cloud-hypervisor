@@ -11,7 +11,7 @@ tdx = []
 
 [dependencies]
 anyhow = "1.0.79"
-byteorder = "1.4.3"
+byteorder = "1.5.0"
 hypervisor = { path = "../hypervisor" }
 libc = "0.2.153"
 linux-loader = { version = "0.11.0", features = ["elf", "bzimage", "pe"] }
