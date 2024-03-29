@@ -11,7 +11,7 @@ mshv = ["vfio-ioctls/mshv"]
 
 [dependencies]
 anyhow = "1.0.79"
-byteorder = "1.4.3"
+byteorder = "1.5.0"
 hypervisor = { path = "../hypervisor" }
 vfio-bindings = { git = "https://github.com/rust-vmm/vfio", branch = "main", features = ["fam-wrappers"] }
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
