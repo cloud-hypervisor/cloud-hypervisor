@@ -177,18 +177,29 @@ impl InterruptSourceGroup for MsiInterruptGroup {
                 route: self.vm.make_routing_entry(route.gsi, &config),
                 masked,
             };
+
+            // When mask a msi irq, entry.masked is set to be true,
+            // and the gsi will not be passed to KVM through KVM_SET_GSI_ROUTING.
+            // So it's required to call disable() (which deassign KVM_IRQFD) before
+            // set_gsi_routes() to avoid kernel panic (see #3827)
             if masked {
                 route.disable(&self.vm)?;
-            } else {
-                route.enable(&self.vm)?;
             }
+
             let mut routes = self.gsi_msi_routes.lock().unwrap();
             routes.insert(route.gsi, entry);
             if set_gsi {
-                return self.set_gsi_routes(&routes);
-            } else {
-                return Ok(());
+                self.set_gsi_routes(&routes)?;
             }
+
+            // Assign KVM_IRQFD after KVM_SET_GSI_ROUTING to avoid
+            // panic on kernel which not have commit a80ced6ea514
+            // (KVM: SVM: fix panic on out-of-bounds guest IRQ).
+            if !masked {
+                route.enable(&self.vm)?;
+            }
+
+            return Ok(());
         }
 
         Err(io::Error::new(
