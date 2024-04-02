@@ -16,5 +16,5 @@ option_parser = { path = "../option_parser" }
 vhost = { version = "0.10.0", features = ["vhost-user-backend"] }
 vhost-user-backend = "0.13.1"
 virtio-bindings = "0.2.0"
-vm-memory = "0.14.0"
+vm-memory = "0.14.1"
 vmm-sys-util = "0.12.1"

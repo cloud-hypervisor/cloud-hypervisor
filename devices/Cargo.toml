@@ -21,7 +21,7 @@ versionize = "0.2.0"
 versionize_derive = "0.1.6"
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
-vm-memory = "0.14.0"
+vm-memory = "0.14.1"
 vm-migration = { path = "../vm-migration" }
 vmm-sys-util = "0.12.1"
 

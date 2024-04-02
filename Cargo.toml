@@ -47,7 +47,7 @@ tpm = { path = "tpm"}
 tracer = { path = "tracer" }
 vmm = { path = "vmm" }
 vmm-sys-util = "0.12.1"
-vm-memory = "0.14.0"
+vm-memory = "0.14.1"
 zbus = { version = "3.15.2", optional = true }
 
 # List of patched crates

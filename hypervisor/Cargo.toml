@@ -25,7 +25,7 @@ mshv-ioctls = { git = "https://github.com/rust-vmm/mshv", branch = "main", optio
 serde = { version = "1.0.196", features = ["rc", "derive"] }
 serde_with = { version = "3.7.0", default-features = false, features = ["macros"] }
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
-vm-memory = { version = "0.14.0", features = ["backend-mmap", "backend-atomic"] }
+vm-memory = { version = "0.14.1", features = ["backend-mmap", "backend-atomic"] }
 vmm-sys-util = { version = "0.12.1", features = ["with-serde"] }
 thiserror = "1.0.52"
 
