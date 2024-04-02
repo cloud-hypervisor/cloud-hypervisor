@@ -1,4 +1,6 @@
 // Copyright 2022 Arm Limited (or its affiliates). All rights reserved.
+//
+// SPDX-License-Identifier: Apache-2.0
 
 use crate::{CpuState, GicState, HypervisorDeviceError, HypervisorVmError};
 use std::any::Any;

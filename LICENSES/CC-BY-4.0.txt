@@ -1,4 +1,5 @@
-The documentation in this directory is covered by the following license:
+All documentations (e.g. files with extension `.md`) in this repository is
+covered by the following license:
 
 Attribution 4.0 International
 

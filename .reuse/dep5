@@ -1,0 +1,12 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: cloud-hypervisor
+Upstream-Contact:  <>
+Source: https://www.cloudhypervisor.org
+
+Files: docs/*.md *.md
+Copyright: 2024
+License: CC-BY-4.0
+
+Files: scripts/* test_data/* *.toml .git* fuzz/Cargo.lock fuzz/.gitignore resources/linux-config-* vmm/src/api/openapi/cloud-hypervisor.yaml CODEOWNERS Cargo.lock
+Copyright: 2024
+License: Apache-2.0

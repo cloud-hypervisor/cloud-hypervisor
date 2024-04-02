@@ -1,4 +1,6 @@
 // Copyright 2020 Arm Limited (or its affiliates). All rights reserved.
+//
+// SPDX-License-Identifier: Apache-2.0
 
 use std::io::{Read, Seek, SeekFrom};
 use std::os::fd::AsFd;
