@@ -6,12 +6,14 @@ sudo sed -i -- 's/# deb-src/deb-src/g' /etc/apt/sources.list
 sudo apt update
 apt-get source linux-image-unsigned-"$(uname -r)"
 pushd linux-azure*/drivers/vdpa/vdpa_sim/ || exit
+# REUSE-IgnoreStart
 cat <<'EOF' >Makefile
 # SPDX-License-Identifier: GPL-2.0
 obj-m += vdpa_sim.o
 obj-m += vdpa_sim_net.o
 obj-m += vdpa_sim_blk.o
 EOF
+# REUSE-IgnoreEnd
 make -C /lib/modules/"$(uname -r)"/build M="$PWD"
 sudo make -C /lib/modules/"$(uname -r)"/build M="$PWD" modules_install
 popd || exit

@@ -1,6 +1,8 @@
 // Copyright TUNTAP, 2017 The Chromium OS Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
+//
+// SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
