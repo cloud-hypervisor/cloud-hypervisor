@@ -21,7 +21,7 @@ uuid = { version = "1.3.4", features = ["v4"] }
 versionize = "0.2.0"
 versionize_derive = "0.1.6"
 virtio-bindings = { version = "0.2.0", features = ["virtio-v5_0_0"] }
-virtio-queue = "0.11.0"
+virtio-queue = "0.12.0"
 vm-memory = { version = "0.14.1", features = ["backend-mmap", "backend-atomic", "backend-bitmap"] }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = "0.12.1"

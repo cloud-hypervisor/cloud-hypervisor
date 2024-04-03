@@ -61,7 +61,7 @@ versionize_derive = "0.1.6"
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
 vfio_user = { git = "https://github.com/rust-vmm/vfio-user", branch = "main" }
 virtio-devices = { path = "../virtio-devices" }
-virtio-queue = "0.11.0"
+virtio-queue = "0.12.0"
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
 vm-memory = { version = "0.14.1", features = ["backend-mmap", "backend-atomic", "backend-bitmap"] }
