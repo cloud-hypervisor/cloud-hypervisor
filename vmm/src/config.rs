@@ -24,6 +24,8 @@ const MAX_NUM_PCI_SEGMENTS: u16 = 96;
 pub enum Error {
     /// Filesystem tag is missing
     ParseFsTagMissing,
+    /// Filesystem tag is too long
+    ParseFsTagTooLong,
     /// Filesystem socket is missing
     ParseFsSockMissing,
     /// Missing persistent memory file parameter.
@@ -355,6 +357,11 @@ impl fmt::Display for Error {
             ParseFileSystem(o) => write!(f, "Error parsing --fs: {o}"),
             ParseFsSockMissing => write!(f, "Error parsing --fs: socket missing"),
             ParseFsTagMissing => write!(f, "Error parsing --fs: tag missing"),
+            ParseFsTagTooLong => write!(
+                f,
+                "Error parsing --fs: max tag length is {}",
+                virtio_devices::vhost_user::VIRTIO_FS_TAG_LEN
+            ),
             ParsePersistentMemory(o) => write!(f, "Error parsing --pmem: {o}"),
             ParsePmemFileMissing => write!(f, "Error parsing --pmem: file missing"),
             ParseVsock(o) => write!(f, "Error parsing --vsock: {o}"),
@@ -1519,6 +1526,9 @@ impl FsConfig {
         parser.parse(fs).map_err(Error::ParseFileSystem)?;
 
         let tag = parser.get("tag").ok_or(Error::ParseFsTagMissing)?;
+        if tag.len() > virtio_devices::vhost_user::VIRTIO_FS_TAG_LEN {
+            return Err(Error::ParseFsTagTooLong);
+        }
         let socket = PathBuf::from(parser.get("socket").ok_or(Error::ParseFsSockMissing)?);
 
         let queue_size = parser
