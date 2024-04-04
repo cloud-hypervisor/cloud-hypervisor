@@ -271,17 +271,18 @@ impl VhostUserFrontendReqHandler for BackendReqHandler {
     }
 }
 
+pub const VIRTIO_FS_TAG_LEN: usize = 36;
 #[derive(Copy, Clone, Versionize)]
 #[repr(C, packed)]
 pub struct VirtioFsConfig {
-    pub tag: [u8; 36],
+    pub tag: [u8; VIRTIO_FS_TAG_LEN],
     pub num_request_queues: u32,
 }
 
 impl Default for VirtioFsConfig {
     fn default() -> Self {
         VirtioFsConfig {
-            tag: [0; 36],
+            tag: [0; VIRTIO_FS_TAG_LEN],
             num_request_queues: 0,
         }
     }
