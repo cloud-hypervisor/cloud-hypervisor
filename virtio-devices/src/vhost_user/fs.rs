@@ -399,7 +399,12 @@ impl Fs {
             // Create virtio-fs device configuration.
             let mut config = VirtioFsConfig::default();
             let tag_bytes_slice = tag.as_bytes();
-            config.tag[..tag_bytes_slice.len()].copy_from_slice(tag_bytes_slice);
+            let len = if tag_bytes_slice.len() < config.tag.len() {
+                tag_bytes_slice.len()
+            } else {
+                config.tag.len()
+            };
+            config.tag[..len].copy_from_slice(tag_bytes_slice[..len].as_ref());
             config.num_request_queues = req_num_queues as u32;
 
             (
