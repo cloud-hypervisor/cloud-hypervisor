@@ -10,13 +10,14 @@
 
 pub mod gic;
 
+use crate::arch::aarch64::StandardRegisters;
 use crate::kvm::{KvmError, KvmResult};
 use kvm_bindings::{
     kvm_mp_state, kvm_one_reg, kvm_regs, KVM_REG_ARM_COPROC_MASK, KVM_REG_ARM_CORE,
     KVM_REG_SIZE_MASK, KVM_REG_SIZE_U32, KVM_REG_SIZE_U64,
 };
 pub use kvm_bindings::{
-    kvm_one_reg as Register, kvm_regs as StandardRegisters, kvm_vcpu_init as VcpuInit, RegList,
+    kvm_one_reg as Register, kvm_vcpu_init as VcpuInit, user_fpsimd_state, user_pt_regs, RegList,
 };
 use serde::{Deserialize, Serialize};
 pub use {kvm_ioctls::Cap, kvm_ioctls::Kvm};
@@ -120,4 +121,44 @@ pub struct VcpuKvmState {
     pub mp_state: kvm_mp_state,
     pub core_regs: kvm_regs,
     pub sys_regs: Vec<kvm_one_reg>,
+}
+
+impl From<StandardRegisters> for kvm_regs {
+    fn from(regs: StandardRegisters) -> Self {
+        Self {
+            regs: user_pt_regs {
+                regs: regs.gpr,
+                sp: regs.sp,
+                pc: regs.pc,
+                pstate: regs.pstate,
+            },
+            sp_el1: regs.sp_el1,
+            elr_el1: regs.elr_el1,
+            spsr: regs.spsr,
+            fp_regs: user_fpsimd_state {
+                vregs: regs.vregs,
+                fpsr: regs.fpsr as u32,
+                fpcr: regs.fpcr as u32,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+}
+
+impl From<kvm_regs> for StandardRegisters {
+    fn from(regs: kvm_regs) -> Self {
+        Self {
+            gpr: regs.regs.regs,
+            sp: regs.regs.sp,
+            pc: regs.regs.pc,
+            pstate: regs.regs.pstate,
+            sp_el1: regs.sp_el1,
+            elr_el1: regs.elr_el1,
+            spsr: regs.spsr,
+            vregs: regs.fp_regs.vregs,
+            fpsr: regs.fp_regs.fpsr as u64,
+            fpcr: regs.fp_regs.fpcr as u64,
+        }
+    }
 }

@@ -1191,12 +1191,12 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn set_regs(&self, regs: &StandardRegisters) -> cpu::Result<()> {
+    fn set_regs(&self, _regs: &crate::arch::aarch64::StandardRegisters) -> cpu::Result<()> {
         unimplemented!()
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn get_regs(&self) -> cpu::Result<StandardRegisters> {
+    fn get_regs(&self) -> cpu::Result<crate::arch::aarch64::StandardRegisters> {
         unimplemented!()
     }
 
