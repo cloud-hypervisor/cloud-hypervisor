@@ -16,3 +16,10 @@ pub struct StandardRegisters {
     pub fpsr: u64,              // Floating point status register
     pub fpcr: u64,              // Floating point control register
 }
+
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "with-serde", derive(Deserialize, Serialize))]
+pub struct Register {
+    pub id: u64,
+    pub addr: u64,
+}

@@ -206,6 +206,7 @@ pub fn construct_gicr_typers(vcpu_states: &[CpuState]) -> Vec<u64> {
             .sys_regs
             .into_iter()
             .filter(|reg| reg.id == KVM_ARM64_SYSREG_MPIDR_EL1)
+            .map(|reg| reg.into())
             .collect();
         //calculate affinity
         let mut cpu_affid = mpidr[0].addr & 1095233437695;

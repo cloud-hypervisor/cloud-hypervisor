@@ -44,7 +44,7 @@ use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
 #[cfg(target_arch = "aarch64")]
-use crate::arch::aarch64::StandardRegisters;
+use crate::arch::aarch64::{Register, StandardRegisters};
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{
     CpuIdEntry, FpuState, LapicState, MsrEntry, SpecialRegisters, StandardRegisters, XsaveState,
@@ -57,7 +57,7 @@ use crate::{
     USER_MEMORY_REGION_LOG_DIRTY, USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
 };
 #[cfg(target_arch = "aarch64")]
-use aarch64::{RegList, Register};
+use aarch64::RegList;
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{
     kvm_enable_cap, kvm_msr_entry, MsrList, KVM_CAP_HYPERV_SYNIC, KVM_CAP_SPLIT_IRQCHIP,
@@ -2044,13 +2044,16 @@ impl cpu::Vcpu for KvmVcpu {
             self.fd
                 .get_one_reg(*index, &mut bytes)
                 .map_err(|e| cpu::HypervisorCpuError::GetSysRegister(e.into()))?;
-            sys_regs.push(kvm_bindings::kvm_one_reg {
-                id: *index,
-                addr: u64::from_le_bytes(bytes),
-            });
+            sys_regs.push(
+                kvm_bindings::kvm_one_reg {
+                    id: *index,
+                    addr: u64::from_le_bytes(bytes),
+                }
+                .into(),
+            );
         }
 
-        state.sys_regs = sys_regs;
+        state.sys_regs = sys_regs.into_iter().map(|reg| reg.into()).collect();
 
         Ok(state.into())
     }
