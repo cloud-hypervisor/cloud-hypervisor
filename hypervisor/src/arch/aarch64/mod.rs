@@ -30,3 +30,7 @@ pub struct VcpuInit {
     pub target: u32,
     pub features: [u32; 7usize],
 }
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "with-serde", derive(Deserialize, Serialize))]
+pub struct RegList(pub Vec<u64>);

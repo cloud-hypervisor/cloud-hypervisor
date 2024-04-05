@@ -43,7 +43,7 @@ use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
 #[cfg(target_arch = "aarch64")]
-use crate::arch::aarch64::{Register, StandardRegisters, VcpuInit};
+use crate::arch::aarch64::{RegList, Register, StandardRegisters, VcpuInit};
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{
     CpuIdEntry, FpuState, LapicState, MsrEntry, SpecialRegisters, StandardRegisters, XsaveState,
@@ -55,8 +55,6 @@ use crate::{
     CpuState, IoEventAddress, IrqRoutingEntry, MpState, UserMemoryRegion,
     USER_MEMORY_REGION_LOG_DIRTY, USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
 };
-#[cfg(target_arch = "aarch64")]
-use aarch64::RegList;
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{
     kvm_enable_cap, kvm_msr_entry, MsrList, KVM_CAP_HYPERV_SYNIC, KVM_CAP_SPLIT_IRQCHIP,
@@ -78,10 +76,11 @@ pub use kvm_bindings::{
 };
 #[cfg(target_arch = "aarch64")]
 use kvm_bindings::{
-    kvm_regs, user_fpsimd_state, user_pt_regs, KVM_GUESTDBG_USE_HW, KVM_NR_SPSR, KVM_REG_ARM64,
-    KVM_REG_ARM64_SYSREG, KVM_REG_ARM64_SYSREG_CRM_MASK, KVM_REG_ARM64_SYSREG_CRN_MASK,
-    KVM_REG_ARM64_SYSREG_OP0_MASK, KVM_REG_ARM64_SYSREG_OP1_MASK, KVM_REG_ARM64_SYSREG_OP2_MASK,
-    KVM_REG_ARM_CORE, KVM_REG_SIZE_U128, KVM_REG_SIZE_U32, KVM_REG_SIZE_U64,
+    kvm_regs, user_fpsimd_state, user_pt_regs, RegList as KvmRegList, KVM_GUESTDBG_USE_HW,
+    KVM_NR_SPSR, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG, KVM_REG_ARM64_SYSREG_CRM_MASK,
+    KVM_REG_ARM64_SYSREG_CRN_MASK, KVM_REG_ARM64_SYSREG_OP0_MASK, KVM_REG_ARM64_SYSREG_OP1_MASK,
+    KVM_REG_ARM64_SYSREG_OP2_MASK, KVM_REG_ARM_CORE, KVM_REG_SIZE_U128, KVM_REG_SIZE_U32,
+    KVM_REG_SIZE_U64,
 };
 #[cfg(feature = "tdx")]
 use kvm_bindings::{kvm_run__bindgen_ty_1, KVMIO};
@@ -1793,8 +1792,10 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     #[cfg(target_arch = "aarch64")]
     fn get_reg_list(&self, reg_list: &mut RegList) -> cpu::Result<()> {
+        let mut kvm_reg_list: KvmRegList = KvmRegList::from_entries(reg_list.0.as_slice())
+            .map_err(|e| cpu::HypervisorCpuError::GetRegList(e.into()))?;
         self.fd
-            .get_reg_list(reg_list)
+            .get_reg_list(&mut kvm_reg_list)
             .map_err(|e| cpu::HypervisorCpuError::GetRegList(e.into()))
     }
 
@@ -2025,7 +2026,7 @@ impl cpu::Vcpu for KvmVcpu {
         // Call KVM_GET_REG_LIST to get all registers available to the guest.
         // For ArmV8 there are around 500 registers.
         let mut sys_regs: Vec<Register> = Vec::new();
-        let mut reg_list = RegList::new(500).unwrap();
+        let mut reg_list = KvmRegList::new(500).unwrap();
         self.fd
             .get_reg_list(&mut reg_list)
             .map_err(|e| cpu::HypervisorCpuError::GetRegList(e.into()))?;

@@ -53,7 +53,7 @@ use std::os::unix::io::AsRawFd;
 use crate::arch::x86::{CpuIdEntry, FpuState, MsrEntry};
 
 #[cfg(target_arch = "aarch64")]
-use crate::arch::aarch64::VcpuInit;
+use crate::arch::aarch64::{RegList, VcpuInit};
 
 const DIRTY_BITMAP_CLEAR_DIRTY: u64 = 0x4;
 const DIRTY_BITMAP_SET_DIRTY: u64 = 0x8;
@@ -1184,7 +1184,7 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn get_reg_list(&self, reg_list: &mut RegList) -> cpu::Result<()> {
+    fn get_reg_list(&self, _reg_list: &mut RegList) -> cpu::Result<()> {
         unimplemented!()
     }
 
