@@ -12,8 +12,7 @@
 use crate::aarch64::gic::KvmGicV3Its;
 #[cfg(target_arch = "aarch64")]
 pub use crate::aarch64::{
-    check_required_kvm_extensions, gic::Gicv3ItsState as GicState, is_system_register, VcpuInit,
-    VcpuKvmState,
+    check_required_kvm_extensions, gic::Gicv3ItsState as GicState, is_system_register, VcpuKvmState,
 };
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::gic::{Vgic, VgicConfig};
@@ -44,7 +43,7 @@ use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
 #[cfg(target_arch = "aarch64")]
-use crate::arch::aarch64::{Register, StandardRegisters};
+use crate::arch::aarch64::{Register, StandardRegisters, VcpuInit};
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{
     CpuIdEntry, FpuState, LapicState, MsrEntry, SpecialRegisters, StandardRegisters, XsaveState,
@@ -693,9 +692,12 @@ impl vm::Vm for KvmVm {
     ///
     #[cfg(target_arch = "aarch64")]
     fn get_preferred_target(&self, kvi: &mut VcpuInit) -> vm::Result<()> {
+        let mut kvm_vcpu_init = (*kvi).into();
         self.fd
-            .get_preferred_target(kvi)
-            .map_err(|e| vm::HypervisorVmError::GetPreferredTarget(e.into()))
+            .get_preferred_target(&mut kvm_vcpu_init)
+            .map_err(|e| vm::HypervisorVmError::GetPreferredTarget(e.into()))?;
+        *kvi = kvm_vcpu_init.into();
+        Ok(())
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -1779,8 +1781,9 @@ impl cpu::Vcpu for KvmVcpu {
 
     #[cfg(target_arch = "aarch64")]
     fn vcpu_init(&self, kvi: &VcpuInit) -> cpu::Result<()> {
+        let kvi = (*kvi).into();
         self.fd
-            .vcpu_init(kvi)
+            .vcpu_init(&kvi)
             .map_err(|e| cpu::HypervisorCpuError::VcpuInit(e.into()))
     }
 

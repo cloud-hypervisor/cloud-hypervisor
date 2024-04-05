@@ -23,3 +23,10 @@ pub struct Register {
     pub id: u64,
     pub addr: u64,
 }
+
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "with-serde", derive(Deserialize, Serialize))]
+pub struct VcpuInit {
+    pub target: u32,
+    pub features: [u32; 7usize],
+}

@@ -9,9 +9,9 @@
 //
 
 #[cfg(target_arch = "aarch64")]
-use crate::aarch64::VcpuInit;
-#[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::gic::{Vgic, VgicConfig};
+#[cfg(target_arch = "aarch64")]
+use crate::arch::aarch64::VcpuInit;
 #[cfg(feature = "tdx")]
 use crate::arch::x86::CpuIdEntry;
 use crate::cpu::Vcpu;

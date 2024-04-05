@@ -10,13 +10,13 @@
 
 pub mod gic;
 
-use crate::arch::aarch64::{Register, StandardRegisters};
+use crate::arch::aarch64::{Register, StandardRegisters, VcpuInit};
 use crate::kvm::{KvmError, KvmResult};
 use kvm_bindings::{
     kvm_mp_state, kvm_one_reg, kvm_regs, KVM_REG_ARM_COPROC_MASK, KVM_REG_ARM_CORE,
     KVM_REG_SIZE_MASK, KVM_REG_SIZE_U32, KVM_REG_SIZE_U64,
 };
-pub use kvm_bindings::{kvm_vcpu_init as VcpuInit, user_fpsimd_state, user_pt_regs, RegList};
+pub use kvm_bindings::{kvm_vcpu_init, user_fpsimd_state, user_pt_regs, RegList};
 use serde::{Deserialize, Serialize};
 pub use {kvm_ioctls::Cap, kvm_ioctls::Kvm};
 
@@ -175,6 +175,24 @@ impl From<kvm_one_reg> for Register {
         Self {
             id: reg.id,
             addr: reg.addr,
+        }
+    }
+}
+
+impl From<VcpuInit> for kvm_vcpu_init {
+    fn from(vcpu_init: VcpuInit) -> Self {
+        Self {
+            target: vcpu_init.target,
+            features: vcpu_init.features,
+        }
+    }
+}
+
+impl From<kvm_vcpu_init> for VcpuInit {
+    fn from(vcpu_init: kvm_vcpu_init) -> Self {
+        Self {
+            target: vcpu_init.target,
+            features: vcpu_init.features,
         }
     }
 }

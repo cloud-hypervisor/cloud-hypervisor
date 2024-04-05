@@ -415,7 +415,7 @@ impl Vcpu {
     /// Initializes an aarch64 specific vcpu for booting Linux.
     #[cfg(target_arch = "aarch64")]
     pub fn init(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
-        let mut kvi: kvm_bindings::kvm_vcpu_init = kvm_bindings::kvm_vcpu_init::default();
+        let mut kvi = VcpuInit::default();
 
         // This reads back the kernel's preferred target type.
         vm.get_preferred_target(&mut kvi)
@@ -2891,11 +2891,10 @@ mod tests {
 #[cfg(test)]
 mod tests {
     use arch::{aarch64::regs, layout};
-    use hypervisor::arch::aarch64::StandardRegisters;
+    use hypervisor::arch::aarch64::{StandardRegisters, VcpuInit};
     use hypervisor::kvm::aarch64::is_system_register;
     use hypervisor::kvm::kvm_bindings::{
-        kvm_vcpu_init, user_pt_regs, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG, KVM_REG_ARM_CORE,
-        KVM_REG_SIZE_U64,
+        user_pt_regs, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG, KVM_REG_ARM_CORE, KVM_REG_SIZE_U64,
     };
     use hypervisor::{arm64_core_reg_id, offset_of};
     use std::mem;
@@ -2910,7 +2909,7 @@ mod tests {
         // Must fail when vcpu is not initialized yet.
         assert!(res.is_err());
 
-        let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
+        let mut kvi = VcpuInit::default();
         vm.get_preferred_target(&mut kvi).unwrap();
         vcpu.vcpu_init(&kvi).unwrap();
 
@@ -2922,7 +2921,7 @@ mod tests {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0, None).unwrap();
-        let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
+        let mut kvi = VcpuInit::default();
         vm.get_preferred_target(&mut kvi).unwrap();
 
         // Must fail when vcpu is not initialized yet.
@@ -2946,7 +2945,7 @@ mod tests {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0, None).unwrap();
-        let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
+        let mut kvi = VcpuInit::default();
         vm.get_preferred_target(&mut kvi).unwrap();
 
         // Must fail when vcpu is not initialized yet.
@@ -2979,7 +2978,7 @@ mod tests {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0, None).unwrap();
-        let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
+        let mut kvi = VcpuInit::default();
         vm.get_preferred_target(&mut kvi).unwrap();
 
         let res = vcpu.get_mp_state();

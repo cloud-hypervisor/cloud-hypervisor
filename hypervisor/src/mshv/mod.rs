@@ -52,6 +52,9 @@ use std::os::unix::io::AsRawFd;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{CpuIdEntry, FpuState, MsrEntry};
 
+#[cfg(target_arch = "aarch64")]
+use crate::arch::aarch64::VcpuInit;
+
 const DIRTY_BITMAP_CLEAR_DIRTY: u64 = 0x4;
 const DIRTY_BITMAP_SET_DIRTY: u64 = 0x8;
 
@@ -1186,7 +1189,7 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn vcpu_init(&self, kvi: &VcpuInit) -> cpu::Result<()> {
+    fn vcpu_init(&self, _kvi: &VcpuInit) -> cpu::Result<()> {
         unimplemented!()
     }
 
@@ -2062,7 +2065,7 @@ impl vm::Vm for MshvVm {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn get_preferred_target(&self, kvi: &mut VcpuInit) -> vm::Result<()> {
+    fn get_preferred_target(&self, _kvi: &mut VcpuInit) -> vm::Result<()> {
         unimplemented!()
     }
 }
