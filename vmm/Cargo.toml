@@ -18,14 +18,14 @@ tracing = ["tracer/tracing"]
 
 [dependencies]
 acpi_tables = { git = "https://github.com/rust-vmm/acpi_tables", branch = "main"  }
-anyhow = "1.0.79"
-arc-swap = "1.5.1"
+anyhow = "1.0.81"
+arc-swap = "1.7.1"
 arch = { path = "../arch" }
-bitflags = "2.4.2"
+bitflags = "2.5.0"
 block = { path = "../block" }
 blocking = { version = "1.5.1", optional = true }
 cfg-if = "1.0.0"
-clap = "4.5.1"
+clap = "4.5.4"
 devices = { path = "../devices" }
 epoll = "4.3.3"
 event_monitor = { path = "../event_monitor" }
@@ -39,7 +39,7 @@ igvm_defs = { git = "https://github.com/microsoft/igvm", branch = "main", packag
 igvm_parser = { git = "https://github.com/microsoft/igvm", branch = "main", package = "igvm", optional  = true }
 libc = "0.2.153"
 linux-loader = { version = "0.11.0", features = ["elf", "bzimage", "pe"] }
-log = "0.4.20"
+log = "0.4.21"
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "main" }
 mshv-bindings = { git = "https://github.com/rust-vmm/mshv", branch = "main", features = ["with-serde", "fam-wrappers"], optional  = true }
 net_util = { path = "../net_util" }
@@ -49,13 +49,13 @@ pci = { path = "../pci" }
 range_map_vec = { version = "0.1.0", optional = true }
 rate_limiter = { path = "../rate_limiter" }
 seccompiler = "0.4.0"
-serde = { version = "1.0.196", features = ["rc", "derive"] }
-serde_json = "1.0.114"
+serde = { version = "1.0.197", features = ["rc", "derive"] }
+serde_json = "1.0.115"
 serial_buffer = { path = "../serial_buffer" }
 signal-hook = "0.3.17"
-thiserror = "1.0.52"
+thiserror = "1.0.58"
 tracer = { path = "../tracer" }
-uuid = "1.3.4"
+uuid = "1.8.0"
 versionize = "0.2.0"
 versionize_derive = "0.1.6"
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }

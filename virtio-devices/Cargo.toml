@@ -8,27 +8,27 @@ edition = "2021"
 default = []
 
 [dependencies]
-anyhow = "1.0.79"
-arc-swap = "1.5.1"
+anyhow = "1.0.81"
+arc-swap = "1.7.1"
 block = { path = "../block" }
 byteorder = "1.5.0"
 epoll = "4.3.3"
 event_monitor = { path = "../event_monitor" }
 libc = "0.2.153"
-log = "0.4.20"
+log = "0.4.21"
 net_gen = { path = "../net_gen" }
 net_util = { path = "../net_util" }
 pci = { path = "../pci" }
 rate_limiter = { path = "../rate_limiter" }
 seccompiler = "0.4.0"
-serde = { version = "1.0.196", features = ["derive"] }
-serde_json = "1.0.114"
+serde = { version = "1.0.197", features = ["derive"] }
+serde_json = "1.0.115"
 serial_buffer = { path = "../serial_buffer" }
-thiserror = "1.0.52"
+thiserror = "1.0.58"
 versionize = "0.2.0"
 versionize_derive = "0.1.6"
 vhost = { version = "0.10.0", features = ["vhost-user-frontend", "vhost-user-backend", "vhost-kern", "vhost-vdpa"] }
-virtio-bindings = { version = "0.2.0", features = ["virtio-v5_0_0"] }
+virtio-bindings = { version = "0.2.2", features = ["virtio-v5_0_0"] }
 virtio-queue = "0.11.0"
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }

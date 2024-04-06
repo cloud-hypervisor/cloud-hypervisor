@@ -6,6 +6,6 @@ edition = "2021"
 [dependencies]
 epoll = "4.3.3"
 libc = "0.2.153"
-log = "0.4.20"
-thiserror = "1.0.40"
+log = "0.4.21"
+thiserror = "1.0.58"
 vmm-sys-util = "0.12.1"
