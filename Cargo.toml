@@ -29,20 +29,20 @@ strip = false
 debug = true
 
 [dependencies]
-anyhow = "1.0.79"
+anyhow = "1.0.81"
 api_client = { path = "api_client" }
-clap = { version = "4.5.1", features = ["string"] }
+clap = { version = "4.5.4", features = ["string"] }
 dhat = { version = "0.3.3", optional = true }
 epoll = "4.3.3"
 event_monitor = { path = "event_monitor" }
 hypervisor = { path = "hypervisor" }
 libc = "0.2.153"
-log = { version = "0.4.20", features = ["std"] }
+log = { version = "0.4.21", features = ["std"] }
 option_parser = { path = "option_parser" }
 seccompiler = "0.4.0"
-serde_json = "1.0.114"
+serde_json = "1.0.115"
 signal-hook = "0.3.17"
-thiserror = "1.0.52"
+thiserror = "1.0.58"
 tpm = { path = "tpm"}
 tracer = { path = "tracer" }
 vmm = { path = "vmm" }
@@ -56,10 +56,10 @@ kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branc
 versionize_derive = { git = "https://github.com/cloud-hypervisor/versionize_derive", branch = "ch-0.1.6" }
 
 [dev-dependencies]
-dirs = "5.0.0"
+dirs = "5.0.1"
 net_util = { path = "net_util" }
 once_cell = "1.19.0"
-serde_json = "1.0.114"
+serde_json = "1.0.115"
 test_infra = { path = "test_infra" }
 wait-timeout = "0.2.0"
 

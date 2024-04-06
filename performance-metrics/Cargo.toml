@@ -6,10 +6,10 @@ edition = "2021"
 build = "../build.rs"
 
 [dependencies]
-clap = { version = "4.5.1", features = ["wrap_help"] }
-dirs = "5.0.0"
-serde = { version = "1.0.196", features = ["rc", "derive"] }
-serde_json = "1.0.114"
+clap = { version = "4.5.4", features = ["wrap_help"] }
+dirs = "5.0.1"
+serde = { version = "1.0.197", features = ["rc", "derive"] }
+serde_json = "1.0.115"
 test_infra = { path = "../test_infra" }
-thiserror = "1.0.52"
+thiserror = "1.0.58"
 wait-timeout = "0.2.0"

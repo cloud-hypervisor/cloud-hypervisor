@@ -6,16 +6,16 @@ edition = "2021"
 
 [dependencies]
 acpi_tables = { git = "https://github.com/rust-vmm/acpi_tables", branch = "main"  }
-anyhow = "1.0.79"
+anyhow = "1.0.81"
 arch = { path = "../arch" }
-bitflags = "2.4.2"
+bitflags = "2.5.0"
 byteorder = "1.5.0"
 event_monitor = { path = "../event_monitor" }
 hypervisor = { path = "../hypervisor" }
 libc = "0.2.153"
-log = "0.4.20"
+log = "0.4.21"
 pci = { path = "../pci" }
-thiserror = "1.0.52"
+thiserror = "1.0.58"
 tpm = { path = "../tpm" }
 versionize = "0.2.0"
 versionize_derive = "0.1.6"
