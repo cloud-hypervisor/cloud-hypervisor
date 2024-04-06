@@ -14,8 +14,8 @@ igvm = []
 [dependencies]
 block = { path = "../block" }
 devices = { path = "../devices" }
-epoll = "4.3.1"
-libc = "0.2.152"
+epoll = "4.3.3"
+libc = "0.2.153"
 libfuzzer-sys = "0.4.7"
 linux-loader = { version = "0.11.0", features = ["elf", "bzimage", "pe"] }
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "main" }
@@ -26,7 +26,7 @@ virtio-devices = { path = "../virtio-devices" }
 virtio-queue = "0.11.0"
 vmm = { path = "../vmm" }
 vmm-sys-util = "0.12.1"
-vm-memory = "0.14.0"
+vm-memory = "0.14.1"
 vm-migration = { path = "../vm-migration" }
 vm-device = { path = "../vm-device" }
 vm-virtio = { path = "../vm-virtio" }
