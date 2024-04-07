@@ -94,7 +94,7 @@ use vm_memory::{
 use vm_migration::protocol::{Request, Response, Status};
 use vm_migration::{
     protocol::MemoryRangeTable, snapshot_from_id, Migratable, MigratableError, Pausable, Snapshot,
-    SnapshotData, Snapshottable, Transportable,
+    Snapshottable, Transportable,
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
@@ -2579,15 +2579,14 @@ impl Snapshottable for Vm {
             })?
         };
 
-        let vm_snapshot_data = serde_json::to_vec(&VmSnapshot {
+        let vm_snapshot_state = VmSnapshot {
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             clock: self.saved_clock,
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             common_cpuid,
-        })
-        .map_err(|e| MigratableError::Snapshot(e.into()))?;
+        };
 
-        let mut vm_snapshot = Snapshot::from_data(SnapshotData(vm_snapshot_data));
+        let mut vm_snapshot = Snapshot::new_from_state(&vm_snapshot_state)?;
 
         let (id, snapshot) = {
             let mut cpu_manager = self.cpu_manager.lock().unwrap();

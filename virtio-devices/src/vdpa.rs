@@ -9,6 +9,7 @@ use crate::{
     VIRTIO_F_IOMMU_PLATFORM,
 };
 use anyhow::anyhow;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     io, result,
@@ -18,8 +19,6 @@ use std::{
     },
 };
 use thiserror::Error;
-use versionize::{VersionMap, Versionize, VersionizeResult};
-use versionize_derive::Versionize;
 use vhost::{
     vdpa::{VhostVdpa, VhostVdpaIovaRange},
     vhost_kern::VhostKernFeatures,
@@ -29,9 +28,7 @@ use vhost::{
 use virtio_queue::{Descriptor, Queue, QueueT};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic};
-use vm_migration::{
-    Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
-};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -95,7 +92,7 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Versionize)]
+#[derive(Serialize, Deserialize)]
 pub struct VdpaState {
     pub avail_features: u64,
     pub acked_features: u64,
@@ -106,8 +103,6 @@ pub struct VdpaState {
     pub queue_sizes: Vec<u16>,
     pub backend_features: u64,
 }
-
-impl VersionMapped for VdpaState {}
 
 pub struct Vdpa {
     common: VirtioCommon,
@@ -489,7 +484,7 @@ impl Snapshottable for Vdpa {
             )));
         }
 
-        let snapshot = Snapshot::new_from_versioned_state(&self.state().map_err(|e| {
+        let snapshot = Snapshot::new_from_state(&self.state().map_err(|e| {
             MigratableError::Snapshot(anyhow!("Error snapshotting vDPA device: {:?}", e))
         })?)?;
 

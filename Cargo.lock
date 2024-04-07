@@ -115,8 +115,6 @@ dependencies = [
  "serde",
  "thiserror",
  "uuid",
- "versionize",
- "versionize_derive",
  "vm-fdt",
  "vm-memory",
  "vm-migration",
@@ -321,15 +319,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bincode"
-version = "1.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "bitfield-struct"
 version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -362,11 +351,10 @@ dependencies = [
  "libc",
  "log",
  "remain",
+ "serde",
  "smallvec",
  "thiserror",
  "uuid",
- "versionize",
- "versionize_derive",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
@@ -525,12 +513,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crc64"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2707e3afba5e19b75d582d88bc79237418f2a2a2d673d01cf9b03633b46e98f3"
-
-[[package]]
 name = "crossbeam-utils"
 version = "0.8.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -612,10 +594,9 @@ dependencies = [
  "libc",
  "log",
  "pci",
+ "serde",
  "thiserror",
  "tpm",
- "versionize",
- "versionize_derive",
  "vm-allocator",
  "vm-device",
  "vm-memory",
@@ -1396,8 +1377,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
- "versionize",
- "versionize_derive",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
@@ -1600,8 +1579,6 @@ dependencies = [
  "log",
  "serde",
  "thiserror",
- "versionize",
- "versionize_derive",
  "vfio-bindings",
  "vfio-ioctls",
  "vfio_user",
@@ -2357,33 +2334,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 
 [[package]]
-name = "versionize"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62929d59c7f6730b7298fcb363760550f4db6e353fbac4076d447d0e82799d6d"
-dependencies = [
- "bincode",
- "crc64",
- "proc-macro2",
- "quote",
- "serde",
- "serde_derive",
- "syn 1.0.109",
- "versionize_derive",
- "vmm-sys-util",
-]
-
-[[package]]
-name = "versionize_derive"
-version = "0.1.6"
-source = "git+https://github.com/cloud-hypervisor/versionize_derive?branch=ch-0.1.6#7906da996152e2d0ab08f5526440683bf3ca7834"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
 name = "vfio-bindings"
 version = "0.4.0"
 source = "git+https://github.com/rust-vmm/vfio?branch=main#4e937a514d9025f953eeb837fb8dafe035d9a8fd"
@@ -2515,10 +2465,9 @@ dependencies = [
  "seccompiler",
  "serde",
  "serde_json",
+ "serde_with",
  "serial_buffer",
  "thiserror",
- "versionize",
- "versionize_derive",
  "vhost",
  "virtio-bindings",
  "virtio-queue",
@@ -2589,8 +2538,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
- "versionize",
- "versionize_derive",
  "vm-memory",
 ]
 
@@ -2646,8 +2593,6 @@ dependencies = [
  "thiserror",
  "tracer",
  "uuid",
- "versionize",
- "versionize_derive",
  "vfio-ioctls",
  "vfio_user",
  "virtio-devices",

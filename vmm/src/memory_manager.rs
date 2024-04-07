@@ -39,8 +39,6 @@ use std::result;
 use std::sync::{Arc, Barrier, Mutex};
 use std::{ffi, thread};
 use tracer::trace_scoped;
-use versionize::{VersionMap, Versionize, VersionizeResult};
-use versionize_derive::Versionize;
 use virtio_devices::BlocksState;
 #[cfg(target_arch = "x86_64")]
 use vm_allocator::GsiApic;
@@ -55,7 +53,7 @@ use vm_memory::{
 };
 use vm_migration::{
     protocol::MemoryRange, protocol::MemoryRangeTable, Migratable, MigratableError, Pausable,
-    Snapshot, SnapshotData, Snapshottable, Transportable, VersionMapped,
+    Snapshot, SnapshotData, Snapshottable, Transportable,
 };
 
 pub const MEMORY_MANAGER_ACPI_SIZE: usize = 0x18;
@@ -82,7 +80,7 @@ const PLATFORM_DEVICE_AREA_SIZE: u64 = 1 << 20;
 
 const MAX_PREFAULT_THREAD_COUNT: usize = 16;
 
-#[derive(Clone, Default, Serialize, Deserialize, Versionize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 struct HotPlugState {
     base: u64,
     length: u64,
@@ -143,7 +141,7 @@ impl MemoryZone {
 
 pub type MemoryZones = HashMap<String, MemoryZone>;
 
-#[derive(Clone, Serialize, Deserialize, Versionize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct GuestRamMapping {
     slot: u32,
     gpa: u64,
@@ -153,7 +151,7 @@ struct GuestRamMapping {
     file_offset: u64,
 }
 
-#[derive(Clone, Serialize, Deserialize, Versionize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct ArchMemRegion {
     base: u64,
     size: usize,
@@ -1269,7 +1267,7 @@ impl MemoryManager {
             memory_file_path.push(String::from(SNAPSHOT_FILENAME));
 
             let mem_snapshot: MemoryManagerSnapshotData =
-                snapshot.to_versioned_state().map_err(Error::Restore)?;
+                snapshot.to_state().map_err(Error::Restore)?;
 
             let mm = MemoryManager::new(
                 vm,
@@ -2628,7 +2626,7 @@ impl Aml for MemoryManager {
 
 impl Pausable for MemoryManager {}
 
-#[derive(Clone, Serialize, Deserialize, Versionize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct MemoryManagerSnapshotData {
     memory_ranges: MemoryRangeTable,
     guest_ram_mappings: Vec<GuestRamMapping>,
@@ -2641,8 +2639,6 @@ pub struct MemoryManagerSnapshotData {
     selected_slot: usize,
     next_hotplug_slot: usize,
 }
-
-impl VersionMapped for MemoryManagerSnapshotData {}
 
 impl Snapshottable for MemoryManager {
     fn id(&self) -> String {
@@ -2662,7 +2658,7 @@ impl Snapshottable for MemoryManager {
         // memory range content for the ranges requiring it.
         self.snapshot_memory_ranges = memory_ranges;
 
-        Ok(Snapshot::from_data(SnapshotData::new_from_versioned_state(
+        Ok(Snapshot::from_data(SnapshotData::new_from_state(
             &self.snapshot_data(),
         )?))
     }

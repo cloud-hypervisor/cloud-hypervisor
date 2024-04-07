@@ -13,6 +13,7 @@ use crate::GuestMemoryMmap;
 use crate::{DmaRemapping, VirtioInterrupt, VirtioInterruptType};
 use anyhow::anyhow;
 use seccompiler::SeccompAction;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io;
 use std::mem::size_of;
@@ -22,15 +23,12 @@ use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex, RwLock};
 use thiserror::Error;
-use versionize::{VersionMap, Versionize, VersionizeResult};
-use versionize_derive::Versionize;
 use virtio_queue::{DescriptorChain, Queue, QueueT};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
     GuestMemoryError, GuestMemoryLoadGuard,
 };
-use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
@@ -781,7 +779,7 @@ impl EpollHelperHandler for IommuEpollHandler {
     }
 }
 
-#[derive(Clone, Copy, Debug, Versionize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 struct Mapping {
     gpa: u64,
     size: u64,
@@ -905,15 +903,13 @@ pub struct Iommu {
 type EndpointsState = Vec<(u32, u32)>;
 type DomainsState = Vec<(u32, (Vec<(u64, Mapping)>, bool))>;
 
-#[derive(Versionize)]
+#[derive(Serialize, Deserialize)]
 pub struct IommuState {
     avail_features: u64,
     acked_features: u64,
     endpoints: EndpointsState,
     domains: DomainsState,
 }
-
-impl VersionMapped for IommuState {}
 
 impl Iommu {
     pub fn new(
@@ -1154,7 +1150,7 @@ impl Snapshottable for Iommu {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        Snapshot::new_from_versioned_state(&self.state())
+        Snapshot::new_from_state(&self.state())
     }
 }
 impl Transportable for Iommu {}

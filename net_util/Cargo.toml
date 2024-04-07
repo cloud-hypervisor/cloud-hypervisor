@@ -13,8 +13,6 @@ net_gen = { path = "../net_gen" }
 rate_limiter = { path = "../rate_limiter" }
 serde = "1.0.197"
 thiserror = "1.0.58"
-versionize = "0.2.0"
-versionize_derive = "0.1.6"
 virtio-bindings = "0.2.2"
 virtio-queue = "0.11.0"
 vm-memory = { version = "0.14.1", features = ["backend-mmap", "backend-atomic", "backend-bitmap"] }

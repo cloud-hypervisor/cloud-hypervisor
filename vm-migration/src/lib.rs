@@ -7,20 +7,8 @@ use crate::protocol::MemoryRangeTable;
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use versionize::{VersionMap, Versionize};
 
 pub mod protocol;
-
-/// Global VMM version for versioning
-const MAJOR_VERSION: u16 = 38;
-const MINOR_VERSION: u16 = 0;
-const VMM_VERSION: u16 = MAJOR_VERSION << 12 | MINOR_VERSION & 0b1111;
-
-pub trait VersionMapped {
-    fn version_map() -> VersionMap {
-        VersionMap::new()
-    }
-}
 
 #[derive(Error, Debug)]
 pub enum MigratableError {
@@ -80,7 +68,9 @@ pub trait Pausable {
 /// Splitting a component migration data into different sections
 /// allows for easier and forward compatible extensions.
 #[derive(Clone, Default, Deserialize, Serialize)]
-pub struct SnapshotData(pub Vec<u8>);
+pub struct SnapshotData {
+    state: String,
+}
 
 impl SnapshotData {
     /// Generate the state data from the snapshot data
@@ -88,16 +78,7 @@ impl SnapshotData {
     where
         T: Deserialize<'a>,
     {
-        serde_json::from_slice(&self.0)
-            .map_err(|e| MigratableError::Restore(anyhow!("Error deserialising: {}", e)))
-    }
-
-    /// Generate versioned state
-    pub fn to_versioned_state<T>(&self) -> Result<T, MigratableError>
-    where
-        T: Versionize + VersionMapped,
-    {
-        T::deserialize(&mut self.0.as_slice(), &T::version_map(), VMM_VERSION)
+        serde_json::from_str(&self.state)
             .map_err(|e| MigratableError::Restore(anyhow!("Error deserialising: {}", e)))
     }
 
@@ -106,23 +87,10 @@ impl SnapshotData {
     where
         T: Serialize,
     {
-        let data = serde_json::to_vec(state)
+        let state = serde_json::to_string(state)
             .map_err(|e| MigratableError::Snapshot(anyhow!("Error serialising: {}", e)))?;
 
-        Ok(SnapshotData(data))
-    }
-
-    /// Create from versioned state
-    pub fn new_from_versioned_state<T>(state: &T) -> Result<Self, MigratableError>
-    where
-        T: Versionize + VersionMapped,
-    {
-        let mut data = Vec::new();
-        state
-            .serialize(&mut data, &T::version_map(), VMM_VERSION)
-            .map_err(|e| MigratableError::Snapshot(anyhow!("Error serialising: {}", e)))?;
-
-        Ok(SnapshotData(data))
+        Ok(SnapshotData { state })
     }
 }
 
@@ -163,16 +131,6 @@ impl Snapshot {
         Ok(Snapshot::from_data(SnapshotData::new_from_state(state)?))
     }
 
-    /// Create from versioned state
-    pub fn new_from_versioned_state<T>(state: &T) -> Result<Self, MigratableError>
-    where
-        T: Versionize + VersionMapped,
-    {
-        Ok(Snapshot::from_data(SnapshotData::new_from_versioned_state(
-            state,
-        )?))
-    }
-
     /// Add a sub-component's Snapshot to the Snapshot.
     pub fn add_snapshot(&mut self, id: String, snapshot: Snapshot) {
         self.snapshots.insert(id, snapshot);
@@ -188,34 +146,21 @@ impl Snapshot {
             .ok_or_else(|| MigratableError::Restore(anyhow!("Missing snapshot data")))?
             .to_state()
     }
-
-    /// Generate versioned state
-    pub fn to_versioned_state<T>(&self) -> Result<T, MigratableError>
-    where
-        T: Versionize + VersionMapped,
-    {
-        self.snapshot_data
-            .as_ref()
-            .ok_or_else(|| MigratableError::Restore(anyhow!("Missing snapshot data")))?
-            .to_versioned_state()
-    }
 }
 
 pub fn snapshot_from_id(snapshot: Option<&Snapshot>, id: &str) -> Option<Snapshot> {
     snapshot.and_then(|s| s.snapshots.get(id).cloned())
 }
 
-pub fn versioned_state_from_id<T>(
-    snapshot: Option<&Snapshot>,
-    id: &str,
-) -> Result<Option<T>, MigratableError>
+pub fn state_from_id<'a, T>(s: Option<&'a Snapshot>, id: &str) -> Result<Option<T>, MigratableError>
 where
-    T: Versionize + VersionMapped,
+    T: Deserialize<'a>,
 {
-    snapshot
-        .and_then(|s| s.snapshots.get(id).cloned())
-        .map(|s| s.to_versioned_state())
-        .transpose()
+    if let Some(s) = s.as_ref() {
+        s.snapshots.get(id).map(|s| s.to_state()).transpose()
+    } else {
+        Ok(None)
+    }
 }
 
 /// A snapshottable component can be snapshotted.

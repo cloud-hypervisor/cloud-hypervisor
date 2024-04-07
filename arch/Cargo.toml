@@ -19,8 +19,6 @@ log = "0.4.21"
 serde = { version = "1.0.197", features = ["rc", "derive"] }
 thiserror = "1.0.58"
 uuid = "1.8.0"
-versionize = "0.2.0"
-versionize_derive = "0.1.6"
 vm-memory = { version = "0.14.1", features = ["backend-mmap", "backend-bitmap"] }
 vm-migration = { path = "../vm-migration" }
 vmm-sys-util = { version = "0.12.1", features = ["with-serde"] }

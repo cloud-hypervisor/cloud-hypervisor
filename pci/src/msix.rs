@@ -5,16 +5,16 @@
 
 use crate::{PciCapability, PciCapabilityId};
 use byteorder::{ByteOrder, LittleEndian};
+use serde::Deserialize;
+use serde::Serialize;
 use std::io;
 use std::result;
 use std::sync::Arc;
-use versionize::{VersionMap, Versionize, VersionizeResult};
-use versionize_derive::Versionize;
 use vm_device::interrupt::{
     InterruptIndex, InterruptSourceConfig, InterruptSourceGroup, MsiIrqSourceConfig,
 };
 use vm_memory::ByteValued;
-use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, VersionMapped};
+use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable};
 
 const MAX_MSIX_VECTORS_PER_DEVICE: u16 = 2048;
 const MSIX_TABLE_ENTRIES_MODULO: u64 = 16;
@@ -35,7 +35,7 @@ pub enum Error {
     UpdateInterruptRoute(io::Error),
 }
 
-#[derive(Debug, Clone, Versionize, Eq, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct MsixTableEntry {
     pub msg_addr_lo: u32,
     pub msg_addr_hi: u32,
@@ -60,15 +60,13 @@ impl Default for MsixTableEntry {
     }
 }
 
-#[derive(Versionize)]
+#[derive(Serialize, Deserialize)]
 pub struct MsixConfigState {
     table_entries: Vec<MsixTableEntry>,
     pba_entries: Vec<u64>,
     masked: bool,
     enabled: bool,
 }
-
-impl VersionMapped for MsixConfigState {}
 
 pub struct MsixConfig {
     pub table_entries: Vec<MsixTableEntry>,
@@ -436,13 +434,13 @@ impl Snapshottable for MsixConfig {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        Snapshot::new_from_versioned_state(&self.state())
+        Snapshot::new_from_state(&self.state())
     }
 }
 
 #[allow(dead_code)]
 #[repr(packed)]
-#[derive(Clone, Copy, Default, Versionize)]
+#[derive(Clone, Copy, Default, Serialize, Deserialize)]
 pub struct MsixCap {
     // Message Control Register
     //   10-0:  MSI-X Table size

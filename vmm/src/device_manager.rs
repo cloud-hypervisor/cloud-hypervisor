@@ -96,8 +96,8 @@ use vm_memory::{Address, GuestAddress, GuestUsize, MmapRegion};
 #[cfg(target_arch = "x86_64")]
 use vm_memory::{GuestAddressSpace, GuestMemory};
 use vm_migration::{
-    protocol::MemoryRangeTable, snapshot_from_id, versioned_state_from_id, Migratable,
-    MigratableError, Pausable, Snapshot, SnapshotData, Snapshottable, Transportable,
+    protocol::MemoryRangeTable, snapshot_from_id, state_from_id, Migratable, MigratableError,
+    Pausable, Snapshot, SnapshotData, Snapshottable, Transportable,
 };
 use vm_virtio::AccessPlatform;
 use vm_virtio::VirtioDeviceType;
@@ -1371,7 +1371,7 @@ impl DeviceManager {
                     .try_clone()
                     .map_err(DeviceManagerError::EventFd)?,
                 self.get_msi_iova_space(),
-                versioned_state_from_id(self.snapshot.as_ref(), iommu_id.as_str())
+                state_from_id(self.snapshot.as_ref(), iommu_id.as_str())
                     .map_err(DeviceManagerError::RestoreGetState)?,
             )
             .map_err(DeviceManagerError::CreateVirtioIommu)?;
@@ -1519,7 +1519,7 @@ impl DeviceManager {
                 id.clone(),
                 APIC_START,
                 Arc::clone(&self.msi_interrupt_manager),
-                versioned_state_from_id(self.snapshot.as_ref(), id.as_str())
+                state_from_id(self.snapshot.as_ref(), id.as_str())
                     .map_err(DeviceManagerError::RestoreGetState)?,
             )
             .map_err(DeviceManagerError::CreateInterruptController)?,
@@ -1791,7 +1791,7 @@ impl DeviceManager {
         let gpio_device = Arc::new(Mutex::new(devices::legacy::Gpio::new(
             id.clone(),
             interrupt_group,
-            versioned_state_from_id(self.snapshot.as_ref(), id.as_str())
+            state_from_id(self.snapshot.as_ref(), id.as_str())
                 .map_err(DeviceManagerError::RestoreGetState)?,
         )));
 
@@ -1892,7 +1892,7 @@ impl DeviceManager {
             id.clone(),
             interrupt_group,
             serial_writer,
-            versioned_state_from_id(self.snapshot.as_ref(), id.as_str())
+            state_from_id(self.snapshot.as_ref(), id.as_str())
                 .map_err(DeviceManagerError::RestoreGetState)?,
         )));
 
@@ -1949,7 +1949,7 @@ impl DeviceManager {
             interrupt_group,
             serial_writer,
             self.timestamp,
-            versioned_state_from_id(self.snapshot.as_ref(), id.as_str())
+            state_from_id(self.snapshot.as_ref(), id.as_str())
                 .map_err(DeviceManagerError::RestoreGetState)?,
         )));
 
@@ -2128,7 +2128,7 @@ impl DeviceManager {
             self.exit_evt
                 .try_clone()
                 .map_err(DeviceManagerError::EventFd)?,
-            versioned_state_from_id(self.snapshot.as_ref(), id.as_str())
+            state_from_id(self.snapshot.as_ref(), id.as_str())
                 .map_err(DeviceManagerError::RestoreGetState)?,
         )
         .map_err(DeviceManagerError::CreateVirtioConsole)?;
@@ -2362,8 +2362,6 @@ impl DeviceManager {
 
         info!("Creating virtio-block device: {:?}", disk_cfg);
 
-        let snapshot = snapshot_from_id(self.snapshot.as_ref(), id.as_str());
-
         let (virtio_device, migratable_device) = if disk_cfg.vhost_user {
             let socket = disk_cfg.vhost_socket.as_ref().unwrap().clone();
             let vu_cfg = VhostUserConfig {
@@ -2380,9 +2378,7 @@ impl DeviceManager {
                         .try_clone()
                         .map_err(DeviceManagerError::EventFd)?,
                     self.force_iommu,
-                    snapshot
-                        .map(|s| s.to_versioned_state())
-                        .transpose()
+                    state_from_id(self.snapshot.as_ref(), id.as_str())
                         .map_err(DeviceManagerError::RestoreGetState)?,
                 ) {
                     Ok(vub_device) => vub_device,
@@ -2542,9 +2538,7 @@ impl DeviceManager {
                     self.exit_evt
                         .try_clone()
                         .map_err(DeviceManagerError::EventFd)?,
-                    snapshot
-                        .map(|s| s.to_versioned_state())
-                        .transpose()
+                    state_from_id(self.snapshot.as_ref(), id.as_str())
                         .map_err(DeviceManagerError::RestoreGetState)?,
                     queue_affinity,
                 )
@@ -2601,8 +2595,6 @@ impl DeviceManager {
         };
         info!("Creating virtio-net device: {:?}", net_cfg);
 
-        let snapshot = snapshot_from_id(self.snapshot.as_ref(), id.as_str());
-
         let (virtio_device, migratable_device) = if net_cfg.vhost_user {
             let socket = net_cfg.vhost_socket.as_ref().unwrap().clone();
             let vu_cfg = VhostUserConfig {
@@ -2626,9 +2618,7 @@ impl DeviceManager {
                         .try_clone()
                         .map_err(DeviceManagerError::EventFd)?,
                     self.force_iommu,
-                    snapshot
-                        .map(|s| s.to_versioned_state())
-                        .transpose()
+                    state_from_id(self.snapshot.as_ref(), id.as_str())
                         .map_err(DeviceManagerError::RestoreGetState)?,
                     net_cfg.offload_tso,
                     net_cfg.offload_ufo,
@@ -2646,11 +2636,8 @@ impl DeviceManager {
                 vhost_user_net as Arc<Mutex<dyn Migratable>>,
             )
         } else {
-            let state = snapshot
-                .map(|s| s.to_versioned_state())
-                .transpose()
+            let state = state_from_id(self.snapshot.as_ref(), id.as_str())
                 .map_err(DeviceManagerError::RestoreGetState)?;
-
             let virtio_net = if let Some(ref tap_if_name) = net_cfg.tap {
                 Arc::new(Mutex::new(
                     virtio_devices::Net::new(
@@ -2784,7 +2771,7 @@ impl DeviceManager {
                     self.exit_evt
                         .try_clone()
                         .map_err(DeviceManagerError::EventFd)?,
-                    versioned_state_from_id(self.snapshot.as_ref(), id.as_str())
+                    state_from_id(self.snapshot.as_ref(), id.as_str())
                         .map_err(DeviceManagerError::RestoreGetState)?,
                 )
                 .map_err(DeviceManagerError::CreateVirtioRng)?,
@@ -2840,7 +2827,7 @@ impl DeviceManager {
                         .try_clone()
                         .map_err(DeviceManagerError::EventFd)?,
                     self.force_iommu,
-                    versioned_state_from_id(self.snapshot.as_ref(), id.as_str())
+                    state_from_id(self.snapshot.as_ref(), id.as_str())
                         .map_err(DeviceManagerError::RestoreGetState)?,
                 )
                 .map_err(DeviceManagerError::CreateVirtioFs)?,
@@ -3024,7 +3011,7 @@ impl DeviceManager {
                 self.exit_evt
                     .try_clone()
                     .map_err(DeviceManagerError::EventFd)?,
-                versioned_state_from_id(self.snapshot.as_ref(), id.as_str())
+                state_from_id(self.snapshot.as_ref(), id.as_str())
                     .map_err(DeviceManagerError::RestoreGetState)?,
             )
             .map_err(DeviceManagerError::CreateVirtioPmem)?,
@@ -3096,7 +3083,7 @@ impl DeviceManager {
                 self.exit_evt
                     .try_clone()
                     .map_err(DeviceManagerError::EventFd)?,
-                versioned_state_from_id(self.snapshot.as_ref(), id.as_str())
+                state_from_id(self.snapshot.as_ref(), id.as_str())
                     .map_err(DeviceManagerError::RestoreGetState)?,
             )
             .map_err(DeviceManagerError::CreateVirtioVsock)?,
@@ -3156,7 +3143,7 @@ impl DeviceManager {
                             .try_clone()
                             .map_err(DeviceManagerError::EventFd)?,
                         virtio_mem_zone.blocks_state().clone(),
-                        versioned_state_from_id(self.snapshot.as_ref(), memory_zone_id.as_str())
+                        state_from_id(self.snapshot.as_ref(), memory_zone_id.as_str())
                             .map_err(DeviceManagerError::RestoreGetState)?,
                     )
                     .map_err(DeviceManagerError::CreateVirtioMem)?,
@@ -3208,7 +3195,7 @@ impl DeviceManager {
                     self.exit_evt
                         .try_clone()
                         .map_err(DeviceManagerError::EventFd)?,
-                    versioned_state_from_id(self.snapshot.as_ref(), id.as_str())
+                    state_from_id(self.snapshot.as_ref(), id.as_str())
                         .map_err(DeviceManagerError::RestoreGetState)?,
                 )
                 .map_err(DeviceManagerError::CreateVirtioBalloon)?,
@@ -3252,7 +3239,7 @@ impl DeviceManager {
                 self.exit_evt
                     .try_clone()
                     .map_err(DeviceManagerError::EventFd)?,
-                versioned_state_from_id(self.snapshot.as_ref(), id.as_str())
+                state_from_id(self.snapshot.as_ref(), id.as_str())
                     .map_err(DeviceManagerError::RestoreGetState)?,
             )
             .map_err(DeviceManagerError::CreateVirtioWatchdog)?,
@@ -3299,7 +3286,7 @@ impl DeviceManager {
                 device_path,
                 self.memory_manager.lock().unwrap().guest_memory(),
                 vdpa_cfg.num_queues as u16,
-                versioned_state_from_id(self.snapshot.as_ref(), id.as_str())
+                state_from_id(self.snapshot.as_ref(), id.as_str())
                     .map_err(DeviceManagerError::RestoreGetState)?,
             )
             .map_err(DeviceManagerError::CreateVdpa)?,

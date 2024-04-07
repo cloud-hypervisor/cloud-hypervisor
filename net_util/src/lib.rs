@@ -14,13 +14,13 @@ mod open_tap;
 mod queue_pair;
 mod tap;
 
+use serde::{Deserialize, Serialize};
 use std::io::Error as IoError;
 use std::os::raw::c_uint;
 use std::os::unix::io::{FromRawFd, RawFd};
 use std::{io, mem, net};
 use thiserror::Error;
-use versionize::{VersionMap, Versionize, VersionizeResult};
-use versionize_derive::Versionize;
+
 use virtio_bindings::virtio_net::{
     virtio_net_hdr_v1, VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX, VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN,
     VIRTIO_NET_F_GUEST_CSUM, VIRTIO_NET_F_GUEST_ECN, VIRTIO_NET_F_GUEST_TSO4,
@@ -45,7 +45,7 @@ pub enum Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[repr(C, packed)]
-#[derive(Copy, Clone, Debug, Default, Versionize)]
+#[derive(Copy, Clone, Debug, Default, Serialize, Deserialize)]
 pub struct VirtioNetConfig {
     pub mac: [u8; 6],
     pub status: u16,

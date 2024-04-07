@@ -13,14 +13,14 @@ use crate::{
 use crate::{GuestMemoryMmap, GuestRegionMmap, MmapRegion};
 use libc::{c_void, off64_t, pread64, pwrite64};
 use seccompiler::SeccompAction;
+use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, Bytes};
 use std::io;
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
-use versionize::{VersionMap, Versionize, VersionizeResult};
-use versionize_derive::Versionize;
 use vhost::vhost_user::message::{
     VhostUserFSBackendMsg, VhostUserFSBackendMsgFlags, VhostUserProtocolFeatures,
     VhostUserVirtioFeatures, VHOST_USER_FS_BACKEND_ENTRIES,
@@ -34,14 +34,14 @@ use vm_memory::{
 };
 use vm_migration::{
     protocol::MemoryRangeTable, Migratable, MigratableError, Pausable, Snapshot, Snapshottable,
-    Transportable, VersionMapped,
+    Transportable,
 };
 use vmm_sys_util::eventfd::EventFd;
 
 const NUM_QUEUE_OFFSET: usize = 1;
 const DEFAULT_QUEUE_NUMBER: usize = 2;
 
-#[derive(Versionize)]
+#[derive(Serialize, Deserialize)]
 pub struct State {
     pub avail_features: u64,
     pub acked_features: u64,
@@ -50,8 +50,6 @@ pub struct State {
     pub vu_num_queues: usize,
     pub backend_req_support: bool,
 }
-
-impl VersionMapped for State {}
 
 struct BackendReqHandler {
     cache_offset: GuestAddress,
@@ -272,9 +270,11 @@ impl VhostUserFrontendReqHandler for BackendReqHandler {
 }
 
 pub const VIRTIO_FS_TAG_LEN: usize = 36;
-#[derive(Copy, Clone, Versionize)]
+#[serde_as]
+#[derive(Copy, Clone, Serialize, Deserialize)]
 #[repr(C, packed)]
 pub struct VirtioFsConfig {
+    #[serde_as(as = "Bytes")]
     pub tag: [u8; VIRTIO_FS_TAG_LEN],
     pub num_request_queues: u32,
 }

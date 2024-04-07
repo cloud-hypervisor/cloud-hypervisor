@@ -8,12 +8,12 @@ use crate::{
     VIRTIO_F_RING_INDIRECT_DESC, VIRTIO_F_VERSION_1,
 };
 use anyhow::anyhow;
+use serde::{Deserialize, Serialize};
 use std::io;
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::sync::{atomic::AtomicBool, Arc, Barrier, Mutex};
 use thiserror::Error;
-use versionize::Versionize;
 use vhost::vhost_user::message::{
     VhostUserInflight, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
 };
@@ -25,7 +25,7 @@ use vm_memory::{
     mmap::MmapRegionError, Address, Error as MmapError, GuestAddressSpace, GuestMemory,
     GuestMemoryAtomic,
 };
-use vm_migration::{protocol::MemoryRangeTable, MigratableError, Snapshot, VersionMapped};
+use vm_migration::{protocol::MemoryRangeTable, MigratableError, Snapshot};
 use vmm_sys_util::eventfd::EventFd;
 use vu_common_ctrl::VhostUserHandle;
 
@@ -430,11 +430,11 @@ impl VhostUserCommon {
         }
     }
 
-    pub fn snapshot<T>(&mut self, state: &T) -> std::result::Result<Snapshot, MigratableError>
+    pub fn snapshot<'a, T>(&mut self, state: &T) -> std::result::Result<Snapshot, MigratableError>
     where
-        T: Versionize + VersionMapped,
+        T: Serialize + Deserialize<'a>,
     {
-        let snapshot = Snapshot::new_from_versioned_state(state)?;
+        let snapshot = Snapshot::new_from_state(state)?;
 
         if self.migration_started {
             self.shutdown();
