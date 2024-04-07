@@ -16,6 +16,7 @@ use crate::GuestMemoryMmap;
 use crate::{VirtioInterrupt, VirtioInterruptType};
 use anyhow::anyhow;
 use seccompiler::SeccompAction;
+use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{self, Read};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
@@ -24,11 +25,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
 use std::time::Instant;
 use thiserror::Error;
-use versionize::{VersionMap, Versionize, VersionizeResult};
-use versionize_derive::Versionize;
 use virtio_queue::{Queue, QueueT};
 use vm_memory::{Bytes, GuestAddressSpace, GuestMemoryAtomic};
-use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -197,14 +195,12 @@ pub struct Watchdog {
     exit_evt: EventFd,
 }
 
-#[derive(Versionize)]
+#[derive(Serialize, Deserialize)]
 pub struct WatchdogState {
     pub avail_features: u64,
     pub acked_features: u64,
     pub enabled: bool,
 }
-
-impl VersionMapped for WatchdogState {}
 
 impl Watchdog {
     /// Create a new virtio watchdog device that will reboot VM if the guest hangs
@@ -420,7 +416,7 @@ impl Snapshottable for Watchdog {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        Snapshot::new_from_versioned_state(&self.state())
+        Snapshot::new_from_state(&self.state())
     }
 }
 

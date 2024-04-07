@@ -12,12 +12,11 @@ use crate::{
 use crate::{GuestMemoryMmap, GuestRegionMmap};
 use net_util::{build_net_config_space, CtrlQueue, MacAddr, VirtioNetConfig};
 use seccompiler::SeccompAction;
+use serde::{Deserialize, Serialize};
 use std::result;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
-use versionize::{VersionMap, Versionize, VersionizeResult};
-use versionize_derive::Versionize;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost::vhost_user::{FrontendReqHandler, VhostUserFrontend, VhostUserFrontendReqHandler};
 use virtio_bindings::virtio_net::{
@@ -31,13 +30,13 @@ use virtio_queue::{Queue, QueueT};
 use vm_memory::{ByteValued, GuestMemoryAtomic};
 use vm_migration::{
     protocol::MemoryRangeTable, Migratable, MigratableError, Pausable, Snapshot, Snapshottable,
-    Transportable, VersionMapped,
+    Transportable,
 };
 use vmm_sys_util::eventfd::EventFd;
 
 const DEFAULT_QUEUE_NUMBER: usize = 2;
 
-#[derive(Versionize)]
+#[derive(Serialize, Deserialize)]
 pub struct State {
     pub avail_features: u64,
     pub acked_features: u64,
@@ -45,8 +44,6 @@ pub struct State {
     pub acked_protocol_features: u64,
     pub vu_num_queues: usize,
 }
-
-impl VersionMapped for State {}
 
 struct BackendReqHandler {}
 impl VhostUserFrontendReqHandler for BackendReqHandler {}

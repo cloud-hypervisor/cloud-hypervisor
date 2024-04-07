@@ -5,12 +5,11 @@
 use crate::device::BarReprogrammingParams;
 use crate::{MsixConfig, PciInterruptPin};
 use byteorder::{ByteOrder, LittleEndian};
+use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::sync::{Arc, Mutex};
-use versionize::{VersionMap, Versionize, VersionizeError, VersionizeResult};
-use versionize_derive::Versionize;
 use vm_device::PciBarType;
-use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, VersionMapped};
+use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable};
 
 // The number of 32bit registers in the config space, 4096 bytes.
 const NUM_CONFIGURATION_REGISTERS: usize = 1024;
@@ -396,7 +395,7 @@ fn decode_64_bits_bar_size(bar_size_hi: u32, bar_size_lo: u32) -> Option<u64> {
     None
 }
 
-#[derive(Debug, Default, Clone, Copy, Versionize)]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 struct PciBar {
     addr: u32,
     size: u32,
@@ -404,7 +403,7 @@ struct PciBar {
     r#type: Option<PciBarRegionType>,
 }
 
-#[derive(Versionize)]
+#[derive(Serialize, Deserialize)]
 pub struct PciConfigurationState {
     registers: Vec<u32>,
     writable_bits: Vec<u32>,
@@ -415,8 +414,6 @@ pub struct PciConfigurationState {
     last_capability: Option<(usize, usize)>,
     msix_cap_reg_idx: Option<usize>,
 }
-
-impl VersionMapped for PciConfigurationState {}
 
 /// Contains the configuration space of a PCI node.
 /// See the [specification](https://en.wikipedia.org/wiki/PCI_configuration_space).
@@ -435,7 +432,7 @@ pub struct PciConfiguration {
 }
 
 /// See pci_regs.h in kernel
-#[derive(Copy, Clone, PartialEq, Eq, Versionize, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Debug)]
 pub enum PciBarRegionType {
     Memory32BitRegion = 0,
     IoRegion = 0x01,
@@ -1070,7 +1067,7 @@ impl Snapshottable for PciConfiguration {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        Snapshot::new_from_versioned_state(&self.state())
+        Snapshot::new_from_state(&self.state())
     }
 }
 

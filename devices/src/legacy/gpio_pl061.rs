@@ -8,16 +8,13 @@
 //!
 
 use crate::{read_le_u32, write_le_u32};
+use serde::{Deserialize, Serialize};
 use std::result;
 use std::sync::{Arc, Barrier};
 use std::{fmt, io};
-use versionize::{VersionMap, Versionize, VersionizeResult};
-use versionize_derive::Versionize;
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_device::BusDevice;
-use vm_migration::{
-    Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
-};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 
 const OFS_DATA: u64 = 0x400; // Data Register
 const GPIODIR: u64 = 0x400; // Direction Register
@@ -89,7 +86,7 @@ pub struct Gpio {
     interrupt: Arc<dyn InterruptSourceGroup>,
 }
 
-#[derive(Versionize)]
+#[derive(Serialize, Deserialize)]
 pub struct GpioState {
     data: u32,
     old_in_data: u32,
@@ -101,8 +98,6 @@ pub struct GpioState {
     istate: u32,
     afsel: u32,
 }
-
-impl VersionMapped for GpioState {}
 
 impl Gpio {
     /// Constructs an PL061 GPIO device.
@@ -328,7 +323,7 @@ impl Snapshottable for Gpio {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        Snapshot::new_from_versioned_state(&self.state())
+        Snapshot::new_from_state(&self.state())
     }
 }
 

@@ -40,22 +40,19 @@ use crate::{
 use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
 use seccompiler::SeccompAction;
+use serde::{Deserialize, Serialize};
 use std::io;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::result;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, RwLock};
-use versionize::{VersionMap, Versionize, VersionizeResult};
-use versionize_derive::Versionize;
 use virtio_queue::Queue;
 use virtio_queue::QueueOwnedT;
 use virtio_queue::QueueT;
 use vm_memory::GuestAddressSpace;
 use vm_memory::GuestMemoryAtomic;
-use vm_migration::{
-    Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
-};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -323,13 +320,11 @@ pub struct Vsock<B: VsockBackend> {
     exit_evt: EventFd,
 }
 
-#[derive(Versionize)]
+#[derive(Serialize, Deserialize)]
 pub struct VsockState {
     pub avail_features: u64,
     pub acked_features: u64,
 }
-
-impl VersionMapped for VsockState {}
 
 impl<B> Vsock<B>
 where
@@ -519,7 +514,7 @@ where
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        Snapshot::new_from_versioned_state(&self.state())
+        Snapshot::new_from_state(&self.state())
     }
 }
 impl<B> Transportable for Vsock<B> where B: VsockBackend + Sync + 'static {}

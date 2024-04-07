@@ -53,7 +53,6 @@ zbus = { version = "3.15.2", optional = true }
 # List of patched crates
 [patch.crates-io]
 kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch-v0.7.0" }
-versionize_derive = { git = "https://github.com/cloud-hypervisor/versionize_derive", branch = "ch-0.1.6" }
 
 [dev-dependencies]
 dirs = "5.0.1"

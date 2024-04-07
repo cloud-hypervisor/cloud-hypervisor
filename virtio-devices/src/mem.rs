@@ -23,6 +23,7 @@ use crate::{GuestMemoryMmap, GuestRegionMmap};
 use crate::{VirtioInterrupt, VirtioInterruptType};
 use anyhow::anyhow;
 use seccompiler::SeccompAction;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io;
 use std::mem::size_of;
@@ -32,8 +33,6 @@ use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex};
 use thiserror::Error;
-use versionize::{VersionMap, Versionize, VersionizeResult};
-use versionize_derive::Versionize;
 use virtio_queue::{DescriptorChain, Queue, QueueT};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_memory::{
@@ -41,9 +40,7 @@ use vm_memory::{
     GuestMemoryError, GuestMemoryLoadGuard, GuestMemoryRegion,
 };
 use vm_migration::protocol::MemoryRangeTable;
-use vm_migration::{
-    Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
-};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: u16 = 128;
@@ -168,7 +165,7 @@ struct VirtioMemResp {
 unsafe impl ByteValued for VirtioMemResp {}
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug, Default, Versionize)]
+#[derive(Copy, Clone, Debug, Default, Serialize, Deserialize)]
 pub struct VirtioMemConfig {
     // Block size and alignment. Cannot change.
     block_size: u64,
@@ -336,7 +333,7 @@ impl Request {
     }
 }
 
-#[derive(Clone, Versionize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct BlocksState {
     bitmap: Vec<bool>,
 }
@@ -686,15 +683,13 @@ pub enum VirtioMemMappingSource {
     Device(u32),
 }
 
-#[derive(Versionize)]
+#[derive(Serialize, Deserialize)]
 pub struct MemState {
     pub avail_features: u64,
     pub acked_features: u64,
     pub config: VirtioMemConfig,
     pub blocks_state: BlocksState,
 }
-
-impl VersionMapped for MemState {}
 
 pub struct Mem {
     common: VirtioCommon,
@@ -1011,7 +1006,7 @@ impl Snapshottable for Mem {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        Snapshot::new_from_versioned_state(&self.state())
+        Snapshot::new_from_state(&self.state())
     }
 }
 impl Transportable for Mem {}

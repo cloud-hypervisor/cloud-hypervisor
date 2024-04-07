@@ -4,15 +4,14 @@
 //
 
 use byteorder::{ByteOrder, LittleEndian};
+use serde::{Deserialize, Serialize};
 use std::io;
 use std::sync::Arc;
 use thiserror::Error;
-use versionize::{VersionMap, Versionize, VersionizeResult};
-use versionize_derive::Versionize;
 use vm_device::interrupt::{
     InterruptIndex, InterruptSourceConfig, InterruptSourceGroup, MsiIrqSourceConfig,
 };
-use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, VersionMapped};
+use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable};
 
 // MSI control masks
 const MSI_CTL_ENABLE: u16 = 0x1;
@@ -47,7 +46,7 @@ pub enum Error {
 
 pub const MSI_CONFIG_ID: &str = "msi_config";
 
-#[derive(Clone, Copy, Default, Versionize)]
+#[derive(Clone, Copy, Default, Serialize, Deserialize)]
 pub struct MsiCap {
     // Message Control Register
     //   0:     MSI enable.
@@ -172,12 +171,10 @@ impl MsiCap {
     }
 }
 
-#[derive(Versionize)]
+#[derive(Serialize, Deserialize)]
 pub struct MsiConfigState {
     cap: MsiCap,
 }
-
-impl VersionMapped for MsiConfigState {}
 
 pub struct MsiConfig {
     pub cap: MsiCap,
@@ -294,6 +291,6 @@ impl Snapshottable for MsiConfig {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        Snapshot::new_from_versioned_state(&self.state())
+        Snapshot::new_from_state(&self.state())
     }
 }

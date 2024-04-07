@@ -9,18 +9,15 @@ use pci::{
     PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciSubclass,
     PCI_CONFIGURATION_ID,
 };
+use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::result;
 use std::sync::{Arc, Barrier, Mutex};
 use thiserror::Error;
-use versionize::{VersionMap, Versionize, VersionizeResult};
-use versionize_derive::Versionize;
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::{BusDevice, Resource};
 use vm_memory::{Address, GuestAddress};
-use vm_migration::{
-    Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
-};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 
 const PVPANIC_VENDOR_ID: u16 = 0x1b36;
 const PVPANIC_DEVICE_ID: u16 = 0x0011;
@@ -60,23 +57,20 @@ pub struct PvPanicDevice {
     bar_regions: Vec<PciBarConfiguration>,
 }
 
-#[derive(Versionize)]
+#[derive(Serialize, Deserialize)]
 pub struct PvPanicDeviceState {
     events: u8,
 }
 
-impl VersionMapped for PvPanicDeviceState {}
-
 impl PvPanicDevice {
     pub fn new(id: String, snapshot: Option<Snapshot>) -> Result<Self, PvPanicError> {
         let pci_configuration_state =
-            vm_migration::versioned_state_from_id(snapshot.as_ref(), PCI_CONFIGURATION_ID)
-                .map_err(|e| {
-                    PvPanicError::RetrievePciConfigurationState(anyhow!(
-                        "Failed to get PciConfigurationState from Snapshot: {}",
-                        e
-                    ))
-                })?;
+            vm_migration::state_from_id(snapshot.as_ref(), PCI_CONFIGURATION_ID).map_err(|e| {
+                PvPanicError::RetrievePciConfigurationState(anyhow!(
+                    "Failed to get PciConfigurationState from Snapshot: {}",
+                    e
+                ))
+            })?;
 
         let mut configuration = PciConfiguration::new(
             PVPANIC_VENDOR_ID,
@@ -97,7 +91,7 @@ impl PvPanicDevice {
 
         let state: Option<PvPanicDeviceState> = snapshot
             .as_ref()
-            .map(|s| s.to_versioned_state())
+            .map(|s| s.to_state())
             .transpose()
             .map_err(|e| {
                 PvPanicError::CreatePvPanicDevice(anyhow!(
@@ -259,7 +253,7 @@ impl Snapshottable for PvPanicDevice {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        let mut snapshot = Snapshot::new_from_versioned_state(&self.state())?;
+        let mut snapshot = Snapshot::new_from_state(&self.state())?;
 
         // Snapshot PciConfiguration
         snapshot.add_snapshot(self.configuration.id(), self.configuration.snapshot()?);

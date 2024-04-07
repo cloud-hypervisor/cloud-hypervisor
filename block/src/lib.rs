@@ -37,6 +37,7 @@ use crate::vhdx::{Vhdx, VhdxError};
 #[cfg(feature = "io_uring")]
 use io_uring::{opcode, IoUring, Probe};
 use libc::{ioctl, S_IFBLK, S_IFMT};
+use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::cmp;
@@ -52,8 +53,6 @@ use std::sync::Arc;
 use std::sync::MutexGuard;
 use std::time::Instant;
 use thiserror::Error;
-use versionize::{VersionMap, Versionize, VersionizeResult};
-use versionize_derive::Versionize;
 use virtio_bindings::virtio_blk::*;
 use virtio_queue::DescriptorChain;
 use vm_memory::{
@@ -544,7 +543,7 @@ impl Request {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, Versionize)]
+#[derive(Copy, Clone, Debug, Default, Serialize, Deserialize)]
 #[repr(C, packed)]
 pub struct VirtioBlockConfig {
     pub capacity: u64,
@@ -567,7 +566,7 @@ pub struct VirtioBlockConfig {
     pub write_zeroes_may_unmap: u8,
     pub unused1: [u8; 3],
 }
-#[derive(Copy, Clone, Debug, Default, Versionize)]
+#[derive(Copy, Clone, Debug, Default, Serialize, Deserialize)]
 #[repr(C, packed)]
 pub struct VirtioBlockGeometry {
     pub cylinders: u16,

@@ -11,13 +11,13 @@ use crate::{GuestMemoryMmap, GuestRegionMmap};
 use crate::{VirtioInterrupt, VIRTIO_F_IOMMU_PLATFORM};
 use block::VirtioBlockConfig;
 use seccompiler::SeccompAction;
+use serde::{Deserialize, Serialize};
 use std::mem;
 use std::result;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
-use versionize::{VersionMap, Versionize, VersionizeResult};
-use versionize_derive::Versionize;
+
 use vhost::vhost_user::message::{
     VhostUserConfigFlags, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
     VHOST_USER_CONFIG_OFFSET,
@@ -32,13 +32,13 @@ use virtio_queue::Queue;
 use vm_memory::{ByteValued, GuestMemoryAtomic};
 use vm_migration::{
     protocol::MemoryRangeTable, Migratable, MigratableError, Pausable, Snapshot, Snapshottable,
-    Transportable, VersionMapped,
+    Transportable,
 };
 use vmm_sys_util::eventfd::EventFd;
 
 const DEFAULT_QUEUE_NUMBER: usize = 1;
 
-#[derive(Versionize)]
+#[derive(Serialize, Deserialize)]
 pub struct State {
     pub avail_features: u64,
     pub acked_features: u64,
@@ -46,8 +46,6 @@ pub struct State {
     pub acked_protocol_features: u64,
     pub vu_num_queues: usize,
 }
-
-impl VersionMapped for State {}
 
 struct BackendReqHandler {}
 impl VhostUserFrontendReqHandler for BackendReqHandler {}

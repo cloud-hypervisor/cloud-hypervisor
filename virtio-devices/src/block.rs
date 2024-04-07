@@ -25,6 +25,7 @@ use block::{
 use rate_limiter::group::{RateLimiterGroup, RateLimiterGroupHandle};
 use rate_limiter::TokenType;
 use seccompiler::SeccompAction;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -37,13 +38,10 @@ use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
 use thiserror::Error;
-use versionize::{VersionMap, Versionize, VersionizeResult};
-use versionize_derive::Versionize;
 use virtio_bindings::virtio_blk::*;
 use virtio_bindings::virtio_config::*;
 use virtio_queue::{Queue, QueueOwnedT, QueueT};
 use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryError};
-use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
@@ -552,7 +550,7 @@ pub struct Block {
     queue_affinity: BTreeMap<u16, Vec<usize>>,
 }
 
-#[derive(Versionize)]
+#[derive(Serialize, Deserialize)]
 pub struct BlockState {
     pub disk_path: String,
     pub disk_nsectors: u64,
@@ -560,8 +558,6 @@ pub struct BlockState {
     pub acked_features: u64,
     pub config: VirtioBlockConfig,
 }
-
-impl VersionMapped for BlockState {}
 
 impl Block {
     /// Create a new virtio block device that operates on the given file.
@@ -916,7 +912,7 @@ impl Snapshottable for Block {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        Snapshot::new_from_versioned_state(&self.state())
+        Snapshot::new_from_state(&self.state())
     }
 }
 impl Transportable for Block {}

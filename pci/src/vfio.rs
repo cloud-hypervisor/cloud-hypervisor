@@ -15,6 +15,7 @@ use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
 use hypervisor::HypervisorVmError;
 use libc::{sysconf, _SC_PAGESIZE};
+use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
 use std::io;
@@ -22,8 +23,6 @@ use std::os::unix::io::AsRawFd;
 use std::ptr::null_mut;
 use std::sync::{Arc, Barrier, Mutex};
 use thiserror::Error;
-use versionize::{VersionMap, Versionize, VersionizeResult};
-use versionize_derive::Versionize;
 use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::{
     VfioContainer, VfioDevice, VfioIrq, VfioRegionInfoCap, VfioRegionSparseMmapArea,
@@ -38,9 +37,7 @@ use vm_device::interrupt::{
 };
 use vm_device::{BusDevice, Resource};
 use vm_memory::{Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestUsize};
-use vm_migration::{
-    Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
-};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 pub(crate) const VFIO_COMMON_ID: &str = "vfio_common";
@@ -95,7 +92,7 @@ enum InterruptUpdateAction {
     DisableMsix,
 }
 
-#[derive(Versionize)]
+#[derive(Serialize, Deserialize)]
 struct IntxState {
     enabled: bool,
 }
@@ -105,7 +102,7 @@ pub(crate) struct VfioIntx {
     enabled: bool,
 }
 
-#[derive(Versionize)]
+#[derive(Serialize, Deserialize)]
 struct MsiState {
     cap: MsiCap,
     cap_offset: u32,
@@ -137,7 +134,7 @@ impl VfioMsi {
     }
 }
 
-#[derive(Versionize)]
+#[derive(Serialize, Deserialize)]
 struct MsixState {
     cap: MsixCap,
     cap_offset: u32,
@@ -440,14 +437,12 @@ impl Vfio for VfioDeviceWrapper {
     }
 }
 
-#[derive(Versionize)]
+#[derive(Serialize, Deserialize)]
 struct VfioCommonState {
     intx_state: Option<IntxState>,
     msi_state: Option<MsiState>,
     msix_state: Option<MsixState>,
 }
-
-impl VersionMapped for VfioCommonState {}
 
 pub(crate) struct ConfigPatch {
     mask: u32,
@@ -476,13 +471,12 @@ impl VfioCommon {
         x_nv_gpudirect_clique: Option<u8>,
     ) -> Result<Self, VfioPciError> {
         let pci_configuration_state =
-            vm_migration::versioned_state_from_id(snapshot.as_ref(), PCI_CONFIGURATION_ID)
-                .map_err(|e| {
-                    VfioPciError::RetrievePciConfigurationState(anyhow!(
-                        "Failed to get PciConfigurationState from Snapshot: {}",
-                        e
-                    ))
-                })?;
+            vm_migration::state_from_id(snapshot.as_ref(), PCI_CONFIGURATION_ID).map_err(|e| {
+                VfioPciError::RetrievePciConfigurationState(anyhow!(
+                    "Failed to get PciConfigurationState from Snapshot: {}",
+                    e
+                ))
+            })?;
 
         let configuration = PciConfiguration::new(
             0,
@@ -515,7 +509,7 @@ impl VfioCommon {
 
         let state: Option<VfioCommonState> = snapshot
             .as_ref()
-            .map(|s| s.to_versioned_state())
+            .map(|s| s.to_state())
             .transpose()
             .map_err(|e| {
                 VfioPciError::RetrieveVfioCommonState(anyhow!(
@@ -523,20 +517,20 @@ impl VfioCommon {
                     e
                 ))
             })?;
-        let msi_state = vm_migration::versioned_state_from_id(snapshot.as_ref(), MSI_CONFIG_ID)
-            .map_err(|e| {
+        let msi_state =
+            vm_migration::state_from_id(snapshot.as_ref(), MSI_CONFIG_ID).map_err(|e| {
                 VfioPciError::RetrieveMsiConfigState(anyhow!(
                     "Failed to get MsiConfigState from Snapshot: {}",
                     e
                 ))
             })?;
-        let msix_state = vm_migration::versioned_state_from_id(snapshot.as_ref(), MSIX_CONFIG_ID)
-            .map_err(|e| {
-            VfioPciError::RetrieveMsixConfigState(anyhow!(
-                "Failed to get MsixConfigState from Snapshot: {}",
-                e
-            ))
-        })?;
+        let msix_state =
+            vm_migration::state_from_id(snapshot.as_ref(), MSIX_CONFIG_ID).map_err(|e| {
+                VfioPciError::RetrieveMsixConfigState(anyhow!(
+                    "Failed to get MsixConfigState from Snapshot: {}",
+                    e
+                ))
+            })?;
 
         if let Some(state) = state.as_ref() {
             vfio_common.set_state(state, msi_state, msix_state)?;
@@ -1388,7 +1382,7 @@ impl Snapshottable for VfioCommon {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        let mut vfio_common_snapshot = Snapshot::new_from_versioned_state(&self.state())?;
+        let mut vfio_common_snapshot = Snapshot::new_from_state(&self.state())?;
 
         // Snapshot PciConfiguration
         vfio_common_snapshot.add_snapshot(self.configuration.id(), self.configuration.snapshot()?);

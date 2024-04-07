@@ -14,6 +14,7 @@ use crate::GuestMemoryMmap;
 use crate::{VirtioInterrupt, VirtioInterruptType};
 use anyhow::anyhow;
 use seccompiler::SeccompAction;
+use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io;
 use std::os::unix::io::AsRawFd;
@@ -21,11 +22,8 @@ use std::result;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};
 use thiserror::Error;
-use versionize::{VersionMap, Versionize, VersionizeResult};
-use versionize_derive::Versionize;
 use virtio_queue::{Queue, QueueT};
 use vm_memory::{GuestAddressSpace, GuestMemory, GuestMemoryAtomic};
-use vm_migration::VersionMapped;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
@@ -158,13 +156,11 @@ pub struct Rng {
     exit_evt: EventFd,
 }
 
-#[derive(Versionize)]
+#[derive(Deserialize, Serialize)]
 pub struct RngState {
     pub avail_features: u64,
     pub acked_features: u64,
 }
-
-impl VersionMapped for RngState {}
 
 impl Rng {
     /// Create a new virtio rng device that gets random data from /dev/urandom.
@@ -324,7 +320,7 @@ impl Snapshottable for Rng {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        Snapshot::new_from_versioned_state(&self.state())
+        Snapshot::new_from_state(&self.state())
     }
 }
 
