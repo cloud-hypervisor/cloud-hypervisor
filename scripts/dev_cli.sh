@@ -7,7 +7,7 @@
 CLI_NAME="Cloud Hypervisor"
 
 CTR_IMAGE_TAG="ghcr.io/cloud-hypervisor/cloud-hypervisor"
-CTR_IMAGE_VERSION="20240229-0"
+CTR_IMAGE_VERSION="20240407-0"
 : "${CTR_IMAGE:=${CTR_IMAGE_TAG}:${CTR_IMAGE_VERSION}}"
 
 DOCKER_RUNTIME="docker"
