@@ -615,6 +615,9 @@ components:
         watchdog:
           type: boolean
           default: false
+        pvpanic:
+          type: boolean
+          default: false
         platform:
           $ref: "#/components/schemas/PlatformConfig"
         tpm:
