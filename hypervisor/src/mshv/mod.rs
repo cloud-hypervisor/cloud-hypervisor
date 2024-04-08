@@ -55,6 +55,12 @@ use crate::arch::x86::{CpuIdEntry, FpuState, MsrEntry};
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::{RegList, VcpuInit};
 
+#[cfg(target_arch = "aarch64")]
+use std::sync::Mutex;
+
+#[cfg(target_arch = "aarch64")]
+use crate::arch::aarch64::gic::{Vgic, VgicConfig};
+
 const DIRTY_BITMAP_CLEAR_DIRTY: u64 = 0x4;
 const DIRTY_BITMAP_SET_DIRTY: u64 = 0x8;
 
@@ -1164,7 +1170,7 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn init_pmu(&self, irq: u32) -> cpu::Result<()> {
+    fn init_pmu(&self, _irq: u32) -> cpu::Result<()> {
         unimplemented!()
     }
 
@@ -1174,12 +1180,12 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn setup_regs(&self, cpu_id: u8, boot_ip: u64, fdt_start: u64) -> cpu::Result<()> {
+    fn setup_regs(&self, _cpu_id: u8, _boot_ip: u64, _fdt_start: u64) -> cpu::Result<()> {
         unimplemented!()
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn get_sys_reg(&self, sys_reg: u32) -> cpu::Result<u64> {
+    fn get_sys_reg(&self, _sys_reg: u32) -> cpu::Result<u64> {
         unimplemented!()
     }
 
@@ -1309,7 +1315,7 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// Set CPU state for aarch64 guest.
     ///
-    fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
+    fn set_state(&self, _state: &CpuState) -> cpu::Result<()> {
         unimplemented!()
     }
 
@@ -2060,7 +2066,7 @@ impl vm::Vm for MshvVm {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn create_vgic(&self, config: VgicConfig) -> vm::Result<Arc<Mutex<dyn Vgic>>> {
+    fn create_vgic(&self, _config: VgicConfig) -> vm::Result<Arc<Mutex<dyn Vgic>>> {
         unimplemented!()
     }
 
