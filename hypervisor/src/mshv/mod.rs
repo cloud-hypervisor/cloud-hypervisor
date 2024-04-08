@@ -3,18 +3,21 @@
 // Copyright © 2020, Microsoft Corporation
 //
 
+#[cfg(target_arch = "x86_64")]
 use crate::arch::emulator::{PlatformEmulator, PlatformError};
-
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::emulator::{Emulator, EmulatorCpuState};
 use crate::cpu;
+#[cfg(target_arch = "x86_64")]
 use crate::cpu::Vcpu;
 use crate::hypervisor;
 use crate::vec_with_array_field;
 use crate::vm::{self, InterruptSourceConfig, VmOps};
 use crate::HypervisorType;
 pub use mshv_bindings::*;
-use mshv_ioctls::{set_registers_64, InterruptRequest, Mshv, NoDatamatch, VcpuFd, VmFd, VmType};
+#[cfg(target_arch = "x86_64")]
+use mshv_ioctls::{set_registers_64, InterruptRequest};
+use mshv_ioctls::{Mshv, NoDatamatch, VcpuFd, VmFd, VmType};
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
