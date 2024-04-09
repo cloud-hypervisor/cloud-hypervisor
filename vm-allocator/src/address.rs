@@ -9,6 +9,7 @@
 
 use std::collections::btree_map::BTreeMap;
 use std::result;
+use thiserror::Error;
 use vm_memory::{Address, GuestAddress, GuestUsize};
 
 #[derive(Debug, Error)]

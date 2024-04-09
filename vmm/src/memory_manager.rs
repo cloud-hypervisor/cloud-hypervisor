@@ -38,6 +38,7 @@ use std::path::PathBuf;
 use std::result;
 use std::sync::{Arc, Barrier, Mutex};
 use std::{ffi, thread};
+use thiserror::Error;
 use tracer::trace_scoped;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;

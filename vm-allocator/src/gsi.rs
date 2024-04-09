@@ -5,6 +5,7 @@
 #[cfg(target_arch = "x86_64")]
 use std::collections::btree_map::BTreeMap;
 use std::result;
+use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Error {

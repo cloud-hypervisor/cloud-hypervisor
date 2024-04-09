@@ -29,7 +29,7 @@ use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
 use std::time::Instant;
-use std::{convert, error, fmt, io};
+use std::{convert, io};
 use thiserror::Error;
 use vhost::vhost_user::message::*;
 use vhost::vhost_user::Listener;
@@ -85,14 +85,6 @@ pub const SYNTAX: &str = "vhost-user-block backend parameters \
  \"path=<image_path>,socket=<socket_path>,num_queues=<number_of_queues>,\
  queue_size=<size_of_each_queue>,readonly=true|false,direct=true|false,\
  poll_queue=true|false\"";
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "vhost_user_block_error: {self:?}")
-    }
-}
-
-impl error::Error for Error {}
 
 impl convert::From<Error> for io::Error {
     fn from(e: Error) -> Self {

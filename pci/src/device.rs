@@ -5,7 +5,6 @@
 use crate::configuration::{self, PciBarRegionType};
 use crate::PciBarConfiguration;
 use std::any::Any;
-use std::fmt::{self, Display};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{io, result};
 use thiserror::Error;

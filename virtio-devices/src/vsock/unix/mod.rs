@@ -12,6 +12,7 @@
 mod muxer;
 mod muxer_killq;
 mod muxer_rxq;
+use thiserror::Error;
 
 pub use muxer::VsockMuxer as VsockUnixBackend;
 pub use Error as VsockUnixError;

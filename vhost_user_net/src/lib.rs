@@ -13,13 +13,13 @@ use net_util::{
 };
 use option_parser::Toggle;
 use option_parser::{OptionParser, OptionParserError};
-use std::fmt;
 use std::io;
 use std::net::Ipv4Addr;
 use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::process;
 use std::sync::{Arc, Mutex, RwLock};
+use thiserror::Error;
 use vhost::vhost_user::message::*;
 use vhost::vhost_user::Listener;
 use vhost_user_backend::{VhostUserBackendMut, VhostUserDaemon, VringRwLock, VringT};
@@ -68,14 +68,6 @@ pub enum Error {
 pub const SYNTAX: &str = "vhost-user-net backend parameters \
 \"ip=<ip_addr>,mask=<net_mask>,socket=<socket_path>,client=on|off,\
 num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,tap=<if_name>\"";
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "vhost_user_net_error: {self:?}")
-    }
-}
-
-impl std::error::Error for Error {}
 
 impl std::convert::From<Error> for std::io::Error {
     fn from(e: Error) -> Self {

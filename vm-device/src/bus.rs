@@ -10,7 +10,7 @@
 use std::cmp::Ordering;
 use std::collections::btree_map::BTreeMap;
 use std::sync::{Arc, Barrier, Mutex, RwLock, Weak};
-use std::{convert, error, fmt, io, result};
+use std::{convert, io, result};
 use thiserror::Error;
 
 /// Trait for devices that respond to reads or writes in an arbitrary address space.
@@ -41,14 +41,6 @@ pub enum Error {
 }
 
 pub type Result<T> = result::Result<T, Error>;
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "bus_error: {self:?}")
-    }
-}
-
-impl error::Error for Error {}
 
 impl convert::From<Error> for io::Error {
     fn from(e: Error) -> Self {

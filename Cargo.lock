@@ -2483,6 +2483,7 @@ dependencies = [
  "libc",
  "log",
  "option_parser",
+ "thiserror",
  "vhost",
  "vhost-user-backend",
  "virtio-bindings",
@@ -2502,6 +2503,7 @@ dependencies = [
  "log",
  "net_util",
  "option_parser",
+ "thiserror",
  "vhost",
  "vhost-user-backend",
  "virtio-bindings",
@@ -2567,6 +2569,7 @@ version = "0.1.0"
 dependencies = [
  "arch",
  "libc",
+ "thiserror",
  "vm-memory",
 ]
 

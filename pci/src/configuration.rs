@@ -5,7 +5,6 @@
 use crate::device::BarReprogrammingParams;
 use crate::{MsixConfig, PciInterruptPin};
 use byteorder::{ByteOrder, LittleEndian};
-use std::fmt::{self, Display};
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeError, VersionizeResult};

@@ -8,7 +8,6 @@
 
 use crate::layout::SMBIOS_START;
 use crate::GuestMemoryMmap;
-use std::fmt::{self, Display};
 use std::mem;
 use std::result;
 use std::slice;
