@@ -23,6 +23,7 @@ use vmm::api::dbus::{dbus_api_graceful_shutdown, DBusApiOptions};
 use vmm::api::http::http_api_graceful_shutdown;
 use vmm::api::ApiAction;
 use vmm::config;
+use vmm::landlock::{Landlock, LandlockError};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::block_signal;
 
@@ -85,6 +86,10 @@ enum Error {
     LoggerSetup(log::SetLoggerError),
     #[error("Failed to gracefully shutdown http api: {0}")]
     HttpApiShutdown(#[source] vmm::Error),
+    #[error("Failed to create Landlock object: {0}")]
+    CreateLandlock(#[source] LandlockError),
+    #[error("Failed to apply Landlock: {0}")]
+    ApplyLandlock(#[source] LandlockError),
 }
 
 #[derive(Error, Debug)]
@@ -795,6 +800,13 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         if let Err(e) = exit_evt.write(1) {
             warn!("writing to exit EventFd: {e}");
         }
+    }
+
+    if landlock_enable {
+        Landlock::new()
+            .map_err(Error::CreateLandlock)?
+            .restrict_self()
+            .map_err(Error::ApplyLandlock)?;
     }
 
     vmm_thread_handle
