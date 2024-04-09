@@ -46,6 +46,7 @@ class TitleStartsWithComponent(LineRule):
             'misc',
             'net_gen',
             'net_util',
+            'openapi',
             'option_parser',
             'pci',
             'performance-metrics',
