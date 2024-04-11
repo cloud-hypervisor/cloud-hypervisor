@@ -6,3 +6,4 @@ edition = "2021"
 
 [dependencies]
 vmm-sys-util = "0.12.1"
+thiserror = "1.0.52"
