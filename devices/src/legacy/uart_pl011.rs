@@ -19,6 +19,7 @@ use vm_device::BusDevice;
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
 };
+use thiserror::Error;
 
 /* Registers */
 const UARTDR: u64 = 0;
@@ -48,25 +49,18 @@ const PL011_ID: [u8; 8] = [0x11, 0x10, 0x14, 0x00, 0x0d, 0xf0, 0x05, 0xb1];
 const AMBA_ID_LOW: u64 = 0x3f8;
 const AMBA_ID_HIGH: u64 = 0x401;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
+    #[error("pl011_write: Bad Write Offset: {0}")]
     BadWriteOffset(u64),
+    #[error("pl011: DMA not implemented.")]
     DmaNotImplemented,
+    #[error("Failed to trigger interrupt: {0}")]
     InterruptFailure(io::Error),
+    #[error("Failed to write: {0}")]
     WriteAllFailure(io::Error),
+    #[error("Failed to flush: {0}")]
     FlushFailure(io::Error),
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Error::BadWriteOffset(offset) => write!(f, "pl011_write: Bad Write Offset: {offset}"),
-            Error::DmaNotImplemented => write!(f, "pl011: DMA not implemented."),
-            Error::InterruptFailure(e) => write!(f, "Failed to trigger interrupt: {e}"),
-            Error::WriteAllFailure(e) => write!(f, "Failed to write: {e}"),
-            Error::FlushFailure(e) => write!(f, "Failed to flush: {e}"),
-        }
-    }
 }
 
 type Result<T> = result::Result<T, Error>;

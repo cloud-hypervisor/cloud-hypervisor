@@ -15,6 +15,7 @@ use std::time::Instant;
 use std::{io, result};
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_device::BusDevice;
+use thiserror::Error;
 
 // As you can see in https://static.docs.arm.com/ddi0224/c/real_time_clock_pl031_r1p3_technical_reference_manual_DDI0224C.pdf
 // at section 3.2 Summary of RTC registers, the total size occupied by this device is 0x000 -> 0xFFC + 4 = 0x1000.
@@ -39,19 +40,12 @@ const AMBA_ID_HIGH: u64 = 0x1000;
 /// Constant to convert seconds to nanoseconds.
 pub const NANOS_PER_SECOND: u64 = 1_000_000_000;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
+    #[error("Bad Write Offset: {0}")]
     BadWriteOffset(u64),
+    #[error("Failed to trigger interrupt: {0}")]
     InterruptFailure(io::Error),
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Error::BadWriteOffset(offset) => write!(f, "Bad Write Offset: {offset}"),
-            Error::InterruptFailure(e) => write!(f, "Failed to trigger interrupt: {e}"),
-        }
-    }
 }
 
 type Result<T> = result::Result<T, Error>;
