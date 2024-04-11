@@ -9,60 +9,51 @@ use api_client::simple_api_full_command;
 use api_client::Error as ApiClientError;
 use clap::{Arg, ArgAction, ArgMatches, Command};
 use option_parser::{ByteSized, ByteSizedParseError};
-use std::fmt;
 use std::io::Read;
 use std::marker::PhantomData;
 use std::os::unix::net::UnixStream;
 use std::process;
+use thiserror::Error;
 #[cfg(feature = "dbus_api")]
 use zbus::{dbus_proxy, zvariant::Optional};
 
 type ApiResult = Result<(), Error>;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 enum Error {
+    #[error("HTTP API client error: {0}")]
     HttpApiClient(ApiClientError),
     #[cfg(feature = "dbus_api")]
+    #[error("D-Bus API client error: {0}")]
     DBusApiClient(zbus::Error),
+    #[error("Error parsing CPU count: {0}")]
     InvalidCpuCount(std::num::ParseIntError),
+    #[error("Error parsing memory size: {0:?}")]
     InvalidMemorySize(ByteSizedParseError),
+    #[error("Error parsing balloon size: {0:?}")]
     InvalidBalloonSize(ByteSizedParseError),
+    #[error("Error parsing device syntax: {0}")]
     AddDeviceConfig(vmm::config::Error),
+    #[error("Error parsing disk syntax: {0}")]
     AddDiskConfig(vmm::config::Error),
+    #[error("Error parsing filesystem syntax: {0}")]
     AddFsConfig(vmm::config::Error),
+    #[error("Error parsing persistent memory syntax: {0}")]
     AddPmemConfig(vmm::config::Error),
+    #[error("Error parsing network syntax: {0}")]
     AddNetConfig(vmm::config::Error),
+    #[error("Error parsing user device syntax: {0}")]
     AddUserDeviceConfig(vmm::config::Error),
+    #[error("Error parsing vDPA device syntax: {0}")]
     AddVdpaConfig(vmm::config::Error),
+    #[error("Error parsing vsock syntax: {0}")]
     AddVsockConfig(vmm::config::Error),
+    #[error("Error parsing restore syntax: {0}")]
     Restore(vmm::config::Error),
+    #[error("Error reading from stdin: {0}")]
     ReadingStdin(std::io::Error),
+    #[error("Error reading from file: {0}")]
     ReadingFile(std::io::Error),
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use Error::*;
-        match self {
-            HttpApiClient(e) => e.fmt(f),
-            #[cfg(feature = "dbus_api")]
-            DBusApiClient(e) => write!(f, "Error D-Bus proxy: {e}"),
-            InvalidCpuCount(e) => write!(f, "Error parsing CPU count: {e}"),
-            InvalidMemorySize(e) => write!(f, "Error parsing memory size: {e:?}"),
-            InvalidBalloonSize(e) => write!(f, "Error parsing balloon size: {e:?}"),
-            AddDeviceConfig(e) => write!(f, "Error parsing device syntax: {e}"),
-            AddDiskConfig(e) => write!(f, "Error parsing disk syntax: {e}"),
-            AddFsConfig(e) => write!(f, "Error parsing filesystem syntax: {e}"),
-            AddPmemConfig(e) => write!(f, "Error parsing persistent memory syntax: {e}"),
-            AddNetConfig(e) => write!(f, "Error parsing network syntax: {e}"),
-            AddUserDeviceConfig(e) => write!(f, "Error parsing user device syntax: {e}"),
-            AddVdpaConfig(e) => write!(f, "Error parsing vDPA device syntax: {e}"),
-            AddVsockConfig(e) => write!(f, "Error parsing vsock syntax: {e}"),
-            Restore(e) => write!(f, "Error parsing restore syntax: {e}"),
-            ReadingStdin(e) => write!(f, "Error reading from stdin: {e}"),
-            ReadingFile(e) => write!(f, "Error reading from file: {e}"),
-        }
-    }
 }
 
 enum TargetApi<'a> {
