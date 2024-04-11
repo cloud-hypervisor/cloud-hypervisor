@@ -2,49 +2,36 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
-use std::fmt::{self, Display};
 use std::io;
 
 use libc::EINVAL;
+use thiserror::Error;
 
 use crate::qcow::{
     qcow_raw_file::QcowRawFile,
     vec_cache::{CacheMap, Cacheable, VecCache},
 };
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
     /// `EvictingCache` - Error writing a refblock from the cache to disk.
+    #[error("failed to write a refblock from the cache to disk: {0}")]
     EvictingRefCounts(io::Error),
     /// `InvalidIndex` - Address requested isn't within the range of the disk.
+    #[error("address requested isn't within the range of the disk.")]
     InvalidIndex,
     /// `NeedCluster` - Handle this error by reading the cluster and calling the function again.
+    #[error("cluster with addr={0} needs to be read")]
     NeedCluster(u64),
     /// `NeedNewCluster` - Handle this error by allocating a cluster and calling the function again.
+    #[error("new cluster needs to be allocated for refcounts")]
     NeedNewCluster,
     /// `ReadingRefCounts` - Error reading the file in to the refcount cache.
+    #[error("failed to read the file into the refcount cache: {0}")]
     ReadingRefCounts(io::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
-
-impl Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use self::Error::*;
-
-        match self {
-            EvictingRefCounts(e) => {
-                write!(f, "failed to write a refblock from the cache to disk: {e}")
-            }
-            InvalidIndex => write!(f, "address requested is not within the range of the disk"),
-            NeedCluster(addr) => write!(f, "cluster with addr={addr} needs to be read"),
-            NeedNewCluster => write!(f, "new cluster needs to be allocated for refcounts"),
-            ReadingRefCounts(e) => {
-                write!(f, "failed to read the file into the refcount cache: {e}")
-            }
-        }
-    }
-}
 
 /// Represents the refcount entries for an open qcow file.
 #[derive(Clone, Debug)]
