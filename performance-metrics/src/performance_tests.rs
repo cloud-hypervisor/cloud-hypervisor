@@ -12,6 +12,7 @@ use std::thread;
 use std::time::Duration;
 use test_infra::Error as InfraError;
 use test_infra::*;
+use thiserror::Error;
 
 #[cfg(target_arch = "x86_64")]
 pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-0.raw";
@@ -19,9 +20,11 @@ pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-
 pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64-custom-20210929-0-update-tool.raw";
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Error)]
 enum Error {
+    #[error("Failed to parse boot time output")]
     BootTimeParse,
+    #[error("Infra error: {0}")]
     Infra(InfraError),
 }
 
