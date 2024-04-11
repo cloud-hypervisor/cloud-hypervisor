@@ -6,6 +6,7 @@
 // Portions Copyright 2017 The Chromium OS Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
+use thiserror::Error;
 use std::sync::Arc;
 pub mod interrupts;
 pub mod layout;
@@ -127,64 +128,83 @@ pub struct CpuidConfig {
     pub amx: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
     /// Error writing MP table to memory.
+    #[error("Error writing MP table to memory")]
     MpTableSetup(mptable::Error),
 
     /// Error configuring the general purpose registers
+    #[error("Error configuring the general purpose registers")]
     RegsConfiguration(regs::Error),
 
     /// Error configuring the special registers
+    #[error("Error configuring the special registers")]
     SregsConfiguration(regs::Error),
 
     /// Error configuring the floating point related registers
+    #[error("Error configuring the floating point related registers")]
     FpuConfiguration(regs::Error),
 
     /// Error configuring the MSR registers
+    #[error("Error configuring the MSR registers")]
     MsrsConfiguration(regs::Error),
 
     /// Failed to set supported CPUs.
+    #[error("Failed to set supported CPUs")]
     SetSupportedCpusFailed(anyhow::Error),
 
     /// Cannot set the local interruption due to bad configuration.
+    #[error("Cannot set the local interruption due to bad configuration")]
     LocalIntConfiguration(anyhow::Error),
 
     /// Error setting up SMBIOS table
+    #[error("Error setting up SMBIOS table")]
     SmbiosSetup(smbios::Error),
 
     /// Could not find any SGX EPC section
+    #[error("Could not find any SGX EPC section")]
     NoSgxEpcSection,
 
     /// Missing SGX CPU feature
+    #[error("Missing SGX CPU feature")]
     MissingSgxFeature,
 
     /// Missing SGX_LC CPU feature
+    #[error("Missing SGX_LC CPU feature")]
     MissingSgxLaunchControlFeature,
 
     /// Error getting supported CPUID through the hypervisor (kvm/mshv) API
+    #[error("Error getting supported CPUID through the hypervisor API")]
     CpuidGetSupported(HypervisorError),
 
     /// Error populating CPUID with KVM HyperV emulation details
+    #[error("Error populating CPUID with KVM HyperV emulation details")]
     CpuidKvmHyperV(vmm_sys_util::fam::Error),
 
     /// Error populating CPUID with CPU identification
+    #[error("Error populating CPUID with CPU identification")]
     CpuidIdentification(vmm_sys_util::fam::Error),
 
     /// Error checking CPUID compatibility
+    #[error("Error checking CPUID compatibility")]
     CpuidCheckCompatibility,
 
     // Error writing EBDA address
+    #[error("Error writing EBDA address")]
     EbdaSetup(vm_memory::GuestMemoryError),
 
     // Error getting CPU TSC frequency
+    #[error("Error getting CPU TSC frequency")]
     GetTscFrequency(HypervisorCpuError),
 
     /// Error retrieving TDX capabilities through the hypervisor (kvm/mshv) API
     #[cfg(feature = "tdx")]
+    #[error("Error retrieving TDX capabilities through the hypervisor API")]
     TdxCapabilities(HypervisorError),
 
     /// Failed to configure E820 map for bzImage
+    #[error("Failed to configure E820 map for bzImage")]
     E820Configuration,
 }
 

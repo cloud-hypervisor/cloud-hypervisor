@@ -13,6 +13,7 @@ use std::mem;
 use std::result;
 use std::slice;
 use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError};
+use thiserror::Error;
 
 // This is a workaround to the Rust enforcement specifying that any implementation of a foreign
 // trait (in this case `ByteValued`) where:
@@ -49,29 +50,40 @@ unsafe impl ByteValued for MpcLintsrcWrapper {}
 // SAFETY: see above
 unsafe impl ByteValued for MpfIntelWrapper {}
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
     /// There was too little guest memory to store the entire MP table.
+    #[error("There was too little guest memory to store the entire MP table")]
     NotEnoughMemory,
     /// The MP table has too little address space to be stored.
+    #[error("The MP table has too little address space to be stored")]
     AddressOverflow,
     /// Failure while zeroing out the memory for the MP table.
+    #[error("Failure while zeroing out the memory for the MP table")]
     Clear(GuestMemoryError),
     /// Number of CPUs exceeds the maximum supported CPUs
+    #[error("Number of CPUs exceeds the maximum supported CPUs")]
     TooManyCpus,
     /// Failure to write the MP floating pointer.
+    #[error("Failure to write the MP floating pointer")]
     WriteMpfIntel(GuestMemoryError),
     /// Failure to write MP CPU entry.
+    #[error("Failure to write MP CPU entry")]
     WriteMpcCpu(GuestMemoryError),
     /// Failure to write MP ioapic entry.
+    #[error("Failure to write MP ioapic entry")]
     WriteMpcIoapic(GuestMemoryError),
     /// Failure to write MP bus entry.
+    #[error("Failure to write MP bus entry")]
     WriteMpcBus(GuestMemoryError),
     /// Failure to write MP interrupt source entry.
+    #[error("Failure to write MP interrupt source entry")]
     WriteMpcIntsrc(GuestMemoryError),
     /// Failure to write MP local interrupt source entry.
+    #[error("Failure to write MP local interrupt source entry")]
     WriteMpcLintsrc(GuestMemoryError),
     /// Failure to write MP table header.
+    #[error("Failure to write MP table header")]
     WriteMpcTable(GuestMemoryError),
 }
 
