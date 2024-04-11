@@ -11,6 +11,7 @@ use versionize::{VersionMap, Versionize, VersionizeError, VersionizeResult};
 use versionize_derive::Versionize;
 use vm_device::PciBarType;
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, VersionMapped};
+use thiserror::Error;
 
 // The number of 32bit registers in the config space, 4096 bytes.
 const NUM_CONFIGURATION_REGISTERS: usize = 1024;
@@ -486,59 +487,44 @@ pub struct PciBarConfiguration {
     prefetchable: PciBarPrefetchable,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
+    #[error("address {0} size {1} too big")]
     BarAddressInvalid(u64, u64),
+    #[error("bar {0} already used")]
     BarInUse(usize),
+    #[error("64bit bar {0} already used(requires two regs)")]
     BarInUse64(usize),
+    #[error("bar {0} invalid, max {}", NUM_BAR_REGS - 1)]
     BarInvalid(usize),
+    #[error("64bitbar {0} invalid, requires two regs, max {}", NUM_BAR_REGS - 1)]
     BarInvalid64(usize),
+    #[error("bar address {0} not a power of two")]
     BarSizeInvalid(u64),
+    #[error("empty capabilities are invalid")]
     CapabilityEmpty,
+    #[error("Invalid capability length {0}")]
     CapabilityLengthInvalid(usize),
+    #[error("capability of size {0} doesn't fit")]
     CapabilitySpaceFull(usize),
+    #[error("failed to decode 32 bits BAR size")]
     Decode32BarSize,
+    #[error("failed to decode 64 bits BAR size")]
     Decode64BarSize,
+    #[error("failed to encode 32 bits BAR size")]
     Encode32BarSize,
+    #[error("failed to encode 64 bits BAR size")]
     Encode64BarSize,
+    #[error("address {0} size {1} too big")]
     RomBarAddressInvalid(u64, u64),
+    #[error("rom bar {0} already used")]
     RomBarInUse(usize),
+    #[error("rom bar {0} invalid, max {}", NUM_BAR_REGS - 1)]
     RomBarInvalid(usize),
+    #[error("rom bar address {0} not a power of two")]
     RomBarSizeInvalid(u64),
 }
 pub type Result<T> = std::result::Result<T, Error>;
-
-impl std::error::Error for Error {}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use self::Error::*;
-        match self {
-            BarAddressInvalid(a, s) => write!(f, "address {a} size {s} too big"),
-            BarInUse(b) => write!(f, "bar {b} already used"),
-            BarInUse64(b) => write!(f, "64bit bar {b} already used(requires two regs)"),
-            BarInvalid(b) => write!(f, "bar {} invalid, max {}", b, NUM_BAR_REGS - 1),
-            BarInvalid64(b) => write!(
-                f,
-                "64bitbar {} invalid, requires two regs, max {}",
-                b,
-                NUM_BAR_REGS - 1
-            ),
-            BarSizeInvalid(s) => write!(f, "bar address {s} not a power of two"),
-            CapabilityEmpty => write!(f, "empty capabilities are invalid"),
-            CapabilityLengthInvalid(l) => write!(f, "Invalid capability length {l}"),
-            CapabilitySpaceFull(s) => write!(f, "capability of size {s} doesn't fit"),
-            Decode32BarSize => write!(f, "failed to decode 32 bits BAR size"),
-            Decode64BarSize => write!(f, "failed to decode 64 bits BAR size"),
-            Encode32BarSize => write!(f, "failed to encode 32 bits BAR size"),
-            Encode64BarSize => write!(f, "failed to encode 64 bits BAR size"),
-            RomBarAddressInvalid(a, s) => write!(f, "address {a} size {s} too big"),
-            RomBarInUse(b) => write!(f, "rom bar {b} already used"),
-            RomBarInvalid(b) => write!(f, "rom bar {} invalid, max {}", b, NUM_BAR_REGS - 1),
-            RomBarSizeInvalid(s) => write!(f, "rom bar address {s} not a power of two"),
-        }
-    }
-}
 
 impl PciConfiguration {
     #[allow(clippy::too_many_arguments)]

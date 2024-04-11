@@ -10,39 +10,27 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::{io, result};
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::{BusDevice, Resource};
+use thiserror::Error;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
     /// Setup of the device capabilities failed.
+    #[error("failed to add capability {0}")]
     CapabilitiesSetup(configuration::Error),
     /// Allocating space for an IO BAR failed.
+    #[error("failed to allocate space for an IO BAR, size={0}")]
     IoAllocationFailed(u64),
     /// Registering an IO BAR failed.
+    #[error("failed to register an IO BAR, addr={0} err={1}")]
     IoRegistrationFailed(u64, configuration::Error),
     /// Expected resource not found.
+    #[error("failed to find expected resource")]
     MissingResource,
     /// Invalid resource.
+    #[error("invalid resource {0:?}")]
     InvalidResource(Resource),
 }
 pub type Result<T> = std::result::Result<T, Error>;
-
-impl Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use self::Error::*;
-
-        match self {
-            CapabilitiesSetup(e) => write!(f, "failed to add capability {e}"),
-            IoAllocationFailed(size) => {
-                write!(f, "failed to allocate space for an IO BAR, size={size}")
-            }
-            IoRegistrationFailed(addr, e) => {
-                write!(f, "failed to register an IO BAR, addr={addr} err={e}")
-            }
-            MissingResource => write!(f, "failed to find expected resource"),
-            InvalidResource(r) => write!(f, "invalid resource {r:?}"),
-        }
-    }
-}
 
 #[derive(Clone, Copy)]
 pub struct BarReprogrammingParams {

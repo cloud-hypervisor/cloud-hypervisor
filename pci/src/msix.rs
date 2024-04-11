@@ -15,6 +15,7 @@ use vm_device::interrupt::{
 };
 use vm_memory::ByteValued;
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, VersionMapped};
+use thiserror::Error;
 
 const MAX_MSIX_VECTORS_PER_DEVICE: u16 = 2048;
 const MSIX_TABLE_ENTRIES_MODULO: u64 = 16;
@@ -27,11 +28,13 @@ const MSIX_ENABLE_MASK: u16 = (1 << MSIX_ENABLE_BIT) as u16;
 pub const MSIX_TABLE_ENTRY_SIZE: usize = 16;
 pub const MSIX_CONFIG_ID: &str = "msix_config";
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
     /// Failed enabling the interrupt route.
+    #[error("Failed enabling the interrupt route: {0}")]
     EnableInterruptRoute(io::Error),
     /// Failed updating the interrupt route.
+    #[error("Failed updating the interrupt route: {0}")]
     UpdateInterruptRoute(io::Error),
 }
 
