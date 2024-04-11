@@ -16,22 +16,30 @@ use virtio_bindings::virtio_net::{
 use virtio_queue::{Queue, QueueT};
 use vm_memory::{ByteValued, Bytes, GuestMemoryError};
 use vm_virtio::{AccessPlatform, Translatable};
+use thiserror::Error;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
     /// Read queue failed.
+    #[error("Failed reading queue: {0}")]
     GuestMemory(GuestMemoryError),
     /// No control header descriptor
+    #[error("No control header descriptor")]
     NoControlHeaderDescriptor,
     /// Missing the data descriptor in the chain.
+    #[error("Missing the data descriptor in the chain")]
     NoDataDescriptor,
     /// No status descriptor
+    #[error("No status descriptor")]
     NoStatusDescriptor,
     /// Failed adding used index
+    #[error("Failed adding used index: {0}")]
     QueueAddUsed(virtio_queue::Error),
     /// Failed creating an iterator over the queue
+    #[error("Failed creating an iterator over the queue: {0}")]
     QueueIterator(virtio_queue::Error),
     /// Failed enabling notification for the queue
+    #[error("Failed enabling notification for the queue: {0}")]
     QueueEnableNotification(virtio_queue::Error),
 }
 
