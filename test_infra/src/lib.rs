@@ -26,24 +26,37 @@ use std::time::Duration;
 use std::{fmt, fs};
 use vmm_sys_util::tempdir::TempDir;
 use wait_timeout::ChildExt;
+use thiserror::Error;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum WaitTimeoutError {
+    #[error("Timed out waiting for child process")]
     Timedout,
+    #[error("Failed with unsuccessful exit status")]
     ExitStatus,
+    #[error("Failed to wait for child process: {0}")]
     General(std::io::Error),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
+    #[error("Failed to parse integer")]
     Parsing(std::num::ParseIntError),
+    #[error("SSH command error: {0}")]
     SshCommand(SshCommandError),
+    #[error("Wait for boot error: {0}")]
     WaitForBoot(WaitForBootError),
+    #[error("ethr log file error: {0}")]
     EthrLogFile(std::io::Error),
+    #[error("ethr log parse error")]
     EthrLogParse,
+    #[error("fio output parse error")]
     FioOutputParse,
+    #[error("iperf3 output parse error")]
     Iperf3Parse,
+    #[error("Failed to spawn process: {0}")]
     Spawn(std::io::Error),
+    #[error("Failed to wait for child process: {0}")]
     WaitTimeout(WaitTimeoutError),
 }
 
@@ -70,12 +83,17 @@ pub const DEFAULT_TCP_LISTENER_MESSAGE: &str = "booted";
 pub const DEFAULT_TCP_LISTENER_PORT: u16 = 8000;
 pub const DEFAULT_TCP_LISTENER_TIMEOUT: i32 = 120;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum WaitForBootError {
+    #[error("Epoll wait error: {0}")]
     EpollWait(std::io::Error),
+    #[error("Listen error: {0}")]
     Listen(std::io::Error),
+    #[error("Epoll wait timeout")]
     EpollWaitTimeout,
+    #[error("Wrong guest address")]
     WrongGuestAddr,
+    #[error("Accept error: {0}")]
     Accept(std::io::Error),
 }
 
@@ -535,20 +553,33 @@ pub struct PasswordAuth {
 pub const DEFAULT_SSH_RETRIES: u8 = 6;
 pub const DEFAULT_SSH_TIMEOUT: u8 = 10;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum SshCommandError {
+    #[error("SSH connection error: {0}")]
     Connection(std::io::Error),
+    #[error("SSH handshake error: {0}")]
     Handshake(ssh2::Error),
+    #[error("SSH authentication error: {0}")]
     Authentication(ssh2::Error),
+    #[error("SSH channel session error: {0}")]
     ChannelSession(ssh2::Error),
+    #[error("SSH command error: {0}")]
     Command(ssh2::Error),
+    #[error("SSH exit status error: {0}")]
     ExitStatus(ssh2::Error),
+    #[error("SSH non-zero exit status: {0}")]
     NonZeroExitStatus(i32),
+    #[error("File read error: {0}")]
     FileRead(std::io::Error),
+    #[error("File metadata error: {0}")]
     FileMetadata(std::io::Error),
+    #[error("SCP send error: {0}")]
     ScpSend(ssh2::Error),
+    #[error("Write all error: {0}")]
     WriteAll(std::io::Error),
+    #[error("Send EOF error: {0}")]
     SendEof(ssh2::Error),
+    #[error("Wait EOF error: {0}")]
     WaitEof(ssh2::Error),
 }
 
