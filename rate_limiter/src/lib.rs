@@ -52,16 +52,19 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use vmm_sys_util::timerfd::TimerFd;
+use thiserror::Error;
 
 /// Module for group rate limiting.
 pub mod group;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 /// Describes the errors that may occur while handling rate limiter events.
 pub enum Error {
     /// The event handler was called spuriously.
+    #[error("Spurious rate limiter event: {0}")]
     SpuriousRateLimiterEvent(&'static str),
     /// The event handler encounters while TimerFd::wait()
+    #[error("Error while waiting for rate limiter event: {0}")]
     TimerFdWaitError(std::io::Error),
 }
 
