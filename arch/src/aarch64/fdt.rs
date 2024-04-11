@@ -6,6 +6,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
+use thiserror::Error;
 use crate::{NumaNodes, PciSpaceInfo};
 use byteorder::{BigEndian, ByteOrder};
 use hypervisor::arch::aarch64::gic::Vgic;
@@ -80,9 +81,10 @@ pub trait DeviceInfoForFdt {
 }
 
 /// Errors thrown while configuring the Flattened Device Tree for aarch64.
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
     /// Failure in writing FDT in memory.
+    #[error("Failure in writing FDT in memory")]
     WriteFdtToMemory(GuestMemoryError),
 }
 type Result<T> = result::Result<T, Error>;

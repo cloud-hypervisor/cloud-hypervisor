@@ -4,17 +4,22 @@ use std::io::{Read, Seek, SeekFrom};
 use std::os::fd::AsFd;
 use std::result;
 use vm_memory::{GuestAddress, GuestMemory};
+use thiserror::Error;
 
 /// Errors thrown while loading UEFI binary
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
     /// Unable to seek to UEFI image start.
+    #[error("Unable to seek to UEFI image start")]
     SeekUefiStart,
     /// Unable to seek to UEFI image end.
+    #[error("Unable to seek to UEFI image end")]
     SeekUefiEnd,
     /// UEFI image too big.
+    #[error("UEFI image too big")]
     UefiTooBig,
     /// Unable to read UEFI image
+    #[error("Unable to read UEFI image")]
     ReadUefiImage,
 }
 type Result<T> = result::Result<T, Error>;
