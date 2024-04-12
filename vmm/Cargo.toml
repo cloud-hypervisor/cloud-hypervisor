@@ -29,7 +29,7 @@ clap = "4.5.4"
 devices = { path = "../devices" }
 epoll = "4.3.3"
 event_monitor = { path = "../event_monitor" }
-flume = "0.10.14"
+flume = "0.11.0"
 futures = { version = "0.3.30", optional = true }
 gdbstub = { version = "0.7.1", optional = true }
 gdbstub_arch = { version = "0.3.0", optional = true }
