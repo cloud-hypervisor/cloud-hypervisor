@@ -30,6 +30,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
 use std::time::Instant;
 use std::{convert, error, fmt, io};
+use thiserror::Error;
 use vhost::vhost_user::message::*;
 use vhost::vhost_user::Listener;
 use vhost_user_backend::{VhostUserBackendMut, VhostUserDaemon, VringRwLock, VringState, VringT};
@@ -58,19 +59,25 @@ type Result<T> = std::result::Result<T, Error>;
 type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Error)]
 enum Error {
     /// Failed to create kill eventfd
+    #[error("Failed to create kill eventfd")]
     CreateKillEventFd(io::Error),
     /// Failed to parse configuration string
+    #[error("Failed to parse configuration string")]
     FailedConfigParse(OptionParserError),
     /// Failed to handle event other than input event.
+    #[error("Failed to handle event other than input event")]
     HandleEventNotEpollIn,
     /// Failed to handle unknown event.
+    #[error("Failed to handle unknown event")]
     HandleEventUnknownEvent,
     /// No path provided
+    #[error("No path provided")]
     PathParameterMissing,
     /// No socket provided
+    #[error("No socket provided")]
     SocketParameterMissing,
 }
 
