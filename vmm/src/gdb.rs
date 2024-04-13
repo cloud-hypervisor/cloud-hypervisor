@@ -85,10 +85,15 @@ pub trait Debuggable: vm_migration::Pausable {
 
 #[derive(Debug)]
 pub enum Error {
+    #[error("VM error")]
     Vm(crate::vm::Error),
+    #[error("GDB Request error")]
     GdbRequest,
+    #[error("GDB Response notify error")]
     GdbResponseNotify(std::io::Error),
+    #[error("GDB Response error")]
     GdbResponse(mpsc::RecvError),
+    #[error("GDB Response timed out")]
     GdbResponseTimeout(mpsc::RecvTimeoutError),
 }
 type GdbResult<T> = std::result::Result<T, Error>;

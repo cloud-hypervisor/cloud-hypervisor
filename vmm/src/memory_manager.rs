@@ -201,145 +201,188 @@ pub struct MemoryManager {
     uefi_flash: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
     /// Failed to create shared file.
+    #[error("Failed to create shared file")]
     SharedFileCreate(io::Error),
 
     /// Failed to set shared file length.
+    #[error("Failed to set shared file length.")]
     SharedFileSetLen(io::Error),
 
     /// Mmap backed guest memory error
+    #[error("Mmap backed guest memory error")]
     GuestMemory(MmapError),
 
     /// Failed to allocate a memory range.
+    #[error("Failed to allocate a memory range.")]
     MemoryRangeAllocation,
 
     /// Error from region creation
+    #[error("Error from region creation")]
     GuestMemoryRegion(MmapRegionError),
 
     /// No ACPI slot available
+    #[error("No ACPI slot available")]
     NoSlotAvailable,
 
     /// Not enough space in the hotplug RAM region
+    #[error("Not enough space in the hotplug RAM region")]
     InsufficientHotplugRam,
 
     /// The requested hotplug memory addition is not a valid size
+    #[error("The requested hotplug memory addition is not a valid size")]
     InvalidSize,
 
     /// Failed to create the user memory region.
+    #[error("Failed to create the user memory region.")]
     CreateUserMemoryRegion(hypervisor::HypervisorVmError),
 
     /// Failed to remove the user memory region.
+    #[error("Failed to remove the user memory region.")]
     RemoveUserMemoryRegion(hypervisor::HypervisorVmError),
 
     /// Failed to EventFd.
+    #[error("Failed to EventFd.")]
     EventFdFail(io::Error),
 
     /// Eventfd write error
+    #[error("Eventfd write error")]
     EventfdError(io::Error),
 
     /// Failed to virtio-mem resize
+    #[error("Failed to virtio-mem resize")]
     VirtioMemResizeFail(virtio_devices::mem::Error),
 
     /// Cannot restore VM
+    #[error("Cannot restore VM")]
     Restore(MigratableError),
 
     /// Cannot restore VM because source URL is missing
+    #[error("Cannot restore VM because source URL is missing")]
     RestoreMissingSourceUrl,
 
     /// Cannot create the system allocator
+    #[error("Cannot create the system allocator")]
     CreateSystemAllocator,
 
     /// Invalid SGX EPC section size
     #[cfg(target_arch = "x86_64")]
+    #[error("Invalid SGX EPC section size")]
     EpcSectionSizeInvalid,
 
     /// Failed allocating SGX EPC region
     #[cfg(target_arch = "x86_64")]
+    #[error("Failed allocating SGX EPC region")]
     SgxEpcRangeAllocation,
 
     /// Failed opening SGX virtual EPC device
     #[cfg(target_arch = "x86_64")]
+    #[error("Failed opening SGX virtual EPC device")]
     SgxVirtEpcOpen(io::Error),
 
     /// Failed setting the SGX virtual EPC section size
     #[cfg(target_arch = "x86_64")]
+    #[error("Failed setting the SGX virtual EPC section size")]
     SgxVirtEpcFileSetLen(io::Error),
 
     /// Failed opening SGX provisioning device
     #[cfg(target_arch = "x86_64")]
+    #[error("Failed opening SGX provisioning device")]
     SgxProvisionOpen(io::Error),
 
     /// Failed enabling SGX provisioning
     #[cfg(target_arch = "x86_64")]
+    #[error("Failed enabling SGX provisioning")]
     SgxEnableProvisioning(hypervisor::HypervisorVmError),
 
     /// Failed creating a new MmapRegion instance.
     #[cfg(target_arch = "x86_64")]
+    #[error("Failed creating a new MmapRegion instance.")]
     NewMmapRegion(vm_memory::mmap::MmapRegionError),
 
     /// No memory zones found.
+    #[error("No memory zones found.")]
     MissingMemoryZones,
 
     /// Memory configuration is not valid.
+    #[error("No memory zones found.")]
     InvalidMemoryParameters,
 
     /// Forbidden operation. Impossible to resize guest memory if it is
     /// backed by user defined memory regions.
+    #[error("Forbidden operation. Impossible to resize guest memory if it is backed by user defined memory regions")]
     InvalidResizeWithMemoryZones,
 
     /// It's invalid to try applying a NUMA policy to a memory zone that is
     /// memory mapped with MAP_SHARED.
+    #[error("It's invalid to try applying a NUMA policy to a memory zone that is memory mapped with MAP_SHARED")]
     InvalidSharedMemoryZoneWithHostNuma,
 
     /// Failed applying NUMA memory policy.
+    #[error("Failed applying NUMA memory policy.")]
     ApplyNumaPolicy(io::Error),
 
     /// Memory zone identifier is not unique.
+    #[error("Memory zone identifier is not unique.")]
     DuplicateZoneId,
 
     /// No virtio-mem resizing handler found.
+    #[error("No virtio-mem resizing handler found.")]
     MissingVirtioMemHandler,
 
     /// Unknown memory zone.
+    #[error("Unknown memory zone.")]
     UnknownMemoryZone,
 
     /// Invalid size for resizing. Can be anything except 0.
+    #[error("Invalid size for resizing. Can be anything except 0.")]
     InvalidHotplugSize,
 
     /// Invalid hotplug method associated with memory zones resizing capability.
+    #[error("Invalid hotplug method associated with memory zones resizing capability.")]
     InvalidHotplugMethodWithMemoryZones,
 
     /// Could not find specified memory zone identifier from hash map.
+    #[error("Could not find specified memory zone identifier from hash map.")]
     MissingZoneIdentifier,
 
     /// Resizing the memory zone failed.
+    #[error("Resizing the memory zone failed.")]
     ResizeZone,
 
     /// Guest address overflow
+    #[error("Guest address overflow")]
     GuestAddressOverFlow,
 
     /// Error opening snapshot file
+    #[error("Error opening snapshot file")]
     SnapshotOpen(io::Error),
 
     // Error copying snapshot into region
+    #[error("Error copying snapshot into region")]
     SnapshotCopy(GuestMemoryError),
 
     /// Failed to allocate MMIO address
+    #[error("Failed to allocate MMIO address")]
     AllocateMmioAddress,
 
     #[cfg(target_arch = "aarch64")]
     /// Failed to create UEFI flash
+    #[error("Failed to create UEFI flash")]
     CreateUefiFlash(HypervisorVmError),
 
     /// Using a directory as a backing file for memory is not supported
+    #[error("Using a directory as a backing file for memory is not supported")]
     DirectoryAsBackingFileForMemory,
 
     /// Failed to stat filesystem
+    #[error("Failed to stat filesystem")]
     GetFileSystemBlockSize(io::Error),
 
     /// Memory size is misaligned with default page size or its hugepage size
+    #[error("Memory size is misaligned with default page size or its hugepage size")]
     MisalignedMemorySize,
 }
 

@@ -23,177 +23,259 @@ const MAX_NUM_PCI_SEGMENTS: u16 = 96;
 #[derive(Debug, Error)]
 pub enum Error {
     /// Filesystem tag is missing
+    #[error("Filesystem tag missing")]
     ParseFsTagMissing,
+    /// Filesystem tag is too long
+    #[error("Filesystem tag too long")]
+    ParseFsTagTooLong,
     /// Filesystem socket is missing
+    #[error("Filesystem socket missing")]
     ParseFsSockMissing,
     /// Missing persistent memory file parameter.
+    #[error("Persistent memory file param missing")]
     ParsePmemFileMissing,
     /// Missing vsock socket path parameter.
+    #[error("Missing vsock socket path param")]
     ParseVsockSockMissing,
     /// Missing vsock cid parameter.
+    #[error("Missing vsock cid param")]
     ParseVsockCidMissing,
     /// Missing restore source_url parameter.
+    #[error("Missing source url param")]
     ParseRestoreSourceUrlMissing,
     /// Error parsing CPU options
+    #[error("Error parsing CPU options")]
     ParseCpus(OptionParserError),
     /// Invalid CPU features
+    #[error("Invalid CPU features")]
     InvalidCpuFeatures(String),
     /// Error parsing memory options
+    #[error("Error parsing memory options")]
     ParseMemory(OptionParserError),
     /// Error parsing memory zone options
+    #[error("Error parsing memory zone options")]
     ParseMemoryZone(OptionParserError),
     /// Missing 'id' from memory zone
+    #[error("Missing id from memory zone")]
     ParseMemoryZoneIdMissing,
     /// Error parsing rate-limiter group options
+    #[error("Error parsing rate-limiter group options")]
     ParseRateLimiterGroup(OptionParserError),
     /// Error parsing disk options
+    #[error("Error parsing disk options")]
     ParseDisk(OptionParserError),
     /// Error parsing network options
+    #[error("Error parsing network options")]
     ParseNetwork(OptionParserError),
     /// Error parsing RNG options
+    #[error("Error parsing RNG options")]
     ParseRng(OptionParserError),
     /// Error parsing balloon options
+    #[error("Error parsing balloon options")]
     ParseBalloon(OptionParserError),
     /// Error parsing filesystem parameters
+    #[error("Error parsing filesys params")]
     ParseFileSystem(OptionParserError),
     /// Error parsing persistent memory parameters
+    #[error("Error parsing persistent memory params")]
     ParsePersistentMemory(OptionParserError),
     /// Failed parsing console
+    #[error("Failed parsing console")]
     ParseConsole(OptionParserError),
     #[cfg(target_arch = "x86_64")]
     /// Failed parsing debug-console
+    #[error("Failed pasing debug-console")]
     ParseDebugConsole(OptionParserError),
     /// No mode given for console
+    #[error("No mode given for console")]
     ParseConsoleInvalidModeGiven,
     /// Failed parsing device parameters
+    #[error("Failed parsing device params")]
     ParseDevice(OptionParserError),
     /// Missing path from device,
+    #[error("Missing path from device")]
     ParseDevicePathMissing,
     /// Failed parsing vsock parameters
+    #[error("Failed parsing vsock params")]
     ParseVsock(OptionParserError),
     /// Failed parsing restore parameters
+    #[error("Failed parsing restore params")]
     ParseRestore(OptionParserError),
     /// Failed parsing SGX EPC parameters
     #[cfg(target_arch = "x86_64")]
+    #[error("Failed parsing SGX EPC params")]
     ParseSgxEpc(OptionParserError),
     /// Missing 'id' from SGX EPC section
     #[cfg(target_arch = "x86_64")]
+    #[error("Missing id from SGX EPC section")]
     ParseSgxEpcIdMissing,
     /// Failed parsing NUMA parameters
+    #[error("Failed parsing NUMA params")]
     ParseNuma(OptionParserError),
     /// Failed validating configuration
+    #[error("Failed validating configuration")]
     Validation(ValidationError),
     #[cfg(feature = "sev_snp")]
     /// Failed parsing SEV-SNP config
+    #[error("Failed parsing SEV-SNP config")]
     ParseSevSnp(OptionParserError),
     #[cfg(feature = "tdx")]
     /// Failed parsing TDX config
+    #[error("Failed parsing TDX config")]
     ParseTdx(OptionParserError),
     #[cfg(feature = "tdx")]
     /// No TDX firmware
+    #[error("No TDX firmware")]
     FirmwarePathMissing,
     /// Failed parsing userspace device
+    #[error("Failed parsing userspace device")]
     ParseUserDevice(OptionParserError),
     /// Missing socket for userspace device
+    #[error("Missing socket for userspace device")]
     ParseUserDeviceSocketMissing,
     /// Failed parsing platform parameters
+    #[error("Failed parsing platform params")]
     ParsePlatform(OptionParserError),
     /// Failed parsing vDPA device
+    #[error("Failed parsing vDPA device")]
     ParseVdpa(OptionParserError),
     /// Missing path for vDPA device
+    #[error("Missing path for vDPA device")]
     ParseVdpaPathMissing,
     /// Failed parsing TPM device
+    #[error("Failed parsing TPM device")]
     ParseTpm(OptionParserError),
     /// Missing path for TPM device
+    #[error("Missing path for TPM device")]
     ParseTpmPathMissing,
 }
 
 #[derive(Debug, PartialEq, Eq, Error)]
 pub enum ValidationError {
     /// No kernel specified
+    #[error("No kernel specified")]
     KernelMissing,
     /// Missing file value for console
+    #[error("Missing file value for console")]
     ConsoleFileMissing,
     /// Missing socket path for console
+    #[error("Missing socket path for console")]
     ConsoleSocketPathMissing,
     /// Max is less than boot
+    #[error("Max is less than boot")]
     CpusMaxLowerThanBoot,
     /// Missing file value for debug-console
     #[cfg(target_arch = "x86_64")]
+    #[error("Missing file value for debug-console")]
     DebugconFileMissing,
     /// Both socket and path specified
+    #[error("Both socket and path specified")]
     DiskSocketAndPath,
     /// Using vhost user requires shared memory
+    #[error("Using vhost user requires shared memory")]
     VhostUserRequiresSharedMemory,
     /// No socket provided for vhost_use
+    #[error("No socket provided for vhost use")]
     VhostUserMissingSocket,
     /// Trying to use IOMMU without PCI
+    #[error("Trying to use IOMMU without PCI")]
     IommuUnsupported,
     /// Trying to use VFIO without PCI
+    #[error("Trying to use IOMMU without PCI")]
     VfioUnsupported,
     /// CPU topology count doesn't match max
+    #[error("CPU topology count doesn't match max")]
     CpuTopologyCount,
     /// One part of the CPU topology was zero
+    #[error("One part of the CPU topology was zero")]
     CpuTopologyZeroPart,
     #[cfg(target_arch = "aarch64")]
     /// Dies per package must be 1
+    #[error("Dies per package must be 1")]
     CpuTopologyDiesPerPackage,
     /// Virtio needs a min of 2 queues
+    #[error("Virtio needs a min of 2 queues")]
     VnetQueueLowerThan2,
     /// The input queue number for virtio_net must match the number of input fds
+    #[error("The input queue number for virtio_net must match the number of input fds")]
     VnetQueueFdMismatch,
     /// Using reserved fd
+    #[error("Using reserved fd")]
     VnetReservedFd,
     /// Hardware checksum offload is disabled.
+    #[error("Hardware checksum offload is disabled.")]
     NoHardwareChecksumOffload,
     /// Hugepages not turned on
+    #[error("Hugepages not turned on")]
     HugePageSizeWithoutHugePages,
     /// Huge page size is not power of 2
+    #[error("Huge page size is not power of 2")]
     InvalidHugePageSize(u64),
     /// CPU Hotplug is not permitted with TDX
     #[cfg(feature = "tdx")]
+    #[error("CPU Hotplug is not permitted with TDX")]
     TdxNoCpuHotplug,
     /// Missing firmware for TDX
     #[cfg(feature = "tdx")]
+    #[error("Missing firmware for TDX")]
     TdxFirmwareMissing,
     /// Insufficient vCPUs for queues
+    #[error("Insufficient vCPUs for queues")]
     TooManyQueues,
     /// Need shared memory for vfio-user
+    #[error("Need shared memory for vfio-user")]
     UserDevicesRequireSharedMemory,
     /// VSOCK Context Identifier has a special meaning, unsuitable for a VM.
+    #[error("VSOCK Context Identifier has a special meaning, unsuitable for a VM.")]
     VsockSpecialCid(u32),
     /// Memory zone is reused across NUMA nodes
+    #[error("Memory zone is reused across NUMA nodes")]
     MemoryZoneReused(String, u32, u32),
     /// Invalid number of PCI segments
+    #[error("Invalid number of PCI segments")]
     InvalidNumPciSegments(u16),
     /// Invalid PCI segment id
+    #[error("Invalid PIC segment id")]
     InvalidPciSegment(u16),
     /// Balloon too big
+    #[error("Balloon too big")]
     BalloonLargerThanRam(u64, u64),
     /// On a IOMMU segment but not behind IOMMU
+    #[error("On a IOMMU segment but not behind IOMMU")]
     OnIommuSegment(u16),
     // On a IOMMU segment but IOMMU not supported
+    #[error("On a IOMMU segment but IOMMU not supported")]
     IommuNotSupportedOnSegment(u16),
     // Identifier is not unique
+    #[error("Identifier is not unique")]
     IdentifierNotUnique(String),
     /// Invalid identifier
+    #[error("Invalid identifier")]
     InvalidIdentifier(String),
     /// Placing the device behind a virtual IOMMU is not supported
+    #[error("Placing the device behind a virtual IOMMU is not supported")]
     IommuNotSupported,
     /// Duplicated device path (device added twice)
+    #[error("Duplicated device path (device added twice)")]
     DuplicateDevicePath(String),
     /// Provided MTU is lower than what the VIRTIO specification expects
+    #[error("Provided MTU is lower than what the VIRTIO specification expects")]
     InvalidMtu(u16),
     /// PCI segment is reused across NUMA nodes
+    #[error("Provided MTU is lower than what the VIRTIO specification expects")]
     PciSegmentReused(u16, u32, u32),
     /// Default PCI segment is assigned to NUMA node other than 0.
+    #[error("Default PCI segment is assigned to NUMA node other than 0.")]
     DefaultPciSegmentInvalidNode(u32),
     /// Invalid rate-limiter group
+    #[error("Invalid rate-limiter group")]
     InvalidRateLimiterGroup,
     /// The specified I/O port was invalid. It should be provided in hex, such as `0xe9`.
     #[cfg(target_arch = "x86_64")]
+    #[error("The specified I/O port was invalid. It should be provided in hex, such as `0xe9`.")]
     InvalidIoPortHex(String),
     #[cfg(feature = "sev_snp")]
+    #[error("Host Data was invalid")]
     InvalidHostData,
 }
 
