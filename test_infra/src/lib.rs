@@ -24,9 +24,9 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 use std::{fmt, fs};
+use thiserror::Error;
 use vmm_sys_util::tempdir::TempDir;
 use wait_timeout::ChildExt;
-use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum WaitTimeoutError {
