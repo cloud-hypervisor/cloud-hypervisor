@@ -51,8 +51,8 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use vmm_sys_util::timerfd::TimerFd;
 use thiserror::Error;
+use vmm_sys_util::timerfd::TimerFd;
 
 /// Module for group rate limiting.
 pub mod group;
