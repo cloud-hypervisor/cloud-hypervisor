@@ -6,7 +6,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
-use thiserror::Error;
 use crate::{NumaNodes, PciSpaceInfo};
 use byteorder::{BigEndian, ByteOrder};
 use hypervisor::arch::aarch64::gic::Vgic;
@@ -27,6 +26,7 @@ use super::layout::{
 };
 use std::fs;
 use std::path::Path;
+use thiserror::Error;
 use vm_fdt::{FdtWriter, FdtWriterResult};
 use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError, GuestMemoryRegion};
 

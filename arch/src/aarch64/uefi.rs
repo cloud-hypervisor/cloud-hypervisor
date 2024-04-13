@@ -3,8 +3,8 @@
 use std::io::{Read, Seek, SeekFrom};
 use std::os::fd::AsFd;
 use std::result;
-use vm_memory::{GuestAddress, GuestMemory};
 use thiserror::Error;
+use vm_memory::{GuestAddress, GuestMemory};
 
 /// Errors thrown while loading UEFI binary
 #[derive(Debug, Error)]

@@ -18,8 +18,8 @@ use log::{log_enabled, Level};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
-use vm_memory::{Address, GuestAddress, GuestMemory, GuestMemoryAtomic};
 use thiserror::Error;
+use vm_memory::{Address, GuestAddress, GuestMemory, GuestMemoryAtomic};
 
 pub const _NSIG: i32 = 65;
 
