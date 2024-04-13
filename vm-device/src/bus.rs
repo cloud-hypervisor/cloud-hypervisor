@@ -11,6 +11,7 @@ use std::cmp::Ordering;
 use std::collections::btree_map::BTreeMap;
 use std::sync::{Arc, Barrier, Mutex, RwLock, Weak};
 use std::{convert, error, fmt, io, result};
+use thiserror::Error;
 
 /// Trait for devices that respond to reads or writes in an arbitrary address space.
 ///
@@ -26,13 +27,16 @@ pub trait BusDevice: Send {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
     /// The insertion failed because the new device overlapped with an old device.
+    #[error("The insertion failed because new device overlapped with an old device")]
     Overlap,
     /// Failed to operate on zero sized range.
+    #[error("Failed to operate on zero sized range")]
     ZeroSizedRange,
     /// Failed to find address range.
+    #[error("Failed to find address range")]
     MissingAddressRange,
 }
 
@@ -91,8 +95,7 @@ impl PartialOrd for BusRange {
 
 /// A device container for routing reads and writes over some address space.
 ///
-/// This doesn't have any restrictions on what kind of device or address space this applies to. The
-/// only restriction is that no two devices can overlap in this address space.
+/// This doesn't have any restrictions on what kind of device or address space this applies to. The only restriction is that no two devices can overlap in this address space.
 #[derive(Default)]
 pub struct Bus {
     devices: RwLock<BTreeMap<BusRange, Weak<Mutex<dyn BusDevice>>>>,
