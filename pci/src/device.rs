@@ -8,9 +8,9 @@ use std::any::Any;
 use std::fmt::{self, Display};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{io, result};
+use thiserror::Error;
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::{BusDevice, Resource};
-use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Error {

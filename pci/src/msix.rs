@@ -8,6 +8,7 @@ use byteorder::{ByteOrder, LittleEndian};
 use std::io;
 use std::result;
 use std::sync::Arc;
+use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use vm_device::interrupt::{
@@ -15,7 +16,6 @@ use vm_device::interrupt::{
 };
 use vm_memory::ByteValued;
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, VersionMapped};
-use thiserror::Error;
 
 const MAX_MSIX_VECTORS_PER_DEVICE: u16 = 2048;
 const MSIX_TABLE_ENTRIES_MODULO: u64 = 16;

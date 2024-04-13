@@ -7,11 +7,11 @@ use crate::{MsixConfig, PciInterruptPin};
 use byteorder::{ByteOrder, LittleEndian};
 use std::fmt::{self, Display};
 use std::sync::{Arc, Mutex};
+use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeError, VersionizeResult};
 use versionize_derive::Versionize;
 use vm_device::PciBarType;
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, VersionMapped};
-use thiserror::Error;
 
 // The number of 32bit registers in the config space, 4096 bytes.
 const NUM_CONFIGURATION_REGISTERS: usize = 1024;
