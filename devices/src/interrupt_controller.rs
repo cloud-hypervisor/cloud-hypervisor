@@ -4,8 +4,8 @@
 
 use std::io;
 use std::result;
-use vmm_sys_util::eventfd::EventFd;
 use thiserror::Error;
+use vmm_sys_util::eventfd::EventFd;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -13,7 +13,7 @@ pub enum Error {
     #[error("Invalid trigger mode")]
     InvalidTriggerMode,
     /// Invalid delivery mode.
-    #[error("Invalid delivery mode")]
+    #[error("Invalid delivery mode.")]
     InvalidDeliveryMode,
     /// Failed creating the interrupt source group.
     #[error("Failed creating the interrupt source group: {0}")]
