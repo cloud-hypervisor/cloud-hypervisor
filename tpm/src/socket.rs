@@ -10,7 +10,7 @@ use std::os::unix::net::UnixStream;
 use thiserror::Error;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
     #[error("Cannot connect to tpm Socket: {0}")]
     ConnectToSocket(#[source] anyhow::Error),
