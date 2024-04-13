@@ -21,11 +21,11 @@ use std::fs::OpenOptions;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
 use std::str;
+use thiserror::Error;
 use vmm_sys_util::{
     file_traits::FileSetLen, file_traits::FileSync, seek_hole::SeekHole, write_zeroes::PunchHole,
     write_zeroes::WriteZeroesAt,
 };
-use thiserror::Error;
 
 pub use crate::qcow::raw_file::RawFile;
 
