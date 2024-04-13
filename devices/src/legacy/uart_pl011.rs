@@ -12,6 +12,7 @@ use std::fmt;
 use std::sync::{Arc, Barrier};
 use std::time::Instant;
 use std::{io, result};
+use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use vm_device::interrupt::InterruptSourceGroup;
@@ -19,7 +20,6 @@ use vm_device::BusDevice;
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
 };
-use thiserror::Error;
 
 /* Registers */
 const UARTDR: u64 = 0;

@@ -11,6 +11,7 @@ use crate::{read_le_u32, write_le_u32};
 use std::result;
 use std::sync::{Arc, Barrier};
 use std::{fmt, io};
+use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
 use vm_device::interrupt::InterruptSourceGroup;
@@ -18,7 +19,6 @@ use vm_device::BusDevice;
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
 };
-use thiserror::Error;
 
 const OFS_DATA: u64 = 0x400; // Data Register
 const GPIODIR: u64 = 0x400; // Direction Register
