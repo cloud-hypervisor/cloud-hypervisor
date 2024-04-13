@@ -6,8 +6,9 @@
 use std::collections::btree_map::BTreeMap;
 use std::result;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
+    #[error("Overflow error")]
     Overflow,
 }
 

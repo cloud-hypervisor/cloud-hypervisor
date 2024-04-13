@@ -11,10 +11,13 @@ use std::collections::btree_map::BTreeMap;
 use std::result;
 use vm_memory::{Address, GuestAddress, GuestUsize};
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
+    #[error("Overflow error")]
     Overflow,
+    #[error("Memory overlap with previous range error")]
     Overlap,
+    #[error("Address is not aligned error")]
     UnalignedAddress,
 }
 

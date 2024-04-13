@@ -27,29 +27,40 @@ mod defs {
     pub const MUXER_KILLQ_SIZE: usize = 128;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
     /// Error converting from UTF-8
+    #[error("Error converting from UTF-8")]
     ConvertFromUtf8(std::str::Utf8Error),
     /// Error registering a new epoll-listening FD.
+    #[error("Error registering a new epoll-listening FD")]
     EpollAdd(std::io::Error),
     /// Error creating an epoll FD.
+    #[error("Error creating an epoll FD")]
     EpollFdCreate(std::io::Error),
     /// The host made an invalid vsock port connection request.
+    #[error("Invalid vsock port connection request")]
     InvalidPortRequest,
     /// Error parsing integer.
+    #[error("Error parsing integer")]
     ParseInteger(std::num::ParseIntError),
     /// Error reading stream port.
+    #[error("Error reading stream port")]
     ReadStreamPort(Box<Error>),
     /// Error accepting a new connection from the host-side Unix socket.
+    #[error("Error accepting a new connection from host-side unix socket")]
     UnixAccept(std::io::Error),
     /// Error binding to the host-side Unix socket.
+    #[error("Error binding host-side unix socket")]
     UnixBind(std::io::Error),
     /// Error connecting to a host-side Unix socket.
+    #[error("Error connecting to host-side unix socket")]
     UnixConnect(std::io::Error),
     /// Error reading from host-side Unix socket.
+    #[error("Error reading from host-side unix socket")]
     UnixRead(std::io::Error),
     /// Muxer connection limit reached.
+    #[error("Maximum connections reached")]
     TooManyConnections,
 }
 
