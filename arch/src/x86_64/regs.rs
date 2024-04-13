@@ -15,8 +15,8 @@ use hypervisor::arch::x86::regs::CR0_PE;
 use hypervisor::arch::x86::{FpuState, SpecialRegisters, StandardRegisters};
 use std::sync::Arc;
 use std::{mem, result};
-use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError};
 use thiserror::Error;
+use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError};
 
 #[derive(Debug, Error)]
 pub enum Error {

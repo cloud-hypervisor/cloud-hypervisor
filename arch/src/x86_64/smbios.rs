@@ -12,10 +12,10 @@ use std::fmt::{self, Display};
 use std::mem;
 use std::result;
 use std::slice;
+use thiserror::Error;
 use uuid::Uuid;
 use vm_memory::ByteValued;
 use vm_memory::{Address, Bytes, GuestAddress};
-use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Error {
