@@ -34,25 +34,34 @@ type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 pub type Result<T> = std::result::Result<T, Error>;
 type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
     /// Failed to create kill eventfd.
+    #[error("Failed to create kill eventfd")]
     CreateKillEventFd(io::Error),
     /// Failed to parse configuration string.
+    #[error("Failed to parse configuration string")]
     FailedConfigParse(OptionParserError),
     /// Failed to signal used queue.
+    #[error("Failed to signal used queue")]
     FailedSignalingUsedQueue(io::Error),
     /// Failed to handle event other than input event.
+    #[error("Failed to handle event other than input event")]
     HandleEventNotEpollIn,
     /// Failed to handle unknown event.
+    #[error("Failed to handle unknown event ")]
     HandleEventUnknownEvent,
     /// Failed to open tap device.
+    #[error("Failed to open tap device")]
     OpenTap(OpenTapError),
     /// No socket provided.
+    #[error("No socket provided")]
     SocketParameterMissing,
     /// Underlying QueuePair error.
+    #[error("Underlying QueuePair error")]
     NetQueuePair(net_util::NetQueuePairError),
     /// Failed to register the TAP listener.
+    #[error("Failed to register the TAP listener")]
     RegisterTapListener(io::Error),
 }
 
