@@ -123,3 +123,30 @@ $ ls /sys/kernel/iommu_groups/22/devices/
 This means these two devices are under the same IOMMU group 22. In such case,
 it is important to bind both devices to VFIO and pass them both through the
 VM, otherwise this could cause some functional and security issues.
+
+### Advanced Configuration Options
+
+Some VFIO devices have a 32-bit mmio BAR. When using many such devices, it is
+possible to exhaust the 32-bit mmio space available on a PCI segment. The
+following example demonstrates an example device with a 16 MiB 32-bit mmio BAR.
+```
+lspci -s 0000:01:00.0  -v
+0000:01:00.0 3D controller: NVIDIA Corporation Device 26b9 (rev a1)
+    [...]
+    Memory at f9000000 (32-bit, non-prefetchable) [size=16M]
+    Memory at 46000000000 (64-bit, prefetchable) [size=64G]
+    Memory at 48040000000 (64-bit, prefetchable) [size=32M]
+    [...]
+```
+
+When using multiple PCI segments, the 32-bit mmio address space available to
+be allocated to VFIO devices is equally split between all PCI segments by
+default. This can be tuned with the `--pci-segment` flag. The following example
+demonstrates a guest with two PCI segments. 2/3 of the 32-bit mmio address
+space is available for use by devices on PCI segment 0 and 1/3 of the 32-bit
+mmio address space is available for use by devices on PCI segment 1.
+```
+--platform num_pci_segments=2
+--pci-segment pci_segment=0,mmio32_aperture_weight=2
+--pci-segment pci_segment=1,mmio32_aperture_weight=1
+```

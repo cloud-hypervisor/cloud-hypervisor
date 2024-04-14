@@ -94,6 +94,22 @@ pub struct PlatformConfig {
     pub sev_snp: bool,
 }
 
+pub const DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT: u32 = 1;
+
+fn default_pci_segment_aperture_weight() -> u32 {
+    DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct PciSegmentConfig {
+    #[serde(default)]
+    pub pci_segment: u16,
+    #[serde(default = "default_pci_segment_aperture_weight")]
+    pub mmio32_aperture_weight: u32,
+    #[serde(default = "default_pci_segment_aperture_weight")]
+    pub mmio64_aperture_weight: u32,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct MemoryZoneConfig {
     pub id: String,
@@ -620,6 +636,7 @@ pub struct VmConfig {
     #[cfg(feature = "guest_debug")]
     #[serde(default)]
     pub gdb: bool,
+    pub pci_segments: Option<Vec<PciSegmentConfig>>,
     pub platform: Option<PlatformConfig>,
     pub tpm: Option<TpmConfig>,
     // Preserved FDs are the ones that share the same life-time as its holding

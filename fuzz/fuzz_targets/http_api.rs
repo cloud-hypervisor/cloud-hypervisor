@@ -187,6 +187,7 @@ impl RequestHandler for StubApiRequestHandler {
                 watchdog: false,
                 #[cfg(feature = "guest_debug")]
                 gdb: false,
+                pci_segments: None,
                 platform: None,
                 tpm: None,
                 preserved_fds: None,
