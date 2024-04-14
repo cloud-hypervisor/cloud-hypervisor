@@ -98,6 +98,8 @@ pub enum Error {
     ParseUserDevice(OptionParserError),
     /// Missing socket for userspace device
     ParseUserDeviceSocketMissing,
+    /// Error parsing pci segment options
+    ParsePciSegment(OptionParserError),
     /// Failed parsing platform parameters
     ParsePlatform(OptionParserError),
     /// Failed parsing vDPA device
@@ -170,6 +172,8 @@ pub enum ValidationError {
     InvalidNumPciSegments(u16),
     /// Invalid PCI segment id
     InvalidPciSegment(u16),
+    /// Invalid PCI segment aperture weight
+    InvalidPciSegmentApertureWeight(u32),
     /// Balloon too big
     BalloonLargerThanRam(u64, u64),
     /// On a IOMMU segment but not behind IOMMU
@@ -278,6 +282,9 @@ impl fmt::Display for ValidationError {
             }
             InvalidPciSegment(pci_segment) => {
                 write!(f, "Invalid PCI segment id: {pci_segment}")
+            }
+            InvalidPciSegmentApertureWeight(aperture_weight) => {
+                write!(f, "Invalid PCI segment aperture weight: {aperture_weight}")
             }
             BalloonLargerThanRam(balloon_size, ram_size) => {
                 write!(
@@ -395,6 +402,7 @@ impl fmt::Display for Error {
             ParseTdx(o) => write!(f, "Error parsing --tdx: {o}"),
             #[cfg(feature = "tdx")]
             FirmwarePathMissing => write!(f, "TDX firmware missing"),
+            ParsePciSegment(o) => write!(f, "Error parsing --pci-segment: {o}"),
             ParsePlatform(o) => write!(f, "Error parsing --platform: {o}"),
             ParseVdpa(o) => write!(f, "Error parsing --vdpa: {o}"),
             ParseVdpaPathMissing => write!(f, "Error parsing --vdpa: path missing"),
@@ -444,6 +452,7 @@ pub struct VmParams<'a> {
     pub watchdog: bool,
     #[cfg(feature = "guest_debug")]
     pub gdb: bool,
+    pub pci_segments: Option<Vec<&'a str>>,
     pub platform: Option<&'a str>,
     pub tpm: Option<&'a str>,
     #[cfg(feature = "igvm")]
@@ -504,6 +513,9 @@ impl<'a> VmParams<'a> {
             .get_many::<String>("numa")
             .map(|x| x.map(|y| y as &str).collect());
         let watchdog = args.get_flag("watchdog");
+        let pci_segments: Option<Vec<&str>> = args
+            .get_many::<String>("pci-segment")
+            .map(|x| x.map(|y| y as &str).collect());
         let platform = args.get_one::<String>("platform").map(|x| x as &str);
         #[cfg(feature = "guest_debug")]
         let gdb = args.contains_id("gdb");
@@ -542,6 +554,7 @@ impl<'a> VmParams<'a> {
             watchdog,
             #[cfg(feature = "guest_debug")]
             gdb,
+            pci_segments,
             platform,
             tpm,
             #[cfg(feature = "igvm")]
@@ -675,6 +688,64 @@ impl CpusConfig {
             affinity,
             features,
         })
+    }
+}
+
+impl PciSegmentConfig {
+    pub const SYNTAX: &'static str = "PCI Segment parameters \
+         \"pci_segment=<segment_id>,mmio32_aperture_weight=<scale>,mmio64_aperture_weight=<scale>\"";
+
+    pub fn parse(disk: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        parser
+            .add("mmio32_aperture_weight")
+            .add("mmio64_aperture_weight")
+            .add("pci_segment");
+        parser.parse(disk).map_err(Error::ParsePciSegment)?;
+
+        let pci_segment = parser
+            .convert("pci_segment")
+            .map_err(Error::ParsePciSegment)?
+            .unwrap_or_default();
+        let mmio32_aperture_weight = parser
+            .convert("mmio32_aperture_weight")
+            .map_err(Error::ParsePciSegment)?
+            .unwrap_or(DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT);
+        let mmio64_aperture_weight = parser
+            .convert("mmio64_aperture_weight")
+            .map_err(Error::ParsePciSegment)?
+            .unwrap_or(DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT);
+
+        Ok(PciSegmentConfig {
+            pci_segment,
+            mmio32_aperture_weight,
+            mmio64_aperture_weight,
+        })
+    }
+
+    pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        let num_pci_segments = match &vm_config.platform {
+            Some(platform_config) => platform_config.num_pci_segments,
+            None => 1,
+        };
+
+        if self.pci_segment >= num_pci_segments {
+            return Err(ValidationError::InvalidPciSegment(self.pci_segment));
+        }
+
+        if self.mmio32_aperture_weight == 0 {
+            return Err(ValidationError::InvalidPciSegmentApertureWeight(
+                self.mmio32_aperture_weight,
+            ));
+        }
+
+        if self.mmio64_aperture_weight == 0 {
+            return Err(ValidationError::InvalidPciSegmentApertureWeight(
+                self.mmio64_aperture_weight,
+            ));
+        }
+
+        Ok(())
     }
 }
 
@@ -2449,6 +2520,12 @@ impl VmConfig {
             }
         }
 
+        if let Some(pci_segments) = &self.pci_segments {
+            for pci_segment in pci_segments {
+                pci_segment.validate(self)?;
+            }
+        }
+
         self.platform.as_ref().map(|p| p.validate()).transpose()?;
         self.iommu |= self
             .platform
@@ -2557,6 +2634,16 @@ impl VmConfig {
             vsock = Some(vsock_config);
         }
 
+        let mut pci_segments: Option<Vec<PciSegmentConfig>> = None;
+        if let Some(pci_segment_list) = &vm_params.pci_segments {
+            let mut pci_segment_config_list = Vec::new();
+            for item in pci_segment_list.iter() {
+                let pci_segment_config = PciSegmentConfig::parse(item)?;
+                pci_segment_config_list.push(pci_segment_config);
+            }
+            pci_segments = Some(pci_segment_config_list);
+        }
+
         let platform = vm_params.platform.map(PlatformConfig::parse).transpose()?;
 
         #[cfg(target_arch = "x86_64")]
@@ -2643,6 +2730,7 @@ impl VmConfig {
             watchdog: vm_params.watchdog,
             #[cfg(feature = "guest_debug")]
             gdb,
+            pci_segments,
             platform,
             tpm,
             preserved_fds: None,
@@ -2764,6 +2852,7 @@ impl Clone for VmConfig {
             #[cfg(target_arch = "x86_64")]
             sgx_epc: self.sgx_epc.clone(),
             numa: self.numa.clone(),
+            pci_segments: self.pci_segments.clone(),
             platform: self.platform.clone(),
             tpm: self.tpm.clone(),
             preserved_fds: self
@@ -2957,6 +3046,46 @@ mod tests {
                 }
             }
         );
+        Ok(())
+    }
+
+    #[test]
+    fn test_pci_segment_parsing() -> Result<()> {
+        assert_eq!(
+            PciSegmentConfig::parse("pci_segment=0")?,
+            PciSegmentConfig {
+                pci_segment: 0,
+                mmio32_aperture_weight: 1,
+                mmio64_aperture_weight: 1,
+            }
+        );
+        assert_eq!(
+            PciSegmentConfig::parse(
+                "pci_segment=0,mmio32_aperture_weight=1,mmio64_aperture_weight=1"
+            )?,
+            PciSegmentConfig {
+                pci_segment: 0,
+                mmio32_aperture_weight: 1,
+                mmio64_aperture_weight: 1,
+            }
+        );
+        assert_eq!(
+            PciSegmentConfig::parse("pci_segment=0,mmio32_aperture_weight=2")?,
+            PciSegmentConfig {
+                pci_segment: 0,
+                mmio32_aperture_weight: 2,
+                mmio64_aperture_weight: 1,
+            }
+        );
+        assert_eq!(
+            PciSegmentConfig::parse("pci_segment=0,mmio64_aperture_weight=2")?,
+            PciSegmentConfig {
+                pci_segment: 0,
+                mmio32_aperture_weight: 1,
+                mmio64_aperture_weight: 2,
+            }
+        );
+
         Ok(())
     }
 
@@ -3536,6 +3665,7 @@ mod tests {
             watchdog: false,
             #[cfg(feature = "guest_debug")]
             gdb: false,
+            pci_segments: None,
             platform: None,
             tpm: None,
             preserved_fds: None,
@@ -3944,6 +4074,28 @@ mod tests {
         assert_eq!(
             invalid_config.validate(),
             Err(ValidationError::PciSegmentReused(1, 0, 1))
+        );
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.pci_segments = Some(vec![PciSegmentConfig {
+            pci_segment: 0,
+            mmio32_aperture_weight: 1,
+            mmio64_aperture_weight: 0,
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::InvalidPciSegmentApertureWeight(0))
+        );
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.pci_segments = Some(vec![PciSegmentConfig {
+            pci_segment: 0,
+            mmio32_aperture_weight: 0,
+            mmio64_aperture_weight: 1,
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::InvalidPciSegmentApertureWeight(0))
         );
 
         let mut invalid_config = valid_config.clone();

@@ -618,6 +618,10 @@ components:
         pvpanic:
           type: boolean
           default: false
+        pci_segments:
+          type: array
+          items:
+            $ref: "#/components/schemas/PciSegmentConfig"
         platform:
           $ref: "#/components/schemas/PlatformConfig"
         tpm:
@@ -682,6 +686,21 @@ components:
             $ref: "#/components/schemas/CpuAffinity"
         features:
           $ref: "#/components/schemas/CpuFeatures"
+
+    PciSegmentConfig:
+      required:
+        - pci_segment
+      type: object
+      properties:
+        pci_segment:
+          type: integer
+          format: int16
+        mmio32_aperture_weight:
+          type: integer
+          format: int32
+        mmio64_aperture_weight:
+          type: integer
+          format: int32
 
     PlatformConfig:
       type: object

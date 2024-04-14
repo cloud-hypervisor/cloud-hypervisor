@@ -356,6 +356,13 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
                 .group("vm-config"),
         )
         .arg(
+            Arg::new("pci-segment")
+                .long("pci-segment")
+                .help(config::PciSegmentConfig::SYNTAX)
+                .num_args(1..)
+                .group("vm-config"),
+        )
+        .arg(
             Arg::new("watchdog")
                 .long("watchdog")
                 .help("Enable virtio-watchdog")
@@ -934,6 +941,7 @@ mod unit_tests {
             watchdog: false,
             #[cfg(feature = "guest_debug")]
             gdb: false,
+            pci_segments: None,
             platform: None,
             tpm: None,
             preserved_fds: None,

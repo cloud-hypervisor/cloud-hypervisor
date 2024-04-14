@@ -22,6 +22,7 @@ use crate::pci_segment::PciSegment;
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::serial_manager::{Error as SerialManagerError, SerialManager};
 use crate::sigwinch_listener::start_sigwinch_listener;
+use crate::vm_config::DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT;
 use crate::GuestRegionMmap;
 use crate::PciDeviceInfo;
 use crate::{device_node, DEVICE_MANAGER_SNAPSHOT_ID};
@@ -969,6 +970,34 @@ pub struct DeviceManager {
     mmio_regions: Arc<Mutex<Vec<MmioRegion>>>,
 }
 
+fn create_mmio_allocators(
+    start: u64,
+    end: u64,
+    num_pci_segments: u16,
+    weights: Vec<u32>,
+    alignment: u64,
+) -> Vec<Arc<Mutex<AddressAllocator>>> {
+    let total_weight: u32 = weights.iter().sum();
+
+    // Start each PCI segment mmio range on an aligned boundary
+    let pci_segment_mmio_size = (end - start + 1) / (alignment * total_weight as u64) * alignment;
+
+    let mut mmio_allocators = vec![];
+    let mut i = 0;
+    for segment_id in 0..num_pci_segments as u64 {
+        let weight = weights[segment_id as usize] as u64;
+        let mmio_start = start + i * pci_segment_mmio_size;
+        let mmio_size = pci_segment_mmio_size * weight;
+        let allocator = Arc::new(Mutex::new(
+            AddressAllocator::new(GuestAddress(mmio_start), mmio_size).unwrap(),
+        ));
+        mmio_allocators.push(allocator);
+        i += weight;
+    }
+
+    mmio_allocators
+}
+
 impl DeviceManager {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -1009,22 +1038,16 @@ impl DeviceManager {
                 1
             };
 
-        let create_mmio_allocators = |start, end, num_pci_segments, alignment| {
-            // Start each PCI segment mmio range on an aligned boundary
-            let pci_segment_mmio_size =
-                (end - start + 1) / (alignment * num_pci_segments as u64) * alignment;
-
-            let mut mmio_allocators = vec![];
-            for i in 0..num_pci_segments as u64 {
-                let mmio_start = start + i * pci_segment_mmio_size;
-                let allocator = Arc::new(Mutex::new(
-                    AddressAllocator::new(GuestAddress(mmio_start), pci_segment_mmio_size).unwrap(),
-                ));
-                mmio_allocators.push(allocator)
+        let mut mmio32_aperture_weights: Vec<u32> =
+            std::iter::repeat(DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT)
+                .take(num_pci_segments.into())
+                .collect();
+        if let Some(pci_segments) = &config.lock().unwrap().pci_segments {
+            for pci_segment in pci_segments.iter() {
+                mmio32_aperture_weights[pci_segment.pci_segment as usize] =
+                    pci_segment.mmio32_aperture_weight
             }
-
-            mmio_allocators
-        };
+        }
 
         let start_of_mmio32_area = layout::MEM_32BIT_DEVICES_START.0;
         let end_of_mmio32_area = layout::MEM_32BIT_DEVICES_START.0 + layout::MEM_32BIT_DEVICES_SIZE;
@@ -1032,8 +1055,20 @@ impl DeviceManager {
             start_of_mmio32_area,
             end_of_mmio32_area,
             num_pci_segments,
+            mmio32_aperture_weights,
             4 << 10,
         );
+
+        let mut mmio64_aperture_weights: Vec<u32> =
+            std::iter::repeat(DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT)
+                .take(num_pci_segments.into())
+                .collect();
+        if let Some(pci_segments) = &config.lock().unwrap().pci_segments {
+            for pci_segment in pci_segments.iter() {
+                mmio64_aperture_weights[pci_segment.pci_segment as usize] =
+                    pci_segment.mmio64_aperture_weight
+            }
+        }
 
         let start_of_mmio64_area = memory_manager.lock().unwrap().start_of_device_area().0;
         let end_of_mmio64_area = memory_manager.lock().unwrap().end_of_device_area().0;
@@ -1041,6 +1076,7 @@ impl DeviceManager {
             start_of_mmio64_area,
             end_of_mmio64_area,
             num_pci_segments,
+            mmio64_aperture_weights,
             4 << 30,
         );
 
@@ -4995,5 +5031,62 @@ impl Drop for DeviceManager {
             // SAFETY: FFI call
             let _ = unsafe { tcsetattr(stdout().lock().as_raw_fd(), TCSANOW, &termios) };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_create_mmio_allocators() {
+        let res = create_mmio_allocators(0x100000, 0x400000, 1, vec![1], 4 << 10);
+        assert_eq!(res.len(), 1);
+        assert_eq!(
+            res[0].lock().unwrap().base(),
+            vm_memory::GuestAddress(0x100000)
+        );
+        assert_eq!(
+            res[0].lock().unwrap().end(),
+            vm_memory::GuestAddress(0x3fffff)
+        );
+
+        let res = create_mmio_allocators(0x100000, 0x400000, 2, vec![1, 1], 4 << 10);
+        assert_eq!(res.len(), 2);
+        assert_eq!(
+            res[0].lock().unwrap().base(),
+            vm_memory::GuestAddress(0x100000)
+        );
+        assert_eq!(
+            res[0].lock().unwrap().end(),
+            vm_memory::GuestAddress(0x27ffff)
+        );
+        assert_eq!(
+            res[1].lock().unwrap().base(),
+            vm_memory::GuestAddress(0x280000)
+        );
+        assert_eq!(
+            res[1].lock().unwrap().end(),
+            vm_memory::GuestAddress(0x3fffff)
+        );
+
+        let res = create_mmio_allocators(0x100000, 0x400000, 2, vec![2, 1], 4 << 10);
+        assert_eq!(res.len(), 2);
+        assert_eq!(
+            res[0].lock().unwrap().base(),
+            vm_memory::GuestAddress(0x100000)
+        );
+        assert_eq!(
+            res[0].lock().unwrap().end(),
+            vm_memory::GuestAddress(0x2fffff)
+        );
+        assert_eq!(
+            res[1].lock().unwrap().base(),
+            vm_memory::GuestAddress(0x300000)
+        );
+        assert_eq!(
+            res[1].lock().unwrap().end(),
+            vm_memory::GuestAddress(0x3fffff)
+        );
     }
 }
