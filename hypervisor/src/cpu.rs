@@ -107,13 +107,27 @@ pub enum HypervisorCpuError {
     ///
     /// Setting Saved Processor Extended States error
     ///
+    #[cfg(feature = "kvm")]
     #[error("Failed to set Saved Processor Extended States: {0}")]
     SetXsaveState(#[source] anyhow::Error),
     ///
     /// Getting Saved Processor Extended States error
     ///
+    #[cfg(feature = "kvm")]
     #[error("Failed to get Saved Processor Extended States: {0}")]
     GetXsaveState(#[source] anyhow::Error),
+    ///
+    /// Getting the VP state components error
+    ///
+    #[cfg(feature = "mshv")]
+    #[error("Failed to get VP State Components: {0}")]
+    GetAllVpStateComponents(#[source] anyhow::Error),
+    ///
+    /// Setting the VP state components error
+    ///
+    #[cfg(feature = "mshv")]
+    #[error("Failed to set VP State Components: {0}")]
+    SetAllVpStateComponents(#[source] anyhow::Error),
     ///
     /// Setting Extended Control Registers error
     ///

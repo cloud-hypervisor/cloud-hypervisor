@@ -1280,15 +1280,13 @@ impl cpu::Vcpu for MshvVcpu {
     /// Set CPU state for x86_64 guest.
     ///
     fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
-        let state: VcpuMshvState = state.clone().into();
+        let mut state: VcpuMshvState = state.clone().into();
         self.set_msrs(&state.msrs)?;
         self.set_vcpu_events(&state.vcpu_events)?;
         self.set_regs(&state.regs.into())?;
         self.set_sregs(&state.sregs.into())?;
         self.set_fpu(&state.fpu)?;
         self.set_xcrs(&state.xcrs)?;
-        self.set_lapic(&state.lapic)?;
-        self.set_xsave(&state.xsave)?;
         // These registers are global and needed to be set only for first VCPU
         // as Microsoft Hypervisor allows setting this regsier for only one VCPU
         if self.vp_index == 0 {
@@ -1299,6 +1297,9 @@ impl cpu::Vcpu for MshvVcpu {
         self.fd
             .set_debug_regs(&state.dbg)
             .map_err(|e| cpu::HypervisorCpuError::SetDebugRegs(e.into()))?;
+        self.fd
+            .set_all_vp_state_components(&mut state.vp_states)
+            .map_err(|e| cpu::HypervisorCpuError::SetAllVpStateComponents(e.into()))?;
         Ok(())
     }
 
@@ -1322,8 +1323,6 @@ impl cpu::Vcpu for MshvVcpu {
         let vcpu_events = self.get_vcpu_events()?;
         let mut msrs = self.msrs.clone();
         self.get_msrs(&mut msrs)?;
-        let lapic = self.get_lapic()?;
-        let xsave = self.get_xsave()?;
         let misc = self
             .fd
             .get_misc_regs()
@@ -1332,6 +1331,10 @@ impl cpu::Vcpu for MshvVcpu {
             .fd
             .get_debug_regs()
             .map_err(|e| cpu::HypervisorCpuError::GetDebugRegs(e.into()))?;
+        let vp_states = self
+            .fd
+            .get_all_vp_state_components()
+            .map_err(|e| cpu::HypervisorCpuError::GetAllVpStateComponents(e.into()))?;
 
         Ok(VcpuMshvState {
             msrs,
@@ -1340,10 +1343,9 @@ impl cpu::Vcpu for MshvVcpu {
             sregs: sregs.into(),
             fpu,
             xcrs,
-            lapic,
             dbg,
-            xsave,
             misc,
+            vp_states,
         }
         .into())
     }
@@ -1425,26 +1427,6 @@ impl cpu::Vcpu for MshvVcpu {
 }
 
 impl MshvVcpu {
-    #[cfg(target_arch = "x86_64")]
-    ///
-    /// X86 specific call that returns the vcpu's current "xsave struct".
-    ///
-    fn get_xsave(&self) -> cpu::Result<Xsave> {
-        self.fd
-            .get_xsave()
-            .map_err(|e| cpu::HypervisorCpuError::GetXsaveState(e.into()))
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    ///
-    /// X86 specific call that sets the vcpu's current "xsave struct".
-    ///
-    fn set_xsave(&self, xsave: &Xsave) -> cpu::Result<()> {
-        self.fd
-            .set_xsave(xsave)
-            .map_err(|e| cpu::HypervisorCpuError::SetXsaveState(e.into()))
-    }
-
     #[cfg(target_arch = "x86_64")]
     ///
     /// X86 specific call that returns the vcpu's current "xcrs".
