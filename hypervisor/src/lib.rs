@@ -165,7 +165,7 @@ pub enum ClockData {
     #[cfg(feature = "kvm")]
     Kvm(kvm_bindings::kvm_clock_data),
     #[cfg(feature = "mshv")]
-    Mshv, /* MSHV does not support ClockData yet */
+    Mshv(mshv::MshvClockData),
 }
 
 #[cfg(target_arch = "x86_64")]
