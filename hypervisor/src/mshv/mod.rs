@@ -92,6 +92,25 @@ impl From<mshv_user_mem_region> for UserMemoryRegion {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
+impl From<MshvClockData> for ClockData {
+    fn from(d: MshvClockData) -> Self {
+        ClockData::Mshv(d)
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+impl From<ClockData> for MshvClockData {
+    fn from(ms: ClockData) -> Self {
+        match ms {
+            ClockData::Mshv(s) => s,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => unreachable!("MSHV clock data is not valid"),
+        }
+    }
+}
+
 impl From<UserMemoryRegion> for mshv_user_mem_region {
     fn from(region: UserMemoryRegion) -> Self {
         let mut flags: u32 = 0;
@@ -1930,13 +1949,23 @@ impl vm::Vm for MshvVm {
     /// Retrieve guest clock.
     #[cfg(target_arch = "x86_64")]
     fn get_clock(&self) -> vm::Result<ClockData> {
-        Ok(ClockData::Mshv)
+        let val = self
+            .fd
+            .get_partition_property(hv_partition_property_code_HV_PARTITION_PROPERTY_REFERENCE_TIME)
+            .map_err(|e| vm::HypervisorVmError::GetClock(e.into()))?;
+        Ok(MshvClockData { ref_time: val }.into())
     }
 
     /// Set guest clock.
     #[cfg(target_arch = "x86_64")]
-    fn set_clock(&self, _data: &ClockData) -> vm::Result<()> {
-        Ok(())
+    fn set_clock(&self, data: &ClockData) -> vm::Result<()> {
+        let data: MshvClockData = (*data).into();
+        self.fd
+            .set_partition_property(
+                hv_partition_property_code_HV_PARTITION_PROPERTY_REFERENCE_TIME,
+                data.ref_time,
+            )
+            .map_err(|e| vm::HypervisorVmError::SetClock(e.into()))
     }
 
     /// Downcast to the underlying MshvVm type
