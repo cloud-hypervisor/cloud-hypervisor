@@ -11,7 +11,7 @@ use std::fmt::{self, Display};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{io, result};
 use vm_allocator::{AddressAllocator, SystemAllocator};
-use vm_device::{BusDevice, Resource};
+use vm_device::Resource;
 
 #[derive(Debug)]
 pub enum Error {
@@ -54,7 +54,7 @@ pub struct BarReprogrammingParams {
     pub region_type: PciBarRegionType,
 }
 
-pub trait PciDevice: BusDevice {
+pub trait PciDevice: Send {
     /// Allocates the needed PCI BARs space using the `allocate` function which takes a size and
     /// returns an address. Returns a Vec of (GuestAddress, GuestUsize) tuples.
     fn allocate_bars(
