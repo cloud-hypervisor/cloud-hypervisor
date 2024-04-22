@@ -97,8 +97,6 @@ dependencies = [
  "serde",
  "thiserror",
  "uuid",
- "versionize",
- "versionize_derive",
  "vm-fdt",
  "vm-memory",
  "vm-migration",
@@ -110,15 +108,6 @@ name = "autocfg"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1fdabc7756949593fe60f30ec81974b613357de856987752631dea1e3394c80"
-
-[[package]]
-name = "bincode"
-version = "1.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "bitflags"
@@ -142,11 +131,10 @@ dependencies = [
  "libc",
  "log",
  "remain",
+ "serde",
  "smallvec",
  "thiserror",
  "uuid",
- "versionize",
- "versionize_derive",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
@@ -274,12 +262,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crc64"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2707e3afba5e19b75d582d88bc79237418f2a2a2d673d01cf9b03633b46e98f3"
-
-[[package]]
 name = "darling"
 version = "0.20.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -300,7 +282,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "strsim 0.10.0",
- "syn 2.0.58",
+ "syn",
 ]
 
 [[package]]
@@ -311,7 +293,7 @@ checksum = "a668eda54683121533a393014d8692171709ff57a7d61f187b6e782719f8933f"
 dependencies = [
  "darling_core",
  "quote",
- "syn 2.0.58",
+ "syn",
 ]
 
 [[package]]
@@ -334,10 +316,9 @@ dependencies = [
  "libc",
  "log",
  "pci",
+ "serde",
  "thiserror",
  "tpm",
- "versionize",
- "versionize_derive",
  "vm-allocator",
  "vm-device",
  "vm-memory",
@@ -574,8 +555,6 @@ dependencies = [
  "rate_limiter",
  "serde",
  "thiserror",
- "versionize",
- "versionize_derive",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
@@ -604,8 +583,6 @@ dependencies = [
  "log",
  "serde",
  "thiserror",
- "versionize",
- "versionize_derive",
  "vfio-bindings",
  "vfio-ioctls",
  "vfio_user",
@@ -653,7 +630,7 @@ checksum = "ad9f2390298a947ee0aa6073d440e221c0726188cfbcdf9604addb6ee393eb4a"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.58",
+ "syn",
 ]
 
 [[package]]
@@ -694,7 +671,7 @@ checksum = "7eb0b34b42edc17f6b7cac84a52a1c5f0e1bb2227e997ca9011ea3dd34e8610b"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.58",
+ "syn",
 ]
 
 [[package]]
@@ -728,7 +705,7 @@ dependencies = [
  "darling",
  "proc-macro2",
  "quote",
- "syn 2.0.58",
+ "syn",
 ]
 
 [[package]]
@@ -783,17 +760,6 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "syn"
-version = "1.0.109"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72b64191b275b66ffe2469e8af2c1cfe3bafa67b529ead792a6d0160888b4237"
-dependencies = [
- "proc-macro2",
- "quote",
- "unicode-ident",
-]
-
-[[package]]
-name = "syn"
 version = "2.0.58"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "44cfb93f38070beee36b3fef7d4f5a16f27751d94b187b666a5cc5e9b0d30687"
@@ -820,7 +786,7 @@ checksum = "c61f3ba182994efc43764a46c018c347bc492c79f024e705f46567b418f6d4f7"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.58",
+ "syn",
 ]
 
 [[package]]
@@ -866,33 +832,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a183cf7feeba97b4dd1c0d46788634f6221d87fa961b305bed08c851829efcc0"
 dependencies = [
  "getrandom",
-]
-
-[[package]]
-name = "versionize"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62929d59c7f6730b7298fcb363760550f4db6e353fbac4076d447d0e82799d6d"
-dependencies = [
- "bincode",
- "crc64",
- "proc-macro2",
- "quote",
- "serde",
- "serde_derive",
- "syn 1.0.109",
- "versionize_derive",
- "vmm-sys-util",
-]
-
-[[package]]
-name = "versionize_derive"
-version = "0.1.6"
-source = "git+https://github.com/cloud-hypervisor/versionize_derive?branch=ch-0.1.6#7906da996152e2d0ab08f5526440683bf3ca7834"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -973,10 +912,9 @@ dependencies = [
  "seccompiler",
  "serde",
  "serde_json",
+ "serde_with",
  "serial_buffer",
  "thiserror",
- "versionize",
- "versionize_derive",
  "vhost",
  "virtio-bindings",
  "virtio-queue",
@@ -1047,8 +985,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
- "versionize",
- "versionize_derive",
  "vm-memory",
 ]
 
@@ -1095,8 +1031,6 @@ dependencies = [
  "thiserror",
  "tracer",
  "uuid",
- "versionize",
- "versionize_derive",
  "vfio-ioctls",
  "vfio_user",
  "virtio-devices",
@@ -1149,7 +1083,7 @@ dependencies = [
  "once_cell",
  "proc-macro2",
  "quote",
- "syn 2.0.58",
+ "syn",
  "wasm-bindgen-shared",
 ]
 
@@ -1171,7 +1105,7 @@ checksum = "e94f17b526d0a461a191c78ea52bbce64071ed5c04c9ffe424dcb38f74171bb7"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.58",
+ "syn",
  "wasm-bindgen-backend",
  "wasm-bindgen-shared",
 ]
@@ -1260,9 +1194,9 @@ checksum = "4e4246f76bdeff09eb48875a0fd3e2af6aada79d409d33011886d3e1581517d9"
 
 [[package]]
 name = "windows_x86_64_gnullvm"
-version = "0.52.4"
+version = "0.52.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77ca79f2451b49fa9e2af39f0747fe999fcda4f5e241b2898624dca97a1f2177"
+checksum = "852298e482cd67c356ddd9570386e2862b5673c85bd5f88df9ab6802b334c596"
 
 [[package]]
 name = "windows_x86_64_msvc"
@@ -1288,5 +1222,5 @@ checksum = "9ce1b18ccd8e73a9321186f97e46f9f04b778851177567b1975109d26a08d2a6"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.58",
+ "syn",
 ]
