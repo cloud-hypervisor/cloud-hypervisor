@@ -168,6 +168,7 @@ mod mshv {
     pub const MSHV_GET_VP_STATE: u64 = 0xc010_b80a;
     pub const MSHV_SET_VP_STATE: u64 = 0xc010_b80b;
     pub const MSHV_SET_PARTITION_PROPERTY: u64 = 0x4010_b80c;
+    pub const MSHV_GET_PARTITION_PROPERTY: u64 = 0xc010_b80d;
     pub const MSHV_GET_GPA_ACCESS_STATES: u64 = 0xc01c_b812;
     pub const MSHV_VP_TRANSLATE_GVA: u64 = 0xc020_b80e;
     pub const MSHV_CREATE_PARTITION: u64 = 0x4030_b801;
@@ -210,6 +211,12 @@ fn create_vmm_ioctl_seccomp_rule_common_mshv() -> Result<Vec<SeccompRule>, Backe
             ArgLen::Dword,
             Eq,
             MSHV_SET_PARTITION_PROPERTY
+        )?],
+        and![Cond::new(
+            1,
+            ArgLen::Dword,
+            Eq,
+            MSHV_GET_PARTITION_PROPERTY
         )?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_GET_GPA_ACCESS_STATES)?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_VP_TRANSLATE_GVA)?],
