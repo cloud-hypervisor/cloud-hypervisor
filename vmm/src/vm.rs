@@ -30,7 +30,7 @@ use crate::igvm::igvm_loader;
 use crate::memory_manager::{
     Error as MemoryManagerError, MemoryManager, MemoryManagerSnapshotData,
 };
-#[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+#[cfg(target_arch = "x86_64")]
 use crate::migration::get_vm_snapshot;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::migration::url_to_file;
@@ -457,7 +457,7 @@ pub struct Vm {
     #[cfg_attr(any(not(feature = "kvm"), target_arch = "aarch64"), allow(dead_code))]
     // The hypervisor abstracted virtual machine.
     vm: Arc<dyn hypervisor::Vm>,
-    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     saved_clock: Option<hypervisor::ClockData>,
     numa_nodes: NumaNodes,
     #[cfg_attr(any(not(feature = "kvm"), target_arch = "aarch64"), allow(dead_code))]
@@ -671,7 +671,7 @@ impl Vm {
             .transpose()
             .map_err(Error::InitramfsFile)?;
 
-        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+        #[cfg(target_arch = "x86_64")]
         let saved_clock = if let Some(snapshot) = snapshot.as_ref() {
             let vm_snapshot = get_vm_snapshot(snapshot).map_err(Error::Restore)?;
             vm_snapshot.clock
@@ -696,7 +696,7 @@ impl Vm {
             cpu_manager,
             memory_manager,
             vm,
-            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+            #[cfg(target_arch = "x86_64")]
             saved_clock,
             numa_nodes,
             hypervisor,
@@ -2468,7 +2468,7 @@ impl Pausable for Vm {
             .valid_transition(new_state)
             .map_err(|e| MigratableError::Pause(anyhow!("Invalid transition: {:?}", e)))?;
 
-        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+        #[cfg(target_arch = "x86_64")]
         {
             let mut clock = self
                 .vm
@@ -2506,7 +2506,7 @@ impl Pausable for Vm {
             .map_err(|e| MigratableError::Resume(anyhow!("Invalid transition: {:?}", e)))?;
 
         self.cpu_manager.lock().unwrap().resume()?;
-        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+        #[cfg(target_arch = "x86_64")]
         {
             if let Some(clock) = &self.saved_clock {
                 self.vm.set_clock(clock).map_err(|e| {
@@ -2525,7 +2525,7 @@ impl Pausable for Vm {
 
 #[derive(Serialize, Deserialize)]
 pub struct VmSnapshot {
-    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     pub clock: Option<hypervisor::ClockData>,
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     pub common_cpuid: Vec<hypervisor::arch::x86::CpuIdEntry>,
@@ -2580,7 +2580,7 @@ impl Snapshottable for Vm {
         };
 
         let vm_snapshot_state = VmSnapshot {
-            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+            #[cfg(target_arch = "x86_64")]
             clock: self.saved_clock,
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             common_cpuid,
