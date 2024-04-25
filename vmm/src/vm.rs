@@ -3246,17 +3246,11 @@ pub fn test_vm() {
 
     loop {
         match vcpu.run().expect("run failed") {
-            VmExit::IoOut(addr, data) => {
-                println!(
-                    "IO out -- addr: {:#x} data [{:?}]",
-                    addr,
-                    str::from_utf8(data).unwrap()
-                );
-            }
             VmExit::Reset => {
                 println!("HLT");
                 break;
             }
+            VmExit::Ignore => {}
             r => panic!("unexpected exit reason: {r:?}"),
         }
     }

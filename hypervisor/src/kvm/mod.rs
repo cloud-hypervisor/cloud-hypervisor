@@ -1625,7 +1625,7 @@ impl cpu::Vcpu for KvmVcpu {
                             .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()));
                     }
 
-                    Ok(cpu::VmExit::IoIn(addr, data))
+                    Ok(cpu::VmExit::Ignore)
                 }
                 #[cfg(target_arch = "x86_64")]
                 VcpuExit::IoOut(addr, data) => {
@@ -1636,7 +1636,7 @@ impl cpu::Vcpu for KvmVcpu {
                             .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()));
                     }
 
-                    Ok(cpu::VmExit::IoOut(addr, data))
+                    Ok(cpu::VmExit::Ignore)
                 }
                 #[cfg(target_arch = "x86_64")]
                 VcpuExit::IoapicEoi(vector) => Ok(cpu::VmExit::IoapicEoi(vector)),
@@ -1669,7 +1669,7 @@ impl cpu::Vcpu for KvmVcpu {
                             .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()));
                     }
 
-                    Ok(cpu::VmExit::MmioRead(addr, data))
+                    Ok(cpu::VmExit::Ignore)
                 }
                 VcpuExit::MmioWrite(addr, data) => {
                     if let Some(vm_ops) = &self.vm_ops {
@@ -1679,7 +1679,7 @@ impl cpu::Vcpu for KvmVcpu {
                             .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()));
                     }
 
-                    Ok(cpu::VmExit::MmioWrite(addr, data))
+                    Ok(cpu::VmExit::Ignore)
                 }
                 VcpuExit::Hyperv => Ok(cpu::VmExit::Hyperv),
                 #[cfg(feature = "tdx")]
