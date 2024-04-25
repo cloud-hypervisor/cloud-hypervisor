@@ -34,9 +34,6 @@ vm-virtio = { path = "../vm-virtio" }
 [dependencies.cloud-hypervisor]
 path = ".."
 
-[patch.crates-io]
-kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch-v0.7.0" }
-
 # Prevent this from interfering with workspaces
 [workspace]
 members = ["."]
