@@ -20,7 +20,7 @@ use igvm_defs::IGVM_VHS_PARAMETER;
 use igvm_defs::IGVM_VHS_PARAMETER_INSERT;
 
 use igvm_parser::snp_defs::SevVmsa;
-pub use mshv_bindings::*;
+use mshv_bindings::*;
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::io::Read;
