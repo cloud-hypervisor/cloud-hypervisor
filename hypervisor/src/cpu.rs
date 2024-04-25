@@ -300,15 +300,9 @@ pub enum HypervisorCpuError {
 }
 
 #[derive(Debug)]
-pub enum VmExit<'a> {
-    #[cfg(target_arch = "x86_64")]
-    IoOut(u16 /* port */, &'a [u8] /* data */),
-    #[cfg(target_arch = "x86_64")]
-    IoIn(u16 /* port */, &'a mut [u8] /* data */),
+pub enum VmExit {
     #[cfg(target_arch = "x86_64")]
     IoapicEoi(u8 /* vector */),
-    MmioRead(u64 /* address */, &'a mut [u8]),
-    MmioWrite(u64 /* address */, &'a [u8]),
     Ignore,
     Reset,
     Shutdown,

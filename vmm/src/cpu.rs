@@ -1147,15 +1147,6 @@ impl CpuManager {
                                             unreachable!("Couldn't get a mutable reference from Arc<dyn Vcpu> as there are multiple instances");
                                         }
                                     }
-                                    _ => {
-                                        error!(
-                                            "VCPU generated error: {:?}",
-                                            Error::UnexpectedVmExit
-                                        );
-                                        vcpu_run_interrupted.store(true, Ordering::SeqCst);
-                                        exit_evt.write(1).unwrap();
-                                        break;
-                                    }
                                 },
 
                                 Err(e) => {
