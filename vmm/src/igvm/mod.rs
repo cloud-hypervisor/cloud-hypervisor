@@ -27,8 +27,8 @@
 
 pub mod igvm_loader;
 mod loader;
+use igvm::snp_defs::SevVmsa;
 use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
-use igvm_parser::snp_defs::SevVmsa;
 use zerocopy::FromZeroes;
 
 #[derive(Debug, Clone)]
