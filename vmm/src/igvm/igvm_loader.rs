@@ -5,21 +5,14 @@
 use crate::cpu::CpuManager;
 use zerocopy::AsBytes;
 
-use crate::igvm::loader::Loader;
-use crate::igvm::IgvmLoadedInfo;
-use crate::igvm::{BootPageAcceptance, StartupMemoryType, HV_PAGE_SIZE};
+use crate::igvm::{
+    loader::Loader, BootPageAcceptance, IgvmLoadedInfo, StartupMemoryType, HV_PAGE_SIZE,
+};
 use crate::memory_manager::MemoryManager;
-use igvm_defs::IgvmPageDataType;
-use igvm_defs::IgvmPlatformType;
-use igvm_parser::IgvmDirectiveHeader;
-use igvm_parser::IgvmFile;
-use igvm_parser::IgvmPlatformHeader;
-use igvm_parser::IsolationType;
-
-use igvm_defs::IGVM_VHS_PARAMETER;
-use igvm_defs::IGVM_VHS_PARAMETER_INSERT;
-
-use igvm_parser::snp_defs::SevVmsa;
+use igvm::{snp_defs::SevVmsa, IgvmDirectiveHeader, IgvmFile, IgvmPlatformHeader, IsolationType};
+use igvm_defs::{
+    IgvmPageDataType, IgvmPlatformType, IGVM_VHS_PARAMETER, IGVM_VHS_PARAMETER_INSERT,
+};
 use mshv_bindings::*;
 use std::collections::HashMap;
 use std::ffi::CString;
@@ -42,7 +35,7 @@ pub enum Error {
     #[error("failed to read igvm file")]
     Igvm(#[source] std::io::Error),
     #[error("invalid igvm file")]
-    InvalidIgvmFile(#[source] igvm_parser::Error),
+    InvalidIgvmFile(#[source] igvm::Error),
     #[error("invalid guest memory map")]
     InvalidGuestMemmap(#[source] arch::Error),
     #[error("loader error")]
