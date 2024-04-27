@@ -90,7 +90,7 @@ impl PciDevice for PciRoot {
         self.config.read_reg(reg_idx)
     }
 
-    fn as_any(&mut self) -> &mut dyn Any {
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
 

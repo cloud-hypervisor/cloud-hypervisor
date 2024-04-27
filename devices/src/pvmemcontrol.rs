@@ -708,7 +708,7 @@ impl PciDevice for PvmemcontrolPciDevice {
         self.configuration.read_config_register(reg_idx)
     }
 
-    fn as_any(&mut self) -> &mut dyn std::any::Any {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
 
