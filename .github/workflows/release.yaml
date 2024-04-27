@@ -88,6 +88,7 @@ jobs:
         if: github.event_name == 'create' && github.event.ref_type == 'tag'
         uses: softprops/action-gh-release@v1
         with:
+          draft: true
           files: |
             ./${{ matrix.platform.name_ch }}
             ./${{ matrix.platform.name_ch_remote }}
