@@ -1186,9 +1186,9 @@ impl PciDevice for VirtioPciDevice {
                 .contains(&o) =>
             {
                 #[cfg(feature = "sev_snp")]
-                for (_event, _addr) in self.ioeventfds(_base) {
-                    if _addr == _base + offset {
-                        _event.write(1).unwrap();
+                for (event, addr) in self.ioeventfds(_base) {
+                    if addr == _base + offset {
+                        event.write(1).unwrap();
                     }
                 }
                 // Handled with ioeventfds.
