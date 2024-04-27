@@ -126,6 +126,39 @@ VM, otherwise this could cause some functional and security issues.
 
 ### Advanced Configuration Options
 
+When using NVIDIA GPUs in a VFIO passthrough configuration, advanced
+configuration options are supported to enable GPUDirect P2P DMA over
+PCIe. When enabled, loads and stores between GPUs use native PCIe
+peer-to-peer transactions instead of a shared memory buffer. This drastically
+decreases P2P latency between GPUs. This functionality is supported by
+cloud-hypervisor on NVIDIA Turing, Ampere, Hopper, and Lovelace GPUs.
+
+The NVIDIA driver does not enable GPUDirect P2P over PCIe within guests
+by default because hardware support for routing P2P TLP between PCIe root
+ports is optional. PCIe P2P should always be supported between devices
+on the same PCIe switch. The `x_nv_gpudirect_clique` config argument may
+be used to signal support for PCIe P2P traffic between NVIDIA VFIO endpoints.
+The guest driver assumes that P2P traffic is supported between all endpoints
+that are part of the same clique.
+```
+--device path=/sys/bus/pci/devices/0000:01:00.0/,x_nv_gpudirect_clique=0
+```
+
+The following command can be run on the guest to verify that GPUDirect P2P is
+correctly enabled.
+```
+nvidia-smi topo -p2p r
+ 	GPU0	GPU1	GPU2	GPU3	GPU4	GPU5	GPU6	GPU7	
+ GPU0	X	OK	OK	OK	OK	OK	OK	OK	
+ GPU1	OK	X	OK	OK	OK	OK	OK	OK	
+ GPU2	OK	OK	X	OK	OK	OK	OK	OK	
+ GPU3	OK	OK	OK	X	OK	OK	OK	OK	
+ GPU4	OK	OK	OK	OK	X	OK	OK	OK	
+ GPU5	OK	OK	OK	OK	OK	X	OK	OK	
+ GPU6	OK	OK	OK	OK	OK	OK	X	OK	
+ GPU7	OK	OK	OK	OK	OK	OK	OK	X	
+```
+
 Some VFIO devices have a 32-bit mmio BAR. When using many such devices, it is
 possible to exhaust the 32-bit mmio space available on a PCI segment. The
 following example demonstrates an example device with a 16 MiB 32-bit mmio BAR.
