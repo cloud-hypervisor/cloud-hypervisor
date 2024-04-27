@@ -644,7 +644,7 @@ impl DeviceRelocation for AddressManager {
             }
         }
 
-        let any_dev = pci_dev.as_any();
+        let any_dev = pci_dev.as_any_mut();
         if let Some(virtio_pci_dev) = any_dev.downcast_ref::<VirtioPciDevice>() {
             let bar_addr = virtio_pci_dev.config_bar_addr();
             if bar_addr == new_base {

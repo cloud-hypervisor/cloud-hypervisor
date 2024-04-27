@@ -422,7 +422,7 @@ impl PciDevice for VfioUserPciDevice {
             .free_bars(allocator, mmio32_allocator, mmio64_allocator)
     }
 
-    fn as_any(&mut self) -> &mut dyn Any {
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
 
