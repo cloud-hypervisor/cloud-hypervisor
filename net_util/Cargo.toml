@@ -11,7 +11,7 @@ libc = "0.2.153"
 log = "0.4.21"
 net_gen = { path = "../net_gen" }
 rate_limiter = { path = "../rate_limiter" }
-serde = "1.0.197"
+serde = {version = "1.0.197",features = ["derive"]}
 thiserror = "1.0.58"
 virtio-bindings = "0.2.2"
 virtio-queue = "0.11.0"
