@@ -256,7 +256,6 @@ mod tests {
     pub struct TestContext {
         pub cid: u64,
         pub mem: GuestMemoryMmap,
-        pub mem_size: usize,
         pub device: Vsock<TestBackend>,
     }
 
@@ -267,7 +266,6 @@ mod tests {
             Self {
                 cid: CID as u64,
                 mem: GuestMemoryMmap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).unwrap(),
-                mem_size: MEM_SIZE,
                 device: Vsock::new(
                     String::from("vsock"),
                     CID,
