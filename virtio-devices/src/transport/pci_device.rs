@@ -830,18 +830,14 @@ impl VirtioPciDevice {
 }
 
 impl VirtioTransport for VirtioPciDevice {
-    fn ioeventfds(&self, base_addr: u64) -> Vec<(&EventFd, u64)> {
+    fn ioeventfds(&self, base_addr: u64) -> impl Iterator<Item = (&EventFd, u64)> {
         let notify_base = base_addr + NOTIFICATION_BAR_OFFSET;
-        self.queue_evts()
-            .iter()
-            .enumerate()
-            .map(|(i, event)| {
-                (
-                    event,
-                    notify_base + i as u64 * u64::from(NOTIFY_OFF_MULTIPLIER),
-                )
-            })
-            .collect()
+        self.queue_evts().iter().enumerate().map(move |(i, event)| {
+            (
+                event,
+                notify_base + i as u64 * u64::from(NOTIFY_OFF_MULTIPLIER),
+            )
+        })
     }
 }
 
