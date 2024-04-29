@@ -782,6 +782,7 @@ mod tests {
             let mut epoll_helper =
                 EpollHelper::new(&ctx.handler.kill_evt, &ctx.handler.pause_evt).unwrap();
 
+            assert_eq!(ctx.guest_rxvq.used.idx.get(), 0);
             assert!(
                 ctx.handler.handle_event(&mut epoll_helper, &event).is_err(),
                 "handle_event() should have failed"
@@ -802,6 +803,7 @@ mod tests {
             let mut epoll_helper =
                 EpollHelper::new(&ctx.handler.kill_evt, &ctx.handler.pause_evt).unwrap();
 
+            assert_eq!(ctx.guest_evvq.used.idx.get(), 0);
             assert!(
                 ctx.handler.handle_event(&mut epoll_helper, &event).is_err(),
                 "handle_event() should have failed"
