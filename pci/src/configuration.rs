@@ -757,10 +757,6 @@ impl PciConfiguration {
                     return Err(Error::BarInvalid64(bar_idx));
                 }
 
-                if end_addr > u64::max_value() {
-                    return Err(Error::BarAddressInvalid(config.addr, config.size));
-                }
-
                 if self.bars[bar_idx + 1].used {
                     return Err(Error::BarInUse64(bar_idx));
                 }
