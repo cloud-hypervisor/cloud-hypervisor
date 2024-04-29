@@ -6015,10 +6015,10 @@ mod common_parallel {
             "id={},tap=,mac={},ip={},mask=255.255.255.0",
             net_id, guest.network.guest_mac, guest.network.host_ip
         );
-        let mut mem_params = "size=4G";
+        let mut mem_params = "size=2G";
 
         if use_hotplug {
-            mem_params = "size=4G,hotplug_method=virtio-mem,hotplug_size=32G"
+            mem_params = "size=2G,hotplug_method=virtio-mem,hotplug_size=32G"
         }
 
         let cloudinit_params = format!(
@@ -6062,7 +6062,7 @@ mod common_parallel {
             // Check the number of vCPUs
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
             // Check the guest RAM
-            assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+            assert!(guest.get_total_memory().unwrap_or_default() > 1_920_000);
             if use_hotplug {
                 // Increase guest RAM with virtio-mem
                 resize_command(
@@ -6263,7 +6263,7 @@ mod common_parallel {
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
             let total_memory = guest.get_total_memory().unwrap_or_default();
             if !use_hotplug {
-                assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+                assert!(total_memory > 1_920_000);
             } else {
                 assert!(total_memory > 4_800_000);
                 assert!(total_memory < 5_760_000);
