@@ -219,10 +219,7 @@ mod tests {
 
     #[test]
     fn new_fails_overflow() {
-        assert_eq!(
-            AddressAllocator::new(GuestAddress(u64::max_value()), 0x100),
-            None
-        );
+        assert_eq!(AddressAllocator::new(GuestAddress(u64::MAX), 0x100), None);
     }
 
     #[test]

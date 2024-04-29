@@ -662,8 +662,8 @@ pub(crate) mod tests {
         // limiter should not be blocked
         assert!(!l.is_blocked());
         // limiter should be disabled so consume(whatever) should work
-        assert!(l.consume(u64::max_value(), TokenType::Ops));
-        assert!(l.consume(u64::max_value(), TokenType::Bytes));
+        assert!(l.consume(u64::MAX, TokenType::Ops));
+        assert!(l.consume(u64::MAX, TokenType::Bytes));
         // calling the handler without there having been an event should error
         assert!(l.event_handler().is_err());
         assert_eq!(
@@ -721,7 +721,7 @@ pub(crate) mod tests {
         assert!(l.as_raw_fd() > 0);
 
         // ops/s limiter should be disabled so consume(whatever) should work
-        assert!(l.consume(u64::max_value(), TokenType::Ops));
+        assert!(l.consume(u64::MAX, TokenType::Ops));
 
         // do full 1000 bytes
         assert!(l.consume(1000, TokenType::Bytes));
@@ -754,7 +754,7 @@ pub(crate) mod tests {
         assert!(l.as_raw_fd() > 0);
 
         // bytes/s limiter should be disabled so consume(whatever) should work
-        assert!(l.consume(u64::max_value(), TokenType::Bytes));
+        assert!(l.consume(u64::MAX, TokenType::Bytes));
 
         // do full 1000 ops
         assert!(l.consume(1000, TokenType::Ops));

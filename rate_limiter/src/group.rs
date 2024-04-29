@@ -367,7 +367,7 @@ pub(crate) mod tests {
         assert!(h.as_raw_fd() > 0);
 
         // ops/s limiter should be disabled so consume(whatever) should work
-        assert!(h.consume(u64::max_value(), TokenType::Ops));
+        assert!(h.consume(u64::MAX, TokenType::Ops));
 
         // do full 1000 bytes
         assert!(h.consume(1000, TokenType::Bytes));
@@ -403,7 +403,7 @@ pub(crate) mod tests {
         assert!(h.as_raw_fd() > 0);
 
         // bytes/s limiter should be disabled so consume(whatever) should work
-        assert!(h.consume(u64::max_value(), TokenType::Bytes));
+        assert!(h.consume(u64::MAX, TokenType::Bytes));
 
         // do full 1000 ops
         assert!(h.consume(1000, TokenType::Ops));
