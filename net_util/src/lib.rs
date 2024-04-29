@@ -67,7 +67,7 @@ fn create_sockaddr(ip_addr: net::Ipv4Addr) -> net_gen::sockaddr {
         sin_family: net_gen::AF_INET as u16,
         sin_port: 0,
         // SAFETY: ip_addr can be safely transmute to in_addr
-        sin_addr: unsafe { mem::transmute(ip_addr.octets()) },
+        sin_addr: unsafe { mem::transmute::<[u8; 4], net_gen::inn::in_addr>(ip_addr.octets()) },
         __pad: [0; 8usize],
     };
 
