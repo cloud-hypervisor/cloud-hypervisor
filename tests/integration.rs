@@ -2344,7 +2344,10 @@ fn make_guest_panic(guest: &Guest) {
 }
 
 mod common_parallel {
-    use std::{fs::OpenOptions, io::SeekFrom};
+    use std::{
+        fs::{remove_dir_all, OpenOptions},
+        io::SeekFrom,
+    };
 
     use crate::*;
 
@@ -6228,6 +6231,9 @@ mod common_parallel {
             &latest_events,
             &event_path_restored
         ));
+
+        // Remove the snapshot dir
+        let _ = remove_dir_all(snapshot_dir.as_str());
 
         let r = std::panic::catch_unwind(|| {
             // Resume the VM
