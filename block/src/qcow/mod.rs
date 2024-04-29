@@ -1631,7 +1631,7 @@ impl PunchHole for QcowFile {
         let mut remaining = length;
         let mut offset = offset;
         while remaining > 0 {
-            let chunk_length = min(remaining, std::usize::MAX as u64) as usize;
+            let chunk_length = min(remaining, usize::MAX as u64) as usize;
             self.deallocate_bytes(offset, chunk_length)?;
             remaining -= chunk_length as u64;
             offset += chunk_length as u64;
