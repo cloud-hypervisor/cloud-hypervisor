@@ -8,7 +8,7 @@
 use crate::layout::{APIC_START, HIGH_RAM_START, IOAPIC_START};
 use crate::x86_64::{get_x2apic_id, mpspec};
 use crate::GuestMemoryMmap;
-use libc::c_char;
+use libc::c_uchar;
 use std::mem;
 use std::result;
 use std::slice;
@@ -82,18 +82,13 @@ pub type Result<T> = result::Result<T, Error>;
 // a large number for FC usecases.
 pub const MAX_SUPPORTED_CPUS: u32 = 254;
 
-// Convenience macro for making arrays of diverse character types.
-macro_rules! char_array {
-    ($t:ty; $( $c:expr ),*) => ( [ $( $c as $t ),* ] )
-}
-
 // Most of these variables are sourced from the Intel MP Spec 1.4.
-const SMP_MAGIC_IDENT: [c_char; 4] = char_array!(c_char; '_', 'M', 'P', '_');
-const MPC_SIGNATURE: [c_char; 4] = char_array!(c_char; 'P', 'C', 'M', 'P');
-const MPC_SPEC: i8 = 4;
-const MPC_OEM: [c_char; 8] = char_array!(c_char; 'F', 'C', ' ', ' ', ' ', ' ', ' ', ' ');
-const MPC_PRODUCT_ID: [c_char; 12] = ['0' as c_char; 12];
-const BUS_TYPE_ISA: [u8; 6] = char_array!(u8; 'I', 'S', 'A', ' ', ' ', ' ');
+const SMP_MAGIC_IDENT: &[c_uchar; 4] = b"_MP_";
+const MPC_SIGNATURE: &[c_uchar; 4] = b"PCMP";
+const MPC_SPEC: u8 = 4;
+const MPC_OEM: &[c_uchar; 8] = b"FC      ";
+const MPC_PRODUCT_ID: &[c_uchar; 12] = &[b'0'; 12];
+const BUS_TYPE_ISA: &[c_uchar; 6] = b"ISA   ";
 const APIC_VERSION: u8 = 0x14;
 const CPU_STEPPING: u32 = 0x600;
 const CPU_FEATURE_APIC: u32 = 0x200;
@@ -168,7 +163,7 @@ pub fn setup_mptable(
     {
         let mut mpf_intel = MpfIntelWrapper(mpspec::mpf_intel::default());
         let size = mem::size_of::<MpfIntelWrapper>() as u64;
-        mpf_intel.0.signature = SMP_MAGIC_IDENT;
+        mpf_intel.0.signature = *SMP_MAGIC_IDENT;
         mpf_intel.0.length = 1;
         mpf_intel.0.specification = 4;
         mpf_intel.0.physptr = (base_mp.raw_value() + size) as u32;
@@ -209,7 +204,7 @@ pub fn setup_mptable(
         let mut mpc_bus = MpcBusWrapper(mpspec::mpc_bus::default());
         mpc_bus.0.type_ = mpspec::MP_BUS as u8;
         mpc_bus.0.busid = 0;
-        mpc_bus.0.bustype = BUS_TYPE_ISA;
+        mpc_bus.0.bustype = *BUS_TYPE_ISA;
         mem.write_obj(mpc_bus, base_mp)
             .map_err(Error::WriteMpcBus)?;
         base_mp = base_mp.unchecked_add(size as u64);
@@ -280,14 +275,14 @@ pub fn setup_mptable(
 
     {
         let mut mpc_table = MpcTableWrapper(mpspec::mpc_table::default());
-        mpc_table.0.signature = MPC_SIGNATURE;
+        mpc_table.0.signature = *MPC_SIGNATURE;
         mpc_table.0.length = table_end.unchecked_offset_from(table_base) as u16;
         mpc_table.0.spec = MPC_SPEC;
-        mpc_table.0.oem = MPC_OEM;
-        mpc_table.0.productid = MPC_PRODUCT_ID;
+        mpc_table.0.oem = *MPC_OEM;
+        mpc_table.0.productid = *MPC_PRODUCT_ID;
         mpc_table.0.lapic = APIC_START.0 as u32;
         checksum = checksum.wrapping_add(compute_checksum(&mpc_table.0));
-        mpc_table.0.checksum = (!checksum).wrapping_add(1) as i8;
+        mpc_table.0.checksum = (!checksum).wrapping_add(1);
         mem.write_obj(mpc_table, table_base)
             .map_err(Error::WriteMpcTable)?;
     }
