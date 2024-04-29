@@ -658,7 +658,9 @@ where
         let mut slices: SmallVec<[IoSliceMut; 1]> = SmallVec::with_capacity(iovecs.len());
         for iovec in iovecs.iter() {
             // SAFETY: on Linux IoSliceMut wraps around libc::iovec
-            slices.push(IoSliceMut::new(unsafe { std::mem::transmute(*iovec) }));
+            slices.push(IoSliceMut::new(unsafe {
+                std::mem::transmute::<libc::iovec, &mut [u8]>(*iovec)
+            }));
         }
 
         let result = {
@@ -691,7 +693,9 @@ where
         let mut slices: SmallVec<[IoSlice; 1]> = SmallVec::with_capacity(iovecs.len());
         for iovec in iovecs.iter() {
             // SAFETY: on Linux IoSlice wraps around libc::iovec
-            slices.push(IoSlice::new(unsafe { std::mem::transmute(*iovec) }));
+            slices.push(IoSlice::new(unsafe {
+                std::mem::transmute::<libc::iovec, &mut [u8]>(*iovec)
+            }));
         }
 
         let result = {
