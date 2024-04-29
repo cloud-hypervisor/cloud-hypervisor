@@ -17,7 +17,7 @@ pub const MP_IRQDIR_DEFAULT: ::std::os::raw::c_uint = 0;
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
 pub struct mpf_intel {
-    pub signature: [::std::os::raw::c_char; 4usize],
+    pub signature: [::std::os::raw::c_uchar; 4usize],
     pub physptr: ::std::os::raw::c_uint,
     pub length: ::std::os::raw::c_uchar,
     pub specification: ::std::os::raw::c_uchar,
@@ -32,12 +32,12 @@ pub struct mpf_intel {
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
 pub struct mpc_table {
-    pub signature: [::std::os::raw::c_char; 4usize],
+    pub signature: [::std::os::raw::c_uchar; 4usize],
     pub length: ::std::os::raw::c_ushort,
-    pub spec: ::std::os::raw::c_char,
-    pub checksum: ::std::os::raw::c_char,
-    pub oem: [::std::os::raw::c_char; 8usize],
-    pub productid: [::std::os::raw::c_char; 12usize],
+    pub spec: ::std::os::raw::c_uchar,
+    pub checksum: ::std::os::raw::c_uchar,
+    pub oem: [::std::os::raw::c_uchar; 8usize],
+    pub productid: [::std::os::raw::c_uchar; 12usize],
     pub oemptr: ::std::os::raw::c_uint,
     pub oemsize: ::std::os::raw::c_ushort,
     pub oemcount: ::std::os::raw::c_ushort,
@@ -106,9 +106,9 @@ pub struct mpc_lintsrc {
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
 pub struct mpc_oemtable {
-    pub signature: [::std::os::raw::c_char; 4usize],
+    pub signature: [::std::os::raw::c_uchar; 4usize],
     pub length: ::std::os::raw::c_ushort,
-    pub rev: ::std::os::raw::c_char,
-    pub checksum: ::std::os::raw::c_char,
-    pub mpc: [::std::os::raw::c_char; 8usize],
+    pub rev: ::std::os::raw::c_uchar,
+    pub checksum: ::std::os::raw::c_uchar,
+    pub mpc: [::std::os::raw::c_uchar; 8usize],
 }
