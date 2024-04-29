@@ -2392,6 +2392,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "vhost"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6be08d1166d41a78861ad50212ab3f9eca0729c349ac3a7a8f557c62406b87cc"
+dependencies = [
+ "bitflags 2.5.0",
+ "libc",
+ "vm-memory",
+ "vmm-sys-util",
+]
+
+[[package]]
 name = "vhost-user-backend"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2399,7 +2411,7 @@ checksum = "72c8c447d076ac508d78cb45664d203df7989e891656dce260a7e93d72352c9a"
 dependencies = [
  "libc",
  "log",
- "vhost",
+ "vhost 0.10.0",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
@@ -2417,7 +2429,7 @@ dependencies = [
  "libc",
  "log",
  "option_parser",
- "vhost",
+ "vhost 0.11.0",
  "vhost-user-backend",
  "virtio-bindings",
  "virtio-queue",
@@ -2436,7 +2448,7 @@ dependencies = [
  "log",
  "net_util",
  "option_parser",
- "vhost",
+ "vhost 0.11.0",
  "vhost-user-backend",
  "virtio-bindings",
  "vm-memory",
@@ -2471,7 +2483,7 @@ dependencies = [
  "serde_with",
  "serial_buffer",
  "thiserror",
- "vhost",
+ "vhost 0.11.0",
  "virtio-bindings",
  "virtio-queue",
  "vm-allocator",
