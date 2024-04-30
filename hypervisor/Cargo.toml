@@ -22,11 +22,11 @@ kvm-bindings = { version = "0.9.1", optional = true, features = ["serde"] }
 kvm-ioctls = { version = "0.18.0", optional = true }
 libc = "0.2.158"
 log = "0.4.22"
-mshv-bindings = { git = "https://github.com/rust-vmm/mshv", tag = "v0.2.0", features = [
+mshv-bindings = { git = "https://github.com/rust-vmm/mshv", tag = "v0.3.0", features = [
   "fam-wrappers",
   "with-serde",
 ], optional = true }
-mshv-ioctls = { git = "https://github.com/rust-vmm/mshv", tag = "v0.2.0", optional = true }
+mshv-ioctls = { git = "https://github.com/rust-vmm/mshv", tag = "v0.3.0", optional = true }
 serde = { version = "1.0.208", features = ["derive", "rc"] }
 serde_with = { version = "3.9.0", default-features = false, features = [
   "macros",

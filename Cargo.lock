@@ -1254,8 +1254,8 @@ checksum = "9bec4598fddb13cc7b528819e697852653252b760f1228b7642679bf2ff2cd07"
 
 [[package]]
 name = "mshv-bindings"
-version = "0.2.0"
-source = "git+https://github.com/rust-vmm/mshv?tag=v0.2.0#dd0a9f5ab9c32673e88d6de200af788dbfca6a72"
+version = "0.3.0"
+source = "git+https://github.com/rust-vmm/mshv?tag=v0.3.0#fda05380ea4c68b807996299d5ffb2854ca6d01d"
 dependencies = [
  "libc",
  "num_enum",
@@ -1267,8 +1267,8 @@ dependencies = [
 
 [[package]]
 name = "mshv-ioctls"
-version = "0.2.0"
-source = "git+https://github.com/rust-vmm/mshv?tag=v0.2.0#dd0a9f5ab9c32673e88d6de200af788dbfca6a72"
+version = "0.3.0"
+source = "git+https://github.com/rust-vmm/mshv?tag=v0.3.0#fda05380ea4c68b807996299d5ffb2854ca6d01d"
 dependencies = [
  "libc",
  "mshv-bindings",
@@ -2225,7 +2225,7 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 [[package]]
 name = "vfio-bindings"
 version = "0.4.0"
-source = "git+https://github.com/rust-vmm/vfio?branch=main#94bec9fa2a94a29e11d83766a992cb85496fcb7c"
+source = "git+https://github.com/rust-vmm/vfio?branch=main#09c6b193d6b5a339f6a3ec3f44095046c519baaa"
 dependencies = [
  "vmm-sys-util",
 ]
@@ -2233,7 +2233,7 @@ dependencies = [
 [[package]]
 name = "vfio-ioctls"
 version = "0.2.0"
-source = "git+https://github.com/rust-vmm/vfio?branch=main#94bec9fa2a94a29e11d83766a992cb85496fcb7c"
+source = "git+https://github.com/rust-vmm/vfio?branch=main#09c6b193d6b5a339f6a3ec3f44095046c519baaa"
 dependencies = [
  "byteorder",
  "kvm-bindings",

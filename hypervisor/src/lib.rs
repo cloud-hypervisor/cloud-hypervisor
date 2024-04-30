@@ -186,7 +186,7 @@ pub enum IrqRoutingEntry {
     #[cfg(feature = "kvm")]
     Kvm(kvm_bindings::kvm_irq_routing_entry),
     #[cfg(feature = "mshv")]
-    Mshv(mshv_bindings::mshv_msi_routing_entry),
+    Mshv(mshv_bindings::mshv_user_irq_entry),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
