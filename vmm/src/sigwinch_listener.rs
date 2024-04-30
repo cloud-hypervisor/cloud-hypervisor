@@ -2,13 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::clone3::{clone3, clone_args, CLONE_CLEAR_SIGHAND};
+use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use arch::_NSIG;
+use hypervisor::HypervisorType;
 use libc::{
     c_int, c_void, close, fork, getpgrp, ioctl, pipe2, poll, pollfd, setsid, sigemptyset,
     siginfo_t, signal, sigprocmask, syscall, tcgetpgrp, tcsetpgrp, SYS_close_range, EINVAL, ENOSYS,
     ENOTTY, O_CLOEXEC, POLLERR, SIGCHLD, SIGWINCH, SIG_DFL, SIG_SETMASK, STDERR_FILENO, TIOCSCTTY,
 };
-use seccompiler::{apply_filter, BpfProgram};
+use seccompiler::{apply_filter, BpfProgram, SeccompAction};
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::fs::{read_dir, File};
@@ -255,4 +257,17 @@ pub fn start_sigwinch_listener(seccomp_filter: BpfProgram, tty_sub: File) -> io:
     rx.read_exact(&mut [0])?;
 
     Ok(rx)
+}
+
+pub fn listen_for_sigwinch_on_tty(
+    pty_sub: File,
+    seccomp_action: &SeccompAction,
+    hypervisor_type: HypervisorType,
+) -> std::io::Result<File> {
+    let seccomp_filter =
+        get_seccomp_filter(seccomp_action, Thread::PtyForeground, hypervisor_type).unwrap();
+
+    let console_resize_pipe = start_sigwinch_listener(seccomp_filter, pty_sub)?;
+
+    Ok(console_resize_pipe)
 }
