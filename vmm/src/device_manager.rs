@@ -20,9 +20,8 @@ use crate::interrupt::LegacyUserspaceInterruptManager;
 use crate::interrupt::MsiInterruptManager;
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager, MEMORY_MANAGER_ACPI_SIZE};
 use crate::pci_segment::PciSegment;
-use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::serial_manager::{Error as SerialManagerError, SerialManager};
-use crate::sigwinch_listener::start_sigwinch_listener;
+use crate::sigwinch_listener::listen_for_sigwinch_on_tty;
 use crate::vm_config::DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT;
 use crate::GuestRegionMmap;
 use crate::PciDeviceInfo;
@@ -494,6 +493,9 @@ pub enum DeviceManagerError {
 
     /// Cannot create a RateLimiterGroup
     RateLimiterGroupCreate(rate_limiter::group::Error),
+
+    /// Cannot start sigwinch listener
+    StartSigwinchListener(std::io::Error),
 }
 
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
@@ -1973,20 +1975,6 @@ impl DeviceManager {
         Ok(serial)
     }
 
-    fn listen_for_sigwinch_on_tty(&mut self, pty_sub: File) -> std::io::Result<()> {
-        let seccomp_filter = get_seccomp_filter(
-            &self.seccomp_action,
-            Thread::PtyForeground,
-            self.hypervisor_type,
-        )
-        .unwrap();
-
-        self.console_resize_pipe =
-            Some(Arc::new(start_sigwinch_listener(seccomp_filter, pty_sub)?));
-
-        Ok(())
-    }
-
     fn add_virtio_console_device(
         &mut self,
         virtio_devices: &mut Vec<MetaVirtioDevice>,
@@ -2015,7 +2003,10 @@ impl DeviceManager {
                     self.config.lock().unwrap().console.file = Some(path.clone());
                     let file = main.try_clone().unwrap();
                     assert!(resize_pipe.is_none());
-                    self.listen_for_sigwinch_on_tty(sub).unwrap();
+                    self.console_resize_pipe = Some(Arc::new(
+                        listen_for_sigwinch_on_tty(sub, &self.seccomp_action, self.hypervisor_type)
+                            .map_err(DeviceManagerError::StartSigwinchListener)?,
+                    ));
                     self.console_pty = Some(Arc::new(Mutex::new(PtyPair { main, path })));
                     Endpoint::PtyPair(file.try_clone().unwrap(), file)
                 }
@@ -2037,8 +2028,14 @@ impl DeviceManager {
 
                 // SAFETY: FFI call. Trivially safe.
                 if unsafe { libc::isatty(libc::STDOUT_FILENO) } == 1 {
-                    self.listen_for_sigwinch_on_tty(stdout.try_clone().unwrap())
-                        .unwrap();
+                    self.console_resize_pipe = Some(Arc::new(
+                        listen_for_sigwinch_on_tty(
+                            stdout.try_clone().unwrap(),
+                            &self.seccomp_action,
+                            self.hypervisor_type,
+                        )
+                        .map_err(DeviceManagerError::StartSigwinchListener)?,
+                    ));
                 }
 
                 // If an interactive TTY then we can accept input
