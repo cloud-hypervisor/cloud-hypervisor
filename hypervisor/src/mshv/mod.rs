@@ -52,9 +52,6 @@ use std::os::unix::io::AsRawFd;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{CpuIdEntry, FpuState, MsrEntry};
 
-const DIRTY_BITMAP_CLEAR_DIRTY: u64 = 0x4;
-const DIRTY_BITMAP_SET_DIRTY: u64 = 0x8;
-
 ///
 /// Export generically-named wrappers of mshv-bindings for Unix-based platforms
 ///
@@ -67,18 +64,12 @@ pub const PAGE_SHIFT: usize = 12;
 
 impl From<mshv_user_mem_region> for UserMemoryRegion {
     fn from(region: mshv_user_mem_region) -> Self {
-        let mut flags: u32 = 0;
-        if region.flags & HV_MAP_GPA_READABLE != 0 {
-            flags |= USER_MEMORY_REGION_READ;
-        }
-        if region.flags & HV_MAP_GPA_WRITABLE != 0 {
+        let mut flags: u32 = USER_MEMORY_REGION_READ | USER_MEMORY_REGION_ADJUSTABLE;
+        if region.flags & (1 << MSHV_MAP_GPA_BIT_WRITABLE) != 0 {
             flags |= USER_MEMORY_REGION_WRITE;
         }
-        if region.flags & HV_MAP_GPA_EXECUTABLE != 0 {
+        if region.flags & (1 << MSHV_MAP_GPA_BIT_EXECUTABLE) != 0 {
             flags |= USER_MEMORY_REGION_EXECUTE;
-        }
-        if region.flags & HV_MAP_GPA_ADJUSTABLE != 0 {
-            flags |= USER_MEMORY_REGION_ADJUSTABLE;
         }
 
         UserMemoryRegion {
@@ -113,18 +104,12 @@ impl From<ClockData> for MshvClockData {
 
 impl From<UserMemoryRegion> for mshv_user_mem_region {
     fn from(region: UserMemoryRegion) -> Self {
-        let mut flags: u32 = 0;
-        if region.flags & USER_MEMORY_REGION_READ != 0 {
-            flags |= HV_MAP_GPA_READABLE;
-        }
+        let mut flags: u8 = 0;
         if region.flags & USER_MEMORY_REGION_WRITE != 0 {
-            flags |= HV_MAP_GPA_WRITABLE;
+            flags |= 1 << MSHV_MAP_GPA_BIT_WRITABLE;
         }
         if region.flags & USER_MEMORY_REGION_EXECUTE != 0 {
-            flags |= HV_MAP_GPA_EXECUTABLE;
-        }
-        if region.flags & USER_MEMORY_REGION_ADJUSTABLE != 0 {
-            flags |= HV_MAP_GPA_ADJUSTABLE;
+            flags |= 1 << MSHV_MAP_GPA_BIT_EXECUTABLE;
         }
 
         mshv_user_mem_region {
@@ -132,6 +117,7 @@ impl From<UserMemoryRegion> for mshv_user_mem_region {
             size: region.memory_size,
             userspace_addr: region.userspace_addr,
             flags,
+            ..Default::default()
         }
     }
 }
@@ -516,8 +502,7 @@ impl cpu::Vcpu for MshvVcpu {
 
     #[allow(non_upper_case_globals)]
     fn run(&self) -> std::result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
-        let hv_message: hv_message = hv_message::default();
-        match self.fd.run(hv_message) {
+        match self.fd.run() {
             Ok(x) => match x.header.message_type {
                 hv_message_type_HVMSG_X64_HALT => {
                     debug!("HALT");
@@ -677,16 +662,21 @@ impl cpu::Vcpu for MshvVcpu {
 
                     let mut gpa_list =
                         vec_with_array_field::<mshv_modify_gpa_host_access, u64>(gpas.len());
-                    gpa_list[0].gpa_list_size = gpas.len() as u64;
-                    gpa_list[0].host_access = host_vis;
-                    gpa_list[0].acquire = 0;
+                    gpa_list[0].page_count = gpas.len() as u64;
                     gpa_list[0].flags = 0;
+                    if host_vis & HV_MAP_GPA_READABLE != 0 {
+                        gpa_list[0].flags |= 1 << MSHV_GPA_HOST_ACCESS_BIT_READABLE;
+                    }
+                    if host_vis & HV_MAP_GPA_WRITABLE != 0 {
+                        gpa_list[0].flags |= 1 << MSHV_GPA_HOST_ACCESS_BIT_WRITABLE;
+                    }
 
                     // SAFETY: gpa_list initialized with gpas.len() and now it is being turned into
                     // gpas_slice with gpas.len() again. It is guaranteed to be large enough to hold
                     // everything from gpas.
                     unsafe {
-                        let gpas_slice: &mut [u64] = gpa_list[0].gpa_list.as_mut_slice(gpas.len());
+                        let gpas_slice: &mut [u64] =
+                            gpa_list[0].guest_pfns.as_mut_slice(gpas.len());
                         gpas_slice.copy_from_slice(gpas.as_slice());
                     }
 
@@ -1834,9 +1824,9 @@ impl vm::Vm for MshvVm {
         readonly: bool,
         _log_dirty_pages: bool,
     ) -> UserMemoryRegion {
-        let mut flags = HV_MAP_GPA_READABLE | HV_MAP_GPA_EXECUTABLE | HV_MAP_GPA_ADJUSTABLE;
+        let mut flags = 1 << MSHV_MAP_GPA_BIT_EXECUTABLE;
         if !readonly {
-            flags |= HV_MAP_GPA_WRITABLE;
+            flags |= 1 << MSHV_MAP_GPA_BIT_WRITABLE;
         }
 
         mshv_user_mem_region {
@@ -1844,6 +1834,7 @@ impl vm::Vm for MshvVm {
             guest_pfn: guest_phys_addr >> PAGE_SHIFT,
             size: memory_size,
             userspace_addr,
+            ..Default::default()
         }
         .into()
     }
@@ -1924,7 +1915,11 @@ impl vm::Vm for MshvVm {
         // This is a requirement from Microsoft Hypervisor
         for (_, s) in dirty_log_slots.iter() {
             self.fd
-                .get_dirty_log(s.guest_pfn, s.memory_size as usize, DIRTY_BITMAP_SET_DIRTY)
+                .get_dirty_log(
+                    s.guest_pfn,
+                    s.memory_size as usize,
+                    MSHV_GPAP_ACCESS_OP_SET as u8,
+                )
                 .map_err(|e| vm::HypervisorVmError::StartDirtyLog(e.into()))?;
         }
         self.fd
@@ -1941,7 +1936,7 @@ impl vm::Vm for MshvVm {
             .get_dirty_log(
                 base_gpa >> PAGE_SHIFT,
                 memory_size as usize,
-                DIRTY_BITMAP_CLEAR_DIRTY,
+                MSHV_GPAP_ACCESS_OP_CLEAR as u8,
             )
             .map_err(|e| vm::HypervisorVmError::GetDirtyLog(e.into()))
     }
@@ -1994,20 +1989,20 @@ impl vm::Vm for MshvVm {
         page_size: u32,
         pages: &[u64],
     ) -> vm::Result<()> {
+        debug_assert!(page_size == hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB);
         if pages.is_empty() {
             return Ok(());
         }
 
         let mut isolated_pages =
             vec_with_array_field::<mshv_import_isolated_pages, u64>(pages.len());
-        isolated_pages[0].num_pages = pages.len() as u64;
-        isolated_pages[0].page_type = page_type;
-        isolated_pages[0].page_size = page_size;
+        isolated_pages[0].page_type = page_type as u8;
+        isolated_pages[0].page_count = pages.len() as u64;
         // SAFETY: isolated_pages initialized with pages.len() and now it is being turned into
         // pages_slice with pages.len() again. It is guaranteed to be large enough to hold
         // everything from pages.
         unsafe {
-            let pages_slice: &mut [u64] = isolated_pages[0].page_number.as_mut_slice(pages.len());
+            let pages_slice: &mut [u64] = isolated_pages[0].guest_pfns.as_mut_slice(pages.len());
             pages_slice.copy_from_slice(pages);
         }
         self.fd
