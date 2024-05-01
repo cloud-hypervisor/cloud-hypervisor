@@ -319,6 +319,9 @@ pub enum Error {
 
     #[error("Error injecting NMI")]
     ErrorNmi,
+
+    #[error("Error resuming the VM: {0}")]
+    ResumeVm(#[source] hypervisor::HypervisorVmError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -2173,6 +2176,11 @@ impl Vm {
             self.vm.tdx_finalize().map_err(Error::FinalizeTdx)?;
         }
 
+        // Resume the vm for MSHV
+        if current_state == VmState::Created {
+            self.vm.resume().map_err(Error::ResumeVm)?;
+        }
+
         self.cpu_manager
             .lock()
             .unwrap()
@@ -2487,6 +2495,10 @@ impl Pausable for Vm {
         self.cpu_manager.lock().unwrap().pause()?;
         self.device_manager.lock().unwrap().pause()?;
 
+        self.vm
+            .pause()
+            .map_err(|e| MigratableError::Pause(anyhow!("Could not pause the VM: {}", e)))?;
+
         *state = new_state;
 
         event!("vm", "paused");
@@ -2495,6 +2507,7 @@ impl Pausable for Vm {
 
     fn resume(&mut self) -> std::result::Result<(), MigratableError> {
         event!("vm", "resuming");
+        let current_state = self.get_state().unwrap();
         let mut state = self
             .state
             .try_write()
@@ -2514,6 +2527,13 @@ impl Pausable for Vm {
                 })?;
             }
         }
+
+        if current_state == VmState::Paused {
+            self.vm
+                .resume()
+                .map_err(|e| MigratableError::Resume(anyhow!("Could not resume the VM: {}", e)))?;
+        }
+
         self.device_manager.lock().unwrap().resume()?;
 
         // And we're back to the Running state.
