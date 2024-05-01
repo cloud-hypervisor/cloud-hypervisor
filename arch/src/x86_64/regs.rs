@@ -15,33 +15,46 @@ use hypervisor::arch::x86::regs::CR0_PE;
 use hypervisor::arch::x86::{FpuState, SpecialRegisters, StandardRegisters};
 use std::sync::Arc;
 use std::{mem, result};
+use thiserror::Error;
 use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError};
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
     /// Failed to get SREGs for this CPU.
+    #[error("Failed to get SREGs for this CPU: {0}")]
     GetStatusRegisters(hypervisor::HypervisorCpuError),
     /// Failed to set base registers for this CPU.
+    #[error("Failed to set base registers for this CPU: {0}")]
     SetBaseRegisters(hypervisor::HypervisorCpuError),
     /// Failed to configure the FPU.
+    #[error("Failed to configure the FPU: {0}")]
     SetFpuRegisters(hypervisor::HypervisorCpuError),
     /// Setting up MSRs failed.
+    #[error("Setting up MSRs failed: {0}")]
     SetModelSpecificRegisters(hypervisor::HypervisorCpuError),
     /// Failed to set SREGs for this CPU.
+    #[error("Failed to set SREGs for this CPU: {0}")]
     SetStatusRegisters(hypervisor::HypervisorCpuError),
     /// Checking the GDT address failed.
+    #[error("Checking the GDT address failed")]
     CheckGdtAddr,
     /// Writing the GDT to RAM failed.
+    #[error("Writing the GDT to RAM failed: {0}")]
     WriteGdt(GuestMemoryError),
     /// Writing the IDT to RAM failed.
+    #[error("Writing the IDT to RAM failed: {0}")]
     WriteIdt(GuestMemoryError),
     /// Writing PDPTE to RAM failed.
+    #[error("Writing PDPTE to RAM failed: {0}")]
     WritePdpteAddress(GuestMemoryError),
     /// Writing PDE to RAM failed.
+    #[error("Writing PDE to RAM failed: {0}")]
     WritePdeAddress(GuestMemoryError),
     /// Writing PML4 to RAM failed.
+    #[error("Writing PML4 to RAM failed: {0}")]
     WritePml4Address(GuestMemoryError),
     /// Writing PML5 to RAM failed.
+    #[error("Writing PML5 to RAM failed: {0}")]
     WritePml5Address(GuestMemoryError),
 }
 

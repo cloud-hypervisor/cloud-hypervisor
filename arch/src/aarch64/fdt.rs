@@ -26,6 +26,7 @@ use super::layout::{
 };
 use std::fs;
 use std::path::Path;
+use thiserror::Error;
 use vm_fdt::{FdtWriter, FdtWriterResult};
 use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError, GuestMemoryRegion};
 
@@ -80,9 +81,10 @@ pub trait DeviceInfoForFdt {
 }
 
 /// Errors thrown while configuring the Flattened Device Tree for aarch64.
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
     /// Failure in writing FDT in memory.
+    #[error("Failure in writing FDT in memory: {0}")]
     WriteFdtToMemory(GuestMemoryError),
 }
 type Result<T> = result::Result<T, Error>;

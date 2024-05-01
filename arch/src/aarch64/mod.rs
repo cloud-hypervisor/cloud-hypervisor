@@ -18,32 +18,40 @@ use log::{log_enabled, Level};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
+use thiserror::Error;
 use vm_memory::{Address, GuestAddress, GuestMemory, GuestMemoryAtomic};
 
 pub const _NSIG: i32 = 65;
 
 /// Errors thrown while configuring aarch64 system.
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
     /// Failed to create a FDT.
+    #[error("Failed to create a FDT")]
     SetupFdt,
 
     /// Failed to write FDT to memory.
+    #[error("Failed to write FDT to memory: {0}")]
     WriteFdtToMemory(fdt::Error),
 
     /// Failed to create a GIC.
+    #[error("Failed to create a GIC")]
     SetupGic,
 
     /// Failed to compute the initramfs address.
+    #[error("Failed to compute the initramfs address")]
     InitramfsAddress,
 
     /// Error configuring the general purpose registers
+    #[error("Error configuring the general purpose registers: {0}")]
     RegsConfiguration(hypervisor::HypervisorCpuError),
 
     /// Error configuring the MPIDR register
+    #[error("Error configuring the MPIDR register: {0}")]
     VcpuRegMpidr(hypervisor::HypervisorCpuError),
 
     /// Error initializing PMU for vcpu
+    #[error("Error initializing PMU for vcpu")]
     VcpuInitPmu,
 }
 
