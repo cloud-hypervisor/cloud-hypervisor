@@ -19,11 +19,11 @@ use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use libc::{EINVAL, ENOSPC, ENOTSUP};
 use remain::sorted;
 use std::cmp::{max, min};
-use std::fmt::{self, Display};
 use std::fs::OpenOptions;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
 use std::str;
+use thiserror::Error;
 use vmm_sys_util::{
     file_traits::FileSetLen, file_traits::FileSync, seek_hole::SeekHole, write_zeroes::PunchHole,
     write_zeroes::WriteZeroesAt,
@@ -32,104 +32,91 @@ use vmm_sys_util::{
 pub use crate::qcow::raw_file::RawFile;
 
 #[sorted]
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
+    #[error("Backing file io error: {0}")]
     BackingFileIo(io::Error),
+    #[error("Backing file open error: {0}")]
     BackingFileOpen(Box<crate::Error>),
+    #[error("Backing file name is too long: {0} bytes over")]
     BackingFileTooLong(usize),
+    #[error("Compressed blocks not supported")]
     CompressedBlocksNotSupported,
+    #[error("Failed to evict cache: {0}")]
     EvictingCache(io::Error),
+    #[error("File larger than max of {}: {0}", MAX_QCOW_FILE_SIZE)]
     FileTooBig(u64),
+    #[error("Failed to get file size: {0}")]
     GettingFileSize(io::Error),
+    #[error("Failed to get refcount: {0}")]
     GettingRefcount(refcount::Error),
+    #[error("Failed to parse filename: {0}")]
     InvalidBackingFileName(str::Utf8Error),
+    #[error("Invalid cluster index")]
     InvalidClusterIndex,
+    #[error("Invalid cluster size")]
     InvalidClusterSize,
+    #[error("Invalid index")]
     InvalidIndex,
+    #[error("Invalid L1 table offset")]
     InvalidL1TableOffset,
+    #[error("Invalid L1 table size: {0}")]
     InvalidL1TableSize(u32),
+    #[error("Invalid magic")]
     InvalidMagic,
+    #[error("Invalid offset: {0}")]
     InvalidOffset(u64),
+    #[error("Invalid refcount table offset")]
     InvalidRefcountTableOffset,
+    #[error("Invalid refcount table size: {0}")]
     InvalidRefcountTableSize(u64),
+    #[error("No free clusters")]
     NoFreeClusters,
+    #[error("No refcount clusters")]
     NoRefcountClusters,
+    #[error("Not enough space for refcounts")]
     NotEnoughSpaceForRefcounts,
+    #[error("Failed to open file {0}")]
     OpeningFile(io::Error),
+    #[error("Failed to read data: {0}")]
     ReadingData(io::Error),
+    #[error("Failed to read header: {0}")]
     ReadingHeader(io::Error),
+    #[error("Failed to read pointers: {0}")]
     ReadingPointers(io::Error),
+    #[error("Failed to read ref count block: {0}")]
     ReadingRefCountBlock(refcount::Error),
+    #[error("Failed to read ref counts: {0}")]
     ReadingRefCounts(io::Error),
+    #[error("Failed to rebuild ref counts: {0}")]
     RebuildingRefCounts(io::Error),
+    #[error("Refcount table offset past file end")]
     RefcountTableOffEnd,
+    #[error("Too many clusters specified for refcount")]
     RefcountTableTooLarge,
+    #[error("Failed to seek file: {0}")]
     SeekingFile(io::Error),
+    #[error("Failed to set file size: {0}")]
     SettingFileSize(io::Error),
+    #[error("Failed to set refcount refcount: {0}")]
     SettingRefcountRefcount(io::Error),
+    #[error("Size too small for number of clusters")]
     SizeTooSmallForNumberOfClusters,
+    #[error("L1 entry table too large: {0}")]
     TooManyL1Entries(u64),
+    #[error("Ref count table too large: {0}")]
     TooManyRefcounts(u64),
+    #[error("Unsupported refcount order")]
     UnsupportedRefcountOrder,
+    #[error("Unsupported version: {0}")]
     UnsupportedVersion(u32),
+    #[error("Failed to write data: {0}")]
     WritingData(io::Error),
+    #[error("Failed to write header: {0}")]
     WritingHeader(io::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
-
-impl Display for Error {
-    #[remain::check]
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use self::Error::*;
-
-        #[sorted]
-        match self {
-            BackingFileIo(e) => write!(f, "backing file io error: {}", e),
-            BackingFileOpen(e) => write!(f, "backing file open error: {}", *e),
-            BackingFileTooLong(len) => {
-                write!(f, "backing file name is too long: {} bytes over", len)
-            }
-            CompressedBlocksNotSupported => write!(f, "compressed blocks not supported"),
-            EvictingCache(e) => write!(f, "failed to evict cache: {e}"),
-            FileTooBig(size) => write!(f, "file larger than max of {MAX_QCOW_FILE_SIZE}: {size}"),
-            GettingFileSize(e) => write!(f, "failed to get file size: {e}"),
-            GettingRefcount(e) => write!(f, "failed to get refcount: {e}"),
-            InvalidBackingFileName(e) => write!(f, "failed to parse filename: {}", e),
-            InvalidClusterIndex => write!(f, "invalid cluster index"),
-            InvalidClusterSize => write!(f, "invalid cluster size"),
-            InvalidIndex => write!(f, "invalid index"),
-            InvalidL1TableOffset => write!(f, "invalid L1 table offset"),
-            InvalidL1TableSize(size) => write!(f, "invalid L1 table size {size}"),
-            InvalidMagic => write!(f, "invalid magic"),
-            InvalidOffset(_) => write!(f, "invalid offset"),
-            InvalidRefcountTableOffset => write!(f, "invalid refcount table offset"),
-            InvalidRefcountTableSize(size) => write!(f, "invalid refcount table size: {size}"),
-            NoFreeClusters => write!(f, "no free clusters"),
-            NoRefcountClusters => write!(f, "no refcount clusters"),
-            NotEnoughSpaceForRefcounts => write!(f, "not enough space for refcounts"),
-            OpeningFile(e) => write!(f, "failed to open file: {e}"),
-            ReadingData(e) => write!(f, "failed to read data: {e}"),
-            ReadingHeader(e) => write!(f, "failed to read header: {e}"),
-            ReadingPointers(e) => write!(f, "failed to read pointers: {e}"),
-            ReadingRefCountBlock(e) => write!(f, "failed to read ref count block: {e}"),
-            ReadingRefCounts(e) => write!(f, "failed to read ref counts: {e}"),
-            RebuildingRefCounts(e) => write!(f, "failed to rebuild ref counts: {e}"),
-            RefcountTableOffEnd => write!(f, "refcount table offset past file end"),
-            RefcountTableTooLarge => write!(f, "too many clusters specified for refcount table"),
-            SeekingFile(e) => write!(f, "failed to seek file: {e}"),
-            SettingFileSize(e) => write!(f, "failed to set file size: {e}"),
-            SettingRefcountRefcount(e) => write!(f, "failed to set refcount refcount: {e}"),
-            SizeTooSmallForNumberOfClusters => write!(f, "size too small for number of clusters"),
-            TooManyL1Entries(count) => write!(f, "l1 entry table too large: {count}"),
-            TooManyRefcounts(count) => write!(f, "ref count table too large: {count}"),
-            UnsupportedRefcountOrder => write!(f, "unsupported refcount order"),
-            UnsupportedVersion(v) => write!(f, "unsupported version: {v}"),
-            WritingData(e) => write!(f, "failed to write data: {e}"),
-            WritingHeader(e) => write!(f, "failed to write header: {e}"),
-        }
-    }
-}
 
 pub enum ImageType {
     Raw,
