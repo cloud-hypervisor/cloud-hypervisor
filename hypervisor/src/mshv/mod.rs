@@ -2076,4 +2076,36 @@ impl vm::Vm for MshvVm {
     fn get_preferred_target(&self, kvi: &mut VcpuInit) -> vm::Result<()> {
         unimplemented!()
     }
+
+    /// Pause the VM
+    fn pause(&self) -> vm::Result<()> {
+        // Freeze the partition
+        self.fd
+            .set_partition_property(
+                hv_partition_property_code_HV_PARTITION_PROPERTY_TIME_FREEZE,
+                1u64,
+            )
+            .map_err(|e| {
+                vm::HypervisorVmError::SetVmProperty(anyhow!(
+                    "Failed to set partition property: {}",
+                    e
+                ))
+            })
+    }
+
+    /// Resume the VM
+    fn resume(&self) -> vm::Result<()> {
+        // Resuming the partition using TIME_FREEZE property
+        self.fd
+            .set_partition_property(
+                hv_partition_property_code_HV_PARTITION_PROPERTY_TIME_FREEZE,
+                0u64,
+            )
+            .map_err(|e| {
+                vm::HypervisorVmError::SetVmProperty(anyhow!(
+                    "Failed to set partition property: {}",
+                    e
+                ))
+            })
+    }
 }

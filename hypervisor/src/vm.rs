@@ -231,6 +231,10 @@ pub enum HypervisorVmError {
     ///
     #[error("Failed to complete isolated import: {0}")]
     CompleteIsolatedImport(#[source] anyhow::Error),
+    /// Failed to set VM property
+    ///
+    #[error("Failed to set VM property: {0}")]
+    SetVmProperty(#[source] anyhow::Error),
 }
 ///
 /// Result type for returning from a function
