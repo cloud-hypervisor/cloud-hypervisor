@@ -23,14 +23,15 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::vec::Vec;
 use vhost::vhost_user::message::*;
 use vhost::vhost_user::Listener;
+use vhost_user_backend::bitmap::BitmapMmapRegion;
 use vhost_user_backend::{VhostUserBackendMut, VhostUserDaemon, VringRwLock, VringT};
 use virtio_bindings::virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1};
 use virtio_bindings::virtio_net::*;
 use vm_memory::GuestAddressSpace;
-use vm_memory::{bitmap::AtomicBitmap, GuestMemoryAtomic};
+use vm_memory::GuestMemoryAtomic;
 use vmm_sys_util::{epoll::EventSet, eventfd::EventFd};
 
-type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
+type GuestMemoryMmap = vm_memory::GuestMemoryMmap<BitmapMmapRegion>;
 
 pub type Result<T> = std::result::Result<T, Error>;
 type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
@@ -159,7 +160,7 @@ impl VhostUserNetBackend {
 }
 
 impl VhostUserBackendMut for VhostUserNetBackend {
-    type Bitmap = AtomicBitmap;
+    type Bitmap = BitmapMmapRegion;
     type Vring = VringRwLock<GuestMemoryAtomic<GuestMemoryMmap>>;
 
     fn num_queues(&self) -> usize {
