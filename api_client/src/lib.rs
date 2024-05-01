@@ -3,39 +3,25 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use std::fmt;
 use std::io::{Read, Write};
 use std::os::unix::io::RawFd;
+use thiserror::Error;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
+    #[error("Error writing to or reading from HTTP socket: {0}")]
     Socket(std::io::Error),
+    #[error("Error writing to or reading from HTTP socket: {0}")]
     SocketSendFds(vmm_sys_util::errno::Error),
+    #[error("Error parsing HTTP status code: {0}")]
     StatusCodeParsing(std::num::ParseIntError),
+    #[error("HTTP output is missing protocol statement")]
     MissingProtocol,
+    #[error("Error parsing HTTP Content-Length field: {0}")]
     ContentLengthParsing(std::num::ParseIntError),
+    #[error("Server responded with an error: {0:?}")]
     ServerResponse(StatusCode, Option<String>),
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use Error::*;
-        match self {
-            Socket(e) => write!(f, "Error writing to or reading from HTTP socket: {e}"),
-            SocketSendFds(e) => write!(f, "Error writing to or reading from HTTP socket: {e}"),
-            StatusCodeParsing(e) => write!(f, "Error parsing HTTP status code: {e}"),
-            MissingProtocol => write!(f, "HTTP output is missing protocol statement"),
-            ContentLengthParsing(e) => write!(f, "Error parsing HTTP Content-Length field: {e}"),
-            ServerResponse(s, o) => {
-                if let Some(o) = o {
-                    write!(f, "Server responded with an error: {s:?}: {o}")
-                } else {
-                    write!(f, "Server responded with an error: {s:?}")
-                }
-            }
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug)]

@@ -5,4 +5,5 @@ name = "api_client"
 version = "0.1.0"
 
 [dependencies]
+thiserror = "1.0.61"
 vmm-sys-util = "0.12.1"
