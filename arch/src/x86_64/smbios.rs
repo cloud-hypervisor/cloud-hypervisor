@@ -8,51 +8,34 @@
 
 use crate::layout::SMBIOS_START;
 use crate::GuestMemoryMmap;
-use std::fmt::{self, Display};
 use std::mem;
 use std::result;
 use std::slice;
+use thiserror::Error;
 use uuid::Uuid;
 use vm_memory::ByteValued;
 use vm_memory::{Address, Bytes, GuestAddress};
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
     /// There was too little guest memory to store the entire SMBIOS table.
+    #[error("There was too little guest memory to store the SMBIOS table")]
     NotEnoughMemory,
     /// The SMBIOS table has too little address space to be stored.
+    #[error("The SMBIOS table has too little address space to be stored")]
     AddressOverflow,
     /// Failure while zeroing out the memory for the SMBIOS table.
+    #[error("Failure while zeroing out the memory for the SMBIOS table")]
     Clear,
     /// Failure to write SMBIOS entrypoint structure
+    #[error("Failure to write SMBIOS entrypoint structure")]
     WriteSmbiosEp,
     /// Failure to write additional data to memory
+    #[error("Failure to write additional data to memory")]
     WriteData,
     /// Failure to parse uuid, uuid format may be error
+    #[error("Failure to parse uuid: {0}")]
     ParseUuid(uuid::Error),
-}
-
-impl std::error::Error for Error {}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use self::Error::*;
-
-        let description = match self {
-            NotEnoughMemory => {
-                "There was too little guest memory to store the SMBIOS table".to_string()
-            }
-            AddressOverflow => {
-                "The SMBIOS table has too little address space to be stored".to_string()
-            }
-            Clear => "Failure while zeroing out the memory for the SMBIOS table".to_string(),
-            WriteSmbiosEp => "Failure to write SMBIOS entrypoint structure".to_string(),
-            WriteData => "Failure to write additional data to memory".to_string(),
-            ParseUuid(e) => format!("Failure to parse uuid: {e}"),
-        };
-
-        write!(f, "SMBIOS error: {description}")
-    }
 }
 
 pub type Result<T> = result::Result<T, Error>;

@@ -23,6 +23,7 @@ use linux_loader::loader::elf::start_info::{
 };
 use std::collections::BTreeMap;
 use std::mem;
+use thiserror::Error;
 use vm_memory::{
     Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
     GuestMemoryRegion, GuestUsize,
@@ -127,64 +128,83 @@ pub struct CpuidConfig {
     pub amx: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
     /// Error writing MP table to memory.
+    #[error("Error writing MP table to memory: {0}")]
     MpTableSetup(mptable::Error),
 
     /// Error configuring the general purpose registers
+    #[error("Error configuring the general purpose registers: {0}")]
     RegsConfiguration(regs::Error),
 
     /// Error configuring the special registers
+    #[error("Error configuring the special registers: {0}")]
     SregsConfiguration(regs::Error),
 
     /// Error configuring the floating point related registers
+    #[error("Error configuring the floating point related registers: {0}")]
     FpuConfiguration(regs::Error),
 
     /// Error configuring the MSR registers
+    #[error("Error configuring the MSR registers: {0}")]
     MsrsConfiguration(regs::Error),
 
     /// Failed to set supported CPUs.
+    #[error("Failed to set supported CPUs: {0}")]
     SetSupportedCpusFailed(anyhow::Error),
 
     /// Cannot set the local interruption due to bad configuration.
+    #[error("Cannot set the local interruption due to bad configuration: {0}")]
     LocalIntConfiguration(anyhow::Error),
 
     /// Error setting up SMBIOS table
+    #[error("Error setting up SMBIOS table: {0}")]
     SmbiosSetup(smbios::Error),
 
     /// Could not find any SGX EPC section
+    #[error("Could not find any SGX EPC section")]
     NoSgxEpcSection,
 
     /// Missing SGX CPU feature
+    #[error("Missing SGX CPU feature")]
     MissingSgxFeature,
 
     /// Missing SGX_LC CPU feature
+    #[error("Missing SGX_LC CPU feature")]
     MissingSgxLaunchControlFeature,
 
     /// Error getting supported CPUID through the hypervisor (kvm/mshv) API
+    #[error("Error getting supported CPUID through the hypervisor API: {0}")]
     CpuidGetSupported(HypervisorError),
 
     /// Error populating CPUID with KVM HyperV emulation details
+    #[error("Error populating CPUID with KVM HyperV emulation details: {0}")]
     CpuidKvmHyperV(vmm_sys_util::fam::Error),
 
     /// Error populating CPUID with CPU identification
+    #[error("Error populating CPUID with CPU identification: {0}")]
     CpuidIdentification(vmm_sys_util::fam::Error),
 
     /// Error checking CPUID compatibility
+    #[error("Error checking CPUID compatibility")]
     CpuidCheckCompatibility,
 
     // Error writing EBDA address
+    #[error("Error writing EBDA address: {0}")]
     EbdaSetup(vm_memory::GuestMemoryError),
 
     // Error getting CPU TSC frequency
+    #[error("Error getting CPU TSC frequency: {0}")]
     GetTscFrequency(HypervisorCpuError),
 
     /// Error retrieving TDX capabilities through the hypervisor (kvm/mshv) API
     #[cfg(feature = "tdx")]
+    #[error("Error retrieving TDX capabilities through the hypervisor API: {0}")]
     TdxCapabilities(HypervisorError),
 
     /// Failed to configure E820 map for bzImage
+    #[error("Failed to configure E820 map for bzImage")]
     E820Configuration,
 }
 
