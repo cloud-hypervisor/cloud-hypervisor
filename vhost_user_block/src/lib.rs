@@ -32,16 +32,18 @@ use std::time::Instant;
 use std::{convert, error, fmt, io};
 use vhost::vhost_user::message::*;
 use vhost::vhost_user::Listener;
-use vhost_user_backend::{VhostUserBackendMut, VhostUserDaemon, VringRwLock, VringState, VringT};
+use vhost_user_backend::{
+    bitmap::BitmapMmapRegion, VhostUserBackendMut, VhostUserDaemon, VringRwLock, VringState, VringT,
+};
 use virtio_bindings::virtio_blk::*;
 use virtio_bindings::virtio_config::VIRTIO_F_VERSION_1;
 use virtio_bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use virtio_queue::QueueT;
 use vm_memory::GuestAddressSpace;
-use vm_memory::{bitmap::AtomicBitmap, ByteValued, Bytes, GuestMemoryAtomic};
+use vm_memory::{ByteValued, Bytes, GuestMemoryAtomic};
 use vmm_sys_util::{epoll::EventSet, eventfd::EventFd};
 
-type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
+type GuestMemoryMmap = vm_memory::GuestMemoryMmap<BitmapMmapRegion>;
 
 const SECTOR_SHIFT: u8 = 9;
 const SECTOR_SIZE: u64 = 0x01 << SECTOR_SHIFT;
@@ -300,7 +302,7 @@ impl VhostUserBlkBackend {
 }
 
 impl VhostUserBackendMut for VhostUserBlkBackend {
-    type Bitmap = AtomicBitmap;
+    type Bitmap = BitmapMmapRegion;
     type Vring = VringRwLock<GuestMemoryAtomic<GuestMemoryMmap>>;
 
     fn num_queues(&self) -> usize {
