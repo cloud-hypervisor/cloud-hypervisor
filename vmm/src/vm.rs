@@ -16,6 +16,7 @@ use crate::config::{
     UserDeviceConfig, ValidationError, VdpaConfig, VmConfig, VsockConfig,
 };
 use crate::config::{NumaConfig, PayloadConfig};
+use crate::console_devices::ConsoleDeviceError;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::{
     CpuElf64Writable, DumpState, Elf64Writable, GuestDebuggable, GuestDebuggableError, NoteDescType,
@@ -322,6 +323,9 @@ pub enum Error {
 
     #[error("Error resuming the VM: {0}")]
     ResumeVm(#[source] hypervisor::HypervisorVmError),
+
+    #[error("Error creating console devices")]
+    CreateConsoleDevices(ConsoleDeviceError),
 }
 pub type Result<T> = result::Result<T, Error>;
 

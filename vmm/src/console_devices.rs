@@ -166,7 +166,6 @@ pub fn create_pty() -> io::Result<(File, File, PathBuf)> {
     Ok((main, unsafe { File::from_raw_fd(sub_fd) }, path))
 }
 
-#[allow(dead_code)]
 pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<ConsoleInfo> {
     let vm_config = vmm.vm_config.as_mut().unwrap().clone();
     let mut vmconfig = vm_config.lock().unwrap();
