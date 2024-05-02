@@ -13,7 +13,7 @@ use crate::api::{
     VmReboot, VmReceiveMigration, VmRemoveDevice, VmResize, VmResizeZone, VmRestore, VmResume,
     VmSendMigration, VmShutdown, VmSnapshot,
 };
-use crate::config::NetConfig;
+use crate::config::{NetConfig, RestoreConfig};
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
 use std::fs::File;
 use std::os::unix::io::IntoRawFd;
@@ -184,7 +184,6 @@ vm_action_put_handler_body!(VmAddUserDevice);
 vm_action_put_handler_body!(VmRemoveDevice);
 vm_action_put_handler_body!(VmResize);
 vm_action_put_handler_body!(VmResizeZone);
-vm_action_put_handler_body!(VmRestore);
 vm_action_put_handler_body!(VmSnapshot);
 vm_action_put_handler_body!(VmReceiveMigration);
 vm_action_put_handler_body!(VmSendMigration);
@@ -219,6 +218,53 @@ impl PutHandler for VmAddNet {
 }
 
 impl GetHandler for VmAddNet {}
+
+impl PutHandler for VmRestore {
+    fn handle_request(
+        &'static self,
+        api_notifier: EventFd,
+        api_sender: Sender<ApiRequest>,
+        body: &Option<Body>,
+        mut files: Vec<File>,
+    ) -> std::result::Result<Option<Body>, HttpError> {
+        if let Some(body) = body {
+            let mut restore_cfg: RestoreConfig = serde_json::from_slice(body.raw())?;
+
+            let mut fds = Vec::new();
+            if !files.is_empty() {
+                fds = files.drain(..).map(|f| f.into_raw_fd()).collect();
+            }
+            let expected_fds = match restore_cfg.net_fds {
+                Some(ref net_fds) => net_fds.iter().map(|net| net.num_fds).sum(),
+                None => 0,
+            };
+            if fds.len() != expected_fds {
+                error!(
+                    "Number of FDs expected: {}, but received: {}",
+                    expected_fds,
+                    fds.len()
+                );
+                return Err(HttpError::BadRequest);
+            }
+            if let Some(ref mut nets) = restore_cfg.net_fds {
+                warn!("Ignoring FDs sent via the HTTP request body");
+                let mut start_idx = 0;
+                for restored_net in nets.iter_mut() {
+                    let end_idx = start_idx + restored_net.num_fds;
+                    restored_net.fds = Some(fds[start_idx..end_idx].to_vec());
+                    start_idx = end_idx;
+                }
+            }
+
+            self.send(api_notifier, api_sender, restore_cfg)
+                .map_err(HttpError::ApiError)
+        } else {
+            Err(HttpError::BadRequest)
+        }
+    }
+}
+
+impl GetHandler for VmRestore {}
 
 // Common handler for boot, shutdown and reboot
 pub struct VmActionHandler {
