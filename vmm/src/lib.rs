@@ -549,6 +549,7 @@ pub struct Vmm {
     signals: Option<Handle>,
     threads: Vec<thread::JoinHandle<()>>,
     original_termios_opt: Arc<Mutex<Option<termios>>>,
+    console_resize_pipe: Option<File>,
 }
 
 impl Vmm {
@@ -683,6 +684,7 @@ impl Vmm {
             signals: None,
             threads: vec![],
             original_termios_opt: Arc::new(Mutex::new(None)),
+            console_resize_pipe: None,
         })
     }
 
