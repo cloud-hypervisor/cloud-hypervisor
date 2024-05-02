@@ -310,6 +310,13 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         )
         .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
 
+        // Always create a frozen partition
+        fd.set_partition_property(
+            hv_partition_property_code_HV_PARTITION_PROPERTY_TIME_FREEZE,
+            1u64,
+        )
+        .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
+
         let vm_fd = Arc::new(fd);
 
         #[cfg(target_arch = "x86_64")]
