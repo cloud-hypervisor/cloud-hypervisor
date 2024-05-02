@@ -445,14 +445,14 @@ fn rest_api_do_command(matches: &ArgMatches, socket: &mut UnixStream) -> ApiResu
                 .map_err(Error::HttpApiClient)
         }
         Some("restore") => {
-            let restore_config = restore_config(
+            let (restore_config, fds) = restore_config(
                 matches
                     .subcommand_matches("restore")
                     .unwrap()
                     .get_one::<String>("restore_config")
                     .unwrap(),
             )?;
-            simple_api_command(socket, "PUT", "restore", Some(&restore_config))
+            simple_api_command_with_fds(socket, "PUT", "restore", Some(&restore_config), fds)
                 .map_err(Error::HttpApiClient)
         }
         Some("coredump") => {
@@ -661,7 +661,7 @@ fn dbus_api_do_command(matches: &ArgMatches, proxy: &DBusApi1ProxyBlocking<'_>) 
             proxy.api_vm_snapshot(&snapshot_config)
         }
         Some("restore") => {
-            let restore_config = restore_config(
+            let (restore_config, _fds) = restore_config(
                 matches
                     .subcommand_matches("restore")
                     .unwrap()
@@ -849,11 +849,20 @@ fn snapshot_config(url: &str) -> String {
     serde_json::to_string(&snapshot_config).unwrap()
 }
 
-fn restore_config(config: &str) -> Result<String, Error> {
-    let restore_config = vmm::config::RestoreConfig::parse(config).map_err(Error::Restore)?;
+fn restore_config(config: &str) -> Result<(String, Vec<i32>), Error> {
+    let mut restore_config = vmm::config::RestoreConfig::parse(config).map_err(Error::Restore)?;
+    // RestoreConfig is modified on purpose to take out the file descriptors.
+    // These fds are passed to the server side process via SCM_RIGHTS
+    let fds = match &mut restore_config.net_fds {
+        Some(net_fds) => net_fds
+            .iter_mut()
+            .flat_map(|net| net.fds.take().unwrap_or_default())
+            .collect(),
+        None => Vec::new(),
+    };
     let restore_config = serde_json::to_string(&restore_config).unwrap();
 
-    Ok(restore_config)
+    Ok((restore_config, fds))
 }
 
 fn coredump_config(destination_url: &str) -> String {
