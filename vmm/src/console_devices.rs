@@ -107,7 +107,7 @@ fn modify_mode<F: FnOnce(&mut termios)>(
     Ok(())
 }
 
-pub fn set_raw_mode(
+fn set_raw_mode(
     f: &dyn AsRawFd,
     original_termios_opt: Arc<Mutex<Option<termios>>>,
 ) -> ConsoleDeviceResult<()> {
@@ -120,7 +120,7 @@ pub fn set_raw_mode(
     .map_err(ConsoleDeviceError::SetPtyRaw)
 }
 
-pub fn create_pty() -> io::Result<(File, File, PathBuf)> {
+fn create_pty() -> io::Result<(File, File, PathBuf)> {
     // Try to use /dev/pts/ptmx first then fall back to /dev/ptmx
     // This is done to try and use the devpts filesystem that
     // could be available for use in the process's namespace first.
