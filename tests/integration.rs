@@ -2351,6 +2351,48 @@ mod common_parallel {
 
     use crate::*;
 
+    fn snapshot_and_check_events(api_socket: &str, snapshot_dir: &str, event_path: &str) {
+        // Pause the VM
+        assert!(remote_command(api_socket, "pause", None));
+        let latest_events: [&MetaEvent; 2] = [
+            &MetaEvent {
+                event: "pausing".to_string(),
+                device_id: None,
+            },
+            &MetaEvent {
+                event: "paused".to_string(),
+                device_id: None,
+            },
+        ];
+        // See: #5938
+        thread::sleep(std::time::Duration::new(1, 0));
+        assert!(check_latest_events_exact(&latest_events, event_path));
+
+        // Take a snapshot from the VM
+        assert!(remote_command(
+            api_socket,
+            "snapshot",
+            Some(format!("file://{snapshot_dir}").as_str()),
+        ));
+
+        // Wait to make sure the snapshot is completed
+        thread::sleep(std::time::Duration::new(10, 0));
+
+        let latest_events = [
+            &MetaEvent {
+                event: "snapshotting".to_string(),
+                device_id: None,
+            },
+            &MetaEvent {
+                event: "snapshotted".to_string(),
+                device_id: None,
+            },
+        ];
+        // See: #5938
+        thread::sleep(std::time::Duration::new(1, 0));
+        assert!(check_latest_events_exact(&latest_events, event_path));
+    }
+
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_focal_hypervisor_fw() {
@@ -6122,45 +6164,7 @@ mod common_parallel {
                 thread::sleep(std::time::Duration::new(10, 0));
             }
 
-            // Pause the VM
-            assert!(remote_command(&api_socket_source, "pause", None));
-            let latest_events = [
-                &MetaEvent {
-                    event: "pausing".to_string(),
-                    device_id: None,
-                },
-                &MetaEvent {
-                    event: "paused".to_string(),
-                    device_id: None,
-                },
-            ];
-            // See: #5938
-            thread::sleep(std::time::Duration::new(1, 0));
-            assert!(check_latest_events_exact(&latest_events, &event_path));
-
-            // Take a snapshot from the VM
-            assert!(remote_command(
-                &api_socket_source,
-                "snapshot",
-                Some(format!("file://{snapshot_dir}").as_str()),
-            ));
-
-            // Wait to make sure the snapshot is completed
-            thread::sleep(std::time::Duration::new(10, 0));
-
-            let latest_events = [
-                &MetaEvent {
-                    event: "snapshotting".to_string(),
-                    device_id: None,
-                },
-                &MetaEvent {
-                    event: "snapshotted".to_string(),
-                    device_id: None,
-                },
-            ];
-            // See: #5938
-            thread::sleep(std::time::Duration::new(1, 0));
-            assert!(check_latest_events_exact(&latest_events, &event_path));
+            snapshot_and_check_events(&api_socket_source, &snapshot_dir, &event_path);
         });
 
         // Shutdown the source VM and check console output
@@ -6280,6 +6284,224 @@ mod common_parallel {
             }
 
             guest.check_devices_common(Some(&socket), Some(&console_text), None);
+        });
+        // Shutdown the target VM and check console output
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        let r = std::panic::catch_unwind(|| {
+            assert!(String::from_utf8_lossy(&output.stdout).contains(&console_text));
+        });
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_snapshot_restore_with_fd() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+        let kernel_path = direct_kernel_boot_path();
+
+        let api_socket_source = format!("{}.1", temp_api_path(&guest.tmp_dir));
+
+        let net_id = "net123";
+        let num_queue_pairs: usize = 2;
+        // use a name that does not conflict with tap dev created from other tests
+        let tap_name = "chtap999";
+        use std::str::FromStr;
+        let taps = net_util::open_tap(
+            Some(tap_name),
+            Some(std::net::Ipv4Addr::from_str(&guest.network.host_ip).unwrap()),
+            None,
+            &mut None,
+            None,
+            num_queue_pairs,
+            Some(libc::O_RDWR | libc::O_NONBLOCK),
+        )
+        .unwrap();
+        let net_params = format!(
+            "id={},fd=[{},{}],mac={},ip={},mask=255.255.255.0,num_queues={}",
+            net_id,
+            taps[0].as_raw_fd(),
+            taps[1].as_raw_fd(),
+            guest.network.guest_mac,
+            guest.network.host_ip,
+            num_queue_pairs * 2
+        );
+
+        let cloudinit_params = format!(
+            "path={},iommu=on",
+            guest.disk_config.disk(DiskType::CloudInit).unwrap()
+        );
+
+        let n_cpu = 2;
+        let event_path = temp_event_monitor_path(&guest.tmp_dir);
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_source])
+            .args(["--event-monitor", format!("path={event_path}").as_str()])
+            .args(["--cpus", format!("boot={}", n_cpu).as_str()])
+            .args(["--memory", "size=1G"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args([
+                "--disk",
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                )
+                .as_str(),
+                cloudinit_params.as_str(),
+            ])
+            .args(["--net", net_params.as_str()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let console_text = String::from("On a branch floating down river a cricket, singing.");
+        // Create the snapshot directory
+        let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            // close the fds after VM boots, as CH duplicates them before using
+            for tap in taps.iter() {
+                unsafe { libc::close(tap.as_raw_fd()) };
+            }
+
+            // Check the number of vCPUs
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), n_cpu);
+            // Check the guest RAM
+            assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
+
+            // Check the guest virtio-devices, e.g. block, rng, vsock, console, and net
+            guest.check_devices_common(None, Some(&console_text), None);
+
+            snapshot_and_check_events(&api_socket_source, &snapshot_dir, &event_path);
+        });
+
+        // Shutdown the source VM and check console output
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        let r = std::panic::catch_unwind(|| {
+            assert!(String::from_utf8_lossy(&output.stdout).contains(&console_text));
+        });
+
+        handle_child_output(r, &output);
+
+        let api_socket_restored = format!("{}.2", temp_api_path(&guest.tmp_dir));
+        let event_path_restored = format!("{}.2", temp_event_monitor_path(&guest.tmp_dir));
+
+        // Restore the VM from the snapshot
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_restored])
+            .args([
+                "--event-monitor",
+                format!("path={event_path_restored}").as_str(),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+        thread::sleep(std::time::Duration::new(2, 0));
+
+        let taps = net_util::open_tap(
+            Some(tap_name),
+            Some(std::net::Ipv4Addr::from_str(&guest.network.host_ip).unwrap()),
+            None,
+            &mut None,
+            None,
+            num_queue_pairs,
+            Some(libc::O_RDWR | libc::O_NONBLOCK),
+        )
+        .unwrap();
+        let restore_params = format!(
+            "source_url=file://{},net_fds=[{}@[{},{}]]",
+            snapshot_dir,
+            net_id,
+            taps[0].as_raw_fd(),
+            taps[1].as_raw_fd()
+        );
+        assert!(remote_command(
+            &api_socket_restored,
+            "restore",
+            Some(restore_params.as_str())
+        ));
+
+        // Wait for the VM to be restored
+        thread::sleep(std::time::Duration::new(20, 0));
+
+        // close the fds as CH duplicates them before using
+        for tap in taps.iter() {
+            unsafe { libc::close(tap.as_raw_fd()) };
+        }
+
+        let expected_events = [
+            &MetaEvent {
+                event: "starting".to_string(),
+                device_id: None,
+            },
+            &MetaEvent {
+                event: "activated".to_string(),
+                device_id: Some("__console".to_string()),
+            },
+            &MetaEvent {
+                event: "activated".to_string(),
+                device_id: Some("__rng".to_string()),
+            },
+            &MetaEvent {
+                event: "restoring".to_string(),
+                device_id: None,
+            },
+        ];
+        assert!(check_sequential_events(
+            &expected_events,
+            &event_path_restored
+        ));
+        let latest_events = [&MetaEvent {
+            event: "restored".to_string(),
+            device_id: None,
+        }];
+        assert!(check_latest_events_exact(
+            &latest_events,
+            &event_path_restored
+        ));
+
+        // Remove the snapshot dir
+        let _ = remove_dir_all(snapshot_dir.as_str());
+
+        let r = std::panic::catch_unwind(|| {
+            // Resume the VM
+            assert!(remote_command(&api_socket_restored, "resume", None));
+            // There is no way that we can ensure the 'write()' to the
+            // event file is completed when the 'resume' request is
+            // returned successfully, because the 'write()' was done
+            // asynchronously from a different thread of Cloud
+            // Hypervisor (e.g. the event-monitor thread).
+            thread::sleep(std::time::Duration::new(1, 0));
+            let latest_events = [
+                &MetaEvent {
+                    event: "resuming".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "resumed".to_string(),
+                    device_id: None,
+                },
+            ];
+            assert!(check_latest_events_exact(
+                &latest_events,
+                &event_path_restored
+            ));
+
+            // Perform same checks to validate VM has been properly restored
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), n_cpu);
+            assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
+
+            guest.check_devices_common(None, Some(&console_text), None);
         });
         // Shutdown the target VM and check console output
         let _ = child.kill();
