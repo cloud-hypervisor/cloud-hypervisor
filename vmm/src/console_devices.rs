@@ -10,6 +10,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
+use crate::sigwinch_listener::listen_for_sigwinch_on_tty;
 use crate::vm_config::ConsoleOutputMode;
 use crate::Vmm;
 use libc::cfmakeraw;
@@ -54,6 +55,10 @@ pub enum ConsoleDeviceError {
     /// Cannot duplicate file descriptor
     #[error("Cannot duplicate file descriptor: {0}")]
     DupFd(#[source] vmm_sys_util::errno::Error),
+
+    /// Error starting sigwinch listener
+    #[error("Error starting sigwinch listener: {0}")]
+    StartSigwinchListener(#[source] std::io::Error),
 }
 
 type ConsoleDeviceResult<T> = result::Result<T, ConsoleDeviceError>;
@@ -179,6 +184,14 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
             console_info.console_main_fd = Some(main_fd.into_raw_fd());
             set_raw_mode(&sub_fd.as_raw_fd(), vmm.original_termios_opt.clone())?;
             vmconfig.console.file = Some(path.clone());
+            vmm.console_resize_pipe = Some(
+                listen_for_sigwinch_on_tty(
+                    sub_fd,
+                    &vmm.seccomp_action,
+                    vmm.hypervisor.hypervisor_type(),
+                )
+                .map_err(ConsoleDeviceError::StartSigwinchListener)?,
+            );
         }
         ConsoleOutputMode::Tty => {
             // Duplicating the file descriptors like this is needed as otherwise
@@ -191,6 +204,18 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
             }
             // SAFETY: stdout is valid and owned solely by us.
             let stdout = unsafe { File::from_raw_fd(stdout) };
+
+            // SAFETY: FFI call. Trivially safe.
+            if unsafe { libc::isatty(libc::STDOUT_FILENO) } == 1 {
+                vmm.console_resize_pipe = Some(
+                    listen_for_sigwinch_on_tty(
+                        stdout.try_clone().unwrap(),
+                        &vmm.seccomp_action,
+                        vmm.hypervisor.hypervisor_type(),
+                    )
+                    .map_err(ConsoleDeviceError::StartSigwinchListener)?,
+                );
+            }
 
             // Make sure stdout is in raw mode, if it's a terminal.
             set_raw_mode(&stdout, vmm.original_termios_opt.clone())?;
