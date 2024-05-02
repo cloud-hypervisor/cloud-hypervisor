@@ -5,15 +5,19 @@
 use crate::{CpuState, GicState, HypervisorDeviceError, HypervisorVmError};
 use std::any::Any;
 use std::result;
+use thiserror::Error;
 
 /// Errors thrown while setting up the VGIC.
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
     /// Error while calling KVM ioctl for setting up the global interrupt controller.
+    #[error("Failed creating GIC device: {0}")]
     CreateGic(HypervisorVmError),
     /// Error while setting device attributes for the GIC.
+    #[error("Failed setting device attributes for the GIC: {0}")]
     SetDeviceAttribute(HypervisorDeviceError),
     /// Error while getting device attributes for the GIC.
+    #[error("Failed getting device attributes for the GIC: {0}")]
     GetDeviceAttribute(HypervisorDeviceError),
 }
 pub type Result<T> = result::Result<T, Error>;
