@@ -13,6 +13,7 @@ use crate::config::{
     ConsoleOutputMode, DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig,
     VdpaConfig, VhostMode, VmConfig, VsockConfig,
 };
+use crate::console_devices::{create_pty, set_raw_mode, ConsoleDeviceError};
 use crate::cpu::{CpuManager, CPU_MANAGER_ACPI_SIZE};
 use crate::device_tree::{DeviceNode, DeviceTree};
 use crate::interrupt::LegacyUserspaceInterruptManager;
@@ -55,8 +56,8 @@ use devices::{
 };
 use hypervisor::{HypervisorType, IoEventAddress};
 use libc::{
-    cfmakeraw, isatty, tcgetattr, tcsetattr, termios, MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED,
-    O_TMPFILE, PROT_READ, PROT_WRITE, TCSANOW,
+    tcsetattr, termios, MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED, O_TMPFILE, PROT_READ, PROT_WRITE,
+    TCSANOW,
 };
 use pci::{
     DeviceRelocation, MmioRegion, PciBarRegionType, PciBdf, PciDevice, VfioDmaMapping,
@@ -66,12 +67,11 @@ use rate_limiter::group::RateLimiterGroup;
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::fs::{read_link, File, OpenOptions};
+use std::fs::{File, OpenOptions};
 use std::io::{self, stdout, Seek, SeekFrom};
-use std::mem::zeroed;
 use std::num::Wrapping;
 use std::os::unix::fs::OpenOptionsExt;
-use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::path::PathBuf;
 use std::result;
 use std::sync::{Arc, Mutex};
@@ -270,7 +270,7 @@ pub enum DeviceManagerError {
     DebugconPtyOpen(io::Error),
 
     /// Error setting pty raw mode
-    SetPtyRaw(vmm_sys_util::errno::Error),
+    SetPtyRaw(ConsoleDeviceError),
 
     /// Error getting pty peer
     GetPtyPeer(vmm_sys_util::errno::Error),
@@ -499,55 +499,6 @@ pub enum DeviceManagerError {
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
 const DEVICE_MANAGER_ACPI_SIZE: usize = 0x10;
-
-const TIOCSPTLCK: libc::c_int = 0x4004_5431;
-const TIOCGTPEER: libc::c_int = 0x5441;
-
-pub fn create_pty() -> io::Result<(File, File, PathBuf)> {
-    // Try to use /dev/pts/ptmx first then fall back to /dev/ptmx
-    // This is done to try and use the devpts filesystem that
-    // could be available for use in the process's namespace first.
-    // Ideally these are all the same file though but different
-    // kernels could have things setup differently.
-    // See https://www.kernel.org/doc/Documentation/filesystems/devpts.txt
-    // for further details.
-
-    let custom_flags = libc::O_NONBLOCK;
-    let main = match OpenOptions::new()
-        .read(true)
-        .write(true)
-        .custom_flags(custom_flags)
-        .open("/dev/pts/ptmx")
-    {
-        Ok(f) => f,
-        _ => OpenOptions::new()
-            .read(true)
-            .write(true)
-            .custom_flags(custom_flags)
-            .open("/dev/ptmx")?,
-    };
-    let mut unlock: libc::c_ulong = 0;
-    // SAFETY: FFI call into libc, trivially safe
-    unsafe { libc::ioctl(main.as_raw_fd(), TIOCSPTLCK as _, &mut unlock) };
-
-    // SAFETY: FFI call into libc, trivially safe
-    let sub_fd = unsafe {
-        libc::ioctl(
-            main.as_raw_fd(),
-            TIOCGTPEER as _,
-            libc::O_NOCTTY | libc::O_RDWR,
-        )
-    };
-    if sub_fd == -1 {
-        return vmm_sys_util::errno::errno_result().map_err(|e| e.into());
-    }
-
-    let proc_path = PathBuf::from(format!("/proc/self/fd/{sub_fd}"));
-    let path = read_link(proc_path)?;
-
-    // SAFETY: sub_fd is checked to be valid before being wrapped in File
-    Ok((main, unsafe { File::from_raw_fd(sub_fd) }, path))
-}
 
 #[derive(Default)]
 pub struct Console {
@@ -2022,44 +1973,6 @@ impl DeviceManager {
         Ok(serial)
     }
 
-    fn modify_mode<F: FnOnce(&mut termios)>(
-        &mut self,
-        fd: RawFd,
-        f: F,
-    ) -> vmm_sys_util::errno::Result<()> {
-        // SAFETY: safe because we check the return value of isatty.
-        if unsafe { isatty(fd) } != 1 {
-            return Ok(());
-        }
-
-        // SAFETY: The following pair are safe because termios gets totally overwritten by tcgetattr
-        // and we check the return result.
-        let mut termios: termios = unsafe { zeroed() };
-        // SAFETY: see above
-        let ret = unsafe { tcgetattr(fd, &mut termios as *mut _) };
-        if ret < 0 {
-            return vmm_sys_util::errno::errno_result();
-        }
-        let mut original_termios_opt = self.original_termios_opt.lock().unwrap();
-        if original_termios_opt.is_none() {
-            *original_termios_opt = Some(termios);
-        }
-        f(&mut termios);
-        // SAFETY: Safe because the syscall will only read the extent of termios and we check
-        // the return result.
-        let ret = unsafe { tcsetattr(fd, TCSANOW, &termios as *const _) };
-        if ret < 0 {
-            return vmm_sys_util::errno::errno_result();
-        }
-
-        Ok(())
-    }
-
-    fn set_raw_mode(&mut self, f: &dyn AsRawFd) -> vmm_sys_util::errno::Result<()> {
-        // SAFETY: FFI call. Variable t is guaranteed to be a valid termios from modify_mode.
-        self.modify_mode(f.as_raw_fd(), |t| unsafe { cfmakeraw(t) })
-    }
-
     fn listen_for_sigwinch_on_tty(&mut self, pty_sub: File) -> std::io::Result<()> {
         let seccomp_filter = get_seccomp_filter(
             &self.seccomp_action,
@@ -2097,7 +2010,7 @@ impl DeviceManager {
                 } else {
                     let (main, sub, path) =
                         create_pty().map_err(DeviceManagerError::ConsolePtyOpen)?;
-                    self.set_raw_mode(&sub)
+                    set_raw_mode(&sub, self.original_termios_opt.clone())
                         .map_err(DeviceManagerError::SetPtyRaw)?;
                     self.config.lock().unwrap().console.file = Some(path.clone());
                     let file = main.try_clone().unwrap();
@@ -2120,7 +2033,7 @@ impl DeviceManager {
                 let stdout = unsafe { File::from_raw_fd(stdout) };
 
                 // Make sure stdout is in raw mode, if it's a terminal.
-                let _ = self.set_raw_mode(&stdout);
+                let _ = set_raw_mode(&stdout, self.original_termios_opt.clone());
 
                 // SAFETY: FFI call. Trivially safe.
                 if unsafe { libc::isatty(libc::STDOUT_FILENO) } == 1 {
@@ -2222,7 +2135,7 @@ impl DeviceManager {
                 } else {
                     let (main, sub, path) =
                         create_pty().map_err(DeviceManagerError::SerialPtyOpen)?;
-                    self.set_raw_mode(&sub)
+                    set_raw_mode(&sub, self.original_termios_opt.clone())
                         .map_err(DeviceManagerError::SetPtyRaw)?;
                     self.config.lock().unwrap().serial.file = Some(path.clone());
                     self.serial_pty = Some(Arc::new(Mutex::new(PtyPair { main, path })));
@@ -2231,7 +2144,7 @@ impl DeviceManager {
             }
             ConsoleOutputMode::Tty => {
                 let out = stdout();
-                let _ = self.set_raw_mode(&out);
+                let _ = set_raw_mode(&out, self.original_termios_opt.clone());
                 Some(Box::new(out))
             }
             ConsoleOutputMode::Off | ConsoleOutputMode::Null | ConsoleOutputMode::Socket => None,
@@ -2281,7 +2194,7 @@ impl DeviceManager {
                     } else {
                         let (main, sub, path) =
                             create_pty().map_err(DeviceManagerError::DebugconPtyOpen)?;
-                        self.set_raw_mode(&sub)
+                        set_raw_mode(&sub, self.original_termios_opt.clone())
                             .map_err(DeviceManagerError::SetPtyRaw)?;
                         self.config.lock().unwrap().debug_console.file = Some(path.clone());
                         self.debug_console_pty = Some(Arc::new(Mutex::new(PtyPair { main, path })));
@@ -2290,7 +2203,7 @@ impl DeviceManager {
                 }
                 ConsoleOutputMode::Tty => {
                     let out = stdout();
-                    let _ = self.set_raw_mode(&out);
+                    let _ = set_raw_mode(&out, self.original_termios_opt.clone());
                     Some(Box::new(out))
                 }
                 ConsoleOutputMode::Off | ConsoleOutputMode::Null | ConsoleOutputMode::Socket => {
