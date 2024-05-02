@@ -63,7 +63,7 @@ component in the state it was left before the snapshot occurred.
 ## Restore a Cloud Hypervisor VM
 
 Given that one has access to an existing snapshot in `/home/foo/snapshot`,
-it is possible to create a new VM based on this snapshot with the following 
+it is possible to create a new VM based on this snapshot with the following
 command:
 
 ```bash
@@ -92,6 +92,21 @@ start using it.
 
 At this point, the VM is fully restored and is identical to the VM which was
 snapshot earlier.
+
+## Restore a VM with new Net FDs
+For a VM created with FDs explicitly passed to NetConfig, a set of valid FDs
+need to be provided along with the VM restore command in the following syntax:
+
+```bash
+# First terminal
+./cloud-hypervisor --api-socket /tmp/cloud-hypervisor.sock
+
+# Second terminal
+./ch-remote --api-socket=/tmp/cloud-hypervisor.sock restore source_url=file:///home/foo/snapshot net_fds=[net1@[23,24],net2@[25,26]]
+```
+In the example above, the net device with id `net1` will be backed by FDs '23'
+and '24', and the net device with id `net2` will be backed by FDs '25' and '26'
+from the restored VM.
 
 ## Limitations
 
