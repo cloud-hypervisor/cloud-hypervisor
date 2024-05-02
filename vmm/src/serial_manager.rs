@@ -4,7 +4,6 @@
 //
 
 use crate::config::ConsoleOutputMode;
-use crate::device_manager::PtyPair;
 #[cfg(target_arch = "aarch64")]
 use devices::legacy::Pl011;
 #[cfg(target_arch = "x86_64")]
@@ -14,6 +13,7 @@ use serial_buffer::SerialBuffer;
 use std::fs::File;
 use std::io::Read;
 use std::net::Shutdown;
+use std::os::fd::RawFd;
 use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::panic::AssertUnwindSafe;
@@ -123,7 +123,7 @@ impl SerialManager {
     pub fn new(
         #[cfg(target_arch = "x86_64")] serial: Arc<Mutex<Serial>>,
         #[cfg(target_arch = "aarch64")] serial: Arc<Mutex<Pl011>>,
-        pty_pair: Option<Arc<Mutex<PtyPair>>>,
+        main_fd: Option<RawFd>,
         mode: ConsoleOutputMode,
         socket: Option<PathBuf>,
     ) -> Result<Option<Self>> {
@@ -131,13 +131,10 @@ impl SerialManager {
 
         let in_file = match mode {
             ConsoleOutputMode::Pty => {
-                if let Some(pty_pair) = pty_pair {
-                    pty_pair
-                        .lock()
-                        .unwrap()
-                        .main
-                        .try_clone()
-                        .map_err(Error::FileClone)?
+                if let Some(pty_main) = main_fd {
+                    // SAFETY: pty_main is guaranteed to be a valid fd from
+                    // pre_create_console_devices() in vmm/src/console_devices.rs
+                    unsafe { File::from_raw_fd(pty_main) }
                 } else {
                     return Ok(None);
                 }
@@ -170,12 +167,13 @@ impl SerialManager {
                 }
             }
             ConsoleOutputMode::Socket => {
-                if let Some(path_in_socket) = socket {
-                    socket_path = Some(path_in_socket.clone());
-                    let listener = UnixListener::bind(path_in_socket.as_path())
-                        .map_err(Error::BindUnixSocket)?;
-                    // SAFETY: listener is valid and will return valid fd
-                    unsafe { File::from_raw_fd(listener.into_raw_fd()) }
+                if let Some(socket_fd) = main_fd {
+                    if let Some(path_in_socket) = socket {
+                        socket_path = Some(path_in_socket.clone());
+                    }
+                    // SAFETY: socke_fd is guaranteed to be a valid fd from
+                    // pre_create_console_devices() in vmm/src/console_devices.rs
+                    unsafe { File::from_raw_fd(socket_fd) }
                 } else {
                     return Ok(None);
                 }

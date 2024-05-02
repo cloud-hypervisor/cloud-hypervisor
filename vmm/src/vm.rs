@@ -16,7 +16,7 @@ use crate::config::{
     UserDeviceConfig, ValidationError, VdpaConfig, VmConfig, VsockConfig,
 };
 use crate::config::{NumaConfig, PayloadConfig};
-use crate::console_devices::ConsoleDeviceError;
+use crate::console_devices::{ConsoleDeviceError, ConsoleInfo};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::{
     CpuElf64Writable, DumpState, Elf64Writable, GuestDebuggable, GuestDebuggableError, NoteDescType,
@@ -491,6 +491,7 @@ impl Vm {
         serial_pty: Option<PtyPair>,
         console_pty: Option<PtyPair>,
         debug_console_pty: Option<PtyPair>,
+        console_info: Option<ConsoleInfo>,
         console_resize_pipe: Option<File>,
         original_termios: Arc<Mutex<Option<termios>>>,
         snapshot: Option<Snapshot>,
@@ -627,7 +628,6 @@ impl Vm {
             #[cfg(target_arch = "x86_64")]
             io_bus,
             mmio_bus,
-            hypervisor.hypervisor_type(),
             vm.clone(),
             config.clone(),
             memory_manager.clone(),
@@ -652,6 +652,7 @@ impl Vm {
                 serial_pty,
                 console_pty,
                 debug_console_pty,
+                console_info,
                 console_resize_pipe,
                 original_termios,
             )
@@ -808,6 +809,7 @@ impl Vm {
         serial_pty: Option<PtyPair>,
         console_pty: Option<PtyPair>,
         debug_console_pty: Option<PtyPair>,
+        console_info: Option<ConsoleInfo>,
         console_resize_pipe: Option<File>,
         original_termios: Arc<Mutex<Option<termios>>>,
         snapshot: Option<Snapshot>,
@@ -888,6 +890,7 @@ impl Vm {
             serial_pty,
             console_pty,
             debug_console_pty,
+            console_info,
             console_resize_pipe,
             original_termios,
             snapshot,
