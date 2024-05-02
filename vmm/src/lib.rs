@@ -63,6 +63,7 @@ mod acpi;
 pub mod api;
 mod clone3;
 pub mod config;
+pub mod console_devices;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 mod coredump;
 pub mod cpu;
