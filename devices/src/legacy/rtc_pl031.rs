@@ -13,6 +13,7 @@ use std::fmt;
 use std::sync::{Arc, Barrier};
 use std::time::Instant;
 use std::{io, result};
+use thiserror::Error;
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_device::BusDevice;
 
@@ -39,19 +40,12 @@ const AMBA_ID_HIGH: u64 = 0x1000;
 /// Constant to convert seconds to nanoseconds.
 pub const NANOS_PER_SECOND: u64 = 1_000_000_000;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
+    #[error("Bad Write Offset: {0}")]
     BadWriteOffset(u64),
+    #[error("Failed to trigger interrupt: {0}")]
     InterruptFailure(io::Error),
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Error::BadWriteOffset(offset) => write!(f, "Bad Write Offset: {offset}"),
-            Error::InterruptFailure(e) => write!(f, "Failed to trigger interrupt: {e}"),
-        }
-    }
 }
 
 type Result<T> = result::Result<T, Error>;

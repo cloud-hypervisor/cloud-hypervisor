@@ -9,9 +9,10 @@
 
 use crate::{read_le_u32, write_le_u32};
 use serde::{Deserialize, Serialize};
+use std::io;
 use std::result;
 use std::sync::{Arc, Barrier};
-use std::{fmt, io};
+use thiserror::Error;
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_device::BusDevice;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -37,27 +38,16 @@ const GPIO_ID_HIGH: u64 = 0x1000;
 
 const N_GPIOS: u32 = 8;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
+    #[error("Bad Write Offset: {0}")]
     BadWriteOffset(u64),
+    #[error("GPIO interrupt disabled by guest driver.")]
     GpioInterruptDisabled,
+    #[error("Could not trigger GPIO interrupt: {0}.")]
     GpioInterruptFailure(io::Error),
+    #[error("Invalid GPIO Input key triggered: {0}.")]
     GpioTriggerKeyFailure(u32),
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Error::BadWriteOffset(offset) => write!(f, "Bad Write Offset: {offset}"),
-            Error::GpioInterruptDisabled => write!(f, "GPIO interrupt disabled by guest driver.",),
-            Error::GpioInterruptFailure(ref e) => {
-                write!(f, "Could not trigger GPIO interrupt: {e}.")
-            }
-            Error::GpioTriggerKeyFailure(key) => {
-                write!(f, "Invalid GPIO Input key triggered: {key}.")
-            }
-        }
-    }
 }
 
 type Result<T> = result::Result<T, Error>;
