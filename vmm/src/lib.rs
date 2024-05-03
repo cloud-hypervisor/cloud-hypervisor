@@ -811,9 +811,6 @@ impl Vmm {
             timestamp,
             None,
             None,
-            None,
-            None,
-            None,
             Arc::clone(&self.original_termios_opt),
             Some(snapshot),
         )
@@ -1264,9 +1261,6 @@ impl RequestHandler for Vmm {
                         &self.seccomp_action,
                         self.hypervisor.clone(),
                         activate_evt,
-                        None,
-                        None,
-                        None,
                         self.console_info.clone(),
                         None,
                         Arc::clone(&self.original_termios_opt),
@@ -1394,9 +1388,6 @@ impl RequestHandler for Vmm {
             &self.seccomp_action,
             self.hypervisor.clone(),
             activate_evt,
-            None,
-            None,
-            None,
             self.console_info.clone(),
             None,
             Arc::clone(&self.original_termios_opt),
@@ -1443,27 +1434,17 @@ impl RequestHandler for Vmm {
         event!("vm", "rebooting");
 
         // First we stop the current VM
-        let (config, serial_pty, console_pty, debug_console_pty, console_resize_pipe) =
-            if let Some(mut vm) = self.vm.take() {
-                let config = vm.get_config();
-                let serial_pty = vm.serial_pty();
-                let console_pty = vm.console_pty();
-                let debug_console_pty = vm.debug_console_pty();
-                let console_resize_pipe = vm
-                    .console_resize_pipe()
-                    .as_ref()
-                    .map(|pipe| pipe.try_clone().unwrap());
-                vm.shutdown()?;
-                (
-                    config,
-                    serial_pty,
-                    console_pty,
-                    debug_console_pty,
-                    console_resize_pipe,
-                )
-            } else {
-                return Err(VmError::VmNotCreated);
-            };
+        let (config, console_resize_pipe) = if let Some(mut vm) = self.vm.take() {
+            let config = vm.get_config();
+            let console_resize_pipe = vm
+                .console_resize_pipe()
+                .as_ref()
+                .map(|pipe| pipe.try_clone().unwrap());
+            vm.shutdown()?;
+            (config, console_resize_pipe)
+        } else {
+            return Err(VmError::VmNotCreated);
+        };
 
         // vm.shutdown() closes all the console devices, so set console_info to None
         // so that the closed FD #s are not reused.
@@ -1501,9 +1482,6 @@ impl RequestHandler for Vmm {
             &self.seccomp_action,
             self.hypervisor.clone(),
             activate_evt,
-            serial_pty,
-            console_pty,
-            debug_console_pty,
             self.console_info.clone(),
             console_resize_pipe,
             Arc::clone(&self.original_termios_opt),

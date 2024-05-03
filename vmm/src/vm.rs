@@ -22,7 +22,7 @@ use crate::coredump::{
     CpuElf64Writable, DumpState, Elf64Writable, GuestDebuggable, GuestDebuggableError, NoteDescType,
 };
 use crate::cpu;
-use crate::device_manager::{DeviceManager, DeviceManagerError, PtyPair};
+use crate::device_manager::{DeviceManager, DeviceManagerError};
 use crate::device_tree::DeviceTree;
 #[cfg(feature = "guest_debug")]
 use crate::gdb::{Debuggable, DebuggableError, GdbRequestPayload, GdbResponsePayload};
@@ -488,9 +488,6 @@ impl Vm {
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         activate_evt: EventFd,
         timestamp: Instant,
-        serial_pty: Option<PtyPair>,
-        console_pty: Option<PtyPair>,
-        debug_console_pty: Option<PtyPair>,
         console_info: Option<ConsoleInfo>,
         console_resize_pipe: Option<File>,
         original_termios: Arc<Mutex<Option<termios>>>,
@@ -648,14 +645,7 @@ impl Vm {
         device_manager
             .lock()
             .unwrap()
-            .create_devices(
-                serial_pty,
-                console_pty,
-                debug_console_pty,
-                console_info,
-                console_resize_pipe,
-                original_termios,
-            )
+            .create_devices(console_info, console_resize_pipe, original_termios)
             .map_err(Error::DeviceManager)?;
 
         #[cfg(feature = "tdx")]
@@ -806,9 +796,6 @@ impl Vm {
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         activate_evt: EventFd,
-        serial_pty: Option<PtyPair>,
-        console_pty: Option<PtyPair>,
-        debug_console_pty: Option<PtyPair>,
         console_info: Option<ConsoleInfo>,
         console_resize_pipe: Option<File>,
         original_termios: Arc<Mutex<Option<termios>>>,
@@ -887,9 +874,6 @@ impl Vm {
             hypervisor,
             activate_evt,
             timestamp,
-            serial_pty,
-            console_pty,
-            debug_console_pty,
             console_info,
             console_resize_pipe,
             original_termios,
@@ -1364,18 +1348,6 @@ impl Vm {
         .map_err(Error::ConfigureSystem)?;
 
         Ok(())
-    }
-
-    pub fn serial_pty(&self) -> Option<PtyPair> {
-        self.device_manager.lock().unwrap().serial_pty()
-    }
-
-    pub fn console_pty(&self) -> Option<PtyPair> {
-        self.device_manager.lock().unwrap().console_pty()
-    }
-
-    pub fn debug_console_pty(&self) -> Option<PtyPair> {
-        self.device_manager.lock().unwrap().debug_console_pty()
     }
 
     pub fn console_resize_pipe(&self) -> Option<Arc<File>> {
