@@ -134,7 +134,7 @@ update_workloads() {
     popd || exit
 
     # Download Cloud Hypervisor binary from its last stable release
-    LAST_RELEASE_VERSION="v36.0"
+    LAST_RELEASE_VERSION="v39.0"
     CH_RELEASE_URL="https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/$LAST_RELEASE_VERSION/cloud-hypervisor-static-aarch64"
     CH_RELEASE_NAME="cloud-hypervisor-static-aarch64"
     pushd "$WORKLOADS_DIR" || exit
