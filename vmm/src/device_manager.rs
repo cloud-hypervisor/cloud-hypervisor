@@ -780,15 +780,6 @@ pub struct DeviceManager {
     // Console abstraction
     console: Arc<Console>,
 
-    // console PTY
-    console_pty: Option<Arc<Mutex<PtyPair>>>,
-
-    // serial PTY
-    serial_pty: Option<Arc<Mutex<PtyPair>>>,
-
-    // debug-console PTY
-    debug_console_pty: Option<Arc<Mutex<PtyPair>>>,
-
     // Serial Manager
     serial_manager: Option<Arc<SerialManager>>,
 
@@ -1168,10 +1159,7 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::EventFd)?,
             acpi_address,
             selected_segment: 0,
-            serial_pty: None,
             serial_manager: None,
-            console_pty: None,
-            debug_console_pty: None,
             console_resize_pipe: None,
             original_termios_opt: Arc::new(Mutex::new(None)),
             virtio_mem_devices: Vec::new(),
@@ -1204,33 +1192,12 @@ impl DeviceManager {
         Ok(device_manager)
     }
 
-    pub fn serial_pty(&self) -> Option<PtyPair> {
-        self.serial_pty
-            .as_ref()
-            .map(|pty| pty.lock().unwrap().clone())
-    }
-
-    pub fn console_pty(&self) -> Option<PtyPair> {
-        self.console_pty
-            .as_ref()
-            .map(|pty| pty.lock().unwrap().clone())
-    }
-
-    pub fn debug_console_pty(&self) -> Option<PtyPair> {
-        self.debug_console_pty
-            .as_ref()
-            .map(|pty| pty.lock().unwrap().clone())
-    }
-
     pub fn console_resize_pipe(&self) -> Option<Arc<File>> {
         self.console_resize_pipe.clone()
     }
 
     pub fn create_devices(
         &mut self,
-        serial_pty: Option<PtyPair>,
-        console_pty: Option<PtyPair>,
-        debug_console_pty: Option<PtyPair>,
         console_info: Option<ConsoleInfo>,
         console_resize_pipe: Option<File>,
         original_termios_opt: Arc<Mutex<Option<termios>>>,
@@ -1294,9 +1261,6 @@ impl DeviceManager {
         self.console = self.add_console_devices(
             &legacy_interrupt_manager,
             &mut virtio_devices,
-            serial_pty,
-            console_pty,
-            debug_console_pty,
             console_info,
             console_resize_pipe,
         )?;
@@ -2079,7 +2043,6 @@ impl DeviceManager {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
     /// Adds all devices that behave like a console with respect to the VM
     /// configuration. This includes:
     /// - debug-console
@@ -2089,10 +2052,6 @@ impl DeviceManager {
         &mut self,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
         virtio_devices: &mut Vec<MetaVirtioDevice>,
-        _serial_pty: Option<PtyPair>,
-        _console_pty: Option<PtyPair>,
-        #[cfg(target_arch = "x86_64")] _debug_console_pty: Option<PtyPair>,
-        #[cfg(not(target_arch = "x86_64"))] _: Option<PtyPair>,
         console_info: Option<ConsoleInfo>,
         console_resize_pipe: Option<File>,
     ) -> DeviceManagerResult<Arc<Console>> {
