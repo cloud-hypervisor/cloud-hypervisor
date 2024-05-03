@@ -4,31 +4,42 @@
 
 use std::io;
 use std::result;
+use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
     /// Invalid trigger mode.
+    #[error("Invalid trigger mode")]
     InvalidTriggerMode,
     /// Invalid delivery mode.
+    #[error("Invalid delivery mode")]
     InvalidDeliveryMode,
     /// Failed creating the interrupt source group.
+    #[error("Failed creating the interrupt source group: {0}")]
     CreateInterruptSourceGroup(io::Error),
     /// Failed triggering the interrupt.
+    #[error("Failed triggering the interrupt: {0}")]
     TriggerInterrupt(io::Error),
     /// Failed masking the interrupt.
+    #[error("Failed masking the interrupt: {0}")]
     MaskInterrupt(io::Error),
     /// Failed unmasking the interrupt.
+    #[error("Failed unmasking the interrupt: {0}")]
     UnmaskInterrupt(io::Error),
     /// Failed updating the interrupt.
+    #[error("Failed updating the interrupt: {0}")]
     UpdateInterrupt(io::Error),
     /// Failed enabling the interrupt.
+    #[error("Failed enabling the interrupt: {0}")]
     EnableInterrupt(io::Error),
     #[cfg(target_arch = "aarch64")]
     /// Failed creating GIC device.
+    #[error("Failed creating GIC device: {0}")]
     CreateGic(hypervisor::HypervisorVmError),
     #[cfg(target_arch = "aarch64")]
     /// Failed restoring GIC device.
+    #[error("Failed restoring GIC device: {0}")]
     RestoreGic(hypervisor::arch::aarch64::gic::Error),
 }
 
