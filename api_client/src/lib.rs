@@ -12,7 +12,7 @@ use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 pub enum Error {
     #[error("Error writing to or reading from HTTP socket: {0}")]
     Socket(std::io::Error),
-    #[error("Error writing to or reading from HTTP socket: {0}")]
+    #[error("Error sending file descriptors: {0}")]
     SocketSendFds(vmm_sys_util::errno::Error),
     #[error("Error parsing HTTP status code: {0}")]
     StatusCodeParsing(std::num::ParseIntError),
