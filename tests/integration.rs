@@ -9725,18 +9725,6 @@ mod live_migration {
         }
 
         #[test]
-        #[cfg(not(feature = "mshv"))]
-        fn test_live_migration_numa() {
-            _test_live_migration_numa(false, false)
-        }
-
-        #[test]
-        #[cfg(not(feature = "mshv"))]
-        fn test_live_migration_numa_local() {
-            _test_live_migration_numa(false, true)
-        }
-
-        #[test]
         fn test_live_migration_watchdog() {
             _test_live_migration_watchdog(false, false)
         }
@@ -9744,16 +9732,6 @@ mod live_migration {
         #[test]
         fn test_live_migration_watchdog_local() {
             _test_live_migration_watchdog(false, true)
-        }
-
-        #[test]
-        fn test_live_migration_balloon() {
-            _test_live_migration_balloon(false, false)
-        }
-
-        #[test]
-        fn test_live_migration_balloon_local() {
-            _test_live_migration_balloon(false, true)
         }
 
         #[test]
@@ -9767,18 +9745,6 @@ mod live_migration {
         }
 
         #[test]
-        #[cfg(not(feature = "mshv"))]
-        fn test_live_upgrade_numa() {
-            _test_live_migration_numa(true, false)
-        }
-
-        #[test]
-        #[cfg(not(feature = "mshv"))]
-        fn test_live_upgrade_numa_local() {
-            _test_live_migration_numa(true, true)
-        }
-
-        #[test]
         fn test_live_upgrade_watchdog() {
             _test_live_migration_watchdog(true, false)
         }
@@ -9786,6 +9752,22 @@ mod live_migration {
         #[test]
         fn test_live_upgrade_watchdog_local() {
             _test_live_migration_watchdog(true, true)
+        }
+    }
+
+    mod live_migration_sequential {
+        use super::*;
+
+        // NUMA & baalloon live migration tests are large so run sequentially
+
+        #[test]
+        fn test_live_migration_balloon() {
+            _test_live_migration_balloon(false, false)
+        }
+
+        #[test]
+        fn test_live_migration_balloon_local() {
+            _test_live_migration_balloon(false, true)
         }
 
         #[test]
@@ -9797,12 +9779,30 @@ mod live_migration {
         fn test_live_upgrade_balloon_local() {
             _test_live_migration_balloon(true, true)
         }
-    }
 
-    mod live_migration_sequential {
-        #[cfg(target_arch = "x86_64")]
+        #[test]
         #[cfg(not(feature = "mshv"))]
-        use super::*;
+        fn test_live_migration_numa() {
+            _test_live_migration_numa(false, false)
+        }
+
+        #[test]
+        #[cfg(not(feature = "mshv"))]
+        fn test_live_migration_numa_local() {
+            _test_live_migration_numa(false, true)
+        }
+
+        #[test]
+        #[cfg(not(feature = "mshv"))]
+        fn test_live_upgrade_numa() {
+            _test_live_migration_numa(true, false)
+        }
+
+        #[test]
+        #[cfg(not(feature = "mshv"))]
+        fn test_live_upgrade_numa_local() {
+            _test_live_migration_numa(true, true)
+        }
 
         // Require to run ovs-dpdk tests sequentially because they rely on the same ovs-dpdk setup
         #[test]
