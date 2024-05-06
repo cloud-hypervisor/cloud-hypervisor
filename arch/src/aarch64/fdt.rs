@@ -219,7 +219,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     guest_mem: &GuestMemoryMmap,
     cmdline: &str,
     vcpu_mpidr: Vec<u64>,
-    vcpu_topology: Option<(u8, u8, u8)>,
+    vcpu_topology: Option<(u32, u32, u32)>,
     device_info: &HashMap<(DeviceType, String), T, S>,
     gic_device: &Arc<Mutex<dyn Vgic>>,
     initrd: &Option<InitramfsConfig>,
@@ -281,7 +281,7 @@ pub fn write_fdt_to_memory(fdt_final: Vec<u8>, guest_mem: &GuestMemoryMmap) -> R
 fn create_cpu_nodes(
     fdt: &mut FdtWriter,
     vcpu_mpidr: &[u64],
-    vcpu_topology: Option<(u8, u8, u8)>,
+    vcpu_topology: Option<(u32, u32, u32)>,
     numa_nodes: &NumaNodes,
 ) -> FdtWriterResult<()> {
     // See https://github.com/torvalds/linux/blob/master/Documentation/devicetree/bindings/arm/cpus.yaml.
