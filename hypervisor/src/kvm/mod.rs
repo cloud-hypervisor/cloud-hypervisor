@@ -451,7 +451,7 @@ impl vm::Vm for KvmVm {
     ///
     fn create_vcpu(
         &self,
-        id: u8,
+        id: u32,
         vm_ops: Option<Arc<dyn VmOps>>,
     ) -> vm::Result<Arc<dyn cpu::Vcpu>> {
         let fd = self
