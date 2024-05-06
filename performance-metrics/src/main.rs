@@ -134,7 +134,7 @@ pub struct PerformanceTestControl {
     queue_size: Option<u32>,
     net_control: Option<(bool, bool)>, // First bool is for RX(true)/TX(false), second bool is for bandwidth or PPS
     fio_control: Option<(FioOps, bool)>, // Second parameter controls whether we want bandwidth or IOPS
-    num_boot_vcpus: Option<u8>,
+    num_boot_vcpus: Option<u32>,
 }
 
 impl fmt::Display for PerformanceTestControl {
