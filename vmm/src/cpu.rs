@@ -322,7 +322,7 @@ macro_rules! round_up {
 pub struct Vcpu {
     // The hypervisor abstracted CPU.
     vcpu: Arc<dyn hypervisor::Vcpu>,
-    id: u8,
+    id: u32,
     #[cfg(target_arch = "aarch64")]
     mpidr: u64,
     saved_state: Option<CpuState>,
@@ -340,7 +340,7 @@ impl Vcpu {
     /// * `vm_ops` - Optional object for exit handling.
     /// * `cpu_vendor` - CPU vendor as reported by __cpuid(0x0)
     pub fn new(
-        id: u8,
+        id: u32,
         apic_id: u8,
         vm: &Arc<dyn hypervisor::Vm>,
         vm_ops: Option<Arc<dyn VmOps>>,
@@ -779,7 +779,7 @@ impl CpuManager {
         Ok(())
     }
 
-    fn create_vcpu(&mut self, cpu_id: u8, snapshot: Option<Snapshot>) -> Result<Arc<Mutex<Vcpu>>> {
+    fn create_vcpu(&mut self, cpu_id: u32, snapshot: Option<Snapshot>) -> Result<Arc<Mutex<Vcpu>>> {
         info!("Creating vCPU: cpu_id = {}", cpu_id);
 
         #[cfg(target_arch = "x86_64")]
@@ -791,7 +791,7 @@ impl CpuManager {
 
         let mut vcpu = Vcpu::new(
             cpu_id,
-            x2apic_id as u8,
+            x2apic_id as u32,
             &self.vm,
             Some(self.vm_ops.clone()),
             #[cfg(target_arch = "x86_64")]
@@ -872,7 +872,7 @@ impl CpuManager {
     /// Only create new vCPUs if there aren't any inactive ones to reuse
     fn create_vcpus(
         &mut self,
-        desired_vcpus: u8,
+        desired_vcpus: u32,
         snapshot: Option<Snapshot>,
     ) -> Result<Vec<Arc<Mutex<Vcpu>>>> {
         let mut vcpus: Vec<Arc<Mutex<Vcpu>>> = vec![];
@@ -889,7 +889,7 @@ impl CpuManager {
         }
 
         // Only create vCPUs in excess of all the allocated vCPUs.
-        for cpu_id in self.vcpus.len() as u8..desired_vcpus {
+        for cpu_id in self.vcpus.len() as u32..desired_vcpus {
             vcpus.push(self.create_vcpu(
                 cpu_id,
                 // TODO: The special format of the CPU id can be removed once
@@ -927,7 +927,7 @@ impl CpuManager {
     fn start_vcpu(
         &mut self,
         vcpu: Arc<Mutex<Vcpu>>,
-        vcpu_id: u8,
+        vcpu_id: u32,
         vcpu_thread_barrier: Arc<Barrier>,
         inserting: bool,
     ) -> Result<()> {
@@ -1187,7 +1187,7 @@ impl CpuManager {
     /// Start up as many vCPUs threads as needed to reach `desired_vcpus`
     fn activate_vcpus(
         &mut self,
-        desired_vcpus: u8,
+        desired_vcpus: u32,
         inserting: bool,
         paused: Option<bool>,
     ) -> Result<()> {
@@ -1213,7 +1213,7 @@ impl CpuManager {
 
         // This reuses any inactive vCPUs as well as any that were newly created
         for vcpu_id in self.present_vcpus()..desired_vcpus {
-            let vcpu = Arc::clone(&self.vcpus[vcpu_id as usize]);
+            let vcpu = Arc::clone(&self.vcpus[vcpu_id as u32]);
             self.start_vcpu(vcpu, vcpu_id, vcpu_thread_barrier.clone(), inserting)?;
         }
 
@@ -1222,7 +1222,7 @@ impl CpuManager {
         Ok(())
     }
 
-    fn mark_vcpus_for_removal(&mut self, desired_vcpus: u8) {
+    fn mark_vcpus_for_removal(&mut self, desired_vcpus: u32) {
         // Mark vCPUs for removal, actual removal happens on ejection
         for cpu_id in desired_vcpus..self.present_vcpus() {
             self.vcpu_states[usize::from(cpu_id)].removing = true;
@@ -1241,7 +1241,7 @@ impl CpuManager {
         false
     }
 
-    fn remove_vcpu(&mut self, cpu_id: u8) -> Result<()> {
+    fn remove_vcpu(&mut self, cpu_id: u32) -> Result<()> {
         info!("Removing vCPU: cpu_id = {}", cpu_id);
         let state = &mut self.vcpu_states[usize::from(cpu_id)];
         state.kill.store(true, Ordering::SeqCst);
@@ -1271,7 +1271,7 @@ impl CpuManager {
     }
 
     pub fn start_restored_vcpus(&mut self) -> Result<()> {
-        self.activate_vcpus(self.vcpus.len() as u8, false, Some(true))
+        self.activate_vcpus(self.vcpus.len() as u32, false, Some(true))
             .map_err(|e| {
                 Error::StartRestoreVcpu(anyhow!("Failed to start restored vCPUs: {:#?}", e))
             })?;
@@ -1279,7 +1279,7 @@ impl CpuManager {
         Ok(())
     }
 
-    pub fn resize(&mut self, desired_vcpus: u8) -> Result<bool> {
+    pub fn resize(&mut self, desired_vcpus: u32) -> Result<bool> {
         if desired_vcpus.cmp(&self.present_vcpus()) == cmp::Ordering::Equal {
             return Ok(false);
         }
@@ -1348,11 +1348,11 @@ impl CpuManager {
         Ok(())
     }
 
-    pub fn boot_vcpus(&self) -> u8 {
+    pub fn boot_vcpus(&self) -> u32 {
         self.config.boot_vcpus
     }
 
-    pub fn max_vcpus(&self) -> u8 {
+    pub fn max_vcpus(&self) -> u32 {
         self.config.max_vcpus
     }
 
@@ -1362,10 +1362,10 @@ impl CpuManager {
         self.cpuid.clone()
     }
 
-    fn present_vcpus(&self) -> u8 {
+    fn present_vcpus(&self) -> u32 {
         self.vcpu_states
             .iter()
-            .fold(0, |acc, state| acc + state.active() as u8)
+            .fold(0, |acc, state| acc + state.active() as u32)
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -1384,7 +1384,7 @@ impl CpuManager {
             .collect()
     }
 
-    pub fn get_vcpu_topology(&self) -> Option<(u8, u8, u8)> {
+    pub fn get_vcpu_topology(&self) -> Option<(u32, u32, u32)> {
         self.config
             .topology
             .clone()
@@ -2011,7 +2011,7 @@ impl Aml for CpuNotify {
 }
 
 struct CpuMethods {
-    max_vcpus: u8,
+    max_vcpus: u32,
     dynamic: bool,
 }
 

@@ -653,7 +653,7 @@ fn remote_command_w_output(api_socket: &str, command: &str, arg: Option<&str>) -
 
 fn resize_command(
     api_socket: &str,
-    desired_vcpus: Option<u8>,
+    desired_vcpus: Option<u32>,
     desired_ram: Option<usize>,
     desired_balloon: Option<usize>,
     event_file: Option<&str>,

@@ -628,11 +628,11 @@ impl CpusConfig {
             .add("features");
         parser.parse(cpus).map_err(Error::ParseCpus)?;
 
-        let boot_vcpus: u8 = parser
+        let boot_vcpus: u32 = parser
             .convert("boot")
             .map_err(Error::ParseCpus)?
             .unwrap_or(DEFAULT_VCPUS);
-        let max_vcpus: u8 = parser
+        let max_vcpus: u32 = parser
             .convert("max")
             .map_err(Error::ParseCpus)?
             .unwrap_or(boot_vcpus);

@@ -9,7 +9,7 @@ use virtio_devices::RateLimiterConfig;
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CpuAffinity {
-    pub vcpu: u8,
+    pub vcpu: u32,
     pub host_cpus: Vec<usize>,
 }
 
@@ -39,8 +39,8 @@ pub fn default_cpuconfig_max_phys_bits() -> u8 {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CpusConfig {
-    pub boot_vcpus: u8,
-    pub max_vcpus: u8,
+    pub boot_vcpus: u32,
+    pub max_vcpus: u32,
     #[serde(default)]
     pub topology: Option<CpuTopology>,
     #[serde(default)]
