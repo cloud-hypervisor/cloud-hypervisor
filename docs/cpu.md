@@ -11,8 +11,8 @@ to set vCPUs options for Cloud Hypervisor.
 
 ```rust
 struct CpusConfig {
-    boot_vcpus: u8,
-    max_vcpus: u8,
+    boot_vcpus: u32,
+    max_vcpus: u32,
     topology: Option<CpuTopology>,
     kvm_hyperv: bool,
     max_phys_bits: u8,
@@ -54,7 +54,7 @@ For instance, if booting the VM with 2 vCPUs and a maximum of 6 vCPUs, it means
 up to 4 vCPUs can be added later at runtime by resizing the VM.
 
 The value must be greater than or equal to the number of boot vCPUs.
-The value is an unsigned integer of 8 bits.
+The value is an unsigned integer of 32 bits.
 
 By default this option takes the value of `boot`, meaning vCPU hotplug is not
 expected and can't be performed.
@@ -148,7 +148,7 @@ The affinity is described through the following structure:
 
 ```rust
 struct CpuAffinity {
-    vcpu: u8,
+    vcpu: u32,
     host_cpus: Vec<u8>,
 }
 ```
@@ -164,7 +164,7 @@ brackets attached to `@` define the list of host CPUs the vCPU is allowed to
 run onto.
 
 Multiple values can be provided to define each list. Each value is an unsigned
-integer of 8 bits.
+integer of 32 bits.
 
 For instance, if one needs to run vCPU 0 on host CPUs from 0 to 4, the syntax
 using `-` will help define a contiguous range with `affinity=0@[0-4]`. The
