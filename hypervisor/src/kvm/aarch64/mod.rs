@@ -114,7 +114,15 @@ pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
         };
     }
 
+    // SetGuestDebug is required but some kernels have it implemented without the capability flag.
+    check_extension!(Cap::ImmediateExit);
+    check_extension!(Cap::Ioeventfd);
+    check_extension!(Cap::Irqchip);
+    check_extension!(Cap::Irqfd);
+    check_extension!(Cap::IrqRouting);
+    check_extension!(Cap::MpState);
     check_extension!(Cap::OneReg);
+    check_extension!(Cap::UserMemory);
     Ok(())
 }
 

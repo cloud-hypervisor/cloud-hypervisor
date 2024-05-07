@@ -40,14 +40,29 @@ pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
         };
     }
 
+    // DeviceCtrl, EnableCap, and SetGuestDebug are also required, but some kernels have
+    // the features implemented without the capability flags.
+    check_extension!(Cap::AdjustClock);
+    check_extension!(Cap::ExtCpuid);
     check_extension!(Cap::GetTscKhz);
     check_extension!(Cap::ImmediateExit);
+    check_extension!(Cap::Ioeventfd);
+    check_extension!(Cap::Irqchip);
+    check_extension!(Cap::Irqfd);
+    check_extension!(Cap::IrqRouting);
+    check_extension!(Cap::MpState);
     check_extension!(Cap::SetIdentityMapAddr);
     check_extension!(Cap::SetTssAddr);
     check_extension!(Cap::SplitIrqchip);
     check_extension!(Cap::TscDeadlineTimer);
+    check_extension!(Cap::UserMemory);
+    check_extension!(Cap::UserNmi);
+    check_extension!(Cap::VcpuEvents);
+    check_extension!(Cap::Xcrs);
+    check_extension!(Cap::Xsave);
     Ok(())
 }
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct VcpuKvmState {
     pub cpuid: Vec<CpuIdEntry>,
