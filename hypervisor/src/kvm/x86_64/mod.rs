@@ -32,9 +32,6 @@ pub use {
 /// Check KVM extension for Linux
 ///
 pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
-    if !kvm.check_extension(Cap::SignalMsi) {
-        return Err(KvmError::CapabilityMissing(Cap::SignalMsi));
-    }
     if !kvm.check_extension(Cap::TscDeadlineTimer) {
         return Err(KvmError::CapabilityMissing(Cap::TscDeadlineTimer));
     }

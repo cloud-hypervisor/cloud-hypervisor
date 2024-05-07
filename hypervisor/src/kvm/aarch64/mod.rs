@@ -106,9 +106,6 @@ pub fn is_system_register(regid: u64) -> bool {
 }
 
 pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
-    if !kvm.check_extension(Cap::SignalMsi) {
-        return Err(KvmError::CapabilityMissing(Cap::SignalMsi));
-    }
     if !kvm.check_extension(Cap::OneReg) {
         return Err(KvmError::CapabilityMissing(Cap::OneReg));
     }
