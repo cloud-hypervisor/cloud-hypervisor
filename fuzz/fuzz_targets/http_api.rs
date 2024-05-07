@@ -105,7 +105,7 @@ impl RequestHandler for StubApiRequestHandler {
         Ok(())
     }
 
-    #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+    #[cfg(target_arch = "x86_64")]
     fn vm_coredump(&mut self, _: &str) -> Result<(), VmError> {
         Ok(())
     }
@@ -185,7 +185,6 @@ impl RequestHandler for StubApiRequestHandler {
                 sgx_epc: None,
                 numa: None,
                 watchdog: false,
-                #[cfg(feature = "guest_debug")]
                 gdb: false,
                 pci_segments: None,
                 platform: None,
