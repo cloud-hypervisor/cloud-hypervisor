@@ -106,9 +106,15 @@ pub fn is_system_register(regid: u64) -> bool {
 }
 
 pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
-    if !kvm.check_extension(Cap::OneReg) {
-        return Err(KvmError::CapabilityMissing(Cap::OneReg));
+    macro_rules! check_extension {
+        ($cap:expr) => {
+            if !kvm.check_extension($cap) {
+                return Err(KvmError::CapabilityMissing($cap));
+            }
+        };
     }
+
+    check_extension!(Cap::OneReg);
     Ok(())
 }
 

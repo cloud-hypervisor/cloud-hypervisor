@@ -32,24 +32,20 @@ pub use {
 /// Check KVM extension for Linux
 ///
 pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
-    if !kvm.check_extension(Cap::GetTscKhz) {
-        return Err(KvmError::CapabilityMissing(Cap::GetTscKhz));
+    macro_rules! check_extension {
+        ($cap:expr) => {
+            if !kvm.check_extension($cap) {
+                return Err(KvmError::CapabilityMissing($cap));
+            }
+        };
     }
-    if !kvm.check_extension(Cap::ImmediateExit) {
-        return Err(KvmError::CapabilityMissing(Cap::ImmediateExit));
-    }
-    if !kvm.check_extension(Cap::SetIdentityMapAddr) {
-        return Err(KvmError::CapabilityMissing(Cap::SetIdentityMapAddr));
-    }
-    if !kvm.check_extension(Cap::SetTssAddr) {
-        return Err(KvmError::CapabilityMissing(Cap::SetTssAddr));
-    }
-    if !kvm.check_extension(Cap::SplitIrqchip) {
-        return Err(KvmError::CapabilityMissing(Cap::SplitIrqchip));
-    }
-    if !kvm.check_extension(Cap::TscDeadlineTimer) {
-        return Err(KvmError::CapabilityMissing(Cap::TscDeadlineTimer));
-    }
+
+    check_extension!(Cap::GetTscKhz);
+    check_extension!(Cap::ImmediateExit);
+    check_extension!(Cap::SetIdentityMapAddr);
+    check_extension!(Cap::SetTssAddr);
+    check_extension!(Cap::SplitIrqchip);
+    check_extension!(Cap::TscDeadlineTimer);
     Ok(())
 }
 #[derive(Clone, Serialize, Deserialize)]
