@@ -17,7 +17,7 @@ libc = "0.2.153"
 linux-loader = { version = "0.11.0", features = ["elf", "bzimage", "pe"] }
 log = "0.4.21"
 serde = { version = "1.0.197", features = ["rc", "derive"] }
-thiserror = "1.0.58"
+thiserror = "1.0.60"
 uuid = "1.8.0"
 vm-memory = { version = "0.14.1", features = ["backend-mmap", "backend-bitmap"] }
 vm-migration = { path = "../vm-migration" }
