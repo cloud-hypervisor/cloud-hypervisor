@@ -7,6 +7,7 @@ edition = "2021"
 [features]
 default = []
 dbus_api = ["blocking", "futures", "zbus"]
+dhat-heap = ["dhat"] # For heap profiling
 guest_debug = ["kvm", "gdbstub", "gdbstub_arch"]
 igvm = ["hex", "dep:igvm", "igvm_defs",  "mshv-bindings", "range_map_vec"]
 io_uring = ["block/io_uring"]
@@ -27,6 +28,7 @@ blocking = { version = "1.5.1", optional = true }
 cfg-if = "1.0.0"
 clap = "4.5.4"
 devices = { path = "../devices" }
+dhat = { version = "0.3.3", optional = true }
 epoll = "4.3.3"
 event_monitor = { path = "../event_monitor" }
 flume = "0.11.0"
