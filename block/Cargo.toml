@@ -17,7 +17,7 @@ log = "0.4.21"
 remain = "0.2.13"
 serde = { version = "1.0.197", features = ["derive"] }
 smallvec = "1.13.2"
-thiserror = "1.0.58"
+thiserror = "1.0.60"
 uuid = { version = "1.8.0", features = ["v4"] }
 virtio-bindings = { version = "0.2.2", features = ["virtio-v5_0_0"] }
 virtio-queue = "0.12.0"
