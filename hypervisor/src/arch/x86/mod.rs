@@ -53,7 +53,6 @@ pub enum Exception {
 pub mod regs;
 
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "with-serde", derive(Deserialize, Serialize))]
 pub struct SegmentRegister {
     pub base: u64,
     pub limit: u32,
@@ -174,7 +173,6 @@ macro_rules! msr_data {
 }
 
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "with-serde", derive(Deserialize, Serialize))]
 pub struct StandardRegisters {
     pub rax: u64,
     pub rbx: u64,
@@ -197,14 +195,12 @@ pub struct StandardRegisters {
 }
 
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "with-serde", derive(Deserialize, Serialize))]
 pub struct DescriptorTable {
     pub base: u64,
     pub limit: u16,
 }
 
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "with-serde", derive(Deserialize, Serialize))]
 pub struct SpecialRegisters {
     pub cs: SegmentRegister,
     pub ds: SegmentRegister,
