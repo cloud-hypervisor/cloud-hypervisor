@@ -1,8 +1,8 @@
 [package]
-name = "tpm"
-edition = "2021"
 authors = ["Microsoft Authors"]
+edition = "2021"
 license = "Apache-2.0"
+name = "tpm"
 version = "0.1.0"
 
 [dependencies]

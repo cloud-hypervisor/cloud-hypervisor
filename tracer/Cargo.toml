@@ -1,8 +1,8 @@
 [package]
-name = "tracer"
-version = "0.1.0"
 authors = ["The Cloud Hypervisor Authors"]
 edition = "2021"
+name = "tracer"
+version = "0.1.0"
 
 [dependencies]
 libc = "0.2.153"

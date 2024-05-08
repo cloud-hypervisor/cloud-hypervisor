@@ -1,8 +1,8 @@
 [package]
-name = "arch"
-version = "0.1.0"
 authors = ["The Chromium OS Authors"]
 edition = "2021"
+name = "arch"
+version = "0.1.0"
 
 [features]
 default = []
@@ -19,7 +19,10 @@ log = "0.4.21"
 serde = { version = "1.0.197", features = ["rc", "derive"] }
 thiserror = "1.0.60"
 uuid = "1.8.0"
-vm-memory = { version = "0.14.1", features = ["backend-mmap", "backend-bitmap"] }
+vm-memory = { version = "0.14.1", features = [
+  "backend-mmap",
+  "backend-bitmap",
+] }
 vm-migration = { path = "../vm-migration" }
 vmm-sys-util = { version = "0.12.1", features = ["with-serde"] }
 
