@@ -13,16 +13,15 @@ mshv = ["vfio-ioctls/mshv"]
 anyhow = "1.0.81"
 byteorder = "1.5.0"
 hypervisor = { path = "../hypervisor" }
+libc = "0.2.153"
+log = "0.4.21"
+serde = { version = "1.0.197", features = ["derive"] }
+thiserror = "1.0.60"
 vfio-bindings = { git = "https://github.com/rust-vmm/vfio", branch = "main", features = [
   "fam-wrappers",
 ] }
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
 vfio_user = { git = "https://github.com/rust-vmm/vfio-user", branch = "main" }
-
-libc = "0.2.153"
-log = "0.4.21"
-serde = { version = "1.0.197", features = ["derive"] }
-thiserror = "1.0.60"
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
 vm-memory = { version = "0.14.1", features = [
