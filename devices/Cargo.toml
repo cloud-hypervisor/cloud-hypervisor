@@ -1,11 +1,11 @@
 [package]
-name = "devices"
-version = "0.1.0"
 authors = ["The Chromium OS Authors"]
 edition = "2021"
+name = "devices"
+version = "0.1.0"
 
 [dependencies]
-acpi_tables = { git = "https://github.com/rust-vmm/acpi_tables", branch = "main"  }
+acpi_tables = { git = "https://github.com/rust-vmm/acpi_tables", branch = "main" }
 anyhow = "1.0.81"
 arch = { path = "../arch" }
 bitflags = "2.5.0"

@@ -1,8 +1,8 @@
 [package]
-name = "vm-virtio"
-version = "0.1.0"
 authors = ["The Cloud Hypervisor Authors"]
 edition = "2021"
+name = "vm-virtio"
+version = "0.1.0"
 
 [features]
 default = []
@@ -10,4 +10,8 @@ default = []
 [dependencies]
 log = "0.4.21"
 virtio-queue = "0.12.0"
-vm-memory = { version = "0.14.1", features = ["backend-mmap", "backend-atomic", "backend-bitmap"] }
+vm-memory = { version = "0.14.1", features = [
+  "backend-mmap",
+  "backend-atomic",
+  "backend-bitmap",
+] }

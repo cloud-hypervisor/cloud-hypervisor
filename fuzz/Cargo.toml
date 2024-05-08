@@ -1,9 +1,9 @@
 [package]
-name = "cloud-hypervisor-fuzz"
-version = "0.0.0"
 authors = ["Automatically generated"]
-publish = false
 edition = "2021"
+name = "cloud-hypervisor-fuzz"
+publish = false
+version = "0.0.0"
 
 [package.metadata]
 cargo-fuzz = true
@@ -24,12 +24,12 @@ once_cell = "1.19.0"
 seccompiler = "0.4.0"
 virtio-devices = { path = "../virtio-devices" }
 virtio-queue = "0.12.0"
-vmm = { path = "../vmm", features = ["guest_debug"]}
-vmm-sys-util = "0.12.1"
+vm-device = { path = "../vm-device" }
 vm-memory = "0.14.1"
 vm-migration = { path = "../vm-migration" }
-vm-device = { path = "../vm-device" }
 vm-virtio = { path = "../vm-virtio" }
+vmm = { path = "../vmm", features = ["guest_debug"] }
+vmm-sys-util = "0.12.1"
 
 [dependencies.cloud-hypervisor]
 path = ".."
@@ -39,97 +39,97 @@ path = ".."
 members = ["."]
 
 [[bin]]
+doc = false
 name = "balloon"
 path = "fuzz_targets/balloon.rs"
 test = false
-doc = false
 
 [[bin]]
+doc = false
 name = "block"
 path = "fuzz_targets/block.rs"
 test = false
-doc = false
 
 [[bin]]
+doc = false
 name = "cmos"
 path = "fuzz_targets/cmos.rs"
 test = false
-doc = false
 
 [[bin]]
+doc = false
 name = "console"
 path = "fuzz_targets/console.rs"
 test = false
-doc = false
 
 [[bin]]
+doc = false
 name = "http_api"
 path = "fuzz_targets/http_api.rs"
 test = false
-doc = false
 
 [[bin]]
+doc = false
 name = "iommu"
 path = "fuzz_targets/iommu.rs"
 test = false
-doc = false
 
 [[bin]]
+doc = false
 name = "linux_loader"
 path = "fuzz_targets/linux_loader.rs"
 test = false
-doc = false
 
 [[bin]]
+doc = false
 name = "linux_loader_cmdline"
 path = "fuzz_targets/linux_loader_cmdline.rs"
 test = false
-doc = false
 
 [[bin]]
+doc = false
 name = "mem"
 path = "fuzz_targets/mem.rs"
 test = false
-doc = false
 
 [[bin]]
+doc = false
 name = "net"
 path = "fuzz_targets/net.rs"
 test = false
-doc = false
 
 [[bin]]
+doc = false
 name = "pmem"
 path = "fuzz_targets/pmem.rs"
 test = false
-doc = false
 
 [[bin]]
+doc = false
 name = "qcow"
 path = "fuzz_targets/qcow.rs"
 test = false
-doc = false
 
 [[bin]]
+doc = false
 name = "rng"
 path = "fuzz_targets/rng.rs"
 test = false
-doc = false
 
 [[bin]]
+doc = false
 name = "serial"
 path = "fuzz_targets/serial.rs"
 test = false
-doc = false
 
 [[bin]]
+doc = false
 name = "vhdx"
 path = "fuzz_targets/vhdx.rs"
 test = false
-doc = false
 
 [[bin]]
+doc = false
 name = "watchdog"
 path = "fuzz_targets/watchdog.rs"
 test = false
-doc = false

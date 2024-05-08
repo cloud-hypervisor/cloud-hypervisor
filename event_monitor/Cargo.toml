@@ -1,8 +1,8 @@
 [package]
-name = "event_monitor"
-version = "0.1.0"
 authors = ["The Cloud Hypervisor Authors"]
 edition = "2021"
+name = "event_monitor"
+version = "0.1.0"
 
 [dependencies]
 flume = "0.11.0"
