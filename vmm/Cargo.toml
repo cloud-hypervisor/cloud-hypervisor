@@ -11,7 +11,7 @@ guest_debug = ["kvm", "gdbstub", "gdbstub_arch"]
 igvm = ["hex", "dep:igvm", "igvm_defs",  "mshv-bindings", "range_map_vec"]
 io_uring = ["block/io_uring"]
 kvm = ["hypervisor/kvm", "vfio-ioctls/kvm", "vm-device/kvm", "pci/kvm"]
-mshv = ["hypervisor/mshv", "vfio-ioctls/mshv", "vm-device/mshv", "pci/mshv"]
+mshv = ["mshv-ioctls", "hypervisor/mshv", "vfio-ioctls/mshv", "vm-device/mshv", "pci/mshv"]
 sev_snp = ["arch/sev_snp", "hypervisor/sev_snp"]
 tdx = ["arch/tdx", "hypervisor/tdx"]
 tracing = ["tracer/tracing"]
@@ -42,6 +42,7 @@ linux-loader = { version = "0.11.0", features = ["elf", "bzimage", "pe"] }
 log = "0.4.21"
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "main" }
 mshv-bindings = { git = "https://github.com/rust-vmm/mshv", branch = "main", features = ["with-serde", "fam-wrappers"], optional  = true }
+mshv-ioctls = { git = "https://github.com/rust-vmm/mshv", branch = "main", optional  = true }
 net_util = { path = "../net_util" }
 once_cell = "1.19.0"
 option_parser = { path = "../option_parser" }
