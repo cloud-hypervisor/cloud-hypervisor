@@ -1,0 +1,21 @@
+name: Cargo.toml Formatting (taplo)
+on:
+  pull_request:
+    paths: 
+      - '**/Cargo.toml'
+
+jobs:
+  cargo_toml_format:
+    name: Cargo.toml Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get -yqq install build-essential libssl-dev
+      - name: Install taplo
+        run: cargo install taplo-cli --locked
+      - name: Check formatting
+        run: taplo fmt --check
