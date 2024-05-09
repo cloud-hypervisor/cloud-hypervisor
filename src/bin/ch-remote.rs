@@ -987,7 +987,7 @@ fn main() {
         )
         .subcommand(
             Command::new("remove-device")
-                .about("Remove VFIO device")
+                .about("Remove VFIO and PCI device")
                 .arg(Arg::new("id").index(1).help("<device_id>")),
         )
         .subcommand(Command::new("info").about("Info on the VM"))
