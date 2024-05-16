@@ -237,9 +237,37 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
             vmconfig.serial.file = Some(path.clone());
         }
         ConsoleOutputMode::Tty => {
-            let out = stdout();
-            console_info.serial_main_fd = Some(out.as_raw_fd());
-            set_raw_mode(&out, vmm.original_termios_opt.clone())?;
+            // During vm_shutdown, when serial device is closed, FD#2(STDOUT)
+            // will be closed and FD#2 could be reused in a future boot of the
+            // guest by a different file.
+            //
+            // To ensure FD#2 always points to STANDARD OUT, a `dup` of STDOUT
+            // is passed to serial device. Doing so, even if the serial device
+            // were to be closed, FD#2 will continue to point to STANDARD OUT.
+
+            // SAFETY: FFI call to dup. Trivially safe.
+            let stdout = unsafe { libc::dup(libc::STDOUT_FILENO) };
+            if stdout == -1 {
+                return vmm_sys_util::errno::errno_result().map_err(ConsoleDeviceError::DupFd);
+            }
+            // SAFETY: stdout is valid and owned solely by us.
+            let stdout = unsafe { File::from_raw_fd(stdout) };
+
+            // SAFETY: FFI call. Trivially safe.
+            if unsafe { libc::isatty(libc::STDOUT_FILENO) } == 1 {
+                vmm.console_resize_pipe = Some(
+                    listen_for_sigwinch_on_tty(
+                        stdout.try_clone().unwrap(),
+                        &vmm.seccomp_action,
+                        vmm.hypervisor.hypervisor_type(),
+                    )
+                    .map_err(ConsoleDeviceError::StartSigwinchListener)?,
+                );
+            }
+
+            // Make sure stdout is in raw mode, if it's a terminal.
+            set_raw_mode(&stdout, vmm.original_termios_opt.clone())?;
+            console_info.serial_main_fd = Some(stdout.into_raw_fd());
         }
         ConsoleOutputMode::Socket => {
             let listener = UnixListener::bind(vmconfig.serial.socket.as_ref().unwrap())
