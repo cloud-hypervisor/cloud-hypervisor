@@ -39,7 +39,7 @@ use std::sync::Mutex;
 use thiserror::Error;
 
 const TIOCSPTLCK: libc::c_int = 0x4004_5431;
-const TIOCGTPEER: libc::c_int = 0x5441;
+const TIOCGPTPEER: libc::c_int = 0x5441;
 
 /// Errors associated with console devices
 #[derive(Debug, Error)]
@@ -151,7 +151,7 @@ fn create_pty() -> io::Result<(File, File, PathBuf)> {
     let sub_fd = unsafe {
         libc::ioctl(
             main.as_raw_fd(),
-            TIOCGTPEER as _,
+            TIOCGPTPEER as _,
             libc::O_NOCTTY | libc::O_RDWR,
         )
     };

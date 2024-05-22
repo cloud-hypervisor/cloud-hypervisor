@@ -47,7 +47,7 @@ const TIOCGPGRP: u64 = 0x540F;
 const TIOCSPGRP: u64 = 0x5410;
 const TIOCGWINSZ: u64 = 0x5413;
 const TIOCSPTLCK: u64 = 0x4004_5431;
-const TIOCGTPEER: u64 = 0x5441;
+const TIOCGPTPEER: u64 = 0x5441;
 const FIOCLEX: u64 = 0x5451;
 const FIONBIO: u64 = 0x5421;
 
@@ -323,7 +323,7 @@ fn create_vmm_ioctl_seccomp_rule_common(
         and![Cond::new(1, ArgLen::Dword, Eq, TCSETS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TCGETS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TIOCGPGRP)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, TIOCGTPEER)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TIOCGPTPEER)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TIOCGWINSZ)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TIOCSCTTY)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TIOCSPGRP)?],
