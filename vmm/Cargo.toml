@@ -43,7 +43,7 @@ libc = "0.2.153"
 linux-loader = { version = "0.11.0", features = ["elf", "bzimage", "pe"] }
 log = "0.4.21"
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "main" }
-mshv-bindings = { git = "https://github.com/rust-vmm/mshv", branch = "main", features = [
+mshv-bindings = { git = "https://github.com/rust-vmm/mshv", tag = "v0.2.0", features = [
   "with-serde",
   "fam-wrappers",
 ], optional = true }
