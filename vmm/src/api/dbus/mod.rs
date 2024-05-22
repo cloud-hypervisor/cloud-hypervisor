@@ -25,7 +25,7 @@ use std::thread;
 use vmm_sys_util::eventfd::EventFd;
 use zbus::fdo::{self, Result};
 use zbus::zvariant::Optional;
-use zbus::{dbus_interface, ConnectionBuilder};
+use zbus::{interface, ConnectionBuilder};
 
 pub type DBusApiShutdownChannels = (oneshot::Sender<()>, oneshot::Receiver<()>);
 
@@ -105,7 +105,7 @@ impl DBusApi {
     }
 }
 
-#[dbus_interface(name = "org.cloudhypervisor.DBusApi1")]
+#[interface(name = "org.cloudhypervisor.DBusApi1")]
 impl DBusApi {
     async fn vmm_ping(&self) -> Result<String> {
         let api_sender = self.clone_api_sender().await;
@@ -301,8 +301,8 @@ impl DBusApi {
             .map(|_| ())
     }
 
-    // implementation of this function is provided by the `dbus_interface` macro
-    #[dbus_interface(signal)]
+    // implementation of this function is provided by the `#[zbus(signal)]` macro call
+    #[zbus(signal)]
     async fn event(ctxt: &zbus::SignalContext<'_>, event: Arc<String>) -> zbus::Result<()>;
 }
 

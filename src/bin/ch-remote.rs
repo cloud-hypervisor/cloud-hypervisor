@@ -15,7 +15,7 @@ use std::marker::PhantomData;
 use std::os::unix::net::UnixStream;
 use std::process;
 #[cfg(feature = "dbus_api")]
-use zbus::{dbus_proxy, zvariant::Optional};
+use zbus::{proxy, zvariant::Optional};
 
 type ApiResult = Result<(), Error>;
 
@@ -72,7 +72,7 @@ enum TargetApi<'a> {
 }
 
 #[cfg(feature = "dbus_api")]
-#[dbus_proxy(name = "org.cloudhypervisor.DBusApi1", assume_defaults = false)]
+#[proxy(name = "org.cloudhypervisor.DBusApi1", assume_defaults = false)]
 trait DBusApi1 {
     fn vmm_ping(&self) -> zbus::Result<String>;
     fn vmm_shutdown(&self) -> zbus::Result<()>;
