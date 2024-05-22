@@ -12,11 +12,11 @@ use log::{warn, LevelFilter};
 use option_parser::OptionParser;
 use seccompiler::SeccompAction;
 use signal_hook::consts::SIGSYS;
-use std::env;
 use std::fs::File;
-use std::os::unix::io::{FromRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
+use std::{env, io};
 use thiserror::Error;
 #[cfg(feature = "dbus_api")]
 use vmm::api::dbus::{dbus_api_graceful_shutdown, DBusApiOptions};
@@ -85,6 +85,18 @@ enum Error {
     LoggerSetup(log::SetLoggerError),
     #[error("Failed to gracefully shutdown http api: {0}")]
     HttpApiShutdown(#[source] vmm::Error),
+}
+
+#[derive(Error, Debug)]
+enum FdTableError {
+    #[error("Failed to create event fd: {0}")]
+    CreateEventFd(std::io::Error),
+    #[error("Failed to obtain file limit: {0}")]
+    GetRLimit(std::io::Error),
+    #[error("Error calling fcntl with F_GETFD: {0}")]
+    GetFd(std::io::Error),
+    #[error("Failed to duplicate file handle: {0}")]
+    Dup2(std::io::Error),
 }
 
 struct Logger {
@@ -782,6 +794,79 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
     r.map(|_| api_socket_path)
 }
 
+// This is a best-effort solution to the latency induced by the RCU
+// synchronization that happens in the kernel whenever the file descriptor table
+// fills up.
+// The table has initially 64 entries on amd64 and everytime it fills up, a new
+// table is created, double the size of the current one, and the entries are
+// copied to the new table. The filesystem code that does this uses
+// synchronize_rcu() to ensure all pre-existing RCU read-side critical sections
+// have completed:
+//
+//     https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/tree/fs/file.c?h=v6.9.1#n162
+//
+// Rust programs that create lots of file handles or use
+// {File,EventFd}::try_clone() to share them are impacted by this issue. This
+// behavior is quite noticeable in the snapshot restore scenario, the latency is
+// a big chunk of the total time required to start cloud-hypervisor and restore
+// the snapshot.
+//
+// The kernel has an optimization in code, where it doesn't call
+// synchronize_rcu() if there is only one thread in the process. We can take
+// advantage of this optimization by expanding the descriptor table at
+// application start, when it has only one thread.
+//
+// The code tries to resize the table to an adequate size for most use cases,
+// 4096, this way we avoid any expansion that might take place later.
+fn expand_fdtable() -> Result<(), FdTableError> {
+    let mut limits = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+
+    // SAFETY: FFI call with valid arguments
+    if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut limits) } < 0 {
+        return Err(FdTableError::GetRLimit(io::Error::last_os_error()));
+    }
+
+    let table_size = if limits.rlim_cur == libc::RLIM_INFINITY {
+        4096
+    } else {
+        std::cmp::min(limits.rlim_cur, 4096) as libc::c_int
+    };
+
+    // The first 3 handles are stdin, stdout, stderr. We don't want to touch
+    // any of them. If table_size is <= 3 it means we either didn't manage to set
+    // the soft limit to 4096 and we use the current soft limit or hard limit <= 3.
+    // Either way there is nothing we can possibly do in this case.
+    if table_size <= 3 {
+        return Ok(());
+    }
+
+    let dummy_evt = EventFd::new(0).map_err(FdTableError::CreateEventFd)?;
+
+    // Test if the file descriptor is empty
+    // SAFETY: FFI call with valid arguments
+    let flags: i32 = unsafe { libc::fcntl(table_size - 1, libc::F_GETFD) };
+    if flags >= 0 {
+        // Nothing to do, the table is already big enough
+        return Ok(());
+    }
+
+    let err = io::Error::last_os_error();
+    if err.raw_os_error() != Some(libc::EBADF) {
+        return Err(FdTableError::GetFd(err));
+    }
+    // SAFETY: FFI call with valid arguments
+    if unsafe { libc::dup2(dummy_evt.as_raw_fd(), table_size - 1) } < 0 {
+        return Err(FdTableError::Dup2(io::Error::last_os_error()));
+    }
+    // SAFETY: FFI call, trivially
+    unsafe { libc::close(table_size - 1) };
+
+    Ok(())
+}
+
 fn main() {
     #[cfg(all(feature = "tdx", feature = "sev_snp"))]
     compile_error!("Feature 'tdx' and 'sev_snp' are mutually exclusive.");
@@ -806,6 +891,10 @@ fn main() {
         }
 
         return;
+    }
+
+    if let Err(e) = expand_fdtable() {
+        warn!("Error expanding FD table: {e}");
     }
 
     let exit_code = match start_vmm(cmd_arguments) {
