@@ -304,6 +304,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         // to override this behavior with a more suitable option i.e., ignore
         // writes from the guest and return zero in attempt to read unimplemented
         // MSR.
+        #[cfg(target_arch = "x86_64")]
         fd.set_partition_property(
             hv_partition_property_code_HV_PARTITION_PROPERTY_UNIMPLEMENTED_MSR_ACTION,
             hv_unimplemented_msr_action_HV_UNIMPLEMENTED_MSR_ACTION_IGNORE_WRITE_READ_ZERO as u64,
