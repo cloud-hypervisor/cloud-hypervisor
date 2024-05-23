@@ -273,6 +273,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         }
 
         // Set additional partition property for SEV-SNP partition.
+        #[cfg(target_arch = "x86_64")]
         if mshv_vm_type == VmType::Snp {
             let snp_policy = snp::get_default_snp_guest_policy();
             let vmgexit_offloads = snp::get_default_vmgexit_offload_features();
