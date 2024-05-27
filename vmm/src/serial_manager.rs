@@ -77,6 +77,10 @@ pub enum Error {
     /// Cannot remove the serial socket
     #[error("Error removing serial socket: {0}")]
     RemoveUnixSocket(#[source] io::Error),
+
+    /// Cannot duplicate file descriptor
+    #[error("Error duplicating file descriptor: {0}")]
+    DupFd(#[source] io::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -143,7 +147,12 @@ impl SerialManager {
                 // SAFETY: trivially safe
                 if unsafe { libc::isatty(libc::STDIN_FILENO) == 1 } {
                     // SAFETY: STDIN_FILENO is a valid fd
-                    let stdin_clone = unsafe { File::from_raw_fd(libc::dup(libc::STDIN_FILENO)) };
+                    let fd = unsafe { libc::dup(libc::STDIN_FILENO) };
+                    if fd == -1 {
+                        return Err(Error::DupFd(std::io::Error::last_os_error()));
+                    }
+                    // SAFETY: fd is valid and owned by us
+                    let stdin_clone = unsafe { File::from_raw_fd(fd) };
                     // SAFETY: FFI calls with correct arguments
                     let ret = unsafe {
                         let mut flags = libc::fcntl(stdin_clone.as_raw_fd(), libc::F_GETFL);
