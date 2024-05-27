@@ -416,7 +416,7 @@ impl InterruptController for Ioapic {
         self.interrupt_source_group
             .trigger(irq as InterruptIndex)
             .map_err(Error::TriggerInterrupt)?;
-        debug!("Interrupt successfully delivered");
+        debug!("Interrupt {irq} successfully delivered");
 
         // If trigger mode is level sensitive, set the Remote IRR bit.
         // It will be cleared when the EOI is received.
