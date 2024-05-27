@@ -274,8 +274,10 @@ impl SerialManager {
         let mut in_file = self.in_file.try_clone().map_err(Error::FileClone)?;
         let serial = self.serial.clone();
         let pty_write_out = self.pty_write_out.clone();
-        //SAFETY: in_file is has a valid fd
-        let listener = unsafe { UnixListener::from_raw_fd(self.in_file.as_raw_fd()) };
+        // SAFETY: from_raw_fd is always called with a valid fd
+        let listener = unsafe {
+            UnixListener::from_raw_fd(in_file.try_clone().map_err(Error::FileClone)?.into_raw_fd())
+        };
         let mut reader: Option<UnixStream> = None;
         let mode = self.mode.clone();
 
