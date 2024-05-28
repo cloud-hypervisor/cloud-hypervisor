@@ -132,6 +132,12 @@ test = false
 
 [[bin]]
 doc = false
+name = "vsock"
+path = "fuzz_targets/vsock.rs"
+test = false
+
+[[bin]]
+doc = false
 name = "watchdog"
 path = "fuzz_targets/watchdog.rs"
 test = false
