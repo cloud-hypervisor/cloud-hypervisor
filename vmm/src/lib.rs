@@ -720,6 +720,9 @@ impl Vmm {
 
         let config = vm_migration_config.vm_config.clone();
         self.vm_config = Some(vm_migration_config.vm_config);
+        self.console_info = Some(pre_create_console_devices(self).map_err(|e| {
+            MigratableError::MigrateReceive(anyhow!("Error creating console devices: {:?}", e))
+        })?);
 
         let vm = Vm::create_hypervisor_vm(
             &self.hypervisor,
@@ -809,7 +812,7 @@ impl Vmm {
             self.hypervisor.clone(),
             activate_evt,
             timestamp,
-            None,
+            self.console_info.clone(),
             None,
             Arc::clone(&self.original_termios_opt),
             Some(snapshot),
