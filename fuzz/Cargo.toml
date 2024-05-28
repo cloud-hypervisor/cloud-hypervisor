@@ -31,9 +31,6 @@ vm-virtio = { path = "../vm-virtio" }
 vmm = { path = "../vmm", features = ["guest_debug"] }
 vmm-sys-util = "0.12.1"
 
-[dependencies.cloud-hypervisor]
-path = ".."
-
 # Prevent this from interfering with workspaces
 [workspace]
 members = ["."]

@@ -65,14 +65,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f538837af36e6f6a9be0faa67f9a314f8119e4e4b5867c6ab40ed60360142519"
 
 [[package]]
-name = "api_client"
-version = "0.1.0"
-dependencies = [
- "thiserror",
- "vmm-sys-util",
-]
-
-[[package]]
 name = "arbitrary"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -128,7 +120,6 @@ version = "0.1.0"
 dependencies = [
  "byteorder",
  "crc-any",
- "io-uring",
  "libc",
  "log",
  "remain",
@@ -200,35 +191,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "98cc8fbded0c607b7ba9dd60cd98df59af97e84d24e49c8557331cfc26d301ce"
 
 [[package]]
-name = "cloud-hypervisor"
-version = "39.0.0"
-dependencies = [
- "anyhow",
- "api_client",
- "clap",
- "epoll",
- "event_monitor",
- "hypervisor",
- "libc",
- "log",
- "option_parser",
- "seccompiler",
- "serde_json",
- "signal-hook",
- "thiserror",
- "tpm",
- "tracer",
- "vm-memory",
- "vmm",
- "vmm-sys-util",
-]
-
-[[package]]
 name = "cloud-hypervisor-fuzz"
 version = "0.0.0"
 dependencies = [
  "block",
- "cloud-hypervisor",
  "devices",
  "epoll",
  "libc",
@@ -445,16 +411,6 @@ name = "ident_case"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
-
-[[package]]
-name = "io-uring"
-version = "0.6.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "595a0399f411a508feb2ec1e970a4a30c249351e30208960d58298de8660b0e5"
-dependencies = [
- "bitflags 1.3.2",
- "libc",
-]
 
 [[package]]
 name = "itoa"
