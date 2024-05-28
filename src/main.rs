@@ -836,9 +836,7 @@ fn expand_fdtable() -> Result<(), FdTableError> {
     };
 
     // The first 3 handles are stdin, stdout, stderr. We don't want to touch
-    // any of them. If table_size is <= 3 it means we either didn't manage to set
-    // the soft limit to 4096 and we use the current soft limit or hard limit <= 3.
-    // Either way there is nothing we can possibly do in this case.
+    // any of them.
     if table_size <= 3 {
         return Ok(());
     }
