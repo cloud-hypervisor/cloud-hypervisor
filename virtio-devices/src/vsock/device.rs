@@ -378,6 +378,11 @@ where
             acked_features: self.common.acked_features,
         }
     }
+
+    #[cfg(fuzzing)]
+    pub fn wait_for_epoll_threads(&mut self) {
+        self.common.wait_for_epoll_threads();
+    }
 }
 
 impl<B> Drop for Vsock<B>
