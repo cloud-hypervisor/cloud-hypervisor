@@ -160,8 +160,8 @@ pub trait VsockChannel {
 /// translates guest-side vsock connections to host-side Unix domain socket connections.
 pub trait VsockBackend: VsockChannel + VsockEpollListener + Send {}
 
-#[cfg(test)]
-mod tests {
+#[cfg(any(test, fuzzing))]
+pub mod tests {
     use std::os::unix::io::AsRawFd;
     use std::path::PathBuf;
     use std::sync::{Arc, RwLock};
@@ -200,6 +200,7 @@ mod tests {
         pub evset: Option<epoll::Events>,
     }
     impl TestBackend {
+        #[allow(clippy::new_without_default)]
         pub fn new() -> Self {
             Self {
                 evfd: EventFd::new(EFD_NONBLOCK).unwrap(),
@@ -264,6 +265,7 @@ mod tests {
     }
 
     impl TestContext {
+        #[allow(clippy::new_without_default)]
         pub fn new() -> Self {
             const CID: u32 = 52;
             const MEM_SIZE: usize = 1024 * 1024 * 128;
