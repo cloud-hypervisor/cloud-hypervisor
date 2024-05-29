@@ -7719,6 +7719,159 @@ mod common_sequential {
 
         handle_child_output(r, &output);
     }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_snapshot_restore_pvpanic() {
+        _test_snapshot_restore_devices(true);
+    }
+
+    fn _test_snapshot_restore_devices(pvpanic: bool) {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+        let kernel_path = direct_kernel_boot_path();
+
+        let api_socket_source = format!("{}.1", temp_api_path(&guest.tmp_dir));
+
+        let device_params = {
+            let mut data = vec![];
+            if pvpanic {
+                data.push("--pvpanic");
+            }
+            data
+        };
+
+        let socket = temp_vsock_path(&guest.tmp_dir);
+        let event_path = temp_event_monitor_path(&guest.tmp_dir);
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_source])
+            .args(["--event-monitor", format!("path={}", event_path).as_str()])
+            .args(["--cpus", "boot=2"])
+            .args(["--memory", "size=1G"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .default_disks()
+            .default_net()
+            .args(["--vsock", format!("cid=3,socket={}", socket).as_str()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(device_params)
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let console_text = String::from("On a branch floating down river a cricket, singing.");
+        // Create the snapshot directory
+        let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            // Check the number of vCPUs
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
+
+            snapshot_and_check_events(&api_socket_source, &snapshot_dir, &event_path);
+        });
+
+        // Shutdown the source VM and check console output
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        // Remove the vsock socket file.
+        Command::new("rm")
+            .arg("-f")
+            .arg(socket.as_str())
+            .output()
+            .unwrap();
+
+        let api_socket_restored = format!("{}.2", temp_api_path(&guest.tmp_dir));
+        let event_path_restored = format!("{}.2", temp_event_monitor_path(&guest.tmp_dir));
+
+        // Restore the VM from the snapshot
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_restored])
+            .args([
+                "--event-monitor",
+                format!("path={event_path_restored}").as_str(),
+            ])
+            .args([
+                "--restore",
+                format!("source_url=file://{snapshot_dir}").as_str(),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        // Wait for the VM to be restored
+        thread::sleep(std::time::Duration::new(20, 0));
+
+        let latest_events = [&MetaEvent {
+            event: "restored".to_string(),
+            device_id: None,
+        }];
+        assert!(check_latest_events_exact(
+            &latest_events,
+            &event_path_restored
+        ));
+
+        // Remove the snapshot dir
+        let _ = remove_dir_all(snapshot_dir.as_str());
+
+        let r = std::panic::catch_unwind(|| {
+            // Resume the VM
+            assert!(remote_command(&api_socket_restored, "resume", None));
+            // There is no way that we can ensure the 'write()' to the
+            // event file is completed when the 'resume' request is
+            // returned successfully, because the 'write()' was done
+            // asynchronously from a different thread of Cloud
+            // Hypervisor (e.g. the event-monitor thread).
+            thread::sleep(std::time::Duration::new(1, 0));
+            let latest_events = [
+                &MetaEvent {
+                    event: "resuming".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "resumed".to_string(),
+                    device_id: None,
+                },
+            ];
+            assert!(check_latest_events_exact(
+                &latest_events,
+                &event_path_restored
+            ));
+
+            // Check the number of vCPUs
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
+            guest.check_devices_common(Some(&socket), Some(&console_text), None);
+
+            if pvpanic {
+                // Trigger guest a panic
+                make_guest_panic(&guest);
+                // Wait a while for guest
+                thread::sleep(std::time::Duration::new(10, 0));
+
+                let expected_sequential_events = [&MetaEvent {
+                    event: "panic".to_string(),
+                    device_id: None,
+                }];
+                assert!(check_latest_events_exact(
+                    &expected_sequential_events,
+                    &event_path_restored
+                ));
+            }
+        });
+        // Shutdown the target VM and check console output
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        let r = std::panic::catch_unwind(|| {
+            assert!(String::from_utf8_lossy(&output.stdout).contains(&console_text));
+        });
+
+        handle_child_output(r, &output);
+    }
 }
 
 mod windows {
