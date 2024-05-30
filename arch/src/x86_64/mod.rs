@@ -820,12 +820,17 @@ pub fn configure_vcpu(
         CpuidPatch::set_cpuid_reg(&mut cpuid, 0x8000_001e, Some(0), CpuidReg::EAX, x2apic_id);
     }
 
-    // Set ApicId in cpuid for each vcpu
-    // SAFETY: get host cpuid when eax=1
-    let mut cpu_ebx = unsafe { core::arch::x86_64::__cpuid(1) }.ebx;
-    cpu_ebx &= 0xffffff;
-    cpu_ebx |= x2apic_id << 24;
-    CpuidPatch::set_cpuid_reg(&mut cpuid, 0x1, None, CpuidReg::EBX, cpu_ebx);
+    // Set ApicId in cpuid for each vcpu - found in cpuid ebx when eax = 1
+    let mut apic_id_patched = false;
+    for entry in &mut cpuid {
+        if entry.function == 1 {
+            entry.ebx &= 0xffffff;
+            entry.ebx |= x2apic_id << 24;
+            apic_id_patched = true;
+            break;
+        }
+    }
+    assert!(apic_id_patched);
 
     if let Some(t) = topology {
         update_cpuid_topology(&mut cpuid, t.0, t.1, t.2, cpu_vendor, id);
