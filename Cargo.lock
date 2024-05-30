@@ -986,7 +986,7 @@ dependencies = [
  "env_logger",
  "iced-x86",
  "igvm",
- "igvm_defs",
+ "igvm_defs 0.3.1",
  "kvm-bindings",
  "kvm-ioctls",
  "libc",
@@ -1025,7 +1025,7 @@ dependencies = [
  "bitfield-struct",
  "crc32fast",
  "hex",
- "igvm_defs",
+ "igvm_defs 0.2.1",
  "open-enum",
  "range_map_vec",
  "thiserror",
@@ -1035,9 +1035,21 @@ dependencies = [
 
 [[package]]
 name = "igvm_defs"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a57e85ae9109a6281a1fc279456f830237a94a65873a331ad858814b1a09b2b"
+checksum = "9fd18c312ee7c275de0ffda03ae58f39678f0110f0647192dcd982447efa8ed7"
+dependencies = [
+ "bitfield-struct",
+ "open-enum",
+ "static_assertions",
+ "zerocopy",
+]
+
+[[package]]
+name = "igvm_defs"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c4942827cef415726296f6d62411afdb13c1b1924125f3222988f04bef33ad2"
 dependencies = [
  "bitfield-struct",
  "open-enum",
@@ -2458,7 +2470,7 @@ dependencies = [
  "hex",
  "hypervisor",
  "igvm",
- "igvm_defs",
+ "igvm_defs 0.3.1",
  "libc",
  "linux-loader",
  "log",
