@@ -1027,7 +1027,7 @@ dependencies = [
  "hex",
  "igvm_defs",
  "open-enum",
- "range_map_vec 0.2.0",
+ "range_map_vec",
  "thiserror",
  "tracing",
  "zerocopy",
@@ -1724,12 +1724,6 @@ checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
  "getrandom",
 ]
-
-[[package]]
-name = "range_map_vec"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8edc89eaa583cf6bc4c6ef16a219f0a60d342ca3bf0eae793560038ac8af1795"
 
 [[package]]
 name = "range_map_vec"
@@ -2474,7 +2468,7 @@ dependencies = [
  "once_cell",
  "option_parser",
  "pci",
- "range_map_vec 0.1.0",
+ "range_map_vec",
  "rate_limiter",
  "seccompiler",
  "serde",
