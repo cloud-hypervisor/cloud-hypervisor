@@ -1018,16 +1018,16 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 
 [[package]]
 name = "igvm"
-version = "0.2.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dac310e8c44854718e087821efe5d30ed18f3f864b3926b777ef70aadbb9834d"
+checksum = "2bc8970c7e36437c52af3b3ef1acaa5e334c2a95cd8ee9639d574830f48af17e"
 dependencies = [
  "bitfield-struct",
  "crc32fast",
  "hex",
  "igvm_defs",
  "open-enum",
- "range_map_vec",
+ "range_map_vec 0.2.0",
  "thiserror",
  "tracing",
  "zerocopy",
@@ -1035,9 +1035,9 @@ dependencies = [
 
 [[package]]
 name = "igvm_defs"
-version = "0.2.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a57e85ae9109a6281a1fc279456f830237a94a65873a331ad858814b1a09b2b"
+checksum = "2c4942827cef415726296f6d62411afdb13c1b1924125f3222988f04bef33ad2"
 dependencies = [
  "bitfield-struct",
  "open-enum",
@@ -1730,6 +1730,12 @@ name = "range_map_vec"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8edc89eaa583cf6bc4c6ef16a219f0a60d342ca3bf0eae793560038ac8af1795"
+
+[[package]]
+name = "range_map_vec"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7cc2191ec1fd850e3ede4cf09ccfd40a33df561111f73e96e1b7c3f9eee31328"
 
 [[package]]
 name = "rate_limiter"
@@ -2468,7 +2474,7 @@ dependencies = [
  "once_cell",
  "option_parser",
  "pci",
- "range_map_vec",
+ "range_map_vec 0.1.0",
  "rate_limiter",
  "seccompiler",
  "serde",
