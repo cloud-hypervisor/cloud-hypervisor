@@ -60,7 +60,9 @@ use hypervisor::kvm::kvm_ioctls::Cap;
 use hypervisor::kvm::{TdxExitDetails, TdxExitStatus};
 #[cfg(target_arch = "x86_64")]
 use hypervisor::CpuVendor;
-use hypervisor::{CpuState, HypervisorCpuError, HypervisorType, VmExit, VmOps};
+#[cfg(feature = "kvm")]
+use hypervisor::HypervisorType;
+use hypervisor::{CpuState, HypervisorCpuError, VmExit, VmOps};
 use libc::{c_void, siginfo_t};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use linux_loader::elf::Elf64_Nhdr;
@@ -846,13 +848,7 @@ impl CpuManager {
 
         #[cfg(target_arch = "x86_64")]
         let topology = self.config.topology.clone().map_or_else(
-            || {
-                #[cfg(feature = "mshv")]
-                if matches!(self.hypervisor.hypervisor_type(), HypervisorType::Mshv) {
-                    return Some((1, self.boot_vcpus(), 1));
-                }
-                None
-            },
+            || Some((1, self.boot_vcpus(), 1)),
             |t| Some((t.threads_per_core, t.cores_per_die, t.dies_per_package)),
         );
         #[cfg(target_arch = "x86_64")]
