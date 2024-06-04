@@ -397,6 +397,14 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
                 .group("logging"),
         )
         .arg(
+            Arg::new("append")
+                .long("append")
+                .help("Append to the existing log file (if one already exists)")
+                .num_args(0)
+                .action(ArgAction::SetTrue)
+                .group("logging"),
+        )
+        .arg(
             Arg::new("api-socket")
                 .long("api-socket")
                 .help("HTTP API socket (UNIX domain socket): path=</path/to/a/file> or fd=<fd>.")
@@ -517,13 +525,25 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         _ => LevelFilter::Trace,
     };
 
-    let log_file: Box<dyn std::io::Write + Send> = if let Some(ref file) =
-        cmd_arguments.get_one::<String>("log-file")
-    {
-        Box::new(std::fs::File::create(std::path::Path::new(file)).map_err(Error::LogFileCreation)?)
-    } else {
-        Box::new(std::io::stderr())
-    };
+    let log_file: Box<dyn std::io::Write + Send> =
+        if let Some(ref file) = cmd_arguments.get_one::<String>("log-file") {
+            if std::path::Path::new(file).is_file() {
+                Box::new(
+                    std::fs::OpenOptions::new()
+                        .write(true)
+                        .append(cmd_arguments.get_flag("append"))
+                        .open(file)
+                        .map_err(Error::LogFileCreation)?,
+                )
+            } else {
+                Box::new(
+                    std::fs::File::create(std::path::Path::new(file))
+                        .map_err(Error::LogFileCreation)?,
+                )
+            }
+        } else {
+            Box::new(std::io::stderr())
+        };
 
     log::set_boxed_logger(Box::new(Logger {
         output: Mutex::new(log_file),

@@ -2,8 +2,8 @@
 
 The target audience of this document is both:
 
-* Developers who want to understand what log level to use and when,
-* Users who want to debug issues with running their workloads in Cloud Hypervisor
+- Developers who want to understand what log level to use and when,
+- Users who want to debug issues with running their workloads in Cloud Hypervisor
 
 ## Control
 
@@ -29,7 +29,6 @@ A typical example of where this level of message should be generated is during a
 
 The user should investigate the meaning of this warning and take steps to ensure the correct functionality.
 
-
 ### `info!()`
 
 Use `-v` to enable.
@@ -41,3 +40,7 @@ This level is for the benefit of developers. It should be used for sporadic and 
 Use `-vv` to enable.
 
 For the most verbose of logging messages. It is acceptable to "spam" the log with repeated invocations of the same message. This level of logging would be combined with `--log-file`.
+
+## Append
+
+Including the `--append` flag ensures that the log, if it exists, will not be truncated on boot. Instead new log messages will just be appended to the existing log.
