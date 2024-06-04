@@ -798,6 +798,22 @@ pub fn check_matched_lines_count(input: &str, keywords: Vec<&str>, line_count: u
     }
 }
 
+pub fn kill_child(child: &mut Child) {
+    let r = unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
+    if r != 0 {
+        let e = io::Error::last_os_error();
+        if e.raw_os_error().unwrap() == libc::ESRCH {
+            return;
+        }
+        eprintln!("Failed to kill child with SIGTERM: {e:?}");
+    }
+
+    // The timeout period elapsed without the child exiting
+    if child.wait_timeout(Duration::new(5, 0)).unwrap().is_none() {
+        let _ = child.kill();
+    }
+}
+
 pub const PIPE_SIZE: i32 = 32 << 20;
 
 static NEXT_VM_ID: Lazy<Mutex<u8>> = Lazy::new(|| Mutex::new(1));
