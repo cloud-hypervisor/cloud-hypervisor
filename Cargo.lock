@@ -991,8 +991,8 @@ dependencies = [
  "kvm-ioctls",
  "libc",
  "log",
- "mshv-bindings",
- "mshv-ioctls",
+ "mshv-bindings 0.2.0",
+ "mshv-ioctls 0.3.0",
  "serde",
  "serde_with",
  "thiserror",
@@ -1259,12 +1259,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "mshv-bindings"
+version = "0.3.0"
+source = "git+https://github.com/rust-vmm/mshv?tag=v0.3.0#1a4d566d18f85a00556d01e2b28ae44906875f21"
+dependencies = [
+ "libc",
+ "num_enum",
+ "vmm-sys-util",
+ "zerocopy",
+]
+
+[[package]]
 name = "mshv-ioctls"
 version = "0.2.0"
 source = "git+https://github.com/rust-vmm/mshv?tag=v0.2.0#dd0a9f5ab9c32673e88d6de200af788dbfca6a72"
 dependencies = [
  "libc",
- "mshv-bindings",
+ "mshv-bindings 0.2.0",
+ "thiserror",
+ "vmm-sys-util",
+]
+
+[[package]]
+name = "mshv-ioctls"
+version = "0.3.0"
+source = "git+https://github.com/rust-vmm/mshv?tag=v0.3.0#1a4d566d18f85a00556d01e2b28ae44906875f21"
+dependencies = [
+ "libc",
+ "mshv-bindings 0.3.0",
  "thiserror",
  "vmm-sys-util",
 ]
@@ -2235,8 +2257,8 @@ dependencies = [
  "kvm-ioctls",
  "libc",
  "log",
- "mshv-bindings",
- "mshv-ioctls",
+ "mshv-bindings 0.2.0",
+ "mshv-ioctls 0.2.0",
  "thiserror",
  "vfio-bindings",
  "vm-memory",
@@ -2463,7 +2485,7 @@ dependencies = [
  "linux-loader",
  "log",
  "micro_http",
- "mshv-bindings",
+ "mshv-bindings 0.2.0",
  "net_util",
  "once_cell",
  "option_parser",
