@@ -4816,7 +4816,12 @@ impl Pausable for DeviceManager {
     fn pause(&mut self) -> result::Result<(), MigratableError> {
         for (_, device_node) in self.device_tree.lock().unwrap().iter() {
             if let Some(migratable) = &device_node.migratable {
-                migratable.lock().unwrap().pause()?;
+                match migratable.lock().unwrap().pause() {
+                    Err(e) if !matches!(e, MigratableError::UnSupported(_)) => {
+                        return Err(e);
+                    }
+                    _ => {}
+                }
             }
         }
         // On AArch64, the pause of device manager needs to trigger
@@ -4837,7 +4842,12 @@ impl Pausable for DeviceManager {
     fn resume(&mut self) -> result::Result<(), MigratableError> {
         for (_, device_node) in self.device_tree.lock().unwrap().iter() {
             if let Some(migratable) = &device_node.migratable {
-                migratable.lock().unwrap().resume()?;
+                match migratable.lock().unwrap().resume() {
+                    Err(e) if !matches!(e, MigratableError::UnSupported(_)) => {
+                        return Err(e);
+                    }
+                    _ => {}
+                }
             }
         }
 
@@ -4857,7 +4867,16 @@ impl Snapshottable for DeviceManager {
         for (_, device_node) in self.device_tree.lock().unwrap().iter() {
             if let Some(migratable) = &device_node.migratable {
                 let mut migratable = migratable.lock().unwrap();
-                snapshot.add_snapshot(migratable.id(), migratable.snapshot()?);
+                let snap = match migratable.snapshot() {
+                    Err(e) => {
+                        if matches!(e, MigratableError::UnSupported(_)) {
+                            continue;
+                        }
+                        return Err(e);
+                    }
+                    Ok(r) => r,
+                };
+                snapshot.add_snapshot(migratable.id(), snap);
             }
         }
 
