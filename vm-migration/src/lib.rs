@@ -47,6 +47,9 @@ pub enum MigratableError {
 
     #[error("Failed to complete migration for migratable component: {0}")]
     CompleteMigration(#[source] anyhow::Error),
+
+    #[error("Unsupported migration: {0}")]
+    UnSupported(#[source] anyhow::Error),
 }
 
 /// A Pausable component can be paused and resumed.
