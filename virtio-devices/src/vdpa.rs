@@ -453,8 +453,8 @@ impl VirtioDevice for Vdpa {
 impl Pausable for Vdpa {
     fn pause(&mut self) -> std::result::Result<(), MigratableError> {
         if !self.migrating {
-            Err(MigratableError::Pause(anyhow!(
-                "Can't pause a vDPA device outside live migration"
+            Err(MigratableError::UnSupported(anyhow!(
+                "Not support to pause a vDPA device outside live migration"
             )))
         } else {
             Ok(())
@@ -463,8 +463,8 @@ impl Pausable for Vdpa {
 
     fn resume(&mut self) -> std::result::Result<(), MigratableError> {
         if !self.migrating {
-            Err(MigratableError::Resume(anyhow!(
-                "Can't resume a vDPA device outside live migration"
+            Err(MigratableError::UnSupported(anyhow!(
+                "Not support to resume a vDPA device outside live migration"
             )))
         } else {
             Ok(())
@@ -479,8 +479,8 @@ impl Snapshottable for Vdpa {
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         if !self.migrating {
-            return Err(MigratableError::Snapshot(anyhow!(
-                "Can't snapshot a vDPA device outside live migration"
+            return Err(MigratableError::UnSupported(anyhow!(
+                "Not support to snapshot a vDPA device outside live migration"
             )));
         }
 
