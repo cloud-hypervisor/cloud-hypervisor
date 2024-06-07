@@ -6,7 +6,7 @@ use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult,
 };
 use crate::DiskTopology;
-use io_uring::{opcode, squeue, types, IoUring};
+use io_uring::{opcode, types, IoUring};
 use std::fs::File;
 use std::io::{Error, Seek, SeekFrom};
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -89,7 +89,6 @@ impl AsyncIo for RawFileAsync {
                 &opcode::Readv::new(types::Fd(self.fd), iovecs.as_ptr(), iovecs.len() as u32)
                     .offset(offset.try_into().unwrap())
                     .build()
-                    .flags(squeue::Flags::ASYNC)
                     .user_data(user_data),
             )
             .map_err(|_| AsyncIoError::ReadVectored(Error::other("Submission queue is full")))?
@@ -118,7 +117,6 @@ impl AsyncIo for RawFileAsync {
                 &opcode::Writev::new(types::Fd(self.fd), iovecs.as_ptr(), iovecs.len() as u32)
                     .offset(offset.try_into().unwrap())
                     .build()
-                    .flags(squeue::Flags::ASYNC)
                     .user_data(user_data),
             )
             .map_err(|_| AsyncIoError::WriteVectored(Error::other("Submission queue is full")))?
@@ -141,7 +139,6 @@ impl AsyncIo for RawFileAsync {
                 sq.push(
                     &opcode::Fsync::new(types::Fd(self.fd))
                         .build()
-                        .flags(squeue::Flags::ASYNC)
                         .user_data(user_data),
                 )
                 .map_err(|_| AsyncIoError::Fsync(Error::other("Submission queue is full")))?
