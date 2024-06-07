@@ -535,9 +535,9 @@ impl vm::Vm for KvmVm {
 
                 if self.check_extension(crate::kvm::Cap::MsiDevid) {
                     // On AArch64, there is limitation on the range of the 'devid',
-                    // it can not be greater than 65536 (the max of u16).
+                    // it cannot be greater than 65536 (the max of u16).
                     //
-                    // BDF can not be used directly, because 'segment' is in high
+                    // BDF cannot be used directly, because 'segment' is in high
                     // 16 bits. The layout of the u32 BDF is:
                     // |---- 16 bits ----|-- 8 bits --|-- 5 bits --|-- 3 bits --|
                     // |      segment    |     bus    |   device   |  function  |
@@ -1505,7 +1505,7 @@ impl cpu::Vcpu for KvmVcpu {
 
     #[cfg(target_arch = "x86_64")]
     ///
-    /// Set the floating point state (FPU) of a vCPU using the `KVM_SET_FPU` ioct.
+    /// Set the floating point state (FPU) of a vCPU using the `KVM_SET_FPU` ioctl.
     ///
     fn set_fpu(&self, fpu: &FpuState) -> cpu::Result<()> {
         let fpu: kvm_bindings::kvm_fpu = (*fpu).clone().into();
@@ -1986,7 +1986,7 @@ impl cpu::Vcpu for KvmVcpu {
     /// SREGS saves/restores a pending interrupt, similar to what
     /// VCPU_EVENTS also does.
     ///
-    /// GET_MSRS requires a pre-populated data structure to do something
+    /// GET_MSRS requires a prepopulated data structure to do something
     /// meaningful. For SET_MSRS it will then contain good data.
     ///
     /// # Example

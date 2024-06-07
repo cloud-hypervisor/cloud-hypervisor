@@ -2488,7 +2488,7 @@ impl VmConfig {
                 return Err(ValidationError::CpuTopologyZeroPart);
             }
 
-            // The setting of dies doesen't apply on AArch64.
+            // The setting of dies doesn't apply on AArch64.
             // Only '1' value is accepted, so its impact on the vcpu topology
             // setting can be ignored.
             #[cfg(target_arch = "aarch64")]

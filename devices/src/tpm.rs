@@ -450,7 +450,7 @@ impl BusDevice for Tpm {
                         );
                     }
                     _ => {
-                        error!("Invalid value passed to CRTL_REQ register");
+                        error!("Invalid value passed to CTRL_REQ register");
                         return None;
                     }
                 },

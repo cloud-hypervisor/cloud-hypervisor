@@ -525,7 +525,7 @@ fn create_memory_node(
                 let memory_region_size: u64 = memory_region.size() as u64;
                 mem_reg_prop.push(memory_region_start_addr);
                 mem_reg_prop.push(memory_region_size);
-                // Set the node address the first non-zero regison address
+                // Set the node address the first non-zero region address
                 if node_memory_addr == 0 {
                     node_memory_addr = memory_region_start_addr;
                 }
@@ -571,7 +571,7 @@ fn create_memory_node(
 
         if ram_regions.len() > 2 {
             panic!(
-                "There should be up to two non-continuous regions, devidided by the
+                "There should be up to two non-continuous regions, divided by the
                     gap at the end of 32bit address space."
             );
         }
@@ -896,7 +896,7 @@ fn create_pci_nodes(
     for pci_device_info_elem in pci_device_info.iter() {
         // EDK2 requires the PCIe high space above 4G address.
         // The actual space in CLH follows the RAM. If the RAM space is small, the PCIe high space
-        // could fall bellow 4G.
+        // could fall below 4G.
         // Here we cut off PCI device space below 8G in FDT to workaround the EDK2 check.
         // But the address written in ACPI is not impacted.
         let (pci_device_base_64bit, pci_device_size_64bit) =

@@ -247,7 +247,7 @@ impl BlockEpollHandler {
     #[inline]
     fn find_inflight_request(&mut self, completed_head: u16) -> Result<Request> {
         // This loop neatly handles the fast path where the completions are
-        // in order (it turng into just a pop_front()) and the 1% of the time
+        // in order (it turns into just a pop_front()) and the 1% of the time
         // (analysis during boot) where slight out of ordering has been
         // observed e.g.
         // Submissions: 1 2 3 4 5 6 7

@@ -1766,7 +1766,7 @@ impl MemoryManager {
         };
         if ret != 0 {
             let e = io::Error::last_os_error();
-            warn!("Failed to mark mappin as MADV_DONTDUMP: {}", e);
+            warn!("Failed to mark mapping as MADV_DONTDUMP: {}", e);
         }
 
         // Mark the pages as mergeable if explicitly asked for.

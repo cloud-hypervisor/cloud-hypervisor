@@ -166,7 +166,7 @@ pub trait Hypervisor: Send + Sync {
                 CpuVendor::AMD
             } else {
                 // Not known yet, the corresponding manufacturer manual should contain the
-                // necesssary info. See also https://wiki.osdev.org/CPUID#CPU_Vendor_ID_String
+                // necessary info. See also https://wiki.osdev.org/CPUID#CPU_Vendor_ID_String
                 CpuVendor::default()
             }
         }

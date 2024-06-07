@@ -37,6 +37,6 @@ generating traces of the boot. These can be relocated for focus tracing on a
 narrow part of the code base.
 
 A `tracer::trace_point!()` macro is also provided for an instantaneous trace
-point however this is not in use in the code base currently nor is handled by
+point however this is neither in use in the code base currently nor is handled by
 the visualisation script due to the difficulty in representation in the SVG.
 

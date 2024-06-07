@@ -32,7 +32,7 @@
 //!    `VsockConnection`.
 //!
 //! The muxer gets notified about all of these events, because, as a `VsockEpollListener`
-//! implementor, it gets to register a nested epoll FD into the main VMM epolling loop. All
+//! implementor, it gets to register a nested epoll FD into the main VMM epoll()ing loop. All
 //! other pollable FDs are then registered under this nested epoll FD.
 //!
 //! To route all these events to their handlers, the muxer uses another `HashMap` object,

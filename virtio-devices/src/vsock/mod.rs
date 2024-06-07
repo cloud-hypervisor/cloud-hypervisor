@@ -126,7 +126,7 @@ pub trait VsockEpollListener {
     /// Get the set of events for which the listener wants to be notified.
     fn get_polled_evset(&self) -> epoll::Events;
 
-    /// Notify the listener that one ore more events have occurred.
+    /// Notify the listener that one or more events have occurred.
     fn notify(&mut self, evset: epoll::Events);
 }
 

@@ -135,7 +135,7 @@ pub trait CpuStateManager: Clone {
                     .checked_add(segment_register.base)
                     .ok_or_else(|| {
                         PlatformError::InvalidAddress(anyhow!(
-                            "Logical address {:#x} can not be linearized with segment {:#x?}",
+                            "Logical address {:#x} cannot be linearized with segment {:#x?}",
                             logical_addr,
                             segment_register
                         ))
@@ -148,7 +148,7 @@ pub trait CpuStateManager: Clone {
                 // Must not write to a read-only segment.
                 if segment_type_ro(segment_type) && write {
                     return Err(PlatformError::InvalidAddress(anyhow!(
-                        "Can not write to a read-only segment"
+                        "Cannot write to a read-only segment"
                     )));
                 }
 

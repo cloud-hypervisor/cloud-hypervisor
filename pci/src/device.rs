@@ -79,7 +79,7 @@ pub trait PciDevice: BusDevice {
 
     /// Sets a register in the configuration space.
     /// * `reg_idx` - The index of the config register to modify.
-    /// * `offset` - Offset in to the register.
+    /// * `offset` - Offset into the register.
     fn write_config_register(
         &mut self,
         reg_idx: usize,
@@ -97,11 +97,11 @@ pub trait PciDevice: BusDevice {
     ) -> Option<BarReprogrammingParams> {
         None
     }
-    /// Reads from a BAR region mapped in to the device.
+    /// Reads from a BAR region mapped into the device.
     /// * `addr` - The guest address inside the BAR.
     /// * `data` - Filled with the data from `addr`.
     fn read_bar(&mut self, _base: u64, _offset: u64, _data: &mut [u8]) {}
-    /// Writes to a BAR region mapped in to the device.
+    /// Writes to a BAR region mapped into the device.
     /// * `addr` - The guest address inside the BAR.
     /// * `data` - The data to write.
     fn write_bar(&mut self, _base: u64, _offset: u64, _data: &[u8]) -> Option<Arc<Barrier>> {

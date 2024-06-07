@@ -46,7 +46,7 @@ const KVM_ARM64_SYSREG_MPIDR_EL1: u64 = KVM_REG_ARM64
     | (((5_u64) << KVM_REG_ARM64_SYSREG_OP2_SHIFT) & KVM_REG_ARM64_SYSREG_OP2_MASK as u64);
 
 /// This is how we represent the registers of a distributor.
-/// It is relrvant their offset from the base address of the
+/// It is relevant their offset from the base address of the
 /// distributor.
 /// Each register has a different number
 /// of bits_per_irq and is therefore variable length.

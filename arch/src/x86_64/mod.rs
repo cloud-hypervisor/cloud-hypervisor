@@ -577,7 +577,7 @@ impl CpuidFeatureEntry {
             if !entry_compatible {
                 error!(
                     "Detected incompatible CPUID entry: leaf={:#02x} (subleaf={:#02x}), register='{:?}', \
-                    compatilbe_check='{:?}', source VM feature='{:#04x}', destination VM feature'{:#04x}'.",
+                    compatible_check='{:?}', source VM feature='{:#04x}', destination VM feature'{:#04x}'.",
                     entry.function, entry.index, entry.feature_reg,
                     entry.compatible_check, src_vm_feature, dest_vm_feature
                     );

@@ -1081,7 +1081,7 @@ releases of the LTS.
 
 ### Virtualised TPM Support
 
-Support for adding an emulated CRB TPM has been added. This has it's own [TPM
+Support for adding an emulated CRB TPM has been added. This has its own [TPM
 documentation](docs/tpm.md).
 
 ### Transparent Huge Page Support
@@ -1272,7 +1272,7 @@ plan to use alternatives.
 The following functionality has been removed:
 
 * The unused `poll_queue` parameter has been removed from `--disk` and
-  equivalent. This was residual from the the removal of the `vhost-user-block`
+  equivalent. This was residual from the removal of the `vhost-user-block`
   spawning feature (#4402.)
 
 ### Contributors
@@ -2094,19 +2094,19 @@ Deprecated features will be removed in a subsequent release and users should pla
 Many thanks to everyone who has contributed to our 0.14.0 release including
 some new faces.
 
-Bo Chen <chen.bo@intel.com>
-Henry Wang <Henry.Wang@arm.com>
-Iggy Jackson <iggy@theiggy.com>
-Jiachen Zhang <zhangjiachen.jaycee@bytedance.com>
-Michael Zhao <michael.zhao@arm.com>
-Muminul Islam <muislam@microsoft.com>
-Penny Zheng <Penny.Zheng@arm.com>
-Rob Bradford <robert.bradford@intel.com>
-Sebastien Boeuf <sebastien.boeuf@intel.com>
-Vineeth Pillai <viremana@linux.microsoft.com>
-Wei Liu <liuwe@microsoft.com>
-William Douglas <william.r.douglas@gmail.com>
-Zide Chen <zide.chen@intel.com>
+* Bo Chen <chen.bo@intel.com>
+* Henry Wang <Henry.Wang@arm.com>
+* Iggy Jackson <iggy@theiggy.com>
+* Jiachen Zhang <zhangjiachen.jaycee@bytedance.com>
+* Michael Zhao <michael.zhao@arm.com>
+* Muminul Islam <muislam@microsoft.com>
+* Penny Zheng <Penny.Zheng@arm.com>
+* Rob Bradford <robert.bradford@intel.com>
+* Sebastien Boeuf <sebastien.boeuf@intel.com>
+* Vineeth Pillai <viremana@linux.microsoft.com>
+* Wei Liu <liuwe@microsoft.com>
+* William Douglas <william.r.douglas@gmail.com>
+* Zide Chen <zide.chen@intel.com>
 
 # v0.13.0
 
@@ -2191,7 +2191,7 @@ removed.
 ### Migration of `vhost-user-fs` backend
 
 The `vhost-user-fs` backend is no longer included in Cloud Hypervisor and it is
-instead hosted in [it's own
+instead hosted in [its own
 repository](https://gitlab.com/virtio-fs/virtiofsd-rs)
 
 ### Enhanced "info" API
@@ -2325,7 +2325,7 @@ Some `virtio-block` device drivers may generate requests with multiple descripto
 
 ### Memory Zones
 
-Support has been added for fine grained control of memory allocation for the guest. This includes controlling the backing of sections of guest memory, assigning to specific host NUMA nodes and assigning memory and vCPUs to specific memory nodes inside the guest. Full details of this can be found in the [memory documentation](docs/memory.md).
+Support has been added for fine-grained control of memory allocation for the guest. This includes controlling the backing of sections of guest memory, assigning to specific host NUMA nodes and assigning memory and vCPUs to specific memory nodes inside the guest. Full details of this can be found in the [memory documentation](docs/memory.md).
 
 ### `Seccomp` Sandbox Improvements
 

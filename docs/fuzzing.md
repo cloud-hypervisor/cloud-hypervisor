@@ -2,7 +2,7 @@
 
 Cloud Hypervisor uses [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) for fuzzing individual components.
 
-The fuzzers are are in the `fuzz/fuzz_targets` directory
+The fuzzers are in the `fuzz/fuzz_targets` directory
 
 ## Preparation
 

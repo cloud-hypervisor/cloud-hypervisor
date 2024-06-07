@@ -127,7 +127,7 @@ pub struct Header {
 impl Header {
     /// Reads the Header structure from a reference VHDx file
     pub fn new(f: &mut File, start: u64) -> Result<Header> {
-        // Read the whole header in to a buffer. We will need it for
+        // Read the whole header into a buffer. We will need it for
         // calculating checksum.
         let mut buffer = [0; HEADER_SIZE as usize];
         f.seek(SeekFrom::Start(start))
@@ -470,7 +470,7 @@ impl VhdxHeader {
 pub fn calculate_checksum(buffer: &mut [u8], csum_offset: usize) -> Result<u32> {
     // Read the checksum into a mutable slice
     let csum_buf = &mut buffer[csum_offset..csum_offset + 4];
-    // Convert the checksum chunk in to a u32 integer
+    // Convert the checksum chunk into a u32 integer
     let orig_csum = LittleEndian::read_u32(csum_buf);
     // Zero the checksum in the buffer
     LittleEndian::write_u32(csum_buf, 0);
