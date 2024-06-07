@@ -3,7 +3,7 @@
 set -x
 
 # This set of vfio tests require to be ran on a specific machine with
-# specific hardware (e.g. the "vfio" bera-metal worker equipped with a
+# specific hardware (e.g. the "vfio" bare-metal worker equipped with a
 # Nvidia Tesla T4 card). So the provisioning of the running machine is
 # out of the scope of this script, including the custom guest image with
 # Nvidia drivers installed, and properly configured Nvidia Tesla T4 card.

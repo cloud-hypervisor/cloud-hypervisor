@@ -1200,7 +1200,7 @@ impl QcowFile {
     }
 
     // Allocate and initialize a new data cluster. Returns the offset of the
-    // cluster in to the file on success.
+    // cluster into the file on success.
     fn append_data_cluster(&mut self, initial_data: Option<Vec<u8>>) -> std::io::Result<u64> {
         let new_addr: u64 = self.get_new_cluster(initial_data)?;
         // The cluster refcount starts at one indicating it is used but doesn't need COW.

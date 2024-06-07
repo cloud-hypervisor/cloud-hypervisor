@@ -1,5 +1,5 @@
 include = ["**/Cargo.toml"]
 
 [formatting]
-reoder_arrays = true
+reorder_arrays = true
 reorder_keys = true

@@ -1220,7 +1220,7 @@ impl RequestHandler for Vmm {
         event!("vm", "booting");
         let r = {
             trace_scoped!("vm_boot");
-            // If we don't have a config, we can not boot a VM.
+            // If we don't have a config, we cannot boot a VM.
             if self.vm_config.is_none() {
                 return Err(VmError::VmMissingConfig);
             };

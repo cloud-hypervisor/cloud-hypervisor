@@ -34,7 +34,7 @@ impl From<InfraError> for Error {
 const BLK_IO_TEST_IMG: &str = "/var/tmp/ch-blk-io-test.img";
 
 pub fn init_tests() {
-    // The test image can not be created on tmpfs (e.g. /tmp) filesystem,
+    // The test image cannot be created on tmpfs (e.g. /tmp) filesystem,
     // as tmpfs does not support O_DIRECT
     assert!(exec_host_command_output(&format!(
         "dd if=/dev/zero of={BLK_IO_TEST_IMG} bs=1M count=4096"
@@ -199,7 +199,7 @@ fn parse_boot_time_output(output: &[u8]) -> Result<f64, Error> {
             );
             assert!(
                 t[7].eq("seconds"),
-                "Expecting 'seconds' as the the last word of the 'Debug I/O port' output"
+                "Expecting 'seconds' as the last word of the 'Debug I/O port' output"
             );
 
             t[6].parse::<f64>().unwrap()
@@ -226,7 +226,7 @@ fn parse_boot_time_output(output: &[u8]) -> Result<f64, Error> {
             );
             assert!(
                 t[7].eq("seconds"),
-                "Expecting 'seconds' as the the last word of the 'Debug I/O port' output"
+                "Expecting 'seconds' as the last word of the 'Debug I/O port' output"
             );
 
             t[6].parse::<f64>().unwrap()

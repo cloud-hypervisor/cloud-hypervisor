@@ -141,7 +141,7 @@ impl VsockPacket {
             buf_size: 0,
         };
 
-        // No point looking for a data/buffer descriptor, if the packet is zero-lengthed.
+        // No point looking for a data/buffer descriptor, if the packet is zero-length.
         if pkt.is_empty() {
             return Ok(pkt);
         }

@@ -270,7 +270,7 @@ definition in XML format:
 ### Command Line Interface
 
 The Cloud Hypervisor Command Line Interface (CLI) can only be used for launching
-the Cloud Hypervisor binary, i.e. it can not be used for controlling the VMM or
+the Cloud Hypervisor binary, i.e. it cannot be used for controlling the VMM or
 the launched VM once they're up and running.
 
 If you want to inspect the VMM, or control the VM after launching Cloud

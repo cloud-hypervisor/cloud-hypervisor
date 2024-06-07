@@ -28,7 +28,7 @@ pub enum Error {
     /// `NeedNewCluster` - Handle this error by allocating a cluster and calling the function again.
     #[error("New cluster needs to be allocated for refcounts")]
     NeedNewCluster,
-    /// `ReadingRefCounts` - Error reading the file in to the refcount cache.
+    /// `ReadingRefCounts` - Error reading the file into the refcount cache.
     #[error("Failed to read the file into the refcount cache: {0}")]
     ReadingRefCounts(io::Error),
 }

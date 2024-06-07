@@ -159,10 +159,10 @@ as we might need to update the direct kernel boot command line, replacing
 
 Update all references to the previous image name to the new one.
 
-## NVIDIA image for VFIO baremetal CI
+## NVIDIA image for VFIO bare-metal CI
 
 Here we are going to describe how to create a cloud image that contains the
-necessary NVIDIA drivers for our VFIO baremetal CI.
+necessary NVIDIA drivers for our VFIO bare-metal CI.
 
 ### Download base image
 

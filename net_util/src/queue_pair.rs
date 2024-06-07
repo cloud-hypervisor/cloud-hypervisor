@@ -418,7 +418,7 @@ impl NetQueuePair {
             .map_or(false, |r| r.is_blocked());
 
         // Stop listening on the `RX_TAP_EVENT` when:
-        // 1) there is no available describles, or
+        // 1) there is no available describes, or
         // 2) the RX rate limit is reached.
         if self.rx_tap_listening && (!self.rx_desc_avail || rate_limit_reached) {
             unregister_listener(

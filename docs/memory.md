@@ -466,7 +466,7 @@ List of virtual CPUs attached to the guest NUMA node identified by the
 `guest_numa_id` option. This allows for describing a list of CPUs which
 must be seen by the guest as belonging to the NUMA node `guest_numa_id`.
 
-One can use this option for a fine grained description of the NUMA topology
+One can use this option for a fine-grained description of the NUMA topology
 regarding the CPUs associated with it, which might help the guest run more
 efficiently.
 
@@ -573,7 +573,7 @@ _Example_
 ### PCI bus
 
 Cloud Hypervisor supports guests with one or more PCI segments. The default PCI segment always
-has affinity to NUMA node 0. Be default, all other PCI segments have afffinity to NUMA node 0.
+has affinity to NUMA node 0. Be default, all other PCI segments have affinity to NUMA node 0.
 The user may configure the NUMA affinity for any additional PCI segments.
 
 _Example_

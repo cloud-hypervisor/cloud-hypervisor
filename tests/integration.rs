@@ -9061,7 +9061,7 @@ mod live_migration {
         dest_api_socket: &str,
         local: bool,
     ) -> bool {
-        // Start to receive migration from the destintion VM
+        // Start to receive migration from the destination VM
         let mut receive_migration = Command::new(clh_command("ch-remote"))
             .args([
                 &format!("--api-socket={dest_api_socket}"),
@@ -9258,7 +9258,7 @@ mod live_migration {
         let r = std::panic::catch_unwind(|| {
             guest.wait_vm_boot(None).unwrap();
 
-            // Make sure the source VM is functaionl
+            // Make sure the source VM is functional
             // Check the number of vCPUs
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
 
@@ -9326,7 +9326,7 @@ mod live_migration {
             );
         };
 
-        // Post live-migration check to make sure the destination VM is funcational
+        // Post live-migration check to make sure the destination VM is functional
         let r = std::panic::catch_unwind(|| {
             // Perform same checks to validate VM has been properly migrated
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
@@ -9340,7 +9340,7 @@ mod live_migration {
         let dest_output = dest_child.wait_with_output().unwrap();
         handle_child_output(r, &dest_output);
 
-        // Check the destination VM has the expected 'concole_text' from its output
+        // Check the destination VM has the expected 'console_text' from its output
         let r = std::panic::catch_unwind(|| {
             assert!(String::from_utf8_lossy(&dest_output.stdout).contains(&console_text));
         });
@@ -9422,7 +9422,7 @@ mod live_migration {
         let r = std::panic::catch_unwind(|| {
             guest.wait_vm_boot(None).unwrap();
 
-            // Make sure the source VM is functaionl
+            // Make sure the source VM is functional
             // Check the number of vCPUs
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
 
@@ -9500,7 +9500,7 @@ mod live_migration {
             );
         };
 
-        // Post live-migration check to make sure the destination VM is funcational
+        // Post live-migration check to make sure the destination VM is functional
         let r = std::panic::catch_unwind(|| {
             // Perform same checks to validate VM has been properly migrated
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
@@ -9529,7 +9529,7 @@ mod live_migration {
         let dest_output = dest_child.wait_with_output().unwrap();
         handle_child_output(r, &dest_output);
 
-        // Check the destination VM has the expected 'concole_text' from its output
+        // Check the destination VM has the expected 'console_text' from its output
         let r = std::panic::catch_unwind(|| {
             assert!(String::from_utf8_lossy(&dest_output.stdout).contains(&console_text));
         });
@@ -9623,7 +9623,7 @@ mod live_migration {
         let r = std::panic::catch_unwind(|| {
             guest.wait_vm_boot(None).unwrap();
 
-            // Make sure the source VM is functaionl
+            // Make sure the source VM is functional
             // Check the number of vCPUs
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
 
@@ -9718,7 +9718,7 @@ mod live_migration {
             );
         };
 
-        // Post live-migration check to make sure the destination VM is funcational
+        // Post live-migration check to make sure the destination VM is functional
         let r = std::panic::catch_unwind(|| {
             // Perform same checks to validate VM has been properly migrated
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
@@ -9776,7 +9776,7 @@ mod live_migration {
         let dest_output = dest_child.wait_with_output().unwrap();
         handle_child_output(r, &dest_output);
 
-        // Check the destination VM has the expected 'concole_text' from its output
+        // Check the destination VM has the expected 'console_text' from its output
         let r = std::panic::catch_unwind(|| {
             assert!(String::from_utf8_lossy(&dest_output.stdout).contains(&console_text));
         });
@@ -9849,7 +9849,7 @@ mod live_migration {
         let r = std::panic::catch_unwind(|| {
             guest.wait_vm_boot(None).unwrap();
 
-            // Make sure the source VM is functaionl
+            // Make sure the source VM is functional
             // Check the number of vCPUs
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
             // Check the guest RAM
@@ -9934,7 +9934,7 @@ mod live_migration {
             );
         };
 
-        // Post live-migration check to make sure the destination VM is funcational
+        // Post live-migration check to make sure the destination VM is functional
         let r = std::panic::catch_unwind(|| {
             // Perform same checks to validate VM has been properly migrated
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
@@ -9975,7 +9975,7 @@ mod live_migration {
         let dest_output = dest_child.wait_with_output().unwrap();
         handle_child_output(r, &dest_output);
 
-        // Check the destination VM has the expected 'concole_text' from its output
+        // Check the destination VM has the expected 'console_text' from its output
         let r = std::panic::catch_unwind(|| {
             assert!(String::from_utf8_lossy(&dest_output.stdout).contains(&console_text));
         });
@@ -10044,7 +10044,7 @@ mod live_migration {
             );
         };
 
-        // Post live-migration check to make sure the destination VM is funcational
+        // Post live-migration check to make sure the destination VM is functional
         let r = std::panic::catch_unwind(|| {
             // Perform same checks to validate VM has been properly migrated
             // Spawn a new netcat listener in the OVS VM
@@ -10126,7 +10126,7 @@ mod live_migration {
     mod live_migration_sequential {
         use super::*;
 
-        // NUMA & baalloon live migration tests are large so run sequentially
+        // NUMA & balloon live migration tests are large so run sequentially
 
         #[test]
         fn test_live_migration_balloon() {
