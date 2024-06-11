@@ -205,7 +205,7 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
             let stdout = unsafe { File::from_raw_fd(stdout) };
 
             // SAFETY: FFI call. Trivially safe.
-            if unsafe { libc::isatty(libc::STDOUT_FILENO) } == 1 {
+            if unsafe { libc::isatty(stdout.as_raw_fd()) } == 1 {
                 vmm.console_resize_pipe = Some(
                     listen_for_sigwinch_on_tty(
                         stdout.try_clone().unwrap(),
@@ -254,7 +254,7 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
             let stdout = unsafe { File::from_raw_fd(stdout) };
 
             // SAFETY: FFI call. Trivially safe.
-            if unsafe { libc::isatty(libc::STDOUT_FILENO) } == 1 {
+            if unsafe { libc::isatty(stdout.as_raw_fd()) } == 1 {
                 vmm.console_resize_pipe = Some(
                     listen_for_sigwinch_on_tty(
                         stdout.try_clone().unwrap(),
